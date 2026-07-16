@@ -279,6 +279,7 @@ func runQAProcessDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 		Live:           *live,
 		DedupeChecked:  *existingJSON != "" || *fetchExisting || *live,
 		DedupeCap:      *capN,
+		ParentIssue:    *project.parent,
 		ParentBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)

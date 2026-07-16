@@ -72,7 +72,7 @@ func TestBuildCodexLoopGateActionItemsFoldsClassesAndDispatchable(t *testing.T) 
 
 	// Every emitted item must be dispatchable — the whole point of filling the scope
 	// fields. A SkippedRow here means the adapter produced a vague issue.
-	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, nil, dogfoodissues.BuildOptions{})
+	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, nil, dogfoodissues.BuildOptions{ParentIssue: 3003, ParentBaseline: 20, CompletionStandard: "development"})
 	if len(skipped) != 0 {
 		t.Fatalf("loop-gate items were not dispatchable: %+v", skipped)
 	}
@@ -122,7 +122,7 @@ func TestBuildCodexLoopGateActionItemsUpdatesExistingByMarker(t *testing.T) {
 		Number: 4291, State: "OPEN", Title: "old title",
 		Body: fmt.Sprintf("tracked\n<!-- fak-dogfood-action-key: %s -->\n", key),
 	}}
-	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, dogfoodissues.BuildOptions{DedupeChecked: true})
+	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, dogfoodissues.BuildOptions{DedupeChecked: true, ParentIssue: 3003, ParentBaseline: 20, CompletionStandard: "development"})
 	if len(skipped) != 0 || len(plan) != 1 {
 		t.Fatalf("plan=%d skipped=%d, want 1/0", len(plan), len(skipped))
 	}
@@ -141,7 +141,7 @@ func TestSessionsCodexLoopSyncIssuesDryRunPlan(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runSessions(&stdout, &stderr, []string{
 		"codex-loop", "--recent", "--codex-home", home, "--limit", "5",
-		"--sync-issues", "--json",
+		"--sync-issues", "--parent-issue", "3003", "--parent-baseline-points", "20", "--completion-standard", "development", "--json",
 	})
 	if code != 0 {
 		t.Fatalf("sync-issues dry-run exited %d stderr=%s", code, stderr.String())
@@ -200,10 +200,13 @@ func TestSessionsCodexLoopSyncIssuesLiveCreatesVerified(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := runCodexLoopSyncIssues(&stdout, &stderr, report, true, codexLoopIssueOptions{
-		Live:   true,
-		Repo:   "o/r",
-		Limit:  300,
-		Runner: runner,
+		Live:               true,
+		Repo:               "o/r",
+		Limit:              300,
+		ParentIssue:        3003,
+		ProjectBaseline:    20,
+		CompletionStandard: "development",
+		Runner:             runner,
 		// Seed existing issues via fixture so the live branch does not shell out to
 		// the real gh for the existing-issue scan; only Sync uses the injected runner.
 		ExistingJSON: writeExistingIssuesFixture(t, "[]"),

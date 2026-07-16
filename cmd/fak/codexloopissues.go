@@ -36,6 +36,7 @@ type codexLoopIssueOptions struct {
 	ExistingJSON       string
 	Limit              int
 	Labels             []string
+	ParentIssue        int
 	ProjectBaseline    float64
 	CompletionStandard string
 	TargetEnvelope     string
@@ -205,6 +206,7 @@ func runCodexLoopSyncIssues(stdout, stderr io.Writer, r codexLoopRecentReport, a
 		DedupeChecked:    opt.Live || opt.FetchExisting || strings.TrimSpace(opt.ExistingJSON) != "",
 		DedupeCap:        opt.Limit,
 		DefaultMilestone: strings.TrimSpace(opt.Milestone),
+		ParentIssue:      opt.ParentIssue,
 		ParentBaseline:   opt.ProjectBaseline, CompletionStandard: opt.CompletionStandard, TargetEnvelope: opt.TargetEnvelope, WitnessedEnvelope: opt.WitnessedEnvelope,
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)

@@ -125,6 +125,7 @@ type HandoffReviewOptions struct {
 	Live               bool
 	DedupeChecked      bool
 	DedupeCap          int
+	ParentIssue        int
 	ParentBaseline     float64
 	CompletionStandard string
 	TargetEnvelope     string
@@ -232,6 +233,9 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 		for i, step := range h.NextSteps {
 			prefix := "NEXT_STEP_" + strconv.Itoa(i+1) + "_"
 			c := handoffIssueCandidate(h, step)
+			if opt.ParentIssue > 0 {
+				c.ParentRef = fmt.Sprintf("#%d", opt.ParentIssue)
+			}
 			if opt.StrictProjectWork {
 				points := float64(c.ExpectedSteps)
 				c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)

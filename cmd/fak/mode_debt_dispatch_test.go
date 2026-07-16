@@ -56,7 +56,7 @@ func TestModeDebtDispatchOneHardUnliftedDial(t *testing.T) {
 	}
 	scorecard := writeModeDebtScorecard(t, dir, sc)
 
-	result := runModeDebtDispatchJSON(t, []string{"--scorecard", scorecard, "--cap", "10", "--json"})
+	result := runModeDebtDispatchJSON(t, []string{"--scorecard", scorecard, "--cap", "10", "--parent-issue", "4397", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
 	if result.Mode != "dry-run" {
 		t.Fatalf("mode=%q, want dry-run", result.Mode)
 	}
@@ -102,7 +102,7 @@ func TestModeDebtDispatchOneHardUnliftedDial(t *testing.T) {
 	if err := os.WriteFile(existingPath, b, 0o644); err != nil {
 		t.Fatalf("write existing: %v", err)
 	}
-	rerun := runModeDebtDispatchJSON(t, []string{"--scorecard", scorecard, "--cap", "10", "--existing-json", existingPath, "--json"})
+	rerun := runModeDebtDispatchJSON(t, []string{"--scorecard", scorecard, "--cap", "10", "--existing-json", existingPath, "--parent-issue", "4397", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
 	if len(rerun.Planned) != 1 {
 		t.Fatalf("rerun planned len=%d, want 1 (dedup, not duplicate)", len(rerun.Planned))
 	}
@@ -127,7 +127,7 @@ func TestModeDebtDispatchCleanScorecardYieldsNothing(t *testing.T) {
 		},
 	}
 	scorecard := writeModeDebtScorecard(t, dir, sc)
-	result := runModeDebtDispatchJSON(t, []string{"--scorecard", scorecard, "--json"})
+	result := runModeDebtDispatchJSON(t, []string{"--scorecard", scorecard, "--parent-issue", "4397", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
 	if len(result.Planned) != 0 {
 		t.Fatalf("planned len=%d, want 0 for a CLEAN fully-lifted scorecard", len(result.Planned))
 	}
@@ -149,7 +149,7 @@ func TestModeDebtDispatchCapBoundsFanout(t *testing.T) {
 		},
 	}
 	scorecard := writeModeDebtScorecard(t, dir, sc)
-	result := runModeDebtDispatchJSON(t, []string{"--scorecard", scorecard, "--cap", "2", "--json"})
+	result := runModeDebtDispatchJSON(t, []string{"--scorecard", scorecard, "--cap", "2", "--parent-issue", "4397", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
 	if len(result.Planned) != 2 {
 		t.Fatalf("planned len=%d, want 2 under --cap 2", len(result.Planned))
 	}

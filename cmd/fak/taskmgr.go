@@ -225,7 +225,7 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 		StrictScope: true, StrictProjectWork: true,
 		Live:          *live,
 		DedupeChecked: *live || *fetchExisting || *existingJSON != "",
-		DedupeCap:     taskHandoffIssueScanLimit(*limit), ParentBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
+		DedupeCap:     taskHandoffIssueScanLimit(*limit), ParentIssue: *project.parent, ParentBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	})
 	mode := "dry-run"
 	if *live {

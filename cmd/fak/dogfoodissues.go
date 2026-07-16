@@ -143,6 +143,7 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		DedupeChecked:    *live || *fetchExisting || *existingJSON != "",
 		DedupeCap:        issueSyncScanLimit(*limit),
 		DefaultMilestone: strings.TrimSpace(*milestone),
+		ParentIssue:      *project.parent,
 		ParentBaseline:   project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)

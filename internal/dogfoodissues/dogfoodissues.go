@@ -175,6 +175,7 @@ type BuildOptions struct {
 	DedupeChecked      bool
 	DedupeCap          int
 	DefaultMilestone   string
+	ParentIssue        int
 	ParentBaseline     float64
 	CompletionStandard string
 	TargetEnvelope     string
@@ -422,15 +423,7 @@ func ExtractActionItems(report map[string]any, reportPath string) []ActionItem {
 // IssueBody renders the stable, marker-stamped issue body for an item.
 func IssueBody(item ActionItem) string { return IssueBodyWithOptions(item, BuildOptions{}) }
 func IssueBodyWithOptions(item ActionItem, opt BuildOptions) string {
-	c := actionCandidate(item)
-	if opt.ParentBaseline > 0 {
-		points := float64(c.ExpectedSteps)
-		c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
-		c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, opt.ParentBaseline)
-		c.CompletionStandard = strmatch.FirstTrimmed(opt.CompletionStandard, "production")
-		c.TargetEnvelope = opt.TargetEnvelope
-		c.WitnessedEnvelope = opt.WitnessedEnvelope
-	}
+	c := actionCandidate(item, opt)
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- fak-dogfood-action-key: %s -->\n", item.Key)
 	fmt.Fprintln(&b, "# Dogfood scorecard ACTION")
@@ -494,15 +487,7 @@ func IssueBodyWithOptions(item ActionItem, opt BuildOptions) string {
 // ReviewActionItem grades one ACTION item against the shared machine-created
 // issue contract.
 func ReviewActionItem(item ActionItem, opt BuildOptions) issuecontract.Review {
-	c := actionCandidate(item)
-	if opt.ParentBaseline > 0 {
-		points := float64(c.ExpectedSteps)
-		c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
-		c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, opt.ParentBaseline)
-		c.CompletionStandard = strmatch.FirstTrimmed(opt.CompletionStandard, "production")
-		c.TargetEnvelope = opt.TargetEnvelope
-		c.WitnessedEnvelope = opt.WitnessedEnvelope
-	}
+	c := actionCandidate(item, opt)
 	return issuecontract.ReviewCandidate(c, issuecontract.Options{
 		Live:              opt.Live,
 		DedupeChecked:     opt.DedupeChecked,
@@ -511,10 +496,10 @@ func ReviewActionItem(item ActionItem, opt BuildOptions) issuecontract.Review {
 	})
 }
 
-func actionCandidate(item ActionItem) issuecontract.Candidate {
+func actionCandidate(item ActionItem, opt BuildOptions) issuecontract.Candidate {
 	scoreState := fmt.Sprintf("Source probe `%s` reported finding `%s`, grade `%s`, and %s `%d`.",
 		item.SourceProbe, item.Finding, item.Grade, item.DebtName, item.DebtCount)
-	return issuecontract.Candidate{
+	c := issuecontract.Candidate{
 		Schema:          issuecontract.Schema,
 		Key:             item.Key,
 		Title:           item.Title,
@@ -544,8 +529,19 @@ func actionCandidate(item ActionItem) issuecontract.Candidate {
 		BoundaryNotes:  append([]string(nil), item.BoundaryNotes...),
 		ClosureBinding: strmatch.FirstTrimmed(item.ClosureBinding, "Resolving commit must cite `#N` and carry a matching `(fak <leaf>)` trailer."),
 	}
+	if opt.ParentIssue > 0 {
+		c.ParentRef = fmt.Sprintf("#%d", opt.ParentIssue)
+	}
+	if opt.ParentBaseline > 0 {
+		points := float64(c.ExpectedSteps)
+		c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
+		c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, opt.ParentBaseline)
+		c.CompletionStandard = strmatch.FirstTrimmed(opt.CompletionStandard, "production")
+		c.TargetEnvelope = opt.TargetEnvelope
+		c.WitnessedEnvelope = opt.WitnessedEnvelope
+	}
+	return c
 }
-
 func dogfoodIssueTrigger(item ActionItem) string {
 	probe := strmatch.FirstTrimmed(item.SourceProbe, "dogfood scorecard")
 	finding := strmatch.FirstTrimmed(item.Finding, item.Key, "ACTION row")
@@ -692,7 +688,7 @@ func planRow(item ActionItem) PlanRow {
 func CohortPlan(items []ActionItem, opt BuildOptions) issuecohort.Plan {
 	candidates := make([]issuecontract.Candidate, 0, len(items))
 	for _, item := range items {
-		candidates = append(candidates, actionCandidate(item))
+		candidates = append(candidates, actionCandidate(item, opt))
 	}
 	return issuecohort.Build(candidates, issuecohort.Options{
 		Options: issuecontract.Options{

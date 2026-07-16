@@ -146,9 +146,12 @@ func TestReviewedPlanAcceptsScopedColonKeyItem(t *testing.T) {
 		Body:   "<!-- fak-dogfood-action-key: guard-rsi-route/guard-journal:blank_reason_on_deny -->",
 	}}
 	plan, skipped := BuildPlanWithOptions([]ActionItem{item}, existing, BuildOptions{
-		Live:          true,
-		DedupeChecked: true,
-		DedupeCap:     300,
+		Live:               true,
+		DedupeChecked:      true,
+		DedupeCap:          300,
+		ParentIssue:        36,
+		ParentBaseline:     20,
+		CompletionStandard: "development",
 	})
 	if len(skipped) != 0 {
 		t.Fatalf("skipped = %+v, want none", skipped)
@@ -181,7 +184,7 @@ func TestReviewedPlanAcceptsScopedColonKeyItem(t *testing.T) {
 
 func TestReviewedPlanAcceptsExplicitInboxMilestone(t *testing.T) {
 	plan, skipped := BuildPlanWithOptions([]ActionItem{scopedGuardActionItem()}, nil, BuildOptions{
-		DefaultMilestone: "Inbox",
+		DefaultMilestone: "Inbox", ParentIssue: 36, ParentBaseline: 20, CompletionStandard: "development",
 	})
 	if len(skipped) != 0 || len(plan) != 1 {
 		t.Fatalf("plan=%+v skipped=%+v, want one dispatchable row", plan, skipped)
@@ -202,7 +205,7 @@ func TestCohortPlanReportsCollidingBatchAsMultipleWaves(t *testing.T) {
 	b.Title = "guardrsi: close second blank-reason hole"
 	b.Paths = []string{"internal/guardrsi/journal.go"} // inside a's tree
 
-	plan := CohortPlan([]ActionItem{a, b}, BuildOptions{})
+	plan := CohortPlan([]ActionItem{a, b}, BuildOptions{ParentIssue: 36, ParentBaseline: 20, CompletionStandard: "development"})
 	if plan.Dispatchable != 2 {
 		t.Fatalf("dispatchable = %d, want 2 (both scoped leaves route)", plan.Dispatchable)
 	}
@@ -236,7 +239,7 @@ func TestCohortPlanReportsDisjointBatchAsOneWave(t *testing.T) {
 	b.Title = "guardrsi: disjoint sibling leaf"
 	b.Paths = []string{"internal/guardroute/**"}
 
-	plan := CohortPlan([]ActionItem{a, b}, BuildOptions{})
+	plan := CohortPlan([]ActionItem{a, b}, BuildOptions{ParentIssue: 36, ParentBaseline: 20, CompletionStandard: "development"})
 	if plan.Dispatchable != 2 {
 		t.Fatalf("dispatchable = %d, want 2", plan.Dispatchable)
 	}
@@ -385,7 +388,7 @@ func scopedGuardActionItem() ActionItem {
 }
 
 func TestSyncUsesPlanLabelsAndGlobalLabels(t *testing.T) {
-	plan, skipped := BuildPlanWithOptions([]ActionItem{scopedGuardActionItem()}, nil, BuildOptions{})
+	plan, skipped := BuildPlanWithOptions([]ActionItem{scopedGuardActionItem()}, nil, BuildOptions{ParentIssue: 36, ParentBaseline: 20, CompletionStandard: "development"})
 	if len(skipped) != 0 || len(plan) != 1 {
 		t.Fatalf("plan=%+v skipped=%+v, want one plan row", plan, skipped)
 	}

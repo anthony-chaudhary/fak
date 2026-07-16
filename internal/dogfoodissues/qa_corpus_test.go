@@ -24,11 +24,11 @@ func TestQADogfoodCorpusMapsLateFailuresToOriginControlsAndIssueBodies(t *testin
 		}
 		seen[row.Key] = true
 
-		review := ReviewActionItem(row.Item, BuildOptions{Live: true, DedupeChecked: true, DedupeCap: 300})
+		review := ReviewActionItem(row.Item, BuildOptions{Live: true, DedupeChecked: true, DedupeCap: 300, ParentIssue: 4684, ParentBaseline: 20, CompletionStandard: "development"})
 		if !review.OK || review.Dispatchability != "dispatchable" {
 			t.Fatalf("%s review = %+v, want dispatchable", row.Key, review)
 		}
-		plan, skipped := BuildPlanWithOptions([]ActionItem{row.Item}, nil, BuildOptions{Live: true, DedupeChecked: true, DedupeCap: 300})
+		plan, skipped := BuildPlanWithOptions([]ActionItem{row.Item}, nil, BuildOptions{Live: true, DedupeChecked: true, DedupeCap: 300, ParentIssue: 4684, ParentBaseline: 20, CompletionStandard: "development"})
 		if len(skipped) != 0 || len(plan) != 1 {
 			t.Fatalf("%s plan=%+v skipped=%+v, want one dispatchable issue", row.Key, plan, skipped)
 		}

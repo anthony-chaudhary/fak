@@ -20,7 +20,7 @@ func TestTaskHandoffDryRunPlansIssueCreate(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--existing-json", existingPath, "--json"})
+	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--existing-json", existingPath, "--parent-issue", "1639", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
@@ -100,7 +100,7 @@ func TestTaskHandoffEvidenceRefsReachDryRunPlan(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--json"})
+	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--parent-issue", "1639", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
@@ -126,7 +126,7 @@ func TestTaskHandoffRefusesUnwitnessedCompletion(t *testing.T) {
 	handoffPath := writeTaskHandoffFixture(t, dir, false)
 
 	var out, errb bytes.Buffer
-	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--json"})
+	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--parent-issue", "1639", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
 	if code != 3 {
 		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
@@ -147,7 +147,7 @@ func TestTaskHandoffRefusesUnscopedFollowUp(t *testing.T) {
 	handoffPath := writeTaskHandoffFixtureWithScope(t, dir, true, false)
 
 	var out, errb bytes.Buffer
-	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--json"})
+	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--parent-issue", "1639", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
 	if code != 3 {
 		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errb.String(), out.String())
 	}

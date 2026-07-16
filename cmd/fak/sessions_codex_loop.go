@@ -212,6 +212,7 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 				ExistingJSON:    strings.TrimSpace(*issueExistingJSON),
 				Limit:           *issueLimit,
 				Labels:          []string(issueLabels),
+				ParentIssue:     *project.parent,
 				ProjectBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 			})
 		}
