@@ -114,7 +114,18 @@ type TreeIndex struct {
 // BuildTreeIndex tokenizes each file in `tree` exactly once and returns the prebuilt
 // index. tree maps rel-path -> source text; this package does no I/O so it stays
 // pure and testable.
-func BuildTreeIndex(tree map[string]string) *TreeIndex {
+//
+// An optional WindowCache memoizes the pure per-file tokenization keyed on the file's
+// exact bytes (#4330): when supplied, an unchanged file is a content-addressed lookup
+// instead of a re-lex. The cache is accelerate-never-gate — a nil cache, a miss, or
+// any implementation failure computes the windows fresh, so the returned index is
+// byte-identical with or without it. Callers pass at most one cache; extras are
+// ignored.
+func BuildTreeIndex(tree map[string]string, cache ...WindowCache) *TreeIndex {
+	var wc WindowCache
+	if len(cache) > 0 {
+		wc = cache[0]
+	}
 	idx := &TreeIndex{
 		files:  make([]string, 0, len(tree)),
 		byFile: make(map[string]map[string][]span, len(tree)),
@@ -124,7 +135,19 @@ func BuildTreeIndex(tree map[string]string) *TreeIndex {
 	}
 	sort.Strings(idx.files)
 	for _, rel := range idx.files {
-		keys, spans := qualifyingWindows(goTokens(tree[rel], false))
+		src := tree[rel]
+		var keys []string
+		var spans []span
+		if wc != nil {
+			if k, s, ok := wc.Get(src); ok {
+				keys, spans = k, s
+			} else {
+				keys, spans = qualifyingWindows(goTokens(src, false))
+				wc.Put(src, keys, spans)
+			}
+		} else {
+			keys, spans = qualifyingWindows(goTokens(src, false))
+		}
 		if len(keys) == 0 {
 			continue
 		}

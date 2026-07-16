@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/clonescan"
+	"github.com/anthony-chaudhary/fak/internal/tokencache"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -153,7 +154,13 @@ func cmdDupGuard(args []string) {
 	// prebuilt index. Previously each added file re-tokenized all ~5.7k tracked
 	// files, so the scan cost grew with (added files × tree size); building the
 	// index once makes it (tree size + added files × cheap intersection).
-	index := clonescan.BuildTreeIndex(tree)
+	//
+	// A persisted, fleet-shared WindowCache (#4330) memoizes each tracked file's
+	// tokenization under its content hash, so the ~5.7k-file re-lex this verb pays on
+	// every run collapses to a directory of lookups for the files that did not change.
+	// A nil cache (FAK_TOKEN_CACHE=off, or common dir unresolvable) degrades to the
+	// exact uncached path.
+	index := clonescan.BuildTreeIndex(tree, tokencache.Open("."))
 
 	type warning struct {
 		AddedIn string            `json:"added_in"`

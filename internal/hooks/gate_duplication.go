@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/clonescan"
+	"github.com/anthony-chaudhary/fak/internal/tokencache"
 )
 
 // gate_duplication.go — the DUPLICATION advisory gate. It brings fak's authoring-time clone
@@ -110,9 +111,15 @@ func duplicationFindings(d *StagedDiff, maxNeighborhood, maxMatches int) ([]Find
 	// directory (its Go package), so building one TreeIndex per neighborhood and
 	// reusing it across candidates avoids re-tokenizing the same siblings per
 	// candidate (the quadratic N*M this ticket removes).
+	//
+	// A persisted, fleet-shared WindowCache (#4330) memoizes each sibling's
+	// tokenization across commits, so an unchanged sibling is a content-addressed
+	// lookup instead of a re-lex. Open once and reuse across neighborhoods; a nil
+	// cache (disabled, or common dir unresolvable) degrades to the exact uncached path.
+	cache := tokencache.Open(d.Root)
 	indexByDir := make(map[string]*clonescan.TreeIndex, len(byDir))
 	for dir, neighborhood := range byDir {
-		indexByDir[dir] = clonescan.BuildTreeIndex(neighborhood)
+		indexByDir[dir] = clonescan.BuildTreeIndex(neighborhood, cache)
 	}
 
 	var findings []Finding
