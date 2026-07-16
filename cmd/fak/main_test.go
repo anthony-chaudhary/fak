@@ -139,6 +139,7 @@ func TestApplyRuntimeInstallsIFCManifestPolicy(t *testing.T) {
 }
 
 func TestPolicyReloaderSwapsAdjudicatorPolicy(t *testing.T) {
+	t.Setenv(policyReloadWidenConfirmEnv, "1")
 	path := filepath.Join(t.TempDir(), "floor.json")
 	if err := os.WriteFile(path, []byte(`{
 		"allow": ["after_reload"],
