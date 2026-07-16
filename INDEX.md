@@ -88,6 +88,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 ## Architecture & design
 
+- [External system architecture](docs/architecture.md) — choose an interface and understand the managed request, effect, result, and support boundaries before implementation internals.
 - [Architecture](ARCHITECTURE.md) — the registry seams and the frozen ABI.
 - [Agent runtime: ownership, interfaces, and proof](docs/explainers/agent-runtime.md) — the builder route for the host-side model/tool loop, its mediated call flow, interface choices, and deterministic offline proof.
 - [GPU forward pass](GPU.md) — the in-kernel Llama decode on the GPU: a real on-box run witnessed against the CPU reference, with the honest gap to llama.cpp.
