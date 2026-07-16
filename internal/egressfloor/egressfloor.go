@@ -107,16 +107,76 @@ func Classify(tool string, args map[string]any, extraDenyHosts ...string) (host,
 	return "", ""
 }
 
-// classifyDestinationWith treats the whole value as a single destination — a URL
-// (scheme://host/…) or a bare host[:port] — and classifies its host against the
-// hardwired metadata set plus any operator extra-deny hosts. A scheme-bearing value
-// yields its host via hostOf; a bare "host" or "host:port" (no scheme) is reduced by
-// hostnameNoPort (pure parsing, never DNS).
-func classifyDestinationWith(v string, extra []string) (host, label string) {
+// Destinations returns every candidate destination host a tool call reaches, from both
+// whole-value destination args (WebFetch.url, an http tool's uri/endpoint/…) and hosts
+// embedded in a shell command line (curl/wget targets). It is the EXTRACTION half of
+// Classify, exposed so a higher egress layer — the operator/community allow-block lists
+// in internal/egresslist — can resolve the SAME hosts the hardwired floor inspects
+// without re-deriving destination parsing, keeping the two layers in agreement about
+// what "the destination" of a call is. Hosts come back normalized (no scheme, no port,
+// no brackets) and de-duplicated in first-seen order; a call with no destination yields
+// nil. Pure and DNS-free, like Classify.
+func Destinations(tool string, args map[string]any) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(h string) {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h == "" || seen[h] {
+			return
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	for k, v := range args {
+		s, ok := v.(string)
+		if !ok || s == "" {
+			continue
+		}
+		key := strings.ToLower(k)
+		switch {
+		case destinationKeys[key]:
+			add(destinationHost(s))
+		case commandKeys[key]:
+			for _, h := range commandHosts(s) {
+				add(h)
+			}
+		}
+	}
+	return out
+}
+
+// destinationHost reduces a whole-value destination arg to its bare host — a URL host
+// (scheme://host/…) via hostOf, or a bare "host"/"host:port" reduced by hostnameNoPort
+// (pure parsing, never DNS). Returns "" when the value names no host.
+func destinationHost(v string) string {
 	h := hostOf(v)
 	if h == "" {
 		h = hostnameNoPort(strings.TrimSpace(v))
 	}
+	return h
+}
+
+// commandHosts extracts every candidate destination host embedded in a shell command
+// line: each http(s):// URL host, plus any bare host-shaped token (a `curl
+// 169.254.169.254` with no scheme still reaches the endpoint). Pure parsing, never DNS.
+func commandHosts(cmd string) []string {
+	var out []string
+	for _, tok := range tokenizeCommand(cmd) {
+		h := hostOf(tok)
+		if h == "" {
+			h = hostnameNoPort(tok)
+		}
+		if h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// classifyDestinationWith treats the whole value as a single destination and classifies
+// its host against the hardwired metadata set plus any operator extra-deny hosts.
+func classifyDestinationWith(v string, extra []string) (host, label string) {
+	h := destinationHost(v)
 	if h == "" {
 		return "", ""
 	}
@@ -126,22 +186,11 @@ func classifyDestinationWith(v string, extra []string) (host, label string) {
 	return "", ""
 }
 
-// classifyCommandWith scans a shell command line for embedded destinations: every
-// http(s):// URL, plus any bare metadata/link-local IP token (a `curl 169.254.169.254`
-// with no scheme still reaches the endpoint). Each host is classified against the
-// hardwired set plus any operator extra-deny hosts. Returns the first blocked host.
+// classifyCommandWith scans a shell command line for embedded destinations and classifies
+// each host against the hardwired set plus any operator extra-deny hosts. Returns the
+// first blocked host.
 func classifyCommandWith(cmd string, extra []string) (host, label string) {
-	for _, tok := range tokenizeCommand(cmd) {
-		// A scheme-bearing URL (curl http://169.254.169.254/…) yields its host; a bare
-		// token (curl 169.254.169.254, curl metadata.google.internal:80) is reduced to
-		// host[:port] form by hostnameNoPort (pure parsing — net.SplitHostPort, never DNS).
-		h := hostOf(tok)
-		if h == "" {
-			h = hostnameNoPort(tok)
-		}
-		if h == "" {
-			continue
-		}
+	for _, h := range commandHosts(cmd) {
 		if blocked, lbl := classifyHostWith(h, extra); blocked {
 			return h, lbl
 		}
