@@ -61,7 +61,11 @@ var guardUsageOnce *sync.Once = new(sync.Once)
 func recordGuardUsage(exitCode int) {
 	guardUsageOnce.Do(func() {
 		if !guardUsageStart.IsZero() {
-			recordUsage("guard", os.Args[2:], exitCode, guardUsageStart)
+			argv := []string(nil)
+			if len(os.Args) > 2 {
+				argv = os.Args[2:]
+			}
+			recordUsage("guard", argv, exitCode, guardUsageStart)
 		}
 	})
 }

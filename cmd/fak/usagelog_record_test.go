@@ -274,6 +274,32 @@ func TestCmdUsageGitOpsKeepsOutcomeLatencySeparate(t *testing.T) {
 	}
 }
 
+func TestRecordGuardUsageAcceptsHelperShapedArgv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_USAGE_LOG", "")
+	t.Setenv("FAK_USAGE_LOG_PATH", filepath.Join(dir, "usage.jsonl"))
+	oldNow, oldStart, oldOnce, oldArgs := recordUsageNow, guardUsageStart, guardUsageOnce, os.Args
+	t.Cleanup(func() { recordUsageNow, guardUsageStart, guardUsageOnce, os.Args = oldNow, oldStart, oldOnce, oldArgs })
+	start := time.Unix(1_700_000_000, 0)
+	recordUsageNow = func() time.Time { return start.Add(time.Second) }
+	guardUsageStart = start
+	guardUsageOnce = new(sync.Once)
+	os.Args = []string{"fak.test"}
+
+	recordGuardUsage(0)
+	data, err := os.ReadFile(filepath.Join(dir, "usage.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row usagelog.Row
+	if err := json.Unmarshal(bytes.TrimSpace(data), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Verb != "guard" || row.ExitCode != 0 {
+		t.Fatalf("guard usage row = %+v, want successful guard row", row)
+	}
+}
+
 func TestRecordGuardUsageClosesDirectExitGap(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FAK_USAGE_LOG", "")
