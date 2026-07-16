@@ -199,13 +199,16 @@ func cmdGuard(argv []string) {
 	guardSetFlags := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { guardSetFlags[f.Name] = true })
 
-	// Floor-aware compaction budget for headless dispatch workers (resolveGuardCompactBudget):
-	// a Claude-Code worker's fixed system+tools floor sits at/above the interactive 48k default,
-	// so TOTAL resident (floor + conversation) is permanently past the budget — tripping the
-	// per-turn inversion nudge (debug_stats) and the fleet's compact-runaway spawn-hold — while
-	// the compaction cut correctly bails under_budget (only the post-floor suffix is sheddable).
+	// Floor-aware compaction budget for EVERY guard launch (resolveGuardCompactBudget): a
+	// Claude-Code system+tools floor sits at/above the lean 48k default, so TOTAL resident
+	// (floor + conversation) is permanently past the budget — tripping the per-turn inversion
+	// nudge (debug_stats) and the fleet's compact-runaway spawn-hold. On a headless worker the
+	// cut then correctly bails under_budget (only the post-floor suffix is sheddable); on the
+	// head-anchored interactive path the whole array is compactible, so it instead re-fires every
+	// turn for a trivial shed and emits a `[fak] compacted` stub each time (#4888). Sizing keys
+	// off the floor the launch carries, NOT the expose profile — an explicit operator budget wins.
 	*compactHistoryBudget = resolveGuardCompactBudget(
-		*compactHistoryBudget, guardSetFlags["compact-history-budget"], *exposeProfile)
+		*compactHistoryBudget, guardSetFlags["compact-history-budget"])
 	guardTraceID := strings.TrimSpace(*sessionID)
 	var guardBudgetEnvelope session.BudgetEnvelope
 	hasGuardBudgetEnvelope := strings.TrimSpace(*budgetEnvelopeSpec) != ""

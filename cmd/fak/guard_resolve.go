@@ -41,20 +41,29 @@ func resolveGuardExposeTools(flagValue string) []string {
 
 // resolveGuardCompactBudget picks the compaction budget for a guard launch. An explicit
 // operator --compact-history-budget always wins (explicit==true → the flag value verbatim,
-// including 0=off). Otherwise a headless dispatch worker gets the floor-aware
-// gateway.HeadlessCompactHistoryBudget in place of the interactive default, because its fixed
-// tool+system floor would otherwise sit permanently past the 48k default (see that constant);
-// every non-headless launch keeps flagValue (which carries DefaultCompactHistoryBudget when the
-// operator left the flag alone). Keyed off effectiveGuardExposeProfile so the FAK_GUARD_EXPOSE_PROFILE
-// full/off opt-out restores the interactive budget in the same move it restores the full registry.
-func resolveGuardCompactBudget(flagValue int, explicit bool, exposeProfileFlag string) int {
+// including 0=off). Every other `fak guard` launch gets the floor-aware
+// gateway.HeadlessCompactHistoryBudget in place of the lean gateway.DefaultCompactHistoryBudget,
+// because EVERY guard launch fronts Claude Code and therefore carries its large fixed
+// system+tools floor — the 48k default assumes a LEAN prompt that this path never has.
+//
+// The budget is DECOUPLED from the expose profile (#4888). It used to key off
+// effectiveGuardExposeProfile, which inverted the sizing: the headless profile PRUNES the tool
+// registry to guardHeadlessExposeTools (a ~9.9k-token-smaller floor) yet took the 96k budget,
+// while an interactive session carrying the FULL 76-tool registry (floor_tokens 42292 observed,
+// resident 86205 / peak 93010) was left on 48k — a budget BELOW its own immutable floor. A budget
+// the floor alone already exceeds has no resting point: with head-anchoring engaged the whole
+// message array is compactible, so the cut re-fires every turn, sheds only the incremental
+// overflow, and still emits the user-visible `[fak] compacted N earlier turn(s)` stub (10
+// context_events over 12 turns observed; avg_turns_between_events 1.2). Sizing the budget is a
+// property of the FLOOR the launch carries, not of how many tools it exposes — so the profile no
+// longer moves it, and the FAK_GUARD_EXPOSE_PROFILE full/off opt-out now restores only the full
+// registry (which makes the floor BIGGER, never smaller). An operator who genuinely wants the lean
+// line passes --compact-history-budget explicitly.
+func resolveGuardCompactBudget(flagValue int, explicit bool) int {
 	if explicit {
 		return flagValue
 	}
-	if strings.EqualFold(effectiveGuardExposeProfile(exposeProfileFlag), "headless") {
-		return gateway.HeadlessCompactHistoryBudget
-	}
-	return flagValue
+	return gateway.HeadlessCompactHistoryBudget
 }
 
 // effectiveGuardExposeProfile resolves the operative expose-profile: the --expose-profile

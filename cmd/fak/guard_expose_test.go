@@ -69,45 +69,77 @@ func TestGuardHeadlessExposeProfileNamesAreReal(t *testing.T) {
 	}
 }
 
-// TestResolveGuardCompactBudget pins the floor-aware headless budget: a headless dispatch
-// worker swaps the interactive 48k default for gateway.HeadlessCompactHistoryBudget (so its
-// fixed tool+system floor no longer sits permanently past the budget, which is what trips the
-// per-turn inversion nudge and the fleet's compact-runaway spawn-hold), while an explicit
-// operator budget and every non-headless launch are untouched.
+// TestResolveGuardCompactBudget pins the floor-aware budget for EVERY guard launch: the
+// resolved default is gateway.HeadlessCompactHistoryBudget, so a launch's fixed Claude-Code
+// tool+system floor never sits permanently past its own budget. Only an explicit operator
+// --compact-history-budget moves it.
 func TestResolveGuardCompactBudget(t *testing.T) {
 	t.Setenv("FAK_GUARD_EXPOSE_PROFILE", "") // isolate from an operator env
 
-	// Headless, operator left the flag alone (explicit=false): floor-aware default.
-	if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false, "headless"); got != gateway.HeadlessCompactHistoryBudget {
-		t.Fatalf("headless default = %d, want %d", got, gateway.HeadlessCompactHistoryBudget)
+	// Operator left the flag alone (explicit=false): floor-aware default.
+	if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false); got != gateway.HeadlessCompactHistoryBudget {
+		t.Fatalf("guard default = %d, want %d", got, gateway.HeadlessCompactHistoryBudget)
 	}
 
-	// An explicit --compact-history-budget ALWAYS wins, even for a headless worker — including
-	// an explicit 0 (compaction OFF), which the floor-aware default must never resurrect.
-	if got := resolveGuardCompactBudget(120000, true, "headless"); got != 120000 {
-		t.Fatalf("explicit budget must win for headless: got %d, want 120000", got)
+	// An explicit --compact-history-budget ALWAYS wins — including an explicit 0 (compaction
+	// OFF), which the floor-aware default must never resurrect.
+	if got := resolveGuardCompactBudget(120000, true); got != 120000 {
+		t.Fatalf("explicit budget must win: got %d, want 120000", got)
 	}
-	if got := resolveGuardCompactBudget(0, true, "headless"); got != 0 {
-		t.Fatalf("explicit 0 (off) must win for headless: got %d, want 0", got)
+	if got := resolveGuardCompactBudget(0, true); got != 0 {
+		t.Fatalf("explicit 0 (off) must win: got %d, want 0", got)
 	}
+}
 
-	// Every non-headless launch keeps the flag value (the interactive default when unset).
-	for _, prof := range []string{"", "full", "off", "anything"} {
-		if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false, prof); got != gateway.DefaultCompactHistoryBudget {
-			t.Fatalf("profile %q must keep the interactive default %d, got %d", prof, gateway.DefaultCompactHistoryBudget, got)
+// TestInteractiveGuardBudgetClearsItsOwnFloor is the #4888 regression: the INTERACTIVE
+// (non-headless) guard path must not be left on a budget its own immutable floor already
+// exceeds. Before the fix, resolveGuardCompactBudget keyed off the expose profile, so every
+// non-headless launch kept the lean 48000 default while carrying the full 76-tool Claude-Code
+// registry — a budget BELOW the observed 42292-token floor. With head-anchoring engaged the
+// whole message array is compactible, so that budget has no under_budget resting point: the cut
+// re-fires every turn, sheds only the incremental overflow, and still emits the user-visible
+// `[fak] compacted N earlier turn(s)` stub (10 context_events over 12 turns observed).
+//
+// The failure class is "resolved budget <= observed floor" — assert against the real numbers the
+// issue captured, not against a constant, so this fails loudly if the budget is ever re-coupled
+// to the tool surface. Under the old profile-keyed logic every case below resolves to 48000 and
+// fails; a peak-clearing budget passes.
+func TestInteractiveGuardBudgetClearsItsOwnFloor(t *testing.T) {
+	// Live interactive `fak guard -- claude` trace from #4888 (fak_context_value, trace `guard`).
+	const (
+		observedFloorTokens    = 42292 // system+tools, immutable (38 builtin + 38 MCP schemas)
+		observedPeakResident   = 93010 // floor + the conversation window it actually held
+		observedResidentTokens = 86205
+	)
+
+	// The profile no longer moves the budget: an interactive launch, an explicit full/off
+	// opt-out, and an unrecognized profile all resolve to the same floor-aware line. Note
+	// full/off make the floor BIGGER (they restore the full registry), so restoring the LEAN
+	// budget there — the pre-#4888 behavior — was exactly backwards.
+	t.Setenv("FAK_GUARD_EXPOSE_PROFILE", "")
+	base := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false)
+	for _, env := range []string{"", "full", "off", "anything"} {
+		t.Setenv("FAK_GUARD_EXPOSE_PROFILE", env)
+		got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false)
+		if got != base {
+			t.Errorf("FAK_GUARD_EXPOSE_PROFILE=%q moved the compaction budget to %d (want %d): "+
+				"budget must key off the floor the launch carries, not the tool surface", env, got, base)
+		}
+		if got <= observedFloorTokens {
+			t.Errorf("FAK_GUARD_EXPOSE_PROFILE=%q resolved budget %d <= observed floor %d: the floor "+
+				"alone exceeds the budget, so the session is structurally past-compact from turn one",
+				env, got, observedFloorTokens)
+		}
+		if got < observedPeakResident {
+			t.Errorf("FAK_GUARD_EXPOSE_PROFILE=%q resolved budget %d < observed peak resident %d: the cut "+
+				"has no resting point, so it re-fires every turn and emits a `[fak] compacted` stub each time "+
+				"(observed resident %d)", env, got, observedPeakResident, observedResidentTokens)
 		}
 	}
 
-	// The FAK_GUARD_EXPOSE_PROFILE opt-out restores the interactive budget in the same move it
-	// restores the full registry: env=full overrides a headless launch flag.
-	t.Setenv("FAK_GUARD_EXPOSE_PROFILE", "full")
-	if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false, "headless"); got != gateway.DefaultCompactHistoryBudget {
-		t.Fatalf("env=full must restore the interactive budget over a headless flag: got %d, want %d", got, gateway.DefaultCompactHistoryBudget)
-	}
-	// And env=headless forces the floor-aware default even when the launch flag is empty.
-	t.Setenv("FAK_GUARD_EXPOSE_PROFILE", "headless")
-	if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false, ""); got != gateway.HeadlessCompactHistoryBudget {
-		t.Fatalf("env=headless must force the floor-aware default: got %d, want %d", got, gateway.HeadlessCompactHistoryBudget)
+	// The escape hatch is still real: an operator who genuinely wants the lean line asks for it.
+	if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, true); got != gateway.DefaultCompactHistoryBudget {
+		t.Fatalf("an explicit lean budget must still win: got %d, want %d", got, gateway.DefaultCompactHistoryBudget)
 	}
 }
 
