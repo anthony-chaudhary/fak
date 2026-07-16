@@ -1,0 +1,17 @@
+schema: fak-external-reader-dogfood/1
+route: docs/testing/external-reader-dogfood.md
+source_binding: pre-publication candidate based on 86153a31b31bb6b5819da86cee8609cabe4cddb0; exact route bytes bound by content_sha256; issue #4939 records publication commit
+content_sha256: c8f14f1d6fba480321c7988cde3b10c461ef58335fa3cbf65806bab776416387
+reader_type: independent model, gpt-5.4-mini, ephemeral read-only session
+entry_state: route text only; no issue context, author transcript, expected answer, or worker commentary
+primary_goal: validate a prose-only public navigation change with a reader who did not author it
+mode: structured
+read_back:
+  verdict: pass
+  audience: documentation page workers validating a public route with a reader who did not author the change
+  page_job: witness reader navigation and comprehension
+  lifecycle_generation_support: current testing process; gen/now; maintained documentation-quality procedure; product behavior retains its own runtime authority
+  applicable_choice: structured read-back; rendered and terminal read-back remain valid when their presentation conditions apply
+  default_and_upgrade: structured read-back for prose and navigation; upgrade to rendered or terminal whenever presentation is part of the claim
+  next_action: copy the task card, select an eligible reader, and run Task 1 without coaching
+ambiguities: []
