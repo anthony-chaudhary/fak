@@ -24,7 +24,7 @@ import (
 // CacheWrite mirrors Input for those rows. Published rates, retrieved 2026-07-16:
 //   - deepseek (deepseek-v4-pro): DeepSeek API docs — cache-miss $0.435, cache-hit $0.003625, output $0.87.
 //   - glm (glm-5.2): Z.AI (Zhipu) API pricing — input $1.4, cached input $0.26, output $4.4.
-//   - kimi (kimi-k2.6): Moonshot official API — input $0.60, cache-hit $0.15, output $2.50.
+//   - kimi (kimi-k2.6): Moonshot official API (platform.kimi.ai) — cache-miss $0.95, cache-hit $0.16, output $4.00.
 var Pricing = map[string]Rates{
 	"opus":   {Input: 15.0, CacheWrite: 18.75, CacheRead: 1.50, Output: 75.0},
 	"sonnet": {Input: 3.0, CacheWrite: 3.75, CacheRead: 0.30, Output: 15.0},
@@ -33,7 +33,7 @@ var Pricing = map[string]Rates{
 	// Non-Claude providers (#4823) — published public per-MTok rates.
 	"deepseek": {Input: 0.435, CacheWrite: 0.435, CacheRead: 0.003625, Output: 0.87},
 	"glm":      {Input: 1.4, CacheWrite: 1.4, CacheRead: 0.26, Output: 4.4},
-	"kimi":     {Input: 0.60, CacheWrite: 0.60, CacheRead: 0.15, Output: 2.50},
+	"kimi":     {Input: 0.95, CacheWrite: 0.95, CacheRead: 0.16, Output: 4.00},
 }
 
 // pricingOrder is the substring match order for PriceFor / ModelTier. The

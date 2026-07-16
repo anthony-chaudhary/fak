@@ -584,7 +584,7 @@ func TestNonClaudeProviderCostRates(t *testing.T) {
 	}{
 		{"deepseek-v4-pro", "deepseek", 1_000_000, 0.435, false},
 		{"glm-5.2", "glm", 1_000_000, 4.4, true},
-		{"kimi-k2.6", "kimi", 1_000_000, 0.60, false},
+		{"kimi-k2.6", "kimi", 1_000_000, 0.95, false},
 	}
 	for _, p := range priced {
 		r, ok := PriceFor(p.model)
