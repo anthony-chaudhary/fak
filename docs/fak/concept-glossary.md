@@ -1117,3 +1117,10 @@ go run ./cmd/fak run --trace testdata/tau2/tau2-smoke.json
 
 - [edge-quickstart.md](edge-quickstart.md) — runs the same adjudication path end to end.
 - [deployment-guide.md](deployment-guide.md) — how the guard, gateway, and engine wire together in production.
+
+
+### SilentCacheInvalidation
+
+The post-fire reconciliation signal (#2791): a compaction that FIRED - which by construction proves the protected prefix was spliced byte-identically, since verifySplicedBody turns any byte-inequality into a prefix_mismatch identity return - yet whose provider reported zero cache_read and nonzero cache_creation, evidencing the provider re-created the very prefix fak preserved (a TTL expiry or capacity eviction fak cannot prevent).
+
+**Distinct from:** NOT CacheBreakEvent: that is a WITNESSED break fak itself authored and can see in its own splice verdict. SilentCacheInvalidation is the provider breaking a prefix fak PROVED it preserved - invisible to bytes.Equal, hence silent. Also NOT the #2785 induced-creation burst: a head-anchored fire bursts the recent suffix on purpose but still READS its protected head, so its cache_read stays positive and it is excluded here.
