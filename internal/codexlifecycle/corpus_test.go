@@ -45,7 +45,7 @@ func TestReadRollout_FirstMetaWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRollout: %v", err)
 	}
-	if m.RolloutID != "child" || m.Provider != "fak" || m.CLIVersion != "0.144.4" {
+	if m.RolloutID != "child" || m.Provider != "fak" || m.CLIVersion != "0.144.4" { //boundarylint:ignore CHANGE_DETECTOR_TEST — closed fixture contract
 		t.Errorf("meta = %+v, want the FIRST (child/fak/0.144.4)", m)
 	}
 	if m.ProviderVersion() != "fak 0.144.4" {
