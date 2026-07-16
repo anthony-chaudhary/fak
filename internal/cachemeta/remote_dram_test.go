@@ -169,3 +169,59 @@ func TestModelRemoteDRAMPageInAdvantage(t *testing.T) {
 		t.Fatalf("the page-in latency advantage is independent of the lender probe; got %.3fx", none.SpeedupX)
 	}
 }
+
+// TestReclaimRemoteDRAMFailsClosed is the witness for the reclaim half of #4306's sketch:
+// "lease + fail-closed reclaim when the lender needs its RAM back". A span paged to a
+// neighbor's borrowed DRAM, the instant that borrow is reclaimed, must re-page to a colder
+// LOCAL tier — never keep reading reclaimed peer memory (use-after-reclaim) and never be
+// re-placed back onto the rung that just vanished. The dual proves the failure class:
+// when even local disk is full, the reclaim recomputes rather than pointing anywhere
+// remote; a span that was never on the borrowed rung is left untouched.
+func TestReclaimRemoteDRAMFailsClosed(t *testing.T) {
+	withLender := ProbedTierProfiles(CapacityProbe{
+		DRAMBytes: 512 << 30, DiskBytes: 8 << 40,
+		RemoteDRAMPresent: true, RemoteDRAMBytes: 200 << 30,
+	})
+	// A big, expensive-to-rebuild span currently resident on the borrowed peer RAM.
+	base := PlacementRequest{
+		Lifecycle:            NewLifecycle(TierRemoteDRAM, 0).MarkResident(withLender, 0),
+		SizeBytes:            64 << 20,
+		Tokens:               4000,
+		Profiles:             withLender,
+		Policy:               LifecyclePolicy{DemoteOnExpiry: true},
+		PerTokenPrefillNanos: 2_000_000, // 2ms/token prefill — expensive to rebuild
+		NowMillis:            1000,
+	}
+
+	// Reclaim with local disk still having room: the span re-pages to LOCAL disk, never
+	// back to the reclaimed rung, and emits a page-out.
+	d := ReclaimRemoteDRAM(base)
+	if d.ToTier == TierRemoteDRAM {
+		t.Fatal("a reclaimed borrow must never resolve back onto remote-DRAM")
+	}
+	if d.Action != ActionSpill || d.ToTier != TierDisk {
+		t.Fatalf("reclaim should re-page the span to local disk, got %s -> %s (%s)", d.Action, d.ToTier, d.Reason)
+	}
+	if d.Directive != KVOffload {
+		t.Fatalf("a reclaim page-out should emit KVOffload, got %s", d.Directive)
+	}
+
+	// Reclaim with local disk ALSO full: nothing local can hold it, so it recomputes —
+	// fail-closed, never a phantom read from memory that was taken back.
+	full := base
+	full.Pressure = TierPressure{TierDisk: 1.0}
+	d = ReclaimRemoteDRAM(full)
+	if d.ToTier == TierRemoteDRAM {
+		t.Fatal("reclaim under a full local tier must not fall back to remote-DRAM")
+	}
+	if d.Action != ActionEvict || d.ToTier != TierRecompute {
+		t.Fatalf("reclaim with no colder local room must recompute, got %s -> %s (%s)", d.Action, d.ToTier, d.Reason)
+	}
+
+	// A span that was never on the borrowed rung has nothing to reclaim.
+	notBorrowed := base
+	notBorrowed.Lifecycle = NewLifecycle(TierDRAM, 0).MarkResident(withLender, 0)
+	if d := ReclaimRemoteDRAM(notBorrowed); d.Action != ActionKeep || d.ToTier != TierDRAM {
+		t.Fatalf("a span not on remote-DRAM must be kept in place, got %s -> %s (%s)", d.Action, d.ToTier, d.Reason)
+	}
+}

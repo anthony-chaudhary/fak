@@ -67,3 +67,44 @@ func ModelRemoteDRAMPageInAdvantage(pageInBytes int64, probe CapacityProbe) Remo
 	}
 	return adv
 }
+
+// ReclaimRemoteDRAM decides where a span currently paged to a peer's borrowed DRAM
+// (TierRemoteDRAM) must go the instant the lender takes its RAM back — the "lease +
+// fail-closed reclaim when the lender needs its RAM back" the #4306 sketch names. A
+// reclaim voids the rung: the borrowed region is gone, so continuing to read the span
+// from it is a use-after-reclaim (the failure class this models). The span MUST re-page
+// to a colder LOCAL tier (disk) or, when nothing local can hold it, recompute — it must
+// never keep pointing at reclaimed peer memory, and it must never be re-placed back onto
+// the very rung that was just reclaimed.
+//
+// It does not invent a parallel policy: it pins the reclaimed rung to full pressure and
+// hands the span to PlanPlacement, whose colder-with-room walk from TierRemoteDRAM is
+// exactly disk -> recompute (NextColderTier threads it that way). So the reclaim path is
+// the placement policy's own demote/spill/evict decision, just forced by the borrow
+// vanishing rather than by ordinary pressure. A span that is NOT on the borrowed rung has
+// nothing to reclaim, so it is kept in place.
+func ReclaimRemoteDRAM(req PlacementRequest) PlacementDecision {
+	from := req.Lifecycle.Tier
+	if from != TierRemoteDRAM {
+		// Nothing borrowed here to reclaim — leave the span where it is.
+		return PlacementDecision{Action: ActionKeep, FromTier: from, ToTier: from, Reason: "not_on_remote_dram"}
+	}
+	// Copy the pressure map (the caller's is shared) and pin the reclaimed rung full, so
+	// PlanPlacement sees the span as under pressure and relocates it strictly colder —
+	// never a Keep on, nor a demote back to, the reclaimed borrow.
+	pressure := make(TierPressure, len(req.Pressure)+1)
+	for t, v := range req.Pressure {
+		pressure[t] = v
+	}
+	pressure[TierRemoteDRAM] = 1.0
+	req.Pressure = pressure
+	d := PlanPlacement(req)
+	// Fail-closed invariant: a reclaim can never resolve back onto the borrowed rung.
+	if d.ToTier == TierRemoteDRAM {
+		return PlacementDecision{
+			Action: ActionEvict, FromTier: from, ToTier: TierRecompute,
+			Directive: KVOffload, Reason: "reclaim_forces_recompute",
+		}
+	}
+	return d
+}
