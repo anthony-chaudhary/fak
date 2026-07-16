@@ -30,6 +30,7 @@ type Inputs struct {
 	Milestone   *milestonereport.Report
 	Heaviness   *scorecard.Payload
 	Fleet       *loopfleet.Report
+	OSP         *OSP
 	Previous    *Report
 
 	// TriageGate selects the decenter-the-human paging policy applied during
@@ -316,6 +317,9 @@ func Fold(in Inputs) Report {
 	if in.Fleet != nil {
 		r.Sources = append(r.Sources, fleetState(in.Fleet))
 	}
+	if in.OSP != nil {
+		r.Sources = append(r.Sources, ospState(in.OSP))
+	}
 
 	if in.Cadence == nil {
 		r.addHuman("cadence", "page", "cadence report missing", "scores, maturity, work, and releases are not in this brief", "generate `fak cadence --json` and pass it with --cadence")
@@ -337,6 +341,9 @@ func Fold(in Inputs) Report {
 	}
 	if in.Fleet != nil {
 		addFleet(&r, *in.Fleet)
+	}
+	if in.OSP != nil {
+		addOSP(&r, *in.OSP)
 	}
 	r.Coherence = sourceCoherence(r.Sources)
 	if r.Coherence.Status == "mixed" {

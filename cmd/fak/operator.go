@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/operatorbrief"
 	"github.com/anthony-chaudhary/fak/internal/programreport"
+	"github.com/anthony-chaudhary/fak/internal/steerpr"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -39,6 +40,7 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	programPath := fs.String("program", "", "path to `fak program report --json` output")
 	milestonePath := fs.String("milestone", "", "path to `fak milestone report --json` output")
 	heavinessPath := fs.String("heaviness", "", "path to `fak operator heaviness --json` output")
+	ospPath := fs.String("osp", "", "path to `fak steer prs --json` (operator-steerability overlay) output; a missing/unreadable payload marks the source unmeasured rather than failing the brief")
 	previousPath := fs.String("previous", "", "path to previous `fak operator brief --json` output for change compression")
 	collect := fs.Bool("collect", false, "collect any missing report input live before folding (slower; artifact inputs still win)")
 	collectTimeout := fs.Int("collect-timeout", 300, "per-source timeout seconds for --collect cadence/report calls")
@@ -57,7 +59,7 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak operator brief: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
-	if stdinUses(*cadencePath, *programPath, *milestonePath, *heavinessPath, *previousPath) > 1 {
+	if stdinUses(*cadencePath, *programPath, *milestonePath, *heavinessPath, *ospPath, *previousPath) > 1 {
 		fmt.Fprintln(stderr, "fak operator brief: only one report input may use '-' for stdin")
 		return 2
 	}
@@ -145,6 +147,10 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		in.Heaviness = &r
+	}
+	if *ospPath != "" {
+		o := loadOSPBriefInput(*ospPath, os.Stdin)
+		in.OSP = &o
 	}
 	if *previousPath != "" {
 		r, err := loadPreviousOperatorBrief(*previousPath, os.Stdin)
@@ -315,6 +321,33 @@ func loadPreviousOperatorBrief(path string, stdin io.Reader) (operatorbrief.Repo
 		return r, fmt.Errorf("schema %q, want %q", r.Schema, operatorbrief.Schema)
 	}
 	return r, nil
+}
+
+// loadOSPBriefInput reads a `fak steer prs --json` (or any steerpr overlay, e.g.
+// `fak release prplan --json`) payload into an operatorbrief.OSP. Per the
+// acceptance gate, a missing or unreadable payload does NOT fail the brief: it
+// returns an Unreadable OSP so the source folds as unmeasured, never as a clean
+// zero. Only the {schema, units} envelope is consumed; the units carry their own
+// bands.
+func loadOSPBriefInput(path string, stdin io.Reader) operatorbrief.OSP {
+	var raw []byte
+	var err error
+	if path == "-" {
+		raw, err = io.ReadAll(stdin)
+	} else {
+		raw, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return operatorbrief.OSP{Unreadable: true, Note: fmt.Sprintf("read %s: %v", path, err)}
+	}
+	var env struct {
+		Schema string         `json:"schema"`
+		Units  []steerpr.Unit `json:"units"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return operatorbrief.OSP{Unreadable: true, Note: fmt.Sprintf("parse %s: %v", path, err)}
+	}
+	return operatorbrief.OSP{Schema: env.Schema, Units: env.Units}
 }
 
 func loadBriefJSON(path string, stdin io.Reader, dst any) error {
