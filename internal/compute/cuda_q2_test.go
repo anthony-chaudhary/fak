@@ -20,7 +20,7 @@ import "testing"
 // the SAME codes+scales. Approx gate: argmax-exact + cosine ≥ cudaQ2CosineMin.
 func TestCUDAQ2_0GEMMMatMulApproxMatchesRef(t *testing.T) {
 	cb := cudaOrSkip(t)
-	ref := Default() // cpu-ref
+	ref := Default()         // cpu-ref
 	const out, in = 320, 256 // in divisible by 32
 	packed, scale := randTernaryWeight(0x4872, out, in, q2Block)
 	dense := dequantQ2Weight(packed, scale, out, in, q2Block)
