@@ -16,7 +16,7 @@ func TestEligibleDenominatorExcludesColdHead(t *testing.T) {
 	if s := o.Snapshot(); s.EligibleReuseRatio != 0 || s.EligibleTokens != 0 {
 		t.Fatalf("idle observer reported phantom eligibility: %+v", s)
 	}
-	o.ObserveLabeled(Labels{Model: "m", Tenant: "t"}, 1000, 0, 0, 0)      // always-cold first prefill
+	o.ObserveLabeled(Labels{Model: "m", Tenant: "t"}, 1000, 0, 0, 0)        // always-cold first prefill
 	o.ObserveLabeled(Labels{Model: "m", Tenant: "t"}, 1000, 800, 800, 1000) // whole prompt in play
 	s := o.Snapshot()
 	if s.EligibleTokens != 1000 {
@@ -37,9 +37,9 @@ func TestEligibleDenominatorExcludesColdHead(t *testing.T) {
 // reused/eligible can never exceed 1.
 func TestEligibleClampedBetweenCacheableAndPrompt(t *testing.T) {
 	o := New()
-	o.ObserveLabeled(Labels{}, 1000, 300, 200, 0)  // stale zero: raised to cacheable (300)
-	o.ObserveLabeled(Labels{}, 100, 0, 0, 5000)    // over-claim: capped at prompt (100)
-	o.ObserveLabeled(Labels{}, 50, 0, 0, -7)       // negative: raised to cacheable (0)
+	o.ObserveLabeled(Labels{}, 1000, 300, 200, 0) // stale zero: raised to cacheable (300)
+	o.ObserveLabeled(Labels{}, 100, 0, 0, 5000)   // over-claim: capped at prompt (100)
+	o.ObserveLabeled(Labels{}, 50, 0, 0, -7)      // negative: raised to cacheable (0)
 	s := o.Snapshot()
 	if want := uint64(300 + 100 + 0); s.EligibleTokens != want {
 		t.Fatalf("eligible = %d, want %d (clamped into [cacheable, prompt] per turn)", s.EligibleTokens, want)
