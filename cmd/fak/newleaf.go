@@ -15,12 +15,36 @@ func runNewLeaf(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("new-leaf", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	tier := fs.String("tier", "", "layering tier: foundation, mechanism, composer, or integrator")
+	suggestTier := fs.String("suggest-tier", "", "read-only: print the minimum-correct tier for an existing internal leaf derived from its imports, then exit")
 	register := fs.Bool("register", false, "add the leaf to the defconfig blank-import list")
 	summary := fs.String("summary", "", "one-line package summary for doc.go")
 	dryRun := fs.Bool("dry-run", false, "print the planned edits without writing files")
 	workspace := fs.String("workspace", "", "workspace root (defaults to current directory)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+	if *suggestTier != "" {
+		// Read-only suggestion mode: the leaf is named by the flag, so no positional
+		// package argument. An optional --tier adds the over/under-declaration advisory.
+		if fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "fak new-leaf: --suggest-tier names the leaf itself; pass no package argument")
+			return 2
+		}
+		s, err := newleaf.Suggest(*workspace, *suggestTier, *tier)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak new-leaf: %v\n", err)
+			return 2
+		}
+		raw, err := s.JSON()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak new-leaf: %v\n", err)
+			return 1
+		}
+		if _, err := stdout.Write(append(raw, '\n')); err != nil {
+			fmt.Fprintf(stderr, "fak new-leaf: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "fak new-leaf: pass exactly one package name")

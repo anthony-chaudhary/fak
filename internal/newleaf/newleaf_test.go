@@ -197,6 +197,93 @@ func TestApplyCreatesLeafAndUpdatesTables(t *testing.T) {
 	}
 }
 
+func TestParseTierTableReadsRows(t *testing.T) {
+	arch := "package architest\n\nvar tier = map[string]int{\n\t\"abi\": 0,\n\t\"foo\": 1,\n\t\"engine\": 2,\n\t// new-leaf:tier\n}\n"
+	tierOf := ParseTierTable(arch)
+	if tierOf["abi"] != 0 || tierOf["foo"] != 1 || tierOf["engine"] != 2 {
+		t.Fatalf("parsed tier table = %v", tierOf)
+	}
+	if len(tierOf) != 3 {
+		t.Fatalf("expected 3 rows, got %d: %v", len(tierOf), tierOf)
+	}
+}
+
+func TestMinTierFloorsAtFoundation(t *testing.T) {
+	tierOf := map[string]int{"abi": 0, "foo": 1, "engine": 2, "recall": 3}
+	// no internal deps -> foundation (floored, never root).
+	if level, gov := MinTier(nil, tierOf); level != Tiers["foundation"] || gov != "" {
+		t.Fatalf("empty deps: level=%d gov=%q, want foundation and no governing dep", level, gov)
+	}
+	// importing only an abi(0) dep still floors at foundation.
+	if level, gov := MinTier([]string{"abi"}, tierOf); level != Tiers["foundation"] || gov != "" {
+		t.Fatalf("abi-only deps: level=%d gov=%q, want foundation floor", level, gov)
+	}
+	// importing a mechanism(2) raises the floor to mechanism, naming the dep.
+	if level, gov := MinTier([]string{"foo", "engine"}, tierOf); level != Tiers["mechanism"] || gov != "engine" {
+		t.Fatalf("mechanism dep: level=%d gov=%q, want mechanism governed by engine", level, gov)
+	}
+	// an unknown dep cannot raise the floor.
+	if level, _ := MinTier([]string{"unknownpkg"}, tierOf); level != Tiers["foundation"] {
+		t.Fatalf("unknown dep raised the floor to %d", level)
+	}
+}
+
+func TestTierAdvisoryFiresOnMismatch(t *testing.T) {
+	tierOf := map[string]int{"abi": 0, "foo": 1, "engine": 2}
+	// minimum-correct: no advisory.
+	if a := TierAdvisory("foundation", nil, tierOf); a != "" {
+		t.Fatalf("minimum-correct declaration fired an advisory: %q", a)
+	}
+	// over-declared with no governing dep.
+	over := TierAdvisory("composer", nil, tierOf)
+	if !strings.Contains(over, "foundation") || !strings.Contains(over, "composer") {
+		t.Fatalf("over-declared advisory = %q", over)
+	}
+	// under-declared: architest would reject; advisory names the offending dep.
+	under := TierAdvisory("foundation", []string{"engine"}, tierOf)
+	if !strings.Contains(under, "engine") || !strings.Contains(under, "mechanism") {
+		t.Fatalf("under-declared advisory = %q", under)
+	}
+}
+
+func TestScanInternalDepsSkipsTestsAndStdlib(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.go"),
+		[]byte("package x\n\nimport (\n\t\"fmt\"\n\t_ \"github.com/anthony-chaudhary/fak/internal/engine\"\n\t_ \"github.com/anthony-chaudhary/fak/internal/foo/sub\"\n)\n\nvar _ = fmt.Sprint\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x_test.go"),
+		[]byte("package x\n\nimport _ \"github.com/anthony-chaudhary/fak/internal/recall\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps, err := ScanInternalDeps(dir)
+	if err != nil {
+		t.Fatalf("ScanInternalDeps: %v", err)
+	}
+	// engine + foo (sub collapses to the leaf); stdlib and _test import excluded.
+	if strings.Join(deps, ",") != "engine,foo" {
+		t.Fatalf("deps = %v, want [engine foo]", deps)
+	}
+}
+
+func TestSuggestForExistingLeaf(t *testing.T) {
+	root := t.TempDir()
+	mustWriteNewLeafFile(t, root, "internal/architest/architest_test.go",
+		"package architest\n\nvar tier = map[string]int{\n\t\"abi\": 0,\n\t\"engine\": 2,\n\t// new-leaf:tier\n}\n")
+	mustWriteNewLeafFile(t, root, "internal/beta/beta.go",
+		"package beta\n\nimport _ \"github.com/anthony-chaudhary/fak/internal/engine\"\n")
+	s, err := Suggest(root, "beta", "integrator")
+	if err != nil {
+		t.Fatalf("Suggest: %v", err)
+	}
+	if s.SuggestedTier != "mechanism" || s.GoverningDep != "engine" {
+		t.Fatalf("suggestion = %+v, want mechanism governed by engine", s)
+	}
+	if s.Advisory == "" {
+		t.Fatalf("over-declared integrator should fire an advisory: %+v", s)
+	}
+}
+
 func newLeafWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

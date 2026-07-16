@@ -3,9 +3,13 @@ package newleaf
 import (
 	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -31,12 +35,13 @@ type Options struct {
 }
 
 type Report struct {
-	Name      string   `json:"name"`
-	Tier      string   `json:"tier"`
-	Register  bool     `json:"register"`
-	DryRun    bool     `json:"dry_run"`
-	Edits     []string `json:"edits"`
-	NextSteps []string `json:"next_steps"`
+	Name         string   `json:"name"`
+	Tier         string   `json:"tier"`
+	Register     bool     `json:"register"`
+	DryRun       bool     `json:"dry_run"`
+	TierAdvisory string   `json:"tier_advisory,omitempty"`
+	Edits        []string `json:"edits"`
+	NextSteps    []string `json:"next_steps"`
 }
 
 func DocGo(name, tier string, n int, summary string) string {
@@ -247,11 +252,199 @@ func Apply(opts Options) (Report, error) {
 		"go test ./internal/" + name + " ./internal/architest",
 		"the architest gate now enforces this leaf's tier on every CI run",
 	}
+	// Nudge toward the minimum-correct tier at creation (#4045): the skeleton
+	// imports only abi (when registered) or nothing, so declaring above foundation
+	// surfaces an advisory the moment the leaf is scaffolded — foundation stops
+	// being the frictionless default without any creation being blocked.
+	var scaffoldDeps []string
+	if opts.Register {
+		scaffoldDeps = []string{"abi"}
+	}
+	report.TierAdvisory = TierAdvisory(tier, scaffoldDeps, ParseTierTable(string(archText)))
 	return report, nil
 }
 
 func (r Report) JSON() ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
+}
+
+// --- minimum-correct-tier suggestion (#4045) --------------------------------
+//
+// The imbalance the architest-foundation epic (#4041) chases is authored in one
+// `new-leaf` call at a time: with no signal about what a leaf imports, the path of
+// least resistance is always `--tier foundation`. These helpers compute the minimum
+// tier consistent with the layered-DAG rule (a package may import only packages of
+// tier <= its own, so its floor is max(tier(dep))) directly from the leaf's imports,
+// so the author chooses from evidence. Advisory only — edit-time enforcement is #2082.
+
+var tierRowRE = regexp.MustCompile(`"([a-z][a-z0-9]*)"\s*:\s*(\d+)`)
+
+// TierNameForLevel reverses Tiers: a level (0..4) to its canonical tier name, or ""
+// for an unknown level.
+func TierNameForLevel(level int) string {
+	for name, n := range Tiers {
+		if n == level {
+			return name
+		}
+	}
+	return ""
+}
+
+// ParseTierTable extracts the package -> tier-level map from the architest tier
+// table text (the `"name": N,` rows new-leaf itself maintains behind TierMarker).
+// It is the read half of the table Apply writes into, so a suggestion is always
+// computed against the same source of truth the gate enforces.
+func ParseTierTable(archText string) map[string]int {
+	out := map[string]int{}
+	for _, m := range tierRowRE.FindAllStringSubmatch(archText, -1) {
+		if n, err := strconv.Atoi(m[2]); err == nil {
+			out[m[1]] = n
+		}
+	}
+	return out
+}
+
+// ScanInternalDeps returns the sorted, unique internal leaf names imported by the
+// non-test Go files in dir: an import of ".../internal/foo" or ".../internal/foo/bar"
+// both yield "foo". It is the import scan the tier suggestion reasons over.
+func ScanInternalDeps(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		nm := e.Name()
+		if e.IsDir() || !strings.HasSuffix(nm, ".go") || strings.HasSuffix(nm, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, nm), nil, parser.ImportsOnly)
+		if err != nil {
+			return nil, err
+		}
+		for _, imp := range f.Imports {
+			p, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				continue
+			}
+			rest, ok := strings.CutPrefix(p, ModulePrefix+"/")
+			if !ok {
+				continue
+			}
+			leaf := rest
+			if i := strings.IndexByte(leaf, '/'); i >= 0 {
+				leaf = leaf[:i]
+			}
+			if leaf != "" {
+				seen[leaf] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// MinTier returns the minimum legal tier LEVEL for a leaf with the given internal
+// deps and the highest-tier dep that sets it (governing == "" when the floor is the
+// unconditional foundation default). It is max(tier(dep)) floored at foundation; a
+// dep absent from tierOf is ignored — an unknown package cannot raise the floor.
+func MinTier(deps []string, tierOf map[string]int) (level int, governing string) {
+	level = Tiers["foundation"]
+	for _, d := range deps {
+		if t, ok := tierOf[d]; ok && t > level {
+			level, governing = t, d
+		}
+	}
+	return level, governing
+}
+
+// TierAdvisory compares the author-declared tier against the minimum legal tier
+// derived from the deps and returns a one-line advisory when they differ, or "" when
+// the declared tier is already minimum-correct. Advisory only — never a block.
+func TierAdvisory(declared string, deps []string, tierOf map[string]int) string {
+	dl, ok := Tiers[declared]
+	if !ok {
+		return ""
+	}
+	level, gov := MinTier(deps, tierOf)
+	name := TierNameForLevel(level)
+	switch {
+	case dl > level:
+		if gov == "" {
+			return fmt.Sprintf("tier advisory: imports only tier-≤%d packages → %q suffices (you declared %q)", level, name, declared)
+		}
+		return fmt.Sprintf("tier advisory: highest-tier import %q is tier-%d → %q suffices (you declared %q)", gov, level, name, declared)
+	case dl < level:
+		return fmt.Sprintf("tier advisory: imports %q (tier-%d) → tier must be ≥ %q (you declared %q); the architest gate rejects an upward import", gov, level, name, declared)
+	}
+	return ""
+}
+
+// Suggestion is the read-only minimum-correct-tier verdict for an existing leaf.
+type Suggestion struct {
+	Leaf           string   `json:"leaf"`
+	DeclaredTier   string   `json:"declared_tier,omitempty"`
+	SuggestedTier  string   `json:"suggested_tier"`
+	SuggestedLevel int      `json:"suggested_level"`
+	GoverningDep   string   `json:"governing_dep,omitempty"`
+	InternalDeps   []string `json:"internal_deps"`
+	Advisory       string   `json:"advisory,omitempty"`
+}
+
+// Suggest computes the minimum-correct tier for an existing internal leaf from its
+// imports, read-only. A non-empty declared tier adds a comparison advisory. root
+// defaults to the current working directory.
+func Suggest(root, leaf, declared string) (Suggestion, error) {
+	if !NameRE.MatchString(leaf) {
+		return Suggestion{}, fmt.Errorf("%q is not a valid lowercase Go package name", leaf)
+	}
+	if declared != "" {
+		if _, ok := Tiers[declared]; !ok {
+			return Suggestion{}, fmt.Errorf("unknown tier %q", declared)
+		}
+	}
+	if root == "" {
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			return Suggestion{}, err
+		}
+	}
+	archText, err := os.ReadFile(filepath.Join(root, "internal", "architest", "architest_test.go"))
+	if err != nil {
+		return Suggestion{}, err
+	}
+	tierOf := ParseTierTable(string(archText))
+	deps, err := ScanInternalDeps(filepath.Join(root, "internal", leaf))
+	if err != nil {
+		return Suggestion{}, err
+	}
+	level, gov := MinTier(deps, tierOf)
+	if deps == nil {
+		deps = []string{}
+	}
+	s := Suggestion{
+		Leaf:           leaf,
+		DeclaredTier:   declared,
+		SuggestedTier:  TierNameForLevel(level),
+		SuggestedLevel: level,
+		GoverningDep:   gov,
+		InternalDeps:   deps,
+	}
+	if declared != "" {
+		s.Advisory = TierAdvisory(declared, deps, tierOf)
+	}
+	return s, nil
+}
+
+// JSON renders the suggestion as indented JSON.
+func (s Suggestion) JSON() ([]byte, error) {
+	return json.MarshalIndent(s, "", "  ")
 }
 
 func splitKeepLines(s string) []string {

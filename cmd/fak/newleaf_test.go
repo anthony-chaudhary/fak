@@ -87,6 +87,86 @@ func TestNewLeafCommandValidatesArgs(t *testing.T) {
 	}
 }
 
+func TestNewLeafSuggestTierFromImports(t *testing.T) {
+	root := commandNewLeafSuggestWorkspace(t)
+
+	// (1) no internal deps -> foundation.
+	if s := commandRunSuggest(t, root, "alpha", ""); s.SuggestedTier != "foundation" {
+		t.Fatalf("alpha suggested_tier = %q, want foundation (%+v)", s.SuggestedTier, s)
+	}
+
+	// (2) imports a mechanism -> suggests >= mechanism, naming the governing dep.
+	beta := commandRunSuggest(t, root, "beta", "")
+	if beta.SuggestedTier != "mechanism" || beta.GoverningDep != "engine" {
+		t.Fatalf("beta suggestion = %+v, want mechanism governed by engine", beta)
+	}
+
+	// (3) over-declared tier -> advisory fires (never blocks; rc already 0 above).
+	over := commandRunSuggest(t, root, "alpha", "composer")
+	if over.Advisory == "" {
+		t.Fatalf("over-declared alpha should surface an advisory: %+v", over)
+	}
+}
+
+func TestNewLeafScaffoldSurfacesTierAdvisory(t *testing.T) {
+	root := commandNewLeafWorkspace(t)
+	var stdout, stderr bytes.Buffer
+	rc := runNewLeaf(&stdout, &stderr, []string{
+		"--workspace", root, "--tier", "composer", "--dry-run", "overshoot",
+	})
+	if rc != 0 {
+		t.Fatalf("runNewLeaf rc=%d stderr=%q", rc, stderr.String())
+	}
+	var report struct {
+		TierAdvisory string `json:"tier_advisory"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal report: %v", err)
+	}
+	if report.TierAdvisory == "" {
+		t.Fatalf("scaffolding composer with no imports should surface a foundation advisory: %s", stdout.String())
+	}
+}
+
+func commandRunSuggest(t *testing.T, root, leaf, tier string) struct {
+	SuggestedTier string   `json:"suggested_tier"`
+	GoverningDep  string   `json:"governing_dep"`
+	InternalDeps  []string `json:"internal_deps"`
+	Advisory      string   `json:"advisory"`
+} {
+	t.Helper()
+	argv := []string{"--workspace", root, "--suggest-tier", leaf}
+	if tier != "" {
+		argv = append(argv, "--tier", tier)
+	}
+	var stdout, stderr bytes.Buffer
+	if rc := runNewLeaf(&stdout, &stderr, argv); rc != 0 {
+		t.Fatalf("runNewLeaf --suggest-tier %s rc=%d stderr=%q", leaf, rc, stderr.String())
+	}
+	var s struct {
+		SuggestedTier string   `json:"suggested_tier"`
+		GoverningDep  string   `json:"governing_dep"`
+		InternalDeps  []string `json:"internal_deps"`
+		Advisory      string   `json:"advisory"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &s); err != nil {
+		t.Fatalf("unmarshal suggestion: %v (%s)", err, stdout.String())
+	}
+	return s
+}
+
+func commandNewLeafSuggestWorkspace(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	commandWriteNewLeafFile(t, root, "internal/architest/architest_test.go",
+		"package architest\n\nvar tier = map[string]int{\n\t\"abi\": 0,\n\t\"engine\": 2,\n\t// new-leaf:tier\n}\n")
+	commandWriteNewLeafFile(t, root, "internal/alpha/alpha.go",
+		"package alpha\n\nimport \"fmt\"\n\nvar _ = fmt.Sprint\n")
+	commandWriteNewLeafFile(t, root, "internal/beta/beta.go",
+		"package beta\n\nimport _ \"github.com/anthony-chaudhary/fak/internal/engine\"\n")
+	return root
+}
+
 func commandNewLeafWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
