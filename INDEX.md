@@ -36,7 +36,7 @@ New dated notes go under [`docs/notes/`](docs/notes/) and get a line in **Notes 
 - [Security policy](SECURITY.md) — evaluate the current capability floor, its policy configuration, scoped evidence, and private reporting route.
 - [Benchmark authority](BENCHMARK-AUTHORITY.md) — select a scoped result, compare its tuned baseline, and follow the committed artifact and reproduce route.
 - [llms.txt](llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
-- [Docs home](docs/index.md) — the published documentation landing page.
+- [Docs home](docs/index.md) — choose a current public, builder, operator, contributor, or research route.
 - [Innovations index](docs/INNOVATIONS-INDEX.md) — the durable catalog of fak's innovations, concepts, and learnings: what each is, the general primitive it embodies, where it lives, whether it's shipped, and whether it's been generalized for reuse. The innovations counterpart to this repo map and the [llms.txt](llms.txt) doc map.
 - [Work map](docs/WORK-MAP.md) — where each *kind* of work lives, kept separate: **optimizations** (the `EXTENDING.md` three-gate lane), **ongoing work** (the in-flight trackers, epics, and dispatch loop), and **dev** (the build/test/partition/ship workflow). Names the overlaps and the known drift between the status surfaces. Read this when you're not sure which front door a task belongs to.
 - [Generation contract](docs/generation.md) — the canonical now/next/second-next/future taxonomy for generation-aware development: stream labels, generation milestones, promotion/demotion evidence, shared-trunk rules, runtime feature-gate separation, intake rules, issue views, and anti-patterns. The front door for epic #1625.

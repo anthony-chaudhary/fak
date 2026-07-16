@@ -3,94 +3,29 @@ title: "fak — the agent kernel | cheaper long sessions, the right model per ca
 description: "fak is one Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. Cheaper long sessions, the right model per call, fewer wasted turns, and an auditable verdict for every tool call."
 ---
 
-# fak — the Fused Agent Kernel (agent kernel)
+# fak documentation
 
-**Put one Go binary in front of the AI agent you already run. Keep your model, your IDE, and your tools — gain a handle on the parts of a real agent loop that get expensive or go wrong.**
+**Primary audience:** people entering the documentation who need to choose a current route by job. `fak` is one Go agent-kernel binary that adjudicates tool calls before they run, reuses shared setup, routes calls, serves repeats locally, and manages context.
 
-<!-- hero video — the headline benchmarks as a ~40s reveal. Assets live in /visuals
-     (outside the Pages /docs root), so they are referenced by absolute raw URL, the
-     same convention as the social-preview image in _config.yml. A real HTML page can
-     autoplay the muted mp4; the gif is the fallback for engines that block <video>. -->
-<div align="center">
-  <video
-    src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/hero-video.mp4"
-    poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/hero-video-poster.png"
-    autoplay loop muted playsinline preload="metadata"
-    width="100%" style="max-width:960px;border-radius:12px"
-    aria-label="fak — the agent kernel: a ~40 second model-card reveal of the headline benchmarks — the performance spectrum, the turn-tax curves (modeled 9.7x vs the naive floor), the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep">
-    <img
-      src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/hero-video.gif"
-      alt="fak headline benchmarks — an animated ~40-second reveal"
-      width="100%" style="max-width:960px;border-radius:12px"/>
-  </video>
-  <br/>
-  <sub>The headline benchmarks as a ~40-second reveal · <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/hero-video.mp4">full-resolution MP4</a></sub>
-</div>
+**Default next action:** run the deterministic offline proof in [the reproducibility packet](repro-packet.md) with `fak agent --offline`. It needs no API key, model, or GPU and ends with checkable task-completion and blocked-operation results.
 
-`fak` is one Go binary you put in front of the AI agent you already run — Claude
-Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. You keep your model,
-your IDE, and your tools. You point one base URL at `fak`, and it gives you a handle
-on the parts of a real agent loop that get expensive or go wrong:
+## Choose your route
 
-- **Cheaper long sessions.** A 100k-token conversation re-sends its whole transcript
-  every turn. `fak` sheds the old turns while keeping the provider's prompt-cache
-  prefix byte-identical, so the discount survives instead of breaking.
-- **The right model per call.** Send an easy read to a cheap model and a write-shaped
-  call to a careful one, chosen per tool call rather than per whole request.
-- **Fewer wasted turns.** A repeated read served locally, a malformed call repaired in
-  place, a dead-end branch refused before the agent spends a turn on it.
-- **A trail you can audit.** Every decision is a plain verdict (`ALLOW`, `DENY`,
-  `TRANSFORM`, or `QUARANTINE`) in JSON logs, an optional hash-chained journal, and
-  Prometheus metrics.
+| You are… | Start here | Use this route to… |
+|---|---|---|
+| Evaluating fak | [Reproducibility packet](repro-packet.md) | Identify the product, run the offline proof, then inspect its evidence. |
+| Building or integrating an agent or client | [Managed agent runtime](explainers/agent-runtime.md) | Choose an interface, understand ownership, and follow the proposal-to-continuation flow. |
+| Deploying or operating | [Deployment guide](fak/deployment-guide.md) | Choose an operating envelope, then configure and observe the service. |
+| Contributing | [Contributor guide](../CONTRIBUTING.md) | Build, test, change, and prove the repository under its current contracts. |
+| Researching design or history | [Notes archive](notes/) | Find rationale and dated evidence, then check current code and tests before relying on it. |
 
-> **In one line:** put `fak` in front of the agent you already run. It makes long
-> sessions cheaper, routes each call to the right model, keeps unsafe tool results out
-> of context, and records every verdict. One binary, no rewrite, no key to start.
+For a human role map, use [`START-HERE.md`](../START-HERE.md). Agents that need a compact authority map should use [`llms.txt`](../llms.txt). The exhaustive audience, task, and lifecycle catalog is [`INDEX.md`](../INDEX.md).
 
-It does this by sitting on the tool-call path as a **kernel**: the model *proposes* a
-call; `fak` decides whether that call exists, whether its arguments are allowed, whether
-the result may enter context, and what gets reused. The same boundary that saves tokens
-is also where a dangerous call gets refused, so cost control and tool-call control share
-one checkpoint ([see below](#tool-call-controls)).
+## Authority and lifecycle
 
-<!-- agent-kernel explainer video — the boundary / how-it-works story (P1) as a ~44s reveal,
-     built by tools/hero_video_gen.py from the in-repo deterministic diagrams (nothing
-     generated). Same /visuals raw-URL convention as the hero video above. -->
-<div align="center">
-  <video
-    src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-kernel-video.mp4"
-    poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-kernel-video-poster.png"
-    autoplay loop muted playsinline preload="metadata"
-    width="100%" style="max-width:960px;border-radius:12px"
-    aria-label="fak — the agent kernel: a ~44 second explainer reveal — the agent-kernel card, the tool call as a syscall, the five-gate flow through the kernel, the two-gate security model, the Context MMU, shared-prefix KV, and the 2-D scheduler">
-    <img
-      src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-kernel-video.gif"
-      alt="fak agent kernel — an animated ~44-second explainer"
-      width="100%" style="max-width:960px;border-radius:12px"/>
-  </video>
-  <br/>
-  <sub>How the boundary works — the agent kernel as a ~44-second reveal · <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-kernel-video.mp4">full-resolution MP4</a></sub>
-</div>
+This page is the **current, public documentation landing page** for the current generation. Runtime behavior is authoritative in code and tests; operational pages link to their owning commands and proofs. Pages marked experimental, simulated, stubbed, superseded, or historical describe a narrower lifecycle and do not override current authorities. Dated material under [`notes/`](notes/) provides provenance rather than the default product contract.
 
-[**▶ Try the live demos**](demos.html){: .btn } ·
-[Open the modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb){: .btn } ·
-[Install (1 line, no clone)](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md){: .btn } ·
-[Get started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md){: .btn } ·
-[See the showcase](showcase.html){: .btn } ·
-[Read the FAQ](FAQ.md){: .btn } ·
-[GitHub repository](https://github.com/anthony-chaudhary/fak){: .btn }
-
-> **▶ See it run.** Start with no-key, no-model demos that run anywhere Go runs:
-> `go run ./cmd/dropindemo -print`, `go run ./cmd/guarddemo -print`, or
-> `go run ./cmd/tokendemo -print`. Then move to the dedicated security,
-> research/science, adoption, memory/serving, and hosted live-model tracks.
-> **[Open the demos →](demos.html)** Or open the
-> [modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb)
-> for policy proof, HTTP adjudication, offline value measurement, and an optional
-> GPU-backed gateway case. You can also [run your own copy](run-the-demos.md)
-> locally, in a container, or on your own cloud VM.
-
----
+This landing page supports route selection for the offline proof, managed runtime, integrations, HTTP service, policy floor, deployment, and contribution workflow. It does not establish availability for accelerator hardware or private control channels; those environment-specific routes state their own prerequisites and support boundary. Begin with the offline proof unless your task requires one of those envelopes.
 
 ## What fak does
 
