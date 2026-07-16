@@ -248,6 +248,10 @@ func TestRunHooks_commitMsgBlocksHardwareTell(t *testing.T) {
 	bad := filepath.Join(dir, "bad.txt")
 	_ = os.WriteFile(bad, []byte("docs(nightrun): add the dgx3 decode (fak nightrun)\n"), 0o644)
 
+	// The public-leak gate intentionally runs first and recognizes the same private
+	// host alias. Escape that gate so this test reaches the distinct hardware-tell
+	// refusal it is meant to witness.
+	t.Setenv("FLEET_ALLOW_LEAK", "1")
 	var out, errb bytes.Buffer
 	if code := runHooks(&out, &errb, []string{"commit-msg", bad}); code != 1 {
 		t.Fatalf("hardware tell should block, got %d; stderr=%s", code, errb.String())

@@ -586,7 +586,11 @@ func TestRunAuditDiagnoseCorrelatesObservedControlTeardown(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	row, _ := mintRow(1, "", journal.Row{TSUnixNano: wave.UnixNano(), Kind: "CHILD_CRASH", Reason: "NONZERO_EXIT"})
+	row, _ := mintRow(1, "", journal.Row{Kind: "CHILD_CRASH", Reason: "NONZERO_EXIT"})
+	// mintRow assigns a deterministic fixture timestamp. Restamp and rehash this
+	// time-correlation witness so the crash wave actually matches the marker.
+	row.TSUnixNano = wave.UnixNano()
+	row.Hash = chainHashForTest("", row)
 	writeRowsFile(t, path, []journal.Row{row})
 	var out, errb bytes.Buffer
 	if code := runAuditDiagnose(&out, &errb, path, true); code != 0 {

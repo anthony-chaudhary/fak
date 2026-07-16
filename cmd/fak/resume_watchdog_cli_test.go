@@ -1094,10 +1094,19 @@ func TestRwResumeArgvPrependsFreshAnchor(t *testing.T) {
 	}
 	t.Cleanup(func() { rwResumeAnchor = oldAnchor })
 	got := rwResumeArgv("", "/bin/claude", "SID", nil)
-	if len(got) < 6 || got[4] != "-p" {
-		t.Fatalf("argv=%#v", got)
+	promptAt := -1
+	for i, arg := range got {
+		if arg == "-p" {
+			if promptAt >= 0 {
+				t.Fatalf("duplicate -p in argv=%#v", got)
+			}
+			promptAt = i
+		}
 	}
-	prompt := got[5]
+	if promptAt < 0 || promptAt+1 >= len(got) {
+		t.Fatalf("missing resume prompt in argv=%#v", got)
+	}
+	prompt := got[promptAt+1]
 	for _, want := range []string{"fresh resume anchor", "prevent cascade drift", "STALL latest=0.40", "p1 wire anchor", resumeWatchdogPrompt} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q: %s", want, prompt)

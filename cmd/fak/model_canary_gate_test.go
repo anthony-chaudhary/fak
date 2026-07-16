@@ -47,7 +47,8 @@ func TestRunModelCanaryGateRejectsUnknownJSON(t *testing.T) {
 
 func topThreeModelopsCLIInput() modelops.Input {
 	policy := func(model string, tier int, fallback ...string) modelops.Policy {
-		return modelops.Policy{Model: model, CapabilityTier: tier, Fallbacks: fallback, MinSamples: 20,
+		return modelops.Policy{Model: model, CapabilityTier: tier, Fallbacks: fallback,
+			Alert: modelops.AlertContract{Owner: "model-ops", Route: "ops", AckSLAMinutes: 15, Runbook: "runbooks/model-canary"}, WindowMinutes: 60, MinSamples: 20,
 			MinSuccessRate: .95, MaxProviderErrorRate: .02, MaxInvalidToolRate: .01,
 			MaxP95LatencyMS: 5000, MaxThrottleRate: .03, MaxFallbackRate: .05}
 	}
