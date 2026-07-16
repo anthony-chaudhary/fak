@@ -181,9 +181,12 @@ func (c *cudaBackend) CUDADebugRestoreResidencyBudget(budgetBytes, dlUsed int64,
 }
 
 // Name returns the registry id of this backend ("cuda").
-func (c *cudaBackend) Name() string            { return c.name }
-func (c *cudaBackend) Tier() string            { return c.tier }
-func (c *cudaBackend) Class() CorrectnessClass { return Approx } // device GEMM != fdot order
+func (c *cudaBackend) Name() string { return c.name }
+
+// SupportsRoutedExpertKQuant advertises native resident Q4_K MatMul plus F16 staging.
+func (c *cudaBackend) SupportsRoutedExpertKQuant() bool { return true }
+func (c *cudaBackend) Tier() string                     { return c.tier }
+func (c *cudaBackend) Class() CorrectnessClass          { return Approx } // device GEMM != fdot order
 func (c *cudaBackend) Caps() Caps {
 	// Async (#482): ops enqueue on g_stream and return unready Buffers; the SOLE host fences
 	// are Read and Argmax. DeviceMemory: resident tensors (incl. the KV cache) are not host-

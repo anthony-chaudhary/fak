@@ -174,6 +174,15 @@ func (c Config) expertIntermediate() int {
 	return c.IntermediateSize
 }
 
+// routedExpertKQuantActive reports whether mat is backed by a session whose
+// backend explicitly supports resident routed k-quant experts. Such a backend
+// must reach the per-expert loop: the older host-batched GLM shortcut otherwise
+// consumes the same Q4_K tensors first and silently bypasses device execution.
+func routedExpertKQuantActive(mat matKernel) bool {
+	sk, ok := mat.(sessionQ4KKernel)
+	return ok && sk.s.supportsRoutedExpertKQuant()
+}
+
 // expertSwiGLU runs one expert's dense SwiGLU over xn and returns its [H] output.
 // It is the per-expert primitive the MoE weighted sum reuses — the same SwiGLU
 // arithmetic as the dense path, just over an expert-indexed weight set.
@@ -183,6 +192,21 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	gn := expertName(layer, expert, "gate_proj.weight")
 	un := expertName(layer, expert, "up_proj.weight")
 	dn := expertName(layer, expert, "down_proj.weight")
+	// CUDA/device HAL route: keep all three expert projections and SwiGLU on the
+	// backend. The helper admits only bias-free SiLU experts whose gate/up/down
+	// weights all have an honest resident Q4_K or staged F16 k-quant representation.
+	if !cfg.ActGeluTanh && !cfg.ActGeluErf &&
+		!m.has(expertName(layer, expert, "gate_proj.bias")) &&
+		!m.has(expertName(layer, expert, "up_proj.bias")) &&
+		!m.has(expertName(layer, expert, "down_proj.bias")) {
+		if sk, ok := mat.(sessionQ4KKernel); ok {
+			if xf, ok := xn.([]float32); ok {
+				if out, ok := sk.s.expertSwiGLUHAL(gn, un, dn, xf); ok {
+					return out
+				}
+			}
+		}
+	}
 	q6Down := false
 	if dq := m.kqw[dn]; dq != nil && dq.kind == kindQ6K {
 		q6Down = true

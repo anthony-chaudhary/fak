@@ -156,7 +156,11 @@ func (m *Model) expertParallelRankPartial(layer int, xn any, mat matKernel, pick
 		}
 		owned = append(owned, pk)
 	}
-	if xf, ok := xn.([]float32); ok && len(owned) > 0 && m.hostBatchedGLMExperts(layer, xf, p, owned) {
+	// A resident routed-kquant backend must win over the older host batch. The exact
+	// GLM rank-local shape (Q4_K gate/up plus k-quant down) satisfies that host path,
+	// so without this capability gate CUDA is silently bypassed before expertSwiGLU.
+	if xf, ok := xn.([]float32); ok && len(owned) > 0 &&
+		!routedExpertKQuantActive(mat) && m.hostBatchedGLMExperts(layer, xf, p, owned) {
 		return p, nil
 	}
 	for _, pk := range owned {

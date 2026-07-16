@@ -209,6 +209,94 @@ func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
 	}, compute.Q4_K)
 }
 
+// weightHALKQuant stages verbatim Q5_K/Q6_K GGUF bytes. CUDA dequantizes in the
+// GEMV tile, so residency remains at checkpoint size and warm calls reuse the same allocation.
+func (s *Session) weightHALKQuant(name string, qt *kQuantTensor) compute.Tensor {
+	if s.Backend == nil || qt == nil {
+		panic("model: weightHALKQuant requires backend and tensor: " + name)
+	}
+	var dt compute.Dtype
+	var host func() compute.Tensor
+	switch qt.kind {
+	case kindQ5K:
+		dt = compute.Q5_K
+		host = func() compute.Tensor { return compute.NewQ5K(compute.Default(), []int{qt.out, qt.in}, qt.raw) }
+	case kindQ6K:
+		dt = compute.Q6_K
+		host = func() compute.Tensor { return compute.NewQ6K(compute.Default(), []int{qt.out, qt.in}, qt.raw) }
+	default:
+		panic("model: unsupported resident expert k-quant: " + qt.kind.String())
+	}
+	return s.weightHALStaged("kquant-raw:"+name, host, dt)
+}
+
+// supportsRoutedExpertKQuant is the explicit optional capability used both by
+// dispatch and execution. Keeping the predicate in one place prevents an earlier
+// host fast path from silently intercepting a backend that can keep expert weights
+// resident.
+func (s *Session) supportsRoutedExpertKQuant() bool {
+	if s == nil || s.Backend == nil {
+		return false
+	}
+	routed, ok := s.Backend.(interface{ SupportsRoutedExpertKQuant() bool })
+	return ok && routed.SupportsRoutedExpertKQuant()
+}
+
+// expertSwiGLUHAL keeps routed expert gate/up/down projections and the SwiGLU
+// activation on Backend. It admits only projections with an honest resident Q4_K
+// or one-time-staged F16 Q5_K/Q6_K representation.
+func (s *Session) expertSwiGLUHAL(gateName, upName, downName string, x []float32) ([]float32, bool) {
+	if s == nil || s.halW == nil || !s.supportsRoutedExpertKQuant() {
+		return nil, false
+	}
+	type expertWeight struct {
+		name string
+		q4   *q4kTensor
+		kq   *kQuantTensor
+	}
+	resolve := func(name string) (expertWeight, bool) {
+		if qt := s.M.q4kw[name]; qt != nil {
+			return expertWeight{name: name, q4: qt}, true
+		}
+		if qt := s.M.kqw[name]; qt != nil {
+			return expertWeight{name: name, kq: qt}, true
+		}
+		return expertWeight{}, false
+	}
+	weights := make([]expertWeight, 3)
+	for i, name := range []string{gateName, upName, downName} {
+		var found bool
+		weights[i], found = resolve(name)
+		if !found {
+			return nil, false
+		}
+	}
+
+	// Raw k-quant residency is already included in the model plan; no expanded F16 copy is created.
+	resident := func(w expertWeight) compute.Tensor {
+		if w.q4 != nil {
+			return s.weightHALQ4K(w.name, w.q4)
+		}
+		return s.weightHALKQuant(w.name, w.kq)
+	}
+	gateW := resident(weights[0])
+	upW := resident(weights[1])
+	downW := resident(weights[2])
+
+	hostX := compute.NewF32(compute.Default(), []int{len(x)}, append([]float32(nil), x...))
+	dx := s.Backend.Upload(hostX, compute.F32)
+	defer s.Backend.Free(dx)
+	gate := s.Backend.MatMul(gateW, dx)
+	defer s.Backend.Free(gate)
+	up := s.Backend.MatMul(upW, dx)
+	defer s.Backend.Free(up)
+	act := s.Backend.SwiGLU(gate, up)
+	defer s.Backend.Free(act)
+	out := s.Backend.MatMul(downW, act)
+	defer s.Backend.Free(out)
+	return s.Backend.Read(out), true
+}
+
 // weightHALF16 stages the host f32 weight `name` onto the backend narrowed to device F16, the
 // F16 twin of weightHALQ8/weightHALQ4K. Unlike those there is no resident prequantized source: the
 // same manifest f32 tensor the f32 weightHAL uploads is handed to Upload with compute.F16, and an

@@ -162,6 +162,8 @@ void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float
  * f32 activation, F32 accumulate. in must be divisible by 256. There is no activation quant on this
  * path (the weight, not the activation, is the narrow operand). */
 void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
+void fcuda_q5k_matmul_f32(const uint8_t *dQ5K, const float *dX, float *dY, int out, int in, int P);
+void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int out, int in, int P);
 
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);

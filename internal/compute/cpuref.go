@@ -149,6 +149,17 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		for o := 0; o < out; o++ {
 			y[o] = q4kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
+	case Q5_K, Q6_K:
+		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		bs := 176
+		if w.Dtype == Q6_K {
+			bs = 210
+		}
+		rowBytes := (in / 256) * bs
+		buf := make([]float32, 256)
+		for o := 0; o < out; o++ {
+			y[o] = rawKRowDot(w.Dtype, raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
+		}
 	default:
 		panic("compute: cpu-ref MatMul unsupported weight dtype " + w.Dtype.String())
 	}
@@ -195,6 +206,20 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
 				Y[t*out+o] = q4kRowDot(row, Xf[t*in:t*in+in], buf)
+			}
+		}
+	case Q5_K, Q6_K:
+		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		bs := 176
+		if w.Dtype == Q6_K {
+			bs = 210
+		}
+		rowBytes := (in / 256) * bs
+		buf := make([]float32, 256)
+		for o := 0; o < out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for t := 0; t < P; t++ {
+				Y[t*out+o] = rawKRowDot(w.Dtype, row, Xf[t*in:t*in+in], buf)
 			}
 		}
 	default:

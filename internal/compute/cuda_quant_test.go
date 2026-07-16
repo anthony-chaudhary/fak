@@ -436,3 +436,60 @@ func BenchmarkCUDAQ4KBatchedMatMul(b *testing.B) {
 	}
 	b.StopTimer()
 }
+
+func TestCUDAKQuantRawMatMulApproxMatchesRef(t *testing.T) {
+	be, ok := Lookup("cuda")
+	if !ok {
+		t.Skip("cuda backend not registered")
+	}
+	ref := Default()
+	const out, in = 7, 512
+	for _, tc := range []struct {
+		name      string
+		dt        Dtype
+		bs        int
+		newTensor func(Backend, []int, []byte) Tensor
+		dequant   func([]float32, []byte)
+	}{
+		{"Q5_K", Q5_K, 176, NewQ5K, dequantQ5K}, {"Q6_K", Q6_K, 210, NewQ6K, dequantQ6K},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := make([]byte, out*(in/256)*tc.bs)
+			for i := range raw {
+				raw[i] = byte((i*37 + 11) % 251)
+			}
+			for b := 0; b < len(raw); b += tc.bs {
+				if tc.dt == Q5_K {
+					binary.LittleEndian.PutUint16(raw[b:], 0x3000)
+					binary.LittleEndian.PutUint16(raw[b+2:], 0x2c00)
+				} else {
+					binary.LittleEndian.PutUint16(raw[b+208:], 0x3000)
+				}
+			}
+			x := make([]float32, in)
+			for i := range x {
+				x[i] = float32((i%29)-14) / 29
+			}
+			wf := make([]float32, out*in)
+			blk := make([]float32, 256)
+			for o := 0; o < out; o++ {
+				for b := 0; b < in/256; b++ {
+					off := (o*(in/256) + b) * tc.bs
+					tc.dequant(blk, raw[off:off+tc.bs])
+					copy(wf[o*in+b*256:], blk)
+				}
+			}
+			want := ref.Read(ref.MatMul(NewF32(ref, []int{out, in}, wf), ref.Upload(NewF32(ref, []int{in}, x), F32)))
+			dw := be.Upload(tc.newTensor(ref, []int{out, in}, raw), tc.dt)
+			dx := be.Upload(NewF32(ref, []int{in}, x), F32)
+			got := be.Read(be.MatMul(dw, dx))
+			defer be.Free(dw)
+			defer be.Free(dx)
+			if c := cosineC(got, want); c < 0.99999 {
+				t.Fatalf("cosine %.9f", c)
+			} else {
+				t.Logf("%s raw resident bytes=%d cosine=%.9f", tc.name, len(raw), c)
+			}
+		})
+	}
+}

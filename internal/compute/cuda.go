@@ -407,8 +407,11 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	if !ok {
 		panic("compute: cuda Upload expects host data")
 	}
-	if t.Dtype == Q4_K {
-		return c.uploadQ4K(t, hb) // raw super-block bytes, copied resident (already narrow)
+	if t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K {
+		if as != t.Dtype {
+			panic("compute: cuda raw k-quant upload requires matching resident dtype")
+		}
+		return c.uploadRawKQuant(t, hb)
 	}
 	if t.Dtype == Q8_0 {
 		// An ALREADY-quantized Q8_0 host weight (codes + per-block scales), copied resident with
@@ -419,7 +422,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		return c.uploadQ8Resident(t, hb)
 	}
 	if t.Dtype != F32 {
-		panic("compute: cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K bytes today (got " + t.Dtype.String() + ")")
+		panic("compute: cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K/Q5_K/Q6_K bytes today (got " + t.Dtype.String() + ")")
 	}
 	if class != MemoryWeights {
 		if as != F32 {
@@ -566,21 +569,21 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 // in its HostBuffer.I8() view (one int8 per byte); they are already narrow (144 bytes / 256 elems),
 // so there is no quantize or dtype-narrow step — just an H2D into a uint8 VRAM buffer the
 // dequant-fused GEMM tile consumes. Cached on (host ptr, Q4_K, layout) like every other upload.
-func (c *cudaBackend) uploadQ4K(t Tensor, hb HostBuffer) Tensor {
+func (c *cudaBackend) uploadRawKQuant(t Tensor, hb HostBuffer) Tensor {
 	raw := hb.I8()
 	var hp uintptr
 	if len(raw) > 0 {
 		hp = uintptr(unsafe.Pointer(&raw[0]))
 		// element-count guard against host-address reuse (see uploadClass F32 path).
-		if cached, ok := uploadCache[ucKey{hp, Q4_K, t.Layout}]; ok && cached.Numel() == t.Numel() {
+		if cached, ok := uploadCache[ucKey{hp, t.Dtype, t.Layout}]; ok && cached.Numel() == t.Numel() {
 			return cached
 		}
 	}
-	res, buf := c.devQ4K(t.Shape, len(raw))
+	res, buf := c.devRawKQuant(t.Dtype, t.Shape, len(raw))
 	if len(raw) > 0 {
 		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
-		buf.host, buf.hostDt, buf.hostLo = hp, Q4_K, t.Layout
-		uploadCache[ucKey{hp, Q4_K, t.Layout}] = res
+		buf.host, buf.hostDt, buf.hostLo = hp, t.Dtype, t.Layout
+		uploadCache[ucKey{hp, t.Dtype, t.Layout}] = res
 	}
 	return res
 }
@@ -602,10 +605,10 @@ func (c *cudaBackend) devQ8(shape []int, block, nScales int) (Tensor, *cudaBuf) 
 // devQ4K allocates a resident Q4_K weight: a single nbytes-long uint8 buffer holding the raw GGUF
 // super-block bytes (d/dmin/scales/codes all packed; no scale side-channel). nbytes is the size of
 // the host byte slice (= (out*in/256)*144). The QuantSpec records the 256-elem super-block.
-func (c *cudaBackend) devQ4K(shape []int, nbytes int) (Tensor, *cudaBuf) {
+func (c *cudaBackend) devRawKQuant(dt Dtype, shape []int, nbytes int) (Tensor, *cudaBuf) {
 	buf := c.dallocWeight(nbytes)
 	q := &QuantSpec{Block: 256, Axis: 2, Bits: 4, Symmetric: false}
-	return makeTensor(c, Q4_K, RowMajor, append([]int(nil), shape...), q, buf), buf
+	return makeTensor(c, dt, RowMajor, append([]int(nil), shape...), q, buf), buf
 }
 
 // uploadF16 narrows an f32 host weight to a resident F16 weight at H2D (#484). The f32 is staged
@@ -774,6 +777,14 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+	case Q5_K:
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{out}, F32)
+		C.fcuda_q5k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+	case Q6_K:
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{out}, F32)
+		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
 	default:
 		panic("compute: cuda MatMul supports F32/F16/Q8_0/Q4_K weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up")
 	}
@@ -814,6 +825,14 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+	case Q5_K:
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{P, out}, F32)
+		C.fcuda_q5k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+	case Q6_K:
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{P, out}, F32)
+		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
 	default:
 		panic("compute: cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K weights today (got " + w.Dtype.String() + ")")
 	}

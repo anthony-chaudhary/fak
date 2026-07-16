@@ -85,3 +85,51 @@ func TestCPURefQ4KMatMulVsF32Dequant(t *testing.T) {
 		t.Fatalf("Q4_K raw bytes %d, want %d (144/super-block)", got, want)
 	}
 }
+
+func TestCPURefRawKQuantMatMulMatchesIndependentDequant(t *testing.T) {
+	const out, in = 5, 512
+	rng := rand.New(rand.NewSource(4843))
+	for _, tc := range []struct {
+		name      string
+		dt        Dtype
+		bs        int
+		newTensor func(Backend, []int, []byte) Tensor
+		dequant   func([]float32, []byte)
+	}{
+		{"Q5_K", Q5_K, 176, NewQ5K, dequantQ5K}, {"Q6_K", Q6_K, 210, NewQ6K, dequantQ6K},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := make([]byte, out*(in/256)*tc.bs)
+			rng.Read(raw)
+			// Keep both scales finite and modest while preserving random codes/scales.
+			for b := 0; b < len(raw); b += tc.bs {
+				if tc.dt == Q5_K {
+					binary.LittleEndian.PutUint16(raw[b:], 0x3000)
+					binary.LittleEndian.PutUint16(raw[b+2:], 0x2c00)
+				} else {
+					binary.LittleEndian.PutUint16(raw[b+208:], 0x3000)
+				}
+			}
+			wf := make([]float32, out*in)
+			block := make([]float32, 256)
+			for o := 0; o < out; o++ {
+				for b := 0; b < in/256; b++ {
+					off := (o*(in/256) + b) * tc.bs
+					tc.dequant(block, raw[off:off+tc.bs])
+					copy(wf[o*in+b*256:], block)
+				}
+			}
+			x := make([]float32, in)
+			for i := range x {
+				x[i] = rng.Float32()*2 - 1
+			}
+			be := Default()
+			hx := be.Upload(NewF32(be, []int{in}, x), F32)
+			got := be.Read(be.MatMul(tc.newTensor(be, []int{out, in}, raw), hx))
+			want := be.Read(be.MatMul(NewF32(be, []int{out, in}, wf), hx))
+			if c := cosineC(got, want); c < 0.999999 {
+				t.Fatalf("cosine %.9f", c)
+			}
+		})
+	}
+}

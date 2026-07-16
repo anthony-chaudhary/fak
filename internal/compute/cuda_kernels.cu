@@ -853,6 +853,93 @@ extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float
       (const unsigned char *)dQ4K, dX, dY, out, in, P);
 }
 
+// Q5_K/Q6_K resident dequant-fused GEMV. One warp computes one output row.
+__global__ void k_q5k_gemm(const unsigned char *W, const float *X, float *Y,
+                           int out, int in, int P) {
+  int lane = threadIdx.x & 31;
+  int o = blockIdx.x * 8 + (threadIdx.x >> 5);
+  int t = blockIdx.y;
+  if (o >= out || t >= P) return;
+
+  int nsb = in / 256;
+  float sum = 0.f;
+  const unsigned char *wr = W + (size_t)o * nsb * 176;
+  const float *xr = X + (size_t)t * in;
+  for (int sb = 0; sb < nsb; ++sb) {
+    const unsigned char *b = wr + (size_t)sb * 176;
+    float d = __half2float(*(const __half *)b);
+    float dm = __half2float(*(const __half *)(b + 2));
+    const unsigned char *sc = b + 4;
+    const unsigned char *qh = b + 16;
+    const unsigned char *ql = b + 48;
+    const float *xb = xr + (size_t)sb * 256;
+#pragma unroll
+    for (int g = 0; g < 8; ++g) {
+      unsigned char scale, mn;
+      getScaleMinK4_dev(g, sc, &scale, &mn);
+      int pair = g >> 1;
+      int q = (g & 1) ? (ql[pair * 32 + lane] >> 4)
+                      : (ql[pair * 32 + lane] & 15);
+      if (qh[lane] & (1u << g)) q += 16;
+      sum += (d * (float)scale * (float)q - dm * (float)mn) * xb[g * 32 + lane];
+    }
+  }
+#pragma unroll
+  for (int z = 16; z; z >>= 1)
+    sum += __shfl_down_sync(0xffffffff, sum, z);
+  if (lane == 0) Y[(size_t)t * out + o] = sum;
+}
+
+__global__ void k_q6k_gemm(const unsigned char *W, const float *X, float *Y,
+                           int out, int in, int P) {
+  int lane = threadIdx.x & 31;
+  int o = blockIdx.x * 8 + (threadIdx.x >> 5);
+  int t = blockIdx.y;
+  if (o >= out || t >= P) return;
+
+  int nsb = in / 256;
+  float sum = 0.f;
+  const unsigned char *wr = W + (size_t)o * nsb * 210;
+  const float *xr = X + (size_t)t * in;
+  for (int sb = 0; sb < nsb; ++sb) {
+    const unsigned char *b = wr + (size_t)sb * 210;
+    const unsigned char *ql = b;
+    const unsigned char *qh = b + 128;
+    const signed char *sc = (const signed char *)(b + 192);
+    float d = __half2float(*(const __half *)(b + 208));
+    const float *xb = xr + (size_t)sb * 256;
+#pragma unroll
+    for (int h = 0; h < 2; ++h) {
+      int qo = h * 64;
+      int ho = h * 32;
+      int so = h * 8;
+      int base = h * 128;
+      int is = lane >> 4;
+      int q1 = (ql[qo + lane] & 15) | (((qh[ho + lane] >> 0) & 3) << 4);
+      int q2 = (ql[qo + lane + 32] & 15) | (((qh[ho + lane] >> 2) & 3) << 4);
+      int q3 = (ql[qo + lane] >> 4) | (((qh[ho + lane] >> 4) & 3) << 4);
+      int q4 = (ql[qo + lane + 32] >> 4) | (((qh[ho + lane] >> 6) & 3) << 4);
+      sum += d * (float)sc[so + is] * (q1 - 32) * xb[base + lane];
+      sum += d * (float)sc[so + is + 2] * (q2 - 32) * xb[base + lane + 32];
+      sum += d * (float)sc[so + is + 4] * (q3 - 32) * xb[base + lane + 64];
+      sum += d * (float)sc[so + is + 6] * (q4 - 32) * xb[base + lane + 96];
+    }
+  }
+#pragma unroll
+  for (int z = 16; z; z >>= 1)
+    sum += __shfl_down_sync(0xffffffff, sum, z);
+  if (lane == 0) Y[(size_t)t * out + o] = sum;
+}
+
+extern "C" void fcuda_q5k_matmul_f32(const uint8_t *w, const float *x, float *y,
+                                      int o, int i, int p) {
+  k_q5k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p);
+}
+extern "C" void fcuda_q6k_matmul_f32(const uint8_t *w, const float *x, float *y,
+                                      int o, int i, int p) {
+  k_q6k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p);
+}
+
 // ---- RMSNorm: one block per row -------------------------------------------------
 __global__ void k_rmsnorm(const float *X, const float *W, float *Y, int rows, int n, float eps) {
   int r = blockIdx.x;

@@ -341,7 +341,7 @@
       ],
       "min_files": 3,
       "name": "Scorecard / debt family",
-      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans \u003e= min_files only because the path is threaded through BuildPlan/IssueBody.",
+      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans >= min_files only because the path is threaded through BuildPlan/IssueBody.",
       "roots": [
         "scorecard",
         "debt"
@@ -372,7 +372,8 @@
         "defaultscoreparitytol",
         "supportmaturityscore",
         "supportmaturitydebt",
-        "immaturity"
+        "immaturity",
+        "SupportsRoutedExpertKQuant"
       ],
       "min_files": 3,
       "name": "Support / coverage / correctness / parity / maturity family",
@@ -383,6 +384,13 @@
         "correctness",
         "parity",
         "maturity"
+      ],
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Backend-private capability probe for issue 4843; not a public concept",
+          "token": "SupportsRoutedExpertKQuant"
+        }
       ]
     },
     {
