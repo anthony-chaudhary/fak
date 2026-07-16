@@ -150,6 +150,9 @@ func TestRunFakcDryRunWithoutFakStillPrintsDelegation(t *testing.T) {
 	if got := strings.TrimSpace(out.String()); got != "fak codex --dry-run --split off -- exec do x" {
 		t.Fatalf("dry-run stdout = %q", got)
 	}
+	if !strings.Contains(errb.String(), "source=fallback") {
+		t.Fatalf("dry-run omitted resolution provenance: %q", errb.String())
+	}
 }
 
 func TestRunFakcExecSeam(t *testing.T) {
@@ -176,5 +179,8 @@ func TestRunFakcExecSeam(t *testing.T) {
 	want := []string{fak, "codex", "--split", "off"}
 	if !reflect.DeepEqual(gotArgv, want) {
 		t.Fatalf("runFakc argv = %#v, want %#v", gotArgv, want)
+	}
+	if !strings.Contains(errb.String(), "explicit FAK_BIN override") || !strings.Contains(errb.String(), "unset FAK_BIN") {
+		t.Fatalf("stale override was invisible or unactionable: %q", errb.String())
 	}
 }

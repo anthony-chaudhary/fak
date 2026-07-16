@@ -257,6 +257,85 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	}
 }
 
+func TestRunCodexLoopGateIgnoresNewestLoopFromDifferentDirectory(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	home := filepath.Join(t.TempDir(), "codex-home")
+	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "16")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, sessionID, cwd string, loop bool) {
+		lines := []string{fmt.Sprintf(`{"timestamp":"2026-07-16T10:00:00Z","type":"session_meta","payload":{"session_id":%q,"cwd":%q,"model_provider":"fak"}}`, sessionID, cwd)}
+		if loop {
+			for i := 1; i <= 3; i++ {
+				lines = append(lines,
+					fmt.Sprintf(`{"timestamp":"2026-07-16T10:00:0%dZ","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{}","call_id":"c%d"}}`, i*2-1, i),
+					fmt.Sprintf(`{"timestamp":"2026-07-16T10:00:0%dZ","type":"response_item","payload":{"type":"function_call_output","call_id":"c%d","output":"same failure"}}`, i*2, i))
+			}
+		}
+		writeCodexLoopFixture(t, filepath.Join(sessionsDir, name), lines)
+	}
+	launchDir := filepath.Join(t.TempDir(), "repo-a")
+	otherDir := filepath.Join(t.TempDir(), "repo-b")
+	if err := os.MkdirAll(launchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Older same-repository rollout is clean; globally newest rollout is a loop
+	// from another checkout and must not poison this launch.
+	write("rollout-2026-07-16T09-00-00-same.jsonl", "same", launchDir, false)
+	write("rollout-2026-07-16T10-00-00-other.jsonl", "other", otherDir, true)
+	if err := writeCodexGuardWitness(home, "other"); err != nil {
+		t.Fatal(err)
+	}
+
+	var errb bytes.Buffer
+	rc := runCodexLoopGate(&errb, codexLoopGateConfig{
+		Threshold: "loop", CodexHome: home, SinceHours: 0, WorkingDir: launchDir,
+	})
+	if rc != 0 {
+		t.Fatalf("unrelated repository loop poisoned launch: rc=%d stderr=%s", rc, errb.String())
+	}
+}
+
+func TestRunCodexLoopGateStillRefusesLoopInSameDirectory(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	home := codexLauncherLoopFixtureForProvider(t, "fak")
+	loopPath := filepath.Join(home, "sessions", "2026", "07", "06", "rollout-2026-07-06T02-25-00-loop.jsonl")
+	data, err := os.ReadFile(loopPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.Replace(data, []byte(`"model_provider":"fak"`), []byte(fmt.Sprintf(`"cwd":%q,"model_provider":"fak"`, cwd)), 1)
+	if err := os.WriteFile(loopPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCodexGuardWitness(home, "loop-session"); err != nil {
+		t.Fatal(err)
+	}
+	var errb bytes.Buffer
+	rc := runCodexLoopGate(&errb, codexLoopGateConfig{Threshold: "loop", CodexHome: home, SinceHours: 0, WorkingDir: cwd})
+	if rc != 1 || !strings.Contains(errb.String(), "loop gate REFUSE") {
+		t.Fatalf("same-repository loop was not refused: rc=%d stderr=%s", rc, errb.String())
+	}
+}
+
+func TestCodexLoopWorkingDirsOverlapSubdirectories(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if !codexWorkingDirsOverlap(root, filepath.Join(root, "subdir")) {
+		t.Fatal("repo root and subdirectory should share launch-loop scope")
+	}
+	if codexWorkingDirsOverlap(root, filepath.Join(t.TempDir(), "other")) {
+		t.Fatal("unrelated repositories should not share launch-loop scope")
+	}
+}
+
 func TestRunCodexLoopGateAllowsForwardProgressPlanTraffic(t *testing.T) {
 	// Regression: a guarded (fak-provider) session that called update_plan many
 	// times, each with a DISTINCT plan, is forward planning progress — not a
@@ -383,7 +462,7 @@ func TestNewestCodexLoopLaunchScanIsByteBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep, scan, err := diagnoseNewestCodexLoopForLaunch(home, 0)
+	rep, scan, err := diagnoseNewestCodexLoopForLaunch(home, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}

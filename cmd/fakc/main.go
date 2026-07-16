@@ -25,6 +25,7 @@ var (
 type fakcCommand struct {
 	Argv    []string
 	Display string
+	Source  string
 }
 
 func main() {
@@ -38,11 +39,14 @@ func runFakc(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	if len(fakCmd.Argv) == 0 {
-		fakCmd = fakcCommand{Argv: []string{"fak"}, Display: "fak"}
+		fakCmd = fakcCommand{Argv: []string{"fak"}, Display: "fak", Source: "fallback"}
 	}
 	argv := fakcArgvPrefix(fakCmd.Argv, args)
+	if fakCmd.Source == "FAK_BIN" {
+		fmt.Fprintf(stderr, "fakc: using explicit FAK_BIN override (%s); unset FAK_BIN to use the installed fak beside fakc or on PATH\n", fakCmd.Display)
+	}
 	if fakcDryRun(args) {
-		fmt.Fprintf(stderr, "fakc: delegating to `fak codex` (%s)\n", fakCmd.Display)
+		fmt.Fprintf(stderr, "fakc: delegating to `fak codex` (%s; source=%s)\n", fakCmd.Display, fakCmd.Source)
 		fmt.Fprintln(stdout, strings.Join(argv, " "))
 		return 0
 	}
@@ -79,7 +83,15 @@ func resolveFakCommand(getenv func(string) string, executable func() (string, er
 	if err != nil {
 		return fakcCommand{}, err
 	}
-	return fakcCommand{Argv: []string{fakBin}, Display: fakBin}, nil
+	source := "PATH"
+	if explicit := strings.TrimSpace(getenv("FAK_BIN")); explicit != "" && filepath.Clean(explicit) == filepath.Clean(fakBin) {
+		source = "FAK_BIN"
+	} else if exe, exeErr := executable(); exeErr == nil && filepath.Dir(fakBin) == filepath.Dir(exe) {
+		source = "sibling"
+	} else if wd, wdErr := getwd(); wdErr == nil && filepath.Dir(fakBin) == filepath.Clean(wd) {
+		source = "cwd"
+	}
+	return fakcCommand{Argv: []string{fakBin}, Display: fakBin, Source: source}, nil
 }
 
 func resolveFakBinary(getenv func(string) string, executable func() (string, error), lookPath func(string) (string, error), getwd func() (string, error), goos string) (string, error) {

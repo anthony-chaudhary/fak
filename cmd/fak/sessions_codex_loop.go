@@ -43,6 +43,7 @@ type codexLoopDiagnosis struct {
 	Originator        string                 `json:"originator,omitempty"`
 	CLI               string                 `json:"cli_version,omitempty"`
 	ModelProvider     string                 `json:"model_provider,omitempty"`
+	WorkingDir        string                 `json:"working_directory,omitempty"`
 	GuardWitnessed    bool                   `json:"guard_witnessed,omitempty"`
 	GitCommit         string                 `json:"git_commit,omitempty"`
 	GitBranch         string                 `json:"git_branch,omitempty"`
@@ -646,14 +647,85 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 	return diagnoseRecentCodexLoopsWith(codexHome, sinceHours, limit, diagnoseCodexLoopPath)
 }
 
-func diagnoseNewestCodexLoopForLaunch(codexHome string, sinceHours float64) (codexLoopRecentReport, codexLoopLaunchScan, error) {
-	var scan codexLoopLaunchScan
-	rep, err := diagnoseRecentCodexLoopsWith(codexHome, sinceHours, 1, func(path string) (codexLoopDiagnosis, error) {
-		d, got, err := diagnoseCodexLoopLaunchPath(path)
-		scan = got
-		return d, err
-	})
-	return rep, scan, err
+func diagnoseNewestCodexLoopForLaunch(codexHome string, sinceHours float64, workingDir string) (codexLoopRecentReport, codexLoopLaunchScan, error) {
+	home, err := resolvedCodexLoopHome(codexHome)
+	if err != nil {
+		return codexLoopRecentReport{}, codexLoopLaunchScan{}, err
+	}
+	// Launch admission is repository-local. A LOOP in an unrelated checkout must
+	// not make every `fakc` invocation on the machine unreachable. Inspect a
+	// bounded newest-first window and select the newest rollout whose session cwd
+	// is this cwd (or an ancestor/descendant, so launching from a repo subdir works).
+	paths, err := discoverRecentCodexLoopSessionPaths(home, sinceHours, 20)
+	if err != nil {
+		return codexLoopRecentReport{}, codexLoopLaunchScan{}, err
+	}
+	for _, path := range paths {
+		d, scan, diagnoseErr := diagnoseCodexLoopLaunchPath(path)
+		if diagnoseErr != nil {
+			return codexLoopRecentReport{}, scan, fmt.Errorf("diagnose %s: %w", path, diagnoseErr)
+		}
+		if !codexWorkingDirsOverlap(workingDir, d.WorkingDir) {
+			continue
+		}
+		d.GuardWitnessed = codexGuardWitnessExists(home, d.SessionID)
+		rep := codexLaunchReport(home, sinceHours, d)
+		return rep, scan, nil
+	}
+	return codexLoopRecentReport{
+		Schema: codexLoopRecentSchema, CodexHome: home, SinceHours: sinceHours, Limit: 1, Verdict: "OK",
+	}, codexLoopLaunchScan{}, nil
+}
+
+func codexLaunchReport(home string, sinceHours float64, d codexLoopDiagnosis) codexLoopRecentReport {
+	r := codexLoopRecentReport{
+		Schema: codexLoopRecentSchema, CodexHome: home, SinceHours: sinceHours, Limit: 1, Scanned: 1,
+		Verdict: d.Verdict, Reason: d.Reason, NextAction: d.NextAction, Diagnoses: []codexLoopDiagnosis{d},
+		ToolCalls: d.ToolCalls, ToolOutputs: d.ToolOutputs, LastTokenTotalSum: d.LastTokenTotal,
+	}
+	if provider := strings.TrimSpace(d.ModelProvider); provider != "" {
+		r.ProviderCounts = map[string]int{provider: 1}
+		if codexLoopDiagnosisUnguarded(d) {
+			r.UnguardedCount = 1
+		}
+	}
+	switch d.Verdict {
+	case "LOOP":
+		r.LoopCount = 1
+		switch {
+		case d.GuardWitnessed:
+			r.GuardedLoopCount = 1
+		case codexLoopDiagnosisUnguarded(d):
+			r.UnguardedLoopCount = 1
+		default:
+			r.UnknownLoopCount = 1
+		}
+	case "ACTION":
+		r.ActionCount = 1
+	default:
+		r.OKCount = 1
+	}
+	if top, ok := codexTopLoopDrivingOutcome(d.RepeatedOutcomes); ok {
+		r.TopRepeated = []codexRepeatedOutcome{top}
+	}
+	return r
+}
+
+func codexWorkingDirsOverlap(a, b string) bool {
+	a = filepath.Clean(strings.TrimSpace(a))
+	b = filepath.Clean(strings.TrimSpace(b))
+	// Empty cwd is legacy transcript/test data. Preserve the historical global
+	// fallback when either side cannot be scoped; modern Codex session_meta always
+	// carries cwd, so unrelated current repositories are isolated.
+	if a == "." || b == "." || a == "" || b == "" {
+		return true
+	}
+	relAB, errAB := filepath.Rel(a, b)
+	relBA, errBA := filepath.Rel(b, a)
+	inside := func(rel string, err error) bool {
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	return inside(relAB, errAB) || inside(relBA, errBA)
 }
 
 func diagnoseRecentCodexLoopsWith(codexHome string, sinceHours float64, limit int, diagnosePath func(string) (codexLoopDiagnosis, error)) (codexLoopRecentReport, error) {
@@ -1187,6 +1259,7 @@ func applyCodexLoopSessionMeta(d *codexLoopDiagnosis, ts string, payload json.Ra
 		Originator    string `json:"originator"`
 		CLIVersion    string `json:"cli_version"`
 		ModelProvider string `json:"model_provider"`
+		WorkingDir    string `json:"cwd"`
 		Git           struct {
 			CommitHash string `json:"commit_hash"`
 			Branch     string `json:"branch"`
@@ -1201,6 +1274,7 @@ func applyCodexLoopSessionMeta(d *codexLoopDiagnosis, ts string, payload json.Ra
 		d.Originator = meta.Originator
 		d.CLI = meta.CLIVersion
 		d.ModelProvider = meta.ModelProvider
+		d.WorkingDir = meta.WorkingDir
 		d.GitCommit = meta.Git.CommitHash
 		d.GitBranch = meta.Git.Branch
 	}

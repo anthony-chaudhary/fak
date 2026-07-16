@@ -50,6 +50,7 @@ type codexLoopGateConfig struct {
 	CodexHome  string
 	SinceHours float64
 	Limit      int
+	WorkingDir string
 	Quiet      bool
 }
 
@@ -141,11 +142,17 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		passthrough:     fs.Args(),
 	}
 	if !launch.dryRun {
+		workingDir, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			fmt.Fprintf(stderr, "fak codex: resolve launch directory: %v\n", cwdErr)
+			return 1
+		}
 		if rc := runCodexLoopGate(stderr, codexLoopGateConfig{
 			Threshold:  *loopGate,
 			CodexHome:  *codexHome,
 			SinceHours: *loopGateSinceHours,
 			Limit:      *loopGateLimit,
+			WorkingDir: workingDir,
 			Quiet:      *quiet,
 		}); rc != 0 {
 			return rc
@@ -295,7 +302,7 @@ func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
 				firstString(strings.TrimSpace(d.ModelProvider), "-"), d.Verdict, firstString(strings.TrimSpace(d.SessionID), "-"))
 		}
 	}
-	rep, _, err := diagnoseNewestCodexLoopForLaunch(cfg.CodexHome, cfg.SinceHours)
+	rep, _, err := diagnoseNewestCodexLoopForLaunch(cfg.CodexHome, cfg.SinceHours, cfg.WorkingDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak codex: loop gate audit failed: %v\n", err)
 		return 1
