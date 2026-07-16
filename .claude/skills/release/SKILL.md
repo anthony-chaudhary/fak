@@ -81,7 +81,7 @@ python tools/release_decide.py --json --limit-commits 300
 
 - `decision: "release"` → proceed; use `next_version`, `level`, `themes`.
 - `decision: "hold"` → **stop unless the operator overrides the named blocker.**
-  - `CI_BASE_RED` — **the latest *decisive* (completed) `main` ci.yml run is red.** ⚠ An in-progress run on a freshly-fixed commit does NOT clear this; `release_decide` reads the latest *completed* run. Fix forward, push, and wait for the whole CI run (including any slow `-race` job) to conclude green before re-deciding.
+  - `CI_BASE_RED` — **the latest *decisive* (completed) `main` `ci-fast.yml` run is red.** An in-progress run on a freshly fixed commit does not clear this; `release decide` reads the latest completed fast-gate run. Fix forward, push, and wait for that release-critical fast subset to conclude green before re-deciding.
   - `VERSION_DRIFT`, `VERSION_BEHIND_REACHABLE_TAG`, `WORKFLOW_UNPARSEABLE` — fix, don't cut through.
   - `NOTHING_TO_SHIP` / `BELOW_SIGNIFICANCE` — nothing substantive since the last tag.
 - `warnings` are not blockers; surface them in the summary.
