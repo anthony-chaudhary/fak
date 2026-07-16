@@ -179,8 +179,16 @@ func TestGuardSeedHandbackBootsFreshStrippingContinue(t *testing.T) {
 	if strings.Contains(joined, "--continue") {
 		t.Fatalf("--continue must be stripped on the seed path (no transcript re-inflation): %v", next)
 	}
-	if !strings.Contains(joined, "--append-system-prompt resume the triage task") {
-		t.Fatalf("bounded seed must ride along as the fresh prompt: %v", next)
+	if n := seedPromptArgCount(next, "--append-system-prompt-file"); n != 1 {
+		t.Fatalf("file-backed seed prompt count = %d, want 1: %v", n, next)
+	}
+	flag := seedPromptArgIndex(next, "--append-system-prompt-file")
+	raw, err := os.ReadFile(next[flag+1])
+	if err != nil {
+		t.Fatalf("read file-backed seed prompt: %v", err)
+	}
+	if got := string(raw); got != "resume the triage task" {
+		t.Fatalf("bounded seed file = %q, want authoritative restart seed", got)
 	}
 }
 
