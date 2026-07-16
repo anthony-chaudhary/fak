@@ -1,0 +1,21 @@
+schema: fak-benchmark-route-witness/1
+route: docs/benchmark-methodology.md
+inbound_route: README.md
+source_binding: pre-publication candidate based on 555f3f485384549b196da8f2bc8b144639da4964; exact bytes bound by page_sha256 and readme_sha256; issue #4915 records publication commit
+page_sha256: d8b07c4c71babdf43c7ca613e7f032afbc13fede2729048b6d17c3e133d07fd3
+readme_sha256: b3ed0f50efa28bcb8fc5bc90f6e8d6d54d62e5b1b27852148efe7989b6c267fb
+reader: independent gpt-5.4-mini ephemeral read-only session
+reader_goal: distinguish current benchmark authority from historical evidence before quoting a result
+mechanical_read_back:
+  local_links_resolved: 7/7
+  inbound_links: README.md -> docs/benchmark-methodology.md
+reader_read_back:
+  verdict: pass
+  audience: Evaluators deciding which benchmark page is current authority, which pages are historical evidence, and what to reproduce before quoting a result.
+  page_job: Benchmark navigation and authority separation with reproduction gating.
+  default_choice: Start with BENCHMARK-AUTHORITY.md; use archived collections only when selected by authority or investigating a recorded generation.
+  classified_routes: current authority; evidence archive; infrastructure reference; legacy collection index; production methodology reference
+  generation_assessment: Current authority is gen/now; archived evidence retains its recorded generation and is not promoted by recency or directory placement.
+  authority_assessment: BENCHMARK-AUTHORITY.md remains singular; surrounding routes are bounded to archive, reference, or conditional methodology use.
+  next_action: Record the selected authority row's six evidence fields and run its reproduction command; missing artifact or command means not yet.
+ambiguities: []
