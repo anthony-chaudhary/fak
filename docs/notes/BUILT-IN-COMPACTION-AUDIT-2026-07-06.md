@@ -309,3 +309,12 @@ For fak, the useful contrast is the one already developing in `ctxplan`: do not
 make the model remember everything through prose. Keep a bounded working set,
 pin what must stay exact, make old state recoverable by reference, and audit
 what was actually retained.
+
+## See also
+
+For how fak guard *aligns with* Codex's built-in compaction at runtime — the
+two-wire model (fak's lossless cache-preserving cut on the Anthropic wire vs
+delegating to Codex's native `model_auto_compact_token_limit=96000` on the
+Responses wire), why guarded sessions "compact when the window looks light,"
+and a fleet audit of the local rollout store — see
+[CODEX-TURN-COMPACTION-ALIGNMENT-2026-07-15](./CODEX-TURN-COMPACTION-ALIGNMENT-2026-07-15.md).
