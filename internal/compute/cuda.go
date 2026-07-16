@@ -89,7 +89,7 @@ func init() {
 		name:        "cuda",
 		tier:        "sm_" + itoaC(int(sm)),
 		totalMem:    int64(total), // KEEP the device VRAM total — it used to be read and discarded
-		budgetBytes: cudaBudgetBytes(),
+		budgetBytes: cudaBudgetBytes(int64(total)),
 	}
 	Register(cudaDev)
 	// Apply the TF32 tensor-core math mode from the env now that fcuda_init has created the

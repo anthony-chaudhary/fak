@@ -4,7 +4,6 @@ package compute
 
 import (
 	"os"
-	"strconv"
 	"sync/atomic"
 	"unsafe"
 )
@@ -14,21 +13,14 @@ import (
 // reconstructs nblk = in/block; `in` must be divisible by it.
 const q8DeviceBlock = 32
 
-// cudaBudgetBytes reads FAK_GPU_BUDGET_MB — the device-local weight budget in MiB. 0 / unset /
-// invalid = unbounded (place every explicit weight allocation with cudaMalloc, the prior behavior).
-// A positive value caps CUDA device-local weight residency; weights past the cap go into
-// cudaMallocManaged so the driver can page them on demand instead of losing the allocation race and
-// hard-panicking.
-func cudaBudgetBytes() int64 {
-	s := os.Getenv("FAK_GPU_BUDGET_MB")
-	if s == "" {
-		return 0
-	}
-	mb, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || mb <= 0 {
-		return 0
-	}
-	return mb * 1024 * 1024
+// cudaBudgetBytes resolves FAK_GPU_BUDGET_MB — the device-local weight budget in MiB — against this
+// device's total VRAM. 0 / unset / invalid = unbounded (place every explicit weight allocation with
+// cudaMalloc, the prior behavior); a positive value caps CUDA device-local weight residency; "auto"
+// derives the cap from totalDeviceLocal (see resolveGPUBudgetBytes), failing open to unbounded when
+// capacity is unknown. Weights past the cap go into cudaMallocManaged so the driver can page them on
+// demand instead of losing the allocation race and hard-panicking.
+func cudaBudgetBytes(totalDeviceLocal int64) int64 {
+	return resolveGPUBudgetBytes(os.Getenv("FAK_GPU_BUDGET_MB"), totalDeviceLocal, totalDeviceLocal > 0)
 }
 
 var cudaDev *cudaBackend

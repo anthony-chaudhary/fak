@@ -42,13 +42,14 @@ func init() {
 	if discrete != 0 {
 		tier = "discrete"
 	}
+	totalDeviceLocal := vulkanCapInt64(C.fvk_total_device_local_memory())
 	vulkanDev = &vulkanBackend{
 		name:                    "vulkan",
 		tier:                    tier + ":" + C.GoString(&name[0]),
 		haveQ8:                  C.fvk_have_q8() != 0,
 		haveMemoryBudget:        C.fvk_have_memory_budget() != 0,
-		totalMem:                vulkanCapInt64(C.fvk_total_device_local_memory()),
-		budgetBytes:             vulkanBudgetBytes(),
+		totalMem:                totalDeviceLocal,
+		budgetBytes:             vulkanBudgetBytes(totalDeviceLocal),
 		maxBufferBytes:          vulkanCapInt64(C.fvk_max_buffer_bytes()),
 		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
 		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
@@ -56,19 +57,13 @@ func init() {
 	Register(vulkanDev)
 }
 
-// vulkanBudgetBytes reads FAK_GPU_BUDGET_MB — the device-local weight budget in MiB. 0 / unset /
-// invalid = unbounded (place every weight device-local, the prior behavior). A positive value
-// caps device-local weight residency; weights past the cap go host-visible in upload order.
-func vulkanBudgetBytes() int64 {
-	s := os.Getenv("FAK_GPU_BUDGET_MB")
-	if s == "" {
-		return 0
-	}
-	mb, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || mb <= 0 {
-		return 0
-	}
-	return mb * 1024 * 1024
+// vulkanBudgetBytes resolves FAK_GPU_BUDGET_MB — the device-local weight budget in MiB — against
+// this device's total device-local memory. 0 / unset / invalid = unbounded (place every weight
+// device-local, the prior behavior); a positive value caps device-local weight residency; "auto"
+// derives the cap from totalDeviceLocal (see resolveGPUBudgetBytes), failing open to unbounded when
+// capacity is unknown. Weights past the cap go host-visible in upload order.
+func vulkanBudgetBytes(totalDeviceLocal int64) int64 {
+	return resolveGPUBudgetBytes(os.Getenv("FAK_GPU_BUDGET_MB"), totalDeviceLocal, totalDeviceLocal > 0)
 }
 
 func vulkanCapInt64(v C.uint64_t) int64 {
