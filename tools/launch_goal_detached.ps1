@@ -328,6 +328,15 @@ if ($Guarded) {
     "--restart-limit", "3",
     "--restart-seed-dir", $seedDir,
     "--max-duration", "$MaxDuration",
+    # A detached /goal worker IS a headless dispatch worker: mark it so, exactly as the
+    # Go dispatch paths do (internal/dispatchtick/dispatchtick.go, cmd/dispatchworker/guard.go,
+    # #3607). Without this, resolveGuardCompactBudget hands it the interactive
+    # DefaultCompactHistoryBudget (48000) instead of the floor-aware
+    # HeadlessCompactHistoryBudget (96000). This repo's fixed tool+system floor is ~68-83k, so
+    # the 48k budget leaves the worker permanently past-compact — it thrash-restarts and dies
+    # on BUDGET_CONTEXT_EXHAUSTED after --restart-limit hops (observed 2026-07-16). The headless
+    # profile also applies the curated headless tool surface the dispatch paths already use.
+    "--expose-profile", "headless",
     "--",
     $claude
   ) + $claudeArgs
@@ -350,6 +359,14 @@ $p = Start-Process -FilePath $spawnFile `
 # file — while its pid is a live claude-image process — from the instant it exists,
 # closing the spawn-to-lease blind window the per-host worker cap had.
 $p.Id | Out-File -FilePath $pidF -Encoding ascii
+
+# WITNESS MARKER (#4800): a single machine-parseable line emitted ONLY once a live
+# process exists (Start-Process -PassThru returned a real $p with a pid). The wave
+# launcher captures this to record a WITNESSED launch (phase=launched + pid) -- so a
+# spawn that threw before this point (missing pointer, oversized goal, Start-Process
+# failure) yields NO marker and is never counted as launched. run_id is the stable
+# per-spawn tag+stamp, also the pid-file/log basename, independently readable after.
+Write-Output ("LAUNCH_WITNESS pid={0} tag={1} run_id={2}" -f $p.Id, $acct.tag, "$tag-$stamp")
 
 [pscustomobject]@{
   pid         = $p.Id
