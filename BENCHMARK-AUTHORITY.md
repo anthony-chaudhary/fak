@@ -1,5 +1,30 @@
 # BENCHMARK AUTHORITY — Single Source of Truth
 
+**Audience:** evaluators deciding which current `fak` result is applicable, what tuned alternative it was measured against, and how to inspect or reproduce its evidence.
+
+## Evaluator route: result first, method second
+
+These are **scoped results**, not a universal speedup claim. Match your workload and hardware before quoting one; use the tuned baseline as the headline comparison.
+
+| Evaluation question | Current scoped result | Tuned baseline and scope | Evidence route |
+|---|---|---|---|
+| **What is the public multi-agent reuse headline?** | **4.1× vs tuned** for a 50-turn × 5-agent Qwen2.5-1.5B Q8 session; the same run is 60.3× vs naive stateless serving. | Tuned per-agent KV is the decision-grade baseline; naive stateless is context, not the headline alternative. | Inspect `headline-qwen-50x5.json` in the [primary-number table](#quick-reference-primary-numbers), then follow its detailed row and reproduce route. |
+| **Is the native CPU forward faster than llama.cpp CPU?** | **No:** decode is **0.55–0.73×** and prefill@256 is **0.58×** on the recorded M3 Pro run. | llama.cpp CPU `-ngl 0`, build 8200; 0.55× compares each engine's best thread setting, while 0.73× uses an equal 12-thread budget. | Inspect `model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json` and the canonical first row below. |
+| **What does prefix reuse achieve on the model ladder?** | RadixAttention reports **4.58× → 6.95×** live speedup for SmolLM2-135M through Qwen2.5-1.5B Q8. | Fresh recompute on the same four-model ladder; this is a prefix-reuse result, not an end-to-end universal serving result. | Inspect `prefill_model_ladder.json`, then use the sheet's RadixAttention detail and reproduce command. |
+
+**Default choice:** start with the **tuned-baseline 4.1× multi-agent row** when evaluating the public reuse headline. Choose the CPU-parity or prefix-reuse row only when that narrower workload matches your question.
+
+**Next action — verify one applicable row:** open its named committed artifact, confirm that its model, hardware, workload, and tuned baseline match your case, then run that row's linked reproduce command before quoting the result.
+
+**Route context:**
+
+- **Mode:** the rows above cover different benchmark modes—multi-agent session accounting, native CPU forward parity, and prefix-reuse prefill. A result applies only to its named mode and artifact configuration.
+- **Generation:** this is the current authority across generation horizons; [the horizon view](docs/generation-benchmark-authority-view.md) separates `gen/now` from next and future evidence.
+- **Lifecycle:** this is a living evidence sheet. A newer committed artifact or an entry under [Tombstoned/Outdated Claims](#tombstonedoutdated-claims) supersedes an older number.
+- **Support boundary:** committed artifacts and reproduce commands support the scoped observations. They do not imply an unmeasured model, backend, hardware, concurrency level, or production SLO; grade any broader claim with the [net-true-value standard](docs/standards/net-true-value.md).
+
+For benchmark governance, contribution rules, and historical rationale, use the methodology routes below; they do not replace the scoped result table.
+
 > **Why this exists.** This repo contains many benchmark results across different axes (raw throughput, reuse efficiency, session value-add, etc.). This document is the **authoritative index** of all committed benchmark claims, with traceability to source commits and artifact files. **Any number claimed elsewhere must trace back to an entry here.**
 
 > **📋 Process:** See **[BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md)** for the DOS-centric process that creates, verifies, and publishes these claims. This file is the *what* (the numbers); Governance is the *how* (the discipline).

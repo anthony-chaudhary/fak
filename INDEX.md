@@ -20,6 +20,7 @@ changes.
 - [Getting started](GETTING-STARTED.md) — choose install, deterministic proof, or production setup with prerequisites and a first check.
 - [AGENTS](AGENTS.md) — orientation for coding agents (build, test, the hard rules).
 - [Security policy](SECURITY.md) — evaluate the current capability floor, its policy configuration, scoped evidence, and private reporting route.
+- [Benchmark authority](BENCHMARK-AUTHORITY.md) — select a scoped result, compare its tuned baseline, and follow the committed artifact and reproduce route.
 - [llms.txt](llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](docs/index.md) — the published documentation landing page.
 - [Innovations index](docs/INNOVATIONS-INDEX.md) — the durable catalog of fak's innovations, concepts, and learnings: what each is, the general primitive it embodies, where it lives, whether it's shipped, and whether it's been generalized for reuse. The innovations counterpart to this repo map and the [llms.txt](llms.txt) doc map.
@@ -144,7 +145,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 ## Benchmarks & methodology
 
-- [Benchmark authority](BENCHMARK-AUTHORITY.md) — the single source of truth for every number.
+- [Benchmark evidence authority](BENCHMARK-AUTHORITY.md) — the governed sheet for scoped benchmark rows, tuned baselines, artifacts, and reproduce commands.
 - [Benchmark template](BENCHMARK-TEMPLATE.md) — the shape a new benchmark result doc must take.
 - [Net-true value standard](docs/standards/net-true-value.md) — how fak decides a gain is real, not noise: the six-question rubric (real baseline / net of cost / scope / provenance / witness / realized) used on fak's own claims and on incoming industry "5×" claims, each criterion bound to the stick that enforces it.
 - [Agent grammar standard](docs/standards/agent-grammar.md) — the normative trust grammar a second agent fleet conforms to: the closed nouns (lane · lease · reason token · witness · verdict · claim · ladder rung · scope), the shipped verbs each with an input→verdict signature and the closed vocabulary it draws from (every verb maps to a `dos_*` MCP verb / `dos.toml` surface today), the lift recipe as MUST clauses, the `G6` one-sided-screen + witnessed-loss polarity predicate as a checkable MUST, and a per-verb conformance checklist — the role `internal/abi`'s golden freeze plays for the ABI.
