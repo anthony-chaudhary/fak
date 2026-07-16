@@ -52,6 +52,15 @@ const cudaFP16CosineMin = 0.997
 const (
 	cudaQ8CosineMin  = 0.999
 	cudaQ4KCosineMin = 0.995
+	// cudaQ2CosineMin is the cuda backend's RECORDED Approx cosine floor for the packed-ternary
+	// Q2_0 device GEMV (#4872). UNLIKE the Q8/Q4_K floors, the Q2_0 witness compares the device
+	// GEMM against a cpuref f32 GEMV over an f32 dequant of the SAME packed ternary codes+scales
+	// (not a true-f32 → ternary reconstruction), so the only residual is the device tile's
+	// reduction/scale-fold order vs the host q2RowDot — no quantization error enters the gate.
+	// That drift is pure f32 summation reordering, so the floor is set at Q8's 0.999 (tight), the
+	// same class of order-only drift; the true-f32 → ternary reconstruction error is a separate,
+	// model-level number, not what this device-vs-cpuref gate measures.
+	cudaQ2CosineMin = 0.999
 )
 
 // cudaAWQCosineMin is the cuda backend's RECORDED Approx cosine floor for the AWQ 4-bit device

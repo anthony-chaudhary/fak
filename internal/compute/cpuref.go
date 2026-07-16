@@ -160,6 +160,15 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		for o := 0; o < out; o++ {
 			y[o] = rawKRowDot(w.Dtype, raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
+	case Q2_0:
+		blk := w.Quant.Block
+		raw := i8AsBytes(c.i8(w))
+		rowBytes := in / 4 // 2-bit codes, 4 per byte
+		ws := w.Quant.Scale
+		nblk := in / blk
+		for o := 0; o < out; o++ {
+			y[o] = q2RowDot(raw[o*rowBytes:(o+1)*rowBytes], ws[o*nblk:o*nblk+nblk], xf, blk)
+		}
 	default:
 		panic("compute: cpu-ref MatMul unsupported weight dtype " + w.Dtype.String())
 	}
@@ -220,6 +229,20 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
 				Y[t*out+o] = rawKRowDot(w.Dtype, row, Xf[t*in:t*in+in], buf)
+			}
+		}
+	case Q2_0:
+		// Per-(o,t) ternary GEMV — bit-identical to MatMul's Q2_0 row dot for each row t.
+		blk := w.Quant.Block
+		raw := i8AsBytes(c.i8(w))
+		rowBytes := in / 4
+		ws := w.Quant.Scale
+		nblk := in / blk
+		for o := 0; o < out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			sc := ws[o*nblk : o*nblk+nblk]
+			for t := 0; t < P; t++ {
+				Y[t*out+o] = q2RowDot(row, sc, Xf[t*in:t*in+in], blk)
 			}
 		}
 	default:

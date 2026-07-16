@@ -63,6 +63,7 @@ const (
 	Q4_K              // llama.cpp k-quant: 256-elem super-block, f16 d+dmin, 6-bit sub-scales, 4-bit codes
 	Q5_K              // llama.cpp k-quant: 256-elem super-block, 176 raw bytes
 	Q6_K              // llama.cpp k-quant: 256-elem super-block, 210 raw bytes
+	Q2_0              // packed ternary: 2-bit codes (4/byte) in {-1,0,+1} · per-block(32) f32 scale (BitNet/prism-ml)
 )
 
 // Bytes is the per-element storage width. For sub-byte formats (I4) it reports the
@@ -102,6 +103,8 @@ func (d Dtype) String() string {
 		return "q5_k"
 	case Q6_K:
 		return "q6_k"
+	case Q2_0:
+		return "q2_0"
 	default:
 		return "dtype?"
 	}
@@ -109,7 +112,7 @@ func (d Dtype) String() string {
 
 // Quantized reports whether the dtype needs a QuantSpec to be interpreted.
 func (d Dtype) Quantized() bool {
-	return d == Q8_0 || d == I8 || d == I4 || d == FP8 || d == Q4_K || d == Q5_K || d == Q6_K
+	return d == Q8_0 || d == I8 || d == I4 || d == FP8 || d == Q4_K || d == Q5_K || d == Q6_K || d == Q2_0
 }
 
 // ---- Layout ---------------------------------------------------------------------

@@ -853,6 +853,51 @@ extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float
       (const unsigned char *)dQ4K, dX, dY, out, in, P);
 }
 
+// k_q2_0_gemm: Y[t,o] = Σ_b (Σ_{i in block} tern(o,b,i)·X[t,b·block+i]) · Wscale[o,b], where
+// each weight is a PACKED TERNARY code — 2 bits, 4 per byte, LSB-first, decoding u∈{0,1,2}
+// to t=u-1∈{-1,0,+1} (the packed-ternary Q2_0 format, issue #4872). The weight is NEVER
+// expanded to f32/f16 in VRAM: the kernel reads one code byte, unpacks the signed indicator,
+// and accumulates X directly (a select/add, not a multiply), folding one f32 block scale at
+// block end — the same per-block scheme as cpuref q2RowDot (only the reduction order differs,
+// which is what makes the device lane Approx, not Reference). One block per (o,t); threads
+// stride the ternary blocks; a shared-memory tree reduces the partials. in must divide block.
+__global__ void k_q2_0_gemm(const unsigned char *Codes, const float *Wscale,
+                            const float *X, float *Y, int out, int in, int P, int block) {
+  int o = blockIdx.x, t = blockIdx.y;
+  if (o >= out || t >= P) return;
+  int nblk = in / block;
+  int rowBytes = in / 4; // 2-bit codes, 4 per byte
+  const unsigned char *crow = Codes + (size_t)o * rowBytes;
+  const float *wsc = Wscale + (size_t)o * nblk;
+  const float *xrow = X + (size_t)t * in;
+  __shared__ float red[256];
+  float local = 0.f;
+  for (int b = threadIdx.x; b < nblk; b += blockDim.x) {
+    int off = b * block;
+    float s = 0.f;
+    for (int i = 0; i < block; i++) {
+      int gi = off + i;
+      int code = (int)((crow[gi >> 2] >> ((gi & 3) * 2)) & 0x3) - 1; // {-1,0,+1}
+      s += (float)code * xrow[gi];
+    }
+    local += s * wsc[b];
+  }
+  red[threadIdx.x] = local;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) Y[(size_t)t * out + o] = red[0];
+}
+
+extern "C" void fcuda_q2_0_matmul_f32(const uint8_t *dCodes, const float *dScales,
+                                      const float *dX, float *dY, int out, int in, int P,
+                                      int block) {
+  k_q2_0_gemm<<<dim3(out, P), 256, 0, g_stream>>>(
+      (const unsigned char *)dCodes, dScales, dX, dY, out, in, P, block);
+}
+
 // Q5_K/Q6_K resident dequant-fused GEMV. One warp computes one output row.
 __global__ void k_q5k_gemm(const unsigned char *W, const float *X, float *Y,
                            int out, int in, int P) {

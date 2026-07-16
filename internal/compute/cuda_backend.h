@@ -162,6 +162,15 @@ void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float
  * f32 activation, F32 accumulate. in must be divisible by 256. There is no activation quant on this
  * path (the weight, not the activation, is the narrow operand). */
 void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
+
+/* fcuda_q2_0_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident PACKED TERNARY
+ * Q2_0 (#4872) — 2-bit codes dCodes[out*in/4] (4 weights/byte, LSB-first, u∈{0,1,2} → t=u-1)
+ * plus per-block(=block) f32 scales dScales[out*(in/block)]. The weight never expands to f32/f16:
+ * the kernel unpacks the signed ternary indicator and multiply-accumulates the f32 activation X
+ * directly, folding one block scale at block end (the cpuref q2RowDot scheme). No activation quant
+ * — the weight is the narrow operand. F32 accumulate/output. in must be divisible by block. */
+void fcuda_q2_0_matmul_f32(const uint8_t *dCodes, const float *dScales, const float *dX, float *dY,
+                           int out, int in, int P, int block);
 void fcuda_q5k_matmul_f32(const uint8_t *dQ5K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int out, int in, int P);
 

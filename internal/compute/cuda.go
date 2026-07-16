@@ -413,6 +413,11 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		}
 		return c.uploadRawKQuant(t, hb)
 	}
+	if t.Dtype == Q2_0 {
+		// An ALREADY-packed ternary Q2_0 host weight (2-bit codes + per-block f32 scales), copied
+		// resident with no re-quantization — the packed-ternary counterpart of uploadQ8Resident.
+		return c.uploadQ2Resident(t, hb)
+	}
 	if t.Dtype == Q8_0 {
 		// An ALREADY-quantized Q8_0 host weight (codes + per-block scales), copied resident with
 		// NO re-quantization. This is the memory-lean load path: the model dropped the f32 weight
@@ -563,6 +568,67 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 		uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
 	}
 	return res
+}
+
+// uploadQ2Resident copies an ALREADY-packed ternary Q2_0 host weight resident with NO
+// re-quantization (#4872): the 2-bit codes (HostBuffer.I8(), out*in/4 bytes) go to the buffer's
+// ptr and the per-block(=Block) f32 scales (QuantSpec.Scale) to its scale side-channel — the same
+// resident (codes ptr + scales) shape uploadQ8Resident produces, so k_q2_0_gemm consumes it
+// unchanged. The weight stays 0.25 byte/elem in VRAM; no dequant-to-f32 round trip.
+func (c *cudaBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
+	if len(t.Shape) != 2 {
+		panic("compute: cuda Upload(Q2_0 host) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")")
+	}
+	if t.Quant == nil || t.Quant.Scale == nil {
+		panic("compute: cuda Upload(Q2_0 host) requires QuantSpec.Scale (per-block f32 scales)")
+	}
+	out, in := t.Shape[0], t.Shape[1]
+	blk := t.Quant.Block
+	if blk <= 0 || in%blk != 0 {
+		panic("compute: cuda Upload(Q2_0 host) needs in divisible by QuantSpec.Block (block=" + itoaC(blk) + ")")
+	}
+	if in%4 != 0 {
+		panic("compute: cuda Upload(Q2_0 host) needs in divisible by 4 (2-bit codes, 4/byte)")
+	}
+	codes := hb.I8()
+	scales := t.Quant.Scale
+	nblk := in / blk
+	if len(codes) != 0 && len(codes) != out*in/4 {
+		panic("compute: cuda Upload(Q2_0 host) code length " + itoaC(len(codes)) + " != out*in/4")
+	}
+	if len(scales) != out*nblk {
+		panic("compute: cuda Upload(Q2_0 host) scale length " + itoaC(len(scales)) + " != out*(in/block)")
+	}
+	var hp uintptr
+	if len(codes) > 0 {
+		hp = uintptr(unsafe.Pointer(&codes[0]))
+		// element-count guard against host-address reuse (see uploadClass F32 path).
+		if cached, ok := uploadCache[ucKey{hp, Q2_0, t.Layout}]; ok && cached.Numel() == t.Numel() {
+			return cached
+		}
+	}
+	res, buf := c.devQ2(t.Shape, blk, len(scales))
+	if len(codes) > 0 {
+		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
+		C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
+		buf.host, buf.hostDt, buf.hostLo = hp, Q2_0, t.Layout
+		uploadCache[ucKey{hp, Q2_0, t.Layout}] = res
+	}
+	return res
+}
+
+// devQ2 allocates a resident packed-ternary Q2_0 weight: an out*in/4-byte codes buffer (ptr, 2-bit
+// codes, 4/byte) plus an nScales*4-byte f32 scale side-channel (scales). The Tensor carries a
+// QuantSpec{Block} so the GEMM reconstructs nblk = in/block. Uses dev-family weight allocs so the
+// resident-weight cache is never recycled out from under it.
+func (c *cudaBackend) devQ2(shape []int, block, nScales int) (Tensor, *cudaBuf) {
+	out, in := shape[0], shape[1]
+	buf := c.dallocWeight(out * in / 4) // 2-bit codes, 4 per byte
+	scales := c.dallocClass(nScales*4, MemoryWeights, "q2-scale")
+	buf.scales = scales.ptr
+	buf.scalesN = scales.n
+	q := &QuantSpec{Block: block, Axis: 2, Bits: 2, Symmetric: true}
+	return makeTensor(c, Q2_0, RowMajor, append([]int(nil), shape...), q, buf), buf
 }
 
 // uploadQ4K copies raw Q4_K super-block bytes resident (#485). The host tensor carries the bytes
@@ -785,8 +851,16 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+	case Q2_0:
+		// native packed-ternary Q2_0 GEMV (#4872): 2-bit codes + per-block f32 scales resident, the
+		// signed indicator unpacked and multiply-accumulated against the f32 activation on device
+		// (no dequant-to-f32, no activation quant); one block scale folded per block, F32 accumulate.
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{out}, F32)
+		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
+			C.int(out), C.int(in), 1, C.int(w.Quant.Block))
 	default:
-		panic("compute: cuda MatMul supports F32/F16/Q8_0/Q4_K weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up")
+		panic("compute: cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up")
 	}
 	// Shape post-condition (#972): the GEMV must yield exactly `out` rows. A wrong-shaped result
 	// (the sm_80 / CUDA-13.0 witness saw a non-block-aligned out=257 come back as 64) is a launch
@@ -833,8 +907,16 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+	case Q2_0:
+		// native packed-ternary Q2_0 prefill GEMM (#4872): each of the P f32 activation rows dotted
+		// against the resident 2-bit ternary weight (unpacked signed indicator, one block scale folded
+		// per block), F32 accumulate. The weight stays 0.25 byte/elem in VRAM.
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{P, out}, F32)
+		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
+			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))
 	default:
-		panic("compute: cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K weights today (got " + w.Dtype.String() + ")")
+		panic("compute: cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0 weights today (got " + w.Dtype.String() + ")")
 	}
 	// Shape post-condition (#972): the batched GEMM must yield exactly P*out elements. Catch a
 	// short/wrong-shaped device result loud at the call site rather than as silent garbage.
