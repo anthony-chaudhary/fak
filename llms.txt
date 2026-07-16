@@ -24,6 +24,8 @@
 - Client and agent integrations: [`docs/integrations/`](docs/integrations/)
 - Scoped benchmark results, tuned baselines, artifacts, and reproduce routes: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md)
 - Security floor, policy configuration, evidence, and private reporting: [`SECURITY.md`](SECURITY.md)
+- Steerability controls and appeal-channel scorecard: [docs/STEERABILITY-SCORECARD.md](docs/STEERABILITY-SCORECARD.md)
+- Operator-heaviness pressure, budgets, and reduction standard: [docs/OPERATOR-HEAVINESS.md](docs/OPERATOR-HEAVINESS.md)
 
 ## Source authorities
 
