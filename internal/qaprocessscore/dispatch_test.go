@@ -93,7 +93,7 @@ func TestKeyStableAcrossDetailDrift(t *testing.T) {
 // marker key) turns the same batch into two updates, never a duplicate create.
 func TestRerunUpdatesInPlace(t *testing.T) {
 	items := ActionItems(fixtureGaps(40.0), "fak score qa-process --json")
-	opt := dogfoodissues.BuildOptions{DedupeChecked: true, DedupeCap: 10}
+	opt := dogfoodissues.BuildOptions{DedupeChecked: true, DedupeCap: 10, ParentBaseline: 40, CompletionStandard: "close the measured qa-process gap"}
 
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, nil, opt)
 	if len(skipped) != 0 {
