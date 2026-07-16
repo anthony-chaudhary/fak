@@ -19,6 +19,7 @@
 - Contribution contract: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)
 - Architecture and system map: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
+- Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
 - Shared endpoint with `fak serve`: [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md)
@@ -44,7 +45,7 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 |---|---|---|
 | Explain or evaluate fak | [`README.md`](README.md) | [`docs/repro-packet.md`](docs/repro-packet.md) |
 | Modify code or docs | [`AGENTS.md`](AGENTS.md) | The owning package tests and [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Integrate a client | [`docs/integrations/`](docs/integrations/) | The selected mode's quickstart and API/config authority |
+| Integrate a client or managed runtime | [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md) | [`docs/integrations/`](docs/integrations/) and the selected mode's quickstart and API/config authority |
 | Deploy or operate | [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md) | [`docs/fak/server-config.md`](docs/fak/server-config.md) and [`docs/fak/api-reference.md`](docs/fak/api-reference.md) |
 | Assess a claim | [`CLAIMS.md`](CLAIMS.md) | [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) and the cited witness |
 | Research design history | [`docs/notes/`](docs/notes/) | Current code, tests, and architecture before relying on an older decision |
@@ -803,7 +804,7 @@ This is the curated map of repository documentation. Start by job and lifecycle;
 | Your job | Current route | Deeper or versioned route |
 |---|---|---|
 | **Evaluate what fak is and verify it** | [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) for the product contract, then [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) for install, deterministic proof, or production selection. | [Security policy](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) for the capability floor; [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) for scoped results and tuned baselines. |
-| **Build or integrate with fak** | [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md), then [integration guides](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) or [supported APIs and protocols](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/apis-and-protocols.md). | [Architecture and design](#architecture--design) for implementation internals; [generation contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation.md) for current versus next work. |
+| **Build or integrate with fak** | [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md), then [agent runtime ownership and flow](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/agent-runtime.md), [integration guides](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations), or [supported APIs and protocols](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/apis-and-protocols.md). | [Architecture and design](#architecture--design) for implementation internals; [generation contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation.md) for current versus next work. |
 | **Operate fak or an agent fleet** | [START-HERE](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) for the runnable route, then [operating the agent fleet](#operating-the-agent-fleet). | [Work map](https://github.com/anthony-chaudhary/fak/blob/main/docs/WORK-MAP.md) for active operational programs and ownership. |
 | **Contribute code or documentation** | [AGENTS](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for enforced workflow and [CONTRIBUTING](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) for contributor policy. | [Reference index](#reference-index), [plans](#plans--media), and versioned implementation docs carry deeper rationale. |
 | **Research history or prior decisions** | [Notes and research](#notes--research-docsnotes) for dated evidence. | [Archive](https://github.com/anthony-chaudhary/fak/tree/main/docs/archive) is historical: follow replacement links before treating archived material as current guidance. |
@@ -883,6 +884,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 ## Architecture & design
 
 - [Architecture](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) — the registry seams and the frozen ABI.
+- [Agent runtime: ownership, interfaces, and proof](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/agent-runtime.md) — the builder route for the host-side model/tool loop, its mediated call flow, interface choices, and deterministic offline proof.
 - [GPU forward pass](https://github.com/anthony-chaudhary/fak/blob/main/GPU.md) — the in-kernel Llama decode on the GPU: a real on-box run witnessed against the CPU reference, with the honest gap to llama.cpp.
 - [Partitioning](https://github.com/anthony-chaudhary/fak/blob/main/PARTITION.md) — how the kernel splits work across lanes and leaves.
 - [Extending fak](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md) — plug in an optimization, prove it correct, prove it faster.
@@ -2395,6 +2397,129 @@ Every request gets a `TraceID` (or generates one). This threads through:
 - `../explainers/policy-in-the-kernel.md` - Policy architecture
 - `../explainers/addressable-kv-cache.md` - Addressable cache design
 - [agent-framework-integration.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/agent-framework-integration.md) - Next: wire a specific agent framework through the gateway
+
+---
+
+# `docs/explainers/agent-runtime.md`
+
+> Source: `docs/explainers/agent-runtime.md`
+
+---
+title: "Agent runtime: ownership, interfaces, and proof"
+description: "A builder-facing map of the host-side fak agent runtime: who owns each boundary, how a tool call crosses the kernel, which interface to choose, and how to prove the path offline."
+slug: agent-runtime
+keywords:
+  - fak agent runtime
+  - managed agent runtime
+  - tool-call loop
+  - runtime ownership
+  - agent integration
+  - fak agent offline
+  - kernel adjudication
+  - result quarantine
+date: 2026-07-15
+---
+
+# Agent runtime — ownership, interfaces, and proof
+
+**Audience:** builders integrating with or extending fak's managed, host-side agent loop.
+
+The runtime owns the model/tool loop and sends every managed tool call through fak's
+in-process kernel seam before a tool can run. The client supplies the task and chooses an
+integration mode; the model backend produces model turns; a tool implementation owns only
+the admitted external side effect.
+
+> **Default:** prove this boundary first with the deterministic, no-key
+> `fak agent --offline` path. Then choose a live-provider or server integration from the
+> interface table below.
+
+## Ownership at a glance
+
+| Owner | Responsibility | Boundary it does not own |
+|---|---|---|
+| Client or integration | Supplies the task, credentials/configuration, and selected runtime mode. | It does not authorize a managed tool call. |
+| Host-side agent runtime (`internal/agent`) | Drives model turns, preserves the conversation, presents tools, receives proposed calls, and continues after admitted results. | It does not bypass the kernel to execute managed calls. |
+| Kernel adjudication and policy | Evaluates each proposed call against structural policy and returns an allow or deny verdict. | It does not invent the client task or perform the external side effect. |
+| vDSO and reuse path | Resolves eligible repeated work locally and records dedup/reuse evidence. | A local hit is still part of the mediated path, not a client-side shortcut. |
+| Engine and model backend | Produces the next model turn through the configured planner/provider seam. | Model output is a proposal, not authority to run a tool. |
+| Tool dispatcher and implementation | Executes an allowed call and returns a typed result. | It receives no permission to execute a denied call. |
+| Context MMU and result-admit path | Admits safe result content and quarantines content that must not re-enter model context. | Tool success alone does not make returned text safe context. |
+| Trace and report surface | Records turns, calls, verdicts, reuse, quarantine, completion, and comparable-arm metrics. | Evidence describes the run; it does not replace the gate. |
+
+The package name `internal/agent` means the **host loop and wire servers**, not the
+untrusted guest program being guarded. Its source-level trust-line authority is
+[`internal/agent/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/doc.go).
+
+## One call, end to end
+
+1. The client supplies a task to the selected runtime entry point.
+2. The runtime asks the configured planner or model backend for the next turn.
+3. The model either returns a final answer or proposes one or more tool calls.
+4. For each managed call, the runtime enters the kernel path: vDSO lookup, adjudication,
+   structural repair when applicable, and an allow or deny verdict.
+5. A denied call returns a typed denial receipt. An eligible repeat may resolve locally;
+   otherwise an allowed call reaches the configured tool engine or dispatcher.
+6. The result-admit path screens the returned content. Safe content enters the next model
+   turn; unsafe content is quarantined rather than copied into model context.
+7. The loop continues until completion or its turn limit, while the trace/report surface
+   records what happened at each boundary.
+
+That ordering is the key contract: **model proposal → kernel verdict → optional effect →
+result admission → continuation**. For the syscall analogy behind the contract, see
+[Tool call is a syscall](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md).
+
+## Choose an interface
+
+| Builder job | Interface | What it gives you |
+|---|---|---|
+| Prove or inspect the reference loop locally | `fak agent --offline` | A deterministic A/B run using the mock planner, local tools, policy denial, reuse, and result screening; no provider key or network is required. |
+| Exercise the reference loop with a live compatible provider | `fak agent` plus provider configuration | The same turn-and-tool path with live model calls; use the CLI help and environment/config authorities for the selected provider. |
+| Host the native managed runtime as a service | `fak serve --native` | A long-lived agent application runtime that hosts sessions and the loop. Start with [Runtime vs client](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md), then the [server quickstart](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-quickstart.md). |
+| Put an existing model client behind fak | `fak serve` | The gateway runtime for compatible model traffic; this governs calls but does not move the client's own agent loop into fak. See [Gateway](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/gateway.md). |
+| Govern an existing local harness | `fak guard` | A governed client path for a harness you already run. It is a client relationship, not a second server layer. See [Runtime vs client](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md). |
+
+The runtime's inputs are the task/conversation, tool definitions and dispatcher, policy,
+and planner/model configuration. Its observable outputs are the answer or completion,
+typed tool results and receipts, and trace/report evidence. Exact CLI flags and wire
+shapes remain authoritative in [`cmd/fak/`](https://github.com/anthony-chaudhary/fak/tree/main/cmd/fak) and the
+[API reference](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/api-reference.md).
+
+## Context and support boundary
+
+| Dimension | Current context |
+|---|---|
+| Mode | This page describes fak-managed host-side execution. Gateway-only and guarded-client modes are valid choices, but they retain a client-owned loop. |
+| Generation | Current behavior; code and tests are authoritative when this explanation and runtime diverge. |
+| Lifecycle | `gen/now` builder route. Historical design notes are provenance, not this contract. |
+| Support boundary | The deterministic offline proof is the first supported diagnostic. Live-provider behavior also depends on the selected provider, credentials, model compatibility, and deployment configuration. Tool side effects remain the tool implementation's responsibility after admission. |
+
+For security guarantees and their scope, use [`SECURITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md). For
+claim status, use [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md); this route does not promote a simulated
+or scoped result into a broader product claim.
+
+## Next action
+
+Run exactly this from the repository root:
+
+```bash
+fak agent --offline
+```
+
+The proof passes when the fak column reports `task completed (booked) YES`, the headline
+reports `poisoned result blocked : YES`, and it reports
+`destructive op prevented : YES`. The complete first-run sequence and expected output
+live in the [repro packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md).
+
+## Deeper routes
+
+- [Runtime vs client](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md) — choose among gateway runtime, native agent
+  runtime, and governed client roles.
+- [Gateway](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/gateway.md) — understand the model-traffic boundary.
+- [Policy in the kernel](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/policy-in-the-kernel.md) — configure structural admission.
+- [One binary, one surface](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/one-binary-one-surface.md) — see why the paths share one
+  checkpoint.
+- [Agent integration architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/agent-integration-architecture.md) — follow the
+  broader integration and component map.
 
 ---
 

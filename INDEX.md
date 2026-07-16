@@ -9,7 +9,7 @@ This is the curated map of repository documentation. Start by job and lifecycle;
 | Your job | Current route | Deeper or versioned route |
 |---|---|---|
 | **Evaluate what fak is and verify it** | [README](README.md) for the product contract, then [Getting started](GETTING-STARTED.md) for install, deterministic proof, or production selection. | [Security policy](SECURITY.md) for the capability floor; [benchmark authority](BENCHMARK-AUTHORITY.md) for scoped results and tuned baselines. |
-| **Build or integrate with fak** | [Getting started](GETTING-STARTED.md), then [integration guides](docs/integrations/) or [supported APIs and protocols](docs/supported/apis-and-protocols.md). | [Architecture and design](#architecture--design) for implementation internals; [generation contract](docs/generation.md) for current versus next work. |
+| **Build or integrate with fak** | [Getting started](GETTING-STARTED.md), then [agent runtime ownership and flow](docs/explainers/agent-runtime.md), [integration guides](docs/integrations/), or [supported APIs and protocols](docs/supported/apis-and-protocols.md). | [Architecture and design](#architecture--design) for implementation internals; [generation contract](docs/generation.md) for current versus next work. |
 | **Operate fak or an agent fleet** | [START-HERE](START-HERE.md) for the runnable route, then [operating the agent fleet](#operating-the-agent-fleet). | [Work map](docs/WORK-MAP.md) for active operational programs and ownership. |
 | **Contribute code or documentation** | [AGENTS](AGENTS.md) for enforced workflow and [CONTRIBUTING](CONTRIBUTING.md) for contributor policy. | [Reference index](#reference-index), [plans](#plans--media), and versioned implementation docs carry deeper rationale. |
 | **Research history or prior decisions** | [Notes and research](#notes--research-docsnotes) for dated evidence. | [Archive](docs/archive/) is historical: follow replacement links before treating archived material as current guidance. |
@@ -89,6 +89,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 ## Architecture & design
 
 - [Architecture](ARCHITECTURE.md) — the registry seams and the frozen ABI.
+- [Agent runtime: ownership, interfaces, and proof](docs/explainers/agent-runtime.md) — the builder route for the host-side model/tool loop, its mediated call flow, interface choices, and deterministic offline proof.
 - [GPU forward pass](GPU.md) — the in-kernel Llama decode on the GPU: a real on-box run witnessed against the CPU reference, with the honest gap to llama.cpp.
 - [Partitioning](PARTITION.md) — how the kernel splits work across lanes and leaves.
 - [Extending fak](EXTENDING.md) — plug in an optimization, prove it correct, prove it faster.

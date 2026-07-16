@@ -13,6 +13,7 @@
 - Contribution contract: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)
 - Architecture and system map: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
+- Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
 - Shared endpoint with `fak serve`: [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md)
@@ -38,7 +39,7 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 |---|---|---|
 | Explain or evaluate fak | [`README.md`](README.md) | [`docs/repro-packet.md`](docs/repro-packet.md) |
 | Modify code or docs | [`AGENTS.md`](AGENTS.md) | The owning package tests and [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Integrate a client | [`docs/integrations/`](docs/integrations/) | The selected mode's quickstart and API/config authority |
+| Integrate a client or managed runtime | [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md) | [`docs/integrations/`](docs/integrations/) and the selected mode's quickstart and API/config authority |
 | Deploy or operate | [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md) | [`docs/fak/server-config.md`](docs/fak/server-config.md) and [`docs/fak/api-reference.md`](docs/fak/api-reference.md) |
 | Assess a claim | [`CLAIMS.md`](CLAIMS.md) | [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) and the cited witness |
 | Research design history | [`docs/notes/`](docs/notes/) | Current code, tests, and architecture before relying on an older decision |
