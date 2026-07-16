@@ -3,49 +3,60 @@ title: "fak proofs: math-correctness master ledger"
 description: "The master ledger of fak's per-module correctness proofs: each theorem, its deterministic witness test, its live verdict, and its DOS git-evidence binding."
 ---
 
-# fak math-proof section — master ledger
+# Find evidence for a fak correctness claim
 
-This is fak's **dedicated proof of mathematical correctness**, sub-module by sub-module.
-Read [`00-METHOD.md`](00-METHOD.md) first: it defines the discipline — every module gets a
-*theorem*, a *proof*, a **deterministic witness** (a test the toolchain re-runs), a
-**verdict** (`PROVEN` / `REFUTED` / `OPEN` / `SCOPED-OUT`), and a **DOS binding** that grounds
-"the proof shipped" in git evidence rather than an author's say-so.
+**Audience:** an evaluator checking whether a specific fak correctness claim has a
+repeatable witness and a current verdict.
 
-```text
-How every module earns its verdict (nothing is "PROVEN" by prose):
+**Next action:** find the subsystem in the claim index below, open its proof page, and run
+the witness command printed beside its verdict. Start with
+[`preflight.md`](preflight.md) when evaluating structural policy denial, or
+[`adjudicator.md`](adjudicator.md) when evaluating the model-backed decision path.
 
-┌───────────────────────────────────────────────────────────────┐
-│ theorem      a precise claim about what the module computes   │
-│    │                                                          │
-│    ▼                                                          │
-│ proof        the mathematical argument that the claim holds   │
-│    │                                                          │
-│    ▼                                                          │
-│ witness      a deterministic test the toolchain re-runs green │
-│    │                                                          │
-│    ▼                                                          │
-│ verdict      PROVEN · REFUTED · OPEN · SCOPED-OUT             │
-│    │                                                          │
-│    ▼                                                          │
-│ DOS binding  dos commit-audit ties the ship to git evidence   │
-└───────────────────────────────────────────────────────────────┘
-```
+This is the current **math-correctness ledger**. It routes by claim and witness type so an
+evaluator can reach evidence directly; design history and contributor rationale remain in
+the individual proof pages and [`00-METHOD.md`](00-METHOD.md).
 
-This section is the math-correctness companion to
-[`../../SUBSYSTEM-CHECKS.md`](https://github.com/anthony-chaudhary/fak/blob/main/SUBSYSTEM-CHECKS.md): that ledger proves a boundary is
-*alive*; this one proves the *math it computes is correct*, and refuses to call anything
-`PROVEN` on self-report.
+## Choose the evidence you need
 
-- **`00-METHOD.md`** — the method: regimes (N/A/C/D), the witness taxonomy, the verdict
-  vocabulary + honesty rule, DOS as meta-witness, the SOTA tooling survey, reproduction.
-- **`<module>.md`** — one proof file per module/obligation: every theorem, its proof, its
-  witness command, its live verdict, its DOS binding.
+| Claim to evaluate | Proof route | Witness type |
+|---|---|---|
+| A disallowed tool call is denied before model execution | [`preflight.md`](preflight.md) | Deterministic behavioral test |
+| The model-backed decision path returns a bounded verdict | [`adjudicator.md`](adjudicator.md) | Deterministic decision-procedure test |
+| Policy parsing and matching preserve the declared capability boundary | [`policy.md`](policy.md) | Deterministic structural and behavioral tests |
+| Canonical bytes and digests are stable | [`canon.md`](canon.md) and [`blob.md`](blob.md) | Golden-vector / integrity tests |
+| Context compaction and restoration preserve required state | [`ctxmmu.md`](ctxmmu.md), [`contextq.md`](contextq.md), and [`sound-restore.md`](sound-restore.md) | Invariant and round-trip tests |
+| Model math matches the reference implementation | [`model-forward-parity.md`](model-forward-parity.md) and the numerical rows in the master ledger | Numerical parity tests |
+| A compute-HAL GEMM preserves the canonical reduction contract | [`compute-gemm.md`](compute-gemm.md) | Deterministic delegation and reduction-order tests |
+| The supported Apple Metal GEMM path matches its CPU reference | [`metalgemm.md`](metalgemm.md) | Metal hardware-backed numerical witness |
+| A shipped proof is bound to repository history | [`witness.md`](witness.md) and [the DOS binding section](#dos-binding--the-proof-section-is-itself-witnessed) | Independent git-evidence witness |
+| A benchmark comparison isolates the claimed effect | [`bench-ab-isolation.md`](bench-ab-isolation.md) and [`isolation-bench.md`](isolation-bench.md) | Controlled A/B measurement |
+
+If the claim is not in this short route table, use the
+[master ledger](#master-ledger), which groups every maintained proof by numerical,
+structural, integrity, and decision-procedure obligation.
+
+## Current authority and support
+
+| Context | Current contract |
+|---|---|
+| Mode | Proof index and reproducible witness commands; it does not replace runtime policy or operational guidance. |
+| Generation | Current `gen/now` ledger. Each proof page names the implementation surface and command it covers. |
+| Lifecycle | Ledger verdicts are `PROVEN`, `REFUTED`, `OPEN`, or `SCOPED-OUT`. Companion packets may use provenance labels such as `DEMONSTRATED`, `WITNESSED`, `OBSERVED`, or `MODELED`; those labels describe evidence origin and do not upgrade a ledger verdict. The command and current repository state decide whether a result still reproduces. |
+| Support | Maintained proof pages and checked-in fixtures are supported evaluator evidence. Dated notes and design history are context, not current verdict authority. |
+
+Every module earns a verdict through the same chain: a precise theorem, a mathematical
+argument, a deterministic or hardware-backed witness, a live verdict, and a DOS binding
+that grounds “shipped” in git evidence rather than author narration. Read
+[`00-METHOD.md`](00-METHOD.md) for the regime taxonomy, honesty rules, and reproduction
+method before extending or auditing the ledger itself.
 
 ## How to read a verdict
 
-A `PROVEN` here means: a named, deterministic test exists; it ran **green** on this node
-(`go test`, native on macOS / via WSL on Windows); the green corroborates the stated
-theorem; and the commit that shipped it is `diff-witnessed` by `dos commit-audit`. An
+A `PROVEN` here means: the proof page names a reproducible witness; that witness ran green
+in the recorded proof build; the result corroborates the theorem within the page's stated platform and model scope; and the commit that shipped it is `diff-witnessed` by
+`dos commit-audit`. Most witnesses are deterministic `go test` targets; hardware proofs name
+the required backend and device. An
 `OPEN` means the theorem is stated but no deterministic witness discharges it *yet* — the
 file says which witness would. A `REFUTED` is a recorded finding with its counterexample,
 not a deletion. Nothing is `PROVEN` by prose.
@@ -58,7 +69,7 @@ not a deletion. Nothing is `PROVEN` by prose.
 > the exact `-run` target and `file:line`.
 
 <!-- LEDGER-START -->
-_Generated from the per-module proof files (**94 PROVEN · 2 OPEN · 1 REFUTED · 1 SCOPED-OUT** across 98 theorems / 40 obligations). Verdicts reflect an actual `go test -count=1` run on this node (darwin/arm64, go1.26), cross-checked by an independent full `./internal/...` suite pass (45 packages green, 0 failures). OPEN obligations closed in the witness pass (commit 3cb8ff9) show ✅ with their added witness test. The one REFUTED row (N7, Qwen3.6 hybrid-GDN multi-token greedy parity) is a recorded finding with its counterexample — token-3 decode drift — not a deletion (00-METHOD §4)._
+_Generated snapshot from the per-module proof files: **94 PROVEN · 2 OPEN · 1 REFUTED · 1 SCOPED-OUT** across 98 theorem rows / 40 obligations. The recorded proof build ran `go test -count=1` on darwin/arm64 with Go 1.26 and cross-checked 45 `./internal/...` packages (0 failures). This is historical execution provenance, not a claim that every row was rerun at the current checkout: reproduce a claim with the exact command on its proof page. Commit `3cb8ff9` closed 25 earlier OPEN rows; the two rows still marked OPEN below remain open. The REFUTED N7 row records Qwen3.6 token-3 decode drift rather than deleting the counterexample (00-METHOD §4). Read each theorem row independently; an obligation heading or roster summary does not broaden a row's model, token-count, or backend scope._
 
 ### N — Numerical / linear-algebra
 
@@ -212,12 +223,13 @@ is **`diff-witnessed`** — its diff does the *kind* of thing its subject claims
 | `e75c9c1` | proof-section spine (method + ledger) | ✅ `OK` · `diff-witnessed` (doc) |
 | `68dc0a9` | 40 grounded per-module proofs + ledger | ✅ `OK` · `diff-witnessed` (doc) |
 | `3cb8ff9` | deterministic witnesses closing 25 OPEN obligations | ✅ `OK` · `diff-witnessed` (**test** — 16 added test files) |
-| `7126a6a` | ledger 94/97 PROVEN, fold in closures | ✅ `OK` · `diff-witnessed` (doc) |
+| `7126a6a` | historical 94/97 ledger checkpoint, before later rows were added | ✅ `OK` · `diff-witnessed` (doc) |
 | `b720af7` | N7 Qwen3.6 token-3 parity **REFUTED** + MLX-bar / swap measurement caveats | ✅ `OK` · `diff-witnessed` (doc) — audited this run |
 
-`dos review` over the full proof range reports **`has_residual: false`, `cleared_rate: 1`**
-— every checkable claim in the range was corroborated by its own diff; there is no residual
-a human must re-verify. The recursion is closed: **the math proves the modules; DOS proves
+The recorded proof-build review reported **`has_residual: false`, `cleared_rate: 1`** for
+that historical commit range. Re-run `dos review <range>` with an explicit current range before
+using the same aggregate claim for later proof commits; the per-commit rows above remain the
+checked-in provenance for the original build. The recursion is closed: **the math proves the modules; DOS proves
 the math actually shipped.** Neither layer trusts the author.
 
 ## Obligation roster
