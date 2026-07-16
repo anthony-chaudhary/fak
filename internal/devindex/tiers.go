@@ -124,6 +124,7 @@ var verbTiers = map[string]VerbTier{
 	"checkpoint-scorecard":          TierDev,
 	"ci-preflight":                  TierDev,
 	"validate":                      TierDev,
+	"llms-full":                     TierDev,
 	"claim-check":                   TierDev,
 	"claude-mac-fak":                TierDev,
 	"clean-bins":                    TierDev,

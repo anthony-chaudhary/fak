@@ -52,7 +52,7 @@ if ($null -ne $py) {
     Write-Host "== index-sync =="
     & $py tools/check_index_sync.py --audit-tree
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    & $py tools/gen_llms_full.py --check
+    go run ./cmd/fak llms-full --check --ref HEAD
     if ($LASTEXITCODE -ne 0) { exit 1 }
 
     # repo-hygiene gates: the deterministic, no-network checks ci.yml runs HARD

@@ -313,7 +313,7 @@ dos-lint:
 # the llms-full.txt check-mode drift gate. The orphan gate has a parity-proven Go twin
 # (hooks.gateIndexSyncTree), so it runs via `fak hygiene --gates INDEX_SYNC` (no Python
 # interpreter spawn) and falls back to the Python checker only on exit 2 (could-not-run).
-# gen_llms_full.py is not yet ported (#928), so it stays on Python.
+# The grandfathered renderer is driven through fak llms-full so checks use committed bytes.
 index-sync:
 	@go build -o tools/.bin/fak ./cmd/fak
 	@tools/.bin/fak hygiene --gates INDEX_SYNC; \
@@ -324,7 +324,7 @@ index-sync:
 	elif [ $$rc -ne 0 ]; then \
 		exit $$rc; \
 	fi
-	@python3 tools/gen_llms_full.py --check
+	@tools/.bin/fak llms-full --check
 	@echo "index-sync OK"
 
 # gofmt-check: every committed .go file is gofmt-formatted — the local mirror of ci.yml's

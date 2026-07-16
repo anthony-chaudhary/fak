@@ -108,6 +108,7 @@ var verbManifest = []Verb{
 	{Name: "checkpoint-scorecard", Synopsis: "score which long-running process subsystems persist resumable WIP state and expose witnessed status", Lane: "cmd"},
 	{Name: "ci-preflight", Synopsis: "is the COMMITTED trunk tip CI-buildable and green? (ci-spec-change migration gate; reads committed tip)", Lane: "cmd"},
 	{Name: "validate", Synopsis: "check committed tip plus only explicit --mine paths with full build/vet and affected tests", Lane: "cmd"},
+	{Name: "llms-full", Synopsis: "generate or check llms-full.txt from committed tip plus explicit owned paths", Lane: "cmd"},
 	{Name: "claim-check", Synopsis: "grade an efficiency/perf claim against the six-question net-true-value rubric", Lane: "cmd"},
 	{Name: "claude-mac-fak", Synopsis: "one-command Mac gateway dogfood through the node-macos-a fak serve gateway", Aliases: []string{"mac"}, Lane: "cmd"},
 	{Name: "clean-bins", Synopsis: "prune stray gitignored go-build binaries at the module root; keeps the live fak (git-maint's build twin)", Lane: "cmd"},

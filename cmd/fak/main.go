@@ -104,6 +104,8 @@ func main() {
 		cmdCIPreflight(os.Args[2:])
 	case "validate":
 		cmdValidate(os.Args[2:])
+	case "llms-full":
+		cmdLLMSFull(os.Args[2:])
 	case "attest":
 		cmdAttest(os.Args[2:])
 	case "backend":

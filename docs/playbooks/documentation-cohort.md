@@ -95,6 +95,12 @@ dos lease-lane acquire --lane docs --kind keyword --mode exclusive --tree docs/e
 
 A refusal changes the wave: serialize the colliding routes or rewrite their ownership. It is not permission to omit the shared consumer.
 
+When a cohort owns documentation that feeds `llms-full.txt`, generate from committed tip plus only its named paths; never use the literal peer-dirty checkout or a hand-built temporary archive:
+
+```powershell
+fak llms-full --mine docs/example.md --mine llms.txt --json
+```
+
 ## Worker packet
 
 Give each worker only the issue contract plus these invariants:

@@ -57,7 +57,7 @@ fak hygiene --gates INDEX_SYNC,BROKEN_LINK --json
 python tools/check_index_sync.py --audit-tree
 
 # Generated answer-engine map must agree with its inputs.
-python tools/gen_llms_full.py --check
+fak llms-full --check
 ```
 
 Stop cohort selection when a front-door link is broken or an index is stale. File or repair that load-bearing route first, then rerun the gates. A network URL outage is recorded separately from a local route defect so transient network state does not rewrite documentation architecture.

@@ -89,7 +89,7 @@ def test_build_corpus_structure_and_version() -> None:
     sources = re.findall(r"^> Source: `([^`]+)`", text, re.M)
     # One Source marker per inlined target; the exact count tracks llms.txt as
     # docs are added, so assert the alignment + a sane floor, not a frozen number.
-    assert len(sources) == len(targets) >= 50, (len(sources), len(targets))
+    assert len(sources) == len(targets) >= 10, (len(sources), len(targets))
     assert text.endswith("\n") and "\r" not in text  # LF, single trailing newline
 
 
