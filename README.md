@@ -12,6 +12,20 @@ The agent keeps its interface and model, while a fak kernel manages its model tr
 
 <!-- readme-verified: 2026-07-15 vs VERSION 0.41.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
+## Try the kernel without a key, model, or GPU
+
+**Audience:** first-time evaluators checking whether fak can manage a tool-using agent.
+
+For the shortest public proof, run one deterministic end-to-end check:
+
+```bash
+fak agent --offline
+```
+
+The proof passes when the comparison ends with `task completed (booked) YES / YES`, `poisoned result blocked YES`, and `destructive op prevented YES`. This offline mode uses a deterministic mock planner, so it verifies the managed-agent path and policy boundary without claiming live-model quality or latency.
+
+**Next action:** run `fak agent --offline` and check those three output rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md).
+
 ## One managed agent, two ways to run the kernel
 
 A **managed agent** pairs Claude Code, Codex, opencode, or your own client—and its chosen model—with fak. The client keeps the task loop and user experience; fak owns the operational boundary around it: what context is retained, what work is reused, which tools may run, what results may return, and how the session recovers.
@@ -94,15 +108,6 @@ Point OpenAI clients at `http://127.0.0.1:8080/v1` and Anthropic clients at the 
 
 Read: [server quickstart](docs/fak/server-quickstart.md) · [serving architecture and engines](docs/serving/README.md) · [configuration](docs/fak/server-config.md) · [API reference](docs/fak/api-reference.md) · [deployment](docs/fak/deployment-guide.md)
 
-## Try the kernel without a key, model, or GPU
-
-```bash
-fak routebench                                    # -> COST / LATENCY / QUALITY vs a one-model baseline
-fak preflight --tool refund_payment --args "{}"   # -> DENY (DEFAULT_DENY): outside the capability floor
-fak agent --offline                               # deterministic end-to-end agent demo
-```
-
-The policy floor is JSON, not a second model. Copy a manifest from [`examples/`](examples/), trim it, and test it before a model runs. [How the boundary works](docs/explainers/tool-call-is-a-syscall.md).
 
 ## Install
 
