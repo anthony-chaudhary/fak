@@ -65,12 +65,25 @@ func CheckFresh(root string) (FreshnessResult, error) {
 		return result, fmt.Errorf("read generated README: %w", err)
 	}
 	actual, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(GeneratedReadme)))
-	if err != nil || !bytes.Equal(actual, expected) {
+	if err != nil || !generatedBytesEqual(actual, expected) {
 		result.Fresh = false
 		result.StalePaths = append(result.StalePaths, GeneratedReadme)
 	}
 	sort.Strings(result.StalePaths)
 	return result, nil
+}
+
+// generatedBytesEqual compares the generated Markdown contract after normalizing
+// checkout line endings. Git may materialize a tracked text file as CRLF on Windows,
+// while the generator subprocess writes LF (or vice versa); that transport detail must
+// not make a semantically identical committed artifact stale. No other bytes are
+// normalized, so content drift remains a hard freshness failure.
+func generatedBytesEqual(actual, expected []byte) bool {
+	return bytes.Equal(normalizeGeneratedNewlines(actual), normalizeGeneratedNewlines(expected))
+}
+
+func normalizeGeneratedNewlines(b []byte) []byte {
+	return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 }
 
 // CheckGitTree checks a committed or staged git tree, immune to peer working-tree files.

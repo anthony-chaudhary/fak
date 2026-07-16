@@ -43,6 +43,20 @@ func TestCheckFreshDetectsHeadlineFamilyAndNoop(t *testing.T) {
 	}
 }
 
+func TestGeneratedBytesEqualNormalizesOnlyCheckoutLineEndings(t *testing.T) {
+	lf := []byte("# score\n\nvalue\n")
+	crlf := []byte("# score\r\n\r\nvalue\r\n")
+	if !generatedBytesEqual(lf, crlf) || !generatedBytesEqual(crlf, lf) {
+		t.Fatal("LF and CRLF forms of the same generated text must compare fresh")
+	}
+	if generatedBytesEqual(lf, []byte("# score\n\nchanged\n")) {
+		t.Fatal("content drift must remain stale")
+	}
+	if generatedBytesEqual([]byte("a\rb"), []byte("a\nb")) {
+		t.Fatal("bare carriage returns are content, not checkout line endings")
+	}
+}
+
 func TestGeneratedSnapshotIsByteStableAndPortable(t *testing.T) {
 	root := fixtureRepo(t)
 	a := filepath.Join(t.TempDir(), "a")
