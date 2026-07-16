@@ -17,12 +17,16 @@ func TestPublicScrubAuditRangeAndTree(t *testing.T) {
 	publicScrubGitRun(t, repo, "config", "user.name", "t")
 	publicScrubWriteFile(t, repo, ".gitignore", "tools/_registry/\n")
 	publicScrubWriteFile(t, repo, "docs/notes.md", "hello\n")
+	needle := "10.11.12.13"
+	publicScrubWriteFile(t, repo, "tools/_registry/scrub_needles.private.json", `{"export_audit_needles":["`+needle+`"]}`+"\n")
+	// The range scanner resolves its private needle sidecar from the selected
+	// revision before falling back to disk. Force-add the fixture so both the
+	// committed-range and tracked-tree paths exercise the same full scan mode.
 	publicScrubGitRun(t, repo, "add", ".gitignore", "docs/notes.md")
+	publicScrubGitRun(t, repo, "add", "-f", "tools/_registry/scrub_needles.private.json")
 	publicScrubGitRun(t, repo, "commit", "-qm", "seed")
 	base := strings.TrimSpace(publicScrubGitRunOutput(t, repo, "rev-parse", "HEAD"))
 
-	needle := "10.11.12.13"
-	publicScrubWriteFile(t, repo, "tools/_registry/scrub_needles.private.json", `{"export_audit_needles":["`+needle+`"]}`+"\n")
 	publicScrubWriteFile(t, repo, "node.json", `{"ip":"`+needle+`"}`+"\n")
 	publicScrubGitRun(t, repo, "add", "node.json")
 	publicScrubGitRun(t, repo, "commit", "-qm", "leak")

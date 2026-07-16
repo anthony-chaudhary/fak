@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -78,7 +79,11 @@ func TestBenchFleetRouteUsesMachineSpecificBridgeChannels(t *testing.T) {
 	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	bridge := filepath.Join(bridgeDir, "dgxbridge-fresh.exe")
+	bridgeName := "dgxbridge-fresh"
+	if runtime.GOOS == "windows" {
+		bridgeName += ".exe"
+	}
+	bridge := filepath.Join(bridgeDir, bridgeName)
 	if err := os.WriteFile(bridge, []byte("bridge"), 0755); err != nil {
 		t.Fatal(err)
 	}

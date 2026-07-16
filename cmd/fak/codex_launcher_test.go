@@ -174,7 +174,7 @@ func TestRunCodexDryRun(t *testing.T) {
 		"guard --split off",
 		"--policy floor.json",
 		"--api-key-env MY_OPENAI_KEY",
-		"codex --dangerously-bypass-approvals-and-sandbox exec --json check the repo",
+		"codex -c model_auto_compact_token_limit=96000 --dangerously-bypass-approvals-and-sandbox exec --json check the repo",
 	} {
 		if !strings.Contains(gotOut, want) {
 			t.Fatalf("dry-run stdout missing %q:\n%s", want, gotOut)
@@ -209,7 +209,7 @@ func TestRunCodexExecSeam(t *testing.T) {
 	if strings.Contains(strings.Join(gotArgv, " "), "--dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("--skip-permissions=false still passed Codex bypass flag: %#v", gotArgv)
 	}
-	if !strings.HasSuffix(strings.Join(gotArgv, " "), "-- codex exec do x") {
+	if !strings.HasSuffix(strings.Join(gotArgv, " "), "-- codex -c model_auto_compact_token_limit=96000 exec do x") {
 		t.Fatalf("argv tail wrong: %#v", gotArgv)
 	}
 	if len(gotEnv) == 0 {

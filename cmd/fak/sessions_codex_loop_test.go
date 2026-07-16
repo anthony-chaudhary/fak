@@ -147,7 +147,7 @@ func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 		"create_goal",
 		"cannot create a new goal",
 		"livelock notices",
-		"hard-fuse repeated unfinished-goal failures",
+		"launch future Codex sessions through `fak codex` or `fak guard -- codex`",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("human render missing %q:\n%s", want, stdout.String())

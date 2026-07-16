@@ -108,7 +108,7 @@ func TestNegateReframe(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("reframe exit = %d, want 0", code)
 	}
-	if !strings.Contains(out.String(), "Remember to stamp") {
+	if !strings.Contains(strings.ToLower(out.String()), "remember to stamp") {
 		t.Errorf("reframe did not flip the idiom: %q", out.String())
 	}
 	if strings.Contains(strings.ToLower(out.String()), "forget") {
