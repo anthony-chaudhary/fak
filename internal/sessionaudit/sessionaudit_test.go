@@ -568,3 +568,53 @@ func TestProviderBucketAndCostBehavior(t *testing.T) {
 		}
 	}
 }
+
+// TestNonClaudeProviderCostRates is the failure-class proof for #4823: before the
+// price rows landed, PriceFor returned ok=false for deepseek/glm/kimi so the
+// provider-cost KPI folded them UNMEASURED; after, each resolves to its published
+// per-MTok rate. The still-unpriced providers (gpt/gemini) must STAY unpriced so
+// the #4490 honesty rule (no fabricated $0.00) still fires for them.
+func TestNonClaudeProviderCostRates(t *testing.T) {
+	priced := []struct {
+		model    string
+		tier     string
+		axis     int64 // 1 MTok exercised on one axis
+		wantUSD  float64
+		onOutput bool
+	}{
+		{"deepseek-v4-pro", "deepseek", 1_000_000, 0.435, false},
+		{"glm-5.2", "glm", 1_000_000, 4.4, true},
+		{"kimi-k2.6", "kimi", 1_000_000, 0.60, false},
+	}
+	for _, p := range priced {
+		r, ok := PriceFor(p.model)
+		if !ok {
+			t.Fatalf("PriceFor(%q) = !ok, want a published rate card (#4823)", p.model)
+		}
+		if r.Input <= 0 || r.Output <= 0 {
+			t.Fatalf("%s rate card has non-positive rates: %+v", p.model, r)
+		}
+		if got := ModelTier(p.model); got != p.tier {
+			t.Fatalf("ModelTier(%q) = %q, want %q", p.model, got, p.tier)
+		}
+		var got float64
+		if p.onOutput {
+			got = CostUSD(p.model, 0, 0, 0, p.axis)
+		} else {
+			got = CostUSD(p.model, p.axis, 0, 0, 0)
+		}
+		if math.Abs(got-p.wantUSD) > 1e-9 {
+			t.Fatalf("CostUSD(%q, 1 MTok) = %.6f, want %.6f", p.model, got, p.wantUSD)
+		}
+	}
+	// Providers with no clean published card stay UNPRICED (honest UNMEASURED, not
+	// a fabricated $0.00) — this guards the boundary the KPI relies on.
+	for _, m := range []string{"gpt-5", "gemini-2.5-pro", "qwen2.5:14b"} {
+		if _, ok := PriceFor(m); ok {
+			t.Fatalf("PriceFor(%q) = ok, but this provider has no rate card and must stay UNMEASURED", m)
+		}
+		if got := ModelTier(m); got != "unpriced" {
+			t.Fatalf("ModelTier(%q) = %q, want \"unpriced\"", m, got)
+		}
+	}
+}
