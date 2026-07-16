@@ -86,14 +86,16 @@ var guardFlagGroups = []guardFlagGroup{
 	{"Session lifecycle hooks (Claude Code)", []string{
 		"precompact-hook", "deny-all-continue", "deny-all-max", "deny-all-warn",
 		"deny-all-final", "same-stop", "toolproc-hooks", "task-handoff", "task-handoff-file",
-		"task-handoff-repo", "task-handoff-live", "operator-directed", "output-style",
+		"task-handoff-repo", "task-handoff-live", "operator-directed",
 	}},
 	{"Budgets, resets & session governance", []string{
 		"context-budget-tokens", "max-duration", "budget-envelope",
 		"reset-on-budget", "restart-on-budget", "restart-limit", "restart-seed-dir", "restart-seed-handback",
-		"wire-retry-limit",
 		"session-id", "session-pressure-gate", "session-pressure-days",
 		"session-pressure-max", "session-pressure-report", "session-pressure-justify",
+	}},
+	{"Lease admission & ownership", []string{
+		"arbitrate", "force", "lane", "promotion-threshold", "tree",
 	}},
 	{"Local in-kernel model", []string{
 		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",
