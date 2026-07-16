@@ -83,7 +83,7 @@ func TestDoctorMCPPermissionFailureIsTyped(t *testing.T) {
 		t.Fatal(err)
 	}
 	rep := diagnoseMCP("fixture", "", path, nil, time.Second)
-	if got := stageCause(rep, "child_spawn"); got != "SPAWN_FAILED" {
+	if got := stageCause(rep, "executable_resolution"); got != "EXECUTABLE_PERMISSION_DENIED" {
 		t.Fatalf("cause=%q stages=%+v", got, rep.Stages)
 	}
 }

@@ -86,7 +86,13 @@ func diagnoseMCP(server, configPath, explicit string, explicitArgs []string, tim
 	rep.Command, rep.Args = command, append([]string(nil), args...)
 	resolved, err := exec.LookPath(command)
 	if err != nil {
-		add(doctorMCPStage{Name: "executable_resolution", Status: "fail", Cause: "EXECUTABLE_MISSING", Detail: err.Error(), Remediation: "install/rebuild the configured executable, then update mcp_servers." + server + ".command"})
+		cause := "EXECUTABLE_MISSING"
+		remediation := "install/rebuild the configured executable, then update mcp_servers." + server + ".command"
+		if errors.Is(err, os.ErrPermission) {
+			cause = "EXECUTABLE_PERMISSION_DENIED"
+			remediation = "grant execute permission to the configured executable or select an executable command"
+		}
+		add(doctorMCPStage{Name: "executable_resolution", Status: "fail", Cause: cause, Detail: err.Error(), Remediation: remediation})
 		return rep
 	}
 	if abs, e := filepath.Abs(resolved); e == nil {
