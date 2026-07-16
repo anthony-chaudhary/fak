@@ -6,6 +6,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 // TestBuildIdentityStamped is the witness for epic #2218 gap G2 (R1): a binary built
