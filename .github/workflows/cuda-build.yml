@@ -146,3 +146,33 @@ jobs:
           CGO_CFLAGS: "-I/usr/local/cuda/include"
           CGO_LDFLAGS: "-L${{ github.workspace }}/internal/compute -L/usr/local/cuda/lib64"
         run: go build -tags cuda ./internal/compute/
+
+      # #4186 DoD item 2 — the teeth-check. The compile step above proves this arch's codegen
+      # is REACHABLE; this proves it has TEETH: nvcc must REJECT a Blackwell-invalid intrinsic
+      # for this arch. cicc passes inline PTX through verbatim to ptxas, and ptxas only runs for
+      # a concrete `code=sm_XX` SASS target — so a bogus tcgen05 mnemonic MUST fail nvcc here.
+      # If nvcc instead exits 0, the leg is not doing real per-arch codegen and the gate is
+      # toothless, so we FAIL the step. This runs GREEN on every CUDA-touching PR (the invalid
+      # probe is EXPECTED to be rejected), which is a stronger, continuous form of the one-shot
+      # "scratch-branch invalid-intrinsic" witness the issue described — GPU-free, no scratch
+      # branch, self-verifying on trunk. The sm_100/sm_120 legs' logs are the DoD-2 witness.
+      - name: negative-compile teeth-check — an invalid Blackwell intrinsic must fail nvcc (${{ matrix.arch }})
+        working-directory: internal/compute
+        run: |
+          cc="${{ matrix.arch }}"; cc="${cc#sm_}"
+          cat > _fak_blackwell_negative_probe.cu <<'PROBE'
+          __global__ void fak_blackwell_negative_probe() {
+              // Deliberately-invalid Blackwell tcgen05 mnemonic: ptxas must reject it for a
+              // concrete SASS target. Inline PTX is passed through cicc verbatim to ptxas.
+              asm volatile("tcgen05.not_a_real_mnemonic.b32;");
+          }
+          PROBE
+          if nvcc -O3 -std=c++14 -gencode "arch=compute_${cc},code=${{ matrix.arch }}" \
+               -ccbin g++ -Xcompiler -fPIC -c _fak_blackwell_negative_probe.cu -o _fak_probe.o 2>_fak_probe.log; then
+            echo "TOOTHLESS: nvcc ACCEPTED an invalid Blackwell intrinsic for ${{ matrix.arch }} — the compile gate is not doing real per-arch codegen." >&2
+            sed 's/^/  nvcc| /' _fak_probe.log || true
+            exit 1
+          fi
+          echo "OK: nvcc REJECTED the invalid Blackwell intrinsic for ${{ matrix.arch }} — the compile gate has teeth. nvcc diagnostics:"
+          sed 's/^/  nvcc| /' _fak_probe.log || true
+          rm -f _fak_blackwell_negative_probe.cu _fak_probe.o _fak_probe.log
