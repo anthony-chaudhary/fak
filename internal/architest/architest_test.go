@@ -294,6 +294,7 @@ var tier = map[string]int{
 	"horizonrecovery":  1, // pure budget-recovery (term r) grounding lens over a ctxplanbench report's already-measured real-transcript fields: surfaces the recovery ratio + its fault-rate FENCE co-located, structurally refuses to emit r/horizon_multiplier; stdlib-only, imports nothing internal, off the hot path.
 	"guardrsi":         1, // pure guard RSI journal fold + scorecard: reads guard-audit bytes, computes deterministic verdict quality, and validates keep/revert iterations; stdlib-only, off the hot path.
 	"repoguard":        1, // pure repo-containment classifier: resolves write/delete targets against a workspace root and emits OUT_OF_TREE_WRITE; stdlib-only, shared by the hook binary and loop driver.
+	"egresslist":       1, // pure offline operator/community allow-block matcher: compiles immutable adblock-style host rules with allow precedence and an embedded registry. Stdlib-only, imports nothing internal, off the hot path.
 	"egressfloor":      1, // pure network-egress destination classifier (cloud-metadata SSRF floor): names a tool call reaching the cloud-instance metadata / link-local family (169.254.169.254, metadata.google.internal, fd00:ec2::254, ...). Imports only abi(0)+net+net/url; the adjudicator's egress rung folds it on the live path.
 	"hooks":            1, // commit-boundary gates run in ONE process: the Go port of the tools/check_*.py git-hook checkers (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/INDEX_SYNC/PROVENANCE_LABEL + commit-msg), folding one staged-diff read. stdlib-only, imports nothing internal, off the hot path.
 	"workflow":         1, // pure DAG/map-reduce/fan-out orchestration core (#245, D-005): JSON-DSL compiler + topo-validated executor + retry/fail-fast fault tolerance; stdlib-only, imports nothing internal, off the hot path.
@@ -480,7 +481,7 @@ var pureRoot = map[string]bool{
 	"codexmemory": true, "commitintent": true, "commitissuelink": true, "compactcohere": true, "conflationscore": true,
 	"corelocks": true, "covmatrix": true, "ctxknobs": true, "ctxplan": true, "ctxplans": true, "deepseekbench": true,
 	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "deploymanifest": true, "devexmeter": true,
-	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true,
+	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true, "egresslist": true,
 	"evebridge": true, "eveimport": true, "eveparity": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
 	"frontierswe": true, "fusedturn": true, "ghspam": true, "godsplitplan": true, "growthgate": true,
