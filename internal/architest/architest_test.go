@@ -460,7 +460,7 @@ var tier = map[string]int{
 	"executionroute":        3,
 	"market":                3,
 	"steerpr":               1, // #5015: pure fold of stamped trunk commits into operator-legible PR units + attention bands; the band is a VIEW over dispatchtick's witness verdicts (supplied by the caller), which is what keeps this leaf stdlib-only and off the hot path.
-	"tokencache":            1, // #4330: persisted, git-common-dir-anchored backing store for clonescan's per-file token windows (content-addressed under the tokenizer version); imports only clonescan (a tier-1 sibling), does its own disk I/O + one `git rev-parse`, off the hot path.
+	"tokencache":            1, // #4330: persisted, git-common-dir-anchored backing store for clonescan's per-file token windows (content-addressed under the tokenizer version); imports only tier-1 siblings (clonescan for the window contract, windowgate to suppress its one `git rev-parse` spawn), does its own disk I/O, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

@@ -38,6 +38,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/clonescan"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // FlagEnv disables the token cache when set to off/0/false/no.
@@ -113,6 +114,9 @@ func commonDir(root string) (string, bool) {
 	if strings.TrimSpace(root) != "" {
 		cmd.Dir = root
 	}
+	// Suppress the console window: this resolve runs inside the commit hook and under
+	// background automation, where a windowless parent would otherwise flash a child.
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false
