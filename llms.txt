@@ -8,7 +8,7 @@
 
 - Product scope and mode choice: [`README.md`](README.md)
 - Human role map: [`START-HERE.md`](START-HERE.md)
-- Repository-wide documentation index: [`INDEX.md`](INDEX.md)
+- Documentation by audience, job, and lifecycle, plus the exhaustive repository map: [`INDEX.md`](INDEX.md)
 - Agent workflow, builds, proofs, commits, and shared-tree rules: [`AGENTS.md`](AGENTS.md)
 - Contribution contract: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)

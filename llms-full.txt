@@ -14,7 +14,7 @@
 
 - Product scope and mode choice: [`README.md`](README.md)
 - Human role map: [`START-HERE.md`](START-HERE.md)
-- Repository-wide documentation index: [`INDEX.md`](INDEX.md)
+- Documentation by audience, job, and lifecycle, plus the exhaustive repository map: [`INDEX.md`](INDEX.md)
 - Agent workflow, builds, proofs, commits, and shared-tree rules: [`AGENTS.md`](AGENTS.md)
 - Contribution contract: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)
@@ -764,7 +764,7 @@ This page is the human route map for **fak**. Choose the job you have now; each 
 | Integrate a client or agent | [Integration guides](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) | Select the guide for your client and follow its smallest working path. |
 | Operate or deploy fak | [Deployment guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/deployment-guide.md) | Choose the topology and health checks for your environment. |
 | Contribute code or docs | [Contributing guide](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) | Read the repository workflow, then choose a scoped issue. |
-| Study architecture or evidence | [Documentation index](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md) | Enter through architecture, proofs, benchmarks, or research history. |
+| Find documentation by job or lifecycle | [Documentation index](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md) | Choose an evaluator, builder, operator, contributor, or research route before entering the detailed map. |
 
 ## Current product paths
 
@@ -794,18 +794,32 @@ If you are still deciding, use the default: [run the one-minute offline proof](h
 
 # INDEX — the full map of the fak repo
 
-The curated map of everything in this repo that is not on the front page. If a
-doc exists, it is reachable from here. New dated notes go under
-[`docs/notes/`](https://github.com/anthony-chaudhary/fak/tree/main/docs/notes) and get a line in the **Notes & research** section
-below, so the front door never has to grow to stay complete. Before touching this
-map or [`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt), run `python tools/check_index_sync.py --audit-tree`;
-the same reciprocal check runs in staged mode for front-door index and dated-note
-changes.
+**Audience:** readers who know the job they need to complete and want the current, versioned, research, or historical documentation route without reconstructing repository history.
 
-> New here? Start with the front doors, not this map: the
-> [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md), [START-HERE](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md), and the
-> [agent orientation](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md). This page is the index for when you already
-> know roughly what you want and need the link.
+This is the curated map of repository documentation. Start by job and lifecycle; the detailed subject map below remains the exhaustive route when you already know a component or artifact name.
+
+## Choose an audience route
+
+| Your job | Current route | Deeper or versioned route |
+|---|---|---|
+| **Evaluate what fak is and verify it** | [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) for the product contract, then [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) for install, deterministic proof, or production selection. | [Security policy](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) for the capability floor; [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) for scoped results and tuned baselines. |
+| **Build or integrate with fak** | [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md), then [integration guides](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) or [supported APIs and protocols](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/apis-and-protocols.md). | [Architecture and design](#architecture--design) for implementation internals; [generation contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation.md) for current versus next work. |
+| **Operate fak or an agent fleet** | [START-HERE](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) for the runnable route, then [operating the agent fleet](#operating-the-agent-fleet). | [Work map](https://github.com/anthony-chaudhary/fak/blob/main/docs/WORK-MAP.md) for active operational programs and ownership. |
+| **Contribute code or documentation** | [AGENTS](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for enforced workflow and [CONTRIBUTING](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) for contributor policy. | [Reference index](#reference-index), [plans](#plans--media), and versioned implementation docs carry deeper rationale. |
+| **Research history or prior decisions** | [Notes and research](#notes--research-docsnotes) for dated evidence. | [Archive](https://github.com/anthony-chaudhary/fak/tree/main/docs/archive) is historical: follow replacement links before treating archived material as current guidance. |
+
+**Default choice:** a first-time evaluator starts with the [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md), then follows [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md). Use another row only when its named job matches yours.
+
+**Next action — select one route:** choose the row matching your job, open its first current link, and use the deeper column only when you need implementation, versioned, research, or historical context.
+
+**Route context:**
+
+- **Mode:** evaluation, building, operation, contribution, and research are separate reader modes; a deep implementation or historical route does not replace its current operational front door.
+- **Generation:** current behavior is labeled `gen/now` through the [generation contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation.md); next and future material is planning context, not a shipped default.
+- **Lifecycle:** front doors and maintained guides are current; versioned docs describe a named revision; dated notes are research evidence; [`docs/archive/`](https://github.com/anthony-chaudhary/fak/tree/main/docs/archive) is historical and requires a replacement check.
+- **Support boundary:** this map routes documentation. Product guarantees remain scoped by [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md), supported-version pages, the [security policy](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md), and committed benchmark evidence.
+
+New dated notes go under [`docs/notes/`](https://github.com/anthony-chaudhary/fak/tree/main/docs/notes) and get a line in **Notes & research**, so the audience route can stay concise while the map remains complete. Before touching this map or [`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt), run `python tools/check_index_sync.py --audit-tree`; the same reciprocal check runs in staged mode for front-door index and dated-note changes.
 
 ## Start here
 

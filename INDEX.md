@@ -1,17 +1,31 @@
 # INDEX — the full map of the fak repo
 
-The curated map of everything in this repo that is not on the front page. If a
-doc exists, it is reachable from here. New dated notes go under
-[`docs/notes/`](docs/notes/) and get a line in the **Notes & research** section
-below, so the front door never has to grow to stay complete. Before touching this
-map or [`llms.txt`](llms.txt), run `python tools/check_index_sync.py --audit-tree`;
-the same reciprocal check runs in staged mode for front-door index and dated-note
-changes.
+**Audience:** readers who know the job they need to complete and want the current, versioned, research, or historical documentation route without reconstructing repository history.
 
-> New here? Start with the front doors, not this map: the
-> [README](README.md), [START-HERE](START-HERE.md), and the
-> [agent orientation](AGENTS.md). This page is the index for when you already
-> know roughly what you want and need the link.
+This is the curated map of repository documentation. Start by job and lifecycle; the detailed subject map below remains the exhaustive route when you already know a component or artifact name.
+
+## Choose an audience route
+
+| Your job | Current route | Deeper or versioned route |
+|---|---|---|
+| **Evaluate what fak is and verify it** | [README](README.md) for the product contract, then [Getting started](GETTING-STARTED.md) for install, deterministic proof, or production selection. | [Security policy](SECURITY.md) for the capability floor; [benchmark authority](BENCHMARK-AUTHORITY.md) for scoped results and tuned baselines. |
+| **Build or integrate with fak** | [Getting started](GETTING-STARTED.md), then [integration guides](docs/integrations/) or [supported APIs and protocols](docs/supported/apis-and-protocols.md). | [Architecture and design](#architecture--design) for implementation internals; [generation contract](docs/generation.md) for current versus next work. |
+| **Operate fak or an agent fleet** | [START-HERE](START-HERE.md) for the runnable route, then [operating the agent fleet](#operating-the-agent-fleet). | [Work map](docs/WORK-MAP.md) for active operational programs and ownership. |
+| **Contribute code or documentation** | [AGENTS](AGENTS.md) for enforced workflow and [CONTRIBUTING](CONTRIBUTING.md) for contributor policy. | [Reference index](#reference-index), [plans](#plans--media), and versioned implementation docs carry deeper rationale. |
+| **Research history or prior decisions** | [Notes and research](#notes--research-docsnotes) for dated evidence. | [Archive](docs/archive/) is historical: follow replacement links before treating archived material as current guidance. |
+
+**Default choice:** a first-time evaluator starts with the [README](README.md), then follows [Getting started](GETTING-STARTED.md). Use another row only when its named job matches yours.
+
+**Next action — select one route:** choose the row matching your job, open its first current link, and use the deeper column only when you need implementation, versioned, research, or historical context.
+
+**Route context:**
+
+- **Mode:** evaluation, building, operation, contribution, and research are separate reader modes; a deep implementation or historical route does not replace its current operational front door.
+- **Generation:** current behavior is labeled `gen/now` through the [generation contract](docs/generation.md); next and future material is planning context, not a shipped default.
+- **Lifecycle:** front doors and maintained guides are current; versioned docs describe a named revision; dated notes are research evidence; [`docs/archive/`](docs/archive/) is historical and requires a replacement check.
+- **Support boundary:** this map routes documentation. Product guarantees remain scoped by [`CLAIMS.md`](CLAIMS.md), supported-version pages, the [security policy](SECURITY.md), and committed benchmark evidence.
+
+New dated notes go under [`docs/notes/`](docs/notes/) and get a line in **Notes & research**, so the audience route can stay concise while the map remains complete. Before touching this map or [`llms.txt`](llms.txt), run `python tools/check_index_sync.py --audit-tree`; the same reciprocal check runs in staged mode for front-door index and dated-note changes.
 
 ## Start here
 

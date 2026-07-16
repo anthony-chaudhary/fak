@@ -15,7 +15,7 @@ This page is the human route map for **fak**. Choose the job you have now; each 
 | Integrate a client or agent | [Integration guides](docs/integrations/) | Select the guide for your client and follow its smallest working path. |
 | Operate or deploy fak | [Deployment guide](docs/fak/deployment-guide.md) | Choose the topology and health checks for your environment. |
 | Contribute code or docs | [Contributing guide](CONTRIBUTING.md) | Read the repository workflow, then choose a scoped issue. |
-| Study architecture or evidence | [Documentation index](INDEX.md) | Enter through architecture, proofs, benchmarks, or research history. |
+| Find documentation by job or lifecycle | [Documentation index](INDEX.md) | Choose an evaluator, builder, operator, contributor, or research route before entering the detailed map. |
 
 ## Current product paths
 
