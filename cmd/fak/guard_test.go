@@ -964,8 +964,8 @@ func TestGuardBudgetRestarterRecontinuesAndEmitsSeed(t *testing.T) {
 		t.Fatal("restarter did not emit a restart event")
 	}
 	fresh := observeSession(context.Background(), child)
-	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Budget.ContextTokensLeft != 50 {
-		t.Fatalf("fresh state = %+v, want recontinued child with fresh context budget", fresh)
+	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Budget.ContextTokensLeft != 5 || fresh.Budget.ContextTokensCap != 5 {
+		t.Fatalf("fresh state = %+v, want recontinued child with preserved live context cap", fresh)
 	}
 }
 
