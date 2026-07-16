@@ -1,0 +1,121 @@
+{
+  "schema": "fak-documentation-authority-map/1",
+  "metadata": {
+    "audience": "Documentation maintainers reconciling duplicated public and contributor claims",
+    "page_job": "Identify the canonical source for a repeated concept and choose a safe redirect or bounded projection",
+    "lifecycle": "current",
+    "generation": "gen/now",
+    "support": "maintained as the current documentation authority map",
+    "authority": "This map owns concept-to-route authority and redirect policy; each canonical route owns the facts named in its entry",
+    "next_action": "Match the duplicated claim to one concept entry, preserve only the allowed projection, and link its canonical route"
+  },
+  "default": {
+    "condition": "The repeated statement matches a concept entry and the consuming page does not own that concept",
+    "choice": "Replace the repeated explanation with the entry's allowed projection and canonical link",
+    "outcome": "One route remains authoritative while inbound pages retain enough context to navigate",
+    "change_condition": "Keep local prose only when the entry explicitly permits a bounded projection; add or revise an entry before redirecting an unmapped concept",
+    "proof": "A structured read-back resolves the concept to exactly one canonical route and every route and anchor validates"
+  },
+  "redirect_contract": {
+    "safe_redirect": [
+      "Name the reader-relevant outcome in one affirmative sentence",
+      "Link the canonical route at the point where the fact is needed",
+      "Preserve local prerequisites or mode conditions that change whether the link applies",
+      "Remove duplicated rationale, implementation history, benchmark numbers, and support promises unless this entry permits them"
+    ],
+    "bounded_projection": "A short local statement is a projection, not a second authority: it must stay within allowed_projection and delegate details and proof to canonical_route",
+    "unmapped_concept": "Do not choose an authority by inference. Add an entry with one owner and validate it before rewriting consumers.",
+    "historical_content": "Retain historical wording only on a lifecycle-labeled historical or archived route that names the current successor; it cannot override a gen/now authority.",
+    "conflict": "When two routes make incompatible current claims, stop the redirect and reconcile the owning evidence before editing projections."
+  },
+  "concepts": [
+    {
+      "concept": "project_definition",
+      "canonical_route": "../../README.md",
+      "canonical_anchor": "#fak--the-fused-agent-kernel",
+      "canonical_owns": "The current public definition, value proposition, and top-level system boundary",
+      "allowed_projection": "One sentence naming fak as an agent kernel plus a link to the README",
+      "safe_redirect": "Read what fak is and why the kernel seam matters",
+      "must_not_duplicate": "Competing product definitions or extended architecture rationale"
+    },
+    {
+      "concept": "canonical_first_proof",
+      "canonical_route": "../repro-packet.md",
+      "canonical_anchor": "#reproduce-the-offline-allowdeny-boundary",
+      "canonical_owns": "The runnable no-key proof commands, expected outcomes, and verification sequence",
+      "allowed_projection": "A short promise of the proof outcome and either the canonical command block or a link; copied commands must remain byte-consistent with the canonical route",
+      "safe_redirect": "Run the canonical 60-second proof",
+      "must_not_duplicate": "A divergent command sequence or different expected result"
+    },
+    {
+      "concept": "human_role_orientation",
+      "canonical_route": "../../START-HERE.md",
+      "canonical_anchor": "#choose-your-route",
+      "canonical_owns": "The current human role-to-route choice",
+      "allowed_projection": "One role-specific link whose label names the destination task",
+      "safe_redirect": "Choose the path that matches your role",
+      "must_not_duplicate": "A second role taxonomy or exhaustive document inventory"
+    },
+    {
+      "concept": "agent_operating_contract",
+      "canonical_route": "../../AGENTS.md",
+      "canonical_anchor": "#hard-rules-these-will-bite-an-agent--they-are-enforced-below-the-agent-layer",
+      "canonical_owns": "Repository operating rules, build questions, guard recovery, and ship discipline for coding agents",
+      "allowed_projection": "A link directing coding agents to read AGENTS.md before acting",
+      "safe_redirect": "Use the repository operating contract",
+      "must_not_duplicate": "A shortened rule set that can drift from enforced behavior"
+    },
+    {
+      "concept": "machine_documentation_map",
+      "canonical_route": "../../llms.txt",
+      "canonical_anchor": "#fak-documentation-map-for-agents",
+      "canonical_owns": "The compact machine-oriented map of documentation routes",
+      "allowed_projection": "A link identifying llms.txt as the machine-oriented map",
+      "safe_redirect": "Open the compact documentation map",
+      "must_not_duplicate": "Another compact machine inventory"
+    },
+    {
+      "concept": "exhaustive_document_catalog",
+      "canonical_route": "../../INDEX.md",
+      "canonical_anchor": "#index--the-full-map-of-the-fak-repo",
+      "canonical_owns": "The exhaustive audience, task, lifecycle, generation, and front-door-link catalog",
+      "allowed_projection": "A link labeled as the exhaustive catalog rather than a recommended starting path",
+      "safe_redirect": "Inspect the exhaustive documentation catalog",
+      "must_not_duplicate": "A hand-maintained exhaustive list on a curated front door"
+    },
+    {
+      "concept": "integration_choice",
+      "canonical_route": "../integrations/README.md",
+      "canonical_anchor": "#which-agent-do-you-run",
+      "canonical_owns": "The supported integration-path choice and route-specific prerequisites",
+      "allowed_projection": "A task-specific integration link with the applicable prerequisite",
+      "safe_redirect": "Choose the supported integration path",
+      "must_not_duplicate": "An unscoped compatibility or support matrix"
+    },
+    {
+      "concept": "claim_status",
+      "canonical_route": "../../CLAIMS.md",
+      "canonical_anchor": "#claimsmd--the-fak-honesty-ledger",
+      "canonical_owns": "Whether a public claim is shipped, simulated, or a stub and the evidence bound to that status",
+      "allowed_projection": "A scoped claim carrying its status tag and a link to the ledger entry",
+      "safe_redirect": "Check the claim status and evidence",
+      "must_not_duplicate": "An untagged capability promise or stronger status than the ledger"
+    },
+    {
+      "concept": "benchmark_authority",
+      "canonical_route": "../../BENCHMARK-AUTHORITY.md",
+      "canonical_anchor": "#benchmark-authority--single-source-of-truth",
+      "canonical_owns": "Benchmark baseline roles, provenance, and which measured result may support a public performance claim",
+      "allowed_projection": "A scoped result with provenance and a link to its authority row",
+      "safe_redirect": "Verify the benchmark baseline and provenance",
+      "must_not_duplicate": "Detached headline numbers, naive-baseline headlines, or inferred general gains"
+    }
+  ],
+  "completion_check": [
+    "The duplicated claim resolves to exactly one concept entry",
+    "The local wording stays within allowed_projection and retains applicable prerequisites or modes",
+    "The canonical route owns the delegated fact and its route and anchor resolve",
+    "No current claim is delegated to historical or archived content",
+    "An independent maintainer can name the concept, canonical source, safe redirect, and next action without guessing"
+  ]
+}

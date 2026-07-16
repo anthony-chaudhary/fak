@@ -1,0 +1,17 @@
+schema: fak-documentation-authority-map-witness/1
+route: docs/project/documentation-authority-map.json
+source_binding: pre-publication candidate based on d88a4b135168de9d36132990e70e8ff7e5dc673f; exact route bytes bound by content_sha256; issue #4946 records publication commit
+content_sha256: c21ba78dedd1a62dbc018ec90c8cef1e9b3a11b0e90a68b2b2b44ff843510d25
+reader: independent gpt-5.4-mini ephemeral read-only session
+reader_goal: resolve duplicated front-door claims to one canonical source and a safe redirect without guessing
+read_back:
+  verdict: pass
+  audience: Documentation maintainers reconciling duplicated public and contributor claims
+  page_job: Identify the canonical source for a repeated concept and choose a safe redirect or bounded projection
+  default_choice: Replace the repeated explanation with the entry's allowed projection and canonical link
+  next_action: Match the duplicated claim to one concept entry, preserve only the allowed projection, and link its canonical route
+  mapped_cases: project definition; canonical proof commands; role navigation; claim status; benchmark authority
+  guarded_cases: unmapped concepts require a new validated owner entry; conflicting current claims stop until owning evidence is reconciled
+  authority_assessment: Pass: every listed case has one non-guessed action, current authority is distinguished from historical content by the gen/now rule, and the redirect contract keeps the canonical route authoritative while allowing only bounded local projections.
+  redirect_safety: Safe redirect rules preserve local prerequisites or mode conditions, point readers to the canonical route at the point of need, strip duplicated rationale/history/benchmarks/support promises unless explicitly allowed, and block inference-based routing that would create a second authority.
+ambiguities: []
