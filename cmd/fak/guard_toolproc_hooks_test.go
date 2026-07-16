@@ -23,18 +23,36 @@ func readGuardHookSettings(t *testing.T, path string) guardPreCompactClaudeSetti
 func assertToolprocEvent(t *testing.T, s guardPreCompactClaudeSettings, event, kind, journal string) {
 	t.Helper()
 	matchers, ok := s.Hooks[event]
-	if !ok || len(matchers) != 1 || len(matchers[0].Hooks) != 1 {
-		t.Fatalf("%s: want exactly one matcher with one hook, got %+v", event, matchers)
+	if !ok {
+		t.Fatalf("%s: hook event missing", event)
 	}
-	h := matchers[0].Hooks[0]
 	want := []string{"toolproc", "hook", kind, "--journal", journal}
-	if h.Type != "command" || len(h.Args) != len(want) {
-		t.Fatalf("%s hook: got %+v, want args %v", event, h, want)
+	var found *guardPreCompactClaudeCommand
+	for i := range matchers {
+		for j := range matchers[i].Hooks {
+			h := &matchers[i].Hooks[j]
+			if len(h.Args) >= 3 && h.Args[0] == "toolproc" && h.Args[1] == "hook" && h.Args[2] == kind {
+				if found != nil {
+					t.Fatalf("%s: duplicate toolproc %s hooks: %+v", event, kind, matchers)
+				}
+				found = h
+			}
+		}
+	}
+	if found == nil || found.Type != "command" || len(found.Args) != len(want) {
+		t.Fatalf("%s hook: got %+v, want args %v", event, found, want)
 	}
 	for i, a := range want {
-		if h.Args[i] != a {
-			t.Fatalf("%s hook arg[%d]: got %q, want %q", event, i, h.Args[i], a)
+		if found.Args[i] != a {
+			t.Fatalf("%s hook arg[%d]: got %q, want %q", event, i, found.Args[i], a)
 		}
+	}
+	if event == "PreToolUse" {
+		if len(matchers) != 2 || matchers[0].Matcher != "Bash" || len(matchers[0].Hooks) != 1 || len(matchers[0].Hooks[0].Args) == 0 || matchers[0].Hooks[0].Args[0] != "guard-commit-gate" {
+			t.Fatalf("%s: commit gate not preserved before toolproc hook: %+v", event, matchers)
+		}
+	} else if len(matchers) != 1 {
+		t.Fatalf("%s: want exactly one toolproc matcher, got %+v", event, matchers)
 	}
 }
 
