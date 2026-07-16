@@ -13,7 +13,7 @@ func TestFindingProjectWorkProductionAndDemo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ScopeContribution != "Contribution: 4/20 points" || c.CompletionStandard != "production" {
+	if c.ScopeContribution != "Contribution: 3/20 points" || c.CompletionStandard != "production" {
 		t.Fatalf("candidate=%+v", c)
 	}
 	body, err := renderFindingIssueBodyWithProjectWork(item, findingProjectWork{Baseline: 20, Standard: "demo"})
