@@ -569,10 +569,73 @@ func (k *Kernel) routeFor(c *abi.ToolCall) string {
 // O(all observers) — adding an observer that only watches EvDeny adds nothing to
 // the EvSubmit/EvDispatch/EvComplete path every syscall walks. A nil/empty
 // registry is a no-op.
+//
+// The fan-out is FAIL-OPEN (#4266): every observer runs under its OWN recover, so a
+// tap that panics can neither kill the syscall it was only watching nor starve the
+// observers behind it in the walk. Observers are INSTRUMENTATION — and
+// instrumentation is optional in a way the syscall is not; a faulty tap degrades to
+// "no telemetry from that tap". The isolation is not silent: each recovered panic is
+// counted and its offender recorded (see [ObserverPanics] / [LastObserverPanic]),
+// because trading a crash for a mystery is not a fix.
 func emit(ev abi.Event) {
 	for _, e := range abi.EmittersFor(ev.Kind) {
-		e.Emit(ev)
+		emitOne(e, ev)
 	}
+}
+
+// emitOne delivers one event to one observer, containing any panic to that observer.
+// The recover is free when nothing panics — an open-coded defer, no allocation, pinned
+// by TestEmitFanoutHappyPathZeroAlloc — so the fail-open guarantee costs the syscall
+// path nothing. Recovering HERE (below the kernel's own frames) is also what keeps the
+// call-path invariants intact: the kernel's callers never unwind, so a lock they hold
+// across an emit is released by their own normal return, not skipped by a panic.
+func emitOne(e abi.Emitter, ev abi.Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			recordObserverPanic(e, ev.Kind, r)
+		}
+	}()
+	e.Emit(ev)
+}
+
+// ObserverPanic is one isolated observer failure: the offending observer's concrete
+// type, the event kind it was observing, and its recovered panic value. It is the
+// witness that a fail-open fan-out is not a fail-SILENT one — the record an operator
+// reads to name the broken tap.
+type ObserverPanic struct {
+	Observer string        // the observer's concrete Go type, e.g. "*kpi.Tap"
+	Kind     abi.EventKind // the event kind it panicked observing
+	Value    string        // the recovered panic value, rendered
+}
+
+var (
+	observerPanicCount atomic.Int64
+	observerPanicLast  atomic.Pointer[ObserverPanic]
+)
+
+// recordObserverPanic tallies an isolated observer panic and records its offender. It
+// runs ONLY on the panic path, so the strings it renders never cost the happy path.
+func recordObserverPanic(e abi.Emitter, kind abi.EventKind, r any) {
+	observerPanicCount.Add(1)
+	observerPanicLast.Store(&ObserverPanic{
+		Observer: fmt.Sprintf("%T", e),
+		Kind:     kind,
+		Value:    fmt.Sprint(r),
+	})
+}
+
+// ObserverPanics returns how many observer panics the fan-out has isolated since
+// process start — the metric that makes a broken tap a visible number rather than
+// either a crashed syscall or a silence.
+func ObserverPanics() int64 { return observerPanicCount.Load() }
+
+// LastObserverPanic returns the most recently isolated observer panic and true, or a
+// zero value and false when no observer has panicked.
+func LastObserverPanic() (ObserverPanic, bool) {
+	if p := observerPanicLast.Load(); p != nil {
+		return *p, true
+	}
+	return ObserverPanic{}, false
 }
 
 // Syscall is Submit then Reap (the synchronous convenience every caller uses).
