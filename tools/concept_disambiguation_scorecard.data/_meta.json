@@ -368,10 +368,16 @@
           "category": "incidental",
           "reason": "Mechanical platform-limit validation inside the existing spawn capability; it introduces no capability or policy surface.",
           "token": "guardWindowsArgvPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal/toolproc cache-reuse decision enum (KEYED/FRESHNESS_BOUNDED/NEVER); not the security capability-policy floor",
+          "token": "ReusePolicy"
         }
       ],
       "id": "policy-capability",
       "ignore": [
+        "ReusePolicy",
         "adjudicate",
         "adjudicated",
         "adjudicates",
@@ -687,33 +693,45 @@
           "category": "incidental",
           "reason": "Test filename in the generated boundary-lint baseline, not a loop taxonomy concept.",
           "token": "doomloop_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal/toolproc shell-poll-storm classifier enum; distinct from the fleet super-loop/RSI agent-loop concept",
+          "token": "POLLING_LOOP"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal/toolproc RepeatClass enum value for a shell poll storm; not the fleet agent-loop concept",
+          "token": "ClassPollingLoop"
         }
       ],
       "id": "loop",
       "ignore": [
-        "loops",
-        "looping",
-        "looped",
-        "loopid",
-        "loopstate",
-        "loopsnapshot",
-        "loopsnapshotforid",
-        "recordloop",
-        "runloop",
-        "loopconsumes",
-        "faklooprunid",
-        "q8prefillneedstokenloop",
+        "ClassPollingLoop",
+        "POLLING_LOOP",
         "appendlooprunevent",
         "buildtuiloopreport",
-        "defaultloopregistry",
-        "loopdoneunwitnessed",
-        "noloopledger",
-        "loopindexdebt",
-        "tuiloopreport",
-        "fakbgloopup",
         "defaultloopledger",
+        "defaultloopregistry",
+        "doomloop_test",
+        "fakbgloopup",
         "fakloopledger",
-        "doomloop_test"
+        "faklooprunid",
+        "loopconsumes",
+        "loopdoneunwitnessed",
+        "looped",
+        "loopid",
+        "loopindexdebt",
+        "looping",
+        "loops",
+        "loopsnapshot",
+        "loopsnapshotforid",
+        "loopstate",
+        "noloopledger",
+        "q8prefillneedstokenloop",
+        "recordloop",
+        "runloop",
+        "tuiloopreport"
       ],
       "min_files": 3,
       "name": "Loop family",
