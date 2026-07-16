@@ -211,16 +211,25 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 			}
 		}
 	}
-	// gate+up share the same activation xn, so dispatch them as ONE group: a Q4_K session kernel
-	// quantizes xn once and runs both output sets under a single goroutine barrier (the same
-	// fused-dispatch the dense FFN already uses via mulGroup), and every other kernel falls back
-	// to the identical two separate muls. Bit-for-bit equal to the prior gate-then-up calls.
-	gu := mulGroup(mat, []string{gn, un}, xn, []int{I, I}, H)
-	g, u := gu[0], gu[1]
-	m.addBiasIfPresent(g, expertName(layer, expert, "gate_proj.bias"))
-	m.addBiasIfPresent(u, expertName(layer, expert, "up_proj.bias"))
-	for i := 0; i < I; i++ {
-		g[i] = act(g[i], cfg) * u[i]
+	// CUDA and other HAL device backends already have a native resident Q4_K MatMul and SwiGLU,
+	// but the legacy sessionQ4KKernel below otherwise dispatches these expert projections through
+	// q4kMatRowsDispatch, whose non-Metal implementation is the host scalar path. Keep gate/up and
+	// their I-wide activation on the backend when possible; read back only the fused intermediate
+	// for the still-host Q5_K/Q6_K down projection. This is intentionally an incremental seam: once
+	// those k-quant device kernels land, the same helper can retain down and the H-wide result too.
+	g, residentInput := q4kExpertInputHAL(func() *Session { sk, _ := mat.(sessionQ4KKernel); return sk.s }(), gn, un, xn, I, H)
+	if !residentInput {
+		// gate+up share the same activation xn, so dispatch them as ONE group: a Q4_K session kernel
+		// quantizes xn once and runs both output sets under a single goroutine barrier (the same
+		// fused-dispatch the dense FFN already uses via mulGroup), and every other kernel falls back
+		// to the identical two separate muls. Bit-for-bit equal to the prior gate-then-up calls.
+		gu := mulGroup(mat, []string{gn, un}, xn, []int{I, I}, H)
+		g, u := gu[0], gu[1]
+		m.addBiasIfPresent(g, expertName(layer, expert, "gate_proj.bias"))
+		m.addBiasIfPresent(u, expertName(layer, expert, "up_proj.bias"))
+		for i := 0; i < I; i++ {
+			g[i] = act(g[i], cfg) * u[i]
+		}
 	}
 	out := mat.mul(dn, mat.prep(g), H, I)
 	m.addBiasIfPresent(out, expertName(layer, expert, "down_proj.bias"))
