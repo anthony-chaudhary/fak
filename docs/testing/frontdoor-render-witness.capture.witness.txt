@@ -1,0 +1,25 @@
+schema: fak-first-screen-witness/1
+route: docs/testing/frontdoor-render-witness.md
+source_binding: pre-publication candidate based on 2353f44da96949acd2da5aeac00f700ea19a12dd; exact page bytes bound by content_sha256; issue #4938 records the publication commit
+content_sha256: 552e801e2a5e6219e5c9f8a7d748542f7cd418dca4e6524ced505ea00c43f25b
+mode: structured-text
+renderer: source-order
+viewport: source-blocks
+presentation: source text; theme, font, zoom, locale, authentication, and device-pixel ratio do not affect source order
+entry_state: direct route, no hidden context
+capture_command: copy exact source blocks from title through the complete capture-mode table and default rule; normalize line endings to LF
+capture_rule: title through the complete capture-mode choice table and default rule
+fold_after: "Default: use structured text for prose-only front-door changes. Upgrade to an image whenever visual placement or wrapping affects the claim."
+artifact: docs/testing/frontdoor-render-witness.capture.txt
+artifact_sha256: 099e7e7f37f5e6d1689a2acb32e0ba1f9ada3475ea230a1783fc38d1400d2d40
+artifact_sha256_sidecar: docs/testing/frontdoor-render-witness.capture.sha256
+captured_at_utc: 2026-07-16T10:06:58Z
+captured_by: independent route-witness workflow
+read_back:
+  audience: page workers changing a landing page or public front door
+  page_job: show exactly what an unprimed reader receives before scrolling in a reproducible, comparable artifact
+  applicable_choice: structured text is the prose-only default; image is required when visual placement or wrapping affects the claim; terminal bytes plus screenshot cover live terminal surfaces
+  lifecycle_generation_support: "Lifecycle: current testing process. Generation: gen/now. Authority: documentation capture evidence; clarity verdict comes from the front-door clarity scorecard; runtime/UI defects follow AGENTS.md."
+  proof_cue: front-door clarity scorecard and AGENTS.md captured-render rule
+  next_action: choose the matching capture mode, freeze its profile, and save the first screen plus metadata before scoring or claiming clarity
+ambiguities: []

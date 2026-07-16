@@ -1,0 +1,18 @@
+# Capture a comparable first-screen witness
+
+**Primary audience:** page workers changing a landing page or public front door.
+**Lifecycle:** current testing process. **Generation:** `gen/now`.
+**Authority:** this page defines documentation capture evidence; the [front-door clarity scorecard](../quality/frontdoor-clarity-scorecard.md) defines the clarity verdict, and runtime/UI defects follow the repository's captured-render rule in [`AGENTS.md`](../../AGENTS.md#proof-by-default-every-issue-fix-ships-its-evidence).
+**Next action:** choose the capture mode that matches the changed surface, freeze its profile, and save the first screen plus metadata before scoring or claiming clarity.
+
+A comparable witness shows exactly what an unprimed reader receives before scrolling. It binds the page revision, rendering conditions, first-screen boundary, and artifact hash so another maintainer can reproduce the same observation.
+
+## Choose the capture mode
+
+| Changed surface | Required capture | Use when | Completion signal |
+|---|---|---|---|
+| Rendered web or documentation layout | **Image capture** (`.png`) | Typography, wrapping, hierarchy, clipping, spacing, responsive layout, or visual order matters. | The image has the full viewport, metadata, and hash; no crop hides first-screen content. |
+| Markdown information architecture | **Structured text capture** (`.txt` or fenced witness) | Audience, job, choices, proof links, lifecycle, or next action changed and pixel layout is not the claim. | Ordered visible blocks and fold boundary can be traced to the source revision. |
+| Terminal/TUI landing surface | **Byte/render capture** plus screenshot when live display matters | ANSI behavior, pane ownership, terminal wrapping, corruption, or interaction is the claim. | Captured bytes assert the property; screenshot records the live viewport when applicable. |
+
+**Default:** use structured text for prose-only front-door changes. Upgrade to an image whenever visual placement or wrapping affects the claim. A structured capture cannot prove a visual defect is fixed; an image alone cannot prove hidden semantics or a command works.
