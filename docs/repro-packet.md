@@ -3,26 +3,25 @@ title: "fak Repro Packet — Reproduce the Allow/Deny Boundary Offline"
 description: "A no-credential, offline reproduction of fak's allow/deny/quarantine boundary: validate a policy manifest, deny a dangerous action, and run the injection A/B."
 ---
 
-# Repro Packet
+# Reproduce the offline allow/deny boundary
 
-Date captured: 2026-06-18
+**Primary audience:** an evaluator deciding whether fak's tool-call boundary is worth deeper integration testing.
 
-This is the first shareable packet for `fak`: a no-credential, no-live-model
-reproduction of the two claims that are safest to put in front of a skeptical
-engineer first.
+## Result and scope
 
-1. A tool-call boundary can deny a dangerous action from a reviewable policy
-   manifest.
-2. The offline injection A/B keeps a poisoned instruction out of the protected
-   arm's context and prevents the destructive operation while still completing
-   the task.
+The canonical offline proof demonstrates two current behaviors in one deterministic fixture:
 
-It is deliberately narrow. It does not prove detector recall, production
-readiness, external endorsement, or the fleet-scale performance claims.
+| Check | Expected result | Scoped meaning |
+|---|---|---|
+| Dangerous `refund_payment` proposal | `DENY (POLICY_BLOCK)` | A reviewable manifest blocks the named action before tool execution. |
+| Benign `search_kb` proposal | `ALLOW` | The same policy preserves its useful read/search path. |
+| Injection A/B | Task booked; poisoned result blocked; destructive operation prevented | The protected arm keeps the fixture's poisoned instruction out of context and still completes the task. |
 
-## Environment
+This is a **current-generation, maintained deterministic witness**. It covers the offline mock-planner mode and the checked-in customer-support fixture on any supported Go build host. It does not establish live-model behavior, detector recall, production readiness, external endorsement, or fleet-scale performance. Those claims require their own authorities and evidence.
 
-Run from a clean checkout with Go available:
+**Default:** use the offline source-checkout route below. It needs no credential, live model, network service, or accelerator.
+
+**Next action:** from a clean checkout with Go 1.26+, run this complete proof block and compare the four results with the table above:
 
 ```bash
 go run ./cmd/fak policy --check examples/customer-support-readonly-policy.json
@@ -31,8 +30,7 @@ go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.js
 go run ./cmd/fak agent --offline
 ```
 
-The 2026-06-18 run wrote the raw A/B JSON to `agent-report.json`
-(produced by the `fak agent --offline` run above — not committed).
+The final command writes the raw A/B details to local `agent-report.json`; the generated file is not committed. The sections below show the expected evidence and explain what each result proves.
 
 ## Witness 1: Policy Manifest Validates
 
@@ -144,24 +142,9 @@ poisoned instruction and executes the destructive operation; the `fak` arm keeps
 the instruction out of context, denies the destructive operation, and still books
 the flight.
 
-## What To Send
+## Fixture requests
 
-For a first contact, send only this packet plus a relevant target packet and a
-matching short draft from your own outreach materials. Do not send the whole
-research cluster unless asked.
-
-Good first ask:
-
-```text
-Would this allow/deny/quarantine packet be useful as a fixture for your agent
-host, MCP server, security review, or evaluation workflow? If not, what exact
-trace shape would make it useful?
-```
-
-If they have a concrete failure mode, ask for a scrubbed or synthetic version via
-the [agent-tool boundary fixture issue form](https://github.com/anthony-chaudhary/fak/blob/main/.github/ISSUE_TEMPLATE/agent-tool-boundary-fixture.yml).
-If they want a framework or host integration, route them to the
-[adapter fixture issue form](https://github.com/anthony-chaudhary/fak/blob/main/.github/ISSUE_TEMPLATE/framework-adapter-fixture.yml).
+The packet is an evaluation fixture rather than a production benchmark. To propose a scrubbed or synthetic boundary failure, use the [agent-tool boundary fixture issue form](https://github.com/anthony-chaudhary/fak/blob/main/.github/ISSUE_TEMPLATE/agent-tool-boundary-fixture.yml). For a framework or host adapter, use the [adapter fixture issue form](https://github.com/anthony-chaudhary/fak/blob/main/.github/ISSUE_TEMPLATE/framework-adapter-fixture.yml).
 
 ## Non-Claims
 
