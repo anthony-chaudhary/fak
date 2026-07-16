@@ -1,0 +1,22 @@
+schema: fak-performance-route-witness/1
+route: docs/performance.md
+inbound_route: README.md
+source_binding: pre-publication candidate based on 979004ebf6da1f2c6532f9e42234675d924e0d01; exact bytes bound by page_sha256 and readme_sha256; issue #4916 records publication commit
+page_sha256: 33a2316edc0307820f9cabfd7a37d6530b9da924b932f50a965dea3bca79abc0
+readme_sha256: 0491bfa28ac18be42eb9ed7714aed819e5203e36d56cf00f2edb4f4c95d510e7
+reader: independent gpt-5.4-mini ephemeral read-only session
+reader_goal: map each performance outcome to the applicable run path and a reproducible witness without turning a scoped result into a universal promise
+mechanical_read_back:
+  local_links_resolved: 9/9
+  benchmark_anchors_resolved: 3/3
+  inbound_links: README.md -> docs/performance.md
+reader_read_back:
+  verdict: pass
+  audience: technical evaluators deciding which fak performance mechanism applies to their run path and which current witness to inspect
+  page_job: Route each outcome to a reproducible witness without collapsing provider reuse, context shedding, local KV reuse, or kernel-only cost into one claim
+  default_choice: Choose the outcome and run path in the table, open its proof route, and reproduce that witness before quoting a result
+  cases: provider input reuse; context-budget longevity; owned-inference model-state reuse; kernel execution-path cost
+  mode_assessment: Provider, proxied, and owned-inference paths are distinguished; no one cross-mode performance promise is made.
+  authority_assessment: Mechanisms and outcomes are separated; measured values remain under Benchmark Authority; this page routes rather than mints numbers.
+  next_action: Reproduce the selected witness before quoting any result.
+ambiguities: []
