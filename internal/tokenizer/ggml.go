@@ -82,12 +82,11 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 		return nil, errors.New("tokenizer: GGML checkpoint has no BPE merges (non-BPE tokenizer?)")
 	}
 
-	split := preTokenizeByteLevel
-	if isQwenPreTokenizer(pre) {
-		split = preTokenizeQwen
-	} else if isGLM4PreTokenizer(pre) {
-		split = preTokenizeGLM4
-	}
+	// Dispatch through the single shared resolver both loaders use, keyed on a closed
+	// kind (#4265): the GGUF hint maps to the kind, the resolver returns the splitter and
+	// the metaspace flag together. Adding a family is one kind + one resolver case, picked
+	// up here and by the JSON path alike, so the two loaders can never silently diverge.
+	split, metaspace := resolvePreTokenizer(ggmlPreTokKind(pre))
 
 	return &Tokenizer{
 		idToToken:        idToToken,
@@ -96,7 +95,7 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 		specialByContent: specialByContent,
 		mergeRank:        mergeRank,
 		split:            split,
-		metaspace:        isMetaspaceTokenizer(pre),
+		metaspace:        metaspace,
 	}, nil
 }
 

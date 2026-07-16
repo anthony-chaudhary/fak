@@ -94,7 +94,15 @@ type tokenizerJSON struct {
 // preTokConfig captures only the pre_tokenizer shape we dispatch on.
 type preTokConfig struct {
 	Type          string         `json:"type"`
+	Pattern       preTokPattern  `json:"pattern"`
 	Pretokenizers []preTokConfig `json:"pretokenizers"`
+}
+
+// preTokPattern is a Split stage's pattern, which HF serializes as {"Regex": "..."}.
+// Only the Regex text is read — to tell a GLM-4 digit-grouping Split (\p{N}{1,3}) apart
+// from the Qwen one (\p{N}), since both families are otherwise marked only by hasSplit.
+type preTokPattern struct {
+	Regex string `json:"Regex"`
 }
 
 // hasSplit reports whether the pre_tokenizer (possibly a Sequence) contains an
@@ -216,12 +224,12 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 		mergeRank[pair] = rank
 	}
 
-	// Dispatch the pre-tokenizer: explicit Split(Regex) => Qwen scanner; otherwise
-	// the GPT-2 ByteLevel/Digits default (SmolLM2 and the bare-BPE fixtures).
-	split := preTokenizeByteLevel
-	if doc.PreTokenizer.hasSplit() {
-		split = preTokenizeQwen
-	}
+	// Dispatch the pre-tokenizer through the single shared resolver both loaders use,
+	// keyed on a closed kind (#4265). The JSON path maps its pre_tokenizer config to that
+	// kind; before unification it had no GLM-4 branch and silently routed a GLM-4
+	// tokenizer.json to the Qwen splitter (wrong digit grouping) — the FromGGML path
+	// avoided the drift, so the same model tokenized differently by load path.
+	split, metaspace := resolvePreTokenizer(jsonPreTokKind(doc.PreTokenizer))
 
 	return &Tokenizer{
 		idToToken:        idToToken,
@@ -230,6 +238,7 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 		specialByContent: specialByContent,
 		mergeRank:        mergeRank,
 		split:            split,
+		metaspace:        metaspace,
 	}, nil
 }
 
