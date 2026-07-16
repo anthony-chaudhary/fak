@@ -103,11 +103,11 @@ const (
 // Session verdicts — the headline the human report leads with, so a large append-only
 // file is never read as a failure.
 const (
-	VerdictFiredAndHeld      = "FIRED_AND_HELD"
-	VerdictFiredWithAnomaly  = "FIRED_WITH_ANOMALIES"
-	VerdictNoFireBounded     = "NO_FIRE_BOUNDED"
-	VerdictNoFireAtCeiling   = "NO_FIRE_ABOVE_CEILING"
-	VerdictTelemetryMissing  = "NO_TELEMETRY"
+	VerdictFiredAndHeld     = "FIRED_AND_HELD"
+	VerdictFiredWithAnomaly = "FIRED_WITH_ANOMALIES"
+	VerdictNoFireBounded    = "NO_FIRE_BOUNDED"
+	VerdictNoFireAtCeiling  = "NO_FIRE_ABOVE_CEILING"
+	VerdictTelemetryMissing = "NO_TELEMETRY"
 )
 
 // CompactFire is one compaction event joined to its resident-context witnesses.
@@ -147,9 +147,9 @@ type CompactSessionReport struct {
 	Cwd       string `json:"cwd"`
 
 	// The three quantities the report exists to keep apart.
-	Bytes                 int64 `json:"rollout_bytes"`            // append-only: grows forever
-	CumulativeInputTokens int   `json:"cumulative_input_tokens"`  // monotonic: grows forever
-	PeakResidentTokens    int   `json:"peak_resident_tokens"`     // the real occupancy signal
+	Bytes                 int64 `json:"rollout_bytes"`           // append-only: grows forever
+	CumulativeInputTokens int   `json:"cumulative_input_tokens"` // monotonic: grows forever
+	PeakResidentTokens    int   `json:"peak_resident_tokens"`    // the real occupancy signal
 	FinalResidentTokens   int   `json:"final_resident_tokens"`
 
 	ContextWindow int `json:"context_window"`
@@ -168,16 +168,16 @@ type CompactSessionReport struct {
 
 // CompactAggregate is the fleet-wide roll-up across many rollouts.
 type CompactAggregate struct {
-	Sessions       int   `json:"sessions"`
-	Bytes          int64 `json:"rollout_bytes"`
-	Fires          int   `json:"fires"`
-	MeasuredFires  int   `json:"measured_fires"` // fires with both witnesses
-	CompactedSessions int `json:"compacted_sessions"`
+	Sessions          int   `json:"sessions"`
+	Bytes             int64 `json:"rollout_bytes"`
+	Fires             int   `json:"fires"`
+	MeasuredFires     int   `json:"measured_fires"` // fires with both witnesses
+	CompactedSessions int   `json:"compacted_sessions"`
 
-	MedianPreTokens      int     `json:"median_pre_tokens"`
-	MedianPostTokens     int     `json:"median_post_tokens"`
-	MedianShedTokens     int     `json:"median_shed_tokens"`
-	MedianResidualRatio  float64 `json:"median_residual_ratio"`
+	MedianPreTokens     int     `json:"median_pre_tokens"`
+	MedianPostTokens    int     `json:"median_post_tokens"`
+	MedianShedTokens    int     `json:"median_shed_tokens"`
+	MedianResidualRatio float64 `json:"median_residual_ratio"`
 
 	AnomalyCounts map[string]int `json:"anomaly_counts"`
 	VerdictCounts map[string]int `json:"verdict_counts"`
