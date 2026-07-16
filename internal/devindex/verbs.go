@@ -148,6 +148,7 @@ var verbManifest = []Verb{
 	{Name: "dup", Synopsis: "authoring-time dedup query: which tracked sites hold a block token-similar to a candidate (--file/--stdin)", Lane: "cmd"},
 	{Name: "edit-tx", Synopsis: "transactional multi-file edit: apply a JSON batch of writes/deletes, run checks, roll back on failure", Lane: "cmd"},
 	{Name: "egress", Synopsis: "prove the network-egress floor on one destination (the cloud-metadata / SSRF class)", Lane: "cmd"},
+	{Name: "egresslist", Synopsis: "refresh bundled egress filter lists from pinned upstream sources", Lane: "cmd"},
 	{Name: "eve", Synopsis: "the impure shell over internal/evebridge: the Eve integration program's operator verbs (security preflight)", Lane: "cmd"},
 	{Name: "experiments", Synopsis: "the experiments registry/runner over experiments/", Lane: "cmd"},
 	{Name: "feature", Synopsis: "query the unified self-feature catalog (dev facts, live tools, memory drivers, capability cards)", Lane: "cmd"},

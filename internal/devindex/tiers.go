@@ -160,6 +160,7 @@ var verbTiers = map[string]VerbTier{
 	"dream":                         TierDev,
 	"dup":                           TierDev,
 	"edit-tx":                       TierDev,
+	"egresslist":                    TierDev,
 	"eve":                           TierDev,
 	"experiments":                   TierDev,
 	"feature":                       TierDev,
