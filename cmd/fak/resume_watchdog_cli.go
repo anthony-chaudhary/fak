@@ -914,7 +914,9 @@ func rwBoundWatchdogArtifacts(logDir, ledgerPath string, now time.Time) {
 	rwRotateFile(filepath.Join(logDir, "resume_watchdog.log"), maxBytes)
 	rwRotateFile(filepath.Join(logDir, "notifications.log"), maxBytes)
 	_ = rwPruneResumeLogs(logDir, rwEnvFloat("FAK_RESUME_LOG_RETAIN_DAYS", 14), now)
-	_ = rwCompactResumeLedger(ledgerPath, rwEnvFloat("FAK_RESUME_LEDGER_RETAIN_DAYS", 30), rwEnvInt64("FAK_RESUME_LEDGER_COMPACT_BYTES", 512*1024), now)
+	compactBytes := rwEnvInt64("FAK_RESUME_LEDGER_COMPACT_BYTES", 512*1024)
+	_ = rwCompactResumeLedger(ledgerPath, rwEnvFloat("FAK_RESUME_LEDGER_RETAIN_DAYS", 30), compactBytes, now)
+	rwRotateFile(ledgerPath, compactBytes)
 }
 
 func rwCompactResumeLedger(path string, retainDays float64, compactBytes int64, now time.Time) int {
