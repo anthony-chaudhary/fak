@@ -357,10 +357,32 @@ func displayConfig(v string) string {
 	return v
 }
 
-// probeLocks returns the sorted, de-duplicated set of live lock paths (common-dir
-// relative) under gitDir: the fixed maintLockNames, plus any *.lock beneath refs/ and
-// worktrees/ (ref-transaction locks and every linked worktree's own locks, incl. its
-// fak-commit.lock). An empty result is the clean, safe-to-fold state.
+// leaseLockPrefix is fak's own lease namespace under refs/. When something CAS-updates
+// a refs/fak/locks/session-* (or intent-*) ref, git writes a transient <ref>.lock for
+// the millisecond the update-ref holds — but that ref is a session LIVENESS heartbeat
+// LEASE (TTL ~2400s), NOT an in-flight object/ref transaction the object-DB fold could
+// race. Object folding touches objects/, never refs/, and on Windows an open pack fails
+// safe to unlink (see the file header). On a box that always has ≥1 live session these
+// lease locks are ALWAYS present, so counting them as transaction locks pinned the grace
+// tier at MaintReasonLocked forever — the loose backlog was unbounded by construction
+// (GAP 2, #4602). probeLocks EXCLUDES this namespace while still counting every genuine
+// ref-transaction lock (refs/heads/**.lock, refs/tags/**.lock, packed-refs.lock, …).
+const leaseLockPrefix = "refs/fak/locks/"
+
+// isLeaseLock reports whether a common-dir-relative *.lock path lives in fak's lease
+// namespace (refs/fak/locks/…) — the transient heartbeat locks probeLocks excludes from
+// the transaction-lock set. The path is slash-normalized so the prefix test holds on
+// Windows, where filepath.Rel returns backslash separators.
+func isLeaseLock(rel string) bool {
+	return strings.HasPrefix(filepath.ToSlash(rel), leaseLockPrefix)
+}
+
+// probeLocks returns the sorted, de-duplicated set of live TRANSACTION lock paths
+// (common-dir relative) under gitDir: the fixed maintLockNames, plus any *.lock beneath
+// refs/ and worktrees/ (ref-transaction locks and every linked worktree's own locks,
+// incl. its fak-commit.lock) — but EXCLUDING fak's own lease-heartbeat namespace
+// (refs/fak/locks/…, see leaseLockPrefix), which is object-DB-orthogonal and always
+// present on a live box. An empty result is the clean, safe-to-fold state.
 func probeLocks(gitDir string) []string {
 	if strings.TrimSpace(gitDir) == "" {
 		return nil
@@ -381,6 +403,9 @@ func probeLocks(gitDir string) []string {
 	}
 	for _, sub := range []string{"refs", "worktrees"} {
 		for _, rel := range walkLockFiles(gitDir, sub) {
+			if isLeaseLock(rel) {
+				continue // fak session/intent lease heartbeat — not a transaction (GAP 2, #4602)
+			}
 			add(rel)
 		}
 	}

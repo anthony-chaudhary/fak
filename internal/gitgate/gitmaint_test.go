@@ -321,6 +321,102 @@ func TestProbeLocksCoversLockSet(t *testing.T) {
 	}
 }
 
+// TestProbeLocksExcludesLeaseNamespace is the #4602 GAP-2 unit witness: fak's own lease
+// heartbeat locks under refs/fak/locks/ (session-*, intent-*, resolve-*) are object-DB
+// orthogonal and thus NOT counted as transaction locks — but a genuine ref-transaction
+// lock (refs/heads/main.lock) and a real refs/tags lock ARE still counted, even when held
+// alongside the leases. The exclusion is narrowed to fak's namespace; it does not blind
+// the preflight to real ref transactions.
+func TestProbeLocksExcludesLeaseNamespace(t *testing.T) {
+	leases := []string{
+		"refs/fak/locks/session-win-abc123.lock",
+		"refs/fak/locks/session-guard.lock",
+		"refs/fak/locks/intent-issue-4602.lock",
+		"refs/fak/locks/resolve-cmd.lock",
+	}
+	gitDir := scratchGit(t)
+	for _, rel := range leases {
+		writeLock(t, gitDir, rel)
+	}
+	if locks := probeLocks(gitDir); len(locks) != 0 {
+		t.Fatalf("lease-namespace locks must not count as transactions; got %v", locks)
+	}
+
+	// Real ref-transaction locks held alongside the leases are still reported; the leases
+	// stay excluded.
+	writeLock(t, gitDir, "refs/heads/main.lock")
+	writeLock(t, gitDir, "refs/tags/v1.lock")
+	locks := probeLocks(gitDir)
+	for _, want := range []string{"refs/heads/main.lock", "refs/tags/v1.lock"} {
+		if !containsStr(locks, want) {
+			t.Fatalf("a real ref-transaction lock %q must still be reported; got %v", want, locks)
+		}
+	}
+	for _, lease := range leases {
+		if containsStr(locks, lease) {
+			t.Fatalf("lease lock %q must stay excluded even with a real lock present; got %v", lease, locks)
+		}
+	}
+}
+
+// TestRunMaintSessionLeaseLocksDoNotDeferGrace is the #4602 GAP-2 end-to-end proof, and
+// the failure-class witness that FAILS before this fix: on an always-live box the only
+// locks present are fak session/intent lease heartbeats under refs/fak/locks/. The old
+// probeLocks counted them, so len(res.Locks)>0 pinned the grace tier at MaintReasonLocked
+// forever and the loose backlog was unbounded. Now the grace tier RUNS — the leases are
+// excluded, nothing is refused, and the loose objects fold into a pack (moved, not pruned).
+func TestRunMaintSessionLeaseLocksDoNotDeferGrace(t *testing.T) {
+	gitDir := scratchGit(t)
+	for _, rel := range []string{
+		"refs/fak/locks/session-win-1.lock",
+		"refs/fak/locks/session-win-2.lock",
+		"refs/fak/locks/session-guard.lock",
+		"refs/fak/locks/intent-issue-4602.lock",
+	} {
+		writeLock(t, gitDir, rel)
+	}
+	f := &fakeMaint{posture: safePosture(), loose: 100, inPack: 500, packs: 11}
+	res := RunMaint(context.Background(), f.run, MaintOptions{RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true})
+
+	if res.GraceRefused != "" {
+		t.Fatalf("session-lease heartbeats must not defer the grace tier: GraceRefused=%q locks=%v", res.GraceRefused, res.Locks)
+	}
+	if len(res.Locks) != 0 {
+		t.Fatalf("session-lease heartbeats must not be reported as transaction locks; got %v", res.Locks)
+	}
+	if !containsStr(mutatingCalls(f.calls), "maintenance run --task=loose-objects") {
+		t.Fatalf("the grace fold must run when only session leases are held; got %v", mutatingCalls(f.calls))
+	}
+	if res.LooseDelta() <= 0 {
+		t.Fatalf("the loose backlog should fold once lease locks no longer block grace: before=%d after=%d", res.Before.Count, res.After.Count)
+	}
+}
+
+// TestRunMaintRealRefLockStillDefersDespiteLeases: a genuine refs/heads/main.lock held
+// alongside the session leases still defers the grace tier with LOCKED, and the real lock
+// (not the leases) is what the preflight reports — the fix narrows the exclusion, it does
+// not disable transaction-lock detection.
+func TestRunMaintRealRefLockStillDefersDespiteLeases(t *testing.T) {
+	gitDir := scratchGit(t)
+	writeLock(t, gitDir, "refs/fak/locks/session-win-1.lock")
+	writeLock(t, gitDir, "refs/heads/main.lock")
+	f := &fakeMaint{posture: safePosture(), loose: 100, inPack: 500, packs: 11}
+	res := RunMaint(context.Background(), f.run, MaintOptions{RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true})
+
+	if res.GraceRefused != MaintReasonLocked {
+		t.Fatalf("a real ref-transaction lock must still defer grace with LOCKED, got %q", res.GraceRefused)
+	}
+	if !containsStr(res.Locks, "refs/heads/main.lock") {
+		t.Fatalf("the real ref lock must be reported; got %v", res.Locks)
+	}
+	if containsStr(res.Locks, "refs/fak/locks/session-win-1.lock") {
+		t.Fatalf("the session lease must stay excluded even when a real lock defers; got %v", res.Locks)
+	}
+	if res.LooseDelta() != 0 {
+		t.Fatalf("nothing should fold while a real ref lock is held: delta=%d", res.LooseDelta())
+	}
+}
+
 func containsStr(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
