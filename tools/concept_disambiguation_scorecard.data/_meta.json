@@ -373,7 +373,20 @@
           "category": "incidental",
           "reason": "internal/toolproc cache-reuse decision enum (KEYED/FRESHNESS_BOUNDED/NEVER); not the security capability-policy floor",
           "token": "ReusePolicy"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Appears only in an explanatory code comment in decode_interleave.go (the mbind-vs-set_mempolicy rationale); not a declared symbol in this repo.",
+          "token": "set_mempolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper trimming a numa_maps policy token to its head word; internal to decode_interleave.go.",
+          "token": "normalizeDecodePolicyLabel"
         }
+      ],
+      "exclude": [
+        "set_mempolicy"
       ],
       "id": "policy-capability",
       "ignore": [
@@ -385,6 +398,7 @@
         "adjudicators",
         "capabilities",
         "guardWindowsArgvPreflight",
+        "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",
         "policies",
         "policyblocks",
@@ -445,34 +459,46 @@
           "category": "incidental",
           "reason": "Backend-private capability probe for issue 4843; not a public concept",
           "token": "SupportsRoutedExpertKQuant"
+        },
+        {
+          "category": "build-tag-only",
+          "reason": "Sentinel error defined only in the non-linux mbind stub (decode_interleave_mbind_other.go, !(linux\u0026\u0026amd64)).",
+          "token": "errInterleaveUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "One reason constant in the closed decode-interleave verdict vocabulary; feature-internal, local to the placement lever.",
+          "token": "DecodeInterleaveUnsupported"
         }
       ],
       "id": "support-maturity",
       "ignore": [
-        "supported",
-        "unsupported",
-        "supports",
-        "supporting",
-        "errmmapunsupported",
-        "errstreamingunsupported",
-        "streamingsupported",
-        "recurrentevictunsupportederror",
-        "numareplicapolicyunsupported",
-        "sourcecoverage",
-        "targetcoverage",
-        "coveragediscipline",
-        "coveragebaseline",
-        "topncoverage",
+        "DecodeInterleaveUnsupported",
+        "SupportsRoutedExpertKQuant",
         "correctnessclass",
         "correctnessdependson",
+        "coveragebaseline",
+        "coveragediscipline",
+        "defaultscoreparitytol",
+        "errInterleaveUnsupported",
+        "errmmapunsupported",
+        "errstreamingunsupported",
+        "immaturity",
+        "numareplicapolicyunsupported",
         "paritybench",
         "parityreport",
+        "recurrentevictunsupportederror",
         "scoreparity",
-        "defaultscoreparitytol",
-        "supportmaturityscore",
+        "sourcecoverage",
+        "streamingsupported",
+        "supported",
+        "supporting",
         "supportmaturitydebt",
-        "immaturity",
-        "SupportsRoutedExpertKQuant"
+        "supportmaturityscore",
+        "supports",
+        "targetcoverage",
+        "topncoverage",
+        "unsupported"
       ],
       "min_files": 3,
       "name": "Support / coverage / correctness / parity / maturity family",
@@ -607,6 +633,16 @@
           "category": "incidental",
           "reason": "Ablation sweep implementation identifier; not a distinct planning-domain concept.",
           "token": "buildMainPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Feature-internal pre-apply verdict struct for the #4974 decode-interleave placement seam; not cross-cutting domain vocabulary.",
+          "token": "DecodeInterleavePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported live-verdict entry point wrapping the pure decode-interleave planner; internal to the #4974 feature, not shared vocabulary.",
+          "token": "PlanDecodeInterleave"
         }
       ],
       "exclude": [
@@ -618,6 +654,8 @@
       "ignore": [
         "BuildSweepPlan",
         "Candidates",
+        "DecodeInterleavePlan",
+        "PlanDecodeInterleave",
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",

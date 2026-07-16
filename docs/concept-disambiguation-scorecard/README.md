@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **98.1/100** (grade A) = 9.8/10 |
-| **Coverage** | **97.1%** (1944/2003 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **59** (clarity 0 + coverage 59) |
-| Crystal-clear concepts | 242 of 1711 positioned |
+| **Score** | **97.2/100** (grade A) = 9.7/10 |
+| **Coverage** | **95.7%** (1949/2037 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **88** (clarity 0 + coverage 88) |
+| Crystal-clear concepts | 253 of 1722 positioned |
 | As of |  (fak ) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,10 +24,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1711 concepts - score 98.1/100 (grade A) - disambiguation-debt 59
+concept-disambiguation chart - 1722 concepts - score 97.2/100 (grade A) - disambiguation-debt 88
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #####....................... 242
+  * crystal       #####....................... 253
   o defined       ############################ 1469
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -35,17 +35,17 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (62 concept(s); 0 crystal)
-  cache            ****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (176 concept(s); 28 crystal)
+  cache            *****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (177 concept(s); 29 crystal)
   context-ctx      *********ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 9 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
-  decision         *******oooooooooooooooooo (25 concept(s); 7 crystal)
+  decision         ********oooooooooooooooooo (26 concept(s); 8 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
-  evict            ***oooooooooooooooooooooooooooooo (33 concept(s); 3 crystal)
+  evict            *****oooooooooooooooooooooooooooooo (35 concept(s); 5 crystal)
   gateway-engine   ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (119 concept(s); 6 crystal)
   guard-gate       ********************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (212 concept(s); 56 crystal)
   layout           ***oooooooo        (11 concept(s); 3 crystal)
   loop             **************oooooooooooooooooooooooooooo (42 concept(s); 14 crystal)
-  plan             ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 15 crystal)
+  plan             *****************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (230 concept(s); 17 crystal)
   policy-capability ***********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (101 concept(s); 11 crystal)
   pool             **ooooooooooooooooooooooooooooo (31 concept(s); 2 crystal)
   render-materialize ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (140 concept(s); 3 crystal)
@@ -54,32 +54,32 @@ clarity mix by family (each cell = one concept):
   support-maturity *****oooooooooooooooo (21 concept(s); 5 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    *********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 33 crystal)
+  witness-proof    **************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (115 concept(s); 38 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ##########################.. 290/311
+  guard-gate       #########################... 291/323
+  cache            ###########################. 223/231
   plan             ###########################. 286/294
-  policy-capability ###########################. 117/122
+  render-materialize ###########################. 162/170
+  policy-capability ##########################.. 118/125
   score-debt       ##########################.. 78/83
+  session-runtime  ###########################. 173/178
   evict            ##########################.. 40/43
-  session-runtime  ############################ 173/176
   support-maturity #########################... 29/32
-  witness-proof    ###########################. 124/127
-  attention        ###########################. 68/70
-  cache            ############################ 222/224
+  witness-proof    ###########################. 125/128
+  attention        ###########################. 69/71
   gateway-engine   ############################ 159/161
-  render-materialize ############################ 162/164
+  loop             ###########################. 57/59
+  context-ctx      ############################ 175/176
   decision         ###########################. 38/39
-  loop             ############################ 57/58
   pool             ###########################. 35/36
-  context-ctx      ############################ 175/175
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   layout           ############################ 12/12
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.1%  (1944/2003 confusable tokens positioned)
+namespace coverage  [###############################.] 95.7%  (1949/2037 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -98,6 +98,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | | Verdict | Kind | Family | Canonical - definition |
 |---|---|---|---|---|
+| * | crystal | symbol | cache | **SilentCacheInvalidation** - The post-fire reconciliation signal (#2791): a compaction that FIRED - which by construction proves the protected prefix was spliced byte-identically, since verifySplicedBody turns any byte-inequality into a prefix_mismatch identity return - yet whose provider reported zero cache_read and nonzero cache_creation, evidencing the provider re-created the very prefix fak preserved (a TTL expiry or capacity eviction fak cannot prevent). |
 | * | crystal | cli-verb | cache | **cachesweep (stale-cache reaping verb)** - internal/cachesweep (the package) and `fak cachesweep` (the verb) reap stale or orphaned cache artifacts the dispatcher and session layers leave behind, bounded by a lane-aware scan so a sweep never touches a live session's working set. |
 | * | crystal | subsystem | cache | **dispatchcache (per-lane dispatch result cache)** - internal/dispatchcache is the per-lane dispatch result cache that memoizes a dispatch tick's issue-to-worker routing decisions so a re-tick does not recompute the full pairwise scan, backed by a bounded queue and a backlog. |
 | * | crystal | config | cache | **CacheTTL5m (default ephemeral cache tier)** - gateway.CacheTTL5m ("5m") is the const pinning the default ephemeral provider cache tier - the 5-minute TTL window a prefix lives at when the managed-cache posture is OFF or auto-unupgraded, mirrored by the ablate package and the warm-resume scale-to-zero path. |
@@ -152,6 +153,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | decision | **ContainmentDecision (toolprocgate)** - The closed verdict-plus-evidence struct returned by DecideContainment in internal/toolprocgate that adjudicates whether a tool-process spawn is admitted, deferred, or refused based on crash-blast-radius containment policy (fleet breaker, surface quarantine, co-location cap), carrying the ContainmentVerdict, the one-bit Admit gate, a reason, and the fault-window evidence so a refusal is auditable. |
 | * | crystal | symbol | decision | **SteerDecision (trajctl)** - One regime-gate steering decision for one objective at one turn boundary (internal/trajctl/steer.go): an Action (nudge/arm/suppress/none) plus the Signal that triggered it and the ObjectiveID it targets, produced by DecideNudge or SteerSweep when the recent score curve is unhealthy (STALL/DRIFT/DETOUR_OVERRUN) and ledgered as one JSONL row via AppendSteerDecisions. |
 | * | crystal | symbol | decision | **WalkDecision (gardenbundle)** - One budgeted item's triage outcome from a garden walk (internal/gardenbundle/walk.go): a Disposition (act/review/defer), the ready Action command to run, a Reason, and a Perform flag, emitted worst-first for each issue the walk inspected so the dispatch garden can split human-needed from fleet-drivable work. |
+| * | crystal | symbol | decision | **RoleDecision** - One role's resolved routing for a single execution: the modelroute Plan chosen, the budget it runs under, spend against it, whether exhausted and on which axis, and any role it escalated to. |
 | * | crystal | symbol | decision | **Decision (witness)** - Git evidence adjudication verdict with CONFIRMED/REFUTED/ABSTAIN labels |
 | * | crystal | symbol | decision | **Decision (kernel)** - Tool-call verdict explanation trace showing why fak gave this verdict |
 | * | crystal | symbol | decision | **Decision (scheduler)** - Loop admission advisory: whether to fire a scheduled loop now |
@@ -163,6 +165,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | evict | **evict (KV cache)** - Physical tensor span removal and RoPE re-rotation in KV cache for memory compaction |
 | * | crystal | symbol | evict | **evict (playbook)** - Logical span pruning from rendered playbook under token budget |
 | * | crystal | symbol | evict | **evict (session pool)** - Model instance eviction from a bounded LRU session pool |
+| * | crystal | symbol | evict | **INSUFFICIENT_NONEVICTING_HBM** - The #4801 typed refusal verdict returned when accelerator memory reachable WITHOUT evicting any peer workload is below the artifact size plus runtime headroom. |
+| * | crystal | doc-term | evict | **non-evicting (placement constraint)** - The #4801 placement constraint that accelerator capacity may only be counted when it is reachable WITHOUT displacing any peer workload, making eviction unavailable as a way to close a shortfall. |
 | * | crystal | subsystem | gateway-engine | **kernel** - The fak core: the one implementation of abi.Kernel that coordinates adjudication, vDSO lookup, engine dispatch, and result admission across the tool-call path. |
 | * | crystal | subsystem | gateway-engine | **gateway** - The kernel-adjudicated wire: the HTTP and MCP-RPC surface that fronts the kernel for non-Go clients, re-validating untrusted wire arguments before they reach it. |
 | * | crystal | subsystem | gateway-engine | **engine** - The inference-engine seam (EngineDriver): the abstract backend interface the kernel dispatches allowed tool calls to (mock, HTTP upstream, fused in-kernel model). |
@@ -242,6 +246,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | loop | **rsiloop (RSI keep-or-revert loop)** - The recursive-self-improvement loop (internal/rsiloop): proposes a change, measures a witness-verified metric gain, and keeps-or-reverts on a non-forgeable keep-bit. |
 | * | crystal | subsystem | loop | **loopmap (loop-family map surface)** - The package (internal/loopmap, fak loopmap) that renders the loop-family map: which mechanism plays which role (timer / selector / executor / witness) and where the names collide. |
 | * | crystal | concept | loop | **loopback (network 127.0.0.1)** - The networking term: the 127.0.0.1 loopback address / same-host bind (isLoopback, loopbackOnly), swallowed by the `loop` root but from a different domain entirely. |
+| * | crystal | symbol | plan | **RolePlan** - Binds one execution Role to its own modelroute Subject (independent model constraints), an independent per-axis Budget, an escalation target, and a result fold. |
+| * | crystal | symbol | plan | **RolePlanSet** - The declared multi-role execution plan: an ordered list of RolePlans plus a top-level fold that composes the roles' results into the final answer. |
 | * | crystal | symbol | plan | **CandidateBlockedBy (dispatch prereq grammar)** - dispatchtick.CandidateBlockedBy parses a dispatch candidate's blocked-by grammar - which other candidates a candidate must wait on before it becomes eligible for a lane. |
 | * | crystal | symbol | plan | **buildKnownBadIssuePlan (known-bad issue-filing plan)** - cmd/fak/knownbad.go buildKnownBadIssuePlan builds the create/update PLAN for filing a known-bad record as a deduped GitHub issue (title, body, occurrence escalation). |
 | * | crystal | symbol | plan | **candidateIDs (rescore/route candidate id vector)** - candidateIDs (internal/kvmmu/rescore.go, internal/modelroute/audit_route.go) is the parallel vector of identifiers for the items being scored - KV spans under rescore, or routes under audit - whose results line up index-for-index. |
@@ -307,6 +313,11 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | concept | vfs | **T3 scratchpad** - The agent's expire-by-default working scratchpad / tmpfs - files that exist for this task and are meant to be thrown away |
 | * | crystal | concept | vfs | **T4 durable memory** - Promoted, verified, forgettable cross-session memory - facts that earned durability through the write/promotion gate and survive the task |
 | * | crystal | concept | vfs | **T5 KV-cache substrate** - The physical KV-cache substrate: where a span's key/value tensors actually sit and how they are addressed and evicted |
+| * | crystal | symbol | witness-proof | **CollectiveWitnessed** - Input field on the #4801 ReservationEnvelope recording that a real NCCL collective smoke test passed across the exact reserved GPU ranks, before any artifact transfer begins. |
+| * | crystal | symbol | witness-proof | **ReservationCollectiveUnwitnessed** - The #4801 typed refusal verdict returned when every resource bar clears but no NCCL collective has been proven across the exact reserved ranks. |
+| * | crystal | symbol | witness-proof | **COLLECTIVE_WITNESS_MISSING** - The wire/JSON string value of the #4801 ReservationCollectiveUnwitnessed verdict, consumed by #4788 to gate the artifact transfer. |
+| * | crystal | symbol | witness-proof | **witnessedReservationEnvelope** - Unexported constructor returning the #4801 candidate reservation exactly as directly witnessed: the non-evicting reach read back from the lab GPU nodes, scrubbed to a node-class label. |
+| * | crystal | symbol | witness-proof | **WitnessedPlacement** - Exported accessor returning the current #4801 typed placement verdict, derived by AdmitPlacement from the witnessed envelope; the artifact #4788 gates its transfer on. |
 | * | crystal | symbol | witness-proof | **WitnessStatus (assume-check wiring field)** - assumecheck.WitnessStatus: the per-assumption registry field that declares HOW that assumption's witness is wired - the value WitnessWired, or one of the generic probe kinds. |
 | * | crystal | symbol | witness-proof | **ProgressWitnessed (watchdog resume counter)** - info_watchdog ProgressWitnessed: the watchdog COUNTER of how many resume/progress events were witnessed for a run, which drives the info pane's "N resumed" line. |
 | * | crystal | symbol | witness-proof | **WitnessCommandProbe (assume-check evidence kind)** - assumecheck.WitnessCommandProbe: one of the generic Evidence KINDS - gather evidence for an assumption by RUNNING a command probe and reading its output via a driver. |
@@ -1926,7 +1937,7 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 26 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1711 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1722 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1938,22 +1949,22 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 290 | 311 | 21 |
+| guard-gate | 291 | 323 | 32 |
+| cache | 223 | 231 | 8 |
 | plan | 286 | 294 | 8 |
-| policy-capability | 117 | 122 | 5 |
+| render-materialize | 162 | 170 | 8 |
+| policy-capability | 118 | 125 | 7 |
 | score-debt | 78 | 83 | 5 |
+| session-runtime | 173 | 178 | 5 |
 | evict | 40 | 43 | 3 |
-| session-runtime | 173 | 176 | 3 |
 | support-maturity | 29 | 32 | 3 |
-| witness-proof | 124 | 127 | 3 |
-| attention | 68 | 70 | 2 |
-| cache | 222 | 224 | 2 |
+| witness-proof | 125 | 128 | 3 |
+| attention | 69 | 71 | 2 |
 | gateway-engine | 159 | 161 | 2 |
-| render-materialize | 162 | 164 | 2 |
+| loop | 57 | 59 | 2 |
+| context-ctx | 175 | 176 | 1 |
 | decision | 38 | 39 | 1 |
-| loop | 57 | 58 | 1 |
 | pool | 35 | 36 | 1 |
-| context-ctx | 175 | 175 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | layout | 12 | 12 | 0 |
