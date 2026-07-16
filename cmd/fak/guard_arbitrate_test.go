@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -132,5 +133,26 @@ func TestGuardArbitrateUnreadableWorkspaceFailsOpen(t *testing.T) {
 	})
 	if err != nil || lease != nil {
 		t.Fatalf("fail-open = lease %v err %v", lease, err)
+	}
+}
+
+func TestGuardArbitrateFlagValueParsesLeaseProfile(t *testing.T) {
+	cfg := guardArbitrateConfig{Mode: guardArbitrateModeShadow}
+	value := guardArbitrateFlagValue{cfg: &cfg}
+	if err := value.Set("mode=enforce,lane=gateway,tree=internal/gateway/**,tree=cmd/fak/**,force=true"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != guardArbitrateModeEnforce || cfg.Lane != "gateway" || !cfg.Force {
+		t.Fatalf("config = %+v", cfg)
+	}
+	if got, want := cfg.Tree, []string{"internal/gateway/**", "cmd/fak/**"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tree = %v, want %v", got, want)
+	}
+}
+
+func TestGuardArbitrateFlagValueRejectsUnknownField(t *testing.T) {
+	cfg := guardArbitrateConfig{Mode: guardArbitrateModeShadow}
+	if err := (guardArbitrateFlagValue{cfg: &cfg}).Set("branch=main"); err == nil || !strings.Contains(err.Error(), "unknown lease field") {
+		t.Fatalf("error = %v", err)
 	}
 }

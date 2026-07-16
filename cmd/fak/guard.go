@@ -107,11 +107,8 @@ func cmdGuard(argv []string) {
 	resourceStats := fs.Bool("resource-stats", true, "ON by default — track the HARNESS's own hardware-resource use this session (CPU, memory/RSS, disk-I/O) for BOTH halves: the kernel (this guard process + the in-process gateway, sampled continuously) and the agent (the wrapped child, folded from its exit state). Reported as one line in the exit summary and appended to .fak/nightrun/harness-resources.jsonl. Pass --resource-stats=false to disable (epic #2044).")
 	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
-	arbitrateMode := fs.String("arbitrate", guardArbitrateModeShadow, "guard launch lease admission: off, shadow, or enforce")
-	arbitrateLane := fs.String("lane", "", "guard lease lane from dos.toml (optional; defaults to whole working tree)")
-	var arbitrateTree pathList
-	fs.Var(&arbitrateTree, "tree", "guard lease repo-relative tree glob (repeatable; defaults to **/*)")
-	arbitrateForce := fs.Bool("force", false, "override non-exclusive guard lease conflicts (exclusive live leases still refuse)")
+	arbitrateConfig := guardArbitrateConfig{Mode: guardArbitrateModeShadow}
+	fs.Var(guardArbitrateFlagValue{cfg: &arbitrateConfig}, "lease", "guard launch lease admission as comma-separated mode=off|shadow|enforce,lane=<lane>,tree=<glob>,force=true (tree repeatable within one value; defaults to **/*)")
 	denyAllContinue := fs.String("deny-all-continue", guardPreCompactModeEnforce, "Claude Code Stop hook that auto-RESUMES the agent after a deny-all turn (the floor refused EVERY proposed tool call, which the wire reports as end_turn — a stop the agent did not choose): off|shadow|enforce. ENFORCE by default (the false-stop fix), bounded by --deny-all-max consecutive continues; shadow logs the would-continue while letting the turn end; off disables. Claude children only.")
 	denyAllMax := fs.Int("deny-all-max", guardStopHookDefaultMax, "with --deny-all-continue=enforce: the hard give-up — the maximum number of CONSECUTIVE deny-all turns to auto-continue past (with escalating guidance) before letting the turn end, so a model that keeps re-proposing refused calls cannot loop forever. The give-up is LOGGED so it is not a silent false-stop.")
 	denyAllWarn := fs.Int("deny-all-warn", guardStopHookDefaultWarn, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the auto-continue guidance escalates from a gentle nudge to a relevance-decision WARNING (asks the agent whether the remaining work is reachable under the floor, and to declare BLOCKED and stop cleanly if not). Clamped to <= --deny-all-final <= --deny-all-max.")
@@ -1411,7 +1408,7 @@ func cmdGuard(argv []string) {
 	// --banner=full, which already streamed it at boot (avoid printing it twice).
 	dumpStartupOnLaunchFail := bannerMode != guardBannerFull
 	arbitrateLease, arbitrateErr := guardArbitrateAcquire(context.Background(), os.Stderr, guardArbitrateConfig{
-		Mode: *arbitrateMode, Lane: *arbitrateLane, Tree: arbitrateTree, Force: *arbitrateForce,
+		Mode: arbitrateConfig.Mode, Lane: arbitrateConfig.Lane, Tree: arbitrateConfig.Tree, Force: arbitrateConfig.Force,
 	})
 	if arbitrateErr != nil {
 		fmt.Fprintf(os.Stderr, "fak guard: %v\n", arbitrateErr)

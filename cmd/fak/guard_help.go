@@ -95,7 +95,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"session-pressure-max", "session-pressure-report", "session-pressure-justify",
 	}},
 	{"Lease admission & ownership", []string{
-		"arbitrate", "force", "lane", "promotion-threshold", "tree",
+		"lease", "promotion-threshold",
 	}},
 	{"Local in-kernel model", []string{
 		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",

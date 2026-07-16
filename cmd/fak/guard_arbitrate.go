@@ -34,6 +34,68 @@ type guardArbitrateConfig struct {
 	Root  string
 }
 
+type guardArbitrateFlagValue struct {
+	cfg *guardArbitrateConfig
+}
+
+func (v guardArbitrateFlagValue) String() string {
+	if v.cfg == nil {
+		return ""
+	}
+	parts := []string{"mode=" + v.cfg.Mode}
+	if v.cfg.Lane != "" {
+		parts = append(parts, "lane="+v.cfg.Lane)
+	}
+	for _, tree := range v.cfg.Tree {
+		parts = append(parts, "tree="+tree)
+	}
+	if v.cfg.Force {
+		parts = append(parts, "force=true")
+	}
+	return strings.Join(parts, ",")
+}
+
+func (v guardArbitrateFlagValue) Set(raw string) error {
+	if v.cfg == nil {
+		return errors.New("nil guard lease config")
+	}
+	for _, field := range strings.Split(raw, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(field, "=")
+		if !ok {
+			return fmt.Errorf("invalid lease field %q (want key=value)", field)
+		}
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		switch key {
+		case "mode":
+			mode, err := normalizeGuardArbitrateMode(value)
+			if err != nil {
+				return err
+			}
+			v.cfg.Mode = mode
+		case "lane":
+			v.cfg.Lane = value
+		case "tree":
+			if value == "" {
+				return errors.New("empty lease tree")
+			}
+			v.cfg.Tree = append(v.cfg.Tree, value)
+		case "force":
+			force, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("invalid lease force %q: %w", value, err)
+			}
+			v.cfg.Force = force
+		default:
+			return fmt.Errorf("unknown lease field %q (want mode, lane, tree, or force)", key)
+		}
+	}
+	return nil
+}
+
 type guardArbitrateLease struct {
 	store       *leaseref.Store
 	record      leaseref.Record
@@ -51,7 +113,7 @@ func normalizeGuardArbitrateMode(raw string) (string, error) {
 	case guardArbitrateModeEnforce:
 		return guardArbitrateModeEnforce, nil
 	default:
-		return "", fmt.Errorf("invalid --arbitrate mode %q (want off, shadow, or enforce)", raw)
+		return "", fmt.Errorf("invalid lease mode %q (want off, shadow, or enforce)", raw)
 	}
 }
 

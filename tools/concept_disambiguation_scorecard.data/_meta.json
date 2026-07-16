@@ -109,6 +109,11 @@
           "category": "incidental",
           "reason": "conceptbench grader sub-check tag for the #2736 injected-verdict scenario; names a graded model failure (routing around a DENY), not a new operator-facing guard gate",
           "token": "guard_bypass"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private flag.Value adapter for parsing the guard lease profile; not a user-facing guard concept.",
+          "token": "guardarbitrateflagvalue"
         }
       ],
       "exclude": [
@@ -135,6 +140,7 @@
         "guardWindowsCommandLineUnits",
         "guardWindowsQuotedArgUnits",
         "guard_bypass",
+        "guardarbitrateflagvalue",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
         "guarddefaultaccountsregistrypath",
