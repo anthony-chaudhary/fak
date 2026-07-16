@@ -14,9 +14,9 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 | Metric | Value |
 |---|---|
 | **Score** | **97.1/100** (grade A) = 9.7/10 |
-| **Coverage** | **95.6%** (1949/2038 confusable tree tokens positioned) |
+| **Coverage** | **95.6%** (1950/2039 confusable tree tokens positioned) |
 | **Disambiguation-debt** | **89** (clarity 0 + coverage 89) |
-| Crystal-clear concepts | 253 of 1722 positioned |
+| Crystal-clear concepts | 254 of 1723 positioned |
 | As of |  (fak ) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,10 +24,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1722 concepts - score 97.1/100 (grade A) - disambiguation-debt 89
+concept-disambiguation chart - 1723 concepts - score 97.1/100 (grade A) - disambiguation-debt 89
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #####....................... 253
+  * crystal       #####....................... 254
   o defined       ############################ 1469
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -54,7 +54,7 @@ clarity mix by family (each cell = one concept):
   support-maturity *****oooooooooooooooo (21 concept(s); 5 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    **************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (115 concept(s); 38 crystal)
+  witness-proof    ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (116 concept(s); 39 crystal)
 
 coverage by family (positioned / discovered):
   guard-gate       #########################... 291/323
@@ -66,7 +66,7 @@ coverage by family (positioned / discovered):
   session-runtime  ###########################. 173/178
   support-maturity #########################... 29/33
   evict            ##########################.. 40/43
-  witness-proof    ###########################. 125/128
+  witness-proof    ###########################. 126/129
   attention        ###########################. 69/71
   gateway-engine   ############################ 159/161
   loop             ###########################. 57/59
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 95.6%  (1949/2038 confusable tokens positioned)
+namespace coverage  [###############################.] 95.6%  (1950/2039 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -313,6 +313,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | concept | vfs | **T3 scratchpad** - The agent's expire-by-default working scratchpad / tmpfs - files that exist for this task and are meant to be thrown away |
 | * | crystal | concept | vfs | **T4 durable memory** - Promoted, verified, forgettable cross-session memory - facts that earned durability through the write/promotion gate and survive the task |
 | * | crystal | concept | vfs | **T5 KV-cache substrate** - The physical KV-cache substrate: where a span's key/value tensors actually sit and how they are addressed and evicted |
+| * | crystal | symbol | witness-proof | **q2_0_witness_test** - The stub-build (non-Apple-Silicon) test file q2_0_witness_test.go: it pins the ternary Q2_0 reference's math obligations -- bit layout, ternary code set, round-trip error bound, and ref-GEMV-vs-dense parity -- in every build that cannot execute the Metal kernel. |
 | * | crystal | symbol | witness-proof | **CollectiveWitnessed** - Input field on the #4801 ReservationEnvelope recording that a real NCCL collective smoke test passed across the exact reserved GPU ranks, before any artifact transfer begins. |
 | * | crystal | symbol | witness-proof | **ReservationCollectiveUnwitnessed** - The #4801 typed refusal verdict returned when every resource bar clears but no NCCL collective has been proven across the exact reserved ranks. |
 | * | crystal | symbol | witness-proof | **COLLECTIVE_WITNESS_MISSING** - The wire/JSON string value of the #4801 ReservationCollectiveUnwitnessed verdict, consumed by #4788 to gate the artifact transfer. |
@@ -1937,7 +1938,7 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 26 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1722 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1723 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1958,7 +1959,7 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 | session-runtime | 173 | 178 | 5 |
 | support-maturity | 29 | 33 | 4 |
 | evict | 40 | 43 | 3 |
-| witness-proof | 125 | 128 | 3 |
+| witness-proof | 126 | 129 | 3 |
 | attention | 69 | 71 | 2 |
 | gateway-engine | 159 | 161 | 2 |
 | loop | 57 | 59 | 2 |
