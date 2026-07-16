@@ -7,7 +7,7 @@ import (
 
 func TestSpoolPersistsTypedRequestUntilCompleted(t *testing.T) {
 	dir := t.TempDir()
-	want := Request{Schema: Schema, EventID: "evt:1", Session: "g1", CWD: `C:\work`, Command: []string{"claude", "--resume", "g1"}, ResumeHandle: "g1"}
+	want := Request{Schema: Schema, EventID: "evt:1", Session: "g1", CWD: t.TempDir(), Command: []string{"claude", "--resume", "g1"}, ResumeHandle: "g1"}
 	path, err := Enqueue(dir, want)
 	if err != nil {
 		t.Fatal(err)
