@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,12 +33,20 @@ func TestDojoProviderCostEpisodesFromSessions(t *testing.T) {
 			// A synthetic (non-billed) row never keys or prices a provider.
 			"<synthetic>": {Turns: 5, Input: 999},
 		}},
-		// A glm-dominant session: glm carries it (5 turns > 1) but is UNPRICED in
-		// the sessionaudit table, so its cost is UNMEASURED, never a fabricated
-		// $0.00. The stray claude turn does NOT fabricate a glm cost — only glm's
-		// own models bill into glm's column.
+		// A glm-dominant session: glm carries it (5 turns > 1) and is now PRICED in
+		// the sessionaudit table (#4823 — published glm rate), so its cost MEASURES:
+		// 500000 input tokens x $1.4/MTok = $0.70. The stray claude turn does NOT
+		// contaminate glm's cost — only glm's own models bill into glm's column.
 		{AssistantTurns: 6, PerModel: map[string]sessionaudit.ModelCounts{
 			"glm-5.2":         {Turns: 5, Input: 500000},
+			"claude-opus-4-8": {Turns: 1, Input: 100000},
+		}},
+		// A gpt-dominant session: gpt carries it (5 turns > 1) but stays UNPRICED in
+		// the sessionaudit table, so its cost is UNMEASURED, never a fabricated
+		// $0.00 (#4490's honesty rule). The stray claude turn does NOT fabricate a
+		// gpt cost — only gpt's own models bill into gpt's column.
+		{AssistantTurns: 6, PerModel: map[string]sessionaudit.ModelCounts{
+			"gpt-5":           {Turns: 5, Input: 500000},
 			"claude-opus-4-8": {Turns: 1, Input: 100000},
 		}},
 		// Not completed tasks: unreadable, turn-less, and synthetic-only sessions
@@ -47,11 +56,11 @@ func TestDojoProviderCostEpisodesFromSessions(t *testing.T) {
 		{AssistantTurns: 2, PerModel: map[string]sessionaudit.ModelCounts{"<synthetic>": {Turns: 2}}},
 	}
 	ins := providerCostEpisodesFromSessions(sessions)
-	if len(ins) != 2 {
-		t.Fatalf("expected one episode per provider (claude measured, glm unmeasured), got %d: %+v", len(ins), ins)
+	if len(ins) != 3 {
+		t.Fatalf("expected one episode per provider (claude+glm measured, gpt unmeasured), got %d: %+v", len(ins), ins)
 	}
-	// Providers render in stable sorted order so ticks stay comparable.
-	claude, glm := ins[0], ins[1]
+	// Providers render in stable sorted order (claude, glm, gpt) so ticks stay comparable.
+	claude, glm, gpt := ins[0], ins[1], ins[2]
 	if claude.Prediction.Lever != "provider-cost" || claude.Prediction.Metric != "cost_per_completed_issue" {
 		t.Fatalf("episode cell wrong: %s/%s", claude.Prediction.Lever, claude.Prediction.Metric)
 	}
@@ -65,11 +74,18 @@ func TestDojoProviderCostEpisodesFromSessions(t *testing.T) {
 	if claude.Outcome.Realized != 3.0 || claude.Outcome.Sample != 2 || !strings.Contains(claude.Outcome.Source, "claude") {
 		t.Fatalf("claude fold wrong: %+v, want $3.00 over 2 completed sessions", claude.Outcome)
 	}
-	if glm.Outcome.Measured || !strings.Contains(glm.Outcome.Source, "glm") || !strings.Contains(glm.Outcome.Source, "no priced billing") {
-		t.Fatalf("an unpriced provider must be UNMEASURED with the reason named, never $0.00: %+v", glm.Outcome)
+	// glm is now priced (#4823): $0.70 over 1 completed session, MEASURED/OBSERVED.
+	if !glm.Outcome.Measured || glm.Outcome.Provenance != dojo.Observed || !strings.Contains(glm.Outcome.Source, "glm") {
+		t.Fatalf("a now-priced provider (glm) must MEASURE (OBSERVED): %+v", glm.Outcome)
 	}
-	if glm.Outcome.Sample != 1 {
-		t.Fatalf("the glm episode should carry its completed-session count (1), got %+v", glm.Outcome)
+	if math.Abs(glm.Outcome.Realized-0.70) > 1e-9 || glm.Outcome.Sample != 1 {
+		t.Fatalf("glm fold wrong: %+v, want $0.70 over 1 completed session", glm.Outcome)
+	}
+	if gpt.Outcome.Measured || !strings.Contains(gpt.Outcome.Source, "gpt") || !strings.Contains(gpt.Outcome.Source, "no priced billing") {
+		t.Fatalf("an unpriced provider must be UNMEASURED with the reason named, never $0.00: %+v", gpt.Outcome)
+	}
+	if gpt.Outcome.Sample != 1 {
+		t.Fatalf("the gpt episode should carry its completed-session count (1), got %+v", gpt.Outcome)
 	}
 
 	// An empty (or missing) corpus still surfaces the cell — honestly UNMEASURED,
@@ -104,10 +120,12 @@ func TestDojoCatalogMatchesProviderCostEmittedMetrics(t *testing.T) {
 }
 
 // TestRunDojoLiveFoldsProviderCostPerProvider pins the cross-provider cell
-// (#4488): `fak dojo run --live` folds provider-cost/cost_per_completed_issue
+// (#4488 / #4823): `fak dojo run --live` folds provider-cost/cost_per_completed_issue
 // from the session corpus with ONE episode PER PROVIDER — each carrying the same
-// registered claim and that provider's own billed USD per completed session — and
-// marks a provider the price table cannot price UNMEASURED instead of $0.00.
+// registered claim and that provider's own billed USD per completed session. It is
+// the Done-condition witness for #4823: the now-priced non-Claude providers
+// (deepseek, glm, kimi) fold MEASURED, while a provider the table still cannot
+// price (gpt) stays UNMEASURED instead of a fabricated $0.00.
 func TestRunDojoLiveFoldsProviderCostPerProvider(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
@@ -115,24 +133,28 @@ func TestRunDojoLiveFoldsProviderCostPerProvider(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	// A fixture session corpus with two providers: a claude session billing
-	// 200000 input tokens at opus rates ($15/MTok -> $3.00) and a glm session the
-	// sessionaudit table cannot price (-> UNMEASURED), dropped where
-	// sessionaudit.Discover (via CLAUDE_CONFIG_DIR) finds them without touching
-	// the real host corpus.
+	// A fixture session corpus, one session per provider, dropped where
+	// sessionaudit.Discover (via CLAUDE_CONFIG_DIR) finds them without touching the
+	// real host corpus. claude bills 200000 input at opus rates ($15/MTok -> $3.00);
+	// deepseek/glm/kimi each bill 1 MTok input at their published rates (#4823) so
+	// they MEASURE; gpt stays unpriced so it folds UNMEASURED.
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", home)
 	nsDir := filepath.Join(home, "projects", "fixture-ns")
 	if err := os.MkdirAll(nsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	claude := `{"type":"assistant","message":{"id":"m1","model":"claude-opus-4-8","usage":{"input_tokens":200000,"output_tokens":0}}}` + "\n"
-	if err := os.WriteFile(filepath.Join(nsDir, "session-claude.jsonl"), []byte(claude), 0o600); err != nil {
-		t.Fatal(err)
+	fixtures := map[string]string{
+		"session-claude.jsonl":   `{"type":"assistant","message":{"id":"m1","model":"claude-opus-4-8","usage":{"input_tokens":200000,"output_tokens":0}}}`,
+		"session-deepseek.jsonl": `{"type":"assistant","message":{"id":"d1","model":"deepseek-v4-pro","usage":{"input_tokens":1000000,"output_tokens":0}}}`,
+		"session-glm.jsonl":      `{"type":"assistant","message":{"id":"g1","model":"glm-5.2","usage":{"input_tokens":1000000,"output_tokens":0}}}`,
+		"session-kimi.jsonl":     `{"type":"assistant","message":{"id":"k1","model":"kimi-k2.6","usage":{"input_tokens":1000000,"output_tokens":0}}}`,
+		"session-gpt.jsonl":      `{"type":"assistant","message":{"id":"p1","model":"gpt-5","usage":{"input_tokens":1000000,"output_tokens":0}}}`,
 	}
-	glm := `{"type":"assistant","message":{"id":"g1","model":"glm-5.2","usage":{"input_tokens":10,"output_tokens":5}}}` + "\n"
-	if err := os.WriteFile(filepath.Join(nsDir, "session-glm.jsonl"), []byte(glm), 0o600); err != nil {
-		t.Fatal(err)
+	for name, line := range fixtures {
+		if err := os.WriteFile(filepath.Join(nsDir, name), []byte(line+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	var out, errb bytes.Buffer
@@ -149,17 +171,11 @@ func TestRunDojoLiveFoldsProviderCostPerProvider(t *testing.T) {
 		if e.Lever != "provider-cost" {
 			continue
 		}
-		switch {
-		case strings.Contains(e.Source, "provider claude"):
-			costs["claude"] = e
-		case strings.Contains(e.Source, "provider glm"):
-			costs["glm"] = e
-		default:
-			t.Fatalf("provider-cost episode with an unexpected provider source: %+v", e)
+		for _, p := range []string{"claude", "deepseek", "glm", "kimi", "gpt"} {
+			if strings.Contains(e.Source, "provider "+p) {
+				costs[p] = e
+			}
 		}
-	}
-	if len(costs) != 2 {
-		t.Fatalf("live report should carry one provider-cost episode per provider (claude, glm), got %d: %s", len(costs), out.String())
 	}
 	claudeEp := costs["claude"]
 	if claudeEp.Metric != "cost_per_completed_issue" || claudeEp.Claimed != 3.0 {
@@ -168,8 +184,19 @@ func TestRunDojoLiveFoldsProviderCostPerProvider(t *testing.T) {
 	if claudeEp.Verdict != dojo.VerdictCalibrated || claudeEp.Realized != 3.0 || claudeEp.Sample != 1 {
 		t.Fatalf("claude episode wrong: %+v, want measured $3.00 over 1 completed session", claudeEp)
 	}
-	glmEp := costs["glm"]
-	if glmEp.Verdict != dojo.VerdictUnmeasured || glmEp.Claimed != 3.0 {
-		t.Fatalf("glm episode must be UNMEASURED (unpriced provider) with the claim intact: %+v", glmEp)
+	// #4823 Done condition: deepseek, glm, and kimi now fold MEASURED (not UNMEASURED).
+	for _, p := range []string{"deepseek", "glm", "kimi"} {
+		ep, ok := costs[p]
+		if !ok {
+			t.Fatalf("live report missing a provider-cost episode for %q: %s", p, out.String())
+		}
+		if ep.Verdict == dojo.VerdictUnmeasured || ep.Realized <= 0 || ep.Sample != 1 || ep.Claimed != 3.0 {
+			t.Fatalf("%s episode must MEASURE per #4823 (priced provider), got %+v", p, ep)
+		}
+	}
+	// gpt stays unpriced -> UNMEASURED (the #4490 honesty rule still fires).
+	gptEp, ok := costs["gpt"]
+	if !ok || gptEp.Verdict != dojo.VerdictUnmeasured || gptEp.Claimed != 3.0 {
+		t.Fatalf("gpt episode must be UNMEASURED (still-unpriced provider) with the claim intact: %+v", gptEp)
 	}
 }
