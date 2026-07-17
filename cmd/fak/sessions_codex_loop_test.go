@@ -167,9 +167,12 @@ func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 		t.Fatalf("fail-on gate did not preserve LOOP diagnosis/stderr: diagnosis=%+v stderr=%s", d, stderr.String())
 	}
 
+	if err := writeCodexGuardWitness(dir, "019f3417-0c8a-7da0-bf38-4ee9fd2354e4"); err != nil {
+		t.Fatal(err)
+	}
 	stdout.Reset()
 	stderr.Reset()
-	code = runSessions(&stdout, &stderr, []string{"codex-loop", "--path", path, "--json", "--fail-on", "unguarded"})
+	code = runSessions(&stdout, &stderr, []string{"codex-loop", "--path", path, "--codex-home", dir, "--json", "--fail-on", "unguarded"})
 	if code != 0 {
 		t.Fatalf("guarded fak-provider session failed --fail-on unguarded: exit=%d stderr=%s", code, stderr.String())
 	}
