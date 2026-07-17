@@ -1,3 +1,17 @@
+---
+title: "Shared workspace, positive state, and the negation operator"
+description: "fak treats an agent's bounded context as a shared workspace to manage, not a chat log to grow: shed superseded history, construct the positive state the agent should occupy, and rewrite kernel-authored negations with the deterministic negframe operator — while the default-deny capability floor still adjudicates every effect below language."
+slug: shared-workspace-negation-operator
+keywords:
+  - shared workspace
+  - global workspace
+  - positive-state construction
+  - negation operator
+  - negframe
+  - context shedding
+  - default-deny capability floor
+---
+
 # Shared workspace, positive state, and the negation operator
 
 An AI agent does not reason over an unlimited transcript. It works inside a bounded context shared by the current task, tool results, policy guidance, and recent conversation. **fak treats that context as a shared workspace to manage**, not as a chat log to grow forever. The analogy is to global-workspace theories: information that remains available can influence many later operations. It is an engineering lens, not a claim that a language model has human consciousness or that fak reproduces a cognitive architecture.
