@@ -9,6 +9,13 @@ var errorAffordances = map[string]string{
 	"OFF_TRUNK":                "commit on main with fak commit --path <owned-path> -m <message>",
 	"OUT_OF_TREE_WRITE":        "write inside the workspace or place scratch data in the OS temp directory",
 	"POLICY_BLOCK":             "choose a tool and arguments admitted by the active policy",
+	// SELF_MODIFY carried no positive next action, so a refusal on a diagnostic or
+	// continuation surfaced only the bare token — which a governed agent read as an
+	// end_turn stop and quit on, instead of routing the intent through a sanctioned
+	// path (#4988). The two real recoveries: an authorized edit to a core-locked
+	// enforcement path goes through the maintenance witness, and an outward publish
+	// that was misclassified as self-modification goes through the compiled fak verb.
+	"SELF_MODIFY": "route an authorized core-lock edit through fak commit --core-lock-maintenance-witness, or send an outward message with fak slack send",
 	"OVERHEAD_BUDGET_EXCEEDED": "measure against the declared budget, then reduce the overhead or update the witnessed envelope",
 	"INVALID_TOOL_ARGUMENTS":   "correct the tool arguments to match the declared schema and retry",
 }
