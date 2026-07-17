@@ -2,7 +2,7 @@ package adjudicator
 
 import (
 	"context"
-	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -24,7 +24,10 @@ type writeReceipt struct {
 	order     uint64
 }
 
-var writeReceiptOrder atomic.Uint64
+var (
+	writeReceiptOrder atomic.Uint64
+	receiptRoot       = receiptWorkspaceRoot()
+)
 
 // ObserveResult records local write effects only after the kernel has observed a
 // successful, committed engine completion. It is intentionally a structural
@@ -34,7 +37,7 @@ func (a *Adjudicator) ObserveResult(_ context.Context, c *abi.ToolCall, r *abi.R
 		return
 	}
 	for _, target := range completedWriteTargets(c) {
-		path, ok := canonicalLocalUnignoredPath(target)
+		path, ok := canonicalLocalReceiptPath(receiptRoot, target)
 		if !ok {
 			continue
 		}
@@ -51,7 +54,7 @@ func (a *Adjudicator) AuthoredPath(traceID, path string) (operation uint64, ok b
 	if a == nil || traceID == "" || path == "" {
 		return 0, false
 	}
-	canonical, eligible := canonicalLocalUnignoredPath(path)
+	canonical, eligible := canonicalLocalReceiptPath(receiptRoot, path)
 	if !eligible {
 		return 0, false
 	}
@@ -124,9 +127,9 @@ func destructiveWriteCommand(command string) bool {
 	return false
 }
 
-func canonicalLocalUnignoredPath(path string) (string, bool) {
+func canonicalLocalReceiptPath(root, path string) (string, bool) {
 	path = cleanShellOperand(path)
-	if path == "" || strings.ContainsAny(path, "*?[]{}") {
+	if root == "" || path == "" || strings.ContainsAny(path, "*?[]{}") {
 		return "", false
 	}
 	absolute, err := filepath.Abs(path)
@@ -139,24 +142,32 @@ func canonicalLocalUnignoredPath(path string) (string, bool) {
 	if parent, err := filepath.EvalSymlinks(filepath.Dir(absolute)); err == nil {
 		absolute = filepath.Join(parent, filepath.Base(absolute))
 	}
-	rootBytes, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", false
-	}
-	root := filepath.Clean(strings.TrimSpace(string(rootBytes)))
+	root = filepath.Clean(root)
 	rel, err := filepath.Rel(root, absolute)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", false
-	}
-	ignored := exec.Command("git", "check-ignore", "-q", "--", rel)
-	ignored.Dir = root
-	if err := ignored.Run(); err == nil {
-		return "", false
-	} else if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 		return "", false
 	}
 	if filepath.Separator == '\\' {
 		absolute = strings.ToLower(absolute)
 	}
 	return absolute, true
+}
+
+// receiptWorkspaceRoot discovers the local workspace once, when the
+// adjudicator is constructed. Receipt reads/writes remain subprocess-free.
+func receiptWorkspaceRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if info, err := os.Stat(filepath.Join(dir, ".git")); err == nil && info != nil {
+			return filepath.Clean(dir)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
