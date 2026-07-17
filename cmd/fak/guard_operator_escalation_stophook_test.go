@@ -15,6 +15,10 @@ import (
 )
 
 func TestRunGuardStopHookResidualEnqueuesSessionThreadReply(t *testing.T) {
+	originalDrain := startGuardSessionThreadDrain
+	startGuardSessionThreadDrain = func() {}
+	t.Cleanup(func() { startGuardSessionThreadDrain = originalDrain })
+
 	regDir := t.TempDir()
 	outboxDir := t.TempDir()
 	t.Setenv("FLEET_REG_DIR", regDir)
