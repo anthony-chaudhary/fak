@@ -1,0 +1,162 @@
+[
+  {
+    "pair_id": "train-0",
+    "layer": 1,
+    "activation": [
+      -2,
+      0
+    ],
+    "negated": false,
+    "split": "train"
+  },
+  {
+    "pair_id": "train-0",
+    "layer": 1,
+    "activation": [
+      -1.8,
+      0
+    ],
+    "negated": false,
+    "split": "train"
+  },
+  {
+    "pair_id": "train-1",
+    "layer": 1,
+    "activation": [
+      2,
+      0
+    ],
+    "negated": true,
+    "split": "train"
+  },
+  {
+    "pair_id": "train-1",
+    "layer": 1,
+    "activation": [
+      1.8,
+      0
+    ],
+    "negated": true,
+    "split": "train"
+  },
+  {
+    "pair_id": "test-0",
+    "layer": 1,
+    "activation": [
+      2.2,
+      0
+    ],
+    "negated": false,
+    "split": "test"
+  },
+  {
+    "pair_id": "test-0",
+    "layer": 1,
+    "activation": [
+      1.7,
+      0
+    ],
+    "negated": false,
+    "split": "test"
+  },
+  {
+    "pair_id": "test-1",
+    "layer": 1,
+    "activation": [
+      -2.2,
+      0
+    ],
+    "negated": true,
+    "split": "test"
+  },
+  {
+    "pair_id": "test-1",
+    "layer": 1,
+    "activation": [
+      -1.7,
+      0
+    ],
+    "negated": true,
+    "split": "test"
+  },
+  {
+    "pair_id": "train-0",
+    "layer": 2,
+    "activation": [
+      -2,
+      0.0
+    ],
+    "negated": false,
+    "split": "train"
+  },
+  {
+    "pair_id": "train-0",
+    "layer": 2,
+    "activation": [
+      -1.8,
+      0.1
+    ],
+    "negated": false,
+    "split": "train"
+  },
+  {
+    "pair_id": "train-1",
+    "layer": 2,
+    "activation": [
+      2,
+      0.0
+    ],
+    "negated": true,
+    "split": "train"
+  },
+  {
+    "pair_id": "train-1",
+    "layer": 2,
+    "activation": [
+      1.8,
+      0.1
+    ],
+    "negated": true,
+    "split": "train"
+  },
+  {
+    "pair_id": "test-0",
+    "layer": 2,
+    "activation": [
+      -2.2,
+      0.0
+    ],
+    "negated": false,
+    "split": "test"
+  },
+  {
+    "pair_id": "test-0",
+    "layer": 2,
+    "activation": [
+      -1.7,
+      0.1
+    ],
+    "negated": false,
+    "split": "test"
+  },
+  {
+    "pair_id": "test-1",
+    "layer": 2,
+    "activation": [
+      2.2,
+      0.0
+    ],
+    "negated": true,
+    "split": "test"
+  },
+  {
+    "pair_id": "test-1",
+    "layer": 2,
+    "activation": [
+      1.7,
+      0.1
+    ],
+    "negated": true,
+    "split": "test"
+  }
+]
