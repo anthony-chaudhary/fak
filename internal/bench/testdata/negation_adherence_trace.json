@@ -1,0 +1,6 @@
+[
+  {"id":"only-violation","instruction":"Do not use tools outside search_kb.","constraint":{"kind":"only","tools":["search_kb"]},"calls_before":["refund_payment"],"calls_after":["search_kb"]},
+  {"id":"only-follow","instruction":"Only use search_kb.","constraint":{"kind":"only","tools":["search_kb"]},"calls_before":["search_kb"],"calls_after":["search_kb"]},
+  {"id":"never-violation","instruction":"Never call refund_payment.","constraint":{"kind":"never","tool":"refund_payment"},"calls_before":["refund_payment"],"calls_after":["search_kb"]},
+  {"id":"never-follow","instruction":"Do not call refund_payment.","constraint":{"kind":"never","tool":"refund_payment"},"calls_before":["search_kb"],"calls_after":["search_kb"]}
+]
