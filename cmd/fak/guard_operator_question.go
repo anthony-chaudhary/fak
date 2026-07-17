@@ -76,7 +76,7 @@ var guardOperatorQuestionClarifyResolver = operatorresolve.Resolver{
 // to PLAN_ORACLES_UNAVAILABLE in a real session.
 var guardOperatorQuestionPlanResolver = resolveGuardOperatorQuestionPlan
 
-func runGuardOperatorQuestionGate(stderr io.Writer, rawMode, transcriptPath, sessionID string) (int, guardStopDisposition, string, bool) {
+func runGuardOperatorQuestionGate(stderr io.Writer, rawMode, transcriptPath, sessionID string, answerOut ...*string) (int, guardStopDisposition, string, bool) {
 	mode, err := normalizeGuardOperatorQuestionMode(rawMode)
 	if err != nil || mode == guardPreCompactModeOff {
 		return 0, "", "", false
@@ -86,6 +86,9 @@ func runGuardOperatorQuestionGate(stderr io.Writer, rawMode, transcriptPath, ses
 		return 0, "", "", false
 	}
 	disp, reason, action := adjudicateOperatorQuestion(q)
+	if len(answerOut) > 0 && answerOut[0] != nil {
+		*answerOut[0] = action
+	}
 	fmt.Fprintf(stderr, "fak guard Stop: operator-question harness=%s kind=%s disposition=%s reason=%s action=%s\n", q.Harness, q.Kind, disp, reason, action)
 	// FLAG THE OPERATOR on a genuine HUMAN_RESIDUAL — a structured native question no oracle could
 	// auto-resolve (authority fork, plan-approval escalate, oracle-unavailable). Without this the
@@ -101,7 +104,7 @@ func runGuardOperatorQuestionGate(stderr io.Writer, rawMode, transcriptPath, ses
 	switch disp {
 	case stopDispOperatorQuestionResolved:
 		fmt.Fprintf(stderr, "fak guard Stop: auto-resolved from witness: %s\n", action)
-		return 0, disp, q.Harness, true
+		return 2, disp, q.Harness, true
 	case stopDispOperatorQuestionBlocked:
 		return 2, disp, q.Harness, true
 	default:

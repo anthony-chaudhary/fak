@@ -610,13 +610,18 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 		// harness-agnostic and carries its OWN dial (--operator-question /
 		// FAK_GUARD_OPERATOR_QUESTION_MODE), which defaults at install to inherit the resolved
 		// operator-directed posture (and thus its operator-absence cap) but can be tuned apart.
-		oqExit, oqDisp, oqHarness, oqFired := runGuardOperatorQuestionGate(stderr, *operatorQuestionFlag, transcriptPath, rec.Session)
+		var oqAnswer string
+		oqExit, oqDisp, oqHarness, oqFired := runGuardOperatorQuestionGate(decisionStderr, *operatorQuestionFlag, transcriptPath, rec.Session, &oqAnswer)
 		if oqFired {
 			rec.Disposition = string(oqDisp)
 			rec.Kind = "operator-question:" + oqHarness
 			rec.Signal = string(oqDisp)
 		}
 		if oqFired && oqExit == 2 {
+			if oqDisp == stopDispOperatorQuestionResolved && strings.TrimSpace(oqAnswer) != "" {
+				nextPayload.Reset()
+				_, _ = fmt.Fprintf(decisionStderr, "Resolved operator answer: %s", strings.TrimSpace(oqAnswer))
+			}
 			return 2
 		}
 		wdExit, wdDisp, wdReason, wdFired := runGuardWitnessedDoneGate(stderr, *witnessedDoneFlag, transcriptPath, repoRoot(), rec.Session, guardWitnessedDoneMaxFromEnv())

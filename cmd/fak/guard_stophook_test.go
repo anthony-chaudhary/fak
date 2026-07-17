@@ -648,6 +648,41 @@ func TestRunGuardStopHookFailOpenWritesUnifiedNextRefusal(t *testing.T) {
 	}
 }
 
+func TestRunGuardStopHookResolvedQuestionReopensWithAnswerWitness(t *testing.T) {
+	withOperatorResolver(t)
+	ledger := filepath.Join(t.TempDir(), "guard-stops.jsonl")
+	t.Setenv(guardStopsLedgerEnv, ledger)
+	transcript := writeOperatorGateTranscript(t, "claude", false)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 0\n"))
+	}))
+	defer srv.Close()
+	var stderr strings.Builder
+	payload := `{"session_id":"sess-answer","transcript_path":"` + filepath.ToSlash(transcript) + `"}`
+	code := runGuardStopHook(&stderr, strings.NewReader(payload), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+		"--operator-question", guardPreCompactModeEnforce,
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want resolved-answer continuation 2; stderr=%s", code, stderr.String())
+	}
+	records, err := readGuardStopRecords(ledger)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records = %+v err=%v", records, err)
+	}
+	next := records[0].Next
+	if next == nil || !next.Applied || next.Move.Kind != sessionctl.MoveContinue || next.Move.Render != sessionctl.RenderReopen {
+		t.Fatalf("next = %+v, want applied continue->reopen answer witness", next)
+	}
+	if !strings.Contains(next.Move.Payload, "Resolved operator answer: Commit explicit owned paths") {
+		t.Fatalf("next payload = %q, want resolved answer", next.Move.Payload)
+	}
+	if next.Move.Session != sessionctl.SessionInteractive {
+		t.Fatalf("next session class = %s, want interactive Stop-hook authority", next.Move.Session)
+	}
+}
+
 func TestRunGuardStopHookContinueWritesUnifiedReopen(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "guard-stops.jsonl")
 	t.Setenv(guardStopsLedgerEnv, ledger)

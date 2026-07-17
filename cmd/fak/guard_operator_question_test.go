@@ -56,7 +56,7 @@ func TestOperatorQuestionGateEnforceBlocksWithWitnessedAnswerForClaudeAndCodex(t
 		t.Run(harness, func(t *testing.T) {
 			var stderr bytes.Buffer
 			exit, disp, gotHarness, fired := runGuardOperatorQuestionGate(&stderr, guardPreCompactModeEnforce, writeOperatorGateTranscript(t, harness, false), "")
-			if !fired || exit != 0 || disp != stopDispOperatorQuestionResolved || gotHarness != harness {
+			if !fired || exit != 2 || disp != stopDispOperatorQuestionResolved || gotHarness != harness {
 				t.Fatalf("fired=%v exit=%d disp=%s harness=%s stderr=%s", fired, exit, disp, gotHarness, stderr.String())
 			}
 			if !strings.Contains(stderr.String(), "harness="+harness) || !strings.Contains(stderr.String(), "Commit explicit owned paths") {
@@ -227,6 +227,19 @@ func TestOperatorQuestionGateFlagsOperatorOnHumanResidual(t *testing.T) {
 	}
 	if called != 0 {
 		t.Fatalf("auto-resolved question must not flag operator, called=%d", called)
+	}
+}
+
+func TestOperatorQuestionResolvedCarriesAnswerForNextContinuation(t *testing.T) {
+	withOperatorResolver(t)
+	var stderr bytes.Buffer
+	var answer string
+	exit, disp, harness, fired := runGuardOperatorQuestionGate(&stderr, guardPreCompactModeEnforce, writeOperatorGateTranscript(t, "claude", false), "sess-answer", &answer)
+	if !fired || exit != 2 || disp != stopDispOperatorQuestionResolved || harness != "claude" {
+		t.Fatalf("resolved gate = fired %v exit %d disp %s harness %q", fired, exit, disp, harness)
+	}
+	if !strings.Contains(answer, "Commit explicit owned paths") {
+		t.Fatalf("answer = %q, want selected witnessed option", answer)
 	}
 }
 

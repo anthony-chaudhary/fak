@@ -111,12 +111,12 @@ const (
 // decide") rather than silently counting it as a clean stop.
 func guardStopDispositionKind(d guardStopDisposition) guardStopKind {
 	switch d {
-	case stopDispCleanCompletion, stopDispCleanWrapup, stopDispOperatorDirectedEscalate:
+	case stopDispCleanCompletion, stopDispCleanWrapup, stopDispOperatorDirectedEscalate, stopDispOperatorQuestionEscalate:
 		// An operator-directed escalate is a legitimate, routed conclusion — the agent was
 		// right to stop on an authority wall — so it rolls up as a clean stop; the
 		// OperatorDirected count keeps it separately visible.
 		return stopKindClean
-	case stopDispToolFeedbackContinue, stopDispDenyAllContinue, stopDispSameIssueContinue, stopDispHandoffBlock, stopDispOperatorDirectedContinue, stopDispOutputStyleContinue:
+	case stopDispToolFeedbackContinue, stopDispDenyAllContinue, stopDispSameIssueContinue, stopDispHandoffBlock, stopDispOperatorDirectedContinue, stopDispOutputStyleContinue, stopDispOperatorQuestionResolved, stopDispOperatorQuestionBlocked:
 		return stopKindContinue
 	case stopDispBlindGiveUp, stopDispSameIssueGiveUp, stopDispToolFeedbackGiveUp, stopDispHandoffGiveUp, stopDispHandoffSessionGiveUp:
 		return stopKindStandDown
