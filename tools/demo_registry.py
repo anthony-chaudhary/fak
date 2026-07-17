@@ -58,6 +58,7 @@ DEMOS: tuple[Demo, ...] = (
     Demo("unseedemo", "/unsee", "api/events", "Un-See It", default_port=8156),
     Demo("timewolfdemo", "/timewolf", "api/scenarios", "what time is it, Mr. Wolf?", default_port=8155),
     Demo("trychatdemo", "/trychat", "api/suggestions", "try-it agentic chat", default_port=8157),
+    Demo("qwen36codedemo", "/qwen36codedemo", "api/health", "fak UltraCode", ("-public-readonly",), 8154),
 )
 
 
@@ -96,6 +97,11 @@ DEMO_LIFECYCLE: dict[str, LifecycleDecision] = {
         "promote-next",
         1736,
         "healthy LCD agentic loop; next candidate for hosted agentic card",
+    ),
+    "qwen36codedemo": LifecycleDecision(
+        "local-keep",
+        4770,
+        "working browser coding-agent spine; keep locally until its authenticated live backend is promoted",
     ),
     "trychatdemo": LifecycleDecision(
         "promote-next",

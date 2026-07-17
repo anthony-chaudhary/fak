@@ -207,6 +207,9 @@ def smoke_server(workspace: Path, exe: Path, demo: Demo, timeout_s: float, base_
     cmd = [str(exe), "-addr", f"127.0.0.1:{port}", *demo.extra_args]
     env = os.environ.copy()
     env.setdefault("NO_COLOR", "1")
+    if demo.name == "qwen36codedemo":
+        env.setdefault("FAK_DEMO_GATEWAY_KEY", "demo-http-smoke-gateway")
+        env.setdefault("FAK_DEMO_EDGE_KEY", "demo-http-smoke-edge")
     if base_source == "flag":
         cmd.extend(("-base-path", demo.base_path))
     elif base_source == "env":

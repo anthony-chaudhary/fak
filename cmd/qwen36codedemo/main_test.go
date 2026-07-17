@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 )
 
 func TestBrowserRenderWitness(t *testing.T) {
@@ -14,7 +16,7 @@ func TestBrowserRenderWitness(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.page(w, r)
 	body := w.Body.String()
-	for _, want := range []string{"fak UltraCode", "Qwen3.6-27B", "Agent event transcript", "Shared cache telemetry", "browser holds no gateway bearer token", "/api/fanout?n=4"} {
+	for _, want := range []string{"fak UltraCode", "Qwen3.6-27B", "Agent event transcript", "Shared cache telemetry", "browser holds no gateway bearer token", "api/fanout?n=4"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("captured render missing %q", want)
 		}
@@ -118,6 +120,34 @@ func TestEdgeProxyKeepsBothSecretsOutOfBrowser(t *testing.T) {
 	page.Body.Close()
 	if strings.Contains(string(html), edgeSecret) {
 		t.Fatal("edge secret leaked into browser page")
+	}
+}
+
+func TestMountedReadonlyDemoServesPageAndHealth(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			t.Fatalf("gateway path = %q, want /healthz", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer gateway.Close()
+
+	s := &server{gateway: gateway.URL, key: "gateway-secret", model: "test-model", client: gateway.Client()}
+	app := http.NewServeMux()
+	app.HandleFunc("/", s.page)
+	app.HandleFunc("/api/health", s.health)
+	root := http.NewServeMux()
+	demoui.MountWithBasePath(root, "/qwen36codedemo", app)
+
+	page := httptest.NewRecorder()
+	root.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/qwen36codedemo/", nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "fak UltraCode") {
+		t.Fatalf("mounted page = %d %q", page.Code, page.Body.String())
+	}
+	health := httptest.NewRecorder()
+	root.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/qwen36codedemo/api/health", nil))
+	if health.Code != http.StatusOK || !strings.Contains(health.Body.String(), `"live":true`) {
+		t.Fatalf("mounted health = %d %q", health.Code, health.Body.String())
 	}
 }
 

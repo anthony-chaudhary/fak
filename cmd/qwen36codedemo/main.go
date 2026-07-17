@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 )
 
 //go:embed page.html
@@ -79,6 +81,8 @@ func main() {
 	gateway := flag.String("gateway", "http://127.0.0.1:8153", "pure fak gateway")
 	model := flag.String("model", "Qwen3.6-27B-Q4_K_M", "model identity")
 	edgeUpstream := flag.String("edge-upstream", os.Getenv("FAK_DEMO_UPSTREAM"), "edge mode: authenticated demo backend URL")
+	basePath := demoui.BasePathFlag(flag.CommandLine, "/qwen36codedemo")
+	publicReadonly := flag.Bool("public-readonly", false, "serve only the page and health endpoint without the edge credential")
 	flag.Parse()
 	listen := *addr
 	if !strings.Contains(listen, ":") {
@@ -86,7 +90,9 @@ func main() {
 	}
 	if *edgeUpstream != "" {
 		log.Printf("qwen36 coding demo HTTPS edge listening on %s", listen)
-		log.Fatal(http.ListenAndServe(listen, edgeHandler(*edgeUpstream)))
+		mux := http.NewServeMux()
+		demoui.MountWithBasePath(mux, *basePath, edgeHandler(*edgeUpstream))
+		log.Fatal(http.ListenAndServe(listen, mux))
 	}
 	key := strings.TrimSpace(os.Getenv("FAK_DEMO_GATEWAY_KEY"))
 	edgeKey := strings.TrimSpace(os.Getenv("FAK_DEMO_EDGE_KEY"))
@@ -99,8 +105,17 @@ func main() {
 	mux.HandleFunc("/api/health", s.health)
 	mux.HandleFunc("/api/run", s.run)
 	mux.HandleFunc("/api/fanout", s.fanout)
-	log.Printf("qwen36 coding demo backend listening on http://%s (both secrets server-side)", listen)
-	log.Fatal(http.ListenAndServe(listen, securityHeaders(requireEdgeKey(edgeKey, mux))))
+	app := http.Handler(securityHeaders(requireEdgeKey(edgeKey, mux)))
+	if *publicReadonly {
+		readonly := http.NewServeMux()
+		readonly.HandleFunc("/", s.page)
+		readonly.HandleFunc("/api/health", s.health)
+		app = securityHeaders(readonly)
+	}
+	root := http.NewServeMux()
+	demoui.MountWithBasePath(root, *basePath, app)
+	log.Printf("qwen36 coding demo backend listening on http://%s%s/ (both secrets server-side)", listen, demoui.NormalizeBasePath(*basePath))
+	log.Fatal(http.ListenAndServe(listen, root))
 }
 
 func edgeHandler(rawUpstream string) http.Handler {
