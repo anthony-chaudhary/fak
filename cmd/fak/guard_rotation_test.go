@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -115,7 +116,10 @@ func TestGuardRotationLauncherWitnessesFirstFailureThenRotatedEnv(t *testing.T) 
 			m[e.Name] = e.Value
 		}
 		launches = append(launches, m)
-		return exec.Command("cmd.exe", "/c", "exit 0"), nil
+		if runtime.GOOS == "windows" {
+			return exec.Command("cmd.exe", "/c", "exit 0"), nil
+		}
+		return exec.Command("sh", "-c", "exit 0"), nil
 	}
 	cmd, env, ok := rt.rotate([]string{"claude", "-p"}, [][2]string{{"CLAUDE_CONFIG_DIR", "/a"}}, "walled", nil, "trace", nil)
 	if !ok {
