@@ -749,7 +749,7 @@ func TestBudgetResetEmitsSharedNextReopenWitness(t *testing.T) {
 	if record.Move.Kind != sessionctl.MoveReanchor || record.Move.Render != sessionctl.RenderReopen || record.Move.Session != sessionctl.SessionInteractive {
 		t.Fatalf("move=%+v", record.Move)
 	}
-	if record.Move.Gate != "context-budget-reset" || record.Move.Source != "gateway-budget-reset" {
+	if record.Move.Gate != "served-session-reset" || record.Move.Source != "gateway-reset-hook" {
 		t.Fatalf("provenance=%+v", record.Move)
 	}
 	if record.Move.Payload != messages[0].Content || !record.Applied {

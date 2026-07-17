@@ -378,8 +378,8 @@ func RecordBudgetResetNext(trace, payload string) {
 	}
 	move := Move{
 		Kind: MoveReanchor, Render: RenderReopen,
-		Session: SessionInteractive, Gate: "context-budget-reset",
-		Source: "gateway-budget-reset", Payload: payload,
+		Session: SessionInteractive, Gate: "served-session-reset",
+		Source: "gateway-reset-hook", Payload: payload,
 	}
 	record, err := WitnessMove(move, ApplyResult{Applied: true})
 	if err != nil {

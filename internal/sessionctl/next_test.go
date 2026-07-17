@@ -268,7 +268,7 @@ func TestRecordBudgetResetNextReadbackAndNoop(t *testing.T) {
 	if got.Move.Kind != MoveReanchor || got.Move.Render != RenderReopen || got.Move.Session != SessionInteractive {
 		t.Fatalf("move=%+v", got.Move)
 	}
-	if got.Move.Gate != "context-budget-reset" || got.Move.Source != "gateway-budget-reset" {
+	if got.Move.Gate != "served-session-reset" || got.Move.Source != "gateway-reset-hook" {
 		t.Fatalf("provenance=%+v", got.Move)
 	}
 	if got.Move.Payload != payload || !got.Applied || got.Refusal != "" {
