@@ -328,8 +328,9 @@ func (c *Catalog) UndeclaredVerbs() []string {
 	return out
 }
 
-// mainDispatchVerbs returns the lowercased quoted verb tokens of the top-level
-// os.Args[1] dispatch switch in the given main.go bytes (sorted, deduped). It tracks
+// mainDispatchVerbs returns the lowercased quoted verb tokens of every top-level
+// dispatch switch in the given main.go bytes (sorted, deduped). It recognizes both
+// the legacy `switch os.Args[1]` and extracted `switch name` helper form. It tracks
 // brace DEPTH from the `switch os.Args[1] {` line, so a case body that itself contains
 // braces — e.g. the Landlock trampoline's `if err != nil { … }` — does not end the
 // scan early: a verb whose case sits AFTER such a body is still seen (the bug a naive
@@ -345,7 +346,7 @@ func mainDispatchVerbs(b []byte) []string {
 	for _, raw := range strings.Split(string(b), "\n") {
 		t := strings.TrimSpace(raw)
 		if !inSwitch {
-			if strings.HasPrefix(t, "switch os.Args[1]") {
+			if strings.HasPrefix(t, "switch os.Args[1]") || strings.HasPrefix(t, "switch name") {
 				inSwitch = true
 				depth = 1 // the `{` that opens the dispatch switch
 			}
@@ -356,7 +357,9 @@ func mainDispatchVerbs(b []byte) []string {
 		// line carries none anyway).
 		if depth == 1 {
 			if strings.HasPrefix(t, "default:") {
-				break // the dispatch switch's default arm — end of the verb set
+				inSwitch = false
+				depth = 0
+				continue // this dispatch switch ended; keep scanning for extracted helpers
 			}
 			if strings.HasPrefix(t, "case ") && strings.HasSuffix(t, ":") {
 				for _, m := range mainCaseRE.FindAllStringSubmatch(t, -1) {
@@ -370,7 +373,7 @@ func mainDispatchVerbs(b []byte) []string {
 		}
 		depth += strings.Count(t, "{") - strings.Count(t, "}")
 		if depth <= 0 {
-			break // the dispatch switch block closed
+			inSwitch = false // this dispatch switch closed; keep scanning for extracted helpers
 		}
 	}
 	sort.Strings(out)

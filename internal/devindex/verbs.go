@@ -299,6 +299,7 @@ var verbManifest = []Verb{
 	{Name: "sota-coverage-scorecard", Synopsis: "native SOTA-coverage scorecard: prior-art coverage as sota-debt, --check exits nonzero on HARD debt", Lane: "cmd"},
 	{Name: "spend", Synopsis: "cross-account spend rollup with provenance labels; --check gates unlabeled spend figures", Lane: "cmd"},
 	{Name: "stallscan", Synopsis: "host stall self-monitor: read low-usage churn signals to fingerprint a lockup; snapshot or --watch loop", Lane: "cmd"},
+	{Name: "steer", Synopsis: "steer open pull requests through guarded commit-audit and merge readiness checks", Lane: "cmd"},
 	{Name: "steering", Synopsis: "the steerability Slack surface for #steering-guard (status/report/alert/pin)", Lane: "cmd"},
 	{Name: "stopfailure", Synopsis: "operator surface for .dos/stop-failures breaker markers (plan/reset-stale/clear-reviewed)", Lane: "cmd"},
 	{Name: "superloop", Synopsis: "operator-intent meta-loop: walk a set of member loops/scorecards/gardens worst-first (list/explain/walk)", Lane: "cmd"},

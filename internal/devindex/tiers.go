@@ -289,6 +289,7 @@ var verbTiers = map[string]VerbTier{
 	"sota-coverage-scorecard":       TierDev,
 	"spend":                         TierDev,
 	"stallscan":                     TierDev,
+	"steer":                         TierDev,
 	"steering":                      TierDev,
 	"stopfailure":                   TierDev,
 	"superloop":                     TierDev,

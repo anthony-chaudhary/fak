@@ -3,6 +3,7 @@ package devindex
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -398,6 +399,30 @@ func TestDeadLLMSLinksNoFile(t *testing.T) {
 	}
 	if got := c.DeadLLMSLinks(); got != nil {
 		t.Errorf("no llms.txt should yield nil, got %v", got)
+	}
+}
+
+func TestMainDispatchVerbsIncludesExtractedHelperSwitch(t *testing.T) {
+	source := []byte(`package main
+func main() {
+	switch os.Args[1] {
+	case "steer":
+	default:
+	}
+}
+func dispatchPrimaryVerb(name string) bool {
+	switch name {
+	case "run", "commit":
+		return true
+	default:
+		return false
+	}
+}
+`)
+	got := mainDispatchVerbs(source)
+	want := []string{"commit", "run", "steer"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mainDispatchVerbs() = %v, want %v", got, want)
 	}
 }
 
