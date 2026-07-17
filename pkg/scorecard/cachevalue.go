@@ -280,6 +280,12 @@ const (
 	CacheValueGateSchema = "fak-cachevalue-gate/1"
 )
 
+// CacheValueGateDebtKey is the corpus debt integer the D2 GATE card (ComposeD2) writes: the
+// count of red D2 fences. ok == (debt == 0); a non-zero debt is the BLOCK signal a gate consumer
+// exits non-zero on. Exported so the `fak score cachevalue-gate` consumer names the same key the
+// fold stamps instead of a bare string literal.
+const CacheValueGateDebtKey = "cachevalue_gate_debt"
+
 // gateEps is the tolerance below which a share/honesty move is treated as flat, so float
 // formatting noise (0.034 stored vs re-derived) can never spuriously red or clear a fence.
 const gateEps = 1e-9
@@ -387,7 +393,7 @@ func ComposeD2(baseline CacheValueBaseline, candidate CacheValueFacts) Payload {
 		valuationBasisNonRegressionKPI(baseline.ValuationBasisHonesty, candHonesty),
 		divergenceCeilingKPI(divergence),
 	}
-	return Fold(CacheValueGateSchema, kpis, "cachevalue_gate_debt", nil, Messages{
+	return Fold(CacheValueGateSchema, kpis, CacheValueGateDebtKey, nil, Messages{
 		Finding:         "cache-value gate BLOCK: a candidate reintroduces a gross-up / unlabeled-on-warm valuation without a matching net gain",
 		FindingClean:    "cache-value gate PASS: net held or improved, gross tracks net, and every fak $ figure stays labelled",
 		NextAction:      "reject the change: converge the reward-hack back to net (value shed at the cache-read marginal, label the basis) instead of grossing up",
