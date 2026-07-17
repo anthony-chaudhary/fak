@@ -43,6 +43,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionreset"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 
@@ -1300,6 +1301,7 @@ func resetServedSessionOnBudget(freshContextTokens int) gateway.ResetOnBudgetFun
 		}, resetTx)
 		resetTransactions.Append(childState.ResetTransaction)
 		persistServeSessionRevision(ctx, child, childState)
+		sessionctl.RecordBudgetResetNext(child, seed.Recap)
 		return child, []agent.Message{{Role: agent.RoleSystem, Content: seed.Recap}}, true
 	}
 }

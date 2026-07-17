@@ -253,3 +253,31 @@ func TestRecordStopWitnessNextReadbackAndNoop(t *testing.T) {
 		t.Fatalf("noop records=%+v", got)
 	}
 }
+
+func TestRecordBudgetResetNextReadbackAndNoop(t *testing.T) {
+	const trace = "budget-reset-child"
+	ReadBudgetResetNextRecords(trace)
+
+	payload := "SESSION_RESET_RECAP: preserve exact bytes\nobjective continues"
+	RecordBudgetResetNext(trace, payload)
+	records := ReadBudgetResetNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("records=%d want 1", len(records))
+	}
+	got := records[0]
+	if got.Move.Kind != MoveReanchor || got.Move.Render != RenderReopen || got.Move.Session != SessionInteractive {
+		t.Fatalf("move=%+v", got.Move)
+	}
+	if got.Move.Gate != "context-budget-reset" || got.Move.Source != "gateway-budget-reset" {
+		t.Fatalf("provenance=%+v", got.Move)
+	}
+	if got.Move.Payload != payload || !got.Applied || got.Refusal != "" {
+		t.Fatalf("record=%+v", got)
+	}
+
+	RecordBudgetResetNext("", payload)
+	RecordBudgetResetNext(trace, "")
+	if got := ReadBudgetResetNextRecords(trace); len(got) != 0 {
+		t.Fatalf("no-op records=%+v", got)
+	}
+}

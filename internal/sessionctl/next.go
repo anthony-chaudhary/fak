@@ -363,6 +363,46 @@ func ReadStopWitnessNextRecords(trace string) []NextRecord {
 	return records
 }
 
+var (
+	budgetResetNextMu sync.Mutex
+	budgetResetNext   = map[string][]NextRecord{}
+)
+
+// RecordBudgetResetNext lowers one context-budget reset onto the shared
+// interactive Next contract. The recap re-anchors a newly reopened child
+// session while preserving the exact system-message payload.
+func RecordBudgetResetNext(trace, payload string) {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || payload == "" {
+		return
+	}
+	move := Move{
+		Kind: MoveReanchor, Render: RenderReopen,
+		Session: SessionInteractive, Gate: "context-budget-reset",
+		Source: "gateway-budget-reset", Payload: payload,
+	}
+	record, err := WitnessMove(move, ApplyResult{Applied: true})
+	if err != nil {
+		return
+	}
+	budgetResetNextMu.Lock()
+	budgetResetNext[trace] = append(budgetResetNext[trace], record)
+	budgetResetNextMu.Unlock()
+}
+
+// ReadBudgetResetNextRecords returns and clears independently re-readable
+// Next witnesses for context-budget reopens keyed by the child trace.
+func ReadBudgetResetNextRecords(trace string) []NextRecord {
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return nil
+	}
+	budgetResetNextMu.Lock()
+	defer budgetResetNextMu.Unlock()
+	records := append([]NextRecord(nil), budgetResetNext[trace]...)
+	delete(budgetResetNext, trace)
+	return records
+}
 func ReadContextAdvisoryNextRecords(trace string) []NextRecord {
 	trace = strings.TrimSpace(trace)
 	if trace == "" {

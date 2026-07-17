@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
 
 // TestApplySessionControlDispatchesEveryVerb proves each route verb lands on its
@@ -715,3 +716,54 @@ func findGatewaySession(rows []gateway.SessionState, trace string) (gateway.Sess
 
 // intPtr is a small helper so the pointer-typed Priority field reads cleanly.
 func intPtr(v int) *int { return &v }
+
+func TestBudgetResetEmitsSharedNextReopenWitness(t *testing.T) {
+	const trace = "trace-next-budget-reset"
+	const child = "trace-next-budget-reset-child"
+	serveSessions.Reset(trace)
+	serveSessions.Reset(child)
+	t.Cleanup(func() {
+		serveSessions.Reset(trace)
+		serveSessions.Reset(child)
+		sessionctl.ReadBudgetResetNextRecords(child)
+	})
+	serveSessions.Restore(trace, session.State{
+		TraceID: trace, ContinuationID: child, Run: session.Running,
+		Budget: session.Budget{TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 1, ContextTokensCap: 50},
+	})
+	sessionctl.ReadBudgetResetNextRecords(child)
+
+	hook := resetServedSessionOnBudget(50)
+	gotChild, messages, ok := hook(context.Background(), trace, []agent.Message{
+		{Role: agent.RoleUser, Content: "keep the objective"},
+		{Role: agent.RoleAssistant, Content: "working"},
+	})
+	if !ok || gotChild != child || len(messages) != 1 || messages[0].Role != agent.RoleSystem {
+		t.Fatalf("reset child=%q ok=%v messages=%+v", gotChild, ok, messages)
+	}
+	records := sessionctl.ReadBudgetResetNextRecords(child)
+	if len(records) != 1 {
+		t.Fatalf("Next records=%d want 1", len(records))
+	}
+	record := records[0]
+	if record.Move.Kind != sessionctl.MoveReanchor || record.Move.Render != sessionctl.RenderReopen || record.Move.Session != sessionctl.SessionInteractive {
+		t.Fatalf("move=%+v", record.Move)
+	}
+	if record.Move.Gate != "context-budget-reset" || record.Move.Source != "gateway-budget-reset" {
+		t.Fatalf("provenance=%+v", record.Move)
+	}
+	if record.Move.Payload != messages[0].Content || !record.Applied {
+		t.Fatalf("record=%+v rendered=%q", record, messages[0].Content)
+	}
+}
+
+func TestBudgetResetNoopEmitsNoSharedNextWitness(t *testing.T) {
+	const trace = "trace-next-budget-reset-noop"
+	sessionctl.ReadBudgetResetNextRecords(trace)
+	if hook := resetServedSessionOnBudget(0); hook != nil {
+		t.Fatal("disabled reset hook must be nil")
+	}
+	if records := sessionctl.ReadBudgetResetNextRecords(trace); len(records) != 0 {
+		t.Fatalf("Next records=%+v want none", records)
+	}
+}
