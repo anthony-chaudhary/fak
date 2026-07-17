@@ -75,6 +75,15 @@ func imageBlockByteWeight(el json.RawMessage) (imgs, imgBytes int, ok bool) {
 	return i, b, true
 }
 
+// messageContentHasImage reports whether a messages[] element carries at least one image block
+// (top-level or nested in a tool_result). It is the boolean the compaction tombstone path uses to
+// decide a non-text originating turn is MEDIA (worth a restore handle) rather than a bare
+// tool_result turn (recoverable from the tool's own re-run).
+func messageContentHasImage(el json.RawMessage) bool {
+	imgs, _, ok := imageBlockByteWeight(el)
+	return ok && imgs > 0
+}
+
 // contentImageWeight sums the image-block count and raw byte weight in a `content` value (a message
 // content array or a nested tool_result content array). A bare-string content has no blocks. It
 // recurses one level into a tool_result block's own content so an image returned BY a tool is

@@ -78,6 +78,14 @@ const compactTombstonePrefix = "[fak] originating task (compacted): "
 // fidelity path).
 const compactTombstoneCap = 240
 
+// compactMediaTombstone is the generic excerpt for a dropped originating turn that carries an image
+// (or other non-text media) instead of text. There is nothing to excerpt, but the turn must still
+// leave an orientation line and — via the accompanying bytes — a fak_context_restore handle, so a
+// resuming model knows the session opened with a media turn it can page back in, rather than seeing
+// only a bare turn count. It stands where the text excerpt would; the id=<hex> handle is appended
+// by compactStubContent exactly as for a text tombstone.
+const compactMediaTombstone = "[media turn — image or non-text content]"
+
 // compactRestoreIDField is the token in the tombstone stub that carries the CALLABLE handle for the
 // dropped originating task: a content-address (sha256 hex, the ctxplan.Digest scheme) a resuming
 // model can present to fak_context_restore to page the full task bytes back in. The lossy excerpt is
@@ -1288,7 +1296,17 @@ func originatingTaskExcerptAndBytes(elems []json.RawMessage, dropStart, keepStar
 	}
 	text, ok := elementTextContent(elems[firstUser])
 	if !ok {
-		return "", nil // tool/image blocks — not a task to excerpt; keep the bare stub
+		// The originating turn is not pure text (an image or tool block). There is no text to
+		// excerpt, but a MEDIA turn must still leave a recovery edge rather than vanishing into a
+		// bare turn count: return a generic marker excerpt AND the full bytes so the caller mints a
+		// content-address handle and stashes them, letting a resuming model page the original media
+		// turn back in via fak_context_restore. A non-media non-text turn (a tool_result-only turn)
+		// still keeps the bare stub — those are recoverable from the tool's own re-run, not lost
+		// context the way a pasted image is.
+		if messageContentHasImage(elems[firstUser]) {
+			return compactMediaTombstone, elems[firstUser]
+		}
+		return "", nil
 	}
 	// Strip a leading [fak:goal] marker a preamble may carry (defensive — a marked goal is hoisted,
 	// not dropped, so this path rarely sees one), then collapse all whitespace runs to single spaces

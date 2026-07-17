@@ -170,3 +170,66 @@ func TestCompactionDoesNotWedgeOnLargeTrailingImage(t *testing.T) {
 		t.Fatalf("the trailing image was dropped; a recent large item must be kept, not shed")
 	}
 }
+
+// TestCompactionMintsRestoreHandleForDroppedOriginatingImage pins the media-restore fix: when the
+// session's ORIGINATING turn is an image (not text) and compaction drops it, the outcome must carry
+// a restore handle (RestoreID + RestoreBytes) so a resuming model can page the image back in — not
+// vanish into a bare turn count the way it did before. A text originating turn already got this;
+// a media one must too.
+func TestCompactionMintsRestoreHandleForDroppedOriginatingImage(t *testing.T) {
+	type block map[string]any
+	// First turn: an image (the originating turn). Then a sprawled text middle. No breakpoint on
+	// the image turn, a system breakpoint anchors the (empty) protected prefix so the whole array
+	// including the image is compactible.
+	msgs := []map[string]any{
+		{"role": "user", "content": []block{
+			{"type": "text", "text": "analyze this diagram"},
+			imageBlock(30000),
+		}},
+	}
+	for i := 1; i < 24; i++ {
+		role := "user"
+		if i%2 == 0 {
+			role = "assistant"
+		}
+		msgs = append(msgs, map[string]any{
+			"role":    role,
+			"content": []block{{"type": "text", "text": strings.Repeat("later turn text ", 50) + itoa(i)}},
+		})
+	}
+	body := map[string]any{
+		"model":      "claude-sonnet-4-6",
+		"max_tokens": 1024,
+		"system": []block{
+			{"type": "text", "text": strings.Repeat("policy. ", 40), "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+		"messages": msgs,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	_, outcome := CompactAnthropicHistoryWithOutcome(raw, 3000)
+	if outcome.Reason != CompactReasonNone {
+		t.Fatalf("compaction did not fire: reason=%q", outcome.Reason)
+	}
+	if outcome.Dropped <= 0 {
+		t.Fatalf("nothing dropped; the originating image turn should have been shed")
+	}
+	// The originating image turn was dropped → a restore handle must be minted for it.
+	if outcome.RestoreID == "" {
+		t.Fatalf("dropped originating IMAGE turn minted no RestoreID — the image is unrecoverable (the bug)")
+	}
+	if len(outcome.RestoreBytes) == 0 {
+		t.Fatalf("RestoreID set but no RestoreBytes stashed — nothing to page back in")
+	}
+	// The restore bytes must be the original image turn (carry the image block).
+	if !strings.Contains(string(outcome.RestoreBytes), `"image"`) {
+		t.Fatalf("RestoreBytes do not carry the image block; wrong turn was content-addressed")
+	}
+	// A resuming model must be able to SEE the handle in the emitted stub.
+	if !strings.Contains(outcome.RestoreExcerpt, "media turn") {
+		t.Fatalf("restore excerpt %q does not mark the dropped turn as media", outcome.RestoreExcerpt)
+	}
+}
