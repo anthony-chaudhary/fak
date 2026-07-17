@@ -547,3 +547,21 @@ on `http://127.0.0.1:8131/v1`) through the real Claude Code CLI:
   already-adjudicated turn (that upstream's true-streaming rung is the
   `/v1/chat/completions` proxy). Witness:
   `TestAnthropicMessagesPassthroughStreamsLiveAndAdjudicates`.
+
+### Moonshot Kimi K3 (opt-in)
+
+Kimi K3 is available through Moonshot's global OpenAI-compatible API. fak applies
+K3's native wire contract automatically for model `kimi-k3`: it sends
+`reasoning_effort: "max"`, omits generic `temperature`/`top_p` defaults, and
+preserves `reasoning_content` when an assistant turn is replayed after tool use.
+
+```bash
+MOONSHOT_API_KEY=... ./scripts/claude-kimi-k3.sh --probe "say pong"
+# PowerShell:
+$env:MOONSHOT_API_KEY='...'; ./scripts/claude-kimi-k3.ps1 --probe "say pong"
+```
+
+Override the endpoint, model, or credential name with `FAK_KIMI_K3_BASE_URL`,
+`FAK_KIMI_K3_MODEL`, and `FAK_KIMI_K3_API_KEY_ENV`. This launcher is opt-in and is
+not installed by the default `--install` flow until it has live route and coding
+witnesses under the common graduation bar.

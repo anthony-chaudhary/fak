@@ -433,6 +433,13 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		if err != nil {
 			return nil, err
 		}
+		if adapter.Provider() == ProviderOpenAI && isKimiK3Model(modelID) {
+			// Moonshot fixes K3 sampling server-side and accepts native effort only.
+			reqBody, err = normalizeKimiK3Request(reqBody)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	// Transparent hop: when the inbound client supplied its own upstream credential
 	// (passthrough), authenticate with THAT key rather than the planner's. Otherwise use
