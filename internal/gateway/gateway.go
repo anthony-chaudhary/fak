@@ -2676,6 +2676,7 @@ func recoverRecurrentEvictUnsupported(r any) (error, bool) {
 // output/context budgets here. Planner errors keep the old behavior: no usage was
 // reported, so there is nothing to debit beyond the turn admission already taken.
 func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	messages = applyPositiveComplementEmit(messages, positiveComplementEmitEnabled())
 	// Mark the trace as holding an open model request so the agents pane can show its
 	// in-flight age (#2627). The window closes when this call returns; adjudication then
 	// stamps last_tool/idle from the served turn. Cleared on every exit path via defer.

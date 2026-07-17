@@ -103,4 +103,5 @@ func (a *negframeOutputAudit) writeMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_negframe_output_scanned_total",
 		"Model-output responses classified by the negframe output shadow (post-sampling).", "counter")
 	fmt.Fprintf(b, "fak_negframe_output_scanned_total{surface=\"model_output\"} %d\n", a.scanned.Load())
+	writePositiveComplementMetrics(b)
 }

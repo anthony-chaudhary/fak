@@ -1,6 +1,7 @@
 package negframe
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -187,4 +188,51 @@ func TestReframeResultCarriesComplementTelemetry(t *testing.T) {
 	if !reflect.DeepEqual(r.ComplementClasses, []ComplementClass{ComplementExact}) {
 		t.Fatalf("complement telemetry = %v", r.ComplementClasses)
 	}
+}
+
+func TestResolvePositiveComplement(t *testing.T) {
+	domain := Domain{Name: "delivery", Members: []string{"queued", "running", "shipped"}}
+	got := ResolvePositive("not running", domain)
+	if !got.Exact || got.FallbackText != "" {
+		t.Fatalf("ResolvePositive = %+v, want exact complement", got)
+	}
+	if want := []string{"queued", "shipped"}; !reflect.DeepEqual(got.Members, want) {
+		t.Fatalf("members = %v, want %v", got.Members, want)
+	}
+}
+
+func TestResolveFallback(t *testing.T) {
+	for name, domain := range map[string]Domain{
+		"open":      {Name: "open"},
+		"malformed": {Name: "bad", Members: []string{"on", "on"}},
+		"unbounded": {Name: "large", Members: makeMembers(MaxPositiveDomainMembers + 1)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := ResolvePositive("not on", domain)
+			if got.Exact || got.Reason == "" || got.FallbackText == "" {
+				t.Fatalf("ResolvePositive fallback = %+v", got)
+			}
+			if got.Members != nil {
+				t.Fatalf("fallback leaked partial members: %v", got.Members)
+			}
+		})
+	}
+}
+
+func TestResolveDeterministic(t *testing.T) {
+	domain := Domain{Name: "mode", Members: []string{"safe", "fast", "audit"}}
+	first := ResolvePositive("not fast", domain)
+	for i := 0; i < 100; i++ {
+		if got := ResolvePositive("not fast", domain); !reflect.DeepEqual(got, first) {
+			t.Fatalf("run %d = %+v, first = %+v", i, got, first)
+		}
+	}
+}
+
+func makeMembers(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("member-%d", i)
+	}
+	return out
 }

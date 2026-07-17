@@ -97,6 +97,74 @@ type Domain struct {
 	Members []string `json:"members"`
 }
 
+// MaxPositiveDomainMembers bounds L2 enumeration. Larger domains are treated as open so the
+// operator never emits a partial residual while pretending it is the exact complement.
+const MaxPositiveDomainMembers = 64
+
+// PositiveResolution is the finite-domain L2 result. Members is populated only when the
+// complement is exact; fallback_text carries the conservative L1 prose result otherwise.
+type PositiveResolution struct {
+	Exact        bool     `json:"exact"`
+	Domain       string   `json:"domain,omitempty"`
+	Negated      string   `json:"negated,omitempty"`
+	Members      []string `json:"members,omitempty"`
+	FallbackText string   `json:"fallback_text,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+}
+
+// ResolvePositive computes D \ {X} only for a finite, closed, bounded Domain. Invalid, open, or
+// oversized domains fall back atomically to the existing L1 prose reframe: no partial set leaks.
+// Domain member order is authored and therefore preserved in the exact residual.
+func ResolvePositive(negated string, domain Domain) PositiveResolution {
+	bare, marked := StripNegation(negated)
+	if !marked {
+		bare = strings.TrimSpace(negated)
+	}
+	fallback := func(reason string) PositiveResolution {
+		return PositiveResolution{
+			Domain:       strings.TrimSpace(domain.Name),
+			Negated:      bare,
+			FallbackText: Reframe(negated),
+			Reason:       reason,
+		}
+	}
+	if strings.TrimSpace(domain.Name) == "" || len(domain.Members) == 0 {
+		return fallback("domain is not finite and closed")
+	}
+	if len(domain.Members) > MaxPositiveDomainMembers {
+		return fallback("domain exceeds bounded enumeration limit")
+	}
+	seen := make(map[string]struct{}, len(domain.Members))
+	canonical := ""
+	for _, member := range domain.Members {
+		member = strings.TrimSpace(member)
+		key := strings.ToLower(member)
+		if member == "" {
+			return fallback("domain contains an empty member")
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return fallback("domain contains duplicate members")
+		}
+		seen[key] = struct{}{}
+		if strings.EqualFold(member, bare) {
+			canonical = member
+		}
+	}
+	if canonical == "" {
+		return fallback("negated term is outside the domain")
+	}
+	members := complementOf(domain, canonical)
+	if len(members) == 0 {
+		return fallback("domain has no positive residual")
+	}
+	return PositiveResolution{
+		Exact:   true,
+		Domain:  strings.TrimSpace(domain.Name),
+		Negated: canonical,
+		Members: members,
+	}
+}
+
 // complementRegistry is the declarative L2 substrate: the enumerable domains over which "not X"
 // resolves to an exact positive or a candidate set. Each domain is grounded in a real fak
 // vocabulary, so a resolution is a TRUE substitution, not a plausible-looking guess:
