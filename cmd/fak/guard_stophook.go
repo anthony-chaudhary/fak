@@ -372,6 +372,7 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	finalFlag := fs.Int("final", guardStopHookFinalFromEnv(), "escalate the continue guidance to a final warning at this consecutive deny-all depth")
 	sameStopFlag := fs.Int("same-stop", guardStopHookSameStopFromEnv(), "hard give-up depth on the SAME-ISSUE path: end the session after this many consecutive deny-all turns proposing the IDENTICAL refused action (same tool+reason). A varied session never reaches it")
 	operatorDirectedFlag := fs.String("operator-directed", os.Getenv(guardStopHookOperatorDirectedEnvMode), "headless 'stopped to ask a human' gate: off|shadow|warn|enforce")
+	operatorQuestionFlag := fs.String("operator-question", os.Getenv(guardStopHookOperatorQuestionEnvMode), "headless evidence-first operator-question gate (native ExitPlanMode/AskUserQuestion adjudication): off|shadow|warn|enforce")
 	hardwareGateFlag := fs.String("hardware-gate", os.Getenv(guardStopHookHardwareGateEnvMode), "headless 'no local hardware' redirect gate: off|shadow|warn|enforce")
 	handoffModeFlag := fs.String("task-handoff-mode", os.Getenv(guardTaskHandoffEnvMode), "completion handoff gate: off|shadow|enforce")
 	witnessedDoneFlag := fs.String("witnessed-done", os.Getenv(guardWitnessedDoneModeEnv), "off|shadow|enforce (require narrated completion to name a witnessed stamped commit)")
@@ -581,8 +582,10 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 		}
 		// Evidence-first operator-question rung: consumes native tool inputs from the
 		// transcript and runs after the linguistic operator-directed sensor. It is
-		// harness-agnostic and shares that rung's install-time mode/operator-absence cap.
-		oqExit, oqDisp, oqHarness, oqFired := runGuardOperatorQuestionGate(stderr, *operatorDirectedFlag, transcriptPath)
+		// harness-agnostic and carries its OWN dial (--operator-question /
+		// FAK_GUARD_OPERATOR_QUESTION_MODE), which defaults at install to inherit the resolved
+		// operator-directed posture (and thus its operator-absence cap) but can be tuned apart.
+		oqExit, oqDisp, oqHarness, oqFired := runGuardOperatorQuestionGate(stderr, *operatorQuestionFlag, transcriptPath, rec.Session)
 		if oqFired {
 			rec.Disposition = string(oqDisp)
 			rec.Kind = "operator-question:" + oqHarness
@@ -1012,6 +1015,13 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		// the right default without threading a second install param. An operator who wants to tune
 		// it independently sets FAK_GUARD_HARDWARE_GATE_MODE / --hardware-gate on the child.
 		{guardStopHookHardwareGateEnvMode, guardHardwareGateNormalizedOrWarn(operatorDirectedMode)},
+		// Pin the operator-question mode. Same rationale as the hardware gate: the evidence-first
+		// ExitPlanMode/AskUserQuestion rung is an operator-absence-capped headless gate, so it
+		// INHERITS the resolved operator-directed posture as its default — a session that split out
+		// this dial but tuned neither behaves exactly as before. An operator who wants the
+		// plan/question rung on a different posture than the prose sensor sets
+		// FAK_GUARD_OPERATOR_QUESTION_MODE / --operator-question on the child.
+		{guardStopHookOperatorQuestionEnvMode, guardOperatorQuestionNormalizedOrWarn(operatorDirectedMode)},
 	}
 	// #2539: wire the trajctl ledger into the hook children so the Stop hook's turn-end
 	// scorers and the PreCompact boundary twin have a curve to append to. Unresolvable repo

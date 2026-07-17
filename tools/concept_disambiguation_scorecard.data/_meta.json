@@ -83,10 +83,48 @@
           "category": "test-only",
           "reason": "grandfathered test filename in the generated Python compatibility inventory",
           "token": "cuda_arch_matrix_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd-layer command entrypoint that installs the existing pkg/scorecard CacheValue D2 gate; plumbing, not a new cache concept",
+          "token": "cmdCacheValueGateScore"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd-layer plumbing that installs/consumes the existing pkg/scorecard CacheValue D2 gate; not a new concept",
+          "token": "cacheValueGateFactsFromReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd-layer plumbing that installs/consumes the existing pkg/scorecard CacheValue D2 gate; not a new concept",
+          "token": "loadCacheValueGateBaseline"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd-layer plumbing that installs/consumes the existing pkg/scorecard CacheValue D2 gate; not a new concept",
+          "token": "runCacheValueGateScore"
+        },
+        {
+          "category": "incidental",
+          "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
+          "token": "CacheValueBaseline"
+        },
+        {
+          "category": "incidental",
+          "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
+          "token": "CacheValueFacts"
+        },
+        {
+          "category": "incidental",
+          "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
+          "token": "CacheValueGateDebtKey"
         }
       ],
       "id": "cache",
       "ignore": [
+        "CacheValueBaseline",
+        "CacheValueFacts",
+        "CacheValueGateDebtKey",
         "FAK_TOKEN_CACHE",
         "FAK_TOKEN_CACHE_MAX_BYTES",
         "TokenCacheDir",
@@ -94,6 +132,7 @@
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
         "cacheBurstBacktest",
+        "cacheValueGateFactsFromReport",
         "cache_trace_test",
         "cacheable",
         "cachebreakevents",
@@ -128,6 +167,7 @@
         "cachevalue_test",
         "cachewritemult",
         "caching",
+        "cmdCacheValueGateScore",
         "compactcachereads",
         "compactlastcacherd",
         "cuda_arch_matrix",
@@ -141,6 +181,7 @@
         "infercachedhits",
         "infercachedtokens",
         "lastcacherd",
+        "loadCacheValueGateBaseline",
         "maybeupgradeanthropiccachettl1h",
         "normalizedSchemaCacheCap",
         "normalizedSchemaCacheLen",
@@ -150,6 +191,7 @@
         "promptcachehittokens",
         "promptcachemisstokens",
         "pycache",
+        "runCacheValueGateScore",
         "tokencache",
         "uncached",
         "usercachedir"
@@ -232,6 +274,91 @@
           "category": "incidental",
           "reason": "File-stem/reason-token spelling of the positioned gateVerbTierTree gate (covg-guard-gate-gateverbtiertree); the same concept, not a distinct one.",
           "token": "gate_verbtier"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing shared Slack delivery helper reused by the operator-question escalation; not a new guard concept",
+          "token": "enqueueGuardSessionThreadNotice"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment variable name for the existing operator-question gate mode, not a distinct guard concept",
+          "token": "guardStopHookOperatorQuestionEnvMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment variable alias for the existing operator-question gate mode; not a separate guard concept",
+          "token": "FAK_GUARD_OPERATOR_QUESTION_MODE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Parser helper for the existing operator-question gate mode; not a separate guard concept",
+          "token": "normalizeGuardOperatorQuestionMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "Warning wrapper around the existing operator-question mode parser; not a separate guard concept",
+          "token": "guardOperatorQuestionNormalizedOrWarn"
+        },
+        {
+          "category": "incidental",
+          "reason": "Actuator function for the already positioned operator-question gate; not a separate guard concept",
+          "token": "runGuardOperatorQuestionGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Slack source label for the existing operator-question gate escalation; not a separate guard concept",
+          "token": "guardOperatorQuestionEscalationSlackSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Test seam for the existing operator-question gate escalation; not a separate guard concept",
+          "token": "guardOperatorQuestionEscalationSink"
+        },
+        {
+          "category": "incidental",
+          "reason": "Delivery helper for the existing operator-question gate escalation; not a separate guard concept",
+          "token": "enqueueGuardOperatorQuestionEscalationFailOpen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Renderer for the existing operator-question gate escalation; not a separate guard concept",
+          "token": "guardOperatorQuestionEscalationSlackText"
+        },
+        {
+          "category": "incidental",
+          "reason": "Formatting helper for options on the existing operator-question gate escalation; not a separate guard concept",
+          "token": "guardOperatorQuestionOptionLabels"
+        },
+        {
+          "category": "incidental",
+          "reason": "Comment cross-reference naming the existing guard operator-question source file; not a separate gate concept",
+          "token": "guard_operator_question"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd-layer plumbing that installs/consumes the existing pkg/scorecard CacheValue D2 gate; not a new concept",
+          "token": "cacheValueGateFactsFromReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd-layer plumbing that installs/consumes the existing pkg/scorecard CacheValue D2 gate; not a new concept",
+          "token": "loadCacheValueGateBaseline"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd-layer plumbing that installs/consumes the existing pkg/scorecard CacheValue D2 gate; not a new concept",
+          "token": "runCacheValueGateScore"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd-layer plumbing that installs/consumes the existing pkg/scorecard CacheValue D2 gate; not a new concept",
+          "token": "cmdCacheValueGateScore"
+        },
+        {
+          "category": "incidental",
+          "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
+          "token": "CacheValueGateDebtKey"
         }
       ],
       "exclude": [
@@ -246,6 +373,12 @@
       ],
       "id": "guard-gate",
       "ignore": [
+        "CacheValueGateDebtKey",
+        "FAK_GUARD_OPERATOR_QUESTION_MODE",
+        "cacheValueGateFactsFromReport",
+        "cmdCacheValueGateScore",
+        "enqueueGuardOperatorQuestionEscalationFailOpen",
+        "enqueueGuardSessionThreadNotice",
         "fleetbarecommitguard",
         "gate_test",
         "gate_verbtier",
@@ -258,10 +391,17 @@
         "guardEquivalentRestartLimit",
         "guardEquivalentRestartStatus",
         "guardEquivalentRestarts",
+        "guardOperatorQuestionEscalationSink",
+        "guardOperatorQuestionEscalationSlackSource",
+        "guardOperatorQuestionEscalationSlackText",
+        "guardOperatorQuestionNormalizedOrWarn",
+        "guardOperatorQuestionOptionLabels",
+        "guardStopHookOperatorQuestionEnvMode",
         "guardWindowsArgvPreflight",
         "guardWindowsCommandLineUnits",
         "guardWindowsQuotedArgUnits",
         "guard_bypass",
+        "guard_operator_question",
         "guardarbitrateflagvalue",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
@@ -281,9 +421,13 @@
         "guardtrajectorywarningline",
         "guardwireretryhop",
         "installguardmcpregistration",
+        "loadCacheValueGateBaseline",
         "newguardlaunchnonce",
+        "normalizeGuardOperatorQuestionMode",
         "readguardstopsledger",
         "readguardstoptranscript",
+        "runCacheValueGateScore",
+        "runGuardOperatorQuestionGate",
         "summarizeguardstops",
         "ungated",
         "unguarded"
@@ -307,6 +451,11 @@
           "category": "incidental",
           "reason": "grandfathered visual generator filename in the generated Python compatibility inventory",
           "token": "gen_session_effectiveness_svg"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing shared session-thread delivery helper reused by the operator-question escalation; not a new runtime concept",
+          "token": "enqueueGuardSessionThreadNotice"
         }
       ],
       "id": "session-runtime",
@@ -314,6 +463,7 @@
         "confusedsessions",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
+        "enqueueGuardSessionThreadNotice",
         "gen_session_effectiveness_svg",
         "guardsessiontempdir",
         "interactivesession",
@@ -616,10 +766,28 @@
           "category": "test-only",
           "reason": "grandfathered test filename in the generated Python compatibility inventory",
           "token": "scorecard_since_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "Data row carrying one existing scorecard axis into the question resolver; not a score-debt concept",
+          "token": "ScorecardAxis"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only adapter over existing scorecards for operator-question resolution; not a score-debt concept",
+          "token": "ScorecardAxisOracle"
+        },
+        {
+          "category": "incidental",
+          "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
+          "token": "CacheValueGateDebtKey"
         }
       ],
       "id": "score-debt",
       "ignore": [
+        "CacheValueGateDebtKey",
+        "ScorecardAxis",
+        "ScorecardAxisOracle",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
         "scorecardPath",
@@ -825,12 +993,29 @@
           "category": "incidental",
           "reason": "Exported live-verdict entry point wrapping the pure decode-interleave planner; internal to the #4974 feature, not shared vocabulary.",
           "token": "PlanDecodeInterleave"
+        },
+        {
+          "category": "incidental",
+          "reason": "Comment cross-reference to the existing operator-question plan resolver; not a new plan concept",
+          "token": "PlanResolver"
+        },
+        {
+          "category": "false-positive",
+          "reason": "string map-key from the existing scorecard cachevalue corpus schema (pkg/scorecard/cachevalue.go); the 'candidate' plan-root match is a false positive on a JSON field name",
+          "token": "candidate_fak_share_gross"
+        },
+        {
+          "category": "false-positive",
+          "reason": "string map-key from the existing scorecard cachevalue corpus schema (pkg/scorecard/cachevalue.go); the 'candidate' plan-root match is a false positive on a JSON field name",
+          "token": "candidate_fak_share_net"
         }
       ],
       "exclude": [
+        "candidate_fak_share_gross",
+        "candidate_fak_share_net",
+        "explanat",
         "plane",
-        "plank",
-        "explanat"
+        "plank"
       ],
       "id": "plan",
       "ignore": [
@@ -838,6 +1023,7 @@
         "Candidates",
         "DecodeInterleavePlan",
         "PlanDecodeInterleave",
+        "PlanResolver",
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
@@ -952,12 +1138,14 @@
       ],
       "id": "loop",
       "ignore": [
+        "BackgroundLoop",
         "ClassPollingLoop",
         "POLLING_LOOP",
         "appendlooprunevent",
         "buildtuiloopreport",
         "defaultloopledger",
         "defaultloopregistry",
+        "dispatch_loop",
         "doomloop_test",
         "fakbgloopup",
         "fakloopledger",
@@ -974,14 +1162,12 @@
         "loopsnapshot",
         "loopsnapshotforid",
         "loopstate",
+        "meta_superloop",
         "noloopledger",
         "q8prefillneedstokenloop",
         "recordloop",
         "runloop",
-        "tuiloopreport",
-        "BackgroundLoop",
-        "meta_superloop",
-        "dispatch_loop"
+        "tuiloopreport"
       ],
       "min_files": 3,
       "name": "Loop family",

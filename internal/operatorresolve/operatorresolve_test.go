@@ -127,6 +127,83 @@ func TestGitIsolationOracleRunsOnlyReadOnlyGitCommands(t *testing.T) {
 	}
 }
 
+type lsFilesRunner struct {
+	tracked map[string]bool
+	calls   [][]string
+}
+
+func (r *lsFilesRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, append([]string{name}, args...))
+	if len(args) == 3 && args[0] == "ls-files" && args[1] == "--" && r.tracked[args[2]] {
+		return []byte(args[2] + "\n"), nil
+	}
+	return nil, nil
+}
+
+func TestTrackedArtifactOracleTakesExistingTrackedFile(t *testing.T) {
+	runner := &lsFilesRunner{tracked: map[string]bool{"internal/foo/foo.go": true}}
+	q := operatorquestion.OperatorQuestion{
+		Kind:     operatorquestion.ChooseApproach,
+		Question: "Should I create a new file or edit the existing one?",
+		Options: []operatorquestion.Option{
+			{Label: "Edit `internal/foo/foo.go`", Rationale: "extend the current implementation"},
+			{Label: "Create internal/foo/foo_v2.go", Rationale: "a parallel module"},
+		},
+	}
+	got, err := (Resolver{Oracles: []Oracle{TrackedArtifactOracle{Runner: runner}}}).Resolve(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Disposition != choicetriage.TakeObvious || got.Reason != ReasonWitnessedOption || got.Action != q.Options[0].Label {
+		t.Fatalf("got %+v", got)
+	}
+	if len(got.Options) != 2 || len(got.Options[0].Evidence) != 1 || got.Options[0].Evidence[0].Oracle != "tracked-artifact-readonly" {
+		t.Fatalf("missing per-option evidence: %+v", got.Options)
+	}
+	for _, call := range runner.calls {
+		joined := strings.Join(call, " ")
+		if !strings.HasPrefix(joined, "git ls-files -- ") {
+			t.Fatalf("mutating or undeclared command: %q", joined)
+		}
+	}
+}
+
+func TestTrackedArtifactOracleAbstainsWithoutCreateEditFraming(t *testing.T) {
+	runner := &lsFilesRunner{tracked: map[string]bool{"internal/foo/foo.go": true}}
+	// The commit-isolation fold names no create/edit framing, so the artifact oracle
+	// must abstain (run no git) and leave the decision to the other oracles / default.
+	q := operatorquestion.OperatorQuestion{
+		Kind:     operatorquestion.ChooseApproach,
+		Question: "How should I isolate this commit?",
+		Options:  []operatorquestion.Option{{Label: "Commit explicit owned paths"}, {Label: "Wait"}},
+	}
+	got, err := (Resolver{Oracles: []Oracle{TrackedArtifactOracle{Runner: runner}}}).Resolve(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Disposition != choicetriage.FreshContext || got.Reason != ReasonNeedsInvestigation {
+		t.Fatalf("abstain should fall to FreshContext, got %+v", got)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("abstaining oracle must not run git: %v", runner.calls)
+	}
+}
+
+func TestTrackedArtifactOracleAbstainsWhenNoOptionNamesAPath(t *testing.T) {
+	runner := &lsFilesRunner{}
+	q := operatorquestion.OperatorQuestion{
+		Kind:     operatorquestion.ChooseApproach,
+		Question: "Should I create a new helper or edit inline?",
+		Options:  []operatorquestion.Option{{Label: "New helper"}, {Label: "Inline it"}},
+	}
+	if _, err := (Resolver{Oracles: []Oracle{TrackedArtifactOracle{Runner: runner}}}).Resolve(context.Background(), q); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("no path token means no git call: %v", runner.calls)
+	}
+}
+
 func TestClaudeAndCodexQuestionsShareOneResolverPath(t *testing.T) {
 	payloads := []operatorquestion.NativeGate{
 		{HarnessCommand: "claude", Tool: "AskUserQuestion", Payload: []byte(`{"questions":[{"header":"Isolation","multiSelect":false,"question":"How should I isolate this commit?","options":[{"label":"Commit explicit owned paths","description":"owned files only"},{"label":"Wait","description":"wait for peers"}]}]}`)},
@@ -157,5 +234,59 @@ func TestClaudeAndCodexQuestionsShareOneResolverPath(t *testing.T) {
 	}
 	if oracleCalls != 4 {
 		t.Fatalf("shared oracle calls=%d want 4", oracleCalls)
+	}
+}
+
+func TestScorecardAxisOracleTakesReversibleDominantOptionAndRecordsAxis(t *testing.T) {
+	q := operatorquestion.OperatorQuestion{
+		Kind:    operatorquestion.ChooseApproach,
+		Options: []operatorquestion.Option{{Label: "Fast path"}, {Label: "Legacy path"}},
+	}
+	resolver := Resolver{Oracles: []Oracle{ScorecardAxisOracle{
+		Axes: []ScorecardAxis{
+			{Name: "quality-score", Scores: map[string]float64{"Fast path": 94, "Legacy path": 81}, Witness: "quality-ledger@r17"},
+			{Name: "operator-heaviness-score", Scores: map[string]float64{"Fast path": 2, "Legacy path": 4}, LowerIsBetter: true, Witness: "heaviness-ledger@r9"},
+		},
+		Reversible: map[string]bool{"Fast path": true, "Legacy path": true},
+	}}}
+
+	got, err := resolver.Resolve(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Disposition != choicetriage.TakeObvious || got.Action != "Fast path" {
+		t.Fatalf("got disposition=%s action=%q, want TAKE_OBVIOUS Fast path", got.Disposition, got.Action)
+	}
+	if !strings.Contains(got.Options[0].Evidence[0].Claim, "quality-score") || !strings.Contains(got.Options[0].Evidence[0].Witness, "quality-ledger@r17") {
+		t.Fatalf("missing deciding axis or witness in evidence: %+v", got.Options[0].Evidence)
+	}
+}
+
+func TestScorecardAxisOracleAbstainsOnTieOrIrreversibleOption(t *testing.T) {
+	q := operatorquestion.OperatorQuestion{
+		Kind:    operatorquestion.ChooseApproach,
+		Options: []operatorquestion.Option{{Label: "A"}, {Label: "B"}},
+	}
+	for _, tc := range []struct {
+		name       string
+		scores     map[string]float64
+		reversible map[string]bool
+	}{
+		{name: "tie", scores: map[string]float64{"A": 90, "B": 90}, reversible: map[string]bool{"A": true, "B": true}},
+		{name: "irreversible", scores: map[string]float64{"A": 95, "B": 80}, reversible: map[string]bool{"A": true, "B": false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := Resolver{Oracles: []Oracle{ScorecardAxisOracle{
+				Axes:       []ScorecardAxis{{Name: "steerability-score", Scores: tc.scores, Witness: "steerability-ledger@r4"}},
+				Reversible: tc.reversible,
+			}}}
+			got, err := resolver.Resolve(context.Background(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Disposition != choicetriage.FreshContext {
+				t.Fatalf("got %s, want FRESH_CONTEXT abstention", got.Disposition)
+			}
+		})
 	}
 }

@@ -55,7 +55,7 @@ func TestOperatorQuestionGateEnforceBlocksWithWitnessedAnswerForClaudeAndCodex(t
 	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
 			var stderr bytes.Buffer
-			exit, disp, gotHarness, fired := runGuardOperatorQuestionGate(&stderr, guardPreCompactModeEnforce, writeOperatorGateTranscript(t, harness, false))
+			exit, disp, gotHarness, fired := runGuardOperatorQuestionGate(&stderr, guardPreCompactModeEnforce, writeOperatorGateTranscript(t, harness, false), "")
 			if !fired || exit != 0 || disp != stopDispOperatorQuestionResolved || gotHarness != harness {
 				t.Fatalf("fired=%v exit=%d disp=%s harness=%s stderr=%s", fired, exit, disp, gotHarness, stderr.String())
 			}
@@ -69,7 +69,7 @@ func TestOperatorQuestionGateEnforceBlocksWithWitnessedAnswerForClaudeAndCodex(t
 func TestOperatorQuestionGateHumanResidualAllowsTypedEscalation(t *testing.T) {
 	withOperatorResolver(t)
 	var stderr bytes.Buffer
-	exit, disp, _, fired := runGuardOperatorQuestionGate(&stderr, guardPreCompactModeEnforce, writeOperatorGateTranscript(t, "claude", true))
+	exit, disp, _, fired := runGuardOperatorQuestionGate(&stderr, guardPreCompactModeEnforce, writeOperatorGateTranscript(t, "claude", true), "")
 	if !fired || exit != 0 || disp != stopDispOperatorQuestionEscalate {
 		t.Fatalf("fired=%v exit=%d disp=%s stderr=%s", fired, exit, disp, stderr.String())
 	}
@@ -83,7 +83,7 @@ func TestOperatorQuestionGateResolvableFindingBlocks(t *testing.T) {
 	guardOperatorQuestionClarifyResolver = operatorresolve.Resolver{}
 	t.Cleanup(func() { guardOperatorQuestionClarifyResolver = old })
 	path := writeOperatorGateTranscript(t, "claude", false)
-	exit, disp, _, fired := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeEnforce, path)
+	exit, disp, _, fired := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeEnforce, path, "")
 	if !fired || exit != 2 || disp != stopDispOperatorQuestionBlocked {
 		t.Fatalf("fired=%v exit=%d disp=%s", fired, exit, disp)
 	}
@@ -92,10 +92,10 @@ func TestOperatorQuestionGateResolvableFindingBlocks(t *testing.T) {
 func TestOperatorQuestionGateWarnAndOffNeverActuate(t *testing.T) {
 	withOperatorResolver(t)
 	path := writeOperatorGateTranscript(t, "claude", false)
-	if exit, disp, _, fired := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardOperatorDirectedModeWarn, path); !fired || exit != 0 || disp != stopDispOperatorQuestionResolved {
+	if exit, disp, _, fired := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardOperatorDirectedModeWarn, path, ""); !fired || exit != 0 || disp != stopDispOperatorQuestionResolved {
 		t.Fatalf("warn fired=%v exit=%d disp=%s", fired, exit, disp)
 	}
-	if exit, _, _, fired := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeOff, path); fired || exit != 0 {
+	if exit, _, _, fired := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeOff, path, ""); fired || exit != 0 {
 		t.Fatalf("off fired=%v exit=%d", fired, exit)
 	}
 	if got := guardOperatorDirectedEffectiveMode(guardPreCompactModeEnforce, true, true, false); got != guardOperatorDirectedModeWarn {
@@ -124,5 +124,130 @@ func TestOperatorQuestionPlanDispositionMapping(t *testing.T) {
 	}
 	if disp, _, _ := adjudicateOperatorQuestion(q); disp != stopDispOperatorQuestionEscalate {
 		t.Fatalf("escalated disp=%s", disp)
+	}
+}
+
+// TestInstallGuardStopHookInjectsOperatorQuestionEnv pins that the operator-question mode is threaded
+// into the Stop-hook child as its OWN dial (FAK_GUARD_OPERATOR_QUESTION_MODE), split from the prose
+// operator-directed sensor but INHERITING the resolved operator-directed posture as its default (both
+// are operator-absent-capped headless gates), and that a bad string is pinned to warn (advisory),
+// never enforce. Mirrors TestInstallGuardStopHookInjectsHardwareGateEnv — the sibling inherited gate.
+func TestInstallGuardStopHookInjectsOperatorQuestionEnv(t *testing.T) {
+	dir := t.TempDir()
+	_, env, install, err := installGuardStopHookAt(
+		[]string{"claude", "-p", "hi"}, guardPreCompactModeEnforce, "http://127.0.0.1:4567",
+		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9, 6, guardPreCompactModeEnforce)
+	if err != nil || !install.Applied {
+		t.Fatalf("install: applied=%v err=%v", install.Applied, err)
+	}
+	got := ""
+	for _, kv := range env {
+		if kv[0] == guardStopHookOperatorQuestionEnvMode {
+			got = kv[1]
+		}
+	}
+	if got != guardPreCompactModeEnforce {
+		t.Fatalf("operator-question env = %q, want enforce (inherited from operator-directed posture)", got)
+	}
+	// A bad operator-directed mode string pins the inherited operator-question dial to warn, not enforce.
+	_, env2, _, err := installGuardStopHookAt(
+		[]string{"claude", "-p", "hi"}, guardPreCompactModeEnforce, "http://127.0.0.1:4567",
+		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9, 6, "loud")
+	if err != nil {
+		t.Fatalf("install(bad mode): %v", err)
+	}
+	got2 := ""
+	for _, kv := range env2 {
+		if kv[0] == guardStopHookOperatorQuestionEnvMode {
+			got2 = kv[1]
+		}
+	}
+	if got2 != guardOperatorDirectedModeWarn {
+		t.Fatalf("bad-mode operator-question env = %q, want warn", got2)
+	}
+}
+
+// TestOperatorQuestionGateFlagsOperatorOnHumanResidual pins the fix for the "questions thing left as
+// empty prose, never picked up by the operator" gap: when a native question folds to HUMAN_RESIDUAL
+// the gate must FLAG THE OPERATOR (route the escalation), not merely emit stderr. Routes in warn and
+// enforce (a structured genuine escalation), stays silent in shadow (pure observe) and off, and never
+// fires for an auto-RESOLVED question.
+func TestOperatorQuestionGateFlagsOperatorOnHumanResidual(t *testing.T) {
+	var gotSession, gotReason string
+	var gotQ operatorquestion.OperatorQuestion
+	var called int
+	old := guardOperatorQuestionEscalationSink
+	guardOperatorQuestionEscalationSink = func(sessionID string, q operatorquestion.OperatorQuestion, reason, action string) {
+		called++
+		gotSession, gotReason, gotQ = sessionID, reason, q
+	}
+	t.Cleanup(func() { guardOperatorQuestionEscalationSink = old })
+	withOperatorResolver(t)
+
+	// authority=true → no option carries decisive evidence → HUMAN_RESIDUAL (see the escalate test).
+	residual := writeOperatorGateTranscript(t, "claude", true)
+
+	// enforce: a genuine residual flags the operator with the session + structured question.
+	called, gotSession = 0, ""
+	if _, disp, _, _ := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeEnforce, residual, "sess-enforce"); disp != stopDispOperatorQuestionEscalate {
+		t.Fatalf("enforce disp=%s want escalate", disp)
+	}
+	if called != 1 || gotSession != "sess-enforce" || gotReason == "" || gotQ.Harness != "claude" {
+		t.Fatalf("enforce residual must flag operator: called=%d session=%q reason=%q harness=%q", called, gotSession, gotReason, gotQ.Harness)
+	}
+
+	// warn: still routes — a native question folding to a residual is a real escalation, not a soak.
+	called, gotSession = 0, ""
+	if _, disp, _, _ := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardOperatorDirectedModeWarn, residual, "sess-warn"); disp != stopDispOperatorQuestionEscalate {
+		t.Fatalf("warn disp=%s want escalate", disp)
+	}
+	if called != 1 || gotSession != "sess-warn" {
+		t.Fatalf("warn residual must flag operator: called=%d session=%q", called, gotSession)
+	}
+
+	// shadow: pure observe — never actuates an operator notice.
+	called = 0
+	runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeShadow, residual, "sess-shadow")
+	if called != 0 {
+		t.Fatalf("shadow must not flag operator, called=%d", called)
+	}
+
+	// off: gate does not fire at all.
+	called = 0
+	runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeOff, residual, "sess-off")
+	if called != 0 {
+		t.Fatalf("off must not flag operator, called=%d", called)
+	}
+
+	// An auto-RESOLVED question (authority=false, decisive witness) is not an escalation → no flag.
+	called = 0
+	resolved := writeOperatorGateTranscript(t, "claude", false)
+	if _, disp, _, _ := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeEnforce, resolved, "sess-resolved"); disp != stopDispOperatorQuestionResolved {
+		t.Fatalf("resolved disp=%s", disp)
+	}
+	if called != 0 {
+		t.Fatalf("auto-resolved question must not flag operator, called=%d", called)
+	}
+}
+
+// TestOperatorQuestionEscalationSlackTextCarriesQuestionAndReason pins that the operator actually
+// receives the actionable payload — the prompt, the choices, why no oracle resolved it, and the next
+// action — rather than an empty notice.
+func TestOperatorQuestionEscalationSlackTextCarriesQuestionAndReason(t *testing.T) {
+	q := operatorquestion.OperatorQuestion{
+		Kind:     operatorquestion.ChooseApproach,
+		Harness:  "codex",
+		Question: "Which product priority should win?",
+		Options:  []operatorquestion.Option{{Label: "Reliability"}, {Label: "Launch"}},
+	}
+	text := guardOperatorQuestionEscalationSlackText(q, "AUTHORITY_FORK", "route the authority question to the operator")
+	for _, want := range []string{"HUMAN_RESIDUAL", "codex", "Which product priority should win?", "Reliability", "Launch", "AUTHORITY_FORK", "route the authority question to the operator"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("escalation text missing %q:\n%s", want, text)
+		}
+	}
+	// A sparse question still yields a non-empty, defaulted notice rather than blank prose.
+	if got := guardOperatorQuestionEscalationSlackText(operatorquestion.OperatorQuestion{}, "", ""); !strings.Contains(got, "HUMAN_RESIDUAL") || !strings.Contains(got, "operator-question") {
+		t.Fatalf("sparse question should still render an actionable notice: %q", got)
 	}
 }
