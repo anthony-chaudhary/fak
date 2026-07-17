@@ -63,6 +63,26 @@
           "category": "incidental",
           "reason": "the backtest fold over the existing CacheBurstPaysBack predicate; measurement of an existing concept (#2812)",
           "token": "backtestCacheBurstPaysBack"
+        },
+        {
+          "category": "incidental",
+          "reason": "grandfathered tool filename in the generated Python compatibility inventory",
+          "token": "cachedoc_numbers_audit"
+        },
+        {
+          "category": "test-only",
+          "reason": "grandfathered test filename in the generated Python compatibility inventory",
+          "token": "cachedoc_numbers_audit_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "grandfathered build audit filename in the generated Python compatibility inventory",
+          "token": "cuda_arch_matrix"
+        },
+        {
+          "category": "test-only",
+          "reason": "grandfathered test filename in the generated Python compatibility inventory",
+          "token": "cuda_arch_matrix_test"
         }
       ],
       "id": "cache",
@@ -85,6 +105,8 @@
         "cachedecay",
         "cachedhits",
         "cachedir",
+        "cachedoc_numbers_audit",
+        "cachedoc_numbers_audit_test",
         "cachedtok",
         "cacheentry",
         "cacheevent",
@@ -108,6 +130,8 @@
         "caching",
         "compactcachereads",
         "compactlastcacherd",
+        "cuda_arch_matrix",
+        "cuda_arch_matrix_test",
         "defaultcacheandresidency",
         "defaultcachesize",
         "droppedcachedtokens",
@@ -272,29 +296,35 @@
           "category": "incidental",
           "reason": "File-path identifier in the generated boundary-lint baseline, not a runtime session concept.",
           "token": "dispatchsessionsaudittest"
+        },
+        {
+          "category": "incidental",
+          "reason": "grandfathered visual generator filename in the generated Python compatibility inventory",
+          "token": "gen_session_effectiveness_svg"
         }
       ],
       "id": "session-runtime",
       "ignore": [
-        "sessions",
-        "scheduling",
-        "scheduled",
-        "schedulers",
-        "slots",
-        "sessionids",
-        "slotting",
-        "guardsessiontempdir",
-        "defaultclaudesessionsperaccount",
         "confusedsessions",
-        "sessionsaudited",
-        "topsessions",
-        "totalslots",
-        "tuisessionrow",
-        "runtuisessions",
+        "defaultclaudesessionsperaccount",
+        "dispatchsessionsaudittest",
+        "gen_session_effectiveness_svg",
+        "guardsessiontempdir",
         "interactivesession",
         "requireminimaxsession",
         "restartfreshsession",
-        "dispatchsessionsaudittest"
+        "runtuisessions",
+        "scheduled",
+        "schedulers",
+        "scheduling",
+        "sessionids",
+        "sessions",
+        "sessionsaudited",
+        "slots",
+        "slotting",
+        "topsessions",
+        "totalslots",
+        "tuisessionrow"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -560,10 +590,36 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "grandfathered tool filename in the generated Python compatibility inventory",
+          "token": "commit_quality_scorecard"
+        },
+        {
+          "category": "test-only",
+          "reason": "grandfathered test filename in the generated Python compatibility inventory",
+          "token": "commit_quality_scorecard_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "grandfathered helper filename in the generated Python compatibility inventory",
+          "token": "scorecard_since"
+        },
+        {
+          "category": "test-only",
+          "reason": "grandfathered test filename in the generated Python compatibility inventory",
+          "token": "scorecard_since_test"
+        }
+      ],
       "id": "score-debt",
       "ignore": [
-        "scorecards",
-        "scorecardPath"
+        "commit_quality_scorecard",
+        "commit_quality_scorecard_test",
+        "scorecardPath",
+        "scorecard_since",
+        "scorecard_since_test",
+        "scorecards"
       ],
       "min_files": 3,
       "name": "Scorecard / debt family",
@@ -861,6 +917,16 @@
           "category": "incidental",
           "reason": "internal/toolproc RepeatClass enum value for a shell poll storm; not the fleet agent-loop concept",
           "token": "ClassPollingLoop"
+        },
+        {
+          "category": "incidental",
+          "reason": "grandfathered loop inventory filename in the generated Python compatibility inventory",
+          "token": "loops_inventory"
+        },
+        {
+          "category": "test-only",
+          "reason": "grandfathered loop inventory test filename in the generated Python compatibility inventory",
+          "token": "loops_inventory_test"
         }
       ],
       "id": "loop",
@@ -882,6 +948,8 @@
         "loopindexdebt",
         "looping",
         "loops",
+        "loops_inventory",
+        "loops_inventory_test",
         "loopsnapshot",
         "loopsnapshotforid",
         "loopstate",
