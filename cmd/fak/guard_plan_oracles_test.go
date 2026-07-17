@@ -74,7 +74,7 @@ func TestGuardPlanResolverInstalledEndToEnd(t *testing.T) {
 		DoneCriterion: "go test ./internal/policy",
 	})
 	var stderr strings.Builder
-	_, disp, _, ran := runGuardOperatorQuestionGate(&stderr, "enforce", path)
+	_, disp, _, ran := runGuardOperatorQuestionGate(&stderr, "enforce", path, "")
 	if !ran || disp != stopDispOperatorQuestionResolved || !strings.Contains(stderr.String(), string(planresolve.ReasonApproved)) {
 		t.Fatalf("ran=%v disp=%v stderr=%q", ran, disp, stderr.String())
 	}
@@ -92,7 +92,7 @@ func TestGuardPlanResolverCollidingPlanRefusesEndToEnd(t *testing.T) {
 		DoneCriterion: "go test ./cmd/fak",
 	})
 	var stderr strings.Builder
-	_, disp, _, ran := runGuardOperatorQuestionGate(&stderr, "enforce", path)
+	_, disp, _, ran := runGuardOperatorQuestionGate(&stderr, "enforce", path, "")
 	if !ran || disp != stopDispOperatorQuestionBlocked || !strings.Contains(stderr.String(), string(planresolve.ReasonTreeCollision)) {
 		t.Fatalf("ran=%v disp=%v stderr=%q", ran, disp, stderr.String())
 	}
@@ -118,7 +118,7 @@ func TestGuardPlanOracleErrorFailsOpenToOperator(t *testing.T) {
 		DoneCriterion: "go test ./internal/policy",
 	})
 	var stderr strings.Builder
-	_, disp, _, ran := runGuardOperatorQuestionGate(&stderr, "enforce", path)
+	_, disp, _, ran := runGuardOperatorQuestionGate(&stderr, "enforce", path, "")
 	if !ran || disp != stopDispOperatorQuestionEscalate || !strings.Contains(stderr.String(), "PLAN_ORACLE_ERROR") {
 		t.Fatalf("ran=%v disp=%v stderr=%q", ran, disp, stderr.String())
 	}
@@ -144,7 +144,7 @@ func TestGuardPlanResolverEscalatesOnlyIrreversibleUnwitnessedStep(t *testing.T)
 		{Text: "delete remote", Tool: "delete_record", Args: map[string]any{"id": "1"}},
 	}, DoneCriterion: "go test ./internal/policy"})
 	var stderr strings.Builder
-	_, disp, _, ran := runGuardOperatorQuestionGate(&stderr, "enforce", path)
+	_, disp, _, ran := runGuardOperatorQuestionGate(&stderr, "enforce", path, "")
 	if !ran || disp != stopDispOperatorQuestionEscalate || !strings.Contains(stderr.String(), string(planresolve.ReasonIrreversibleUnwitnessed)) {
 		t.Fatalf("ran=%v disp=%v stderr=%q", ran, disp, stderr.String())
 	}
