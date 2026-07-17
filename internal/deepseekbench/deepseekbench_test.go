@@ -9,7 +9,8 @@ import (
 )
 
 // TestRequiredFields is the FIELD LOCK: every required JSON key from the issue must
-// be present on every emitted row, and no others. If a field is renamed/dropped
+// be present on every emitted row, and no others (including the #3020 speculative
+// axis: "speculative" + "accepted_token_ratio"). If a field is renamed/dropped
 // without updating RequiredFields, this fails.
 func TestRequiredFields(t *testing.T) {
 	for i, r := range DryRunRows() {
@@ -90,11 +91,13 @@ func TestAxisCoverage(t *testing.T) {
 }
 
 // TestSpeedupRefusal is the honesty gate: the scorecard must NOT print a speedup for
-// a dry-run fixture, a shape mismatch, or an unverified parity — and MUST print one
-// only when shape + parity + live all line up.
+// a dry-run fixture, a shape mismatch, an unverified parity, or a missing/invalid
+// speculative label (#3020) — and MUST print one only when shape + parity + live +
+// speculative label all line up, with the acceptance evidence beside any
+// speculative-on delta.
 func TestSpeedupRefusal(t *testing.T) {
-	base := Row{Measurement: "live", QualityParity: "verified", E2EMillis: 100, PromptShapeKey: "4K|short|non-thinking|stream=true", ModelID: "baseline"}
-	subj := Row{Measurement: "live", QualityParity: "verified", E2EMillis: 50, PromptShapeKey: "4K|short|non-thinking|stream=true", ModelID: ModelV4Flash}
+	base := Row{Measurement: "live", QualityParity: "verified", E2EMillis: 100, PromptShapeKey: "4K|short|non-thinking|stream=true", ModelID: "baseline", Speculative: "off", AcceptedTokenRatio: "unknown"}
+	subj := Row{Measurement: "live", QualityParity: "verified", E2EMillis: 50, PromptShapeKey: "4K|short|non-thinking|stream=true", ModelID: ModelV4Flash, Speculative: "off", AcceptedTokenRatio: "unknown"}
 
 	// (a) dry-run fixture -> refuse.
 	if line, printed := CompareSpeedup(Row{Measurement: "dry-run-fixture"}, base); printed || !strings.Contains(line, "NOT COMPARABLE") {
@@ -116,6 +119,37 @@ func TestSpeedupRefusal(t *testing.T) {
 	line, printed := CompareSpeedup(subj, base)
 	if !printed || !strings.Contains(line, "OBSERVED provider speed") || !strings.Contains(line, "not a fak-authored saving") {
 		t.Fatalf("aligned rows must print an OBSERVED delta, got printed=%v line=%q", printed, line)
+	}
+	// (e) an mtp subject vs an off baseline WITHOUT verified parity -> refuse: a
+	// speculative speedup can never surface without a verified quality parity.
+	mtpNoParity := subj
+	mtpNoParity.Speculative = "mtp"
+	mtpNoParity.QualityParity = "unknown"
+	if line, printed := CompareSpeedup(mtpNoParity, base); printed || !strings.Contains(line, "quality parity") {
+		t.Fatalf("mtp without verified parity must refuse, got printed=%v line=%q", printed, line)
+	}
+	// (f) an empty or off-vocabulary speculative label -> refuse.
+	unlabelled := subj
+	unlabelled.Speculative = ""
+	if line, printed := CompareSpeedup(unlabelled, base); printed || !strings.Contains(line, "missing speculative label") {
+		t.Fatalf("empty speculative label must refuse, got printed=%v line=%q", printed, line)
+	}
+	invalid := subj
+	invalid.Speculative = "eagle"
+	if line, printed := CompareSpeedup(invalid, base); printed || !strings.Contains(line, "missing speculative label") {
+		t.Fatalf("off-vocabulary speculative label must refuse, got printed=%v line=%q", printed, line)
+	}
+	// (g) an mtp subject vs an off baseline WITH verified parity, shared shape, both
+	// live, measured E2E -> prints, and the acceptance evidence rides beside it.
+	mtp := subj
+	mtp.Speculative = "mtp"
+	mtp.AcceptedTokenRatio = "0.87"
+	line, printed = CompareSpeedup(mtp, base)
+	if !printed || !strings.Contains(line, "OBSERVED provider speed") {
+		t.Fatalf("aligned mtp rows must print an OBSERVED delta, got printed=%v line=%q", printed, line)
+	}
+	if !strings.Contains(line, "speculative=mtp") || !strings.Contains(line, "accepted_token_ratio=0.87") {
+		t.Fatalf("a speculative speedup line must carry its acceptance evidence, got %q", line)
 	}
 }
 

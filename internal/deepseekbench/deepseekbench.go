@@ -46,6 +46,7 @@ type Row struct {
 	OutputTarget  string `json:"output_target"`  // short | 1K | 8K | long-reasoning
 	ReasoningMode string `json:"reasoning_mode"` // non-thinking | high | max
 	Stream        bool   `json:"stream"`
+	Speculative   string `json:"speculative"` // off | mtp | dspark (#3020)
 
 	// Latency / throughput.
 	TTFTMillis       float64 `json:"ttft_ms"`
@@ -63,6 +64,11 @@ type Row struct {
 	PromptCacheMissTokens int    `json:"prompt_cache_miss_tokens"`
 	CacheAttribution      string `json:"cache_attribution"` // "provider-observed" | "unknown-dry-run"
 
+	// Speculative-decode acceptance evidence (#3020). A string, not a float, so the
+	// honest default is "unknown" when the engine does not expose an acceptance
+	// counter — mirroring the CacheAttribution provider-observed discipline.
+	AcceptedTokenRatio string `json:"accepted_token_ratio"` // e.g. "0.87" | "unknown"
+
 	// Comparability keys — the scorecard refuses a speedup unless these line up.
 	PromptShapeKey string `json:"prompt_shape"`   // shape descriptor (bucket|output|reasoning|stream)
 	QualityParity  string `json:"quality_parity"` // "unknown" | "verified" | "differs"
@@ -75,19 +81,21 @@ func RequiredFields() []string {
 	return []string{
 		"measurement", "speed_provenance",
 		"model_id", "provider_route", "engine_route", "hosting",
-		"context_bucket", "output_target", "reasoning_mode", "stream",
+		"context_bucket", "output_target", "reasoning_mode", "stream", "speculative",
 		"ttft_ms", "tpot_ms", "e2e_ms", "output_toks_per_s",
 		"prompt_tokens", "completion_tokens", "reasoning_tokens",
 		"prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "cache_attribution",
+		"accepted_token_ratio",
 		"prompt_shape", "quality_parity",
 	}
 }
 
 // The locked axis vocabularies (the issue's buckets/targets/modes).
 var (
-	ContextBuckets = []string{"4K", "32K", "128K", "512K", "1M"}
-	OutputTargets  = []string{"short", "1K", "8K", "long-reasoning"}
-	ReasoningModes = []string{"non-thinking", "high", "max"}
+	ContextBuckets   = []string{"4K", "32K", "128K", "512K", "1M"}
+	OutputTargets    = []string{"short", "1K", "8K", "long-reasoning"}
+	ReasoningModes   = []string{"non-thinking", "high", "max"}
+	SpeculativeModes = []string{"off", "mtp", "dspark"} // #3020
 )
 
 // The two current DeepSeek V4 model ids (both, always, side by side — Flash is
@@ -176,21 +184,23 @@ func DryRunRows() []Row {
 	// One existing-fak-route baseline row, same harness, same schema. It is also a
 	// fixture, so the scorecard MUST refuse to compare it (Measurement != live).
 	rows = append(rows, Row{
-		Measurement:      "dry-run-fixture",
-		SpeedProvenance:  "fixture-placeholder-not-measured",
-		ModelID:          "claude-sonnet-5",
-		ProviderRoute:    "anthropic",
-		EngineRoute:      "hosted-api",
-		Hosting:          "hosted",
-		ContextBucket:    "32K",
-		OutputTarget:     "1K",
-		ReasoningMode:    "non-thinking",
-		Stream:           true,
-		CacheAttribution: "unknown-dry-run",
-		PromptShapeKey:   PromptShape("32K", "1K", "non-thinking", true),
-		QualityParity:    "unknown",
-		PromptTokens:     contextBucketTokens("32K"),
-		CompletionTokens: outputTargetTokens("1K"),
+		Measurement:        "dry-run-fixture",
+		SpeedProvenance:    "fixture-placeholder-not-measured",
+		ModelID:            "claude-sonnet-5",
+		ProviderRoute:      "anthropic",
+		EngineRoute:        "hosted-api",
+		Hosting:            "hosted",
+		ContextBucket:      "32K",
+		OutputTarget:       "1K",
+		ReasoningMode:      "non-thinking",
+		Stream:             true,
+		Speculative:        "off",
+		CacheAttribution:   "unknown-dry-run",
+		AcceptedTokenRatio: "unknown",
+		PromptShapeKey:     PromptShape("32K", "1K", "non-thinking", true),
+		QualityParity:      "unknown",
+		PromptTokens:       contextBucketTokens("32K"),
+		CompletionTokens:   outputTargetTokens("1K"),
 	})
 	return rows
 }
@@ -234,6 +244,7 @@ func fixtureRow(m benchModel, bucket, output, reasoning string, stream bool) Row
 		OutputTarget:     output,
 		ReasoningMode:    reasoning,
 		Stream:           stream,
+		Speculative:      "off",
 		TTFTMillis:       round2(ttft),
 		TPOTMillis:       round2(tpot),
 		E2EMillis:        round2(e2e),
@@ -246,6 +257,7 @@ func fixtureRow(m benchModel, bucket, output, reasoning string, stream bool) Row
 		PromptCacheHitTokens:  0,
 		PromptCacheMissTokens: 0,
 		CacheAttribution:      "unknown-dry-run",
+		AcceptedTokenRatio:    "unknown",
 		PromptShapeKey:        PromptShape(bucket, output, reasoning, stream),
 		QualityParity:         "unknown",
 	}
@@ -255,11 +267,25 @@ func round2(v float64) float64 {
 	return float64(int64(v*100+0.5)) / 100
 }
 
+// validSpeculative reports whether label is one of the locked SpeculativeModes.
+func validSpeculative(label string) bool {
+	for _, m := range SpeculativeModes {
+		if label == m {
+			return true
+		}
+	}
+	return false
+}
+
 // CompareSpeedup is the honesty gate the issue demands: it prints a speedup delta
 // ONLY when the DeepSeek row and the baseline row (a) share a prompt shape, (b) both
-// carry a verified quality parity, and (c) are both live measurements. Any other case
-// returns a "[NOT COMPARABLE: …]" line and printed=false — a dry-run fixture, a shape
-// mismatch, or an unverified parity can never surface as a speed headline.
+// carry a verified quality parity, (c) are both live measurements, and (d) both carry
+// a valid speculative label from SpeculativeModes (#3020). Any other case returns a
+// "[NOT COMPARABLE: …]" line and printed=false — a dry-run fixture, a shape mismatch,
+// an unverified parity, or an unlabelled speculative mode can never surface as a
+// speed headline. When a delta IS printed, the subject's accepted_token_ratio rides
+// beside it, so a speculative speedup is never reported without its acceptance
+// evidence (or an honest "unknown").
 func CompareSpeedup(subject, baseline Row) (line string, printed bool) {
 	switch {
 	case subject.Measurement != "live" || baseline.Measurement != "live":
@@ -268,12 +294,14 @@ func CompareSpeedup(subject, baseline Row) (line string, printed bool) {
 		return fmt.Sprintf("[NOT COMPARABLE: prompt shape differs (%s vs %s)]", subject.PromptShapeKey, baseline.PromptShapeKey), false
 	case subject.QualityParity != "verified" || baseline.QualityParity != "verified":
 		return "[NOT COMPARABLE: quality parity not verified for both rows]", false
+	case !validSpeculative(subject.Speculative) || !validSpeculative(baseline.Speculative):
+		return "[NOT COMPARABLE: missing speculative label]", false
 	case baseline.E2EMillis <= 0 || subject.E2EMillis <= 0:
 		return "[NOT COMPARABLE: a measured E2E is missing]", false
 	}
 	ratio := baseline.E2EMillis / subject.E2EMillis
-	return fmt.Sprintf("OBSERVED provider speed: %s is %.2f× the E2E of %s at shape %s (provider-observed, not a fak-authored saving)",
-		subject.ModelID, ratio, baseline.ModelID, subject.PromptShapeKey), true
+	return fmt.Sprintf("OBSERVED provider speed: %s is %.2f× the E2E of %s at shape %s (speculative=%s accepted_token_ratio=%s, provider-observed, not a fak-authored saving)",
+		subject.ModelID, ratio, baseline.ModelID, subject.PromptShapeKey, subject.Speculative, subject.AcceptedTokenRatio), true
 }
 
 // LiveGate is the pure opt-in guard for a live run: it admits a live measurement
@@ -397,16 +425,21 @@ func MeasureStreamed(client *http.Client, baseURL, key, model string) (Row, erro
 		attribution = "provider-observed"
 	}
 	return Row{
-		Measurement:           "live",
-		SpeedProvenance:       "provider-observed",
-		ModelID:               model,
-		ProviderRoute:         "deepseek",
-		EngineRoute:           "hosted-api",
-		Hosting:               "hosted",
-		ContextBucket:         "4K",
-		OutputTarget:          "short",
-		ReasoningMode:         "non-thinking",
-		Stream:                true,
+		Measurement:     "live",
+		SpeedProvenance: "provider-observed",
+		ModelID:         model,
+		ProviderRoute:   "deepseek",
+		EngineRoute:     "hosted-api",
+		Hosting:         "hosted",
+		ContextBucket:   "4K",
+		OutputTarget:    "short",
+		ReasoningMode:   "non-thinking",
+		Stream:          true,
+		// The plain streamed request does not enable a speculative decoder, and the
+		// OpenAI-compatible usage block exposes no acceptance counter — so the row is
+		// honestly labelled off/unknown rather than guessing.
+		Speculative:           "off",
+		AcceptedTokenRatio:    "unknown",
 		TTFTMillis:            round2(float64(ttft.Microseconds()) / 1000.0),
 		TPOTMillis:            round2(tpot),
 		E2EMillis:             round2(float64(e2e.Microseconds()) / 1000.0),

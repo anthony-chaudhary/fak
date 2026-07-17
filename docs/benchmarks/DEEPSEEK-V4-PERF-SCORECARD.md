@@ -28,15 +28,41 @@ One JSONL row per scorecard cell across the matrix the issue locks:
 - **reasoning mode** — `non-thinking / high / max`.
 - **stream vs non-stream**.
 
+- **speculative decode** — `off / mtp / dspark` (see the axis subsection below).
+
 Each row carries: `ttft_ms`, `tpot_ms`, `e2e_ms`, `output_toks_per_s`,
 `prompt_tokens`, `completion_tokens`, `reasoning_tokens`,
-`prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, `cache_attribution`, plus the
+`prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, `cache_attribution`,
+`speculative`, `accepted_token_ratio`, plus the
 route identity (`model_id`, `provider_route`, `engine_route`, `hosting`) and the two
 comparability keys (`prompt_shape`, `quality_parity`). The full locked list is
 `RequiredFields()` in [`internal/deepseekbench/deepseekbench.go`](../../internal/deepseekbench/deepseekbench.go);
 the field-lock test `TestRequiredFields` fails if any row drifts from it. The
 `fak deepseekbench` command in [`cmd/fak/deepseekbench.go`](../../cmd/fak/deepseekbench.go)
 is only the thin flag/I-O wire over that pure, isolation-testable package.
+
+### Speculative axis (#3020)
+
+Every row is labelled with a `speculative` mode from the locked vocabulary
+`off | mtp | dspark` (`SpeculativeModes` in the core package): `off` for plain
+autoregressive decode, `mtp` for DeepSeek's native multi-token-prediction draft
+head, `dspark` for an external draft-model speculative stack. All current rows —
+the dry-run fixture and the plain streamed live measurement — are honestly
+labelled `off`.
+
+Alongside it rides `accepted_token_ratio`, the acceptance evidence for a
+speculative run: a **string**, `"unknown"` whenever the serving engine does not
+expose an acceptance counter (the same provider-observed-or-unknown discipline as
+`cache_attribution`) — never a guessed number.
+
+The speedup gate covers the axis: `CompareSpeedup` **refuses**
+(`[NOT COMPARABLE: missing speculative label]`) when either row's `speculative`
+label is empty or off-vocabulary, and a speculative (`mtp`/`dspark`) speedup can
+only print when quality parity is `verified` for both rows — a spec-decode speed
+headline is never reported without its parity check, and the printed line always
+carries the subject's `speculative` mode and `accepted_token_ratio` beside the
+ratio. Background + eval plan:
+[`../notes/DEEPSEEK-V4-MTP-SPECULATIVE-EVAL-2026-07-08.md`](../notes/DEEPSEEK-V4-MTP-SPECULATIVE-EVAL-2026-07-08.md).
 
 ## The keyless dry-run fixture (CI-safe, no key, no network)
 
