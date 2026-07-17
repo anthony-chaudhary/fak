@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/negframe"
@@ -13,6 +14,7 @@ import (
 
 var positiveComplementSubstitutions atomic.Uint64
 var negframeRewriteSubstitutions atomic.Uint64
+var negationOperatorSubstitutions atomic.Uint64
 
 // positiveComplementEmitEnabled is default-off. Only an explicit truthy value enables mutation.
 // FAK_POSITIVE_COMPLEMENT is the #4445 soak flag; #4448 owns the broader lexical rewrite flag.
@@ -34,11 +36,81 @@ func negframeRewriteEnabled() bool {
 	}
 }
 
-// applyNegframeRequestPass is the common request seam. The finite-domain L2 resolver and the
-// mechanical lexicon rewrite have independent default-off soak flags and counters.
-func applyNegframeRequestPass(messages []agent.Message) []agent.Message {
-	messages = applyPositiveComplementEmit(messages, positiveComplementEmitEnabled())
-	return applyMechanicalNegframeRewrite(messages, negframeRewriteEnabled())
+// negationOperatorEnabled controls the unified L1/L2 operator. It is default-on so managed
+// turns receive bounded positive-state normalization unless the benchmark ablation says off.
+func negationOperatorEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_NEGATION_OP"))) {
+	case "off", "0", "false", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+// applyNegframeRequestPass is the common managed-turn request seam. FAK_NEGATION_OP is the
+// master ablation: off means byte-identical input even if a legacy soak flag is set.
+func applyNegframeRequestPass(messages []agent.Message, traceID string) []agent.Message {
+	enabled := negationOperatorEnabled()
+	result := negframe.ReframeResult{}
+	if enabled {
+		messages, result = applyEmitNegationPass(messages)
+		messages = applyPositiveComplementEmit(messages, positiveComplementEmitEnabled())
+		messages = applyMechanicalNegframeRewrite(messages, negframeRewriteEnabled())
+	}
+	if path := reframeJournalPath(); path != "" {
+		arm := "treatment"
+		if !enabled {
+			arm = "control"
+			result.ResidualNegatives = countMessageNegatives(messages)
+		}
+		_ = negframe.AppendReframeJournal(path, negframe.NewReframeJournalSiteRow(traceID, "gateway.negation_operator", arm, result, time.Now()), negframe.DefaultJournalMaxRows)
+	}
+	return messages
+}
+
+// applyEmitNegationPass applies equivalence-gated L1 NNF followed by exact L2 finite-domain
+// complements. Refused and residual counts are content-free journal inputs.
+func applyEmitNegationPass(messages []agent.Message) ([]agent.Message, negframe.ReframeResult) {
+	result := negframe.ReframeResult{}
+	for i := range messages {
+		text := messages[i].Content
+		text, admitted, refused := applyRegisteredL1(text)
+		text, exact := substituteRegisteredComplements(text)
+		if admitted+exact > 0 {
+			messages[i].Content = text
+		}
+		result.Applied += admitted + exact
+		result.VerbatimFallback += refused
+	}
+	result.ResidualNegatives = countMessageNegatives(messages)
+	if result.Applied > 0 {
+		negationOperatorSubstitutions.Add(uint64(result.Applied))
+	}
+	return messages, result
+}
+
+func applyRegisteredL1(text string) (string, int, int) {
+	for _, domain := range negframe.Domains() {
+		r := negframe.RewriteL1(text, domain)
+		if r.Admitted > 0 {
+			return r.Text, r.Admitted, r.Refused
+		}
+	}
+	// A structurally recognized but unprovable clause is one refusal, not one per registry domain.
+	for _, domain := range negframe.Domains() {
+		if r := negframe.RewriteL1(text, domain); r.Refused > 0 {
+			return text, 0, 1
+		}
+	}
+	return text, 0, 0
+}
+
+func countMessageNegatives(messages []agent.Message) int {
+	total := 0
+	for _, message := range messages {
+		total += len(negframe.Classify("gateway-managed-turn", message.Content))
+	}
+	return total
 }
 
 func applyMechanicalNegframeRewrite(messages []agent.Message, enabled bool) []agent.Message {
@@ -129,4 +201,7 @@ func writePositiveComplementMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_negframe_rewrite_substitutions_total",
 		"Mechanical negframe substitutions applied on the model request path.", "counter")
 	fmt.Fprintf(b, "fak_negframe_rewrite_substitutions_total %d\n", negframeRewriteSubstitutions.Load())
+	writeHelpType(b, "fak_negation_operator_substitutions_total",
+		"Positive-state substitutions applied by the default-on managed-turn negation operator.", "counter")
+	fmt.Fprintf(b, "fak_negation_operator_substitutions_total %d\n", negationOperatorSubstitutions.Load())
 }

@@ -1,12 +1,16 @@
 package gateway
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/negframe"
 )
 
 func TestPositiveComplementEmit(t *testing.T) {
@@ -116,5 +120,64 @@ func TestNegframeRewriteMetric(t *testing.T) {
 	want := fmt.Sprintf("fak_negframe_rewrite_substitutions_total %d", before+1)
 	if !strings.Contains(metrics.String(), want) {
 		t.Fatalf("rewrite metric sample absent: want %q in %q", want, metrics.String())
+	}
+}
+
+func TestEmitNegationPassDefaultOn(t *testing.T) {
+	t.Setenv("FAK_NEGATION_OP", "")
+	t.Setenv("FAK_POSITIVE_COMPLEMENT", "")
+	t.Setenv("FAK_NEGFRAME_REWRITE", "")
+	input := []agent.Message{{Role: "user", Content: "Use not shared access."}}
+	got := applyNegframeRequestPass(cloneMessages(t, input), "trace-on")
+	if got[0].Content != "Use exclusive access." {
+		t.Fatalf("default-on content = %q", got[0].Content)
+	}
+}
+
+func TestEmitNegationPassOffIsByteExact(t *testing.T) {
+	t.Setenv("FAK_NEGATION_OP", "off")
+	// The master ablation wins over legacy soak flags.
+	t.Setenv("FAK_POSITIVE_COMPLEMENT", "on")
+	t.Setenv("FAK_NEGFRAME_REWRITE", "on")
+	input := []agent.Message{{Role: "user", Content: "Never disable checks; use not shared access."}}
+	got := applyNegframeRequestPass(cloneMessages(t, input), "trace-off")
+	if got[0].Content != input[0].Content {
+		t.Fatalf("off content = %q, want byte exact %q", got[0].Content, input[0].Content)
+	}
+}
+
+func TestEmitNegationPassPolarityAndIdempotence(t *testing.T) {
+	t.Setenv("FAK_NEGATION_OP", "on")
+	input := []agent.Message{{Role: "system", Content: "Never delete records. Use not shared access. `not shared`"}}
+	once := applyNegframeRequestPass(cloneMessages(t, input), "trace-one")
+	twice := applyNegframeRequestPass(cloneMessages(t, once), "trace-two")
+	want := "Never delete records. Use exclusive access. `not shared`"
+	if once[0].Content != want || twice[0].Content != want {
+		t.Fatalf("once=%q twice=%q want=%q", once[0].Content, twice[0].Content, want)
+	}
+}
+
+func TestEmitNegationPassJournalCounts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "operator.jsonl")
+	t.Setenv("FAK_NEGATION_OP", "on")
+	t.Setenv("FAK_NEGFRAME_JOURNAL", path)
+	input := []agent.Message{{Role: "user", Content: "Use not shared access; never invent facts."}}
+	_ = applyNegframeRequestPass(cloneMessages(t, input), "journal-trace")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var rows []negframe.ReframeJournalRow
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var row negframe.ReframeJournalRow
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) != 1 || rows[0].Site != "gateway.negation_operator" || rows[0].Applied != 1 || rows[0].Refused != 0 || rows[0].ResidualNegatives < 1 {
+		t.Fatalf("journal rows = %+v", rows)
 	}
 }

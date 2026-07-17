@@ -86,3 +86,23 @@ func TestL1RefusesAmbiguousConjunctionAndEmptyAllowSet(t *testing.T) {
 		}
 	}
 }
+
+func TestNNFEquivalenceGated(t *testing.T) {
+	got := RewriteL1("Do not use walk or car.", testL1Domain)
+	if got.Text != "Use only bike, bus, train." || got.Admitted != 1 || got.Refused != 0 {
+		t.Fatalf("NNF rewrite = %+v", got)
+	}
+	refused := RewriteL1("Do not use walk or hovercraft.", testL1Domain)
+	if refused.Text != "Do not use walk or hovercraft." || refused.Refused != 1 {
+		t.Fatalf("NNF fail-closed = %+v", refused)
+	}
+}
+
+func TestPolarityPreservedByPositiveTransforms(t *testing.T) {
+	input := "Never delete records. Do not use walk or car."
+	once := RewriteL1(input, testL1Domain)
+	twice := RewriteL1(once.Text, testL1Domain)
+	if once.Text != "Never delete records. Use only bike, bus, train." || twice.Text != once.Text {
+		t.Fatalf("polarity/idempotence once=%q twice=%q", once.Text, twice.Text)
+	}
+}

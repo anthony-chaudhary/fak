@@ -22,6 +22,7 @@ type ReframeJournalRow struct {
 	Arm               string `json:"arm"` // control | treatment
 	Applied           int    `json:"applied"`
 	VerbatimFallback  int    `json:"verbatim_fallback"`
+	Refused           int    `json:"refused"`
 	ResidualNegatives int    `json:"residual_negatives"`
 }
 
@@ -33,7 +34,7 @@ func NewReframeJournalSiteRow(traceID, site, arm string, result ReframeResult, n
 	if arm != "treatment" {
 		arm = "control"
 	}
-	return ReframeJournalRow{Schema: ReframeJournalSchema, UnixMillis: now.UnixMilli(), TraceID: traceID, Site: site, Arm: arm, Applied: result.Applied, VerbatimFallback: result.VerbatimFallback, ResidualNegatives: result.ResidualNegatives}
+	return ReframeJournalRow{Schema: ReframeJournalSchema, UnixMillis: now.UnixMilli(), TraceID: traceID, Site: site, Arm: arm, Applied: result.Applied, VerbatimFallback: result.VerbatimFallback, Refused: result.VerbatimFallback, ResidualNegatives: result.ResidualNegatives}
 }
 
 // AppendReframeJournal appends one JSONL row and retains at most maxRows newest
