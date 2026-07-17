@@ -70,3 +70,51 @@ func cloneMessages(t *testing.T, input []agent.Message) []agent.Message {
 	}
 	return out
 }
+
+func TestNegframeRewriteRequest(t *testing.T) {
+	input := []agent.Message{{Role: "user", Content: "Don't forget to stamp the commit."}}
+	got := applyMechanicalNegframeRewrite(cloneMessages(t, input), true)
+	if want := "remember to stamp the commit."; got[0].Content != want {
+		t.Fatalf("rewrite content = %q, want %q", got[0].Content, want)
+	}
+}
+
+func TestNegframeRewriteDefaultOffByteExact(t *testing.T) {
+	t.Setenv("FAK_NEGFRAME_REWRITE", "")
+	input := []agent.Message{{Role: "user", Content: "Don't forget to stamp the commit."}}
+	before, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := applyMechanicalNegframeRewrite(input, negframeRewriteEnabled())
+	after, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("default-off request changed:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+func TestNegframeRewritePreservesJudgementAndFences(t *testing.T) {
+	input := []agent.Message{{Role: "user", Content: "Never delete evidence.\n```text\nDon't forget to mutate.\n```\nDon't forget to push."}}
+	got := applyMechanicalNegframeRewrite(cloneMessages(t, input), true)[0].Content
+	want := "Never delete evidence.\n```text\nDon't forget to mutate.\n```\nremember to push."
+	if got != want {
+		t.Fatalf("judgement/fence rewrite = %q, want %q", got, want)
+	}
+}
+
+func TestNegframeRewriteMetric(t *testing.T) {
+	before := negframeRewriteSubstitutions.Load()
+	applyMechanicalNegframeRewrite([]agent.Message{{Role: "user", Content: "No need to wait."}}, true)
+	if got := negframeRewriteSubstitutions.Load(); got != before+1 {
+		t.Fatalf("rewrite substitutions = %d, want %d", got, before+1)
+	}
+	var metrics strings.Builder
+	writePositiveComplementMetrics(&metrics)
+	want := fmt.Sprintf("fak_negframe_rewrite_substitutions_total %d", before+1)
+	if !strings.Contains(metrics.String(), want) {
+		t.Fatalf("rewrite metric sample absent: want %q in %q", want, metrics.String())
+	}
+}

@@ -12,6 +12,7 @@ import (
 )
 
 var positiveComplementSubstitutions atomic.Uint64
+var negframeRewriteSubstitutions atomic.Uint64
 
 // positiveComplementEmitEnabled is default-off. Only an explicit truthy value enables mutation.
 // FAK_POSITIVE_COMPLEMENT is the #4445 soak flag; #4448 owns the broader lexical rewrite flag.
@@ -22,6 +23,37 @@ func positiveComplementEmitEnabled() bool {
 	default:
 		return false
 	}
+}
+
+func negframeRewriteEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_NEGFRAME_REWRITE"))) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// applyNegframeRequestPass is the common request seam. The finite-domain L2 resolver and the
+// mechanical lexicon rewrite have independent default-off soak flags and counters.
+func applyNegframeRequestPass(messages []agent.Message) []agent.Message {
+	messages = applyPositiveComplementEmit(messages, positiveComplementEmitEnabled())
+	return applyMechanicalNegframeRewrite(messages, negframeRewriteEnabled())
+}
+
+func applyMechanicalNegframeRewrite(messages []agent.Message, enabled bool) []agent.Message {
+	if !enabled {
+		return messages
+	}
+	for i := range messages {
+		result := negframe.ReframePass(messages[i].Content)
+		if result.Applied == 0 {
+			continue
+		}
+		messages[i].Content = result.Text
+		negframeRewriteSubstitutions.Add(uint64(result.Applied))
+	}
+	return messages
 }
 
 // applyPositiveComplementEmit is the request-side L2 hook. It walks model-visible message prose,
@@ -94,4 +126,7 @@ func writePositiveComplementMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_positive_complement_substitutions_total",
 		"Exact finite-domain positive complements substituted on the model request path.", "counter")
 	fmt.Fprintf(b, "fak_positive_complement_substitutions_total %d\n", positiveComplementSubstitutions.Load())
+	writeHelpType(b, "fak_negframe_rewrite_substitutions_total",
+		"Mechanical negframe substitutions applied on the model request path.", "counter")
+	fmt.Fprintf(b, "fak_negframe_rewrite_substitutions_total %d\n", negframeRewriteSubstitutions.Load())
 }
