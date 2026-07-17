@@ -166,6 +166,71 @@ func TestComplainFromJournalRefusesAmbiguousWitness(t *testing.T) {
 	}
 }
 
+// TestComplainLiveModeResolvesFlagOrEnv pins the "file gh tickets automatically,
+// not just journal" contract: the explicit --live flag OR a truthy
+// FAK_COMPLAIN_LIVE env makes the complaint file, while an unset/false env leaves
+// it a dry-run that records nothing. The env is what lets a fleet auto-file every
+// appeal without threading --live through every call site.
+func TestComplainLiveModeResolvesFlagOrEnv(t *testing.T) {
+	cases := []struct {
+		name     string
+		flagLive bool
+		env      string
+		want     bool
+	}{
+		{"flag wins even with empty env", true, "", true},
+		{"flag wins over a false env", true, "0", true},
+		{"env 1 auto-files", false, "1", true},
+		{"env true auto-files", false, "true", true},
+		{"env yes auto-files", false, "yes", true},
+		{"env TRUE case-insensitive", false, "TRUE", true},
+		{"env padded truthy", false, "  1  ", true},
+		{"env 0 stays dry-run", false, "0", false},
+		{"env false stays dry-run", false, "false", false},
+		{"env empty stays dry-run", false, "", false},
+		{"env garbage stays dry-run", false, "maybe", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			getenv := func(k string) string {
+				if k == "FAK_COMPLAIN_LIVE" {
+					return tc.env
+				}
+				return ""
+			}
+			if got := complainLiveMode(tc.flagLive, getenv); got != tc.want {
+				t.Fatalf("complainLiveMode(flag=%v, env=%q) = %v, want %v", tc.flagLive, tc.env, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestComplainDryRunDisclosesNothingFiled guards the honesty of the default: a
+// complaint run without --live (and without the env) must announce on stderr that
+// NO ticket was filed, so the dry-run is never mistaken for a filed appeal.
+func TestComplainDryRunDisclosesNothingFiled(t *testing.T) {
+	t.Setenv("FAK_COMPLAIN_LIVE", "")
+	code, out, errs := runComplainCapture([]string{
+		"--summary", "floor blocked a legit note", "--reason", "FILE_ADMISSION", "--tool", "Bash", "--json",
+	})
+	if code != 0 {
+		t.Fatalf("dry-run exit = %d, want 0", code)
+	}
+	if !strings.Contains(errs, "NO gh ticket was filed") {
+		t.Fatalf("dry-run must disclose nothing was filed: %q", errs)
+	}
+	if !strings.Contains(errs, "FAK_COMPLAIN_LIVE=1") {
+		t.Fatalf("dry-run should name the auto-file env: %q", errs)
+	}
+	var res guardcomplaint.Result
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	if res.Mode != "dry-run" || len(res.Synced) != 0 {
+		t.Fatalf("mode/synced = %q/%d, want dry-run/0", res.Mode, len(res.Synced))
+	}
+}
+
 func TestComplainEvidenceSelectorsRequireFromJournal(t *testing.T) {
 	code, _, errs := runComplainCapture([]string{
 		"--summary", "x", "--journal-seq", "72",

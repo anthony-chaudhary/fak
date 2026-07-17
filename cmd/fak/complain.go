@@ -61,7 +61,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	limit := fs.Int("limit", 300, "existing issue scan limit for live/fetch modes")
 	existingJSON := fs.String("existing-json", "", "fixture list of existing gh issues for dry-run tests")
 	fetchExisting := fs.Bool("fetch-existing", false, "dry-run but query gh to classify create vs update")
-	live := fs.Bool("live", false, "create/update the GitHub issue with gh")
+	live := fs.Bool("live", false, "create/update the GitHub issue with gh (or set FAK_COMPLAIN_LIVE=1 to auto-file every complaint fleet-wide)")
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to a newly-created complaint; repeatable (default: "+guardcomplaint.Label+")")
@@ -82,6 +82,13 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak complain: %v\n", err)
 		return 2
 	}
+
+	// Resolve whether this complaint actually files a gh ticket. --live is the
+	// explicit per-call opt-in; FAK_COMPLAIN_LIVE=1 is the fleet-wide default that
+	// makes the appeal channel file automatically. Without one of them a complaint
+	// is a dry-run that records NOTHING durable — the "worked around it and
+	// journaled it" failure the friction-complaint doctrine exists to kill.
+	liveMode := complainLiveMode(*live, os.Getenv)
 
 	c := guardcomplaint.Complaint{
 		Kind:      normKind,
@@ -125,7 +132,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak complain: --existing-json must contain a JSON list: %v\n", err)
 			return 2
 		}
-	case *live || *fetchExisting:
+	case liveMode || *fetchExisting:
 		existing, err = guardcomplaint.FetchExisting(*repo, *limit)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak complain: %v\n", err)
@@ -135,7 +142,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 
 	row := guardcomplaint.BuildPlan(c, existing)
 	mode := "dry-run"
-	if *live {
+	if liveMode {
 		mode = "live"
 	}
 	result := guardcomplaint.Result{
@@ -144,7 +151,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		Planned: []guardcomplaint.PlanRow{row},
 		Synced:  []dogfoodissues.SyncRow{},
 	}
-	if *live {
+	if liveMode {
 		useLabels := []string(labels)
 		if len(useLabels) == 0 {
 			useLabels = []string{guardcomplaint.Label}
@@ -161,12 +168,30 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stdout, guardcomplaint.Render(result))
 	}
 
-	if *live {
+	if liveMode {
 		for _, s := range result.Synced {
 			if !s.OK {
 				return 1
 			}
 		}
+	} else {
+		// A dry-run files nothing. Disclose that loudly so the complaint is not
+		// mistaken for a filed ticket, and name BOTH ways to actually file.
+		fmt.Fprintln(stderr, "fak complain: dry-run — NO gh ticket was filed. Add --live to file now, or set FAK_COMPLAIN_LIVE=1 to auto-file every complaint.")
 	}
 	return 0
+}
+
+// complainLiveMode resolves whether a complaint should actually file a gh ticket.
+// The explicit --live flag is the per-call opt-in; FAK_COMPLAIN_LIVE (1/true/yes)
+// is the fleet-wide default that makes the appeal channel file GitHub tickets
+// automatically, so a complaint is a tracked, deduped record rather than a
+// dry-run that leaves nothing behind. getenv is injected so the resolution is
+// unit-testable without touching the process environment or the network.
+func complainLiveMode(flagLive bool, getenv func(string) string) bool {
+	if flagLive {
+		return true
+	}
+	v := strings.TrimSpace(getenv("FAK_COMPLAIN_LIVE"))
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
 }
