@@ -141,9 +141,10 @@ func TestEPFanoutClientInheritsRequestCancellation(t *testing.T) {
 	}
 
 	started := make(chan struct{})
+	release := make(chan struct{})
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
-		<-r.Context().Done()
+		<-release
 	}))
 	defer peer.Close()
 	t.Setenv("FAK_EP_FANOUT_ADDRS", peer.URL)
@@ -161,6 +162,8 @@ func TestEPFanoutClientInheritsRequestCancellation(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(time.Second):
+		close(release)
 		t.Fatal("fanout did not inherit inbound request cancellation")
 	}
+	close(release)
 }
