@@ -292,3 +292,44 @@ func ReadSteerNextRecords(trace string) []NextRecord {
 	delete(steerNext, trace)
 	return records
 }
+
+var (
+	advisoryNextMu sync.Mutex
+	advisoryNext   = map[string][]NextRecord{}
+)
+
+// RecordContextAdvisoryNext lowers one consumed context-spike advisory onto the
+// shared interactive Next contract. The advisory is rendered as a user splice;
+// it annotates the live objective rather than redirecting it.
+func RecordContextAdvisoryNext(trace, payload string) {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || payload == "" {
+		return
+	}
+	move := Move{
+		Kind: MoveAnnotate, Render: RenderUserSplice,
+		Session: SessionInteractive, Gate: "context-spike",
+		Source: "agent-turn-boundary", Payload: payload,
+	}
+	record, err := WitnessMove(move, ApplyResult{Applied: true})
+	if err != nil {
+		return
+	}
+	advisoryNextMu.Lock()
+	advisoryNext[trace] = append(advisoryNext[trace], record)
+	advisoryNextMu.Unlock()
+}
+
+// ReadContextAdvisoryNextRecords returns and clears independently re-readable
+// Next witnesses for context advisories consumed by trace.
+func ReadContextAdvisoryNextRecords(trace string) []NextRecord {
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return nil
+	}
+	advisoryNextMu.Lock()
+	defer advisoryNextMu.Unlock()
+	records := append([]NextRecord(nil), advisoryNext[trace]...)
+	delete(advisoryNext, trace)
+	return records
+}

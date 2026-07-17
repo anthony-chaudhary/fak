@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
 
 // loop_ctxnudge_test.go — the agent-loop half of the #2197 context-spike nudge
@@ -69,5 +71,44 @@ func TestContextNudgeGatePathAndPreference(t *testing.T) {
 	cfg := resolveRunConfig([]RunOption{WithSessionTable(tb, "tr"), WithSessionGate(gate, "tr")})
 	if got := cfg.contextNudge(); got != "gate advisory" || asked != "tr" {
 		t.Fatalf("gate must own the boundary: got %q (asked=%q)", got, asked)
+	}
+}
+
+func TestContextNudgeRunArmEmitsSharedNextWitness(t *testing.T) {
+	const trace = "ctx-nudge-next-trace"
+	sessionctl.ReadContextAdvisoryNextRecords(trace)
+	gate := SessionGate{Nudge: func(string) string { return "summarize, then continue" }}
+	p := &recordingPlanner{}
+	if _, err := RunArm(context.Background(), p, "original task", false, 1, nil, WithSessionGate(gate, trace)); err != nil {
+		t.Fatalf("RunArm: %v", err)
+	}
+	var spliced bool
+	for _, m := range p.seen {
+		if m.Role == RoleUser && m.Content == "summarize, then continue" {
+			spliced = true
+		}
+	}
+	if !spliced {
+		t.Fatalf("context advisory was not spliced as the user turn the planner consumes: %+v", p.seen)
+	}
+	records := sessionctl.ReadContextAdvisoryNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("context advisory Next witnesses=%d, want 1", len(records))
+	}
+	r := records[0]
+	if !r.Applied || r.Move.Kind != sessionctl.MoveAnnotate || r.Move.Render != sessionctl.RenderUserSplice || r.Move.Session != sessionctl.SessionInteractive || r.Move.Payload != "summarize, then continue" {
+		t.Fatalf("context advisory Next witness=%+v", r)
+	}
+}
+
+func TestContextNudgeRunArmNoAdvisoryNoNextWitness(t *testing.T) {
+	const trace = "ctx-nudge-next-empty"
+	sessionctl.ReadContextAdvisoryNextRecords(trace)
+	p := &recordingPlanner{}
+	if _, err := RunArm(context.Background(), p, "original task", false, 1, nil, WithSessionGate(SessionGate{Nudge: func(string) string { return "" }}, trace)); err != nil {
+		t.Fatalf("RunArm: %v", err)
+	}
+	if records := sessionctl.ReadContextAdvisoryNextRecords(trace); len(records) != 0 {
+		t.Fatalf("empty advisory emitted Next witnesses: %+v", records)
 	}
 }

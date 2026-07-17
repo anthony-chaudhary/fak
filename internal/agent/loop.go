@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
@@ -501,6 +502,7 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		// steer, closest to the model's next turn. Advisory only, and a no-op without
 		// a wired trace/table/gate — the historical loop is byte-for-byte unchanged.
 		if nudge := cfg.contextNudge(); nudge != "" {
+			sessionctl.RecordContextAdvisoryNext(cfg.trace, nudge)
 			messages = append(messages, Message{Role: RoleUser, Content: nudge})
 		}
 

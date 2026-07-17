@@ -207,3 +207,24 @@ func TestRecordSteerNextReadbackAndNoop(t *testing.T) {
 		t.Fatalf("refused=%+v", refused)
 	}
 }
+
+func TestRecordContextAdvisoryNextReadbackAndNoop(t *testing.T) {
+	const trace = "next-context-advisory"
+	ReadContextAdvisoryNextRecords(trace)
+	RecordContextAdvisoryNext(trace, "  summarize, then continue  ")
+	records := ReadContextAdvisoryNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("records=%d, want 1", len(records))
+	}
+	r := records[0]
+	if !r.Applied || r.Move.Kind != MoveAnnotate || r.Move.Render != RenderUserSplice || r.Move.Session != SessionInteractive {
+		t.Fatalf("record=%+v", r)
+	}
+	if r.Move.Payload != "  summarize, then continue  " || r.Move.Gate != "context-spike" || r.Move.Source != "agent-turn-boundary" {
+		t.Fatalf("move=%+v", r.Move)
+	}
+	RecordContextAdvisoryNext(trace, "")
+	if got := ReadContextAdvisoryNextRecords(trace); len(got) != 0 {
+		t.Fatalf("empty advisory emitted records: %+v", got)
+	}
+}
