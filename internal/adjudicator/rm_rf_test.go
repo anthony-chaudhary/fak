@@ -40,18 +40,24 @@ func TestRmRfStructuralNoFalsePositive(t *testing.T) {
 }
 
 // TestRmRfStructuralCatchesLaunder is face (2): the rule must fire on a real
-// recursive OR forced rm at a command boundary regardless of flag order, flag
+// recursive rm — OR a force-only rm whose target set is a sweep (glob, multiple
+// paths, or a variable) — at a command boundary regardless of flag order, flag
 // spelling, or a wrapping sh -c / sudo / xargs / nohup — the launders the raw
-// regex (which inspected only the first flag cluster after `rm`) let slip.
+// regex (which inspected only the first flag cluster after `rm`) let slip. A
+// force-only delete of a single literal path is the ONE case that degrades to the
+// confirm gate; it lives in TestRmRfForceOnlySingleLiteralNotHardDenied (#4983).
 func TestRmRfStructuralCatchesLaunder(t *testing.T) {
 	danger := []string{
 		`rm -rf /`,
-		`rm -fr x`,
-		`rm -f x`,                             // force-only: recursive OR force
+		`rm -fr x`,                            // recursive+force cluster
 		`rm -i -rf x`,                         // interactive first, then -rf (flag reorder)
 		`rm --recursive --force x`,            // long-flag spelling
 		`rm -v -r -f x`,                       // split short flags in later clusters
 		`rm -R dir`,                           // capital-R recursive
+		`rm -rf foo.txt`,                      // recursive on a single literal path is still denied
+		`rm -f a b`,                           // force-only but MULTIPLE paths (a sweep) — stays denied (#4983 scope)
+		`rm -f *.tmp`,                         // force-only but a GLOB (unbounded) — stays denied (#4983 scope)
+		`rm -f $TARGET`,                       // force-only but a VARIABLE target — stays denied (#4983 scope)
 		`sudo rm -rf /`,                       // sudo unwrap
 		`sh -c 'rm -rf /'`,                    // laundered one level deep through sh -c
 		`nohup rm -rf x`,                      // transparent wrapper
@@ -63,6 +69,61 @@ func TestRmRfStructuralCatchesLaunder(t *testing.T) {
 		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
 			t.Errorf("danger %q: got %v/%s, want Deny/POLICY_BLOCK (laundered rm -rf slipped)",
 				cmd, v.Kind, abi.ReasonName(v.Reason))
+		}
+	}
+}
+
+// TestRmRfForceOnlySingleLiteralNotHardDenied fences #4983: a FORCE-ONLY (no -r/-R)
+// `rm` of a single explicit literal path must NOT be a terminal POLICY_BLOCK — it
+// degrades to the same reversibility preview-confirm gate as plain `rm foo`, because
+// -f adds no recursive/blast-radius over plain rm (it only suppresses the
+// interactive prompt, which never fires in a headless agent). The pure decider says
+// "not unsafe"; end-to-end the call is anything BUT a hard recursive/forced-delete
+// deny. Every recursive, glob, multi-path, or variable form stays denied — those are
+// fenced in TestRmRfStructuralCatchesLaunder / TestForceOnlyDeleteDecider.
+func TestRmRfForceOnlySingleLiteralNotHardDenied(t *testing.T) {
+	forceOnlySingle := []string{
+		`rm -f x`,
+		`rm -f foo.txt`,
+		`rm --force ./build/artifact.o`,
+		`rm -f -- weird-name`,
+		`rm -vf note.md`, // force in a non-first cluster position, still single literal
+	}
+	a := rcePipeAdj(t, defaultRmRfDenyRegex)
+	for _, cmd := range forceOnlySingle {
+		v := a.Adjudicate(context.Background(), inlineCall("Bash", jsonCmd(cmd)))
+		if v.Kind == abi.VerdictDeny && v.Reason == abi.ReasonPolicyBlock {
+			t.Errorf("force-only single-literal %q: got Deny/POLICY_BLOCK, want a non-terminal "+
+				"verdict (falls through to the reversibility confirm gate) (#4983)", cmd)
+		}
+	}
+}
+
+// TestForceOnlyDeleteDecider pins the pure structural decider at the #4983 boundary:
+// force-only + single literal path is "not unsafe" (falls through); recursive in any
+// form, or force-only over a sweep (glob/multi/variable), stays unsafe.
+func TestForceOnlyDeleteDecider(t *testing.T) {
+	cases := []struct {
+		cmd    string
+		unsafe bool
+	}{
+		{"rm -f foo.txt", false},         // force-only, single literal → confirm gate
+		{"rm --force foo.txt", false},    // long force spelling
+		{"rm -vf foo.txt", false},        // force in a later cluster, single literal
+		{"rm -f -- foo.txt", false},      // literal after the -- options terminator
+		{"rm foo.txt", false},            // plain rm (no r/f) was never this rule's job
+		{"rm -rf foo.txt", true},         // recursive on a single literal is STILL denied
+		{"rm -Rf foo.txt", true},         // capital-R recursive
+		{"rm --recursive foo.txt", true}, // long recursive spelling
+		{"rm -f a b", true},              // force-only but multiple paths (a sweep)
+		{"rm -f *.tmp", true},            // force-only but a glob (unbounded)
+		{"rm -f $TARGET", true},          // force-only but a variable target
+		{"rm -f `cat list`", true},       // force-only but a command-substitution target
+		{"rm -f", true},                  // force-only with no operand is not the single-literal case
+	}
+	for _, tc := range cases {
+		if got := commandHasUnsafeRecursiveForcedDelete(tc.cmd, "/work/fak", nil); got != tc.unsafe {
+			t.Errorf("commandHasUnsafeRecursiveForcedDelete(%q) = %v, want %v", tc.cmd, got, tc.unsafe)
 		}
 	}
 }

@@ -68,9 +68,12 @@ func commandHasRecursiveForcedDelete(cmd string) bool {
 }
 
 // commandHasUnsafeRecursiveForcedDelete keeps the shipped fail-closed verdict
-// except when every recursive/forced delete target is a literal path strictly
-// below a declared scratchpad root. Workspace paths are deliberately NOT
-// exempt: recursive cleanup there can destroy real work even when it is in-tree.
+// except in two bounded carve-outs: (1) every recursive/forced delete target is a
+// literal path strictly below a declared scratchpad root, and (2) the call is a
+// FORCE-ONLY (no -r/-R) delete of a single explicit literal path — see
+// rmArgvHardDenied for why that degrades to the reversibility confirm gate (#4983).
+// Workspace paths are deliberately NOT scratch-exempt: recursive cleanup there can
+// destroy real work even when it is in-tree.
 func commandHasUnsafeRecursiveForcedDelete(cmd, ws string, scratch []string) bool {
 	for _, src := range rceShellSources(cmd) {
 		for _, seg := range rceShellSegments(src) {
@@ -81,7 +84,7 @@ func commandHasUnsafeRecursiveForcedDelete(cmd, ws string, scratch []string) boo
 			switch rceProgramBasename(seg.argv[i]) {
 			case "rm":
 				args := seg.argv[i+1:]
-				if argvHasRecursiveOrForce(args) && !rmDeleteTargetsInScratch(args, ws, scratch) {
+				if rmArgvHardDenied(args) && !rmDeleteTargetsInScratch(args, ws, scratch) {
 					return true
 				}
 			case strings.ToLower("Remove" + "-Item"):
@@ -96,6 +99,14 @@ func commandHasUnsafeRecursiveForcedDelete(cmd, ws string, scratch []string) boo
 }
 
 func rmDeleteTargetsInScratch(args []string, ws string, scratch []string) bool {
+	return deleteTargetsStrictlyInScratch(rmDeleteTargets(args), ws, scratch)
+}
+
+// rmDeleteTargets extracts the path operands from an `rm` argv: every non-option
+// token, with a bare `--` ending option scanning (the rest are operands). It is the
+// shared operand walk behind both the scratch-containment check and the
+// single-literal-target check (#4983).
+func rmDeleteTargets(args []string) []string {
 	var targets []string
 	optionsDone := false
 	for _, arg := range args {
@@ -108,7 +119,7 @@ func rmDeleteTargetsInScratch(args []string, ws string, scratch []string) bool {
 		}
 		targets = append(targets, arg)
 	}
-	return deleteTargetsStrictlyInScratch(targets, ws, scratch)
+	return targets
 }
 
 func psDeleteTargetsInScratch(args []string, ws string, scratch []string) bool {
@@ -188,24 +199,70 @@ func rmDeleteCommandWord(argv []string) int {
 	return i
 }
 
-// argvHasRecursiveOrForce reports whether any flag in args selects recursive
-// (-r/-R/--recursive) or force (-f/--force) delete. Short clusters match on any of
-// r/R/f/F (mirroring the shipped `[rRfF]` class, in any cluster position); a bare
-// `--` ends option scanning (the rest are path operands, as the raw regex also
-// required a `-` immediately after `rm`).
-func argvHasRecursiveOrForce(args []string) bool {
+// rmArgvHardDenied reports whether an `rm` argv must stay hard-denied
+// (POLICY_BLOCK), as opposed to falling through to the reversibility rung's
+// preview-confirm gate. Recursive (-r/-R/--recursive) is ALWAYS hard-denied: it
+// turns a named delete into an unbounded tree removal. Force (-f/--force) WITHOUT
+// recursive adds no blast radius that a plain `rm` — which the reversibility rung
+// already preview-confirms, not hard-denies — does not already have: -f only
+// suppresses the interactive are-you-sure prompt and the missing-file error,
+// neither of which is a floor this guard enforces, and in a headless agent there is
+// no prompt to suppress at all. So a force-only delete of a SINGLE explicit literal
+// path degrades to that same confirm gate (#4983) — the hard deny was pure friction
+// there, forcing a `rm -f foo` -> `rm foo` rewrite that reaches the identical
+// deletion through the confirm gate anyway. Force-only stays hard-denied when the
+// target set is unbounded or ambiguous — a glob (`rm -f *`), more than one path
+// (`rm -f a b`), or a variable/command-substitution target — because there the
+// force flag drives a wide, non-interactive sweep the single-target confirm preview
+// cannot faithfully surface (the complaint's own requested scope, #4983).
+func rmArgvHardDenied(args []string) bool {
+	recursive, force := argvRecursiveForce(args)
+	if recursive {
+		return true
+	}
+	if !force {
+		return false // neither -r nor -f: a plain rm the reversibility rung confirm-gates
+	}
+	return !rmSingleLiteralTarget(args)
+}
+
+// argvRecursiveForce scans an `rm` argv and reports whether it selects recursive
+// (-r/-R/--recursive) and/or force (-f/--force) deletion. Short clusters match on
+// any of r/R/f/F (mirroring the shipped `[rRfF]` class, in any cluster position);
+// a bare `--` ends option scanning (the rest are path operands, as the raw regex
+// also required a `-` immediately after `rm`).
+func argvRecursiveForce(args []string) (recursive, force bool) {
 	for _, t := range args {
 		switch {
 		case t == "--":
-			return false
-		case t == "--recursive" || t == "--force":
-			return true
-		case rceIsShortCluster(t) && (rceClusterHas(t, 'r') || rceClusterHas(t, 'R') ||
-			rceClusterHas(t, 'f') || rceClusterHas(t, 'F')):
-			return true
+			return recursive, force
+		case t == "--recursive":
+			recursive = true
+		case t == "--force":
+			force = true
+		case rceIsShortCluster(t):
+			if rceClusterHas(t, 'r') || rceClusterHas(t, 'R') {
+				recursive = true
+			}
+			if rceClusterHas(t, 'f') || rceClusterHas(t, 'F') {
+				force = true
+			}
 		}
 	}
-	return false
+	return recursive, force
+}
+
+// rmSingleLiteralTarget reports whether an `rm` argv names EXACTLY ONE path operand
+// that is a plain literal — no glob metacharacter (`*`, `?`, `[`), no shell
+// variable/expansion (`$`), and no command substitution (backtick). Those forms
+// expand to an unbounded or caller-opaque target set, so a force-only delete naming
+// one is NOT the bounded single-file case #4983 carves out.
+func rmSingleLiteralTarget(args []string) bool {
+	targets := rmDeleteTargets(args)
+	if len(targets) != 1 {
+		return false
+	}
+	return !strings.ContainsAny(targets[0], "*?[$`")
 }
 
 func argvHasPowerShellRecursiveOrForce(args []string) bool {
