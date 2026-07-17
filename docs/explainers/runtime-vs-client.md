@@ -15,6 +15,8 @@ keywords:
   - agent SDK
   - managed agent runtime
   - two runtimes one binary
+  - enforcement boundary
+  - request arrival vs turn end
 date: 2026-07-11
 ---
 
@@ -130,6 +132,57 @@ surface](one-binary-one-surface.md).
   settled, and prefer the gateway path unless you specifically want fak to own the loop.
 - **"Client" is a role, not a product.** The same harness is a client of whichever runtime
   it points at; `fak guard` is just the one-command way to make it a *governed* one.
+
+## Enforcement boundary — what a client gets on its own loop
+
+The three roles answer *what do I run*; the next question an adopter with their own loop
+asks is *what does fak actually enforce on MY loop, and what do I lose by not letting
+`fak guard` own my process?* The axis that decides it is **request-arrival vs turn-end**:
+
+> The gateway can refuse, throttle, reset, charge, or stop anything that **arrives** on
+> the wire — trace-keyed, no harness required. It cannot compel a request your loop
+> decided not to send. Everything welded to the **end of a turn** ("the model stopped —
+> now what?") rides Claude Code lifecycle hooks, and those exist only when `fak guard`
+> **owns the process** and installs them into the child's merged `--settings`.
+
+Per mechanism, which boundary it fires on and whether it transfers to a bare
+repoint-the-base-URL client:
+
+| Enforcement | Request arrival (`fak serve`, over the wire) | Turn end (needs `fak guard` process ownership) | Anchor |
+|---|---|---|---|
+| **Per-turn admission** — run-state (pause/drain/stop) + turn/token budget, refused *before* the model runs | yes | — | `beginServedSessionTurn` (`internal/gateway/session_admit.go`), fed by the `decideSession` hook (`cmd/fak/main.go`) |
+| **Hard spend cap** (#3273) — a scope over its versioned budget gets a kernel-side 409 refusal, never a plea to the model | yes — `spendBreach` refuses the turn, `chargeSpend` debits post-response, on any served path (serve or guard-as-client) | — | `internal/gateway/session_admit.go`, `internal/gateway/spend_governor.go`. *Caveat:* the governor must be attached via `SetSpendGovernor`; the `fak serve` CLI wiring is still open (#4859), so today attachment is programmatic, not a flag |
+| **Pace shaping** — per-request min-gap delay and a max-tokens cap that can only lower what the client asked for | yes | — | `servedSessionTurn.minGapMs`, `maxTokensFor` (`internal/gateway/session_admit.go`) |
+| **Budget / coherence session resets** — the human-like continue on token/context drain; a latched hard reset on the next admitted turn | yes | — | `isBudgetResetReason`, `armCoherenceReset` / `consumeCoherenceReset` (`internal/gateway/session_admit.go`) |
+| **Operator control + steer** — the operator POSTs drain/stop or budget/pace changes; a steer lands at the *next* request boundary | yes | — | `steerSession` (`cmd/fak/main.go`) enqueues on the a2achan bus |
+| **Confirm-token / reversibility gate** — an irreversible action needs a fresh operator token, checked per request | yes | — | `ReversibilityConfirmed` / `reversibilityGateVerdict` (`internal/adjudicator/decide.go`) |
+| **Deny-all auto-continue** — resume the agent past a turn the floor refused entirely (the deny-all false-stop fix) | — | yes — Stop hook | `cmd/fak/guard_stophook.go`, installed in `cmd/fak/guard.go` |
+| **Task-handoff gate** — a clean Stop must carry a `fak.task-handoff.v1` JSON (enforce for headless/fleet, auto-off attended-interactive) | — | yes — Stop hook | `cmd/fak/guard_handoff_mode.go` |
+| **Operator-directed gate** — catches a headless turn ending by asking an absent human (#4951) | — | yes — Stop hook | `guardOperatorDirectedEffectiveMode` (`cmd/fak/guard.go`) |
+| **PreCompact** — intercept the harness's context compaction | — | yes — PreCompact hook | `installGuardPreCompactHook` (`cmd/fak/guard.go`) |
+| **Supervised restart loop** — on context-budget exhaustion, relaunch the child under the continuation trace with a carryover seed | — | yes — guard relaunches the child | `newGuardBudgetRestarter`, `--restart-on-budget` (`cmd/fak/guard.go`) |
+
+Two honest footnotes, so no row outruns the code:
+
+- **The residual weld is thinner than it looks.** Even the turn-end give-up decision is
+  mostly gateway-side already: the counter it keys on — consecutive deny-all turns
+  proposing the *identical* refused action — lives in the gateway
+  (`denyAllSameSnapshot`, `internal/gateway/metrics_observe.go`). Only the *actuation*
+  (actually ending or continuing the harness's turn) is harness-bound; exposing that seam
+  to non-guard clients is #5161.
+- **The per-session cache-break gate is inert today.** The counter, cause vocabulary, and
+  Prometheus surface exist (`internal/metrics/cache_break.go`), but the #2915
+  prefix-mutation detector that would produce live events never landed — do not read it
+  as a working gateway signal.
+
+So the practical answer to "what do I lose by not running `fak guard`": nothing in the
+left column — admission, budgets, spend, pace, resets, steer, and the reversibility gate
+all bind a bare base-URL client, because they fire when the request *arrives*. What you
+lose is the right column: everything that reacts to your loop *stopping* — auto-continue
+past a false stop, the handoff and operator-directed gates, PreCompact, and the
+supervised restart — because the model-API wire never tells the gateway your turn ended.
+This table is the shape future seam findings should land in: one row per mechanism, one
+boundary, one anchor. (Driving tickets: #5152, #5153, #5161; captured by #5162.)
 
 ## Where to go deeper
 
