@@ -758,9 +758,9 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	}
 	terms := mapAt(capFact, "cap_terms")
 	if dispatchMapInt(terms, "configured_cap") != dispatchtick.DefaultMaxWorkers || dispatchMapInt(terms, "lease_cap") != 3 ||
-		dispatchMapInt(terms, "host_cap") != 64 || dispatchMapInt(terms, "seat_cap") < 3 ||
+		dispatchMapInt(terms, "host_cap") != 32 || dispatchMapInt(terms, "seat_cap") < 3 ||
 		dispatchMapInt(terms, "effective_cap") != 3 || dispatchMapString(terms, "limiting") != "lease" {
-		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=64 seat>=3 effective=3 limiting=lease", terms, dispatchtick.DefaultMaxWorkers)
+		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=32 seat>=3 effective=3 limiting=lease", terms, dispatchtick.DefaultMaxWorkers)
 	}
 	preflight := mapAt(got, "preflight")
 	if dispatchMapString(mapAt(preflight, "cap_terms"), "limiting") != "lease" {
