@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **97.1/100** (grade A) = 9.7/10 |
-| **Coverage** | **95.6%** (1947/2036 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **89** (clarity 0 + coverage 89) |
-| Crystal-clear concepts | 254 of 1723 positioned |
+| **Score** | **96.3/100** (grade A) = 9.6/10 |
+| **Coverage** | **94.3%** (1951/2070 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **119** (clarity 0 + coverage 119) |
+| Crystal-clear concepts | 255 of 1724 positioned |
 | As of |  (fak ) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,10 +24,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1723 concepts - score 97.1/100 (grade A) - disambiguation-debt 89
+concept-disambiguation chart - 1724 concepts - score 96.3/100 (grade A) - disambiguation-debt 119
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #####....................... 254
+  * crystal       #####....................... 255
   o defined       ############################ 1469
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -42,7 +42,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            *****oooooooooooooooooooooooooooooo (35 concept(s); 5 crystal)
   gateway-engine   ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (119 concept(s); 6 crystal)
-  guard-gate       ********************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (212 concept(s); 56 crystal)
+  guard-gate       *********************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (213 concept(s); 57 crystal)
   layout           ***oooooooo        (11 concept(s); 3 crystal)
   loop             **************oooooooooooooooooooooooooooo (42 concept(s); 14 crystal)
   plan             *****************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (230 concept(s); 17 crystal)
@@ -57,21 +57,21 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (116 concept(s); 39 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ##########################.. 290/315
-  plan             ###########################. 286/298
-  cache            ###########################. 223/234
-  policy-capability ##########################.. 117/125
-  render-materialize ###########################. 162/170
+  guard-gate       #########################... 292/328
+  cache            ##########################.. 223/241
+  plan             ###########################. 286/301
+  render-materialize ##########################.. 162/173
+  context-ctx      ###########################. 175/183
+  policy-capability ##########################.. 118/126
+  session-runtime  ###########################. 173/179
   score-debt       ##########################.. 78/83
-  session-runtime  ###########################. 173/178
-  witness-proof    ###########################. 125/129
-  context-ctx      ############################ 175/178
+  support-maturity ########################.... 29/34
+  witness-proof    ###########################. 126/130
   evict            ##########################.. 40/43
   gateway-engine   ###########################. 159/162
-  support-maturity #########################... 29/32
   attention        ###########################. 69/71
+  loop             ###########################. 57/59
   decision         ###########################. 38/39
-  loop             ############################ 57/58
   pool             ###########################. 35/36
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 95.6%  (1947/2036 confusable tokens positioned)
+namespace coverage  [##############################..] 94.3%  (1951/2070 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -173,6 +173,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | gateway-engine | **vDSO (tool vDSO)** - The tool vDSO: a local fast path (pure registry, content-addressed cache, static table) that answers a tool call with zero engine round-trip. |
 | * | crystal | subsystem | gateway-engine | **model (in-kernel model)** - The in-kernel inference core: a pure-Go forward pass that runs chat token decode over a loaded GGUF checkpoint across several architectures and quant schemes. |
 | * | crystal | symbol | gateway-engine | **engines registry** - The runtime registry (abi.Registry.engines) that maps engine IDs to their EngineDriver implementations: the kernel's dispatch table of all registered inference backends. |
+| * | crystal | symbol | guard-gate | **gateVerbTierTree (whole-tree verb-tier gate)** - Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653). |
 | * | crystal | subsystem | guard-gate | **guard_mcp (guard MCP self-query install)** - The cmd/fak/guard_mcp.go module: it wires fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_context_*) into the guarded child by injecting an MCP server registration into the child's launch config, mirroring the install shape of guard_precompact.go / guard_codex.go. |
 | * | crystal | subsystem | guard-gate | **guard_codex (guard Codex-provider wiring)** - The cmd/fak/guard_codex.go module: the first-class `fak guard -- codex` wiring, fak's OpenAI-Codex provider install path (credential resolve plus config rewrite) that lets the guard front a Codex child the same way it fronts an Anthropic one. |
 | * | crystal | symbol | guard-gate | **GuardAssumption (assume-check adjudication)** - assumecheck.GuardAssumption: the adjudication that folds a stated assumption plus its evidence into an Allow/Refuse verdict for `fak assume check` (and the re-witness loop `fak assume loop`). |
@@ -1938,7 +1939,7 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 26 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1723 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1724 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1950,21 +1951,21 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 290 | 315 | 25 |
-| plan | 286 | 298 | 12 |
-| cache | 223 | 234 | 11 |
-| policy-capability | 117 | 125 | 8 |
-| render-materialize | 162 | 170 | 8 |
+| guard-gate | 292 | 328 | 36 |
+| cache | 223 | 241 | 18 |
+| plan | 286 | 301 | 15 |
+| render-materialize | 162 | 173 | 11 |
+| context-ctx | 175 | 183 | 8 |
+| policy-capability | 118 | 126 | 8 |
+| session-runtime | 173 | 179 | 6 |
 | score-debt | 78 | 83 | 5 |
-| session-runtime | 173 | 178 | 5 |
-| witness-proof | 125 | 129 | 4 |
-| context-ctx | 175 | 178 | 3 |
+| support-maturity | 29 | 34 | 5 |
+| witness-proof | 126 | 130 | 4 |
 | evict | 40 | 43 | 3 |
 | gateway-engine | 159 | 162 | 3 |
-| support-maturity | 29 | 32 | 3 |
 | attention | 69 | 71 | 2 |
+| loop | 57 | 59 | 2 |
 | decision | 38 | 39 | 1 |
-| loop | 57 | 58 | 1 |
 | pool | 35 | 36 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |

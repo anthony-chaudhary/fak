@@ -1,0 +1,26 @@
+{
+  "rows": [
+    {
+      "id": "covg-guard-gate-gateverbtiertree",
+      "canonical": "gateVerbTierTree (whole-tree verb-tier gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653).",
+      "distinction": "Audits the VERB-tier table (every cmd/fak dispatch verb carries a tier); distinct from gateTierDeclaredTree, which audits the LEAF/package tier (every internal/\u003cleaf\u003e declares a support tier). Both whole-tree hooks gates over a devindex source-of-truth; different subject table.",
+      "distinct_from": [
+        "covg-guard-gate-gatetierdeclaredtree",
+        "covg-guard-gate-gateuntieredleaf"
+      ],
+      "aliases": [
+        "gate_verbtier",
+        "VERB_UNTIERED"
+      ],
+      "grounding": "gateVerbTierTree",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

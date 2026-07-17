@@ -1131,3 +1131,10 @@ The post-fire reconciliation signal (#2791): a compaction that FIRED - which by 
 The stub-build (non-Apple-Silicon) test file q2_0_witness_test.go: it pins the ternary Q2_0 reference's math obligations -- bit layout, ternary code set, round-trip error bound, and ref-GEMV-vs-dense parity -- in every build that cannot execute the Metal kernel.
 
 **Distinct from:** A source FILE name, not a run-status or claim verdict: it names where the Q2_0 math obligations are asserted, whereas the witness-proof family's other rows name whether a claim was corroborated at runtime. It records no verdict and gates no dispatch.
+
+
+### gateVerbTierTree (whole-tree verb-tier gate)
+
+Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653).
+
+**Distinct from:** Audits the VERB-tier table (every cmd/fak dispatch verb carries a tier); distinct from gateTierDeclaredTree, which audits the LEAF/package tier (every internal/<leaf> declares a support tier). Both whole-tree hooks gates over a devindex source-of-truth; different subject table.

@@ -116,6 +116,11 @@ func HygieneGates() []HygieneGate {
 		{"BRAND_CONSISTENCY", gateBrandConsistencyTree, false, false},
 		{"TIER_DECLARED", gateTierDeclaredTree, false, true},
 		{"NEW_PYTHON_TOOL", gatePythonToolTree, false, false},
+		// VERB_UNTIERED ships default-ON like NEW_PYTHON_TOOL: the live tree already passes
+		// devindex.TestVerbTierCoverageIsTotal, so the gate lands clean and only a NEW
+		// dispatched cmd/fak verb with no tier row can red it — surfaced pre-push here
+		// instead of at CI time on the shared trunk (epic #2653).
+		{"VERB_UNTIERED", gateVerbTierTree, false, false},
 		// GOD_FILE_GROWTH ships default-ON like NEW_PYTHON_TOOL: the grandfathered
 		// baseline (godfile_baseline.go) freezes today's offenders at-size, so the
 		// tree is clean the moment the gate lands — only NEW growth can red it.

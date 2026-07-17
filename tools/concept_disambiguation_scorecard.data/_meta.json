@@ -227,6 +227,11 @@
           "category": "incidental",
           "reason": "local status formatter for restart feedback, not a distinct operator-facing gate concept",
           "token": "guardEquivalentRestartStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "File-stem/reason-token spelling of the positioned gateVerbTierTree gate (covg-guard-gate-gateverbtiertree); the same concept, not a distinct one.",
+          "token": "gate_verbtier"
         }
       ],
       "exclude": [
@@ -243,6 +248,7 @@
       "ignore": [
         "fleetbarecommitguard",
         "gate_test",
+        "gate_verbtier",
         "gated",
         "gateresult",
         "gates",

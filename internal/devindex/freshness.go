@@ -328,6 +328,14 @@ func (c *Catalog) UndeclaredVerbs() []string {
 	return out
 }
 
+// DispatchVerbs is the exported form of mainDispatchVerbs: the lowercased dispatch
+// tokens parsed out of cmd/fak/main.go bytes (sorted, deduped). It exists so the
+// pre-push VERB_UNTIERED hygiene gate (internal/hooks/gate_verbtier.go) reads the
+// verb set through the SAME parser TestVerbTierCoverageIsTotal uses, rather than a
+// second copy — the gate can then never disagree with the CI ratchet it fronts about
+// which tokens the switch actually dispatches (epic #2653).
+func DispatchVerbs(b []byte) []string { return mainDispatchVerbs(b) }
+
 // mainDispatchVerbs returns the lowercased quoted verb tokens of every top-level
 // dispatch switch in the given main.go bytes (sorted, deduped). It recognizes both
 // the legacy `switch os.Args[1]` and extracted `switch name` helper form. It tracks
