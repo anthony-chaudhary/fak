@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/memq"
 	"github.com/anthony-chaudhary/fak/internal/recall"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
 
 // ---------------------------------------------------------------------------
@@ -943,6 +944,10 @@ func TestAnthropicMessagesPassthroughPreservesCacheAndAdjudicates(t *testing.T) 
 }
 
 func TestAnthropicMessagesGuardRecoveryPromptInjectedOnce(t *testing.T) {
+	const trace = "guard-recovery-next-trace"
+	const recovery = "[fak] resume recovery: prior refusal OFF_TRUNK x2; do not retry unchanged"
+	sessionctl.ReadGuardRecoveryNextRecords(trace)
+	t.Cleanup(func() { sessionctl.ReadGuardRecoveryNextRecords(trace) })
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
@@ -960,7 +965,7 @@ func TestAnthropicMessagesGuardRecoveryPromptInjectedOnce(t *testing.T) {
 	srv, err := New(Config{
 		EngineID: "test", Model: "claude-test", BaseURL: upstream.URL, Provider: "anthropic",
 		APIKey: "configured-key", VDSO: true,
-		GuardRecoveryPrompt: "[fak] resume recovery: prior refusal OFF_TRUNK x2; do not retry unchanged",
+		GuardRecoveryPrompt: recovery,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -973,6 +978,7 @@ func TestAnthropicMessagesGuardRecoveryPromptInjectedOnce(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Trace-Id", trace)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("post %d: %v", i+1, err)
@@ -981,6 +987,20 @@ func TestAnthropicMessagesGuardRecoveryPromptInjectedOnce(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("post %d status = %d", i+1, resp.StatusCode)
 		}
+	}
+	rows := sessionctl.ReadGuardRecoveryNextRecords(trace)
+	if len(rows) != 1 {
+		t.Fatalf("Next records=%d want 1", len(rows))
+	}
+	next := rows[0]
+	if next.Move.Kind != sessionctl.MoveRedirect || next.Move.Render != sessionctl.RenderUserSplice || next.Move.Session != sessionctl.SessionInteractive {
+		t.Fatalf("Next move=%+v", next.Move)
+	}
+	if next.Move.Gate != "guard-recovery" || next.Move.Source != "gateway-anthropic-boundary" || next.Move.Payload != recovery || !next.Applied {
+		t.Fatalf("Next record=%+v", next)
+	}
+	if extra := sessionctl.ReadGuardRecoveryNextRecords(trace); len(extra) != 0 {
+		t.Fatalf("recovery emitted more than one Next row: %+v", extra)
 	}
 	if len(upstreamBodies) != 2 {
 		t.Fatalf("upstream requests = %d, want 2", len(upstreamBodies))

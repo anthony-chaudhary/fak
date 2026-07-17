@@ -403,6 +403,47 @@ func ReadBudgetResetNextRecords(trace string) []NextRecord {
 	delete(budgetResetNext, trace)
 	return records
 }
+
+var (
+	guardRecoveryNextMu sync.Mutex
+	guardRecoveryNext   = map[string][]NextRecord{}
+)
+
+// RecordGuardRecoveryNext lowers one consumed gateway recovery prompt onto the
+// shared interactive Next contract. The prompt redirects the next live user turn
+// away from a previously refused action.
+func RecordGuardRecoveryNext(trace, payload string) {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || payload == "" {
+		return
+	}
+	move := Move{
+		Kind: MoveRedirect, Render: RenderUserSplice,
+		Session: SessionInteractive, Gate: "guard-recovery",
+		Source: "gateway-anthropic-boundary", Payload: payload,
+	}
+	record, err := WitnessMove(move, ApplyResult{Applied: true})
+	if err != nil {
+		return
+	}
+	guardRecoveryNextMu.Lock()
+	guardRecoveryNext[trace] = append(guardRecoveryNext[trace], record)
+	guardRecoveryNextMu.Unlock()
+}
+
+// ReadGuardRecoveryNextRecords returns and clears independently re-readable
+// recovery-prompt Next witnesses for trace.
+func ReadGuardRecoveryNextRecords(trace string) []NextRecord {
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return nil
+	}
+	guardRecoveryNextMu.Lock()
+	defer guardRecoveryNextMu.Unlock()
+	records := append([]NextRecord(nil), guardRecoveryNext[trace]...)
+	delete(guardRecoveryNext, trace)
+	return records
+}
 func ReadContextAdvisoryNextRecords(trace string) []NextRecord {
 	trace = strings.TrimSpace(trace)
 	if trace == "" {

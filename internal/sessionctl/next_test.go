@@ -281,3 +281,29 @@ func TestRecordBudgetResetNextReadbackAndNoop(t *testing.T) {
 		t.Fatalf("no-op records=%+v", got)
 	}
 }
+
+func TestRecordGuardRecoveryNextReadbackAndNoop(t *testing.T) {
+	const trace = "guard-recovery-trace"
+	ReadGuardRecoveryNextRecords(trace)
+	payload := "[fak] resume recovery: do not retry unchanged"
+	RecordGuardRecoveryNext(trace, payload)
+	records := ReadGuardRecoveryNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("records=%d want 1", len(records))
+	}
+	got := records[0]
+	if got.Move.Kind != MoveRedirect || got.Move.Render != RenderUserSplice || got.Move.Session != SessionInteractive {
+		t.Fatalf("move=%+v", got.Move)
+	}
+	if got.Move.Gate != "guard-recovery" || got.Move.Source != "gateway-anthropic-boundary" {
+		t.Fatalf("provenance=%+v", got.Move)
+	}
+	if got.Move.Payload != payload || !got.Applied || got.Refusal != "" {
+		t.Fatalf("record=%+v", got)
+	}
+	RecordGuardRecoveryNext("", payload)
+	RecordGuardRecoveryNext(trace, "")
+	if got := ReadGuardRecoveryNextRecords(trace); len(got) != 0 {
+		t.Fatalf("no-op records=%+v", got)
+	}
+}

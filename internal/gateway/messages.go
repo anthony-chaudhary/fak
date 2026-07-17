@@ -27,6 +27,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/promptmmu"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
 
 // anthropicMessageResponse is the buffered (non-streaming) /v1/messages body.
@@ -128,6 +129,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
+	appendSessionLedger(reqTrace, "user_message", req.Raw)
 	// C1 read-scope floor (#4192): the first turn a trace serves binds its owning principal, so a
 	// later fak_context_restore / fak_context_spans read-self op can be scoped to it. First-writer-
 	// wins; "" on the no-RequireKey loopback (single-tenant).
@@ -150,6 +152,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
 	// still refuses paused/draining/stopped sessions.
 	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
+	defer sessionTurn.complete()
 	if canceled {
 		return
 	}
@@ -184,7 +187,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	applySessionPaceToAnthropicRequest(req, sessionTurn)
-	s.injectGuardRecoveryPrompt(req)
+	s.injectGuardRecoveryPrompt(req, reqTrace)
 	prep := s.prepareServedAnthropicRequest(ctx, r, req, reqTrace, sessionTurn)
 	compacted := prep.compacted
 	contextEvent := prep.contextEvent
@@ -317,7 +320,7 @@ func (s *Server) takeGuardRecoveryPrompt() string {
 	return out
 }
 
-func (s *Server) injectGuardRecoveryPrompt(req *agent.AnthropicMessagesRequest) bool {
+func (s *Server) injectGuardRecoveryPrompt(req *agent.AnthropicMessagesRequest, trace string) bool {
 	if req == nil {
 		return false
 	}
@@ -333,6 +336,7 @@ func (s *Server) injectGuardRecoveryPrompt(req *agent.AnthropicMessagesRequest) 
 			req.Raw = raw
 		}
 	}
+	sessionctl.RecordGuardRecoveryNext(trace, prompt)
 	return true
 }
 
