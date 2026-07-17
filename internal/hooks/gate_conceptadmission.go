@@ -33,6 +33,16 @@ func admissionToken(s string) string {
 	return b.String()
 }
 
+// admissionLeaf derives the leaf name from a gated source path
+// (internal/<leaf>/... or cmd/<leaf>/...) so the remedy can name the
+// per-leaf rows-<leaf>.json shard.
+func admissionLeaf(p string) string {
+	if segs := strings.SplitN(p, "/", 3); len(segs) >= 3 {
+		return segs[1]
+	}
+	return "leaf"
+}
+
 func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 	metaBytes, ok := d.FileBytes("tools/concept_disambiguation_scorecard.data/_meta.json")
 	if !ok {
@@ -123,7 +133,11 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 						continue
 					}
 					seen[key] = true
-					cmd := fmt.Sprintf("fak concept position --id %s --canonical %q --family %s --definition TEXT --distinction TEXT --kind symbol --grounding %s --grounding-kind symbol --glossary docs/fak/concept-glossary.md --distinct-from SIBLING_ID", tok, raw, f.id, raw)
+					// Suggest the per-leaf rows shard (--row-file) rather than the shared
+					// glossary/scorecard files: on a shared trunk the bare command plans
+					// writes into peer-contended files, while a new rows-<leaf>.json is
+					// lane-local and clears this gate on its own (#5104).
+					cmd := fmt.Sprintf("fak concept position --id %s --canonical %q --family %s --definition TEXT --distinction TEXT --kind symbol --grounding %s --grounding-kind symbol --row-file rows-%s.json --distinct-from SIBLING_ID", tok, raw, f.id, raw, admissionLeaf(p))
 					detail := fmt.Sprintf("family=%s token=%s introduced at %s:%d is neither positioned nor classified; run `%s` (or `fak concept classify --family %s --token %s --category incidental --reason TEXT`)", f.id, raw, p, line.New, cmd, f.id, raw)
 					out = append(out, Finding{Gate: "CONCEPT_ADMISSION", File: p, Line: line.New, Detail: detail})
 				}

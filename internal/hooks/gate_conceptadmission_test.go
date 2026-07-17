@@ -60,6 +60,38 @@ func TestConceptAdmissionRejectsUntreatedTokenWithRepair(t *testing.T) {
 	}
 }
 
+// The suggested repair must be lane-local: exactly one per-leaf rows shard,
+// never the shared glossary or scorecard files a peer may hold mid-flight (#5104).
+func TestConceptAdmissionRemedyTouchesExactlyOneFile(t *testing.T) {
+	d := conceptAdmissionFixture(t, "const CacheBurst = 1", "", false)
+	got, err := gateConceptAdmission(d)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	detail := got[0].Detail
+	start := strings.Index(detail, "`fak concept position")
+	if start < 0 {
+		t.Fatalf("no position remedy in detail: %s", detail)
+	}
+	end := strings.Index(detail[start+1:], "`")
+	if end < 0 {
+		t.Fatalf("unterminated remedy command in detail: %s", detail)
+	}
+	cmd := detail[start+1 : start+1+end]
+	var files []string
+	for _, tok := range strings.Fields(cmd) {
+		if strings.Contains(tok, "/") || strings.HasSuffix(tok, ".json") || strings.HasSuffix(tok, ".md") {
+			files = append(files, tok)
+		}
+	}
+	if len(files) != 1 || files[0] != "rows-demo.json" {
+		t.Fatalf("remedy must name exactly the per-leaf rows shard, got %v in %q", files, cmd)
+	}
+	if strings.Contains(cmd, "--glossary") {
+		t.Fatalf("remedy still plans a shared glossary write: %q", cmd)
+	}
+}
+
 func TestConceptAdmissionTreatmentsPass(t *testing.T) {
 	for _, treatment := range []string{"position", "classify"} {
 		t.Run(treatment, func(t *testing.T) {
