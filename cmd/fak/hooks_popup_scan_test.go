@@ -48,12 +48,12 @@ func popupRangeRepo(t *testing.T, baseFiles, headFiles map[string]string) (strin
 		gitHook(t, repo, "commit", "-q", "-m", msg)
 	}
 	commit(baseFiles, "base")
-	baseSha := strings.TrimSpace(gitCapture(t, repo, "rev-parse", "HEAD"))
+	baseSha := strings.TrimSpace(gitCaptureForPopupTest(t, repo, "rev-parse", "HEAD"))
 	commit(headFiles, "head")
 	return repo, baseSha
 }
 
-func gitCapture(t *testing.T, repo string, args ...string) string {
+func gitCaptureForPopupTest(t *testing.T, repo string, args ...string) string {
 	t.Helper()
 	c := exec.Command("git", append([]string{"-C", repo}, args...)...)
 	c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
