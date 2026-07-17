@@ -1,0 +1,12 @@
+[
+  {"checkpoint":"llama3-8b","family":"llama","pairs":[{"negated":[0,1],"positive":[1,1]},{"negated":[0,2],"positive":[1,2]}]},
+  {"checkpoint":"gemma2","family":"gemma","pairs":[{"negated":[0,1],"positive":[0.98,1]},{"negated":[0,2],"positive":[0.98,2]}]},
+  {"checkpoint":"gemma3","family":"gemma","pairs":[{"negated":[0,1],"positive":[1.02,1]},{"negated":[0,2],"positive":[1.02,2]}]},
+  {"checkpoint":"gemma4","family":"gemma","pairs":[{"negated":[0,1],"positive":[1,1.03]},{"negated":[0,2],"positive":[1,2.03]}]},
+  {"checkpoint":"qwen2.5","family":"qwen","pairs":[{"negated":[0,1],"positive":[0.95,1]},{"negated":[0,2],"positive":[0.95,2]}]},
+  {"checkpoint":"qwen3","family":"qwen","pairs":[{"negated":[0,1],"positive":[1.04,1]},{"negated":[0,2],"positive":[1.04,2]}]},
+  {"checkpoint":"qwen3.5","family":"qwen","pairs":[{"negated":[0,1],"positive":[1,0.96]},{"negated":[0,2],"positive":[1,1.96]}]},
+  {"checkpoint":"qwen3.6","family":"qwen","pairs":[{"negated":[0,1],"positive":[1.05,1.02]},{"negated":[0,2],"positive":[1.05,2.02]}]},
+  {"checkpoint":"mistral","family":"mistral","pairs":[{"negated":[0,1],"positive":[0.97,1.03]},{"negated":[0,2],"positive":[0.97,2.03]}]},
+  {"checkpoint":"glm","family":"glm","pairs":[{"negated":[0,1],"positive":[0.2,1.8]},{"negated":[0,2],"positive":[0.2,2.8]}]}
+]
