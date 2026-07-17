@@ -1218,12 +1218,55 @@ func (r Report) OK() bool {
 // ScanTree audits the on-disk worktree .ps1, .py, and Go helper files under repoRoot.
 // It includes untracked, non-ignored files because a new cmd/fak/*.go file can
 // compile into the binary before it is committed.
+//
+// NOTE: because ScanTree spans untracked working-tree siblings, it is the RIGHT scan
+// for the "is the whole tracked tree clean" assertion (TestTrackedTreeHasNoPopups) but
+// the WRONG scan for a PUSH gate on a shared multi-session checkout — an untracked peer
+// file it flags can never reach the trunk (#5145). The push seam uses ScanFiles over the
+// push range instead.
 func ScanTree(repoRoot string) (Report, error) {
-	var rep Report
 	ps1, err := worktreeFiles(repoRoot, "*.ps1")
 	if err != nil {
-		return rep, err
+		return Report{}, err
 	}
+	py, err := worktreeFiles(repoRoot, "*.py")
+	if err != nil {
+		return Report{}, err
+	}
+	goFiles, err := worktreeFiles(repoRoot, "*.go")
+	if err != nil {
+		return Report{}, err
+	}
+	return scanFileSet(repoRoot, ps1, py, goFiles), nil
+}
+
+// ScanFiles audits a CALLER-SUPPLIED set of repo-relative files (any mix of .ps1, .py,
+// and .go — other extensions are ignored) instead of the whole worktree. The pre-push
+// popup gate uses it to scan ONLY the push range (files that can actually reach the
+// trunk), so an untracked peer sibling in a shared checkout never trips the gate (#5145).
+// It reuses the exact per-file violation logic ScanTree uses; only the file set differs.
+func ScanFiles(repoRoot string, relPaths []string) (Report, error) {
+	var ps1, py, goFiles []string
+	for _, rel := range relPaths {
+		rel = strings.ReplaceAll(rel, "\\", "/")
+		switch {
+		case strings.HasSuffix(rel, ".ps1"):
+			ps1 = append(ps1, rel)
+		case strings.HasSuffix(rel, ".py"):
+			py = append(py, rel)
+		case strings.HasSuffix(rel, ".go"):
+			goFiles = append(goFiles, rel)
+		}
+	}
+	return scanFileSet(repoRoot, ps1, py, goFiles), nil
+}
+
+// scanFileSet applies the per-file violation and watchlist logic to the given
+// pre-partitioned repo-relative paths and returns a sorted Report. It is the single
+// shared per-file loop behind both ScanTree (whole worktree) and ScanFiles (push range),
+// so the detection logic is never duplicated across the two entrypoints.
+func scanFileSet(repoRoot string, ps1, py, goFiles []string) Report {
+	var rep Report
 	for _, rel := range ps1 {
 		src, err := readRel(repoRoot, rel)
 		if err != nil {
@@ -1233,10 +1276,6 @@ func ScanTree(repoRoot string) (Report, error) {
 			rep.PSInstallers = append(rep.PSInstallers, v)
 		}
 		rep.PSStartProcesses = append(rep.PSStartProcesses, PSStartProcessViolations(rel, src)...)
-	}
-	py, err := worktreeFiles(repoRoot, "*.py")
-	if err != nil {
-		return rep, err
 	}
 	for _, rel := range py {
 		src, err := readRel(repoRoot, rel)
@@ -1250,10 +1289,6 @@ func ScanTree(repoRoot string) (Report, error) {
 		}
 		rep.PySpawns = append(rep.PySpawns, PySpawnViolations(rel, src)...)
 		rep.PyCandidates = append(rep.PyCandidates, PySpawnCandidates(rel, src)...)
-	}
-	goFiles, err := worktreeFiles(repoRoot, "*.go")
-	if err != nil {
-		return rep, err
 	}
 	for _, rel := range goFiles {
 		src, err := readRel(repoRoot, rel)
@@ -1271,7 +1306,7 @@ func ScanTree(repoRoot string) (Report, error) {
 	sort.Strings(rep.PyDefaultModules)
 	sort.Strings(rep.GoExecs)
 	sort.Strings(rep.GoCandidates)
-	return rep, nil
+	return rep
 }
 
 func worktreeFiles(repoRoot string, globs ...string) ([]string, error) {

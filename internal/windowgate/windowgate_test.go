@@ -433,6 +433,45 @@ func TestScanTreeIncludesUntrackedGoFiles(t *testing.T) {
 	}
 }
 
+// TestScanFilesScopesToSuppliedSetNotWholeTree is the #5145 unit: ScanFiles audits
+// ONLY the caller-supplied paths, so an untracked peer sibling with a real hard popup
+// on disk is invisible to it (it is not in the set) while ScanTree over the same tree
+// still flags it. This is exactly the push-range vs whole-worktree distinction the
+// pre-push gate relies on.
+func TestScanFilesScopesToSuppliedSetNotWholeTree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A hard UNSUPPRESSED_GO_EXEC under the dispatch* hard path.
+	peer := "package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"gh\", \"issue\", \"list\")\n _, _ = cmd.Output()\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "cmd", "fak", "dispatch_peer.go"), []byte(peer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A clean file that IS in the supplied set (the "push range").
+	if err := os.WriteFile(filepath.Join(root, "cmd", "fak", "clean.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ScanFiles over only the clean file: no findings.
+	rep, err := ScanFiles(root, []string{"cmd/fak/clean.go"})
+	if err != nil {
+		t.Fatalf("ScanFiles: %v", err)
+	}
+	if !rep.OK() || len(rep.GoExecs) != 0 {
+		t.Fatalf("ScanFiles over a clean set must be clean, got GoExecs=%v", rep.GoExecs)
+	}
+
+	// ScanFiles that DOES include the peer file flags it (detection logic unchanged).
+	rep2, err := ScanFiles(root, []string{"cmd/fak/dispatch_peer.go"})
+	if err != nil {
+		t.Fatalf("ScanFiles: %v", err)
+	}
+	if len(rep2.GoExecs) != 1 {
+		t.Fatalf("ScanFiles including the peer helper should flag it, got GoExecs=%v", rep2.GoExecs)
+	}
+}
+
 // TestTrackedTreeHasNoPopups is the live trunk guard: the real repo's tracked
 // and untracked worktree .ps1 task installers, window-suppressing .py modules,
 // and hard-ratcheted Go helpers must be clean.
