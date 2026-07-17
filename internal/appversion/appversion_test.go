@@ -204,3 +204,29 @@ func findingOfBinary(rep BinaryReport, check string) string {
 	}
 	return ""
 }
+
+func TestCurrentDoesNotBorrowVersionFromWorkingTree(t *testing.T) {
+	t.Setenv("FAK_APP_VERSION", "")
+	old := BuildVersion
+	BuildVersion = ""
+	t.Cleanup(func() { BuildVersion = old })
+
+	// The test executable lives outside dir. This models an old fak installed on PATH
+	// and launched from a newer checkout: cwd's VERSION is not the binary's identity.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte("99.88.77\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	if got := Current(); got != fallback {
+		t.Fatalf("Current() = %q, want %q; installed binary borrowed cwd VERSION", got, fallback)
+	}
+}

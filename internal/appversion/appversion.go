@@ -1,5 +1,5 @@
-// Package appversion resolves the fleet/FAK application version from the single
-// repo-level VERSION marker, with build-time and environment fallbacks.
+// Package appversion resolves the FAK application version from build identity or
+// from a VERSION marker that belongs to the running executable.
 package appversion
 
 import (
@@ -24,7 +24,13 @@ var BuildVersion string
 // application version.
 var BuildCommit string
 
-// Current returns the best available application version.
+// Current returns the running binary's best available application version.
+//
+// VERSION is searched only from the executable directory. In particular, Current must not
+// read VERSION from the process working directory: an installed or stale fak is routinely
+// launched while cwd is a newer checkout, and borrowing that checkout's marker makes the old
+// binary claim the new version. Release/dev-profile builds and self-update stamp BuildVersion;
+// an unstamped binary outside its source tree honestly reports "dev".
 func Current() string {
 	if v := strings.TrimSpace(os.Getenv("FAK_APP_VERSION")); v != "" {
 		return v
@@ -32,8 +38,8 @@ func Current() string {
 	if v := strings.TrimSpace(BuildVersion); v != "" {
 		return v
 	}
-	for _, start := range candidateStarts() {
-		if v, ok := FromDir(start); ok {
+	if exe, err := os.Executable(); err == nil {
+		if v, ok := FromDir(filepath.Dir(exe)); ok {
 			return v
 		}
 	}
@@ -67,17 +73,6 @@ func FromDir(start string) (string, bool) {
 		}
 		dir = parent
 	}
-}
-
-func candidateStarts() []string {
-	var starts []string
-	if wd, err := os.Getwd(); err == nil {
-		starts = append(starts, wd)
-	}
-	if exe, err := os.Executable(); err == nil {
-		starts = append(starts, filepath.Dir(exe))
-	}
-	return starts
 }
 
 func readVersionFile(path string) (string, bool) {
