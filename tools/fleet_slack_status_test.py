@@ -541,6 +541,25 @@ class StatusTrafficTest(unittest.TestCase):
         self.assertEqual(2, len(calls))
 
 
+class BackgroundFleetRollupTest(unittest.TestCase):
+    def test_rollup_renders_managed_and_process_only_super_loop(self):
+        mod = load()
+        dispatch = mod.fixture_dispatch_payload(ROOT)
+        fleet = mod.fixture_fleet_snapshot()
+        background = {
+            "available": True, "total": 2, "live": 2, "managed": 1,
+            "process_only": 1, "stale": 0,
+            "loops": [
+                {"id": "dispatch/claude", "kind": "dispatch-loop", "source": "loopmgr", "state": "live"},
+                {"id": "meta-superloop", "kind": "super-loop", "source": "process", "state": "live", "pid": 4242},
+            ],
+        }
+        text = mod.rollup_text(dispatch, fleet, background)
+        self.assertIn("all background loops (not Slack-only): 2 total", text)
+        self.assertIn("dispatch-loop · dispatch/claude", text)
+        self.assertIn("super-loop · meta-superloop · live [process] pid=4242", text)
+
+
 class ClassifySignalNoiseTest(unittest.TestCase):
     """The list-free signal/noise classifier: every char in exactly one bucket, with
     box-drawing/fence/whitespace and restated tokens as noise, first occurrences as

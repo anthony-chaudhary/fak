@@ -32,6 +32,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -404,6 +406,48 @@ def post_fleet(root: Path, *, channel: str, dry_run: bool,
     return verdict
 
 
+def collect_background_fleet(root: Path) -> dict[str, Any]:
+    """Read the kernel-owned all-loop inventory; degrade honestly when unavailable."""
+    binary = os.environ.get("FAK_BIN", "").strip() or shutil.which("fak")
+    empty = {"schema": "fak.background-fleet-status.v1", "available": False,
+             "total": 0, "live": 0, "managed": 0, "process_only": 0,
+             "stale": 0, "loops": []}
+    if not binary:
+        return {**empty, "reason": "fak binary not found"}
+    try:
+        proc = subprocess.run([binary, "slack", "fleet-status", "--json"], cwd=root,
+                              capture_output=True, text=True, timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {**empty, "reason": str(exc)}
+    if proc.returncode != 0:
+        return {**empty, "reason": (proc.stderr or proc.stdout).strip()[:240]}
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        return {**empty, "reason": f"invalid JSON: {exc}"}
+    payload["available"] = True
+    return payload
+
+
+def _background_lines(background: dict[str, Any] | None, *, max_rows: int = 8) -> list[str]:
+    if not background:
+        return []
+    if not background.get("available"):
+        return [f"• background loops unavailable — {background.get('reason', 'unknown')}"]
+    lines = [f"• all background loops (not Slack-only): {background.get('total', 0)} total · "
+             f"{background.get('live', 0)} live · {background.get('managed', 0)} managed · "
+             f"{background.get('process_only', 0)} process-only · {background.get('stale', 0)} stale"]
+    rows = sorted(list(background.get("loops") or []),
+                  key=lambda row: (str(row.get("state")) != "live", str(row.get("kind")), str(row.get("id"))))
+    for row in rows[:max_rows]:
+        pid = f" pid={row.get('pid')}" if row.get("pid") else ""
+        lines.append(f"    ◦ {row.get('kind', 'loop')} · {row.get('id', '?')} · "
+                     f"{row.get('state', '?')} [{row.get('source', '?')}]{pid}")
+    if len(rows) > max_rows:
+        lines.append(f"    ◦ +{len(rows) - max_rows} more")
+    return lines
+
+
 def collect_rollup(root: Path, *, fast: bool, window_h: float,
                    history_path: str = "", trend_window: int = 24,
                    dry_run: bool = False,
@@ -423,7 +467,8 @@ def collect_rollup(root: Path, *, fast: bool, window_h: float,
         if history_path:
             fleet_top.attach_trend(
                 fleet_snap, history_path, window=trend_window, record=not dry_run)
-    return {"dispatch": dispatch_payload, "fleet": fleet_snap}
+    return {"dispatch": dispatch_payload, "fleet": fleet_snap,
+            "background": collect_background_fleet(root)}
 
 
 def _strip_prefix(line: str, prefix: str) -> str:
@@ -841,7 +886,8 @@ def _attention_line(prefix: str, items: list[dict[str, Any]]) -> str:
 
 
 def rollup_text(dispatch_payload: dict[str, Any] | None,
-                fleet_snap: dict[str, Any] | None) -> str:
+                fleet_snap: dict[str, Any] | None,
+                background_fleet: dict[str, Any] | None = None) -> str:
     """One Slack message for the operator: state, trend, what needs a human, and what
     the automation is already handling. This deliberately avoids the per-plane
     "plane:" labels and boxed terminal chrome."""
@@ -895,6 +941,7 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
     lines.append(_issue_work_line(dispatch_payload))
     lines.append(_session_line(fleet_snap))
     lines.extend(_trend_lines(dispatch_payload, fleet_snap))
+    lines.extend(_background_lines(background_fleet))
     lines.extend(_section_lines("being handled", handled))
     lines.extend(_section_lines("waiting", waiting))
     return "\n".join(line for line in lines if line)
@@ -920,7 +967,8 @@ def _write_status_state(path: Path, value: dict[str, Any]) -> None:
 
 
 def post_rollup(dispatch_payload: dict[str, Any] | None,
-                fleet_snap: dict[str, Any] | None, *,
+                fleet_snap: dict[str, Any] | None,
+                background_fleet: dict[str, Any] | None = None, *,
                 channel: str = "", dry_run: bool = False,
                 transport: Any | None = None, state_path: Path | None = None,
                 now: float | None = None, max_silence_s: float = 12 * 60 * 60) -> dict[str, Any]:
@@ -933,7 +981,10 @@ def post_rollup(dispatch_payload: dict[str, Any] | None,
         import slack_post  # sibling module in tools/
     except Exception as exc:  # noqa: BLE001
         return {"posted": False, "error": f"slack_post unavailable: {exc}", "skipped": None}
-    text = rollup_text(dispatch_payload, fleet_snap)
+    if background_fleet is None and isinstance(fleet_snap, dict):
+        background_fleet = fleet_snap.get("background_fleet")
+    text = (rollup_text(dispatch_payload, fleet_snap, background_fleet)
+            if background_fleet is not None else rollup_text(dispatch_payload, fleet_snap))
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     state = _read_status_state(state_path) if state_path else {}
     stamp = dt.datetime.now(dt.timezone.utc).timestamp() if now is None else now
@@ -992,6 +1043,7 @@ def run(root: Path, *, channel: str = "", dry_run: bool = False, fast: bool = Fa
                                do_dispatch=do_dispatch, do_fleet=do_fleet)
     dp = collected.get("dispatch")
     fs = collected.get("fleet")
+    background = collected.get("background")
     out["dispatch"] = (
         {"card_verdict": dp.get("verdict"), "ok": dp.get("ok")}
         if isinstance(dp, dict) else None
@@ -1001,7 +1053,13 @@ def run(root: Path, *, channel: str = "", dry_run: bool = False, fast: bool = Fa
          "system": (fs.get("system") or {}).get("verdict")}
         if isinstance(fs, dict) else None
     )
-    out["rollup"] = post_rollup(dp, fs, channel=channel, dry_run=dry_run,
+    out["background"] = background
+    # Keep the post seam's historical two-argument call shape so test/host transports
+    # can replace it; attach the inventory to a shallow fleet envelope instead.
+    rollup_fleet = dict(fs) if isinstance(fs, dict) else fs
+    if isinstance(rollup_fleet, dict):
+        rollup_fleet["background_fleet"] = background
+    out["rollup"] = post_rollup(dp, rollup_fleet, channel=channel, dry_run=dry_run,
                                 transport=transport,
                                 state_path=state_path or _status_state_path(root))
     out["ok"] = bool((out["rollup"] or {}).get("posted")

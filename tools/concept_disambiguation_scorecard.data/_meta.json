@@ -933,6 +933,21 @@
           "category": "test-only",
           "reason": "grandfathered loop inventory test filename in the generated Python compatibility inventory",
           "token": "loops_inventory_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "private JSON row type for the existing loopfleet status projection; not a new loop concept",
+          "token": "BackgroundLoop"
+        },
+        {
+          "category": "incidental",
+          "reason": "legacy process command spelling recognized by the all-loop inventory; not a new loop concept",
+          "token": "meta_superloop"
+        },
+        {
+          "category": "incidental",
+          "reason": "legacy process command spelling recognized by the all-loop inventory; not a new loop concept",
+          "token": "dispatch_loop"
         }
       ],
       "id": "loop",
@@ -963,7 +978,10 @@
         "q8prefillneedstokenloop",
         "recordloop",
         "runloop",
-        "tuiloopreport"
+        "tuiloopreport",
+        "BackgroundLoop",
+        "meta_superloop",
+        "dispatch_loop"
       ],
       "min_files": 3,
       "name": "Loop family",

@@ -1469,7 +1469,7 @@ def main(argv: list[str] | None = None) -> int:
         out_dir = Path(args.markdown_dir).resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
         for rel, content in render_doc_folder(payload, stamp=args.stamp or None).items():
-            (out_dir / rel).write_text(content + "\n", encoding="utf-8")
+            (out_dir / rel).write_text(content + "\n", encoding="utf-8", newline="\n")
         if not args.json:
             print(f"wrote concept-disambiguation doc folder -> {out_dir}")
 

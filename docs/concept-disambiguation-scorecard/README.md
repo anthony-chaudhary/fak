@@ -13,9 +13,9 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **96.3/100** (grade A) = 9.6/10 |
-| **Coverage** | **94.3%** (1951/2070 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **119** (clarity 0 + coverage 119) |
+| **Score** | **96.9/100** (grade A) = 9.7/10 |
+| **Coverage** | **95.2%** (1948/2047 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **99** (clarity 0 + coverage 99) |
 | Crystal-clear concepts | 255 of 1724 positioned |
 | As of |  (fak ) |
 
@@ -24,7 +24,7 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1724 concepts - score 96.3/100 (grade A) - disambiguation-debt 119
+concept-disambiguation chart - 1724 concepts - score 96.9/100 (grade A) - disambiguation-debt 99
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####....................... 255
@@ -57,21 +57,21 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (116 concept(s); 39 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       #########################... 292/328
-  cache            ##########################.. 223/241
-  plan             ###########################. 286/301
-  render-materialize ##########################.. 162/173
-  context-ctx      ###########################. 175/183
-  policy-capability ##########################.. 118/126
+  guard-gate       ##########################.. 291/316
+  cache            ##########################.. 223/240
+  plan             ###########################. 286/299
+  policy-capability ##########################.. 117/125
+  render-materialize ###########################. 162/170
+  context-ctx      ###########################. 175/182
   session-runtime  ###########################. 173/179
   score-debt       ##########################.. 78/83
-  support-maturity ########################.... 29/34
-  witness-proof    ###########################. 126/130
+  support-maturity #########################... 29/33
+  witness-proof    ###########################. 125/129
   evict            ##########################.. 40/43
   gateway-engine   ###########################. 159/162
   attention        ###########################. 69/71
-  loop             ###########################. 57/59
   decision         ###########################. 38/39
+  loop             ############################ 57/58
   pool             ###########################. 35/36
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 94.3%  (1951/2070 confusable tokens positioned)
+namespace coverage  [##############################..] 95.2%  (1948/2047 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1951,21 +1951,21 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 292 | 328 | 36 |
-| cache | 223 | 241 | 18 |
-| plan | 286 | 301 | 15 |
-| render-materialize | 162 | 173 | 11 |
-| context-ctx | 175 | 183 | 8 |
-| policy-capability | 118 | 126 | 8 |
+| guard-gate | 291 | 316 | 25 |
+| cache | 223 | 240 | 17 |
+| plan | 286 | 299 | 13 |
+| policy-capability | 117 | 125 | 8 |
+| render-materialize | 162 | 170 | 8 |
+| context-ctx | 175 | 182 | 7 |
 | session-runtime | 173 | 179 | 6 |
 | score-debt | 78 | 83 | 5 |
-| support-maturity | 29 | 34 | 5 |
-| witness-proof | 126 | 130 | 4 |
+| support-maturity | 29 | 33 | 4 |
+| witness-proof | 125 | 129 | 4 |
 | evict | 40 | 43 | 3 |
 | gateway-engine | 159 | 162 | 3 |
 | attention | 69 | 71 | 2 |
-| loop | 57 | 59 | 2 |
 | decision | 38 | 39 | 1 |
+| loop | 57 | 58 | 1 |
 | pool | 35 | 36 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
