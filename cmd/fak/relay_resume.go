@@ -40,11 +40,13 @@ func runRelay(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		return runRelayHandoff(stdout, stderr, argv[1:])
 	case "resume":
 		return runRelayResume(stdin, stdout, stderr, argv[1:])
+	case "status":
+		return runRelayStatus(stdout, stderr, argv[1:])
 	case "help", "-h", "--help":
 		relayUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak relay: unknown subcommand %q (want handoff or resume)\n", argv[0])
+		fmt.Fprintf(stderr, "fak relay: unknown subcommand %q (want handoff, resume, or status)\n", argv[0])
 		relayUsage(stderr)
 		return 2
 	}
@@ -179,6 +181,7 @@ func relayUsage(w io.Writer) {
   fak relay handoff --relay-id <RID> --start-sha <sha> [flags] [--out <path>]
   fak relay resume --baton <path>|- [--json]
   fak relay resume <path>
+  fak relay status <relay-id> [--dir <path>] [--json]
 
 handoff (offline, no gateway) projects a closing leg's stated flags into a canonical
 fak.relay.baton.v1 and writes the byte-stable wire bytes to --out (or stdout), so the
