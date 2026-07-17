@@ -70,6 +70,7 @@ func TestTrajctlNudgeBusEmitsOnDegradingNotHealthy(t *testing.T) {
 	if !ds[0].Delivered || ds[0].DeliverErr != "" {
 		t.Fatalf("nudge not delivered onto the bus: %+v", ds[0])
 	}
+	assertNudgeNext(t, ds[0], true)
 	if ds[0].Packet == "" || !strings.Contains(ds[0].Packet, "re-anchor") {
 		t.Errorf("ledger row lost its re-anchor packet: %q", ds[0].Packet)
 	}
@@ -97,6 +98,9 @@ func TestTrajctlNudgeBusEmitsOnDegradingNotHealthy(t *testing.T) {
 	if hs[0].Delivered || hs[0].Packet != "" {
 		t.Errorf("healthy no-action row carried a delivery/packet: %+v", hs[0])
 	}
+	if hs[0].Next != nil {
+		t.Fatalf("healthy next = %#v, want nil for no-action decision", hs[0].Next)
+	}
 	if n := sessionctl.RedirectPendingLen(traceH); n != 0 {
 		t.Fatalf("healthy session received %d redirects, want 0 (a HEALTHY curve is never nudged)", n)
 	}
@@ -121,6 +125,10 @@ func TestTrajctlNudgeBusCapturesBusRefusal(t *testing.T) {
 	if !strings.Contains(ds[0].DeliverErr, string(sessionctl.RedirectNoRedirectableState)) {
 		t.Fatalf("deliver error = %q, want the closed REDIRECT_NO_REDIRECTABLE_STATE reason", ds[0].DeliverErr)
 	}
+	assertNudgeNext(t, ds[0], false)
+	if !strings.Contains(ds[0].Next.Refusal, string(sessionctl.RedirectNoRedirectableState)) {
+		t.Fatalf("next refusal = %q, want %s", ds[0].Next.Refusal, sessionctl.RedirectNoRedirectableState)
+	}
 	if n := sessionctl.RedirectPendingLen(trace); n != 0 {
 		t.Fatalf("a refused redirect entered the mailbox (%d queued), want 0", n)
 	}
@@ -135,5 +143,28 @@ func TestTrajctlNudgeCLIReachable(t *testing.T) {
 	}
 	if code := runTrajctl(io.Discard, io.Discard, []string{"no-such-sub"}); code != 2 {
 		t.Fatalf("unknown subcommand exit = %d, want 2 (dispatch routing live)", code)
+	}
+}
+
+func assertNudgeNext(t *testing.T, outcome trajctlNudgeOutcome, applied bool) {
+	t.Helper()
+	if outcome.Next == nil {
+		t.Fatal("next witness is nil")
+	}
+	n := outcome.Next
+	if n.Applied != applied {
+		t.Fatalf("next applied = %v, want %v", n.Applied, applied)
+	}
+	if n.Move.Kind != sessionctl.MoveRedirect || n.Move.Render != sessionctl.RenderSystemDirective {
+		t.Fatalf("next move/render = %s/%s, want redirect/system-directive", n.Move.Kind, n.Move.Render)
+	}
+	if n.Move.Session != sessionctl.SessionAutonomous {
+		t.Fatalf("next class = %s, want autonomous", n.Move.Session)
+	}
+	if n.Move.Source != "trajctl_nudge" || n.Move.Gate != "trajctl-regime" {
+		t.Fatalf("next identity = source %q gate %q", n.Move.Source, n.Move.Gate)
+	}
+	if n.Move.Payload != outcome.Packet {
+		t.Fatalf("next payload = %q, want decision packet %q", n.Move.Payload, outcome.Packet)
 	}
 }

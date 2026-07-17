@@ -34,6 +34,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
+type trajctlNudgeOutcome struct {
+	trajctl.SteerDecision
+	Next *sessionctl.NextRecord `json:"next,omitempty"`
+}
+
 // trajctlNudgeBus runs the trajctl regime gate over every OPEN objective in st and,
 // for each objective the gate elects to nudge, emits a first-class redirect op onto
 // the #2753 out-of-band control bus keyed by trace (the run's trace id the loop's
@@ -49,13 +54,14 @@ import (
 // captured on the decision row (Delivered=false, DeliverErr) exactly as a failed
 // steer delivery is, so the episode stays armed and the next boundary retries — the
 // bus op costs the nudge, never the turn.
-func trajctlNudgeBus(st trajctl.State, trace string, stamp trajctl.Stamp, nowMillis int64) []trajctl.SteerDecision {
-	out := make([]trajctl.SteerDecision, 0)
+func trajctlNudgeBus(st trajctl.State, trace string, stamp trajctl.Stamp, nowMillis int64) []trajctlNudgeOutcome {
+	out := make([]trajctlNudgeOutcome, 0)
 	for _, oc := range st.OpenCurves().Objectives {
 		d := st.DecideNudge(oc)
 		d.UnixMillis = nowMillis
 		d.SessionID = stamp.SessionID
 		d.RunID = stamp.RunID
+		var next *sessionctl.NextRecord
 		if d.Action == trajctl.ActionNudge {
 			switch {
 			case trace == "":
@@ -74,8 +80,28 @@ func trajctlNudgeBus(st trajctl.State, trace string, stamp trajctl.Stamp, nowMil
 					d.Delivered = true
 				}
 			}
+
+			move := sessionctl.Move{
+				Kind:    sessionctl.MoveRedirect,
+				Render:  sessionctl.RenderSystemDirective,
+				Session: sessionctl.SessionAutonomous,
+				Source:  "trajctl_nudge",
+				Gate:    "trajctl-regime",
+				Payload: d.Packet,
+			}
+			apply := sessionctl.ApplyResult{Applied: d.Delivered, Refusal: d.DeliverErr}
+			record, err := sessionctl.WitnessMove(move, apply)
+			if err != nil {
+				if d.DeliverErr == "" {
+					d.DeliverErr = "next witness: " + err.Error()
+				} else {
+					d.DeliverErr += "; next witness: " + err.Error()
+				}
+			} else {
+				next = &record
+			}
 		}
-		out = append(out, d)
+		out = append(out, trajctlNudgeOutcome{SteerDecision: d, Next: next})
 	}
 	return out
 }
