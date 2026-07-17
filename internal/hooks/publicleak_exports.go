@@ -31,10 +31,15 @@ func ScanRangePublicLeak(root, revRange string) ([]Finding, error) {
 	if code != 0 {
 		return nil, ErrCouldNotRun
 	}
+	tip := revRange
+	if _, after, ok := strings.Cut(revRange, ".."); ok {
+		tip = after
+	}
 	d := &StagedDiff{
 		Root:        root,
 		run:         realRunner,
 		ctx:         context.Background(),
+		Treeish:     tip + ":",
 		AddedByFile: parseUnifiedAddedLines(out),
 		fileCache:   map[string]fileEntry{},
 	}
