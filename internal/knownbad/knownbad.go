@@ -89,6 +89,14 @@ const DefaultLedgerRel = "docs/nightrun/known-bad.jsonl"
 // enough that a forgotten signature does not outlive the failure it names.
 const DefaultRecordTTLSeconds int64 = 45 * 60
 
+// DefaultCompactKeepTerminal bounds how many terminally-retracted signatures a
+// `fak knownbad compact` keeps for audit: the most-recently-retracted resolved/revoked
+// rows. LIVE signatures are ALWAYS kept (dropping one would silently un-hold the fleet);
+// this only bounds the dead-history tail so the ledger — append-to-supersede, so a
+// resolve/revoke adds a row rather than removing one — does not grow without bound. A
+// negative value keeps every terminal row (unbounded audit).
+const DefaultCompactKeepTerminal = 50
+
 // Record is one appended known-bad ledger row: a durable, cross-trace statement
 // that a shared failure exists over a tree. The required fields are the ones the
 // epic names; Note and FailureHash are optional context (omitted when empty) —
@@ -553,6 +561,114 @@ func LatestState(records []Record, signature string, nowUnix int64) (rec Record,
 		// (retracted-by-time) unless it declares its own predicate above.
 		return rec, true, "expired"
 	}
+}
+
+// CompactStats reports what a Compact fold dropped, so the shell can print an honest
+// before/after and a test can assert the reduction. The arithmetic balances:
+// InputRows - KeptRows == SupersededDropped + ExpiredDropped + TerminalDropped, and
+// KeptRows == LiveKept + TerminalKept.
+type CompactStats struct {
+	InputRows         int // rows read from the ledger
+	KeptRows          int // rows written back (one latest row per kept signature)
+	Signatures        int // distinct signatures seen
+	LiveKept          int // live signatures kept (always ALL of them)
+	TerminalKept      int // resolved/revoked signatures kept (the bounded tail)
+	SupersededDropped int // non-latest rows folded away by the append-to-supersede collapse
+	ExpiredDropped    int // signatures whose latest row lapsed its TTL (passive self-heal)
+	TerminalDropped   int // resolved/revoked signatures beyond the kept tail
+}
+
+// Compact folds a multi-writer append ledger down to its minimal current state — the GC
+// the append-to-supersede design otherwise lacks. Because resolve/revoke/claim each ADD
+// a row (never remove one) and the bounded TTL only gates MATCH liveness, expired and
+// superseded rows accrete on disk forever; Compact prunes them.
+//
+// It keeps exactly the LATEST row per signature (earlier rows are dead once a later row
+// exists), then classifies each signature by that latest row:
+//
+//   - LIVE (open, unexpired): always kept — dropping one would silently release a hold
+//     the fleet is still honoring.
+//   - RESOLVED / REVOKED (an explicit witnessed-or-operator retraction with audit value):
+//     kept up to a bounded tail of the `keepTerminal` most-recently-retracted, so recent
+//     history survives without the ledger growing without bound.
+//   - EXPIRED (an open row whose bounded TTL lapsed — passive self-healing, no audit
+//     value): dropped.
+//
+// keepTerminal < 0 keeps every terminal row (unbounded audit); >= 0 caps the tail (0
+// drops all terminal history, live-only). Kept rows are emitted in original ledger append
+// order, so the rewrite is stable and a re-compact of an already-compact ledger is a
+// no-op. Pure: nowUnix is data, no I/O.
+func Compact(records []Record, nowUnix int64, keepTerminal int) ([]Record, CompactStats) {
+	stats := CompactStats{InputRows: len(records)}
+
+	// Latest row index per signature, in first-seen order (append-to-supersede: the last
+	// row for a signature is its current state).
+	latestIdx := make(map[string]int, len(records))
+	order := make([]string, 0, len(records))
+	for i, rec := range records {
+		sig := strings.TrimSpace(rec.Signature)
+		if _, seen := latestIdx[sig]; !seen {
+			order = append(order, sig)
+		}
+		latestIdx[sig] = i
+	}
+	stats.Signatures = len(order)
+
+	// Classify each signature by its latest row. Terminal (resolved/revoked) signatures
+	// carry their latest-row index so the tail can keep only the most-recently-retracted.
+	keep := make(map[string]bool, len(order))
+	type termSig struct {
+		sig string
+		idx int
+	}
+	var terminals []termSig
+	for _, sig := range order {
+		rec := records[latestIdx[sig]]
+		switch {
+		case rec.Live(nowUnix):
+			keep[sig] = true
+			stats.LiveKept++
+		case rec.Resolved() || rec.Revoked():
+			terminals = append(terminals, termSig{sig: sig, idx: latestIdx[sig]})
+		default:
+			// An open row whose bounded TTL has lapsed (or any other non-live, non-terminal
+			// status): passive self-healing with no audit value — dropped.
+			stats.ExpiredDropped++
+		}
+	}
+
+	// Bound the terminal tail to the keepTerminal most-recently-retracted (highest
+	// latest-row index). keepTerminal < 0 keeps all of them.
+	if keepTerminal < 0 || len(terminals) <= keepTerminal {
+		for _, t := range terminals {
+			keep[t.sig] = true
+		}
+		stats.TerminalKept = len(terminals)
+	} else {
+		sort.SliceStable(terminals, func(i, j int) bool { return terminals[i].idx > terminals[j].idx })
+		for _, t := range terminals[:keepTerminal] {
+			keep[t.sig] = true
+		}
+		stats.TerminalKept = keepTerminal
+		stats.TerminalDropped = len(terminals) - keepTerminal
+	}
+
+	// Emit each kept signature's LATEST row, in original ledger append order, so the
+	// rewrite is stable (byte-for-byte re-compactable).
+	out := make([]Record, 0, len(keep))
+	for i, rec := range records {
+		sig := strings.TrimSpace(rec.Signature)
+		if latestIdx[sig] != i {
+			continue // a superseded row — folded away by the collapse
+		}
+		if !keep[sig] {
+			continue // expired, or a terminal row beyond the kept tail
+		}
+		out = append(out, rec)
+	}
+	stats.KeptRows = len(out)
+	stats.SupersededDropped = stats.InputRows - stats.Signatures
+	return out, stats
 }
 
 // ParseLedger folds JSONL bytes into records. It is deliberately robust for a

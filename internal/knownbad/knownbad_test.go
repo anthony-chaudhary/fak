@@ -383,3 +383,89 @@ func TestWithDerivedFromGenealogy(t *testing.T) {
 		t.Errorf("WithDerivedFrom must not change the signature")
 	}
 }
+
+// TestCompact folds a mixed ledger (superseded rows, an expired signature, a
+// resolved and a revoked terminal) and asserts the GC keeps every live signature's
+// LATEST row, drops expired + superseded rows, bounds the resolved/revoked tail, and
+// is a no-op on a second pass (#3471).
+func TestCompact(t *testing.T) {
+	const now = int64(1_000_000)
+	const ttl = int64(100)
+	mk := func(reason, tree string, at int64) Record {
+		return NewRecord(reason, []string{tree}, "", "agent", "", at, ttl)
+	}
+
+	live := mk("build", "internal/live/**", now)            // open, unexpired
+	liveClaim := live.WithClaim("fixer", now+1)             // supersedes live's open row (still open -> live)
+	expired := mk("test", "internal/expired/**", now-200)   // open but TTL lapsed: now-200+100 < now
+	resolvedOpen := mk("lint", "internal/resolved/**", now) // superseded by the resolve below
+	resolved := resolvedOpen.WithResolve("fixer", now+2, "tests")
+	revokedOpen := mk("vet", "internal/revoked/**", now) // superseded by the revoke below
+	revoked := revokedOpen.WithRevoke("op", now+3, "was flaky, not shared")
+
+	records := []Record{live, liveClaim, expired, resolvedOpen, resolved, revokedOpen, revoked}
+
+	// keepTerminal < 0 keeps all terminal history: live + resolved + revoked survive,
+	// expired + the 3 superseded rows drop.
+	kept, stats := Compact(records, now, -1)
+	if stats.InputRows != 7 || stats.KeptRows != 3 || stats.Signatures != 4 {
+		t.Fatalf("keep-all stats = %+v, want Input 7 Kept 3 Signatures 4", stats)
+	}
+	if stats.LiveKept != 1 || stats.TerminalKept != 2 || stats.SupersededDropped != 3 ||
+		stats.ExpiredDropped != 1 || stats.TerminalDropped != 0 {
+		t.Fatalf("keep-all stats breakdown = %+v", stats)
+	}
+	if len(kept) != 3 {
+		t.Fatalf("keep-all kept %d rows, want 3", len(kept))
+	}
+	// The kept live row must be the LATEST (claimed) row, not the original open row.
+	if kept[0].ClaimedBy != "fixer" {
+		t.Errorf("compact kept a superseded live row, not the latest: %+v", kept[0])
+	}
+	// The dropped expired signature must be gone entirely.
+	for _, r := range kept {
+		if strings.Contains(strings.Join(r.TreeGlobs, ","), "internal/expired") {
+			t.Errorf("expired signature survived compaction: %+v", r)
+		}
+	}
+	// Balance invariant.
+	if stats.InputRows-stats.KeptRows != stats.SupersededDropped+stats.ExpiredDropped+stats.TerminalDropped {
+		t.Errorf("stats do not balance: %+v", stats)
+	}
+
+	// A second compaction of an already-compact ledger is a no-op (stable rewrite).
+	kept2, stats2 := Compact(kept, now, -1)
+	if stats2.KeptRows != stats2.InputRows || len(kept2) != len(kept) {
+		t.Errorf("re-compact was not a no-op: %+v", stats2)
+	}
+
+	// keepTerminal = 1 keeps only the MOST-recently-retracted terminal (the revoke at
+	// now+3 beats the resolve at now+2), dropping the older resolved signature.
+	kept1, stats1 := Compact(records, now, 1)
+	if stats1.KeptRows != 2 || stats1.TerminalKept != 1 || stats1.TerminalDropped != 1 {
+		t.Fatalf("keep-1 stats = %+v, want Kept 2 TerminalKept 1 TerminalDropped 1", stats1)
+	}
+	var sawRevoke, sawResolve bool
+	for _, r := range kept1 {
+		if r.Revoked() {
+			sawRevoke = true
+		}
+		if r.Resolved() {
+			sawResolve = true
+		}
+	}
+	if !sawRevoke || sawResolve {
+		t.Errorf("keep-1 kept the wrong terminal tail (sawRevoke=%v sawResolve=%v)", sawRevoke, sawResolve)
+	}
+
+	// keepTerminal = 0 is live-only: just the one live signature survives.
+	keptLiveOnly, stats0 := Compact(records, now, 0)
+	if stats0.KeptRows != 1 || len(keptLiveOnly) != 1 || !keptLiveOnly[0].Live(now) {
+		t.Fatalf("keep-0 = %d rows / stats %+v, want 1 live row", len(keptLiveOnly), stats0)
+	}
+
+	// An empty ledger compacts to nothing without panicking.
+	if out, s := Compact(nil, now, -1); len(out) != 0 || s.InputRows != 0 {
+		t.Errorf("empty compact = %d rows / %+v", len(out), s)
+	}
+}
