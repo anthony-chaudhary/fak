@@ -102,6 +102,12 @@ func TestRwAccountTag(t *testing.T) {
 }
 
 func TestResumeWatchdogBrokerDenyDoesNotSpawnWorker(t *testing.T) {
+	t.Setenv("FAK_RESUME_MAX_LIVE", "1000000")
+	policy := filepath.Join(t.TempDir(), "source-policy.json")
+	if err := os.WriteFile(policy, []byte(`{"default":{"max_live_resumes":1000000,"max_launches_per_window":1000000,"window_seconds":1,"min_launch_spacing_seconds":-1}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_RESUME_SOURCE_POLICY", policy)
 	regDir := t.TempDir()
 	logDir := t.TempDir()
 	home := t.TempDir()
@@ -255,6 +261,12 @@ func rwHoldTestEnv(t *testing.T) {
 	t.Setenv("FLEET_USER_HOME", filepath.Join(home, "empty-home"))
 	t.Setenv("FLEET_CONFIG_HOME", filepath.Join(home, "empty-config"))
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "") // keep the self-guard inert regardless of the ambient session
+	t.Setenv("FAK_RESUME_MAX_LIVE", "1000000")
+	policy := filepath.Join(t.TempDir(), "source-policy.json")
+	if err := os.WriteFile(policy, []byte(`{"default":{"max_live_resumes":1000000,"max_launches_per_window":1000000,"window_seconds":1,"min_launch_spacing_seconds":-1}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_RESUME_SOURCE_POLICY", policy)
 }
 
 func TestResumeWatchdogOperatorHoldDoesNotSpawn(t *testing.T) {
@@ -1169,11 +1181,14 @@ func TestResumeWatchdogPromptTransportMovesGuardFrontedWindowsPrompt(t *testing.
 }
 
 func TestResumeWatchdogDryRunLedgersSharedNextDecision(t *testing.T) {
+	rwHoldTestEnv(t)
 	dir := t.TempDir()
 	plan := filepath.Join(dir, "plan.json")
-	ledger := filepath.Join(dir, "ledger.jsonl")
-	row := resume.WatchdogPlanRow{Session: "session-next", CWD: dir, Account: "worker"}
-	b, err := json.Marshal([]resume.WatchdogPlanRow{row})
+	ledger := filepath.Join(dir, "resume_ledger.jsonl")
+	row := resume.WatchdogPlanRow{Session: "session-next", CWD: dir, Account: ""}
+	b, err := json.Marshal(struct {
+		Plan []resume.WatchdogPlanRow `json:"plan"`
+	}{Plan: []resume.WatchdogPlanRow{row}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1186,7 +1201,7 @@ func TestResumeWatchdogDryRunLedgersSharedNextDecision(t *testing.T) {
 	t.Cleanup(func() { rwSpawnResumeLaunch = oldSpawn })
 
 	var out, stderr strings.Builder
-	code := runResumeWatchdog(&out, &stderr, []string{"--plan", plan, "--ledger", ledger, "--no-refresh"})
+	code := runResumeWatchdog(&out, &stderr, []string{"--plan", plan, "--reg-dir", dir, "--no-refresh"})
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}

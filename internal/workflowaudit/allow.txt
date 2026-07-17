@@ -66,3 +66,4 @@ negframe-ratchet.yml:fak-v0.1
 # track the development role), but it is correct on today's no-cutover tree. Allowlisted
 # with this note so the gate surfaces it without redding the green trunk.
 bench.yml:main
+propagation-feed.yml:master
