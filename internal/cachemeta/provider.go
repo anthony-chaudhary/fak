@@ -164,14 +164,13 @@ func providerLabels(p ProviderCache) map[string]string {
 }
 
 // providerTTLMillis maps a provider retention hint to an advisory TTL so a metrics
-// sink can age out stale provider telemetry without inventing precision.
+// sink can age out stale provider telemetry without inventing precision. It reads
+// the window off the MEASURED-or-HYPOTHESIS ProviderTTLConstants records (#1542) so
+// the returned TTL carries provenance; the numeric result is unchanged (an unknown
+// retention still ages out at 0).
 func providerTTLMillis(retention string) int64 {
-	switch retention {
-	case "5m", "5min":
-		return 5 * 60 * 1000
-	case "1h", "60m":
-		return 60 * 60 * 1000
-	default:
-		return 0
+	if c, ok := lookupProviderTTL(retention); ok {
+		return int64(c.Value)
 	}
+	return 0
 }
