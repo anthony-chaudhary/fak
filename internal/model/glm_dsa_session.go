@@ -209,7 +209,7 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 		if cfg.BlockTopology == ParallelResidual {
 			mlpNorm = m.parallelMLPNorms(layer, attnNorm)
 		}
-		composeBlock(cfg.BlockTopology, x, attnNorm, mlpNorm, eps, cfg, attnBody, mlpBody)
+		composeBlockAtLayer(layer, cfg.BlockTopology, x, attnNorm, mlpNorm, eps, cfg, attnBody, mlpBody)
 		glmDsaDumpResidual(layer, pos, x)
 	}
 	if isLast {

@@ -586,6 +586,13 @@ type normWeights struct {
 //
 // so a Config left at the zero value is bit-identical to the pre-axis block.
 func composeBlock(t BlockTopology, x []float32, attnNorm, mlpNorm normWeights, eps float32, cfg Config, attn, mlp sublayer) {
+	composeBlockAtLayer(-1, t, x, attnNorm, mlpNorm, eps, cfg, attn, mlp)
+}
+
+// composeBlockAtLayer forms one complete transformer block residual and then invokes
+// the optional activation-space hook. Keeping the hook after the complete block makes
+// its contract identical for sequential and parallel residual topologies.
+func composeBlockAtLayer(layer int, t BlockTopology, x []float32, attnNorm, mlpNorm normWeights, eps float32, cfg Config, attn, mlp sublayer) {
 	if t == ParallelResidual {
 		// Attention and the MLP both read the ORIGINAL block input. GPT-NeoX uses
 		// distinct input/post-attention LayerNorms for the two branches; Cohere lacks
@@ -597,12 +604,14 @@ func composeBlock(t BlockTopology, x []float32, attnNorm, mlpNorm normWeights, e
 		for i := range x {
 			x[i] += o[i] + d[i]
 		}
+		invokeResidualHook(cfg, layer, x)
 		return
 	}
 
 	// Sequential: attention updates x, then the MLP reads the updated x.
 	composeSublayer(t, x, attnNorm, eps, cfg, attn)
 	composeSublayer(t, x, mlpNorm, eps, cfg, mlp)
+	invokeResidualHook(cfg, layer, x)
 }
 
 // composeSublayer applies ONE residual sub-layer (norm placement + body + add) to x

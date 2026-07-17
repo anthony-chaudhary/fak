@@ -19,6 +19,10 @@ import (
 // TestArchLlamaNoOp). The fields are grouped: the Llama-13 base first, then the
 // additive Stage-2 axes.
 type Config struct {
+	// EnableResidualHook gates the activation-space write seam. Its zero value is off.
+	EnableResidualHook bool
+	residualHook       ResidualHook
+
 	HiddenSize        int               `json:"hidden_size"`
 	NumLayers         int               `json:"num_hidden_layers"`
 	NumHeads          int               `json:"num_attention_heads"`

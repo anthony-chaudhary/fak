@@ -472,7 +472,7 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		} else {
 			mlpNorm = m.mlpNorms(l)
 		}
-		composeBlock(cfg.BlockTopology, x, attnNorm, mlpNorm, eps, cfg, attnBody, mlpBody)
+		composeBlockAtLayer(l, cfg.BlockTopology, x, attnNorm, mlpNorm, eps, cfg, attnBody, mlpBody)
 		return x
 	}
 	if cfg.isLinearAttnLayer(l) {
