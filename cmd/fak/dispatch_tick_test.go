@@ -21,6 +21,7 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 	old := dispatchRunJSON
 	oldExternal := dispatchRunExternalJSON
 	oldResources := dispatchProbeHostResources
+	oldBuildResources := dispatchBuildHostResources
 	oldWorkerCount := dispatchProbeWorkerCount
 	oldProcesses := dispatchProbeProcesses
 	oldReadAccountRoster := dispatchReadAccountRoster
@@ -36,7 +37,10 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 		return nil, fmt.Errorf("unexpected external helper %q %v", name, args)
 	}
 	dispatchProbeHostResources = func() dispatchtick.HostResources {
-		return dispatchtick.HostResources{Cores: dispatchtick.IntPtr(64), FreeRAMMB: dispatchtick.IntPtr(128000), TotalThreads: dispatchtick.IntPtr(1000)}
+		return dispatchtick.HostResources{Cores: dispatchtick.IntPtr(32), FreeRAMMB: dispatchtick.IntPtr(128000), TotalThreads: dispatchtick.IntPtr(500)}
+	}
+	dispatchBuildHostResources = func(dispatchtick.ProcGuardInput) dispatchtick.HostResources {
+		return dispatchtick.HostResources{Cores: dispatchtick.IntPtr(32), FreeRAMMB: dispatchtick.IntPtr(128000), TotalThreads: dispatchtick.IntPtr(500)}
 	}
 	dispatchProbeWorkerCount = func(root, product string) int { return 0 }
 	dispatchProbeProcesses = func() dispatchtick.ProcGuardInput {
@@ -84,6 +88,7 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 		dispatchRunJSON = old
 		dispatchRunExternalJSON = oldExternal
 		dispatchProbeHostResources = oldResources
+		dispatchBuildHostResources = oldBuildResources
 		dispatchProbeWorkerCount = oldWorkerCount
 		dispatchProbeProcesses = oldProcesses
 		dispatchReadAccountRoster = oldReadAccountRoster
@@ -181,7 +186,7 @@ func TestDispatchPromptCarriesResumeWitnessState(t *testing.T) {
 	for _, want := range []string{
 		"resume witness state (independent; not worker self-report):",
 		"- Last commit audit: commit-audit close_result ok=false verdict=NO_COMMIT reason=no audited commit bound to #1794",
-		"- Last route decision: lane=cmd target=#1794",
+		"- Last route decision: view=current lane=cmd target=#1794",
 		"- Last issue status: OPEN",
 	} {
 		if !strings.Contains(prompt, want) {

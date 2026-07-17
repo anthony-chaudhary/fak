@@ -16,6 +16,11 @@ import (
 // soft reactive dip (via the ceiling-bounded #3368 floor), and an unset or malformed
 // setpoint leaves the payload byte-identical to before the knob existed.
 func TestDispatchPreflightFoldsOperatorSetpoint(t *testing.T) {
+	oldBuildResources := dispatchBuildHostResources
+	dispatchBuildHostResources = func(dispatchtick.ProcGuardInput) dispatchtick.HostResources {
+		return dispatchtick.HostResources{Cores: dispatchtick.IntPtr(32), FreeRAMMB: dispatchtick.IntPtr(128000), TotalThreads: dispatchtick.IntPtr(500)}
+	}
+	t.Cleanup(func() { dispatchBuildHostResources = oldBuildResources })
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 
 	// Pin every ambient knob the cap fold reads so the arithmetic below is exact:
@@ -105,12 +110,12 @@ func TestDispatchPreflightFoldsOperatorSetpoint(t *testing.T) {
 	kernelAlive, kernelTarget = 2, 4
 	t.Setenv(dispatchtick.SetpointConcurrencyEnv, "6")
 	out = preflight(t)
-	if out["verdict"] != dispatchtick.PreflightOKVerdict || out["cap"] != 6 {
-		t.Fatalf("grow verdict/cap = %v/%v, want SPAWN_OK/6; payload=%v", out["verdict"], out["cap"], out)
+	if out["verdict"] != dispatchtick.PreflightOKVerdict || out["cap"] != 8 {
+		t.Fatalf("grow verdict/cap = %v/%v, want SPAWN_OK/8; payload=%v", out["verdict"], out["cap"], out)
 	}
 	terms = capTerms(t, out)
-	if terms["limiting"] != "floor" || terms["worker_floor"] != 6 {
-		t.Fatalf("grow cap_terms = %v, want limiting=floor worker_floor=6", terms)
+	if terms["limiting"] != "configured" || terms["worker_floor"] != 6 {
+		t.Fatalf("grow cap_terms = %v, want limiting=configured worker_floor=6", terms)
 	}
 	sp, ok = out["setpoint"].(map[string]any)
 	if !ok || sp["mode"] != "grow" || sp["desired_cap"] != 6 {
