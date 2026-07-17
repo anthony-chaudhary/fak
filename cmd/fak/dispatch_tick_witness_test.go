@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -590,6 +591,189 @@ func TestDispatchLandVerify(t *testing.T) {
 	green := landWorkerWorktreeVerified(t.TempDir(), "wt", "base", nil, fakeGit)
 	if !green.OK || !green.Applied || !green.Committed {
 		t.Fatalf("green verify must land the diff (applied+committed), got %+v", green)
+	}
+}
+
+// withWitnessStrandedBuildStub pins the #3515 scoped-build seam to a fixed verdict
+// and returns the recorded package sets, so the sweep test controls the "did the
+// strand red the build" gate without a real toolchain run.
+func withWitnessStrandedBuildStub(t *testing.T, failed, ok bool) *[][]string {
+	t.Helper()
+	old := dispatchWitnessStrandedBuildFails
+	calls := &[][]string{}
+	dispatchWitnessStrandedBuildFails = func(_ string, pkgs []string) (bool, bool) {
+		*calls = append(*calls, pkgs)
+		return failed, ok
+	}
+	t.Cleanup(func() { dispatchWitnessStrandedBuildFails = old })
+	return calls
+}
+
+func writeStrandedFile(t *testing.T, root, rel, body string) {
+	t.Helper()
+	p := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", p, err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", p, err)
+	}
+}
+
+// seedStrandedTrunk seeds a REAL git repo modeling the #3515 crash scene: a dead
+// shared-trunk worker (lease tree cmd/**) stranded a non-compiling edit to a
+// tracked lane file plus an untracked half-written lane file, while a live peer
+// holds WIP in docs/ that must never be touched. The rung's git half (status,
+// stash) runs for real against this repo; only the build verdict is stubbed.
+func seedStrandedTrunk(t *testing.T) (root, runsDir, stem string) {
+	t.Helper()
+	root = t.TempDir()
+	initDispatchGit(t, root)
+	writeStrandedFile(t, root, "cmd/lane/tool.go", "package lane\n")
+	writeStrandedFile(t, root, "docs/peer.md", "peer baseline\n")
+	runDispatchGit(t, root, "add", "cmd/lane/tool.go", "docs/peer.md")
+	commitDispatchGit(t, root, "seed trunk")
+	// The dead worker's strands (in-lane) and a live peer's WIP (out of lane).
+	writeStrandedFile(t, root, "cmd/lane/tool.go", "package lane\nfunc broken( {\n")
+	writeStrandedFile(t, root, "cmd/lane/half_written.go", "package lane\nfunc also( {\n")
+	writeStrandedFile(t, root, "docs/peer.md", "peer wip - must survive\n")
+	runsDir = filepath.Join(root, dispatchtick.RunsDirName)
+	stem = "resolve-3515-20260715-010101"
+	writeWitnessWorker(t, runsDir, stem, "# fak-spawn issue=3515 lane=cmd\ncrashed mid-edit\n", deadDispatchPID)
+	if err := os.WriteFile(filepath.Join(runsDir, stem+dispatchLeaseTreeSidecarSuffix), []byte(`["cmd/**"]`), 0o644); err != nil {
+		t.Fatalf("write lease-tree sidecar: %v", err)
+	}
+	return root, runsDir, stem
+}
+
+// TestWitnessRevertsDeadWorkersStrandedPoison is the #3515 witness: a live sweep
+// over a provably-dead, no-commit shared-trunk worker whose lane holds a dirty
+// non-compiling file (scoped build stubbed RED) archives the strand under the
+// runs dir, reverts the tracked file with a real scoped `git stash push --`
+// (recoverable, never a hard discard), leaves the peer's out-of-lane WIP and the
+// untracked strand in place, and surfaces the reverted paths on the graded row
+// and .witness sidecar.
+func TestWitnessRevertsDeadWorkersStrandedPoison(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root, runsDir, stem := seedStrandedTrunk(t)
+	withWitnessStubs(t, func(string, int, string) string { return "" }, "", "")
+	builds := withWitnessStrandedBuildStub(t, true, true) // the strand provably reds the scoped build
+
+	payload, records := witnessExitedWorkers(root, runsDir, true)
+
+	// The build gate was asked about exactly the lane package holding the strands.
+	if len(*builds) != 1 || len((*builds)[0]) != 1 || (*builds)[0][0] != "./cmd/lane" {
+		t.Fatalf("scoped build pkgs = %v, want one call with [./cmd/lane]", *builds)
+	}
+	// The tracked strand is reverted to its committed content...
+	b, err := os.ReadFile(filepath.Join(root, "cmd", "lane", "tool.go"))
+	if err != nil || string(b) != "package lane\n" {
+		t.Fatalf("stranded file = %q err=%v, want reverted to committed content", b, err)
+	}
+	// ...via a recoverable stash, never a hard discard.
+	if got := runDispatchGit(t, root, "stash", "list"); !strings.Contains(got, "stash@{0}") {
+		t.Fatalf("revert must be a recoverable stash, stash list = %q", got)
+	}
+	// The peer's out-of-lane WIP is byte-identical.
+	peer, err := os.ReadFile(filepath.Join(root, "docs", "peer.md"))
+	if err != nil || string(peer) != "peer wip - must survive\n" {
+		t.Fatalf("peer WIP = %q err=%v, want untouched", peer, err)
+	}
+	// The untracked strand has no sanctioned revert primitive: archived, left in place.
+	if _, err := os.Stat(filepath.Join(root, "cmd", "lane", "half_written.go")); err != nil {
+		t.Fatalf("untracked strand must be left in place (no -u stash), stat err=%v", err)
+	}
+	// Both strands' poison bytes were archived under the runs dir BEFORE the stash.
+	for _, rel := range []string{"cmd/lane/tool.go", "cmd/lane/half_written.go"} {
+		arch, err := os.ReadFile(filepath.Join(runsDir, stem+witnessStrandedArchiveSuffix, filepath.FromSlash(rel)))
+		if err != nil || !strings.Contains(string(arch), "( {") {
+			t.Fatalf("archive %s = %q err=%v, want the stranded poison bytes", rel, arch, err)
+		}
+	}
+	// The revert is first-class evidence on the graded row and in the sidecar.
+	if len(records) != 1 || records[0].Claim != dispatchtick.ClaimNoCommit {
+		t.Fatalf("records = %+v, want the one CLAIM_NO_COMMIT slot", records)
+	}
+	rows := payload["no_commit"].([]any)
+	row := rows[0].(map[string]any)
+	rev, _ := row["reverted"].([]string)
+	if len(rev) != 1 || rev[0] != "cmd/lane/tool.go" {
+		t.Fatalf("row reverted = %v, want [cmd/lane/tool.go]", row["reverted"])
+	}
+	assertFileContains(t, filepath.Join(runsDir, stem+dispatchtick.WitnessSidecarSuffix), `"reverted":["cmd/lane/tool.go"]`)
+}
+
+// TestWitnessStrandedRevertStandsDown pins the fail-open edges of the #3515 rung:
+// a dry-run sweep, a green scoped build, and an indeterminate build verdict must
+// each leave the strand exactly as found — no stash, no archive. The rung deletes
+// work when it is wrong, so it never guesses.
+func TestWitnessStrandedRevertStandsDown(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	for _, tc := range []struct {
+		name        string
+		live        bool
+		buildFailed bool
+		buildOK     bool
+		wantBuilds  int
+	}{
+		{"dry-run-never-mutates", false, true, true, 0},
+		{"green-build-preserves-strand", true, false, true, 1},
+		{"indeterminate-build-preserves-strand", true, false, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, runsDir, stem := seedStrandedTrunk(t)
+			withWitnessStubs(t, func(string, int, string) string { return "" }, "", "")
+			builds := withWitnessStrandedBuildStub(t, tc.buildFailed, tc.buildOK)
+
+			_, records := witnessExitedWorkers(root, runsDir, tc.live)
+
+			if len(records) != 1 || records[0].Claim != dispatchtick.ClaimNoCommit {
+				t.Fatalf("records = %+v, want the one no-commit slot", records)
+			}
+			if len(*builds) != tc.wantBuilds {
+				t.Fatalf("build gate ran %d times, want %d", len(*builds), tc.wantBuilds)
+			}
+			b, err := os.ReadFile(filepath.Join(root, "cmd", "lane", "tool.go"))
+			if err != nil || !strings.Contains(string(b), "func broken(") {
+				t.Fatalf("stranded file = %q err=%v, want left dirty (fail-open)", b, err)
+			}
+			if got := strings.TrimSpace(runDispatchGit(t, root, "stash", "list")); got != "" {
+				t.Fatalf("stand-down must create no stash, stash list = %q", got)
+			}
+			if _, err := os.Stat(filepath.Join(runsDir, stem+witnessStrandedArchiveSuffix)); !os.IsNotExist(err) {
+				t.Fatalf("stand-down must write no archive, stat err = %v", err)
+			}
+		})
+	}
+}
+
+// TestDispatchPathInLeaseTree pins the destructive matcher's semantics: lease
+// subtree globs match their files, prefix look-alikes and out-of-lane paths do
+// not, and the wildcard-all spellings conservatively match NOTHING (a whole-tree
+// lease provides no per-lane scoping for a rung that deletes work).
+func TestDispatchPathInLeaseTree(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		tree []string
+		want bool
+	}{
+		{"cmd/lane/tool.go", []string{"cmd/**"}, true},
+		{"cmd/lane/tool.go", []string{"cmd/*"}, true},
+		{"cmd/lane/tool.go", []string{"cmd/lane/tool.go"}, true},
+		{"cmd/lane/tool.go", []string{"docs/**", "cmd/**"}, true},
+		{"docs/peer.md", []string{"cmd/**"}, false},
+		{"cmdextra/x.go", []string{"cmd/**"}, false},
+		{"cmd/lane/tool.go", []string{"**"}, false},
+		{"cmd/lane/tool.go", []string{"**/*"}, false},
+		{"cmd/lane/tool.go", nil, false},
+	} {
+		if got := dispatchPathInLeaseTree(tc.path, tc.tree); got != tc.want {
+			t.Errorf("dispatchPathInLeaseTree(%q, %v) = %v, want %v", tc.path, tc.tree, got, tc.want)
+		}
 	}
 }
 

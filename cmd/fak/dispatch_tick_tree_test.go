@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -45,6 +47,34 @@ func TestDispatchProbeTreeBuildNoModuleFailsOpen(t *testing.T) {
 	t.Cleanup(func() { dispatchTreeBuildCommand = old })
 	if got := dispatchProbeTreeBuild(t.TempDir()); got.Poisoned {
 		t.Fatalf("got=%+v", got)
+	}
+}
+
+// A build that exceeds the 90s probe cap is killed by the deadline, not by a
+// compiler diagnostic. dispatchTreeBuildCommand wraps that as
+// context.DeadlineExceeded; the probe must fail open (a loaded host is
+// infrastructure, not a poisoned tree) rather than freeze the fleet.
+func TestDispatchProbeTreeBuildTimeoutFailsOpen(t *testing.T) {
+	old := dispatchTreeBuildCommand
+	dispatchTreeBuildCommand = func(string) (string, error) {
+		return "", fmt.Errorf("tree build probe timed out after 90s: %w", context.DeadlineExceeded)
+	}
+	t.Cleanup(func() { dispatchTreeBuildCommand = old })
+	if got := dispatchProbeTreeBuild(t.TempDir()); got.Poisoned {
+		t.Fatalf("timed-out build must fail open, got=%+v", got)
+	}
+}
+
+// A SIGKILL reap (an OOM kill under fleet load) surfaces as "signal: killed"
+// with no compiler diagnostic — infrastructure, not poison, so it fails open.
+func TestDispatchProbeTreeBuildKilledFailsOpen(t *testing.T) {
+	old := dispatchTreeBuildCommand
+	dispatchTreeBuildCommand = func(string) (string, error) {
+		return "", errors.New("signal: killed")
+	}
+	t.Cleanup(func() { dispatchTreeBuildCommand = old })
+	if got := dispatchProbeTreeBuild(t.TempDir()); got.Poisoned {
+		t.Fatalf("killed build must fail open, got=%+v", got)
 	}
 }
 

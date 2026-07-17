@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -144,6 +145,12 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		if b, err := os.ReadFile(stem + dispatchtick.BaseSHASidecarSuffix); err == nil {
 			base = strings.TrimSpace(string(b))
 		}
+		// #3515: remember whether this worker ran ISOLATED in a per-worker worktree
+		// (the sidecar is consumed by the land below). Such a worker never edited the
+		// shared trunk, so any dirty trunk file inside its lane belongs to a live peer
+		// — the stranded-poison revert rung below must never fire for it.
+		_, wtErr := os.Stat(stem + dispatchWorktreeSidecarSuffix)
+		ranInWorktree := wtErr == nil
 		// #3168: the pid is provably dead. If this worker ran in a per-worker git
 		// worktree, land its diff onto the trunk and reap the worktree BEFORE the
 		// resolving-SHA scan, so the just-landed commit is what gets witnessed. All
@@ -155,6 +162,8 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			landAndReapWorkerWorktree(root, stem, base)
 		}
 		sha := dispatchWitnessResolvingSHA(root, issue, base)
+		tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
+		var reverted []string
 		var rec dispatchtick.WitnessRecord
 		if sha == "" {
 			tail, size := dispatchWitnessLogTail(log)
@@ -163,6 +172,15 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 				Log:    filepath.Base(log),
 				Claim:  dispatchtick.ClaimNoCommit,
 				Reason: dispatchtick.ClassifyNoCommitReason(tail, size),
+			}
+			// #3515 revert rung: a dead shared-trunk worker that landed NO resolving
+			// commit may have stranded uncommitted, non-compiling edits that red
+			// `go build` for every peer until a human intervenes. Archive-then-stash
+			// exactly its lane-scoped dirty files — live sweeps only (a dry-run never
+			// mutates), and never for a worktree-isolated worker (its lane's dirty
+			// trunk files can only be a peer's).
+			if live && !ranInWorktree {
+				reverted = dispatchWitnessRevertStranded(root, runsDir, stem, tree)
 			}
 		} else {
 			verdict, witness := dispatchWitnessCommitAudit(root, sha)
@@ -185,7 +203,6 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			ran, passed := dispatchWitnessTestRun(root, sha)
 			rec.TestClaim = dispatchtick.GradeTestRun(ran, passed)
 		}
-		tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
 		if len(tree) > 0 {
 			if changed, ok := dispatchWitnessCommitPaths(root, sha); ok {
 				rec.OutOfLanePathCount = dispatchCountPathsOutsideTrees(changed, tree)
@@ -205,6 +222,13 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		}
 		records = append(records, rec)
 		row := rec.Map()
+		if len(reverted) > 0 {
+			// #3515: surface the revert as first-class evidence on the graded row (and
+			// so in the .witness sidecar below) — an operator can see exactly which
+			// stranded paths were stashed, and recover them via `git stash pop` or the
+			// runs-dir archive copy.
+			row["reverted"] = reverted
+		}
 		audited = append(audited, row)
 		buckets[rec.Claim] = append(buckets[rec.Claim], row)
 		if live {
@@ -418,4 +442,263 @@ func dispatchWitnessChangedTestPkgs(root, sha string) []string {
 		pkgs = append(pkgs, "./"+dir+"/")
 	}
 	return pkgs
+}
+
+// --- #3515: the crashed-worker stranded-poison revert rung ----------------------
+//
+// A worker that dies mid-edit in the SHARED trunk (no per-worker worktree) can
+// strand an uncommitted, non-compiling file that reds `go build` for every peer
+// until a human notices. The witness sweep is the one place that already proves
+// "this worker is DEAD and landed NO commit", so it is the safe owner of the
+// cleanup. The rung is FAIL-OPEN at every step — it deletes work when it is
+// wrong, so any ambiguity (git fault, indeterminate build, green build, no lease
+// scoping, un-archived file) stands it down and leaves the tree exactly as found.
+
+// dispatchWitnessDirtyFile is one uncommitted working-tree entry from
+// `git status --porcelain -z`: its repo-relative path plus whether git tracks it.
+// Untracked strands are archived but never stashed — the sole sanctioned revert
+// primitive (`git stash push -- <paths>`) rejects a pathspec naming an untracked
+// file outright (handling them needs `-u`, a deliberate follow-on).
+type dispatchWitnessDirtyFile struct {
+	Path      string
+	Untracked bool
+}
+
+// Injectable seams for the #3515 rung, mirroring the resolving-SHA / commit-audit /
+// test-run seams so the sweep test can drive the rung hermetically (the test stubs
+// only the build verdict and exercises real `git status` / `git stash push`).
+var dispatchWitnessDirtyPaths = dispatchWitnessDirtyPathsGit
+var dispatchWitnessStrandedBuildFails = dispatchWitnessStrandedBuildFailsGo
+var dispatchWitnessStashPaths = dispatchWitnessStashPathsGit
+
+// witnessStrandedArchiveSuffix names the per-worker archive dir (under the runs
+// dir) the rung copies stranded bytes into BEFORE stashing them — the same
+// archive-before-destroy discipline as worktree_doctor.py --sweep-disposable.
+const witnessStrandedArchiveSuffix = ".stranded"
+
+// dispatchWitnessRevertStranded reverts a provably-dead, no-commit worker's
+// stranded lane-scoped edits, when and only when ALL fire conditions hold:
+//
+//  1. the worker declared a non-empty lease tree (its .tree sidecar);
+//  2. `git status --porcelain` reports dirty files, and root IS the repo toplevel;
+//  3. at least one dirty file falls under the lease tree's globs;
+//  4. at least one matching dirty file is a .go file (a docs-only strand cannot
+//     be "the non-compiling file"), and at least one matching file is TRACKED
+//     (else there is nothing the sanctioned stash primitive can revert);
+//  5. a SCOPED `go build` of exactly the package dirs containing the matching
+//     dirty .go files FAILS — the strand is provably what reds the build.
+//
+// Then: archive every matching dirty file under the runs dir, and revert the
+// tracked ones with the sole gitgate-permitted primitive, exactly
+// `git stash push -- <concrete paths>` (recoverable via `git stash pop`; bare
+// stash / reset --hard / clean are refused by internal/gitgate for the same
+// peer-WIP-sweeping reason this rung matches paths one by one). Every other
+// outcome returns nil with the tree untouched. Returns the stashed paths.
+func dispatchWitnessRevertStranded(root, runsDir, stem string, tree []string) []string {
+	if len(tree) == 0 {
+		return nil // no declared lease tree -> no safe attribution -> never touch the tree
+	}
+	dirty, ok := dispatchWitnessDirtyPaths(root)
+	if !ok || len(dirty) == 0 {
+		return nil
+	}
+	var mine []dispatchWitnessDirtyFile
+	var stash []string
+	goDirs := map[string]bool{}
+	for _, f := range dirty {
+		if strings.HasSuffix(f.Path, "/") {
+			continue // an all-untracked DIR entry: unstashable, and its files are unlisted
+		}
+		if !dispatchPathInLeaseTree(f.Path, tree) {
+			continue // a peer's WIP outside the dead worker's lane: never touched
+		}
+		mine = append(mine, f)
+		if !f.Untracked {
+			stash = append(stash, f.Path)
+		}
+		if strings.HasSuffix(f.Path, ".go") {
+			if dir := filepath.ToSlash(filepath.Dir(f.Path)); dir == "." || dir == "" {
+				goDirs["."] = true
+			} else {
+				goDirs["./"+dir] = true
+			}
+		}
+	}
+	if len(stash) == 0 || len(goDirs) == 0 {
+		return nil // nothing both provably-poisonous AND revertible by the sanctioned primitive
+	}
+	pkgs := make([]string, 0, len(goDirs))
+	for d := range goDirs {
+		pkgs = append(pkgs, d)
+	}
+	sort.Strings(pkgs)
+	failed, ok := dispatchWitnessStrandedBuildFails(root, pkgs)
+	if !ok || !failed {
+		return nil // green or indeterminate -> the strand is not proven poison -> preserve it
+	}
+	if !dispatchWitnessArchiveStranded(root, runsDir, stem, mine) {
+		return nil // an un-archived file is never destroyed
+	}
+	if err := dispatchWitnessStashPaths(root, stash); err != nil {
+		return nil
+	}
+	return stash
+}
+
+// dispatchPathInLeaseTree reports whether a repo-relative path falls under one of
+// the lease tree's entries ("cmd/**", "docs/shared.md"). Same directory-ancestry
+// semantics as the lease geometry (a trailing /** or /* names the directory's
+// subtree), EXCEPT the wildcard-all spellings ("**", "**/*", "*"): a lease naming
+// the whole tree provides no per-lane scoping, and this matcher feeds a
+// DESTRUCTIVE rung, so wildcard-all conservatively matches nothing here.
+func dispatchPathInLeaseTree(path string, tree []string) bool {
+	path = strings.Trim(strings.ReplaceAll(path, "\\", "/"), "/")
+	if path == "" {
+		return false
+	}
+	for _, t := range tree {
+		t = strings.ReplaceAll(strings.TrimSpace(t), "\\", "/")
+		t = strings.TrimPrefix(t, "./")
+		t = strings.TrimSuffix(t, "/")
+		t = strings.TrimSuffix(t, "/**")
+		t = strings.TrimSuffix(t, "/*")
+		t = strings.TrimSuffix(t, "/")
+		if t == "" || t == "**" || t == "**/*" || t == "*" {
+			continue
+		}
+		if path == t || strings.HasPrefix(path, t+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// dispatchWitnessDirtyPathsGit lists uncommitted working-tree entries via
+// `git status --porcelain -z` (NUL-separated: no quoting ambiguity). It first
+// proves root IS the repo toplevel — were root a bare dir under some enclosing
+// repo, git would resolve THAT repo and the later stash would mutate a tree the
+// sweep does not own. Fail-open: any fault yields (nil, false) and the rung
+// stands down.
+func dispatchWitnessDirtyPathsGit(root string) ([]dispatchWitnessDirtyFile, bool) {
+	top, err := dispatchWitnessGitOut(root, "rev-parse", "--show-toplevel")
+	if err != nil || !dispatchWitnessSamePath(strings.TrimSpace(top), root) {
+		return nil, false
+	}
+	out, err := dispatchWitnessGitOut(root, "status", "--porcelain", "-z")
+	if err != nil {
+		return nil, false
+	}
+	var files []dispatchWitnessDirtyFile
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if len(e) < 4 || e[2] != ' ' {
+			continue
+		}
+		code, path := e[:2], e[3:]
+		if code[0] == 'R' || code[0] == 'C' {
+			i++ // the NEXT NUL token is the rename/copy ORIGIN path
+		}
+		if code == "!!" {
+			continue
+		}
+		files = append(files, dispatchWitnessDirtyFile{Path: path, Untracked: code == "??"})
+	}
+	return files, true
+}
+
+// dispatchWitnessSamePath compares two on-disk paths for identity, tolerant of
+// symlinks (macOS's /var -> /private/var), separators, and Windows casing.
+func dispatchWitnessSamePath(a, b string) bool {
+	if ra, err := filepath.EvalSymlinks(a); err == nil {
+		a = ra
+	}
+	if rb, err := filepath.EvalSymlinks(b); err == nil {
+		b = rb
+	}
+	return strings.EqualFold(filepath.ToSlash(filepath.Clean(a)), filepath.ToSlash(filepath.Clean(b)))
+}
+
+// dispatchWitnessGitOut runs one git command in root and returns its stdout,
+// with the same timeout/window discipline as the sweep's other git helpers.
+func dispatchWitnessGitOut(root string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	return string(out), err
+}
+
+// dispatchWitnessStrandedBuildFailsGo runs a SCOPED `go build` of exactly the
+// package dirs containing the dead worker's matching dirty .go files, reporting
+// (failed, ok). ok=false means the verdict is INDETERMINATE (no packages, no
+// toolchain, or a timeout) and the caller must preserve the work — unlike the
+// land-site verify this rung destroys bytes on a positive verdict, so a missing
+// toolchain stands it down instead of waving it through. -o points at a
+// throwaway dir so a main package's executable never lands in the shared tree.
+func dispatchWitnessStrandedBuildFailsGo(root string, pkgs []string) (failed, ok bool) {
+	if len(pkgs) == 0 {
+		return false, false
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		return false, false
+	}
+	tmp, err := os.MkdirTemp("", "fak-stranded-build-")
+	if err != nil {
+		return false, false
+	}
+	defer os.RemoveAll(tmp)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	args := append([]string{"build", "-o", tmp + string(os.PathSeparator)}, pkgs...)
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	err = cmd.Run()
+	if ctx.Err() != nil {
+		return false, false // timeout: indeterminate, never grade it as poison
+	}
+	return err != nil, true
+}
+
+// dispatchWitnessArchiveStranded copies each matching dirty file into the
+// per-worker <stem>.stranded/ dir under the runs dir, mirroring the repo-relative
+// layout, BEFORE anything is stashed. Returns false on any copy fault so the
+// caller never destroys an un-archived byte. A dirty DELETION has no bytes to
+// copy and is skipped (the stash itself records it, recoverably).
+func dispatchWitnessArchiveStranded(root, runsDir, stem string, files []dispatchWitnessDirtyFile) bool {
+	dir := filepath.Join(runsDir, filepath.Base(stem)+witnessStrandedArchiveSuffix)
+	for _, f := range files {
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f.Path)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return false
+		}
+		dst := filepath.Join(dir, filepath.FromSlash(f.Path))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return false
+		}
+		if err := os.WriteFile(dst, b, 0o644); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// dispatchWitnessStashPathsGit runs exactly `git stash push -- <paths>` — the
+// sole gitgate-permitted revert primitive (internal/gitgate: a pathspec-scoped
+// stash create is allowed; bare stash / reset --hard / checkout -- / clean are
+// refused). The stash keeps the reverted work recoverable (`git stash pop`) on
+// top of the runs-dir archive copy.
+func dispatchWitnessStashPathsGit(root string, paths []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"stash", "push", "--"}, paths...)...)
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	return cmd.Run()
 }

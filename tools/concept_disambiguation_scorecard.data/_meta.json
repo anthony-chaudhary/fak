@@ -351,6 +351,66 @@
           "category": "incidental",
           "reason": "Not a new concept: the const's value IS the kernel's existing CLAIM_UNWITNESSED verdict from internal/dispatchtick. internal/steerpr is a pure, stdlib-only leaf that takes verdicts as INPUT so its attention band stays a view over that existing oracle rather than a second one; this identifier is the local Go spelling of the governed token, not a competing definition of it.",
           "token": "VerdictUnwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessRevertStranded"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessDirtyFile"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessDirtyPaths"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessDirtyPathsGit"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessStrandedBuildFails"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessStrandedBuildFailsGo"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessStashPaths"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessStashPathsGit"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "witnessStrandedArchiveSuffix"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessArchiveStranded"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessGitOut"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
+          "token": "dispatchWitnessSamePath"
         }
       ],
       "id": "witness-proof",
@@ -360,6 +420,17 @@
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
         "VerdictUnwitnessed",
+        "dispatchWitnessArchiveStranded",
+        "dispatchWitnessDirtyFile",
+        "dispatchWitnessDirtyPaths",
+        "dispatchWitnessDirtyPathsGit",
+        "dispatchWitnessGitOut",
+        "dispatchWitnessRevertStranded",
+        "dispatchWitnessSamePath",
+        "dispatchWitnessStashPaths",
+        "dispatchWitnessStashPathsGit",
+        "dispatchWitnessStrandedBuildFails",
+        "dispatchWitnessStrandedBuildFailsGo",
         "done_not_witnessed",
         "named_witness",
         "nwitness",
@@ -370,6 +441,7 @@
         "revocations",
         "want_witness",
         "withdefaultoriginwitnesses",
+        "witnessStrandedArchiveSuffix",
         "witnessable",
         "witnessed",
         "witnesses",
