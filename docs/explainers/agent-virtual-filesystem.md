@@ -167,10 +167,28 @@ Shipped pieces that already live in these tiers — with the gaps named, not hid
   search ([agent-memory integration](../integrations/agent-memory.md)); a T4 engineer may
   select a vector store *as* a T2 backend, but the seam gates and caches whatever backend
   answers, it does not improve the ranking.
-- **T3** — scratchpad is real but ungoverned; leasing/GC/checkpoint-inclusion is proposed
-  in [#2420](https://github.com/anthony-chaudhary/fak/issues/2420),
-  [#2344](https://github.com/anthony-chaudhary/fak/issues/2344),
-  [#2345](https://github.com/anthony-chaudhary/fak/issues/2345).
+- **T3** — the scratchpad-lifecycle **primitive has landed**: the once-ungoverned session
+  scratch dir is now a *leased* resource with the whole lifecycle the affordance was
+  missing (`internal/session/scratch_lease.go`, [#2420](https://github.com/anthony-chaudhary/fak/issues/2420),
+  under the T3 umbrella [#2579](https://github.com/anthony-chaudhary/fak/issues/2579)):
+  **birth** (`MintScratch` mints a per-trace dir and journals its path), **death**
+  (`ScratchLease.GC` reaps the whole tree at session end and journals an `EvScratchGC`
+  event carrying `BytesReclaimed`/`FilesDropped` — the before/after disk witness the
+  [#2344](https://github.com/anthony-chaudhary/fak/issues/2344) 2 GB/day accrual asked
+  for), **fork isolation** (`Fork` gives each fork its own copy-on-write dir so two
+  forks cannot race one temp tree), and a **checkpoint axis** (`Checkpoint` archives a
+  content-`Digest`'d copy without ever removing the live tree — a checkpoint is *not* a
+  GC — and `Restore` reproduces or deliberately skips it). Every event lands through a
+  nil-permissive `ScratchJournal` seam. The T3↔T4 promotion boundary is the
+  **`turn`-class default-expire durability gate** already shipped one tier up
+  ([context is not memory](../CONTEXT-IS-NOT-MEMORY.md), #82): a scratch artifact is not
+  a durable fact unless it earns `durable`. Witness: `go test ./internal/session -run
+  Scratch` (mint/GC/fork/checkpoint/restore, green). *Honest fence:* this is the lifecycle
+  **primitive**, unit-witnessed but **not yet wired into the live session harness loop** —
+  the two open follow-ons are the always-on janitor that reaps *dead-session* scratch dirs
+  at [#2344](https://github.com/anthony-chaudhary/fak/issues/2344)'s accrual rate, and
+  carrying the predecessor scratch path across resume/re-home
+  ([#2345](https://github.com/anthony-chaudhary/fak/issues/2345)).
 - **T4** — the promotion ledger, verified recall over the notes backend
   (`internal/memq`, [#2346](https://github.com/anthony-chaudhary/fak/issues/2346)), and
   the write-time durability thesis
