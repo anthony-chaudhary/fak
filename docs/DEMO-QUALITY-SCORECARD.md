@@ -1,6 +1,6 @@
 ---
 title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
-description: "fak's demo-quality scorecard grades 73 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+description: "fak's demo-quality scorecard grades 78 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
 ---
 
 # Demo-quality scorecard
@@ -16,11 +16,11 @@ description: "fak's demo-quality scorecard grades 73 demos on five deterministic
 
 | Metric | Value |
 |---|---|
-| Demos scored | 73 |
+| Demos scored | 78 |
 | **Demo-debt (total defects)** | **0** |
-| Mean score | 98.6/100 |
-| Median / min / max | 100.0 / 91.0 / 100.0 |
-| Grade distribution | A:73 B:0 C:0 D:0 F:0 |
+| Mean score | 98.4/100 |
+| Median / min / max | 100.0 / 85.9 / 100.0 |
+| Grade distribution | A:77 B:1 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -28,6 +28,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
+| 85.9 | B | 0 | 86 | 86 | 90 | 88 | 78 | `cmd/qwen36codedemo` |
 | 91.0 | A | 0 | 86 | 100 | 100 | 88 | 78 | `examples/mobile-ffi` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/playground` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/trace-authoring` |
@@ -36,10 +37,12 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/bench-latency` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/gpu-smoke` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/turntax` |
+| 95.3 | A | 0 | 100 | 86 | 100 | 100 | 90 | `examples/vm-fs-guard` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/autogen-groupchat` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/crewai-crew` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/fanbench` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/plan-cfi` |
+| 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `cmd/extseamsdemo` |
 | 96.4 | A | 0 | 100 | 100 | 90 | 100 | 90 | `examples/normgate-evasion` |
 | 96.6 | A | 0 | 86 | 100 | 100 | 100 | 100 | `examples/deny-as-value` |
 | 96.6 | A | 0 | 86 | 100 | 100 | 100 | 100 | `examples/grammar-repair` |
@@ -59,6 +62,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/session-reload` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/vdso-cache-hit` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/verified-memory-recall` |
+| 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `cmd/marketdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/adjudication-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/agentdojo-redteam` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/auth-hardening` |
@@ -88,6 +92,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/ctxdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/ctxplandemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/cxlpooldemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/fanoutdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/guarddemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/hwcachedemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/memqdemo` |
@@ -107,6 +112,14 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ## Soft signals (score only, not debt)
+
+### `cmd/qwen36codedemo`
+- runnable: a runnable script exists but the README shows no paste-able command to launch it
+- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
+- honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+- documented: no run/usage section and no visible run command — hard to find how to start
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/mobile-ffi`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
@@ -146,6 +159,10 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
+### `examples/vm-fs-guard`
+- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
 ### `examples/autogen-groupchat`
 - self_contained: no stated prerequisites — a cold runner can't tell what to install first
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
@@ -159,6 +176,10 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/plan-cfi`
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `cmd/extseamsdemo`
 - self_contained: no stated prerequisites — a cold runner can't tell what to install first
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
@@ -218,5 +239,8 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/verified-memory-recall`
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `cmd/marketdemo`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
