@@ -89,3 +89,60 @@ func positiveResidueFixture(t *testing.T, lines []string) []byte {
 	}
 	return body
 }
+func TestPositiveResidualSubstitution(t *testing.T) {
+	body := positiveResidueFixtureWithLines(t, []string{
+		"complete the originating task",
+		"Do not forget to push after the commit.",
+	})
+	out, outcome := CompactAnthropicHistoryWithOptions(body, CompactOptions{
+		Budget: 700, Anchor: CompactAnchorHead, ColdCache: true, PositiveResidue: true,
+	})
+	if outcome.PositiveResidue != "remember to push after the commit." {
+		t.Fatalf("positive residual=%q", outcome.PositiveResidue)
+	}
+	if bytes.Contains(out, []byte("Do not forget")) || !bytes.Contains(out, []byte("remember to push after the commit.")) {
+		t.Fatalf("negated span was not substituted: %s", out)
+	}
+	if !bytes.Contains(outcome.ResidueRestoreBytes, []byte("Do not forget to push after the commit.")) {
+		t.Fatalf("original bytes not retained for restore: %s", outcome.ResidueRestoreBytes)
+	}
+}
+
+func TestPositiveResidualSubstitutionDefaultOff(t *testing.T) {
+	body := positiveResidueFixtureWithLines(t, []string{
+		"complete the originating task",
+		"Do not forget to push after the commit.",
+	})
+	out, outcome := CompactAnthropicHistoryWithOptions(body, CompactOptions{
+		Budget: 700, Anchor: CompactAnchorHead, ColdCache: true,
+	})
+	if outcome.PositiveResidue != "" || outcome.ResidueRestoreID != "" || bytes.Contains(out, []byte("remember to push")) {
+		t.Fatalf("default-off path mutated history: outcome=%+v body=%s", outcome, out)
+	}
+}
+
+func positiveResidueFixtureWithLines(t *testing.T, lines []string) []byte {
+	t.Helper()
+	type block map[string]any
+	messages := make([]map[string]any, 0, 18)
+	for i := 0; i < 18; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		text := strings.Repeat("droppable filler ", 20)
+		if i < len(lines) {
+			text = lines[i]
+		}
+		messages = append(messages, map[string]any{"role": role, "content": []block{{"type": "text", "text": text}}})
+	}
+	body, err := json.Marshal(map[string]any{
+		"model": "test", "max_tokens": 512,
+		"system":   []block{{"type": "text", "text": "shared policy", "cache_control": map[string]any{"type": "ephemeral"}}},
+		"messages": messages,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}

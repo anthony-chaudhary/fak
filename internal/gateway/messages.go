@@ -725,7 +725,11 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		// reads (reqTrace); the empty-trace path (tests, non-session callers) is a safe no-op.
 		s.recordPlacement(trace)
 	}
-	opts := agent.CompactOptions{Budget: s.compactHistoryBudget, Anchor: agent.CompactAnchorFirstBP}
+	opts := agent.CompactOptions{
+		Budget:          s.compactHistoryBudget,
+		Anchor:          agent.CompactAnchorFirstBP,
+		PositiveResidue: s.positiveResidualSubstitution,
+	}
 	if s.compactAnchorHead {
 		// #1407/#1408 opt-in: re-anchor on the stable head so anchor-starved sessions can
 		// shed. headSessionPrior supplies the {TotalTurns, CurrentTurn} pair the burst gate
@@ -769,6 +773,11 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	// preserves the task verbatim and mints no handle), where stashRestore no-ops.
 	if outcome.Reason == agent.CompactReasonNone && outcome.RestoreID != "" {
 		s.stashRestore(trace, outcome.RestoreID, outcome.RestoreExcerpt, outcome.RestoreBytes)
+	}
+	// Positive-residual substitution preserves the complete dropped span behind its own digest,
+	// independent of the originating-task tombstone above.
+	if outcome.Reason == agent.CompactReasonNone && outcome.ResidueRestoreID != "" {
+		s.stashRestore(trace, outcome.ResidueRestoreID, outcome.PositiveResidue, outcome.ResidueRestoreBytes)
 	}
 	return outcome.Reason == agent.CompactReasonNone, outcome.Reason
 }

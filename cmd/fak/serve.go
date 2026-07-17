@@ -81,58 +81,59 @@ func configureServeToolEngines() {
 // definition order, so the boot stages consume them without threading four dozen
 // locals through every call.
 type serveFlags struct {
-	addr                        *string
-	stdio                       *bool
-	provider                    *string
-	baseURL                     *string
-	replicaBaseURLs             repeatedStringFlag
-	model                       *string
-	apiKeyEnv                   *string
-	engineCacheEngine           *string
-	engineCacheBaseURL          *string
-	engineCacheAdminKeyEnv      *string
-	engineCacheIdleTimeout      *time.Duration
-	engineCacheRequireExactSpan *bool
-	engineID                    *string
-	backendName                 *string
-	cudaGraph                   *bool
-	policyPath                  *string
-	policyCheck                 *bool
-	expose                      repeatedStringFlag
-	vdso                        *bool
-	invalidation                *string
-	requireKeyEnv               *string
-	routeManifest               *string
-	routeAccounts               *string
-	ggufPath                    *string
-	tokPath                     *string
-	ctxViewBudget               *int
-	compactHistoryBudget        *int
-	compactAnchorHead           *bool
-	vcacheAnchor                *bool
-	deferColdTools              *bool
-	assumeSessionTurns          *int
-	elideResultBytes            *int
-	elideStaleReads             *bool
-	sessionID                   *string
-	sessionStatePath            *string
-	contextBudgetTokens         *int
-	resetOnBudget               *bool
-	cpuOffloadExperts           *bool
-	metal                       *bool
-	expertParallel              *int
-	tensorParallel              *int
-	budgetWebhook               *string
-	budgetWarnFraction          *float64
-	notifyNative                *bool
-	notifyWebhook               *string
-	notifySlack                 *string
-	debugStats                  *bool
-	dojoMode                    *bool
-	native                      *bool
-	nativeMaxTurns              *int
-	vdsoProxyFill               *bool
-	metricsSnapshot             *time.Duration
+	addr                         *string
+	stdio                        *bool
+	provider                     *string
+	baseURL                      *string
+	replicaBaseURLs              repeatedStringFlag
+	model                        *string
+	apiKeyEnv                    *string
+	engineCacheEngine            *string
+	engineCacheBaseURL           *string
+	engineCacheAdminKeyEnv       *string
+	engineCacheIdleTimeout       *time.Duration
+	engineCacheRequireExactSpan  *bool
+	engineID                     *string
+	backendName                  *string
+	cudaGraph                    *bool
+	policyPath                   *string
+	policyCheck                  *bool
+	expose                       repeatedStringFlag
+	vdso                         *bool
+	invalidation                 *string
+	requireKeyEnv                *string
+	routeManifest                *string
+	routeAccounts                *string
+	ggufPath                     *string
+	tokPath                      *string
+	ctxViewBudget                *int
+	compactHistoryBudget         *int
+	positiveResidualSubstitution *bool
+	compactAnchorHead            *bool
+	vcacheAnchor                 *bool
+	deferColdTools               *bool
+	assumeSessionTurns           *int
+	elideResultBytes             *int
+	elideStaleReads              *bool
+	sessionID                    *string
+	sessionStatePath             *string
+	contextBudgetTokens          *int
+	resetOnBudget                *bool
+	cpuOffloadExperts            *bool
+	metal                        *bool
+	expertParallel               *int
+	tensorParallel               *int
+	budgetWebhook                *string
+	budgetWarnFraction           *float64
+	notifyNative                 *bool
+	notifyWebhook                *string
+	notifySlack                  *string
+	debugStats                   *bool
+	dojoMode                     *bool
+	native                       *bool
+	nativeMaxTurns               *int
+	vdsoProxyFill                *bool
+	metricsSnapshot              *time.Duration
 }
 
 // newServeFlagSet defines the full `fak serve` flag surface and returns the set
@@ -168,6 +169,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.tokPath = fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
 	sf.ctxViewBudget = fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	sf.compactHistoryBudget = fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "on the Anthropic PASSTHROUGH (an upstream --base-url anthropic), compact OLD conversation turns in the OUTBOUND request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream cache hit survives. This reaches the flagship passthrough the streaming ctxplan view cannot (#555). DEFAULT-ON: once a conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). No effect on non-passthrough wires.")
+	sf.positiveResidualSubstitution = fs.Bool("positive-residual-substitution", false, "replace compacted negated/stale history with its positive residual; original bytes remain available through ctxrestore (default off)")
 	sf.compactAnchorHead = fs.Bool("compact-anchor-head", true, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything. DEFAULT-ON, and every fire stays gated on the burst economics (CacheBurstPaysBack, #1408): a WARM session with no bounded turns budget never bursts — it fires only when a wired session-turn horizon repays the one-time burst, or when the trace OBSERVABLY idled past the message-breakpoint cache TTL since its last served turn (a penalty-free cut, the long-session firing path). Pass =false to pin the old warm-only first-breakpoint anchor.")
 	sf.assumeSessionTurns = fs.Int("assume-session-turns", gateway.DefaultAssumedSessionTurns, "the session length the head-anchored burst gate (--compact-anchor-head) ASSUMES when no bounded turn horizon is wired, so a WARM continuously-active long session sheds early instead of waiting to idle past the message-span cache TTL. The gate maps the trace's real served-turn depth to CurrentTurn and this value to TotalTurns: it fires early (many repaying turns left) and refuses near the presumed end — the same one-time-burst break-even economics (agent.CacheBurstPaysBack, #1408), just given a history-based length instead of refusing outright. DEFAULT-ON at gateway.DefaultAssumedSessionTurns; a genuine wired Budget.TurnsLeft horizon always WINS over this prior, and a large invalidated suffix still refuses regardless. Pass 0 to disable (byte-for-byte the conservative no-horizon behavior — no fire unless the burst is zero-penalty). Consulted only when --compact-anchor-head is on and the head re-anchor engages; inert on every other path.")
 	sf.elideResultBytes = fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
@@ -303,47 +305,48 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	}
 
 	srv, err := gateway.New(gateway.Config{
-		EngineID:                    *sf.engineID,
-		Model:                       *sf.model,
-		BaseURL:                     *sf.baseURL,
-		ReplicaBaseURLs:             sf.replicaBaseURLs.Values(),
-		Provider:                    *sf.provider,
-		APIKey:                      rt.apiKey,
-		EngineCacheEngine:           *sf.engineCacheEngine,
-		EngineCacheBaseURL:          *sf.engineCacheBaseURL,
-		EngineCacheAdminKey:         rt.engineCacheAdminKey,
-		EngineCacheIdleTimeout:      *sf.engineCacheIdleTimeout,
-		EngineCacheRequireExactSpan: *sf.engineCacheRequireExactSpan,
-		InKernelModel:               rt.inKernelModel,
-		Tokenizer:                   rt.inKernelTok,
-		InKernelQ4K:                 rt.inKernelQ4K,
-		Backend:                     rt.chatBackend,
-		CPUOffloadExperts:           *sf.cpuOffloadExperts,
-		Metal:                       rt.useMetal,
-		ExpertParallelRanks:         *sf.expertParallel,
-		RequireKey:                  rt.requireKey,
-		VDSO:                        *sf.vdso,
-		Invalidation:                *sf.invalidation,
-		Version:                     appversion.Current(),
-		ReloadPolicy:                policyReloader(*sf.policyPath),
-		ResetTrace:                  resetTrace,
-		ObserveTrace:                observeTrace,
-		ObserveSession:              observeSession,
-		ControlSession:              controlSession,
-		SteerSession:                steerSession,
-		ListSessions:                listSessions,
-		DecideSession:               decideSession,
-		DebitSession:                debitSession,
-		ResetOnBudget:               resetOnBudgetHook(*sf.resetOnBudget, *sf.contextBudgetTokens),
-		DefaultTraceID:              rt.defaultTraceID,
-		StartTime:                   rt.t0,
-		StartupPhases:               rt.startupPhases,
-		CtxViewBudget:               *sf.ctxViewBudget,
-		CompactHistoryBudget:        *sf.compactHistoryBudget,
-		CompactAnchorHead:           *sf.compactAnchorHead,
-		AssumeSessionTurns:          *sf.assumeSessionTurns,
-		ElideResultBytes:            *sf.elideResultBytes,
-		ElideStaleReads:             *sf.elideStaleReads,
+		EngineID:                     *sf.engineID,
+		Model:                        *sf.model,
+		BaseURL:                      *sf.baseURL,
+		ReplicaBaseURLs:              sf.replicaBaseURLs.Values(),
+		Provider:                     *sf.provider,
+		APIKey:                       rt.apiKey,
+		EngineCacheEngine:            *sf.engineCacheEngine,
+		EngineCacheBaseURL:           *sf.engineCacheBaseURL,
+		EngineCacheAdminKey:          rt.engineCacheAdminKey,
+		EngineCacheIdleTimeout:       *sf.engineCacheIdleTimeout,
+		EngineCacheRequireExactSpan:  *sf.engineCacheRequireExactSpan,
+		InKernelModel:                rt.inKernelModel,
+		Tokenizer:                    rt.inKernelTok,
+		InKernelQ4K:                  rt.inKernelQ4K,
+		Backend:                      rt.chatBackend,
+		CPUOffloadExperts:            *sf.cpuOffloadExperts,
+		Metal:                        rt.useMetal,
+		ExpertParallelRanks:          *sf.expertParallel,
+		RequireKey:                   rt.requireKey,
+		VDSO:                         *sf.vdso,
+		Invalidation:                 *sf.invalidation,
+		Version:                      appversion.Current(),
+		ReloadPolicy:                 policyReloader(*sf.policyPath),
+		ResetTrace:                   resetTrace,
+		ObserveTrace:                 observeTrace,
+		ObserveSession:               observeSession,
+		ControlSession:               controlSession,
+		SteerSession:                 steerSession,
+		ListSessions:                 listSessions,
+		DecideSession:                decideSession,
+		DebitSession:                 debitSession,
+		ResetOnBudget:                resetOnBudgetHook(*sf.resetOnBudget, *sf.contextBudgetTokens),
+		DefaultTraceID:               rt.defaultTraceID,
+		StartTime:                    rt.t0,
+		StartupPhases:                rt.startupPhases,
+		CtxViewBudget:                *sf.ctxViewBudget,
+		CompactHistoryBudget:         *sf.compactHistoryBudget,
+		PositiveResidualSubstitution: *sf.positiveResidualSubstitution,
+		CompactAnchorHead:            *sf.compactAnchorHead,
+		AssumeSessionTurns:           *sf.assumeSessionTurns,
+		ElideResultBytes:             *sf.elideResultBytes,
+		ElideStaleReads:              *sf.elideStaleReads,
 		// M2 star-anchor pre-flight gate (#1493): DEFAULT-ON (--vcache-anchor), DECOUPLED
 		// from CompactHistoryBudget so --compact-history-budget=0 no longer takes anchoring
 		// down with it. Applies cachemeta.RecommendLayout on the Anthropic passthrough;

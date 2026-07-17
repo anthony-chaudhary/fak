@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/negframe"
 )
 
 var positiveResidueKey = regexp.MustCompile(`(?i)^([a-z][a-z0-9_.-]{0,63})\s*(?:=|:)\s*(.+)$`)
@@ -48,6 +50,11 @@ func extractPositiveResidue(elems []json.RawMessage) positiveResidueResult {
 		}
 		for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 			line = strings.TrimSpace(strings.TrimLeft(line, "-* "))
+			if residual, ok := negframe.ResolveResidual(line); ok {
+				key := "residual:" + strings.ToLower(line)
+				active[key] = residueAssertion{key: key, value: residual.Positive}
+				continue
+			}
 			lower := strings.ToLower(line)
 			switch {
 			case strings.HasPrefix(lower, "fact:"), strings.HasPrefix(lower, "state:"):
@@ -84,9 +91,13 @@ func extractPositiveResidue(elems []json.RawMessage) positiveResidueResult {
 		if i > 0 {
 			out.WriteString("; ")
 		}
-		out.WriteString(key)
-		out.WriteByte('=')
-		out.WriteString(active[key].value)
+		if strings.HasPrefix(key, "residual:") {
+			out.WriteString(active[key].value)
+		} else {
+			out.WriteString(key)
+			out.WriteByte('=')
+			out.WriteString(active[key].value)
+		}
 	}
 	result.Text = out.String()
 	result.AssertionsKept = len(keys)

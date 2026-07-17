@@ -530,6 +530,9 @@ type Config struct {
 	// other wire. Sibling of CtxViewBudget: compaction drops a contiguous suffix of old
 	// turns, ctxview stubs the planner's non-contiguous resident-set misses (#927).
 	CompactHistoryBudget int
+	// PositiveResidualSubstitution enables conservative positive-state extraction for the
+	// history span compaction drops. It is default-off; original bytes remain restorable.
+	PositiveResidualSubstitution bool
 	// AutoCheckpoint is a best-effort risky-boundary callback. It runs asynchronously
 	// when context step advice reaches checkpoint/rebuild; gateway service never waits.
 	AutoCheckpoint func(session, reason string)
@@ -1457,7 +1460,9 @@ type Server struct {
 	// budget while preserving the cached-prefix bytes (agent.CompactAnthropicHistory). 0
 	// (the default) leaves the body byte-for-byte unchanged.
 	compactHistoryBudget int
-	autoCheckpoint       func(session, reason string)
+	// positiveResidualSubstitution mirrors the default-off config gate.
+	positiveResidualSubstitution bool
+	autoCheckpoint               func(session, reason string)
 
 	// compactAnchorHead mirrors Config.CompactAnchorHead: false (the default) keeps the
 	// warm-cache-safe agent.CompactAnchorFirstBP anchor; true re-anchors compaction on
@@ -1766,65 +1771,66 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		k:                          k,
-		engineID:                   engineID,
-		model:                      model,
-		requireKey:                 cfg.RequireKey,
-		exposeUpstreamErrorDetail:  cfg.ExposeUpstreamErrorDetail,
-		upstreamBadRequestNotify:   cfg.UpstreamBadRequestNotify,
-		version:                    version,
-		logf:                       logf,
-		debugStatsf:                cfg.DebugStatsf,
-		reloadPolicy:               cfg.ReloadPolicy,
-		resetTrace:                 cfg.ResetTrace,
-		observeTrace:               cfg.ObserveTrace,
-		observeSession:             cfg.ObserveSession,
-		controlSession:             cfg.ControlSession,
-		steerSession:               cfg.SteerSession,
-		listSessions:               cfg.ListSessions,
-		decideSession:              cfg.DecideSession,
-		stopGate:                   cfg.StopGate,
-		debitSession:               cfg.DebitSession,
-		resetOnBudget:              cfg.ResetOnBudget,
-		budgetDrained:              cfg.OnBudgetExhausted,
-		defaultTraceID:             strings.TrimSpace(cfg.DefaultTraceID),
-		guardRecoveryPrompt:        strings.TrimSpace(cfg.GuardRecoveryPrompt),
-		startup:                    startup,
-		planner:                    planner,
-		inKernelModelButChatIsMock: inKernelModelButChatIsMock,
-		engineCache:                remoteCache,
-		admissionCtl:               admissionCtl,
-		ctxView:                    ctxView,
-		compactHistoryBudget:       cfg.CompactHistoryBudget,
-		autoCheckpoint:             cfg.AutoCheckpoint,
-		ctxExpenseWarn:             ctxExpenseThresholdOr(cfg.CtxExpenseWarnTokens, ctxExpenseWarnTokensDefault),
-		ctxExpenseBlock:            ctxExpenseThresholdOr(cfg.CtxExpenseBlockTokens, ctxExpenseBlockTokensDefault),
-		ctxExpenseGate:             cfg.CtxExpenseGate || envEnabled("FAK_CTX_EXPENSE_GATE"),
-		compactAnchorHead:          cfg.CompactAnchorHead,
-		assumeSessionTurns:         cfg.AssumeSessionTurns,
-		exposeProfile:              cfg.ExposeProfile,
-		elideResultBytes:           ablateUncachedTrimBytes(cfg.ElideResultBytes),
-		elideStaleReads:            cfg.ElideStaleReads,
-		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
-		prefixGuard:                cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
-		vcacheAnchor:               cfg.VCacheAnchor || envEnabled("FAK_ABLATE_BP_PLAN"),
-		toolFloorDenies:            cfg.ToolFloorDenies,
-		exposeAllow:                exposeAllow,
-		deferMCPTools:              cfg.DeferMCPTools || envEnabled("FAK_DEFER_MCP_TOOLS"),
-		deferColdTools:             cfg.DeferColdTools || envEnabled("FAK_DEFER_COLD_TOOLS"),
-		cacheStream:                cacheStream,
-		rungObs:                    rungObs,
-		feed:                       newCoherenceFeed(0),
-		sessionFeed:                newSessionFeed(0),
-		activity:                   newSessionActivity(),
-		toolPages:                  ctxmmu.NewToolPageTable(nil), // nil ⇒ the process-global MMU pager (#2440)
-		metrics:                    newGatewayMetrics(time.Now()),
-		route:                      newRouteLive(cfg.RouteManifest),
-		roster:                     cfg.RouteAccounts,
-		native:                     cfg.Native,
-		nativeMaxTurns:             nativeMaxTurnsOr(cfg.NativeMaxTurns),
-		vdsoProxyFill:              cfg.VDSOProxyFill,
-		maxAgeByTool:               cfg.ToolMaxAge,
+		k:                            k,
+		engineID:                     engineID,
+		model:                        model,
+		requireKey:                   cfg.RequireKey,
+		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail,
+		upstreamBadRequestNotify:     cfg.UpstreamBadRequestNotify,
+		version:                      version,
+		logf:                         logf,
+		debugStatsf:                  cfg.DebugStatsf,
+		reloadPolicy:                 cfg.ReloadPolicy,
+		resetTrace:                   cfg.ResetTrace,
+		observeTrace:                 cfg.ObserveTrace,
+		observeSession:               cfg.ObserveSession,
+		controlSession:               cfg.ControlSession,
+		steerSession:                 cfg.SteerSession,
+		listSessions:                 cfg.ListSessions,
+		decideSession:                cfg.DecideSession,
+		stopGate:                     cfg.StopGate,
+		debitSession:                 cfg.DebitSession,
+		resetOnBudget:                cfg.ResetOnBudget,
+		budgetDrained:                cfg.OnBudgetExhausted,
+		defaultTraceID:               strings.TrimSpace(cfg.DefaultTraceID),
+		guardRecoveryPrompt:          strings.TrimSpace(cfg.GuardRecoveryPrompt),
+		startup:                      startup,
+		planner:                      planner,
+		inKernelModelButChatIsMock:   inKernelModelButChatIsMock,
+		engineCache:                  remoteCache,
+		admissionCtl:                 admissionCtl,
+		ctxView:                      ctxView,
+		compactHistoryBudget:         cfg.CompactHistoryBudget,
+		positiveResidualSubstitution: cfg.PositiveResidualSubstitution,
+		autoCheckpoint:               cfg.AutoCheckpoint,
+		ctxExpenseWarn:               ctxExpenseThresholdOr(cfg.CtxExpenseWarnTokens, ctxExpenseWarnTokensDefault),
+		ctxExpenseBlock:              ctxExpenseThresholdOr(cfg.CtxExpenseBlockTokens, ctxExpenseBlockTokensDefault),
+		ctxExpenseGate:               cfg.CtxExpenseGate || envEnabled("FAK_CTX_EXPENSE_GATE"),
+		compactAnchorHead:            cfg.CompactAnchorHead,
+		assumeSessionTurns:           cfg.AssumeSessionTurns,
+		exposeProfile:                cfg.ExposeProfile,
+		elideResultBytes:             ablateUncachedTrimBytes(cfg.ElideResultBytes),
+		elideStaleReads:              cfg.ElideStaleReads,
+		cacheTTL1H:                   cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
+		prefixGuard:                  cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
+		vcacheAnchor:                 cfg.VCacheAnchor || envEnabled("FAK_ABLATE_BP_PLAN"),
+		toolFloorDenies:              cfg.ToolFloorDenies,
+		exposeAllow:                  exposeAllow,
+		deferMCPTools:                cfg.DeferMCPTools || envEnabled("FAK_DEFER_MCP_TOOLS"),
+		deferColdTools:               cfg.DeferColdTools || envEnabled("FAK_DEFER_COLD_TOOLS"),
+		cacheStream:                  cacheStream,
+		rungObs:                      rungObs,
+		feed:                         newCoherenceFeed(0),
+		sessionFeed:                  newSessionFeed(0),
+		activity:                     newSessionActivity(),
+		toolPages:                    ctxmmu.NewToolPageTable(nil), // nil ⇒ the process-global MMU pager (#2440)
+		metrics:                      newGatewayMetrics(time.Now()),
+		route:                        newRouteLive(cfg.RouteManifest),
+		roster:                       cfg.RouteAccounts,
+		native:                       cfg.Native,
+		nativeMaxTurns:               nativeMaxTurnsOr(cfg.NativeMaxTurns),
+		vdsoProxyFill:                cfg.VDSOProxyFill,
+		maxAgeByTool:                 cfg.ToolMaxAge,
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}

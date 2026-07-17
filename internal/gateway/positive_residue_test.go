@@ -70,3 +70,104 @@ func positiveResidueGatewayFixture(t *testing.T) []byte {
 	}
 	return body
 }
+func TestPositiveResidualSubstitutionConfigGate(t *testing.T) {
+	off := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model"})
+	if off.positiveResidualSubstitution {
+		t.Fatal("positive residual substitution must default off")
+	}
+	on := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", PositiveResidualSubstitution: true})
+	if !on.positiveResidualSubstitution {
+		t.Fatal("explicit positive residual substitution config did not reach server")
+	}
+}
+
+func TestPositiveResidualSubstitutionRestore(t *testing.T) {
+	body := positiveResidualGatewayFixture(t)
+	decode := func() *agent.AnthropicMessagesRequest {
+		req, err := agent.DecodeAnthropicMessagesRequest(body)
+		if err != nil {
+			t.Fatalf("decode fixture: %v", err)
+		}
+		return req
+	}
+
+	// The production gateway gate is explicit and default-off: even when compaction fires,
+	// disabled mode neither substitutes the negated span nor creates a residual restore entry.
+	off := anthropicPassthroughServer(700)
+	off.compactAnchorHead = true
+	reqOff := decode()
+	if fired, reason := off.compactAnthropicRawWithReason(reqOff, 100, "positive-residual-off"); !fired || reason != agent.CompactReasonNone {
+		t.Fatalf("default-off compaction fired=%v reason=%q", fired, reason)
+	}
+	if strings.Contains(string(reqOff.Raw), "positive residual state") || strings.Contains(string(reqOff.Raw), "remember to push after the commit.") {
+		t.Fatalf("default-off path must not substitute residual: %s", reqOff.Raw)
+	}
+	off.ctxRestoreMu.Lock()
+	offEntries := len(off.ctxRestore["positive-residual-off"].entries)
+	off.ctxRestoreMu.Unlock()
+	if offEntries != 1 { // the ordinary originating-task tombstone only
+		t.Fatalf("default-off path stashed %d entries, want only the originating task", offEntries)
+	}
+
+	on := anthropicPassthroughServer(700)
+	on.compactAnchorHead = true
+	on.positiveResidualSubstitution = true
+	const trace = "positive-residual-substitution"
+	reqOn := decode()
+	if fired, reason := on.compactAnthropicRawWithReason(reqOn, 100, trace); !fired || reason != agent.CompactReasonNone {
+		t.Fatalf("enabled compaction fired=%v reason=%q", fired, reason)
+	}
+	if strings.Contains(string(reqOn.Raw), "Do not forget") || !strings.Contains(string(reqOn.Raw), "remember to push after the commit.") {
+		t.Fatalf("negated span survived production compaction: %s", reqOn.Raw)
+	}
+
+	on.ctxRestoreMu.Lock()
+	stash := on.ctxRestore[trace]
+	var residualID string
+	if stash != nil {
+		for _, entry := range stash.entries {
+			if entry.excerpt == "remember to push after the commit." {
+				residualID = entry.id
+				break
+			}
+		}
+	}
+	on.ctxRestoreMu.Unlock()
+	if residualID == "" {
+		t.Fatal("production gateway did not stash the positive-residual source bytes")
+	}
+	got, err := on.restoreContext("", ContextRestoreRequest{ID: residualID, TraceID: trace})
+	if err != nil {
+		t.Fatalf("restore original span: %v", err)
+	}
+	if !strings.Contains(got.Bytes, "Do not forget to push after the commit.") {
+		t.Fatalf("ctxrestore did not recover original bytes: %q", got.Bytes)
+	}
+}
+
+func positiveResidualGatewayFixture(t *testing.T) []byte {
+	t.Helper()
+	type block map[string]any
+	states := []string{"complete the originating task", "Do not forget to push after the commit."}
+	messages := make([]map[string]any, 0, 18)
+	for i := 0; i < 18; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		text := strings.Repeat("droppable filler ", 20)
+		if i < len(states) {
+			text = states[i]
+		}
+		messages = append(messages, map[string]any{"role": role, "content": []block{{"type": "text", "text": text}}})
+	}
+	body, err := json.Marshal(map[string]any{
+		"model": "test", "max_tokens": 512,
+		"system":   []block{{"type": "text", "text": "shared policy", "cache_control": map[string]any{"type": "ephemeral"}}},
+		"messages": messages,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
