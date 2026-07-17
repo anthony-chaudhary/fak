@@ -200,7 +200,7 @@ const wholeTreeDiscardLaw = "whole-tree-discard refused: `git checkout .` / `git
 // trunk guard refuses off-trunk commits after the fact; this catches the branch open
 // at the call boundary. Switching to an EXISTING branch needs repo state (is the
 // target development branch?) and stays deferred — only the unconditional CREATE forms fire here.
-const offTrunkBranchLaw = "off-trunk refused: `git checkout -b` / `git switch -c` / `git worktree add` opens a feature branch or worktree — work directly on the configured development branch; never branch or spin a worktree in this repo (AGENTS.md OFF_TRUNK)."
+const offTrunkBranchLaw = "off-trunk refused: `git checkout -b` / `git switch -c` / raw `git worktree add` opens an unmanaged branch or worktree. Work directly on the configured development branch. For an explicitly requested detached worker, use the collision-safe sanctioned route instead: `fak worktree worker prepare --id <worker-id> --scope <path>`, then `fak worktree worker land --id <worker-id>` and `fak worktree worker reap --id <worker-id>` (AGENTS.md OFF_TRUNK)."
 
 // historyRewriteLaw fires on a whole-history rewrite subcommand (`git filter-branch`,
 // `git filter-repo`). These rewrite every commit on the shared trunk — the same class

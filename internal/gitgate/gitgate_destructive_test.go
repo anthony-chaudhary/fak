@@ -11,6 +11,24 @@ import (
 // `worktree add`. The defer rows carry the weight — they prove the rung does NOT
 // false-positive on the SAFE neighbors (a soft reset, a clean dry-run, a
 // specific-path revert, a switch/checkout to an existing branch, a worktree list).
+func TestOffTrunkRefusalNamesSanctionedDetachedWorkerRecovery(t *testing.T) {
+	got, ok := New().Classify(`git worktree add ..\worker`)
+	if !ok {
+		t.Fatal("raw git worktree add must remain refused")
+	}
+	for _, want := range []string{
+		"fak worktree worker prepare --id <worker-id> --scope <path>",
+		"fak worktree worker land --id <worker-id>",
+		"fak worktree worker reap --id <worker-id>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("refusal must preserve the goal with sanctioned recovery %q; got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "never branch or spin a worktree") {
+		t.Fatalf("stale terminal recovery contradicts the sanctioned detached-worker route: %q", got)
+	}
+}
 func TestClassifyDestructiveAndOffTrunk(t *testing.T) {
 	g := New()
 	cases := []struct {
