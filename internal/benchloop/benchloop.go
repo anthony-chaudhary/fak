@@ -36,6 +36,7 @@ type Parts struct {
 	Tasks       []nightrun.Task
 	TaskErr     error
 	Authority   nightrun.LedgerGapReport
+	Cross       CrossCommit // #5088 cross-commit reuse evidence hooks; zero value = commit-exact rule only
 }
 
 type Report struct {
@@ -169,6 +170,7 @@ func Load(opts Options) Report {
 		Tasks:       tasks,
 		TaskErr:     taskErr,
 		Authority:   nightrun.CompareWithAuthority(ledger, root),
+		Cross:       DefaultCrossCommit(root),
 	})
 }
 
@@ -205,7 +207,9 @@ func StatusFromParts(p Parts) Report {
 }
 
 // evalReuse decides whether the next local benchmark run is redundant because a prior
-// catalog run already covers this box at the current commit (#4600). It is a no-op
+// catalog run already covers this box at the current commit (#4600) — or, when the
+// #5088 cross-commit hooks are wired, at an earlier commit whose window to HEAD
+// touched no bench code/harness/model/config (benchcli.DetectInvalidation). It is a no-op
 // (no reuse) unless there is a concrete next auto-runnable local datum to skip, a
 // current commit lineage, and a known machine — and it honors the NoReuseEnv
 // force-rerun escape hatch. Machine/model/precision beyond (commit × box) are left as
@@ -226,7 +230,7 @@ func evalReuse(p Parts, r Report) ReuseVerdict {
 	if strings.TrimSpace(p.Caps.Box) == "" {
 		return ReuseVerdict{Reason: "unknown machine; cannot confirm lineage reuse"}
 	}
-	return LineageReuse(p.Catalog.Runs, LineageKey{Commit: p.Commit, Machine: p.Caps.Box})
+	return LineageReuseAcross(p.Catalog.Runs, LineageKey{Commit: p.Commit, Machine: p.Caps.Box}, p.Cross)
 }
 
 func Walk() []Surface {
