@@ -1166,6 +1166,13 @@ func guardInfoManagedCacheText(v guardInfoVars) string {
 	if !mc.Active {
 		return "managed cache off"
 	}
+	// Wire-aware: the OpenAI Responses (codex) wire has no 1h-TTL lever, so a zero-upgrade
+	// ACTIVE session is NOT inert — fak's lever there is the pinned prompt_cache_key. Name that
+	// lever instead of the Anthropic "ACTIVE but inert (0 upgrades)" false posture, mirroring
+	// bannerLine's `provider == "openai-responses"` branch. Empty wire keeps Anthropic behavior.
+	if mc.WireHasNo1hTTLLever() {
+		return "managed cache ACTIVE (OpenAI Responses wire: no 1h-TTL lever; stable prompt_cache_key pinned)"
+	}
 	if mc.Inert {
 		if reason := topTTLUpgradeReason(mc.Reasons); reason != "" {
 			return fmt.Sprintf("managed cache ACTIVE but inert (0 upgrades, mostly %s)", reason)

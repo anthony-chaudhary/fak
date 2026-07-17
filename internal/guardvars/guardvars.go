@@ -64,7 +64,27 @@ type CacheAttributionVars struct {
 	FakCompactionCacheReadTokens uint64 `json:"fak_compaction_cache_read_tokens,omitempty"`
 	FakKVPrefixReusedTokens      uint64 `json:"fak_kv_prefix_reused_tokens"`
 	FakVDSOAvoidedCalls          uint64 `json:"fak_vdso_avoided_calls"` // avoided engine calls, NOT a token-equiv
+	// FakDeferCold* surface the cold-tool-DEFER shed (#3647/#3232, the --defer-cold-tools lever) —
+	// a THIRD shed mechanism distinct from the compaction shed above. FakDeferColdTurns/Count witness
+	// how many turns fak deferred the cold tool tail and how many custom defs it marked defer_loading;
+	// FakDeferColdToolNames names WHICH tools were deferred. Unlike the token-equiv fields above this
+	// is NOT priced in tokens — defer shrinks no request bytes; the reduction is provider-side (only
+	// the hot core loads into context) and OBSERVED in the usage relay — so the `fak info` Cache tab
+	// renders it as its own informational line, never a token-savings bar. Absent when the lever is off.
+	FakDeferColdTurns     uint64   `json:"fak_defer_cold_turns,omitempty"`
+	FakDeferColdCount     uint64   `json:"fak_defer_cold_count,omitempty"`
+	FakDeferColdToolNames []string `json:"fak_defer_cold_tool_names,omitempty"`
 }
+
+// WireOpenAIResponses is the resolved-upstream provider string for the OpenAI Responses
+// (codex) wire (gateway.Config.Provider / guardManagedCachePosture.provider). That wire has
+// no cache_control grammar and thus no 1h-TTL upgrade lever: the provider prefix cache is
+// automatic and fak's managed-cache lever is the stable prompt_cache_key the outbound adapter
+// pins. So on this wire an ACTIVE managed-cache posture with zero 1h upgrades is EXPECTED, not
+// the #2190 ACTIVE-but-inert misconfiguration — the posture surfaces (Inert / "ACTIVE but
+// inert" / POSTURE_MISMATCH) key on this string to stay wire-aware, mirroring
+// guardManagedCachePosture.bannerLine's `provider == "openai-responses"` branch.
+const WireOpenAIResponses = "openai-responses"
 
 // ManagedCacheVars is the /debug/vars managed-cache 1h TTL-upgrade POSTURE (#2190). Active is the
 // resolved lever state independent of whether any head was eligible; Inert names the
@@ -72,9 +92,25 @@ type CacheAttributionVars struct {
 // session pays the 5m re-write the operator opted out of). Upgraded and Reasons mirror the
 // AdjudicationSummary ttl-upgrade fields the durable ledger and the /metrics counter carry.
 // Reasons is refusal-only (the "upgraded" outcome lives in Upgraded).
+//
+// Wire is the resolved upstream provider (gateway.Config.Provider) the posture was formed on.
+// The 1h-TTL upgrade lever Inert keys on is Anthropic-only; on the OpenAI Responses wire
+// (WireOpenAIResponses) the real lever is the pinned prompt_cache_key, so a zero-upgrade ACTIVE
+// session there is NOT inert. Empty (the historical default) preserves the Anthropic reading so
+// existing callers and captured fixtures are unaffected. omitempty keeps the block byte-stable on
+// the Anthropic wire.
 type ManagedCacheVars struct {
 	Active   bool              `json:"active"`
 	Inert    bool              `json:"inert"`
 	Upgraded uint64            `json:"upgraded"`
 	Reasons  map[string]uint64 `json:"reasons,omitempty"`
+	Wire     string            `json:"wire,omitempty"`
+}
+
+// WireHasNo1hTTLLever reports whether the resolved wire lacks the Anthropic 1h-TTL upgrade
+// lever — true only on the OpenAI Responses (codex) wire, where the managed-cache lever is the
+// pinned prompt_cache_key and a zero 1h-upgrade count is expected rather than inert. Empty wire
+// (the historical default) returns false, preserving Anthropic-wire behavior.
+func (m ManagedCacheVars) WireHasNo1hTTLLever() bool {
+	return m.Wire == WireOpenAIResponses
 }

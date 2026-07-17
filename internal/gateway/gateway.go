@@ -380,6 +380,13 @@ type Config struct {
 	// RequireKey, if non-empty, is the bearer token the gateway REQUIRES on every
 	// request (except /healthz). Empty => no auth (drop-in compatible, loopback).
 	RequireKey string
+	// ReadBearer, if non-empty, is an ADDITIONAL bearer accepted ONLY on the read-only
+	// observability endpoints (/healthz, /debug/vars, /metrics) as an alternative to
+	// the loopback exemption / RequireKey (#3461). It never authorizes any other
+	// route — a mutating call presenting it still 401s under RequireKey. `fak guard`
+	// publishes it in the guard-session index so a second process can read this
+	// session's status with no prior port (or key) knowledge.
+	ReadBearer string
 	// ExposeUpstreamErrorDetail, when true, lets the proxy fold a SCRUBBED, bounded
 	// snapshot of the upstream provider's own 400 error body into the client-facing
 	// message (see upstreamErrorStatus / plannerErrorStatus). It exists ONLY for the
@@ -1102,6 +1109,9 @@ type Server struct {
 	engineID   string
 	model      string
 	requireKey string
+	// readBearer is the read-scoped observability bearer (Config.ReadBearer): accepted
+	// ONLY on /healthz, /debug/vars, /metrics, never on a mutating route.
+	readBearer string
 	// exposeUpstreamErrorDetail folds a scrubbed, bounded snapshot of the upstream's
 	// own 400 body into the client-facing message. TRUE only on the trusted local
 	// path (fak guard, loopback-bound); FALSE (the default) keeps the no-leak
@@ -1496,6 +1506,14 @@ type Server struct {
 	// passthrough upgrades stable-head cache_control breakpoints to ttl:"1h" before forwarding.
 	cacheTTL1H bool
 
+	// provider mirrors Config.Provider — the resolved upstream wire ("anthropic",
+	// "openai-responses", ...). The managed-cache posture surfaces read it to stay wire-aware:
+	// the 1h-TTL upgrade lever cacheTTL1H drives is Anthropic-only, so on the OpenAI Responses
+	// (codex) wire an ACTIVE session with zero upgrades is expected (the real lever is the pinned
+	// prompt_cache_key), NOT the #2190 ACTIVE-but-inert misconfiguration. Empty preserves the
+	// historical Anthropic reading.
+	provider string
+
 	// prefixGuard mirrors Config.PrefixGuard or FAK_ABLATE_PREFIX_GUARD (#2182): when true,
 	// each served passthrough turn folds the inbound protected-prefix digest into the
 	// fak_prefix_guard_* determinism witness (observePrefixGuard). Lossless — wire bytes
@@ -1775,6 +1793,7 @@ func New(cfg Config) (*Server, error) {
 		engineID:                     engineID,
 		model:                        model,
 		requireKey:                   cfg.RequireKey,
+		readBearer:                   cfg.ReadBearer,
 		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail,
 		upstreamBadRequestNotify:     cfg.UpstreamBadRequestNotify,
 		version:                      version,
@@ -1812,6 +1831,7 @@ func New(cfg Config) (*Server, error) {
 		elideResultBytes:             ablateUncachedTrimBytes(cfg.ElideResultBytes),
 		elideStaleReads:              cfg.ElideStaleReads,
 		cacheTTL1H:                   cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
+		provider:                     strings.TrimSpace(cfg.Provider),
 		prefixGuard:                  cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
 		vcacheAnchor:                 cfg.VCacheAnchor || envEnabled("FAK_ABLATE_BP_PLAN"),
 		toolFloorDenies:              cfg.ToolFloorDenies,

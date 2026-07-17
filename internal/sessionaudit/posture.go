@@ -62,7 +62,21 @@ type ManagedCacheClaim struct {
 	Inert    bool              `json:"inert"`
 	Upgraded uint64            `json:"upgraded"`
 	Reasons  map[string]uint64 `json:"reasons,omitempty"`
+	// Wire is the resolved upstream provider the posture was formed on (mirrors
+	// guardvars.ManagedCacheVars.Wire). The reconciliation is wire-aware: the 1h-TTL upgrade the
+	// verdict turns on is Anthropic-only, so on the OpenAI Responses (codex) wire
+	// (wireOpenAIResponses) an ACTIVE claim with zero upgrades is EXPECTED — fak's managed-cache
+	// lever there is the pinned prompt_cache_key, and the 1h counter can never move — NOT a
+	// POSTURE_MISMATCH. Empty (the historical default, and an older captured /debug/vars block)
+	// preserves the Anthropic reading.
+	Wire string `json:"wire,omitempty"`
 }
+
+// wireOpenAIResponses is the resolved-upstream provider string for the OpenAI Responses (codex)
+// wire — the one wire with no Anthropic 1h-TTL upgrade lever, so an ACTIVE managed-cache posture
+// with zero 1h upgrades is expected there rather than a mismatch. Kept as a local literal so this
+// package stays stdlib-only (it mirrors guardvars.WireOpenAIResponses by value).
+const wireOpenAIResponses = "openai-responses"
 
 // ManagedCacheLedger mirrors the gateway usage-ledger 1h TTL-upgrade counters
 // (gatewayusageledger.Counters.CacheTTLUpgrades*): the INDEPENDENT, durable wire witness of
@@ -128,7 +142,15 @@ func ReconcileManagedCachePosture(claim ManagedCacheClaim, ledger ManagedCacheLe
 		WireUpgraded:    wireUpgraded,
 		RefusalReasons:  unionReasonKeys(claim.Reasons, ledger.Reasons),
 	}
+	// noTTLLever: the resolved wire has no Anthropic 1h-TTL upgrade lever (the OpenAI Responses
+	// wire), so a zero-upgrade ACTIVE claim there is EXPECTED — fak's lever is the pinned
+	// prompt_cache_key and the 1h counter can never move — not a mismatch. Mirrors bannerLine's
+	// `provider == "openai-responses"` branch. Empty wire keeps the Anthropic reading.
+	noTTLLever := claim.Wire == wireOpenAIResponses
 	switch {
+	case claim.Active && !wireUpgraded && noTTLLever:
+		audit.Verdict = PostureOK
+		audit.Finding = "POSTURE_OK — the banner claimed ACTIVE on the OpenAI Responses wire, which has no 1h TTL lever; fak's managed-cache lever here is the pinned prompt_cache_key, so a zero 1h-upgrade count is expected, not a mismatch"
 	case claim.Active && !wireUpgraded:
 		audit.Verdict = PostureMismatch
 		why := "no 1h TTL upgrade attempt was recorded"

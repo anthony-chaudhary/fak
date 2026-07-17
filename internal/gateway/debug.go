@@ -469,7 +469,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		Upstream:         upstream,
 		VCache:           vcacheVarsFromSnapshot(infer),
 		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
-		ManagedCache:     managedCacheVars(s.cacheTTL1H, m.adjudicationSummary()),
+		ManagedCache:     managedCacheVars(s.cacheTTL1H, s.provider, m.adjudicationSummary()),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
 		VCacheGovernor:   m.vcacheGovernorDecisionRecords(),
 		VCacheGovQuality: m.vcacheGovernorQualityVars(),
@@ -798,7 +798,12 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 		ms.FakVDSOAvoidedCalls += uint64(vdsoHits)
 	}
 	ms.FakVDSOAvoidedCalls += servedInline
-	if !ms.HasAnyTokenActivity() && ms.FakVDSOAvoidedCalls == 0 {
+	// The cold-tool-DEFER shed (#3647) is a THIRD mechanism that, unlike the two token-equiv
+	// sheds, shrinks NO request bytes — its reduction is provider-side (only the hot core loads
+	// into context), so it never lands in ms.HasAnyTokenActivity(). Fold it into the same gate
+	// so a defer-ON session with no token slice still renders the block rather than reading as
+	// a quiet cold session.
+	if !ms.HasAnyTokenActivity() && ms.FakVDSOAvoidedCalls == 0 && sum.DeferColdCount == 0 {
 		return nil
 	}
 	return &debugCacheAttributionVars{
@@ -811,6 +816,9 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 		FakCompactionCacheReadTokens:              ms.FakCompactionCacheReadTokens,
 		FakKVPrefixReusedTokens:                   ms.FakKVPrefixReusedTokens,
 		FakVDSOAvoidedCalls:                       ms.FakVDSOAvoidedCalls,
+		FakDeferColdTurns:                         sum.DeferColdTurns,
+		FakDeferColdCount:                         sum.DeferColdCount,
+		FakDeferColdToolNames:                     sum.DeferColdToolNames,
 	}
 }
 
@@ -830,22 +838,30 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 type debugManagedCacheVars = guardvars.ManagedCacheVars
 
 // managedCacheVars builds the /debug/vars managed-cache posture block from the session's
-// resolved lever state (active) and the SAME AdjudicationSummary ttl-upgrade fields the
-// ledger row folds. It returns nil — omitting the block — only when the lever is OFF and
-// nothing was observed, so a passive, cold session stays quiet; an ACTIVE session renders
-// even at zero upgrades (Inert=true), keeping "the lever fired and paid" distinct from "the
-// lever is off" on the live surface. Reasons is refusal-only (the "upgraded" outcome lives
-// in Upgraded), inherited from AdjudicationSummary.
-func managedCacheVars(active bool, sum AdjudicationSummary) *debugManagedCacheVars {
+// resolved lever state (active), the resolved upstream wire (provider), and the SAME
+// AdjudicationSummary ttl-upgrade fields the ledger row folds. It returns nil — omitting the
+// block — only when the lever is OFF and nothing was observed, so a passive, cold session stays
+// quiet; an ACTIVE session renders even at zero upgrades, keeping "the lever fired and paid"
+// distinct from "the lever is off" on the live surface. Reasons is refusal-only (the "upgraded"
+// outcome lives in Upgraded), inherited from AdjudicationSummary.
+//
+// Inert is WIRE-AWARE: it names the #2190 ACTIVE-but-inert misconfiguration only on a wire that
+// HAS the Anthropic 1h-TTL lever. On the OpenAI Responses (codex) wire that lever can never move
+// (fak's real lever there is the pinned prompt_cache_key), so an ACTIVE zero-upgrade session is
+// NOT inert — mirroring bannerLine's `provider == "openai-responses"` branch. Wire carries the
+// resolved provider so the `fak info` and sessionaudit consumers stay wire-aware too.
+func managedCacheVars(active bool, provider string, sum AdjudicationSummary) *debugManagedCacheVars {
 	if !active && sum.CacheTTLUpgraded == 0 && len(sum.CacheTTLUpgradeReasons) == 0 {
 		return nil
 	}
-	return &debugManagedCacheVars{
+	block := &debugManagedCacheVars{
 		Active:   active,
-		Inert:    active && sum.CacheTTLUpgraded == 0,
 		Upgraded: sum.CacheTTLUpgraded,
 		Reasons:  sum.CacheTTLUpgradeReasons,
+		Wire:     provider,
 	}
+	block.Inert = active && sum.CacheTTLUpgraded == 0 && !block.WireHasNo1hTTLLever()
+	return block
 }
 
 func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {

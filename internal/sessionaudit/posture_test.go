@@ -68,6 +68,16 @@ func TestReconcileManagedCachePosture(t *testing.T) {
 			wantVerdict: PostureMismatch,
 			wantWire:    true,
 		},
+		{
+			// #5188: the OpenAI Responses (codex) wire has no 1h-TTL lever, so an ACTIVE claim with
+			// zero upgrades is EXPECTED there (fak's lever is the pinned prompt_cache_key) -> OK, NOT
+			// the false POSTURE_MISMATCH the Anthropic-only counter would produce.
+			name:        "openai-responses active, no wire upgrade -> ok (wire-aware)",
+			claim:       ManagedCacheClaim{Active: true, Inert: false, Upgraded: 0, Wire: "openai-responses"},
+			ledger:      ManagedCacheLedger{Upgraded: 0},
+			wantVerdict: PostureOK,
+			wantWire:    false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

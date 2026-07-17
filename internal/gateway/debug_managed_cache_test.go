@@ -8,7 +8,7 @@ import "testing"
 // collapsing it into the same "no block" a passive session emits.
 func TestManagedCacheVars(t *testing.T) {
 	t.Run("active with upgrades reports posture and count", func(t *testing.T) {
-		got := managedCacheVars(true, AdjudicationSummary{
+		got := managedCacheVars(true, "", AdjudicationSummary{
 			CacheTTLUpgraded:       3,
 			CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 2},
 		})
@@ -27,7 +27,7 @@ func TestManagedCacheVars(t *testing.T) {
 	})
 
 	t.Run("active but zero upgrades is a visible inert block", func(t *testing.T) {
-		got := managedCacheVars(true, AdjudicationSummary{
+		got := managedCacheVars(true, "", AdjudicationSummary{
 			CacheTTLUpgradeReasons: map[string]uint64{"no_stable_breakpoint": 5},
 		})
 		if got == nil {
@@ -41,14 +41,33 @@ func TestManagedCacheVars(t *testing.T) {
 		}
 	})
 
+	// #5188: on the OpenAI Responses (codex) wire the 1h-TTL counter can never move — fak's
+	// managed-cache lever there is the pinned prompt_cache_key — so an ACTIVE zero-upgrade
+	// session must render as ACTIVE-not-inert, NOT the Anthropic ACTIVE-but-inert false posture.
+	t.Run("openai-responses active zero upgrades is NOT inert", func(t *testing.T) {
+		got := managedCacheVars(true, "openai-responses", AdjudicationSummary{})
+		if got == nil {
+			t.Fatal("ACTIVE responses session must still emit a visible block")
+		}
+		if !got.Active {
+			t.Fatalf("responses-active: Active=%t, want true", got.Active)
+		}
+		if got.Inert {
+			t.Fatal("responses wire has no 1h-TTL lever: a zero-upgrade ACTIVE session must NOT read as inert")
+		}
+		if got.Wire != "openai-responses" {
+			t.Fatalf("Wire = %q, want the resolved provider to surface for wire-aware consumers", got.Wire)
+		}
+	})
+
 	t.Run("passive cold session stays quiet", func(t *testing.T) {
-		if got := managedCacheVars(false, AdjudicationSummary{}); got != nil {
+		if got := managedCacheVars(false, "", AdjudicationSummary{}); got != nil {
 			t.Fatalf("passive cold session should emit no block, got %+v", got)
 		}
 	})
 
 	t.Run("passive but observed still reports (defensive)", func(t *testing.T) {
-		got := managedCacheVars(false, AdjudicationSummary{CacheTTLUpgraded: 1})
+		got := managedCacheVars(false, "", AdjudicationSummary{CacheTTLUpgraded: 1})
 		if got == nil {
 			t.Fatal("observed activity must not be dropped even when the lever reads off")
 		}

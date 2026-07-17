@@ -33,6 +33,13 @@ func TestGuardInfoManagedCacheText(t *testing.T) {
 			mc:      &guardInfoManagedCache{Active: true, Inert: true},
 			wantSub: []string{"ACTIVE but inert", "0 upgrades"},
 		},
+		{
+			// #5188: on the OpenAI Responses (codex) wire the 1h-TTL counter can never move, so an
+			// ACTIVE zero-upgrade session must name the prompt_cache_key lever, NOT "ACTIVE but inert".
+			name:    "openai-responses active is ACTIVE, not inert",
+			mc:      &guardInfoManagedCache{Active: true, Wire: "openai-responses"},
+			wantSub: []string{"ACTIVE", "prompt_cache_key"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
