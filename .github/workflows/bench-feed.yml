@@ -13,12 +13,10 @@ name: bench-feed
 # `fak bench post` reads experiments/benchmark/catalog.json + tools/bench_baseline.json
 # directly, so there is NO python payload-gen step — just Go.
 #
-# Posting is GATED on TWO things being present (the real post step skips unless BOTH
-# hold), so a fork, a secret-less run, or an unconfigured channel never hard-fails —
-# it runs --dry-run and writes the card to the step summary, showing what WOULD post:
-#   1. the FAK_SCOREBOARD_TOKEN secret (the bench token falls back to it); and
-#   2. the FAK_BENCH_CHANNEL repo variable — the bench channel id has NO built-in
-#      default, so without it the post has nowhere to go.
+# Posting is GATED on the FAK_SCOREBOARD_TOKEN secret, so a fork or a
+# secret-less run never hard-fails — it runs --dry-run and writes the card to
+# the step summary, showing what WOULD post. The channel defaults to the CI/CD
+# reporting sink (C0BGQ411TCJ), same convention as cachevalue-/blockers-feed.yml.
 #
 # This is a SLACK STATUS feeder (cadence -> channel post), the dual of
 # steering-guard.yml — NOT an issue feeder. It does not write issues or push; it only
@@ -27,8 +25,8 @@ name: bench-feed
 # OPERATOR STEPS (one-time, under Settings -> Secrets and variables -> Actions):
 #   1. add the repo SECRET   FAK_SCOREBOARD_TOKEN  — the scoreboard-workspace bot
 #      token (the same value in the gitignored .env.slack.local).
-#   2. add the repo VARIABLE FAK_BENCH_CHANNEL     — the bench channel id (there is
-#      no built-in default; without it the real post is skipped).
+#   2. optionally add the repo VARIABLE FAK_BENCH_CHANNEL — a dedicated bench
+#      channel id — to split the rollup out of the CI/CD sink.
 on:
   schedule:
     # Daily 08:27 UTC — an off-the-hour minute clear of the other scheduled jobs
@@ -97,27 +95,18 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # POST — only when BOTH gates hold: the token secret is present AND the bench
-      # channel variable is set (the channel has no built-in default). A manual
-      # dry_run also skips.
+      # POST — only when the token secret is present. A manual dry_run also
+      # skips. The channel is always non-empty (CI/CD sink fallback), so the
+      # gate is the token alone — the sibling *-feed.yml convention.
       - name: post bench rollup
-        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BENCH_CHANNEL != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
         run: |
           go run ./cmd/fak bench post --rollup ${{ steps.rollup.outputs.rollup }} \
             --source ci
 
       - name: note when posting was skipped
-        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' || env.FAK_BENCH_CHANNEL == '' }}
-        run: |
-          {
-            echo "Posting skipped — ran in dry-run, nothing posted."
-            if [ -z "${{ env.FAK_SCOREBOARD_TOKEN }}" ]; then
-              echo "- FAK_SCOREBOARD_TOKEN secret is not set (add it to enable posting)."
-            fi
-            if [ -z "${{ env.FAK_BENCH_CHANNEL }}" ]; then
-              echo "- FAK_BENCH_CHANNEL repo variable is not set (the bench channel has no built-in default)."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
 
       - name: upload card artifact
         if: always()

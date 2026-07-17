@@ -14,18 +14,18 @@ name: backlog-feed
 # the dispatch loop and post nothing to Slack). It has `contents: read` +
 # `issues: read` only: it posts to Slack, it never opens or edits an issue.
 #
-# Posting is GATED on BOTH the FAK_SCOREBOARD_TOKEN secret AND the
-# FAK_BACKLOG_CHANNEL repo variable being present. Without either (forks,
-# secret-less runs, or before the operator provisions the channel) the job runs
-# in --dry-run and writes the card to the step summary, so it never hard-fails —
-# it just shows what WOULD post. Same convention as steering-guard.yml.
+# Posting is GATED on the FAK_SCOREBOARD_TOKEN secret. Without it (forks,
+# secret-less runs) the job runs in --dry-run and writes the card to the step
+# summary, so it never hard-fails — it just shows what WOULD post. The channel
+# defaults to the CI/CD reporting sink (C0BGQ411TCJ), same convention as
+# cachevalue-/blockers-feed.yml.
 #
-# OPERATOR STEP (one-time, the #1005 blocker): provision a `#backlog` channel in
-# the scoreboard workspace, then add the repo variable FAK_BACKLOG_CHANNEL (its
-# channel id, e.g. C0XXXXXXXXX) under Settings -> Secrets and variables ->
-# Actions -> Variables, and the repo secret FAK_SCOREBOARD_TOKEN (the
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
 # scoreboard-workspace bot token — the same value in the gitignored
-# .env.slack.local) under Secrets. Until both exist the feeder runs dry-run only.
+# .env.slack.local) under Settings -> Secrets and variables -> Actions.
+# To split the digest out of the CI/CD sink into a dedicated `#backlog`
+# channel, provision that channel (#1005) and set the repo variable
+# FAK_BACKLOG_CHANNEL to its channel id (e.g. C0XXXXXXXXX).
 on:
   schedule:
     # Weekly Monday 09:11 UTC — triage is a cadence signal, not a per-commit one.
@@ -128,7 +128,7 @@ jobs:
       - name: render card (dry-run)
         run: |
           go run ./cmd/fak scoreboard post \
-            --channel "${FAK_BACKLOG_CHANNEL:-pending}" \
+            --channel "$FAK_BACKLOG_CHANNEL" \
             --kpi backlog-triage \
             --value "${{ steps.digest.outputs.orphan }}" \
             --grade "${{ steps.grade.outputs.grade }}" \
@@ -143,12 +143,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # POST — only when BOTH the token secret and the channel variable are
-      # present. A manual dry_run also skips. Until the operator provisions
-      # #backlog and sets FAK_BACKLOG_CHANNEL, this step is skipped and the job
-      # stays a clean dry-run.
+      # POST — only when the token secret is present. A manual dry_run also
+      # skips. The channel is always non-empty (CI/CD sink fallback), so the
+      # gate is the token alone — the sibling *-feed.yml convention.
       - name: post to #backlog
-        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BACKLOG_CHANNEL != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
         run: |
           go run ./cmd/fak scoreboard post \
             --channel "$FAK_BACKLOG_CHANNEL" \
@@ -160,13 +159,8 @@ jobs:
             --source ci
 
       - name: note when posting was skipped
-        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' || env.FAK_BACKLOG_CHANNEL == '' }}
-        run: |
-          if [ -z "$FAK_BACKLOG_CHANNEL" ]; then
-            echo "FAK_BACKLOG_CHANNEL not set — provision the #backlog channel and add its id as a repo variable (the #1005 blocker). Ran in dry-run; nothing posted." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
-          fi
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
 
       - name: upload card artifact
         if: always()
