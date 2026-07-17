@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -578,8 +579,21 @@ func (k *Kernel) routeFor(c *abi.ToolCall) string {
 // "no telemetry from that tap". The isolation is not silent: each recovered panic is
 // counted and its offender recorded (see [ObserverPanics] / [LastObserverPanic]),
 // because trading a crash for a mystery is not a fix.
+//
+// The fan-out is also SELF-HEALING (#5091): an observer that keeps panicking is
+// DISARMED after [ObserverDisarmThreshold] recovered panics and never re-entered,
+// so a reliably-broken tap stops taxing every subsequent syscall with a recover +
+// record-store forever. The disarm is kernel-local — the abi registry snapshot is
+// never mutated, so its lock-free read stays uncontended — and it is witnessed
+// (see [DisarmedObservers]): a silently-dropped observer would be its own mystery.
+// Until the first disarm ever happens the skip check is a single atomic bool load,
+// so the happy path stays allocation-free (TestEmitFanoutHappyPathZeroAlloc).
 func emit(ev abi.Event) {
+	skipDisarmed := observerDisarmedAny.Load()
 	for _, e := range abi.EmittersFor(ev.Kind) {
+		if skipDisarmed && observerIsDisarmed(e) {
+			continue
+		}
 		emitOne(e, ev)
 	}
 }
@@ -623,6 +637,115 @@ func recordObserverPanic(e abi.Emitter, kind abi.EventKind, r any) {
 		Kind:     kind,
 		Value:    fmt.Sprint(r),
 	})
+	trackObserverPanicForDisarm(e, kind)
+}
+
+// ObserverDisarmThreshold is how many recovered panics one observer may cost before
+// the fan-out disarms it (#5091). The count is CUMULATIVE per observer, not
+// consecutive: resetting a streak on success would require touching per-observer
+// state on the happy path, which the zero-alloc pin forbids — and an
+// instrumentation tap that panics this many times is broken either way.
+const ObserverDisarmThreshold = 3
+
+// DisarmedObserver is the witness for one disarmed tap (#5091): which observer was
+// disarmed, after how many recovered panics, and on which event kind it tripped the
+// threshold. The record an operator reads to learn WHY a tap went quiet.
+type DisarmedObserver struct {
+	Observer string        // the observer's concrete Go type, e.g. "*kpi.Tap"
+	Kind     abi.EventKind // the event kind of the panic that tripped the threshold
+	Panics   int64         // how many recovered panics it cost before disarm
+}
+
+// observerDisarmState is the copy-on-write disarmed set: emitters is what the
+// fan-out's skip check compares against (by interface identity), records is the
+// parallel witness DisarmedObservers returns. Replaced whole under
+// observerDisarmMu, read lock-free.
+type observerDisarmState struct {
+	emitters []abi.Emitter
+	records  []DisarmedObserver
+}
+
+var (
+	// observerDisarmedAny is the hot-path gate: false until the FIRST observer is
+	// ever disarmed, so a fan-out where nothing has ever panicked pays one atomic
+	// bool load and no per-observer lookup (the zero-alloc guarantee's condition).
+	observerDisarmedAny atomic.Bool
+	observerDisarmed    atomic.Pointer[observerDisarmState]
+
+	// observerPanicStreaks counts panics per LIVE (not yet disarmed) observer. It is
+	// touched only on the panic path, under observerDisarmMu.
+	observerDisarmMu     sync.Mutex
+	observerPanicStreaks map[abi.Emitter]int64
+)
+
+// trackObserverPanicForDisarm advances an observer's panic count and disarms it at
+// the threshold. Panic path only. An observer whose dynamic type is not comparable
+// cannot be identity-tracked in a map; it stays armed (counted and recorded by
+// recordObserverPanic exactly as before #5091) rather than risking a panic inside
+// the recover that is supposed to be containing one.
+func trackObserverPanicForDisarm(e abi.Emitter, kind abi.EventKind) {
+	if t := reflect.TypeOf(e); t == nil || !t.Comparable() {
+		return
+	}
+	observerDisarmMu.Lock()
+	defer observerDisarmMu.Unlock()
+	if observerPanicStreaks == nil {
+		observerPanicStreaks = map[abi.Emitter]int64{}
+	}
+	observerPanicStreaks[e]++
+	n := observerPanicStreaks[e]
+	if n < ObserverDisarmThreshold {
+		return
+	}
+	delete(observerPanicStreaks, e) // disarmed observers are skipped; drop the streak
+	next := &observerDisarmState{}
+	if cur := observerDisarmed.Load(); cur != nil {
+		for _, d := range cur.emitters {
+			if d == e {
+				return // already disarmed (a racing panic in flight before the skip took)
+			}
+		}
+		next.emitters = append(append([]abi.Emitter{}, cur.emitters...), e)
+		next.records = append(append([]DisarmedObserver{}, cur.records...), DisarmedObserver{
+			Observer: fmt.Sprintf("%T", e), Kind: kind, Panics: n,
+		})
+	} else {
+		next.emitters = []abi.Emitter{e}
+		next.records = []DisarmedObserver{{Observer: fmt.Sprintf("%T", e), Kind: kind, Panics: n}}
+	}
+	observerDisarmed.Store(next)
+	observerDisarmedAny.Store(true)
+}
+
+// observerIsDisarmed reports whether the fan-out has disarmed e. Lock-free and
+// allocation-free: a linear identity scan of the (tiny — one entry per broken tap
+// in the process's lifetime) disarmed set. Every stored emitter has a comparable
+// dynamic type, so the interface comparison cannot panic.
+func observerIsDisarmed(e abi.Emitter) bool {
+	s := observerDisarmed.Load()
+	if s == nil {
+		return false
+	}
+	for _, d := range s.emitters {
+		if d == e {
+			return true
+		}
+	}
+	return false
+}
+
+// DisarmedObservers returns the witness records for every observer the fan-out has
+// disarmed since process start (#5091), in disarm order. Empty means every
+// registered tap is still being entered. The companion to [ObserverPanics]: the
+// counter says panics happened, this says which taps the kernel gave up on.
+func DisarmedObservers() []DisarmedObserver {
+	s := observerDisarmed.Load()
+	if s == nil {
+		return nil
+	}
+	out := make([]DisarmedObserver, len(s.records))
+	copy(out, s.records)
+	return out
 }
 
 // ObserverPanics returns how many observer panics the fan-out has isolated since
