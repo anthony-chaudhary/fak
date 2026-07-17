@@ -105,7 +105,7 @@ func TestDecodeTokS(t *testing.T) {
 // and the parse-stable field keys. A rename of these keys silently breaks the sweep parser,
 // so this pins the contract.
 func TestFormatDecodeResultEchoesKnobs(t *testing.T) {
-	got := formatDecodeResult(64, 3, 2*time.Second, 248068, 0, 0, false)
+	got := formatDecodeResult(64, 3, 2*time.Second, 248068, 0, 0, false, "interleave=applied(reason=eligible,nodes=0-7,regions=339)")
 	for _, want := range []string{
 		"RESULT ",
 		"decode_tok_s=32.0000",
@@ -116,6 +116,7 @@ func TestFormatDecodeResultEchoesKnobs(t *testing.T) {
 		"fak_workers=",
 		"fak_kq_int8=",
 		"fak_q4k=",
+		`numa="interleave=applied(reason=eligible,nodes=0-7,regions=339)"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("decode RESULT line missing %q\n  got: %s", want, got)
@@ -124,7 +125,7 @@ func TestFormatDecodeResultEchoesKnobs(t *testing.T) {
 }
 
 func TestFormatDecodeResultIncludesFailClosedRoofline(t *testing.T) {
-	got := formatDecodeResult(40, 2, 25*time.Second, 248068, 15_000_000_000, 90, true)
+	got := formatDecodeResult(40, 2, 25*time.Second, 248068, 15_000_000_000, 90, true, "interleave=skipped(reason=single_node)")
 	for _, want := range []string{
 		"decode_tok_s=1.6000",
 		"bytes_per_token=15000000000",

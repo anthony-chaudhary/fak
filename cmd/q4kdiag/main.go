@@ -80,6 +80,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  q4k[%s] out=%d in=%d\n", n, o, i)
 	}
 
+	// #4974: apply the witnessed NUMA interleave placement in-process (the placement half of
+	// the interleave+64-worker regime; the worker half is already auto-selected). No-op off
+	// linux/amd64 or on a single-node/constrained/override-off host — the label records which.
+	// Runs after resident load, before decode, so mbind(MPOL_MF_MOVE) restripes resident pages.
+	fmt.Fprintf(os.Stderr, "numa: %s\n", m.ApplyDecodeNUMAInterleave())
+
 	s := m.NewSession()
 	s.Quant = true
 	s.Q4K = true
@@ -109,7 +115,7 @@ func main() {
 		wall := time.Since(t0)
 		fmt.Fprintln(os.Stderr, formatDecodeLine(*decodeN, *warmup, wall, firstID))
 		// Machine-parseable single line for the sweep runner to grep.
-		fmt.Fprintln(os.Stdout, formatDecodeResult(*decodeN, *warmup, wall, firstID, rep.DecodeBytesPerToken, *membw, *requireRoofline))
+		fmt.Fprintln(os.Stdout, formatDecodeResult(*decodeN, *warmup, wall, firstID, rep.DecodeBytesPerToken, *membw, *requireRoofline, m.NUMAInterleaveLabel()))
 	}
 
 	var ms runtime.MemStats
@@ -263,11 +269,11 @@ func decodeBandwidth(bytesPerToken int64, tokPerSec, streamPeakGBps float64) (ac
 	return achievedGBps, 100 * achievedGBps / streamPeakGBps
 }
 
-func formatDecodeResult(steps, warmup int, wall time.Duration, firstTokenID int, bytesPerToken int64, streamPeakGBps float64, requireRoofline bool) string {
+func formatDecodeResult(steps, warmup int, wall time.Duration, firstTokenID int, bytesPerToken int64, streamPeakGBps float64, requireRoofline bool, numaLabel string) string {
 	tokS := decodeTokS(steps, wall)
-	base := fmt.Sprintf("RESULT decode_tok_s=%.4f first_token_id=%d steps=%d warmup=%d wall_s=%.4f gomaxprocs=%d fak_workers=%q fak_kq_int8=%q fak_q4k=%q",
+	base := fmt.Sprintf("RESULT decode_tok_s=%.4f first_token_id=%d steps=%d warmup=%d wall_s=%.4f gomaxprocs=%d fak_workers=%q fak_kq_int8=%q fak_q4k=%q numa=%q",
 		tokS, firstTokenID, steps, warmup, wall.Seconds(),
-		runtime.GOMAXPROCS(0), os.Getenv("FAK_WORKERS"), os.Getenv("FAK_KQ_INT8"), os.Getenv("FAK_Q4K"))
+		runtime.GOMAXPROCS(0), os.Getenv("FAK_WORKERS"), os.Getenv("FAK_KQ_INT8"), os.Getenv("FAK_Q4K"), numaLabel)
 	if !requireRoofline {
 		return base
 	}

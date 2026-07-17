@@ -195,6 +195,12 @@ type Model struct {
 	q4kw    map[string]*q4kTensor
 	q4khead *q4kTensor // pinned when lm_head is held raw in q4kw; headName() can't see q4kw
 
+	// numaInterleaveLabel caches the verdict of the last ApplyDecodeNUMAInterleave call
+	// (#4974) so a later NUMAInterleaveLabel() — e.g. a decode-witness RESULT line — can
+	// report the same placement decision without re-walking the resident weight regions.
+	// "" ⇒ ApplyDecodeNUMAInterleave has not run on this model yet.
+	numaInterleaveLabel string
+
 	// kqw holds the optional resident Q5_K/Q6_K (k-quant super-block) copy of MoE EXPERT
 	// matmul weights, built straight from the GGUF payload (no f32 round trip) for GLM-5.2's
 	// mixed-quant UD-Q4_K_M experts and consumed on the host expert seam (residentMatRows ->

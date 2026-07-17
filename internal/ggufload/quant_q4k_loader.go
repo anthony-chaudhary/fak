@@ -373,6 +373,14 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	if err != nil {
 		return nil, err
 	}
+	// #4974: reproduce the witnessed `numactl --interleave=all` weight placement in-process so the
+	// CPU Q4_K decode path gets the multi-node bandwidth regime out of the box (no external wrapper).
+	// Gated + no-op off linux/amd64, on a single-node/constrained host, or under FAK_NUMA_INTERLEAVE=off
+	// (see Model.ApplyDecodeNUMAInterleave). Reported through the load profiler so the placement
+	// decision that governed the run is visible on the load-path summary line.
+	if lbl := m.ApplyDecodeNUMAInterleave(); p != nil && p.Progress != nil && lbl != "" {
+		fmt.Fprintf(p.Progress, "numa: %s\n", lbl)
+	}
 	if w3Requested {
 		if err := m.ValidateResidentW3MLP(); err != nil {
 			return nil, err
