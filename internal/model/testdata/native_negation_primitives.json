@@ -1,0 +1,5 @@
+[
+  {"variant":"learned_involution","involution_error":0,"composition_accuracy":1,"parameters":4,"operations_per_negation":4},
+  {"variant":"pi_phase","involution_error":0,"composition_accuracy":1,"parameters":0,"operations_per_negation":2},
+  {"variant":"polarity_channel","involution_error":0,"composition_accuracy":1,"parameters":0,"operations_per_negation":1}
+]
