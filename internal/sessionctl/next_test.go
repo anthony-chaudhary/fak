@@ -181,3 +181,29 @@ func TestNextDrainHasSingleProductionAuthority(t *testing.T) {
 		t.Fatalf("NextQueue.Drain production authorities = %v, want only internal/sessionctl/next.go", definitions)
 	}
 }
+
+func TestRecordSteerNextReadbackAndNoop(t *testing.T) {
+	const trace = "next-steer-witness"
+	ReadSteerNextRecords(trace)
+	RecordSteerNext(trace, "  switch to plan B  ", ApplyResult{Applied: true})
+	records := ReadSteerNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("records=%d, want 1", len(records))
+	}
+	r := records[0]
+	if !r.Applied || r.Move.Kind != MoveAnnotate || r.Move.Render != RenderUserSplice || r.Move.Session != SessionInteractive {
+		t.Fatalf("record=%+v", r)
+	}
+	if r.Move.Payload != "  switch to plan B  " {
+		t.Fatalf("payload=%q", r.Move.Payload)
+	}
+	RecordSteerNext(trace, "", ApplyResult{Applied: true})
+	if got := ReadSteerNextRecords(trace); len(got) != 0 {
+		t.Fatalf("empty payload emitted records: %+v", got)
+	}
+	RecordSteerNext(trace, "", ApplyResult{Refusal: "quarantined"})
+	refused := ReadSteerNextRecords(trace)
+	if len(refused) != 1 || refused[0].Applied || refused[0].Refusal != "quarantined" {
+		t.Fatalf("refused=%+v", refused)
+	}
+}

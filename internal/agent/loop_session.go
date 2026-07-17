@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
 
 // RunOption configures an optional behavior of RunArm / Run. The zero set of options
@@ -526,15 +527,20 @@ func (c runConfig) drainSteer() string {
 			break // empty mailbox (VerdictDefer) — nothing more to splice
 		}
 		if v.Kind != abi.VerdictAllow {
+			sessionctl.RecordSteerNext(c.trace, "", sessionctl.ApplyResult{
+				Refusal: fmt.Sprintf("a2achan receive verdict %v", v.Kind),
+			})
 			continue // quarantined/screened operator input — drop, keep draining
 		}
 		if len(msg.Body.Inline) == 0 {
 			continue
 		}
+		payload := string(msg.Body.Inline)
+		sessionctl.RecordSteerNext(c.trace, payload, sessionctl.ApplyResult{Applied: true})
 		if out != "" {
 			out += "\n"
 		}
-		out += string(msg.Body.Inline)
+		out += payload
 	}
 	return out
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
 
 // recordingPlanner captures the message list it is handed each turn and then ends
@@ -56,6 +57,17 @@ func TestSteerSplicedAtTurnBoundary(t *testing.T) {
 	if !spliced {
 		t.Fatalf("steer was NOT spliced into the turn input; planner saw %d messages, none carried the steer (enqueue-only, consumer half missing)", len(p.seen))
 	}
+	records := sessionctl.ReadSteerNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("steer Next witnesses = %d, want 1", len(records))
+	}
+	next := records[0]
+	if !next.Applied || next.Move.Kind != sessionctl.MoveAnnotate || next.Move.Render != sessionctl.RenderUserSplice || next.Move.Session != sessionctl.SessionInteractive {
+		t.Fatalf("steer Next witness = %+v", next)
+	}
+	if next.Move.Payload != "switch to plan B" {
+		t.Fatalf("steer Next payload = %q", next.Move.Payload)
+	}
 	// The mailbox must be drained, not left queued (a re-Recv would double-splice).
 	if n := a2achan.Default.Len(key); n != 0 {
 		t.Fatalf("steer mailbox not drained: %d messages still queued", n)
@@ -73,6 +85,9 @@ func TestNoSteerNoSplice(t *testing.T) {
 		if m.Role == RoleUser && m.Content != "lone task" {
 			t.Fatalf("unexpected user message spliced with empty mailbox: %q", m.Content)
 		}
+	}
+	if records := sessionctl.ReadSteerNextRecords("no-steer-trace"); len(records) != 0 {
+		t.Fatalf("empty steer mailbox emitted Next witnesses: %+v", records)
 	}
 }
 

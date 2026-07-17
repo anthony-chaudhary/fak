@@ -251,3 +251,44 @@ func ReadNextRecords(r io.Reader) ([]NextRecord, error) {
 	}
 	return records, nil
 }
+
+var (
+	steerNextMu sync.Mutex
+	steerNext   = map[string][]NextRecord{}
+)
+
+// RecordSteerNext lowers one admitted freeform operator steer onto the shared
+// interactive Next contract. The caller has already consumed the a2achan message;
+// this function records that applied user-splice at the same turn boundary.
+func RecordSteerNext(trace, payload string, result ApplyResult) {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || (payload == "" && result.Applied) {
+		return
+	}
+	move := Move{
+		Kind: MoveAnnotate, Render: RenderUserSplice,
+		Session: SessionInteractive, Gate: "a2achan-recv",
+		Source: "agent-turn-boundary", Payload: payload,
+	}
+	record, err := WitnessMove(move, result)
+	if err != nil {
+		return
+	}
+	steerNextMu.Lock()
+	steerNext[trace] = append(steerNext[trace], record)
+	steerNextMu.Unlock()
+}
+
+// ReadSteerNextRecords returns and clears the independently re-readable Next
+// witnesses for steer messages applied to trace. An empty mailbox yields no rows.
+func ReadSteerNextRecords(trace string) []NextRecord {
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return nil
+	}
+	steerNextMu.Lock()
+	defer steerNextMu.Unlock()
+	records := append([]NextRecord(nil), steerNext[trace]...)
+	delete(steerNext, trace)
+	return records
+}
