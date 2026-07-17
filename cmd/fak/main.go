@@ -59,90 +59,11 @@ func main() {
 	if resolveEarlyDispatch(&verb, &argv, start) {
 		return
 	}
+	if dispatchPrimaryVerb(os.Args[1], os.Args[2:], start, &verb) {
+		recordUsage(verb, argv, 0, start)
+		return
+	}
 	switch os.Args[1] {
-	case "run":
-		cmdRun(os.Args[2:])
-	case "replay":
-		// Explicit, unambiguous spelling of the trace-replay path (`fak run --trace`).
-		cmdRunTrace(os.Args[2:])
-	case "commit":
-		verb = gitOperationName(verb, argv)
-		os.Exit(runObservedGitOperation(start, verb, argv, func() int {
-			return runCommitCommand(os.Stdout, os.Stderr, argv)
-		}))
-	case "edit-tx":
-		cmdEditTx(os.Args[2:])
-	case "sweep":
-		verb = gitOperationName(verb, argv)
-		os.Exit(runObservedGitOperation(start, verb, argv, func() int {
-			return runSweep(os.Stdout, os.Stderr, argv)
-		}))
-	case "sync":
-		verb = gitOperationName(verb, argv)
-		os.Exit(runObservedGitOperation(start, verb, argv, func() int {
-			return runSync(os.Stdout, os.Stderr, argv)
-		}))
-	case "merge":
-		cmdMerge(os.Args[2:])
-	case "whats-changed":
-		cmdWhatsChanged(os.Args[2:])
-	case "affected":
-		cmdAffected(os.Args[2:])
-	case "blast":
-		cmdBlast(os.Args[2:])
-	case "buildcheck":
-		cmdBuildCheck(os.Args[2:])
-	case "go":
-		cmdGoShim(os.Args[2:])
-	case "worktree":
-		cmdWorktreeVerb(os.Args[2:])
-	case "wip":
-		cmdWip(os.Args[2:])
-	case "preflight":
-		cmdPreflight(os.Args[2:])
-	case "ci-preflight":
-		cmdCIPreflight(os.Args[2:])
-	case "validate":
-		cmdValidate(os.Args[2:])
-	case "llms-full":
-		cmdLLMSFull(os.Args[2:])
-	case "attest":
-		cmdAttest(os.Args[2:])
-	case "backend":
-		cmdBackend(os.Args[2:])
-	case "bench":
-		cmdBench(os.Args[2:])
-	case "benchmarks":
-		cmdBenchmarks(os.Args[2:])
-	case "frontierswe":
-		cmdFrontierswe(os.Args[2:])
-	case "sota":
-		cmdSota(os.Args[2:])
-	case "kvbm":
-		cmdKVBM(os.Args[2:])
-	case "sota-coverage-scorecard":
-		cmdSOTACoverageScorecard(os.Args[2:])
-	case "bench-runs":
-		cmdBenchRuns(os.Args[2:])
-	case "bench-loop", "benchloop":
-		cmdBenchLoop(os.Args[2:])
-	case "bench-ingest":
-		cmdBenchIngest(os.Args[2:])
-	case "amd-gpu-facts":
-		cmdAMDGPUFacts(os.Args[2:])
-	case "commit-subject-coverage":
-		cmdCommitSubjectCoverage(os.Args[2:])
-	case "ablate":
-		cmdAblate(os.Args[2:])
-	case "ablate-arm":
-		// Hidden internal seam: the ablate arm-mode re-exec child (see cmdAblateArm).
-		cmdAblateArm(os.Args[2:])
-	case "turntax":
-		cmdTurnTax(os.Args[2:])
-	case "hooklat":
-		cmdHookLat(os.Args[2:])
-	case "dispatchlat":
-		cmdDispatchLat(os.Args[2:])
 	case "agent":
 		cmdAgent(os.Args[2:])
 	case "api-host":
@@ -587,6 +508,8 @@ func main() {
 		cmdScoreboard(os.Args[2:])
 	case "steering":
 		cmdSteering(os.Args[2:])
+	case "steer":
+		cmdSteer(os.Args[2:])
 	case "blockers":
 		cmdBlockers(os.Args[2:])
 	case "product":
@@ -671,6 +594,97 @@ func main() {
 		os.Exit(2)
 	}
 	recordUsage(verb, argv, 0, start)
+}
+
+func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *string) bool {
+	switch name {
+	case "run":
+		cmdRun(args)
+	case "replay":
+		// Explicit, unambiguous spelling of the trace-replay path (`fak run --trace`).
+		cmdRunTrace(args)
+	case "commit":
+		*verb = gitOperationName(*verb, args)
+		os.Exit(runObservedGitOperation(start, *verb, args, func() int {
+			return runCommitCommand(os.Stdout, os.Stderr, args)
+		}))
+	case "edit-tx":
+		cmdEditTx(args)
+	case "sweep":
+		*verb = gitOperationName(*verb, args)
+		os.Exit(runObservedGitOperation(start, *verb, args, func() int {
+			return runSweep(os.Stdout, os.Stderr, args)
+		}))
+	case "sync":
+		*verb = gitOperationName(*verb, args)
+		os.Exit(runObservedGitOperation(start, *verb, args, func() int {
+			return runSync(os.Stdout, os.Stderr, args)
+		}))
+	case "merge":
+		cmdMerge(args)
+	case "whats-changed":
+		cmdWhatsChanged(args)
+	case "affected":
+		cmdAffected(args)
+	case "blast":
+		cmdBlast(args)
+	case "buildcheck":
+		cmdBuildCheck(args)
+	case "go":
+		cmdGoShim(args)
+	case "worktree":
+		cmdWorktreeVerb(args)
+	case "wip":
+		cmdWip(args)
+	case "preflight":
+		cmdPreflight(args)
+	case "ci-preflight":
+		cmdCIPreflight(args)
+	case "validate":
+		cmdValidate(args)
+	case "llms-full":
+		cmdLLMSFull(args)
+	case "attest":
+		cmdAttest(args)
+	case "backend":
+		cmdBackend(args)
+	case "bench":
+		cmdBench(args)
+	case "benchmarks":
+		cmdBenchmarks(args)
+	case "frontierswe":
+		cmdFrontierswe(args)
+	case "sota":
+		cmdSota(args)
+	case "kvbm":
+		cmdKVBM(args)
+	case "sota-coverage-scorecard":
+		cmdSOTACoverageScorecard(args)
+	case "bench-runs":
+		cmdBenchRuns(args)
+	case "bench-loop", "benchloop":
+		cmdBenchLoop(args)
+	case "bench-ingest":
+		cmdBenchIngest(args)
+	case "amd-gpu-facts":
+		cmdAMDGPUFacts(args)
+	case "commit-subject-coverage":
+		cmdCommitSubjectCoverage(args)
+	case "ablate":
+		cmdAblate(args)
+	case "ablate-arm":
+		// Hidden internal seam: the ablate arm-mode re-exec child (see cmdAblateArm).
+		cmdAblateArm(args)
+	case "turntax":
+		cmdTurnTax(args)
+	case "hooklat":
+		cmdHookLat(args)
+	case "dispatchlat":
+		cmdDispatchLat(args)
+	default:
+		return false
+	}
+	return true
 }
 
 func ctx() context.Context { return context.Background() }
