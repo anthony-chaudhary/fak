@@ -81,7 +81,8 @@ type Finding struct {
 	Path     string        `json:"path"`
 	Line     int           `json:"line"` // 1-based line number within Path
 	Category Category      `json:"category"`
-	Text     string        `json:"text"`    // the clipped source phrase that matched
+	Span     string        `json:"span"`    // exact source bytes matched on Line
+	Text     string        `json:"text"`    // clipped source line containing Span
 	Suggest  string        `json:"suggest"` // the positive rewrite (mechanical tier) or "" (judgement)
 	Hint     string        `json:"hint"`    // the category hint (judgement tier) or "" (mechanical)
 	Tier     BroadcastTier `json:"broadcast_tier"`
@@ -201,6 +202,7 @@ func classifyLine(line string) []Finding {
 			claimed = append(claimed, span{s, e})
 			f := Finding{
 				Category: r.Category,
+				Span:     line[s:e],
 				Text:     scorecard.Clip(line, 100),
 			}
 			if r.Template != "" {

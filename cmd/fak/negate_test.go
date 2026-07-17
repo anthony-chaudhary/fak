@@ -9,6 +9,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/negframe"
 )
 
+type detectEnvelope struct {
+	Present  bool `json:"present"`
+	Findings []struct {
+		Line       int               `json:"line"`
+		Span       string            `json:"span"`
+		Category   negframe.Category `json:"category"`
+		Mechanical bool              `json:"mechanical"`
+	} `json:"findings"`
+}
+
 func TestNegateDetect(t *testing.T) {
 	var out, errb bytes.Buffer
 	// A prohibition idiom -> Classify finds a mechanical finding -> exit 1.
@@ -34,13 +44,42 @@ func TestNegateDetectClean(t *testing.T) {
 
 func TestNegateDetectJSON(t *testing.T) {
 	var out, errb bytes.Buffer
-	runNegateDetect(strings.NewReader("do not forget to push\n"), &out, &errb, []string{"--json"})
-	var findings []negframe.Finding
-	if err := json.Unmarshal(out.Bytes(), &findings); err != nil {
+	code := runNegateDetect(strings.NewReader("do not forget to push\nShip directly.\nNo need to wait.\n"), &out, &errb, []string{"--json"})
+	if code != 1 {
+		t.Fatalf("detect --json exit = %d, want 1 (stderr=%q)", code, errb.String())
+	}
+	var got detectEnvelope
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("detect --json is not valid JSON: %v\n%s", err, out.String())
 	}
-	if len(findings) == 0 {
-		t.Error("detect --json found no findings on negative prose")
+	if !got.Present {
+		t.Fatal("detect --json present = false, want true")
+	}
+	if len(got.Findings) != 2 {
+		t.Fatalf("detect --json findings = %d, want 2: %#v", len(got.Findings), got.Findings)
+	}
+	first := got.Findings[0]
+	if first.Line != 1 || first.Span != "do not forget to push" || first.Category != negframe.Prohibition || !first.Mechanical {
+		t.Errorf("first finding = %#v, want line 1 exact mechanical prohibition span", first)
+	}
+	second := got.Findings[1]
+	if second.Line != 3 || second.Span != "No need to wait" || second.Category != negframe.Absence || !second.Mechanical {
+		t.Errorf("second finding = %#v, want line 3 exact mechanical absence span", second)
+	}
+}
+
+func TestNegateDetectJSONCleanEnvelope(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runNegateDetect(strings.NewReader("Ship directly.\n"), &out, &errb, []string{"--json"})
+	if code != 0 {
+		t.Fatalf("clean detect --json exit = %d, want 0 (stderr=%q)", code, errb.String())
+	}
+	var got detectEnvelope
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("clean detect --json is not valid JSON: %v\n%s", err, out.String())
+	}
+	if got.Present || len(got.Findings) != 0 {
+		t.Fatalf("clean envelope = %#v, want present=false and empty findings", got)
 	}
 }
 

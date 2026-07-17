@@ -97,7 +97,19 @@ func runNegateDetect(stdin io.Reader, stdout, stderr io.Writer, argv []string) i
 	}
 	findings := negframe.Classify(*path, string(input))
 	if *asJSON {
-		negateJSON(stdout, findings)
+		encoded := make([]map[string]any, 0, len(findings))
+		for _, finding := range findings {
+			encoded = append(encoded, map[string]any{
+				"line":       finding.Line,
+				"span":       finding.Span,
+				"category":   finding.Category,
+				"mechanical": finding.Mechanical(),
+			})
+		}
+		negateJSON(stdout, map[string]any{
+			"present":  len(findings) > 0,
+			"findings": encoded,
+		})
 	} else {
 		writeFindingsHuman(stdout, findings)
 	}
@@ -127,7 +139,7 @@ func writeFindingsHuman(w io.Writer, findings []negframe.Finding) {
 			tier = "mechanical"
 			fix = "-> " + f.Suggest
 		}
-		fmt.Fprintf(w, "  %s:%d [%s/%s] %s\n", f.Path, f.Line, f.Category, tier, strings.TrimSpace(f.Text))
+		fmt.Fprintf(w, "  %s:%d [%s/%s] %s\n", f.Path, f.Line, f.Category, tier, f.Span)
 		if fix != "" {
 			fmt.Fprintf(w, "      %s\n", fix)
 		}

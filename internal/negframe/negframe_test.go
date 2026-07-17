@@ -241,3 +241,13 @@ func TestWeightBuildExposesWeightedDebtWithoutChangingFlatDebt(t *testing.T) {
 		t.Fatalf("weighted debt=%v want %d", got, TierPerSession.Weight()+TierCold.Weight())
 	}
 }
+
+func TestClassifyReportsExactMatchedSpan(t *testing.T) {
+	findings := Classify("fixture.md", "Prefix: don't forget to push, then continue.\n")
+	if len(findings) != 1 {
+		t.Fatalf("Classify findings = %d, want 1: %#v", len(findings), findings)
+	}
+	if got, want := findings[0].Span, "don't forget to push"; got != want {
+		t.Fatalf("Finding.Span = %q, want exact match %q", got, want)
+	}
+}
