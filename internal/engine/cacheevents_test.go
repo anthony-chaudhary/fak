@@ -96,6 +96,7 @@ func TestCacheTierMemoryClassProjection(t *testing.T) {
 		{cachemeta.TierDisk, compute.MemoryOffload},
 		{cachemeta.TierRemote, compute.MemoryOffload},
 		{cachemeta.TierProvider, compute.MemoryOffload},
+		{cachemeta.TierRemoteDRAM, compute.MemoryOffload},
 		{cachemeta.TierUnknown, compute.MemoryUnknown},
 	} {
 		if got := engine.CacheTierMemoryClass(tc.tier); got != tc.want {

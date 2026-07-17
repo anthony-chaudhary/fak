@@ -274,15 +274,16 @@ func (mx *CacheEventMetrics) Snapshot() CacheEventSnapshot {
 
 // CacheTierMemoryClass projects a residency tier into the operator-facing memory class used
 // by the capacity/OOM surfaces. HBM is the hot device KV cache; byte-addressable host/far
-// tiers are DDR-cache residency; disk/remote/provider are offload tiers; an unset tier is
-// unknown. This is deliberately a projection over metadata only — it does not move bytes.
+// tiers are DDR-cache residency; disk/remote/provider/remote-DRAM are offload tiers; an
+// unset tier is unknown. This is deliberately a projection over metadata only — it does
+// not move bytes.
 func CacheTierMemoryClass(t cachemeta.ResidencyTier) compute.MemoryClass {
 	switch t {
 	case cachemeta.TierHBM:
 		return compute.MemoryKVCache
 	case cachemeta.TierDRAM, cachemeta.TierNUMAFar, cachemeta.TierCXL:
 		return compute.MemoryDDRCache
-	case cachemeta.TierDisk, cachemeta.TierRemote, cachemeta.TierProvider:
+	case cachemeta.TierDisk, cachemeta.TierRemote, cachemeta.TierProvider, cachemeta.TierRemoteDRAM:
 		return compute.MemoryOffload
 	default:
 		return compute.MemoryUnknown
