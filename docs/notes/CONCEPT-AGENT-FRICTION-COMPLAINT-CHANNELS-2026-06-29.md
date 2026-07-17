@@ -83,14 +83,17 @@ it actionable instead of noise.
    only the agent that made the call knows. The complaint must carry the **witnessed
    verdict** pulled from the journal (a self-report is not a witness), and repeat
    appeals about the same class fold onto one escalating, deduplicated issue.
-   `not yet`: the dedicated `fak complain` verb (backed by `internal/guardcomplaint`)
-   is **in-flight on the shared tree** — the package exists but its CLI dispatch is
-   not wired in `cmd/fak/main.go` today (the verb file was being reworked while this
-   note was written). Until it lands, attach the journal `DENY` row as evidence and
-   file the appeal through the dogfood-issues fold by hand. **Next checkable step:**
-   once the complain surface settles, add the `case "complain"` dispatch + a
-   `workflow`/`dev` complaint domain so the *same* deduping channel covers general
-   agentic-dev friction (the classes above), and reference it from
+   **Shipped:** the dedicated `fak complain` verb (backed by
+   `internal/guardcomplaint`) is wired (`cmd/fak/main.go` `case "complain"`). Attach
+   the witness with `--from-journal` (disambiguated by `--journal-seq` / `--trace-id`
+   / `--args-digest`, #3830) and **file the ticket** — do not stop at a dry-run.
+   A complaint files a gh ticket only when it runs `--live`, **or** when the fleet
+   sets `FAK_COMPLAIN_LIVE=1` so every appeal auto-files without threading the flag
+   through each call. A dry-run says loudly on stderr that NO ticket was filed, so a
+   printed plan is never mistaken for a tracked appeal — the "worked around it and
+   journaled it privately" failure this note exists to kill. **Next checkable step:**
+   add a `workflow`/`dev` complaint domain so the *same* deduping channel covers
+   general agentic-dev friction (the classes above), and reference it from
    [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) so it is discoverable by default.
 
 3. **Structured, verifiable refusal** — when the right move is to *decline green
@@ -133,12 +136,14 @@ each one a property the channels above already enforce:
 - **Shipped today:** `fak blockers post|feed` (operator/status/clear surfacing) and
   the DOS refusal vocabulary (`dos_refuse_reasons` / `dos_check_reason`) are the
   stable channels an agent can use right now. The dedup/escalation machinery
-  (`internal/dogfoodissues`) is shipped and reused by the appeal path.
-- **`not yet`:** a single, discoverable, low-friction verb that covers *general*
-  agentic-dev friction (not just guard appeals) is not wired. The `guardcomplaint`
-  appeal engine exists but its `fak complain` dispatch is mid-rework on the shared
-  tree, and `cmd/fak/main.go` is peer-churning, so wiring it this pass would entangle
-  peer WIP. The next checkable step is in channel (2) above: wire the dispatch and
-  add the `workflow`/`dev` domain once the surface settles, then surface it in
-  `AGENTS.md`. This note is the durable half — the taxonomy and routing an agent
-  needs to complain well *today*, through the channels that already exist.
+  (`internal/dogfoodissues`) is shipped and reused by the appeal path. `fak complain`
+  is now wired (`cmd/fak/main.go`); it files a deduped gh ticket with the witnessed
+  verdict attached. To make filing the default rather than an easily-forgotten
+  `--live` opt-in, set `FAK_COMPLAIN_LIVE=1` fleet-wide so every appeal auto-files;
+  a dry-run discloses on stderr that nothing was filed so it is never mistaken for a
+  tracked ticket.
+- **`not yet`:** a single verb that covers *general* agentic-dev friction (not just
+  guard appeals) — the `workflow`/`dev` complaint domain — is not yet wired. The next
+  checkable step is in channel (2) above: add that domain to the same deduping
+  channel. This note is the durable half — the taxonomy and routing an agent needs to
+  complain well *today*, through the channels that already exist.
