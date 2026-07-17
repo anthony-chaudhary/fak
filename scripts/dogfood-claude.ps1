@@ -368,6 +368,8 @@ function Build-FakBinary {
   }
   Warn "working-tree build failed - a peer's uncommitted edit likely doesn't compile yet."
   Warn "falling back to the last committed trunk (HEAD) so dogfood still works."
+  $headCommit = (& git -C $FakDir rev-parse HEAD 2>$null).Trim()
+  if ($LASTEXITCODE -ne 0 -or $headCommit -notmatch '^[0-9a-fA-F]{40}$') { Die "could not resolve HEAD for committed-trunk build provenance" }
   $head = Join-Path ([System.IO.Path]::GetTempPath()) ("fak-dogfood-head-" + [System.Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force $head | Out-Null
   $tarball = "$head.tar"
@@ -384,7 +386,7 @@ function Build-FakBinary {
     & $systar -x -f $tarball -C $head; if ($LASTEXITCODE -ne 0) { Die "could not extract the committed-trunk archive" }
     Push-Location $head
     try {
-      & go build -o $out ./cmd/fak 2>&1 | ForEach-Object { Write-Host $_ }
+      & go build -ldflags "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildCommit=$headCommit" -o $out ./cmd/fak 2>&1 | ForEach-Object { Write-Host $_ }
       if ($LASTEXITCODE -ne 0) { Die "even the committed trunk (HEAD) failed to build - this is a real break, not a peer's WIP" }
     } finally { Pop-Location }
     Log "built fak from the committed trunk (HEAD); your working-tree edit was skipped."
