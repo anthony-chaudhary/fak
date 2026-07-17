@@ -455,3 +455,43 @@ func ReadContextAdvisoryNextRecords(trace string) []NextRecord {
 	delete(advisoryNext, trace)
 	return records
 }
+
+var (
+	toolTerminalWakeNextMu sync.Mutex
+	toolTerminalWakeNext   = map[string][]NextRecord{}
+)
+
+// RecordToolTerminalWakeNext lowers one consumed background-tool terminal wake
+// onto the shared interactive Next contract at the turn boundary that renders it.
+func RecordToolTerminalWakeNext(trace, payload string) {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || payload == "" {
+		return
+	}
+	move := Move{
+		Kind: MoveContinue, Render: RenderUserSplice,
+		Session: SessionInteractive, Gate: "tool-terminal-wake",
+		Source: "agent-turn-boundary", Payload: payload,
+	}
+	record, err := WitnessMove(move, ApplyResult{Applied: true})
+	if err != nil {
+		return
+	}
+	toolTerminalWakeNextMu.Lock()
+	toolTerminalWakeNext[trace] = append(toolTerminalWakeNext[trace], record)
+	toolTerminalWakeNextMu.Unlock()
+}
+
+// ReadToolTerminalWakeNextRecords returns and clears independently re-readable
+// terminal-wake Next witnesses for trace.
+func ReadToolTerminalWakeNextRecords(trace string) []NextRecord {
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return nil
+	}
+	toolTerminalWakeNextMu.Lock()
+	defer toolTerminalWakeNextMu.Unlock()
+	records := append([]NextRecord(nil), toolTerminalWakeNext[trace]...)
+	delete(toolTerminalWakeNext, trace)
+	return records
+}

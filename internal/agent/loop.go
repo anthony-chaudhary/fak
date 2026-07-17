@@ -450,13 +450,16 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	}
 
 	for turn := 0; turn < maxTurns; turn++ {
+		var toolTerminalPayload string
 		if turn > 0 && cfg.toolTerminalWake != nil {
 			select {
 			case <-cfg.toolTerminalWake.signal:
 				wake := cfg.toolTerminalWake.next()
 				cfg.toolTerminalWake.received(wake)
 				payload, _ := json.Marshal(wake)
-				messages = append(messages, Message{Role: RoleUser, Content: string(payload)})
+				rendered := string(payload)
+				toolTerminalPayload = rendered
+				messages = append(messages, Message{Role: RoleUser, Content: rendered})
 			case <-ctx.Done():
 				return m, ctx.Err()
 			}
@@ -472,6 +475,9 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				finalizeFak(k, &m)
 			}
 			return m, nil
+		}
+		if toolTerminalPayload != "" {
+			sessionctl.RecordToolTerminalWakeNext(cfg.trace, toolTerminalPayload)
 		}
 		cfg.applyPace(perTurnCap)
 

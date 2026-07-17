@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
@@ -43,6 +44,7 @@ func TestLoopReentersOnToolTerminal(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			const trace, call = "owned-session", "background-trace"
+			sessionctl.ReadToolTerminalWakeNextRecords(trace)
 			wake := NewToolTerminalWakeQueue(trace)
 			sup := toolprocgate.NewSupervisor(toolproc.Config{})
 			sup.SetTerminalSink(wake.Enqueue)
@@ -91,6 +93,9 @@ func TestLoopReentersOnToolTerminal(t *testing.T) {
 					t.Fatal("paused wake dispatched before resume")
 				default:
 				}
+				if records := sessionctl.ReadToolTerminalWakeNextRecords(trace); len(records) != 0 {
+					t.Fatalf("paused wake emitted applied Next before dispatch: %+v", records)
+				}
 				close(resume)
 			}
 
@@ -104,14 +109,25 @@ func TestLoopReentersOnToolTerminal(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			var seeded bool
+			var seeded string
 			for _, m := range seen {
 				if strings.Contains(m.Content, ToolTerminalWakeKind) && strings.Contains(m.Content, call) && strings.Contains(m.Content, `"state":"DONE"`) {
-					seeded = true
+					seeded = m.Content
 				}
 			}
-			if !seeded {
+			if seeded == "" {
 				t.Fatalf("next turn missing terminal verdict: %+v", seen)
+			}
+			records := sessionctl.ReadToolTerminalWakeNextRecords(trace)
+			if len(records) != 1 {
+				t.Fatalf("shared Next records=%d want 1: %+v", len(records), records)
+			}
+			next := records[0]
+			if next.Move.Kind != sessionctl.MoveContinue || next.Move.Render != sessionctl.RenderUserSplice || next.Move.Session != sessionctl.SessionInteractive {
+				t.Fatalf("shared Next move=%+v", next.Move)
+			}
+			if next.Move.Gate != "tool-terminal-wake" || next.Move.Source != "agent-turn-boundary" || next.Move.Payload != seeded || !next.Applied {
+				t.Fatalf("shared Next record=%+v rendered=%q", next, seeded)
 			}
 			journal := wake.Journal()
 			last := journal[len(journal)-1]
