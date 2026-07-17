@@ -164,7 +164,13 @@ func guardSlackAuditRef(s string) string {
 	return path.Base(strings.ReplaceAll(s, "\\", "/"))
 }
 
-func startGuardSessionThreadDrain() {
+// startGuardSessionThreadDrain kicks the background outbox delivery goroutine.
+// It is a package-level func value (not a plain func) so tests that only assert
+// the synchronous ENQUEUE can stub the async drain to a no-op — otherwise the
+// spawned goroutine keeps writing the outbox dir past the test body and races
+// t.Cleanup's RemoveAll ("directory not empty", #5146). Mirrors the guardSessionWire
+// test seam below.
+var startGuardSessionThreadDrain = func() {
 	token := resolveGuardSessionsToken()
 	if token == "" {
 		return

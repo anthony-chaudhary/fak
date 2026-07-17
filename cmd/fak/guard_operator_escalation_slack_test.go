@@ -13,6 +13,13 @@ import (
 )
 
 func TestGuardOperatorEscalationEnqueuesExactlyOneSessionThreadReply(t *testing.T) {
+	// Stub the async outbox drain: this test asserts the synchronous enqueue only,
+	// and the real drain goroutine would keep writing outboxDir past the test body,
+	// racing t.Cleanup's RemoveAll ("directory not empty", #5146).
+	originalDrain := startGuardSessionThreadDrain
+	startGuardSessionThreadDrain = func() {}
+	t.Cleanup(func() { startGuardSessionThreadDrain = originalDrain })
+
 	t.Setenv(guardSessionsTokenEnv, "")
 
 	regDir := t.TempDir()
