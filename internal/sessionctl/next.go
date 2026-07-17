@@ -1,0 +1,225 @@
+package sessionctl
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+	"sync"
+	"time"
+)
+
+// MoveKind is the closed vocabulary emitted by an autonomous decision point.
+type MoveKind string
+
+const (
+	MoveContinue MoveKind = "continue"
+	MoveRedirect MoveKind = "redirect"
+	MoveAnnotate MoveKind = "annotate"
+	MoveReanchor MoveKind = "re-anchor"
+	MoveHalt     MoveKind = "halt"
+)
+
+// RenderKind is the closed boundary action used to apply a move.
+type RenderKind string
+
+const (
+	RenderUserSplice      RenderKind = "user-splice"
+	RenderSystemDirective RenderKind = "system-directive"
+	RenderReopen          RenderKind = "reopen"
+	RenderStop            RenderKind = "stop"
+)
+
+// SessionClass identifies the one rendering authority a trace belongs to.
+type SessionClass string
+
+const (
+	SessionInteractive SessionClass = "interactive"
+	SessionAutonomous  SessionClass = "autonomous"
+)
+
+// Move is a decision already made by a gate. Enqueue validates and records it;
+// it never reruns Gate.
+type Move struct {
+	Kind    MoveKind     `json:"kind"`
+	Render  RenderKind   `json:"render"`
+	Session SessionClass `json:"session_class"`
+	Gate    string       `json:"gate"`
+	Source  string       `json:"source,omitempty"`
+	Payload string       `json:"payload,omitempty"`
+	Reason  string       `json:"reason,omitempty"`
+	Shadow  bool         `json:"shadow,omitempty"`
+}
+
+// NextRecord is the independently readable witness of one attempted move.
+type NextRecord struct {
+	Sequence uint64    `json:"sequence"`
+	At       time.Time `json:"at"`
+	Move     Move      `json:"move"`
+	Applied  bool      `json:"applied"`
+	Refusal  string    `json:"refusal,omitempty"`
+}
+
+// ApplyResult distinguishes an applied move from a witnessed no-op/refusal.
+type ApplyResult struct {
+	Applied bool
+	Refusal string
+}
+
+// MoveApplier is the sole actuation boundary used by Drain.
+type MoveApplier func(Move) (ApplyResult, error)
+
+type queuedMove struct {
+	sequence uint64
+	move     Move
+}
+
+// NextQueue preserves source-site enqueue order across render classes.
+type NextQueue struct {
+	mu      sync.Mutex
+	next    uint64
+	class   SessionClass
+	moves   []queuedMove
+	drained bool
+}
+
+// NewNextQueue binds a trace to exactly one session/rendering class.
+func NewNextQueue(class SessionClass) (*NextQueue, error) {
+	if !class.Valid() {
+		return nil, fmt.Errorf("sessionctl next: invalid session class %q", class)
+	}
+	return &NextQueue{class: class}, nil
+}
+
+func (k MoveKind) Valid() bool {
+	switch k {
+	case MoveContinue, MoveRedirect, MoveAnnotate, MoveReanchor, MoveHalt:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r RenderKind) Valid() bool {
+	switch r {
+	case RenderUserSplice, RenderSystemDirective, RenderReopen, RenderStop:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c SessionClass) Valid() bool { return c == SessionInteractive || c == SessionAutonomous }
+
+// AllowsRender is the render-class XOR: a trace can carry user-facing or
+// autonomous directives, never both. Stop is valid for either class.
+func (c SessionClass) AllowsRender(render RenderKind) bool {
+	switch c {
+	case SessionInteractive:
+		return render == RenderUserSplice || render == RenderReopen || render == RenderStop
+	case SessionAutonomous:
+		return render == RenderSystemDirective || render == RenderStop
+	default:
+		return false
+	}
+}
+
+// DefaultRender makes the move-to-render mapping exhaustive and testable.
+func DefaultRender(kind MoveKind, class SessionClass) (RenderKind, bool) {
+	if !kind.Valid() || !class.Valid() {
+		return "", false
+	}
+	if kind == MoveHalt {
+		return RenderStop, true
+	}
+	if kind == MoveReanchor && class == SessionInteractive {
+		return RenderReopen, true
+	}
+	if class == SessionInteractive {
+		return RenderUserSplice, true
+	}
+	return RenderSystemDirective, true
+}
+
+// Enqueue validates shape and vocabulary but deliberately never evaluates the gate.
+func (q *NextQueue) Enqueue(move Move) error {
+	if q == nil {
+		return errors.New("sessionctl next: nil queue")
+	}
+	if !move.Kind.Valid() {
+		return fmt.Errorf("sessionctl next: invalid move kind %q", move.Kind)
+	}
+	if !move.Render.Valid() {
+		return fmt.Errorf("sessionctl next: invalid render %q", move.Render)
+	}
+	if strings.TrimSpace(move.Gate) == "" {
+		return errors.New("sessionctl next: gate is required")
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.drained {
+		return errors.New("sessionctl next: queue already drained")
+	}
+	if move.Session == "" {
+		move.Session = q.class
+	}
+	if move.Session != q.class || !q.class.AllowsRender(move.Render) {
+		return fmt.Errorf("sessionctl next: render %q does not belong to %q trace", move.Render, q.class)
+	}
+	q.next++
+	q.moves = append(q.moves, queuedMove{sequence: q.next, move: move})
+	return nil
+}
+
+// Drain is the one actuation boundary. It writes one JSONL witness for every
+// attempted move, including no-ops, refusals, and applier errors.
+func (q *NextQueue) Drain(w io.Writer, apply MoveApplier) error {
+	if q == nil || w == nil || apply == nil {
+		return errors.New("sessionctl next: drain requires queue, witness, and applier")
+	}
+	q.mu.Lock()
+	if q.drained {
+		q.mu.Unlock()
+		return errors.New("sessionctl next: queue already drained")
+	}
+	q.drained = true
+	moves := append([]queuedMove(nil), q.moves...)
+	q.mu.Unlock()
+
+	enc := json.NewEncoder(w)
+	for _, item := range moves {
+		result, applyErr := apply(item.move)
+		if applyErr != nil {
+			result.Applied = false
+			result.Refusal = applyErr.Error()
+		}
+		record := NextRecord{Sequence: item.sequence, At: time.Now().UTC(), Move: item.move, Applied: result.Applied, Refusal: strings.TrimSpace(result.Refusal)}
+		if err := enc.Encode(record); err != nil {
+			return fmt.Errorf("sessionctl next: write witness: %w", err)
+		}
+	}
+	return nil
+}
+
+// ReadNextRecords re-reads the durable JSONL witness rather than trusting an
+// in-memory Drain return.
+func ReadNextRecords(r io.Reader) ([]NextRecord, error) {
+	if r == nil {
+		return nil, errors.New("sessionctl next: nil witness reader")
+	}
+	var records []NextRecord
+	s := bufio.NewScanner(r)
+	for s.Scan() {
+		var record NextRecord
+		if err := json.Unmarshal(s.Bytes(), &record); err != nil {
+			return nil, fmt.Errorf("sessionctl next: decode witness: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := s.Err(); err != nil {
+		return nil, fmt.Errorf("sessionctl next: read witness: %w", err)
+	}
+	return records, nil
+}
