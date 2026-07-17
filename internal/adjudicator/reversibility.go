@@ -32,6 +32,13 @@ type ReversibilityEnvelope struct {
 	Preview      string             `json:"preview"`
 	ConfirmToken string             `json:"confirm_token,omitempty"`
 	DryRunHint   string             `json:"dry_run_hint,omitempty"`
+	// RewriteTool/RewriteCommand carry the sanctioned in-flight substitution the rung
+	// MAY apply in place of the preview-confirm hold: populated only when the matched
+	// family declares a rewrite AND the pending call passed its safe-subset gate.
+	// Empty ⇒ no auto-repair is available for this call (the rung holds as before).
+	// Whether the substitution actually fires is the rung's decision (Policy-gated).
+	RewriteTool    string `json:"rewrite_tool,omitempty"`
+	RewriteCommand string `json:"rewrite_command,omitempty"`
 }
 
 var previewSecretRE = regexp.MustCompile(`(?i)(password|token|secret|api[_-]?key|authorization)(=|:)[^\s]+`)
@@ -41,11 +48,21 @@ var previewSecretRE = regexp.MustCompile(`(?i)(password|token|secret|api[_-]?key
 // shells out, never consults tool-specific code, and only escalates the known
 // outward/destructive families that need a preview-confirm pause.
 func ClassifyReversibility(tool string, args map[string]any) ReversibilityEnvelope {
-	class, hint := classifyReversibility(tool, args)
+	class, hint, fam := classifyReversibility(tool, args)
 	preview := reversibilityPreview(class, tool, args)
 	env := ReversibilityEnvelope{Class: class, Preview: preview, DryRunHint: hint}
 	if class != ReversibilityReversible {
 		env.ConfirmToken = ReversibilityConfirmToken(class, tool, args)
+		// Offer the sanctioned in-flight substitution iff the matched family declares a
+		// rewrite AND this specific call is a payload-free equivalent of the verb. The
+		// offer is advisory here — the rung decides whether to act on it (Policy-gated).
+		if fam != nil && fam.rewrite != nil {
+			rw := fam.rewrite
+			if rw.safeSubset == nil || rw.safeSubset(tool, args) {
+				env.RewriteTool = rw.targetTool
+				env.RewriteCommand = rw.targetCommand
+			}
+		}
 	}
 	return env
 }
@@ -67,12 +84,12 @@ func ReversibilityConfirmed(tool string, args map[string]any) (ReversibilityEnve
 
 // ReversibilityConfirmToken derives the stable preview token. Confirmation keys
 // AND incidental keys (a Bash call's free-text "description", and the client
-// supervision knobs "timeout"/"timeout_ms"/"run_in_background" — see
-// isIncidentalTokenKey) are excluded from the hashed payload, and the
-// action-bearing command text is whitespace-normalized (see normalizeCommandForToken),
-// so the token binds only to the call's effect-bearing subject and is stable across a
-// re-proposal even when the client's confirm key, prose annotation, supervision knobs,
-// OR cosmetic command spacing drift between proposals.
+// supervision knobs "timeout"/"run_in_background" — see isIncidentalTokenKey) are
+// excluded from the hashed payload, and the action-bearing command text is
+// whitespace-normalized (see normalizeCommandForToken), so the token binds only
+// to the call's effect-bearing subject and is stable across a re-proposal even
+// when the client's confirm key, prose annotation, supervision knobs, OR cosmetic
+// command spacing drift between proposals.
 //
 // The annotation exclusion is the fix for the confirm-loop that wedged a fleet
 // session (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md): Claude Code's Bash
@@ -88,13 +105,13 @@ func ReversibilityConfirmToken(class ReversibilityClass, tool string, args map[s
 	return "fak-" + hex.EncodeToString(sum[:8])
 }
 
-func classifyReversibility(tool string, args map[string]any) (ReversibilityClass, string) {
+func classifyReversibility(tool string, args map[string]any) (ReversibilityClass, string, *reversibilityFamily) {
 	cmd := commandText(args)
 	// The dry-run scan reads the quote-stripped payload view, not the raw
 	// command: a QUOTED "--dry-run" is a mention, and must not launder a
 	// destructive command past the preview gate (#2752).
 	if hasDryRunPreview(payloadScanView(cmd), args) {
-		return ReversibilityReversible, ""
+		return ReversibilityReversible, "", nil
 	}
 	return classifyAgainstFamilies(reversibilityFamilies, tool, cmd)
 }
@@ -128,6 +145,23 @@ type reversibilityFamily struct {
 	matchCmd     func(in familyMatchInput) bool // payload-shaped matchers (curl flags, SQL words)
 	// Redirect surfaced when this family blocks ("" = no sanctioned sidestep).
 	hint string
+	// rewrite, when non-nil, promotes the family's advisory sidestep to a machine-
+	// applicable in-flight substitution: the production home of what the
+	// familyRemedyCommands test table names by hand. The reversibility rung may
+	// substitute targetCommand (run as targetTool) for the held call — but ONLY when
+	// safeSubset reports the pending call is a payload-free equivalent of the verb, so
+	// a `--force`/`--delete`/refspec variant is never laundered into a non-force push.
+	// Only git-push declares one today: its sidestep `fak sync push` is nullary (pushes
+	// the current branch), so the swap loses no intent. A parametric sidestep
+	// (`fak issue create --title …`) stays advisory — its payload can't be blind-swapped.
+	rewrite *familyRewrite
+}
+
+// familyRewrite is a family's machine-applicable sanctioned substitution.
+type familyRewrite struct {
+	targetTool    string                                      // tool the substitute runs as (e.g. "Bash")
+	targetCommand string                                      // the compiled verb, e.g. "fak sync push"
+	safeSubset    func(tool string, args map[string]any) bool // gate: only substitute a payload-free equivalent
 }
 
 func (f *reversibilityFamily) matches(in familyMatchInput) bool {
@@ -157,7 +191,7 @@ func (f *reversibilityFamily) matches(in familyMatchInput) bool {
 // outward-facing, whatever the table order.
 var reversibilityClassOrder = []ReversibilityClass{ReversibilityOutwardFacing, ReversibilityIrreversible}
 
-func classifyAgainstFamilies(families []reversibilityFamily, tool, cmd string) (ReversibilityClass, string) {
+func classifyAgainstFamilies(families []reversibilityFamily, tool, cmd string) (ReversibilityClass, string, *reversibilityFamily) {
 	// Payload-shaped scans (curl flags, SQL words, cmdContains substrings) read
 	// the quote-stripped view so a trigger mentioned inside a quoted argument —
 	// a commit message, a grep pattern, an echoed string — is not a live token,
@@ -176,11 +210,11 @@ func classifyAgainstFamilies(families []reversibilityFamily, tool, cmd string) (
 				continue
 			}
 			if families[i].matches(in) {
-				return class, families[i].hint
+				return class, families[i].hint, &families[i]
 			}
 		}
 	}
-	return ReversibilityReversible, ""
+	return ReversibilityReversible, "", nil
 }
 
 // reversibilityFamilies is the single source of truth for the escalated
@@ -244,6 +278,15 @@ var reversibilityFamilies = []reversibilityFamily{
 		prefixes:     [][]string{{"git", "push"}},
 		toolContains: []string{"git_push"},
 		hint:         "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run",
+		// The only family with a machine-applicable rewrite: `fak sync push` is nullary
+		// (current-branch, non-force, fast-forward-only — internal/safesync/safepush.go),
+		// so it is a faithful stand-in for a BARE push and only a bare push. safeSubset
+		// keeps `--force`/`--delete`/refspec and any non-current-branch target on the hold.
+		rewrite: &familyRewrite{
+			targetTool:    "Bash",
+			targetCommand: "fak sync push",
+			safeSubset:    gitPushSafeSubset,
+		},
 	},
 	// The gh-write carve-out (#3560, see the gh note above): a `gh api` mutation
 	// (--method/-X POST|PUT|PATCH|DELETE) or `gh repo fork|rename|delete` is the
@@ -449,6 +492,109 @@ func gitDryRunPreview(cmd string) bool {
 	return false
 }
 
+// gitPushSafeSubset reports whether a held git-push call is a payload-free
+// equivalent of `fak sync push` — the ONLY shape it is sound to auto-substitute.
+// It handles both call shapes the git-push family matches:
+//   - a Bash `command` string → gitPushBareShell (dash-preserving flag parse), and
+//   - a structured MCP `git_push` tool (no shell command) → mcpGitPushSafe.
+//
+// The bar is deliberately high: `fak sync push` pushes the CURRENT branch, non-
+// force, fast-forward-only (internal/safesync/safepush.go), so a bare push is
+// equivalent but a `--force`/`--delete`, a `--tags`/`--all`/`--mirror`/`--prune`, an
+// explicit `remote branch`/refspec, or an upstream-setting `-u` push is NOT — those
+// stay on the preview-confirm hold rather than being silently rewritten into a
+// weaker push (which would change intent, worse than refusing).
+func gitPushSafeSubset(tool string, args map[string]any) bool {
+	if cmd := commandText(args); strings.TrimSpace(cmd) != "" {
+		return gitPushBareShell(cmd)
+	}
+	return mcpGitPushSafe(args)
+}
+
+// gitPushBareShell is true iff the command is EXACTLY one real segment of the form
+// `git push [remote]` carrying only benign flags. More than one segment (`git add
+// -A && git push`), any non-benign flag, an explicit refspec (`a:b`), or a second
+// positional (a branch) → false: replacing the whole command with `fak sync push`
+// must not drop a sibling command or change WHAT is pushed. Parses the RAW command
+// dash-preserving, stripping the same env/wrapper heads as commandSegments.
+func gitPushBareShell(cmd string) bool {
+	seen := 0
+	for _, raw := range commandSegmentRE.Split(cmd, -1) {
+		fields := strings.Fields(raw)
+		for len(fields) > 0 &&
+			(envAssignmentRE.MatchString(fields[0]) || commandWrapperHeads[strings.ToLower(fields[0])]) {
+			fields = fields[1:]
+		}
+		if len(fields) == 0 {
+			continue // empty segment (a trailing/leading sequencing operator)
+		}
+		seen++
+		if seen > 1 {
+			return false // a second real command rides along — don't blind-replace it
+		}
+		if len(fields) < 2 || strings.ToLower(fields[0]) != "git" || strings.ToLower(fields[1]) != "push" {
+			return false
+		}
+		remotes := 0
+		for _, tok := range fields[2:] {
+			if strings.HasPrefix(tok, "-") {
+				switch strings.ToLower(tok) {
+				case "-q", "--quiet", "-v", "--verbose", "--progress", "--no-progress":
+					continue // cosmetic, no effect on WHAT is pushed
+				default:
+					return false // -f/--force/--force-with-lease/-d/--delete/--tags/--all/--mirror/--prune/-u/…
+				}
+			}
+			if strings.Contains(tok, ":") {
+				return false // explicit src:dst refspec
+			}
+			remotes++
+			if remotes > 1 {
+				return false // `git push <remote> <branch>` — a specific target, not the current branch
+			}
+		}
+	}
+	return seen == 1
+}
+
+// mcpGitPushSafe judges a structured MCP git_push tool call (no shell command): safe
+// to substitute only when it carries NONE of the recognized force/delete flags or an
+// explicit branch/refspec target — i.e. a bare current-branch push. Any recognized
+// danger or target field, or an unrecognized truthy force-shaped key, keeps the hold.
+func mcpGitPushSafe(args map[string]any) bool {
+	for _, k := range []string{"force", "force_with_lease", "forceWithLease", "delete", "all", "tags", "mirror", "prune"} {
+		if truthyArg(args[k]) {
+			return false
+		}
+	}
+	for _, k := range []string{"branch", "refspec", "ref", "src", "dst", "destination", "target"} {
+		if s, ok := args[k].(string); ok && strings.TrimSpace(s) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// truthyArg reports whether a JSON-decoded arg value reads as "on": a true bool, a
+// non-zero number, or a non-empty/"true"/"1"/"yes" string. Anything else is false.
+func truthyArg(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case float64:
+		return t != 0
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "", "0", "false", "no", "off":
+			return false
+		default:
+			return true
+		}
+	default:
+		return false
+	}
+}
+
 var curlWriteFlagRE = regexp.MustCompile(`(?i)(^|[;&|()]|[[:space:]])curl(\.exe)?\b.*([[:space:]]-[Xx][[:space:]]*(POST|PUT|PATCH|DELETE)\b|[[:space:]]--request(=|[[:space:]]+)(POST|PUT|PATCH|DELETE)\b|[[:space:]](-d|--data|--data-raw|--data-binary|--form)(=|[[:space:]]|$))`)
 
 func curlWrites(cmd string) bool {
@@ -625,9 +771,16 @@ func commandSegments(cmd string) [][]string {
 		if len(fields) == 0 {
 			continue
 		}
-		if words := commandWords(strings.Join(fields, " ")); len(words) > 0 {
-			segs = append(segs, words)
+		head := strings.ToLower(strings.TrimSuffix(unquoteSpans(fields[0]), ".exe"))
+		if i := strings.LastIndexAny(head, `/\`); i >= 0 {
+			head = head[i+1:]
 		}
+		if head == "" {
+			continue
+		}
+		words := []string{head}
+		words = append(words, commandWords(strings.Join(fields[1:], " "))...)
+		segs = append(segs, words)
 	}
 	return segs
 }
@@ -1111,29 +1264,28 @@ func foldLineContinuations(s string) string {
 //
 //   - Human-readable annotation: the free-text "description" Claude Code attaches to
 //     every Bash call, or the "explanation" other harnesses use (#2777).
-//   - Client supervision knobs: how long the CALLER waits ("timeout"/"timeout_ms")
-//     and whether it detaches ("run_in_background"). These say how the caller
+//   - Client supervision knobs: "timeout" (how long the CLIENT waits) and
+//     "run_in_background" (whether the client detaches). These say how the caller
 //     SUPERVISES the call, not what it does — `git push` pushes the same commits to
-//     the same remote at any timeout, foreground or background — and none is read by
-//     the classifier or rendered into the preview the operator acknowledges. They are
-//     the residual axis of the confirm-loop (fak-private#21): the gate advertises
-//     "re-propose byte-identical … the free-text description need not match", but a
-//     model that re-proposed the identical outward-facing publish while nudging its timeout
-//     (the ordinary reaction to a slow or timed-out call over a flaky remote bridge)
-//     drew a FRESH token, so the advertised recovery could never converge and the
-//     operator's repeated approval never became executable.
+//     the same remote at any timeout, foreground or background — and neither is read
+//     by the classifier or rendered into the preview the operator acknowledges.
+//     They were the residual axis of the same confirm-loop (fak-private#21): the gate
+//     advertises "re-propose byte-identical … the free-text description need not
+//     match", but a model that re-proposed the identical command while nudging its
+//     timeout (the ordinary reaction to a slow or timed-out call) still drew a FRESH
+//     token, so the advertised recovery could not converge.
 //
 // Excluding a key here cannot weaken the floor: the token must bind to exactly the
 // effect-bearing subject the preview shows, and every argument that steers the effect
-// — a command's text, an MCP git_push `force`/`branch`, a `dangerouslyDisableSandbox`,
-// a `workdir` — is still hashed verbatim, so a confirm can never be transplanted onto
-// a materially different call. Hashing everything by default and excluding a NAMED
+// — a command's text, an MCP git_push `force`/`branch`, a `dangerouslyDisableSandbox`
+// — is still hashed verbatim, so a confirm can never be transplanted onto a
+// materially different call. Hashing everything by default and excluding a NAMED
 // incidental is deliberate: a novel effect-bearing arg binds automatically.
 func isIncidentalTokenKey(k string) bool {
 	switch strings.ToLower(k) {
 	case "description", "explanation":
 		return true
-	case "timeout", "timeout_ms", "run_in_background":
+	case "timeout", "run_in_background":
 		return true
 	default:
 		return false

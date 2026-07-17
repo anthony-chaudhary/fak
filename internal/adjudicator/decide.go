@@ -33,6 +33,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/egressfloor"
+	"github.com/anthony-chaudhary/fak/internal/egresslist"
 )
 
 // Policy is the decision table. A zero Policy is the fail-closed empty policy:
@@ -123,6 +124,48 @@ type Policy struct {
 	// with POLICY_BLOCK and a bounded host witness. Fetched bytes still flow
 	// through the result-admission chain as untrusted data.
 	ResearchEgressAllowHosts []string
+	// EgressAllowHosts, EgressBlockHosts, and EgressBlockLists configure the
+	// adblock-style site allow/block layer (internal/egresslist) that sits ABOVE the
+	// hardwired egressfloor and BELOW the research allowlist:
+	//   - EgressAllowHosts are exception rules (adblock '@@'): a host here stays
+	//     reachable even under a broad community block list, and — for WebFetch — is a
+	//     POSITIVE admit, generalizing ResearchEgressAllowHosts to a maintained site
+	//     list so a sanctioned docs host is reachable under a restrictive posture.
+	//   - EgressBlockHosts are operator block rules with subdomain matching (a rule
+	//     "ads.example" blocks it and every subdomain).
+	//   - EgressBlockLists names bundled community filter lists (egresslist.BundledList)
+	//     compiled into the block set.
+	// All three are additive and empty by default — a floor with none is byte-for-byte
+	// the pre-list path — and are compiled once per SetPolicy into policyState.egressList.
+	// The hardwired metadata floor always runs first, so an allow rule can never
+	// un-block the cloud-metadata SSRF class.
+	EgressAllowHosts []string
+	EgressBlockHosts []string
+	EgressBlockLists []string
+	// EgressRestrict selects the search/fetch POSTURE — which way the default falls
+	// for a WebFetch host that no rule mentions:
+	//   - false (DEFAULT, "default-allowed"): a fetch reaches any host the block layer
+	//     and hardwired floor do not refuse. This is the adblock model — subscribe to
+	//     block lists, and everything else is reachable.
+	//   - true ("restrict"): a strict allowlist. WebFetch is admitted ONLY for a host on
+	//     EgressAllowHosts ∪ ResearchEgressAllowHosts; every other host is POLICY_BLOCK.
+	//     With no allowlist, restrict blocks ALL WebFetch (the fully-closed egress).
+	// Independent of the legacy trigger: a non-empty ResearchEgressAllowHosts still
+	// forces the strict allowlist on its own (back-compat), so setting it is equivalent
+	// to EgressRestrict with that list. Only WebFetch carries a destination host, so the
+	// knob acts there; WebSearch (a query, no host) is unaffected.
+	EgressRestrict bool
+
+	// AutoRepairSidestep opts the reversibility rung into IN-FLIGHT REPAIR of a
+	// sanctioned compiled sidestep: when a held call's family offers a machine-
+	// applicable safe-subset substitution (today only a bare `git push` → `fak sync
+	// push`), emit that as a TRANSFORM instead of the preview-confirm HOLD. Default
+	// false — the hold is preserved. Only the SAFE subset is ever substituted; a
+	// --force/--delete/refspec push carries no RewriteCommand and still holds, so
+	// turning this on never launders a dangerous push into a weaker one. The guard
+	// sets it from FAK_GUARD_AUTOREPAIR=sidestep (cmd/fak/guard_startup.go); see
+	// docs/notes/IN-FLIGHT-REPAIR-SANCTIONED-SIDESTEP-2026-07-15.md.
+	AutoRepairSidestep bool
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -188,6 +231,11 @@ type ArgPredicate struct {
 type policyState struct {
 	policy    Policy
 	argByTool map[string][]ArgPredicate
+	// egressList is the compiled adblock-style site allow/block matcher, built ONCE per
+	// SetPolicy from the policy's Egress{Allow,Block}Hosts + EgressBlockLists (like
+	// argByTool), so the decide path never recompiles rules per call. nil when no list
+	// is configured (the common case), which egresslist.Decide treats as "no rule".
+	egressList *egresslist.List
 }
 
 type Adjudicator struct {
@@ -198,15 +246,16 @@ type Adjudicator struct {
 	// binary exec (see synthtool.go). A sync.Map gives a lock-free concurrent set
 	// alongside the policy RWMutex; its zero value is a ready empty ledger, so New
 	// need not initialize it. Cleared at a task boundary via ResetRun.
-	authored sync.Map
+	authored    sync.Map
+	receiptRoot string
 }
 
 // New builds an adjudicator with the given policy.
 func New(p Policy) *Adjudicator {
 	p.Profile = sanitizeProfile(p.Profile)                         // floor invariant: a profile may narrow only
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // floor invariant: only heuristic reasons soften
-	a := &Adjudicator{}
-	a.state.Store(&policyState{policy: p, argByTool: indexArgPredicates(p.ArgPredicates)})
+	a := &Adjudicator{receiptRoot: receiptWorkspaceRoot()}
+	a.state.Store(&policyState{policy: p, argByTool: indexArgPredicates(p.ArgPredicates), egressList: compileEgressList(p)})
 	return a
 }
 
@@ -217,7 +266,30 @@ func (a *Adjudicator) SetPolicy(p Policy) {
 	// Build the immutable predicate index before excluding readers. The lock then
 	// protects only the atomic policy+index pair swap, not O(predicate-count) work.
 	argByTool := indexArgPredicates(p.ArgPredicates)
-	a.state.Store(&policyState{policy: p, argByTool: argByTool})
+	a.state.Store(&policyState{policy: p, argByTool: argByTool, egressList: compileEgressList(p)})
+}
+
+// compileEgressList folds the policy's adblock-style egress inputs — operator allow
+// (exception) hosts, operator block hosts, and any named bundled community lists — into a
+// single immutable matcher. Returns nil when nothing is configured (the common case), so
+// the decide path pays zero cost and Decide's nil-safety carries the absent case. A
+// block-list name that does not resolve to a bundled list is SKIPPED here (defensive: the
+// policy loader in internal/policy validates names and fails LOUD, so an unknown name
+// should never reach this point; skipping rather than panicking keeps a hand-built test
+// Policy from crashing the monitor).
+func compileEgressList(p Policy) *egresslist.List {
+	if len(p.EgressAllowHosts) == 0 && len(p.EgressBlockHosts) == 0 && len(p.EgressBlockLists) == 0 {
+		return nil
+	}
+	b := egresslist.NewBuilder()
+	b.AddRules("policy:allow_hosts", p.EgressAllowHosts, egresslist.Allow)
+	b.AddRules("policy:block_hosts", p.EgressBlockHosts, egresslist.Block)
+	for _, name := range p.EgressBlockLists {
+		if text, ok := egresslist.BundledList(name); ok {
+			b.AddFilterText("list:"+name, text)
+		}
+	}
+	return b.Build()
 }
 
 // ResetRun clears the per-run synthesized-tool ledger (#543). The authored-script
@@ -458,8 +530,49 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 				Payload: abi.WitnessPayload{Claim: label + ": " + host},
 			}
 		}
+		// SITE ALLOW/BLOCK LISTS (adblock-style, internal/egresslist): the operator +
+		// community layer, ABOVE the hardwired metadata floor (which already ran, so an
+		// allow rule can never un-block the SSRF class) and BELOW the research allowlist.
+		// A destination host on a block rule is refused EGRESS_BLOCK unless an allow
+		// (exception) rule carves it back open; block WINS across a multi-destination call.
+		// A WebFetch whose destination is an explicitly-allowed site is a POSITIVE admit
+		// here (like the research allowlist), so a sanctioned docs host stays reachable
+		// even under a restrictive research allowlist or a default-deny posture. Bounded
+		// disclosure: the witness names the offending host + which list spoke, never the URL.
+		if el := state.egressList; el != nil {
+			allowedHost := ""
+			for _, h := range egressfloor.Destinations(c.Tool, args) {
+				switch d := el.Decide(h); d.Kind {
+				case egresslist.Block:
+					return abi.Verdict{
+						Kind:    abi.VerdictDeny,
+						Reason:  egressfloor.ReasonEgressBlock,
+						By:      "monitor/egress-list",
+						Payload: abi.WitnessPayload{Claim: "egress blocked by " + d.Source + ": " + h},
+					}
+				case egresslist.Allow:
+					allowedHost = h
+				}
+			}
+			if allowedHost != "" && strings.EqualFold(c.Tool, "WebFetch") {
+				return abi.Verdict{
+					Kind: abi.VerdictAllow,
+					By:   "monitor/egress-list",
+					Meta: map[string]string{"egress_list": "allowlisted", "host": allowedHost},
+				}
+			}
+		}
 	}
-	if v, ok := researchEgressVerdict(c.Tool, args, p.ResearchEgressAllowHosts); ok {
+	// STRICT-ALLOWLIST posture: fires when the operator asked to restrict (EgressRestrict)
+	// or set the legacy research allowlist. Under restrict, an allow-listed host was
+	// already admitted by the block layer above; here a host on NO allow rule is refused
+	// POLICY_BLOCK. Default-allowed (restrict off, no research allowlist) skips this
+	// entirely, so the fetch falls through to the normal posture.
+	egressAllow := p.ResearchEgressAllowHosts
+	if p.EgressRestrict && len(p.EgressAllowHosts) > 0 {
+		egressAllow = append(append([]string(nil), p.ResearchEgressAllowHosts...), p.EgressAllowHosts...)
+	}
+	if v, ok := researchEgressVerdict(c.Tool, args, egressAllow, p.EgressRestrict); ok {
 		return v
 	}
 
@@ -515,8 +628,44 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// a preview token it cannot use.
 	confirmedWithToken := false
 	if pr.runs(cl, rungReversibility) && (redacted || wouldAdmit(p, c.Tool, lowerTool)) {
+		if a.selfAuthoredUntrackedRemoval(c, args) {
+			return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/reversibility", Meta: map[string]string{
+				"witness": "trace-authored-git-untracked",
+			}}
+		}
 		env, ok := ReversibilityConfirmed(c.Tool, args)
 		if !ok {
+			// In-flight repair of a sanctioned compiled sidestep: when the operator opts
+			// in (FAK_GUARD_AUTOREPAIR=sidestep) and the matched family offered a machine-
+			// applicable substitution for THIS call (env carries a RewriteCommand only when
+			// the family's safe-subset gate passed — a bare `git push`, never a --force/
+			// --delete/refspec push), substitute the sanctioned verb instead of holding.
+			// The dangerous variants never reach here with a RewriteCommand, so they still
+			// take the preview-confirm hold below.
+			if p.AutoRepairSidestep && env.RewriteCommand != "" {
+				// Preserve every non-confirmation arg (workdir, timeout, description, …) and
+				// swap only the effect-bearing command, so the sanctioned verb still runs in
+				// the same working directory the operator targeted — dropping workdir here
+				// would silently push a different repo.
+				na := argsWithoutConfirmation(args)
+				na["command"] = env.RewriteCommand
+				if ref, ok := putJSON(ctx, na); ok {
+					newTool := ""
+					if !strings.EqualFold(c.Tool, env.RewriteTool) {
+						newTool = env.RewriteTool // cross-tool sidestep (e.g. MCP git_push → Bash)
+					}
+					return abi.Verdict{
+						Kind:    abi.VerdictTransform,
+						By:      "monitor/reversibility",
+						Payload: abi.TransformPayload{NewArgs: ref, NewTool: newTool},
+						Meta: map[string]string{
+							"reversibility_autorepair":   "sidestep",
+							"reversibility_class":        string(env.Class),
+							"reversibility_substitution": env.RewriteCommand,
+						},
+					}
+				}
+			}
 			return reversibilityGateVerdict(env)
 		}
 		confirmedWithToken = env.Class != ReversibilityReversible && hasConfirmationArg(args)
@@ -639,7 +788,7 @@ func (p Policy) NeverAdmits(tool string) bool {
 	// over-drop, so we refuse to prune anything when there is nothing to admit. A real
 	// floor (any Allow entry, AllowPrefix, or research WebFetch allowlist) re-enables
 	// pruning of the names it genuinely never admits.
-	if len(p.Allow) == 0 && len(p.AllowPrefix) == 0 && len(p.ResearchEgressAllowHosts) == 0 {
+	if len(p.Allow) == 0 && len(p.AllowPrefix) == 0 && len(p.ResearchEgressAllowHosts) == 0 && len(p.EgressAllowHosts) == 0 {
 		return false
 	}
 	if r, denied := p.Deny[tool]; denied {
@@ -655,7 +804,7 @@ func (p Policy) NeverAdmits(tool string) bool {
 			return false
 		}
 	}
-	if strings.EqualFold(tool, "WebFetch") && len(p.ResearchEgressAllowHosts) > 0 {
+	if strings.EqualFold(tool, "WebFetch") && (len(p.ResearchEgressAllowHosts) > 0 || len(p.EgressAllowHosts) > 0) {
 		return false
 	}
 	// Advisory DEFAULT_DENY admits any name (with the would-deny record), so
@@ -726,8 +875,15 @@ func stripConfirmationTransform(ctx context.Context, args map[string]any, adviso
 	return v, true
 }
 
-func researchEgressVerdict(tool string, args map[string]any, allowHosts []string) (abi.Verdict, bool) {
-	if !strings.EqualFold(tool, "WebFetch") || len(allowHosts) == 0 {
+func researchEgressVerdict(tool string, args map[string]any, allowHosts []string, restrict bool) (abi.Verdict, bool) {
+	if !strings.EqualFold(tool, "WebFetch") {
+		return abi.Verdict{}, false
+	}
+	// Default-allowed (not restricted AND no allowlist to enforce): this rung has nothing
+	// to say — the fetch falls through to the normal posture. Under restrict, an empty
+	// allowlist means EVERY host is refused below (the fully-closed egress), so we do NOT
+	// bail here.
+	if len(allowHosts) == 0 && !restrict {
 		return abi.Verdict{}, false
 	}
 	raw, _ := args["url"].(string)
@@ -1050,7 +1206,9 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 			// after `rm`, so `rm -i -rf`, `rm --recursive --force`, and `sh -c 'rm -rf /'`
 			// launder past it. commandHasRecursiveForcedDelete tokenizes the command, resolves
 			// the real `rm` command word (exempting quoted text and `git rm`), and scans all
-			// of rm's argv flags for a recursive OR force option.
+			// of rm's argv flags for a recursive delete (always denied) or a force delete
+			// (denied unless it is a force-only delete of a single literal path, which
+			// degrades to the reversibility confirm gate like plain `rm foo` — #4983).
 			if isRmRfArgRule(pr) {
 				ws, scratch := outOfTreeRoots()
 				if present && commandHasUnsafeRecursiveForcedDelete(val, ws, scratch) {

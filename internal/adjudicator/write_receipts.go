@@ -24,10 +24,7 @@ type writeReceipt struct {
 	order     uint64
 }
 
-var (
-	writeReceiptOrder atomic.Uint64
-	receiptRoot       = receiptWorkspaceRoot()
-)
+var writeReceiptOrder atomic.Uint64
 
 // ObserveResult records local write effects only after the kernel has observed a
 // successful, committed engine completion. It is intentionally a structural
@@ -37,7 +34,7 @@ func (a *Adjudicator) ObserveResult(_ context.Context, c *abi.ToolCall, r *abi.R
 		return
 	}
 	for _, target := range completedWriteTargets(c) {
-		path, ok := canonicalLocalReceiptPath(receiptRoot, target)
+		path, ok := canonicalLocalReceiptPath(a.receiptRoot, target)
 		if !ok {
 			continue
 		}
@@ -50,11 +47,19 @@ func (a *Adjudicator) ObserveResult(_ context.Context, c *abi.ToolCall, r *abi.R
 // AuthoredPath reports whether path has a live successful-write receipt for the
 // same trace. Empty trace IDs and paths fail closed. operation identifies the
 // committed tool call and is provided for audit/read-back.
+func (a *Adjudicator) hasPriorWriteReceipt(traceID, path string, before uint64) bool {
+	if before == 0 {
+		return false
+	}
+	op, ok := a.AuthoredPath(traceID, path)
+	return ok && op < before
+}
+
 func (a *Adjudicator) AuthoredPath(traceID, path string) (operation uint64, ok bool) {
 	if a == nil || traceID == "" || path == "" {
 		return 0, false
 	}
-	canonical, eligible := canonicalLocalReceiptPath(receiptRoot, path)
+	canonical, eligible := canonicalLocalReceiptPath(a.receiptRoot, path)
 	if !eligible {
 		return 0, false
 	}
