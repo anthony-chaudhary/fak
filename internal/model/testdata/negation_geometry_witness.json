@@ -1,0 +1,13 @@
+{
+  "mean_cosine": 0.9997513026795102,
+  "top_singular_value_fraction": 0.9998130161934046,
+  "shared_map_held_out_rmse": 0.018456028825291702,
+  "per_concept_baseline_rmse": 1.4107887864595465,
+  "mean_displacement": [
+    2.0025,
+    -1.734723475976807e-18
+  ],
+  "verdict": "shared",
+  "cosine_threshold": 0.98,
+  "singular_fraction_threshold": 0.99
+}

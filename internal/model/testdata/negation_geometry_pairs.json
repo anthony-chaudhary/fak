@@ -1,0 +1,74 @@
+[
+  {
+    "concept": "amber",
+    "affirmed": [
+      1,
+      0
+    ],
+    "negated": [
+      3,
+      0.04
+    ],
+    "split": "train"
+  },
+  {
+    "concept": "blue",
+    "affirmed": [
+      0,
+      1
+    ],
+    "negated": [
+      2.02,
+      0.98
+    ],
+    "split": "train"
+  },
+  {
+    "concept": "cedar",
+    "affirmed": [
+      -1,
+      0
+    ],
+    "negated": [
+      1.01,
+      -0.03
+    ],
+    "split": "train"
+  },
+  {
+    "concept": "delta",
+    "affirmed": [
+      0,
+      -1
+    ],
+    "negated": [
+      1.98,
+      -0.99
+    ],
+    "split": "train"
+  },
+  {
+    "concept": "ember",
+    "affirmed": [
+      0.5,
+      0.5
+    ],
+    "negated": [
+      2.51,
+      0.52
+    ],
+    "split": "test"
+  },
+  {
+    "concept": "fjord",
+    "affirmed": [
+      -0.5,
+      0.7
+    ],
+    "negated": [
+      1.48,
+      0.68
+    ],
+    "split": "test"
+  }
+]
