@@ -87,7 +87,21 @@ const (
 	AnomalyDuplicateFireEvent = "DUPLICATE_FIRE_EVENT"
 	AnomalyMissingPreWitness  = "MISSING_PRE_WITNESS"
 	AnomalyMissingPostWitness = "MISSING_POST_WITNESS"
+	// AnomalyWedgedAtCeiling — the session FIRED repeatedly yet resident context never came
+	// down off the ceiling: every measured fire left post-fire resident still above the
+	// late-fire fraction of the window. This is the signature an oversized single item produces
+	// (a large image or paste the shedder cannot drop): compaction keeps firing but the window
+	// walk can never seat a kept window under budget, so the session sails at the top firing
+	// uselessly. It is distinct from INEFFECTIVE_FIRE (one fire that did not reduce resident) and
+	// from NO_FIRE_ABOVE_CEILING (never fired at all): here the fires HAPPEN and still do not help.
+	AnomalyWedgedAtCeiling = "WEDGED_AT_CEILING"
 )
+
+// CompactWedgeMinFires — the minimum number of measured fires before a session's persistent
+// high-ceiling residency is read as a WEDGE rather than one late fire. Two consecutive fires that
+// both leave resident above the ceiling is the smallest pattern that distinguishes "stuck" from a
+// single ill-timed cut.
+const CompactWedgeMinFires = 2
 
 // Typed confidence + reason for a fire's pre/post binding.
 const (
@@ -108,6 +122,10 @@ const (
 	VerdictNoFireBounded    = "NO_FIRE_BOUNDED"
 	VerdictNoFireAtCeiling  = "NO_FIRE_ABOVE_CEILING"
 	VerdictTelemetryMissing = "NO_TELEMETRY"
+	// VerdictWedgedAtCeiling — fired repeatedly and still never came off the ceiling (the
+	// oversized-item wedge). Ranked as the worst FIRED outcome: unlike FIRED_WITH_ANOMALIES it is
+	// not a one-off artifact but a session that is structurally stuck.
+	VerdictWedgedAtCeiling = "WEDGED_AT_CEILING"
 )
 
 // CompactFire is one compaction event joined to its resident-context witnesses.
@@ -591,6 +609,24 @@ func finalizeCompactReport(rep *CompactSessionReport) {
 	atCeiling := rep.ContextWindow > 0 &&
 		float64(rep.PeakResidentTokens) >= CompactCeilingApproachFraction*float64(rep.ContextWindow)
 
+	// Wedge detection: count measured fires whose POST-fire resident stayed above the late-fire
+	// ceiling. When at least CompactWedgeMinFires did, the session fired repeatedly and never came
+	// off the ceiling — the oversized-single-item wedge. Requires a known window (else the ceiling
+	// ratio is undefined) and post witnesses (an unmeasured fire cannot prove residency).
+	wedgedFires := 0
+	if rep.ContextWindow > 0 {
+		ceiling := int(CompactCeilingLateFraction * float64(rep.ContextWindow))
+		for i := range rep.Fires {
+			if rep.Fires[i].PostTokens >= ceiling {
+				wedgedFires++
+			}
+		}
+	}
+	wedged := wedgedFires >= CompactWedgeMinFires
+	if wedged {
+		rep.Anomalies = appendUnique(rep.Anomalies, AnomalyWedgedAtCeiling)
+	}
+
 	switch {
 	case rep.TokenSamples == 0:
 		rep.Verdict = VerdictTelemetryMissing
@@ -600,6 +636,9 @@ func finalizeCompactReport(rep *CompactSessionReport) {
 	case len(rep.Fires) == 0:
 		// Bounded without ever needing to fire. Not an anomaly, however big the file.
 		rep.Verdict = VerdictNoFireBounded
+	case wedged:
+		// Fired repeatedly and still pinned at the ceiling — the worst FIRED outcome.
+		rep.Verdict = VerdictWedgedAtCeiling
 	case len(rep.Anomalies) > 0:
 		rep.Verdict = VerdictFiredWithAnomaly
 	default:

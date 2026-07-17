@@ -231,6 +231,55 @@ func TestCompactAuditLateFireFlagged(t *testing.T) {
 	}
 }
 
+// Firing repeatedly yet never coming off the ceiling is the oversized-single-item WEDGE:
+// compaction keeps cutting but the window walk can never seat a kept window under budget (a
+// large image or paste it cannot drop), so resident stays pinned at the top. Two fires that both
+// leave post-fire resident above the late-fire ceiling must land WEDGED_AT_CEILING — distinct from
+// a single LATE_FIRE and from NO_FIRE_ABOVE_CEILING.
+func TestCompactAuditWedgedAtCeilingFlagged(t *testing.T) {
+	// window 258400; late-fire ceiling = 0.95*258400 ≈ 245480. Both fires leave post ≈ 250000,
+	// still above the ceiling — the session fires and never gets headroom.
+	rollout := strings.Join([]string{
+		`{"timestamp":"2026-06-18T09:00:00.000Z","type":"session_meta","payload":{"id":"sess-wedge","cwd":"C:\\work\\fak"}}`,
+		`{"timestamp":"2026-06-18T09:00:01.000Z","type":"event_msg","payload":{"type":"task_started"}}`,
+		`{"timestamp":"2026-06-18T09:00:10.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":255000},"last_token_usage":{"input_tokens":255000},"model_context_window":258400}}}`,
+		`{"timestamp":"2026-06-18T09:00:15.000Z","type":"compacted","payload":{"message":""}}`,
+		`{"timestamp":"2026-06-18T09:00:15.005Z","type":"event_msg","payload":{"type":"context_compacted"}}`,
+		`{"timestamp":"2026-06-18T09:00:20.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":510000},"last_token_usage":{"input_tokens":250000},"model_context_window":258400}}}`,
+		`{"timestamp":"2026-06-18T09:00:25.000Z","type":"event_msg","payload":{"type":"task_started"}}`,
+		`{"timestamp":"2026-06-18T09:00:30.000Z","type":"compacted","payload":{"message":""}}`,
+		`{"timestamp":"2026-06-18T09:00:30.005Z","type":"event_msg","payload":{"type":"context_compacted"}}`,
+		`{"timestamp":"2026-06-18T09:00:35.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":760000},"last_token_usage":{"input_tokens":251000},"model_context_window":258400}}}`,
+		"",
+	}, "\n")
+
+	rep, err := ScanCompactRollout(strings.NewReader(rollout), "mem", int64(len(rollout)))
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if rep.FireCount != 2 {
+		t.Fatalf("fire count = %d, want 2", rep.FireCount)
+	}
+	if rep.Verdict != VerdictWedgedAtCeiling {
+		t.Errorf("verdict = %q, want %q", rep.Verdict, VerdictWedgedAtCeiling)
+	}
+	if !hasAnomaly(rep.Anomalies, AnomalyWedgedAtCeiling) {
+		t.Errorf("anomalies = %v, want %s", rep.Anomalies, AnomalyWedgedAtCeiling)
+	}
+}
+
+// A healthy repeated fire that DOES come off the ceiling must NOT be read as wedged — the wedge
+// signal keys on post-fire resident staying at the top, not on the fire count.
+func TestCompactAuditHealthyRepeatedFireNotWedged(t *testing.T) {
+	rep := scanFixture(t, "healthy-repeated-fire.jsonl")
+	if rep.Verdict == VerdictWedgedAtCeiling {
+		t.Errorf("healthy repeated-fire session read as wedged: %v", rep.Anomalies)
+	}
+	if hasAnomaly(rep.Anomalies, AnomalyWedgedAtCeiling) {
+		t.Errorf("healthy session flagged WEDGED_AT_CEILING: %v", rep.Anomalies)
+	}
+}
+
 // The audit must never surface prompt or tool-output bodies — not in any report field,
 // not in the JSON form. The fixtures carry sentinel bodies for exactly this check.
 func TestCompactAuditNeverEmitsPromptOrToolBodies(t *testing.T) {
