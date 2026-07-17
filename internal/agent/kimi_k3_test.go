@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -85,6 +86,47 @@ func TestKimiK3MoonshotWireAndReasoningReplay(t *testing.T) {
 	}
 }
 
+func TestKimiK3StreamingWireAndReasoning(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Fatalf("request JSON: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"model\":\"kimi-k3\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"inspect \"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"model\":\"kimi-k3\",\"choices\":[{\"delta\":{\"reasoning_content\":\"constraints\",\"content\":\"pong\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	planner := NewHTTPPlanner(server.URL, "kimi-k3", "moonshot-test-key")
+	var streamed strings.Builder
+	completion, err := planner.CompleteStream(context.Background(), func(delta string) error {
+		streamed.WriteString(delta)
+		return nil
+	}, []Message{{Role: RoleUser, Content: "reply pong"}}, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if streamed.String() != "pong" || completion.Message.Content != "pong" {
+		t.Fatalf("stream/content = %q/%q", streamed.String(), completion.Message.Content)
+	}
+	if completion.Message.ReasoningContent != "inspect constraints" {
+		t.Fatalf("reasoning_content = %q", completion.Message.ReasoningContent)
+	}
+	if request["reasoning_effort"] != "max" || request["stream"] != true {
+		t.Fatalf("K3 stream controls = %#v", request)
+	}
+	for _, forbidden := range []string{"temperature", "top_p", "thinking"} {
+		if _, ok := request[forbidden]; ok {
+			t.Errorf("stream request unexpectedly contains %s", forbidden)
+		}
+	}
+}
 func TestKimiK3RejectsUnsupportedReasoningEffort(t *testing.T) {
 	planner := NewHTTPPlanner("http://127.0.0.1:1", "moonshotai/kimi-k3", "")
 	if err := planner.SetExtraBodyJSON(`{"reasoning_effort":"high"}`); err != nil {
