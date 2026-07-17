@@ -256,6 +256,8 @@ concurrent = [
   "executionroute",
   "market",
   "clonescan", # #5059: internal/clonescan leaf (the #4325/#4330 dup-cache tokenizer) declared so clonescan-scoped issues route to a runnable `go test ./internal/clonescan` gate, not the phantom ci/internal/ci lane; cmd/fak/dup.go + internal/hooks shims stay in their own lanes to keep leaf trees pairwise-disjoint.
+  "egresslist", # #5130: internal/egresslist leaf (the bundled egress filter-list classifier, shipped by #4978) declared so the arbiter detects same-tree collisions instead of borrowing the `policy` lane; cmd/fak egresslist shims stay in the `cmd` lane to keep leaf trees pairwise-disjoint
+  "egressrefresh", # #5130: internal/egressrefresh leaf (the #4978 upstream refresh engine, maintenance twin of egresslist) declared as its own lane so its tree stays pairwise-disjoint from egresslist
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -377,6 +379,8 @@ autopick = [
   "executionroute",
   "market",
   "clonescan", # #5059: internal/clonescan leaf -- see [lanes].concurrent note.
+  "egresslist", # #5130: internal/egresslist leaf -- see [lanes].concurrent note.
+  "egressrefresh", # #5130: internal/egressrefresh leaf -- see [lanes].concurrent note.
   # new-leaf:lane
 ]
 
@@ -581,6 +585,8 @@ modelaccept = ["internal/modelaccept/**"]
 executionroute = ["internal/executionroute/**"]
 market = ["internal/market/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
+egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
+egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
