@@ -136,3 +136,48 @@ func TestNextQueueDrainsInSourceSiteOrderAcrossRenderClasses(t *testing.T) {
 		t.Fatal("second boundary drain accepted")
 	}
 }
+
+func TestWitnessMoveUsesSharedDrainAndReadback(t *testing.T) {
+	move := Move{Kind: MoveContinue, Render: RenderReopen, Session: SessionInteractive, Gate: "guard", Source: "guard-stophook", Payload: "keep working"}
+	record, err := WitnessMove(move, ApplyResult{Applied: false, Refusal: "fail-open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Move != move || record.Applied || record.Refusal != "fail-open" || record.Sequence != 1 {
+		t.Fatalf("record = %+v, want durable refused continuation", record)
+	}
+}
+
+func TestNextDrainHasSingleProductionAuthority(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	var definitions []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if base == ".git" || base == "_scratch" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(b), "func (q *NextQueue) Drain(") {
+			definitions = append(definitions, filepath.ToSlash(path))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(definitions) != 1 || !strings.HasSuffix(definitions[0], "internal/sessionctl/next.go") {
+		t.Fatalf("NextQueue.Drain production authorities = %v, want only internal/sessionctl/next.go", definitions)
+	}
+}

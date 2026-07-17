@@ -14,8 +14,8 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 | Metric | Value |
 |---|---|
 | **Score** | **96.3/100** (grade A) = 9.6/10 |
-| **Coverage** | **94.3%** (1951/2070 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **119** (clarity 0 + coverage 119) |
+| **Coverage** | **94.3%** (1951/2069 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **118** (clarity 0 + coverage 118) |
 | Crystal-clear concepts | 255 of 1724 positioned |
 | As of |  (fak ) |
 
@@ -24,7 +24,7 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1724 concepts - score 96.3/100 (grade A) - disambiguation-debt 119
+concept-disambiguation chart - 1724 concepts - score 96.3/100 (grade A) - disambiguation-debt 118
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####....................... 255
@@ -66,7 +66,7 @@ coverage by family (positioned / discovered):
   session-runtime  ###########################. 173/179
   score-debt       ##########################.. 78/83
   support-maturity ########################.... 29/34
-  witness-proof    ###########################. 126/131
+  witness-proof    ###########################. 126/130
   evict            ##########################.. 40/43
   gateway-engine   ###########################. 159/162
   attention        ###########################. 69/71
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 94.3%  (1951/2070 confusable tokens positioned)
+namespace coverage  [##############################..] 94.3%  (1951/2069 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1960,7 +1960,7 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 | session-runtime | 173 | 179 | 6 |
 | score-debt | 78 | 83 | 5 |
 | support-maturity | 29 | 34 | 5 |
-| witness-proof | 126 | 131 | 5 |
+| witness-proof | 126 | 130 | 4 |
 | evict | 40 | 43 | 3 |
 | gateway-engine | 159 | 162 | 3 |
 | attention | 69 | 71 | 2 |

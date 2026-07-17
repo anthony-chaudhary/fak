@@ -275,6 +275,23 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 		d := resume.DecideWatchdogRow(p, guards, hist, outcome)
+		nextMove := sessionctl.Move{
+			Kind: sessionctl.MoveHalt, Render: sessionctl.RenderStop, Session: sessionctl.SessionAutonomous,
+			Gate: string(d.Action), Source: "resume-watchdog", Reason: d.Reason,
+		}
+		if d.Action == resume.WatchdogLaunch {
+			nextMove.Kind, nextMove.Render = sessionctl.MoveContinue, sessionctl.RenderSystemDirective
+			nextMove.Payload = p.ResumeTarget()
+		}
+		result := sessionctl.ApplyResult{Applied: d.Action == resume.WatchdogLaunch}
+		if d.Action != resume.WatchdogLaunch {
+			result.Refusal = d.Reason
+		}
+		if nextRecord, err := sessionctl.WitnessMove(nextMove, result); err != nil {
+			note("  NEXT-WITNESS %s skipped (fail-open): %v", sid8, err)
+		} else {
+			rwAppendLedger(ledgerPath, map[string]any{"ts": rwNowISO(), "session": p.Session, "phase": "decision", "next": nextRecord})
+		}
 		// Count the per-session verdict the moment it is decided — launch, skip_self,
 		// skip_blocked, skip_operator_hold, … — so /debug/vars carries the live verdict mix
 		// independent of any ledger write that may or may not land (#3803).

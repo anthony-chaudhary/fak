@@ -359,6 +359,41 @@
           "category": "incidental",
           "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
           "token": "CacheValueGateDebtKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "guard_output_style"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "guardHandoffBlockCeiling"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "guardHandoffBlockCeilingEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "FAK_GUARD_HANDOFF_BLOCK_CEILING"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "guardHandoffBlockCeilingDefault"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "guardHandoffBlockCounterRel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "guardHandoffBlockCounterPath"
         }
       ],
       "exclude": [
@@ -374,6 +409,7 @@
       "id": "guard-gate",
       "ignore": [
         "CacheValueGateDebtKey",
+        "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
@@ -391,6 +427,11 @@
         "guardEquivalentRestartLimit",
         "guardEquivalentRestartStatus",
         "guardEquivalentRestarts",
+        "guardHandoffBlockCeiling",
+        "guardHandoffBlockCeilingDefault",
+        "guardHandoffBlockCeilingEnv",
+        "guardHandoffBlockCounterPath",
+        "guardHandoffBlockCounterRel",
         "guardOperatorQuestionEscalationSink",
         "guardOperatorQuestionEscalationSlackSource",
         "guardOperatorQuestionEscalationSlackText",
@@ -402,6 +443,7 @@
         "guardWindowsQuotedArgUnits",
         "guard_bypass",
         "guard_operator_question",
+        "guard_output_style",
         "guardarbitrateflagvalue",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
@@ -471,6 +513,31 @@
           "category": "incidental",
           "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
           "token": "SessionAutonomous"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "handoff_session_give_up"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "stopDispHandoffSessionGiveUp"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "sanitizeSessionForPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "readSessionHandoffBlocks"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "bumpSessionHandoffBlocks"
         }
       ],
       "id": "session-runtime",
@@ -478,16 +545,20 @@
         "SessionAutonomous",
         "SessionClass",
         "SessionInteractive",
+        "bumpSessionHandoffBlocks",
         "confusedsessions",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
         "enqueueGuardSessionThreadNotice",
         "gen_session_effectiveness_svg",
         "guardsessiontempdir",
+        "handoff_session_give_up",
         "interactivesession",
+        "readSessionHandoffBlocks",
         "requireminimaxsession",
         "restartfreshsession",
         "runtuisessions",
+        "sanitizeSessionForPath",
         "scheduled",
         "schedulers",
         "scheduling",
@@ -496,6 +567,7 @@
         "sessionsaudited",
         "slots",
         "slotting",
+        "stopDispHandoffSessionGiveUp",
         "topsessions",
         "totalslots",
         "tuisessionrow"
@@ -615,6 +687,11 @@
           "category": "incidental",
           "reason": "implementation helper for dispatch resume witness capture; not a distinct witness-proof concept",
           "token": "dispatchWitnessSamePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "WitnessMove"
         }
       ],
       "id": "witness-proof",
@@ -624,6 +701,7 @@
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
         "VerdictUnwitnessed",
+        "WitnessMove",
         "dispatchWitnessArchiveStranded",
         "dispatchWitnessDirtyFile",
         "dispatchWitnessDirtyPaths",
@@ -938,12 +1016,18 @@
           "category": "incidental",
           "reason": "Local benchloop struct carrying the launch-gate reuse verdict; the canonical concept is benchmark-run lineage reuse, not this DTO",
           "token": "ReuseDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
+          "token": "decisionStderr"
         }
       ],
       "id": "decision",
       "ignore": [
         "ReuseDecision",
         "appendsteerdecisions",
+        "decisionStderr",
         "gooddecisionratio",
         "kinddecisionsabout"
       ],

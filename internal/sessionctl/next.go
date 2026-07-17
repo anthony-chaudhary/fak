@@ -203,6 +203,34 @@ func (q *NextQueue) Drain(w io.Writer, apply MoveApplier) error {
 	return nil
 }
 
+// WitnessMove runs one move through the shared enqueue/drain boundary and returns
+// the decoded witness row. Callers persist that row in their own durable ledger;
+// they do not invent a parallel decision schema.
+func WitnessMove(move Move, result ApplyResult) (NextRecord, error) {
+	if move.Session == "" {
+		return NextRecord{}, errors.New("sessionctl next: witness move requires session class")
+	}
+	q, err := NewNextQueue(move.Session)
+	if err != nil {
+		return NextRecord{}, err
+	}
+	if err := q.Enqueue(move); err != nil {
+		return NextRecord{}, err
+	}
+	var witness strings.Builder
+	if err := q.Drain(&witness, func(Move) (ApplyResult, error) { return result, nil }); err != nil {
+		return NextRecord{}, err
+	}
+	records, err := ReadNextRecords(strings.NewReader(witness.String()))
+	if err != nil {
+		return NextRecord{}, err
+	}
+	if len(records) != 1 {
+		return NextRecord{}, fmt.Errorf("sessionctl next: one-move witness produced %d rows", len(records))
+	}
+	return records[0], nil
+}
+
 // ReadNextRecords re-reads the durable JSONL witness rather than trusting an
 // in-memory Drain return.
 func ReadNextRecords(r io.Reader) ([]NextRecord, error) {

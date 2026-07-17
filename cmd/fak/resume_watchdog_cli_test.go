@@ -1167,3 +1167,48 @@ func TestResumeWatchdogPromptTransportMovesGuardFrontedWindowsPrompt(t *testing.
 		}
 	}
 }
+
+func TestResumeWatchdogDryRunLedgersSharedNextDecision(t *testing.T) {
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "plan.json")
+	ledger := filepath.Join(dir, "ledger.jsonl")
+	row := resume.WatchdogPlanRow{Session: "session-next", CWD: dir, Account: "worker"}
+	b, err := json.Marshal([]resume.WatchdogPlanRow{row})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plan, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldSpawn := resumeWatchdogSpawn
+	resumeWatchdogSpawn = func(resumeWatchdogSpawnSpec) error { return nil }
+	t.Cleanup(func() { resumeWatchdogSpawn = oldSpawn })
+
+	var out, stderr strings.Builder
+	code := runResumeWatchdog(&out, &stderr, []string{"--plan", plan, "--ledger", ledger, "--no-refresh"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	data, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found struct {
+		Phase string                `json:"phase"`
+		Next  sessionctl.NextRecord `json:"next"`
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var row struct {
+			Phase string                `json:"phase"`
+			Next  sessionctl.NextRecord `json:"next"`
+		}
+		if json.Unmarshal([]byte(line), &row) == nil && row.Phase == "decision" {
+			found = row
+			break
+		}
+	}
+	if found.Phase != "decision" || !found.Next.Applied || found.Next.Move.Kind != sessionctl.MoveContinue || found.Next.Move.Render != sessionctl.RenderSystemDirective {
+		t.Fatalf("decision next = %+v", found)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
@@ -355,14 +356,38 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	// hook test that does not set it and never changes this hook's decision. The default
 	// disposition is the conservative fail-open-bad-args reading until a return reclassifies.
 	rec := guardStopRecord{Schema: guardStopRecordSchema, Ts: time.Now().UTC().Format(time.RFC3339), Disposition: string(stopDispFailOpenBadArgs)}
+	var nextPayload strings.Builder
+	decisionStderr := io.MultiWriter(stderr, &nextPayload)
 	defer func() {
 		rec.Exit = exit
 		rec.Blocked = exit == 2
 		if rec.Kind == "" {
 			rec.Kind = string(guardStopDispositionKind(guardStopDisposition(rec.Disposition)))
 		}
+		kind := guardStopDispositionKind(guardStopDisposition(rec.Disposition))
+		move := sessionctl.Move{
+			Kind: sessionctl.MoveHalt, Render: sessionctl.RenderStop,
+			Session: sessionctl.SessionInteractive, Gate: rec.Disposition,
+			Source: "guard-stophook", Payload: strings.TrimSpace(nextPayload.String()),
+		}
+		result := sessionctl.ApplyResult{Applied: true}
+		if exit == 2 || kind == stopKindShadow {
+			move.Kind, move.Render = sessionctl.MoveContinue, sessionctl.RenderReopen
+		}
+		if kind == stopKindShadow {
+			move.Shadow = true
+			result = sessionctl.ApplyResult{Applied: false, Refusal: "shadow: continuation observed but stop allowed"}
+		} else if kind == stopKindFailOpen {
+			result = sessionctl.ApplyResult{Applied: false, Refusal: "fail-open: stop allowed because the gate could not decide"}
+		}
+		if next, err := sessionctl.WitnessMove(move, result); err == nil {
+			rec.Next = &next
+		} else {
+			fmt.Fprintf(stderr, "fak guard Stop: next witness skipped (fail-open): %v\n", err)
+		}
 		emitGuardStopRecord(stderr, rec)
 	}()
+	stderr = decisionStderr
 	fs := flag.NewFlagSet("guard-stophook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	modeFlag := fs.String("mode", os.Getenv(guardStopHookEnvMode), "off|shadow|enforce")

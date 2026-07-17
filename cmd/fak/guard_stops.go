@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/headlesslint"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/resume/transcript"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
 
 // guard_stops.go — make the guard Stop hook's session-ending decisions TYPED,
@@ -58,6 +60,7 @@ const (
 	stopDispSameIssueContinue        guardStopDisposition = "same_issue_continue"        // block: same-issue deny-all ladder
 	stopDispHandoffBlock             guardStopDisposition = "handoff_block"              // block: task-handoff Stop gate held the stop
 	stopDispOperatorDirectedContinue guardStopDisposition = "operator_directed_continue" // block: headless turn asked a human; feed the choicetriage remediation back
+	stopDispOutputStyleContinue      guardStopDisposition = "output_style_continue"      // block: final turn closed on a prose wall; feed the re-cast remediation back
 
 	// operator-directed non-blocking outcomes (see guard_operator_directed.go): the final
 	// turn addressed a human, but the gate allowed the stop.
@@ -65,11 +68,17 @@ const (
 	stopDispOperatorDirectedWarn     guardStopDisposition = "operator_directed_warn"     // allow: warn soak — remediation printed, stop allowed
 	stopDispOperatorDirectedShadow   guardStopDisposition = "operator_directed_shadow"   // allow: shadow — would-enforce decision logged, stop allowed
 
+	// output-style (closing-shape) non-blocking outcomes (see guard_output_style.go): the
+	// final turn closed on a prose wall, but the gate allowed the stop.
+	stopDispOutputStyleWarn   guardStopDisposition = "output_style_warn"   // allow: warn soak — re-cast remediation printed, stop allowed
+	stopDispOutputStyleShadow guardStopDisposition = "output_style_shadow" // allow: shadow — would-enforce decision logged, stop allowed
+
 	// bounded stand-downs (the hook gave up and ALLOWED the stop after the ladder)
-	stopDispBlindGiveUp        guardStopDisposition = "blind_give_up"         // stood down past --deny-all-max (blind)
-	stopDispSameIssueGiveUp    guardStopDisposition = "same_issue_give_up"    // stood down at the same-issue depth
-	stopDispToolFeedbackGiveUp guardStopDisposition = "tool_feedback_give_up" // stood down past the tool-feedback continue bound (#A6)
-	stopDispHandoffGiveUp      guardStopDisposition = "handoff_give_up"       // stood down: handoff still invalid after a prior block (stop_hook_active) (#A2)
+	stopDispBlindGiveUp          guardStopDisposition = "blind_give_up"           // stood down past --deny-all-max (blind)
+	stopDispSameIssueGiveUp      guardStopDisposition = "same_issue_give_up"      // stood down at the same-issue depth
+	stopDispToolFeedbackGiveUp   guardStopDisposition = "tool_feedback_give_up"   // stood down past the tool-feedback continue bound (#A6)
+	stopDispHandoffGiveUp        guardStopDisposition = "handoff_give_up"         // stood down: handoff still invalid after a prior block (stop_hook_active) (#A2)
+	stopDispHandoffSessionGiveUp guardStopDisposition = "handoff_session_give_up" // stood down: handoff still invalid after the per-session block ceiling (the bound a real worker's late re-stop never reaches via stop_hook_active)
 
 	// non-enforcing outcomes
 	stopDispModeOff guardStopDisposition = "mode_off" // --deny-all-continue=off: layer disabled
@@ -107,13 +116,13 @@ func guardStopDispositionKind(d guardStopDisposition) guardStopKind {
 		// right to stop on an authority wall — so it rolls up as a clean stop; the
 		// OperatorDirected count keeps it separately visible.
 		return stopKindClean
-	case stopDispToolFeedbackContinue, stopDispDenyAllContinue, stopDispSameIssueContinue, stopDispHandoffBlock, stopDispOperatorDirectedContinue:
+	case stopDispToolFeedbackContinue, stopDispDenyAllContinue, stopDispSameIssueContinue, stopDispHandoffBlock, stopDispOperatorDirectedContinue, stopDispOutputStyleContinue:
 		return stopKindContinue
-	case stopDispBlindGiveUp, stopDispSameIssueGiveUp, stopDispToolFeedbackGiveUp, stopDispHandoffGiveUp:
+	case stopDispBlindGiveUp, stopDispSameIssueGiveUp, stopDispToolFeedbackGiveUp, stopDispHandoffGiveUp, stopDispHandoffSessionGiveUp:
 		return stopKindStandDown
 	case stopDispModeOff:
 		return stopKindOff
-	case stopDispShadow, stopDispOperatorDirectedWarn, stopDispOperatorDirectedShadow:
+	case stopDispShadow, stopDispOperatorDirectedWarn, stopDispOperatorDirectedShadow, stopDispOutputStyleWarn, stopDispOutputStyleShadow:
 		return stopKindShadow
 	default:
 		return stopKindFailOpen
@@ -142,14 +151,21 @@ type guardStopRecord struct {
 	Blocked     bool   `json:"blocked,omitempty"`
 	Depth       int    `json:"depth,omitempty"` // the consecutive count that drove the decision
 	Bound       int    `json:"bound,omitempty"` // the give-up bound (max, or same-issue depth)
+	// HandoffBlockSeq is how many times the task-handoff Stop gate has blocked THIS
+	// session, counting the current decision. It is the per-session sequence the
+	// handoff-block ceiling bounds (see guardHandoffBlockCeiling); surfaced so an
+	// operator can see a worker riding the ceiling (seq climbing to the bound) instead
+	// of the churn being invisible. Zero for any stop the handoff gate did not block.
+	HandoffBlockSeq int `json:"handoff_block_seq,omitempty"`
 
 	DenyAllConsecutive      int `json:"deny_all_consecutive,omitempty"`
 	DenyAllSameConsecutive  int `json:"deny_all_same_consecutive,omitempty"`
 	ToolFeedbackConsecutive int `json:"tool_feedback_consecutive,omitempty"`
 
-	StopHookActive bool                 `json:"stop_hook_active,omitempty"`
-	Transcript     *guardStopTranscript `json:"transcript,omitempty"`
-	Note           string               `json:"note,omitempty"`
+	StopHookActive bool                   `json:"stop_hook_active,omitempty"`
+	Transcript     *guardStopTranscript   `json:"transcript,omitempty"`
+	Next           *sessionctl.NextRecord `json:"next,omitempty"`
+	Note           string                 `json:"note,omitempty"`
 }
 
 // guardStopTranscript is the bounded read-back of the session transcript at the
@@ -179,6 +195,15 @@ type guardStopTranscript struct {
 	OperatorDirectedDisposition string `json:"operator_directed_disposition,omitempty"`
 	OperatorDirectedResolve     string `json:"operator_directed_resolve,omitempty"`
 	OperatorDirectedCount       int    `json:"operator_directed_count,omitempty"`
+
+	// ClosingProseWall records that the FINAL assistant turn closed on a trailing prose
+	// wall — a long paragraph with no scannable bullets, burying the verdict and the next
+	// step in text (internal/headlesslint.ScanClosing). It is recorded INDEPENDENTLY of the
+	// operator-directed scan: a turn clean of questions can still close on a wall.
+	// ClosingResolve carries the re-cast remediation the output-style rung feeds back.
+	// Observe-only and fail-open: a scannable close leaves both fields zero.
+	ClosingProseWall bool   `json:"closing_prose_wall,omitempty"`
+	ClosingResolve   string `json:"closing_resolve,omitempty"`
 }
 
 // ---- transcript reading -----------------------------------------------------
@@ -243,6 +268,7 @@ func readGuardStopTranscript(path string) *guardStopTranscript {
 	// question, and that is the one worth recording.
 	if lastText != "" && !sig.LastHadToolUse {
 		applyHeadlessLintSignal(sig, lastText)
+		applyClosingSignal(sig, lastText)
 	}
 	return sig
 }
@@ -265,6 +291,21 @@ func applyHeadlessLintSignal(sig *guardStopTranscript, finalTurn string) {
 	sig.OperatorDirectedClass = string(top.Class)
 	sig.OperatorDirectedDisposition = string(top.Disposition)
 	sig.OperatorDirectedResolve = top.Resolve
+}
+
+// applyClosingSignal records whether the final assistant turn closed on a prose wall
+// (internal/headlesslint.ScanClosing) rather than scannable bullets — the SENSOR the
+// output-style rung (guard_output_style.go) reads. It is INDEPENDENT of
+// applyHeadlessLintSignal: a turn clean of operator-directed questions can still close
+// on a wall, so both run over the same final turn. Fail-open: a scannable close is a
+// no-op, leaving ClosingProseWall/ClosingResolve zero.
+func applyClosingSignal(sig *guardStopTranscript, finalTurn string) {
+	rep := headlesslint.ScanClosing(finalTurn, false)
+	if !rep.Refused() {
+		return
+	}
+	sig.ClosingProseWall = true
+	sig.ClosingResolve = rep.Resolve
 }
 
 // transcriptNotesNoAllowedPath reports whether assistant text carries the sanctioned
@@ -316,6 +357,109 @@ func guardStopsLedgerResolved() string {
 		return p
 	}
 	return guardStopsLedgerDefault()
+}
+
+// ---- per-session handoff-block ceiling --------------------------------------
+
+const (
+	// guardHandoffBlockCeilingEnv overrides how many times the task-handoff Stop gate
+	// may BLOCK a single session's clean stop before it stands down and allows the stop.
+	guardHandoffBlockCeilingEnv = "FAK_GUARD_HANDOFF_BLOCK_CEILING"
+	// guardHandoffBlockCeilingDefault is that bound's default. The gate's original only
+	// stand-down (stop_hook_active) fires ONLY on an immediate harness re-fire; a real
+	// worker re-stops many turns later with stop_hook_active=false, so without this
+	// ceiling the gate can re-block a worker that has nothing left to hand off every
+	// 24-65 turns indefinitely (the observed handoff-loop). Three blocks is enough to
+	// demand the handoff firmly without holding a stuck session forever.
+	guardHandoffBlockCeilingDefault = 3
+	// guardHandoffBlockCounterRel is the subdirectory (beside the stops ledger) holding
+	// one tiny per-session counter file, so the ceiling is O(1) and exact per session.
+	guardHandoffBlockCounterRel = "handoff-blocks"
+)
+
+// guardHandoffBlockCeiling resolves the per-session handoff-block ceiling: the env
+// override if a valid non-negative int, else the default. A value <= 0 disables the
+// ceiling (the gate reverts to its prior stop_hook_active-only bound).
+func guardHandoffBlockCeiling() int {
+	v := strings.TrimSpace(os.Getenv(guardHandoffBlockCeilingEnv))
+	if v == "" {
+		return guardHandoffBlockCeilingDefault
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return guardHandoffBlockCeilingDefault
+	}
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// guardHandoffBlockCounterPath is the per-session counter file, beside the wired stops
+// ledger. Empty when no session id is known or no ledger is configured — in which case
+// the ceiling is inert and the gate keeps its prior behavior (fail-open). Each claude
+// session owns a unique id, so its counter file is never shared and its Stop hooks fire
+// serially, so no concurrent writer races on it.
+func guardHandoffBlockCounterPath(session string) string {
+	session = strings.TrimSpace(session)
+	if session == "" {
+		return ""
+	}
+	ledger := guardStopsLedgerConfigured()
+	if ledger == "" {
+		return ""
+	}
+	safe := sanitizeSessionForPath(session)
+	if safe == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(ledger), guardHandoffBlockCounterRel, safe)
+}
+
+// sanitizeSessionForPath maps a session id to a single safe path segment (session ids
+// are UUID-like, but be defensive against a path separator smuggled in).
+func sanitizeSessionForPath(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, s)
+}
+
+// readSessionHandoffBlocks returns how many times the handoff gate has already blocked
+// this session. FAIL-OPEN: any miss (no path, unreadable, unparsable) reads as 0.
+func readSessionHandoffBlocks(session string) int {
+	p := guardHandoffBlockCounterPath(session)
+	if p == "" {
+		return 0
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// bumpSessionHandoffBlocks increments this session's handoff-block counter by one.
+// FAIL-OPEN: a no-op on any error (no path, unwritable dir) — the ceiling then simply
+// never engages for this session rather than changing the stop decision.
+func bumpSessionHandoffBlocks(session string) {
+	p := guardHandoffBlockCounterPath(session)
+	if p == "" {
+		return
+	}
+	n := readSessionHandoffBlocks(session) + 1
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(p, []byte(strconv.Itoa(n)), 0o644)
 }
 
 // emitGuardStopRecord appends one row to the wired ledger. FAIL-OPEN: a no-op when no
@@ -504,6 +648,9 @@ func renderGuardStopsSummary(sum guardStopsSummary) string {
 			if r.Bound > 0 {
 				fmt.Fprintf(&b, "/%d", r.Bound)
 			}
+		}
+		if r.HandoffBlockSeq > 0 {
+			fmt.Fprintf(&b, " handoff_seq=%d", r.HandoffBlockSeq)
 		}
 		if r.Transcript != nil && r.Transcript.NotedNoAllowedPath {
 			b.WriteString(" (agent noted no-allowed-path)")

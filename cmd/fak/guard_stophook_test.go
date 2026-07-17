@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 )
 
@@ -432,6 +433,63 @@ func TestRunGuardStopHookHandoffStandsDownWhenStopHookActive(t *testing.T) {
 	}
 }
 
+// TestRunGuardTaskHandoffGateHonorsTerminalWrapup: a missing/invalid handoff no longer blocks when
+// the worker's final turn wrote the guard's own sanctioned "no allowed path:" wrap-up — that terminal
+// conclusion is honored (allowed, classified clean_wrapup) rather than re-demanded.
+func TestRunGuardTaskHandoffGateHonorsTerminalWrapup(t *testing.T) {
+	tr := &guardStopTranscript{Read: true, NotedNoAllowedPath: true}
+	exit, disp := runGuardTaskHandoffGate(&strings.Builder{}, false, tr, 0, 3, guardTaskHandoffConfig{
+		Mode: guardPreCompactModeEnforce,
+		File: filepath.Join(t.TempDir(), "missing-handoff.json"),
+	})
+	if exit != 0 || disp != stopDispCleanWrapup {
+		t.Fatalf("gate = (%d,%q), want (0,%q) — a sanctioned wrap-up must be honored, not re-blocked", exit, disp, stopDispCleanWrapup)
+	}
+}
+
+// TestRunGuardTaskHandoffGateSessionCeiling: below the per-session ceiling the gate still blocks; at
+// or past it the gate stands down (the bound a real worker's late re-stop never trips via stop_hook_active).
+func TestRunGuardTaskHandoffGateSessionCeiling(t *testing.T) {
+	cfg := guardTaskHandoffConfig{Mode: guardPreCompactModeEnforce, File: filepath.Join(t.TempDir(), "missing-handoff.json")}
+	if exit, disp := runGuardTaskHandoffGate(&strings.Builder{}, false, nil, 2, 3, cfg); exit != 2 || disp != stopDispHandoffBlock {
+		t.Fatalf("priorBlocks=2 ceiling=3: gate = (%d,%q), want (2,%q) — still block below the ceiling", exit, disp, stopDispHandoffBlock)
+	}
+	if exit, disp := runGuardTaskHandoffGate(&strings.Builder{}, false, nil, 3, 3, cfg); exit != 0 || disp != stopDispHandoffSessionGiveUp {
+		t.Fatalf("priorBlocks=3 ceiling=3: gate = (%d,%q), want (0,%q) — stand down at the ceiling", exit, disp, stopDispHandoffSessionGiveUp)
+	}
+	// ceiling <= 0 disables the bound: the gate keeps blocking regardless of priorBlocks.
+	if exit, disp := runGuardTaskHandoffGate(&strings.Builder{}, false, nil, 99, 0, cfg); exit != 2 || disp != stopDispHandoffBlock {
+		t.Fatalf("ceiling=0 (disabled): gate = (%d,%q), want (2,%q)", exit, disp, stopDispHandoffBlock)
+	}
+}
+
+// TestRunGuardStopHookHandoffCeilingStandsDownAfterRepeatedBlocks exercises the per-session counter
+// end-to-end through the full hook: with a wired stops ledger and a ceiling of 2, the same session's
+// first two clean stops are blocked (handoff missing) and the third stands down — the durable counter
+// bounds the loop even though stop_hook_active is never set on a real worker's late re-stops.
+func TestRunGuardStopHookHandoffCeilingStandsDownAfterRepeatedBlocks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 0\n"))
+	}))
+	defer srv.Close()
+	t.Setenv(guardStopsLedgerEnv, filepath.Join(t.TempDir(), "guard-stops.jsonl"))
+	t.Setenv(guardHandoffBlockCeilingEnv, "2")
+	args := []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+		"--task-handoff-mode", guardPreCompactModeEnforce,
+		"--task-handoff-file", filepath.Join(t.TempDir(), "missing-handoff.json"),
+	}
+	payload := `{"session_id":"sess-ceiling"}`
+	for i, want := range []int{2, 2, 0} { // block, block, stand down
+		var stderr strings.Builder
+		got := runGuardStopHook(&stderr, strings.NewReader(payload), args)
+		if got != want {
+			t.Fatalf("stop #%d: exit = %d, want %d; stderr=%s", i+1, got, want, stderr.String())
+		}
+	}
+}
+
 // TestRunGuardStopHookGivesUpToolFeedbackPastOwnBound is the bound half of #A6: the retryable
 // tool-feedback continue no longer runs forever. Past its own (separate, generous) ceiling the hook
 // stands down and ALLOWS the stop instead of holding the turn open every turn. The ceiling is
@@ -562,6 +620,56 @@ func TestRunGuardStopHookFailsOpenWhenGaugeUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "allowing stop") {
 		t.Fatalf("stderr = %q, want fail-open log", stderr.String())
+	}
+}
+
+func TestRunGuardStopHookFailOpenWritesUnifiedNextRefusal(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "guard-stops.jsonl")
+	t.Setenv(guardStopsLedgerEnv, ledger)
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", "http://127.0.0.1:1/metrics",
+		"--timeout", "1ms",
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want fail-open 0", code)
+	}
+	records, err := readGuardStopRecords(ledger)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records = %+v err=%v", records, err)
+	}
+	next := records[0].Next
+	if next == nil || next.Applied || next.Move.Kind != sessionctl.MoveHalt || next.Move.Render != sessionctl.RenderStop {
+		t.Fatalf("next = %+v, want unapplied halt->stop fail-open witness", next)
+	}
+	if !strings.Contains(next.Refusal, "fail-open") {
+		t.Fatalf("refusal = %q, want fail-open", next.Refusal)
+	}
+}
+
+func TestRunGuardStopHookContinueWritesUnifiedReopen(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "guard-stops.jsonl")
+	t.Setenv(guardStopsLedgerEnv, ledger)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 1\n"))
+	}))
+	defer srv.Close()
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{"--mode", guardPreCompactModeEnforce, "--metrics-url", srv.URL + "/metrics"})
+	if code != 2 {
+		t.Fatalf("exit = %d, want continue 2", code)
+	}
+	records, err := readGuardStopRecords(ledger)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records = %+v err=%v", records, err)
+	}
+	next := records[0].Next
+	if next == nil || !next.Applied || next.Move.Kind != sessionctl.MoveContinue || next.Move.Render != sessionctl.RenderReopen {
+		t.Fatalf("next = %+v, want applied continue->reopen witness", next)
+	}
+	if next.Move.Payload == "" {
+		t.Fatal("continue witness lost stderr guidance payload")
 	}
 }
 
