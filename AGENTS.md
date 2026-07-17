@@ -477,6 +477,18 @@ route around the guard (that just trips the next one).
 Check your setup first: `python tools/extend_preflight.py`. Full contributor contract:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+**If you judge the refusal itself wrong — appeal it, don't just journal it.** A
+false-positive `DENY` is byte-identical in the decision journal to a correct one, so
+only the agent that made the call knows it was wrong; a private memory note fixes
+nothing for the next agent. File a deduping, witnessed appeal:
+`fak complain --summary "…" --reason <TOKEN> --tool <Tool> --from-journal
+--args-digest <sha256:…> --live` (repeat appeals about the same class fold onto one
+escalating issue). It files a gh ticket only with `--live`, **or** set
+`FAK_COMPLAIN_LIVE=1` fleet-wide so every appeal auto-files — a dry-run says on
+stderr that nothing was filed. Recover first; appeal only when you are confident the
+guard, not your call, is wrong. Taxonomy + routing:
+[`docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md`](docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md).
+
 ## Releasing (cut, publish, roll back)
 
 The version source-of-truth is the bare `VERSION` file; the shipped history is the
