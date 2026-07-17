@@ -91,20 +91,12 @@ func popupPushRangeFiles(r, base string) ([]string, error) {
 	if _, err := gitOut(r, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
 		return nil, fmt.Errorf("base %q unresolvable", base)
 	}
-	out, err := gitOut(r, "diff", "--name-only", base+"...HEAD")
+	changed, err := gitChangedFilesRange(r, base, "HEAD", ".ps1", ".py", ".go")
 	if err != nil {
 		return nil, err
 	}
 	var files []string
-	for _, ln := range strings.Split(out, "\n") {
-		ln = strings.TrimSpace(ln)
-		if ln == "" {
-			continue
-		}
-		if !strings.HasSuffix(ln, ".ps1") && !strings.HasSuffix(ln, ".py") && !strings.HasSuffix(ln, ".go") {
-			continue
-		}
-		ln = filepath.ToSlash(ln)
+	for _, ln := range changed {
 		if _, statErr := os.Stat(filepath.Join(r, filepath.FromSlash(ln))); statErr != nil {
 			continue // deleted in the range → nothing on disk to flash
 		}

@@ -457,6 +457,16 @@ func resolvePrepushBase(r string) string {
 // base..HEAD add or change, via three-dot `git diff` (merge-base range = exactly what the
 // push adds), reading COMMITTED bytes only — never the peer-dirty working tree.
 func gitChangedGoFilesRange(r, base, tip string) ([]string, error) {
+	return gitChangedFilesRange(r, base, tip, ".go")
+}
+
+// gitChangedFilesRange is the general form of gitChangedGoFilesRange: it returns the
+// repo-relative, slash-separated files the commits in base...tip add or change whose name
+// ends in ANY of suffixes, via three-dot `git diff` (merge-base range = exactly what the
+// push adds), reading COMMITTED bytes only — never the peer-dirty working tree. Passing no
+// suffixes returns every changed path. Shared by the .go-only prepush build gate and the
+// .ps1/.py/.go pre-push popup gate (#5145) so the range walk lives in exactly one place.
+func gitChangedFilesRange(r, base, tip string, suffixes ...string) ([]string, error) {
 	out, err := gitOut(r, "diff", "--name-only", base+"..."+tip)
 	if err != nil {
 		return nil, err
@@ -464,13 +474,26 @@ func gitChangedGoFilesRange(r, base, tip string) ([]string, error) {
 	var files []string
 	for _, ln := range strings.Split(out, "\n") {
 		ln = strings.TrimSpace(ln)
-		if ln == "" || !strings.HasSuffix(ln, ".go") {
+		if ln == "" {
+			continue
+		}
+		if len(suffixes) > 0 && !hasAnySuffix(ln, suffixes) {
 			continue
 		}
 		files = append(files, filepath.ToSlash(ln))
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// hasAnySuffix reports whether s ends in any of the given suffixes.
+func hasAnySuffix(s string, suffixes []string) bool {
+	for _, suf := range suffixes {
+		if strings.HasSuffix(s, suf) {
+			return true
+		}
+	}
+	return false
 }
 
 // prepushGitRevParse resolves ref to a full sha in repo r via the committed `gitOut` helper.
