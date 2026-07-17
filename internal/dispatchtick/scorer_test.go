@@ -13,7 +13,7 @@ func TestLaneScorerRegistryCombinesIndependentSignals(t *testing.T) {
 		}
 		return 0
 	}}
-	got := NewLaneScorerRegistry(priority, affinity).Order([]LaneCandidate{{1, 400}, {2, 60}}, false)
+	got := NewLaneScorerRegistry(priority, affinity).Order([]LaneCandidate{{Number: 1, Weight: 400}, {Number: 2, Weight: 60}}, false)
 	if want := []int{2, 1}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("order=%v want %v", got, want)
 	}
@@ -32,14 +32,14 @@ func TestLaneScorerRegistryClampsPluginScores(t *testing.T) {
 		}
 		return 0
 	}}
-	got := NewLaneScorerRegistry(broken, bounded).Order([]LaneCandidate{{1, 0}, {2, 0}}, false)
+	got := NewLaneScorerRegistry(broken, bounded).Order([]LaneCandidate{{Number: 1, Weight: 0}, {Number: 2, Weight: 0}}, false)
 	if want := []int{2, 1}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("order=%v want %v", got, want)
 	}
 }
 
 func TestDefaultLaneScorersPreservePriorityOrdering(t *testing.T) {
-	got := OrderLaneCandidates([]LaneCandidate{{4, 60}, {3, 150}, {2, 400}, {1, 1000}}, false)
+	got := OrderLaneCandidates([]LaneCandidate{{Number: 4, Weight: 60}, {Number: 3, Weight: 150}, {Number: 2, Weight: 400}, {Number: 1, Weight: 1000}}, false)
 	if want := []int{1, 2, 3, 4}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("order=%v want %v", got, want)
 	}

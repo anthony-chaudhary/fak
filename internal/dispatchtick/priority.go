@@ -3,6 +3,8 @@ package dispatchtick
 import (
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/dispatchaging"
 )
 
 // Priority weights mirror the label-taxonomy weights in tools/issue_triage.py
@@ -54,6 +56,13 @@ func laneIssueWeight(priority map[int]int, number int) int {
 type LaneCandidate struct {
 	Number int
 	Weight int
+	// ReadySince is the unix time (seconds) the issue first became dispatchable — the
+	// wait clock the opt-in aging path (FAK_DISPATCH_AGING, see aging_order.go) folds
+	// into an effective weight. Zero == unknown: it accrues zero wait, so it never earns
+	// an aging boost and never trips the starvation deadline (the fail-closed direction).
+	// The default ordering ignores this field entirely, so a caller that never sets it —
+	// and the flag-off path — is byte-for-byte the pre-aging order.
+	ReadySince int64
 }
 
 // OrderLaneCandidates returns the candidate issue numbers in dispatch order:
@@ -72,6 +81,9 @@ type LaneCandidate struct {
 // citing #1395, never #1780; published history cannot be rewritten, so this
 // comment restates the closure binding explicitly for the grep-based referee.
 func OrderLaneCandidates(cands []LaneCandidate, preferNewest bool) []int {
+	if agingOrderingEnabled() {
+		return orderLaneCandidatesAged(cands, preferNewest, dispatchaging.DefaultParams(agingNowUnix()))
+	}
 	return defaultLaneScorers.Order(cands, preferNewest)
 }
 
