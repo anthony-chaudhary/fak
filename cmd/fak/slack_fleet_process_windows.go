@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopfleet"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 type windowsProcessRow struct {
@@ -21,7 +22,9 @@ type windowsProcessRow struct {
 
 func collectBackgroundProcesses() ([]loopfleet.Process, error) {
 	script := `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress`
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("process inventory: %w", err)
 	}
