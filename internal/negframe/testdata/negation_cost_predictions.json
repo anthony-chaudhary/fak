@@ -1,0 +1,47 @@
+[
+  {
+    "id": "NEG-COST-01",
+    "claim": "At fixed model capacity, negation accuracy decreases as concurrent deliberate-workspace load increases.",
+    "variables": ["accuracy A", "workspace load W", "model capacity C"],
+    "prediction": "Holding C fixed, dA/dW is more negative for negated tasks than matched affirmative tasks.",
+    "falsifier": "Matched negated and affirmative accuracy slopes are indistinguishable across at least three deliberate-load levels.",
+    "measurement": "internal/bench negation witness suite crossed with workspace-selectivity load levels",
+    "rungs": ["L0", "L1", "L2", "L3", "L4"]
+  },
+  {
+    "id": "NEG-COST-02",
+    "claim": "Negation emulation cost grows with representational entanglement between a concept and its negated form.",
+    "variables": ["emulation depth D", "entanglement E"],
+    "prediction": "Crystallization depth and error increase with activation-space cosine overlap after controlling for prompt length.",
+    "falsifier": "Depth and error are uncorrelated or decrease as held-out activation overlap increases.",
+    "measurement": "internal/model NegationGeometryReport joined to layerwise LayerLogits crystallization depth",
+    "rungs": ["L2", "L3"]
+  },
+  {
+    "id": "NEG-COST-03",
+    "claim": "A causal activation-space operator offloads inversion from deliberate depth.",
+    "variables": ["accuracy A", "effective depth D", "operator route R"],
+    "prediction": "At fixed or lower D, an L3-routed operator improves A over base emulation on held-out negation pairs.",
+    "falsifier": "The routed operator does not beat equal-depth base emulation, or its gain disappears under causal patch controls.",
+    "measurement": "internal/model NegAdapter and NegationAffine fresh-forward residual-hook witnesses",
+    "rungs": ["L3"]
+  },
+  {
+    "id": "NEG-COST-04",
+    "claim": "Naive negation pays an observable forward-pass depth or latency tax relative to a positive-state operator.",
+    "variables": ["crystallization depth D", "latency T", "accuracy A"],
+    "prediction": "At non-worse A, the operator condition has lower D or T than the matched naive condition.",
+    "falsifier": "Across the committed matched corpus, operator D and T are never lower at non-worse A.",
+    "measurement": "internal/bench DepthLatencyTax rows and internal/model LayerLogits",
+    "rungs": ["L0", "L1", "L2", "L3", "L4"]
+  },
+  {
+    "id": "NEG-COST-05",
+    "claim": "Specialized negation routing need not tax affirmative traffic.",
+    "variables": ["bypass allocations B", "adapter operations O", "output bits X"],
+    "prediction": "When the detector is silent, B=0, O=0, and output X is bit-identical.",
+    "falsifier": "Any detector-negative route allocates adapter state, executes adapter MACs, or changes output bits.",
+    "measurement": "internal/model TestNegAdapterApplyAndZeroCostBypass",
+    "rungs": ["L3", "L4"]
+  }
+]
