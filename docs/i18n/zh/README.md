@@ -71,6 +71,9 @@ go build -o fak ./cmd/fak
 
 ## 下一步
 
+- [快速开始 — 10 分钟跑起本地模型](./quickstart.md)
+- [安装 — 二进制与 tier 映射](./install.md)
+- [FAQ — 首次接触常见问题](./faq.md)
 - [README（完整概览）](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — 10 分钟跑起本地模型](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — 安装二进制](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

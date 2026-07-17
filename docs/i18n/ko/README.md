@@ -80,6 +80,9 @@ Ollama / vLLM / SGLang / llama.cpp / LM Studio 또는 임의의 OpenAI-compatibl
 
 ## 다음으로 갈 곳
 
+- [빠른 시작 — 10분 만에 로컬 모델](./quickstart.md)
+- [설치 — 바이너리와 tier 맵](./install.md)
+- [FAQ — 첫 접촉 질문](./faq.md)
 - [README (전체 개요)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — 10분 만에 로컬 모델](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [GETTING-STARTED — 바이너리 설치](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

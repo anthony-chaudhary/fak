@@ -87,6 +87,9 @@ SGLang / llama.cpp / LM Studio または任意の OpenAI 互換 API。
 
 ## 次に読むもの
 
+- [クイックスタート — 約 10 分でローカルモデル](./quickstart.md)
+- [インストール — バイナリと tier マップ](./install.md)
+- [FAQ — はじめての質問](./faq.md)
 - [README（全体像）](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — 10 分でローカルモデルを動かす](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — バイナリをインストール](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

@@ -89,6 +89,9 @@ vLLM / SGLang / llama.cpp / LM Studio o cualquier API compatible con OpenAI.
 
 ## Hacia dónde seguir
 
+- [Quickstart — una IA local gobernada en ~10 minutos](./quickstart.md)
+- [Instalación — el binario y el mapa de tiers](./install.md)
+- [FAQ — preguntas de primer contacto](./faq.md)
 - [README (la visión completa)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — un modelo local en 10 minutos](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — instalar el binario](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

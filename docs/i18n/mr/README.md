@@ -77,6 +77,9 @@ SGLang / llama.cpp / LM Studio किंवा कोणत्याही OpenA
 
 ## पुढे कुठे
 
+- [quickstart — 10 मिनिटांत local model](./quickstart.md)
+- [install — binary इंस्टॉल करा](./install.md)
+- [FAQ — पहिल्या भेटीतले प्रश्न](./faq.md)
 - [README (पूर्ण आढावा)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — 10 मिनिटांत local model](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — binary install करा](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

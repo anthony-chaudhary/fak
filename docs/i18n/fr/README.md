@@ -88,6 +88,9 @@ compatible OpenAI.
 
 ## Où aller ensuite
 
+- [Démarrage rapide — un modèle local en 10 minutes](./quickstart.md)
+- [Installation — le binaire et la tier-map](./install.md)
+- [FAQ — questions de premier contact](./faq.md)
 - [README (la vue d'ensemble complète)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — un modèle local en 10 minutes](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — installer le binaire](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

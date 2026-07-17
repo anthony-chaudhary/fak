@@ -81,6 +81,9 @@ OpenAI-compatible API வழியாகவும்.
 
 ## அடுத்து எங்கே
 
+- [விரைவுத் தொடக்கம் — 10 நிமிடத்தில் local model](./quickstart.md)
+- [நிறுவல் — binary-ஐ நிறுவுங்கள்](./install.md)
+- [FAQ — முதல்-தொடர்பு கேள்விகள்](./faq.md)
 - [README (முழு கண்ணோட்டம்)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — 10 நிமிடத்தில் local model](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — binary நிறுவவும்](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

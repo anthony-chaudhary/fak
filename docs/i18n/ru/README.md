@@ -95,6 +95,9 @@ Ollama / vLLM / SGLang / llama.cpp / LM Studio или любой OpenAI-совм
 
 ## Куда двигаться дальше
 
+- [Быстрый старт — 10 минут до локальной модели](./quickstart.md)
+- [Установка — бинарник и карта тиров](./install.md)
+- [FAQ — вопросы первого контакта](./faq.md)
 - [README (полный обзор)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — локальная модель за 10 минут](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [GETTING-STARTED — установить бинарник](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

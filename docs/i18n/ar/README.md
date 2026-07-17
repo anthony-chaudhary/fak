@@ -81,6 +81,9 @@ git clone ... && go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 
 ## إلى أين بعد ذلك
 
+- [البداية السريعة — ذكاء اصطناعي محلي في نحو ١٠ دقائق](./quickstart.md)
+- [التثبيت — الملف الثنائي وخريطة الطبقات](./install.md)
+- [FAQ — أسئلة أول لقاء](./faq.md)
 - [README (النظرة الكاملة)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — نموذج محلي في 10 دقائق](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [GETTING-STARTED — ثبّت الثنائي](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

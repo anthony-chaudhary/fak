@@ -76,6 +76,9 @@ llama.cpp / LM Studio বা যেকোনো OpenAI-compatible API-এর ম
 
 ## এরপর কোথায়
 
+- [quickstart — ১০ মিনিটে local model](./quickstart.md)
+- [install — binary ইনস্টল করুন](./install.md)
+- [FAQ — প্রথম-পরিচয়ের প্রশ্ন](./faq.md)
 - [README (পূর্ণ পরিদর্শন)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — ১০ মিনিটে local model](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — binary install করুন](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

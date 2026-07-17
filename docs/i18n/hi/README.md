@@ -76,6 +76,9 @@ llama.cpp / LM Studio या किसी भी OpenAI-compatible API के �
 
 ## आगे कहाँ जाएँ
 
+- [क्विकस्टार्ट — 10 मिनट में local model](./quickstart.md)
+- [इंस्टॉल — बाइनरी और tier map](./install.md)
+- [FAQ — पहली मुलाक़ात के आम सवाल](./faq.md)
 - [README (पूरा अवलोकन)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — 10 मिनट में local model](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — बाइनरी इंस्टॉल करें](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)

@@ -79,6 +79,9 @@ Ollama / vLLM / SGLang / llama.cpp / LM Studio లేదా ఏ OpenAI-compatibl
 
 ## తరువాత ఎక్కడికి
 
+- [త్వరిత ప్రారంభం — 10 నిమిషాల్లో local model](./quickstart.md)
+- [ఇన్‌స్టాల్ — binary ను ఇన్‌స్టాల్ చేయండి](./install.md)
+- [FAQ — మొదటి పరిచయపు ప్రశ్నలు](./faq.md)
 - [README (పూర్తి అవలోకనం)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — 10 నిమిషాల్లో local model](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
 - [Getting Started — binary install చేయండి](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)
