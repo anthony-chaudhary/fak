@@ -1,0 +1,5 @@
+[
+  {"variant":"strict_involution","involution_error":0,"double_negation_error":0,"synthetic_accuracy":1,"conclusion":"double negation is structural: reflection squares to identity"},
+  {"variant":"pi_rotation","involution_error":0,"double_negation_error":0,"synthetic_accuracy":1,"conclusion":"double negation is structural: pi rotation squares to identity"},
+  {"variant":"unconstrained","involution_error":0.416908263290619,"double_negation_error":0.3528190045901722,"synthetic_accuracy":0.5,"conclusion":"double negation requires the involution regularizer"}
+]
