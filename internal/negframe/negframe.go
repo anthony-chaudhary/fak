@@ -59,6 +59,9 @@ const (
 	// Hedge: a property asserted by double negative ("not un-", "not impossible", "not without").
 	// The positive shape asserts the property directly.
 	Hedge Category = "hedge"
+	// Exception: selection narrowed by an exception frame ("only", "except").
+	// The positive shape enumerates the selected or remaining set.
+	Exception Category = "exception"
 )
 
 // categoryHint is the JUDGEMENT-tier reframe hint shown when a finding has no mechanical rewrite.
@@ -67,6 +70,7 @@ var categoryHint = map[Category]string{
 	Absence:     "name what is present or required, not what is missing",
 	Refusal:     "state the permitted path first, then the boundary",
 	Hedge:       "assert the property directly instead of by double negative",
+	Exception:   "enumerate the selected or remaining positive set",
 }
 
 // Hint returns the positive-shape hint for a category (empty for an unknown one).
@@ -135,8 +139,8 @@ var rules = []reframeRule{
 	{regexp.MustCompile(`(?i)\bwithout\b`), Absence, ""},
 }
 
-// Categories lists the four categories in a stable order (used for per-category KPI folding).
-var Categories = []Category{Prohibition, Absence, Refusal, Hedge}
+// Categories lists the categories in a stable order (used for per-category KPI folding).
+var Categories = []Category{Prohibition, Absence, Refusal, Hedge, Exception}
 
 // Classify locates every negatively-framed span in text, tagging each with path for the
 // finding's provenance. Fenced code blocks (``` / ~~~) and blank lines are skipped -- the card
