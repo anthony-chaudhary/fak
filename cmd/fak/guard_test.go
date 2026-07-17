@@ -2004,6 +2004,26 @@ func TestGuardRefusalCarryForwardTopReasonsWithFixes(t *testing.T) {
 	}
 }
 
+// TestGuardReasonFixSelfModifyIsRecoverable pins the SELF_MODIFY recovery text to the
+// three properties issue #4988 (confusing SELF_MODIFY) asked for: it must (1) name the
+// guarded trust-critical tree so the agent can tell a kernel self-edit apart from an
+// ordinary write, (2) say ordinary docs/notes/workspace writes are not blocked, and
+// (3) hand back an actionable route (an operator/worktree-isolated path) instead of a
+// bare token that reads as "stop". A dos.toml [reasons.SELF_MODIFY] fix still overrides.
+func TestGuardReasonFixSelfModifyIsRecoverable(t *testing.T) {
+	fix := guardReasonFix("SELF_MODIFY", nil)
+	for _, want := range []string{"internal/adjudicator", "docs/notes", "not blocked", "operator"} {
+		if !strings.Contains(strings.ToLower(fix), strings.ToLower(want)) {
+			t.Fatalf("SELF_MODIFY fix %q missing recovery cue %q", fix, want)
+		}
+	}
+	// An operator-authored dos.toml fix still wins over the built-in fallback.
+	docs := map[string]guardReasonDoc{"SELF_MODIFY": {Fix: "custom operator guidance"}}
+	if got := guardReasonFix("SELF_MODIFY", docs); got != "custom operator guidance" {
+		t.Fatalf("dos.toml fix should override built-in, got %q", got)
+	}
+}
+
 func TestGuardRefusalCarryForwardCleanSessionIsEmpty(t *testing.T) {
 	rows := []journal.Row{
 		{Seq: 1, TraceID: "task", Kind: "DECIDE", Verdict: "ALLOW"},

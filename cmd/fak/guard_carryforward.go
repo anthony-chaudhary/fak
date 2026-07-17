@@ -445,7 +445,7 @@ func guardReasonFix(reason string, docs map[string]guardReasonDoc) string {
 	case "POLICY_BLOCK":
 		return "choose an allowed alternative, or change the policy intentionally if this tool should be permitted"
 	case "SELF_MODIFY":
-		return "redirect the write away from guarded kernel/agent files, split the command, or drop the guarded edit"
+		return "the write reaches a guarded trust-critical tree (internal/adjudicator|kernel|abi|shipgate, dos.toml, .dos/); ordinary docs/notes/workspace writes are NOT blocked — target an unguarded path, split a compound command to isolate the guarded part, or drop it; a genuinely required self-edit is operator-gated, so route it to an operator or worktree-isolated path (#1334) and keep unrelated work moving"
 	case "MALFORMED":
 		return "repair the tool arguments to the declared schema, then retry"
 	case "MISROUTE":
