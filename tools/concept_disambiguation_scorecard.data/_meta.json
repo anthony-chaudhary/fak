@@ -456,10 +456,28 @@
           "category": "incidental",
           "reason": "Existing shared session-thread delivery helper reused by the operator-question escalation; not a new runtime concept",
           "token": "enqueueGuardSessionThreadNotice"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "SessionClass"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "SessionInteractive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "SessionAutonomous"
         }
       ],
       "id": "session-runtime",
       "ignore": [
+        "SessionAutonomous",
+        "SessionClass",
+        "SessionInteractive",
         "confusedsessions",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
@@ -781,15 +799,27 @@
           "category": "incidental",
           "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
           "token": "CacheValueGateDebtKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "scorecard debt-key constant follows the existing score route schema",
+          "token": "NegationOperatorDebtKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "machine-readable debt key for the negation operator scorecard",
+          "token": "negation_operator_debt"
         }
       ],
       "id": "score-debt",
       "ignore": [
         "CacheValueGateDebtKey",
+        "NegationOperatorDebtKey",
         "ScorecardAxis",
         "ScorecardAxisOracle",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
+        "negation_operator_debt",
         "scorecardPath",
         "scorecard_since",
         "scorecard_since_test",
@@ -819,17 +849,29 @@
           "category": "incidental",
           "reason": "One reason constant in the closed decode-interleave verdict vocabulary; feature-internal, local to the placement lever.",
           "token": "DecodeInterleaveUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "machine-readable score field, not a new support-maturity concept",
+          "token": "enumerable_domain_coverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go field name for a score signal, not a new support-maturity concept",
+          "token": "DomainCoverage"
         }
       ],
       "id": "support-maturity",
       "ignore": [
         "DecodeInterleaveUnsupported",
+        "DomainCoverage",
         "SupportsRoutedExpertKQuant",
         "correctnessclass",
         "correctnessdependson",
         "coveragebaseline",
         "coveragediscipline",
         "defaultscoreparitytol",
+        "enumerable_domain_coverage",
         "errInterleaveUnsupported",
         "errmmapunsupported",
         "errstreamingunsupported",
@@ -918,10 +960,52 @@
           "category": "incidental",
           "reason": "private CLI output formatter for the validate verb, not a render/materialization subsystem concept",
           "token": "renderValidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "RenderKind"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "RenderUserSplice"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "RenderSystemDirective"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "RenderReopen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "RenderStop"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "AllowsRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
+          "token": "DefaultRender"
         }
       ],
       "id": "render-materialize",
       "ignore": [
+        "AllowsRender",
+        "DefaultRender",
+        "RenderKind",
+        "RenderReopen",
+        "RenderStop",
+        "RenderSystemDirective",
+        "RenderUserSplice",
         "indexrenderhits",
         "materialized",
         "materializers",
