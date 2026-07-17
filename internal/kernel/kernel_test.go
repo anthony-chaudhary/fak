@@ -773,3 +773,41 @@ func TestDispatchRaceClean(t *testing.T) {
 		t.Fatalf("want 50 submits, got %d", k.Counters().Submits)
 	}
 }
+
+type resultObserverAdj struct {
+	observed   int64
+	lastCall   *abi.ToolCall
+	lastResult *abi.Result
+}
+
+func (a *resultObserverAdj) Adjudicate(context.Context, *abi.ToolCall) abi.Verdict {
+	return abi.Verdict{Kind: abi.VerdictAllow}
+}
+func (a *resultObserverAdj) Caps() []abi.Capability { return nil }
+func (a *resultObserverAdj) ObserveResult(_ context.Context, c *abi.ToolCall, r *abi.Result) {
+	atomic.AddInt64(&a.observed, 1)
+	a.lastCall, a.lastResult = c, r
+}
+
+func TestReapNotifiesPostExecutionObserverOnlyOnCommittedSuccess(t *testing.T) {
+	abi.ResetForTest()
+	eng := &countEngine{}
+	abi.RegisterEngine("receipt-engine", eng)
+	observer := &resultObserverAdj{}
+	k := New("receipt-engine", WithAdjudicators([]abi.Adjudicator{observer}))
+	call := &abi.ToolCall{Tool: "write_file", TraceID: "trace-a", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"path":"x"}`)}}
+	h, verdict := k.Submit(context.Background(), call)
+	if verdict.Kind != abi.VerdictAllow {
+		t.Fatalf("submit = %v", verdict.Kind)
+	}
+	result, err := k.Reap(context.Background(), h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt64(&observer.observed); got != 1 {
+		t.Fatalf("observed = %d, want 1", got)
+	}
+	if observer.lastCall != call || observer.lastResult != result {
+		t.Fatal("observer did not receive committed call/result")
+	}
+}

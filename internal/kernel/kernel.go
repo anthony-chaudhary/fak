@@ -551,6 +551,7 @@ func (k *Kernel) Reap(ctx context.Context, h abi.SubmissionHandle) (*abi.Result,
 		r.Call = p.call
 	}
 	k.admitResult(ctx, p.call, r)
+	k.observeCompletedResult(ctx, p.call, r)
 	emit(abi.Event{Kind: abi.EvComplete, Call: p.call, Result: r, Fields: costFields(engNs, 0)})
 	return r, nil
 }
@@ -710,3 +711,22 @@ func Disposition(r abi.ReasonCode) string {
 }
 
 var _ abi.Kernel = (*Kernel)(nil)
+
+// completedResultObserver is an optional post-engine seam implemented by policy
+// rungs that need independently observed effect receipts. It is deliberately
+// local to kernel: the frozen ABI remains additive-only and old adjudicators are
+// unaffected.
+type completedResultObserver interface {
+	ObserveResult(context.Context, *abi.ToolCall, *abi.Result)
+}
+
+func (k *Kernel) observeCompletedResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) {
+	if r == nil || r.Status != abi.StatusOK || r.Outcome != abi.OutcomeCommitted {
+		return
+	}
+	for _, adj := range k.adjudicatorsFor(c) {
+		if observer, ok := adj.(completedResultObserver); ok {
+			observer.ObserveResult(ctx, c, r)
+		}
+	}
+}
