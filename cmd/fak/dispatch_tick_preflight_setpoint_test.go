@@ -18,7 +18,7 @@ import (
 func TestDispatchPreflightFoldsOperatorSetpoint(t *testing.T) {
 	oldBuildResources := dispatchBuildHostResources
 	dispatchBuildHostResources = func(dispatchtick.ProcGuardInput) dispatchtick.HostResources {
-		return dispatchtick.HostResources{Cores: dispatchtick.IntPtr(32), FreeRAMMB: dispatchtick.IntPtr(128000), TotalThreads: dispatchtick.IntPtr(500)}
+		return dispatchtick.HostResources{Cores: dispatchtick.IntPtr(64), FreeRAMMB: dispatchtick.IntPtr(128000), TotalThreads: dispatchtick.IntPtr(1000)}
 	}
 	t.Cleanup(func() { dispatchBuildHostResources = oldBuildResources })
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
