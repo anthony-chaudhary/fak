@@ -164,7 +164,7 @@ func guardSlackAuditRef(s string) string {
 	return path.Base(strings.ReplaceAll(s, "\\", "/"))
 }
 
-var startGuardSessionThreadDrain = func() {
+func startGuardSessionThreadDrain() {
 	token := resolveGuardSessionsToken()
 	if token == "" {
 		return
