@@ -1556,6 +1556,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.inKernelModelButChatIsMock {
 		health["in_kernel_model_but_chat_is_mock"] = true
 	}
+	// A boot-time fixed-prompt decode can prove that the local model is loaded but
+	// incoherent. Keep that process out of readiness until it restarts and probes
+	// cleanly; proxy/mock serves never arm this gate.
+	if kind, sample, bad := s.startupDecode.degenerate(); bad {
+		health["ok"] = false
+		health["degenerate_decode"] = map[string]any{
+			"kind":   kind,
+			"sample": sample,
+		}
+	}
 	// #3051: a local backend that is UP (listener bound) but has not finished its
 	// one-time warmup — weight load, CUDA-graph capture, DeepGEMM/JIT compile — must
 	// not report ready, or the operator's first real turn absorbs the full ~500s

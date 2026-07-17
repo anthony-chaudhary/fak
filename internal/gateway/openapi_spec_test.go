@@ -60,12 +60,13 @@ var specPathFor = map[string]string{
 	"/v1/fak/account/rehome":        "/v1/fak/account/rehome",
 	"/v1/models":                    "/v1/models",
 	// Multi-node dev-server read plane (#2297).
-	"/v1/leases":   "/v1/leases",
-	"/v1/sessions": "/v1/sessions",
-	"/mcp":         "/mcp",
-	"/healthz":     "/healthz",
-	"/metrics":     "/metrics",
-	"/debug/vars":  "/debug/vars",
+	"/v1/leases":         "/v1/leases",
+	"/v1/sessions":       "/v1/sessions",
+	"/mcp":               "/mcp",
+	"/healthz":           "/healthz",
+	"/metrics":           "/metrics",
+	"/debug/vars":        "/debug/vars",
+	"/debug/guard-audit": "/debug/guard-audit",
 }
 
 // openAPISpecPath is the committed OpenAPI document, relative to this package.

@@ -1579,6 +1579,26 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /debug/guard-audit:
+    get:
+      tags: [Operational]
+      summary: Guard audit journal footprint
+      description: Returns the bounded guard decision-journal file count, byte count, and oldest timestamp when the host installs a footprint provider; otherwise returns 404.
+      responses:
+        '200':
+          description: Current guard audit journal footprint.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files, bytes]
+                properties:
+                  files: { type: integer, minimum: 0 }
+                  bytes: { type: integer, format: int64, minimum: 0 }
+                  oldest_unix: { type: integer, format: int64 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: No guard audit footprint provider is installed. }
+
 # ---------------------------------------------------------------------------
 components:
   securitySchemes:
