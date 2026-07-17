@@ -56,9 +56,8 @@ func guardedCommandTree(args map[string]any, globs []string) (cmd, glob string, 
 // shell-path dual of the targetPath self-modify check: it gates a Bash/exec call
 // whose write target lives in the `command`/`cmd` string rather than a path arg.
 //
-// It fires only when BOTH hold: (1) the command string contains a write-shaped
-// shell verb or an output redirect, AND (2) a decoded write TARGET contains a
-// guarded glob fragment. Requiring a write target is what keeps a read of a
+// It fires only when a decoded write TARGET contains a guarded glob fragment.
+// Requiring a write target is what keeps a read of a
 // guarded file (`cat VERSION > /tmp/v`, `cp VERSION /tmp/v`) allowed — only the
 // write into the tree is refused. Opaque eval-shaped writers keep the conservative
 // whole-segment target because their real file open happens inside a program string,
@@ -68,65 +67,12 @@ func commandSelfModify(args map[string]any, globs []string) string {
 	if !ok {
 		return "" // no command to inspect
 	}
-	if !commandWrites(cmd) {
-		return "" // a read of a guarded file is allowed; only writes are refused
-	}
-	// SSH/SCP identity-file READ (#1086): an `ssh -i <key>` / `scp -i <key>` names a
-	// credential glob (id_rsa / id_ed25519) only as the key it READS for auth, not a
-	// write target — but the command may carry a write verb elsewhere (scp's own `cp `
-	// substring, or a remote build's `cp`/`mv`), so commandWrites is true and the glob
-	// matched. That conflates a sanctioned remote build+bench over SSH with a self-edit
-	// of a key. Re-check the match with the `-i <keyfile>` operand removed: if no guarded
-	// glob remains, the only match WAS the identity read, so allow. A genuine write that
-	// still names a guarded glob after the identity arg is stripped (e.g. `tee ~/.ssh/
-	// id_rsa`, or a redirect into a key) keeps its deny — the floor is unchanged for it.
-	if stripped, did := stripSSHIdentityArg(cmd); did {
-		cmd = stripped
-	}
 	for _, target := range commandWriteTargets(cmd) {
 		if g := matchGlob(target, globs); g != "" {
 			return g
 		}
 	}
 	return ""
-}
-
-// stripSSHIdentityArg removes the `-i <keyfile>` identity operand from an ssh/scp command
-// string, returning the remainder and whether a strip happened. It fires only when the
-// command is an ssh/scp invocation (leading token, so a tool literally named `ssh-keygen`
-// or an arbitrary program with a `-i` flag is unaffected) carrying an `-i <path>` pair.
-// The keyfile token is whatever follows `-i` up to the next space — exactly what OpenSSH
-// treats as the IdentityFile argument. It is a surgical removal for the self-modify
-// re-check ONLY; the original command is what actually runs.
-func stripSSHIdentityArg(cmd string) (string, bool) {
-	lc := strings.ToLower(cmd)
-	// Only ssh / scp / sftp read a `-i <keyfile>` identity; gate on the leading token so
-	// the carve-out cannot be reached by an arbitrary program that happens to take `-i`.
-	if !hasCommandLeadingToken(lc, "ssh") &&
-		!hasCommandLeadingToken(lc, "scp") &&
-		!hasCommandLeadingToken(lc, "sftp") {
-		return cmd, false
-	}
-	fields := strings.Fields(cmd)
-	out := make([]string, 0, len(fields))
-	stripped := false
-	for i := 0; i < len(fields); i++ {
-		if fields[i] == "-i" && i+1 < len(fields) {
-			i++ // skip the keyfile operand too
-			stripped = true
-			continue
-		}
-		// The glued `-i<path>` spelling (no space) — OpenSSH accepts it.
-		if strings.HasPrefix(fields[i], "-i") && len(fields[i]) > 2 {
-			stripped = true
-			continue
-		}
-		out = append(out, fields[i])
-	}
-	if !stripped {
-		return cmd, false
-	}
-	return strings.Join(out, " "), true
 }
 
 // commandWrites reports whether a shell command string contains a write-shaped
@@ -263,8 +209,29 @@ func hasFileWriteRedirect(cmd string) bool {
 // fd-duplication (`2>&1`) and null-device sinks are deliberately absent.
 func fileWriteRedirectTargets(cmd string) []string {
 	var targets []string
+	var quote byte
+	escaped := false
 	for i := 0; i < len(cmd); i++ {
-		if cmd[i] != '>' {
+		c := cmd[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' || c == '`' {
+			quote = c
+			continue
+		}
+		if c != '>' {
 			continue
 		}
 		j := i + 1
@@ -451,11 +418,25 @@ func segmentWriteTargets(segment string) []string {
 			break
 		}
 	}
-	for _, w := range words {
-		if !w.quoted || !looksNestedShell(w.text) {
+	// An ssh payload executes beyond the local enforcement boundary. Treating its
+	// quoted program as a nested local shell invents local write targets from remote
+	// cp/mv/redirects and can turn a read-only connectivity probe into SELF_MODIFY.
+	// Keep inspecting option values before the destination: ProxyCommand and
+	// LocalCommand execute locally and must retain the normal self-modify floor.
+	remotePayload := remoteExecPayloadStart(words, start)
+	for i, w := range words {
+		if remotePayload >= 0 && i >= remotePayload {
 			continue
 		}
-		for _, target := range commandWriteTargets(w.text) {
+		nested := w.text
+		if key, value, ok := strings.Cut(nested, "="); ok &&
+			(strings.EqualFold(key, "ProxyCommand") || strings.EqualFold(key, "LocalCommand")) {
+			nested = value
+		}
+		if !w.quoted || !looksNestedShell(nested) {
+			continue
+		}
+		for _, target := range commandWriteTargets(nested) {
 			add(target)
 		}
 	}
@@ -465,6 +446,68 @@ func segmentWriteTargets(segment string) []string {
 type shellWord struct {
 	text   string
 	quoted bool
+}
+
+// remoteExecPayloadStart returns the first word of an ssh remote command. A
+// negative result means the command is not a structurally understood ssh
+// invocation, so callers conservatively inspect every nested program string.
+func remoteExecPayloadStart(words []shellWord, start int) int {
+	if start < 0 || start >= len(words) || !isSSHExecutable(words[start].text) {
+		return -1
+	}
+	for i := start + 1; i < len(words); i++ {
+		word := words[i].text
+		if word == "--" {
+			if i+1 < len(words) {
+				return i + 2
+			}
+			return -1
+		}
+		if strings.HasPrefix(word, "-") && word != "-" {
+			option := strings.TrimPrefix(word, "-")
+			if option == "" {
+				return -1
+			}
+			if sshOptionTakesValue(option[0]) {
+				if len(option) == 1 {
+					i++
+					if i >= len(words) {
+						return -1
+					}
+				}
+				continue
+			}
+			if sshFlagCluster(option) {
+				continue
+			}
+			return -1
+		}
+		// This is the destination; all subsequent operands belong to the
+		// remote command and cannot name a local mutation target.
+		return i + 1
+	}
+	return -1
+}
+
+func isSSHExecutable(head string) bool {
+	head = strings.TrimPrefix(strings.ToLower(head), "./")
+	if slash := strings.LastIndexAny(head, "/\\"); slash >= 0 {
+		head = head[slash+1:]
+	}
+	return head == "ssh" || head == "ssh.exe"
+}
+
+func sshOptionTakesValue(option byte) bool {
+	return strings.ContainsRune("BbcDEeFIiJLlmOoPpQRSWw", rune(option))
+}
+
+func sshFlagCluster(option string) bool {
+	for i := 0; i < len(option); i++ {
+		if !strings.ContainsRune("46AaCfGgKkMNnqstTVvXxYy", rune(option[i])) {
+			return false
+		}
+	}
+	return true
 }
 
 func shellWords(cmd string) []shellWord {
