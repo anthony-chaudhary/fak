@@ -13,6 +13,7 @@ import (
 )
 
 func TestGuardOperatorEscalationEnqueuesExactlyOneSessionThreadReply(t *testing.T) {
+	t.Setenv(guardSessionsTokenEnv, "")
 
 	regDir := t.TempDir()
 	outboxDir := t.TempDir()
