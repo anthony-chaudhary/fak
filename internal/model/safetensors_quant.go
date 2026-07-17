@@ -84,6 +84,14 @@ func LoadSafetensorsQuant(path string, cfg Config, opts ...LoadOption) (*Model, 
 }
 
 func loadSafetensorsQuantFile(path string, cfg Config, open safetensorsFileOpener, opts ...LoadOption) (*Model, error) {
+	// Admit a DeepSeek-V4 config before any file I/O or model allocation, exactly
+	// as newModel does for the f32 path (#4807): a mis-shaped deepseek_v4 config
+	// must fail here with the typed admission error, not later at ensureV4LiveExpert.
+	if cfg.IsDeepSeekV4() {
+		if err := AdmitDeepSeekV4Config(cfg); err != nil {
+			return nil, err
+		}
+	}
 	lo := resolveLoadOptions(opts)
 	sf, err := open(path)
 	if err != nil {
@@ -115,6 +123,14 @@ func LoadSafetensorsQuantDir(dir string, cfg Config, opts ...LoadOption) (*Model
 }
 
 func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener, opts ...LoadOption) (*Model, error) {
+	// Admit a DeepSeek-V4 config before touching the index or allocating the model,
+	// mirroring newModel's f32-path gate (#4807). Identity alone never authorizes
+	// the V4 lazy-expert path; the typed ErrV4ConfigAdmission propagates unchanged.
+	if cfg.IsDeepSeekV4() {
+		if err := AdmitDeepSeekV4Config(cfg); err != nil {
+			return nil, err
+		}
+	}
 	lo := resolveLoadOptions(opts)
 	idxPath := filepath.Join(dir, "model.safetensors.index.json")
 	if _, err := os.Stat(idxPath); err != nil {
