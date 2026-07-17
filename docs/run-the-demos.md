@@ -87,6 +87,7 @@ Headless witnesses by track:
 | **causalbench** | `go run ./cmd/causalbench -selfcheck` | research/science | an external write evicts exactly the dependent cached read, keeps siblings warm, and refuses stale re-admission |
 | **deletioncert** | `go run ./cmd/deletioncert -selfcheck` | research/science | a selected KV span is evicted to `max|Delta|=0`, bound into a certificate, and tamper-rejected |
 | **agentbenchdemo** | `go run ./cmd/agentbenchdemo` | performance | the kernel's per-tool-call adjudication cost (the "self-tax") is microseconds — orders of magnitude under one LLM round-trip |
+| **fanoutdemo** | `go run ./cmd/fanoutdemo -selfcheck` | product | the issue fan-out planner refuses to plan without a spine witness, then expands a shipped spine into a deterministic set of contract-ready, dispatchable follow-ons |
 | **trajectory-control** | `go test ./internal/trajctl/` | agentic | the trajctl objective/score/witness-rung model and its append-only JSONL ledger round-trip (declare an objective, one score per W3/W2/W1/W0 rung, fold keeps the latest objective + full score history) |
 
 `guarddemo`, `turntaxdemo`, `tokendemo`, `dropindemo`, and `unseedemo` are the
@@ -234,6 +235,9 @@ go run ./cmd/deletioncert -selfcheck
 go run ./cmd/deletioncert -selfcheck -out deletioncert.json
 go run ./cmd/agentbenchdemo
 go run ./cmd/agentbenchdemo -selfcheck
+go run ./cmd/fanoutdemo               # the issue fan-out planner, spine-first guard + full plan
+go run ./cmd/fanoutdemo -selfcheck    # fan-out invariants: refusal enforced, every follow-on dispatchable
+go run ./cmd/fanoutdemo -json         # the refusal + the fak.issue-fanout-plan.v1 plan as JSON
 ```
 
 ## Demo lifecycle
