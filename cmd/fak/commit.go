@@ -31,6 +31,8 @@ func runCommitCommand(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "status":
 		return runCommitStatus(stdout, stderr, argv[1:])
+	case "patch":
+		return runCommitPatch(stdout, stderr, argv[1:])
 	case "poison-audit":
 		return runCommitPoisonAudit(stdout, stderr, argv[1:])
 	case "submit":
@@ -614,6 +616,7 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 	if res.Reason == "" {
 		fmt.Fprintf(stdout, "committed %s (%d path(s))%s\n", short(res.SHA), len(res.Paths), pushedSuffix(res))
 		renderCommitScore(stdout, res)
+		renderCommitVelocity(stdout, res)
 		renderCommitReview(stdout, res)
 		return
 	}
@@ -623,6 +626,7 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 	}
 	fmt.Fprintln(stdout)
 	renderCommitScore(stdout, res)
+	renderCommitVelocity(stdout, res)
 	renderCommitReview(stdout, res)
 	if len(res.RacedExtra) > 0 {
 		fmt.Fprintf(stdout, "  raced extra paths: %s\n", strings.Join(res.RacedExtra, ", "))
@@ -643,6 +647,34 @@ func renderCommitScore(stdout io.Writer, res safecommit.Result) {
 	if res.LockHoldNS > 0 {
 		fmt.Fprintf(stdout, "  lock hold: %s\n", time.Duration(res.LockHoldNS))
 	}
+}
+
+// renderCommitVelocity prints the effect-qualified ship-speed legs (#4241). It is deliberately
+// separate from renderCommitScore: quality answers "how healthy was the outcome", velocity
+// answers "how fast did the effect land against its budget". A SCORED leg shows its
+// budget-relative score; an UNSCORED leg shows its retained timing and the reason it did not
+// qualify (a refusal/race/no-op never earns a score). Nil velocity — a fake result in a test, or
+// a pre-scoring path — prints nothing. Because `fak sweep --apply` renders through this same
+// path, sweep exposes ship speed without inventing a second score.
+func renderCommitVelocity(stdout io.Writer, res safecommit.Result) {
+	if res.Velocity == nil {
+		return
+	}
+	renderVelocityLeg(stdout, "local", res.Velocity.Local)
+	renderVelocityLeg(stdout, "push", res.Velocity.Push)
+}
+
+func renderVelocityLeg(stdout io.Writer, name string, leg safecommit.CommitVelocityLeg) {
+	elapsed, budget := time.Duration(leg.ElapsedNS), time.Duration(leg.BudgetNS)
+	if leg.Score != nil {
+		fmt.Fprintf(stdout, "  velocity %s: %d/100 (%s, %s/%s)\n", name, *leg.Score, leg.Status, elapsed, budget)
+		return
+	}
+	if leg.Note != "" {
+		fmt.Fprintf(stdout, "  velocity %s: %s — %s (%s/%s)\n", name, leg.Status, leg.Note, elapsed, budget)
+		return
+	}
+	fmt.Fprintf(stdout, "  velocity %s: %s (%s/%s)\n", name, leg.Status, elapsed, budget)
 }
 
 func renderCommitReview(stdout io.Writer, res safecommit.Result) {

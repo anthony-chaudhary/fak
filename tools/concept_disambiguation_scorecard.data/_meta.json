@@ -995,6 +995,16 @@
           "category": "incidental",
           "reason": "Closed sessionctl Next contract implementation symbol; not a new standalone concept.",
           "token": "DefaultRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "private output formatter for the existing commit result surface, not a domain concept",
+          "token": "renderCommitVelocity"
+        },
+        {
+          "category": "incidental",
+          "reason": "private formatting helper for one velocity row, not a materialization concept",
+          "token": "renderVelocityLeg"
         }
       ],
       "id": "render-materialize",
@@ -1012,7 +1022,9 @@
         "materializes",
         "metricsrender",
         "priorwtrendercrash",
+        "renderCommitVelocity",
         "renderValidate",
+        "renderVelocityLeg",
         "rendered",
         "rendering",
         "renders",
@@ -1092,6 +1104,16 @@
           "category": "false-positive",
           "reason": "string map-key from the existing scorecard cachevalue corpus schema (pkg/scorecard/cachevalue.go); the 'candidate' plan-root match is a false positive on a JSON field name",
           "token": "candidate_fak_share_net"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported implementation helper of the opt-in aging ordering path in OrderLaneCandidates; the canonical concept is dispatchaging.Fold's effective-weight order, not this leaf-local adapter.",
+          "token": "orderLaneCandidatesAged"
+        },
+        {
+          "category": "incidental",
+          "reason": "local temporary variable naming paths in a candidate commit, not a planning abstraction",
+          "token": "candidatePaths"
         }
       ],
       "exclude": [
@@ -1112,11 +1134,13 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "buildMainPlan",
+        "candidatePaths",
         "candidatemean",
         "candidates",
         "fitandplanserveggufexpertparallelpathondevice",
         "notplanned",
         "nplan",
+        "orderLaneCandidatesAged",
         "planErr",
         "planapproval",
         "planned",
