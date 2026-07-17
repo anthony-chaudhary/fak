@@ -228,3 +228,28 @@ func TestRecordContextAdvisoryNextReadbackAndNoop(t *testing.T) {
 		t.Fatalf("empty advisory emitted records: %+v", got)
 	}
 }
+
+func TestRecordStopWitnessNextReadbackAndNoop(t *testing.T) {
+	const trace = "trace-stop-witness"
+	const payload = "STOP_UNWITNESSED: missing declared witness: file:proof.sha256. Continue working until that witness exists."
+	RecordStopWitnessNext(trace, payload)
+	records := ReadStopWitnessNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("records=%d want 1", len(records))
+	}
+	r := records[0]
+	if r.Move.Kind != MoveContinue || r.Move.Render != RenderUserSplice || r.Move.Session != SessionInteractive {
+		t.Fatalf("move=%+v", r.Move)
+	}
+	if r.Move.Gate != "stop-witness" || r.Move.Source != "agent-turn-boundary" || r.Move.Payload != payload || !r.Applied {
+		t.Fatalf("record=%+v", r)
+	}
+	if again := ReadStopWitnessNextRecords(trace); len(again) != 0 {
+		t.Fatalf("read did not clear: %+v", again)
+	}
+	RecordStopWitnessNext("", payload)
+	RecordStopWitnessNext(trace, "")
+	if got := ReadStopWitnessNextRecords(trace); len(got) != 0 {
+		t.Fatalf("noop records=%+v", got)
+	}
+}

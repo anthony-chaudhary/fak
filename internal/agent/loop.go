@@ -535,7 +535,9 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		if len(asst.ToolCalls) == 0 {
 			if cfg.finalGate != nil {
 				if satisfied, missing := cfg.finalGate(); !satisfied {
-					messages = append(messages, Message{Role: RoleUser, Content: "STOP_UNWITNESSED: missing declared witness: " + missing + ". Continue working until that witness exists."})
+					continuation := "STOP_UNWITNESSED: missing declared witness: " + missing + ". Continue working until that witness exists."
+					sessionctl.RecordStopWitnessNext(cfg.trace, continuation)
+					messages = append(messages, Message{Role: RoleUser, Content: continuation})
 					continue
 				}
 			}

@@ -322,6 +322,47 @@ func RecordContextAdvisoryNext(trace, payload string) {
 
 // ReadContextAdvisoryNextRecords returns and clears independently re-readable
 // Next witnesses for context advisories consumed by trace.
+var (
+	stopWitnessNextMu sync.Mutex
+	stopWitnessNext   = map[string][]NextRecord{}
+)
+
+// RecordStopWitnessNext lowers one denied final answer onto the shared
+// interactive Next contract. The denial is rendered as a user splice that
+// continues the same objective until the named witness exists.
+func RecordStopWitnessNext(trace, payload string) {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || payload == "" {
+		return
+	}
+	move := Move{
+		Kind: MoveContinue, Render: RenderUserSplice,
+		Session: SessionInteractive, Gate: "stop-witness",
+		Source: "agent-turn-boundary", Payload: payload,
+	}
+	record, err := WitnessMove(move, ApplyResult{Applied: true})
+	if err != nil {
+		return
+	}
+	stopWitnessNextMu.Lock()
+	stopWitnessNext[trace] = append(stopWitnessNext[trace], record)
+	stopWitnessNextMu.Unlock()
+}
+
+// ReadStopWitnessNextRecords returns and clears independently re-readable Next
+// witnesses for final-answer denials consumed by trace.
+func ReadStopWitnessNextRecords(trace string) []NextRecord {
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return nil
+	}
+	stopWitnessNextMu.Lock()
+	defer stopWitnessNextMu.Unlock()
+	records := append([]NextRecord(nil), stopWitnessNext[trace]...)
+	delete(stopWitnessNext, trace)
+	return records
+}
+
 func ReadContextAdvisoryNextRecords(trace string) []NextRecord {
 	trace = strings.TrimSpace(trace)
 	if trace == "" {
