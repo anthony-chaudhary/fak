@@ -178,6 +178,7 @@ func dosCommitAuditRange(root, baseSHA, headSHA string) map[string]steerpr.Verdi
 	out := map[string]steerpr.Verdict{}
 	cmd := exec.Command("dos", "commit-audit", baseSHA+".."+headSHA, "--json")
 	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
 	// dos exits 1 when it finds an unwitnessed claim — that is a real verdict,
 	// not a tool failure, and it still prints the JSON on stdout. So read stdout
 	// regardless of exit code and only bail if the payload does not parse.
