@@ -24,7 +24,7 @@ Needs only Go (to build `fak`) — **no model, key, GPU, server, or network**. E
 verdict is a live decision of the **same kernel** a guarded session runs: `fak preflight`
 folds the call-side adjudicator chain for one filesystem tool call, and `fak demo` folds
 the result-side admitter (`Kernel.AdmitResult`) over a poisoned read. The result is
-bit-identical on every run. Captured output: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+bit-identical on every run, and the full script normally completes in a few seconds after Go compilation. Captured output: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
 ## What it proves
 

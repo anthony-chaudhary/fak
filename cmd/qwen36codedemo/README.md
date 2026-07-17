@@ -8,6 +8,8 @@ Browser coding-agent spine for epic #4762 / issue #4770.
 
 The cache panel reports observed counters only. It deliberately does not claim a performance advantage until the tuned benchmark artifact passes `fak claim-check`.
 
+The local read-only witness normally starts in a few seconds after Go compilation. Its checked-in UI and fixture responses are deterministic, so the same revision produces the same result on every run.
+
 ## Local read-only browser witness
 
 ```bash

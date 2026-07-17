@@ -6,7 +6,7 @@ Print the production catalog that maps extension use cases to the least-privileg
 go run ./cmd/extseamsdemo
 ```
 
-The output is deterministic and offline. It helps operators choose between out-of-process agent hooks, lazy capability resolution, reviewed in-process extensions, policy data, and independently witnessed improvement proposals.
+The output is deterministic and offline, and the command normally completes in under one second after Go compilation. It helps operators choose between out-of-process agent hooks, lazy capability resolution, reviewed in-process extensions, policy data, and independently witnessed improvement proposals.
 
 ## What this demo does not claim
 

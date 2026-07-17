@@ -19,7 +19,7 @@ description: "fak's demo-quality scorecard grades 78 demos on five deterministic
 | Demos scored | 78 |
 | **Demo-debt (total defects)** | **0** |
 | Mean score | 98.4/100 |
-| Median / min / max | 100.0 / 85.9 / 100.0 |
+| Median / min / max | 100.0 / 89.0 / 100.0 |
 | Grade distribution | A:77 B:1 C:0 D:0 F:0 |
 
 ## Per-demo scores
@@ -28,7 +28,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
-| 85.9 | B | 0 | 86 | 86 | 90 | 88 | 78 | `cmd/qwen36codedemo` |
+| 89.0 | B | 0 | 86 | 100 | 90 | 88 | 78 | `cmd/qwen36codedemo` |
 | 91.0 | A | 0 | 86 | 100 | 100 | 88 | 78 | `examples/mobile-ffi` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/playground` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/trace-authoring` |
@@ -115,7 +115,6 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ### `cmd/qwen36codedemo`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
-- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
 - honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
 - self_contained: no stated prerequisites — a cold runner can't tell what to install first
 - documented: no run/usage section and no visible run command — hard to find how to start

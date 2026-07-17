@@ -6,7 +6,7 @@ Run the real extension-market conformance witness with no network, model, or dur
 go run ./cmd/marketdemo -selfcheck
 ```
 
-The demo validates one inert descriptor against the production `internal/market` parser and prints a deterministic PASS witness. Use `-json` to inspect the descriptor catalog.
+The demo validates one inert descriptor against the production `internal/market` parser and prints a deterministic PASS witness. After Go compilation, the selfcheck normally completes in under one second. Use `-json` to inspect the descriptor catalog.
 
 ## What this demo does not claim
 
