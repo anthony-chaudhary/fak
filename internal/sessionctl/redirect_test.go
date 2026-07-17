@@ -145,3 +145,61 @@ func TestRedirectNoTraceIsNoop(t *testing.T) {
 		t.Fatalf("empty-trace apply did work: applied=%v refused=%v", applied, refused)
 	}
 }
+
+func TestApplyPendingRedirectEmitsNextWitness(t *testing.T) {
+	const trace = "redirect-next-applied"
+	ClearObjective(trace)
+	defer ClearObjective(trace)
+	if ref := EnqueueRedirect(trace, Redirect{ObjectiveID: "o-next", Goal: "ship the direct redirect witness"}); ref != nil {
+		t.Fatalf("enqueue: %v", ref)
+	}
+	applied, refused := ApplyPendingRedirect(trace)
+	if len(applied) != 1 || len(refused) != 0 {
+		t.Fatalf("applied=%d refused=%d", len(applied), len(refused))
+	}
+	records := ReadRedirectNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("records=%d, want 1", len(records))
+	}
+	r := records[0]
+	if !r.Applied || r.Move.Kind != MoveRedirect || r.Move.Render != RenderSystemDirective || r.Move.Session != SessionAutonomous {
+		t.Fatalf("record=%+v", r)
+	}
+	if !strings.Contains(r.Move.Payload, "ship the direct redirect witness") {
+		t.Fatalf("payload=%q", r.Move.Payload)
+	}
+	if again := ReadRedirectNextRecords(trace); len(again) != 0 {
+		t.Fatalf("readback did not drain: %d", len(again))
+	}
+}
+
+func TestApplyPendingRedirectRefusalEmitsUnappliedNextWitness(t *testing.T) {
+	const trace = "redirect-next-refused"
+	ClearObjective(trace)
+	defer ClearObjective(trace)
+	if ref := EnqueueRedirect(trace, Redirect{Goal: "queued before terminal transition"}); ref != nil {
+		t.Fatalf("enqueue: %v", ref)
+	}
+	SetObjective(trace, Objective{Goal: "already done", Status: ObjectiveMet})
+	applied, refused := ApplyPendingRedirect(trace)
+	if len(applied) != 0 || len(refused) != 1 {
+		t.Fatalf("applied=%d refused=%d", len(applied), len(refused))
+	}
+	records := ReadRedirectNextRecords(trace)
+	if len(records) != 1 || records[0].Applied || records[0].Refusal == "" {
+		t.Fatalf("records=%+v", records)
+	}
+	if records[0].Move.Kind != MoveRedirect || records[0].Move.Render != RenderSystemDirective {
+		t.Fatalf("move=%+v", records[0].Move)
+	}
+}
+
+func TestApplyPendingRedirectNoopEmitsNoNextWitness(t *testing.T) {
+	const trace = "redirect-next-noop"
+	ClearObjective(trace)
+	defer ClearObjective(trace)
+	ApplyPendingRedirect(trace)
+	if records := ReadRedirectNextRecords(trace); len(records) != 0 {
+		t.Fatalf("records=%+v, want none", records)
+	}
+}

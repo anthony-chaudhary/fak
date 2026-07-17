@@ -171,6 +171,7 @@ func (r Redirect) asObjective() Objective {
 var (
 	redirectMu        sync.Mutex
 	redirectPending   = map[string][]Redirect{}
+	redirectNext      = map[string][]NextRecord{}
 	redirectObjective = map[string]Objective{}
 )
 
@@ -212,6 +213,7 @@ func ClearObjective(trace string) {
 	defer redirectMu.Unlock()
 	delete(redirectObjective, trace)
 	delete(redirectPending, trace)
+	delete(redirectNext, trace)
 }
 
 // EnqueueRedirect accepts one redirect for the session keyed by trace, to be applied
@@ -265,17 +267,47 @@ func ApplyPendingRedirect(trace string) (applied []Objective, refused []Redirect
 	defer redirectMu.Unlock()
 	queued := redirectPending[trace]
 	delete(redirectPending, trace)
+	appendNext := func(r Redirect, result ApplyResult) {
+		move := Move{
+			Kind: MoveRedirect, Render: RenderSystemDirective,
+			Session: SessionAutonomous, Gate: "sessionctl-redirect",
+			Source: "agent-turn-boundary", Payload: r.asObjective().Directive(),
+		}
+		// Constants above satisfy the shared closed contract; a future vocabulary
+		// change that violates it is pinned by the redirect Next tests.
+		if record, err := WitnessMove(move, result); err == nil {
+			redirectNext[trace] = append(redirectNext[trace], record)
+		}
+	}
 	for _, r := range queued {
 		if cur, ok := redirectObjective[trace]; ok && !cur.Redirectable() {
-			refused = append(refused, RedirectRefusal{
+			refusal := RedirectRefusal{
 				Reason: RedirectNoRedirectableState,
 				Detail: fmt.Sprintf("current objective status %q is terminal", cur.Status),
-			})
+			}
+			refused = append(refused, refusal)
+			appendNext(r, ApplyResult{Refusal: refusal.Error()})
 			continue
 		}
 		obj := r.asObjective()
 		redirectObjective[trace] = obj
 		applied = append(applied, obj)
+		appendNext(r, ApplyResult{Applied: true})
 	}
 	return applied, refused
+}
+
+// ReadRedirectNextRecords returns and clears the independently re-readable Next
+// witnesses emitted while the trace's redirect mailbox was applied. Empty/no-op
+// drains produce no records.
+func ReadRedirectNextRecords(trace string) []NextRecord {
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return nil
+	}
+	redirectMu.Lock()
+	defer redirectMu.Unlock()
+	records := append([]NextRecord(nil), redirectNext[trace]...)
+	delete(redirectNext, trace)
+	return records
 }

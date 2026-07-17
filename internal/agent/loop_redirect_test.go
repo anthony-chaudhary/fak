@@ -61,6 +61,18 @@ func TestRedirectAppliedAtTurnBoundary(t *testing.T) {
 	if n := sessionctl.RedirectPendingLen(trace); n != 0 {
 		t.Fatalf("redirect mailbox not drained: %d ops still queued", n)
 	}
+	records := sessionctl.ReadRedirectNextRecords(trace)
+	if len(records) != 1 {
+		t.Fatalf("redirect Next witnesses = %d, want 1", len(records))
+	}
+	next := records[0]
+	if !next.Applied || next.Move.Kind != sessionctl.MoveRedirect || next.Move.Render != sessionctl.RenderSystemDirective || next.Move.Session != sessionctl.SessionAutonomous {
+		t.Fatalf("redirect Next witness = %+v", next)
+	}
+	if !strings.Contains(next.Move.Payload, goal) {
+		t.Fatalf("redirect Next payload = %q, want goal", next.Move.Payload)
+	}
+
 	obj, ok := sessionctl.CurrentObjective(trace)
 	if !ok || obj.Goal != goal {
 		t.Fatalf("live objective after boundary = %+v (ok=%v), want the new goal %q", obj, ok, goal)
@@ -101,5 +113,37 @@ func TestApplyRedirectNoTraceIsNoop(t *testing.T) {
 	}
 	if n := sessionctl.RedirectPendingLen(other); n != 1 {
 		t.Fatalf("untraced run drained a foreign mailbox: pending = %d, want 1", n)
+	}
+}
+
+func TestRedirectRefusalAtTurnBoundaryEmitsUnappliedNext(t *testing.T) {
+	const trace = "redirect-refusal-next-boundary"
+	sessionctl.ClearObjective(trace)
+	defer sessionctl.ClearObjective(trace)
+	if ref := sessionctl.EnqueueRedirect(trace, sessionctl.Redirect{Goal: "late redirect"}); ref != nil {
+		t.Fatalf("EnqueueRedirect: %v", ref)
+	}
+	sessionctl.SetObjective(trace, sessionctl.Objective{Goal: "completed objective", Status: sessionctl.ObjectiveMet})
+	if got := (runConfig{trace: trace}).applyRedirect(); !strings.Contains(got, "completed objective") {
+		t.Fatalf("standing directive = %q", got)
+	}
+	records := sessionctl.ReadRedirectNextRecords(trace)
+	if len(records) != 1 || records[0].Applied || records[0].Refusal == "" {
+		t.Fatalf("refused redirect Next witnesses = %+v", records)
+	}
+	if records[0].Move.Kind != sessionctl.MoveRedirect || records[0].Move.Render != sessionctl.RenderSystemDirective {
+		t.Fatalf("refused redirect move = %+v", records[0].Move)
+	}
+}
+
+func TestRedirectNoopAtTurnBoundaryEmitsNoNext(t *testing.T) {
+	const trace = "redirect-noop-next-boundary"
+	sessionctl.ClearObjective(trace)
+	defer sessionctl.ClearObjective(trace)
+	if got := (runConfig{trace: trace}).applyRedirect(); got != "" {
+		t.Fatalf("directive = %q, want empty", got)
+	}
+	if records := sessionctl.ReadRedirectNextRecords(trace); len(records) != 0 {
+		t.Fatalf("no-op redirect Next witnesses = %+v", records)
 	}
 }
