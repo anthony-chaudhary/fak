@@ -101,6 +101,7 @@ type reframeRule struct {
 	Pattern  *regexp.Regexp
 	Category Category
 	Template string // regexp replacement ($1.. refer to Pattern's capture groups); "" == judgement tier
+	ProofID  string // boolean-equivalence obligation for mechanical rules
 }
 
 // rules is the negation lexicon, ordered most-specific-first so a mechanical rule ("don't
@@ -112,11 +113,11 @@ type reframeRule struct {
 // the judgement tier, where the reframe is a human call and the card only points.
 var rules = []reframeRule{
 	// --- mechanical tier: fixed idioms with an unambiguous positive inverse -------------------
-	{regexp.MustCompile(`(?i)\bdo\s+not\s+forget\s+to\s+(\w+)`), Prohibition, "remember to $1"},
-	{regexp.MustCompile(`(?i)\bdon'?t\s+forget\s+to\s+(\w+)`), Prohibition, "remember to $1"},
-	{regexp.MustCompile(`(?i)\bdo\s+not\s+hesitate\s+to\s+(\w+)`), Prohibition, "feel free to $1"},
-	{regexp.MustCompile(`(?i)\bdon'?t\s+hesitate\s+to\s+(\w+)`), Prohibition, "feel free to $1"},
-	{regexp.MustCompile(`(?i)\bno\s+need\s+to\s+(\w+)`), Absence, "you can skip $1"},
+	{regexp.MustCompile(`(?i)\bdo\s+not\s+forget\s+to\s+(\w+)`), Prohibition, "remember to $1", "double-negative"},
+	{regexp.MustCompile(`(?i)\bdon'?t\s+forget\s+to\s+(\w+)`), Prohibition, "remember to $1", "double-negative"},
+	{regexp.MustCompile(`(?i)\bdo\s+not\s+hesitate\s+to\s+(\w+)`), Prohibition, "feel free to $1", "double-negative"},
+	{regexp.MustCompile(`(?i)\bdon'?t\s+hesitate\s+to\s+(\w+)`), Prohibition, "feel free to $1", "double-negative"},
+	{regexp.MustCompile(`(?i)\bno\s+need\s+to\s+(\w+)`), Absence, "you can skip $1", "optional-action"},
 	// The double-negative reframe ("not un-X" -> "X") holds ONLY when "un" is the negating prefix
 	// of a genuine antonym. A bare `not\s+un(\w+)` also fires on words where "un" is part of the
 	// ROOT -- "not unique", "not universal", "not unless", "does not unlock" -- and emits garbage
@@ -124,20 +125,20 @@ var rules = []reframeRule{
 	// red the ratchet. The stem is therefore an explicit allowlist of adjectives that actually
 	// negate with "un-"; anything outside it stays un-suggested (and is caught, if at all, by the
 	// generic judgement rules). Extend the list rather than loosening it back to `\w+`.
-	{regexp.MustCompile(`(?i)\bnot\s+un(readable|usual|common|clear|likely|necessary|important|safe|able|available|aware|certain|reasonable|realistic|helpful|related|expected|documented|reachable|recoverable|ambiguous|desirable|acceptable|familiar|known|wise|fair|kind|true|real|stable|bounded|intended|wanted|used|changed|tested|defined|limited|restricted|planned|warranted|justified|founded|biased|happy|healthy|even)\b`), Hedge, "$1"},
-	{regexp.MustCompile(`(?i)\bmake\s+sure\s+(?:that\s+)?you\s+do\s+not\s+(\w+)`), Prohibition, "make sure you avoid $1ing"},
+	{regexp.MustCompile(`(?i)\bnot\s+un(readable|usual|common|clear|likely|necessary|important|safe|able|available|aware|certain|reasonable|realistic|helpful|related|expected|documented|reachable|recoverable|ambiguous|desirable|acceptable|familiar|known|wise|fair|kind|true|real|stable|bounded|intended|wanted|used|changed|tested|defined|limited|restricted|planned|warranted|justified|founded|biased|happy|healthy|even)\b`), Hedge, "$1", "double-negative"},
+	{regexp.MustCompile(`(?i)\bmake\s+sure\s+(?:that\s+)?you\s+do\s+not\s+(\w+)`), Prohibition, "make sure you avoid $1ing", "prohibition"},
 
 	// --- judgement tier: negatively framed, reframe is a human call ---------------------------
-	{regexp.MustCompile(`(?i)\bnever\b`), Prohibition, ""},
-	{regexp.MustCompile(`(?i)\bdo\s+not\b`), Prohibition, ""},
-	{regexp.MustCompile(`(?i)\bdon'?t\b`), Prohibition, ""},
-	{regexp.MustCompile(`(?i)\bavoid\b`), Prohibition, ""},
-	{regexp.MustCompile(`(?i)\bnot\s+allowed\b`), Refusal, ""},
-	{regexp.MustCompile(`(?i)\bforbidden\b`), Refusal, ""},
-	{regexp.MustCompile(`(?i)\bmay\s+not\b`), Refusal, ""},
-	{regexp.MustCompile(`(?i)\brefuse\s+to\b`), Refusal, ""},
-	{regexp.MustCompile(`(?i)\bfails?\s+to\b`), Absence, ""},
-	{regexp.MustCompile(`(?i)\bwithout\b`), Absence, ""},
+	{regexp.MustCompile(`(?i)\bnever\b`), Prohibition, "", ""},
+	{regexp.MustCompile(`(?i)\bdo\s+not\b`), Prohibition, "", ""},
+	{regexp.MustCompile(`(?i)\bdon'?t\b`), Prohibition, "", ""},
+	{regexp.MustCompile(`(?i)\bavoid\b`), Prohibition, "", ""},
+	{regexp.MustCompile(`(?i)\bnot\s+allowed\b`), Refusal, "", ""},
+	{regexp.MustCompile(`(?i)\bforbidden\b`), Refusal, "", ""},
+	{regexp.MustCompile(`(?i)\bmay\s+not\b`), Refusal, "", ""},
+	{regexp.MustCompile(`(?i)\brefuse\s+to\b`), Refusal, "", ""},
+	{regexp.MustCompile(`(?i)\bfails?\s+to\b`), Absence, "", ""},
+	{regexp.MustCompile(`(?i)\bwithout\b`), Absence, "", ""},
 }
 
 // Categories lists the categories in a stable order (used for per-category KPI folding).
