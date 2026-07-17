@@ -257,9 +257,9 @@ func TestFormatCacheValuePersistenceSummaryNamesEvidenceAndNextCommand(t *testin
 // dead-wiring regression on the serve path).
 func TestCacheValueSummaryWiredIntoGuardExit(t *testing.T) {
 	root := repoRootFromTest(t)
-	body, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "guard_child.go"))
+	body, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "guard_child_supervision.go"))
 	if err != nil {
-		t.Fatalf("read guard_child.go: %v", err)
+		t.Fatalf("read guard_child_supervision.go: %v", err)
 	}
 	src := string(body)
 	for _, want := range []string{
@@ -267,7 +267,7 @@ func TestCacheValueSummaryWiredIntoGuardExit(t *testing.T) {
 		`formatCacheValuePersistenceSummary("fak guard"`,
 	} {
 		if !strings.Contains(src, want) {
-			t.Fatalf("guard_child.go no longer surfaces the cache-value savings summary at session exit (missing %q); the dollar-aware formatter is orphaned again", want)
+			t.Fatalf("guard_child_supervision.go no longer surfaces the cache-value savings summary at session exit (missing %q); the dollar-aware formatter is orphaned again", want)
 		}
 	}
 }
