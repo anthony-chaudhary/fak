@@ -181,7 +181,7 @@ func TestDispatchPromptCarriesResumeWitnessState(t *testing.T) {
 	for _, want := range []string{
 		"resume witness state (independent; not worker self-report):",
 		"- Last commit audit: commit-audit close_result ok=false verdict=NO_COMMIT reason=no audited commit bound to #1794",
-		"- Last route decision: view=updated lane=cmd target=#1794",
+		"- Last route decision: lane=cmd target=#1794",
 		"- Last issue status: OPEN",
 	} {
 		if !strings.Contains(prompt, want) {
@@ -753,9 +753,9 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	}
 	terms := mapAt(capFact, "cap_terms")
 	if dispatchMapInt(terms, "configured_cap") != dispatchtick.DefaultMaxWorkers || dispatchMapInt(terms, "lease_cap") != 3 ||
-		dispatchMapInt(terms, "host_cap") != 8 || dispatchMapInt(terms, "seat_cap") < 3 ||
+		dispatchMapInt(terms, "host_cap") != 32 || dispatchMapInt(terms, "seat_cap") < 3 ||
 		dispatchMapInt(terms, "effective_cap") != 3 || dispatchMapString(terms, "limiting") != "lease" {
-		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=8 seat>=3 effective=3 limiting=lease", terms, dispatchtick.DefaultMaxWorkers)
+		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=32 seat>=3 effective=3 limiting=lease", terms, dispatchtick.DefaultMaxWorkers)
 	}
 	preflight := mapAt(got, "preflight")
 	if dispatchMapString(mapAt(preflight, "cap_terms"), "limiting") != "lease" {

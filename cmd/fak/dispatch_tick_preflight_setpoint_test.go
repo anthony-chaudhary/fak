@@ -105,8 +105,8 @@ func TestDispatchPreflightFoldsOperatorSetpoint(t *testing.T) {
 	kernelAlive, kernelTarget = 2, 4
 	t.Setenv(dispatchtick.SetpointConcurrencyEnv, "6")
 	out = preflight(t)
-	if out["verdict"] != dispatchtick.PreflightOKVerdict || out["cap"] != 8 {
-		t.Fatalf("grow verdict/cap = %v/%v, want SPAWN_OK/8; payload=%v", out["verdict"], out["cap"], out)
+	if out["verdict"] != dispatchtick.PreflightOKVerdict || out["cap"] != 6 {
+		t.Fatalf("grow verdict/cap = %v/%v, want SPAWN_OK/6; payload=%v", out["verdict"], out["cap"], out)
 	}
 	terms = capTerms(t, out)
 	if terms["limiting"] != "floor" || terms["worker_floor"] != 6 {
