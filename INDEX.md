@@ -221,6 +221,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Intervention as a state operator](docs/notes/CONCEPT-INTERVENTION-AS-STATE-OPERATOR-2026-07-17.md) -- auto-indexed dated note.
 - [Workspace-to-negation cost model — 2026-07-17](docs/notes/WORKSPACE-NEGATION-COST-MODEL-2026-07-17.md) -- auto-indexed dated note.
 - [Native negation primitive seam — 2026-07-17](docs/notes/NATIVE-NEGATION-PRIMITIVE-SEAM-2026-07-17.md) -- auto-indexed dated note.
 - [Negation involution A/B - 2026-07-17](docs/notes/NEGATION-INVOLUTION-AB-2026-07-17.md) -- auto-indexed dated note.
