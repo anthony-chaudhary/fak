@@ -370,3 +370,22 @@ func TestFindIntDeepWalk(t *testing.T) {
 		t.Fatalf("bool must not be read as int, got %v", *got)
 	}
 }
+
+func TestNegationOperatorCardParticipatesInCardsFold(t *testing.T) {
+	var found *Card
+	for i := range Cards {
+		if Cards[i].Key == "negation_operator" {
+			found = &Cards[i]
+			break
+		}
+	}
+	if found == nil || found.Debt != "negation_operator_debt" || !strings.Contains(found.Cmd, "score negation_operator --json") {
+		t.Fatalf("negation operator card = %+v", found)
+	}
+	payload := map[string]any{"corpus": map[string]any{"negation_operator_debt": float64(0), "family": "Cards"}, "ok": true, "verdict": "OK"}
+	metric := MetricFromPayload(*found, payload, "")
+	fold := Fold([]Metric{metric}, nil, "/repo", "abc1234")
+	if len(fold.Metrics) != 1 || fold.Metrics[0].Key != "negation_operator" || fold.TotalDebt != 0 {
+		t.Fatalf("Cards fold = %+v", fold)
+	}
+}
