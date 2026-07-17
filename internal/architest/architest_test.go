@@ -461,6 +461,7 @@ var tier = map[string]int{
 	"market":                3,
 	"steerpr":               1, // #5015: pure fold of stamped trunk commits into operator-legible PR units + attention bands; the band is a VIEW over dispatchtick's witness verdicts (supplied by the caller), which is what keeps this leaf stdlib-only and off the hot path.
 	"tokencache":            1, // #4330: persisted, git-common-dir-anchored backing store for clonescan's per-file token windows (content-addressed under the tokenizer version); imports only tier-1 siblings (clonescan for the window contract, windowgate to suppress its one `git rev-parse` spawn), does its own disk I/O, off the hot path.
+	"amendclass":            1, // #5171: pure policy amendment-class registry (FROZEN/RATCHET/GATED_WIDEN/SELF_AMENDABLE) — data-only classification of every adjudicator.Policy knob; stdlib-only in non-test code (only the conformance _test.go reflects over adjudicator), imports nothing internal, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -477,7 +478,7 @@ var tier = map[string]int{
 // (1->1) edge it never sees (#3945).
 var pureRoot = map[string]bool{
 	"accountobs": true, "accountprobe": true, "affectedtests": true, "agentsindex": true, "ailuminate": true,
-	"answershape": true, "apihostprobe": true, "appversion": true, "astquery": true, "auditreason": true, "benchauthority": true,
+	"amendclass": true, "answershape": true, "apihostprobe": true, "appversion": true, "astquery": true, "auditreason": true, "benchauthority": true,
 	"benchckpt": true, "benchids": true, "benchruns": true, "bgloop": true,
 	"blob": true, "boundarylint": true, "brittleness": true, "buildwitness": true, "cacheobs": true, "cacheprice": true,
 	"callavoid": true, "canon": true, "chatops": true, "chatopsdetach": true, "claimcheck": true,

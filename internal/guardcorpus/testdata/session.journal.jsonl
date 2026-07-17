@@ -1,0 +1,6 @@
+{"seq":1,"ts_unix_nano":1000,"kind":"TOOL_DEFINITION_PRUNED","tool":"ReportFindings","trace_id":"sess-golden","verdict":"ADVISORY","reason":"DEFAULT_DENY","by":"tool-definition-pruner"}
+{"seq":2,"ts_unix_nano":2000,"kind":"DECIDE","tool":"Read","trace_id":"sess-golden","verdict":"ALLOW","by":"monitor","args_label":"path=main.go"}
+{"seq":3,"ts_unix_nano":3000,"kind":"DENY","tool":"Bash","trace_id":"sess-golden","verdict":"DENY","reason":"POLICY_BLOCK","by":"floor","witness":"rm -rf /","args_label":"command=rm","taint":"trusted"}
+{"seq":4,"ts_unix_nano":4000,"kind":"QUARANTINE","tool":"WebFetch","trace_id":"sess-golden","verdict":"QUARANTINE","reason":"SECRET_DISCOVERED","by":"secretgate","witness":"secret-claim","taint":"quarantined"}
+{"seq":5,"ts_unix_nano":5000,"kind":"DENY","tool":"Bash","trace_id":"sess-golden","verdict":"DENY","reason":"OFF_TRUNK","by":"gitgate"}
+{"seq":6,"ts_unix_nano":6000,"kind":"DECIDE","tool":"Grep","trace_id":"sess-golden","verdict":"ALLOW","by":"monitor"}
