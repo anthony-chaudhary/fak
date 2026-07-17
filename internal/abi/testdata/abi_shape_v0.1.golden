@@ -59,7 +59,8 @@
   {
     "struct": "abi.TransformPayload",
     "fields": [
-      "NewArgs: abi.Ref"
+      "NewArgs: abi.Ref",
+      "NewTool: string"
     ]
   },
   {

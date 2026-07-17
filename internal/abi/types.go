@@ -235,8 +235,16 @@ type VerdictPayload interface{ isVerdictPayload() }
 
 // TransformPayload is the VerdictTransform body: NewArgs is the rewritten,
 // adjudicator-approved Args the call proceeds with in place of the original.
-type TransformPayload struct{ NewArgs Ref } // Kind==VerdictTransform
-func (TransformPayload) isVerdictPayload()  {}
+// NewTool is an OPTIONAL substitute tool NAME: when non-empty the call proceeds
+// as that tool instead of the one proposed (e.g. an MCP `git_push` tool rewritten
+// to a Bash `fak sync push` sanctioned sidestep). Empty ⇒ same-tool arg-only
+// rewrite (the back-compatible default every existing producer emits). Appended
+// after NewArgs to preserve the additive-only ABI shape freeze.
+type TransformPayload struct {
+	NewArgs Ref
+	NewTool string
+}                                          // Kind==VerdictTransform
+func (TransformPayload) isVerdictPayload() {}
 
 type QuarantinePayload struct{ PageOut bool } // Kind==VerdictQuarantine
 func (QuarantinePayload) isVerdictPayload()   {}
