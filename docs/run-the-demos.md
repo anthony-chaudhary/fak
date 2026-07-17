@@ -325,6 +325,7 @@ PORT=8154 ./dropindemo &
 PORT=8156 ./unseedemo &
 PORT=8155 ./timewolfdemo &
 PORT=8157 ./trychatdemo &
+PORT=8154 ./qwen36codedemo -public-readonly &
 PORT=8153 ./ctxdemo &
 PORT=8147 ./demorace &
 #  3. open YOUR_VM_IP:<port> in the firewall / security group for inbound TCP.
@@ -344,6 +345,7 @@ FAK_DEMO_BASE_PATH=/demorace  PORT=8147 ./demorace
 FAK_DEMO_BASE_PATH=/unsee     PORT=8156 ./unseedemo
 FAK_DEMO_BASE_PATH=/timewolf  PORT=8155 ./timewolfdemo
 FAK_DEMO_BASE_PATH=/trychat   PORT=8157 ./trychatdemo
+FAK_DEMO_GATEWAY_KEY=test FAK_DEMO_EDGE_KEY=test FAK_DEMO_BASE_PATH=/qwen36codedemo PORT=8154 ./qwen36codedemo -public-readonly
 ```
 
 That means an HTTPS host can mount `/guarddemo/`, `/turntax/`, `/dropin/`,
@@ -407,6 +409,13 @@ server {
 
     location /timewolf/ {
         proxy_pass http://127.0.0.1:8155;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /qwen36codedemo/ {
+        proxy_pass http://127.0.0.1:8154;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;

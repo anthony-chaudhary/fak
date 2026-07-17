@@ -63,6 +63,8 @@ type runResult struct {
 	Error     string         `json:"error,omitempty"`
 }
 
+const defaultAddr = "127.0.0.1:8154"
+
 const fixture = `package counter
 
 import "sync"
@@ -77,19 +79,16 @@ func (c *Counter) Value() int { return c.n }
 `
 
 func main() {
-	addr := flag.String("addr", env("PORT", "8154"), "listen address or port")
+	addr := flag.String("addr", defaultAddr, "listen address or port")
 	gateway := flag.String("gateway", "http://127.0.0.1:8153", "pure fak gateway")
 	model := flag.String("model", "Qwen3.6-27B-Q4_K_M", "model identity")
 	edgeUpstream := flag.String("edge-upstream", os.Getenv("FAK_DEMO_UPSTREAM"), "edge mode: authenticated demo backend URL")
 	basePath := demoui.BasePathFlag(flag.CommandLine, "/qwen36codedemo")
 	publicReadonly := flag.Bool("public-readonly", false, "serve only the page and health endpoint without the edge credential")
 	flag.Parse()
-	listen := *addr
-	if !strings.Contains(listen, ":") {
-		listen = ":" + listen
-	}
+	listen := demoui.ListenAddr(*addr, defaultAddr)
 	if *edgeUpstream != "" {
-		log.Printf("qwen36 coding demo HTTPS edge listening on %s", listen)
+		log.Printf("qwen36 coding demo HTTPS edge listening on %s", demoui.LocalURL(listen, *basePath))
 		mux := http.NewServeMux()
 		demoui.MountWithBasePath(mux, *basePath, edgeHandler(*edgeUpstream))
 		log.Fatal(http.ListenAndServe(listen, mux))
@@ -114,7 +113,7 @@ func main() {
 	}
 	root := http.NewServeMux()
 	demoui.MountWithBasePath(root, *basePath, app)
-	log.Printf("qwen36 coding demo backend listening on http://%s%s/ (both secrets server-side)", listen, demoui.NormalizeBasePath(*basePath))
+	log.Printf("qwen36 coding demo backend listening on %s (both secrets server-side)", demoui.LocalURL(listen, *basePath))
 	log.Fatal(http.ListenAndServe(listen, root))
 }
 

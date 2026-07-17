@@ -7,3 +7,9 @@ Browser coding-agent spine for epic #4762 / issue #4770.
 - Neither secret appears in browser JavaScript or HTML.
 
 The cache panel reports observed counters only. It deliberately does not claim a performance advantage until the tuned benchmark artifact passes `fak claim-check`.
+
+## Local read-only browser witness
+
+```bash
+FAK_DEMO_GATEWAY_KEY=test FAK_DEMO_EDGE_KEY=test FAK_DEMO_BASE_PATH=/qwen36codedemo go run ./cmd/qwen36codedemo -public-readonly
+```

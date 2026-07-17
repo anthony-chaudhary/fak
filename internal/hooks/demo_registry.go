@@ -42,6 +42,7 @@ var demoRegistry = []demoReg{
 	{name: "unseedemo", basePath: "/unsee", apiPath: "api/events", pageMarker: "Un-See It", defaultPort: 8156},
 	{name: "timewolfdemo", basePath: "/timewolf", apiPath: "api/scenarios", pageMarker: "what time is it, Mr. Wolf?", defaultPort: 8155},
 	{name: "trychatdemo", basePath: "/trychat", apiPath: "api/suggestions", pageMarker: "try-it agentic chat", defaultPort: 8157},
+	{name: "qwen36codedemo", basePath: "/qwen36codedemo", apiPath: "api/health", pageMarker: "fak UltraCode", defaultPort: 8154},
 }
 
 // lifecycleDecision is the Go twin of demo_registry.LifecycleDecision.
@@ -56,14 +57,15 @@ var validLifecycleStates = []string{"hosted-keep", "promote-next", "local-keep",
 
 // demoLifecycle mirrors demo_registry.DEMO_LIFECYCLE.
 var demoLifecycle = map[string]lifecycleDecision{
-	"guarddemo":    {"local-keep", 1738, "healthy security-floor proof; keep in local/deep catalog unless promoted by a later rubric pass"},
-	"turntaxdemo":  {"hosted-keep", 1167, "hosted front-door efficiency proof; live link currently witnessed"},
-	"ctxdemo":      {"hosted-keep", 1739, "hosted research/performance slot; must re-earn with current model and net-value witness"},
-	"demorace":     {"hosted-keep", 1739, "hosted live-model research slot; must re-earn with current model and net-value witness"},
-	"dropindemo":   {"local-keep", 1738, "healthy adoption proof; keep in local/deep catalog unless it earns a front-door slot"},
-	"unseedemo":    {"local-keep", 1738, "healthy KV-removal witness; keep in local/deep catalog unless promoted by the rubric"},
-	"timewolfdemo": {"promote-next", 1736, "healthy LCD agentic loop; next candidate for hosted agentic card"},
-	"trychatdemo":  {"promote-next", 1736, "healthy LCD try-it chat; next candidate for hosted agentic card"},
+	"guarddemo":      {"local-keep", 1738, "healthy security-floor proof; keep in local/deep catalog unless promoted by a later rubric pass"},
+	"turntaxdemo":    {"hosted-keep", 1167, "hosted front-door efficiency proof; live link currently witnessed"},
+	"ctxdemo":        {"hosted-keep", 1739, "hosted research/performance slot; must re-earn with current model and net-value witness"},
+	"demorace":       {"hosted-keep", 1739, "hosted live-model research slot; must re-earn with current model and net-value witness"},
+	"dropindemo":     {"local-keep", 1738, "healthy adoption proof; keep in local/deep catalog unless it earns a front-door slot"},
+	"unseedemo":      {"local-keep", 1738, "healthy KV-removal witness; keep in local/deep catalog unless promoted by the rubric"},
+	"timewolfdemo":   {"promote-next", 1736, "healthy LCD agentic loop; next candidate for hosted agentic card"},
+	"qwen36codedemo": {"local-keep", 4770, "working browser coding-agent spine; keep locally until its authenticated live backend is promoted"},
+	"trychatdemo":    {"promote-next", 1736, "healthy LCD try-it chat; next candidate for hosted agentic card"},
 }
 
 // demoRegNames returns the registry demo names in registry (DEMOS) order.
