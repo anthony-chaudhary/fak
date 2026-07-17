@@ -1,0 +1,4 @@
+[
+  {"id":"not-red-to-blue","layer":3,"control_layer":1,"clean":[1,0],"corrupt":[-1,0],"target":[1,0],"min_effect":1.5,"max_control":0},
+  {"id":"deny-to-allowed-action","layer":3,"control_layer":0,"clean":[0,1],"corrupt":[0,-1],"target":[0,1],"min_effect":1.5,"max_control":0}
+]

@@ -1,0 +1,2 @@
+{"id":"not-red-to-blue","clean_score":1,"corrupt_score":-1,"patched_score":1,"control_score":-1,"patch_effect":2,"control_effect":0,"sign_correct":true,"above_threshold":true,"control_specific":true}
+{"id":"deny-to-allowed-action","clean_score":1,"corrupt_score":-1,"patched_score":1,"control_score":-1,"patch_effect":2,"control_effect":0,"sign_correct":true,"above_threshold":true,"control_specific":true}
