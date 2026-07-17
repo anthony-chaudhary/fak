@@ -152,6 +152,11 @@ WITNESSES: tuple[Witness, ...] = (
     Witness("agentbenchdemo-selfcheck", ("go", "run", "./cmd/agentbenchdemo", "-selfcheck"), ("the self-tax invariants hold",)),
     Witness("agentbenchdemo-json", ("go", "run", "./cmd/agentbenchdemo", "-json"), ('"iterations"', '"calls"')),
     Witness(
+        "marketdemo-selfcheck",
+        ("go", "run", "./cmd/marketdemo", "-selfcheck"),
+        ("PASS fak-extension-conformance/1", "1 descriptors locally reverified", "metadata never executed"),
+    ),
+    Witness(
         "fanoutdemo",
         ("go", "run", "./cmd/fanoutdemo"),
         ("the spine-first fan-out planner", "contract-ready follow-ons for issue fanout planner", "spine_ref is required"),
