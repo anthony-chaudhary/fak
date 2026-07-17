@@ -90,7 +90,7 @@ func CompactAnthropicHistoryToView(raw []byte, planned []Message) ([]byte, Compa
 	}
 	shedTokens := 0
 	for _, i := range stubIdx {
-		shedTokens += len(elems[i]) / 4
+		shedTokens += estimateElementTokens(elems[i])
 	}
 	if stubCost := ctxViewStubTokenCost(len(stubIdx)); shedTokens > stubCost {
 		shedTokens -= stubCost

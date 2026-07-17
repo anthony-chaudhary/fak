@@ -147,7 +147,7 @@ func compactWithGoalPin(raw []byte, elems []json.RawMessage, spans []elementSpan
 		if i == goalIdx {
 			continue
 		}
-		shedTokens += len(elems[i]) / 4
+		shedTokens += estimateElementTokens(elems[i])
 	}
 	if shedTokens -= compactStubTokenCost(dropped, "", "", "", ""); shedTokens < 0 {
 		shedTokens = 0
@@ -167,7 +167,7 @@ func compactWithGoalPin(raw []byte, elems []json.RawMessage, spans []elementSpan
 		// shedTokens loop above), else the gate over-credits the saving and can fire a burst the true
 		// economics would reject. invalidatedSuffixTokens (the one-time penalty over [keepStart, …])
 		// is unaffected: the goal sits before keepStart.
-		if droppedCachedTokens -= len(elems[goalIdx]) / 4; droppedCachedTokens < 0 {
+		if droppedCachedTokens -= estimateElementTokens(elems[goalIdx]); droppedCachedTokens < 0 {
 			droppedCachedTokens = 0
 		}
 		if opts.ColdCache {

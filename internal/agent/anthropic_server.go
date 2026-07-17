@@ -326,6 +326,16 @@ func AnthropicStopReason(finishReason string, hasToolUse bool) string {
 // EstimateAnthropicTokens is a cheap, tokenizer-free input-token estimate (~4 chars
 // per token) over the decoded system+messages+tool surface — enough for the
 // optional count_tokens endpoint, never billed against a real model.
+//
+// Images are the one block the ~4-chars/token rule cannot see: the decoder folds an image
+// block down to the literal "[image]" placeholder (unknownBlockPlaceholder), so the decoded
+// m.Content carries ~7 chars for a picture the provider bills at ~imageTokenCost tokens. Left
+// unadjusted, an image-heavy request reports near-zero input tokens, and any client trusting
+// this endpoint to decide when to compact/summarize is told the window is empty right up to a
+// real overflow. So each image block preserved in req.ContentBlocks (the verbatim per-message
+// content the decoder keeps for ledger replay) is charged imageTokenCost on top of the text
+// estimate — the SAME flat per-image currency the byte-level compaction path uses
+// (estimateElementTokens), so the two estimators finally agree on what a picture costs.
 func EstimateAnthropicTokens(req *AnthropicMessagesRequest) int {
 	chars := len(req.System)
 	for _, m := range req.Messages {
@@ -337,7 +347,23 @@ func EstimateAnthropicTokens(req *AnthropicMessagesRequest) int {
 	for _, t := range req.Tools {
 		chars += len(t.Function.Name) + len(t.Function.Description) + len(t.Function.Parameters)
 	}
-	return chars / 4
+	tokens := chars / 4
+	// Charge each image its real per-image cost from the preserved raw content blocks, which
+	// still carry the base64 the decoded placeholder dropped. countContentBlockImages walks the
+	// same top-level + tool_result nesting the decoder does.
+	for _, cb := range req.ContentBlocks {
+		tokens += countContentBlockImages(cb) * imageTokenCost
+	}
+	return tokens
+}
+
+// countContentBlockImages counts image blocks in one preserved message content value (a bare
+// string has none; a block array is walked, recursing one level into a tool_result's own content
+// so a screenshot returned by a tool is counted). It shares contentImageWeight's traversal but
+// needs only the count, not the byte weight.
+func countContentBlockImages(content json.RawMessage) int {
+	imgs, _ := contentImageWeight(content)
+	return imgs
 }
 
 // --- small wire helpers ---------------------------------------------------------

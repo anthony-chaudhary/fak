@@ -359,12 +359,12 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	//    so prefixTokens is 0 and under_budget there is genuinely benign.
 	suffixTokens := 0
 	for i := pfxEnd + 1; i < len(elems); i++ {
-		suffixTokens += len(elems[i]) / 4
+		suffixTokens += estimateElementTokens(elems[i])
 	}
 	if suffixTokens <= budget {
 		prefixTokens := 0
 		for i := 0; i <= pfxEnd && i < len(elems); i++ {
-			prefixTokens += len(elems[i]) / 4
+			prefixTokens += estimateElementTokens(elems[i])
 		}
 		return raw, CompactOutcome{
 			Reason:                CompactReasonUnderBudget,
@@ -481,7 +481,7 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	// billing-truth comparison (vs the provider's cache_read on the same turn).
 	shedTokens := 0
 	for i := pfxEnd + 1; i < keepStart; i++ {
-		shedTokens += len(elems[i]) / 4
+		shedTokens += estimateElementTokens(elems[i])
 	}
 	if shedTokens -= compactStubTokenCost(dropped, tombstone, restoreID, positiveResidue.Text, positiveResidue.RestoreID); shedTokens < 0 {
 		shedTokens = 0
@@ -545,12 +545,12 @@ func headBurstEconomics(elems []json.RawMessage, dropStart, keepStart int) (drop
 		dropStart = 0
 	}
 	for i := dropStart; i < keepStart && i < len(elems); i++ {
-		droppedCachedTokens += len(elems[i]) / 4
+		droppedCachedTokens += estimateElementTokens(elems[i])
 	}
 	lastBp := lastBreakpointMessage(elems)
 	if lastBp >= keepStart {
 		for i := keepStart; i <= lastBp && i < len(elems); i++ {
-			invalidatedSuffixTokens += len(elems[i]) / 4
+			invalidatedSuffixTokens += estimateElementTokens(elems[i])
 		}
 	}
 	return droppedCachedTokens, invalidatedSuffixTokens
@@ -961,7 +961,7 @@ func chooseKeptWindow(elems []json.RawMessage, compactStart, budget int) int {
 	keep := len(elems)
 	acc := 0
 	for i := len(elems) - 1; i >= compactStart; i-- {
-		acc += len(elems[i]) / 4
+		acc += estimateElementTokens(elems[i])
 		if acc > budget {
 			break
 		}
