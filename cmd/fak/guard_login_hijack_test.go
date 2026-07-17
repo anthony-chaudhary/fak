@@ -27,14 +27,17 @@ func TestGuardLoginHijackWatchWarnsAtCredentialRewrite(t *testing.T) {
 	}
 	var warn bytes.Buffer
 	stop := guardWatchLoginHijack(dir, regPath, probe, &warn, 5*time.Millisecond)
-	defer stop()
 	if err := os.WriteFile(cred, []byte(`{"claudeAiOauth":{"accessToken":"new-token-longer"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(time.Second)
-	for warn.Len() == 0 && time.Now().Before(deadline) {
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(dir, ".fak-login-hijack.jsonl")); err == nil {
+			break
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
+	stop()
 	got := warn.String()
 	for _, want := range []string{"july4-netra", "july4@example.test", "uuid-4", "july17@example.test", "uuid-17", "fak accounts enroll-current --name"} {
 		if !strings.Contains(got, want) {
