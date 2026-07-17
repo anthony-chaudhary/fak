@@ -520,7 +520,7 @@ func scanLaunchLedger(path string) (times []int64, last int64) {
 func isNonLaunchPhase(phase string) bool {
 	switch strings.ToLower(strings.TrimSpace(phase)) {
 	case "deferred", "considered", "skipped", "gate_fail_open", "broker_denied",
-		"queued", "detected", "status", "tick", "snapshot", "progress",
+		"queued", "detected", "status", "tick", "snapshot", "progress", "decision",
 		"settled", "operator_settled", "consolidated":
 		return true
 	default:

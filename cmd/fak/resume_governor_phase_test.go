@@ -92,7 +92,7 @@ func TestLegacyPhaselessRowIsALaunch(t *testing.T) {
 func TestIsNonLaunchPhaseVocabulary(t *testing.T) {
 	for _, ph := range []string{
 		"broker_denied", "deferred", "considered", "skipped", "gate_fail_open",
-		"queued", "detected", "status", "tick", "snapshot", "progress",
+		"queued", "detected", "status", "tick", "snapshot", "progress", "decision",
 		"settled", "operator_settled", "consolidated",
 	} {
 		if !isNonLaunchPhase(ph) {
