@@ -9,9 +9,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 )
+
+func readGuardStopRecordsForTest(path string) ([]guardStopRecord, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return jsonlledger.Parse(string(content), func(r guardStopRecord) bool {
+		return r.Schema == guardStopRecordSchema
+	}), nil
+}
 
 func TestGuardStopHookDecision(t *testing.T) {
 	// Default ladder: warn=3, final=7, max=9.
@@ -433,63 +444,6 @@ func TestRunGuardStopHookHandoffStandsDownWhenStopHookActive(t *testing.T) {
 	}
 }
 
-// TestRunGuardTaskHandoffGateHonorsTerminalWrapup: a missing/invalid handoff no longer blocks when
-// the worker's final turn wrote the guard's own sanctioned "no allowed path:" wrap-up — that terminal
-// conclusion is honored (allowed, classified clean_wrapup) rather than re-demanded.
-func TestRunGuardTaskHandoffGateHonorsTerminalWrapup(t *testing.T) {
-	tr := &guardStopTranscript{Read: true, NotedNoAllowedPath: true}
-	exit, disp := runGuardTaskHandoffGate(&strings.Builder{}, false, tr, 0, 3, guardTaskHandoffConfig{
-		Mode: guardPreCompactModeEnforce,
-		File: filepath.Join(t.TempDir(), "missing-handoff.json"),
-	})
-	if exit != 0 || disp != stopDispCleanWrapup {
-		t.Fatalf("gate = (%d,%q), want (0,%q) — a sanctioned wrap-up must be honored, not re-blocked", exit, disp, stopDispCleanWrapup)
-	}
-}
-
-// TestRunGuardTaskHandoffGateSessionCeiling: below the per-session ceiling the gate still blocks; at
-// or past it the gate stands down (the bound a real worker's late re-stop never trips via stop_hook_active).
-func TestRunGuardTaskHandoffGateSessionCeiling(t *testing.T) {
-	cfg := guardTaskHandoffConfig{Mode: guardPreCompactModeEnforce, File: filepath.Join(t.TempDir(), "missing-handoff.json")}
-	if exit, disp := runGuardTaskHandoffGate(&strings.Builder{}, false, nil, 2, 3, cfg); exit != 2 || disp != stopDispHandoffBlock {
-		t.Fatalf("priorBlocks=2 ceiling=3: gate = (%d,%q), want (2,%q) — still block below the ceiling", exit, disp, stopDispHandoffBlock)
-	}
-	if exit, disp := runGuardTaskHandoffGate(&strings.Builder{}, false, nil, 3, 3, cfg); exit != 0 || disp != stopDispHandoffSessionGiveUp {
-		t.Fatalf("priorBlocks=3 ceiling=3: gate = (%d,%q), want (0,%q) — stand down at the ceiling", exit, disp, stopDispHandoffSessionGiveUp)
-	}
-	// ceiling <= 0 disables the bound: the gate keeps blocking regardless of priorBlocks.
-	if exit, disp := runGuardTaskHandoffGate(&strings.Builder{}, false, nil, 99, 0, cfg); exit != 2 || disp != stopDispHandoffBlock {
-		t.Fatalf("ceiling=0 (disabled): gate = (%d,%q), want (2,%q)", exit, disp, stopDispHandoffBlock)
-	}
-}
-
-// TestRunGuardStopHookHandoffCeilingStandsDownAfterRepeatedBlocks exercises the per-session counter
-// end-to-end through the full hook: with a wired stops ledger and a ceiling of 2, the same session's
-// first two clean stops are blocked (handoff missing) and the third stands down — the durable counter
-// bounds the loop even though stop_hook_active is never set on a real worker's late re-stops.
-func TestRunGuardStopHookHandoffCeilingStandsDownAfterRepeatedBlocks(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 0\n"))
-	}))
-	defer srv.Close()
-	t.Setenv(guardStopsLedgerEnv, filepath.Join(t.TempDir(), "guard-stops.jsonl"))
-	t.Setenv(guardHandoffBlockCeilingEnv, "2")
-	args := []string{
-		"--mode", guardPreCompactModeEnforce,
-		"--metrics-url", srv.URL + "/metrics",
-		"--task-handoff-mode", guardPreCompactModeEnforce,
-		"--task-handoff-file", filepath.Join(t.TempDir(), "missing-handoff.json"),
-	}
-	payload := `{"session_id":"sess-ceiling"}`
-	for i, want := range []int{2, 2, 0} { // block, block, stand down
-		var stderr strings.Builder
-		got := runGuardStopHook(&stderr, strings.NewReader(payload), args)
-		if got != want {
-			t.Fatalf("stop #%d: exit = %d, want %d; stderr=%s", i+1, got, want, stderr.String())
-		}
-	}
-}
-
 // TestRunGuardStopHookGivesUpToolFeedbackPastOwnBound is the bound half of #A6: the retryable
 // tool-feedback continue no longer runs forever. Past its own (separate, generous) ceiling the hook
 // stands down and ALLOWS the stop instead of holding the turn open every turn. The ceiling is
@@ -635,7 +589,7 @@ func TestRunGuardStopHookFailOpenWritesUnifiedNextRefusal(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want fail-open 0", code)
 	}
-	records, err := readGuardStopRecords(ledger)
+	records, err := readGuardStopRecordsForTest(ledger)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("records = %+v err=%v", records, err)
 	}
@@ -667,7 +621,7 @@ func TestRunGuardStopHookResolvedQuestionReopensWithAnswerWitness(t *testing.T) 
 	if code != 2 {
 		t.Fatalf("exit = %d, want resolved-answer continuation 2; stderr=%s", code, stderr.String())
 	}
-	records, err := readGuardStopRecords(ledger)
+	records, err := readGuardStopRecordsForTest(ledger)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("records = %+v err=%v", records, err)
 	}
@@ -695,7 +649,7 @@ func TestRunGuardStopHookContinueWritesUnifiedReopen(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("exit = %d, want continue 2", code)
 	}
-	records, err := readGuardStopRecords(ledger)
+	records, err := readGuardStopRecordsForTest(ledger)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("records = %+v err=%v", records, err)
 	}

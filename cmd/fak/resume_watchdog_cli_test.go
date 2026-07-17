@@ -1181,9 +1181,9 @@ func TestResumeWatchdogDryRunLedgersSharedNextDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldSpawn := resumeWatchdogSpawn
-	resumeWatchdogSpawn = func(resumeWatchdogSpawnSpec) error { return nil }
-	t.Cleanup(func() { resumeWatchdogSpawn = oldSpawn })
+	oldSpawn := rwSpawnResumeLaunch
+	rwSpawnResumeLaunch = func(string, resume.WatchdogPlanRow, string, string, launchBrokerGrant) (int, error) { return 1, nil }
+	t.Cleanup(func() { rwSpawnResumeLaunch = oldSpawn })
 
 	var out, stderr strings.Builder
 	code := runResumeWatchdog(&out, &stderr, []string{"--plan", plan, "--ledger", ledger, "--no-refresh"})
