@@ -1,0 +1,36 @@
+{
+  "best_layer": 2,
+  "best_effect": 0.5121951218903276,
+  "layers": [
+    {
+      "layer": 0,
+      "steering_rmse": 0.39350984739902,
+      "affine_rmse": 0.16301840386829794,
+      "unpatched_target_score": 0.6105572886072992,
+      "patched_target_score": 0.8598316214721238,
+      "random_target_score": 0.572994290151686,
+      "patch_effect": 0.2492743328648246,
+      "random_effect": -0.03756299845561317
+    },
+    {
+      "layer": 2,
+      "steering_rmse": 0.39051248379533277,
+      "affine_rmse": 6.089185813511359e-11,
+      "unpatched_target_score": 0.48780487804878053,
+      "patched_target_score": 0.999999999939108,
+      "random_target_score": 0.40532761398014844,
+      "patch_effect": 0.5121951218903276,
+      "random_effect": -0.0824772640686321
+    },
+    {
+      "layer": 4,
+      "steering_rmse": 0.2704163456597992,
+      "affine_rmse": 0.21102428769255444,
+      "unpatched_target_score": 0.5000781494236034,
+      "patched_target_score": 0.8257472704410965,
+      "random_target_score": 0.4157788835300984,
+      "patch_effect": 0.3256691210174931,
+      "random_effect": -0.084299265893505
+    }
+  ]
+}
