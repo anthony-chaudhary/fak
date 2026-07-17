@@ -5,9 +5,12 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func TestCheckFreshDetectsHeadlineFamilyAndNoop(t *testing.T) {
@@ -75,6 +78,51 @@ func TestGeneratedSnapshotIsByteStableAndPortable(t *testing.T) {
 	if strings.Contains(string(aa), root) {
 		t.Fatal("generated output leaks machine path")
 	}
+}
+
+// TestGeneratedReadmeRoundTripsThroughGitStaging is the #5136 regression: the
+// generator must emit bytes that git staging leaves unchanged, even under the
+// Windows-default core.autocrlf=true normalization. A CRLF write is staged as
+// LF, so the committed artifact can never byte-match a fresh regeneration and
+// CONCEPT_FRESHNESS becomes structurally unsatisfiable on Windows.
+func TestGeneratedReadmeRoundTripsThroughGitStaging(t *testing.T) {
+	root := fixtureRepo(t)
+	disk, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(GeneratedReadme)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(disk, []byte("\r\n")) {
+		t.Fatal("generator wrote CRLF; git normalizes the staged blob to LF so freshness can never match")
+	}
+	repo := t.TempDir()
+	if _, err := git(repo, "init", "-q"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(repo, "config", "core.autocrlf", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), disk, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(repo, "add", "README.md"); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := gitStdout(repo, "show", ":README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(staged, disk) {
+		t.Fatalf("generated README does not round-trip through git staging: disk %d bytes, staged %d bytes", len(disk), len(staged))
+	}
+}
+
+// gitStdout runs git capturing stdout only, so blob content is never mixed
+// with normalization warnings the way the CombinedOutput helper would.
+func gitStdout(root string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Output()
 }
 
 func fixtureRepo(t *testing.T) string {
