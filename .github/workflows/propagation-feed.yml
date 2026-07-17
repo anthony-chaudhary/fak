@@ -1,0 +1,133 @@
+name: propagation-feed
+
+# Turn fak's convention-propagation DEBT into specific, deduped GitHub issues the
+# dispatch loop can resolve — the unattended feeder #1517 asks for. `fak
+# propagation-scorecard` names every place a proven scorecard improvement (the shared
+# pkg/scorecard kernel, --compare, --markdown, ...) stalled short of fanning out to its
+# siblings; `fak propagation-debt-dispatch` fans each HARD gap out into one scoped
+# tracker issue via the internal/dogfoodissues backlog bridge. That dispatcher already
+# works by hand (it filed #1509-#1514); this workflow is the follow-through that runs it
+# unattended, exactly like the sibling INTERNAL issue feeders (score-signal.yml,
+# dogfood.yml).
+#
+# AUTONOMOUS LIVE FILING: the daily SCHEDULE files/updates the issues itself — the same
+# deliberate exception to the "scheduled jobs only report" convention that score-signal
+# (#980) and dogfood already make, because the point of an issue feeder is for CI to
+# create the tracked ticket without a human. The storm bound is the dispatcher's own
+# discipline, NOT a human in the loop:
+#
+#   * dedup by marker key (internal/dogfoodissues) => a steady gap files exactly ONE open
+#     issue, then reruns UPDATE it in place — never a daily re-file. This is the property
+#     #1517's witness names ("two consecutive --live runs create on the first and
+#     update-in-place on the second"), proven at the package level by
+#     TestPlanUpdatesExistingStableKeyInsteadOfDuplicate and
+#     TestSyncRecordsPartialProgressAndRerunUpdatesVerifiedCreate.
+#   * the worst-first --cap (default 10) bounds a multi-gap burst.
+#
+# A manual `workflow_dispatch` defaults to DRY-RUN (live=false) for a safe off-cadence
+# probe; the plan is rendered to the step summary + an artifact on every run so the run
+# is auditable even when nothing is filed. The plan/dedup core is self-tested FIRST
+# (go test ./internal/propagationscore ./internal/dogfoodissues), so a filed issue is a
+# real signal, not a tool that always fires.
+
+on:
+  schedule:
+    # Daily 09:27 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, score-signal 07:41,
+    # scoreboard/cadence 08:17, capacity-feed 08:47, blockers-feed 09:07,
+    # score-signal band 09:13, cachevalue-feed 09:37).
+    - cron: "27 9 * * *"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Actually CREATE/UPDATE the issues (default: dry-run plan only)"
+        type: boolean
+        default: false
+      cap:
+        description: "Max propagation-debt gaps to fan out per run (worst-first)"
+        type: string
+        default: "10"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: propagation-feed
+  cancel-in-progress: false
+
+jobs:
+  propagation-feed:
+    name: propagation debt -> issue
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: auto
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # The plan/dedup core FIRST: a filed issue is only meaningful if the pure code
+      # that produced and deduped it is itself proven. internal/propagationscore builds
+      # the gap set; internal/dogfoodissues owns the marker-key dedup that makes a rerun
+      # update in place instead of duplicating.
+      - name: propagation feed self-test
+        run: go test ./internal/propagationscore ./internal/dogfoodissues
+
+      # Build a real fak into tools/.bin/ — the path the fleet runners resolve — so the
+      # dispatcher runs from a binary, matching dogfood.yml.
+      - name: build fak
+        run: go build -o tools/.bin/fak ./cmd/fak
+
+      # Plan the fan-out (dry-run) ALWAYS — --fetch-existing queries the open backlog and
+      # dedups against it, so the summary shows what WOULD be created vs updated-in-place
+      # even on a non-live run.
+      - name: plan propagation-debt issues (dry-run)
+        env:
+          CAP: ${{ github.event.inputs.cap || '10' }}
+        run: |
+          ./tools/.bin/fak propagation-debt-dispatch --cap "$CAP" --fetch-existing --json | tee propagation-plan.json
+          ./tools/.bin/fak propagation-debt-dispatch --cap "$CAP" --fetch-existing | tee propagation-plan.txt
+
+      # File NEW gaps + REFRESH worsened open ones. AUTONOMOUS on the daily SCHEDULE; a
+      # manual `workflow_dispatch` still needs live=true. Marker-key dedup + the
+      # worst-first --cap bound a storm, so a daily live run cannot duplicate.
+      - name: file propagation-debt issues (autonomous on schedule, or armed dispatch)
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true') }}
+        env:
+          CAP: ${{ github.event.inputs.cap || '10' }}
+        run: ./tools/.bin/fak propagation-debt-dispatch --cap "$CAP" --live
+
+      - name: plan -> step summary
+        if: always()
+        run: |
+          {
+            echo "## propagation-feed plan"
+            armed="${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true')) && 'LIVE (issues filed/updated)' || 'dry-run (nothing filed)' }}"
+            echo "_Mode: ${armed}. The daily schedule files autonomously; a manual workflow_dispatch needs live=true. Marker-key dedup + the worst-first cap bound a storm — reruns update in place._"
+            echo '```'
+            cat propagation-plan.txt 2>/dev/null || echo "(no plan)"
+            echo '```'
+            echo '<details><summary>machine plan</summary>'
+            echo
+            echo '```json'
+            cat propagation-plan.json 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: propagation-plan
+          path: |
+            propagation-plan.json
+            propagation-plan.txt
+          if-no-files-found: ignore
