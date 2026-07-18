@@ -103,7 +103,8 @@ connection is made, and those pages link back here instead of coining new status
 | You run… | Wire | Support | Guide |
 |---|---|---|---|
 | **Claude Code** / the Anthropic API or SDK | Anthropic Messages | `fak guard` + guide | [`claude.md`](claude.md) |
-| **OpenAI Codex** / the OpenAI API or SDK | OpenAI Chat Completions | `fak guard` + guide | [`openai-codex.md`](openai-codex.md) |
+| **OpenAI Codex** (CLI / IDE extension) | OpenAI Chat Completions | `fak guard` + guide | [`openai-codex.md`](openai-codex.md) |
+| **Any OpenAI SDK or Chat Completions client** (OpenAI / Agents SDK, LangChain, LlamaIndex, …) | OpenAI Chat Completions | guide | [`openai.md`](openai.md) |
 | **OpenCode** (terminal agent) | OpenAI Chat Completions | `fak guard` + guide | [`claude.md#opencode`](claude.md#opencode) |
 | **Hermes Agent** (NousResearch self-hosted agent) | OpenAI Chat Completions | `fak guard` + guide | [`hermes.md`](hermes.md) |
 | **Cursor** (IDE) | MCP *or* OpenAI proxy | guide | [`cursor.md`](cursor.md) |
@@ -324,6 +325,7 @@ governance surface, not tokens per second. Full scope, claim by claim:
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
 - [Add fak to your agent over MCP](mcp.md) — the MCP-client setup route: one `.mcp.json` paste wires `fak serve --stdio` into Claude Code, Cursor, or any MCP client, checked by the deterministic stdio proof; the wire contract and kernel internals stay linked one layer deeper.
 - [Harden any MCP server](harden-any-mcp.md) — drop fak in front of any MCP server: a context-MMU quarantines poisoned tool results out of context and a capability allow-list blocks tools you never wired.
+- [fak + the OpenAI API](openai.md) — the OpenAI-client route: the compatible `/v1/*` endpoints on the current build (chat completions with tools + streaming, buffered Responses, models, embeddings, moderations), the supported `guard`/`serve` and upstream choices, and the honest current limits.
 - [fak + LiteLLM](litellm.md) — the three topologies (fak in front of a LiteLLM proxy, fak as a governed node behind it, and fak's per-aspect routing dispatching through it), and why supporting LiteLLM is one wire, not a hundred adapters.
 - [fak + llm-d](llm-d.md) — front the llm-d Gateway API OpenAI-compatible route, or use the registered `llm-d` engine id for syscall/model-route dispatch.
 - [Routers & gateways](routers.md) — OpenRouter, Portkey, LiteLLM Router, Unify, Martian: fak as a complement (govern + route per aspect) to request-level routers, with the honest categorical positioning.

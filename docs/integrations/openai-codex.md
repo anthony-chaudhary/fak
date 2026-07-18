@@ -25,7 +25,7 @@ There are two useful fak entry points:
 |---|---|---|
 | Current Codex CLI or IDE extension | `fak serve --stdio` as an MCP server | Codex supports MCP, and fak exposes verdict tools without changing Codex's model wire. |
 | Codex CLI with an OpenAI API key and you want fak in front of the model wire | `fak codex -- <codex args...>` | One command starts `fak guard`, launches Codex, and injects per-run Codex `-c model_provider=fak` overrides for the Responses wire. |
-| OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. |
+| OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. Endpoint-by-endpoint compatibility and current limits: [openai.md](openai.md). |
 
 Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
 proxy to an OpenAI Responses upstream with `--provider openai-responses`. The public
