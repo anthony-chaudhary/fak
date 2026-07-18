@@ -13,9 +13,12 @@ const (
 )
 
 // CacheAffinityDecision is the auditable cache-affinity handoff stamped when a
-// context-budget reset mints a continuation id. It is deliberately provider-neutral:
-// vcachegov owns provider-specific header derivation, while session owns the lineage
-// decision that says whether a hidden reset preserved affinity.
+// context-budget reset mints a continuation id. It is deliberately provider-neutral
+// and ADVISORY: session owns the lineage decision that says a hidden reset kept the
+// same opaque key, and the decision is serialized onto the reset directive for the
+// HOST to act on. Nothing in fak's own outbound wire path consumes AffinityKey —
+// the live provider routing hint (responsesPromptCacheKey in internal/agent) is
+// derived independently from the request head and never consults this value.
 type CacheAffinityDecision struct {
 	Action      string `json:"action,omitempty"`
 	AffinityKey string `json:"affinity_key,omitempty"`

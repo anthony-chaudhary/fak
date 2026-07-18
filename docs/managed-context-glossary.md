@@ -220,17 +220,21 @@ fact never mints a promotion record at all — it was never a candidate.
 a chained request is likely to land on a shard that already has your prefix warm — and the
 guards that keep fak from trusting that belief past what it's worth.
 
-**Shipped mechanism:** `internal/vcachegov` and `internal/vcachecal`. `vcachegov.AffinityKey`
-biases chained requests onto one shard so a warm prefix is read by the request that warmed
-it; the affinity router also watches for a correlated warmth collapse (an autoscale reshard
-invalidating a whole warm set at once) and throttles its own warming bursts so it never
-triggers that reshard itself. `vcachecal.Concentration` measures whether a workload is
-concentrated enough (a Zipf exponent `s > 1`) for warming to pay off at all, and flags a flat
-workload as structurally defeated rather than warming a tail that will never pay back.
+**Shipped mechanism:** the agent wire layer's `prompt_cache_key` derivation
+(`internal/agent`): every OpenAI-Responses request carries a stable 32-hex-char hash of its
+cacheable head (model + system instructions + tools), biasing chained requests that share a
+prefix onto the same warm upstream cache node. Off the request path, `internal/vcachegov`
+and `internal/vcachecal` are the decision/proof layer: the governor classifies prefixes
+(pin / lazy-rebuild / ride-natural / evict) and budgets warming inside rate-limit headroom,
+and `vcachecal.Concentration` measures whether a workload is concentrated enough (a Zipf
+exponent `s > 1`) for warming to pay off at all, flagging a flat workload as structurally
+defeated rather than warming a tail that will never pay back. (An earlier version of this
+entry claimed a shipped `vcachegov.AffinityKey` router with autoscale-rehash detection and
+warming-burst caps; that router never had a live caller and was cut in #5190.)
 
-- **What fak manages:** routing chained requests for affinity, detecting a correlated
-  cache-warmth collapse, capping its own warming bursts, and measuring up front whether your
-  workload's shape makes cache warming worth doing.
+- **What fak manages:** pinning a stable per-prefix routing hint on the wire, classifying
+  and budgeting the warm set off-path, and measuring up front whether your workload's shape
+  makes cache warming worth doing.
 - **What fak asks about:** nothing here is ever load-bearing for correctness — cache
   warmth is a cost/latency *belief*, confirmed by provider telemetry, never an authority to
   omit context. A miss costs latency; it never silently drops a fact from your session.

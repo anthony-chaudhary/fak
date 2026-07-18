@@ -1,12 +1,14 @@
 // Package vcachegov is the vCache Governor — the steady-state policy layer that
 // decides, per cacheable prefix, whether to heartbeat-pin it, let it lazy-rebuild,
-// ride natural traffic, or evict it; how many prefixes to warm inside rate-limit
-// headroom; and how to route chained requests onto a consistent warm shard.
+// ride natural traffic, or evict it; and how many prefixes to warm inside
+// rate-limit headroom.
 //
 // It is milestone M5 of the vCache epic (issue #720). The full design lives in
 // docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md; this package implements the
-// four acceptance criteria drawn from §5.4 (pin/lazy/evict), §5.5 (rate-limit warm
-// budget), §9 + Law D3 (affinity routing), and Law D4 (secret/retention safety).
+// acceptance criteria drawn from §5.4 (pin/lazy/evict), §5.5 (rate-limit warm
+// budget), and Law D4 (secret/retention safety). The §9 / Law D3 affinity router
+// was cut as dead code in #5190 (see affinity.go); the live cross-shard routing
+// hint is derived in the agent wire layer instead.
 //
 // Like cachemeta's lifecycle.go and placement.go, the Governor is a PURE decision
 // layer: the caller injects the calibration M1 produces (arrival rate λ, TTL T,
