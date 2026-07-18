@@ -20,6 +20,25 @@ capability floor, the result-side quarantine, and the audit trail in front. This
 the local engines that wiring covers, then the one engine fak runs itself — the in-kernel
 reference engine — and finally the catch-all for anything else that speaks the wire.
 
+## Start here: front an engine and confirm the seat in one check
+
+If you are an operator, your job is to pick the engine that serves your tokens and confirm
+fak is governing it. The wiring is one shape for every engine in section 1 (and anything
+else that speaks the OpenAI-compatible wire) — point fak at the engine's `/v1`, then check
+fak's own health:
+
+```bash
+fak serve --provider openai --base-url http://<host>:<port>/v1 --model <served-model>
+curl -s http://127.0.0.1:8080/healthz   # -> {"ok":true,"model":"…","engine":"…"}
+```
+
+The one exception is fak's own in-kernel reference engine (section 2): select it with
+`--engine inkernel`, and the `engine` field reads `inkernel` instead of an upstream. Support
+is witnessed in the [compatibility matrix](../integrations/compatibility-matrix.md) (the
+section-1 engines, each with its base URL) and the
+[Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) (the in-kernel
+[SHIPPED] tag). Everything below is the per-engine base URL and the exact wiring.
+
 ## 1. Local / self-hosted engines over the OpenAI-compatible wire
 
 These run on your own box and expose an OpenAI-compatible `/v1` surface. You point
