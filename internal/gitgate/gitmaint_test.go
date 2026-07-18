@@ -30,6 +30,10 @@ type fakeMaint struct {
 	// fsmonErr models git being unable to run the probe at all (→ unknown).
 	fsmon    string
 	fsmonErr bool
+	// fsmonStartFails models the #5068 clone shape where `git fsmonitor--daemon start`
+	// cannot bring a daemon up (git #75781, #26154): start exits non-zero and the
+	// status probe keeps reporting not-watching.
+	fsmonStartFails bool
 }
 
 func (f *fakeMaint) run(_ context.Context, dir string, args ...string) (string, int, error) {
@@ -65,6 +69,19 @@ func (f *fakeMaint) run(_ context.Context, dir string, args ...string) (string, 
 		}
 		f.loose -= drop // removed outright — in-pack does NOT grow
 		f.unreachable = 0
+		return "", 0, nil
+	case len(args) >= 3 && args[0] == "config" && args[1] == "--unset":
+		if _, ok := f.posture[args[2]]; ok {
+			delete(f.posture, args[2])
+			return "", 0, nil
+		}
+		return "", 5, nil // git exits 5 when the key to unset does not exist
+	case len(args) >= 2 && args[0] == "fsmonitor--daemon" && args[1] == "start":
+		if f.fsmonStartFails {
+			return "error: fsmonitor--daemon failed to start", 128, nil
+		}
+		f.fsmon = "fsmonitor-daemon is watching 'C:/work/clone'"
+		f.fsmonErr = false
 		return "", 0, nil
 	case len(args) >= 2 && args[0] == "fsmonitor--daemon" && args[1] == "status":
 		if f.fsmonErr {

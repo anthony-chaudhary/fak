@@ -41,7 +41,10 @@
 // loose immediately — including an object a concurrent commit wrote milliseconds
 // ago), never `git gc` / `--task=gc`, never a full `repack -a/-A/-adb`, never
 // `git worktree prune`, never `git maintenance register/start` (those write the
-// GLOBAL ~/.gitconfig), never edits .git/config. The ONE permitted prune form is
+// GLOBAL ~/.gitconfig), never edits .git/config — the operator-invoked fsmonitor
+// repair (RepairFsmonitor, fsmonitor_repair.go / #5068) may unset core.fsmonitor,
+// but it is never called from RunMaint or any auto-run path, so this invariant
+// holds for every unattended tier. The ONE permitted prune form is
 // the grace-prune tier's `git prune --expire=<≥2w>`: the ≥2-week expire floor
 // (enforced in code — a sub-floor or `now` expire is REFUSED, never executed)
 // means it can only drop objects that have been unreachable for weeks, which no

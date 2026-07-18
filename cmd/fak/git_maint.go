@@ -26,7 +26,10 @@ import (
 // which unlink ONLY fully-covered redundant copies) only when the lock preflight AND
 // the shared no-auto-gc posture both pass, re-checking locks before every mutating step.
 // It never prunes unreachable objects, never full-repacks, never edits .git/config, and
-// is idempotent. It prints before/after `git count-objects -vH`.
+// is idempotent. It prints before/after `git count-objects -vH`. The ONE config-editing
+// exception is explicitly operator-invoked: --repair-fsmonitor (#5068) clears the #4603
+// "core.fsmonitor=true but dead daemon" drift by unsetting the key (default) or starting
+// the builtin daemon (--fsmonitor-mode start); the auto-run path never does this.
 //
 // Default is APPLY (the point of the verb is to consolidate); --dry-run probes locks +
 // posture and prints the plan and the before-count without mutating anything. Exit 0 on
@@ -38,7 +41,14 @@ func cmdGitMaint(argv []string) {
 	dryRun := fs.Bool("dry-run", false, "probe locks + posture and print the plan and the before-count; mutate nothing")
 	asJSON := fs.Bool("json", false, "emit a machine-readable result")
 	root := fs.String("root", "", "repo root to consolidate (default: discover from cwd)")
+	repairFsmonitor := fs.Bool("repair-fsmonitor", false, "operator-invoked repair of the #4603 fsmonitor drift before the maintenance run (see --fsmonitor-mode)")
+	fsmonitorMode := fs.String("fsmonitor-mode", string(gitgate.FsmonitorRepairOff), "fsmonitor repair mode: off (unset core.fsmonitor — the #5068 default for this clone) or start (start the builtin daemon)")
 	_ = fs.Parse(argv)
+
+	if *fsmonitorMode != string(gitgate.FsmonitorRepairOff) && *fsmonitorMode != string(gitgate.FsmonitorRepairStart) {
+		fmt.Fprintf(os.Stderr, "git-maint: unknown --fsmonitor-mode %q (want off|start)\n", *fsmonitorMode)
+		os.Exit(2)
+	}
 
 	repoRoot := strings.TrimSpace(*root)
 	if repoRoot == "" {
@@ -54,6 +64,19 @@ func cmdGitMaint(argv []string) {
 		os.Exit(2)
 	}
 
+	// Operator-invoked fsmonitor repair (#5068) runs BEFORE the maintenance run, so
+	// the posture line below is the captured after-witness the acceptance gate asks
+	// for: on a repaired clone it reads SAFE in the same invocation.
+	var repair *gitgate.FsmonitorRepairResult
+	if *repairFsmonitor {
+		r := gitgate.RepairFsmonitor(context.Background(), gitRunner, gitgate.FsmonitorRepairOptions{
+			RepoRoot: repoRoot,
+			Mode:     gitgate.FsmonitorRepairMode(*fsmonitorMode),
+			Apply:    !*dryRun,
+		})
+		repair = &r
+	}
+
 	res := gitgate.RunMaint(context.Background(), gitRunner, gitgate.MaintOptions{
 		RepoRoot:     repoRoot,
 		GitCommonDir: commonDir,
@@ -61,11 +84,14 @@ func cmdGitMaint(argv []string) {
 	})
 
 	if *asJSON {
-		if err := renderGitMaintJSON(os.Stdout, res); err != nil {
+		if err := renderGitMaintJSON(os.Stdout, res, repair); err != nil {
 			fmt.Fprintf(os.Stderr, "git-maint: encode json: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
+		if repair != nil {
+			renderFsmonitorRepairText(os.Stdout, *repair)
+		}
 		renderGitMaintText(os.Stdout, res)
 	}
 
@@ -96,13 +122,51 @@ func discoverGitCommonDir(root string) string {
 	return p
 }
 
-func renderGitMaintJSON(w io.Writer, res gitgate.MaintResult) error {
+func renderGitMaintJSON(w io.Writer, res gitgate.MaintResult, repair *gitgate.FsmonitorRepairResult) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(struct {
 		Schema string `json:"schema"`
 		gitgate.MaintResult
-	}{Schema: "fak-git-maint/1", MaintResult: res})
+		FsmonitorRepair *gitgate.FsmonitorRepairResult `json:"fsmonitor_repair,omitempty"`
+	}{Schema: "fak-git-maint/1", MaintResult: res, FsmonitorRepair: repair})
+}
+
+// renderFsmonitorRepairText prints the one-line before/after witness of the
+// operator-invoked fsmonitor repair (#5068), ahead of the maintenance report whose
+// posture line then shows the post-repair state.
+func renderFsmonitorRepairText(w io.Writer, r gitgate.FsmonitorRepairResult) {
+	before := "core.fsmonitor=" + displayValue(r.BeforeValue)
+	if r.BeforeDaemon != "" {
+		before += ", daemon=" + r.BeforeDaemon
+	}
+	after := "core.fsmonitor=" + displayValue(r.AfterValue)
+	if r.AfterDaemon != "" {
+		after += ", daemon=" + r.AfterDaemon
+	}
+	verdict := "NOT CLEARED"
+	if r.Cleared {
+		verdict = "CLEARED"
+	}
+	switch {
+	case r.Err != "" && !r.Ran:
+		fmt.Fprintf(w, "fsmonitor repair (mode=%s): REFUSED — %s\n\n", r.Mode, r.Err)
+	case r.Action == gitgate.FsmonitorActionNone:
+		fmt.Fprintf(w, "fsmonitor repair (mode=%s): nothing to repair (%s) — %s\n\n", r.Mode, before, verdict)
+	case !r.Ran:
+		fmt.Fprintf(w, "fsmonitor repair (mode=%s): DRY-RUN — %s; planned: git %s\n\n", r.Mode, before, strings.Join(r.Args, " "))
+	default:
+		fmt.Fprintf(w, "fsmonitor repair (mode=%s): %s -> git %s (exit %d%s) -> %s — %s\n\n",
+			r.Mode, before, strings.Join(r.Args, " "), r.Code, errSuffix(r.Err), after, verdict)
+	}
+}
+
+// displayValue renders a config value, spelling the unset case as <unset>.
+func displayValue(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "<unset>"
+	}
+	return v
 }
 
 func renderGitMaintText(w io.Writer, res gitgate.MaintResult) {
@@ -150,6 +214,14 @@ func renderGitMaintText(w io.Writer, res gitgate.MaintResult) {
 		fmt.Fprintf(w, "loose objects folded: %d (%d -> %d); in-pack %d -> %d; packs %d -> %d — nothing pruned\n",
 			res.LooseDelta(), res.Before.Count, res.After.Count,
 			res.Before.InPack, res.After.InPack, res.Before.Packs, res.After.Packs)
+	}
+	if res.Before.Available {
+		verdict := "ok"
+		if res.LooseBacklogHigh {
+			verdict = "HIGH"
+		}
+		fmt.Fprintf(w, "LOOSE_BACKLOG_HIGH: %s (%d >= %d threshold)\n",
+			verdict, res.Before.Count, gitgate.LooseBacklogThreshold)
 	}
 	if res.Incident {
 		fmt.Fprintln(w, "\nINCIDENT: posture drift — the shared no-auto-gc config was violated; an auto-gc could prune-race.")
