@@ -455,11 +455,8 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			select {
 			case <-cfg.toolTerminalWake.signal:
 				wake := cfg.toolTerminalWake.next()
-				cfg.toolTerminalWake.received(wake)
 				payload, _ := json.Marshal(wake)
-				rendered := string(payload)
-				toolTerminalPayload = rendered
-				messages = append(messages, Message{Role: RoleUser, Content: rendered})
+				toolTerminalPayload = string(payload)
 			case <-ctx.Done():
 				return m, ctx.Err()
 			}
@@ -470,6 +467,9 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		// stop is taken at a CLEAN boundary, never mid-turn.
 		perTurnCap, proceed, stopReason := cfg.gateTurn(ctx)
 		if !proceed {
+			if toolTerminalPayload != "" {
+				cfg.toolTerminalWake.release()
+			}
 			m.StoppedBySession = stopReason
 			if fak {
 				finalizeFak(k, &m)
@@ -477,6 +477,8 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			return m, nil
 		}
 		if toolTerminalPayload != "" {
+			cfg.toolTerminalWake.mark("DISPATCHED")
+			messages = append(messages, Message{Role: RoleUser, Content: toolTerminalPayload})
 			sessionctl.RecordToolTerminalWakeNext(cfg.trace, toolTerminalPayload)
 		}
 		cfg.applyPace(perTurnCap)

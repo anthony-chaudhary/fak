@@ -115,20 +115,21 @@ func (q *ToolTerminalWakeQueue) next() ToolTerminalWake {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	w := q.queued[0]
-	q.queued = q.queued[1:]
+	q.pending = &w
+	return w
+}
+
+// release returns an unadmitted claim to the queue and re-arms its wake signal.
+func (q *ToolTerminalWakeQueue) release() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.pending = nil
 	if len(q.queued) > 0 {
 		select {
 		case q.signal <- struct{}{}:
 		default:
 		}
 	}
-	return w
-}
-
-func (q *ToolTerminalWakeQueue) received(w ToolTerminalWake) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.pending = &w
 }
 
 func (q *ToolTerminalWakeQueue) mark(status string) {
@@ -139,7 +140,14 @@ func (q *ToolTerminalWakeQueue) mark(status string) {
 	}
 	q.records = append(q.records, ToolTerminalWakeRecord{Wake: *q.pending, Status: status})
 	if status == "DISPATCHED" {
+		q.queued = q.queued[1:]
 		q.pending = nil
+		if len(q.queued) > 0 {
+			select {
+			case q.signal <- struct{}{}:
+			default:
+			}
+		}
 	}
 }
 
@@ -348,9 +356,6 @@ func (c runConfig) gateTurn(ctx contextLike) (maxTokens int, proceed bool, reaso
 		for {
 			mt, proceed, gap, reason := c.gate.Decide(c.trace)
 			if proceed {
-				if c.toolTerminalWake != nil {
-					c.toolTerminalWake.mark("DISPATCHED")
-				}
 				if gap > 0 {
 					select {
 					case <-ctx.Done():
