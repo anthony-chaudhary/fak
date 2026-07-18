@@ -147,7 +147,7 @@ attribution collected in the epic research brief.
    a local model (`--gguf`) or the mock planner — no external dependency on the request path.
    **Not yet shipped:** a packaged air-gapped deployment kit with an SBOM, which is
    [#3279](https://github.com/anthony-chaudhary/fak/issues/3279). The *property* (one binary,
-   offline) is real today; the turnkey *kit* is ticketed.
+   offline) is real today; the packaged *kit* is ticketed.
 8. **File-lease arbitration.** `dos_arbitrate` is a pure admission kernel: given the leases
    already held, it decides whether a new worker may take a file-tree lane, using a lock-mode
    tree-disjointness rule (shared/shared may overlap; anything with an exclusive holder must
@@ -173,7 +173,7 @@ The honest scope, stated once, so nothing above has to be walked back:
   fence above). We sell on operational pain, not a regulatory clock.
 - **No hard cost kill-switch yet.** Row 3 observes and warns; the hard kill/pause is #3273.
 - **No non-human-identity product yet.** Row 4 is entirely ticketed (#3274).
-- **No turnkey air-gap kit yet.** The single-binary/offline property ships; the packaged kit
+- **No packaged air-gap kit yet.** The single-binary/offline property ships; the packaged kit
   + SBOM is #3279.
 - **Redaction is off by default and gated on the flagship route.** Row 9 is real but fenced
   on both axes.
