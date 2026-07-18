@@ -95,4 +95,11 @@ func registerBuiltins() {
 	}
 }
 
-func init() { registerBuiltins() }
+// builtinsRegistered is deliberately a package-level VAR initializer, not a func init():
+// Go runs every var initializer before ANY init() function, and catalog.go's init()
+// asserts each FeatureCard token is already registered. As a func init() here it runs
+// AFTER catalog.go's (init()s fire in file order, catalog.go first) and that assertion
+// panics at process start in every binary importing this package. The var is
+// "unreferenced" on purpose — it exists only for this ordering guarantee; do not fold
+// it back into init().
+var builtinsRegistered = func() bool { registerBuiltins(); return true }()
