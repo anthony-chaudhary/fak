@@ -1,0 +1,346 @@
+{
+  "rows": [
+    {
+      "id": "cov5306-fak-planner-retry-budget",
+      "canonical": "FAK_PLANNER_RETRY_BUDGET (planner retry wall-clock budget)",
+      "family": "plan",
+      "kind": "config",
+      "definition": "internal/agent/retry.go: env knob bounding the planner's total retry wall-clock budget (default 4h, clamped by maxRetryBudget so a fat-fingered value cannot wedge a run); when raised, the attempt cap rises toward the hard ceiling.",
+      "distinction": "A retry TIME BUDGET for the agent planner - NOT a memory/fit plan and NOT the harness-selection plan; it caps how long retries may run, not what gets planned.",
+      "distinct_from": [
+        "cov5306-harness-candidates",
+        "plan"
+      ],
+      "aliases": [],
+      "grounding": "FAK_PLANNER_RETRY_BUDGET",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-harness-candidates",
+      "canonical": "HarnessCandidates (execution-route harness options)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/executionroute/executionroute.go HarnessCandidates: the []string of candidate harness ids a route request offers, from which selectHarness picks one against the available profiles.",
+      "distinction": "The CANDIDATE SET of harnesses to choose among - NOT the single selected Harness and NOT a memory/fit plan; it is the input options, not a decision.",
+      "distinct_from": [
+        "cov5306-speculation-candidate",
+        "plan"
+      ],
+      "aliases": [],
+      "grounding": "HarnessCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-inkernel-planner-prefix-reuse-supported",
+      "canonical": "inKernelPlannerPrefixReuseSupported (prefix-reuse capability test)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent/inkernel_decode.go inKernelPlannerPrefixReuseSupported: reports whether the in-kernel planner can reuse a prefix KV for the given model and backend, gating whether a decode takes the prefix-reuse path.",
+      "distinction": "A CAPABILITY predicate (can this model/backend reuse a prefix?) - NOT prefixCacheIdentityFromContext (which names WHICH prefix) and NOT a batch/memory plan; it returns a bool, not a plan.",
+      "distinct_from": [
+        "plan",
+        "cov5306-serve-gguf-memory-plan"
+      ],
+      "aliases": [],
+      "grounding": "inKernelPlannerPrefixReuseSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-numa-replica-plan",
+      "canonical": "NUMAReplicaPlan (NUMA weight-replica plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute/numa_replica_plan.go NUMAReplicaPlan: the plan for how model-weight replicas are laid across NUMA nodes given a per-replica byte size and a reserve budget.",
+      "distinction": "The NUMA weight-REPLICA layout plan - NOT PlanNUMAReplicas (the func that computes it) and NOT v4ExpertBatchPlan (a routed-expert batch plan); it sizes replicas across nodes.",
+      "distinct_from": [
+        "cov5306-plan-numa-replicas",
+        "cov5306-v4-expert-batch-plan"
+      ],
+      "aliases": [],
+      "grounding": "NUMAReplicaPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-plan-numa-replicas",
+      "canonical": "PlanNUMAReplicas (compute the NUMA replica plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute/numa_replica_plan.go PlanNUMAReplicas: computes a NUMAReplicaPlan from the per-replica byte size and reserve budget.",
+      "distinction": "The FUNC that computes the NUMA replica plan - NOT NUMAReplicaPlan (its result struct) and NOT planV4ExpertBatch (which plans an expert batch, not replicas).",
+      "distinct_from": [
+        "cov5306-numa-replica-plan",
+        "cov5306-plan-v4-expert-batch"
+      ],
+      "aliases": [],
+      "grounding": "PlanNUMAReplicas",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-plan9",
+      "canonical": "plan9 (Plan 9 OS build target)",
+      "family": "plan",
+      "kind": "doc-term",
+      "definition": "internal/model/madvise_other.go + mmap_other.go: 'plan9' names the Plan 9 operating system in the GOOS build-tag lists of the platforms that fall back to the portable (no-mmap / no-madvise) paths.",
+      "distinction": "The Plan 9 OPERATING-SYSTEM build target - NOT any fak 'plan' concept; it is a GOOS name that only collides in spelling with the plan family.",
+      "distinct_from": [
+        "plan",
+        "cov5306-plant"
+      ],
+      "aliases": [],
+      "grounding": "plan9",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-plan-classify",
+      "canonical": "PlanClassify (concept reclassify plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/conceptcatalog (cmd/fak/concept.go): PlanClassify builds the plan to RECLASSIFY an existing concept row's verdict/fields against the tree, without adding a new row.",
+      "distinction": "Plans a RE-CLASSIFY of an existing concept - NOT PlanPosition (which plans ADDING a new positioned row) and NOT a memory/fit plan.",
+      "distinct_from": [
+        "cov5306-plan-position",
+        "plan"
+      ],
+      "aliases": [],
+      "grounding": "PlanClassify",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-plan-position",
+      "canonical": "PlanPosition (concept position-add plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/conceptcatalog (cmd/fak/concept.go): PlanPosition builds the plan to ADD a new positioned concept row (canonical, definition, distinction, distinct-from) to a rows file and glossary.",
+      "distinction": "Plans ADDING a new positioned concept row - NOT PlanClassify (which plans re-grading an existing one) and NOT a memory/fit plan.",
+      "distinct_from": [
+        "cov5306-plan-classify",
+        "plan"
+      ],
+      "aliases": [],
+      "grounding": "PlanPosition",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-plant",
+      "canonical": "plant (English verb, not a plan)",
+      "family": "plan",
+      "kind": "doc-term",
+      "definition": "cmd/fak/codex_mcp_install.go + internal/quality/regression_bisect.go: 'plant' occurs only as an English VERB in comments ('plant artifacts under a directory', 'plant a revision'), never as a fak concept.",
+      "distinction": "An English VERB that collides in spelling with the plan family - NOT a fak 'plan' (a computed layout/decision); it names an action in prose, not a concept.",
+      "distinct_from": [
+        "plan",
+        "cov5306-plan9"
+      ],
+      "aliases": [],
+      "grounding": "plant",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-plan-v4-expert-batch",
+      "canonical": "planV4ExpertBatch (routed-expert batch planner)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/model/v4_expert_batch.go planV4ExpertBatch: plans one layer's routed-expert batch load - which selected experts to stage within a byte cap - returning a v4ExpertBatchPlan.",
+      "distinction": "The FUNC that plans an expert batch load - NOT v4ExpertBatchPlan (its result) and NOT PlanExpertCache (which sizes resident-expert HBM capacity, not a per-layer batch).",
+      "distinct_from": [
+        "cov5306-v4-expert-batch-plan",
+        "cov5304-plan-expert-cache"
+      ],
+      "aliases": [],
+      "grounding": "planV4ExpertBatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-v4-expert-batch-plan",
+      "canonical": "v4ExpertBatchPlan (routed-expert batch plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/model/v4_expert_batch.go v4ExpertBatchPlan: the plan produced for one layer's routed-expert batch - the chosen experts and staging under the byte cap.",
+      "distinction": "The batch-load PLAN struct - NOT planV4ExpertBatch (the func that builds it) and NOT NUMAReplicaPlan (a NUMA replica layout).",
+      "distinct_from": [
+        "cov5306-plan-v4-expert-batch",
+        "cov5306-numa-replica-plan"
+      ],
+      "aliases": [],
+      "grounding": "v4ExpertBatchPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-pr-plan-file-list",
+      "canonical": "prPlanFileList (PR-plan file-list formatter)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/release_prplan.go prPlanFileList: formats the changed-file list for a release PR plan, truncating to a maxFiles cap for the plan summary.",
+      "distinction": "FORMATS the PR plan's file list - NOT prPlanResolve (which resolves the plan's base ref) and NOT releasePRPlanGit (the raw git helper).",
+      "distinct_from": [
+        "cov5306-pr-plan-resolve",
+        "cov5306-release-prplan-git"
+      ],
+      "aliases": [],
+      "grounding": "prPlanFileList",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-pr-plan-resolve",
+      "canonical": "prPlanResolve (PR-plan base-ref resolver)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/release_prplan.go prPlanResolve: resolves the base ref and SHA a release PR plan is computed against (trying origin/<release-branch> then the local branch).",
+      "distinction": "RESOLVES the plan's base ref/SHA - NOT prPlanFileList (which formats its file list) and NOT releasePRPlanGit (the low-level git runner it uses).",
+      "distinct_from": [
+        "cov5306-pr-plan-file-list",
+        "cov5306-release-prplan-git"
+      ],
+      "aliases": [],
+      "grounding": "prPlanResolve",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-release-prplan-git",
+      "canonical": "releasePRPlanGit (PR-plan git helper)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/release_prplan.go releasePRPlanGit: the low-level git command runner (log --name-only etc.) the release PR-plan builder uses to gather commits and files.",
+      "distinction": "The raw GIT helper for PR-plan building - NOT prPlanResolve (base-ref resolution) and NOT prPlanFileList (output formatting); it just runs git.",
+      "distinct_from": [
+        "cov5306-pr-plan-resolve",
+        "cov5306-pr-plan-file-list"
+      ],
+      "aliases": [],
+      "grounding": "releasePRPlanGit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-resolve-guard-operator-question-plan",
+      "canonical": "resolveGuardOperatorQuestionPlan (operator-question plan resolver)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_plan_oracles.go resolveGuardOperatorQuestionPlan: resolves an operator question into a planresolve.Verdict - the plan/decision for how the guard should answer or escalate the question.",
+      "distinction": "Resolves an OPERATOR-QUESTION into a plan verdict - NOT a memory/fit plan and NOT the PR-plan resolvers; it plans a guard's answer to a human-facing question.",
+      "distinct_from": [
+        "cov5306-pr-plan-resolve",
+        "plan"
+      ],
+      "aliases": [],
+      "grounding": "resolveGuardOperatorQuestionPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-serve-gguf-memory-plan",
+      "canonical": "serveGGUFMemoryPlan (GGUF serve memory-fit plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/serve.go serveGGUFMemoryPlan: plans whether a GGUF model fits in device memory for `fak serve` given the f32-resident bytes, context-budget tokens, and device fit budget.",
+      "distinction": "The in-device memory FIT plan - NOT serveGGUFCPUOffloadMemoryPlan (the variant that plans CPU offload when it does NOT fit) and NOT NUMAReplicaPlan.",
+      "distinct_from": [
+        "cov5306-serve-gguf-cpu-offload-memory-plan",
+        "cov5306-numa-replica-plan"
+      ],
+      "aliases": [],
+      "grounding": "serveGGUFMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-serve-gguf-cpu-offload-memory-plan",
+      "canonical": "serveGGUFCPUOffloadMemoryPlan (GGUF CPU-offload memory plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/serve.go serveGGUFCPUOffloadMemoryPlan: plans the CPU-offload memory layout for `fak serve` when a GGUF model does not fit on-device, given context-budget tokens and the device fit budget.",
+      "distinction": "The CPU-OFFLOAD memory plan (does not fit on-device) - NOT serveGGUFMemoryPlan (the on-device fit plan) and NOT PlanNUMAReplicas.",
+      "distinct_from": [
+        "cov5306-serve-gguf-memory-plan",
+        "cov5306-plan-numa-replicas"
+      ],
+      "aliases": [],
+      "grounding": "serveGGUFCPUOffloadMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5306-speculation-candidate",
+      "canonical": "SpeculationCandidate (look-ahead speculation candidate)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/loopmgr (cmd/fak/guard_lookahead.go lookaheadSpeculationCandidate): a SpeculationCandidate is one proposed look-ahead action the loop manager may fork-and-roll-out to speculate on before committing.",
+      "distinction": "A proposed SPECULATION action for look-ahead rollout - NOT HarnessCandidates (candidate harnesses to run) and NOT a memory/fit plan; it is a branch to speculate, not a resource layout.",
+      "distinct_from": [
+        "cov5306-harness-candidates",
+        "plan"
+      ],
+      "aliases": [],
+      "grounding": "SpeculationCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

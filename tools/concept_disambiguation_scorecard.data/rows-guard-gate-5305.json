@@ -1,0 +1,848 @@
+{
+  "rows": [
+    {
+      "id": "cov5305-triage-cadence",
+      "canonical": "FAK_CADENCE_TRIAGE_GATE (cadence page-vs-act mode switch)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The enforce-mode switch for the cadence report: under =enforce an INCOMPLETE report whose next action is a runnable rerun routes to the FLEET (decenter-the-human) instead of paging the operator; unset/false is byte-for-byte the un-triaged CheckGate (trendreport.AdvisoryGateTriaged).",
+      "distinction": "Flips ONLY the cadence report page-vs-act fold - NOT a runtime guard gate that admits/refuses a tool call, and NOT the sibling *_TRIAGE_GATE knobs that flip a DIFFERENT report.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate",
+        "cov5305-triage-fleet-pane"
+      ],
+      "aliases": [],
+      "grounding": "FAK_CADENCE_TRIAGE_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-triage-fleet-pane",
+      "canonical": "FAK_FLEETPANE_TRIAGE_GATE (fleet-pane page-vs-act mode switch)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The enforce-mode switch for the fleet-pane report: under =enforce an INCOMPLETE report whose next action is a runnable rerun routes to the FLEET (decenter-the-human) instead of paging the operator; unset/false is byte-for-byte the un-triaged CheckGate (trendreport.AdvisoryGateTriaged).",
+      "distinction": "Flips ONLY the fleet-pane report page-vs-act fold - NOT a runtime guard gate that admits/refuses a tool call, and NOT the sibling *_TRIAGE_GATE knobs that flip a DIFFERENT report.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate",
+        "cov5305-triage-garden-walk"
+      ],
+      "aliases": [],
+      "grounding": "FAK_FLEETPANE_TRIAGE_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-triage-garden-walk",
+      "canonical": "FAK_GARDENWALK_TRIAGE_GATE (garden-walk page-vs-act mode switch)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The enforce-mode switch for the garden-walk report: under =enforce an INCOMPLETE report whose next action is a runnable rerun routes to the FLEET (decenter-the-human) instead of paging the operator; unset/false is byte-for-byte the un-triaged CheckGate (trendreport.AdvisoryGateTriaged).",
+      "distinction": "Flips ONLY the garden-walk report page-vs-act fold - NOT a runtime guard gate that admits/refuses a tool call, and NOT the sibling *_TRIAGE_GATE knobs that flip a DIFFERENT report.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate",
+        "cov5305-triage-milestone"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GARDENWALK_TRIAGE_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-triage-milestone",
+      "canonical": "FAK_MILESTONE_TRIAGE_GATE (milestone page-vs-act mode switch)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The enforce-mode switch for the milestone report: under =enforce an INCOMPLETE report whose next action is a runnable rerun routes to the FLEET (decenter-the-human) instead of paging the operator; unset/false is byte-for-byte the un-triaged CheckGate (trendreport.AdvisoryGateTriaged).",
+      "distinction": "Flips ONLY the milestone report page-vs-act fold - NOT a runtime guard gate that admits/refuses a tool call, and NOT the sibling *_TRIAGE_GATE knobs that flip a DIFFERENT report.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate",
+        "cov5305-triage-program"
+      ],
+      "aliases": [],
+      "grounding": "FAK_MILESTONE_TRIAGE_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-triage-program",
+      "canonical": "FAK_PROGRAM_TRIAGE_GATE (program page-vs-act mode switch)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The enforce-mode switch for the program report: under =enforce an INCOMPLETE report whose next action is a runnable rerun routes to the FLEET (decenter-the-human) instead of paging the operator; unset/false is byte-for-byte the un-triaged CheckGate (trendreport.AdvisoryGateTriaged).",
+      "distinction": "Flips ONLY the program report page-vs-act fold - NOT a runtime guard gate that admits/refuses a tool call, and NOT the sibling *_TRIAGE_GATE knobs that flip a DIFFERENT report.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate",
+        "cov5305-triage-release-status"
+      ],
+      "aliases": [],
+      "grounding": "FAK_PROGRAM_TRIAGE_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-triage-release-status",
+      "canonical": "FAK_RELEASESTATUS_TRIAGE_GATE (release-status page-vs-act mode switch)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The enforce-mode switch for the release-status report: under =enforce an INCOMPLETE report whose next action is a runnable rerun routes to the FLEET (decenter-the-human) instead of paging the operator; unset/false is byte-for-byte the un-triaged CheckGate (trendreport.AdvisoryGateTriaged).",
+      "distinction": "Flips ONLY the release-status report page-vs-act fold - NOT a runtime guard gate that admits/refuses a tool call, and NOT the sibling *_TRIAGE_GATE knobs that flip a DIFFERENT report.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate",
+        "cov5305-triage-resume"
+      ],
+      "aliases": [],
+      "grounding": "FAK_RELEASESTATUS_TRIAGE_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-triage-resume",
+      "canonical": "FAK_RESUME_TRIAGE_GATE (resume page-vs-act mode switch)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The enforce-mode switch for the resume (stopped-session) report: under =enforce an INCOMPLETE report whose next action is a runnable rerun routes to the FLEET (decenter-the-human) instead of paging the operator; unset/false is byte-for-byte the un-triaged CheckGate (trendreport.AdvisoryGateTriaged).",
+      "distinction": "Flips ONLY the resume (stopped-session) report page-vs-act fold - NOT a runtime guard gate that admits/refuses a tool call, and NOT the sibling *_TRIAGE_GATE knobs that flip a DIFFERENT report.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate",
+        "cov5305-triage-watchdog"
+      ],
+      "aliases": [],
+      "grounding": "FAK_RESUME_TRIAGE_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-triage-watchdog",
+      "canonical": "FAK_WATCHDOG_TRIAGE_GATE (watchdog page-vs-act mode switch)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The enforce-mode switch for the stale-work watchdog report: under =enforce an INCOMPLETE report whose next action is a runnable rerun routes to the FLEET (decenter-the-human) instead of paging the operator; unset/false is byte-for-byte the un-triaged CheckGate (trendreport.AdvisoryGateTriaged).",
+      "distinction": "Flips ONLY the stale-work watchdog report page-vs-act fold - NOT a runtime guard gate that admits/refuses a tool call, and NOT the sibling *_TRIAGE_GATE knobs that flip a DIFFERENT report.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate",
+        "cov5305-triage-cadence"
+      ],
+      "aliases": [],
+      "grounding": "FAK_WATCHDOG_TRIAGE_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-fak-guard-auto-refresh",
+      "canonical": "FAK_GUARD_AUTO_REFRESH (proactive credential self-refresh toggle)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_child.go guardAutoRefreshEnabled: toggle (default ON) for whether the guard proactively drives the agent to rotate its own expiring credential so a headless seat self-heals without a human; falsey (0/false/off/no) restores the pure wait-for-rotation poll.",
+      "distinction": "The ON/OFF toggle for proactive refresh - NOT FAK_GUARD_AUTO_REFRESH_TIMEOUT (how long one refresh spawn may run) and NOT FAK_GUARD_REFRESH_SKEW (how early before expiry to fire).",
+      "distinct_from": [
+        "cov5305-fak-guard-auto-refresh-timeout",
+        "cov5305-fak-guard-refresh-skew"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_AUTO_REFRESH",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-fak-guard-auto-refresh-timeout",
+      "canonical": "FAK_GUARD_AUTO_REFRESH_TIMEOUT (single refresh-spawn bound)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_child.go guardAutoRefreshTimeout: bounds a single active-refresh spawn (default = the 30s headless-rehydrate window) so a refresh turn that never returns cannot outlast the wait it replaces; any Go duration, clamped to a floor/ceiling.",
+      "distinction": "The per-spawn DURATION cap - NOT FAK_GUARD_AUTO_REFRESH (the on/off toggle) and NOT FAK_GUARD_REFRESH_SKEW (the pre-expiry lead time).",
+      "distinct_from": [
+        "cov5305-fak-guard-auto-refresh",
+        "cov5305-fak-guard-refresh-skew"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_AUTO_REFRESH_TIMEOUT",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-fak-guard-refresh-skew",
+      "canonical": "FAK_GUARD_REFRESH_SKEW (pre-expiry refresh lead)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_child.go guardRefreshSkew: how early before actual credential expiry a proactive refresh may fire (default 5m, clamped to 1h; 0 restores strict only-refresh-once-expired).",
+      "distinction": "The PRE-EXPIRY lead time - NOT FAK_GUARD_AUTO_REFRESH_TIMEOUT (the spawn duration cap) and NOT FAK_GUARD_AUTH_RECOVER_WINDOW (the post-crash recovery window).",
+      "distinct_from": [
+        "cov5305-fak-guard-auto-refresh-timeout",
+        "cov5305-fak-guard-auth-recover-window"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_REFRESH_SKEW",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-fak-guard-auth-recover-window",
+      "canonical": "FAK_GUARD_AUTH_RECOVER_WINDOW (auth-crash recovery window)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_child.go: the window within which a correlated auth crash is treated as recoverable (the guard waits/relogs rather than declaring a hard failure).",
+      "distinction": "The AUTH-CRASH recovery window - NOT FAK_GUARD_REFRESH_SKEW (a pre-expiry lead) and NOT the auto-refresh toggle; it governs crash handling, not proactive rotation.",
+      "distinct_from": [
+        "cov5305-fak-guard-refresh-skew",
+        "cov5305-guard-classify-auth-crash"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_AUTH_RECOVER_WINDOW",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-fak-guard-scratchpad-roots",
+      "canonical": "FAK_GUARD_SCRATCHPAD_ROOTS (writable scratchpad roots)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "internal/adjudicator/outoftree.go: an OS-path-list of absolute scratchpad roots the guard treats as sanctioned writable/out-of-tree locations, so writes there are not flagged as out-of-tree escapes.",
+      "distinction": "Declares SANCTIONED-WRITE roots for the out-of-tree adjudicator - NOT a credential-refresh knob and NOT FAK_GATE_MIN_WORKERS; it widens allowed write paths, not timing or worker floors.",
+      "distinct_from": [
+        "cov5305-fak-gate-min-workers",
+        "cov5305-fak-guard-expose-profile"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_SCRATCHPAD_ROOTS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-fak-gate-min-workers",
+      "canonical": "FAK_GATE_MIN_WORKERS (preflight worker-floor override)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "internal/dispatchtick/preflight_gate.go: the operator floor overlaid on the preflight worker-cap gate - the minimum worker presence kept alive so a pressured fleet never drops to a 0 cap and stalls, while still refusing to GROW onto a slow kernel.",
+      "distinction": "A minimum-WORKERS floor on the dispatch preflight gate - NOT a triage-gate report switch and NOT FAK_GUARD_SCRATCHPAD_ROOTS; it governs fleet worker admission, not reports or paths.",
+      "distinct_from": [
+        "cov5305-fak-guard-scratchpad-roots",
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GATE_MIN_WORKERS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-fak-guard-expose-profile",
+      "canonical": "FAK_GUARD_EXPOSE_PROFILE (MCP tool-surface profile override)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard.go: env that OVERRIDES the --expose-profile flag selecting the in-kernel fak_* MCP tool-surface profile; the fleet opt-out (full/off) restores the whole registry instead of the curated headless allowlist a dispatch worker gets.",
+      "distinction": "Selects the MCP TOOL-SURFACE profile (registry breadth) - NOT FAK_GATE_MIN_WORKERS (a worker floor) and NOT a triage-gate report switch; it prunes/restores schema surface, not workers or reports.",
+      "distinct_from": [
+        "cov5305-fak-gate-min-workers",
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_EXPOSE_PROFILE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-park-for-relogin",
+      "canonical": "guardParkForRelogin (credential-park wait)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_park.go guardParkForRelogin: parks a headless guard run when the credential is missing/expired, polling for the operator (or auto-refresh) to restore login within a budget, then reports whether it recovered.",
+      "distinction": "The PARK-and-wait-for-login loop - NOT guardClassifyAuthCrash (which decides IF a crash was auth-correlated) and NOT guardRunHeadlessRehydrate (the proactive pre-expiry rehydrate).",
+      "distinct_from": [
+        "cov5305-guard-classify-auth-crash",
+        "cov5305-guard-run-headless-rehydrate"
+      ],
+      "aliases": [],
+      "grounding": "guardParkForRelogin",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-park",
+      "canonical": "guardPark (credential-park subsystem)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "cmd/fak/guard_park.go: the guard credential-PARK mechanism (budget + poll) that holds a headless seat idle while a missing/expired login is restored, rather than failing the run.",
+      "distinction": "The PARK subsystem (hold-and-wait for login) - NOT guardParkPoll (its poll-interval knob) and NOT the auto-refresh path that avoids parking by rotating early.",
+      "distinct_from": [
+        "cov5305-guard-park-poll",
+        "cov5305-guard-park-for-relogin"
+      ],
+      "aliases": [],
+      "grounding": "guardPark",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-park-poll",
+      "canonical": "guardParkPoll (park poll interval)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_park.go guardParkPoll: the poll interval at which a parked guard run re-checks whether the credential has been restored.",
+      "distinction": "The park POLL INTERVAL - NOT guardParkForRelogin (the park loop itself) and NOT guardParkBudget (the total park deadline).",
+      "distinct_from": [
+        "cov5305-guard-park-for-relogin",
+        "cov5305-guard-park"
+      ],
+      "aliases": [],
+      "grounding": "guardParkPoll",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-classify-auth-crash",
+      "canonical": "guardClassifyAuthCrash (auth-correlated crash test)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_child.go guardClassifyAuthCrash: decides whether a child crash was correlated with a missing/expired credential and whether it was recovered, from the credential state and a CredCheck.",
+      "distinction": "CLASSIFIES a crash as auth-related or not - NOT guardParkForRelogin (which then waits out an auth crash) and NOT guardRestartLimitStatus (restart-budget accounting).",
+      "distinct_from": [
+        "cov5305-guard-park-for-relogin",
+        "cov5305-guard-restart-limit-status"
+      ],
+      "aliases": [],
+      "grounding": "guardClassifyAuthCrash",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-run-headless-rehydrate",
+      "canonical": "guardRunHeadlessRehydrate (proactive rehydrate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_child.go guardRunHeadlessRehydrate: runs the #1834 proactive rehydrate for a headless seat - refreshing an about-to-expire credential before it blocks, returning a verdict.",
+      "distinction": "The PROACTIVE pre-expiry rehydrate - NOT guardParkForRelogin (the reactive park after expiry) and NOT guardClassifyAuthCrash (post-crash classification).",
+      "distinct_from": [
+        "cov5305-guard-park-for-relogin",
+        "cov5305-guard-classify-auth-crash"
+      ],
+      "aliases": [],
+      "grounding": "guardRunHeadlessRehydrate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-effective-policy-digest",
+      "canonical": "guardEffectivePolicyDigest (effective-policy hash)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_support.go guardEffectivePolicyDigest: hashes the EFFECTIVE guard policy - the base policy bytes unioned with the allow overlay and minus the deny overlay - into a digest identifying exactly what the guard is enforcing.",
+      "distinction": "A digest of the MERGED effective policy (base+allow-deny) - NOT loadGuardCapabilityFloor (which loads the base floor) and NOT protectGuardPolicyConfig (which write-protects the config).",
+      "distinct_from": [
+        "cov5305-load-guard-capability-floor",
+        "cov5305-protect-guard-policy-config"
+      ],
+      "aliases": [],
+      "grounding": "guardEffectivePolicyDigest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-load-guard-capability-floor",
+      "canonical": "loadGuardCapabilityFloor (base floor loader)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_startup.go loadGuardCapabilityFloor: loads the base guard capability floor from a policy path, returning the policy runtime, the floor source, its digest, and load duration.",
+      "distinction": "LOADS the base capability floor - NOT guardEffectivePolicyDigest (the merged-policy hash after overlays) and NOT protectGuardPolicyConfig (write-protection).",
+      "distinct_from": [
+        "cov5305-guard-effective-policy-digest",
+        "cov5305-protect-guard-policy-config"
+      ],
+      "aliases": [],
+      "grounding": "loadGuardCapabilityFloor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-protect-guard-policy-config",
+      "canonical": "protectGuardPolicyConfig (config write-protection)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_startup.go protectGuardPolicyConfig: marks the guard policy config paths as protected in the policy runtime, so a wrapped agent cannot edit the very files that constrain it.",
+      "distinction": "WRITE-PROTECTS the policy files - NOT loadGuardCapabilityFloor (which reads them) and NOT guardEffectivePolicyDigest (which hashes the result).",
+      "distinct_from": [
+        "cov5305-load-guard-capability-floor",
+        "cov5305-guard-effective-policy-digest"
+      ],
+      "aliases": [],
+      "grounding": "protectGuardPolicyConfig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guarded-dispatch-command",
+      "canonical": "guardedDispatchCommand (dispatch command guard-wrap)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/dispatch_tick_worker.go guardedDispatchCommand: wraps a dispatch worker's command for a lane/backend so it launches under the guard, returning the guarded argv and whether wrapping applied.",
+      "distinction": "WRAPS a dispatch command under the guard - NOT guardStripContinueFlag (which edits an argv's flags) and NOT the guard kernel itself; it composes the launch line.",
+      "distinct_from": [
+        "cov5305-guard-strip-continue-flag",
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guardedDispatchCommand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-strip-continue-flag",
+      "canonical": "guardStripContinueFlag (remove agent continue flag)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_child.go guardStripContinueFlag: removes an agent's continue/resume flag from a command line (per agent) so a relaunch starts clean rather than resuming a dead turn.",
+      "distinction": "Edits an argv to DROP the continue flag - NOT guardedDispatchCommand (which guard-wraps the whole command) and NOT guardPromptStdinTransportForOS (which reshapes prompt transport).",
+      "distinct_from": [
+        "cov5305-guarded-dispatch-command",
+        "cov5305-guard-prompt-stdin-transport-for-os"
+      ],
+      "aliases": [],
+      "grounding": "guardStripContinueFlag",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-prompt-stdin-transport-for-os",
+      "canonical": "guardPromptStdinTransportForOS (prompt transport rewrite)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_prompt_transport.go guardPromptStdinTransportForOS: rewrites how a prompt is delivered (argv vs stdin) for a given GOOS, returning the adjusted command, the stdin body, and whether stdin transport is used.",
+      "distinction": "Chooses argv-vs-STDIN prompt transport per OS - NOT guardStripContinueFlag (a flag edit) and NOT formatGuardResumeGuidance (human guidance text).",
+      "distinct_from": [
+        "cov5305-guard-strip-continue-flag",
+        "cov5305-format-guard-resume-guidance"
+      ],
+      "aliases": [],
+      "grounding": "guardPromptStdinTransportForOS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-format-guard-resume-guidance",
+      "canonical": "formatGuardResumeGuidance (resume guidance text)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_child_supervision.go formatGuardResumeGuidance: formats the human-facing guidance shown when a guarded agent exits with a given code - how to resume the seat.",
+      "distinction": "Renders human RESUME-GUIDANCE text - NOT guardLoginStatusNote (a login-state note) and NOT guardRestartLimitStatus (restart-budget status).",
+      "distinct_from": [
+        "cov5305-guard-login-status-note",
+        "cov5305-guard-restart-limit-status"
+      ],
+      "aliases": [],
+      "grounding": "formatGuardResumeGuidance",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-login-status-note",
+      "canonical": "guardLoginStatusNote (upstream login-state note)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_child.go guardLoginStatusNote: formats a short note describing the upstream credential/login state for the guarded run's status surface.",
+      "distinction": "A LOGIN-STATE note string - NOT guardSubscriptionLoginPresent (a boolean presence test) and NOT formatGuardResumeGuidance (exit-resume guidance).",
+      "distinct_from": [
+        "cov5305-guard-subscription-login-present",
+        "cov5305-format-guard-resume-guidance"
+      ],
+      "aliases": [],
+      "grounding": "guardLoginStatusNote",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-subscription-login-present",
+      "canonical": "guardSubscriptionLoginPresent (subscription-login test)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_support.go guardSubscriptionLoginPresent: reports whether a subscription-style login credential is present for the given token env var.",
+      "distinction": "A BOOLEAN presence test for a subscription login - NOT guardLoginStatusNote (a descriptive note) and NOT guardClassifyAuthCrash (crash correlation).",
+      "distinct_from": [
+        "cov5305-guard-login-status-note",
+        "cov5305-guard-classify-auth-crash"
+      ],
+      "aliases": [],
+      "grounding": "guardSubscriptionLoginPresent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-restart-limit-status",
+      "canonical": "guardRestartLimitStatus (restart-budget status)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_child.go guardRestartLimitStatus: formats the restart-budget status for a guarded run - how many child restarts remain against a limit given a restart event.",
+      "distinction": "RESTART-BUDGET accounting/status - NOT guardNoProgressStep (no-progress step counting) and NOT formatGuardResumeGuidance (resume text).",
+      "distinct_from": [
+        "cov5305-guard-no-progress-step",
+        "cov5305-format-guard-resume-guidance"
+      ],
+      "aliases": [],
+      "grounding": "guardRestartLimitStatus",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-no-progress-step",
+      "canonical": "guardNoProgressStep (no-progress step counter)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_child.go guardNoProgressStep: advances the no-progress counter by comparing the previous and current HEAD - detecting a guarded run that is churning turns without landing a commit.",
+      "distinction": "Counts NO-PROGRESS steps (HEAD unchanged) - NOT guardRestartLimitStatus (restart budget) and NOT guardShortBuildID (a build identifier).",
+      "distinct_from": [
+        "cov5305-guard-restart-limit-status",
+        "cov5305-guard-short-build-id"
+      ],
+      "aliases": [],
+      "grounding": "guardNoProgressStep",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-short-build-id",
+      "canonical": "guardShortBuildID (short build revision)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/version.go guardShortBuildID: returns the short build/module revision id the guard stamps into surfaces (e.g. the codex MCP install module revision).",
+      "distinction": "A short BUILD-REVISION string - NOT guardNoProgressStep (progress counting) and NOT guardEffectivePolicyDigest (a policy hash).",
+      "distinct_from": [
+        "cov5305-guard-no-progress-step",
+        "cov5305-guard-effective-policy-digest"
+      ],
+      "aliases": [],
+      "grounding": "guardShortBuildID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-resolve-guard-compact-budget",
+      "canonical": "resolveGuardCompactBudget (compaction budget resolver)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_resolve.go resolveGuardCompactBudget: resolves the guarded run's context-compaction budget from a flag value and whether it was explicitly set.",
+      "distinction": "Resolves the COMPACTION budget - NOT resolveGuardSessionID (which resolves the session identity) and NOT a triage-gate report switch.",
+      "distinct_from": [
+        "cov5305-resolve-guard-session-id",
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "resolveGuardCompactBudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-resolve-guard-session-id",
+      "canonical": "resolveGuardSessionID (session-identity resolver)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_session_id.go resolveGuardSessionID: resolves the guarded run's session id from an explicit value, whether durability is wanted, the descriptor meta, and a nonce.",
+      "distinction": "Resolves the SESSION IDENTITY - NOT resolveGuardCompactBudget (a compaction budget) and NOT SessionMeta (the identity record it may consult).",
+      "distinct_from": [
+        "cov5305-resolve-guard-compact-budget",
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "resolveGuardSessionID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-lifecycle-socket-env",
+      "canonical": "FAK_GUARD_LIFECYCLE_SOCKET (lifecycle IPC socket env)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_lifecycle_ipc.go guardLifecycleSocketEnv: env var naming the socket path over which the guard child talks lifecycle signals to its parent.",
+      "distinction": "The lifecycle IPC SOCKET path - NOT FAK_GUARD_LIFECYCLE_TOKEN (the auth token for that socket) and NOT fetchGuardLifecycleSignals (the client that reads it).",
+      "distinct_from": [
+        "cov5305-guard-lifecycle-token-env",
+        "cov5305-fetch-guard-lifecycle-signals"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_LIFECYCLE_SOCKET",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-lifecycle-token-env",
+      "canonical": "FAK_GUARD_LIFECYCLE_TOKEN (lifecycle IPC auth token env)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_lifecycle_ipc.go guardLifecycleTokenEnv: env var carrying the bearer token that authenticates a guard lifecycle IPC connection on the socket.",
+      "distinction": "The lifecycle IPC AUTH TOKEN - NOT FAK_GUARD_LIFECYCLE_SOCKET (the socket path) and NOT fetchGuardLifecycleSignals (the reader).",
+      "distinct_from": [
+        "cov5305-guard-lifecycle-socket-env",
+        "cov5305-fetch-guard-lifecycle-signals"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_LIFECYCLE_TOKEN",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-fetch-guard-lifecycle-signals",
+      "canonical": "fetchGuardLifecycleSignals (lifecycle-signals client)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_lifecycle_ipc.go fetchGuardLifecycleSignals: connects to the guard lifecycle socket with a token and timeout and reads the current LifecycleSignals from the parent.",
+      "distinction": "The lifecycle-signals READER/client - NOT FAK_GUARD_LIFECYCLE_SOCKET/TOKEN (its address and auth env) and NOT the gateway that serves the signals.",
+      "distinct_from": [
+        "cov5305-guard-lifecycle-socket-env",
+        "cov5305-guard-lifecycle-token-env"
+      ],
+      "aliases": [],
+      "grounding": "fetchGuardLifecycleSignals",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-operator-directed-mode-warn",
+      "canonical": "guardOperatorDirectedModeWarn (operator-directed warn mode)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_operator_directed.go: the 'warn' mode value for operator-directed guard handling - surface a warning but do not hard-refuse an operator-directed action.",
+      "distinction": "The WARN mode constant for operator-directed handling - NOT a runtime refuse gate and NOT the triage-gate report switches; it selects warn-vs-enforce for operator-directed acts.",
+      "distinct_from": [
+        "gate",
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guardOperatorDirectedModeWarn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-gate-restore-by-digest",
+      "canonical": "gateRestoreByDigest (context-restore admission gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/gateway/ctxrestore_gate.go gateRestoreByDigest: admits or refuses a context-RESTORE request by matching its digest against a restore gate policy, returning a status code.",
+      "distinction": "A CONTEXT-RESTORE admission gate (digest match) - NOT a triage-gate report switch and NOT the guard capability floor; it gates restore-by-digest specifically.",
+      "distinct_from": [
+        "gate",
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "gateRestoreByDigest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-feature-prefix-guard",
+      "canonical": "FeaturePrefixGuard (ablation feature 'prefix_guard')",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "internal/ablate/ablate.go FeaturePrefixGuard = 'prefix_guard': the ablation feature name whose effect is measured when the prefix-guard (prefix-reuse safety check) is toggled.",
+      "distinction": "An ABLATION FEATURE name for the prefix-guard - NOT a runtime guard gate and NOT FeatureUncachedTrim (a different ablation feature).",
+      "distinct_from": [
+        "gate",
+        "cov5304-feature-uncached-trim"
+      ],
+      "aliases": [],
+      "grounding": "FeaturePrefixGuard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-set-token-rate-gate",
+      "canonical": "SetTokenRateGate (install token-rate gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/gateway/token_admission.go SetTokenRateGate: installs a TokenRateGate on the gateway server - the admission gate that throttles requests by token rate.",
+      "distinction": "INSTALLS the token-rate admission gate - NOT gateRestoreByDigest (a context-restore gate) and NOT a triage-gate report switch; it wires a rate limiter into serve.",
+      "distinct_from": [
+        "cov5305-gate-restore-by-digest",
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "SetTokenRateGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-audit",
+      "canonical": "guard_audit (guard audit journal)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "cmd/dispatchworker/guard.go guardAuditPath + guard-audit.jsonl: the per-lane guard AUDIT journal recording each guarded run's admitted/refused decisions for later replay and complaint attach.",
+      "distinction": "The guard decision AUDIT LOG - NOT guardAuditPruned (a pruning tick over it) and NOT guardcorpus (the folded GUARD-SESSION dataset built from many sessions).",
+      "distinct_from": [
+        "cov5305-guard-audit-pruned",
+        "cov5305-guard-corpus"
+      ],
+      "aliases": [],
+      "grounding": "guard_audit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-audit-pruned",
+      "canonical": "guardAuditPruned (audit-prune tick result)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/dispatchworker/main.go guardAuditPruned: the result of pruneGuardAuditTick - how many stale guard-audit entries were pruned on a dispatch tick to bound the journal.",
+      "distinction": "The PRUNE-tick outcome over the audit journal - NOT guard_audit (the journal itself) and NOT guardcorpus (the analysis dataset).",
+      "distinct_from": [
+        "cov5305-guard-audit",
+        "cov5305-guard-corpus"
+      ],
+      "aliases": [],
+      "grounding": "guardAuditPruned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5305-guard-corpus",
+      "canonical": "guardcorpus (GUARD-SESSION dataset)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "internal/guardcorpus: the folded GUARD-SESSION dataset - many guarded sessions' decisions assembled into one corpus for guard-accuracy scoring and RSI analysis.",
+      "distinction": "The folded multi-session DATASET - NOT guard_audit (one lane's raw journal) and NOT SessionMeta (a single session's identity within it).",
+      "distinct_from": [
+        "cov5305-guard-audit",
+        "cov5303-session-meta"
+      ],
+      "aliases": [],
+      "grounding": "guardcorpus",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
