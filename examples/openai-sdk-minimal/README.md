@@ -24,8 +24,10 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Expected output (the model reply line appears only if you wired an upstream with
-`fak serve --base-url …`; the verdicts always print):
+## What you'll see
+
+The model reply line appears only if you wired an upstream with `fak serve --base-url …`;
+the two verdicts always print:
 
 ```text
 model reply: 'OK.'                # or a skip note if no upstream is configured
@@ -41,6 +43,12 @@ not on the allow-list, so the default-deny floor refuses it — **a verdict, not
 (deny-as-value). The exact reason/disposition come straight from fak, so this output is
 whatever your running gateway actually returns.
 
+**How to tell pass from fail.** The two adjudication verdicts are **deterministic** — the
+default-deny floor returns the same `ALLOW`/`DENY` decision for the same proposed call on
+every run. `app.py` runs to completion and exits `0` once both verdicts print; if it cannot
+reach the gateway it raises and exits non-zero. Pass = `read_file` shows `ALLOW` and `Bash`
+shows `DENY … disposition=TERMINAL`; a printed `DENY` rather than a traceback is the point.
+
 ## The one line that matters
 
 ```python
@@ -52,6 +60,13 @@ Everything else is standard OpenAI-SDK code. Swap `base_url` back to the provide
 your app is un-governed again — the boundary is exactly this one setting.
 
 ## Notes and honest fences
+
+**What this does not claim.** The adjudication is a *pre-execution verdict only* — this
+demo does not prove the model is actually prevented from running a denied tool (that
+enforcement lives in `fak guard` and the managed runtime, not in this SDK-side call), it
+does not exercise a real upstream model by default, and it does not demonstrate the
+authenticated path. It shows exactly one thing: the default-deny boundary decides on a
+proposed call before that call runs.
 
 - **The verdict endpoint needs no model.** `/v1/fak/adjudicate` returns the
   pre-execution decision only (no dispatch, no engine), so it works even against a
