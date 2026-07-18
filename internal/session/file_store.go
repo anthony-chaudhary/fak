@@ -41,8 +41,11 @@ func NewFileStore(path string) *FileStore {
 // CorruptDescriptorFileError reports malformed or unsupported descriptor-index
 // content. Callers may recover by quarantining the index: descriptors are a
 // rebuildable projection of live session state, not the session transcript.
+// Cause carries the normalized, privacy-safe corruption class so recovery
+// observability never has to echo descriptor contents (#4658).
 type CorruptDescriptorFileError struct {
-	Err error
+	Cause RecoveryCause
+	Err   error
 }
 
 func (e *CorruptDescriptorFileError) Error() string { return e.Err.Error() }
@@ -55,8 +58,8 @@ func IsCorruptDescriptorFile(err error) bool {
 	return errors.As(err, &target)
 }
 
-func corruptDescriptorFileError(err error) error {
-	return &CorruptDescriptorFileError{Err: err}
+func corruptDescriptorFileError(cause RecoveryCause, err error) error {
+	return &CorruptDescriptorFileError{Cause: cause, Err: err}
 }
 
 type descriptorFile struct {
@@ -153,15 +156,15 @@ func (s *FileStore) loadLocked() (map[string]Descriptor, error) {
 	}
 	var doc descriptorFile
 	if err := json.Unmarshal(b, &doc); err != nil {
-		return nil, corruptDescriptorFileError(fmt.Errorf("decode session descriptor file: %w", err))
+		return nil, corruptDescriptorFileError(RecoveryCauseDecode, fmt.Errorf("decode session descriptor file: %w", err))
 	}
 	if doc.Version != descriptorFileVersion {
-		return nil, corruptDescriptorFileError(fmt.Errorf("unsupported session descriptor file version %q", doc.Version))
+		return nil, corruptDescriptorFileError(RecoveryCauseVersion, fmt.Errorf("unsupported session descriptor file version %q", doc.Version))
 	}
 	byID := make(map[string]Descriptor, len(doc.Descriptors))
 	for _, d := range doc.Descriptors {
 		if d.ID == "" {
-			return nil, corruptDescriptorFileError(errBlankDescriptorID)
+			return nil, corruptDescriptorFileError(RecoveryCauseBlankID, errBlankDescriptorID)
 		}
 		byID[d.ID] = d
 	}
