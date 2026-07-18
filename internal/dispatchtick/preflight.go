@@ -202,6 +202,12 @@ type PreflightInput struct {
 	// value (Enabled=false) is a no-op: classifyPreflight only consults it when Enabled,
 	// so the fold is byte-identical to before this term existed unless the knob is set.
 	LandContention LandContention
+	// WorktreeIsolation is the OPTIONAL evidence-gated cap raise (#3185): with per-worker
+	// worktree isolation ON (#3168) AND a #3180 A/B report witnessing zero build-poison at
+	// a measured peak concurrency, the artificial ~6 shared-trunk ceiling (#1333) is lifted
+	// toward that PROVEN number. The zero value earns nothing, so with isolation off -- or
+	// on but unproven -- the cap is byte-identical to before this term existed.
+	WorktreeIsolation WorktreeIsolation
 	// SettleBeforeRedecide is the OPTIONAL settle-before-redecide gate (#3370). When true,
 	// classifyPreflight returns PreflightObserveSettling while the kernel is mid-scale
 	// (Alive != Target) -- holding a new scaling decision until the prior one converges so
@@ -250,9 +256,14 @@ type CapTerms struct {
 	// a scale-down was in flight, or nil when no contraction was pending. When it is the
 	// tightest term, Limiting reads "contraction" so an operator sees the drain -- not a
 	// physical/config cap -- is what is holding admits down.
-	ContractionCap *int   `json:"contraction_cap,omitempty"`
-	EffectiveCap   int    `json:"effective_cap"`
-	Limiting       string `json:"limiting"`
+	ContractionCap *int `json:"contraction_cap,omitempty"`
+	// WorktreeCap is the evidence-earned isolation raise (#3185) that lifted the effective
+	// cap, or 0 when no proven raise applied. When it is what set the effective cap,
+	// Limiting reads "worktree" so an operator can see the A/B poison-free evidence -- not
+	// a min() cap -- is what permits the fleet to run above the old shared-trunk ceiling.
+	WorktreeCap  int    `json:"worktree_cap"`
+	EffectiveCap int    `json:"effective_cap"`
+	Limiting     string `json:"limiting"`
 }
 
 func IntPtr(n int) *int { return &n }
@@ -359,6 +370,39 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		}
 	}
 
+	// Evidence-gated worktree cap raise (#3185, the payoff of epic #3165): the ~6 safe
+	// ceiling (#1333) exists because a shared trunk build-poisons past ~4 workers. Once
+	// per-worker worktree isolation (#3168) removes the shared build surface AND a #3180
+	// A/B report witnesses ZERO poison at a measured peak, that ceiling is artificial and
+	// the fleet may rise toward the PROVEN concurrency. Gated on the evidence, never the
+	// flag: WorktreeProvenCap returns 0 for isolation-on-but-unproven, so this cannot
+	// repeat #1334's raise-on-belief. The raise lifts capacity over the reactive LEASE
+	// target (the dos [supervise].target that the poison-avoidance policy pins low) --
+	// that is the artificial term -- but stays bounded by the HARD ceiling: the operator's
+	// explicit config max, host capacity (#1337), and seat inventory. Bounding by
+	// MaxWorkers matches the #3368 forecast-floor convention (a raising term never crosses
+	// an explicit operator ceiling), so proving isolation never silently overshoots a
+	// deliberately small --max-workers; an operator opts into the higher number once, and
+	// the evidence then lets the fleet actually reach it instead of being held at the lease
+	// target. Applied BEFORE the contraction clamp so a pending drain still bounds it.
+	worktreeApplied := 0
+	if proven := WorktreeProvenCap(in.WorktreeIsolation); proven > 0 {
+		ceiling := minInt(proven, in.MaxWorkers)
+		if hostCapInfo.HostCap != nil {
+			ceiling = minInt(ceiling, *hostCapInfo.HostCap)
+		}
+		if foldSeats {
+			ceiling = minInt(ceiling, *in.Seat.Total)
+		}
+		if ceiling < 0 {
+			ceiling = 0
+		}
+		worktreeApplied = ceiling
+		if worktreeApplied > capacity {
+			capacity = worktreeApplied
+		}
+	}
+
 	// Pending-contraction floor (#4038): while a scale-down / drain is in flight toward
 	// ContractionTarget T, cap admits at T so no worker is admitted onto capacity being
 	// reclaimed (kvcached's in_shrink guard). Applied AFTER the predictive floor so it
@@ -394,7 +438,7 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		Cap:           capacity,
 		Live:          live,
 		Headroom:      headroom,
-		CapTerms:      capTerms(in, hostCapInfo.HostCap, capacity, floorApplied),
+		CapTerms:      capTerms(in, hostCapInfo.HostCap, capacity, floorApplied, worktreeApplied),
 		MaxWorkers:    in.MaxWorkers,
 		HostCap:       hostCapInfo.HostCap,
 		HostCapacity:  hostCapInfo,
@@ -434,13 +478,14 @@ func accountUnattributedLiveSlots(seat SeatCheck, live int) SeatCheck {
 	return seat
 }
 
-func capTerms(in PreflightInput, hostCap *int, effective, floor int) CapTerms {
+func capTerms(in PreflightInput, hostCap *int, effective, floor, worktree int) CapTerms {
 	terms := CapTerms{
 		ConfiguredCap: in.MaxWorkers,
 		LeaseCap:      positivePtr(in.Kernel.Target),
 		HostCap:       copyIntPtr(hostCap),
 		SeatCap:       positivePtr(in.Seat.Total),
 		WorkerFloor:   floor,
+		WorktreeCap:   worktree,
 		EffectiveCap:  effective,
 		Limiting:      "configured",
 	}
@@ -465,12 +510,20 @@ func capTerms(in PreflightInput, hostCap *int, effective, floor int) CapTerms {
 	if best < 0 {
 		terms.Limiting = "configured"
 	}
-	// The predictive floor lifted the effective cap above the tightest lowering cap:
-	// the forecast floor, not a min() cap, now sets what the fleet may run. (When the
-	// floor only matches an existing lowering cap it did not raise anything, so the
-	// lowering cap stays named as the limiter.)
-	if floor > 0 && effective > best {
-		terms.Limiting = "floor"
+	// A RAISING term lifted the effective cap above the tightest lowering cap, so name
+	// which one: the forecast floor (#3368) or the isolation evidence (#3185), not a min()
+	// cap, now sets what the fleet may run. (When a raising term only matches an existing
+	// lowering cap it did not raise anything, so the lowering cap stays named as the
+	// limiter.) The worktree raise wins a tie because the poison-free measurement is the
+	// stronger claim about what the fleet may safely run; with no raise earned
+	// (worktree == 0) this reduces exactly to the prior floor-only behavior.
+	if effective > best {
+		switch {
+		case worktree > 0 && worktree >= effective && worktree >= floor:
+			terms.Limiting = "worktree"
+		case floor > 0:
+			terms.Limiting = "floor"
+		}
 	}
 	return terms
 }
@@ -574,6 +627,7 @@ func (c CapTerms) Map() map[string]any {
 		"host_cap":        ptrAny(c.HostCap),
 		"seat_cap":        ptrAny(c.SeatCap),
 		"worker_floor":    c.WorkerFloor,
+		"worktree_cap":    c.WorktreeCap,
 		"effective_cap":   c.EffectiveCap,
 		"limiting":        c.Limiting,
 	}
