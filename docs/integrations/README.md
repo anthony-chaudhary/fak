@@ -72,17 +72,39 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 
 ## Which agent do you run?
 
-Pick by **client**, the **wire** it speaks, and its **support** status. Support has three
-values: **`fak guard`** is a one-command launcher (starts the gateway in-process and injects
-the base URL into the child only); **guide** is a dedicated walkthrough you wire by base URL
-or MCP; a tool not listed here uses the [universal recipe](#dont-see-your-framework-the-universal-recipe)
-and is graded, sourced, in the [compatibility matrix](compatibility-matrix.md). **Default:**
-if a row offers `fak guard`, that is the shortest path.
+Pick by **client**, the **wire** it speaks, and its **support** status. **Default:** if a
+row offers `fak guard`, that is the shortest path.
+
+### Support status: the canonical vocabulary
+
+**This section is authoritative for support status.** The other integration pages — the
+[agent-harnesses page](../supported/agent-harnesses.md), the
+[interoperability stance](interoperability.md), and the
+[compatibility matrix](compatibility-matrix.md) — reference these labels rather than
+defining their own. Support has exactly three values:
+
+- **`fak guard`** — a one-command launcher: `fak guard -- <agent>` starts the gateway
+  in-process and injects the base URL into the child only. Every `fak guard` tool also
+  has a guide, so the tables write it **`fak guard` + guide**.
+- **guide** — a dedicated walkthrough you wire by base URL or MCP. (The
+  [agent-harnesses page](../supported/agent-harnesses.md) calls its top rows
+  "first-class guides" — that is this **guide** label, not a fourth value.)
+- **universal recipe** — a tool not listed in the table below uses the
+  [universal recipe](#dont-see-your-framework-the-universal-recipe) and is graded,
+  sourced, in the [compatibility matrix](compatibility-matrix.md).
+
+Two companion columns on those pages are **wire facts, not support labels**: the matrix's
+*custom base URL* (Yes / Partial / No — can the tool repoint its wire) and the
+interoperability page's *connect grade* (Drop-in, Per-wire, Partial, Needs an adapter,
+Different boundary, No first-party path — how cleanly fak adjudicates that wire). A tool
+carries one support-status label from the three above; the wire facts qualify how the
+connection is made, and those pages link back here instead of coining new status words.
 
 | You run… | Wire | Support | Guide |
 |---|---|---|---|
 | **Claude Code** / the Anthropic API or SDK | Anthropic Messages | `fak guard` + guide | [`claude.md`](claude.md) |
 | **OpenAI Codex** / the OpenAI API or SDK | OpenAI Chat Completions | `fak guard` + guide | [`openai-codex.md`](openai-codex.md) |
+| **OpenCode** (terminal agent) | OpenAI Chat Completions | `fak guard` + guide | [`claude.md#opencode`](claude.md#opencode) |
 | **Hermes Agent** (NousResearch self-hosted agent) | OpenAI Chat Completions | `fak guard` + guide | [`hermes.md`](hermes.md) |
 | **Cursor** (IDE) | MCP *or* OpenAI proxy | guide | [`cursor.md`](cursor.md) |
 | **VS Code + GitHub Copilot** (IDE) | OpenAI/Anthropic proxy | guide | [`vscode.md`](vscode.md) |
@@ -93,13 +115,22 @@ if a row offers `fak guard`, that is the shortest path.
 | **Continue** (VS Code) | OpenAI (`config.yaml` `apiBase`) | guide | [`continue.md`](continue.md) |
 | **Roo Code** (VS Code) | OpenAI-Compatible *or* MCP | guide | [`roo-code.md`](roo-code.md) |
 | **Windsurf** (Cascade agent) | OpenAI-compatible proxy | guide | [`windsurf.md`](windsurf.md) |
-| **Any MCP client** | MCP | one-paste `.mcp.json` | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
+| **Any MCP client** | MCP | guide (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
+| **No agent at all — a product feature that calls a model directly** (screener, classifier, drafter; your own loop, your own tools) | OpenAI or Anthropic SDK, direct API call | guide | [`embed-in-your-product.md`](embed-in-your-product.md) |
 
 **On a Claude Pro/Max subscription?** [`fable5-more-usage-for-free.md`](fable5-more-usage-for-free.md)
 is the honest, dogfood-witnessed case for how `fak guard -- claude` stretches the seat you
 already pay for — the pure-fak, native-cache-excluded slice (context shedding + KV-prefix
 reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable 5 fallover),
 with every number labeled by provenance and the shed-per-fire double-count fence carried in full.
+
+**Not running an agent — you have a product feature that calls a model?** A SaaS/API
+backend that calls `messages.create(...)` / `chat.completions.create(...)` itself (a
+job-application screener, a support-reply drafter, a field extractor) keeps its own loop
+and fronts *that call* with `fak serve` — `fak guard` is a child-process launcher and does
+not fit a server-side product. The persona guide, including why the default floor denies
+your app's own tools and how to author one that doesn't:
+[`embed-in-your-product.md`](embed-in-your-product.md).
 
 **Adopting from outside the repo?** The [adopter playbook](adopter-playbook.md) is the
 end-to-end, bare-serve production checklist — prerequisites → `policy.json` → auth-key
@@ -287,6 +318,7 @@ governance surface, not tokens per second. Full scope, claim by claim:
 - [What fak supports](../supported/README.md) — the dedicated capability pages: [models](../supported/models.md), [clouds & hosted providers](../supported/clouds.md), [APIs, wires & MCP](../supported/apis-and-protocols.md), [agent harnesses & frameworks](../supported/agent-harnesses.md), and [serving engines](../supported/engines.md).
 - [Two runtimes, one binary: gateway vs agent runtime vs client](../explainers/runtime-vs-client.md) — the first-decision naming behind "put fak in front of your agent": `fak serve` (the gateway runtime that governs model traffic) vs `fak serve --native` (the agent application runtime that owns the loop) vs a harness wrapped by `fak guard` (a governed client). `serve` and `guard` are a runtime and a client, not two versions of one thing.
 - [More Fable 5 (and every model) out of your Claude seat](fable5-more-usage-for-free.md) — the reader-facing "more usage for free" case for `fak guard -- claude`, reporting only fak's own authored slice (native prompt cache excluded on purpose): 69.7% WITNESSED KV-prefix reuse, ~37k tokens shed per compaction fire, the capped-Opus → Fable 5 fallover, and the honest fences on what "for free" and "Fable-specific" actually mean.
+- [Embed fak in your product](embed-in-your-product.md) — the front door for the *non*-agent adopter: a product feature that makes a direct API call keeps its own loop, repoints one base URL at `fak serve`, and authors a capability floor for its own tools (the default floors allow-list a coding harness's tools, not yours).
 - [Harness integration acceptance checklist](harness-acceptance-checklist.md) — the model-wire, host-tool dialect, argument-field, deny-behavior, and replay fixture contract for first-class launchers.
 - [Reusable harness-loop playbook](harness-loop-playbook.md) — apply the selector/executor/witness/stop pattern to customer workflows such as support queues, data QA, and eval runs.
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
