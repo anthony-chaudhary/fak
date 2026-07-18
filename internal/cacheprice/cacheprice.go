@@ -68,3 +68,35 @@ func ShedTokenEquiv(shed, warmWitness uint64) float64 {
 	cold := shed - warm
 	return float64(warm)*ReadMultiplier + float64(cold)
 }
+
+// AdmissionTokens returns the billable prompt-token count for admitting a turn whose prefix
+// is partially resident — the residency-discounted admission cost (#3893, vLLM's
+// num_new_tokens = total − num_computed_tokens). residentPrefixTokens are the prompt tokens
+// already held in the KV cache: served from a locally-resident prefix PLUS any span pulled
+// across the fabric from the external / DISAGGREGATED KV tier (the two non-recompute buckets
+// of the cacheobs provenance axis). Those tokens are already computed, so scheduling them costs
+// nothing; the turn need only pay for the uncached suffix. A fully-resident prefix drives
+// billable → 0; a cold prompt with no residency drives billable → promptTokens. This is the
+// M2 "2×" lever expressed as the token count the cache lets a scheduler NOT admit —
+// residency shrinks admission cost LINEARLY, with no cliff, so a warmer prefix is literally
+// cheaper to admit than a colder one.
+//
+// It clamps defensively so a miscounted residency can never bill negative or discount more
+// than the prompt: a non-positive promptTokens books as 0, and residentPrefixTokens is
+// clamped into [0, promptTokens] before the subtraction (an over-reported residency caps at
+// a full discount, never a negative bill). Pricing the billable tokens in $ stays the
+// caller's job (ReadMultiplier for the resident share it displaced, base input for what is
+// billed here), so this returns the raw token count both the pricing and the cacheobs
+// provenance axes agree on — one source of truth for "the tokens residency saved".
+func AdmissionTokens(promptTokens, residentPrefixTokens int) int {
+	if promptTokens <= 0 {
+		return 0
+	}
+	if residentPrefixTokens < 0 {
+		residentPrefixTokens = 0
+	}
+	if residentPrefixTokens > promptTokens {
+		residentPrefixTokens = promptTokens
+	}
+	return promptTokens - residentPrefixTokens
+}
