@@ -1,0 +1,74 @@
+# examples/compose-ollama/compose.yaml
+#
+# A governed local model in one command. Ollama generates; `fak serve` sits in front
+# and adjudicates every tool call the model proposes against a default-deny capability
+# floor, writing an audit log. `docker compose up` gives you an OpenAI-compatible
+# endpoint at http://localhost:8080/v1 — and Ollama's own port is never published, so
+# the only way in is through the governed front door.
+#
+#   export FAK_GATEWAY_KEY="$(openssl rand -hex 32)"
+#   docker compose up            # first run pulls the model (~1 GB) into a named volume
+#
+# Then talk to it like any OpenAI endpoint (note the Bearer key fak requires):
+#   curl -s http://localhost:8080/healthz                     # {"ok":true,...}  (no auth)
+#   curl -s http://localhost:8080/v1/chat/completions \
+#     -H "Authorization: Bearer $FAK_GATEWAY_KEY" \
+#     -d '{"model":"qwen2.5:1.5b","messages":[{"role":"user","content":"Say OK."}]}'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    # 11434 stays INTERNAL to the compose network on purpose — it is NOT published to
+    # the host. Only fak's :8080 below is reachable, so nothing bypasses the gate.
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: pull the model into the shared volume, then exit. fak waits for this to
+  # finish so the first request never races the download.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull qwen2.5:1.5b"]
+    restart: "no"
+
+  fak:
+    # The published distroless image (~13 MB, nonroot). To build from source instead,
+    # comment `image:` and use: build: https://github.com/anthony-chaudhary/fak.git
+    # Pin a release tag (e.g. :0.36.0) for production rather than :latest.
+    image: ghcr.io/anthony-chaudhary/fak:latest
+    restart: unless-stopped
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"          # the ONLY published port: the governed front door
+    environment:
+      # Clients must present `Authorization: Bearer $FAK_GATEWAY_KEY` on every route
+      # except /healthz. The :? makes compose refuse to start if it is unset.
+      - FAK_GATEWAY_KEY=${FAK_GATEWAY_KEY:?set a strong key, e.g. export FAK_GATEWAY_KEY=$(openssl rand -hex 32)}
+      - FAK_AUDIT_JOURNAL=/var/lib/fak/audit.jsonl
+      - FAK_HTTP_WRITE_TIMEOUT_S=300     # raise for a slow local model
+    volumes:
+      - ./policy.json:/etc/fak/policy.json:ro
+      - fak-audit:/var/lib/fak
+    command:
+      - serve
+      - --addr=0.0.0.0:8080
+      - --base-url=http://ollama:11434/v1
+      - --model=qwen2.5:1.5b
+      - --policy=/etc/fak/policy.json
+      - --require-key-env=FAK_GATEWAY_KEY
+
+volumes:
+  ollama-models:
+  fak-audit:

@@ -1,0 +1,18 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "calculate"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "deny": {
+    "exfiltrate": "SECRET_EXFIL",
+    "shell_rm_rf": "POLICY_BLOCK"
+  }
+}
