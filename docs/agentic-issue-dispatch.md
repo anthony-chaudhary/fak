@@ -191,6 +191,48 @@ Route the verdict this way:
 Same-wave collision refusal is a success condition. It means the arbiter prevented two
 workers from mutating the same tree.
 
+### A GO is an admission-view answer, not an acquirability promise (#5056)
+
+`dos arbitrate` decides **admission** — "may a worker with this tree be admitted,
+given this view of the live-lease set." It takes no lock and journals nothing; the
+grant itself happens only at `dos lease-lane acquire`, whose read-arbitrate-append
+runs under the lane-lease mutex. So an `acquire` verdict (the `GO — you may take
+lane …` interpretation) is *not* a promise that the lease verb will grant the lane,
+and a GO followed by an `acquire` refusal is not a bug. Three reasons, all by
+design:
+
+- **The kernel deliberately keeps two lease views.** The lock-held `acquire` read
+  uses the structural fold (`live_leases(expire_dead=False)`): every un-RELEASEd
+  booking stays visible, because a lease's *effect* (the booked tree) outlives the
+  short-lived process that journaled it — the recorded pid of every **healthy**
+  lease is dead within moments of acquisition, so a dead pid never means a free
+  lane. The dead-eliding admission/contention view (`expire_dead=True`, the
+  phantom-orphan self-heal used by the pre-admission sensor) exists for a
+  different consumer. Forcing all readers to agree is a known regression: eliding
+  a still-held region at acquire time double-books it — the exact TOCTOU the lease
+  exists to prevent.
+- **The MCP `dos_arbitrate` tool is pure** — state in, decision out, no I/O. With
+  `live_leases` omitted it arbitrates against *nothing live*, so its GO reflects
+  only the leases you passed. Feed it the real live set (e.g.
+  `--leases "$(fak leaseref live)"` on the CLI, or the journal's live leases) or
+  its answer is about an empty world.
+- **Even a correct GO can be stale by acquire time** — arbitrate holds no lock, so
+  a peer can take the lane between the two calls.
+
+Route on the *lease* verb's verdict, not arbitrate's: GO means "admissible per the
+admission view — proceed to `dos lease-lane acquire`", and a subsequent acquire
+refusal is authoritative (wait, or pick a disjoint lane/tree). Never edit a tree on
+the strength of a GO alone.
+
+History: #5056 originally diagnosed a GO-then-refuse on lane `cmd` as a liveness
+bug ("the holder's pid is dead, so the lease is stale and `acquire` is wrong") and
+asked that all three readers (`arbitrate`, `top`, `lease-lane acquire`) be forced
+to agree. That diagnosis was **retracted** by its author: the dead pid was the
+expected steady state (it names the short-lived acquiring CLI process, not the
+worker), and the make-the-readers-agree done condition would have reintroduced the
+double-booking regression. Only this documentation clarification survives; the
+lease-stranding it collided with is tracked separately as #4324.
+
 ### Synthetic dry run
 
 Use synthetic rows when validating the runbook or a future native command:
