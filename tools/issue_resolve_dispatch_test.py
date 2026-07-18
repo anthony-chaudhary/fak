@@ -24,6 +24,15 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "issue_resolve_dispatch.py"
 
 
+def _no_window_creationflags() -> int:
+    """``creationflags`` that stop a console child (the git shell-outs in the
+    hermetic fixtures below) from popping a visible window when this test runs
+    windowless on Windows; ``0`` on POSIX. Mirrors
+    dispatch_worker.no_window_creationflags, kept local so this test imports only
+    stdlib."""
+    return 0x08000000 if os.name == "nt" else 0
+
+
 def load():
     sys.path.insert(0, str(SCRIPT.parent))
     spec = importlib.util.spec_from_file_location("issue_resolve_dispatch", SCRIPT)
@@ -5709,12 +5718,14 @@ class OpenWitnessedDispositionTest(unittest.TestCase):
         base = ["git", "-C", str(repo), "-c", "user.email=t@t",
                 "-c", "user.name=t", "-c", "core.hooksPath=",
                 "-c", "commit.gpgsign=false"]
-        subprocess.run(base + list(args), check=True, capture_output=True, text=True)
+        subprocess.run(base + list(args), check=True, capture_output=True, text=True,
+                       creationflags=_no_window_creationflags())
 
     @staticmethod
     def _head_sha(repo: Path) -> str:
         out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                             check=True, capture_output=True, text=True)
+                             check=True, capture_output=True, text=True,
+                             creationflags=_no_window_creationflags())
         return out.stdout.strip()
 
     def _repo_with_resolving_commit(self, repo: Path) -> str:
