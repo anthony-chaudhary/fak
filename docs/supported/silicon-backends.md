@@ -14,6 +14,24 @@ does not fork the agent kernel; it implements `internal/compute.Backend`, regist
 a backend name, advertises exact `Caps`, and proves its correctness class against
 the reference floor.
 
+## Start here: bring a backend and prove it runs
+
+**Audience:** an accelerator or chip team bringing a backend to fak's kernel — you
+implement `internal/compute.Backend`, register a name, advertise `Caps`, and prove a
+correctness class against the `cpu-ref` floor. fak keeps the agent-kernel boundary stable;
+you own the kernels and the runtime evidence.
+
+**Next action:** prove your backend actually executes instead of silently falling back to
+the CPU reference — the non-reference gate fails closed if it does:
+
+```bash
+cmd/modelbench -backend <name> -require-non-reference
+```
+
+Then label the support row by the evidence you have (`Reference` / `Approx` / `FENCED` /
+`PARTIAL` / `not-yet`, defined below). Honest fence: `fak-certified backend` is the intended
+public mark but is **not-yet** — do not claim it until the Backend Conformance Kit lands.
+
 ## What is shipped
 
 | Surface | Status |
