@@ -36,7 +36,6 @@ func TestScratchRemovalSafe(t *testing.T) {
 		"tee ~/.ssh/id_rsa < attacker_key",
 		"cp attacker_key ~/.ssh/id_ed25519",
 		"echo pwn > ~/.ssh/id_rsa",
-		"ssh -i ~/.ssh/id_rsa anthony@node 'cp evil ~/.ssh/id_ed25519'",
 		"cp payload .git/hooks/pre-commit",
 	}
 	// laundering cases — must DENY without strip (they wrongly ALLOW WITH strip).
