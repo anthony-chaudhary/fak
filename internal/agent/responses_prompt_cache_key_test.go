@@ -50,7 +50,7 @@ func TestResponsesPromptCacheKeyPresentAndStable(t *testing.T) {
 	if k1 == "" {
 		t.Fatal("prompt_cache_key absent — codex loses the cross-shard cache-routing hint")
 	}
-	if len(k1) != 32 {
+	if len(k1) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST 32-hex-char (128-bit) routing-hint width is a fixed invariant
 		t.Errorf("prompt_cache_key = %q (len %d), want a 32-hex-char routing hint", k1, len(k1))
 	}
 	if strings.TrimLeft(k1, "0123456789abcdef") != "" {
