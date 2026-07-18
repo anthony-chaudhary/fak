@@ -148,6 +148,10 @@ the readers below tolerate absence. Most writers share the `appendLedgerFile[T]`
 | Dojo history | `docs/dojo/history.jsonl` | — | `cmd/fak/dojo.go:191` | dojo/RSI episode scoring |
 | Cache-frontier review | `--append-ledger` JSONL + `--markdown-out` md (e.g. `docs/cache-frontier/review-ledger.jsonl`) | — | `cmd/fak/cachevalue_review.go:276`/`:291` | durable machine + human cache-frontier review |
 
+**Retired:** `docs/nightrun/fleet-outcome-health.jsonl` never had a writer or reader in-tree
+(one-off WIP snapshot, frozen `CRIT` rows from 2026-07-08); retired per #5149 — its content is
+now a single tombstone row and the file is pending deletion. Do not fold it as loop-health.
+
 **Bounding:** the gateway-usage ledger is compacted in place by `Cut`
 (`internal/gatewayusageledger/cut.go:130`, atomic tmp+rename) folding rows older than the
 newest N into counter-preserving carryforward rows — operator door `fak nightrun cut --apply`
