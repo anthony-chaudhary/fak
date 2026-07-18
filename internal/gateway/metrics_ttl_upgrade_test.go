@@ -72,6 +72,29 @@ func TestCacheTTLUpgradeFoldsIntoAdjudicationSummary(t *testing.T) {
 	}
 }
 
+// A composed place-then-upgrade (#2175) is an AUTHORING outcome, not a refusal: it must
+// fold into CacheTTLUpgraded alongside plain "upgraded" and must NEVER appear in the
+// refusal-reason map. Booking it as a bail undercounted the authored count and
+// double-penalized the fired-rate the cache-health digest folds.
+func TestCacheTTLUpgradePlacedAndUpgradedCountsAsAuthored(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeCacheTTLUpgrade("")                               // an existing breakpoint upgraded
+	m.observeCacheTTLUpgrade(cacheTTLUpgradePlacedAndUpgraded) // composed place-then-upgrade fire
+	m.observeCacheTTLUpgrade(cacheTTLUpgradePlacedAndUpgraded) // a second composed fire
+	m.observeCacheTTLUpgrade("volatile_head")                  // a genuine refusal
+
+	sum := m.adjudicationSummary()
+	if sum.CacheTTLUpgraded != 3 { // 1 upgraded + 2 placed_and_upgraded
+		t.Fatalf("CacheTTLUpgraded = %d, want 3 (upgraded + placed_and_upgraded authored)", sum.CacheTTLUpgraded)
+	}
+	if _, present := sum.CacheTTLUpgradeReasons[cacheTTLUpgradePlacedAndUpgraded]; present {
+		t.Fatalf("placed_and_upgraded leaked into the refusal-reason map: %v", sum.CacheTTLUpgradeReasons)
+	}
+	if got := sum.CacheTTLUpgradeReasons["volatile_head"]; got != 1 {
+		t.Fatalf("CacheTTLUpgradeReasons[volatile_head] = %d, want 1", got)
+	}
+}
+
 // A lever-off session (nothing observed) folds to a zero count and an ABSENT reason map,
 // so the ledger row's omitempty keeps the JSON key out and OFF stays distinguishable from
 // ON-but-ineligible.

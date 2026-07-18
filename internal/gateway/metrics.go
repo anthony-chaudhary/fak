@@ -731,8 +731,11 @@ type AdjudicationSummary struct {
 	// epic #1844 C6) into the same exit frame, WITNESSED (fak authored the cache_control
 	// splice, and the upgrader re-proves the body redecodes before returning changed
 	// bytes): CacheTTLUpgraded counts turns whose stable-head breakpoint fak actually
-	// extended to the 1h tier; CacheTTLUpgradeReasons is the per-refusal breakdown over
-	// the closed agent.TTLUpgradeReason* vocabulary. The family is recorded only while
+	// extended to the 1h tier — BOTH authoring outcomes, an existing breakpoint upgraded
+	// ("upgraded") and a breakpoint placed-and-upgraded in one composed turn (#2175);
+	// CacheTTLUpgradeReasons is the per-refusal breakdown over the closed
+	// agent.TTLUpgradeReason* vocabulary (an authoring outcome is never a refusal, so it
+	// never appears here). The family is recorded only while
 	// the lever is on, so zero/absent means OFF, while a zero upgraded count WITH reason
 	// rows means ON-but-ineligible (every head refused) — visible, not silent.
 	CacheTTLUpgraded       uint64            `json:"cache_ttl_upgrades_upgraded"`
@@ -796,12 +799,19 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 		sum.CompactionBailReasons = comp.bailReasons
 	}
 	// Managed-cache TTL-upgrade outcomes (#1844 C6): split the snapshot's one outcome
-	// map into the upgraded count and the refusal-reason breakdown, attaching the map
-	// only when non-empty so a lever-off session keeps the JSON field absent (omitempty).
-	sum.CacheTTLUpgraded = comp.ttlUpgrades["upgraded"]
+	// map into the AUTHORED count and the refusal-reason breakdown, attaching the map only
+	// when non-empty so a lever-off session keeps the JSON field absent (omitempty). BOTH
+	// authoring outcomes count as authored — "upgraded" (an existing stable-head breakpoint
+	// extended to 1h) AND "placed_and_upgraded" (the #2175 composed transform that placed a
+	// breakpoint AND upgraded it in one turn) — matching the managed-cache self-check's
+	// Authored = Upgraded + PlacedAndUpgraded contract (internal/cachewitness). A composed
+	// fire is NOT a refusal, so it must never land in the reason map: booking it there
+	// undercounted CacheTTLUpgraded AND double-counted it as a bail, sinking the fired-rate
+	// the cache-health digest folds (cachevaluereport TTLRefusals → UpgradeFiredHealth).
+	sum.CacheTTLUpgraded = comp.ttlUpgrades["upgraded"] + comp.ttlUpgrades[cacheTTLUpgradePlacedAndUpgraded]
 	ttlReasons := map[string]uint64{}
 	for reason, n := range comp.ttlUpgrades {
-		if reason != "upgraded" {
+		if reason != "upgraded" && reason != cacheTTLUpgradePlacedAndUpgraded {
 			ttlReasons[reason] = n
 		}
 	}
