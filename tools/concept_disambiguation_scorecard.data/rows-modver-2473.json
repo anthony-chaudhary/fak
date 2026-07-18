@@ -1,0 +1,26 @@
+{
+  "rows": [
+    {
+      "id": "guard-gate-appendguarded",
+      "canonical": "AppendGuarded (advisory-lock-guarded ledger append)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/modver.AppendGuarded appends already-rendered fak-module-versions/1 JSONL to the module-versions ledger while holding an exclusive internal/flock advisory lock on <ledger>.lock, so two agents stamping the shared multi-session trunk cannot interleave a torn or duplicated row (#2473).",
+      "distinction": "It is a file-level concurrency serialiser guarding one ledger O_APPEND write — it admits nothing and evaluates no predicate; contrast the validation/policy guard-gates (CheckExternalizeGate, gateVerbTierTree, the guard stop hook) that gate a turn, commit, or rotation on a check.",
+      "distinct_from": [
+        "guard-gate-checkexternalizegate",
+        "covg-guard-gate-gateverbtiertree"
+      ],
+      "aliases": [
+        "AppendGuarded",
+        "appendguarded"
+      ],
+      "grounding": "AppendGuarded",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -105,17 +105,10 @@ func stampModverLedger(stdout, stderr io.Writer, root, ledger string, rep modver
 		fmt.Fprintf(stderr, "fak version modules: %v\n", err)
 		return 1
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		fmt.Fprintf(stderr, "fak version modules: %v\n", err)
-		return 1
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak version modules: %v\n", err)
-		return 1
-	}
-	defer f.Close()
-	if _, err := f.Write(lines); err != nil {
+	// Guard the append with an advisory lock (#2473): on the shared multi-session
+	// trunk two agents can stamp at once, and an unguarded concurrent O_APPEND can
+	// interleave a torn or duplicated row into the ledger.
+	if err := modver.AppendGuarded(path, lines); err != nil {
 		fmt.Fprintf(stderr, "fak version modules: write ledger: %v\n", err)
 		return 1
 	}
