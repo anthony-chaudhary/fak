@@ -7,6 +7,26 @@ description: "The hosted model providers and cloud gateways fak serve sits in fr
 
 This page lists the hosted model providers and cloud gateways `fak serve` can sit in front of. `fak serve` is a gateway: it fronts whatever serves your tokens and runs every proposed tool call through the kernel before it reaches the model. So a cloud is "supported" when you can point fak's `--provider` and `--base-url` at it. Two tiers cover the field: native provider wires that fak speaks directly, and any cloud that exposes an OpenAI-compatible endpoint.
 
+## Start here: pick a cloud path and confirm it in one check
+
+If you are an operator, your job is to choose the path for your cloud and confirm fak
+fronts it. The choice is one question — does fak speak your cloud's wire natively?
+
+- **Native wire (Tier 1)** — Anthropic, OpenAI, Gemini, or xAI: pass its `--provider`
+  value (table below). The accepted values are witnessed in `internal/agent/adapters.go`
+  (the `Provider` constants and `ParseProvider`).
+- **OpenAI-compatible (Tier 2)** — any other cloud exposing a `/v1` Chat Completions
+  endpoint: `--provider openai --base-url <cloud /v1>`. The per-cloud repoint keys are
+  witnessed in the [compatibility matrix](../integrations/compatibility-matrix.md).
+
+Either way, start the gateway and confirm the seat is live with one command:
+
+```bash
+curl -s http://127.0.0.1:8080/healthz   # -> {"ok":true,"model":"…","engine":"…"}
+```
+
+Everything below is the per-provider detail and the exact repoint recipe.
+
 ## Tier 1: Native provider wires
 
 These are the `--provider` values `fak serve` and `fak guard` accept. Each value selects a transcript adapter that translates the canonical agent transcript into that provider's request and response wire. The values, wires, and aliases are sourced from `internal/agent/adapters.go` (the `Provider` constants and `ParseProvider`).
