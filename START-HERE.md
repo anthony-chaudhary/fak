@@ -2,7 +2,22 @@
 
 This page is the human route map for **fak**. Choose the job you have now; each route points to its current authority and one next action. For the product overview and first commands, use the [README](README.md).
 
-**Default:** if you are evaluating fak for the first time, run the [one-minute offline proof](docs/repro-packet.md). It needs no key, model download, or GPU.
+## See one verdict in one command — no key, model, or GPU
+
+If you are evaluating fak for the first time, the shortest proof that it manages a
+tool-using agent is a single copy-pasteable command:
+
+```bash
+fak agent --offline
+```
+
+It runs a deterministic end-to-end check against a mock planner and prints three
+adjudicated results — `task completed (booked) YES / YES`, `poisoned result blocked YES`,
+and `destructive op prevented YES` — so you see the managed-agent path and the policy
+boundary decide, with no key, model download, or GPU. For the expanded policy, routing,
+and benchmark sequence, use the [one-minute offline proof](docs/repro-packet.md).
+
+Everything below is the route map — choose the job you have now.
 
 ## Choose your route
 
