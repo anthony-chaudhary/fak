@@ -347,13 +347,23 @@ func EstimateAnthropicTokens(req *AnthropicMessagesRequest) int {
 	for _, t := range req.Tools {
 		chars += len(t.Function.Name) + len(t.Function.Description) + len(t.Function.Parameters)
 	}
-	tokens := chars / 4
-	// Charge each image its real per-image cost from the preserved raw content blocks, which
-	// still carry the base64 the decoded placeholder dropped. countContentBlockImages walks the
-	// same top-level + tool_result nesting the decoder does.
+	// Count the preserved image blocks once. The decoder folded each image down to the
+	// "[image]" placeholder already summed into chars above, so subtract that placeholder's
+	// chars before the /4 estimate — otherwise imageTokenCost is charged ON TOP of the
+	// ~len("[image]")/4 tokens the placeholder itself already contributed (#5166). Images are
+	// then charged their real per-image cost from the preserved raw content blocks, which still
+	// carry the base64 the decoded placeholder dropped. countContentBlockImages walks the same
+	// top-level + tool_result nesting the decoder does.
+	numImages := 0
 	for _, cb := range req.ContentBlocks {
-		tokens += countContentBlockImages(cb) * imageTokenCost
+		numImages += countContentBlockImages(cb)
 	}
+	if drop := numImages * len("[image]"); drop < chars {
+		chars -= drop
+	} else {
+		chars = 0
+	}
+	tokens := chars/4 + numImages*imageTokenCost
 	return tokens
 }
 

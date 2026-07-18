@@ -59,6 +59,33 @@ func TestEstimateAnthropicTokensChargesImageRealCost(t *testing.T) {
 	}
 }
 
+// TestEstimateAnthropicTokensNoImagePlaceholderDoubleCount pins the #5166 fix: the decoder folds
+// an image block to the "[image]" placeholder that the text walk already sums into chars, so before
+// the fix imageTokenCost was charged ON TOP of the placeholder's ~len("[image]")/4 tokens — a small
+// double-count per image. A message that is ONLY an image (no text) must therefore estimate to
+// EXACTLY imageTokenCost: the placeholder now nets zero.
+func TestEstimateAnthropicTokensNoImagePlaceholderDoubleCount(t *testing.T) {
+	body := map[string]any{
+		"model":      "claude-sonnet-4-6",
+		"max_tokens": 1024,
+		"messages": []map[string]any{
+			{"role": "user", "content": []map[string]any{imageBlock(50000)}},
+		},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req, err := DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := EstimateAnthropicTokens(req)
+	if got != imageTokenCost {
+		t.Fatalf("image-only request estimated at %d tokens; want exactly imageTokenCost (%d) — the [image] placeholder is being double-counted on top of imageTokenCost", got, imageTokenCost)
+	}
+}
+
 // TestEstimateElementTokensImageNotByteWeighted pins the byte-level half: an image element's
 // giant base64 must collapse to the flat per-image charge, not len(rawJSON)/4. A 50k-char base64
 // element is ~12.5k tokens by the old len/4 rule; the fix charges imageTokenCost (~1600) instead.
