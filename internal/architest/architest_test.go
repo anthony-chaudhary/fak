@@ -463,6 +463,7 @@ var tier = map[string]int{
 	"tokencache":            1, // #4330: persisted, git-common-dir-anchored backing store for clonescan's per-file token windows (content-addressed under the tokenizer version); imports only tier-1 siblings (clonescan for the window contract, windowgate to suppress its one `git rev-parse` spawn), does its own disk I/O, off the hot path.
 	"guardcorpus":           2, // guarded-session corpus fold consumes journal semantics and emits durable analysis records; off the request hot path.
 	"stripeload":            1, // #4298: pure chunk-planner + striping io.ReaderAt that fans one logical read across N byte-identical mirrors proportionally to measured bandwidth (the same fan-out later stripes {NVMe, peer-RAM, S3}); stdlib-only, callers own I/O policy and bandwidth measurement.
+	"lookahead":             2, // #5204 (epic #5202): pure witness-gated Lesson core — distills a fork-rollout's outcome into a Lesson whose FACT/RISK authority is bounded by the witness rung its evidence earned (W3 may assert FACT, W2 only RISK, W1/W0 refused LESSON_OVERCLAIMS); injected model seam (decline discipline), stdlib + trajctl(1), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

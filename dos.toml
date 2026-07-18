@@ -1429,6 +1429,13 @@ summary  = "an A2A push-notification webhook target is not admissible -- a non-a
 fix      = "register the receiver's host on the delivery allowlist (Server.SetA2APushWebhookAllowlist); use an http(s) URL with a public host, or explicitly enable loopback delivery for a deliberately-internal receiver. Floor: internal/gateway a2aWebhookAdmit refuses before any dial."
 see_also = ["internal/gateway/a2a_pushnotify.go", "internal/gateway/a2a.go", "dos check-reason"]
 
+[reasons.LESSON_OVERCLAIMS]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A distilled look-ahead Lesson asserted more authority than the witness rung its rollout evidence earned -- a FACT from below-W3 (structured-activity or weaker) evidence, or ANY lesson from a W1 (judge) / W0 (self-report) rollout. The kernel does not believe the supervisor's foresight either: opinion and self-report never masquerade as a witnessed fact."
+fix      = "Emit the lesson at the authority its evidence proves: a W2 rollout may flag a RISK (not a FACT); a W1/W0 rollout may assert nothing (fold it as a hypothesis, not a steer). Earn W3 (a witnessed commit / green suite / benchmark row) before asserting a FACT. Floor: internal/lookahead DistillLesson."
+see_also = ["internal/lookahead/lookahead.go", "internal/trajctl/trajctl.go", "docs/notes/CONCEPT-LOOKAHEAD-RESET-2026-07-17.md"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).
