@@ -161,23 +161,34 @@ KPI_GROUP: dict[str, str] = {
     "ship_integrity": "verifiability",
 }
 
-# A metric family is DECLARED two ways in the Go source: as the first string arg
-# of a HELP/TYPE writer helper (`help("fak_x", ...)`, `writeCounter(b, "fak_x", ...)`,
-# `writeHelpType(&b, "fak_x", ...)`), or written as a raw exposition literal where
-# the name is immediately followed by `{` (labels) or a space (value). Both are
-# emitted-metric signals; an MCP tool name (`case "fak_syscall":`) or a struct
-# field (`"fak_native": v`) matches NEITHER, so the source of truth stays clean.
-# The optional first arg is the exposition buffer the helper writes into — a Go
+# A metric family is DECLARED as the first string arg of a writer helper: a free
+# HELP/TYPE function (`help("fak_x", ...)`, `writeCounter(b, "fak_x", ...)`,
+# `writeHelpType(&b, "fak_x", ...)`), OR a Prometheus text-exposition writer method
+# (`w.gauge("fak_x", ...)`, `w.counter("fak_x", ...)` — the form the cmd/fak
+# roll-up exporters use). A family may also be written as a raw exposition literal
+# where the name is immediately followed by `{` (labels) or a space (value). All
+# are emitted-metric signals; an MCP tool name (`case "fak_syscall":`) or a struct
+# field (`"fak_native": v`) matches NONE, so the source of truth stays clean. The
+# optional first arg is the exposition buffer the helper writes into — a Go
 # identifier passed by value (`b,`) or by pointer (`&b,`); both forms are emitted.
 _METRIC_DECL_RE = re.compile(
-    r'(?:help|write[A-Za-z]*)\(\s*(?:&?[A-Za-z_]\w*\s*,\s*)?"(' + METRIC_PREFIX + r'[a-z0-9_]+)"')
+    r'(?:\b(?:help|write[A-Za-z]*)|\.(?:gauge|counter))\('
+    r'\s*(?:&?[A-Za-z_]\w*\s*,\s*)?"(' + METRIC_PREFIX + r'[a-z0-9_]+)"')
 _METRIC_EXPO_RE = re.compile(r'"(' + METRIC_PREFIX + r'[a-z0-9_]+)(?:\{| )')
 _FAK_FAMILY_TOKEN_RE = re.compile(r'\b(' + METRIC_PREFIX + r'[a-z0-9_]+)\b')
-# Every quoted "fak_..." literal in Go source, metric or not. Subtracting the
-# emitted-metric set leaves the NON-metric identifiers that share the prefix —
-# MCP tool names (`fak_syscall`, `fak_context_change`), route ids — which a doc
-# legitimately references and which must NOT be flagged as a phantom metric.
-_FAK_ANY_LITERAL_RE = re.compile(r'"(' + METRIC_PREFIX + r'[a-z0-9_]+)"')
+# A metric family whose name is BUILT at runtime from a `fak_*` prefix constant:
+#   const p = "fak_sched_preempt_"; writeNativeCounter(b, p+"total", …)
+# The full family literal never appears, so resolve each `fak_*`-prefix constant,
+# then fold every `<const>+"suffix"` into the emitted family `prefix+suffix`.
+_PREFIX_CONST_RE = re.compile(
+    r'\b([A-Za-z_]\w*)\s*:?=\s*"(' + METRIC_PREFIX + r'[a-z0-9_]*_)"')
+# Every quoted "fak_..." literal in Go source, metric or not (the closing quote is
+# NOT required, so a struct tag `json:"fak_share_pct,omitempty"` still yields
+# `fak_share_pct`). Subtracting the emitted-metric set leaves the NON-metric
+# identifiers that share the prefix — MCP tool names (`fak_syscall`,
+# `fak_context_change`), route ids, struct-field tags — which a doc legitimately
+# references and which must NOT be flagged as a phantom metric.
+_FAK_ANY_LITERAL_RE = re.compile(r'"(' + METRIC_PREFIX + r'[a-z0-9_]+)')
 _THEOREM_RE = re.compile(r"^#{2,}\s*THEOREM\b", re.IGNORECASE)
 _WITNESS_RE = re.compile(r"\*\*\s*WITNESS", re.IGNORECASE)
 _VERDICT_RE = re.compile(r"\*\*\s*VERDICT", re.IGNORECASE)
@@ -244,11 +255,35 @@ def is_metric_shaped(token: str) -> bool:
     return len(parts) >= 2 and all(p for p in parts)
 
 
+def extract_prefixed_families(go_text: str) -> set[str]:
+    """Families built from a `fak_*` prefix constant: `const p = "fak_x_"; …
+    write…(b, p+"suffix", …)`, where the full family name never appears as one
+    literal. Resolve each fak_-prefix constant, then fold every `<const>+"suffix"`
+    into `prefix+suffix`. Per-file so a prefix const never bleeds across files."""
+    out: set[str] = set()
+    for m in _PREFIX_CONST_RE.finditer(go_text):
+        ident, prefix = m.group(1), m.group(2)
+        concat = re.compile(r'\b' + re.escape(ident) + r'\s*\+\s*"([a-z0-9_]+)"')
+        for sm in concat.finditer(go_text):
+            out.add(prefix + sm.group(1))
+    return out
+
+
+def extract_family_decls(go_text: str) -> set[str]:
+    """Families DECLARED via a writer helper (`help`/`write*`/`.gauge`/`.counter`)
+    or built from a `fak_*` prefix constant. Excludes the raw space/brace
+    exposition-literal form, which is a reliable metric signal only in the
+    internal/ gateway source — in cmd/fak an MCP tool-name string in help prose
+    (`"fak_capabilities "`) can share that shape without being a metric."""
+    return set(_METRIC_DECL_RE.findall(go_text)) | extract_prefixed_families(go_text)
+
+
 def extract_family_literals(go_text: str) -> set[str]:
-    """The emitted-metric source of truth: every fak_* family DECLARED in Go source
-    via a HELP/TYPE writer helper or written as a raw exposition literal. Excludes
-    MCP tool names and struct-field literals that merely share the `fak_` prefix."""
-    return set(_METRIC_DECL_RE.findall(go_text)) | set(_METRIC_EXPO_RE.findall(go_text))
+    """The internal/ emitted-metric source of truth: every DECLARED family plus the
+    raw exposition literals (`"fak_x{"` / `"fak_x "`) the gateway writes directly.
+    Excludes MCP tool names and struct-field literals that share the `fak_`
+    prefix."""
+    return extract_family_decls(go_text) | set(_METRIC_EXPO_RE.findall(go_text))
 
 
 def extract_family_tokens(text: str) -> set[str]:
@@ -637,6 +672,23 @@ def gather(root: Path, *, run_dos: bool = True,
         all_fak_literals |= set(_FAK_ANY_LITERAL_RE.findall(text))
         if f.startswith("internal/gateway/"):
             gateway_go_text_parts.append(text)
+
+    # cmd/fak carries the Prometheus text-exposition exporters (e.g. the cache-value
+    # & ablation roll-up in cmd/fak/cachevalue_metrics.go). Their families are
+    # DECLARED through exposition writer methods (`w.gauge("fak_...", …)`), never as
+    # internal/-style raw exposition literals, so scan them with the DECL/prefix
+    # extractor only — NOT the space/brace EXPO form, which in cmd/fak would misread
+    # MCP tool-name help strings (`"fak_capabilities "`) as emitted metrics. Without
+    # this, every panel in the roll-up dashboard read as a phantom (SOURCE_DIRS only
+    # scanned internal/), and a doc citing an emitted `fak_cachevalue_*` family
+    # tripped drift.
+    cmd_src = [f for f in tracked
+               if f.startswith("cmd/fak/") and f.endswith(".go")
+               and not f.endswith("_test.go")]
+    for f in cmd_src:
+        text = _safe_read(root / f)
+        emitted |= extract_family_decls(text)
+        all_fak_literals |= set(_FAK_ANY_LITERAL_RE.findall(text))
     gateway_text = "\n".join(gateway_go_text_parts)
     # NON-metric fak_ identifiers (MCP tool names, route ids) a doc may reference
     # without it being a phantom metric — excluded from doc drift.

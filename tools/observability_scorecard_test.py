@@ -117,6 +117,62 @@ def test_extract_family_literals_excludes_tool_names():
     assert fams == set()
 
 
+def test_extract_family_literals_exposition_writer_methods():
+    # The cmd/fak roll-up exporters DECLARE families through a Prometheus
+    # text-exposition writer method (`w.gauge("fak_...", …)` / `w.counter(...)`),
+    # not the internal/ free-function helpers. A matcher blind to the method form
+    # missed all 49 fak_cachevalue_*/fak_ablation_* families, so every panel in the
+    # roll-up dashboard read as a phantom (the dashboard_integrity false positive
+    # this pins shut).
+    go = (
+        'w.gauge("fak_cachevalue_latest_net_usd", "net $ …", rep.LatestNetUSD)\n'
+        'w.gauge("fak_ablation_arms", "arms …", n, "arm", a)\n'
+        'w.counter("fak_cachevalue_kernel_decisions_total", "…", c)\n'
+    )
+    fams = obs.extract_family_literals(go)
+    assert {"fak_cachevalue_latest_net_usd", "fak_ablation_arms",
+            "fak_cachevalue_kernel_decisions_total"} <= fams
+    # a CamelCase Prometheus constructor is NOT the lowercase writer method
+    assert obs.extract_family_literals('promauto.NewGauge(Opts{Name: "fak_x"})') == set()
+
+
+def test_extract_prefixed_families_const_concat():
+    # A family whose name is BUILT at runtime from a prefix constant
+    # (`const p = "fak_sched_preempt_"; write…(b, p+"suffix", …)`) never appears as
+    # one literal. The doc referenced two such families and they read as phantoms
+    # until the prefix constant is resolved.
+    go = (
+        'const p = "fak_sched_preempt_"\n'
+        'writeNativeHelpType(b, p+"last_expired_pins", "…", "gauge")\n'
+        'writeNativeCounter(b, p+"pin_expired_total", "…", st.ExpiredPins)\n'
+        'fmt.Fprintf(b, "%srunning %d\\n", p, st.Running)\n'  # value line, not a decl
+    )
+    fams = obs.extract_prefixed_families(go)
+    assert {"fak_sched_preempt_last_expired_pins",
+            "fak_sched_preempt_pin_expired_total"} <= fams
+    # a non-fak prefix constant contributes nothing
+    assert obs.extract_prefixed_families('const q = "http_"\nf(q+"total")\n') == set()
+
+
+def test_fak_any_literal_captures_struct_tag():
+    # A JSON struct tag `json:"fak_share_pct,omitempty"` names a NON-metric field a
+    # doc may cite (`fleet_benefit.fak_share_pct`). The closing-quote-optional regex
+    # captures it so it lands in the nonmetric exclusion set and does not read as
+    # doc drift.
+    lits = set(obs._FAK_ANY_LITERAL_RE.findall(
+        'FakSharePct *float64 `json:"fak_share_pct,omitempty"`\n'
+        'case "fak_syscall":\n'))
+    assert "fak_share_pct" in lits and "fak_syscall" in lits
+
+
+def test_extract_family_decls_excludes_expo_literals():
+    # The cmd/fak DECL-only scan must NOT treat an MCP tool-name help string that
+    # happens to be followed by a space (`"fak_capabilities "`) as an emitted
+    # metric — only true writer-helper declarations count.
+    go = 'io.WriteString(w, "scrape fak_capabilities and fak_tools_search\\n")\n'
+    assert obs.extract_family_decls(go) == set()
+
+
 def test_is_metric_shaped():
     assert obs.is_metric_shaped("fak_gateway_up")
     assert obs.is_metric_shaped("fak_verdict_total")
