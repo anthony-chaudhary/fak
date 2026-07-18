@@ -46,8 +46,9 @@ func cmdComplain(argv []string) { os.Exit(runComplain(os.Stdout, os.Stderr, argv
 func runComplain(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("complain", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	kind := fs.String("kind", guardcomplaint.DefaultKind, "complaint class: false-positive | over-broad | latency | confusing | other")
-	reason := fs.String("reason", "", "the guard reason token being appealed (e.g. FILE_ADMISSION, OUT_OF_TREE_WRITE)")
+	domain := fs.String("domain", guardcomplaint.DefaultDomain, "complaint domain: guard (capability-floor appeal) | workflow (non-guard dev friction: shared-tree-clobber, tool-timeout, lane-collision)")
+	kind := fs.String("kind", "", "complaint class within the domain (empty = the domain default). guard: false-positive|over-broad|latency|confusing|other. workflow: shared-tree-clobber|tool-timeout|lane-collision|other")
+	reason := fs.String("reason", "", "the guard reason token being appealed (e.g. FILE_ADMISSION, OUT_OF_TREE_WRITE); in the workflow domain, free context for the friction")
 	tool := fs.String("tool", "", "the refused tool (e.g. Bash, Write)")
 	summary := fs.String("summary", "", "one-line headline of the complaint (required; drives the dedup key)")
 	rationale := fs.String("rationale", "", "why the agent judges the guard wrong — and the recovery it wanted")
@@ -77,7 +78,12 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak complain: --journal-seq, --trace-id, and --args-digest require --from-journal")
 		return 2
 	}
-	normKind, err := guardcomplaint.NormalizeKind(*kind)
+	normDomain, err := guardcomplaint.NormalizeDomain(*domain)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak complain: %v\n", err)
+		return 2
+	}
+	normKind, err := guardcomplaint.NormalizeKindFor(normDomain, *kind)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak complain: %v\n", err)
 		return 2
@@ -91,6 +97,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	liveMode := complainLiveMode(*live, os.Getenv)
 
 	c := guardcomplaint.Complaint{
+		Domain:    normDomain,
 		Kind:      normKind,
 		Reason:    strings.TrimSpace(*reason),
 		Tool:      strings.TrimSpace(*tool),
@@ -154,7 +161,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	if liveMode {
 		useLabels := []string(labels)
 		if len(useLabels) == 0 {
-			useLabels = []string{guardcomplaint.Label}
+			useLabels = []string{guardcomplaint.LabelFor(normDomain)}
 		}
 		result.Synced = []dogfoodissues.SyncRow{guardcomplaint.Sync(row, *repo, useLabels, nil)}
 	}

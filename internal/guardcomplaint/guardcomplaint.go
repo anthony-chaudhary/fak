@@ -45,6 +45,76 @@ var Kinds = map[string]string{
 // DefaultKind is used when the agent names none.
 const DefaultKind = "false-positive"
 
+// Domains is the closed set of complaint domains (#5191). "guard" is the original
+// capability-floor appeal channel (a wrong `fak guard` decision); "workflow" carries
+// non-guard agentic-dev friction — shared-tree clobbers, tool timeouts, lane collisions —
+// through the SAME deduping gh channel so operator-visible loop friction files a tracked
+// ticket instead of a private journal note. The two domains share the create/update/
+// occurrence plumbing and differ only in their kind vocabulary, title/body framing, and label.
+var Domains = map[string]string{
+	"guard":    "an appeal against a `fak guard` capability-floor decision (the original channel)",
+	"workflow": "non-guard agentic-dev friction (shared-tree clobber, tool timeout, lane collision)",
+}
+
+// DefaultDomain defaults an unspecified domain to the original guard-appeal channel, so every
+// pre-#5191 caller and every existing dedup key stays byte-identical.
+const DefaultDomain = "guard"
+
+// WorkflowKinds is the closed kind vocabulary for the workflow domain — the non-guard
+// counterpart of Kinds. These are loop-level friction classes an agent hits that no guard
+// refused, so they cannot ride the guard-reason/journal-witness shape.
+var WorkflowKinds = map[string]string{
+	"shared-tree-clobber": "a peer's concurrent edit or stage on the shared trunk overwrote or raced this agent's work",
+	"tool-timeout":        "a tool or command that timed out or hung long enough to stall the loop",
+	"lane-collision":      "two workers contending on the same files or lease so one had to back off or redo work",
+	"other":               "agentic-dev friction worth tracking that fits no other workflow kind",
+}
+
+// DefaultWorkflowKind is used when a workflow complaint names no kind.
+const DefaultWorkflowKind = "other"
+
+// WorkflowLabel is the gh label for workflow-domain friction complaints, filterable apart
+// from the guard-appeal channel (Label) while sharing its deduping plumbing.
+const WorkflowLabel = "workflow-complaint"
+
+// KindsFor returns the closed kind vocabulary for a domain: the workflow set for "workflow",
+// else the guard Kinds (the default and every unknown domain, which NormalizeDomain rejects
+// before it reaches here).
+func KindsFor(domain string) map[string]string {
+	if domain == "workflow" {
+		return WorkflowKinds
+	}
+	return Kinds
+}
+
+// LabelFor returns the gh label for a domain: WorkflowLabel for "workflow", else the guard Label.
+func LabelFor(domain string) string {
+	if domain == "workflow" {
+		return WorkflowLabel
+	}
+	return Label
+}
+
+func defaultKindFor(domain string) string {
+	if domain == "workflow" {
+		return DefaultWorkflowKind
+	}
+	return DefaultKind
+}
+
+// NormalizeDomain lowercases/validates a domain, defaulting an empty one to guard. It returns
+// the canonical domain and an error naming the closed set when the domain is unknown.
+func NormalizeDomain(domain string) (string, error) {
+	d := strings.ToLower(strings.TrimSpace(domain))
+	if d == "" {
+		return DefaultDomain, nil
+	}
+	if _, ok := Domains[d]; !ok {
+		return "", fmt.Errorf("unknown complaint domain %q (want one of: %s)", domain, strings.Join(sortedKeys(Domains), ", "))
+	}
+	return d, nil
+}
+
 // Evidence is the witnessed half of a complaint: a real adjudicated verdict pulled from
 // the decision journal (or supplied manually). The agent's rationale is a self-report;
 // this is the non-forgeable record that the refusal it is appealing actually happened.
@@ -61,14 +131,27 @@ type Evidence struct {
 	ArgsDigest  string `json:"args_digest,omitempty"`
 }
 
-// Complaint is one agent-authored appeal against a guard decision.
+// Complaint is one agent-authored complaint. In the guard domain (the default) it is an appeal
+// against a `fak guard` decision; in the workflow domain (#5191) it is a non-guard dev-friction
+// report. The fields are shared; Reason/Tool/Evidence are guard-shaped and simply stay empty for
+// most workflow friction.
 type Complaint struct {
+	Domain    string    `json:"domain,omitempty"` // "guard" (default) | "workflow"
 	Kind      string    `json:"kind"`
 	Reason    string    `json:"reason,omitempty"` // the guard reason token being appealed (e.g. FILE_ADMISSION)
 	Tool      string    `json:"tool,omitempty"`   // the refused tool (e.g. Bash, Write)
 	Summary   string    `json:"summary"`          // one-line headline
 	Rationale string    `json:"rationale"`        // why the agent judges the guard wrong
 	Evidence  *Evidence `json:"evidence,omitempty"`
+}
+
+// domain resolves the complaint's domain, defaulting an empty one to guard so a zero-value
+// Complaint and every pre-#5191 caller stays on the original channel with byte-identical output.
+func (c Complaint) domain() string {
+	if d := strings.ToLower(strings.TrimSpace(c.Domain)); d != "" {
+		return d
+	}
+	return DefaultDomain
 }
 
 // PlanRow is one create/update decision for a complaint. Occurrences is the escalating
@@ -80,6 +163,7 @@ type PlanRow struct {
 	State       string `json:"state"`
 	Title       string `json:"title"`
 	Body        string `json:"-"`
+	Domain      string `json:"domain,omitempty"`
 	Kind        string `json:"kind"`
 	Reason      string `json:"reason,omitempty"`
 	Tool        string `json:"tool,omitempty"`
@@ -94,22 +178,38 @@ type Result struct {
 	Synced  []dogfoodissues.SyncRow `json:"synced"`
 }
 
-// NormalizeKind lowercases/validates a kind, defaulting an empty one. It returns the
-// canonical kind and an error naming the closed set when the kind is unknown.
-func NormalizeKind(kind string) (string, error) {
+// NormalizeKindFor lowercases/validates a kind against a domain's closed set, defaulting an
+// empty one to that domain's default kind. The error names the domain's own vocabulary so a
+// workflow complaint is not told to use a guard kind and vice-versa.
+func NormalizeKindFor(domain, kind string) (string, error) {
+	kinds := KindsFor(domain)
 	k := strings.ToLower(strings.TrimSpace(kind))
 	if k == "" {
-		return DefaultKind, nil
+		return defaultKindFor(domain), nil
 	}
-	if _, ok := Kinds[k]; !ok {
-		return "", fmt.Errorf("unknown complaint kind %q (want one of: %s)", kind, strings.Join(sortedKinds(), ", "))
+	if _, ok := kinds[k]; !ok {
+		// The guard domain keeps its historical "unknown complaint kind" wording (unqualified);
+		// a non-guard domain names itself so a workflow complaint is not told to use a guard kind.
+		label := "complaint kind"
+		if domain != DefaultDomain {
+			label = domain + " complaint kind"
+		}
+		return "", fmt.Errorf("unknown %s %q (want one of: %s)", label, kind, strings.Join(sortedKeys(kinds), ", "))
 	}
 	return k, nil
 }
 
-func sortedKinds() []string {
-	out := make([]string, 0, len(Kinds))
-	for k := range Kinds {
+// NormalizeKind is the guard-domain kind normalizer, preserved byte-for-byte for every
+// pre-#5191 caller (it delegates to NormalizeKindFor on the default guard domain).
+func NormalizeKind(kind string) (string, error) {
+	return NormalizeKindFor(DefaultDomain, kind)
+}
+
+// sortedKeys returns a map's keys sorted — a stable, deterministic ordering for the closed-set
+// error messages (Kinds, WorkflowKinds, Domains).
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
 		out = append(out, k)
 	}
 	sort.Strings(out)
@@ -145,8 +245,15 @@ func (c Complaint) Key() string {
 	if tool == "" {
 		tool = "any"
 	}
+	// The domain prefixes the key so a guard and a workflow complaint that happen to share a
+	// summary never fold onto one issue. The guard prefix is left as the historical literal
+	// "guard-complaint" so every pre-#5191 key is byte-identical.
+	prefix := "guard-complaint"
+	if c.domain() == "workflow" {
+		prefix = "workflow-complaint"
+	}
 	return strings.Join([]string{
-		"guard-complaint",
+		prefix,
 		slug(c.Kind),
 		slug(reason),
 		slug(tool),
@@ -168,7 +275,11 @@ func oneLine(s string) string {
 // summary are collapsed: issue titles and Render rows are single-line surfaces.
 func (c Complaint) Title() string {
 	var b strings.Builder
-	b.WriteString("guard complaint [")
+	if c.domain() == "workflow" {
+		b.WriteString("workflow friction [")
+	} else {
+		b.WriteString("guard complaint [")
+	}
 	b.WriteString(c.Kind)
 	b.WriteString("]")
 	scope := []string{}
@@ -196,6 +307,9 @@ func (c Complaint) Title() string {
 func (c Complaint) Body(occurrences int) string {
 	if occurrences < 1 {
 		occurrences = 1
+	}
+	if c.domain() == "workflow" {
+		return c.workflowBody(occurrences)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- fak-guard-complaint-key: %s -->\n", c.Key())
@@ -230,6 +344,53 @@ func (c Complaint) Body(occurrences int) string {
 	b.WriteString("Filed by `fak complain`. Re-running it for the same class updates THIS issue in place and bumps ")
 	b.WriteString("the occurrence count rather than opening a duplicate. A confirmed false positive is a floor bug to fix; ")
 	b.WriteString("a rejected appeal is closed with the reason the refusal was correct.\n")
+	return b.String()
+}
+
+// workflowBody renders the issue body for a workflow-domain (#5191) friction complaint. It
+// reuses the SAME dedup marker tag (fak-guard-complaint-key) so MarkerKey/occurrence folding
+// work unchanged; only the framing differs — this is non-guard loop friction, so there is no
+// capability-floor decision to appeal and (usually) no journal witness.
+func (c Complaint) workflowBody(occurrences int) string {
+	if occurrences < 1 {
+		occurrences = 1
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "<!-- fak-guard-complaint-key: %s -->\n", c.Key())
+	b.WriteString("# Workflow friction (agent report)\n\n")
+	b.WriteString("An agent hit agentic-dev friction that no `fak guard` decision caused — a shared-tree ")
+	b.WriteString("clobber, a tool timeout, a lane collision, or similar loop friction. It is filed through ")
+	b.WriteString("the same deduping complaint channel so recurring friction reads as the tracked signal it ")
+	b.WriteString("is instead of a private journal note.\n\n")
+	fmt.Fprintf(&b, "- domain: `workflow`\n")
+	fmt.Fprintf(&b, "- kind: `%s` — %s\n", c.Kind, WorkflowKinds[c.Kind])
+	if t := strings.TrimSpace(c.Tool); t != "" {
+		fmt.Fprintf(&b, "- tool: `%s`\n", t)
+	}
+	if r := strings.TrimSpace(c.Reason); r != "" {
+		fmt.Fprintf(&b, "- context: `%s`\n", r)
+	}
+	fmt.Fprintf(&b, "- occurrences: `%d`\n", occurrences)
+	fmt.Fprintf(&b, "- stable key: `%s`\n\n", c.Key())
+
+	b.WriteString("## What happened\n\n")
+	rationale := strings.TrimSpace(c.Rationale)
+	if rationale == "" {
+		rationale = "_(none given)_"
+	}
+	b.WriteString(rationale)
+	b.WriteString("\n\n")
+
+	if c.Evidence != nil && c.Evidence.Source != "" && c.Evidence.Source != "none" {
+		b.WriteString("## Evidence\n\n")
+		b.WriteString(c.evidenceBlock())
+		b.WriteString("\n")
+	}
+
+	b.WriteString("---\n")
+	b.WriteString("Filed by `fak complain --domain workflow`. Re-running it for the same class updates THIS ")
+	b.WriteString("issue in place and bumps the occurrence count rather than opening a duplicate. Recurring ")
+	b.WriteString("workflow friction is a loop-ergonomics bug to fix.\n")
 	return b.String()
 }
 
@@ -299,6 +460,7 @@ func BuildPlan(c Complaint, existing []dogfoodissues.Issue) PlanRow {
 		Action:      "create",
 		Key:         key,
 		Title:       c.Title(),
+		Domain:      c.domain(),
 		Kind:        c.Kind,
 		Reason:      c.Reason,
 		Tool:        c.Tool,
