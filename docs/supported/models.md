@@ -16,6 +16,26 @@ that runs a model itself, proven bit-exact against HuggingFace. That engine is a
 correctness reference, not a production-throughput server, and it covers a fixed set of
 architectures.
 
+## Start here: what does this build serve, and how is it proven?
+
+If you are an operator, your job is to identify the model this fak build supports and the
+authority that proves it. One command answers the first half against a running gateway:
+
+```bash
+curl -s http://127.0.0.1:8080/healthz   # -> {"ok":true,"model":"…","engine":"…"}
+```
+
+The `engine` field routes you to the right half of this page: `inkernel` means fak is
+**running** the model itself (Layer 2 — a fixed, bit-exact-proven architecture set); any
+other value means fak is **fronting** an upstream model through the gateway (Layer 1 — any
+model your upstream serves, unrestricted by id). For the authority behind each claim, the
+machine-checked support tags are in the
+[Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md), and the
+in-kernel correctness proof is `go test ./internal/model -run TestForwardMatchesHFOracle`
+(weight-gated; it skips cleanly when the HF export is absent).
+
+Everything below is the full taxonomy behind that one check.
+
 ---
 
 ## Layer 1 — Models you front through the gateway
