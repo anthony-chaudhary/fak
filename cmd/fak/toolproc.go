@@ -44,13 +44,15 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		return runToolprocContain(stdout, stderr, argv[1:])
 	case "sample":
 		return runToolprocSample(stdout, stderr, argv[1:])
+	case "repeats":
+		return runToolprocRepeats(stdout, stderr, argv[1:])
 	case "hook":
 		return runToolprocHook(os.Stdin, stderr, argv[1:])
 	case "-h", "--help", "help":
 		toolprocUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | host-faults | sample | hook)\n", argv[0])
+		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | host-faults | sample | repeats | hook)\n", argv[0])
 		toolprocUsage(stderr)
 		return 2
 	}
@@ -488,6 +490,9 @@ func toolprocUsage(w io.Writer) {
                        [--window-ms N] [--max-per-surface N] [--quarantine-faults N]
                        [--breaker-faults N] [--breaker-sessions N]
   fak toolproc sample [--json | --journal]
+  fak toolproc repeats ROLLOUT.jsonl... [--json] [--no-digest] [--root DIR]
+                       [--top N] [--poll-min-repeats N]
+                       [--poll-max-median-spacing-ms N] [--fresh-ms N]
   fak toolproc hook (pre | post | stop) [--journal FILE]
                     [--deadline-ms N] [--heartbeat-ms N] [--policy FILE]
 
@@ -517,6 +522,17 @@ QUARANTINE_SURFACE holds a surface in a re-crash loop; BREAKER_OPEN holds ALL
 spawns during a cross-session fault storm. A missing journal fail-opens to
 ADMIT (no recorded faults = no evidence of instability); an unreadable/drifted
 one refuses (1) rather than guess.
+
+repeats streams native Codex rollout JSONL logs into the typed repeat
+classifier (#5121): each function_call / local_shell_call and its *_output twin
+becomes one normalized CallRecord (output SIZE only, secrets redacted, never a
+body), immutable-read targets are digested from the local filesystem so a read
+after a mutation forms a NEW identity (pass --no-digest for the conservative
+path-only fold), and the fold prints the RepeatReport — per-identity groups
+with class (IMMUTABLE_READ / MUTABLE_QUERY / POLL_STORM / IDEMPOTENT_WRITE /
+UNKNOWN), reuse decision, dup counts, and net-true avoidable spawns/input
+bytes. --json emits the machine report. Exit 0 on a fold, 1 when a named
+rollout file is unreadable, 2 on usage.
 
 hook is the harness adapter (seam 4): wire it as a Claude Code (or compatible)
 PreToolUse / PostToolUse / Stop hook and each firing appends one journal event
