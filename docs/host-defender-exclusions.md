@@ -130,6 +130,10 @@ Remove-MpPreference -ExclusionProcess 'claude.exe','fak.exe','bash.exe','python.
 
 ## See also
 
+- [Windows Defender exclusions for the hot-clone git object DB](notes/GITGATE-DEFENDER-EXCLUSIONS-HOT-CLONE-OBJECT-DB-2026-07-17.md)
+  — the #4602/#5080 follow-up: the narrow `.git/objects` variant of the path
+  exclusion, the per-worker worktree root, and the `git.exe` process exclusion
+  this baseline does not carry.
 - [Runaway-process guard & leak audit](perf-runaway-guard.md) — the other
   standing host-cost backstop (a process whose thread/handle/CPU level runs away).
 - [Desktop-slowness maintenance runbook](notes/DESKTOP-SLOWNESS-MAINTENANCE-2026-06-28.md)
