@@ -10,21 +10,23 @@ The agent keeps its interface and model, while a fak kernel manages its model tr
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
-<!-- readme-verified: 2026-07-15 vs VERSION 0.41.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-07-18 vs VERSION 0.41.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
 ## Try the kernel without a key, model, or GPU
 
 **Audience:** first-time evaluators checking whether fak can manage a tool-using agent.
 
-For the shortest public proof, run one deterministic end-to-end check:
+For the shortest public proof, install the one binary and run one deterministic end-to-end check:
 
 ```bash
+go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 fak agent --offline
+# -> task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
 ```
 
-The proof passes when the comparison ends with `task completed (booked) YES / YES`, `poisoned result blocked YES`, and `destructive op prevented YES`. This offline mode uses a deterministic mock planner, so it verifies the managed-agent path and policy boundary without claiming live-model quality or latency.
+Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
 
-**Next action:** run `fak agent --offline` and check those three output rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md).
+**Next action:** run it and check those three rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md).
 
 ## One managed agent, two ways to run the kernel
 
@@ -40,7 +42,7 @@ The roles stay separate: the **agent or client** owns the task loop and user exp
 
 **Default:** start with `fak guard` for one existing agent; choose `fak serve` when the kernel must be a shared or durable endpoint.
 
-Both commands run the **same kernel**. `guard` is the convenient client-side lifecycle wrapper; `serve` is the standalone/server-side deployment. The model remains a replaceable backend—cloud API, local model server, or in-kernel GGUF.
+Both commands run the **same kernel**. `guard` runs it beside one agent session, as that session's launcher and supervisor; `serve` runs it as a standalone service. The model remains a replaceable backend—cloud API, local model server, or in-kernel GGUF.
 
 ```mermaid
 flowchart LR
@@ -60,8 +62,8 @@ For architecture, current evidence, and development workflow, start at [START-HE
 
 - **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system—on by default, and without changing the model's output: it keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses KV directly when it owns inference. **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on larger models).
 - **Long runs keep moving.** Sessions compact their own history (up to **~107K tokens** per trim) and can resume after a crash instead of dying at the context limit.
-- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor—**362 ns** in process, with no policy model or network hop.
-- **Composable or standalone.** Use either capability, combine both, proxy an existing server, or run GGUF locally.
+- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor—**362 ns** in process, with no policy model or network hop. Tool results carry provenance too, so poisoned content read from an untrusted source is stopped before the model acts on it.
+- **Big local models are first-class.** The kernel loads GGUF weights itself and serves OpenAI, Anthropic, and MCP clients directly. For mixture-of-experts models (where each token uses only a few of the model's expert blocks), it pages just the needed expert weights in from SSD and stripes weight reads across sources by measured bandwidth—so the whole model does not have to sit in RAM. Quantized (e.g. Q4) inference and grammar-constrained structured output are built in.
 
 Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims ledger](CLAIMS.md).
 
@@ -117,12 +119,12 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 
 Go 1.26+; no external Go dependencies. Source builds, archives, and containers: [INSTALL.md](INSTALL.md).
 
-## Where to go next
+## Going deeper
 
 - **Use it:** [tutorial](docs/fak/tutorial.md) · [integration guides](docs/integrations/) · [examples](examples/README.md)
 - **Operate it:** [serving](docs/serving/README.md) · [observability](docs/fak/observability.md) · [deployment](docs/fak/deployment-guide.md)
 - **Understand it:** [performance outcomes and proofs](docs/performance.md) · [managed cache](docs/explainers/what-is-managed-cache.md) · [external system architecture](docs/architecture.md) · [concepts and story](docs/concepts-and-story.md)
 - **Verify it:** [benchmark route](docs/benchmark-methodology.md) · [current benchmark authority](BENCHMARK-AUTHORITY.md) · [claims ledger](CLAIMS.md) · [reproduction packet](docs/repro-packet.md)
-- **Build it:** [contributing](CONTRIBUTING.md) · [security](SECURITY.md) · [documentation home by audience](docs/index.md)
+- **Build it:** [contributing](CONTRIBUTING.md) · [security](SECURITY.md) · [documentation home by audience](docs/index.md) · [front-page overflow](docs/README-legacy.md)
 
 Apache-2.0. Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
