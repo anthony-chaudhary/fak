@@ -5,7 +5,31 @@ description: "Wire Claude Code or the Anthropic API to fak serve, a kernel-adjud
 
 # fak + Claude Code Integration Guide
 
+**Reader:** a Claude Code or Anthropic SDK user putting the fak kernel in front of the
+Claude they already run.
+**Lifecycle:** current · **Generation:** the `fak guard` launch path and the Anthropic
+`/v1/messages` wire are release-independent; the per-seat limits below track the
+current build.
+**Authority:** [supported agent harnesses](../supported/agent-harnesses.md) ·
+[APIs, wires & MCP that fak supports](../supported/apis-and-protocols.md) ·
+[compatibility matrix](compatibility-matrix.md).
+**Proof:** `fak guard --probe -- claude -p "Reply with exactly the word: pong"` — one
+headless kernel-adjudicated turn on your logged-in subscription (needs `claude` on your
+`PATH`); the deeper four-check gateway-transit proof is
+[below](#prove-it-the-request-really-transited-the-gateway-over-your-subscription).
+
 This guide explains how to put **fak** in front of the Claude Code you already run: one kernel that makes long sessions cheaper (the provider prompt-cache discount survives, old turns are shed, repeated reads can be served locally) and can run a local model in-kernel with no key and no network. On the same seam, every tool call a Claude agent proposes is also evaluated before it executes — dangerous calls dropped, malformed calls repaired, policy violations refused — so the loop stays controlled at no extra cost.
+
+**Not your route?**
+
+| You are… | Go to |
+|---|---|
+| A Claude Code / Anthropic SDK user fronting your model with fak | **this page** |
+| Wiring fak **into** your agent as an MCP server (per-call verdicts, not a base-URL proxy) | [mcp.md](mcp.md) |
+| An OpenAI SDK / Chat Completions client user | [openai.md](openai.md) |
+| A Codex CLI / IDE-extension user | [openai-codex.md](openai-codex.md) |
+| An OpenCode user | [§ OpenCode](#opencode) on this page |
+| Reading the wire contract or kernel internals (contributor) | [APIs, wires & MCP](../supported/apis-and-protocols.md) and [ARCHITECTURE.md](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) |
 
 ## Put fak in front of Claude Code in 3 steps
 
@@ -114,12 +138,6 @@ key explicitly: `--api-key-env ANTHROPIC_API_KEY`.)
    while every tool call Claude proposes crosses the capability floor first.
 5. Tears the gateway down when Claude exits and prints what the kernel decided:
 
-A launcher is not first-class merely because its provider wire connects. Its exact
-host-tool dialect must be covered too: Claude Code's PascalCase tools, Codex's
-snake_case tools, OpenCode's lowercase tools, danger-bearing argument names, and each
-harness's stop/continue behavior after a denial. Keep new `fak guard` launcher claims tied
-to the [harness integration acceptance checklist](harness-acceptance-checklist.md).
-
 ```
 fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
   blocked: POLICY_BLOCK     x4
@@ -129,6 +147,12 @@ fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quara
 (`deferred` and `escalated` only appear when nonzero: a `deferred` is a non-blocking
 admit — typically an inbound tool result let through the result-side floor — and is a
 normal outcome, not an error.)
+
+A launcher is first-class only when its exact host-tool dialect is covered, not merely
+when its provider wire connects: Claude Code's PascalCase tools, Codex's snake_case
+tools, OpenCode's lowercase tools, danger-bearing argument names, and each harness's
+stop/continue behavior after a denial. New `fak guard` launcher claims are gated by the
+[harness integration acceptance checklist](harness-acceptance-checklist.md).
 
 > **Your Claude Pro/Max subscription is the default — no API key needed.** When the
 > upstream is Anthropic, `fak guard` uses your **subscription** unless you explicitly name
