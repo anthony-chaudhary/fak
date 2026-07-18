@@ -1,6 +1,9 @@
 package model
 
-import "errors"
+import (
+	"errors"
+	"io"
+)
 
 // mmap.go — the platform-neutral seam for memory-mapping a single-file safetensors
 // checkpoint. The per-platform mmapOpen (mmap_unix.go for darwin/linux/BSD via stdlib
@@ -24,3 +27,24 @@ type closerFunc func() error
 // Close runs the wrapped teardown closure (the per-platform munmap/unmap-and-close)
 // and returns its error.
 func (f closerFunc) Close() error { return f() }
+
+// MmapOpen maps path read-only (PROT_READ) and returns the mapped bytes plus a Closer
+// that munmaps the region and closes the file. It is the exported seam over the
+// per-platform mmapOpen so sibling weight loaders (internal/ggufload's SSD-offload
+// shard readers, #2726/#2722) can share the one mmap implementation instead of growing
+// their own per-platform build-tag pair. ok=false with a nil err means this
+// platform/file simply cannot be mapped (mmap_other.go stub, zero-size file) — the
+// caller should fall back to os.Open + ReadAt, exactly as openSafetensorsFile does. A
+// non-nil err is a real mapping failure (open/stat/mmap syscall error) worth surfacing.
+// The returned slice aliases OS-managed read-only memory: callers must only READ it and
+// must not retain it past the Closer.
+func MmapOpen(path string) (data []byte, closer io.Closer, ok bool, err error) {
+	data, closer, err = mmapOpen(path)
+	if err != nil {
+		if errors.Is(err, errMmapUnsupported) {
+			return nil, nil, false, nil
+		}
+		return nil, nil, false, err
+	}
+	return data, closer, true, nil
+}
