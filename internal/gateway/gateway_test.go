@@ -176,7 +176,7 @@ func TestRenderVerdict(t *testing.T) {
 		claim  string
 	}{
 		{"allow", abi.Verdict{Kind: abi.VerdictAllow, By: "x"}, nil, "ALLOW", "", "", ""},
-		{"deny-policy", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}, nil, "DENY", "POLICY_BLOCK", "TERMINAL", ""},
+		{"deny-policy", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}, nil, "DENY", "POLICY_BLOCK", "RETRYABLE", ""},
 		{"deny-misroute-retryable", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonMisroute}, nil, "DENY", "MISROUTE", "RETRYABLE", ""},
 		{"deny-ratelimited-wait", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited}, nil, "DENY", "RATE_LIMITED", "WAIT", ""},
 		{"deny-selfmodify-escalate", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonSelfModify, Payload: abi.WitnessPayload{Claim: "internal/abi/"}}, nil, "DENY", "SELF_MODIFY", "ESCALATE", "internal/abi/"},
@@ -271,7 +271,7 @@ func TestHTTPSyscallDenyIsValueNot5xx(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("a deny must be a 200 deny-as-value, got %d", code)
 	}
-	if resp.Verdict.Kind != "DENY" || resp.Verdict.Reason != "POLICY_BLOCK" || resp.Verdict.Disposition != "TERMINAL" {
+	if resp.Verdict.Kind != "DENY" || resp.Verdict.Reason != "POLICY_BLOCK" || resp.Verdict.Disposition != "RETRYABLE" {
 		t.Errorf("deny verdict = %+v", resp.Verdict)
 	}
 }
