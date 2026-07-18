@@ -125,6 +125,7 @@ they are not the same claim:
 | **Qwen2 / Qwen2.5** | `qwen2` (legacy projection-bias default) | Forward-pass proven | shares the Llama-shape forward; `config_test.go` `TestConfigDerivesQwenLegacyBias…`; oracle path in `internal/model` |
 | **Qwen3** (per-head qk-norm) | `qwen3` | Forward-pass proven | `TestOptionalQwen3OracleCoversQKNorm` |
 | **Qwen3-MoE** (hybrid dense + sparse layers) | `qwen3moe` | Forward-pass proven | `TestOptionalQwen3MoEOracleCoversHybridDenseSparseLayers` |
+| **Qwen3.5/3.6 hybrid** (Gated-DeltaNet linear + periodic full attention; incl. **Bonsai / Ternary-Bonsai-27B**) | `qwen35` — the Bonsai spellings `bonsai`, `ternary-bonsai`, `qwen3.6`, `qwen36` canonicalize onto it (`canonicalGGUFArch`, `internal/ggufload/gguf_config.go`) | Forward-pass proven (hybrid oracle, when exported) | `TestOptionalQwen35HybridOracleForwardMatchesHF`; recognition triplet in `internal/ggufload/gguf_bonsai_arch_test.go`; ChatML + thinking + tool-call conformance in `internal/agent/bonsai_conformance_test.go` |
 | **Gemma2 / Gemma3** (sandwich-norm, (1+w) gain, tanh-GELU, local/global attention) | `gemma2`, `gemma3` | Forward-pass proven (Gemma3 oracle) | `TestOptionalGemma3OracleCoversLocalGlobalAttention`; Gemma axes in `arch.go` + `config_test.go` |
 | **GLM-MoE-DSA** (GLM-5.2 lineage; DSA sparse attention + MoE) | `glm_moe_dsa` | Forward-pass proven (cacheless + session-cache oracle); DSA forward is research-grade | `TestOptionalGLMMoeDsaOracleForwardMatchesHFCacheless`, `…SessionCacheMatchesHF` |
 | **GPT-OSS** (MoE, yarn RoPE, sliding-window layers, attention sinks) | `gpt_oss` | Config + architecture-axis | `config_test.go` `TestConfigDerivesArchitectureAxesFromMetadata` (gpt-oss case); attention-sink + softcap axes in `arch.go`. No committed HF forward oracle for this family |
@@ -153,11 +154,60 @@ narrower-precision paths each have their own status.
 | **Resident Q4_K** (raw q4_k blocks stay resident, decode streams ~1.8× fewer bytes; the Qwen3.6-27B route) | ~0.5 | Available via `FAK_Q4K` (the resident-Q4_K decode path) | [model-engine-env.md](../model-engine-env.md) (`FAK_Q4K`) |
 | **AWQ 4-bit** (activation-aware, symmetric, zero-point 8; safetensors only) | ~0.5625 | Implemented (`model.LoadAWQ`); CUDA kernel near-Q8 throughput, CPU scalar reference; oracle threshold cosine ≥0.95 | [awq-quantization.md](../explainers/awq-quantization.md) |
 | **GPTQ 4/8-bit** (AutoGPTQ/GPTQModel `qweight`/`qzeros`/`scales`, optional `g_idx`) | ~0.5 / ~1.0 plus scales | Implemented for CPU-resident in-kernel sessions (`model.LoadGPTQ`, opt-in `Session.GPTQ`); loader supports single-file and sharded safetensors and routes Llama/Mistral-shaped matmul weights through resident GPTQ GEMV. No native packed GPTQ CUDA throughput claim is made here. | `internal/model/gptq.go`; `go test ./internal/model -run TestGPTQ` |
+| **Q2_0 ternary GGUF** (g128: {-1,0,+1} weights, one f16 scale per 128 — the Ternary-Bonsai-27B quant) | ~0.27 (34-byte g128 blocks, kept packed-resident) | Implemented for CPU-resident sessions: `Q2_0` tensors load verbatim (no load-time dequant) and the forward GEMV runs on the packed form, bit-exact vs the independent dequant reference (`TestQ2ResidentMatchesDequant`, max\|Δ\|=0). CUDA `k_q2_0_gemm` HAL kernel and a Metal GEMV with in-shader 2-bit unpack landed; Metal parity is CI-witnessed on the Apple-Silicon runner (manual `metal-q2-parity` workflow). No end-to-end 27B serve witness yet — see the Bonsai note below | `internal/ggufload/gguf_q2_0_test.go`; `internal/model/quant_q2_resident_test.go`; `internal/metalgemm/q2_0_test.go`; `.github/workflows/metal-q2-parity.yml` |
 
 Hardware coverage for these paths (Metal, Vulkan, CUDA Ada and Ampere, the CPU SIMD
 tiers) is in the [Hardware matrix](../HARDWARE-MATRIX.md). The `FAK_*` knobs that pick a
 load format, residency budget, and SIMD tier are in
 [model-engine-env.md](../model-engine-env.md).
+
+### Bonsai (prism-ml Ternary-Bonsai-27B) — support scope
+
+[prism-ml/Ternary-Bonsai-27B](https://huggingface.co/prism-ml/Ternary-Bonsai-27B-gguf)
+is Qwen3.6-27B with the architecture unchanged — only the weights are re-quantized to
+ternary `Q2_0` (epic
+[#4867](https://github.com/anthony-chaudhary/fak/issues/4867)). Because the backbone is
+the qwen35 hybrid family fak already runs, its support cell is the **Qwen3.5/3.6 hybrid**
+row above: `canonicalGGUFArch` (`internal/ggufload/gguf_config.go`) normalizes the
+`bonsai` / `ternary-bonsai` / `qwen3.6` / `qwen36` arch spellings onto `qwen35`, so the
+hybrid Gated-DeltaNet schedule derives and the recognized-hybrid forward path fires. In
+the generated [model × backend coverage matrix](../coverage-matrix.md), Bonsai therefore
+rides the Qwen family cells rather than adding a column — a distinct Bonsai family would
+require a roster change in `internal/covmatrix`, which deliberately mirrors the kernel's
+resolver families.
+
+**Witnessed in-tree (what works today):**
+
+- Arch recognition + hybrid config derivation — `internal/ggufload/gguf_bonsai_arch_test.go`
+  (normalization, config derivation keyed on the file's own metadata prefix,
+  spelling-invariance, recognized-GDN forward classification).
+- Ternary `Q2_0` load → packed-resident store → CPU forward GEMV — golden-block reference
+  `TestQ2_0GoldenReferenceBlock` (`internal/ggufload`) and resident-path parity
+  `TestQ2ResidentMatchesDequant` (`internal/model`).
+- Chat template, `<think>` thinking, and tool-call lift —
+  `internal/agent/bonsai_conformance_test.go`.
+- GPU ternary kernels — CUDA `k_q2_0_gemm` (HAL `Q2_0` dtype) and a Metal GEMV with
+  in-shader 2-bit unpack; Metal parity is witnessed on the Apple-Silicon CI runner
+  (`.github/workflows/metal-q2-parity.yml`, manual dispatch so it never reds a PR).
+- Speculative decode — the draft→verify→rollback loop is wired engine-agnostically and
+  token-identical to sequential greedy
+  (`go test ./internal/polymodel -run SpecDecodeLossless`).
+
+**Explicitly not yet (deferred, tracked on the epic):**
+
+- Vision tower (VLM) end-to-end and 4-bit HQQ vision-tower weights
+  ([#4875](https://github.com/anthony-chaudhary/fak/issues/4875),
+  [#4876](https://github.com/anthony-chaudhary/fak/issues/4876)).
+- The 1-bit `Q1_0` (g128) sibling build
+  ([#4871](https://github.com/anthony-chaudhary/fak/issues/4871)).
+- 262K yarn RoPE context + 4-bit KV-cache quant
+  ([#4874](https://github.com/anthony-chaudhary/fak/issues/4874)).
+- Head-to-head numeric parity + tok/s vs llama.cpp on the ternary GGUF
+  ([#4880](https://github.com/anthony-chaudhary/fak/issues/4880)).
+- **An end-to-end `fak serve` greedy-decode smoke on the real 27B `Q2_0` checkpoint.**
+  The witnesses above are block-level and synthetic-fixture; the real-checkpoint smoke is
+  weight-gated (the 27B GGUF is not in CI) and no transcript is committed yet. Until one
+  lands, treat "fak serves Bonsai-27B end-to-end" as asserted, not proven.
 
 ---
 
