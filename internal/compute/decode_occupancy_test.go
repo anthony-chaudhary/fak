@@ -189,3 +189,64 @@ func TestOccupancyDeviceSMsDefault(t *testing.T) {
 		t.Errorf("deviceSMs=0 fallback = %d, want %d", def.DeviceSMs, A100SMs)
 	}
 }
+
+// TestDecodeOccupancyWitnessReport is the PRINTED witness `make cuda-occupancy` runs (#4188): the
+// per-decode-kernel occupancy + HBM-traffic table plus the eight Cluster-G file/no-file verdicts,
+// emitted via t.Logf so `go test -v` prints it on any host. Every number here is the exact analytic
+// arm (grid-block vs SM counts, operand-byte counts — no timer, no device); the DEVICE corroboration
+// (ncu achieved-occupancy / DRAM-%) is the separate GPU-only harness tools/dgx_decode_occupancy_ncu.sh,
+// and the report's last line says it was NOT run rather than claiming it — the SKIP-is-not-PASS
+// discipline with nothing skipped, because the analytic arm never skips.
+func TestDecodeOccupancyWitnessReport(t *testing.T) {
+	a, ok := LookupNVArch(SM80)
+	if !ok {
+		t.Fatal("sm_80 must be a known arch")
+	}
+	const flashRegs = 40 // placeholder compiler count; ncu launch__registers_per_thread replaces it
+	g := smolLM2_135M
+
+	t.Logf("decode occupancy witness — arch=%s deviceSMs=%d geometry=SmolLM2-135M (nH=%d nKV=%d hd=%d dff=%d vocab=%d kvlen=%d)",
+		a.Label, A100SMs, g.NHeads, g.NKVHeads, g.HeadDim, g.DFF, g.Vocab, g.KVLen)
+	launches := []DecodeLaunch{
+		FlashDecodeLaunch(g, flashRegs),
+		Q8GemmDecodeLaunch(g.DFF, flashRegs),    // FFN projection width
+		AWQGemvDecodeLaunch(g.Vocab, flashRegs), // LM head, the largest decode GEMV
+	}
+	for _, l := range launches {
+		occ := a.Occupancy(l, A100SMs)
+		if occ.GridBlocks <= 0 || occ.BlocksPerSM <= 0 {
+			t.Fatalf("%s: degenerate occupancy row %+v", l.Kernel, occ)
+		}
+		t.Logf("kernel=%-17s grid=%5d blocks/SM=%2d limiter=%-8s theoreticalOcc=%.2f deviceOcc=%.4f idleSMs=%3d waves=%d waveQuantWaste=%.3f",
+			occ.Kernel, occ.GridBlocks, occ.BlocksPerSM, occ.BindingLimiter,
+			occ.TheoreticalOcc, occ.DeviceOcc, occ.IdleSMs, occ.Waves, occ.WaveQuantWaste)
+	}
+
+	tr := DecodeHBMTraffic(g)
+	t.Logf("traffic: streamed=%dB reuseOptimal=%dB kvReuseWaste=%dB kvStreamFrac=%.4f intensity=%.3f FLOP/B memoryBound=%v",
+		tr.Streamed, tr.ReuseOptimal, tr.KVReuseWaste, tr.KVStreamFrac, tr.Intensity, tr.MemoryBound())
+
+	report := DecodeGapReport(a, A100SMs, g, flashRegs)
+	if len(report) != 8 {
+		t.Fatalf("gap report has %d rows, want 8 (the Cluster-G shortlist)", len(report))
+	}
+	filed := 0
+	for _, gap := range report {
+		if gap.Candidate == "" || gap.Seam == "" || gap.Rationale == "" {
+			t.Errorf("incomplete verdict row: %+v", gap)
+		}
+		verdict := "defer(not-measurable-here)"
+		switch {
+		case gap.ShouldFile():
+			verdict = "FILE"
+			filed++
+		case gap.Measurable:
+			verdict = "no-gap(do-not-file)"
+		}
+		t.Logf("verdict=%-26s candidate=%-42s keysOn=%-32s seam=%s", verdict, gap.Candidate, gap.KeysOn, gap.Seam)
+	}
+	if filed == 0 {
+		t.Error("no candidate files — an all-no-gap report would gate the whole shortlist; check DecodeGapReport")
+	}
+	t.Logf("device corroboration: NOT run here — exact analytic arm only; GPU harness = tools/dgx_decode_occupancy_ncu.sh; baseline = docs/notes/2026-07-11-decode-occupancy-witness-measurement.md")
+}

@@ -128,6 +128,16 @@ Every candidate maps to a filed home so nothing is lost. `[V]` = witness verdict
 
 Object-level kernel knowledge from a *wiki*, not from fak-side profiling. Each witness itself said "measure the fak-side occupancy/traffic gap first," so filing kernel tickets here would be speculative. **File-after-measurement**: land a decode-shaped occupancy/traffic witness in `internal/compute` first, then promote the ones that show a real gap.
 
+**The gate landed (#4188)** — the witness is `internal/compute/decode_occupancy.go`
+(`DecodeGapReport`, commit `84a8034ac`), printed by `make cuda-occupancy`, with the A100
+Nsight-Compute corroboration harness `tools/dgx_decode_occupancy_ncu.sh`. Per-candidate verdicts
+and the committed baseline live in
+[`2026-07-11-decode-occupancy-witness-measurement.md`](2026-07-11-decode-occupancy-witness-measurement.md):
+4 FILE (promoted as #4289–#4292 under epic #3946), 1 measured-no-gap
+(tmem-accumulator-migration — grid-bound, not per-SM-bound), 3 defer (not A100-measurable:
+nvfp4, PDL, CLC try-cancel). The device ncu percentages remain pending (bridge-gated), recorded
+as not-yet rather than fabricated.
+
 | [V] | candidate | fak seam |
 |---|---|---|
 | ABSENT | tmem-accumulator-migration | `internal/compute/cuda_kernels.cu:719` |

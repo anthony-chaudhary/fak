@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
@@ -572,6 +572,18 @@ cuda-test:
 # tools/cuda_acceptance.sh. GPU node only; a no-GPU host exits non-zero (never a false green).
 cuda-accept:
 	bash tools/cuda_acceptance.sh
+
+# cuda-occupancy (#4188): print the decode-shaped per-kernel occupancy + HBM-traffic witness
+# (internal/compute/decode_occupancy.go) — the file-after-measurement gate for the KernelWiki
+# Blackwell decode shortlist (Cluster G, docs/notes/2026-07-10-kernelwiki-study.md). The verdict
+# arm is EXACT (grid-block vs SM counts, operand-byte counts; no timer), so it prints real numbers
+# on ANY host — nothing skips, so there is no skip-as-pass to launder. The DEVICE corroboration
+# (ncu achieved-occupancy / DRAM-%) is the separate GPU-node harness
+# tools/dgx_decode_occupancy_ncu.sh, and the report's last line states it was NOT run here rather
+# than claiming it (same honesty discipline as cuda-accept). Baseline + per-candidate verdicts:
+# docs/notes/2026-07-11-decode-occupancy-witness-measurement.md.
+cuda-occupancy:
+	go test ./internal/compute -run TestDecodeOccupancyWitnessReport -count=1 -v
 
 # negframe-ratchet (#3545): the diff-scoped negation-framing gate — the CI twin of the
 # `fak score negframe` scorecard. `--since $(BASE)` scans the agent-steer prose corpus
