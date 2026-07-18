@@ -17,6 +17,27 @@ func TestRelaunchCacheAffinityStableAcrossRelaunches(t *testing.T) {
 	}
 }
 
+func TestNewRelaunchAffinityRowDerivesKeyAndLeavesTSForShell(t *testing.T) {
+	const uuid = "4b66d1ba-b3dc-4f74-a8f5-d78ef67933c4"
+	row := NewRelaunchAffinityRow("  " + uuid + "  ")
+	if row.Session != uuid {
+		t.Fatalf("row.Session = %q, want trimmed %q", row.Session, uuid)
+	}
+	if row.AffinityKey == "" || row.AffinityKey != RelaunchCacheAffinityKey(uuid) {
+		t.Fatalf("row.AffinityKey = %q, want the derived key %q", row.AffinityKey, RelaunchCacheAffinityKey(uuid))
+	}
+	if row.TS != "" {
+		t.Fatalf("row.TS = %q, want \"\" (the shell stamps write time)", row.TS)
+	}
+	blank := NewRelaunchAffinityRow("   ")
+	if blank.Session != "" || blank.AffinityKey != "" {
+		t.Fatalf("blank-session row = %+v, want empty session and key (a row the fold skips)", blank)
+	}
+	if got := FoldRelaunchAffinity([]RelaunchAffinityRow{blank}); len(got) != 0 {
+		t.Fatalf("fold of a blank row = %#v, want empty", got)
+	}
+}
+
 func TestRelaunchCacheAffinityFoldLatestValid(t *testing.T) {
 	const session = "session-a"
 	derived := RelaunchCacheAffinityKey(session)

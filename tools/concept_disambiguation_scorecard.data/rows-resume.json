@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "fakresumecacheaffinity",
+      "canonical": "FAK_RESUME_CACHE_AFFINITY",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Env-var name carrying the transcript-UUID-derived relaunch cache-affinity route onto a resumed claude --resume child, so the warm provider cache route survives the OS relaunch (#4140/#5189).",
+      "distinction": "The relaunch-carry env carrier for the resume watchdog's per-transcript cache route, distinct from the Anthropic managed-cache TTL upgrade (c4681-cachettlupgrade) and from RelaunchCacheAffinityEnv which is the Go const naming this same variable.",
+      "distinct_from": [
+        "c4681-cachettlupgrade"
+      ],
+      "aliases": [],
+      "grounding": "FAK_RESUME_CACHE_AFFINITY",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

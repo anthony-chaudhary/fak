@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "relaunchcacheaffinityenv",
+      "canonical": "RelaunchCacheAffinityEnv",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The resume-package Go const holding the FAK_RESUME_CACHE_AFFINITY env-var name; the watchdog relaunch threads RelaunchCacheAffinityKey(session) onto the child env under this key (#5189).",
+      "distinction": "The Go const (name binding), distinct from FAK_RESUME_CACHE_AFFINITY the literal string it holds, and from the Anthropic managed-cache TTL upgrade.",
+      "distinct_from": [
+        "c4681-cachettlupgrade"
+      ],
+      "aliases": [],
+      "grounding": "RelaunchCacheAffinityEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -8,6 +8,15 @@ import (
 
 const relaunchCacheAffinityDomain = "fak-resume-cache-affinity\x00"
 
+// RelaunchCacheAffinityEnv is the environment variable the watchdog sets on every
+// relaunched `claude --resume` child to carry the transcript's derived cache route
+// across the OS relaunch (#4140). An env var (not an argv flag) because neither the
+// claude CLI nor the `fak guard` front takes a cache-route flag, and the child env is
+// already the watchdog's carrier for per-child launch state (CLAUDE_CONFIG_DIR). The
+// value is RelaunchCacheAffinityKey(session) — 32 hex chars, never a credential — so
+// it survives the launch broker's secret-floor env sanitizer by construction.
+const RelaunchCacheAffinityEnv = "FAK_RESUME_CACHE_AFFINITY"
+
 // RelaunchCacheAffinityKey derives the stable cache route shared by every OS-level
 // relaunch of one Claude transcript. A blank UUID cannot name a transcript and
 // therefore yields no route.
@@ -34,6 +43,15 @@ type RelaunchAffinityRow struct {
 	TS          string `json:"ts,omitempty"`
 	Session     string `json:"session"`
 	AffinityKey string `json:"affinity_key"`
+}
+
+// NewRelaunchAffinityRow derives the append-only ledger row for one OS relaunch of a
+// transcript. Pure by construction, mirroring NewRelaunchResetRow: there is no clock in
+// the core, so TS (audit-only, ignored by the fold) is left "" for the shell to stamp at
+// write time. A blank session yields a row the fold skips (blank key), never a panic.
+func NewRelaunchAffinityRow(session string) RelaunchAffinityRow {
+	uuid := strings.TrimSpace(session)
+	return RelaunchAffinityRow{Session: uuid, AffinityKey: RelaunchCacheAffinityKey(uuid)}
 }
 
 // FoldRelaunchAffinity returns the latest valid affinity key per transcript UUID.

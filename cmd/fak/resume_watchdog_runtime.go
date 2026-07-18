@@ -332,7 +332,21 @@ var rwSpawnResumeLaunch = rwSpawnResume
 
 func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, resumeCfg string, postureArgs []string, carry ...resume.DriveCarryRow) launchBrokerAttempt {
 	return newLaunchBrokerAttempt("resume_watchdog", "claude", rwResumeArgv(fakExe, claudeExe, p.Session, postureArgs, carry...),
-		envMap(resume.WatchdogChildEnv(os.Environ(), resumeCfg)), rwResumeCWD(p))
+		rwResumeChildEnv(p.Session, resumeCfg), rwResumeCWD(p))
+}
+
+// rwResumeChildEnv builds the resumed child's env map: the stripped-and-repinned
+// WatchdogChildEnv base plus the transcript's derived cache-affinity route (#4140) —
+// RelaunchCacheAffinityEnv=RelaunchCacheAffinityKey(session) — so the warm provider
+// cache route survives the OS relaunch instead of every relaunch starting cold. The
+// key derives from the transcript UUID alone, so every relaunch of one transcript
+// carries the SAME route. A blank session derives no key and sets nothing.
+func rwResumeChildEnv(session, resumeCfg string) map[string]string {
+	env := envMap(resume.WatchdogChildEnv(os.Environ(), resumeCfg))
+	if key := resume.RelaunchCacheAffinityKey(session); key != "" {
+		env[resume.RelaunchCacheAffinityEnv] = key
+	}
+	return env
 }
 
 var rwResumeAnchor = func(session string) resume.ResumeAnchor {
@@ -416,7 +430,9 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	// identity, and pins CLAUDE_CONFIG_DIR to the target seat (resume.WatchdogChildEnv —
 	// the 2026-07-01 whole-wave-crash fix: a resumed child inheriting a guarded parent's
 	// ANTHROPIC_BASE_URL routes through the parent's loopback proxy and dies with it).
-	cmd.Env = resume.WatchdogChildEnv(os.Environ(), resumeCfg)
+	// Same base + cache-affinity carry as the broker attempt (#4140), so even the
+	// defensive empty-grant fallback keeps the transcript's warm route.
+	cmd.Env = envSliceFromMap(rwResumeChildEnv(p.Session, resumeCfg))
 	if len(grant.Env) > 0 {
 		cmd.Env = envSliceFromMap(grant.Env)
 	}
@@ -534,6 +550,32 @@ func rwLoadRelaunchResets(regDir string) map[string]resume.RelaunchResetRow {
 		return nil
 	}
 	return resets
+}
+
+// rwRelaunchAffinityLedger is the durable, transcript-UUID-keyed store of relaunch
+// cache-affinity rows (#4140) — the cache-route sibling of the relaunch-reset store
+// above. It lives in the SAME regDir the tick resolves, so the launch-site writer (the
+// "launched" block in runResumeWatchdog) and this reader always agree on the file. It is
+// append-only and folded last-write-per-session, exactly like the stores it mirrors.
+func rwRelaunchAffinityLedger(regDir string) string {
+	return filepath.Join(regDir, "resume_relaunch_affinity.jsonl")
+}
+
+// rwLoadRelaunchAffinity reads the append-only relaunch cache-affinity store and folds
+// it — through the pure leaf resume.FoldRelaunchAffinity — into the latest cache route
+// per session id (the Claude transcript UUID the plan row carries). A missing /
+// unreadable / empty store yields a nil map (fail-open), mirroring rwLoadRelaunchResets:
+// affinity is a warmth bias, and its absence must never strand a resume.
+func rwLoadRelaunchAffinity(regDir string) map[string]string {
+	raw, err := os.ReadFile(rwRelaunchAffinityLedger(regDir))
+	if err != nil {
+		return nil
+	}
+	routes := resume.FoldRelaunchAffinity(jsonlledger.Parse[resume.RelaunchAffinityRow](string(raw), nil))
+	if len(routes) == 0 {
+		return nil
+	}
+	return routes
 }
 
 // rwLoadIdentity reads the append-only identity store and folds it — through the pure leaf
