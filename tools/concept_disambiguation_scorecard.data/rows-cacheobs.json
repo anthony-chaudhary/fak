@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "localcachehit",
+      "canonical": "local_cache_hit",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "A served prompt token reused from a KV prefix already resident on THIS box (an in-session prefix or a shared local KV store); one of the three cacheobs provenance-axis buckets (#3896, vLLM's by_source label).",
+      "distinction": "A LOCAL-residency reuse - NOT a cross-fabric external_kv_transfer (the disaggregated tier) and NOT a local_compute re-prefill; the near-free reuse a single box already earns.",
+      "distinct_from": [
+        "x-cache-cachehit"
+      ],
+      "aliases": [],
+      "grounding": "local_cache_hit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

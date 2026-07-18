@@ -100,9 +100,18 @@ type Observer struct {
 	// preempted + cold == promptTokens - reusedTokens by construction.
 	preemptedReuseLostTokens uint64
 	coldMissTokens           uint64
-	frozen                   uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
-	partial                  uint64 // turns between ColdCeil and FrozenFloor
-	cold                     uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
+	// srcLocalCompute / srcLocalHit / srcExternalTransfer decompose observed prompt tokens
+	// along the ORTHOGONAL provenance axis (#3896, vLLM's by_source counter): WHERE a served
+	// token's value came from — recomputed locally, served from a prefix already RESIDENT on
+	// this box, or pulled across the fabric from the external / DISAGGREGATED KV tier. Fed by
+	// ObserveBySource (bysource.go), independent of the depth-axis counters above; the three
+	// always sum to the prompt tokens booked through that tap (the parts==total invariant).
+	srcLocalCompute     uint64
+	srcLocalHit         uint64
+	srcExternalTransfer uint64
+	frozen              uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
+	partial             uint64 // turns between ColdCeil and FrozenFloor
+	cold                uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
 	// reuseHist[i] counts turns whose ratio fell in (ReuseRatioBuckets[i-1],
 	// ReuseRatioBuckets[i]] — per-bucket (non-cumulative) so each increment touches
 	// one slot; a renderer accumulates left-to-right to emit `le` lines.
