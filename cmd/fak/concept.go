@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
-	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -206,38 +205,4 @@ func runGitOutput(args ...string) (string, error) {
 	windowgate.ConfigureBackgroundCommand(cmd)
 	b, e := cmd.Output()
 	return string(b), e
-}
-
-func runConceptAdmission(stdout, stderr io.Writer, root string, argv []string) int {
-	fs := flag.NewFlagSet("concept admission", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	base := fs.String("base", "", "committed base revision")
-	tip := fs.String("tip", "HEAD", "committed candidate revision")
-	asJSON := fs.Bool("json", false, "emit JSON")
-	if !parseFlags(fs, argv) || *base == "" {
-		return 2
-	}
-	d, err := hooks.ReadRangeDiff(root, *base, *tip)
-	if err != nil {
-		fmt.Fprintf(stderr, "concept admission: %v\n", err)
-		return 2
-	}
-	findings, err := hooks.CheckConceptAdmission(d)
-	if err != nil {
-		fmt.Fprintf(stderr, "concept admission: %v\n", err)
-		return 2
-	}
-	if *asJSON {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak.concept_admission.v1", "ok": len(findings) == 0, "base": *base, "tip": *tip, "findings": findings})
-	} else if len(findings) == 0 {
-		fmt.Fprintln(stdout, "concept admission: OK")
-	} else {
-		for _, f := range findings {
-			fmt.Fprintf(stderr, "CONCEPT_ADMISSION %s:%d: %s\n", f.File, f.Line, f.Detail)
-		}
-	}
-	if len(findings) > 0 {
-		return 1
-	}
-	return 0
 }

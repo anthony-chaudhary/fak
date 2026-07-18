@@ -571,24 +571,6 @@ type normWeights struct {
 	postBias []float32
 }
 
-// composeBlock applies the residual/norm composition for one decoder block to x in
-// place, dispatching on the topology. attnNorm/mlpNorm carry each sub-layer's
-// pre/post norm weights; PreNorm reads only the pre weights, while Gemma2/3-style
-// SandwichNorm can supply distinct post-attention / post-feedforward weights. attn
-// and mlp are the two sub-layer bodies (each consuming a normalized input). For the
-// sequential topologies the MLP reads the attention-updated residual; for
-// ParallelResidual both read one shared norm of the original input.
-//
-// PreNorm lowers to the exact current instruction stream:
-//
-//	xn  := rmsnorm(x, attnNorm.pre); o := attn(xn); x += o
-//	xn2 := rmsnorm(x, mlpNorm.pre);  d := mlp(xn2); x += d
-//
-// so a Config left at the zero value is bit-identical to the pre-axis block.
-func composeBlock(t BlockTopology, x []float32, attnNorm, mlpNorm normWeights, eps float32, cfg Config, attn, mlp sublayer) {
-	composeBlockAtLayer(-1, t, x, attnNorm, mlpNorm, eps, cfg, attn, mlp)
-}
-
 // composeBlockAtLayer forms one complete transformer block residual and then invokes
 // the optional activation-space hook. Keeping the hook after the complete block makes
 // its contract identical for sequential and parallel residual topologies.

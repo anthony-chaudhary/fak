@@ -182,15 +182,6 @@ func glmMoeDsaMTPOrVisionTensor(name string) bool {
 	return isGLMMoeDsaMTPTensor(name) || isGLMMoeDsaVisionTensor(name)
 }
 
-// glmMoeDsaMTPOrVisionTensorForType is glmMoeDsaMTPOrVisionTensor gated to the MLA+MoE family
-// (glm_moe_dsa OR deepseek2), so the model-type check stays in one place at the callsites that
-// already know the model type. DeepSeek-V3 ships the same "blk.<L>.nextn.*" MTP head (llama.cpp's
-// nextn tensors) with no canonical HF slot, so it must be skipped for a real DeepSeek load exactly
-// as for GLM-5.2 — the underlying .nextn./vision predicate is arch-agnostic.
-func glmMoeDsaMTPOrVisionTensorForType(modelType, name string) bool {
-	return archUsesMLAMoELayout(modelType) && glmMoeDsaMTPOrVisionTensor(name)
-}
-
 // glmMoeDsaSkipGGUFTensor reports whether a glm_moe_dsa GGUF tensor should be DROPPED from load
 // byte-accounting. Both non-causal-LM families it recognizes — the vision tower and the MTP
 // ("nextn") head — are dropped by DEFAULT (llama.cpp likewise ignores the nextn head, "model has

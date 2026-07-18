@@ -169,13 +169,3 @@ func runGuardPolicyExplain(stdout, stderr io.Writer, allowLayers []guardAllowOve
 	}
 	return 0
 }
-
-// cmdGuardPolicy dispatches the `fak guard policy <subverb>` family. Only `explain`
-// exists today (`policy diff` is sibling A3, #5170); anything else is a usage error.
-func cmdGuardPolicy(argv []string) {
-	if len(argv) == 1 && argv[0] == "explain" {
-		os.Exit(runGuardPolicyExplain(os.Stdout, os.Stderr, guardAllowOverlayPaths(), guardDenyOverlayPath()))
-	}
-	fmt.Fprintln(os.Stderr, "usage: fak guard policy explain")
-	os.Exit(2)
-}

@@ -620,10 +620,6 @@ func dispatchLastLine(path string) string {
 	return ""
 }
 
-func dispatchPreflightHost(_ string, _ io.Writer) dispatchtick.HostCheck {
-	return dispatchPreflightHostFromProcesses(dispatchProbeProcesses())
-}
-
 func dispatchPreflightHostFromProcesses(processes dispatchtick.ProcGuardInput) dispatchtick.HostCheck {
 	res := dispatchtick.EvaluateProcGuard(processes)
 	return dispatchtick.HostCheck{

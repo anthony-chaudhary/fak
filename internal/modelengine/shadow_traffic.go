@@ -352,25 +352,6 @@ func shadowJudge(ref, cand []string, prov shadowProvenance) shadowVerdict {
 	return shadowVerdict{Pass: true, Detail: fmt.Sprintf("candidate reproduced the reference: %d tokens identical", len(ref))}
 }
 
-// shadowFirstDiff returns the first index at which two token streams differ, the
-// min length if one is a prefix of the other, or -1 if identical. It lets the
-// witness assert the oracle's localization without hard-coding an index.
-func shadowFirstDiff(a, b []string) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
-		if a[i] != b[i] {
-			return i
-		}
-	}
-	if len(a) != len(b) {
-		return n
-	}
-	return -1
-}
-
 // shadowResult is the outcome of one shadow evaluation: the response the USER
 // receives (from the reference engine, always), the regression verdict for the
 // candidate, and the scrubbed request the candidate actually saw.

@@ -174,19 +174,6 @@ func fetchGuardPreCompactSignalsPreferred(ctx context.Context, metricsURL string
 	return guardPreCompactSignals{posture: posture, relayArmed: relayArmed, relayPresent: relayPresent}, "http", nil
 }
 
-// surfaceGuardPreCompactRelayShadow routes the relay would-rotate signal (#1869)
-// onto the PreCompact shadow seam. When the gateway scrape carries the relay
-// gauge, the hook logs the advisory RELAY_ARMED / disarmed state on the SAME
-// stderr line family the compaction posture already uses, so an operator reads
-// both in one place. It is observation only — the caller has already decided the
-// exit code and this never changes it. When the gauge is absent (an older gateway,
-// or no relay driver on the trace) it emits nothing, keeping the shadow log
-// byte-identical for non-relay sessions.
-func surfaceGuardPreCompactRelayShadow(stderr io.Writer, metrics string) {
-	armed, present := parseGuardPreCompactRelayArmed(metrics)
-	surfaceGuardPreCompactRelayShadowSignal(stderr, armed, present)
-}
-
 func surfaceGuardPreCompactRelayShadowSignal(stderr io.Writer, armed, present bool) {
 	if !present {
 		return

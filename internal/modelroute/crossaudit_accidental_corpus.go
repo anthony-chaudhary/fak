@@ -131,29 +131,6 @@ func runAccidentalWitness(f AccidentalCorpusFixture) (bool, error) {
 	}
 }
 
-func accidentalWitnessSurface(b IssueAuditBundle) string {
-	var out strings.Builder
-	for _, blob := range b.Blobs {
-		out.WriteByte('\n')
-		out.WriteString(blob.Content)
-	}
-	for _, commit := range b.Closure.Commits {
-		for _, path := range commit.ChangedPaths {
-			out.WriteByte('\n')
-			out.WriteString(path)
-		}
-	}
-	for _, refs := range [][]EvidenceRef{b.Evidence.Tests, b.Evidence.CI, b.Evidence.DOS, b.Evidence.Artifacts, b.Evidence.Other} {
-		for _, ref := range refs {
-			out.WriteByte('\n')
-			out.WriteString(ref.Kind)
-			out.WriteByte(':')
-			out.WriteString(ref.Ref)
-		}
-	}
-	return out.String()
-}
-
 // SelfCheckAccidentalCorpus proves pair completeness and deterministic labels.
 // A flipped label changes Expected but not the evidence, so this check fails.
 func SelfCheckAccidentalCorpus(fixtures []AccidentalCorpusFixture) error {

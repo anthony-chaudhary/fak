@@ -24,7 +24,6 @@ package negframe
 // the same discipline the negation lexicon keeps with its "un-" allowlist (negframe.go).
 
 import (
-	"sort"
 	"strings"
 )
 
@@ -337,14 +336,4 @@ func complementOf(d Domain, x string) []string {
 // message stays readable.
 func quoteTerm(s string) string {
 	return "\"" + strings.ReplaceAll(s, "\"", "'") + "\""
-}
-
-// sortedDomainNames returns the registry's domain names sorted, for stable help/list output.
-func sortedDomainNames() []string {
-	names := make([]string, 0, len(complementRegistry))
-	for _, d := range complementRegistry {
-		names = append(names, d.Name)
-	}
-	sort.Strings(names)
-	return names
 }

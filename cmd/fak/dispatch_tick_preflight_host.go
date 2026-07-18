@@ -191,38 +191,6 @@ func dispatchFreeRAM() *int {
 	return &mb
 }
 
-func dispatchRAMAndThreads() (*int, *int) {
-	if runtime.GOOS == "windows" {
-		return dispatchRAMAndThreadsWindows()
-	}
-	return dispatchRAMAndThreadsPOSIX()
-}
-
-func dispatchRAMAndThreadsWindows() (*int, *int) {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
-		"$os = Get-CimInstance Win32_OperatingSystem; "+
-			"$t = (Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum; "+
-			"[pscustomobject]@{ free_kb = [int64]$os.FreePhysicalMemory; threads = [int]$t } | ConvertTo-Json -Compress")
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, nil
-	}
-	doc, err := lastJSONObject(out)
-	if err != nil {
-		return nil, nil
-	}
-	freeKB := intPtrFromAny(doc["free_kb"])
-	threads := intPtrFromAny(doc["threads"])
-	if freeKB != nil {
-		mb := *freeKB / 1024
-		freeKB = &mb
-	}
-	return freeKB, threads
-}
-
 func dispatchRAMAndThreadsPOSIX() (*int, *int) {
 	var freeRAM *int
 	if b, err := os.ReadFile("/proc/meminfo"); err == nil {

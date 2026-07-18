@@ -146,16 +146,6 @@ func resetIsFuture(reset string, now time.Time) *bool {
 	return &r
 }
 
-// throttleIsActive is a thin view over the cap-disambiguation core (capstate.go): a carried
-// throttle is live when DisambiguateCap says so. With the zero CapObservation it reproduces
-// fleet_accounts.throttle_is_active exactly — a WEEKLY cap that is not provably past keeps
-// the throttle active on its own (a present weekly whose reset is future, or unparseable,
-// counts as active; only a weekly proven past falls through to the daily-reset check, whose
-// unknown format also fails closed to active).
-func throttleIsActive(info map[string]any) bool {
-	return DisambiguateCap(info, CapObservation{}, time.Now().UTC(), DefaultCapPolicy()).Active
-}
-
 // weeklyThrottleIsActive is the view for the weekly leg's independent liveness (the rung
 // that holds a seat closed through a fresh OK probe). Mirrors
 // fleet_accounts._weekly_throttle_is_active: no weekly text means no weekly cap, a weekly

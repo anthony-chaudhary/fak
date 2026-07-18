@@ -128,11 +128,6 @@ func auditReceiptSoundRows(err error) int {
 	return 0
 }
 
-// auditVerifyVerdict retains the command helper used by older callers.
-func auditVerifyVerdict(path, rowKind string, n int, err error) {
-	os.Exit(renderAuditVerifyVerdict(os.Stdout, os.Stderr, path, rowKind, n, err))
-}
-
 func renderAuditVerifyVerdict(stdout, stderr io.Writer, path, rowKind string, n int, err error) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
@@ -167,23 +162,4 @@ func auditVerifySchema(path string) string {
 		return probe.Schema
 	}
 	return ""
-}
-
-func isUsageLog(path string) bool { return auditVerifySchema(path) == usagelog.SchemaV1 }
-
-// cmdAuditExport re-emits a journal as JSONL on stdout. It opens the file-backed
-// journal (append mode, recovering the chain head) and streams its durable history
-// re-read from disk, so an export of a sound journal is itself a sound journal.
-func cmdAuditExport(args []string) {
-	path := auditJournalPathArg("audit export", "usage: fak audit export <journal.jsonl>", args)
-	j, err := journal.Open(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak audit export: %v\n", err)
-		os.Exit(1)
-	}
-	defer j.Close()
-	if _, err := j.ExportTo(os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "fak audit export: %v\n", err)
-		os.Exit(1)
-	}
 }

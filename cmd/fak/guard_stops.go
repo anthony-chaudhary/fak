@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/headlesslint"
@@ -376,91 +375,6 @@ const (
 	// one tiny per-session counter file, so the ceiling is O(1) and exact per session.
 	guardHandoffBlockCounterRel = "handoff-blocks"
 )
-
-// guardHandoffBlockCeiling resolves the per-session handoff-block ceiling: the env
-// override if a valid non-negative int, else the default. A value <= 0 disables the
-// ceiling (the gate reverts to its prior stop_hook_active-only bound).
-func guardHandoffBlockCeiling() int {
-	v := strings.TrimSpace(os.Getenv(guardHandoffBlockCeilingEnv))
-	if v == "" {
-		return guardHandoffBlockCeilingDefault
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return guardHandoffBlockCeilingDefault
-	}
-	if n < 0 {
-		return 0
-	}
-	return n
-}
-
-// guardHandoffBlockCounterPath is the per-session counter file, beside the wired stops
-// ledger. Empty when no session id is known or no ledger is configured — in which case
-// the ceiling is inert and the gate keeps its prior behavior (fail-open). Each claude
-// session owns a unique id, so its counter file is never shared and its Stop hooks fire
-// serially, so no concurrent writer races on it.
-func guardHandoffBlockCounterPath(session string) string {
-	session = strings.TrimSpace(session)
-	if session == "" {
-		return ""
-	}
-	ledger := guardStopsLedgerConfigured()
-	if ledger == "" {
-		return ""
-	}
-	safe := sanitizeSessionForPath(session)
-	if safe == "" {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(ledger), guardHandoffBlockCounterRel, safe)
-}
-
-// sanitizeSessionForPath maps a session id to a single safe path segment (session ids
-// are UUID-like, but be defensive against a path separator smuggled in).
-func sanitizeSessionForPath(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-			return r
-		default:
-			return '_'
-		}
-	}, s)
-}
-
-// readSessionHandoffBlocks returns how many times the handoff gate has already blocked
-// this session. FAIL-OPEN: any miss (no path, unreadable, unparsable) reads as 0.
-func readSessionHandoffBlocks(session string) int {
-	p := guardHandoffBlockCounterPath(session)
-	if p == "" {
-		return 0
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return 0
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
-
-// bumpSessionHandoffBlocks increments this session's handoff-block counter by one.
-// FAIL-OPEN: a no-op on any error (no path, unwritable dir) — the ceiling then simply
-// never engages for this session rather than changing the stop decision.
-func bumpSessionHandoffBlocks(session string) {
-	p := guardHandoffBlockCounterPath(session)
-	if p == "" {
-		return
-	}
-	n := readSessionHandoffBlocks(session) + 1
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return
-	}
-	_ = os.WriteFile(p, []byte(strconv.Itoa(n)), 0o644)
-}
 
 // emitGuardStopRecord appends one row to the wired ledger. FAIL-OPEN: a no-op when no
 // ledger is configured, and an append error is advisory (stderr) only — never a

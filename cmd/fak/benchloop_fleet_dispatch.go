@@ -439,30 +439,6 @@ func benchFleetRoutes(root string) benchFleetRouteConfig {
 	return cfg
 }
 
-func benchFleetMacHost(root string) string { return strings.TrimSpace(benchFleetRoutes(root).MacHost) }
-
-func benchFleetWorkstationScript(req benchFleetRequest) string {
-	command := req.Command
-	switch req.Benchmark {
-	case "gpu-benchmark":
-		// This weight-independent acceptance run executes real sm_89 CUDA kernels and
-		// emits correctness, VRAM, and timing witnesses on the registered laptop GPU.
-		command = "CUDA_HOME=$HOME/cudaenv FAK_CUDA_ARCH=sm_89 bash tools/run_485_acceptance_on_gpu.sh"
-	case "session-benchmark":
-		command = "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -prefix 64 -result 16 -decode 4 -reps 1 -val-scale 32,2,1,4,8"
-	case "model-benchmark":
-		command = "go run ./cmd/modelbench -hf internal/model/.cache/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
-	}
-	return "set -euo pipefail\n" +
-		"printf 'FAK_BENCH_NODE='; hostname\n" +
-		"printf 'FAK_BENCH_GPU='; nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p'\n" +
-		"export PATH=/usr/local/go/bin:$HOME/cudaenv/bin:$PATH\n" +
-		"if [ ! -d $HOME/fak/.git ]; then git clone --depth 1 https://github.com/anthony-chaudhary/fak $HOME/fak; fi\n" +
-		"git -C $HOME/fak fetch --depth 1 origin main\n" +
-		"git -C $HOME/fak reset --hard origin/main\n" +
-		"cd $HOME/fak\n" + command + "\n"
-}
-
 type benchFleetRunManifest struct {
 	Schema    string            `json:"$schema"`
 	RunID     string            `json:"run_id"`

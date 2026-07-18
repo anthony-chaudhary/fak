@@ -76,27 +76,6 @@ func (q Query) String() string {
 	return b.String()
 }
 
-// referencedColumns is every column the query names, in projection or WHERE — the set the
-// scope validator checks against a view's allowlist. "*" is reported via selectsAll, not here.
-func (q Query) referencedColumns() []string {
-	seen := map[string]bool{}
-	var cols []string
-	add := func(c string) {
-		if c == "*" || seen[c] {
-			return
-		}
-		seen[c] = true
-		cols = append(cols, c)
-	}
-	for _, c := range q.Columns {
-		add(c)
-	}
-	for _, p := range q.Where {
-		add(p.Field)
-	}
-	return cols
-}
-
 // Execute runs the query over rows and returns the projected, filtered, limited result.
 func (q Query) Execute(rows []Row) ([]Row, error) {
 	var out []Row

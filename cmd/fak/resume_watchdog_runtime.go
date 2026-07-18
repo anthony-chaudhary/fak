@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -238,37 +237,6 @@ func resumeMaxLiveEnv() (value int, present bool) {
 		return 0, false
 	}
 	return n, true
-}
-
-// resumeMaxLiveFlagDefault is the default for `fak resume admit --max-live`: the
-// FAK_RESUME_MAX_LIVE env when set, else the static resume.DefaultMaxLiveResumes. This
-// makes the env a first-class rail for the admit gate without changing the flag's shape.
-func resumeMaxLiveFlagDefault() int {
-	if v, ok := resumeMaxLiveEnv(); ok {
-		return v
-	}
-	return resume.DefaultMaxLiveResumes
-}
-
-// resolveAdmitMaxLiveProvenance reports the source of the effective live-resume ceiling
-// for `fak resume admit --explain`. An explicit --max-live argument is the strongest
-// signal; otherwise the shared resolver decides env → policy-file → default. The admit
-// gate has no seat census, so it never derives — derivation is the watchdog tick's path.
-func resolveAdmitMaxLiveProvenance(fs *flag.FlagSet, flagValue, configValue int) resume.ResolvedMaxLiveResumes {
-	if flagSet(fs, "max-live") {
-		return resume.ResolvedMaxLiveResumes{
-			Value:  flagValue,
-			Source: resume.MaxLiveFromFlag,
-			Detail: "explicit --max-live argument",
-		}
-	}
-	envVal, envPresent := resumeMaxLiveEnv()
-	return resume.ResolveMaxLiveResumes(resume.MaxLiveResumesInput{
-		EnvPresent:  envPresent,
-		EnvValue:    envVal,
-		ConfigValue: configValue,
-		Floor:       resume.DefaultMaxLiveResumes,
-	})
 }
 
 // rwLoadHeadroomSeats reads the fleet sessions.json seat census (accounts[]) for the

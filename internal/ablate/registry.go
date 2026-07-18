@@ -95,4 +95,4 @@ func registerBuiltins() {
 	}
 }
 
-var builtinsRegistered = func() bool { registerBuiltins(); return true }()
+func init() { registerBuiltins() }
