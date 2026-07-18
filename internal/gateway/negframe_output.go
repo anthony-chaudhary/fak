@@ -5,45 +5,40 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/negframe"
 )
 
+const negframeOutputQueueDepth = 32
+
 // negframeOutputAudit is the #3567 output-side shadow: a sampled, observe-only
 // counter of negatively-framed spans in the MODEL's own outbound prose. It is the
-// #3566 emit-time Reframe pass (which flips fak's INBOUND guard notes to positive
-// voice) pointed the other way -- at what the model emits -- so the #3546 A/B can
-// ask whether reframing the input shifts the framing of the output. It never
-// mutates the assistant content or the wire: the only effect is the counter.
-//
-// It is DEFAULT-OFF (rate 0): a shadow/ablation instrument must not perturb the
-// serve hot path in production, so the classification only runs once an operator or
-// the #3546 A/B (via #3568's lever) opts in with FAK_NEGFRAME_OUTPUT_SAMPLE > 0.
-// When off, observe() short-circuits on a single float compare -- the vDSO serve
-// latency floor (TestSyscallServeLatencyDistribution) is untouched. When on,
-// negframe.Classify is a bounded regex pass over prose (code fences skipped), and
-// the sample rate bounds how many responses pay it.
+// #3566 emit-time Reframe pass pointed the other way, at what the model emits.
+// It never mutates assistant content or waits for classification: sampled prose is
+// offered to one bounded background worker and a full queue drops telemetry rather
+// than adding response latency.
 type negframeOutputAudit struct {
-	rate      float64       // [0,1]: 0 = off (default), 1 = every sampled response
+	rate      float64       // [0,1]: 0 = off (default), 1 = every response
 	calls     atomic.Uint64 // responses considered (drives fractional sampling)
-	scanned   atomic.Uint64 // responses actually classified (post-sampling)
-	negatives atomic.Uint64 // total negative-framing findings (fak_negframe_output_negatives_total)
+	scanned   atomic.Uint64 // responses classified by the background worker
+	negatives atomic.Uint64 // total negative-framing findings
+	dropped   atomic.Uint64 // sampled responses omitted because the queue was full
+
+	start    sync.Once
+	queue    chan string
+	classify func(string) int // test seam; production uses classifyModelOutput
 }
 
 // outputNegframeAudit is the process-wide singleton the serve paths fold into and
-// renderMetrics publishes. Package-level (not a Server field) because the counter
-// is process-global telemetry, like the other fak_*_total families -- and so the
-// #3567 seam adds no surface to the actively-contended Server struct/constructor.
+// renderMetrics publishes.
 var outputNegframeAudit = newNegframeOutputAudit()
 
 func newNegframeOutputAudit() *negframeOutputAudit {
 	return &negframeOutputAudit{rate: resolveNegframeOutputRate(os.Getenv("FAK_NEGFRAME_OUTPUT_SAMPLE"))}
 }
 
-// resolveNegframeOutputRate parses the sample-rate knob, clamping to [0,1] and
-// defaulting to OFF (0) on an empty or malformed value -- so the shadow stays off
-// the hot path unless explicitly enabled.
 func resolveNegframeOutputRate(v string) float64 {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -54,32 +49,56 @@ func resolveNegframeOutputRate(v string) float64 {
 		return 0
 	}
 	if f > 1 {
-		return 1.0
+		return 1
 	}
 	return f
 }
 
-// observe folds one model-output response into the shadow counter: it samples per
-// the configured rate, and on a sampled response adds the negframe finding count.
-// Pure telemetry -- the argument is never modified and nothing is returned.
+// classifyModelOutput deliberately calls the same pure detector used by the tree
+// card. Keeping the call here makes detector drift mechanically visible.
+func classifyModelOutput(text string) int {
+	return len(negframe.Classify("model-output", text))
+}
+
+// observe samples and enqueues one immutable model-output string. It never runs
+// classification inline and never blocks: if the bounded shadow queue is full,
+// telemetry is dropped and counted instead of delaying the response.
 func (a *negframeOutputAudit) observe(text string) {
 	if a == nil || a.rate <= 0 {
-		return // shadow disabled: a single compare, zero hot-path cost
+		return
 	}
 	n := a.calls.Add(1)
 	if !a.shouldScan(n) {
 		return
 	}
-	a.scanned.Add(1)
-	if neg := len(negframe.Classify("model-output", text)); neg > 0 {
-		a.negatives.Add(uint64(neg))
+	a.startWorker()
+	select {
+	case a.queue <- text:
+	default:
+		a.dropped.Add(1)
 	}
 }
 
-// shouldScan is the deterministic (rand-free) sampling gate: rate>=1 scans every
-// response, rate<=0 none, and a fractional rate scans when the running rate*count
-// product crosses the next integer -- an even 1-in-N spread with no shared RNG, so
-// it is reproducible in a test and cheap on the hot path.
+func (a *negframeOutputAudit) startWorker() {
+	a.start.Do(func() {
+		if a.queue == nil {
+			a.queue = make(chan string, negframeOutputQueueDepth)
+		}
+		classify := a.classify
+		if classify == nil {
+			classify = classifyModelOutput
+		}
+		go func() {
+			for text := range a.queue {
+				if count := classify(text); count > 0 {
+					a.negatives.Add(uint64(count))
+				}
+				a.scanned.Add(1)
+			}
+		}()
+	})
+}
+
 func (a *negframeOutputAudit) shouldScan(n uint64) bool {
 	if a.rate >= 1 {
 		return true
@@ -90,9 +109,6 @@ func (a *negframeOutputAudit) shouldScan(n uint64) bool {
 	return int64(float64(n)*a.rate) > int64(float64(n-1)*a.rate)
 }
 
-// writeMetrics renders the shadow's Prometheus fragment onto the shared /metrics
-// surface. Always emitted (a real, always-armed family): the counter reads 0 until
-// the first sampled negative.
 func (a *negframeOutputAudit) writeMetrics(b *strings.Builder) {
 	if a == nil || b == nil {
 		return
@@ -103,5 +119,8 @@ func (a *negframeOutputAudit) writeMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_negframe_output_scanned_total",
 		"Model-output responses classified by the negframe output shadow (post-sampling).", "counter")
 	fmt.Fprintf(b, "fak_negframe_output_scanned_total{surface=\"model_output\"} %d\n", a.scanned.Load())
+	writeHelpType(b, "fak_negframe_output_dropped_total",
+		"Sampled model-output responses omitted to keep the shadow off the response path.", "counter")
+	fmt.Fprintf(b, "fak_negframe_output_dropped_total{surface=\"model_output\"} %d\n", a.dropped.Load())
 	writePositiveComplementMetrics(b)
 }

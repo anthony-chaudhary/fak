@@ -3,86 +3,119 @@ package gateway
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/negframe"
 )
 
-// TestOutputNegationCounter is the #3567 witness: a sampled-shadow audit over a
-// canned model response folds exactly the negframe finding count into the counter,
-// never touches the response bytes, and is fully skipped when sampling is off.
+func waitOutputAudit(t *testing.T, a *negframeOutputAudit, want uint64) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for a.scanned.Load() < want && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := a.scanned.Load(); got != want {
+		t.Fatalf("scanned = %d, want %d", got, want)
+	}
+}
+
+// TestOutputNegationCounter is the #3567 witness: a sampled shadow over canned
+// model prose folds exactly the shared detector's findings into the counter while
+// leaving response content byte-identical.
 func TestOutputNegationCounter(t *testing.T) {
-	// A canned model "response" carrying unambiguous negative idioms plus
-	// positive/neutral lines that must not inflate the count.
 	const modelOutput = "Here is the plan.\n" +
-		"Do not forget to run the tests.\n" + // mechanical negative
-		"Don't hesitate to ask for help.\n" + // mechanical negative
-		"I will ship it now." // positive/neutral
+		"Do not forget to run the tests.\n" +
+		"Don't hesitate to ask for help.\n" +
+		"I will ship it now."
 
 	wantN := len(negframe.Classify("model-output", modelOutput))
 	if wantN == 0 {
-		t.Fatalf("fixture sanity: canned output must contain at least one negative; got 0")
+		t.Fatal("fixture sanity: canned output must contain a negative")
 	}
 
-	// rate=1: every response scanned; counter == the finding count.
 	on := &negframeOutputAudit{rate: 1}
 	on.observe(modelOutput)
+	waitOutputAudit(t, on, 1)
 	if got := on.negatives.Load(); got != uint64(wantN) {
 		t.Fatalf("sampled counter = %d, want %d", got, wantN)
 	}
-	if got := on.scanned.Load(); got != 1 {
-		t.Fatalf("scanned = %d, want 1", got)
-	}
-
-	// The counter accumulates across responses.
 	on.observe(modelOutput)
+	waitOutputAudit(t, on, 2)
 	if got := on.negatives.Load(); got != uint64(2*wantN) {
 		t.Fatalf("counter after 2 observes = %d, want %d", got, 2*wantN)
 	}
 
-	// rate=0: shadow fully off -- no scan, no count (DoD: off the hot path).
 	off := &negframeOutputAudit{rate: 0}
 	off.observe(modelOutput)
-	if got := off.negatives.Load(); got != 0 {
-		t.Fatalf("off-shadow counter = %d, want 0", got)
-	}
 	if got := off.scanned.Load(); got != 0 {
 		t.Fatalf("off-shadow scanned = %d, want 0", got)
 	}
-
-	// The content channel is byte-identical regardless of the shadow: observe is
-	// pure telemetry, and the adjudication-note seam returns content unchanged when
-	// there is no note (nil adjs). Proves the shadow never mutates the wire.
 	if got := prependAdjudicationContentNote(modelOutput, nil); got != modelOutput {
 		t.Fatalf("content channel mutated: got %q want %q", got, modelOutput)
 	}
 }
 
-// TestOutputNegationSampleRate covers the rate knob parse+clamp, the deterministic
-// fractional-sampling spread, and the Prometheus fragment shape.
+// TestOutputNegationAuditReturnsBeforeClassification proves sampled-on classification remains off
+// the response path: observe returns while a deliberately blocked detector is
+// still pending. A bounded full queue also returns immediately and records drops.
+func TestOutputNegationAuditReturnsBeforeClassification(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	a := &negframeOutputAudit{rate: 1, classify: func(string) int {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-release
+		return 1
+	}}
+
+	start := time.Now()
+	a.observe("Do not wait.")
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("sampled observe waited %s for classification", elapsed)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("background classifier did not start")
+	}
+
+	start = time.Now()
+	for i := 0; i < negframeOutputQueueDepth+2; i++ {
+		a.observe("Do not queue forever.")
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("full shadow queue delayed response path by %s", elapsed)
+	}
+	if got := a.dropped.Load(); got == 0 {
+		t.Fatal("full queue did not record dropped telemetry")
+	}
+	close(release)
+}
+
 func TestOutputNegationSampleRate(t *testing.T) {
 	for _, tc := range []struct {
 		in   string
 		want float64
 	}{
-		{"", 0}, {"1", 1.0}, {"0", 0}, {"0.5", 0.5}, {"bad", 0}, {"-1", 0}, {"2", 1.0},
+		{"", 0}, {"1", 1}, {"0", 0}, {"0.5", 0.5}, {"bad", 0}, {"-1", 0}, {"2", 1},
 	} {
 		if got := resolveNegframeOutputRate(tc.in); got != tc.want {
 			t.Errorf("resolveNegframeOutputRate(%q) = %v, want %v", tc.in, got, tc.want)
 		}
 	}
 
-	// rate=0.5 gives an even, deterministic 1-in-2 spread: 5 scanned of 10.
 	half := &negframeOutputAudit{rate: 0.5}
 	for i := 0; i < 10; i++ {
 		half.observe("Do not forget to x.")
 	}
-	if got := half.scanned.Load(); got != 5 {
-		t.Fatalf("rate 0.5 over 10 observes = %d scanned, want 5", got)
-	}
+	waitOutputAudit(t, half, 5)
 
-	// The metrics fragment renders the labeled counter with HELP/TYPE, house-style.
 	a := &negframeOutputAudit{rate: 1}
 	a.observe("Do not forget to run.")
+	waitOutputAudit(t, a, 1)
 	var b strings.Builder
 	a.writeMetrics(&b)
 	out := b.String()
@@ -90,6 +123,7 @@ func TestOutputNegationSampleRate(t *testing.T) {
 		"# TYPE fak_negframe_output_negatives_total counter",
 		`fak_negframe_output_negatives_total{surface="model_output"}`,
 		`fak_negframe_output_scanned_total{surface="model_output"} 1`,
+		`fak_negframe_output_dropped_total{surface="model_output"} 0`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("metrics fragment missing %q; got:\n%s", want, out)
@@ -97,16 +131,6 @@ func TestOutputNegationSampleRate(t *testing.T) {
 	}
 }
 
-// TestOutputNegframeWiredIntoRenderMetrics is the #4248 wiring witness: the
-// process-wide outputNegframeAudit singleton is actually folded into the live
-// Server.renderMetrics() surface (metrics_render.go), not merely callable in
-// isolation. The pre-existing tests above exercise the type on a local instance,
-// so a refactor that dropped the outputNegframeAudit.writeMetrics(&b) call from
-// renderMetrics would compile and silently delete the family without reddening a
-// test. This test fails on exactly that "incorrectly wired" regression -- the
-// failure mode the issue's undefined-symbol build break was one instance of. The
-// family is always-armed (observe-only, default-off), so a fresh server declares
-// it at 0 rather than withholding it until a first event.
 func TestOutputNegframeWiredIntoRenderMetrics(t *testing.T) {
 	srv := newTestServer(t)
 	out := srv.renderMetrics()
@@ -115,6 +139,7 @@ func TestOutputNegframeWiredIntoRenderMetrics(t *testing.T) {
 		`fak_negframe_output_negatives_total{surface="model_output"} 0`,
 		"# TYPE fak_negframe_output_scanned_total counter",
 		`fak_negframe_output_scanned_total{surface="model_output"} 0`,
+		`fak_negframe_output_dropped_total{surface="model_output"} 0`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("negframe output family not wired into live /metrics render (missing %q):\n%s", want, out)

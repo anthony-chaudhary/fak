@@ -10,6 +10,8 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 
 ## The product
 
+- [SHIPPED] The gateway samples model-output prose into a bounded, non-blocking shadow queue and counts shared `internal/negframe.Classify` findings as `fak_negframe_output_negatives_total{surface="model_output"}` without rewriting or delaying response bytes; queue saturation drops telemetry and increments a labeled drop counter. Witness: `go test ./internal/gateway -run TestOutputNegation -count=1` (`TestOutputNegationCounter`, `TestOutputNegationAuditReturnsBeforeClassification`).
+- [STUB] Full-stream model-output negation auditing remains intentionally unwired: #3567 ships sampled observe-only telemetry, not an inline full-stream classifier or output rewriter.
 - [SHIPPED] One statically-linked Go binary (`fak`) runs an agentic tool loop where every tool call crosses one in-process syscall boundary. Witness: `go build ./...` exit 0; `fak run --trace ...` completes.
 - [SHIPPED] Process-level fusion: harness + reference monitor + vDSO + pre-flight + context-MMU collapsed into one Go address space; no spawned hook, no IPC on the decide path. Witness: `TestNoOsExecOnHotPath` (ABSENCE proof, unit 72).
 - [SHIPPED] The frozen ABI is a machine-checked contract (additive-only). Witness: `TestABIGoldenFreeze` over `internal/abi/testdata/abi_v0.1.golden` (unit 2/9).
