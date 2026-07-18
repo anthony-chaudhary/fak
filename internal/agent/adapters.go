@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -453,6 +455,21 @@ type openAIResponsesRequest struct {
 	Text   *openAIResponsesText `json:"text,omitempty"`
 	Store  bool                 `json:"store"`
 	Stream bool                 `json:"stream,omitempty"`
+	// PromptCacheKey is the OpenAI Responses cross-shard cache-routing hint. On this
+	// wire the provider prompt cache is AUTOMATIC and prefix-keyed (no cache_control
+	// grammar, unlike Anthropic), so the documented lever to raise its hit rate is to
+	// pin a stable prompt_cache_key that routes requests sharing a prefix onto the same
+	// upstream cache node. responsesPromptCacheKey derives it from the cacheable HEAD
+	// (model + system instructions + tools), so it is identical across every turn of a
+	// session AND across sessions that share the same fixed harness prefix — the Codex
+	// case, where a large constant system prompt then stays warm on one node instead of
+	// re-warming per session. This is the Responses-wire analogue of the Anthropic
+	// managed-cache 1h-TTL upgrade; responsesPromptCacheKey is the single live producer
+	// of this hint (there is no parallel implementation elsewhere to keep in sync). It
+	// rides at the END of the body, behind the model+input head, so it never perturbs the
+	// stable leading bytes the prefix cache keys on.
+	// Empty => omit (so a caller that computed no key is byte-for-byte the pre-seam body).
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 // openAIResponsesText is the `text` envelope on the Responses API; only its
@@ -511,6 +528,12 @@ type openAIResponsesResponse struct {
 // become input items, tools become function declarations, and the chat-style
 // response_format carrier is mapped onto the Responses `text.format` shape. The
 // Responses API has no `stop`, so Stop is dropped, and Store is forced false.
+// Any provider ExtraBody (the FAK_PROVIDER_EXTRA_BODY_JSON / guided-decode escape
+// hatch) is merged into the body top-level via marshalWithExtraBody, same as the
+// chat openAIAdapter — this wire is the sanctioned ExtraBody path for top_k and
+// friends (chat.go: "OpenAI/xAI/Responses have none, so ... via ExtraBody"), and
+// reservedExtraBodyKey already fences the Responses core keys (input,
+// max_output_tokens, store), so a merge can extend the body but never rewrite it.
 func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	toolChoice := ""
 	if len(r.Tools) > 0 {
@@ -524,7 +547,7 @@ func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	if !r.OmitMaxOutputTokens && r.MaxTokens > 0 {
 		maxOutput = &r.MaxTokens
 	}
-	return json.Marshal(openAIResponsesRequest{
+	return marshalWithExtraBody(openAIResponsesRequest{
 		Model:           r.Model,
 		Input:           openAIResponsesInput(r.Messages),
 		Tools:           openAIResponsesTools(r.Tools),
@@ -535,7 +558,59 @@ func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		Text:            responsesText(r.ResponseFormat),
 		Store:           false,
 		Stream:          r.Stream,
-	})
+		PromptCacheKey:  responsesPromptCacheKey(r.Model, r.Messages, r.Tools),
+	}, r.ExtraBody)
+}
+
+// responsesPromptCacheKey derives the stable prompt_cache_key for the Responses wire
+// from the request's cacheable HEAD — the model, the leading contiguous run of
+// system/developer instruction messages (a RoleSystem item appearing after the first
+// non-system message is conversation suffix, not head, and never feeds the key),
+// and the tool declarations — the bytes the provider's automatic prefix cache
+// actually keys on. Hashing only the head (never the per-turn user/assistant/tool
+// suffix) makes the key identical across every turn of a session AND across sessions
+// that share the same fixed harness prefix, so a large constant system prompt (Codex)
+// stays warm on ONE upstream cache node instead of re-warming per session. Routing is a
+// bias, never a correctness input (a miss only ever costs latency), so an over-broad key
+// is safe: it can only share warmth, never leak state.
+//
+// The value is a 32-hex-char (128-bit) sha256 truncation. The 32-char width is
+// load-bearing, not cosmetic: the Responses API caps prompt_cache_key at 64 characters
+// and the Codex/ChatGPT subscription backend returns a 400 on a longer value, so the
+// truncation keeps the routing hint safely under the cap (do NOT widen this to the full
+// 64-hex digest). 128 bits is still wide enough that two distinct heads colliding is a
+// cryptographic non-event. This function is the ONLY live producer of the hint — it does
+// not mirror any other implementation (the once-referenced vcachegov.AffinityHeader was
+// dead code, cut in #5190), so this [:32] and the NUL separators below are the single
+// place the invariant lives. A NUL separator between components guards against
+// concatenation collisions; an empty head still hashes to a deterministic key, so even
+// a bare request is pinned rather than left to per-request routing.
+func responsesPromptCacheKey(model string, messages []Message, tools []ToolDef) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(strings.TrimSpace(model)))
+	_, _ = h.Write([]byte{0})
+	for _, m := range messages {
+		// Only the LEADING contiguous run of system/developer turns is the instruction
+		// head; the first non-system message anchors it. Everything after — including a
+		// late RoleSystem steering item spliced mid-conversation — is conversation suffix
+		// and is deliberately excluded so the key stays stable turn-to-turn and shareable
+		// across sessions with the same harness prompt.
+		if m.Role != RoleSystem {
+			break
+		}
+		_, _ = h.Write([]byte(m.Content))
+		_, _ = h.Write([]byte{0})
+	}
+	_, _ = h.Write([]byte{0})
+	for _, t := range tools {
+		_, _ = h.Write([]byte(t.Function.Name))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(t.Function.Parameters))
+		_, _ = h.Write([]byte{0})
+	}
+	// [:32] is a hard cap, not a preference: the Codex/ChatGPT backend 400s a prompt_cache_key
+	// longer than 64 chars (see doc above). TestResponsesPromptCacheKeyPresentAndStable pins len==32.
+	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
 func openAIResponsesInput(messages []Message) []openAIResponsesItem {

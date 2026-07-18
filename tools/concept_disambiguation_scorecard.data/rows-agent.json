@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "promptcachekey",
+      "canonical": "PromptCacheKey",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The OpenAI Responses-wire cross-shard cache-routing hint (prompt_cache_key): a stable key derived from the cacheable HEAD that pins requests sharing a prefix onto one upstream automatic-prefix-cache node (#5186).",
+      "distinction": "A routing/affinity hint on the auto prefix cache (miss only costs latency), distinct from the Anthropic managed-cache TTL upgrade (c4681-cachettlupgrade) which extends explicit cache_control breakpoint lifetime.",
+      "distinct_from": [
+        "c4681-cachettlupgrade"
+      ],
+      "aliases": [],
+      "grounding": "PromptCacheKey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
