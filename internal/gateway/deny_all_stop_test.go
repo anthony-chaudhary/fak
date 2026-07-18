@@ -205,11 +205,10 @@ func TestNilMetricsRecordAdjudicationOutcomeNoPanic(t *testing.T) {
 	}
 }
 
-// TestAnthropicStreamDenyAllCountsDenyAllStop is the end-to-end witness: an all-denied
-// STREAMED turn (the flagship passthrough path) both rewrites stop_reason to end_turn AND
-// records exactly one deny-all stop in the adjudication summary — so the otherwise-invisible
-// "fak ended the turn" is counted, which is what the guard Stop-hook resumes the agent past.
-func TestAnthropicStreamDenyAllCountsDenyAllStop(t *testing.T) {
+// TestAnthropicStreamRetryablePolicyDenyDoesNotCountDenyAllStop is the end-to-end
+// witness that call-scoped policy feedback remains retryable: the streamed tool denial is
+// returned to the model without incrementing the session-wide deny-all stop gauges.
+func TestAnthropicStreamRetryablePolicyDenyDoesNotCountDenyAllStop(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
@@ -267,16 +266,15 @@ func TestAnthropicStreamDenyAllCountsDenyAllStop(t *testing.T) {
 		t.Fatalf("no SSE frames")
 	}
 
-	if got := srv.AdjudicationSummary().DenyAllStops; got != 1 {
-		t.Fatalf("DenyAllStops = %d, want 1 (the all-denied streamed turn must count exactly one deny-all stop)", got)
+	if got := srv.AdjudicationSummary().DenyAllStops; got != 0 {
+		t.Fatalf("DenyAllStops = %d, want 0 (retryable policy feedback must not count as a session-wide deny-all stop)", got)
 	}
-	// And the gauges the Stop-hook polls read 1 after the single deny-all turn: the blind
-	// consecutive AND the same-issue gauge it now keys its give-up on.
+	// Retryable feedback must also stay out of both gauges polled by the Stop hook.
 	rendered := srv.renderMetrics()
-	if !strings.Contains(rendered, "fak_guard_deny_all_consecutive 1") {
-		t.Fatalf("metrics did not show one consecutive deny-all turn")
+	if !strings.Contains(rendered, "fak_guard_deny_all_consecutive 0") {
+		t.Fatalf("metrics did not keep the consecutive deny-all gauge at zero")
 	}
-	if !strings.Contains(rendered, "fak_guard_deny_all_same_consecutive 1") {
-		t.Fatalf("metrics did not show one same-issue deny-all turn")
+	if !strings.Contains(rendered, "fak_guard_deny_all_same_consecutive 0") {
+		t.Fatalf("metrics did not keep the same-issue deny-all gauge at zero")
 	}
 }
