@@ -558,4 +558,108 @@ func providerTokensEpisodesFromSessions(sessions []sessionaudit.Session) []dojo.
 	return out
 }
 
+// --- the provider-completion lever -------------------------------------------
+
+// providerCompletionLever is the cross-provider verified-completion-rate cell
+// (#4506): the fraction of the sessions a provider is dispatched that reconcile
+// as a verified close (verified_completion_rate), PER PROVIDER, so the dojo can
+// state where fak sits versus other providers on the generic closed/dispatched
+// KPI instead of calibrating only fak-internal levers. It is the per-provider
+// analog of the fak-aggregate dispatch-yield/verified_ship_rate cell (#4497):
+// same closed/dispatched concept, keyed by provider and folded from the session
+// corpus rather than the loop ledger. Theory is the one registered
+// provider-completion/verified_completion_rate claim; reality folds from the same
+// local multi-provider session corpus (and the same provider keying) as the
+// provider-turns, provider-cache, provider-cost, and provider-tokens leaderboard
+// cells, one episode per provider. The scenario corpus is ignored: the session
+// corpus, not a replay, is the ground truth for completion.
+type providerCompletionLever struct{}
+
+func (providerCompletionLever) Name() string { return "provider-completion" }
+
+func (providerCompletionLever) Episodes(dojo.Scenario) ([]dojo.ScoredInput, error) {
+	return providerCompletionEpisodesFromSessions(loadProviderTurnsSessions()), nil
+}
+
+// providerCompletionEpisodesFromSessions adapts the session corpus into the
+// dojo's (prediction, outcome) pairs for provider-completion/verified_completion_rate
+// — one episode per provider, every episode scored against the SAME registered
+// claim so the recalibrate arm still rewrites exactly one literal while the report
+// renders the per-provider spread. It is pure so the fold is unit-testable without
+// a corpus on disk.
+//
+// The per-provider rate is verified closes / dispatched, mirroring the
+// fak-aggregate dispatch-yield/verified_ship_rate (#4497):
+//   - DISPATCHED = every readable session (Error=="") keyed to the provider that
+//     carried it (its dominant billed provider) — one dispatched task attempt each.
+//   - VERIFIED CLOSE = a dispatched session that reconciled as a clean completion:
+//     it produced billed assistant turns and was NOT interrupted (Interrupted==0),
+//     the corpus proxy for a closed task (an interrupted session is a dispatched
+//     attempt that did not verify-close). An interrupted assistant turn is still
+//     billed (sessionaudit counts it into PerModel before flagging Interrupted), so
+//     an interrupted session still keys to its provider as a dispatched attempt.
+//
+// Because dispatched>0 for every keyed provider, the rate is always a real
+// measurement in [0,1] (a provider whose every session was interrupted honestly
+// measures 0.0 — a witnessed all-abandoned window, not a fabricated zero). Only a
+// corpus with no dispatched (keyed) session at all yields one honest UNMEASURED
+// episode, never a fabricated rate.
+func providerCompletionEpisodesFromSessions(sessions []sessionaudit.Session) []dojo.ScoredInput {
+	pred := dojo.Registry.MustPredict("provider-completion", "verified_completion_rate", "fraction")
+	type acc struct {
+		dispatched int
+		closed     int
+	}
+	sums := map[string]*acc{}
+	for _, s := range sessions {
+		if s.Error != "" {
+			continue // an unreadable session carries no billed provider to key by
+		}
+		provider := providerTurnsDominantProvider(s)
+		if provider == "" {
+			continue // only harness-synthetic turns — no billed provider to key by
+		}
+		a := sums[provider]
+		if a == nil {
+			a = &acc{}
+			sums[provider] = a
+		}
+		a.dispatched++
+		if s.Interrupted == 0 {
+			// A completed, non-interrupted session is the corpus proxy for a
+			// verified close (an interrupted session is dispatched-but-not-closed).
+			a.closed++
+		}
+	}
+	if len(sums) == 0 {
+		return []dojo.ScoredInput{{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Measured: false,
+				Source:   "no dispatched sessions in the local session corpus — nothing to fold a per-provider verified completion rate from",
+			},
+		}}
+	}
+	providers := make([]string, 0, len(sums))
+	for p := range sums {
+		providers = append(providers, p)
+	}
+	sort.Strings(providers)
+	out := make([]dojo.ScoredInput, 0, len(providers))
+	for _, p := range providers {
+		a := sums[p]
+		out = append(out, dojo.ScoredInput{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Realized:   float64(a.closed) / float64(a.dispatched),
+				Provenance: dojo.Observed,
+				Measured:   true,
+				Sample:     a.dispatched,
+				Source:     "provider " + p + ": verified closes (completed, non-interrupted sessions) / dispatched sessions over the local multi-provider corpus (OBSERVED)",
+			},
+		})
+	}
+	return out
+}
+
 // --- output + durable ledger I/O -------------------------------------------

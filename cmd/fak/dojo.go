@@ -294,6 +294,14 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	for _, in := range providerTokensEpisodesFromSessions(sessionCorpus) {
 		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
+	// And the cross-provider verified-completion-rate cell (#4506): one episode per
+	// provider of verified closes / dispatched — the per-provider analog of the
+	// fak-aggregate dispatch-yield cell, folded from the session corpus so the live
+	// run renders where every provider fak routes to sits on completion rate,
+	// UNMEASURED only when nothing was dispatched rather than a fabricated rate.
+	for _, in := range providerCompletionEpisodesFromSessions(sessionCorpus) {
+		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
 	report := dojo.Fold(episodes, dojo.FoldOpts{
@@ -673,10 +681,20 @@ type dojoLeverInfo struct {
 	Metrics []dojoMetricInfo `json:"metrics"`
 }
 
-// dojoLeverCatalog is the static description of the registered levers and the
-// metrics each scores, for `fak dojo list`. It is kept in lockstep with the
-// episodes the levers actually emit (resumeEpisodesFromBacktest).
+// dojoLeverCatalog is the description of the registered levers and the metrics
+// each scores, for `fak dojo list`: the central catalog literal
+// (dojoLeverCatalogBase) plus every row registered through the additive
+// RegisterLever seam (#5108). It is kept in lockstep with the episodes the
+// levers actually emit (resumeEpisodesFromBacktest).
 func dojoLeverCatalog() []dojoLeverInfo {
+	return append(dojoLeverCatalogBase(), registeredLeverInfos()...)
+}
+
+// dojoLeverCatalogBase is the central catalog literal. A new KPI cell should
+// NOT edit it: register the lever + row in the cell's own file via
+// RegisterLever (dojo_lever_provider_tokens.go is the worked example) so
+// parallel KPI-cell workers stop serializing on this file.
+func dojoLeverCatalogBase() []dojoLeverInfo {
 	return []dojoLeverInfo{
 		{
 			Name:    "resume-posture",
@@ -753,21 +771,23 @@ func dojoLeverCatalog() []dojoLeverInfo {
 			},
 		},
 		{
-			Name:    "provider-tokens",
-			Summary: "total billed tokens per completed issue per provider (claude/gpt/gemini/deepseek/glm/kimi), folded from the local multi-provider session corpus — the cross-provider tokens-to-close leaderboard cell, one episode per provider against the one registered claim; a provider with no billed tokens is UNMEASURED, never a fabricated 0 (#4503)",
+			Name:    "provider-completion",
+			Summary: "verified completion rate (verified closes / dispatched) per provider (claude/gpt/gemini/deepseek/glm/kimi), folded from the local multi-provider session corpus — the cross-provider verified-completion-rate leaderboard cell and the per-provider analog of dispatch-yield (#4497), one episode per provider against the one registered claim; a provider with no dispatched sessions is UNMEASURED, never a fabricated rate (#4506)",
 			Metrics: []dojoMetricInfo{
-				{Name: "tokens_per_completed_issue", Theory: "a provider bills about one million total tokens (input + output + cache_read + cache_creation) per completed issue, the mean total billed tokens per completed session (claim 1000000 — a seeded estimate the RSI loop recalibrates toward the measured per-provider means)"},
+				{Name: "verified_completion_rate", Theory: "about half of the sessions a provider is dispatched reconcile as a verified close — a completed, non-interrupted session (claim 0.5 — a seeded estimate the RSI loop recalibrates toward the measured per-provider rates)"},
 			},
 		},
 	}
 }
 
 // allDojoLevers returns every registered lever, including compactionLever{} — the
-// full set `--lever compaction` selects from. Use defaultDojoLevers for the set a
-// run folds when no --lever filter is given. root is the workspace root the
-// dispatch-yield lever reads its loop ledger under.
+// full set `--lever compaction` selects from: the central literal plus every
+// lever registered through the additive RegisterLever seam (#5108). Use
+// defaultDojoLevers for the set a run folds when no --lever filter is given.
+// root is the workspace root the dispatch-yield lever reads its loop ledger
+// under.
 func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
-	return []dojo.Lever{
+	levers := []dojo.Lever{
 		resumePostureLever{ttl: ttl, maxFiles: maxFiles},
 		compactionLever{},
 		vcacheLever{maxFiles: maxFiles},
@@ -778,8 +798,9 @@ func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever 
 		providerCacheLever{},
 		cacheReadShareLever{},
 		providerCostLever{},
-		providerTokensLever{},
+		providerCompletionLever{},
 	}
+	return append(levers, registeredLeverSet(dojoLeverEnv{Root: root, TTL: ttl, MaxFiles: maxFiles})...)
 }
 
 // defaultDojoLevers is the set folded implicitly by `dojo run` (no --lever),

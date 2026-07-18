@@ -47,6 +47,10 @@ func TestRegistryPreservesPinnedClaims(t *testing.T) {
 		// provider-tokens is the cross-provider tokens-to-close cell (#4503): total
 		// billed tokens per completed issue per provider, also a seeded genuine estimate.
 		{"provider-tokens", "tokens_per_completed_issue", 1000000.0, false, false},
+		// provider-completion is the cross-provider verified-completion-rate cell
+		// (#4506): verified closes / dispatched per provider, also a seeded genuine
+		// estimate (higher is better, not a floor).
+		{"provider-completion", "verified_completion_rate", 0.5, false, false},
 	}
 	if len(Registry) != len(want) {
 		t.Fatalf("registry has %d cells, want %d — a cell was added or dropped without updating the witness", len(Registry), len(want))
@@ -88,11 +92,11 @@ var probeCell = RegisterClaim("kpi-seam-probe", "additive_resolves",
 func TestRegisterClaimResolvesViaRegistry(t *testing.T) {
 	// The additive registration did not grow the central literal (8 extracted
 	// cells + the seeded dispatch-yield, provider-turns, provider-cache,
-	// provider-toolcall, cache-read-share, and provider-cost KPI cells,
-	// plus provider-tokens (#4503).
-	// #4497/#4505/#4504/#4507/#4498/#4488/#4503).
-	if len(Registry) != 15 {
-		t.Fatalf("central Registry literal has %d cells, want 15 — additive registration must not grow it", len(Registry))
+	// provider-toolcall, cache-read-share, provider-cost, and provider-tokens
+	// KPI cells, plus provider-completion (#4506).
+	// #4497/#4505/#4504/#4507/#4498/#4488/#4503/#4506).
+	if len(Registry) != 16 {
+		t.Fatalf("central Registry literal has %d cells, want 16 — additive registration must not grow it", len(Registry))
 	}
 	// The registered cell resolves through the composed Lookup.
 	c, ok := Registry.Lookup("kpi-seam-probe", "additive_resolves")

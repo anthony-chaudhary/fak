@@ -75,7 +75,8 @@ type ClaimRegistry map[claimKey]Claim
 // `Claimed:` field it replaced; the pinned-claim tests in cmd/fak/dojo_test.go
 // prove the extraction preserved each value. The dispatch-yield (#4497),
 // provider-turns (#4505), provider-cache (#4504), provider-toolcall (#4507),
-// provider-cost (#4488), provider-tokens (#4503), and cache-read-share (#4498/#4484)
+// provider-cost (#4488), provider-tokens (#4503), provider-completion (#4506),
+// and cache-read-share (#4498/#4484)
 // KPI cells are SEEDED estimates instead — they live in this central literal
 // (not the additive RegisterClaim seam) because the RSI recalibrate arm's
 // anchored rewriter targets only this file (dojocal.ClaimsRelPath), and those
@@ -124,6 +125,9 @@ var Registry = ClaimRegistry{
 
 	{"provider-tokens", "tokens_per_completed_issue"}: claim(1000000.0,
 		"seed theory (#4503): a provider bills about one million total tokens (input + output + cache_read + cache_creation) per completed issue — the mean total billed tokens per completed session (the corpus proxy for a verified close) across the multi-provider session corpus; a genuine estimate the RSI loop recalibrates toward the measured per-provider means, and the per-provider spread of the same cell is the cross-provider tokens-to-close leaderboard. This is TOTAL billed tokens keyed by provider (not USD cost, not output-only tokens); a provider whose completed sessions carry no billed tokens scores UNMEASURED, never a fabricated 0"),
+
+	{"provider-completion", "verified_completion_rate"}: claim(0.5,
+		"seed theory (#4506): about half of the sessions a provider is dispatched reconcile as a verified close (a completed, non-interrupted session — the corpus proxy for a closed task) over the multi-provider session corpus; a genuine estimate the RSI loop recalibrates toward the measured per-provider rates, and the per-provider spread of the same cell is the cross-provider verified-completion-rate leaderboard. This is verified closes / dispatched keyed BY PROVIDER — the per-provider analog of the fak-aggregate dispatch-yield/verified_ship_rate cell (#4497), seeded at the same 0.5, not that cell; a provider with no dispatched sessions in the corpus scores UNMEASURED, never a fabricated rate"),
 }
 
 // registered is the additive claim seam: the composed home for cells a KPI leaf
