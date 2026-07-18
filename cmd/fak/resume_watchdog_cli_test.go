@@ -189,7 +189,17 @@ func TestResumeWatchdogBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ledger: %v", err)
 	}
-	if !strings.Contains(string(ledger), `"phase":"broker_denied"`) || strings.Contains(string(ledger), `"payload":"`+configDir+`"`) {
+	foundBrokerDeny := false
+	for _, row := range strings.Split(string(ledger), "\n") {
+		if !strings.Contains(row, `"phase":"broker_denied"`) {
+			continue
+		}
+		foundBrokerDeny = true
+		if strings.Contains(row, configDir) {
+			t.Fatalf("broker-denied row leaked config path: %s", row)
+		}
+	}
+	if !foundBrokerDeny {
 		t.Fatalf("broker-denied ledger = %s", ledger)
 	}
 }
