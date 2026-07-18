@@ -607,7 +607,7 @@ func PathMatchesLane(path string, trees map[string][]string) []string {
 	if strings.HasPrefix(p, "fak/") {
 		p = strings.TrimPrefix(p, "fak/")
 	}
-	lanes := sortedKeysSliceMap(trees)
+	lanes := sortedKeys(trees)
 	hits := []string{}
 	for _, lane := range lanes {
 		for _, glob := range trees[lane] {
@@ -1259,16 +1259,9 @@ func routeSortLess(a, b IssueRoute) bool {
 	return a.Number > b.Number
 }
 
-func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedKeysSliceMap(m map[string][]string) []string {
+// sortedKeys returns the keys of m in ascending order, for any map value type —
+// one generic helper the string-map and slice-map callers share.
+func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
