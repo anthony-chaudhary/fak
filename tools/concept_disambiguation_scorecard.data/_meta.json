@@ -692,6 +692,11 @@
           "category": "incidental",
           "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
           "token": "WitnessMove"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported gateway adapter applying the existing subagentDoneVerdict fold-witness (the canonical witness-proof concept) to the scripted RPC syscall path (#2858); not a new witness family",
+          "token": "witnessScriptedFold"
         }
       ],
       "id": "witness-proof",
@@ -723,6 +728,7 @@
         "revocations",
         "want_witness",
         "withdefaultoriginwitnesses",
+        "witnessScriptedFold",
         "witnessStrandedArchiveSuffix",
         "witnessable",
         "witnessed",

@@ -141,3 +141,44 @@ func subagentDoneVerdict(tool, content string, base WireVerdict) (WireVerdict, b
 		Detail:      map[string]string{"claim": kind},
 	}, true
 }
+
+// scriptedFoldMetaKey is the ResultEnvelope.Meta breadcrumb a scripted-fold demotion
+// stamps — the "witnessed result envelope per scripted call" the #2858 scope names. Its
+// value is the closed-vocabulary reason (ReasonLoopBodyUnwitnessed) the fold was demoted
+// under, so a subagent script can branch on env.Meta["subagent_fold"] without re-parsing
+// the verdict.
+const scriptedFoldMetaKey = "subagent_fold"
+
+// witnessScriptedFold applies the subagent-fold witness to a SCRIPTED RPC tool result —
+// the fak_syscall / /v1/fak/syscall execute path a Hermes-style subagent script drives
+// (#2858, epic #2834 Track F). A scripted call collapses into a "zero-context-cost" turn
+// by never re-entering the model context, but its result is still folded into the parent
+// script; that fold is the SAME forgeable boundary the model-facing admit path guards via
+// subagentDoneVerdict (subagent_witness.go). So the SAME rule holds on the scripted path:
+// an ALLOW subagent-spawn call whose result CLAIMS ship/create/fix with no artifact
+// witness is demoted RESIDUAL/LOOP_DONE_UNWITNESSED here too — "zero-context-cost" never
+// silently becomes "zero-adjudication of the fold". The child's return string still
+// forwards (the parent sees env.Content), only now visibly unverified, and the demotion is
+// recorded on the envelope as a scriptedFoldMetaKey breadcrumb the parent can check
+// (dos_verify-style) before folding it in.
+//
+// A nil envelope (a DENY/errored call that executed nothing) has no return string to fold,
+// so the base verdict passes through unchanged. The breadcrumb is written onto a FRESH copy
+// of Meta, never the kernel/vDSO result's own map, so stamping a demotion can never poison
+// a pooled cache entry that shares that map.
+func witnessScriptedFold(tool string, env *ResultEnvelope, base WireVerdict) WireVerdict {
+	if env == nil {
+		return base
+	}
+	demoted, tainted := subagentDoneVerdict(tool, env.Content, base)
+	if !tainted {
+		return base
+	}
+	meta := make(map[string]string, len(env.Meta)+1)
+	for k, v := range env.Meta {
+		meta[k] = v
+	}
+	meta[scriptedFoldMetaKey] = demoted.Reason
+	env.Meta = meta
+	return demoted
+}

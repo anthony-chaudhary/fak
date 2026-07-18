@@ -120,7 +120,13 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 	// calls. The single-model PICK below is byte-for-byte the pre-#597 path.
 	if plan, ok := s.ensemblePlan(tc.Tool, readOnly, tc.Meta); ok {
 		wv, env, err = s.dispatchEnsemble(ctx, tc, plan)
-		return wv, env, err
+		if err != nil {
+			return wv, env, err
+		}
+		// The scripted-fold witness rides the SAME execute floor as a single-model call
+		// (#2858): an ensemble is still a scripted RPC result folded into the parent.
+		wv = witnessScriptedFold(tc.Tool, env, wv)
+		return wv, env, nil
 	}
 	r, v := s.k.Syscall(ctx, tc)
 	s.rememberOriginSeq(tc.TraceID, tc.Tool, string(resolveBytes(ctx, tc.Args)), tc.SeqNo)
@@ -136,6 +142,12 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		// credential env NAME — no secret values. No-op without a roster.
 		s.recordRouteAccount(env, tc.Tool, readOnly, tc.Meta)
 	}
+	// Witness the subagent fold on the scripted RPC execute path (#2858, epic #2834
+	// Track F): a "zero-context-cost" scripted call that spawns a subagent and folds its
+	// return still crosses the SAME fold-witness the model-facing admit path applies, so
+	// an unwitnessed done-claim is demoted RESIDUAL/LOOP_DONE_UNWITNESSED and the envelope
+	// carries the demotion breadcrumb the parent script checks before folding.
+	wv = witnessScriptedFold(tc.Tool, env, wv)
 	return wv, env, nil
 }
 
