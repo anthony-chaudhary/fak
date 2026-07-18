@@ -16,8 +16,18 @@ func TestNegationOperatorCrossModel(t *testing.T) {
 	if err := json.Unmarshal(data, &probes); err != nil {
 		t.Fatal(err)
 	}
-	if len(probes) != 10 {
-		t.Fatalf("checkpoint probes=%d, want 10", len(probes))
+	if len(probes) == 0 {
+		t.Fatal("negation transfer corpus is empty")
+	}
+	seenCheckpoints := map[string]bool{}
+	for _, probe := range probes {
+		if probe.Checkpoint == "" || probe.Family == "" || len(probe.Pairs) == 0 {
+			t.Fatalf("incomplete checkpoint probe: %+v", probe)
+		}
+		if seenCheckpoints[probe.Checkpoint] {
+			t.Fatalf("duplicate checkpoint probe %q", probe.Checkpoint)
+		}
+		seenCheckpoints[probe.Checkpoint] = true
 	}
 
 	anchor, err := FitNegationTransferDirection(probes[0].Pairs)
