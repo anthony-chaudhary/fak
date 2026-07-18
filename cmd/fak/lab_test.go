@@ -455,3 +455,97 @@ func TestLabReadinessFromSnapshotNamesKeyMismatch(t *testing.T) {
 		t.Fatalf("no-orphan derivation = (%q,%q), want (publish-lab-readiness, no-fresh-lab-report)", bare.NextAction, bare.Evidence)
 	}
 }
+
+// TestLabReadinessFromReportsAdoptsNonRosterKeys is the #5065 regression witness: a
+// correctly-produced ready report filed under a key NO roster box matches (the private
+// bridge keys by its own label, the generic roster by box id) must reach a determinate
+// CLEAR verdict instead of holding dispatch closed on INDETERMINATE /
+// reports-under-non-roster-keys. The key here is generic on purpose.
+func TestLabReadinessFromReportsAdoptsNonRosterKeys(t *testing.T) {
+	reportsDir := t.TempDir()
+	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
+
+	if err := fleet.WriteReport(reportsDir, "lab-host-7", fleet.Report{
+		State:     fleet.StateLive,
+		Inference: &fleet.InferenceStats{Status: fleet.InferenceReady, Engine: "fak", Model: "glm-5.2"},
+	}); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-reports", "--json"})
+	if rc != 0 {
+		t.Fatalf("readiness should adopt the non-roster-keyed ready report and admit, got %d: %s", rc, out.String())
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness --from-reports did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Phase != linkstate.Clear || !rec.AdmitDispatch {
+		t.Fatalf("readiness from adopted useful inference = %+v, want CLEAR admitting", rec)
+	}
+	if rec.Evidence != "scrubbed-fleet-report" {
+		t.Fatalf("evidence = %q, want scrubbed-fleet-report", rec.Evidence)
+	}
+}
+
+// TestLabReadinessFromReportsAdoptedWarmingHolds pins the fail-closed half of the
+// #5065 reconciliation: adoption fixes the KEY join only — a genuinely not-ready lab
+// reporting under a non-roster key still holds dispatch closed, with the same honest
+// remedy a roster-keyed warming report gets. No false READY_FOR_DEV_WORK.
+func TestLabReadinessFromReportsAdoptedWarmingHolds(t *testing.T) {
+	reportsDir := t.TempDir()
+	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
+
+	if err := fleet.WriteReport(reportsDir, "lab-host-7", fleet.Report{
+		State:     fleet.StateLive,
+		Inference: &fleet.InferenceStats{Status: fleet.InferenceWarming, Engine: "fak", Reason: "loading"},
+	}); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-reports", "--json"})
+	if rc != 1 {
+		t.Fatalf("adopted warming inference should fail closed, got %d: %s", rc, out.String())
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness --from-reports did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Phase != linkstate.Waiting || rec.AdmitDispatch {
+		t.Fatalf("readiness from adopted warming inference = %+v, want WAITING hold", rec)
+	}
+	if rec.NextAction != "wait-lab-inference-ready" {
+		t.Fatalf("next_action = %q, want wait-lab-inference-ready", rec.NextAction)
+	}
+}
+
+// TestLabReadinessFromReportsKeepsUnreconcilableOrphans: after #5065 the
+// reports-under-non-roster-keys verdict must remain reachable exactly when a foreign-
+// keyed file CANNOT be read as a report — that is a genuine key/content mismatch, not
+// a down lab, and the remedy stays "reconcile", still failing closed.
+func TestLabReadinessFromReportsKeepsUnreconcilableOrphans(t *testing.T) {
+	reportsDir := t.TempDir()
+	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
+
+	if err := os.WriteFile(filepath.Join(reportsDir, "stray.json"), []byte("not a report"), 0o644); err != nil {
+		t.Fatalf("write junk orphan: %v", err)
+	}
+
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-reports", "--json"})
+	if rc != 1 {
+		t.Fatalf("an unreconcilable orphan must fail closed, got %d: %s", rc, out.String())
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness --from-reports did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Phase != linkstate.Waiting || rec.AdmitDispatch {
+		t.Fatalf("readiness from junk orphan = %+v, want WAITING hold", rec)
+	}
+	if rec.NextAction != "reconcile-report-keys-with-roster" || rec.Evidence != "reports-under-non-roster-keys" {
+		t.Fatalf("junk-orphan derivation = (%q,%q), want (reconcile-report-keys-with-roster, reports-under-non-roster-keys)", rec.NextAction, rec.Evidence)
+	}
+}

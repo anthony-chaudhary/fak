@@ -191,6 +191,37 @@ func OrphanReports(dir string, ro Roster) []string {
 	return orphans
 }
 
+// AdoptOrphanReports reconciles the report-key/roster join for the READINESS
+// derivation: it reads each orphan report file (a key no box.Ref() matches — a
+// producer keying by its own label instead of the box's generic roster id) and
+// ADOPTS every file that parses as a valid, reachable current-schema report,
+// returning those as extra reports keyed by their file stem, plus the keys that
+// remain genuinely unreconcilable (unreadable, wrong schema, unknown state).
+//
+// This is what lets a live lab whose bridge writes under non-roster keys reach a
+// determinate readiness verdict (#5065) WITHOUT weakening the fail-closed gate:
+// an adopted report still passes every guard a roster-keyed one does (schema,
+// state vocabulary, inference normalization, the mtime freshness floor), so a
+// stale or junk file can never buy a false READY — it either ages out downstream
+// or stays in the returned orphans list. After adoption, "reports-under-non-
+// roster-keys" means exactly what it says: files under foreign keys that cannot
+// be read as reports at all.
+func AdoptOrphanReports(dir string, ro Roster) (adopted []Report, orphans []string) {
+	for _, key := range OrphanReports(dir, ro) {
+		if !safeReportKey(key) {
+			orphans = append(orphans, key)
+			continue
+		}
+		r := readReportFile(dir, key, key)
+		if r.Reachable() {
+			adopted = append(adopted, r)
+		} else {
+			orphans = append(orphans, key)
+		}
+	}
+	return adopted, orphans
+}
+
 func readOneReport(dir string, b Box) Report {
 	key := b.Ref()
 	// Endpoint is opaque to other transports, but for THIS (file) transport it names
@@ -199,27 +230,35 @@ func readOneReport(dir string, b Box) Report {
 	if !safeReportKey(key) {
 		return Report{ID: b.ID, State: StateUnknown, Err: fmt.Sprintf("endpoint %q is not a file-safe report key", key)}
 	}
+	return readReportFile(dir, key, b.ID)
+}
+
+// readReportFile reads and validates <dir>/<key>.json as a report owned by id.
+// key must already be file-safe (the caller's guard). Shared by the roster-keyed
+// read (id = the box's roster id) and orphan adoption (id = the file stem), so an
+// adopted report passes exactly the guards a roster-keyed one does.
+func readReportFile(dir, key, id string) Report {
 	path := filepath.Join(dir, key+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Report{ID: b.ID, State: StateUnknown, Err: fmt.Sprintf("no report (%v)", rootErr(err))}
+		return Report{ID: id, State: StateUnknown, Err: fmt.Sprintf("no report (%v)", rootErr(err))}
 	}
 	var r Report
 	if err := json.Unmarshal(data, &r); err != nil {
-		return Report{ID: b.ID, State: StateUnknown, Err: fmt.Sprintf("bad report json: %v", err)}
+		return Report{ID: id, State: StateUnknown, Err: fmt.Sprintf("bad report json: %v", err)}
 	}
-	r.ID = b.ID // the roster is the identity authority; the file supplies only state.
+	r.ID = id // the roster is the identity authority; the file supplies only state.
 	if r.Schema != "" && r.Schema != ReportSchema {
 		// Mirror the roster's fail-loud schema guard: a future incompatible
 		// fak.fleet.report/v2 must not be silently folded as v1.
-		return Report{ID: b.ID, State: StateUnknown, Err: fmt.Sprintf("unsupported report schema %q (want %s)", r.Schema, ReportSchema)}
+		return Report{ID: id, State: StateUnknown, Err: fmt.Sprintf("unsupported report schema %q (want %s)", r.Schema, ReportSchema)}
 	}
 	if !r.State.Known() {
 		r.Err = fmt.Sprintf("unknown state %q", r.State)
 		r.State = StateUnknown
 	}
 	if err := normalizeInference(r.Inference); err != nil {
-		return Report{ID: b.ID, State: StateUnknown, Err: err.Error()}
+		return Report{ID: id, State: StateUnknown, Err: err.Error()}
 	}
 	// Freshness backstop: age_sec only ages a box if the bridge keeps re-stamping it,
 	// so a dead bridge would leave a frozen "live, age 5s" file reading green forever.

@@ -279,6 +279,55 @@ func TestOrphanReports(t *testing.T) {
 	}
 }
 
+// TestAdoptOrphanReports is the report-key/roster reconciliation witness (#5065): an
+// orphan file that parses as a valid, reachable current-schema report is ADOPTED under
+// its file stem, while a file that cannot be read as a report stays a genuine orphan.
+// Adoption is what lets a live lab whose producer keys reports by its own label reach a
+// determinate readiness verdict; the surviving orphans keep "reports-under-non-roster-
+// keys" honest. Keys here are GENERIC on purpose (public/private boundary).
+func TestAdoptOrphanReports(t *testing.T) {
+	dir := t.TempDir()
+	ro := Roster{Boxes: []Box{{ID: "box-a"}}}
+	if err := WriteReport(dir, "box-a", Report{State: StateLive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteReport(dir, "stray-live", Report{
+		State:     StateLive,
+		Inference: &InferenceStats{Status: InferenceReady, Engine: "fak"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stray-junk.json"), []byte("not a report"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stray-silent.json"), []byte(`{"state":"unknown"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adopted, orphans := AdoptOrphanReports(dir, ro)
+	if len(adopted) != 1 || adopted[0].ID != "stray-live" || adopted[0].State != StateLive {
+		t.Fatalf("adopted = %+v, want exactly the valid stray-live report", adopted)
+	}
+	if adopted[0].Inference == nil || adopted[0].Inference.Status != InferenceReady {
+		t.Fatalf("adopted report lost its inference block: %+v", adopted[0])
+	}
+	want := []string{"stray-junk", "stray-silent"} // roster-keyed box-a is never an orphan; unreadable/unknown stay orphans
+	if len(orphans) != len(want) {
+		t.Fatalf("orphans = %v, want %v", orphans, want)
+	}
+	for i := range want {
+		if orphans[i] != want[i] {
+			t.Fatalf("orphans = %v, want %v", orphans, want)
+		}
+	}
+
+	// A missing reports dir adopts nothing and orphans nothing.
+	a, o := AdoptOrphanReports(filepath.Join(dir, "does-not-exist"), ro)
+	if a != nil || o != nil {
+		t.Fatalf("missing dir should adopt/orphan nothing, got %v / %v", a, o)
+	}
+}
+
 // TestRenderSurfacesOrphans: the render must name orphan files so an operator reading
 // "0/N reachable" learns the reports exist under unresolved keys, not that the fleet is
 // dead. A snapshot with no orphans prints no ORPHANS line.

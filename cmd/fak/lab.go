@@ -334,8 +334,31 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 		if labReportsPopulated(dir) {
 			reps = fleet.ReadReports(dir, ro)
 		}
-		snap := fleet.Fold(ro, reps, fleet.FoldOpts{})
-		snap.Orphans = fleet.OrphanReports(dir, ro) // name a key-mismatch instead of "no reports"
+		// Reconcile the report-key/roster join (#5065): the private bridge keys its
+		// report files by its own labels while the generic roster keys by box id, so a
+		// live lab could fold as "0 reachable + orphans" and hold dispatch closed on an
+		// INDETERMINATE verdict. Adopt every orphan file that parses as a valid report
+		// as its own synthetic box so a correctly-produced report reaches a determinate
+		// phase under whatever key it was filed; only files that CANNOT be read as
+		// reports remain orphans, keeping "reports-under-non-roster-keys" for genuinely
+		// unreconcilable keys and every fail-closed hold (silent, stale, warming,
+		// blocked lab) exactly as strict as before.
+		adopted, orphans := fleet.AdoptOrphanReports(dir, ro)
+		foldRo := ro
+		if len(adopted) > 0 {
+			boxes := make([]fleet.Box, 0, len(ro.Boxes)+len(adopted))
+			boxes = append(boxes, ro.Boxes...)
+			if reps == nil {
+				reps = fleet.ReadReports(dir, ro) // align reports[i] with boxes[i] before appending
+			}
+			for _, r := range adopted {
+				boxes = append(boxes, fleet.Box{ID: r.ID, Class: *machineClass})
+				reps = append(reps, r)
+			}
+			foldRo = fleet.Roster{Schema: ro.Schema, Boxes: boxes}
+		}
+		snap := fleet.Fold(foldRo, reps, fleet.FoldOpts{})
+		snap.Orphans = orphans // name a genuine key-mismatch instead of "no reports"
 		rec = labReadinessFromSnapshot(*machineClass, snap, time.Now())
 		if probs := rec.Validate(); len(probs) > 0 {
 			fmt.Fprintf(stderr, "fak lab readiness: invalid record: %s\n", strings.Join(probs, "; "))
