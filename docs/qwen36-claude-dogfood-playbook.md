@@ -662,3 +662,7 @@ repo-local binary automatically.
   dedicated **FAK Dogfood Slow Requests** dashboard.
 - `fak/experiments/agent-live/dogfood-claude-probe.json` is the committed Claude
   Code dogfood witness.
+- `docs/notes/MAC-CACHEVALUE-EXACT-SPAN-WITNESS-2026-07-18.md` — the #2727 cache-value
+  witness for this serving path: exact-span KV eviction + the WITNESSED (fak-authored)
+  cache-value P&L, contract-tested end-to-end on the in-kernel path; the on-Mac session
+  artifact is the named remaining step.
