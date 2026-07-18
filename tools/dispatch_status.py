@@ -4052,7 +4052,7 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 f"live {sa.get('live')} + free {sa.get('seat_free')}, ceiling {sa.get('hard_ceiling')})")
         selection = latest_tick.get("seat_selection") or {}
         if selection.get("summary"):
-            lines.append(f"- **seat pick**: {selection.get('summary')}")
+            out.append(f"- **seat pick**: {selection.get('summary')}")
         streak = _int(latest_tick.get("spawn_failed_streak"), 0) or 0
         if streak > 0:
             cause_bit = f", cause `{latest_tick.get('cause')}`" if latest_tick.get("cause") else ""

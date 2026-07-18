@@ -916,7 +916,7 @@ class FleetTrendTickTest(unittest.TestCase):
             self.assertTrue(out["ok"])
             ledger = root / ".fak" / "nightrun" / "fleet-status-history.jsonl"
             self.assertTrue(ledger.exists())
-            rows = [json.loads(l) for l in ledger.read_text(encoding="utf-8").splitlines()]
+            rows = [json.loads(ln) for ln in ledger.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["ts"], "2026-07-14T12:00:00Z")
             self.assertEqual(rows[0]["live"], 3.0)
@@ -924,7 +924,7 @@ class FleetTrendTickTest(unittest.TestCase):
             for absent in ("usable", "sessions", "escalate"):
                 self.assertNotIn(absent, rows[0])
             mod.append_fleet_trend_row(root, payload, now="2026-07-14T12:05:00Z")
-            rows = [json.loads(l) for l in ledger.read_text(encoding="utf-8").splitlines()]
+            rows = [json.loads(ln) for ln in ledger.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(rows), 2)
 
     def test_missing_preflight_records_zero_live(self) -> None:

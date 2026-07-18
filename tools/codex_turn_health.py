@@ -153,12 +153,12 @@ def _parse_lines(lines: Iterable[str]) -> Iterable[dict]:
     writer) or a stray non-JSON line; a monitor must survive them, not abort the
     whole scan on one bad byte.
     """
-    for l in lines:
-        l = l.strip()
-        if not l:
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
             continue
         try:
-            obj = json.loads(l)
+            obj = json.loads(ln)
         except (ValueError, TypeError):
             continue
         if isinstance(obj, dict):
