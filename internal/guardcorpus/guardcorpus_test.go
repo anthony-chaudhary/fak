@@ -65,9 +65,9 @@ func TestFoldCountsHonestyAndOutcome(t *testing.T) {
 	if rec.PolicyDigest != "sha256:abc" {
 		t.Fatalf("record policy_digest = %q", rec.PolicyDigest)
 	}
-	// Examples: 3 denies + 1 quarantine + 1 crash + 1 allow = 6.
-	if len(ex) != 6 {
-		t.Fatalf("examples = %d, want 6", len(ex))
+	// Every source row that represents a decision or crash emits one example.
+	if len(ex) != len(planted())-1 { // the unknown verdict is counted as an honesty hole, not training data
+		t.Fatalf("examples = %d, want one for every eligible planted row", len(ex))
 	}
 	for _, e := range ex {
 		if e.Schema != ExampleSchema {
