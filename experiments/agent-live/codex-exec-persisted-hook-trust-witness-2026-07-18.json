@@ -1,0 +1,127 @@
+{
+  "schema": "fak-codex-exec-persisted-hook-trust-witness/1",
+  "captured_at": "2026-07-18T21:36:57Z",
+  "github_issue": 3939,
+  "status": "PROVEN",
+  "environment": {
+    "codex_cli_version": "0.144.5",
+    "host": "windows/amd64",
+    "working_directories": ["<repo-root>", "<repo-root>/docs"],
+    "hook_source": "<repo-root>/.codex/hooks.json",
+    "persisted_trust": "hooks.state entry for '<repo-root>/.codex/hooks.json:user_prompt_submit:0:0' in <codex-home>/config.toml with trusted_hash sha256:3ce6cca81cd9455b07187a6fa27c3c62df76fcb9cb2704f5d715a940fe43b404",
+    "prior_reproduction": "The defect (persisted trusted project hook skipped by noninteractive codex exec unless --dangerously-bypass-hook-trust was supplied) was last reproduced by the issue owner on Codex CLI 0.144.4 on 2026-07-14. This witness reruns the identical paired arms on 0.144.5."
+  },
+  "method": {
+    "hook_instrument": "A PATH-prepended fak.cmd shim intercepted the trusted hook command ('fak sessions codex-loop-hook'), logged each invocation, emitted {\"decision\":\"block\",\"reason\":\"fak 3939 witness sentinel\"}, and exited 0. The trusted <repo-root>/.codex/hooks.json was never modified, so hooks/list kept reporting the same key and hash throughout.",
+    "traffic_discriminator": "Each arm uses a deliberately invalid model slug (definitely-invalid-model-3939). If the hook is skipped the request reaches provider validation and fails HTTP 400 invalid_request_error; if the trusted blocking hook dispatches, the turn completes with all-zero token usage and no provider event.",
+    "command_shape": "codex exec -C <cwd> -m definitely-invalid-model-3939 --json <fixed-synthetic-prompt>",
+    "privacy": "Absolute paths are normalized to <repo-root>/<codex-home>. The fixed synthetic prompt is omitted. Thread ids are the same public witness handles the issue thread uses.",
+    "note": "Every arm (including blocked ones) emits a local 'Model metadata for `definitely-invalid-model-3939` not found' item before turn.started; that is local metadata lookup, not provider traffic."
+  },
+  "hooks_list_readback": {
+    "queried_cwds": ["<repo-root>", "<repo-root>/docs"],
+    "both_cwds_identical": true,
+    "entry": {
+      "key": "<repo-root>/.codex/hooks.json:user_prompt_submit:0:0",
+      "eventName": "userPromptSubmit",
+      "source": "project",
+      "enabled": true,
+      "currentHash": "sha256:3ce6cca81cd9455b07187a6fa27c3c62df76fcb9cb2704f5d715a940fe43b404",
+      "trustStatus": "trusted",
+      "command": "fak sessions codex-loop-hook 2>nul || exit /b 0"
+    },
+    "warnings": [],
+    "errors": []
+  },
+  "arms": [
+    {
+      "arm": "root_persisted_trust_no_bypass",
+      "cwd": "<repo-root>",
+      "bypass_flag": false,
+      "thread_id": "019f7720-0bc8-70e3-a5bc-ddec36cb7b3b",
+      "hook_dispatched": true,
+      "shim_invocation_log": "invoked sessions codex-loop-hook",
+      "observed_codex_events": [
+        {"type": "thread.started"},
+        {"type": "item.completed", "item": {"type": "error", "message": "Model metadata for `definitely-invalid-model-3939` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}},
+        {"type": "turn.started"},
+        {"type": "turn.completed", "usage": {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0}}
+      ],
+      "provider_traffic": "none (no provider validation error, zero tokens)",
+      "verdict": "trusted hook dispatched and stopped the turn without the bypass flag"
+    },
+    {
+      "arm": "nested_persisted_trust_no_bypass",
+      "cwd": "<repo-root>/docs",
+      "bypass_flag": false,
+      "thread_id": "019f7721-0beb-7da1-8a6e-173eadf3ac7a",
+      "hook_dispatched": true,
+      "shim_invocation_log": "invoked sessions codex-loop-hook",
+      "observed_codex_events": [
+        {"type": "thread.started"},
+        {"type": "item.completed", "item": {"type": "error", "message": "Model metadata for `definitely-invalid-model-3939` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}},
+        {"type": "turn.started"},
+        {"type": "turn.completed", "usage": {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0}}
+      ],
+      "provider_traffic": "none (no provider validation error, zero tokens)",
+      "verdict": "the same trusted root .codex/hooks.json entry dispatched from the nested cwd without the bypass flag"
+    },
+    {
+      "arm": "root_bypass_control",
+      "cwd": "<repo-root>",
+      "bypass_flag": true,
+      "thread_id": "019f771e-c47c-7a82-b4fe-963d8f4c385a",
+      "hook_dispatched": true,
+      "shim_invocation_log": "invoked sessions codex-loop-hook",
+      "observed_codex_events": [
+        {"type": "thread.started"},
+        {"type": "item.completed", "item": {"type": "error", "message": "`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}},
+        {"type": "item.completed", "item": {"type": "error", "message": "Model metadata for `definitely-invalid-model-3939` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}},
+        {"type": "turn.started"},
+        {"type": "turn.completed", "usage": {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0}}
+      ],
+      "provider_traffic": "none",
+      "verdict": "bypass still works and is loudly warned about; it is an explicit override, no longer the only way to activate an already-trusted hook"
+    },
+    {
+      "arm": "root_no_blocking_hook_negative_control",
+      "cwd": "<repo-root>",
+      "bypass_flag": false,
+      "thread_id": "019f7722-3308-7e33-904c-6b867e2ff7b0",
+      "hook_dispatched": true,
+      "shim_invocation_log": "(shim removed from PATH; the real non-blocking continuation hook ran)",
+      "observed_codex_events": [
+        {"type": "thread.started"},
+        {"type": "item.completed", "item": {"type": "error", "message": "Model metadata for `definitely-invalid-model-3939` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}},
+        {"type": "turn.started"},
+        {"type": "error", "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'definitely-invalid-model-3939' model is not supported when using Codex with a ChatGPT account.\"}}"},
+        {"type": "turn.failed"}
+      ],
+      "provider_traffic": "reached provider validation (HTTP 400 invalid_request_error)",
+      "verdict": "negative control: without a blocking decision the same command demonstrably reaches the provider, so the zero-traffic stops in the trust-only arms are caused by the dispatched hook block"
+    }
+  ],
+  "done_condition_checks": {
+    "exec_honors_persisted_trust_without_bypass": {
+      "pass": true,
+      "evidence": "root_persisted_trust_no_bypass: shim invocation logged and turn stopped at zero tokens with no bypass flag."
+    },
+    "root_and_nested_cwd_dispatch_same_entry": {
+      "pass": true,
+      "evidence": "Both no-bypass arms dispatched the identical trusted key '<repo-root>/.codex/hooks.json:user_prompt_submit:0:0' reported by hooks/list for both cwds."
+    },
+    "blocking_hook_stops_before_provider_traffic": {
+      "pass": true,
+      "evidence": "Both no-bypass arms: turn.completed with all-zero usage and no provider event, versus the negative control which reached provider HTTP 400."
+    },
+    "hooks_list_same_trusted_key_hash_no_warnings": {
+      "pass": true,
+      "evidence": "hooks/list for root and nested cwd returned the same key, currentHash sha256:3ce6cca8..., trustStatus trusted, warnings [] and errors [], after all exec arms ran."
+    },
+    "bypass_remains_explicit_override": {
+      "pass": true,
+      "evidence": "root_bypass_control still dispatches the hook and emits an explicit dangerous-flag warning; the trust-only arms prove it is no longer required."
+    }
+  },
+  "verdict": "PROVEN on Codex CLI 0.144.5: noninteractive codex exec now honors persisted project-hook trust. A hook reported trusted by hooks/list dispatches without --dangerously-bypass-hook-trust from both the repository root and a nested cwd, and a blocking UserPromptSubmit decision stops the turn before any provider/model/tool traffic. The defect reported in issue #3939 (reproduced through 0.144.4) is no longer reproducible; the fix landed upstream in the Codex CLI, not in this repository."
+}
