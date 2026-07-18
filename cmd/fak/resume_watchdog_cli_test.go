@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1180,50 +1181,78 @@ func TestResumeWatchdogPromptTransportMovesGuardFrontedWindowsPrompt(t *testing.
 	}
 }
 
-func TestResumeWatchdogDryRunLedgersSharedNextDecision(t *testing.T) {
-	rwHoldTestEnv(t)
-	dir := t.TempDir()
-	plan := filepath.Join(dir, "plan.json")
-	ledger := filepath.Join(dir, "resume_ledger.jsonl")
-	row := resume.WatchdogPlanRow{Session: "session-next", CWD: dir, Account: ""}
-	b, err := json.Marshal(struct {
-		Plan []resume.WatchdogPlanRow `json:"plan"`
-	}{Plan: []resume.WatchdogPlanRow{row}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(plan, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	oldSpawn := rwSpawnResumeLaunch
-	rwSpawnResumeLaunch = func(string, resume.WatchdogPlanRow, string, string, launchBrokerGrant) (int, error) { return 1, nil }
-	t.Cleanup(func() { rwSpawnResumeLaunch = oldSpawn })
-
-	var out, stderr strings.Builder
-	code := runResumeWatchdog(&out, &stderr, []string{"--plan", plan, "--reg-dir", dir, "--no-refresh"})
-	if code != 0 {
-		t.Fatalf("code=%d stderr=%s", code, stderr.String())
-	}
+func readResumeNextDecisions(t *testing.T, ledger string) []sessionctl.NextRecord {
+	t.Helper()
 	data, err := os.ReadFile(ledger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found struct {
-		Phase string                `json:"phase"`
-		Next  sessionctl.NextRecord `json:"next"`
-	}
+	var records []sessionctl.NextRecord
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		var row struct {
 			Phase string                `json:"phase"`
 			Next  sessionctl.NextRecord `json:"next"`
 		}
 		if json.Unmarshal([]byte(line), &row) == nil && row.Phase == "decision" {
-			found = row
-			break
+			records = append(records, row.Next)
 		}
 	}
-	if found.Phase != "decision" || !found.Next.Applied || found.Next.Move.Kind != sessionctl.MoveContinue || found.Next.Move.Render != sessionctl.RenderSystemDirective {
-		t.Fatalf("decision next = %+v", found)
+	return records
+}
+
+func TestResumeWatchdogNextWitnessMatchesSpawnOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		live      bool
+		spawnErr  error
+		wantApply bool
+		wantWhy   string
+	}{
+		{name: "dry-run-refused", wantWhy: "dry-run: launch not applied"},
+		{name: "spawn-failed-refused", live: true, spawnErr: errors.New("test spawn failure"), wantWhy: "spawn failed: test spawn failure"},
+		{name: "spawn-succeeded-applied", live: true, wantApply: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rwHoldTestEnv(t)
+			dir := t.TempDir()
+			plan := filepath.Join(dir, "plan.json")
+			ledger := filepath.Join(dir, "resume_ledger.jsonl")
+			row := resume.WatchdogPlanRow{Session: "session-next", CWD: dir, Account: "worker"}
+			b, err := json.Marshal(struct {
+				Plan []resume.WatchdogPlanRow `json:"plan"`
+			}{Plan: []resume.WatchdogPlanRow{row}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(plan, b, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			oldSpawn := rwSpawnResumeLaunch
+			rwSpawnResumeLaunch = func(string, resume.WatchdogPlanRow, string, string, launchBrokerGrant) (int, error) {
+				return 1, tc.spawnErr
+			}
+			t.Cleanup(func() { rwSpawnResumeLaunch = oldSpawn })
+
+			args := []string{"--plan", plan, "--no-refresh", "--reg-dir", dir, "--log-dir", dir, "--spacing-sec", "0"}
+			if tc.live {
+				args = append(args, "--live")
+			}
+			var out, stderr strings.Builder
+			if code := runResumeWatchdog(&out, &stderr, args); code != 0 {
+				t.Fatalf("code=%d stderr=%s", code, stderr.String())
+			}
+			records := readResumeNextDecisions(t, ledger)
+			if len(records) != 1 {
+				t.Fatalf("Next records=%d want 1: %+v\nstdout=%s", len(records), records, out.String())
+			}
+			got := records[0]
+			if got.Move.Kind != sessionctl.MoveContinue || got.Move.Render != sessionctl.RenderSystemDirective || got.Move.Session != sessionctl.SessionAutonomous {
+				t.Fatalf("move=%+v", got.Move)
+			}
+			if got.Applied != tc.wantApply || got.Refusal != tc.wantWhy {
+				t.Fatalf("Next=%+v want applied=%v refusal=%q", got, tc.wantApply, tc.wantWhy)
+			}
+		})
 	}
 }

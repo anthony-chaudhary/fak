@@ -282,15 +282,8 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		if d.Action == resume.WatchdogLaunch {
 			nextMove.Kind, nextMove.Render = sessionctl.MoveContinue, sessionctl.RenderSystemDirective
 			nextMove.Payload = p.ResumeTarget()
-		}
-		result := sessionctl.ApplyResult{Applied: d.Action == resume.WatchdogLaunch}
-		if d.Action != resume.WatchdogLaunch {
-			result.Refusal = d.Reason
-		}
-		if nextRecord, err := sessionctl.WitnessMove(nextMove, result); err != nil {
-			note("  NEXT-WITNESS %s skipped (fail-open): %v", sid8, err)
 		} else {
-			rwAppendLedger(ledgerPath, map[string]any{"ts": rwNowISO(), "session": p.Session, "phase": "decision", "next": nextRecord})
+			rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Refusal: d.Reason}, note)
 		}
 		// Count the per-session verdict the moment it is decided — launch, skip_self,
 		// skip_blocked, skip_operator_hold, … — so /debug/vars carries the live verdict mix
@@ -304,6 +297,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		backoff := resumebackoff.Decide(resumebackoff.Input{Session: p.Session, Signature: signature, Now: time.Now().UTC(), History: backoffHistory})
 		if !backoff.Eligible {
 			note("  SKIP %s — %s repeat=%d next=%s", sid8, backoff.Reason, backoff.Repeat, backoff.NextEligible.Format(time.RFC3339))
+			rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Refusal: backoff.Reason}, note)
 			rwAppendLedger(ledgerPath, map[string]any{"ts": rwNowISO(), "session": p.Session, "signature": signature, "phase": "deferred", "reason": backoff.Reason, "repeat": backoff.Repeat, "next_eligible": backoff.NextEligible})
 			continue
 		}
@@ -312,10 +306,12 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		grant := launchSpawnBroker(rwResumeBrokerAttempt(fakExe, claudeExe, p, resumeCfg, posture, driveCarry[p.Session]))
 		if !*live {
 			if !grant.Allow {
+				rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Refusal: "dry-run spawn broker denied: " + grant.Reason}, note)
 				note("  WOULD DENY %s acct=%s proj=%s — spawn broker: %s agent_run=%s policy_digest=%s",
 					sid8, acct, p.Project, grant.Reason, grant.Metadata.AgentRunID, grant.Metadata.PolicyDigest)
 				continue
 			}
+			rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Refusal: "dry-run: launch not applied"}, note)
 			note("  WOULD RESUME %s acct=%s proj=%s agent_run=%s policy_digest=%s",
 				sid8, acct, p.Project, grant.Metadata.AgentRunID, grant.Metadata.PolicyDigest)
 			continue
@@ -327,6 +323,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		// next tick. Fails open — a broken gate must never strand the whole watchdog.
 		if admit, reason := rwSourceAdmit(ledgerPath, regDir, time.Now()); !admit {
 			note("  DEFER %s acct=%s — per-source gate: %s", sid8, acct, reason)
+			rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Refusal: "source concurrency gate: " + reason}, note)
 			rwAppendLedger(ledgerPath, map[string]any{
 				"ts": rwNowISO(), "session": p.Session, "account": p.Account,
 				"resume_account": p.ResumeAccount,
@@ -336,6 +333,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		}
 
 		if !grant.Allow {
+			rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Refusal: "spawn broker denied: " + grant.Reason}, note)
 			note("  DENY %s acct=%s — spawn broker: %s agent_run=%s policy_digest=%s",
 				sid8, acct, grant.Reason, grant.Metadata.AgentRunID, grant.Metadata.PolicyDigest)
 			rwAppendLedger(ledgerPath, map[string]any{
@@ -350,6 +348,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		if p.Rehomed {
 			if !rehome.RehomeTranscript(p.RehomeSource(), resumeCfg, p.Project, p.Session, nil) {
 				note("  SKIP %s — re-home source transcript missing", sid8)
+				rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Refusal: "re-home source transcript missing"}, note)
 				continue
 			}
 			note("  RE-HOME %s %s -> %s (transcript copied; resuming on healthy account)",
@@ -359,8 +358,10 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		pid, err := rwSpawnResumeLaunch(claudeExe, p, resumeCfg, logDir, grant)
 		if err != nil {
 			note("  FAIL %s — spawn: %v", sid8, err)
+			rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Refusal: "spawn failed: " + err.Error()}, note)
 			continue
 		}
+		rwWitnessResumeNext(ledgerPath, p.Session, nextMove, sessionctl.ApplyResult{Applied: true}, note)
 		// Record the launch BEFORE anything else — a crash cannot double-launch in this
 		// tick. The gate keys on OUTCOME, not mere presence: phase="launched" marks an
 		// attempt whose result is unknown until the next tick reads the transcript.
@@ -407,6 +408,15 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 
 	note("  done: launched=%d sessions_in_ledger=%d", launched, len(history))
 	return 0
+}
+
+func rwWitnessResumeNext(ledgerPath, session string, move sessionctl.Move, result sessionctl.ApplyResult, note func(string, ...any)) {
+	nextRecord, err := sessionctl.WitnessMove(move, result)
+	if err != nil {
+		note("  NEXT-WITNESS %s skipped (fail-open): %v", shortID(session), err)
+		return
+	}
+	rwAppendLedger(ledgerPath, map[string]any{"ts": rwNowISO(), "session": session, "phase": "decision", "next": nextRecord})
 }
 
 // The pre-gate screens (self-resume guard, worker-account policy) and the probe-mode
