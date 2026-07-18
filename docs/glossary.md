@@ -14,6 +14,13 @@ This is the canonical docs-lane glossary for the term-conflation audit tracked i
 ([`docs/notes/VOCAB-DISAMBIGUATION-WORKLIST-2026-06-24.md`](notes/VOCAB-DISAMBIGUATION-WORKLIST-2026-06-24.md))
 is the source audit; this page is the stable reader-facing contract.
 
+This page carries the public vocabulary: product terms defined without internal
+shorthand. Its contributor-layer companion is the
+[concept glossary](fak/concept-glossary.md), which disambiguates implementation
+vocabulary — colliding Go identifiers, package names, and internal families. If
+the term you met is a code symbol, resolve it there; every product term resolves
+here.
+
 ## Canonical overloaded vocabulary
 
 | term | senses in this repo | house rule |

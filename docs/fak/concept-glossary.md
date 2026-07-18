@@ -16,6 +16,34 @@ The rule for an entry: one canonical name, one sentence on what it IS, and one
 sentence on what it is NOT (the sibling it is most confused with). When a concept is
 not yet in here, the scorecard counts it as coverage debt.
 
+## Start here: which glossary do you need?
+
+This page serves one primary audience: a **fak contributor** resolving
+implementation vocabulary — Go identifiers, package names, and internal families
+that collide in spelling. It is current, machine-verified reference material:
+every entry is anchored on disk and the concept-disambiguation scorecard checks
+those anchors, so an entry here is a live claim, not a historical note. New
+entries are appended at the tail of the page by the positioning tools, which is
+why late-positioned symbols appear after the "Read next" section.
+
+Product terms live one page over. The public vocabulary — session, agent,
+context, model, memory, tool vs skill, steering, the preflight/inflight/prefill
+split, and the cache-economics words a `fak guard` run prints — is defined in
+plain language in the [fak glossary](../glossary.md), and it resolves there
+without internal shorthand.
+
+| Your term looks like | Open | Examples |
+|---|---|---|
+| a product word, or a word a `fak` command printed | [the fak glossary](../glossary.md) — the default for public readers | session, rebate, preflight |
+| a Go identifier, package name, or internal family | this page | `abi.Verdict`, `ctxmmu`, `WitnessGrade` |
+
+One checkable next action — verify this page's entries are real and anchored
+(read-only; prints the current disambiguation grade):
+
+```bash
+python tools/concept_disambiguation_scorecard.py
+```
+
 ---
 
 ## The cache family
@@ -413,7 +441,7 @@ separates them is *what is being witnessed and where*.
 
 - **assume-check evidence kinds** (`internal/assumecheck`) - how an assumption's evidence
   is GATHERED. **WitnessCommandProbe** runs a command, **WitnessConfigFlag** reads a
-  config flag, and **WitnessLedgerRead** is a bespoke authority read of a ledger (NOT one
+  config flag, and **WitnessLedgerRead** is a purpose-built authority read of a ledger (NOT one
   of the generic probe kinds - it has no generic driver). **WitnessStatus** is the
   per-assumption FIELD declaring how the witness is wired, and **WitnessWired** is the
   status VALUE meaning it is fully wired. Field vs value vs gather-method - none is a
@@ -1138,3 +1166,17 @@ The stub-build (non-Apple-Silicon) test file q2_0_witness_test.go: it pins the t
 Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653).
 
 **Distinct from:** Audits the VERB-tier table (every cmd/fak dispatch verb carries a tier); distinct from gateTierDeclaredTree, which audits the LEAF/package tier (every internal/<leaf> declares a support tier). Both whole-tree hooks gates over a devindex source-of-truth; different subject table.
+
+
+### ForkSessionID
+
+The forked session id whose lookahead rollout produced a RolloutEvidence/Lesson (#5204): the twin session spun off to roll the trajectory forward under the fork-rollout runner.
+
+**Distinct from:** Identifies the throwaway FORK session a lookahead rollout ran in (evidence provenance), distinct from the live drive session it was forked from.
+
+
+### local_cache_hit
+
+A served prompt token reused from a KV prefix already resident on THIS box (an in-session prefix or a shared local KV store); one of the three cacheobs provenance-axis buckets (#3896, vLLM's by_source label).
+
+**Distinct from:** A LOCAL-residency reuse - NOT a cross-fabric external_kv_transfer (the disaggregated tier) and NOT a local_compute re-prefill; the near-free reuse a single box already earns.
