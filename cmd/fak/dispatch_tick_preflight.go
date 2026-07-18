@@ -771,17 +771,7 @@ func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, er
 	if err != nil {
 		return nil, err
 	}
-	return dispatchApplyAccountCooldown(rows, dispatchLoadAccountCooldownStore(), time.Now()), nil
-}
-
-// dispatchLoadAccountCooldownStore loads the shared account-cooldown store, failing
-// open (nil) when it is absent or unreadable so a missing store never wedges dispatch.
-func dispatchLoadAccountCooldownStore() *accounts.CooldownStore {
-	store, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
-	if err != nil {
-		return nil
-	}
-	return store
+	return dispatchApplyAccountCooldown(rows, loadCooldownStoreFailOpen(), time.Now()), nil
 }
 
 // dispatchApplyAccountCooldown marks every roster row whose upstream account holds an
@@ -850,7 +840,7 @@ func dispatchPreflightUsageCap(root, product string, seat dispatchtick.SeatCheck
 	if product == "codex" {
 		return dispatchtick.UsageCapAdvisory{}
 	}
-	store := dispatchLoadAccountCooldownStore()
+	store := loadCooldownStoreFailOpen()
 	if store == nil {
 		return dispatchtick.UsageCapAdvisory{}
 	}

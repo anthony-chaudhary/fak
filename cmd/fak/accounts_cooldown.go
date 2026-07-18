@@ -48,6 +48,19 @@ func defaultCooldownStorePath() string {
 	return filepath.Join(findRepoRoot(cwd), "tools", "_registry", "account-cooldown.json")
 }
 
+// loadCooldownStoreFailOpen loads the fleet-shared cooldown store for a cooldown-aware
+// resolution (Registry.ServeAt) and FAILS OPEN: an absent or unreadable store yields nil —
+// the cooldown-blind fold — so bad cooldown state can never block a resolve, launch, or
+// dispatch preflight (#4675). Callers that must EXPLAIN unreadability (the status and
+// cooldown verbs) load the store themselves and surface the error instead.
+func loadCooldownStoreFailOpen() *accounts.CooldownStore {
+	store, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
+	if err != nil {
+		return nil
+	}
+	return store
+}
+
 // accountsCooldown is the `fak accounts cooldown` surface: with no --clear, it
 // lists the accounts currently within an active cooldown window (the seats the
 // login overlay is dropping from the pool) and when each returns; with --clear

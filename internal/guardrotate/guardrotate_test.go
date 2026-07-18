@@ -186,6 +186,66 @@ func TestPlanPicksRoomiestAmongOfferable(t *testing.T) {
 	}
 }
 
+// TestPlanServeAtSkipsCooledRotationTarget is #4675's caller-side witness: the rotation
+// DECISION can pick a seat off a stale-positive headroom row while the fleet-shared store
+// has ALREADY cooled that seat's account (the probe lags the wall). The cooldown-blind
+// Serve stopped ON that seat — trading one walled seat for another — so the resolve step
+// must be the cooldown-aware ServeAt, which walks PAST the cooled decision seat along its
+// rehome chain onto the live pool-mate.
+func TestPlanServeAtSkipsCooledRotationTarget(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	reset := now.Add(2 * time.Hour)
+	bob := grHome("bob", "/home/.claude-bob", "u-bob")
+	bob.RehomeTo = "carol" // bob's own fall-forward: the live pool-mate
+	reg := accounts.Registry{Homes: []accounts.Home{
+		grHome("alice", "/home/.claude", "u-alice"),
+		bob,
+		grHome("carol", "/home/.claude-carol", "u-carol"),
+	}}
+	// BOTH alice (ambient) and bob are cooled in the store; carol is free.
+	store := grStore(t, now, reset, "uuid:u-alice", "uuid:u-bob")
+	// Stale headroom: bob still reads offerable (the probe ran before bob's cap landed),
+	// so NextRotationDecision picks bob.
+	hr := accounts.RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 1.5, "uuid:u-carol": 1.2}
+
+	dir, note, ok := Plan(reg, store, hr, "/home/.claude", now)
+	if !ok {
+		t.Fatal("expected a rotation onto the live pool-mate, got ok=false")
+	}
+	if guardWantDir(dir) != guardWantDir("/home/.claude-carol") {
+		t.Fatalf("rotated dir = %q, want carol's (the cooled decision seat must be walked past)", dir)
+	}
+	if note.From != "alice" || note.To != "carol" {
+		t.Fatalf("note = %+v, want From=alice To=carol (the seat actually landed on)", note)
+	}
+	if note.Headroom != nil {
+		t.Fatalf("note.Headroom = %v, want nil — bob's score does not describe carol", *note.Headroom)
+	}
+}
+
+// TestPlanEveryReachableSeatCooledFailsOpen: the decision seat's account is cooled in the
+// store (a stale-positive headroom row again) AND its fall-forward reaches no serving seat,
+// so ServeAt reports the all-cooled terminal (non-nil entry). Rotating onto a seat that is
+// itself walled buys nothing over staying, so Plan must fail open and keep the current dir.
+// (The blind Serve happily returned the cooled seat's dir here.)
+func TestPlanEveryReachableSeatCooledFailsOpen(t *testing.T) {
+	now := grMustTime(t, "2026-07-07T12:00:00Z")
+	reg := accounts.Registry{Homes: []accounts.Home{
+		grHome("alice", "/home/.claude", "u-alice"),
+		grHome("bob", "/home/.claude-bob", "u-bob"),
+	}}
+	store := grStore(t, now, now.Add(2*time.Hour), "uuid:u-alice", "uuid:u-bob")
+	hr := accounts.RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 1.5} // stale: bob's cap not yet probed
+
+	dir, _, ok := Plan(reg, store, hr, "/home/.claude", now)
+	if ok {
+		t.Fatalf("an all-cooled pool must fail open, got ok=true dir=%q", dir)
+	}
+	if dir != "/home/.claude" {
+		t.Fatalf("fail-open must keep the original dir, got %q", dir)
+	}
+}
+
 // TestPlanNotCooledIsNoop is the warm common case — the ambient seat's account is not
 // cooled, so Plan is a no-op and the caller keeps the original dir. Zero behavior change for
 // every normal launch.

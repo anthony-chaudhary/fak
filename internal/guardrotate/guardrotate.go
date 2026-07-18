@@ -108,16 +108,28 @@ func Plan(reg accounts.Registry, store *accounts.CooldownStore, hr accounts.Rota
 	if !hasRoom(dec.Seat.Headroom) && resetImminent(entry.ResetAt, now) {
 		return cur, Note{}, false
 	}
-	home, _, err := reg.Serve(dec.Seat.Name)
-	if err != nil || strings.TrimSpace(home.Dir) == "" {
+	// Resolve the chosen seat through the cooldown-aware fall-forward (#4675). The blind
+	// Serve stopped ON the decision seat even when the fleet-shared store had already
+	// cooled its account (the headroom row lags the wall), trading one walled seat for
+	// another. ServeAt walks past cooled pool-mates; a non-nil cdEntry is its all-cooled
+	// terminal — even the fall-forward landed on a walled seat — where rotating buys
+	// nothing over staying, so fail open.
+	home, _, cdEntry, err := reg.ServeAt(dec.Seat.Name, store, now)
+	if err != nil || cdEntry != nil || strings.TrimSpace(home.Dir) == "" {
 		return cur, Note{}, false
 	}
-	return home.Dir, Note{
+	note := Note{
 		From:     h.Name,
-		To:       dec.Seat.Name,
+		To:       home.Name,
 		ResetAt:  entry.ResetAt,
 		Headroom: dec.Seat.Headroom,
-	}, true
+	}
+	if home.Name != dec.Seat.Name {
+		// The fall-forward walked past the decision seat: its headroom score does not
+		// describe the seat we actually landed on.
+		note.Headroom = nil
+	}
+	return home.Dir, note, true
 }
 
 // PersistCooldownForRehome records a self-recovering usage-limit cooldown for the account a

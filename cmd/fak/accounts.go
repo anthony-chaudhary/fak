@@ -562,8 +562,9 @@ func accountsVersion(stdout io.Writer, asJSON bool) int {
 }
 
 // accountsResolve prints the config dir that serves <name>: rehoming to a live seat by default
-// (Serve), or pinning to the exact seat with --pin (Resolve). With --env it prints
-// CLAUDE_CONFIG_DIR=<dir> for eval/wrappers, else the bare dir.
+// (the cooldown-aware ServeAt, #4675 — a seat inside an active usage-limit window is walked
+// past), or pinning to the exact seat with --pin (the pure Resolve — the raw static rehome
+// pointer). With --env it prints CLAUDE_CONFIG_DIR=<dir> for eval/wrappers, else the bare dir.
 // accountsLoadFor resolves the shared `fak accounts <verb> <name>` prologue: it resolves the
 // target seat, loads-or-discovers the registry, and refreshes it from disk (Serve/Resolve/Pull
 // all need disk-derived identity). The positional is the primary form for back-compat; nameFlag
@@ -592,31 +593,55 @@ func accountsLoadFor(stderr io.Writer, positional []string, nameFlag, usage, reg
 }
 
 func accountsResolve(stdout, stderr io.Writer, positional []string, nameFlag, registryPath, homeDir string, pin, asEnv bool) int {
-	// Rehome is the DEFAULT (a seat that can't serve falls forward to a live one); --pin is the
-	// strict opt-in. The shared prologue refreshes the registry from disk for that identity.
+	// Rehome is the DEFAULT (a seat that can't serve — including one whose account is inside
+	// an active cooldown window — falls forward to a live one); --pin is the strict opt-in.
+	// The shared prologue refreshes the registry from disk for that identity.
 	name, reg, code, ok := accountsLoadFor(stderr, positional, nameFlag, "usage: fak accounts resolve <name>|--name <name> [--env]", registryPath, homeDir)
 	if !ok {
 		return code
 	}
-	var home accounts.Home
-	var chain []string
-	var err error
-	if pin {
-		home, chain, err = reg.Resolve(name)
-	} else {
-		home, chain, err = reg.Serve(name)
-	}
+	home, chain, entry, err := accountsResolveServe(reg, name, pin, loadCooldownStoreFailOpen(), time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
 	}
 	accountsReportHome(stderr, home, chain)
+	warnAllCooled(stderr, home, entry)
 	if asEnv {
 		fmt.Fprintf(stdout, "CLAUDE_CONFIG_DIR=%s\n", home.Dir)
 	} else {
 		fmt.Fprintln(stdout, home.Dir)
 	}
 	return 0
+}
+
+// accountsResolveServe is the pure serve step of `fak accounts resolve` (#4675): the default
+// resolution is COOLDOWN-AWARE — ServeAt with the fleet-shared store, so the answer lands on
+// a seat that can actually serve now, walking past accounts inside an active usage-limit
+// window — while pin keeps the pure, cooldown-blind Resolve for the "where does the static
+// rehome pointer go?" question. entry is ServeAt's all-cooled degraded signal (always nil
+// from the pin path, which cannot degrade). Split from the I/O wrapper so the
+// skip-a-cooled-seat contract is unit-testable without a disk registry or the fleet-shared
+// store path.
+func accountsResolveServe(reg accounts.Registry, name string, pin bool, cd *accounts.CooldownStore, now time.Time) (accounts.Home, []string, *accounts.CooldownEntry, error) {
+	if pin {
+		home, chain, err := reg.Resolve(name)
+		return home, chain, nil, err
+	}
+	return reg.ServeAt(name, cd, now)
+}
+
+// warnAllCooled surfaces ServeAt's all-cooled terminal on stderr: every reachable,
+// otherwise-serveable seat is inside an active cooldown window, and the resolution landed on
+// the one with the SOONEST reset rather than failing loud. A nil entry (some seat truly
+// serves) prints nothing. Shared by `accounts resolve` and `accounts launch` so both degrade
+// with the same explanation.
+func warnAllCooled(stderr io.Writer, home accounts.Home, entry *accounts.CooldownEntry) {
+	if entry == nil {
+		return
+	}
+	fmt.Fprintf(stderr, "warning: every serveable seat is cooling down — %q has the soonest reset (%s)\n",
+		home.Name, entry.ResetAt.UTC().Format(time.RFC3339))
 }
 
 // accountsNext runs the live rotation read and prints the next eligible account — the next

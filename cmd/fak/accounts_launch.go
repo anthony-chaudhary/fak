@@ -327,13 +327,19 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	}
 
 	// Rehome by default (a tombstoned/unservable seat falls forward to a live one), exactly
-	// as `fak accounts resolve` does without --pin.
-	home, chain, err := reg.Serve(name)
+	// as `fak accounts resolve` does without --pin — and cooldown-aware (#4675): the walk
+	// consults the fleet-shared cooldown store, so a launch skips seats whose account is
+	// inside an active usage-limit window instead of stranding the session on a throttled
+	// seat. In the all-cooled terminal (non-nil cdEntry) the launch proceeds on the
+	// soonest-reset seat with a warning: a seat that resets soon still beats refusing to
+	// launch at all.
+	home, chain, cdEntry, err := reg.ServeAt(name, loadCooldownStoreFailOpen(), time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", err)
 		return 1
 	}
 	id := accountsReportHome(stderr, home, chain)
+	warnAllCooled(stderr, home, cdEntry)
 
 	command := strings.TrimSpace(p.command)
 	if command == "" {
