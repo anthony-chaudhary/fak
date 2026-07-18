@@ -462,6 +462,8 @@ var tier = map[string]int{
 	"steerpr":               1, // #5015: pure fold of stamped trunk commits into operator-legible PR units + attention bands; the band is a VIEW over dispatchtick's witness verdicts (supplied by the caller), which is what keeps this leaf stdlib-only and off the hot path.
 	"tokencache":            1, // #4330: persisted, git-common-dir-anchored backing store for clonescan's per-file token windows (content-addressed under the tokenizer version); imports only tier-1 siblings (clonescan for the window contract, windowgate to suppress its one `git rev-parse` spawn), does its own disk I/O, off the hot path.
 	"guardcorpus":           2, // guarded-session corpus fold consumes journal semantics and emits durable analysis records; off the request hot path.
+	"amendclass":            3, // #5171: reflection-backed registry classifying every adjudicator.Policy knob by amendment class (Frozen/Ratchet/GatedWiden) + a conformance test binding the registry to the live struct; imports adjudicator(2) for the reflected field set, else stdlib-only, off the hot path.
+	"stripeload":            1, // #4298: pure chunk-planner + striping io.ReaderAt that fans one logical read across N byte-identical mirrors proportionally to measured bandwidth (the same fan-out later stripes {NVMe, peer-RAM, S3}); stdlib-only, callers own I/O policy and bandwidth measurement.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -502,7 +504,7 @@ var pureRoot = map[string]bool{
 	"rsl": true, "savingsvector": true, "seatpark": true, "sensecheck": true, "sessionaudit": true, "sessiondesc": true,
 	"sessionread": true, "sessionsignals": true, "sessionsteer": true, "signals": true, "simhash": true, "slackenv": true,
 	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "steerpr": true, "stepbaton": true, "stopfailure": true,
-	"strmatch": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
+	"stripeload": true, "strmatch": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
 	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "tuiplugin": true, "turnkind": true, "uiquality": true, "unwitnessedclaim": true, "urllint": true, "vllmcompile": true,
 	"wipattr": true, "wiprecon": true, "wipref": true, "workerenvelope": true, "workflow": true, "workflowlint": true,
 	"worklog": true, "worktreewitness": true, "worktype": true, "xprobe": true,
