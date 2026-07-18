@@ -84,7 +84,7 @@ they are done. The live status of each is tracked as GitHub issues.
 
 - **Durable sessions (planned).** A SQLite-backed session and turn store so a
   long agent run survives a restart — the strongest host seam borrowed from the
-  best-in-class proxy harnesses. Milestone **M#1 Durable sessions**; task handoff
+  established proxy harnesses. Milestone **M#1 Durable sessions**; task handoff
   at session completion is [#1434](https://github.com/anthony-chaudhary/fak/issues/1434),
   WAL-class turn persistence is [#1363](https://github.com/anthony-chaudhary/fak/issues/1363).
   Demonstrated in the `fak guard -- claude` front door; **not yet** milestone-landed.
