@@ -12,7 +12,6 @@ package modver
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -113,15 +112,7 @@ func FoldWeekly(ledger []byte, live map[string]bool, now time.Time) WeeklyDigest
 
 	agg := map[string]*weeklyAgg{}
 	totalParsed := 0
-	for _, line := range bytes.Split(ledger, []byte{'\n'}) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var row LedgerRow
-		if err := json.Unmarshal(line, &row); err != nil || row.Module == "" {
-			continue
-		}
+	for _, row := range parseLedgerRows(ledger) {
 		totalParsed++
 		if row.TS >= startStr && row.TS <= nowStr {
 			d.LedgerRows++

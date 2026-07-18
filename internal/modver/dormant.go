@@ -1,8 +1,6 @@
 package modver
 
 import (
-	"bytes"
-	"encoding/json"
 	"sort"
 	"time"
 )
@@ -82,15 +80,7 @@ func Dormant(ledger []byte, issues []OpenIssue, now time.Time, days int) Dormant
 		rev                int
 	}
 	latest := map[string]modInfo{}
-	for _, line := range bytes.Split(ledger, []byte{'\n'}) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var row LedgerRow
-		if err := json.Unmarshal(line, &row); err != nil || row.Module == "" {
-			continue
-		}
+	for _, row := range parseLedgerRows(ledger) {
 		if cur, ok := latest[row.Module]; ok && row.TS < cur.ts {
 			continue
 		}

@@ -1,8 +1,6 @@
 package modver
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -51,15 +49,7 @@ func Trend(ledger []byte) TrendReport {
 	}
 	seen := map[string]*bounds{}
 	var rep TrendReport
-	for _, line := range bytes.Split(ledger, []byte{'\n'}) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var row LedgerRow
-		if err := json.Unmarshal(line, &row); err != nil || row.Module == "" {
-			continue
-		}
+	for _, row := range parseLedgerRows(ledger) {
 		rep.Rows++
 		if rep.Window[0] == "" || row.TS < rep.Window[0] {
 			rep.Window[0] = row.TS

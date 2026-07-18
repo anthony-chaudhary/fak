@@ -449,6 +449,25 @@ type LedgerRow struct {
 	ScoreProvenance string `json:"score_provenance,omitempty"`
 }
 
+// parseLedgerRows decodes an append-only module-versions ledger into its rows in
+// file order, skipping blank lines and any scarred (unparseable or module-less)
+// entry — an append-only ledger a fleet writes will have scars.
+func parseLedgerRows(ledger []byte) []LedgerRow {
+	var rows []LedgerRow
+	for _, line := range bytes.Split(ledger, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var row LedgerRow
+		if err := json.Unmarshal(line, &row); err != nil || row.Module == "" {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 // DeltaRows computes the ledger rows a stamp should append: one row per module
 // whose rev (or score) moved since its last row in the existing ledger, so the
 // ledger grows proportionally to actual change. Unparseable prior lines are
@@ -460,15 +479,7 @@ func DeltaRows(rep Report, prevLedger []byte, ts string) []LedgerRow {
 		provenance string
 	}
 	prev := map[string]last{}
-	for _, line := range bytes.Split(prevLedger, []byte{'\n'}) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var row LedgerRow
-		if err := json.Unmarshal(line, &row); err != nil || row.Module == "" {
-			continue
-		}
+	for _, row := range parseLedgerRows(prevLedger) {
 		prev[row.Module] = last{rev: row.Rev, score: row.Score, provenance: row.ScoreProvenance}
 	}
 	var rows []LedgerRow
