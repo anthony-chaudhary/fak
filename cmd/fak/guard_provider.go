@@ -283,6 +283,17 @@ func guardEnvValue(provider, gwURL string) string {
 // OPENAI_API_BASE), plus ANTHROPIC_BASE_URL pointed at the same guard. That last var is
 // load-bearing for `fak guard --local -- claude`: the upstream proxy hop is OpenAI
 // compatible, but Claude Code still speaks Anthropic Messages to the local guard.
+//
+// The Anthropic wire additionally carries ENABLE_TOOL_SEARCH=true (#5049, Headroom
+// GH#746): Claude Code stops DEFERRING its MCP/system tool schemas — materializing all
+// ~35.8k tokens of them into context — when ANTHROPIC_BASE_URL is a custom host and
+// ENABLE_TOOL_SEARCH is unset. Guard repoints the base URL, so it must also set the
+// guard var or a plain `fak guard -- claude` silently pays the full tool-schema floor
+// before the request even reaches the gateway. Client-side complement of the gateway's
+// --defer-cold-tools (#3232) and fenced the same way — Anthropic wire only, since the
+// deferred schemas fault in provider-side and a non-Anthropic upstream cannot serve the
+// tool_search fault-in. An operator-set ENABLE_TOOL_SEARCH is never overridden, and an
+// explicit --env override still yields exactly its one var.
 func guardInjectedEnv(provider, override, gwURL string) [][2]string {
 	val := guardEnvValue(provider, gwURL)
 	primary := guardEnvVar(provider, override)
@@ -291,8 +302,20 @@ func guardInjectedEnv(provider, override, gwURL string) [][2]string {
 		pairs = append(pairs, [2]string{"OPENAI_API_BASE", val})
 		pairs = append(pairs, [2]string{"ANTHROPIC_BASE_URL", guardEnvValue("anthropic", gwURL)})
 	}
+	if strings.TrimSpace(override) == "" && provider == "anthropic" &&
+		strings.TrimSpace(os.Getenv(guardEnableToolSearchEnv)) == "" {
+		pairs = append(pairs, [2]string{guardEnableToolSearchEnv, guardEnableToolSearchValue})
+	}
 	return pairs
 }
+
+// guardEnableToolSearchEnv preserves Claude Code's own tool-schema deferral across the
+// base-URL repoint (#5049): with a custom ANTHROPIC_BASE_URL and this var unset, the
+// client materializes every tool schema into context (Headroom GH#746).
+const (
+	guardEnableToolSearchEnv   = "ENABLE_TOOL_SEARCH"
+	guardEnableToolSearchValue = "true"
+)
 
 const (
 	guardClaudeAutoCompactWindowEnv    = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"

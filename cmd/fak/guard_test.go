@@ -361,10 +361,14 @@ func TestResolveGuardProvider(t *testing.T) {
 
 func TestGuardInjectedEnv(t *testing.T) {
 	const gw = "http://127.0.0.1:8137"
+	t.Setenv(guardEnableToolSearchEnv, "")
 
-	// Anthropic: exactly one var, the bare host (the client appends /v1/messages).
-	if got := guardInjectedEnv("anthropic", "", gw); len(got) != 1 || got[0] != [2]string{"ANTHROPIC_BASE_URL", gw} {
-		t.Errorf("anthropic injected = %v, want one ANTHROPIC_BASE_URL=%s", got, gw)
+	// Anthropic: the bare host (the client appends /v1/messages), plus the
+	// ENABLE_TOOL_SEARCH guard (#5049) so Claude Code keeps deferring its tool
+	// schemas across the custom-base-URL repoint (Headroom GH#746).
+	wantAnthropic := [][2]string{{"ANTHROPIC_BASE_URL", gw}, {guardEnableToolSearchEnv, guardEnableToolSearchValue}}
+	if got := guardInjectedEnv("anthropic", "", gw); !reflect.DeepEqual(got, wantAnthropic) {
+		t.Errorf("anthropic injected = %v, want %v", got, wantAnthropic)
 	}
 
 	// OpenAI wire with no --env: the OpenAI conventional base-URL vars carry /v1, while
@@ -379,10 +383,30 @@ func TestGuardInjectedEnv(t *testing.T) {
 		}
 	}
 
-	// An explicit --env override yields exactly that one var (no OPENAI_API_BASE alias),
-	// still carrying the /v1 the OpenAI wire needs.
+	// An explicit --env override yields exactly that one var (no OPENAI_API_BASE alias,
+	// no ENABLE_TOOL_SEARCH), still carrying the /v1 the OpenAI wire needs.
 	if got := guardInjectedEnv("openai", "MY_BASE", gw); len(got) != 1 || got[0] != [2]string{"MY_BASE", gw + "/v1"} {
 		t.Errorf("override injected = %v, want one MY_BASE=%s/v1", got, gw)
+	}
+
+	// An explicit --env override on the Anthropic wire also stays exactly one var:
+	// the operator took manual control of the repoint, so guard adds nothing.
+	if got := guardInjectedEnv("anthropic", "MY_BASE", gw); len(got) != 1 || got[0] != [2]string{"MY_BASE", gw} {
+		t.Errorf("anthropic override injected = %v, want one MY_BASE=%s", got, gw)
+	}
+}
+
+// TestGuardInjectedEnvKeepsOperatorToolSearch pins the #5049 fail-safe: a
+// user-provided ENABLE_TOOL_SEARCH (any value, including an explicit opt-out) is
+// never overwritten by the guard injection.
+func TestGuardInjectedEnvKeepsOperatorToolSearch(t *testing.T) {
+	const gw = "http://127.0.0.1:8137"
+	t.Setenv(guardEnableToolSearchEnv, "false")
+
+	got := guardInjectedEnv("anthropic", "", gw)
+	want := [][2]string{{"ANTHROPIC_BASE_URL", gw}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("anthropic injected with operator ENABLE_TOOL_SEARCH = %v, want %v", got, want)
 	}
 }
 
