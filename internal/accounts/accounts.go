@@ -42,6 +42,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/canon"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
@@ -393,7 +394,7 @@ func (r Registry) Resolve(name string) (Home, []string, error) {
 // name, it follows the chain until stop(h) is true (the seat that serves), returning that
 // seat and the ordered list of tombstoned names hopped through. It is fail-loud the same
 // way for both callers: an unknown name, an unknown rehome target, or a cycle is an error
-// — never a silent fallback. The two callers differ only in stop (Active vs serveable)
+// — never a silent fallback. The callers differ only in stop (Active vs serveableAt)
 // and in next, which yields the next name to walk to (or an error when there is nowhere
 // to fall forward); next is consulted only after the current seat is recorded in chain.
 func (r Registry) walkRehome(name string, stop func(Home) bool, next func(Home) (string, error)) (Home, []string, error) {
@@ -424,12 +425,33 @@ func (r Registry) walkRehome(name string, stop func(Home) bool, next func(Home) 
 	}
 }
 
-// serveable reports whether a seat can run a session right now. The closed login status
+// serveableAt reports whether a seat can run a session right now, with an optional
+// usage-limit cooldown overlay. The static half is CanServe — the closed login status
 // vocabulary owns that definition so launch, rotation, and human status surfaces do not
-// drift: ready means active, enabled, present on disk, and carrying live credentials. It
-// reads disk-derived Identity, so callers should Refresh the registry first.
-func (r Registry) serveable(h Home) bool {
-	return h.CanServe()
+// drift: ready means active, enabled, present on disk, and carrying live credentials.
+// The overlay half reads the CooldownStore the same way LoginReportAt does: an
+// otherwise-serveable seat whose upstream ACCOUNT has an active cooldown at now is NOT
+// serveable — rehoming onto it would just bounce off the same usage wall (#4673). A nil
+// store or zero now applies no overlay, so serveableAt(h, nil, time.Time{}) equals
+// h.CanServe() exactly. It reads disk-derived Identity, so callers should Refresh the
+// registry first.
+func serveableAt(h Home, cd *CooldownStore, now time.Time) bool {
+	if !h.CanServe() {
+		return false
+	}
+	_, cooled := cooldownFor(h, cd, now)
+	return !cooled
+}
+
+// cooldownFor returns the active cooldown entry for h's upstream account at now, and
+// whether one holds. A nil store or zero now means no cooldown overlay (never cooled),
+// mirroring LoginReportAt's gate, so zero-value callers keep the pure, cooldown-blind
+// fold.
+func cooldownFor(h Home, cd *CooldownStore, now time.Time) (CooldownEntry, bool) {
+	if cd == nil || now.IsZero() {
+		return CooldownEntry{}, false
+	}
+	return cd.CooledDown(h.Identity.AccountKey(), now)
 }
 
 // Serve resolves name to the seat that should actually run it, REHOMING BY DEFAULT.
@@ -442,10 +464,59 @@ func (r Registry) serveable(h Home) bool {
 // requested seat is returned as-is (rehome only kicks in when needed). Use Resolve when
 // you truly need to PIN to an exact seat. Serve reads disk-derived Identity, so Refresh
 // first; an unknown name is still fail-loud (a typo must not silently rehome).
+//
+// Serve is ServeAt with no cooldown overlay: it cannot see usage-limit throttling, so a
+// throttled-but-logged-in seat still reads as serving. A caller that holds the
+// CooldownStore should call ServeAt so the fall-forward walks PAST throttled seats.
 func (r Registry) Serve(name string) (Home, []string, error) {
-	return r.walkRehome(name, r.serveable, func(h Home) (string, error) {
-		next := h.RehomeTo
-		if next == "" {
+	h, chain, _, err := r.ServeAt(name, nil, time.Time{})
+	return h, chain, err
+}
+
+// ServeAt is Serve with the usage-limit cooldown overlay the rehome walk was blind to
+// (#4673): the fall-forward stop predicate is serveableAt, so an otherwise-Ready seat
+// whose account has an active cooldown at now is walked PAST — recorded in chain like
+// any other non-serving hop — instead of stopped on. A nil cd or zero now applies no
+// overlay, making ServeAt(name, nil, time.Time{}) behave exactly like Serve always has.
+//
+// The returned *CooldownEntry is the explicit all-cooled signal for the terminal case
+// where the chain reaches ONLY cooled-down seats: rather than fail loud (a throttled
+// seat that resets in 20 minutes still beats a hard resolution error) or silently land
+// on a throttled seat (the bug this fixes), ServeAt returns the reachable
+// otherwise-serveable seat with the SOONEST reset, its active cooldown entry (non-nil
+// ⇔ degraded, ResetAt says when it returns), and the chain of hops that reached it.
+// When any seat truly serves, the entry is nil. Structural failures — unknown name,
+// dangling rehome, cycle among unserveable seats, nowhere to fall forward — stay
+// fail-loud exactly as in Serve.
+func (r Registry) ServeAt(name string, cd *CooldownStore, now time.Time) (Home, []string, *CooldownEntry, error) {
+	// cooled collects the seats the walk refused ONLY because of an active cooldown —
+	// otherwise-serveable pool members — with each one's active entry and the length of
+	// the chain that reached it, so the all-cooled terminal case below can still resolve.
+	type cooledSeat struct {
+		home     Home
+		entry    CooldownEntry
+		chainLen int
+	}
+	var cooled []cooledSeat
+	walked := 0
+	stop := func(h Home) bool {
+		if serveableAt(h, cd, now) {
+			return true
+		}
+		if h.CanServe() {
+			// Refused purely by the cooldown overlay: remember it as a degraded-mode
+			// candidate. walkRehome appends h to chain right after a false stop, so the
+			// chain that reaches h is exactly the walked hops so far.
+			if e, ok := cooldownFor(h, cd, now); ok {
+				cooled = append(cooled, cooledSeat{home: h, entry: e, chainLen: walked})
+			}
+		}
+		walked++
+		return false
+	}
+	next := func(h Home) (string, error) {
+		nxt := h.RehomeTo
+		if nxt == "" {
 			// No explicit rehome target: fall forward to a ROLE seat. Prefer the anchor (its
 			// whole job is to be the always-available fall-forward); if no anchor is set, the
 			// active seat is the next-best stable target. A role pointing back at the seat we
@@ -454,10 +525,30 @@ func (r Registry) Serve(name string) (Home, []string, error) {
 			if !ok {
 				return "", fmt.Errorf("accounts: %q cannot serve and has no rehome_to, anchor, or active seat to fall forward to", h.Name)
 			}
-			next = fb
+			nxt = fb
 		}
-		return next, nil
-	})
+		return nxt, nil
+	}
+	h, chain, err := r.walkRehome(name, stop, next)
+	if err == nil {
+		return h, chain, nil, nil
+	}
+	if len(cooled) == 0 {
+		// No seat was refused for cooldown alone, so the walk failed for a structural
+		// reason — identical to Serve's fail-loud behavior.
+		return h, chain, nil, err
+	}
+	// Every reachable, otherwise-serveable seat is cooled down (the walk only ran out of
+	// road because the overlay refused them all). Resolve to the soonest-reset one and
+	// say so via its entry; ties keep the first-walked seat for determinism.
+	best := cooled[0]
+	for _, c := range cooled[1:] {
+		if c.entry.ResetAt.Before(best.entry.ResetAt) {
+			best = c
+		}
+	}
+	entry := best.entry
+	return best.home, chain[:best.chainLen], &entry, nil
 }
 
 // fallbackSeat returns the role seat to fall forward onto when the seat named avoid can't

@@ -420,6 +420,164 @@ func TestServeUnknownFailsLoud(t *testing.T) {
 	}
 }
 
+// cooldownServeFixture is serveFixture's cooldown-aware sibling (#4673): every live seat
+// has creds and a distinct account UUID, so the ONLY thing that can make one unserveable
+// is the CooldownStore overlay. "gone" is the tombstoned seat whose rehome chain points
+// at "sink" — the throttled-sink shape from the live audit — and "anchor-seat" is the
+// fall-forward anchor.
+func cooldownServeFixture() Registry {
+	id := func(name, uuid string) Identity {
+		return Identity{Email: name + "@example.test", AccountUUID: uuid, Exists: true, HasCreds: true}
+	}
+	return Registry{
+		Roles: map[string]string{RoleAnchor: "anchor-seat"},
+		Homes: []Home{
+			{Name: "anchor-seat", Dir: "/h/.claude-anchor-seat", Identity: id("anchor", "u-anchor")},
+			{Name: "sink", Dir: "/h/.claude-sink", Identity: id("sink", "u-sink")},
+			{Name: "gone", Status: StatusTombstoned, RehomeTo: "sink"},
+		},
+	}
+}
+
+// TestServeAtWalksPastCooledDownSeat is the #4673 repro: a tombstone whose rehome chain
+// points at a throttled seat. Cooldown-blind Serve stops ON the throttled sink (the bug
+// shape — documented here so the baseline is explicit); ServeAt with the store walks
+// PAST it to the serving anchor.
+func TestServeAtWalksPastCooledDownSeat(t *testing.T) {
+	r := cooldownServeFixture()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
+	cd.Cool(UUIDBucketKey("u-sink"), CooldownUsageLimit, "weekly limit", now, now.Add(2*time.Hour))
+
+	h, _, err := r.Serve("gone")
+	if err != nil || h.Name != "sink" {
+		t.Fatalf("cooldown-blind Serve = %q,%v, want the throttled sink (the documented blind baseline)", h.Name, err)
+	}
+
+	h, chain, entry, err := r.ServeAt("gone", cd, now)
+	if err != nil {
+		t.Fatalf("ServeAt: %v", err)
+	}
+	if h.Name != "anchor-seat" {
+		t.Fatalf("ServeAt landed on %q, want anchor-seat (must not stop on the throttled sink)", h.Name)
+	}
+	if strings.Join(chain, ",") != "gone,sink" {
+		t.Fatalf("chain = %v, want [gone sink] (the cooled hop is walked past, so it is a hop)", chain)
+	}
+	if entry != nil {
+		t.Fatalf("a serving seat was reachable, so the all-cooled entry must be nil, got %+v", entry)
+	}
+}
+
+// TestServeAtRehomesCooledRequestedSeat covers the directly-pinned case: the requested
+// seat itself is otherwise Ready but throttled, so it falls forward like any other
+// unserveable seat instead of serving into the wall.
+func TestServeAtRehomesCooledRequestedSeat(t *testing.T) {
+	r := cooldownServeFixture()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
+	cd.Cool(UUIDBucketKey("u-sink"), CooldownUsageLimit, "weekly limit", now, now.Add(2*time.Hour))
+
+	h, chain, entry, err := r.ServeAt("sink", cd, now)
+	if err != nil {
+		t.Fatalf("ServeAt: %v", err)
+	}
+	if h.Name != "anchor-seat" || strings.Join(chain, ",") != "sink" || entry != nil {
+		t.Fatalf("ServeAt(sink) = %q chain=%v entry=%v, want anchor-seat via [sink] with nil entry", h.Name, chain, entry)
+	}
+}
+
+// TestServeAtNilStoreMatchesServe proves the DoD delegation contract: Serve IS
+// ServeAt(name, nil, time.Time{}) — no overlay, byte-for-byte the historical behavior —
+// across every serve shape the existing fixtures exercise (serveable as-is, tombstone
+// rehome, unserveable fall-forward, explicit rehome, unknown name).
+func TestServeAtNilStoreMatchesServe(t *testing.T) {
+	r := serveFixture()
+	for _, name := range []string{"gem8-seat", "q", "throttled", "stale", "ghost"} {
+		sh, sc, serr := r.Serve(name)
+		ah, ac, entry, aerr := r.ServeAt(name, nil, time.Time{})
+		if entry != nil {
+			t.Fatalf("ServeAt(%q, nil, zero) returned all-cooled entry %+v; a nil store applies no overlay", name, entry)
+		}
+		if sh.Name != ah.Name || strings.Join(sc, ",") != strings.Join(ac, ",") || (serr == nil) != (aerr == nil) {
+			t.Fatalf("ServeAt(%q, nil, zero) = %q %v %v diverges from Serve = %q %v %v",
+				name, ah.Name, ac, aerr, sh.Name, sc, serr)
+		}
+	}
+}
+
+// TestServeableAtMatchesCanServeAndCooldown pins serveableAt's contract: identical to
+// CanServe with no store (or before/after the window), false exactly while the seat's
+// account holds an active cooldown at now.
+func TestServeableAtMatchesCanServeAndCooldown(t *testing.T) {
+	ready := Home{Name: "sink", Dir: "/h/.claude-sink",
+		Identity: Identity{Email: "sink@example.test", AccountUUID: "u-sink", Exists: true, HasCreds: true}}
+	dead := Home{Name: "gone", Status: StatusTombstoned, RehomeTo: "sink"}
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
+	cd.Cool(UUIDBucketKey("u-sink"), CooldownUsageLimit, "weekly limit", now, now.Add(time.Hour))
+
+	if got := serveableAt(ready, nil, time.Time{}); got != ready.CanServe() {
+		t.Fatalf("serveableAt(ready, nil, zero) = %v, want CanServe() = %v", got, ready.CanServe())
+	}
+	if got := serveableAt(dead, cd, now); got != dead.CanServe() {
+		t.Fatalf("serveableAt(dead, cd, now) = %v, want CanServe() = %v (cooldown never rescues a static failure)", got, dead.CanServe())
+	}
+	if serveableAt(ready, cd, now) {
+		t.Fatalf("an active cooldown at now must make an otherwise-ready seat non-serveable")
+	}
+	if !serveableAt(ready, cd, now.Add(2*time.Hour)) {
+		t.Fatalf("an elapsed cooldown must restore serveability with no manual action")
+	}
+}
+
+// TestServeAtAllCooledDownResolvesSoonestReset pins the terminal case: when every
+// reachable, otherwise-serveable seat is throttled, ServeAt neither hard-errors nor
+// silently lands — it returns the soonest-reset seat WITH its cooldown entry as the
+// explicit all-cooled/degraded signal.
+func TestServeAtAllCooledDownResolvesSoonestReset(t *testing.T) {
+	r := cooldownServeFixture()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
+	cd.Cool(UUIDBucketKey("u-sink"), CooldownUsageLimit, "weekly limit", now, now.Add(2*time.Hour))
+	cd.Cool(UUIDBucketKey("u-anchor"), CooldownUsageLimit, "weekly limit", now, now.Add(20*time.Minute))
+
+	h, chain, entry, err := r.ServeAt("gone", cd, now)
+	if err != nil {
+		t.Fatalf("all-cooled chain must degrade, not hard-error: %v", err)
+	}
+	if h.Name != "anchor-seat" {
+		t.Fatalf("all-cooled resolve landed on %q, want anchor-seat (soonest reset: 20m vs 2h)", h.Name)
+	}
+	if entry == nil {
+		t.Fatalf("all reachable seats are cooled: the returned entry must be the explicit signal, got nil")
+	}
+	if !entry.ResetAt.Equal(now.Add(20 * time.Minute)) {
+		t.Fatalf("entry.ResetAt = %v, want the soonest reset %v", entry.ResetAt, now.Add(20*time.Minute))
+	}
+	if strings.Join(chain, ",") != "gone,sink" {
+		t.Fatalf("chain = %v, want [gone sink] (the hops that reached the served seat)", chain)
+	}
+}
+
+// TestServeAtStructuralFailureStaysLoud pins that the degraded fallback never masks a
+// genuinely broken registry: with no cooled candidate in the walk, an unresolvable chain
+// still fails exactly as Serve always has.
+func TestServeAtStructuralFailureStaysLoud(t *testing.T) {
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
+	r := Registry{Homes: []Home{
+		{Name: "a", Status: StatusTombstoned, RehomeTo: "b"},
+		{Name: "b", Status: StatusTombstoned, RehomeTo: "a"},
+	}}
+	if _, _, entry, err := r.ServeAt("a", cd, now); err == nil || entry != nil {
+		t.Fatalf("a rehome cycle with no serveable seat must stay fail-loud, got entry=%v err=%v", entry, err)
+	}
+	if _, _, entry, err := r.ServeAt("ghost", cd, now); err == nil || entry != nil {
+		t.Fatalf("an unknown name must stay fail-loud, got entry=%v err=%v", entry, err)
+	}
+}
+
 func TestPlanPullsSharedHistory(t *testing.T) {
 	r := fixture()
 	r.SharedHistory = filepath.Join("/store")
