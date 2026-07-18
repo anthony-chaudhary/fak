@@ -106,6 +106,50 @@ func TestPSTransportErrorExits1(t *testing.T) {
 	}
 }
 
+// TestPSGatewayDownIsFriendlyAndNonZero is the #5094 core: when the gateway is
+// not listening (connection refused), `fak ps` must exit non-zero (so a liveness
+// probe can tell "gateway down" from "no sessions") and print an actionable line
+// naming the address and the start command instead of a raw Go dial string.
+func TestPSGatewayDownIsFriendlyAndNonZero(t *testing.T) {
+	// Bind a server to claim a port, then close it: the address is now guaranteed
+	// to refuse connections, deterministically reproducing the gateway-down path.
+	ts := httptest.NewServer(http.NewServeMux())
+	addr := ts.URL
+	ts.Close()
+
+	out, errb, code := runPSAt(t, addr, false)
+	if code == 0 {
+		t.Fatalf("ps against a down gateway exit = 0, want non-zero (breaks liveness probes)")
+	}
+	if !strings.Contains(errb, "gateway not running") || !strings.Contains(errb, "fak serve") {
+		t.Fatalf("down message not actionable: %q", errb)
+	}
+	if strings.Contains(errb, "connectex") || strings.Contains(errb, "dial tcp") {
+		t.Fatalf("raw Go dial string leaked to the operator: %q", errb)
+	}
+	if out != "" {
+		t.Fatalf("human ps wrote a table on the down path: %q", out)
+	}
+}
+
+// TestPSGatewayDownJSONEnvelope proves --json still emits a valid, machine-readable
+// error object (not an empty stream) on the down path, and still exits non-zero.
+func TestPSGatewayDownJSONEnvelope(t *testing.T) {
+	ts := httptest.NewServer(http.NewServeMux())
+	addr := ts.URL
+	ts.Close()
+
+	out, _, code := runPSAt(t, addr, false, "--json")
+	if code == 0 {
+		t.Fatalf("ps --json against a down gateway exit = 0, want non-zero")
+	}
+	for _, want := range []string{`"schema"`, "fak.ps.error.v1", `"kind"`, "gateway_down", `"hint"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ps --json down envelope missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestPSRejectsStrayPositional(t *testing.T) {
 	_, errb, code := runPSAt(t, "http://127.0.0.1:0", false, "sess-1")
 	if code != 2 {

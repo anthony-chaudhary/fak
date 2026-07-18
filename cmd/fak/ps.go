@@ -27,12 +27,14 @@ package main
 // actually carries rather than fabricate a progress estimate it cannot source.
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -87,11 +89,19 @@ func runPS(stdout, stderr io.Writer, argv []string, watchDefault bool) int {
 }
 
 // psFrame fetches the session snapshot once and renders it (JSON or the aligned
-// table), returning the process exit code. A transport/HTTP error maps to 1.
+// table), returning the process exit code. A transport/HTTP error maps to 1 — a
+// FAILED status command must never exit 0 (#5094), so a liveness probe can tell
+// "gateway up, no sessions" (exit 0, "no live sessions") from "gateway down"
+// (exit 1). A connection-refused error is rewritten into an actionable line
+// instead of a raw Go dial string; --json gets a structured error envelope so a
+// machine consumer parsing stdout still gets valid JSON on the down path.
 func psFrame(stdout, stderr io.Writer, c *sessionClient, asJSON bool) int {
 	list, err := c.list()
 	if err != nil {
-		fmt.Fprintf(stderr, "fak ps: %v\n", err)
+		if asJSON {
+			_ = writeJSON(stdout, psErrorEnvelope(c.base, err))
+		}
+		fmt.Fprintf(stderr, "fak ps: %s\n", psFriendlyError(c.base, err))
 		return 1
 	}
 	if asJSON {
@@ -99,6 +109,64 @@ func psFrame(stdout, stderr io.Writer, c *sessionClient, asJSON bool) int {
 	}
 	renderPSTable(stdout, list)
 	return 0
+}
+
+// psGatewayDown reports whether err is a "gateway is not listening" transport
+// failure (connection refused) rather than an HTTP-level error from a gateway
+// that answered. It checks the syscall errno through the wrapped error chain
+// (req wraps with %w) and falls back to the platform refusal strings, so it
+// holds on both the POSIX "connection refused" and the Windows "target machine
+// actively refused it" (connectex) phrasings.
+func psGatewayDown(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "actively refused") ||
+		strings.Contains(s, "no connection could be made")
+}
+
+// psFriendlyError turns a transport error into a one-line, operator-actionable
+// message. A gateway-down error names the address and the command that starts
+// the gateway; any other error is passed through verbatim so nothing is hidden.
+func psFriendlyError(base string, err error) string {
+	if psGatewayDown(err) {
+		return fmt.Sprintf("gateway not running at %s (start it with 'fak serve')", psAddrHostPort(base))
+	}
+	return err.Error()
+}
+
+// psErrorEnvelope is the machine-readable form of psFriendlyError for --json: a
+// consumer reading stdout gets a valid JSON object on the failure path instead
+// of an empty stream plus a stderr string. kind distinguishes the down case.
+func psErrorEnvelope(base string, err error) map[string]any {
+	env := map[string]any{
+		"schema": "fak.ps.error.v1",
+		"addr":   strings.TrimRight(base, "/"),
+		"error":  psFriendlyError(base, err),
+	}
+	if psGatewayDown(err) {
+		env["kind"] = "gateway_down"
+		env["hint"] = "start it with 'fak serve'"
+	} else {
+		env["kind"] = "transport_error"
+	}
+	return env
+}
+
+// psAddrHostPort strips the scheme from a base URL for display (http://host:port
+// → host:port), keeping the down message tight. It falls back to the trimmed
+// base if there is no scheme to strip.
+func psAddrHostPort(base string) string {
+	s := strings.TrimRight(base, "/")
+	if i := strings.Index(s, "://"); i >= 0 {
+		return s[i+3:]
+	}
+	return s
 }
 
 // psWatch refreshes the view on the interval until the frame budget is spent
@@ -116,7 +184,7 @@ func psWatch(stdout, stderr io.Writer, c *sessionClient, asJSON bool, interval t
 		list, err := c.list()
 		switch {
 		case err != nil:
-			fmt.Fprintf(stderr, "fak ps: %v\n", err)
+			fmt.Fprintf(stderr, "fak ps: %s\n", psFriendlyError(c.base, err))
 		case asJSON:
 			emitSessionJSON(stdout, stderr, list)
 		default:
