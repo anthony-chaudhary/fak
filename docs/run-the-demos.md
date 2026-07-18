@@ -14,6 +14,22 @@ Read this if you want to prove the demos from a fresh checkout before touching h
 infrastructure. By the end, you'll be able to pick the right track, run the model-free
 witnesses first, and know which demos require a browser, network, or live model.
 
+## Start here: your first command
+
+You are a new runner proving the demos from a fresh checkout — no key, no model, no GPU,
+no network. Run this one command first; it exits `0` when the safety floor reproduces and
+non-zero if anything drifts:
+
+```bash
+go run ./cmd/guarddemo -selfcheck   # WITHOUT fak: 4 / 2 / 0 breaches · WITH fak: 0 (per scenario)
+```
+
+That is the whole next action. Everything below is the fuller catalog — the one-command
+local set (§1), the headless witnesses for exact accounting (§2), the live-model race
+(§3), and the dedicated tracks (security, research/science, memory/serving, adoption). The
+**Cache-frontier walkthrough** immediately below is an *optional* specialized path, for
+when your goal is fak's caching value-add specifically rather than the whole catalog.
+
 ## Cache-frontier walkthrough
 
 Use this path when the goal is fak's caching value-add rather than the whole demo
