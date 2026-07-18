@@ -17,6 +17,7 @@
 - Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
+- Claude Code on your own Mac's local model (`fak claude-mac-fak`, pointing Claude Code at a Mac's `fak serve` gateway running Qwen3.6-27B; first local turn is slow and single-stream, but end-to-end and observable via the preflight panel): [`docs/fak/mac-agent-ui.md`](docs/fak/mac-agent-ui.md)
 - Shared endpoint with `fak serve`: [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md)
 - Configuration: [`docs/fak/server-config.md`](docs/fak/server-config.md)
 - API: [`docs/fak/api-reference.md`](docs/fak/api-reference.md)
@@ -27,6 +28,7 @@
 - Security floor, policy configuration, evidence, and private reporting: [`SECURITY.md`](SECURITY.md)
 - Steerability controls and appeal-channel scorecard: [docs/STEERABILITY-SCORECARD.md](docs/STEERABILITY-SCORECARD.md)
 - Operator-heaviness pressure, budgets, and reduction standard: [docs/OPERATOR-HEAVINESS.md](docs/OPERATOR-HEAVINESS.md)
+- Operator-steerability PRs (`fak steer prs`) — the gate/observability separation, the OSP unit, and why the overlay must never become a merge gate: [docs/operator-steerability-prs.md](docs/operator-steerability-prs.md)
 
 ## Source authorities
 
