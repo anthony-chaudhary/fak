@@ -1,6 +1,6 @@
 ---
 title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
-description: "fak's demo-quality scorecard grades 78 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+description: "fak's demo-quality scorecard grades 80 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
 ---
 
 # Demo-quality scorecard
@@ -16,11 +16,11 @@ description: "fak's demo-quality scorecard grades 78 demos on five deterministic
 
 | Metric | Value |
 |---|---|
-| Demos scored | 78 |
-| **Demo-debt (total defects)** | **0** |
-| Mean score | 98.4/100 |
-| Median / min / max | 100.0 / 89.0 / 100.0 |
-| Grade distribution | A:77 B:1 C:0 D:0 F:0 |
+| Demos scored | 80 |
+| **Demo-debt (total defects)** | **3** |
+| Mean score | 98.0/100 |
+| Median / min / max | 100.0 / 65.4 / 100.0 |
+| Grade distribution | A:78 B:1 C:0 D:1 F:0 |
 
 ## Per-demo scores
 
@@ -28,6 +28,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
+| 65.4 | D | 3 | 45 | 48 | 58 | 100 | 90 | `examples/compose-ollama` |
 | 89.0 | B | 0 | 86 | 100 | 90 | 88 | 78 | `cmd/qwen36codedemo` |
 | 91.0 | A | 0 | 86 | 100 | 100 | 88 | 78 | `examples/mobile-ffi` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/playground` |
@@ -75,6 +76,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/mcp` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/mcp-client` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/observability` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/openai-sdk-minimal` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/policy-hot-reload` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/preflight-ladder` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/presets` |
@@ -109,9 +111,16 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 ## Demo-debt work-list
 
-No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
+### `examples/compose-ollama` — 3 defect(s), score 65.4 (D)
+- runnable: no runnable entry: no run script / `go run` / `python x.py` / make command, and no `__main__` script — there is no one-command way to run it
+- reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run — a reader cannot tell what a correct run looks like
+- honest_scope: no scope / 'what this does not claim' statement — a demo that only shows the win overclaims; state the boundary honestly
 
 ## Soft signals (score only, not debt)
+
+### `examples/compose-ollama`
+- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `cmd/qwen36codedemo`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
