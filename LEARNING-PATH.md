@@ -2119,3 +2119,187 @@ Where to go from there:
 
 Found a course whose reading no longer matches what the code does? That is a doc bug —
 please [open an issue](https://github.com/anthony-chaudhary/fak/issues).
+
+## Appendix — the full shipped surface (operator, contributor, and package map)
+
+**Who this is for.** The courses above teach the load-bearing ideas end to end, but the
+binary ships far more than 99 courses can each drill into: a fleet-operations toolbox, a
+set of self-measuring scorecards, model/hardware benchmarks, and a stack of internal
+leaves you will meet the moment you open the tree. This appendix is the orientation index
+for that surface — one honest line per verb, standalone binary, and internal package,
+each anchored to the code that implements it. It is a reference, not a lesson: skim it to
+know a tool *exists*, then reach for `--help` or the cited source when you need it.
+
+**Try any verb.** Every verb is reachable through the single binary; append `-h`/`--help`
+or the JSON flag most carry:
+
+```bash
+go run ./cmd/fak <verb> --help      # each verb prints its own usage/subcommands
+go run ./cmd/fak demo               # if you want a zero-flag proof first, start here
+```
+
+Deploying onto rented GPU hardware rather than fronting a hosted API? The operator
+quickstart is [`docs/fak/neo-cloud-deploy.md`](docs/fak/neo-cloud-deploy.md).
+
+### A. Running the gateway and the shared-trunk fleet
+
+| Verb | What it does | Try |
+| --- | --- | --- |
+| `fak service` | Install/run fak as a system service (systemd on Linux, launchd on macOS) via `internal/systemservice`. | `fak service -h` |
+| `fak watchdog` | Operator surface over the default OS-scheduled watchdog monitors (resume, supervisor, dos-dispatch, stale-work garden). | `fak watchdog status` |
+| `fak schedscan` | Observability window onto the fleet's Windows Scheduled Tasks (FleetResumeWatchdog / FakFleetJanitor) beyond "is it Ready?". | `fak schedscan` |
+| `fak host-crash` | Samples host crash / soft-fault signals over an interval and writes them for the crash-profile ledger. | `fak host-crash -h` |
+| `fak host-relaunch-broker` | Drains the machine-control-plane→desktop relaunch request spool and launches Windows Terminal; `--validate` prints the argv without launching. | `fak host-relaunch-broker --validate` |
+| `fak conpty` | Searchable status surface for the pwsh `0xE9` ConPTY FailFast crash class: resolves the ConPTY pair on PATH and compares its FileVersion to a known-good floor. | `fak conpty --json` |
+| `fak stallscan` | Reads the churn signals (soft-fault storm, scheduler/syscall thrash, spawn bursts) that reveal a low-usage machine stall. | `fak stallscan` |
+| `fak growthgate` | The standing-footprint twin of `stallscan`: classifies where the disk/IO went and emits a census + verdict. | `fak growthgate --json` |
+| `fak git-maint` | Guarded, lock-aware "consolidate-never-prune" object-DB maintenance (multi-pack-index / commit-graph) the destructive-git guard otherwise only defers. | `fak git-maint -h` |
+| `fak clean-bins` | Safe, idempotent, witnessed prune of the stray `go build` binaries dropped at the module root. | `fak clean-bins` |
+| `fak buildcheck` | Concurrency-safe compile check for a fleet editing one shared trunk; never drops a binary in the tree. | `fak buildcheck` |
+| `fak ci-preflight` | Answers "is the committed trunk tip CI-buildable and gofmt-clean, and if not which files" without trusting the working tree. | `fak ci-preflight -h` |
+| `fak go` | A poison-free `go` passthrough for the permanently peer-dirty shared trunk (builds in an isolated temp copy). | `fak go build ./...` |
+| `fak validate` | Answers whether the committed tree builds, a distinct question from a live working-tree build. | `fak validate -h` |
+| `fak trunk-build-probe` | Read-only diagnosis of whether the release gate's red trunk is a forgotten `git add`. | `fak trunk-build-probe -h` |
+| `fak trunk-red` | Folds the pre-existing trunk-red witness ledger into the distinct shared breaks the build gate admitted over (a peer's red, not yours), worst-first. | `fak trunk-red -h` |
+| `fak worktree` | `fak worktree worker prepare\|land\|reap` — the detached per-worker build-isolation worktree that lands its diff back on `main` under a lane lease. | `fak worktree worker -h` |
+
+### B. Session, budget, and spend accounting
+
+| Verb | What it does | Try |
+| --- | --- | --- |
+| `fak budget` | Inline per-task budget readout ("spent N, budget M, here's where it went") from real gateway usage records. | `fak budget --json` |
+| `fak spend` | Cross-account spend rollup; gate-fails on unlabeled spend figures. | `fak spend -h` |
+| `fak savings` | The Track-2 observed-$ cache-savings audit trio over the local savings ledger. | `fak savings audit` |
+| `fak balance` | Night-balance readout: resume recovery-vs-stranding and gardening-vs-throughput side by side; exits non-zero on an underwater recovery budget. | `fak balance -h` |
+| `fak footprint` | Always-sent MCP tool-schema floor scorecard: prices fak's registered `tools/list` floor offline. | `fak footprint -h` |
+| `fak assume` | Thin shell over the `internal/assumecheck` kernel: gathers evidence for a launch-seat assumption, prints the verdict, maps it to an exit code. | `fak assume -h` |
+| `fak sessionjournal` | Crash-survivable session-registration journal (open/beat/close JSONL) and its monitoring/resume sidecar. | `fak sessionjournal -h` |
+| `fak wip` | Working-tree checkpoint/restore spine: a gc-safe snapshot of uncommitted tracked changes under `refs/fak/wip/<session>`. | `fak wip -h` |
+| `fak idempotency` | Retry-safe executor for non-idempotent tool ops (create issue, push, ledger append) keyed by op + token. | `fak idempotency -h` |
+| `fak goal-park` | Status/claim a durable goal under a supervisor lease (`internal/goalpark`). | `fak goal-park status -h` |
+| `fak tasks` | Thin shell over `internal/taskgraph`: the shared task list as a typed table with lease-gated claims. | `fak tasks -h` |
+| `fak multisubmit` | Multi-submission planner: once an issue is resolved once, plans cheap differentiated bonus takes on the same issue. | `fak multisubmit -h` |
+| `fak cachesweep` | Sweeps the cache-savings knee: finds the threshold as a fraction of the infinite-cache ceiling and emits the sweep result. | `fak cachesweep --json` |
+
+### C. Guard, audit, and safety surfaces
+
+| Verb | What it does | Try |
+| --- | --- | --- |
+| `fak guard-audit` | Prunes repo-local guard audit journals only after a durable logvault mirror proves their bytes (`internal/guardaudit`). | `fak guard-audit prune -h` |
+| `fak guard-commit-gate` | Claude Code PreToolUse boundary that binds a git-commit's stamp/paths (hook actuator). | `fak guard-commit-gate -h` |
+| `fak guard-sessionstart` | Claude Code SessionStart hook actuator installed by `fak guard`. | `fak guard-sessionstart -h` |
+| `fak guard-stops` | Folds the typed Stop-hook decision ledger into a tally (clean stops, bounded stand-downs, fail-open stops). | `fak guard-stops -h` |
+| `fak guard-stops-slack` | Durable update-in-place Slack scoreboard feeder for the Stop decision ledger. | `fak guard-stops-slack -h` |
+| `fak knownbad` | Impure shell over `internal/knownbad`: record/match/claim/resolve blast-radius "known-bad tree" containment entries. | `fak knownbad report` |
+| `fak blast` | `fak blast estimate` — blast-radius estimate for a change (the containment epic's planner). | `fak blast estimate -h` |
+| `fak headless-lint` | Scans an agent's final-output text for operator-directed "pesky notes" ("do you want me to push?") — the sensor-side dual of choice-triage. | `fak headless-lint -h` |
+| `fak conformance` | Standalone safety-conformance suite: re-adjudicates the shipped dogfood verdict matrix against the compiled kernel — a CI-gateable, third-party-runnable attestation. | `fak conformance` |
+| `fak egresslist` | Maintenance surface for the bundled egress filter lists the adjudicator's egress rung compiles. | `fak egresslist refresh --dry-run` |
+| `fak eve` | Eve integration bridge: mechanical security preflight over Eve's MCP/OpenAPI connections. | `fak eve -h` |
+
+### D. Self-measuring scorecards, RSI loops, and contributor tooling
+
+| Verb | What it does | Try |
+| --- | --- | --- |
+| `fak score` | Parent verb grouping the meta-scorecards / RSI loops; `fak score <name>` routes to each legacy `*-scorecard`/`*-score` handler. | `fak score -h` |
+| `fak quality` | The missing-middle quality ladder: run one case through a reference path and an engine path, compare, score against a rubric, emit a replayable failure bundle. | `fak quality -h` |
+| `fak mlp-score` | Witnessed grade of the "first lovable cut" for the all-in-one agent-runtime epic. | `fak mlp-score -h` |
+| `fak antipattern-scorecard` | The unifying work-loss card: folds REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one `antipattern_debt`. | `fak antipattern-scorecard` |
+| `fak checkpoint-scorecard` | Which long-running subsystems persist durable resumable WIP and expose a witnessed status surface. | `fak checkpoint-scorecard` |
+| `fak checkpoint-debt-dispatch` | Files one deduped issue per un-checkpointed subsystem, capped. | `fak checkpoint-debt-dispatch -h` |
+| `fak unwired-scorecard` | Which code-complete internal packages are wired into a default path vs orphaned (imported by no `.go`). | `fak unwired-scorecard` |
+| `fak unwired-debt-dispatch` | Files one deduped issue per unwired package, capped. | `fak unwired-debt-dispatch -h` |
+| `fak qa-process-debt-dispatch` | The E-testing-quality "is our test process honest?" fan-out (regression_catch). | `fak qa-process-debt-dispatch -h` |
+| `fak mode-debt-dispatch` | Permission-regime fan-out: one deduped issue per un-lifted permission dial. | `fak mode-debt-dispatch -h` |
+| `fak concept` | The conceptbench disambiguation surface: `fak concept position\|classify\|validate\|freshness\|admission` over the concept catalog. | `fak concept -h` |
+| `fak negate` | The negation operator: `fak negate detect\|resolve\|reframe` over `internal/negframe`. | `fak negate detect -h` |
+| `fak signals` | Plain-English behavioral signals (NL prompt + verdict schema + sample rate) judged over an agent's turns. | `fak signals -h` |
+| `fak question-ledger` | Deterministic labeling authority for `docs/questions/asked.jsonl` that `/question-loop` defers to. | `fak question-ledger -h` |
+| `fak refactor-verify` | Read-only proof that a god-split / code-motion refactor dropped no top-level declaration. | `fak refactor-verify -h` |
+| `fak godsplit-plan` | Read-only, doc-comment-aware boundary + hazard planner for a behavior-preserving Go split (consumed by `/modularize`). | `fak godsplit-plan --json <file>` |
+| `fak hwgate-lint` | Lints that no local-hardware blocker is declared as terminal, keeping the fleet hardware-portable. | `fak hwgate-lint` |
+| `fak tier-calibrate` | Offline calibration fold over recorded tier decisions and witnessed outcomes; proposes threshold moves, mutates nothing live. | `fak tier-calibrate -h` |
+| `fak dispatch-aging` | Read-only anti-starvation diagnostic: which ready issues are starving and in what pick order. | `fak dispatch-aging` |
+| `fak dispatchlat` | Read-only dispatch-latency diagnostic. | `fak dispatchlat --json` |
+| `fak execution-route` | Composes harness/model/session routing into one inspectable execution decision (`internal/executionroute`). | `fak execution-route -h` |
+| `fak steer` | `fak steer prs` — folds the pending dev→release delta into operator-legible PR-sized units, worst-attention-first. | `fak steer prs -h` |
+| `fak project` | The ProjectsV2 board control-pane fold: makes the board an operator-visible report/verdict/Slack-ready dimension. | `fak project -h` |
+| `fak trajctl` | Declare/scope your own trajectory-corpus views (scope confinement for `trajquery`). | `fak trajctl declare -h` |
+| `fak trajquery` | Query your own trajectory corpus with a small scoped SQL `SELECT`; the validator refuses any scope escape. | `fak trajquery -h` |
+| `fak shadowgit` | Non-invasive per-step write ledger over a worktree via a separate git dir; attributes each step's changed files. | `fak shadowgit -h` |
+| `fak wiki` | The fak-native, witness-verified repo-wiki core (structure + content). | `fak wiki -h` |
+| `fak skill` | Queried skill loader: `fak skill query\|residency\|swap` over `.claude/skills` (+ the MCP resolver). | `fak skill query -h` |
+| `fak demo` | The zero-flag 60-second offline proof: fak's scenario through the real kernel, one live verdict per call class. | `fak demo` |
+| `fak init` | Emit a minimal, valid `fak.toml` deployment manifest. | `fak init` |
+| `fak micro` | The native in-process Go microagent runtime front door. | `fak micro -h` |
+| `fak doomloop` | Two-axis doom-loop guard: classifies live workers on effort vs verified progress and wires the reversible-first correction. | `fak doomloop -h` |
+| `fak llms-full` | Generate the full `llms-full.txt` corpus digest from the git tree. | `fak llms-full -h` |
+
+### E. Model and hardware benchmarks
+
+| Verb | What it does | Try |
+| --- | --- | --- |
+| `fak macbench` | Apple-silicon decode-longgen + prefill-sweep benchmark driver. | `fak macbench -h` |
+| `fak macfit` | Models Apple unified-memory capacity for many concurrent agents (`internal/macfit`). | `fak macfit -h` |
+| `fak mac` | Crisp handle for the mac path (long form `fak claude-mac-fak`); both spellings route to one handler. | `fak mac -h` |
+| `fak deepseekbench` | DeepSeek V4 Pro/Flash TTFT/TPOT/context-scaling scorecard (thin wire over `internal/deepseekbench`). | `fak deepseekbench -h` |
+| `fak glm52-prefill-sweep` | GLM-5.2 pure-fak prefill-latency sweep driver; `--dry-run` prints the plan, `--endpoint` runs it live. | `fak glm52-prefill-sweep --dry-run` |
+| `fak kvbm` | Replays a KV-block-manager trace and proves the #2666 validation shape; exit 1 unless proven. | `fak kvbm replay` |
+| `fak bench-ingest` | Folds checked-in benchmark snapshot fixtures (Terminal-Bench, SWE-bench, FrontierSWE) into a provenanced `modelscore` registry, refusing any unprovenanced row. | `fak bench-ingest -h` |
+
+### F. Standalone binaries under `cmd/`
+
+Not everything is a `fak` sub-verb; a handful of engines and fixtures ship as their own
+binary so they compose without importing the whole kernel.
+
+| Binary | What it does |
+| --- | --- |
+| `cmd/auditreceipt` | Verifies a model-route audit-receipt ledger (`fak-auditreceipt-verification/v1`) against its HEAD-bound cursor. |
+| `cmd/codesearch` | Standalone front door to the code-intelligence engine: trigram regex/literal search, AST shape queries, call-graph traversal, and RRF-fused feature retrieval. |
+| `cmd/crossauditcalibrate` | Calibrates a cross-audit run manifest against per-arm observation files. |
+| `cmd/crossauditdogfood` | Folds cross-audit receipt envelopes (author/auditor/verdict) for dogfooding the cross-model audit. |
+| `cmd/crossauditfixture` | Test fixture for the cross-audit ABI: PASS/FAIL exact contract comparison of a candidate against a base64 contract. |
+| `cmd/customlintfixture` | Hostile-behavior test fixture for the custom-linter ABI. |
+| `cmd/devfresh` | Scans docs for unpointed version claims (`docfreshrsi.ScanVersionClaims`); `--selfcheck` runs the built-in witness. |
+| `cmd/negframescan` | Throwaway harness (not shipped) that exercises `internal/negframe` against real repo prose when `cmd/fak` is wedged. |
+| `cmd/wdcheck` | Throwaway verifier for the `info_watchdog.go` pure mappers. |
+| `cmd/wgscan` | Scans a tree via `internal/windowgate` for un-suppressed window-popping exec calls. |
+| `cmd/zaitask` | Bounded non-streaming Z.AI task runner CLI (emits content + a usage receipt). |
+
+### G. Internal package map — the leaves you will meet in the tree
+
+Each leaf is a tiered, single-purpose fold (see **FAK 209** for the tier DAG). One line each:
+
+| Package | Purpose |
+| --- | --- |
+| `internal/chatopsdetach` | Pure detached-execution decision kernel for chatops ACT verbs: ack-now / witnessed-completion / stall-escalation routing. |
+| `internal/choicetriage` | Decenters the human from a surfaced "choice" — most surfaced choices are fake and resolvable without a person. |
+| `internal/cvregress` | Per-session cache-efficiency (hit% + write-amp) regression flagging over the cache-savings ledger. |
+| `internal/doomloop` | Two-axis doom-loop classifier: an effort-vs-verified-progress window → a closed verdict + reversible-first correction. |
+| `internal/egresslist` | Adblock-style site allow/block layer above the hardwired cloud-metadata egress floor and below the WebFetch research allowlist. |
+| `internal/egressrefresh` | Re-fetches the bundled egress filter lists from their provenance URLs and rewrites the checked-in artifact + pinned checksum. |
+| `internal/executionroute` | Composes harness, model, and session routing into one inspectable execution decision. |
+| `internal/godfileceiling` | Ratcheting god-file LOC ceiling gate — the merge-time "no" that stops god-files from growing. |
+| `internal/guardaudit` | Bounds repo-local guard audit journals only after a verified logvault mirror proves durability. |
+| `internal/guardcompile` | Compiles one authoring-time model extraction into a review-only policy patch (data, not runtime enforcement). |
+| `internal/l3kv` | Durable L3 KV residency backend: `StageSpan`/`RestoreSpan` persist a demoted span by digest behind a durable manifest. |
+| `internal/macfit` | Models Apple unified-memory capacity for many concurrent agents. |
+| `internal/market` | Validates discoverable extension descriptors without executing extension code. |
+| `internal/microagent` | Hosts many agent loops in one process: a worker pool sharing one in-process kernel gateway. |
+| `internal/mlpscore` | Grades the "first lovable cut" contract from committed, machine-checkable witness manifests. |
+| `internal/modelaccept` | Evaluates versioned exact-model capability corpora without letting missing evidence or averages authorize a tier. |
+| `internal/modelops` | Folds exact-model canary observations into capability-safe promotion / rollback / hold decisions. |
+| `internal/operatorquestion` | Harness-agnostic operator-question normalization. |
+| `internal/operatorresolve` | Evidence-first operator-question resolver. |
+| `internal/planresolve` | Oracle-driven plan-content adjudicator. |
+| `internal/rsl` | Git Reference State Log: a forge-independent, append-only, hash-chained record of trunk ref transitions — the offline no-force-push proof. |
+| `internal/steerpr` | Folds continuous-merge trunk commits into operator-legible PR-sized units banded by where operator attention is owed. |
+| `internal/tuiplugin` | In-process extension seam for fak console panes (Register-from-init). |
+| `internal/versionskew` | Turns "I can't tell which fak is running" into a structured, refusable version-skew verdict. |
+| `internal/wiki` | The fak-native, witness-verified repo-wiki core (structure L1 + content). |
+| `internal/zaitask` | Bounded non-streaming Z.AI task runner. |
+
+**Checkpoint:** Name the verb you would reach for to (a) prove the committed trunk builds
+without trusting your working tree, (b) see which ready issues are starving, and (c) get
+an offline per-task spend readout mid-run. (Answers: `fak validate` / `fak ci-preflight`,
+`fak dispatch-aging`, `fak budget`.)
