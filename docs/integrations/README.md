@@ -37,7 +37,7 @@ loop stays controlled at no extra cost. Your agent, your model, your prompts —
   └────────────────────┘  │   └───────────────────────┘
   ┌────────────────────┐  │  OpenAI Chat Completions
   │ Any MCP client ────┼──┘  POST /v1/chat/completions
-  │  → examples/mcp/   │     MCP: --stdio / POST /mcp
+  │  → mcp.md          │     MCP: --stdio / POST /mcp
   └────────────────────┘
 ```
 
@@ -115,7 +115,7 @@ connection is made, and those pages link back here instead of coining new status
 | **Continue** (VS Code) | OpenAI (`config.yaml` `apiBase`) | guide | [`continue.md`](continue.md) |
 | **Roo Code** (VS Code) | OpenAI-Compatible *or* MCP | guide | [`roo-code.md`](roo-code.md) |
 | **Windsurf** (Cascade agent) | OpenAI-compatible proxy | guide | [`windsurf.md`](windsurf.md) |
-| **Any MCP client** | MCP | guide (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
+| **Any MCP client** | MCP | guide (one-paste `.mcp.json`) | [`mcp.md`](mcp.md) |
 | **No agent at all — a product feature that calls a model directly** (screener, classifier, drafter; your own loop, your own tools) | OpenAI or Anthropic SDK, direct API call | guide | [`embed-in-your-product.md`](embed-in-your-product.md) |
 
 **On a Claude Pro/Max subscription?** [`fable5-more-usage-for-free.md`](fable5-more-usage-for-free.md)
@@ -206,8 +206,8 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
 ```
 
 **MCP clients** (the agent *asks* the kernel about a call, rather than being proxied):
-run `fak serve --stdio` as the server command. The one-paste setup and the five
-`fak_*` tools it exposes are in [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md).
+run `fak serve --stdio` as the server command. The one-paste setup and the `fak_*`
+tools it exposes are in [`mcp.md`](mcp.md).
 
 **Need the exact key for *your* tool?** The [compatibility matrix](compatibility-matrix.md)
 lists 47 surveyed harnesses, frameworks, backends, and protocols — the wire each speaks,
@@ -279,7 +279,7 @@ curl -s http://127.0.0.1:8077/v1/fak/adjudicate \
 
 Same gate, two surfaces: transparently in front of the model (the proxy adds the `fak`
 block to every response) or asked directly (`/v1/fak/adjudicate`, verdict only — what the
-[MCP tools](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) expose). Swap the mock for your real engine by
+[MCP tools](mcp.md) expose). Swap the mock for your real engine by
 adding `--base-url`; nothing else changes.
 
 **Don't take the snippets on faith — run them.** The same two checks (plus an allow-case)
@@ -322,6 +322,7 @@ governance surface, not tokens per second. Full scope, claim by claim:
 - [Harness integration acceptance checklist](harness-acceptance-checklist.md) — the model-wire, host-tool dialect, argument-field, deny-behavior, and replay fixture contract for first-class launchers.
 - [Reusable harness-loop playbook](harness-loop-playbook.md) — apply the selector/executor/witness/stop pattern to customer workflows such as support queues, data QA, and eval runs.
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
+- [Add fak to your agent over MCP](mcp.md) — the MCP-client setup route: one `.mcp.json` paste wires `fak serve --stdio` into Claude Code, Cursor, or any MCP client, checked by the deterministic stdio proof; the wire contract and kernel internals stay linked one layer deeper.
 - [Harden any MCP server](harden-any-mcp.md) — drop fak in front of any MCP server: a context-MMU quarantines poisoned tool results out of context and a capability allow-list blocks tools you never wired.
 - [fak + LiteLLM](litellm.md) — the three topologies (fak in front of a LiteLLM proxy, fak as a governed node behind it, and fak's per-aspect routing dispatching through it), and why supporting LiteLLM is one wire, not a hundred adapters.
 - [fak + llm-d](llm-d.md) — front the llm-d Gateway API OpenAI-compatible route, or use the registered `llm-d` engine id for syscall/model-route dispatch.
@@ -335,3 +336,6 @@ governance surface, not tokens per second. Full scope, claim by claim:
 - [Policy / permissions](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — author, dump, and review the capability floor.
 - [FAQ](../FAQ.md) — what fak is, how it differs from a firewall / guardrails / vLLM, the threat model.
 - [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — a machine-readable map for LLMs and answer engines.
+- [Custom linter subprocess ABI](custom-linters.md) — the versioned `fak-custom-lint/1` wire schema for user- and agent-authored linters on the agent-hook seam, and its host implementation contract.
+- [Extension descriptor and local conformance](extension-descriptors.md) — the `fak-extension-descriptor/1` discovery-metadata contract: catalog enumeration never executes an artifact; local `Verify` re-hashes it and re-runs the bounded witness.
+- [Slack helper ownership](slack-helpers-canonical.md) — reusable Slack transport and control infrastructure is canonical in the `slack-helpers` repository; what lives there vs in this tree.
