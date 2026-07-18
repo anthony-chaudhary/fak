@@ -983,9 +983,9 @@ func cmdGuard(argv []string) {
 		// The observable debug layer (#793) is ON by default so the cache + token-value
 		// economy of every turn is visible without a flag; --debug-stats=false or --quiet
 		// silences it. The full JSON --log stream stays separate (and off by default).
-		DebugStatsf:                  debugStatsSink(debugStatsStderr),
-		CtxViewBudget:                *ctxViewBudget,
-		CompactHistoryBudget:         *compactHistoryBudget,
+		DebugStatsf:          debugStatsSink(debugStatsStderr),
+		CtxViewBudget:        *ctxViewBudget,
+		CompactHistoryBudget: *compactHistoryBudget,
 		AutoCheckpoint: func(session, reason string) {
 			_ = runWipAutoCheckpoint(io.Discard, io.Discard, []string{"--session", session, "--reason", reason})
 		},
