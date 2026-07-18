@@ -31,13 +31,18 @@ func runMCPFootprint(out, errw io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	ab := fs.Bool("ab", false, "run the #3532 cold-tool-deferral A/B token-delta scorecard")
 	heldAcc := fs.Bool("held-accuracy", false, "run the #3533 cold-tool-deferral held-accuracy fault-in-recall eval")
-	flagArgs, _ := partitionArgs(argv, map[string]bool{"top": true})
+	audit := fs.Bool("audit", false, "run the #5050 session-config token-bloat audit (floor split + verifiable config wastes + the fak lever for each)")
+	reqFile := fs.String("req", "", "audit: path to a captured Anthropic Messages request JSON body (default: the representative Claude-Code-shaped body)")
+	flagArgs, _ := partitionArgs(argv, map[string]bool{"top": true, "req": true})
 	if err := fs.Parse(flagArgs); err != nil {
 		fmt.Fprintln(errw, err)
 		footprintUsage(errw)
 		return 2
 	}
 
+	if *audit {
+		return runFootprintAudit(out, errw, *reqFile, *top, *asJSON)
+	}
 	if *ab {
 		return runFootprintAB(out, errw, *asJSON)
 	}
@@ -101,6 +106,14 @@ agent request footprint uses, so it never drifts from EstimateAnthropicTokens.
   --json    emit machine-readable JSON (schema fak-mcp-footprint/1)
   --ab      cold-tool-deferral A/B scorecard (#3532, schema fak-footprint-ab/1)
   --held-accuracy  cold-tool-deferral fault-in-recall eval (#3533, schema fak-footprint-held-accuracy/1)
+  --audit   session-config token-bloat audit (#5050, schema fak-footprint-audit/1):
+            the floor split (system/tools/history/tail) over one request plus the
+            verifiable config wastes — cold custom tools that could defer (#3232)
+            and a custom ANTHROPIC_BASE_URL with ENABLE_TOOL_SEARCH unset (GH#746,
+            #5049) — each with the exact fak lever that fixes it. Read-only; every
+            number is ESTIMATED (~4 chars/token), never a provider-measured saving.
+  --req F   with --audit: audit a captured Anthropic Messages request body from file F
+            instead of the representative Claude-Code-shaped body
 
 The measurement foundation of epic #3229: run before/after a deferral change
 (#3231, #3232) to witness the reduction. Baseline: docs/context-budget/mcp-tool-floor.md.
