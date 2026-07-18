@@ -20,8 +20,12 @@ type fakeMaint struct {
 	loose   int
 	inPack  int
 	packs   int
-	calls   [][]string
-	onGrace func(args []string)
+	// unreachable models the loose objects with NO reachable referent — the ~86%
+	// backlog only a prune can reclaim (#5079). A `git prune --expire=…` call drops
+	// them from `loose` without adding to `in-pack` (removed, not folded).
+	unreachable int
+	calls       [][]string
+	onGrace     func(args []string)
 	// fsmon is the text `git fsmonitor--daemon status` returns (classified by readPosture);
 	// fsmonErr models git being unable to run the probe at all (→ unknown).
 	fsmon    string
@@ -46,10 +50,21 @@ func (f *fakeMaint) run(_ context.Context, dir string, args ...string) (string, 
 		if f.onGrace != nil {
 			f.onGrace(args)
 		}
-		if hasArg(args, "--task=loose-objects") && f.loose > 10 {
-			f.inPack += f.loose - 10 // loose folded into a pack — moved, not deleted
-			f.loose = 10
+		if reachable := f.loose - f.unreachable; hasArg(args, "--task=loose-objects") && reachable > 10 {
+			f.inPack += reachable - 10 // reachable loose folded into a pack — moved, not deleted
+			f.loose -= reachable - 10  // unreachable loose is unfoldable: only a prune reclaims it
 		}
+		return "", 0, nil
+	case len(args) >= 1 && args[0] == "prune":
+		if f.onGrace != nil {
+			f.onGrace(args)
+		}
+		drop := f.unreachable
+		if drop > f.loose {
+			drop = f.loose
+		}
+		f.loose -= drop // removed outright — in-pack does NOT grow
+		f.unreachable = 0
 		return "", 0, nil
 	case len(args) >= 2 && args[0] == "fsmonitor--daemon" && args[1] == "status":
 		if f.fsmonErr {
@@ -123,7 +138,7 @@ func mutatingCalls(calls [][]string) []string {
 			continue
 		}
 		switch c[1] { // c[0] is the dir
-		case "multi-pack-index", "commit-graph", "maintenance":
+		case "multi-pack-index", "commit-graph", "maintenance", "prune":
 			out = append(out, strings.Join(c[1:], " "))
 		}
 	}
@@ -596,4 +611,242 @@ func TestRunMaintFsmonitorDeadDaemonRefusesGrace(t *testing.T) {
 	if res.LooseDelta() != 0 {
 		t.Fatalf("nothing should be folded under posture drift: delta=%d", res.LooseDelta())
 	}
+}
+
+// pruneCalls returns every recorded `git prune …` argv (after the dir word), so a
+// grace-prune test can assert exactly what — if anything — was asked of git.
+func pruneCalls(calls [][]string) [][]string {
+	var out [][]string
+	for _, c := range calls {
+		if len(c) >= 2 && c[1] == "prune" {
+			out = append(out, c[1:])
+		}
+	}
+	return out
+}
+
+// TestGracePruneDefaultOff is the #5079 default-off witness: with MaintOptions.GracePrune
+// unset, an otherwise clean+quiet+safe apply run issues NO prune argv at all — the tier is
+// recorded as skipped with the structured PRUNE_OFF reason, it is not an incident, and the
+// fold tiers run exactly as before.
+func TestGracePruneDefaultOff(t *testing.T) {
+	gitDir := scratchGit(t)
+	f := &fakeMaint{posture: safePosture(), loose: 100, unreachable: 80, inPack: 500, packs: 11}
+	res := RunMaint(context.Background(), f.run, MaintOptions{RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true})
+
+	if got := pruneCalls(f.calls); len(got) != 0 {
+		t.Fatalf("default-off must never issue a prune argv; got %v", got)
+	}
+	if res.GracePruneRefused != MaintReasonPruneOff {
+		t.Fatalf("grace-prune should be held back with PRUNE_OFF, got %q", res.GracePruneRefused)
+	}
+	if res.Incident {
+		t.Fatalf("default-off prune is not an incident")
+	}
+	if !containsStr(mutatingCalls(f.calls), "maintenance run --task=loose-objects") {
+		t.Fatalf("the fold tiers must be unaffected by the prune gate; got %v", mutatingCalls(f.calls))
+	}
+	var found bool
+	for _, s := range res.Steps {
+		if s.Tier == gracePruneTier {
+			found = true
+			if s.Ran || s.Skipped != MaintReasonPruneOff {
+				t.Fatalf("grace-prune step should be skipped PRUNE_OFF, got %+v", s)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the skipped grace-prune step must still be recorded; steps=%+v", res.Steps)
+	}
+}
+
+// TestGracePruneRunsInQuietWindow is the positive-path witness: opted in, safe posture, no
+// transaction lock, no session lease ⇒ exactly ONE `git prune` runs, its argv carries the
+// 2-week floor expire, and the unreachable backlog drops WITHOUT growing in-pack (removed,
+// not folded — the reclaim the fold tiers structurally cannot deliver).
+func TestGracePruneRunsInQuietWindow(t *testing.T) {
+	gitDir := scratchGit(t)
+	f := &fakeMaint{posture: safePosture(), loose: 100, unreachable: 80, inPack: 500, packs: 11}
+	res := RunMaint(context.Background(), f.run, MaintOptions{
+		RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true, GracePrune: true})
+
+	prunes := pruneCalls(f.calls)
+	if len(prunes) != 1 {
+		t.Fatalf("exactly one prune per run; got %v", prunes)
+	}
+	if want := []string{"prune", "--expire=" + defaultPruneExpire}; !equalArgs(prunes[0], want) {
+		t.Fatalf("prune argv = %v, want %v", prunes[0], want)
+	}
+	if res.GracePruneRefused != "" {
+		t.Fatalf("quiet+safe+opted-in must not refuse grace-prune: %q", res.GracePruneRefused)
+	}
+	// The fold tier grows in-pack by what it MOVED; anything the run dropped beyond
+	// that vanished outright — the prune's reclaim. It must equal the unreachable set.
+	removedOutright := res.LooseDelta() - (res.After.InPack - res.Before.InPack)
+	if removedOutright != 80 {
+		t.Fatalf("prune should reclaim the 80 unreachable objects outright (removed, not folded): got %d (before=%+v after=%+v)",
+			removedOutright, res.Before, res.After)
+	}
+}
+
+// TestGracePruneRefusesUnderSessionLease is the load-bearing quiet-window witness (#5079):
+// the SAME session-lease heartbeats that must NOT defer the fold tier (#4602 GAP 2) MUST
+// refuse the grace-prune tier with SESSION_LIVE — a fold can run beside a live session, a
+// prune must not. No prune argv is issued; the leases are reported as the evidence.
+func TestGracePruneRefusesUnderSessionLease(t *testing.T) {
+	gitDir := scratchGit(t)
+	for _, rel := range []string{
+		"refs/fak/locks/session-win-1.lock",
+		"refs/fak/locks/intent-issue-5079", // a loose lease REF (no .lock suffix) also blocks
+	} {
+		writeLock(t, gitDir, rel)
+	}
+	f := &fakeMaint{posture: safePosture(), loose: 100, unreachable: 80, inPack: 500, packs: 11}
+	res := RunMaint(context.Background(), f.run, MaintOptions{
+		RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true, GracePrune: true})
+
+	if res.GraceRefused != "" {
+		t.Fatalf("session leases must still not defer the FOLD tier: %q", res.GraceRefused)
+	}
+	if !containsStr(mutatingCalls(f.calls), "maintenance run --task=loose-objects") {
+		t.Fatalf("the fold must run beside live sessions; got %v", mutatingCalls(f.calls))
+	}
+	if res.GracePruneRefused != MaintReasonSessionLive {
+		t.Fatalf("grace-prune must refuse with SESSION_LIVE under a live lease, got %q", res.GracePruneRefused)
+	}
+	if got := pruneCalls(f.calls); len(got) != 0 {
+		t.Fatalf("no prune argv may be issued while a session is live; got %v", got)
+	}
+	for _, want := range []string{"refs/fak/locks/session-win-1.lock", "refs/fak/locks/intent-issue-5079"} {
+		if !containsStr(res.SessionLeases, want) {
+			t.Fatalf("the refusing leases must be reported; got %v", res.SessionLeases)
+		}
+	}
+}
+
+// TestGracePruneRefusesUnderTransactionLockAndPostureDrift: the prune tier honors the SAME
+// gates as the fold tier — a live transaction lock refuses LOCKED, posture drift refuses
+// POSTURE_DRIFT — before the quiet-window question is even asked. No prune argv either way.
+func TestGracePruneRefusesUnderTransactionLockAndPostureDrift(t *testing.T) {
+	t.Run("transaction lock", func(t *testing.T) {
+		gitDir := scratchGit(t)
+		writeLock(t, gitDir, "index.lock")
+		f := &fakeMaint{posture: safePosture(), loose: 100, unreachable: 80, inPack: 500, packs: 11}
+		res := RunMaint(context.Background(), f.run, MaintOptions{
+			RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true, GracePrune: true})
+		if res.GracePruneRefused != MaintReasonLocked {
+			t.Fatalf("grace-prune under index.lock should refuse LOCKED, got %q", res.GracePruneRefused)
+		}
+		if got := pruneCalls(f.calls); len(got) != 0 {
+			t.Fatalf("no prune argv under a transaction lock; got %v", got)
+		}
+	})
+	t.Run("posture drift", func(t *testing.T) {
+		gitDir := scratchGit(t)
+		f := &fakeMaint{posture: map[string]string{"maintenance.auto": "false", "core.untrackedCache": "true"}, // gc.auto unset
+			loose: 100, unreachable: 80, inPack: 500, packs: 11}
+		res := RunMaint(context.Background(), f.run, MaintOptions{
+			RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true, GracePrune: true})
+		if res.GracePruneRefused != MaintReasonPostureDrift {
+			t.Fatalf("grace-prune under posture drift should refuse POSTURE_DRIFT, got %q", res.GracePruneRefused)
+		}
+		if got := pruneCalls(f.calls); len(got) != 0 {
+			t.Fatalf("no prune argv under posture drift; got %v", got)
+		}
+	})
+}
+
+// TestGracePruneExpireFloorEnforced is the DoD expire-floor witness: a sub-floor or
+// unparseable expire (`now` above all — the Mata-class forbidden form) REFUSES with
+// PRUNE_EXPIRE_UNSAFE and no prune argv is ever built, while floor-or-wider windows run
+// with exactly the requested expire. Every argv that DOES reach git carries an expire from
+// the validated ≥2w set — `--expire=now` can never be emitted.
+func TestGracePruneExpireFloorEnforced(t *testing.T) {
+	cases := []struct {
+		expire   string
+		wantRun  bool
+		wantArgv string // the --expire value expected when wantRun
+	}{
+		{"", true, defaultPruneExpire},
+		{"2.weeks.ago", true, "2.weeks.ago"},
+		{"6.weeks.ago", true, "6.weeks.ago"},
+		{"1.months.ago", true, "1.months.ago"},
+		{"1.years.ago", true, "1.years.ago"},
+		{"now", false, ""},
+		{"all", false, ""},
+		{"1.weeks.ago", false, ""},
+		{"0.weeks.ago", false, ""},
+		{"13.days.ago", false, ""},  // day units are not provably ≥2w — fail-closed
+		{"2.weeks", false, ""},      // not the closed <n>.<unit>.ago form
+		{"2026-01-01", false, ""},   // free-text dates refused
+		{"-3.weeks.ago", false, ""}, // negative refused
+	}
+	for _, tc := range cases {
+		name := tc.expire
+		if name == "" {
+			name = "<default>"
+		}
+		t.Run(name, func(t *testing.T) {
+			gitDir := scratchGit(t)
+			f := &fakeMaint{posture: safePosture(), loose: 100, unreachable: 80, inPack: 500, packs: 11}
+			res := RunMaint(context.Background(), f.run, MaintOptions{
+				RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true, GracePrune: true, PruneExpire: tc.expire})
+
+			prunes := pruneCalls(f.calls)
+			if tc.wantRun {
+				if len(prunes) != 1 || !equalArgs(prunes[0], []string{"prune", "--expire=" + tc.wantArgv}) {
+					t.Fatalf("expire %q should run as --expire=%s; got %v", tc.expire, tc.wantArgv, prunes)
+				}
+				if res.GracePruneRefused != "" {
+					t.Fatalf("valid expire %q must not refuse: %q", tc.expire, res.GracePruneRefused)
+				}
+			} else {
+				if len(prunes) != 0 {
+					t.Fatalf("sub-floor expire %q must never reach git; got %v", tc.expire, prunes)
+				}
+				if res.GracePruneRefused != MaintReasonPruneExpireUnsafe {
+					t.Fatalf("sub-floor expire %q should refuse PRUNE_EXPIRE_UNSAFE, got %q", tc.expire, res.GracePruneRefused)
+				}
+				// The recorded skipped step must not carry the refused value either.
+				for _, s := range res.Steps {
+					if s.Tier == gracePruneTier && !equalArgs(s.Args, []string{"prune", "--expire=" + defaultPruneExpire}) {
+						t.Fatalf("a refused expire must not appear in the step record: %+v", s)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestGracePruneDryRunPlansOnly: dry-run + opted-in + quiet plans the prune step (Ran=false,
+// no refusal) and issues no mutating argv at all.
+func TestGracePruneDryRunPlansOnly(t *testing.T) {
+	gitDir := scratchGit(t)
+	f := &fakeMaint{posture: safePosture(), loose: 100, unreachable: 80, inPack: 500, packs: 11}
+	res := RunMaint(context.Background(), f.run, MaintOptions{
+		RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: false, GracePrune: true})
+
+	if got := pruneCalls(f.calls); len(got) != 0 {
+		t.Fatalf("dry-run must issue no prune argv; got %v", got)
+	}
+	if res.GracePruneRefused != "" {
+		t.Fatalf("a quiet dry-run plans the prune, it does not refuse it: %q", res.GracePruneRefused)
+	}
+	for _, s := range res.Steps {
+		if s.Tier == gracePruneTier && (s.Ran || s.Skipped != "") {
+			t.Fatalf("dry-run prune step should be planned-only: %+v", s)
+		}
+	}
+}
+
+func equalArgs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

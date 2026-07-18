@@ -8,7 +8,8 @@
 // WHY IT IS SAFE ON A HOT CLONE. Object-DB maintenance is orthogonal to working-tree
 // hotness: it reads .git/objects + refs and never touches the tree, so it is safely
 // automatable while 80–100 files are dirty across peer sessions. The ONLY risk is
-// object DELETION, which this path forbids outright. Two tiers, gated differently:
+// object DELETION, which this path forbids except for the strictly supervised
+// grace-prune tier below. Three tiers, gated progressively harder:
 //
 //   - ALWAYS-SAFE (RunMaint runs it unconditionally, even mid-commit): `git
 //     multi-pack-index write` and `git commit-graph write --reachable`. Both are
@@ -25,12 +26,29 @@
 //     no-auto-gc posture still holds — and the locks are RE-CHECKED before every
 //     mutating step (TOCTOU), so a peer that starts committing mid-run defers the rest.
 //
+//   - GRACE-PRUNE (#5079, #4602 Phase 4 — OPT-IN, default OFF): `git prune
+//     --expire=<≥2w>` only, the reclaim half the fold tiers structurally cannot
+//     deliver (folding relocates loose objects into packs; it never removes the
+//     ~86% that are UNREACHABLE). Gated strictly harder than the fold tier: the
+//     posture assert AND a fresh transaction-lock re-probe AND a genuine QUIET
+//     WINDOW — no live session/intent lease under refs/fak/locks/, the exact
+//     namespace the fold tiers deliberately ignore. This is the one tier where a
+//     live session lease IS load-bearing: a fold can run beside a live session,
+//     a prune must not.
+//
 // WHAT IT NEVER DOES (the forbidden set, mirroring gitgate.go's refusals): never
 // `--prune=now` / bare `git prune` (they ignore gc.pruneexpire and drop unreachable
-// loose immediately), never `git gc` / `--task=gc`, never a full `repack -a/-A/-adb`,
-// never `git worktree prune`, never `git maintenance register/start` (those write the
-// GLOBAL ~/.gitconfig), never edits .git/config. It only ever ADDS a midx/commit-graph
-// and folds redundant loose/pack copies that git itself proves are already covered.
+// loose immediately — including an object a concurrent commit wrote milliseconds
+// ago), never `git gc` / `--task=gc`, never a full `repack -a/-A/-adb`, never
+// `git worktree prune`, never `git maintenance register/start` (those write the
+// GLOBAL ~/.gitconfig), never edits .git/config. The ONE permitted prune form is
+// the grace-prune tier's `git prune --expire=<≥2w>`: the ≥2-week expire floor
+// (enforced in code — a sub-floor or `now` expire is REFUSED, never executed)
+// means it can only drop objects that have been unreachable for weeks, which no
+// in-flight commit could have just written, and the quiet-window gate means no
+// session is even live to race. That is precisely why it is not the forbidden
+// form: the forbidden prunes are dangerous because `now` drops just-written
+// objects mid-transaction; a supervised ≥2w prune in a quiet window cannot.
 //
 // Like treedoctor/safecommit, every git effect goes through an injected MaintRunner so
 // the whole tier-gating + preflight decision tree is unit-testable with no git and no
@@ -65,6 +83,16 @@ type MaintOptions struct {
 	// Apply performs the consolidation. When false the run is a DRY-RUN: it probes
 	// locks + posture and the before-count and reports the plan, mutating nothing.
 	Apply bool
+	// GracePrune opts in to the supervised grace-prune tier (#5079): a single
+	// `git prune --expire=<≥2w>` reclaiming unreachable loose objects, run only
+	// under the full preflight AND a quiet window (no live session lease). Default
+	// false = the tier is OFF and recorded as skipped with MaintReasonPruneOff.
+	GracePrune bool
+	// PruneExpire optionally overrides the grace-prune expire window. Empty means
+	// the defaultPruneExpire floor. Fail-closed: any value validPruneExpire cannot
+	// prove is at/above the 2-week floor (`now`, `1.weeks.ago`, free-text dates…)
+	// REFUSES the tier with MaintReasonPruneExpireUnsafe — the argv is never built.
+	PruneExpire string
 }
 
 // MaintReason is a structured, closed-vocabulary reason the safe-with-grace tier was
@@ -85,6 +113,21 @@ const (
 	// tier REFUSES and the drift is surfaced as an incident for an operator to repair
 	// the shared config.
 	MaintReasonPostureDrift MaintReason = "POSTURE_DRIFT"
+	// MaintReasonPruneOff: the grace-prune tier was not requested — it is opt-in and
+	// default-OFF (MaintOptions.GracePrune=false) until soaked (#5079). Not an
+	// incident; the fold tiers are unaffected.
+	MaintReasonPruneOff MaintReason = "PRUNE_OFF"
+	// MaintReasonSessionLive: a live session/intent lease is held under
+	// refs/fak/locks/ — the box is not in a quiet window, so the grace-prune tier
+	// refuses immediately (no added latency). This is the ONE tier where a lease is
+	// load-bearing: the fold tiers deliberately ignore that namespace (#4602 GAP 2),
+	// but a prune must not run while any session is live.
+	MaintReasonSessionLive MaintReason = "SESSION_LIVE"
+	// MaintReasonPruneExpireUnsafe: the requested prune expire is below the 2-week
+	// floor (or unparseable — `now`, `all`, free-text). The tier REFUSES and the
+	// sub-floor argv is never constructed, so `git prune --expire=now` cannot be
+	// emitted through this path even by misconfiguration.
+	MaintReasonPruneExpireUnsafe MaintReason = "PRUNE_EXPIRE_UNSAFE"
 )
 
 // alwaysSafeSteps are the add-only, atomic, safe-even-mid-commit git verbs — they
@@ -99,6 +142,48 @@ var alwaysSafeSteps = [][]string{
 var graceSteps = [][]string{
 	{"maintenance", "run", "--task=loose-objects"},
 	{"maintenance", "run", "--task=incremental-repack"},
+}
+
+// Grace-prune tier constants (#5079): the tier name, and the expire floor. The floor
+// is git approxidate `2.weeks.ago` — wide enough that no object a concurrent commit
+// just wrote can be inside the window, and enforced in code by validPruneExpire (a
+// sub-floor request refuses; it is never merely clamped or ignored).
+const (
+	gracePruneTier     = "grace-prune"
+	defaultPruneExpire = "2.weeks.ago"
+)
+
+// validPruneExpire validates a requested grace-prune expire window against the
+// 2-week floor, returning the canonical value to place after `--expire=`. Empty
+// means the default floor. FAIL-CLOSED: only the closed forms `<n>.weeks.ago`
+// (n ≥ 2), `<n>.months.ago` / `<n>.years.ago` (n ≥ 1) are provably at/above the
+// floor; everything else — `now`, `all`, day/hour units, free-text dates — is
+// refused rather than parsed generously, so the forbidden `--expire=now` argv is
+// structurally unbuildable through this path.
+func validPruneExpire(v string) (string, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return defaultPruneExpire, true
+	}
+	for _, u := range []struct {
+		suffix string
+		floor  int
+	}{
+		{".weeks.ago", 2},
+		{".months.ago", 1},
+		{".years.ago", 1},
+	} {
+		num, ok := strings.CutSuffix(v, u.suffix)
+		if !ok {
+			continue
+		}
+		n, err := strconv.Atoi(num)
+		if err != nil || n < u.floor {
+			return "", false
+		}
+		return v, true
+	}
+	return "", false
 }
 
 // maintLockNames is the fixed set of common-dir lock files whose presence means a
@@ -156,7 +241,7 @@ type CountObjects struct {
 
 // MaintStep is one executed (or planned, or skipped) git step and its outcome.
 type MaintStep struct {
-	Tier    string      `json:"tier"` // "always-safe" | "safe-with-grace"
+	Tier    string      `json:"tier"` // "always-safe" | "safe-with-grace" | "grace-prune"
 	Args    []string    `json:"args"` // the git argv (after the "git" program word)
 	Ran     bool        `json:"ran"`  // false when dry-run-planned or skipped
 	Skipped MaintReason `json:"skipped,omitempty"`
@@ -166,14 +251,22 @@ type MaintStep struct {
 
 // MaintResult is the full structured outcome of a git-maint run.
 type MaintResult struct {
-	Apply        bool         `json:"apply"`
-	Posture      Posture      `json:"posture"`
-	Locks        []string     `json:"locks,omitempty"`         // lock paths (common-dir-relative) live at preflight
-	GraceRefused MaintReason  `json:"grace_refused,omitempty"` // "" when the grace tier ran
-	Incident     bool         `json:"incident"`                // posture drift — surfaced as an incident
-	Steps        []MaintStep  `json:"steps"`
-	Before       CountObjects `json:"before"`
-	After        CountObjects `json:"after"`
+	Apply        bool        `json:"apply"`
+	Posture      Posture     `json:"posture"`
+	Locks        []string    `json:"locks,omitempty"`         // lock paths (common-dir-relative) live at preflight
+	GraceRefused MaintReason `json:"grace_refused,omitempty"` // "" when the grace tier ran
+	// GracePruneRefused is "" only when the grace-prune tier actually ran (or was
+	// dry-run-planned); otherwise the structured reason it was held back — PRUNE_OFF
+	// (default), PRUNE_EXPIRE_UNSAFE, POSTURE_DRIFT, LOCKED, or SESSION_LIVE.
+	GracePruneRefused MaintReason `json:"grace_prune_refused,omitempty"`
+	// SessionLeases are the live session/intent lease files under refs/fak/locks/
+	// seen by the grace-prune quiet-window probe (populated only when they refused
+	// the tier). The fold tiers ignore this namespace; the prune tier must not.
+	SessionLeases []string     `json:"session_leases,omitempty"`
+	Incident      bool         `json:"incident"` // posture drift — surfaced as an incident
+	Steps         []MaintStep  `json:"steps"`
+	Before        CountObjects `json:"before"`
+	After         CountObjects `json:"after"`
 	// LooseBacklogHigh is set from the PRE-run count: true when the loose-object backlog
 	// is at/above LooseBacklogThreshold. A read-only high-water witness — it mutates
 	// nothing and gates no tier — so an operator/caller can SEE the invisible backlog
@@ -202,9 +295,12 @@ func LooseBacklogHigh(co CountObjects) bool {
 // is add-only and atomic, safe even mid-commit. The SAFE-WITH-GRACE tier (git
 // maintenance run --task=loose-objects / --task=incremental-repack, which may UNLINK a
 // fully-covered redundant copy) runs only when BOTH the posture assert and the lock
-// preflight pass, re-checking locks before every mutating step (TOCTOU). It never
-// prunes unreachable objects, never full-repacks, never edits config. Idempotent: a
-// rerun with nothing to consolidate is a no-op.
+// preflight pass, re-checking locks before every mutating step (TOCTOU). The
+// GRACE-PRUNE tier (opt-in, default-off) additionally requires the ≥2-week expire
+// floor and a quiet window (no live session lease) before its single supervised
+// `git prune --expire=<≥2w>`; with GracePrune unset RunMaint never prunes anything.
+// It never full-repacks, never edits config. Idempotent: a rerun with nothing to
+// consolidate is a no-op.
 func RunMaint(ctx context.Context, run MaintRunner, opts MaintOptions) MaintResult {
 	res := MaintResult{Apply: opts.Apply}
 	res.Before = countObjects(ctx, run, opts.RepoRoot)
@@ -239,9 +335,76 @@ func RunMaint(ctx context.Context, run MaintRunner, opts MaintOptions) MaintResu
 		}
 	}
 
+	// Grace-prune tier (#5079, #4602 Phase 4): opt-in, default-off, gated strictly
+	// harder than the fold tier — expire floor, posture, a fresh transaction-lock
+	// re-probe, AND a quiet window (no live session lease). At most one prune per run.
+	res.Steps = append(res.Steps, gracePruneStep(ctx, run, opts, &res))
+
 	res.After = countObjects(ctx, run, opts.RepoRoot)
 	res.LooseBacklogHigh = LooseBacklogHigh(res.Before)
 	return res
+}
+
+// gracePruneStep decides and (when every gate passes) executes the single supervised
+// grace-prune step, recording the structured refusal otherwise. Gate order: opt-in
+// flag, expire floor, posture, transaction locks (a FRESH probe — the preflight
+// snapshot may be stale by now), then the quiet window. A refused step never builds
+// a sub-floor argv: the displayed args always carry a validated (or the default
+// floor) expire, so `--expire=now` cannot appear in a step record, let alone hit git.
+func gracePruneStep(ctx context.Context, run MaintRunner, opts MaintOptions, res *MaintResult) MaintStep {
+	expire, expireOK := validPruneExpire(opts.PruneExpire)
+	if !expireOK {
+		expire = defaultPruneExpire // display-only: the refused value is never placed in an argv
+	}
+	args := []string{"prune", "--expire=" + expire}
+	refuse := func(reason MaintReason) MaintStep {
+		res.GracePruneRefused = reason
+		return MaintStep{Tier: gracePruneTier, Args: args, Skipped: reason}
+	}
+	switch {
+	case !opts.GracePrune:
+		return refuse(MaintReasonPruneOff)
+	case !expireOK:
+		return refuse(MaintReasonPruneExpireUnsafe)
+	case !res.Posture.Safe:
+		return refuse(MaintReasonPostureDrift)
+	}
+	if live := probeLocks(opts.GitCommonDir); len(live) > 0 {
+		res.Locks = live
+		return refuse(MaintReasonLocked)
+	}
+	if leases := probeSessionLeases(opts.GitCommonDir); len(leases) > 0 {
+		res.SessionLeases = leases
+		return refuse(MaintReasonSessionLive)
+	}
+	return runStep(ctx, run, opts, gracePruneTier, args)
+}
+
+// probeSessionLeases returns every file (sorted, common-dir-relative) under fak's
+// lease namespace refs/fak/locks/ — loose lease refs (session-*, intent-*) and their
+// transient *.lock twins alike. For the fold tiers this namespace is deliberately
+// invisible (#4602 GAP 2: a fold is object-DB-orthogonal to a live session); for the
+// grace-prune tier it is THE load-bearing quiet-window signal — any file here means
+// a session is (or may be) live, and the prune refuses with MaintReasonSessionLive.
+// Conservative on purpose: a stale lease also blocks (reap it first), because a
+// false "quiet" is the failure mode this tier exists to avoid.
+func probeSessionLeases(gitDir string) []string {
+	if strings.TrimSpace(gitDir) == "" {
+		return nil
+	}
+	root := filepath.Join(gitDir, filepath.FromSlash(leaseLockPrefix))
+	var out []string
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if rel, rerr := filepath.Rel(gitDir, p); rerr == nil {
+			out = append(out, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out
 }
 
 // appendSkipped records every grace step as skipped with the given reason (used when
