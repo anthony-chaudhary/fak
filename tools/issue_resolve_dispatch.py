@@ -81,6 +81,7 @@ import issue_lane_router  # noqa: E402  (lane_taxonomy: dos.toml lane→tree map
 import fleet_trend  # noqa: E402  (per-tick fleet-status-history append, #4594)
 import lane_core  # noqa: E402  (core-source / trust-critical lane predicates, mirror of internal/dispatchtick/selfmodify.go)
 import tier_launch  # noqa: E402  (per-issue tier launch profile, mirror of internal/dispatchtick/launchprofile.go)
+import issue_closure_audit  # noqa: E402  (shared resolving-commit witness grammar, #5071)
 
 # Re-export the shared console-window suppressor so the account-topup / glm-docs
 # entry scripts (which import THIS module as `ird`) route every helper subprocess
@@ -3975,6 +3976,165 @@ def commit_audit_abstain_holds(root: Path, candidates: set[int], *,
     return records
 
 
+# --- Pre-dispatch OPEN_WITNESSED closure guard (#5071) ---
+# On 2026-07-16 the live resolver dispatched #2850 even though two resolving
+# commits (f8aff29dfd, 8d0d6f620f) were already on main AND origin/main: the
+# locally_witnessed_issues guard above only covers the UNPUSHED origin/main..HEAD
+# window, so an issue that is open on GitHub while its resolving commit sits in
+# full trunk ancestry (the closure auditor's OPEN_WITNESSED bucket) was admitted
+# as engineering fuel, burned a ~18-minute seat, and wrote a false CLAIM_NO_COMMIT.
+# A witness-gated loop must CONSUME already-shipped open issues by closing them,
+# never redispatch them. This guard joins issue selection to the same
+# resolving-commit witness issue_closure_audit grades against, and the close is
+# routed through the EXISTING trusted close arm (issue_resolve_witnessed.py) so
+# every close still re-verifies per-sha and keeps that arm's pushed / reopen /
+# coverage / readback gates. Everything here is FAIL-OPEN: a git or audit error
+# witnesses nothing (the tick dispatches exactly as before).
+OPEN_WITNESSED = "OPEN_WITNESSED"
+
+
+def open_witnessed_dispositions(root: Path, candidates: set[int], *,
+                                git: Any | None = None,
+                                audit_runner: Any | None = None,
+                                scan_limit: int = 600) -> list[dict[str, Any]]:
+    """Typed OPEN_WITNESSED dispositions for candidates already resolved in trunk.
+
+    A candidate is disposed OPEN_WITNESSED when a commit in HEAD ancestry (the
+    trunk the dispatcher stands on — a commit outside that ancestry is never
+    consulted) classifies RESOLVING for it under the closure auditor's shared
+    grammar (issue_closure_audit.classify_refs — a mere body mention is
+    insufficient) AND the DOS witness grades that commit OK / diff-witnessed
+    with a resolution-binding claim kind. Each disposition carries the commit
+    witness (sha, subject, verdict, witness, claim_kind) so the tick can report
+    the witnessed SHA and route the close. An unwitnessed resolving cite keeps
+    scanning older commits; an issue with no witnessed resolving commit is NOT
+    disposed and stays eligible. Fail-open on any git/audit error.
+    """
+    wanted = {int(n) for n in candidates if n is not None}
+    if not wanted:
+        return []
+    git = git or _git_capture
+    audit = audit_runner or _run_commit_audit
+    rc, out = git(root, ["log", "--no-color", "-n", str(int(scan_limit)),
+                         "--pretty=format:%H%x1f%s%x1f%b%x1e"])
+    if rc != 0 or not out:
+        return []
+    rows: list[dict[str, Any]] = []
+    decided: set[int] = set()
+    audited: dict[str, dict[str, Any]] = {}
+    for entry in out.split("\x1e"):
+        entry = entry.strip("\n")
+        if not entry.strip():
+            continue
+        parts = entry.split("\x1f")
+        if len(parts) < 2:
+            continue
+        sha = parts[0].strip()
+        subject = parts[1].strip()
+        body = parts[2] if len(parts) > 2 else ""
+        if not sha:
+            continue
+        refs = issue_closure_audit.classify_refs(subject, body)
+        nums = sorted(n for n, kind in refs.items()
+                      if kind == issue_closure_audit.RESOLVING
+                      and n in wanted and n not in decided)
+        if not nums:
+            continue
+        row = audited.get(sha)
+        if row is None:
+            row = audit(root, sha) or {}
+            audited[sha] = row
+        verdict = str(row.get("verdict") or "").upper()
+        witness = str(row.get("witness") or "")
+        if verdict != "OK" or witness != _WITNESS_OK:
+            # A resolving cite without the diff-witness keep-bit is not shipped
+            # evidence (preserve the existing witness rules); keep scanning.
+            continue
+        if not issue_closure_audit.commit_binds_resolution(row, ""):
+            # A doc/triage claim never resolves a (presumed non-docs) issue; the
+            # empty title is the conservative direction — the issue stays
+            # eligible rather than being closed on a doc claim.
+            continue
+        for issue in nums:
+            rows.append({
+                "issue": issue, "sha": sha, "subject": subject,
+                "code": OPEN_WITNESSED,
+                "verdict": row.get("verdict"), "witness": row.get("witness"),
+                "claim_kind": row.get("claim_kind"),
+                "close_via": "tools/issue_resolve_witnessed.py",
+            })
+            decided.add(issue)
+        if decided >= wanted:
+            break
+    return rows
+
+
+def _run_close_arm(root: Path, cmd: list[str], *, timeout: int = 300) -> tuple[int, str]:
+    """Default close-arm runner -> (returncode, stdout). Never raises."""
+    kwargs: dict[str, Any] = {
+        "cwd": str(root), "capture_output": True, "text": True,
+        "encoding": "utf-8", "errors": "replace", "timeout": timeout,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = no_window_creationflags()
+    try:
+        proc = subprocess.run(cmd, **kwargs)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 127, str(exc)
+    return proc.returncode, (proc.stdout or "").strip()
+
+
+def close_open_witnessed(root: Path, runs_dir: Path, rows: list[dict[str, Any]], *,
+                         live: bool, runner: Any | None = None) -> dict[str, Any]:
+    """Route OPEN_WITNESSED dispositions through the EXISTING trusted close path.
+
+    The dispatcher never closes an issue itself: it hands the witnessed rows to
+    issue_resolve_witnessed.py (the close-resolved arm) as a synthetic
+    OPEN_WITNESSED audit via --audit-json, so every close still re-verifies its
+    sha through `dos commit-audit` at close time and keeps the arm's pushed /
+    reopen / coverage / state-readback gates. A non-live invocation plans the
+    closes dry-run (the arm's default); a failed or unparseable invocation
+    fails open — the skip-set already prevented the redispatch this tick, so
+    closure merely lags to a later tick or a standalone close-arm run.
+    """
+    if not rows:
+        return {}
+    run = runner or _run_close_arm
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    audit_path = runs_dir / f"open-witnessed-{stamp}.audit.json"
+    synthetic = {
+        "schema": "issue-closure-audit/synthetic/open-witnessed-dispatch/1",
+        "issues": [{"number": int(r["issue"]), "bucket": OPEN_WITNESSED,
+                    "title": str(r.get("title") or ""),
+                    "witnessed_commits": [{"sha": str(r.get("sha") or ""),
+                                           "subject": str(r.get("subject") or "")}]}
+                   for r in rows if r.get("issue") is not None],
+    }
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        audit_path.write_text(json.dumps(synthetic, indent=2), encoding="utf-8")
+    except OSError as exc:
+        return {"invoked": False, "error": f"could not write synthetic audit: {exc}"}
+    cmd = [_py(), str(root / "tools" / "issue_resolve_witnessed.py"),
+           "--workspace", str(root), "--audit-json", str(audit_path),
+           "--limit", str(len(rows)), "--json"]
+    if live:
+        cmd.append("--live")
+    rc, out = run(root, cmd)
+    try:
+        doc = json.loads(out or "{}")
+    except ValueError:
+        doc = {}
+    if not isinstance(doc, dict) or not doc:
+        return {"invoked": True, "ok": False, "returncode": rc, "live": live,
+                "error": (out or "close arm produced no JSON")[-300:]}
+    return {"invoked": True, "ok": bool(doc.get("ok")), "returncode": rc,
+            "live": live, "verdict": doc.get("verdict"),
+            "counts": doc.get("counts"),
+            "closed_numbers": doc.get("closed_numbers"),
+            "audit_json": str(audit_path)}
+
+
 def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
                            alive: set[int] | None = None, probe: Any | None = None,
                            git: Any | None = None,
@@ -5040,6 +5200,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     audit_abstain_holds = commit_audit_abstain_holds(root, candidates)
     audit_abstain_held = {int(r["issue"]) for r in audit_abstain_holds
                           if r.get("issue") is not None}
+    # #5071: a candidate whose resolving commit is ALREADY witnessed in trunk
+    # ancestry (the closure auditor's OPEN_WITNESSED bucket) is bookkeeping lag,
+    # not engineering fuel — exclude it from selection BEFORE lease/spawn and
+    # route it to the trusted close arm instead of burning a seat on a redo
+    # (the witnessed #2850 redispatch).
+    open_witnessed_rows = open_witnessed_dispositions(root, candidates)
+    open_witnessed_held = {int(r["issue"]) for r in open_witnessed_rows
+                           if r.get("issue") is not None}
     # Part B (per-node hardware-capability gate): drop candidate issues whose
     # declared required_caps this node does NOT advertise (FLEET_NODE_CAPS, default
     # empty => GPU-less). A capability-skipped issue is NOT cooled/leased/labeled —
@@ -5056,7 +5224,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         for n in sorted(capability_skipped)]
     skip = (live_issues | cooled | held_no_commit | contract_held_prior
             | multi_lane_held_prior | collision_held_prior
-            | local_witnessed | audit_abstain_held | capability_skipped)
+            | local_witnessed | audit_abstain_held | open_witnessed_held
+            | capability_skipped)
     scan_stream = contract_scan_stream(eligible_lanes, skip)
     if scan_stream:
         chosen_lane, target = scan_stream[0]
@@ -5106,6 +5275,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         **({"locally_witnessed": sorted(local_witnessed)} if local_witnessed else {}),
         **({"commit_audit_abstain_held": audit_abstain_holds}
            if audit_abstain_holds else {}),
+        # Never a silent drop (#5071): name every candidate disposed
+        # OPEN_WITNESSED with its witnessing SHA, so the tick REPORTS the
+        # evidence it excluded on. Empty => key omitted (byte-identical).
+        **({"open_witnessed": open_witnessed_rows} if open_witnessed_rows else {}),
         # Surface proactive self-source-tree holds (lane_issue_numbers) only when
         # something is actually held, for the same byte-identical-common-case reason.
         **({"self_modify_held": pick.get("self_modify_held")} if pick.get("self_modify_held") else {}),
@@ -5128,6 +5301,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         **({"lane_leases": live_leases} if live_leases.get("fail_open") else {}),
         "already_live": sorted(live_issues), "held_lanes": sorted(held_lanes),
     }
+
+    # #5071: transition OPEN_WITNESSED candidates through the defined closure
+    # path (the trusted close arm) on a LIVE tick — a close consumes no worker
+    # seat, so it runs regardless of the spawn outcome below. Dry-run ticks
+    # report the dispositions + explicit close action only (byte-identical
+    # common case, and never a gh side effect from a plan).
+    if live and open_witnessed_rows:
+        payload["open_witnessed_close"] = close_open_witnessed(
+            root, runs_dir, open_witnessed_rows, live=True)
 
     if not pre_ok:
         hint = _preflight_refusal_hint(pre)

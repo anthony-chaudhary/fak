@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import importlib.util
 import atexit
+import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -954,6 +956,7 @@ class EvaluateTest(unittest.TestCase):
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set(cooled or [])
         mod.locally_witnessed_issues = lambda root, **k: set()
         mod.commit_audit_abstain_holds = lambda root, candidates, **k: []
+        mod.open_witnessed_dispositions = lambda root, candidates, **k: []
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
         mod.issue_contract_review = passing_issue_contract
@@ -1590,6 +1593,46 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 2293)
         self.assertEqual(p["locally_witnessed"], [1444])
         self.assertEqual(reviewed, [2293])
+
+    def test_open_witnessed_candidate_closed_not_redispatched(self) -> None:
+        """#5071 regression (the #2850 redispatch): an open candidate whose
+        resolving commit is already witnessed in trunk ancestry is disposed
+        OPEN_WITNESSED — excluded from selection before lease/spawn, reported
+        with its witnessed SHA — while a non-witnessed control stays eligible."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [2850, 2293],
+                          "by_lane_count": {"tools": 2},
+                          "eligible_by_lane": [["tools", [2850, 2293]]]})
+        seen: dict[str, set[int]] = {}
+
+        def fake_dispositions(root, candidates, **_kw):
+            seen["candidates"] = set(candidates)
+            return [{"issue": 2850, "sha": "f8aff29dfd", "code": "OPEN_WITNESSED",
+                     "subject": "fix(dispatch): guard tick (#2850) (fak tools)",
+                     "verdict": "OK", "witness": "diff-witnessed",
+                     "claim_kind": "code_effect",
+                     "close_via": "tools/issue_resolve_witnessed.py"}]
+
+        mod.open_witnessed_dispositions = fake_dispositions
+        reviewed: list[int] = []
+
+        def counting_review(root, issue, number, **_kw):
+            reviewed.append(number)
+            return passing_issue_contract()
+
+        mod.issue_contract_review = counting_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 2293)  # the control stays eligible
+        self.assertEqual(reviewed, [2293])  # 2850 never reviewed/spawned
+        self.assertEqual(seen["candidates"], {2850, 2293})
+        self.assertEqual(p["open_witnessed"][0]["issue"], 2850)
+        self.assertEqual(p["open_witnessed"][0]["code"], "OPEN_WITNESSED")
+        self.assertEqual(p["open_witnessed"][0]["sha"], "f8aff29dfd")
+        # dry-run never invokes the close arm — dispositions only
+        self.assertNotIn("open_witnessed_close", p)
 
     def test_commit_audit_abstain_test_commit_holds_candidate(self) -> None:
         """A matching test-scope commit whose witness ABSTAINS is a visible hold,
@@ -5654,6 +5697,163 @@ class SpawnFailedCauseTest(unittest.TestCase):
         tail = self.HEADER + "HTTP 429 rate-limited\nfatal error: aborted\n"
         self.assertEqual(mod.classify_spawn_failed_cause({"tail": tail}),
                          mod.SPAWN_CAUSE_WEEKLY_LIMIT)
+
+
+class OpenWitnessedDispositionTest(unittest.TestCase):
+    """#5071: the pre-dispatch OPEN_WITNESSED guard against a REAL temporary git
+    history — the #2850 fixture (open issue + resolving commit already in trunk
+    ancestry) plus a concrete non-witnessed control that remains eligible."""
+
+    @staticmethod
+    def _git(repo: Path, *args: str) -> None:
+        base = ["git", "-C", str(repo), "-c", "user.email=t@t",
+                "-c", "user.name=t", "-c", "core.hooksPath=",
+                "-c", "commit.gpgsign=false"]
+        subprocess.run(base + list(args), check=True, capture_output=True, text=True)
+
+    @staticmethod
+    def _head_sha(repo: Path) -> str:
+        out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                             check=True, capture_output=True, text=True)
+        return out.stdout.strip()
+
+    def _repo_with_resolving_commit(self, repo: Path) -> str:
+        """One trunk commit whose subject cites #2850 (the resolving grammar)."""
+        self._git(repo, "init", "-q", "-b", "main")
+        (repo / "a.go").write_text("package a\n", encoding="utf-8")
+        self._git(repo, "add", "a.go")
+        self._git(repo, "commit", "-q", "--no-gpg-sign", "-m",
+                  "fix(dispatch): close pre-witnessed guard (#2850) (fak tools)")
+        return self._head_sha(repo)
+
+    def test_witnessed_trunk_commit_disposes_candidate_control_stays(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            sha = self._repo_with_resolving_commit(repo)
+            audits = {sha: {"sha": sha, "verdict": "OK",
+                            "witness": "diff-witnessed",
+                            "claim_kind": "code_effect"}}
+            rows = mod.open_witnessed_dispositions(
+                repo, {2850, 2293},
+                audit_runner=lambda root, s, **k: audits.get(s, {}))
+            # #2850 is disposed with its witnessing SHA...
+            self.assertEqual([r["issue"] for r in rows], [2850])
+            self.assertEqual(rows[0]["sha"], sha)
+            self.assertEqual(rows[0]["code"], "OPEN_WITNESSED")
+            self.assertEqual(rows[0]["witness"], "diff-witnessed")
+            # ...and the control (#2293, no resolving commit anywhere) is not.
+
+    def test_unwitnessed_resolving_cite_is_not_shipped(self) -> None:
+        """A mere subject mention without the diff-witness keep-bit must not
+        dispose the candidate (preserve the existing witness rules)."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            sha = self._repo_with_resolving_commit(repo)
+            audits = {sha: {"sha": sha, "verdict": "ABSTAIN", "witness": "abstain"}}
+            rows = mod.open_witnessed_dispositions(
+                repo, {2850},
+                audit_runner=lambda root, s, **k: audits.get(s, {}))
+            self.assertEqual(rows, [])
+
+    def test_doc_claim_does_not_dispose_issue(self) -> None:
+        """A diff-witnessed doc/triage claim witnesses a note, never the
+        candidate's feature — the issue stays eligible (#2998 rule shared)."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            sha = self._repo_with_resolving_commit(repo)
+            audits = {sha: {"sha": sha, "verdict": "OK",
+                            "witness": "diff-witnessed", "claim_kind": "doc"}}
+            rows = mod.open_witnessed_dispositions(
+                repo, {2850},
+                audit_runner=lambda root, s, **k: audits.get(s, {}))
+            self.assertEqual(rows, [])
+
+    def test_git_error_fails_open(self) -> None:
+        mod = load()
+        rows = mod.open_witnessed_dispositions(
+            Path("z:/nope"), {2850},
+            git=lambda root, args, **k: (1, ""),
+            audit_runner=lambda root, s, **k: {})
+        self.assertEqual(rows, [])
+
+
+class CloseOpenWitnessedTest(unittest.TestCase):
+    """#5071: dispositions transition through the EXISTING trusted close path
+    (issue_resolve_witnessed.py via a synthetic OPEN_WITNESSED --audit-json)."""
+
+    ROW = {"issue": 2850, "sha": "f8aff29dfd", "code": "OPEN_WITNESSED",
+           "subject": "fix(dispatch): guard tick (#2850) (fak tools)",
+           "verdict": "OK", "witness": "diff-witnessed",
+           "claim_kind": "code_effect"}
+
+    def test_routes_through_close_arm_with_synthetic_audit(self) -> None:
+        mod = load()
+        calls: list[list[str]] = []
+
+        def fake_run(root, cmd, **_kw):
+            calls.append(list(cmd))
+            return 0, json.dumps({"ok": True, "verdict": "CLOSED",
+                                  "counts": {"closed": 1},
+                                  "closed_numbers": [2850]})
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d) / "runs"
+            out = mod.close_open_witnessed(Path(d), runs, [dict(self.ROW)],
+                                           live=True, runner=fake_run)
+            self.assertTrue(out["invoked"])
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["verdict"], "CLOSED")
+            self.assertEqual(out["closed_numbers"], [2850])
+            cmd = calls[0]
+            self.assertIn("--audit-json", cmd)
+            self.assertIn("--live", cmd)
+            self.assertTrue(str(cmd[1]).endswith("issue_resolve_witnessed.py"))
+            # The synthetic audit carries the OPEN_WITNESSED bucket + witness.
+            audit_path = Path(cmd[cmd.index("--audit-json") + 1])
+            doc = json.loads(audit_path.read_text(encoding="utf-8"))
+            self.assertEqual(doc["issues"][0]["number"], 2850)
+            self.assertEqual(doc["issues"][0]["bucket"], "OPEN_WITNESSED")
+            self.assertEqual(doc["issues"][0]["witnessed_commits"][0]["sha"],
+                             "f8aff29dfd")
+
+    def test_dry_run_never_passes_live(self) -> None:
+        mod = load()
+        calls: list[list[str]] = []
+
+        def fake_run(root, cmd, **_kw):
+            calls.append(list(cmd))
+            return 0, json.dumps({"ok": True, "verdict": "PLANNED"})
+
+        with tempfile.TemporaryDirectory() as d:
+            out = mod.close_open_witnessed(Path(d), Path(d) / "runs",
+                                           [dict(self.ROW)],
+                                           live=False, runner=fake_run)
+            self.assertTrue(out["invoked"])
+            self.assertNotIn("--live", calls[0])
+
+    def test_close_arm_failure_fails_open(self) -> None:
+        mod = load()
+
+        def fake_run(root, cmd, **_kw):
+            return 127, "boom: not json"
+
+        with tempfile.TemporaryDirectory() as d:
+            out = mod.close_open_witnessed(Path(d), Path(d) / "runs",
+                                           [dict(self.ROW)],
+                                           live=True, runner=fake_run)
+            self.assertTrue(out["invoked"])
+            self.assertFalse(out["ok"])
+            self.assertIn("boom", out["error"])
+
+    def test_no_rows_is_a_noop(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.close_open_witnessed(Path("."), Path("."), [], live=True,
+                                     runner=lambda *a, **k: (0, "{}")),
+            {})
 
 
 if __name__ == "__main__":
