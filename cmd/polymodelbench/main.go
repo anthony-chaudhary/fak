@@ -18,10 +18,11 @@
 //     plain greedy decoding. Losslessness only holds if the bit-exact rollback is
 //     correct, so this is the end-to-end witness for the speculative KV path.
 //
-// The throughput-optimal single-pass batched verify (the GPU lever) is NOT done
-// here — the verify runs as sequential target Steps, which is correctness-faithful
-// but not the speedup. That, and real multi-model residency on a backend, are the
-// sequenced GAPs in the plan doc. This command proves the design's CORRECTNESS core,
+// The speculative loop itself is the shared internal/polymodel.SpecDecode driver
+// (#4877): this command binds its drafter/verifier/rollback closures over real
+// model.Session.VerifyForward (the single-pass batched verify) + model.KVCache.Evict,
+// so there is ONE loop, tested once. Real multi-model residency on a backend remains
+// a sequenced GAP in the plan doc. This command proves the design's CORRECTNESS core,
 // never a tokens/sec number.
 package main
 
@@ -245,115 +246,112 @@ func greedyDecode(m *model.Model, prompt []int, n int) []int {
 	return out
 }
 
-// specDecode is greedy speculative decoding with bit-exact KV rollback. The draft
-// proposes k tokens; the target verifies them (here as sequential Steps — the
-// single-pass batched verify is the GPU lever, not this witness); polymodel.AcceptGreedy
-// decides the accepted prefix; the rejected draft positions are removed from BOTH
-// sessions with model.KVCache.Evict (the bit-exact rollback). Greedy speculation is
-// provably lossless, so the output must equal greedyDecode — which only holds if Evict
-// is bit-exact. Returns the output tokens plus draft/accept counts.
-func specDecodeModel(target, draft *model.Model, prompt []int, n, k int) (out []int, drafted, accepted, evicted int) {
-	ts := target.NewSession()
-	ds := draft.NewSession()
-	tl := ts.Prefill(prompt) // target's next-token distribution at the shared context
-	dl := ds.Prefill(prompt) // draft's, threaded so it always reflects committed context
-	out = make([]int, 0, n)
+// targetVerify binds a target model.Session to polymodel.SpecDecode's Verifier +
+// Rollback seam. The verifier first syncs the session to the committed context (the
+// previous round's correction/bonus token is committed by the loop but never fed to
+// the session), then runs ONE model.Session.VerifyForward pass over the draft — the
+// chain shape is bit-identical to sequential Steps (TestVerifyForwardMatchesSerial),
+// so losslessness is preserved — and returns the target's argmax at the k+1 panel
+// positions. The rollback removes the rejected draft suffix with the bit-exact
+// model.KVCache.Evict, using the positions captured by the verify pass.
+type targetVerify struct {
+	s        *model.Session
+	tl       []float32 // next-token logits at the committed context (threaded)
+	base     int       // cache length at the start of the current verify pass
+	draftLen int       // draft length of the current verify pass
+}
 
-	for len(out) < n {
-		pT := ts.Cache.Len()
-		pD := ds.Cache.Len()
+func newTargetVerify(target *model.Model, prompt []int) *targetVerify {
+	s := target.NewSession()
+	return &targetVerify{s: s, tl: s.Prefill(prompt)}
+}
 
-		// 1. Draft proposes k tokens greedily from its own model, threading dl.
-		drafts := make([]int, 0, k)
-		for j := 0; j < k; j++ {
-			dj := mathx.ArgmaxF32(dl)
-			drafts = append(drafts, dj)
-			dl = ds.Step(dj)
-		}
-		drafted += k
-
-		// 2. Target verifies: argmax at the current position (from tl) and after each
-		//    drafted token fed sequentially → k+1 argmaxes.
-		targetArgmax := make([]int, 0, k+1)
-		targetArgmax = append(targetArgmax, mathx.ArgmaxF32(tl))
-		for j := 0; j < k; j++ {
-			targetArgmax = append(targetArgmax, mathx.ArgmaxF32(ts.Step(drafts[j])))
-		}
-
-		// 3. Accept the longest matching prefix.
-		res := polymodel.AcceptGreedy(drafts, targetArgmax)
-		accepted += res.Accepted
-
-		// 4. Roll back the rejected draft positions on BOTH sessions (bit-exact Evict).
-		if res.EvictKV > 0 {
-			ts.Cache.Evict(pT+res.Accepted, res.EvictKV)
-			ds.Cache.Evict(pD+res.Accepted, res.EvictKV)
-			evicted += res.EvictKV
-		}
-
-		// 5. Emit the committed tokens (accepted drafts + the correction/bonus) and
-		//    advance both sessions by the correction so the next round shares context.
-		correction := targetArgmax[res.Accepted]
-		for j := 0; j < res.Accepted && len(out) < n; j++ {
-			out = append(out, drafts[j])
-		}
-		if len(out) < n {
-			out = append(out, correction)
-		}
-		tl = ts.Step(correction)
-		dl = ds.Step(correction)
+func (v *targetVerify) verify(committed, draft []int) []int {
+	for _, t := range committed[v.s.Cache.Len():] { // feed the not-yet-seen correction
+		v.tl = v.s.Step(t)
 	}
-	return out, drafted, accepted, evicted
+	v.base = v.s.Cache.Len()
+	v.draftLen = len(draft)
+	argmax := make([]int, 0, len(draft)+1)
+	argmax = append(argmax, mathx.ArgmaxF32(v.tl)) // position 0: already known from tl
+	for _, row := range v.s.VerifyForward(draft, nil, nil) {
+		argmax = append(argmax, mathx.ArgmaxF32(row))
+	}
+	return argmax
+}
+
+func (v *targetVerify) rollback(evictKV int) {
+	v.s.Cache.Evict(v.base+(v.draftLen-evictKV), evictKV)
+}
+
+// specDecodeModel is greedy speculative decoding with a real co-resident draft model,
+// driven by the shared polymodel.SpecDecode loop (#4877): the drafter closure proposes
+// k tokens greedily from the draft model's own session, the verifier closure runs the
+// target's single-pass model.Session.VerifyForward, and the rollback closure removes
+// the rejected draft positions from BOTH sessions with the bit-exact model.KVCache.Evict.
+// Greedy speculation is provably lossless, so the output must equal greedyDecode —
+// which only holds if Evict is bit-exact. Returns the output tokens plus counts.
+func specDecodeModel(target, draft *model.Model, prompt []int, n, k int) (out []int, drafted, accepted, evicted int) {
+	tv := newTargetVerify(target, prompt)
+	ds := draft.NewSession()
+	dl := ds.Prefill(prompt) // draft's logits, threaded so it always reflects committed context
+	var pD int               // draft-session cache length at the start of the current round
+
+	run, err := polymodel.SpecDecode(prompt,
+		func(committed []int) []int {
+			for _, t := range committed[ds.Cache.Len():] { // sync: feed the last correction
+				dl = ds.Step(t)
+			}
+			pD = ds.Cache.Len()
+			drafts := make([]int, 0, k)
+			for j := 0; j < k; j++ {
+				dj := mathx.ArgmaxF32(dl)
+				drafts = append(drafts, dj)
+				dl = ds.Step(dj)
+			}
+			return drafts
+		},
+		tv.verify,
+		polymodel.SpecDecodeConfig{MaxNewTokens: n, MaxDraft: k,
+			Rollback: func(evictKV int) { // roll back BOTH sessions bit-exactly
+				tv.rollback(evictKV)
+				ds.Cache.Evict(pD+(tv.draftLen-evictKV), evictKV)
+			}})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  specDecodeModel: SpecDecode failed: %v\n", err)
+	}
+	return run.Output, run.DraftedTokens, run.AcceptedDrafts, run.EvictKV
 }
 
 // specDecodeProposer is speculative decode where the draft is a PROPOSER FUNCTION
 // rather than a model — used to stress the rollback path with an adversarial draft
-// that forces rejections. Only the target has a KV cache; the rejected draft tokens
-// are rolled back from it with the bit-exact model.KVCache.Evict. In production the
-// proposer is a co-resident small model (polymodel.PickDrafter); here a deterministic
-// function lets the witness GUARANTEE rejections happen. Returns output + counts.
+// that forces rejections — driven by the same shared polymodel.SpecDecode loop. Only
+// the target has a KV cache; the rejected draft tokens are rolled back from it with
+// the bit-exact model.KVCache.Evict. In production the proposer is a co-resident
+// small model (polymodel.PickDrafter); here a deterministic function lets the witness
+// GUARANTEE rejections happen. Returns output + counts.
 func specDecodeProposer(target *model.Model, prompt []int, n, k int, propose func(round, j, last int) int) (out []int, drafted, accepted, evicted int) {
-	ts := target.NewSession()
-	tl := ts.Prefill(prompt)
-	out = make([]int, 0, n)
-	last := prompt[len(prompt)-1]
+	tv := newTargetVerify(target, prompt)
+	round := -1
 
-	for round := 0; len(out) < n; round++ {
-		pT := ts.Cache.Len()
-
-		drafts := make([]int, 0, k)
-		prev := last
-		for j := 0; j < k; j++ {
-			dj := ((propose(round, j, prev) % 256) + 256) % 256 // valid token id
-			drafts = append(drafts, dj)
-			prev = dj
-		}
-		drafted += k
-
-		targetArgmax := make([]int, 0, k+1)
-		targetArgmax = append(targetArgmax, mathx.ArgmaxF32(tl))
-		for j := 0; j < k; j++ {
-			targetArgmax = append(targetArgmax, mathx.ArgmaxF32(ts.Step(drafts[j])))
-		}
-
-		res := polymodel.AcceptGreedy(drafts, targetArgmax)
-		accepted += res.Accepted
-		if res.EvictKV > 0 {
-			ts.Cache.Evict(pT+res.Accepted, res.EvictKV)
-			evicted += res.EvictKV
-		}
-
-		correction := targetArgmax[res.Accepted]
-		for j := 0; j < res.Accepted && len(out) < n; j++ {
-			out = append(out, drafts[j])
-		}
-		if len(out) < n {
-			out = append(out, correction)
-		}
-		last = correction
-		tl = ts.Step(correction)
+	run, err := polymodel.SpecDecode(prompt,
+		func(committed []int) []int {
+			round++
+			prev := committed[len(committed)-1] // the last committed token
+			drafts := make([]int, 0, k)
+			for j := 0; j < k; j++ {
+				dj := ((propose(round, j, prev) % 256) + 256) % 256 // valid token id
+				drafts = append(drafts, dj)
+				prev = dj
+			}
+			return drafts
+		},
+		tv.verify,
+		polymodel.SpecDecodeConfig{MaxNewTokens: n, MaxDraft: k, Rollback: tv.rollback})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  specDecodeProposer: SpecDecode failed: %v\n", err)
 	}
-	return out, drafted, accepted, evicted
+	return run.Output, run.DraftedTokens, run.AcceptedDrafts, run.EvictKV
 }
 
 // runSpecDecodeTrials runs BOTH speculative-decode regimes — a real co-resident
