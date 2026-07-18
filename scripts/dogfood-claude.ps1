@@ -563,6 +563,19 @@ if ($Mode -eq 'install') {
   $dest = Join-Path $BinDir 'fak.exe'
   $new  = "$dest.new"
   Copy-Item -Force $Bin $new
+  # Fail-closed provenance read-back (#5211): before swapping the on-PATH exe, run BOTH the
+  # freshly built binary and the staged .new copy and confirm each reports a `build:` revision
+  # equal to the repo HEAD's 12-char prefix. A stale/corrupt staged copy or a future provenance
+  # regression fails HARD here rather than installing an unverifiable executable.
+  $wantRev = (& git -C $FakDir rev-parse --short=12 HEAD 2>$null).Trim()
+  if ($LASTEXITCODE -ne 0 -or $wantRev -notmatch '^[0-9a-fA-F]{12}$') { Die "provenance read-back: could not resolve HEAD revision" }
+  foreach ($cand in @($Bin, $new)) {
+    $out = (& $cand version 2>$null | Out-String)
+    $m = [regex]::Match($out, 'build:\s*([0-9a-fA-F]{12})')
+    if (-not $m.Success) { Die "provenance read-back FAILED: $cand did not report a build: revision" }
+    if ($m.Groups[1].Value -ne $wantRev) { Die "provenance read-back FAILED: $cand reports build $($m.Groups[1].Value) != HEAD $wantRev - refusing to install an unverifiable candidate" }
+  }
+  Log "provenance read-back OK: built + staged candidates report build:$wantRev (pre-swap)"
   if (Test-Path $dest) {
     $old = "$dest.old-$(Get-Date -Format yyyyMMddHHmmss)"
     Move-Item -Force $dest $old
