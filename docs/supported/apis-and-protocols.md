@@ -16,6 +16,22 @@ indirect, the row says so plainly rather than overclaim.
 serves your tokens and adjudicates every tool call at the boundary. The throughput
 question belongs to the engine; the wire question belongs here.
 
+## Start here: confirm fak speaks your client's wire
+
+If you are integrating a client, your job is to pick the wire your agent already speaks
+and confirm fak serves it. fak exposes three client wires — OpenAI Chat Completions,
+Anthropic Messages, and Gemini `generateContent` — so you repoint your client's base URL
+at the fak host instead of the provider, and select the upstream with `--provider`
+(witnessed in [`internal/agent/adapters.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/adapters.go)).
+
+Confirm the surface is live with one command against the always-exposed OpenAI wire:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/models   # lists the served model id fak is fronting
+```
+
+Everything below is the exact per-wire surface, `--provider` value, and status.
+
 ---
 
 ## 1. Model wires fak speaks
