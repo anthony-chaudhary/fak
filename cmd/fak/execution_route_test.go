@@ -55,8 +55,15 @@ func TestExecutionRouteCLIDescriptorPairDrivesCompat(t *testing.T) {
 	if got.Session.Compat == nil || got.Session.Compat.Verdict != executionroute.CompatIdentical {
 		t.Fatalf("compat=%+v want identical verdict", got.Session.Compat)
 	}
-	if len(got.Session.Compat.Axes) != 5 {
-		t.Fatalf("axes=%d want 5 per-axis comparisons", len(got.Session.Compat.Axes))
+	wantAxes := map[executionroute.CompatAxis]bool{
+		executionroute.AxisHarness: true, executionroute.AxisWire: true, executionroute.AxisModelFamily: true,
+		executionroute.AxisToolProtocol: true, executionroute.AxisTranscriptFormat: true,
+	}
+	for _, axis := range got.Session.Compat.Axes {
+		delete(wantAxes, axis.Axis)
+	}
+	if len(wantAxes) != 0 {
+		t.Fatalf("compatibility result omitted axes: %v", wantAxes)
 	}
 
 	// A changed model family strands required thinking: the move is REFUSED.
