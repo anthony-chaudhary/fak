@@ -1,0 +1,26 @@
+{
+  "schema": "fak.shipgate.crossaudit-adoption/v1",
+  "issue": 3860,
+  "epic": 3846,
+  "calibration": {
+    "source": "experiments/crossaudit-calibration-3854/report.json",
+    "prompt_version": "issue-resolution-audit/v2",
+    "calibrated_families": [
+      "claude",
+      "gpt"
+    ],
+    "family_count": 2,
+    "min_independent": 2,
+    "met": true
+  },
+  "dogfood": {
+    "source": "experiments/crossaudit-dogfood-3859/scorecard.json",
+    "grade": "F",
+    "dark_loop": true,
+    "green": false,
+    "note": "background audit loop not running (dark_loop=true); 1 auditor provider unavailable"
+  },
+  "prereqs_met": false,
+  "recommended_stage": "dry-run-report-only",
+  "rationale": "calibration is satisfied (2 independent calibrated families) but the dogfood rollout is not green (live audit loop dark); the gate ships enforcement-capable but stays in dry-run until dogfood is green — no default-on enablement while prerequisites are unmet."
+}

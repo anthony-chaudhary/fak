@@ -1,0 +1,98 @@
+{
+  "rows": [
+    {
+      "id": "auditrefute",
+      "canonical": "AuditRefute",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The shipgate closure-gate verdict token REFUTE: the independent cross-model auditor affirmatively refuted the closure claim, so a high-risk issue closure is blocked at the ship gate (#3860).",
+      "distinction": "A shipgate-local projection of the model-route receipt verdict used to decide closure admission; distinct from CrossAuditRefute, which is the modelroute wire verdict on the receipt itself rather than the ship-gate decision token.",
+      "distinct_from": [
+        "covg4719-witness-proof-crossauditrefute"
+      ],
+      "aliases": [],
+      "grounding": "AuditRefute",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "crossauditpolicy",
+      "canonical": "CrossAuditPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The shipgate enforcement policy for high-risk issue closures: the calibrated auditor-family allowlist, required calibration version, receipt freshness window, and staged-enablement prerequisites that decide whether a closure receipt opens the gate (#3860).",
+      "distinction": "Governs whether an issue closure may land at the ship gate; distinct from AuditIndependencePolicy, which governs how modelroute selects an independent auditor when producing a receipt upstream of the gate.",
+      "distinct_from": [
+        "policy-capability-audit-independence-policy"
+      ],
+      "aliases": [],
+      "grounding": "CrossAuditPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "defaultcrossauditpolicy",
+      "canonical": "DefaultCrossAuditPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The calibrated CrossAuditPolicy instance built from the measured issue-3854 calibration evidence (two independent families at issue-resolution-audit/v2) with the issue-3859 dogfood loop not green, so the closure gate ships enforcement-capable but in dry-run (#3860).",
+      "distinction": "The measured-evidence default instance of the shipgate closure policy; distinct from DefaultAuditIndependencePolicy, which defaults modelroute auditor-independence selection rather than closure enforcement.",
+      "distinct_from": [
+        "crossauditpolicy"
+      ],
+      "aliases": [],
+      "grounding": "DefaultCrossAuditPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "adjudicateclosure",
+      "canonical": "AdjudicateClosure",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The fail-closed shipgate decision function for a high-risk issue closure: structural deny first, then a calibrated, independent, fresh PASS receipt or an audited break-glass; runs dry-run while the calibration and dogfood prerequisites are unmet (#3860).",
+      "distinction": "Adjudicates issue-closure admission at the ship gate; distinct from AdjudicateMemoryWrite, which adjudicates memory-write tool calls in memq rather than issue closures.",
+      "distinct_from": [
+        "policy-capability-adjudicate-memwrite"
+      ],
+      "aliases": [],
+      "grounding": "AdjudicateClosure",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "closuredecision",
+      "canonical": "ClosureDecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The typed outcome of the shipgate high-risk closure gate: whether the closure is allowed, whether enforcement was on, whether dry-run would have blocked, and the closed-vocabulary reason (#3860).",
+      "distinction": "Decides issue-closure admission at the ship gate; distinct from RouteDecision, which decides guardroute request routing rather than whether an issue closure may land.",
+      "distinct_from": [
+        "x2-decision-routedecision"
+      ],
+      "aliases": [],
+      "grounding": "ClosureDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
