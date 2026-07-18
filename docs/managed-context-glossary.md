@@ -229,7 +229,7 @@ and `internal/vcachecal` are the decision/proof layer: the governor classifies p
 and `vcachecal.Concentration` measures whether a workload is concentrated enough (a Zipf
 exponent `s > 1`) for warming to pay off at all, flagging a flat workload as structurally
 defeated rather than warming a tail that will never pay back. (An earlier version of this
-entry claimed a shipped `vcachegov.AffinityKey` router with autoscale-rehash detection and
+entry claimed a shipped governor-side affinity router with autoscale-rehash detection and
 warming-burst caps; that router never had a live caller and was cut in #5190.)
 
 - **What fak manages:** pinning a stable per-prefix routing hint on the wire, classifying
