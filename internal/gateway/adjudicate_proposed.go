@@ -240,6 +240,20 @@ func callRequestsFresh(args string) bool {
 	return json.Unmarshal(raw, &b) == nil && b
 }
 
+// livelockObservationOf builds the livelock observation for one adjudicated tool
+// call — the identical field-fill the admitted and failed observation paths both
+// record.
+func livelockObservationOf(trace string, a ToolAdjudication) guardrsi.LivelockObservation {
+	return guardrsi.LivelockObservation{
+		TraceID:     trace,
+		Tool:        a.Tool,
+		ArgsDigest:  a.ArgsDigest,
+		Verdict:     a.Verdict.Kind,
+		Reason:      a.Verdict.Reason,
+		Disposition: a.Verdict.Disposition,
+	}
+}
+
 // annotateToolLivelock attaches the livelock envelope to each repeated adjudication
 // and, when an admitted call's envelope has armed the hard Fuse, converts that call
 // into a retryable DENY in place. It returns the set of tool-call IDs it fused so the
@@ -263,14 +277,7 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map
 		switch {
 		case a.Admitted && (a.Verdict.Kind == "ALLOW" || a.Verdict.Kind == "TRANSFORM") && a.Verdict.Reason != "SERVED_INLINE":
 			sawObservation = true
-			env, ok := s.livelock.ObserveAdmitted(guardrsi.LivelockObservation{
-				TraceID:     trace,
-				Tool:        a.Tool,
-				ArgsDigest:  a.ArgsDigest,
-				Verdict:     a.Verdict.Kind,
-				Reason:      a.Verdict.Reason,
-				Disposition: a.Verdict.Disposition,
-			})
+			env, ok := s.livelock.ObserveAdmitted(livelockObservationOf(trace, a))
 			if ok {
 				hits = append(hits, hit{idx: i, env: env})
 			}
@@ -279,14 +286,7 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map
 			continue
 		}
 		sawObservation = true
-		env, ok := s.livelock.ObserveFailure(guardrsi.LivelockObservation{
-			TraceID:     trace,
-			Tool:        a.Tool,
-			ArgsDigest:  a.ArgsDigest,
-			Verdict:     a.Verdict.Kind,
-			Reason:      a.Verdict.Reason,
-			Disposition: a.Verdict.Disposition,
-		})
+		env, ok := s.livelock.ObserveFailure(livelockObservationOf(trace, a))
 		if ok {
 			hits = append(hits, hit{idx: i, env: env})
 		}
