@@ -7,7 +7,7 @@ import (
 )
 
 // feed.go makes a session-audit run DURABLE. Every other nightrun signal — cache
-// savings, gateway usage, fleet outcome health — appends a scrubbed row per sample to a
+// savings, gateway usage, memory value — appends a scrubbed row per sample to a
 // docs/nightrun/*.jsonl ledger, so its health is a time series you can trend and gate.
 // session-audit was the exception: it only ever emitted a one-off report, so "were the
 // last few hours of sessions healthy?" had no durable answer and no regression witness.
