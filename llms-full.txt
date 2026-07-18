@@ -35,6 +35,7 @@
 - Steerability controls and appeal-channel scorecard: [docs/STEERABILITY-SCORECARD.md](docs/STEERABILITY-SCORECARD.md)
 - Operator-heaviness pressure, budgets, and reduction standard: [docs/OPERATOR-HEAVINESS.md](docs/OPERATOR-HEAVINESS.md)
 - Operator-steerability PRs (`fak steer prs`) — the gate/observability separation, the OSP unit, and why the overlay must never become a merge gate: [docs/operator-steerability-prs.md](docs/operator-steerability-prs.md)
+- Version-everything (`fak version modules`) — per-module rev+date over the module tree, git-witnessed via the `fak-module-versions/1` ledger rather than asserted: [docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md)
 
 ## Source authorities
 
@@ -666,21 +667,23 @@ The agent keeps its interface and model, while a fak kernel manages its model tr
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
-<!-- readme-verified: 2026-07-15 vs VERSION 0.41.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-07-18 vs VERSION 0.41.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
 ## Try the kernel without a key, model, or GPU
 
 **Audience:** first-time evaluators checking whether fak can manage a tool-using agent.
 
-For the shortest public proof, run one deterministic end-to-end check:
+For the shortest public proof, install the one binary and run one deterministic end-to-end check:
 
 ```bash
+go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 fak agent --offline
+# -> task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
 ```
 
-The proof passes when the comparison ends with `task completed (booked) YES / YES`, `poisoned result blocked YES`, and `destructive op prevented YES`. This offline mode uses a deterministic mock planner, so it verifies the managed-agent path and policy boundary without claiming live-model quality or latency.
+Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
 
-**Next action:** run `fak agent --offline` and check those three output rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md).
+**Next action:** run it and check those three rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md).
 
 ## One managed agent, two ways to run the kernel
 
@@ -696,7 +699,7 @@ The roles stay separate: the **agent or client** owns the task loop and user exp
 
 **Default:** start with `fak guard` for one existing agent; choose `fak serve` when the kernel must be a shared or durable endpoint.
 
-Both commands run the **same kernel**. `guard` is the convenient client-side lifecycle wrapper; `serve` is the standalone/server-side deployment. The model remains a replaceable backend—cloud API, local model server, or in-kernel GGUF.
+Both commands run the **same kernel**. `guard` runs it beside one agent session, as that session's launcher and supervisor; `serve` runs it as a standalone service. The model remains a replaceable backend—cloud API, local model server, or in-kernel GGUF.
 
 ```mermaid
 flowchart LR
@@ -716,8 +719,8 @@ For architecture, current evidence, and development workflow, start at [START-HE
 
 - **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system—on by default, and without changing the model's output: it keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses KV directly when it owns inference. **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on larger models).
 - **Long runs keep moving.** Sessions compact their own history (up to **~107K tokens** per trim) and can resume after a crash instead of dying at the context limit.
-- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor—**362 ns** in process, with no policy model or network hop.
-- **Composable or standalone.** Use either capability, combine both, proxy an existing server, or run GGUF locally.
+- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor—**362 ns** in process, with no policy model or network hop. Tool results carry provenance too, so poisoned content read from an untrusted source is stopped before the model acts on it.
+- **Big local models are first-class.** The kernel loads GGUF weights itself and serves OpenAI, Anthropic, and MCP clients directly. For mixture-of-experts models (where each token uses only a few of the model's expert blocks), it pages just the needed expert weights in from SSD and stripes weight reads across sources by measured bandwidth—so the whole model does not have to sit in RAM. Quantized (e.g. Q4) inference and grammar-constrained structured output are built in.
 
 Evidence: [tuned benchmark baselines](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) · [tagged claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
@@ -773,14 +776,13 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 
 Go 1.26+; no external Go dependencies. Source builds, archives, and containers: [INSTALL.md](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md).
 
-## Where to go next
+## Going deeper
 
 - **Use it:** [tutorial](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) · [integration guides](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) · [examples](https://github.com/anthony-chaudhary/fak/blob/main/examples/README.md)
-- **See the showcase:** [Claude Code on your own Mac's local model](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-agent-ui.md) — one `fak` binary points Claude Code at your Mac's own `fak serve` gateway running Qwen3.6-27B (`fak claude-mac-fak`). The first local turn is slow and single-stream; the point is that it works end to end and stays fully observable through fak's preflight panel.
 - **Operate it:** [serving](https://github.com/anthony-chaudhary/fak/blob/main/docs/serving/README.md) · [observability](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/observability.md) · [deployment](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/deployment-guide.md)
 - **Understand it:** [performance outcomes and proofs](https://github.com/anthony-chaudhary/fak/blob/main/docs/performance.md) · [managed cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-managed-cache.md) · [external system architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/architecture.md) · [concepts and story](https://github.com/anthony-chaudhary/fak/blob/main/docs/concepts-and-story.md)
 - **Verify it:** [benchmark route](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmark-methodology.md) · [current benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) · [claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) · [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md)
-- **Build it:** [contributing](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) · [security](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · [documentation home by audience](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md)
+- **Build it:** [contributing](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) · [security](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · [documentation home by audience](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md) · [front-page overflow](https://github.com/anthony-chaudhary/fak/blob/main/docs/README-legacy.md)
 
 Apache-2.0. Please report vulnerabilities privately as described in [SECURITY.md](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md).
 
@@ -794,7 +796,35 @@ Apache-2.0. Please report vulnerabilities privately as described in [SECURITY.md
 
 This page is the human route map for **fak**. Choose the job you have now; each route points to its current authority and one next action. For the product overview and first commands, use the [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md).
 
-**Default:** if you are evaluating fak for the first time, run the [one-minute offline proof](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md). It needs no key, model download, or GPU.
+## See one verdict in one command — no key, model, or GPU
+
+If you are evaluating fak for the first time, the shortest proof that it manages a
+tool-using agent is a single copy-pasteable command:
+
+```bash
+fak agent --offline
+```
+
+**Expected output** (abridged — the check is deterministic, so you should see these
+same verdict lines; the [tutorial](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) shows the full capture):
+
+```
+injection in context                YES           no
+destructive op executed             YES           no
+task completed (booked)             YES          YES
+
+HEADLINE
+  poisoned result blocked   : YES
+  destructive op prevented  : YES
+```
+
+It runs a deterministic end-to-end check against a mock planner and prints three
+adjudicated results — `task completed (booked) YES / YES`, `poisoned result blocked YES`,
+and `destructive op prevented YES` — so you see the managed-agent path and the policy
+boundary decide, with no key, model download, or GPU. For the expanded policy, routing,
+and benchmark sequence, use the [one-minute offline proof](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md).
+
+Everything below is the route map — choose the job you have now.
 
 ## Choose your route
 
@@ -992,7 +1022,10 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Objections & one-line answers (advocate card)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/objections.md) — a pocket card of the 10 objections fak actually draws (isn't this a classifier, doesn't it slow the agent, why not just use vLLM, is the security real if the detector is evadable, another gateway, is it novel, how is it different from a firewall, do I rewrite my agent, are the numbers too good, is the KV eviction lossless), each with a crisp honest one-to-two-line answer and a deeper link. Concedes where an objection lands (evadable detector, 0/29 novelty, throughput); witnessed numbers only. Dimension I of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [The pitch ladder: 1 sentence / 1 paragraph / 1 page](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/pitch-ladder.md) — the canonical fak pitch at three zoom levels: one sentence (the tweet, ≤30 words), one paragraph (the HN comment), one page (the blog intro) — each self-consistent and quotable, anchored on "treat the tool call like a syscall: the model proposes, the kernel disposes". The source for the README lead; a consistency table keeps the rungs from drifting; witnessed numbers only (the tuned ~4.1×, ~362 ns guard tax, `max|Δ| = 0`) and the 0/29 novelty fence conceded up front. Dimension I of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Launch-post draft kit (honest, ready to adapt)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/launch-kit.md) — a single, self-contained Show HN / launch-post draft: title options, the opening hook, the prosecution-first first comment, a longer launch-post body, the honest what-it-IS / what-it-is-NOT framing, a copy-paste TL;DR, and a pre-post checklist that blocks an over-claim. Draft only — posting is human-owned; every witnessed number traces to [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) / [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) and leads with the tuned ~4.1×, never the naive multiplier; aspirational numbers (~60×, "agent city", power/$) are labeled design-target / simulated. The one-page unit; the deeper per-channel campaign is [`docs/launch/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/launch/README.md). Dimension J of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [It didn't work: first-run troubleshooting](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/troubleshooting-first-run.md) — the five most likely fak first-run failures, each with the exact symptom, cause, and one-line fix: binary not on PATH (`./fak` or `dogfood-claude.ps1 --install`), `--base-url` wrong or empty (empty = the offline scripted mock, hence canned replies), the upstream key env not set for a keyed provider (`--api-key-env VAR` names the env var, never the literal key), a tool call refused by the embedded default-deny capability floor (inspect with `fak guard --dump-policy`, then grant — don't disable the gate), and `address already in use` on `fak serve` (pick another `--addr`). Frames first-run failures as wiring, not the one static Go binary. Dimension F of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Bench-story: the 4x that's real](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/stories/the-real-4x.md) — the tuned warm-cache result told honestly: fak's fused kernel does ~4.1× less work than a *tuned* single-tenant stack (B/C, the honest headline) on a 50-turn × 5-agent session (Qwen2.5-1.5B, Q8_0, M3 Pro), not the flattering 60.3× naive number (A/C). What the 4.1x is (prefix reuse + decode batching over a warm KV cache), what it is NOT (a throughput win over llama.cpp; a hosted-API win), and the conditions it holds under. Witnessed against [SESSION-VALUE-STACK-RESULTS.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/SESSION-VALUE-STACK-RESULTS.md). Dimension H of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Bench-story: max|Δ| = 0, the bit-exact eviction result](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/stories/bit-exact.md) — the addressable-KV eviction result told as a falsifiable claim: fak removes a span from a live kernel-owned attention cache and the next-token distribution comes out bit-identical to a run that never saw it (`max|Δ| = 0`, argmax and tie-break identical), against a non-vacuous poison control at `max|Δ| ≈ 0.326`. Keeps the two exactness numbers apart (evict-vs-never `0` vs the HF-oracle `≈4.4e-5`), names the honest fences (synthetic-model witness, self-signed v1 deletion certificate, coherent-compaction scope), and gives the one no-key/no-GPU/no-network command that checks it (`examples/addressable-evict/run.sh`). Witnessed against [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). Dimension H of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Bench-story: the cache cliff](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/stories/cache-cliff.md) — why a high prompt-cache hit rate can be a warning sign: fak's fleet audit measured 96.6% of ingested tokens cached (median 99%, 199 sessions), but that number is the *frozen-trajectory ceiling* — a prefix match that rises with length (82%→96%→99% at 10/50/200 turns) and only holds while the harness never edits history. Edit-depth into the prefix sends it off a cliff (99%→94.1%→74.3%→49.5%→0.0% at 0/5/25/50/100%), and cross-agent fan-out forfeits shared reuse (0% across the fleet). Argues the honest metric is reread work *deleted* (content/identity-keyed, coherence-checked) not hit rate quoted; runnable via [tools/cache_curve.py](https://github.com/anthony-chaudhary/fak/blob/main/tools/cache_curve.py). Witnessed against the frozen-trajectory cache-cliff explainer. Dimension H of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Capability matrix across the category](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/matrix.md) — the one-glance, sourced table scoring fak against the three neighbouring product categories people already run (guardrails/output-validation libraries, LLM API gateways & routers, vLLM/SGLang-class inference servers) on the six capabilities fak claims: default-deny tool-call gate, prompt-injection result quarantine, addressable bit-exact KV eviction (`max|Δ| = 0`), commit-level verify, closed-vocabulary structured refusal, and single-binary drop-in. Every cell is yes/partial/no with a note and a source (or an `unverified` tag), the categories are framed as complements not rivals, and fak's own gaps are named (the KV evictor is a no-op on a proxy seat; 0/29 novel). Links to the long-form [comparison](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak-vs-alternatives-comparison.md) and [compatibility matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md) for depth. Dimension D of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [fak vs a guardrails library (honest side-by-side)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/vs-guardrails.md) — the focused one-on-one against the guardrails class (Guardrails AI, NeMo Guardrails, Llama Guard): each tool's real strength stated from its own primary docs, the fail-open recognizer vs fail-closed capability-gate distinction as the spine, a side-by-side table, and the honest "these are complements you run together" framing (a guardrails lib validates content; fak default-denies the tool-call boundary and can front one via one base-URL change). fak's own gaps named (poor content classifier, evadable-by-design bonus detector, 0/29 novel). Links to the wider [capability matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/matrix.md). Dimension D of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [fak vs an API gateway / LLM router](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/vs-routers.md) — the focused router/gateway side-by-side for the "don't I already have this?" question: a router (OpenRouter, Portkey, LiteLLM, Kong AI Gateway) picks *which model* serves a request and how to reach it reliably; fak governs *which effects* each tool call may have via a default-deny capability floor one layer down. Shows the compose topology (fak in front of the router), states the honestly-mixed packaging (Kong=binary, LiteLLM=Python proxy, OpenRouter=hosted → why the category is *Partial* on single-binary), and names fak's gaps (does not out-connect a gateway; KV evictor is a no-op on a hosted seat; 0/29 novel). Summarizes and links [the routers integration guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/routers.md) and the [category matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/compare/matrix.md); witnessed numbers only. Dimension D of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
@@ -1003,6 +1036,8 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Voices: adopter quotes & case notes](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/voices.md) — the honest, empty-until-real scaffold where genuine adopter testimonials and case notes land: the one rule (**no fabricated testimonials** — every quote is real, attributable, adopter-approved, or it is not here), a copy-paste submission template, and an empty state that reads as an invitation (*be the first — here's how to share your story*) rather than a manufactured quote. Ships empty on purpose; the same *verify, don't trust* discipline turned on our own social proof — witnessed numbers only (tuned ~4.1× never the naive ~60×), no market-adoption claim, the personas gallery's other half. Dimension E of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [The fak roadmap: what's shipped and what's next](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/roadmap.md) — the reader-facing "what we're building next" page, on the now/next/future generation taxonomy: **Now** lists what is shipped and git-witnessed today (the default-deny tool-call gate at ~362 ns, `dos commit-audit` verify, the bit-exact KV cache `max|Δ| = 0`, the single binary, and fak owning its native agent loop via the closed epic #1315); **Next** labels the planned near-term foundation (durable sessions M#1, cache default-on M#2, native-harness host seams); **Later** keeps the longer-horizon bets visible as bets (neo-silicon/neo-cloud binding #1678, the datacenter-GPU pure-fak kernel #1010). Every planned item is labeled planned, every number is witnessed (tuned ~4.1× never the naive ~60×), no market-adoption claim. Dimension E of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [fak install paths: which one command do I run?](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/install-paths.md) — a four-row decision table that routes each reader to their one correct install command: prebuilt binary ("just try it"), go install ("I have Go"), from source ("I want to hack on it"), and the one-paste MCP .mcp.json ("I drive an MCP client"). Each row has one verified command (all consistent with GETTING-STARTED and examples/mcp/.mcp.json) and its honest caveat. Dimension F of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Recipe: OpenAI SDK + fak (set one base URL)](https://github.com/anthony-chaudhary/fak/blob/main/examples/openai-sdk-minimal/README.md) — the smallest runnable repo for the universal integration recipe: `app.py` points the official OpenAI SDK at `fak serve` (one line: `base_url`), makes one `chat.completions` call, then asks fak to adjudicate two proposed tool calls without running them (`POST /v1/fak/adjudicate`, pre-execution verdict only) and prints the real verdict (`read_file`→ALLOW, `Bash "git push"`→DENY). Self-contained (the verdict endpoint needs no model); one dep (`openai`), verdict call is stdlib. Dimension G (integration recipes) of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
+- [Recipe: fak in front of Ollama (docker compose)](https://github.com/anthony-chaudhary/fak/blob/main/examples/compose-ollama/README.md) — a copy-paste `compose.yaml` + validated `policy.json` that brings up a governed local model in one command: Ollama generates on an internal-only `:11434`, a one-shot `ollama-pull` seeds the model, and `fak serve` fronts it as the only published port (`:8080`) enforcing a fail-closed `fak-policy/v1` floor + Bearer auth + audit journal. Distilled from the deployment guide's compose pattern; the policy validates offline with `fak policy --check`. Dimension G (integration recipes) of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Adopt fak in an existing repo (10-minute checklist)](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/adopt-in-your-repo.md) — the ordered checklist for taking an agent project you already run and putting fak in front in ~10 minutes: get the binary, repoint one base URL (fak guard -- claude, or fak serve --base-url), load a starter capability floor, verify a verdict appears (fak preflight / the guard exit summary), then wire the DOS trust gate into your runtime (dos init --hooks auto .) so a false "done" is refused from git evidence (dos commit-audit). Honest about what does not change (model, keys, IDE, subscription stay put) and the current limits (KV evictor is a no-op on a subscription seat; Anthropic-wire streaming is buffered). Dimension G of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 - [Bench-story: roughly 100% evadable, on purpose](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/stories/evadable-on-purpose.md) — the detector-honesty story: fak's injection detector is roughly 100% evadable by design and the repo says so in CLAIMS.md and SECURITY.md; the security floor is the default-deny capability lock plus structural quarantine, neither of which has to recognize an attack to stop it. Separates the evadable detector (a bonus) from the non-evadable floor + containment, and names the false-positive ceiling (2 of 59 pages sealed on benign images) and the argument-injection residual. Dimension H of the [concept-popularization epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 
@@ -1083,6 +1118,9 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Mac serving-path cache-value witness — contract half landed, Mac-hardware half `not yet` (#2727)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MAC-CACHEVALUE-EXACT-SPAN-WITNESS-2026-07-18.md) -- auto-indexed dated note.
+- [Net tokens/sec on a slow SSD-offloaded MoE — the expert-coalescing lever](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MOE-SSD-MULTI-AGENT-NET-TOKS-2026-07-18.md) -- auto-indexed dated note.
+- [The monotone-tighten self-amendment envelope](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-MONOTONE-TIGHTEN-SELF-AMENDMENT-2026-07-17.md) -- auto-indexed dated note.
 - [Intervention as a state operator](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-INTERVENTION-AS-STATE-OPERATOR-2026-07-17.md) -- auto-indexed dated note.
 - [Workspace-to-negation cost model — 2026-07-17](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/WORKSPACE-NEGATION-COST-MODEL-2026-07-17.md) -- auto-indexed dated note.
 - [Native negation primitive seam — 2026-07-17](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/NATIVE-NEGATION-PRIMITIVE-SEAM-2026-07-17.md) -- auto-indexed dated note.
@@ -1170,6 +1208,7 @@ front page.
 - [Model-progress caching taxonomy — what state each family produces, and what of it is cacheable](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-MODEL-PROGRESS-CACHING-TAXONOMY-2026-07-07.md) -- auto-indexed dated note.
 - [compress default-on witness (2026-07-06)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMPRESS-DEFAULT-ON-WITNESS-2026-07-06.md) -- auto-indexed dated note.
 - [GLM-5.2 per-box baseline + next steps (GPU server 2 vs GPU server 3)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/GLM52-DGX-PER-BOX-BASELINE-AND-NEXT-STEPS-2026-07-06.md) -- auto-indexed dated note.
+- [GLM-5.2 status by machine size — the one organized rollup (2026-07-18)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/GLM52-STATUS-BY-MACHINE-SIZE-2026-07-18.md) -- the single size-ordered view of where GLM-5.2 UD-Q4_K_M runs and how fast: small boxes (does not fit), CPU-only large-RAM host (0.243 tok/s), 40 GiB/card node (expert-offload only, 2.24 tok/s -- the "~2.2 tok/s expert-offload" figure), 80 GiB/card node (resident, 23.2 tok/s llama.cpp / 0.09-0.21 fak pre-performance). Reconciles the scattered per-box notes, folds the freshest 2026-07-18 lab-bridge numbers, and keeps the llama.cpp-baseline-vs-fak-kernel engine-honesty fence.
 - [GLM-5.2 night-fleet coordination marker (session 11ce8d1c)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COORD-GLM52-NIGHT-FLEET-11ce8d1c-2026-07-09.md) -- which GPU-free perf levers this session's sub-agent fleet claimed for the 2026-07-09 overnight run, and the decision to stay off the peer-held resident GPU box.
 - [GLM-5.2 pure-fak performance: the true frontier, and what landed](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/GLM52-PURE-FAK-PERF-FRONTIER-AND-LANDED-2026-07-08.md) -- auto-indexed dated note.
 - [Related-repos & SOTA landscape (2026-07-07)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-related-repos-landscape-2026-07-07.md) -- auto-indexed dated note.
@@ -1221,6 +1260,7 @@ front page.
 - [Context views at marginal cost: on-demand quality views over KV + attention (2026-07-04)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONTEXT-VIEWS-AT-MARGINAL-COST-2026-07-04.md) — since the forward pass already computes attention scores and holds the whole KV cache, the kernel can construct many "views" of the token history at marginal cost. Three cost tiers (FREE / keep-an-O(spans)-scalar-side-car / re-attend), grounded in what fak already ships (attn_observer, kvmmu/attention.go, memview, contextq, the `Kraw` exact-eviction primitive) and the SOTA (H2O/SnapKV/TOVA + retrieval heads; Prompt Cache/CacheBlend/EPIC/PIC; the MoE expert-specialization caution). Filed next steps: [#2617](https://github.com/anthony-chaudhary/fak/issues/2617), [#2623](https://github.com/anthony-chaudhary/fak/issues/2623), [#2626](https://github.com/anthony-chaudhary/fak/issues/2626).
 - [Plugin extensibility for fak's operator surfaces: TUI panes first, then the verb switch (2026-07-04)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/TUI-CLI-PLUGIN-EXTENSIBILITY-2026-07-04.md) — fak's real plugin model (`internal/abi`'s `Register*` + reserved-range + atomic-snapshot seam, `EXTENDING.md`/`ARCHITECTURE.md`) never reached the operator-facing surfaces: `fak console <pane>` (`cmd/fak/tui.go`, a 7-case switch) and `fak <verb>` (`cmd/fak/main.go`, "the 200-case switch") both require a core-file edit to extend. Proposes an `internal/tuiplugin` registry that ports the existing panes onto the ABI's own seam shape, a `~/.fak/console.json` user-config layer (pane selection/ordering/defaults, same additive-override shape as `~/.fak/targets.json`), a keypress-driven interactivity path reusing `golang.org/x/term` instead of a TUI framework, and the same recipe generalized to the verb switch. Promotion evidence named: port 2 panes (`guard`, `loops`) onto the registry first.
 - [Structured generation SOTA, fak fit, and backlog split](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/STRUCTURED-GENERATION-SOTA-BACKLOG-2026-07-04.md) -- auto-indexed dated note.
+- [Structured generation didn't die — it became infrastructure](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/structured-generation-became-infrastructure.md) — the reader-facing positioning piece distilled from that note: structured generation didn't vanish, it was absorbed into structured outputs / tool calling / MCP / provider-native schema modes / engine guided decoding. Names why it feels quieter (syntax became table stakes; the hard problems moved up-stack to semantics, streaming, security), a three-layer contrast table (structured-output library vs guided-decoding engine vs fak gate), the benchmark cautions (JSONSchemaBench, ExtractBench, CodeSpear), and the recommendation: use the libraries/engines for structure, put fak at the effect boundary. Dimension (positioning) of the concept-popularization epic.
 - [Harness tool dialects: guard floor compatibility postmortem](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/HARNESS-TOOL-DIALECT-GUARD-FLOOR-2026-07-03.md) -- auto-indexed dated note.
 - [Guard value under a kernel we control — the GPU-server GLM-5.2 vs API ablation (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/GUARD-KERNEL-CONTROL-ABLATION-2026-07-03.md) — the benchmark design for proving real `fak guard` value when the wrapped agent's upstream is fak's own inkernel serve instead of a provider API: the K1 (fak kernel) / K2 (vLLM-SGLang, same weights) / A1 (same-model API) matrix crossed with guard-on/off, the five kernel-only value axes (WITNESSED kv-prefix economics vs OBSERVED provider `cache_read`, clean guard-hop pricing, constrained-decode enforcement headroom, credential-surface elimination, deterministic replay adjudication), and the honest runnable-today vs `not yet` gates. Dispatch rows live in the nightrun overlay; tracker [#2509](https://github.com/anthony-chaudhary/fak/issues/2509) (child of epic #1010).
 - [Trajectory control — score anything, steer by curve (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md) — the trajctl concept family: declared objectives with witness-rung progress scores (W3 evidence > W2 transcript heuristic > W1 judge > W0 self-report), curves not points, a regime-gated steering ladder (annotate → re-anchor nudge → warn → suspend → escalate), and detours as budgeted child objectives. Positioned against `fak traj` (retrospective corpus gardening), the scorecard `*_debt` family, and `loopdrive`'s binary GOAL.md witness.
@@ -1467,7 +1507,7 @@ front page.
 - [Memory into weights: online LoRA consolidation spine + MW ladder (2026-07-02)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-memory-into-weights-online-lora-consolidation-2026-07-02.md) — SOTA triage of consolidating agent memory into model weights via an automatic LoRA/PEFT loop (TMEM, PEAM, SEAL, sleep-time compute, LoRA Without Regret, rejection-sampling fine-tuning, multi-adapter hot-swap serving, unlearning-is-suppression), the six-stage sleep-cadence spine that reuses fak's shipped seams (witness ledger as the RFT success filter, quarantine as the training-data firewall, durability axis as the admission policy, memview contract making the adapter a rebuildable derived view, `shipgate.Evaluate` as the promotion keep-bit, deletion = deterministic rebuild-without) while fak trains nothing in-kernel and never trains its own adjudicator (referee/student split answering the layer-1-disinterest doctrine), and the 44-issue production ladder MW-01..MW-44 across harvest/trainer/gate/serving/provenance/fleet/observability/research tracks with the nine P0 spine issues named. Design only — nothing shipped; honest boundary and forbidden-overclaims list inside.
 - [Managed-cache proving ground over the real session ledgers (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MANAGED-CACHE-PROVING-GROUND-2026-07-03.md) — the durable spine (`tools/managed_cache_proving_ground.py`, `make cache-proving` in ci) that turns the real guarded-session ledgers (`docs/nightrun/cache-savings.jsonl` / `gateway-usage.jsonl` / `cache-value.jsonl`) into a validated, rung-folded, baseline-ratcheted proving ground for the #1844 managed-cache levers: row contracts (schema, closed mechanism vocabulary, the `0.9r−0.25c` savings identity), a closed evidence ladder (UNIMPLEMENTED→UNWIRED→CHANNEL_READY→SILENT_ZERO→EVIDENCED) with auto-detected rung climbs, and a regression gate where counts only grow, rungs only climb, violations only shrink. First live reading: provider passthrough EVIDENCED (59 rows), compaction a witnessed zero (#1407), C6 TTL-upgrade and breakpoint placement UNWIRED for lack of durable witness channels. Carries four contract-validated ready-to-file issues (100/100) closing those gaps.
 - [Slop-debt sub-categories + systemic approach (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SLOP-DEBT-SUBCATEGORIES-AND-SYSTEMIC-APPROACH-2026-07-03.md) — why the code-slop scorecard's 810-unit `duplication` bucket (98% of all slop-debt) is one flat count with no gradient, and the empirically-derived split that gives it structure: `dup_extractable` (125 real cross-file prod clones, ≥10 lines/≥3 sites — the number to zero out), `dup_pair` (521), `dup_local` (240 same-file), `dup_test`/`dup_data` (advisory), each a pure re-projection of span/site-set/token-kind the detector already computes, weighted by extractable payoff not raw count. Plus three systemic moves beyond one-off retirement — a `dedup` skill that acts via the `modularize` code-motion recipe, generator-extraction tickets to kill clones at the source (verified: `ParseLedger` ×5 packages; `gradeFor` ×34 shown to be a token-window mirage over 2 differently-signatured defs), and making the sub-category thresholds themselves ratchetable via score-2x. Design only; every count reproduced from `tools/code_slop_scorecard.py --json`.
-- [Dedup earlier and more often — the structural root of fresh duplication (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEDUP-EARLIER-AND-MORE-OFTEN-2026-07-03.md) — the forward-looking sibling of the slop-debt sub-categories note: why fresh duplication keeps getting born (fak has a world-class *post-hoc* clone detector and *zero authoring-time dedup query* — every dedup signal fires a cycle late, as debt to retire rather than a question to ask before writing). Diagnoses three surfaces with one shape of gap (code clones caught only by the batch scorecard; issue dedup self-certified via `--dedupe-checked` not searched; no guard at the authoring/filing boundary), names the reusable primitives already in the tree (the `go_tokens` structural token-window engine for code, `internal/simhash` for prose), and prescribes the shift to earlier + durable: a `fak dup query` forward query over the tracked tree, a witnessed issue-search, and an advisory (never hard-blocking) pre-ship guard. Ships the code-query spine as `internal/clonescan` (the forward token-window engine as importable Go, sharing one clone definition with the scorecard so driving query-warnings to zero drives `dup_extractable` to zero). Complements the already-filed prose/issue dedup epic [#2503].
+- [Dedup earlier and more often — the structural root of fresh duplication (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEDUP-EARLIER-AND-MORE-OFTEN-2026-07-03.md) — the forward-looking sibling of the slop-debt sub-categories note: why fresh duplication keeps getting born (fak has a thorough *post-hoc* clone detector and *zero authoring-time dedup query* — every dedup signal fires a cycle late, as debt to retire rather than a question to ask before writing). Diagnoses three surfaces with one shape of gap (code clones caught only by the batch scorecard; issue dedup self-certified via `--dedupe-checked` not searched; no guard at the authoring/filing boundary), names the reusable primitives already in the tree (the `go_tokens` structural token-window engine for code, `internal/simhash` for prose), and prescribes the shift to earlier + durable: a `fak dup query` forward query over the tracked tree, a witnessed issue-search, and an advisory (never hard-blocking) pre-ship guard. Ships the code-query spine as `internal/clonescan` (the forward token-window engine as importable Go, sharing one clone definition with the scorecard so driving query-warnings to zero drives `dup_extractable` to zero). Complements the already-filed prose/issue dedup epic [#2503].
 - [First-class connector concepts across fak's levels — a wide survey (2026-07-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONNECTOR-CONCEPTS-SURVEY-2026-07-03.md) — positioning survey, not a build plan: extracts the five-part recipe the repo's one shipped generic transfer primitive (KV-transfer — typed OK/MISS/FAULT outcome, content-addressed digest identity, a registered backend seam, control/data-path honesty, the G1-G8 gate set) already proves, then applies it across install-time backing stores (DuckDB `read_json_auto` over existing JSONL as the near-zero-effort win; a `StateBackend` seam as the durability move; the zero-`go.sum` constraint on any Postgres/DuckDB driver), processing-framework connectors (gate-native job adjudication + result quarantine, not a native Spark/Ray client — extending the D-006 tool-ecosystem decision), session-level agentic memory (`memq.Backend` and `WarmKVStore` as already-shipped templates), and four new server-level transfer-primitive candidates (tool-result CAS sharing, policy/config sync, ledger replication, session-envelope cross-node resume) with an effort/payoff priority table. Nothing here is built; every claim is file-cited or explicitly `[STUB]`.
 - [The shared-trunk compile-integrity gap: lease disjointness is not build isolation (2026-07-06)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SHARED-TRUNK-COMPILE-INTEGRITY-GAP-2026-07-06.md) — a witnessed incident (a peer's uncommitted call to an undefined `runSuperloopDrive` broke every session's `cmd/fak` build) exposes a fourth axis the git-admin epic's three named gaps (#822/#834) do not cover. Disjoint file leases (`dos arbitrate`) guarantee ownership disjointness at *file* granularity; Go compiles at *package* granularity, so two agents with disjoint leases in one package still share one build graph — and on a shared dirty tree an agent cannot witness its own change, the one place the witness-not-self-report floor cannot stand. Shows neither `pre-commit` (7 content gates) nor `pre-push` (`dos review` + tier drift) compiles anything, so the runbook's archive-HEAD build stays manual. Proposes raising *atomic commit* from "coherent file set" to "coherent file set proven to compile against HEAD in isolation": a static self-containment rung at the commit seam (`COMMIT_NOT_SELF_CONTAINED`, no build) and an affected-scoped isolated build rung at the push seam (`TRUNK_WOULD_NOT_COMPILE`), both fail-closed with the standard block|warn|off ladder, reusing `affectedtests.Select` and the archive-HEAD technique. Design only; the hook change is park-by-default/sensitive and wants its own issue + warn-soak.
 - [RSI market-discovery epic: file a ticket the moment the market moves (2026-07-08)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/rsi-market-discovery-epic-2026-07-08.md) — a reviewable seed of 12 broad research tickets for the self-improving work-discovery loop, anchored on the just-shipped arXiv+GitHub+**Hacker News** `idea-scout` spine (HN via the public Algolia `search_by_date` API, newest-first — a trending front-page story becomes a candidate within moments of release). The tickets span five axes: fresh market-condition crawl (Reddit/X/new-release-firehose adapters, cross-source deep dedup + a durable seen-everything index), a minimum spine (a `Source` interface + conformance suite so new sources are cheap), domain-specific support (per-vertical topic packs + a "scout my domain" onramp for outside agent builders), operator-steerable superloops (a scheduled discovery loop + a super-meta loop that reweights topics from triage outcomes, and a single steer surface to pause/reweight/re-scope from above), and the honesty surface (concept-disambiguation of discovered ideas + an AEO explainer and a QA gate that every auto-filed issue body stays honest). Each ticket names a concrete first deliverable and a witness; only the HN/arXiv/GitHub spine is shipped, everything else is open research/build.
@@ -3155,6 +3195,13 @@ go run ./cmd/fak console sessions `
 This is the repeatable check that the UI is pointed at the same always-on gateway
 instead of a one-off local process.
 
+## See also
+
+- [Always-On Dogfood Server](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/always-on-dogfood-server.md) — how the `node-macos-a`
+  gateway this UI targets is stood up, measured, and kill-switched.
+- [Server quickstart](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-quickstart.md) — starting your own `fak serve` endpoint
+  from scratch if you don't have an always-on gateway yet.
+
 ---
 
 # `docs/fak/server-quickstart.md`
@@ -4513,7 +4560,7 @@ Clear every item before a network-facing deploy. Sources for each are in
   metal use a dedicated service user (the systemd unit below uses `DynamicUser`).
 - [ ] **Version pinned.** Pin a release (`FAK_VERSION` for the installer, an image
   tag for containers) rather than tracking `latest`. This guide tracks
-  **v0.36.0**.
+  **v0.41.0**.
 
 ---
 
@@ -4534,7 +4581,7 @@ shell, no package manager, runs as `nonroot`, exposes `8080`.
 ### Pull (recommended)
 
 ```bash
-docker pull ghcr.io/anthony-chaudhary/fak:0.36.0
+docker pull ghcr.io/anthony-chaudhary/fak:0.41.0
 # or track the moving tag:
 docker pull ghcr.io/anthony-chaudhary/fak:latest
 ```
@@ -4543,13 +4590,13 @@ docker pull ghcr.io/anthony-chaudhary/fak:latest
 
 ```bash
 # From a clone (repo root, where the Dockerfile lives):
-docker build -t fak:0.36.0 .
+docker build -t fak:0.41.0 .
 
 # Stamp a specific version into the binary:
-docker build --build-arg APP_VERSION=0.36.0 -t fak:0.36.0 .
+docker build --build-arg APP_VERSION=0.41.0 -t fak:0.41.0 .
 
 # Without cloning — build straight from the Git remote:
-docker build -t fak:0.36.0 https://github.com/anthony-chaudhary/fak.git
+docker build -t fak:0.41.0 https://github.com/anthony-chaudhary/fak.git
 ```
 
 The default `CMD` is `serve --addr 0.0.0.0:8080` (containers must bind `0.0.0.0`,
@@ -4560,7 +4607,7 @@ not loopback). The `ENTRYPOINT` is the `fak` binary, so override the command to 
 
 ```bash
 # Reach a model server running on the host (Ollama here) from the container:
-docker run --rm -p 8080:8080 fak:0.36.0 serve --addr 0.0.0.0:8080 \
+docker run --rm -p 8080:8080 fak:0.41.0 serve --addr 0.0.0.0:8080 \
   --base-url http://host.docker.internal:11434/v1 \
   --model qwen2.5:1.5b
 ```
@@ -4581,7 +4628,7 @@ docker run --rm -p 8080:8080 \
   -e FAK_AUDIT_JOURNAL=/var/lib/fak/audit.jsonl \
   -v "$PWD/policy.json:/etc/fak/policy.json:ro" \
   -v fak-audit:/var/lib/fak \
-  fak:0.36.0 serve --addr 0.0.0.0:8080 \
+  fak:0.41.0 serve --addr 0.0.0.0:8080 \
     --provider openai --base-url https://api.openai.com/v1 \
     --model gpt-4o --api-key-env OPENAI_API_KEY \
     --policy /etc/fak/policy.json \
@@ -4606,7 +4653,7 @@ the default image as the `-cuda` tag:
 
 ```bash
 # Pull (a tagged release publishes both):
-docker pull ghcr.io/anthony-chaudhary/fak:0.36.0-cuda
+docker pull ghcr.io/anthony-chaudhary/fak:0.41.0-cuda
 
 # Or build locally, picking the arch that matches the rented card
 # (sm_80 A100, sm_89 Ada/L4 default, sm_90 H100/H200, sm_100 B200/GB200):
@@ -4615,7 +4662,7 @@ docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t fak:cuda .
 # Run with the NVIDIA Container Toolkit (--gpus requires it on the host):
 docker run --rm --gpus all -p 8080:8080 \
   -v /models:/models:ro \
-  ghcr.io/anthony-chaudhary/fak:0.36.0-cuda \
+  ghcr.io/anthony-chaudhary/fak:0.41.0-cuda \
   serve --addr 0.0.0.0:8080 --gguf /models/model.gguf \
   --engine inkernel --backend cuda
 ```
@@ -4637,7 +4684,7 @@ the observability stack:
 # compose.yaml
 services:
   fak:
-    image: ghcr.io/anthony-chaudhary/fak:0.36.0   # published image; swap for your own to build from source
+    image: ghcr.io/anthony-chaudhary/fak:0.41.0   # published image; swap for your own to build from source
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -4735,7 +4782,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: fak
-          image: ghcr.io/anthony-chaudhary/fak:0.36.0   # or REGISTRY/fak:0.36.0 if you build from source
+          image: ghcr.io/anthony-chaudhary/fak:0.41.0   # or REGISTRY/fak:0.41.0 if you build from source
           args:
             - serve
             - --addr=0.0.0.0:8080
@@ -4831,12 +4878,12 @@ SHA-256, installs to PATH — no Go, no clone):
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 ```
 
-Installer knobs (environment): `FAK_VERSION` pins a version (e.g. `0.36.0`;
+Installer knobs (environment): `FAK_VERSION` pins a version (e.g. `0.41.0`;
 default latest release), `FAK_INSTALL_DIR` sets the target (default
 `/usr/local/bin` if writable, else `~/.local/bin`).
 
 ```bash
-FAK_VERSION=0.36.0 FAK_INSTALL_DIR=/usr/local/bin \
+FAK_VERSION=0.41.0 FAK_INSTALL_DIR=/usr/local/bin \
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh)"
 fak version
 ```
@@ -6422,5 +6469,105 @@ that ever reaches the band reds the suite on the commit that wires it.
 go test ./internal/steerpr/...   # the fold, the bands, the pessimistic reconcile, the anti-gaming fence
 fak steer prs --base HEAD~10 --head HEAD   # one bounded live read; READ-ONLY, gates nothing
 ```
+
+---
+
+# docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md
+
+> Source: `docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md`
+
+---
+title: "Version everything: the per-module version spine (2026-07-03)"
+description: "A per-module version spine that derives each module's rev from trunk-commit history, shipped as fak version modules plus a delta-stamping ledger."
+---
+
+# Version everything: the per-module version spine (2026-07-03)
+
+Status: spine SHIPPED (`internal/modver` + `fak version modules`); the program
+around it is the follow-on backlog (see the companion issue plan below).
+
+## The doctrine
+
+The repo already versions the *release* (root `VERSION`, `vX.Y.Z` tags,
+`internal/appversion`) and the *binary* (`internal/binstamp`, the `fak version`
+build stamp). Nothing versioned the *parts*: ~380 `internal/` leaves and ~30
+`cmd/` binaries grow at wildly different rates, and none of that growth was a
+queryable fact. "How fast is the gateway moving? which leaves are dormant?
+did the slop score improve as the module churned?" had no mechanical answer.
+
+Two rules make per-module versioning survivable on this shared trunk:
+
+1. **Derived, never declared.** A hand-maintained per-module version file
+   (×410) would rot within hours on a multi-session tree and generate infinite
+   merge noise. A module's version is computed from history alone:
+   `rev` = the count of trunk commits touching the module — monotonic,
+   conflict-free, needs no cooperation from committers. Rendered
+   `r<rev>+g<shortsha>` (e.g. `internal/gateway r652+g1f75c56d`).
+2. **Stamp deltas, not snapshots.** The ledger
+   (`docs/nightrun/module-versions.jsonl`, schema `fak-module-versions/1`)
+   appends one row per module *per change*, so it grows proportionally to real
+   movement. Stamping twice at the same HEAD is a no-op (witnessed by
+   `TestStampModverLedgerRoundtrip`).
+
+## The e2e (minimal, working, witnessed)
+
+```
+fak version modules                 # table: r<rev>+g<sha>  last-touch  module
+fak version modules --json          # the same report, machine-readable
+fak version modules --stamp         # append changed-module rows to the ledger
+fak version modules --scores S.json # join a flat {"module": score} map
+```
+
+Live run at head c9a8c26a: 410 modules versioned; first stamp seeded 410
+ledger rows; the immediate second stamp wrote 0 ("ledger current — 0 of 410
+modules moved"). Logic witnesses live in `internal/modver/modver_test.go`
+(parse, ghost-module exclusion, score join, delta convergence) and
+`cmd/fak/version_modules_test.go` (render + ledger roundtrip).
+
+## Versions → scores (the trend lens)
+
+`fak version score-adapter --input scorecard-files.json` converts a per-file
+scorecard envelope (`{"files":[{"path":"internal/gateway/a.go","score":80}, ...]}`)
+into that flat map. Paths use the same module classifier as the version snapshot.
+The aggregation rule is deliberately simple and explainable: **each file has equal
+weight, and a module's score is the arithmetic mean of its file scores**. Duplicate
+normalized paths and paths that cannot map to a module are refused rather than
+silently skewing or mis-joining the result. The output can be passed directly to
+`--scores` through a temporary file or shell process substitution.
+
+`--scores` joins any flat `{"module": number}` map into the report and the
+ledger rows, so a score series reads against the version series: score deltas
+between rev r47 and r52 of a module are now a query over one JSONL file, not
+an archaeology dig. The scorecard fleet (slop, code, maturity, …) keys by
+*metric*, not module — the adapter that folds scorecard output into per-module
+maps is deliberately follow-on work, not spine.
+
+## How it plugs into the rest of the system
+
+- **fak guard / dos**: a guard decision can cite the module rev it judged
+  (staleness tells beyond the binary build stamp); `dos verify` can bind a
+  claim to "module X at rev N" instead of a bare SHA. A future
+  `MODULE_REV_STALE` refusal token can catch a loop acting on recall from an
+  old rev — the same class as `STALE_RECALL`, but mechanical per module.
+- **super loops / dispatch**: `--stamp` is a natural nightrun/super-loop turn;
+  rev velocity per lane feeds dispatch (a hot module is a collision-risk
+  signal; a dormant one is a cheap-lane signal).
+- **skills / plugins**: skills and plugin surfaces are unversioned key spaces
+  today; the same derived-rev scheme extends to `docs/`, `tools/`, `.claude/`
+  skills, and policy manifests — each is one `trackedRoots` entry plus a
+  moduleOf rule.
+- **releases / ongoing updates**: each ledger row carries `app_version`, so
+  "what moved between 0.36 and 0.37" is a filter, and release notes can be
+  partially generated from module rev deltas.
+- **agentic dev velocity**: rev-per-day per module is the growth trend the
+  goal asks for; joined with scores it distinguishes "churn that improved
+  things" from slop.
+
+## Follow-on program
+
+The 40-issue backlog (QA, dogfooding, productization, guard/dos integration,
+skills/plugins key spaces, trend reporting) lives in the companion plan
+`docs/notes/VERSION-EVERYTHING-BACKLOG-2026-07-03.md`, wave-planned with
+`fak issue cohort`.
 
 ---
