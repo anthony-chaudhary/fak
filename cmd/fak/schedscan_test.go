@@ -340,6 +340,162 @@ func TestRunSchedScan_TableDedupsHints(t *testing.T) {
 	}
 }
 
+// TestSchedActionMasksExit pins the shim detector (#5095): conhost.exe in any
+// spelling (bare, full path, quoted) masks the wrapped program's exit code, and
+// nothing else does — a direct powershell/python action's exit code is real.
+func TestSchedActionMasksExit(t *testing.T) {
+	masking := []string{
+		"conhost.exe",
+		"conhost",
+		`C:\WINDOWS\System32\conhost.exe`,
+		`"C:\Windows\System32\conhost.exe"`,
+		"  CONHOST.EXE  ",
+	}
+	for _, e := range masking {
+		if !schedActionMasksExit(e) {
+			t.Errorf("schedActionMasksExit(%q) = false, want true", e)
+		}
+	}
+	direct := []string{
+		"",
+		"powershell.exe",
+		`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+		"pythonw.exe",
+		`C:\work\fak\fak.exe`,
+		"notconhost.exe",
+	}
+	for _, e := range direct {
+		if schedActionMasksExit(e) {
+			t.Errorf("schedActionMasksExit(%q) = true, want false", e)
+		}
+	}
+}
+
+// TestApplySchedExitMask pins the demotion rule: ONLY a trusted zero ("idle",
+// code 0) is weakened by the conhost shim, to "unverified" with the
+// heartbeat-freshness remediation — never to failing (the fleet launches most
+// tasks through conhost; latching --strict on the shim would red the fleet
+// forever). Every verdict that does not rest on a trusted zero passes through.
+func TestApplySchedExitMask(t *testing.T) {
+	// The headline case: masked exit 0 stops reading as healthy.
+	status, r := applySchedExitMask("idle", decodeSchedTaskResult(0), true)
+	if status != "unverified" {
+		t.Errorf("masked idle+0 => %q, want unverified", status)
+	}
+	if r.Severity != "warn" || !strings.Contains(r.Message, "#5095") {
+		t.Errorf("masked meaning = severity %q message %q, want warn + #5095", r.Severity, r.Message)
+	}
+	if !strings.Contains(r.Hint, "heartbeat") {
+		t.Errorf("masked hint = %q, want the heartbeat-freshness remediation", r.Hint)
+	}
+
+	// Unmasked exit 0 stays idle/ok — a direct action's zero is real.
+	if status, r := applySchedExitMask("idle", decodeSchedTaskResult(0), false); status != "idle" || r.Severity != "ok" {
+		t.Errorf("unmasked idle+0 => (%q,%q), want (idle,ok)", status, r.Severity)
+	}
+	// A NON-zero result through the shim is Task Scheduler's own verdict (the
+	// launch itself failed) and must stay failing, untouched.
+	if status, r := applySchedExitMask("failing", decodeSchedTaskResult(0x800710E0), true); status != "failing" || r.Severity != "fail" {
+		t.Errorf("masked refused => (%q,%q), want (failing,fail) untouched", status, r.Severity)
+	}
+	// Running / disabled don't rest on a trusted zero; no demotion.
+	if status, _ := applySchedExitMask("running", decodeSchedTaskResult(0x41301), true); status != "running" {
+		t.Errorf("masked running => %q, want running", status)
+	}
+	if status, _ := applySchedExitMask("disabled", decodeSchedTaskResult(0x41302), true); status != "disabled" {
+		t.Errorf("masked disabled => %q, want disabled", status)
+	}
+}
+
+// schedScanMaskFixture mimics the live fleet's conhost posture: a conhost-shimmed
+// task reporting the untrustworthy exit 0, a conhost-shimmed task whose launch
+// Task Scheduler itself refused (real failure, must survive), a direct-action
+// task whose exit 0 is trustworthy, and a running conhost task.
+const schedScanMaskFixture = `[
+  {"TaskName":"FleetSupervisorWatchdog","State":"Ready","LogonType":"Interactive","LastRunTime":"2026-07-16T04:00:00.0000000-07:00","LastTaskResult":0,"ActionExecute":"conhost.exe","ActionArguments":"--headless powershell.exe -NoProfile -File watchdog.ps1"},
+  {"TaskName":"FleetResumeWatchdog","State":"Ready","LogonType":"Interactive","LastTaskResult":-2147020576,"ActionExecute":"C:\\WINDOWS\\System32\\conhost.exe","ActionArguments":"--headless powershell.exe -File resume.ps1"},
+  {"TaskName":"FakFleetJanitor","State":"Ready","LogonType":"S4U","LastTaskResult":0,"ActionExecute":"powershell.exe","ActionArguments":"-NoProfile -File janitor.ps1"},
+  {"TaskName":"FleetControlPaneTick","State":"Running","LastTaskResult":267009,"ActionExecute":"conhost.exe","ActionArguments":"--headless cmd.exe /c tick.cmd"}
+]`
+
+// TestBuildSchedScanDoc_ConhostMaskedExitZero is the #5095 acceptance witness in
+// snapshot form: the conhost-shimmed result=0 task (the FleetSupervisorWatchdog
+// that reported result=0 for ~25 days while its target was dead) no longer rolls
+// up as healthy-idle — it is "unverified" with result_masked=true — while a real
+// failure and a trustworthy direct-action zero keep their verdicts.
+func TestBuildSchedScanDoc_ConhostMaskedExitZero(t *testing.T) {
+	rows, err := parseSchedTaskJSON(schedScanMaskFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := buildSchedScanDoc(rows, regexp.MustCompile(schedScanDefaultFilter), "test", "2026-07-16T12:00:00Z")
+	if doc.Count != 4 {
+		t.Fatalf("count = %d, want 4", doc.Count)
+	}
+	byName := map[string]schedScanTaskReport{}
+	for _, tk := range doc.Tasks {
+		byName[tk.Name] = tk
+	}
+	sup := byName["FleetSupervisorWatchdog"]
+	if sup.Status != "unverified" || sup.Failing || !sup.ResultMasked {
+		t.Errorf("conhost exit-0 => status=%q failing=%v masked=%v, want unverified/false/true", sup.Status, sup.Failing, sup.ResultMasked)
+	}
+	if !strings.Contains(sup.Result.Hint, "heartbeat") {
+		t.Errorf("conhost exit-0 hint = %q, want heartbeat-freshness remediation", sup.Result.Hint)
+	}
+	if sup.Action == "" || !strings.Contains(sup.Action, "conhost.exe") {
+		t.Errorf("action = %q, want the conhost command line surfaced", sup.Action)
+	}
+	// The refused conhost task is still a REAL failure — masking must never
+	// weaken a non-zero result.
+	if res := byName["FleetResumeWatchdog"]; res.Status != "failing" || !res.Failing {
+		t.Errorf("masked+refused => (%q,%v), want (failing,true)", res.Status, res.Failing)
+	}
+	// The direct-action zero is trustworthy and stays idle.
+	if jan := byName["FakFleetJanitor"]; jan.Status != "idle" || jan.ResultMasked {
+		t.Errorf("direct exit-0 => status=%q masked=%v, want idle/false", jan.Status, jan.ResultMasked)
+	}
+	// A running conhost task is not demoted.
+	if run := byName["FleetControlPaneTick"]; run.Status != "running" {
+		t.Errorf("masked running => %q, want running", run.Status)
+	}
+	if doc.FailingCount != 1 {
+		t.Errorf("failing_count = %d, want 1 (unverified is NOT failing)", doc.FailingCount)
+	}
+	if doc.Counts["unverified"] != 1 {
+		t.Errorf("counts = %v, want unverified=1", doc.Counts)
+	}
+}
+
+// TestRunSchedScan_TableUnverifiedHint pins that the heartbeat remediation
+// travels with an unverified (mask-demoted) row in the human table, not only
+// with failing rows — otherwise the operator sees UNVERIFIED with no cure.
+func TestRunSchedScan_TableUnverifiedHint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "snap.json")
+	if err := os.WriteFile(path, []byte(schedScanMaskFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runSchedScan(&out, &errb, []string{"--from", path}); code != 0 {
+		t.Fatalf("exit = %d; stderr=%s", code, errb.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "UNVERIFIED") {
+		t.Errorf("table missing the UNVERIFIED status row:\n%s", s)
+	}
+	if !strings.Contains(s, "heartbeat freshness") {
+		t.Errorf("table missing the heartbeat-freshness remediation for the unverified row:\n%s", s)
+	}
+	// --strict still keys on real failures only: with the refused task filtered
+	// out, an unverified row alone must NOT latch exit 3.
+	out.Reset()
+	errb.Reset()
+	if code := runSchedScan(&out, &errb, []string{"--from", path, "--strict", "--filter", "^FleetSupervisorWatchdog$"}); code != 0 {
+		t.Errorf("strict exit (unverified only) = %d, want 0; stderr=%s", code, errb.String())
+	}
+}
+
 // TestSchedScanShortTime covers the three fallback branches plus rune-safety of the
 // non-RFC3339 truncation.
 func TestSchedScanShortTime(t *testing.T) {

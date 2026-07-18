@@ -31,6 +31,15 @@ import (
 // or watchdog can gate on. The decode/classify/parse core is pure and
 // cross-platform; only the live enumeration is Windows-only (and `--from` feeds a
 // captured snapshot in on any OS).
+//
+// The second lie schedscan refuses to believe (#5095): LastTaskResult=0 through a
+// `conhost.exe --headless <program> ...` launch shim. conhost exits 0 regardless
+// of the wrapped program's exit code (verified live: `conhost --headless cmd /c
+// exit 7` returns 0), so for the many fleet tasks that launch through that shim a
+// zero result is NOT evidence the last run succeeded — the resume watchdog once
+// sat dead for hours on a param-binding failure while reporting result=0. Each
+// task's Action is captured, and a conhost-shimmed exit-0 is demoted from "idle"
+// to "unverified" with a judge-by-heartbeat-freshness remediation.
 
 const schedScanSchema = "fak.schedscan/1"
 
@@ -130,7 +139,10 @@ func decodeSchedTaskResult(raw int64) schedResultMeaning {
 }
 
 // schedScanTaskInfo is one row of the Get-ScheduledTask ⋈ Get-ScheduledTaskInfo
-// join as emitted by the PowerShell probe (or a --from snapshot).
+// join as emitted by the PowerShell probe (or a --from snapshot). ActionExecute /
+// ActionArguments carry the task's first Action so the classifier can tell which
+// tasks launch through an exit-code-masking shim; older --from snapshots without
+// the fields simply decode them empty (no shim ⇒ no demotion).
 type schedScanTaskInfo struct {
 	TaskName           string `json:"TaskName"`
 	TaskPath           string `json:"TaskPath"`
@@ -142,22 +154,61 @@ type schedScanTaskInfo struct {
 	LastTaskResult     int64  `json:"LastTaskResult"`
 	NextRunTime        string `json:"NextRunTime"`
 	NumberOfMissedRuns int64  `json:"NumberOfMissedRuns"`
+	ActionExecute      string `json:"ActionExecute"`
+	ActionArguments    string `json:"ActionArguments"`
 }
 
 // schedScanTaskReport is the decoded, classified per-task record in the JSON doc.
+// ResultMasked marks a row whose action launches through an exit-code-masking
+// shim (conhost.exe): its zero LastTaskResult carries no health signal (#5095).
 type schedScanTaskReport struct {
-	Name       string             `json:"name"`
-	Path       string             `json:"path,omitempty"`
-	State      string             `json:"state"`
-	LogonType  string             `json:"logon_type,omitempty"`
-	RunLevel   string             `json:"run_level,omitempty"`
-	UserID     string             `json:"user_id,omitempty"`
-	LastRun    string             `json:"last_run,omitempty"`
-	NextRun    string             `json:"next_run,omitempty"`
-	MissedRuns int64              `json:"missed_runs,omitempty"`
-	Result     schedResultMeaning `json:"result"`
-	Status     string             `json:"status"`
-	Failing    bool               `json:"failing"`
+	Name         string             `json:"name"`
+	Path         string             `json:"path,omitempty"`
+	State        string             `json:"state"`
+	LogonType    string             `json:"logon_type,omitempty"`
+	RunLevel     string             `json:"run_level,omitempty"`
+	UserID       string             `json:"user_id,omitempty"`
+	LastRun      string             `json:"last_run,omitempty"`
+	NextRun      string             `json:"next_run,omitempty"`
+	MissedRuns   int64              `json:"missed_runs,omitempty"`
+	Action       string             `json:"action,omitempty"`
+	Result       schedResultMeaning `json:"result"`
+	ResultMasked bool               `json:"result_masked,omitempty"`
+	Status       string             `json:"status"`
+	Failing      bool               `json:"failing"`
+}
+
+// schedActionMasksExit reports whether a task Action's executable is an
+// exit-code-masking launch shim — today, conhost.exe: `conhost --headless <prog>`
+// exits 0 no matter what the wrapped program returned (verified live on this
+// fleet, #5095), so LastTaskResult records conhost's 0, never the script's real
+// exit. Tolerates quoting and full paths ("C:\Windows\System32\conhost.exe").
+// A NON-zero result through the shim is still meaningful (it is Task Scheduler
+// itself failing to launch, e.g. 0x800710E0), so this only ever weakens a zero.
+func schedActionMasksExit(execute string) bool {
+	exe := strings.ToLower(strings.Trim(strings.TrimSpace(execute), `"'`))
+	exe = strings.TrimSuffix(exe, ".exe")
+	if i := strings.LastIndexAny(exe, `\/`); i >= 0 {
+		exe = exe[i+1:]
+	}
+	return exe == "conhost"
+}
+
+// applySchedExitMask demotes a healthy-looking row whose exit 0 arrived through a
+// masking shim: "idle" (the only bucket exit 0 can produce) becomes "unverified",
+// never failing — the fleet launches most tasks through conhost, so latching
+// --strict on the shim itself would red the whole fleet forever. The rewritten
+// meaning carries the #5095 remediation: judge the task by heartbeat freshness,
+// not LastTaskResult. Every other status (failing/running/disabled/degraded)
+// passes through untouched — those verdicts do not rest on a trusted zero.
+func applySchedExitMask(status string, r schedResultMeaning, masked bool) (string, schedResultMeaning) {
+	if !masked || status != "idle" || r.Code != 0 {
+		return status, r
+	}
+	r.Severity = "warn"
+	r.Message = "Exit 0 through a conhost.exe launch shim — conhost swallows the wrapped script's exit code, so this result does not prove the last run succeeded (#5095)."
+	r.Hint = "judge this task by heartbeat freshness (fleet_status.ps1 HEALTH), not LastTaskResult; conhost --headless masks inner failures as exit 0"
+	return "unverified", r
 }
 
 // classifySchedTask rolls a task's live State and decoded result into one health
@@ -248,19 +299,23 @@ func buildSchedScanDoc(rows []schedScanTaskInfo, filter *regexp.Regexp, source, 
 		}
 		res := decodeSchedTaskResult(row.LastTaskResult)
 		status, failing := classifySchedTask(row.State, res)
+		masked := schedActionMasksExit(row.ActionExecute)
+		status, res = applySchedExitMask(status, res, masked)
 		doc.Tasks = append(doc.Tasks, schedScanTaskReport{
-			Name:       row.TaskName,
-			Path:       strings.TrimSpace(row.TaskPath),
-			State:      row.State,
-			LogonType:  row.LogonType,
-			RunLevel:   row.RunLevel,
-			UserID:     row.UserId,
-			LastRun:    row.LastRunTime,
-			NextRun:    row.NextRunTime,
-			MissedRuns: row.NumberOfMissedRuns,
-			Result:     res,
-			Status:     status,
-			Failing:    failing,
+			Name:         row.TaskName,
+			Path:         strings.TrimSpace(row.TaskPath),
+			State:        row.State,
+			LogonType:    row.LogonType,
+			RunLevel:     row.RunLevel,
+			UserID:       row.UserId,
+			LastRun:      row.LastRunTime,
+			NextRun:      row.NextRunTime,
+			MissedRuns:   row.NumberOfMissedRuns,
+			Action:       strings.TrimSpace(strings.TrimSpace(row.ActionExecute) + " " + strings.TrimSpace(row.ActionArguments)),
+			Result:       res,
+			ResultMasked: masked,
+			Status:       status,
+			Failing:      failing,
 		})
 		doc.Counts[status]++
 		if failing {
@@ -286,6 +341,7 @@ func buildSchedScanDoc(rows []schedScanTaskInfo, filter *regexp.Regexp, source, 
 const schedScanLiveScript = `$ErrorActionPreference='SilentlyContinue'
 Get-ScheduledTask | ForEach-Object {
   $i = $_ | Get-ScheduledTaskInfo
+  $a = $_.Actions | Select-Object -First 1
   [pscustomobject]@{
     TaskName = $_.TaskName
     TaskPath = $_.TaskPath
@@ -297,6 +353,8 @@ Get-ScheduledTask | ForEach-Object {
     LastTaskResult = [int64]$i.LastTaskResult
     NextRunTime = if ($i.NextRunTime) { $i.NextRunTime.ToString('o') } else { '' }
     NumberOfMissedRuns = [int64]$i.NumberOfMissedRuns
+    ActionExecute = [string]$a.Execute
+    ActionArguments = [string]$a.Arguments
   }
 } | ConvertTo-Json -Depth 3`
 
@@ -434,11 +492,12 @@ func renderSchedScanTable(w io.Writer, doc schedScanDoc, failingOnly bool) {
 		fmt.Fprintln(w, "  (no failing tasks)")
 		return
 	}
-	// Remediation hints for the failing tasks, deduped by hint so a fleet-wide
-	// misconfiguration (all 19 tasks refused for the same reason) prints once.
+	// Remediation hints for the failing (and mask-unverified, #5095) tasks, deduped
+	// by hint so a fleet-wide misconfiguration (all 19 tasks refused for the same
+	// reason, or all launched through the same conhost shim) prints once.
 	seen := map[string]bool{}
 	for _, t := range doc.Tasks {
-		if !t.Failing || t.Result.Hint == "" || seen[t.Result.Hint] {
+		if (!t.Failing && t.Status != "unverified") || t.Result.Hint == "" || seen[t.Result.Hint] {
 			continue
 		}
 		seen[t.Result.Hint] = true
