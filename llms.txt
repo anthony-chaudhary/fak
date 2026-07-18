@@ -29,6 +29,7 @@
 - Steerability controls and appeal-channel scorecard: [docs/STEERABILITY-SCORECARD.md](docs/STEERABILITY-SCORECARD.md)
 - Operator-heaviness pressure, budgets, and reduction standard: [docs/OPERATOR-HEAVINESS.md](docs/OPERATOR-HEAVINESS.md)
 - Operator-steerability PRs (`fak steer prs`) — the gate/observability separation, the OSP unit, and why the overlay must never become a merge gate: [docs/operator-steerability-prs.md](docs/operator-steerability-prs.md)
+- Version-everything (`fak version modules`) — per-module rev+date over the module tree, git-witnessed via the `fak-module-versions/1` ledger rather than asserted: [docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md)
 
 ## Source authorities
 

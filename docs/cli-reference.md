@@ -718,6 +718,7 @@ attaches through a registry.
 | KPI + A/B bench | `internal/metrics`,`internal/bench` | vDSO ablation; the primary gate; provenance + identical-workload guard | `report.json`, `baseline.json` |
 | turn-tax bench | `internal/turnbench` | `fak turntax`: prices the extra error-code MODEL turn (malformed/duplicate/poison) a SOTA loop fires vs the 1-shot kernel, per lever, safety floor on its own axis | `go test` (incl. happy-path=0 control); `TURN-TAX-RESULTS.md` |
 | stewards + RSI gate | `internal/steward`,`internal/shipgate` | single-invariant stewards + meta-prune; keep-or-revert on a non-forgeable keep-bit, worktree isolation, escalation breaker | `go test` |
+| version-everything | `internal/modver` | `fak version modules`: a per-module version report over the module tree — content-addressed rev + date (+ optional joined `-scores`), with `-only <prefix>`, `-sort name\|rev\|date`, `-top N`, and `-json` views; `-stamp` appends changed-module rows to the `fak-module-versions/1` ledger (`docs/nightrun/module-versions.jsonl`, seeded with 410 modules) so a module's version is git-witnessed, not asserted | `go test` (`internal/modver`, `cmd/fak/version_modules_test.go`); `docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md` |
 
 ## What this is NOT (labeled, not hidden — see `CLAIMS.md`)
 

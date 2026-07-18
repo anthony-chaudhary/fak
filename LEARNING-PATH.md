@@ -137,7 +137,8 @@ checkpoints, you are qualified to start there.
 
 **Lab:**
 ```bash
-go run ./cmd/fak version  # confirm the single binary builds and prints its version
+go run ./cmd/fak version          # confirm the single binary builds and prints its version
+go run ./cmd/fak version modules -top 10  # version-everything: per-module rev+date over the tree (the fak-module-versions/1 ledger, 410 modules)
 ```
 
 **Checkpoint:** In one sentence, state what fak is and name one thing it is explicitly NOT. Name two of the four questions fak owns that token engines leave open.
