@@ -44,11 +44,22 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 	hookMin := fs.Int("hook-min", 0, "hook-failure-storm signature floor: min `hook: … Failed` lines per session (0 = default 3)")
 	heartbeat := fs.Bool("heartbeat", false, "append a STARTED/NEVER_STARTED heartbeat event per worker to the loop ledger (default: off — a routine read-only audit never writes)")
 	ledger := fs.String("ledger", "", "loop JSONL ledger path for --heartbeat (default: the loop ledger)")
+	windowH := fs.Float64("window-h", 168, "only scan logs spawned within the last N hours (0 = scan the entire runs dir)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 
-	workers, err := dispatchaudit.ScanDir(*runsDir)
+	// Bound the scan to a retrospective window (#3478): the runs dir is never
+	// reaped, so the windowless scan re-reads every historical log (up to 2 MB
+	// each) on every scheduled cadence — O(N²) over fleet lifetime. 168h keeps a
+	// generous 7-day audit horizon; --window-h=0 is the explicit
+	// scan-everything opt-out (zero since disables the window).
+	var since time.Time
+	if *windowH > 0 {
+		since = time.Now().Add(-time.Duration(*windowH * float64(time.Hour)))
+	}
+
+	workers, err := dispatchaudit.ScanDirSince(*runsDir, since)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak dispatch audit: scan %s: %v\n", *runsDir, err)
 		return 1
@@ -72,7 +83,7 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 	if *hookMin > 0 {
 		sigTh.HookMin = *hookMin
 	}
-	if sigs, sigErr := dispatchaudit.ScanDirSignatures(*runsDir, sigTh); sigErr != nil {
+	if sigs, sigErr := dispatchaudit.ScanDirSignaturesSince(*runsDir, sigTh, since); sigErr != nil {
 		fmt.Fprintf(stderr, "fak dispatch audit: signature scan %s: %v\n", *runsDir, sigErr)
 	} else {
 		for _, sf := range sigs {
