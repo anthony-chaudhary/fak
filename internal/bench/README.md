@@ -101,3 +101,23 @@ dependency-free `cpumemstress` tool itself.
 go test ./internal/bench -count=1
 go vet ./internal/bench
 ```
+
+### Negation naive baseline
+
+`negbaseline` scores auditable matched affirmative/negated cloze and QA probes through
+OpenAI-compatible `fak serve` endpoints. The offline fixture is the default test; live
+capture is opt-in:
+
+```bash
+FAK_NEGBASELINE_OUT=/tmp/negbaseline.json \
+FAK_NEGBASELINE_TARGETS=/tmp/negbaseline-targets.json \
+  go test ./internal/bench -run TestNegBaselineCapture -count=1 -v
+```
+
+The targets file is a JSON array of `{url, model, parameters, host, surface}` objects.
+This is an OBSERVED baseline witness, not a CI gate: it reports plain accuracy,
+negated accuracy, their gap, and whether the endpoint gaps widen with model size; it
+never asserts that the literature's inverse-scaling signature must reproduce. The
+committed witness in `testdata/negation_baseline_observed.json` names the fak-served
+models and host used for the run.
+

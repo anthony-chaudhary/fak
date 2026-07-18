@@ -1,0 +1,103 @@
+[
+  {
+    "id": "cloze_robin",
+    "family": "cloze",
+    "affirmative_prompt": "Complete with exactly one choice, bird or mammal: A robin is a ___.",
+    "negated_prompt": "Complete with exactly one choice, bird or mammal: A robin is not a ___.",
+    "expected_plain": [
+      "bird"
+    ],
+    "expected_complement": [
+      "mammal"
+    ]
+  },
+  {
+    "id": "cloze_salmon",
+    "family": "cloze",
+    "affirmative_prompt": "Complete with exactly one choice, fish or bird: A salmon is a ___.",
+    "negated_prompt": "Complete with exactly one choice, fish or bird: A salmon is not a ___.",
+    "expected_plain": [
+      "fish"
+    ],
+    "expected_complement": [
+      "bird"
+    ]
+  },
+  {
+    "id": "cloze_triangle",
+    "family": "cloze",
+    "affirmative_prompt": "Complete with exactly one choice, three or four: A triangle has ___ sides.",
+    "negated_prompt": "Complete with exactly one choice, three or four: A triangle does not have ___ sides.",
+    "expected_plain": [
+      "three",
+      "3"
+    ],
+    "expected_complement": [
+      "four",
+      "4"
+    ]
+  },
+  {
+    "id": "cloze_water",
+    "family": "cloze",
+    "affirmative_prompt": "Complete with exactly one choice, zero or hundred: Pure water normally freezes at ___ degrees Celsius.",
+    "negated_prompt": "Complete with exactly one choice, zero or hundred: Pure water does not normally freeze at ___ degrees Celsius.",
+    "expected_plain": [
+      "zero",
+      "0"
+    ],
+    "expected_complement": [
+      "hundred",
+      "100"
+    ]
+  },
+  {
+    "id": "qa_paris",
+    "family": "qa",
+    "affirmative_prompt": "Answer with exactly yes or no: Is Paris the capital of France?",
+    "negated_prompt": "Answer with exactly yes or no: Is Paris not the capital of France?",
+    "expected_plain": [
+      "yes"
+    ],
+    "expected_complement": [
+      "no"
+    ]
+  },
+  {
+    "id": "qa_whale",
+    "family": "qa",
+    "affirmative_prompt": "Answer with exactly yes or no: Is a whale a mammal?",
+    "negated_prompt": "Answer with exactly yes or no: Is a whale not a mammal?",
+    "expected_plain": [
+      "yes"
+    ],
+    "expected_complement": [
+      "no"
+    ]
+  },
+  {
+    "id": "qa_earth",
+    "family": "qa",
+    "affirmative_prompt": "Answer with exactly yes or no: Does Earth orbit the Sun?",
+    "negated_prompt": "Answer with exactly yes or no: Does Earth not orbit the Sun?",
+    "expected_plain": [
+      "yes"
+    ],
+    "expected_complement": [
+      "no"
+    ]
+  },
+  {
+    "id": "qa_fire",
+    "family": "qa",
+    "affirmative_prompt": "Answer with exactly yes or no: Is fire hot?",
+    "negated_prompt": "Answer with exactly yes or no: Is fire not hot?",
+    "expected_plain": [
+      "yes"
+    ],
+    "expected_complement": [
+      "no"
+    ]
+  }
+]
+

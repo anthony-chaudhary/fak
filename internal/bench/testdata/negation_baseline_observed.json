@@ -1,0 +1,34 @@
+{
+  "schema": "fak-negation-baseline/1",
+  "provenance": "OBSERVED / FAK-SERVED MODEL",
+  "informational_only": true,
+  "reports": [
+    {
+      "model": "qwen2.5-0.5b-cpu",
+      "parameters": 500000000,
+      "host": "fak-realmodel/g2-standard-8/linux/amd64",
+      "surface": "fak serve gguf CPU OpenAI-compatible endpoint",
+      "n": 8,
+      "plain_correct": 8,
+      "complement_correct": 4,
+      "plain_accuracy": 1,
+      "complement_accuracy": 0.5,
+      "plain_minus_complement_gap": 0.5
+    },
+    {
+      "model": "qwen2.5-14b",
+      "parameters": 14000000000,
+      "host": "fak-realmodel/g2-standard-8/linux/amd64",
+      "surface": "fak serve Ollama-backed OpenAI-compatible endpoint",
+      "n": 8,
+      "plain_correct": 8,
+      "complement_correct": 7,
+      "plain_accuracy": 1,
+      "complement_accuracy": 0.875,
+      "plain_minus_complement_gap": 0.125
+    }
+  ],
+  "gap_widens_with_size": false
+}
+
+
