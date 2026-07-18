@@ -469,24 +469,8 @@ func (l *QuarantineLedger) releasedSet() map[int]bool {
 func (l *QuarantineLedger) isReleased(seq int) bool { return l.releasedSet()[seq] }
 
 func (l *QuarantineLedger) append(r QuarantineRow) error {
-	if l.path != "" {
-		f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			return err
-		}
-		b, err := json.Marshal(r)
-		if err != nil {
-			f.Close()
-			return err
-		}
-		b = append(b, '\n')
-		if _, err := f.Write(b); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
-			return err
-		}
+	if err := appendLedgerLine(l.path, r); err != nil {
+		return err
 	}
 	l.rows = append(l.rows, r)
 	return nil

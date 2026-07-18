@@ -326,27 +326,35 @@ func (l *CuratorLedger) isReverted(seq int) bool {
 	return l.revertedSet()[seq]
 }
 
+// appendLedgerLine durably appends r as one JSON line to a file-backed ledger at
+// path; an empty path marks an in-memory-only ledger and is a no-op. It is the
+// shared write half of every rsiloop ledger's append method.
+func appendLedgerLine(path string, r any) error {
+	if path == "" {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		f.Close()
+		return err
+	}
+	b = append(b, '\n')
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // append records the row in memory and, if the ledger is file-backed, durably
 // appends it as one JSON line so the journal survives a restart.
 func (l *CuratorLedger) append(r CuratorRow) error {
-	if l.path != "" {
-		f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			return err
-		}
-		b, err := json.Marshal(r)
-		if err != nil {
-			f.Close()
-			return err
-		}
-		b = append(b, '\n')
-		if _, err := f.Write(b); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
-			return err
-		}
+	if err := appendLedgerLine(l.path, r); err != nil {
+		return err
 	}
 	l.rows = append(l.rows, r)
 	return nil

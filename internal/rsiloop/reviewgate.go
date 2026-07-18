@@ -402,24 +402,8 @@ func (l *ReviewLedger) isResolved(decisionSeq int) bool {
 // append records the row in memory and, if file-backed, durably appends it as one
 // JSON line so the ledger survives a restart (the CuratorLedger discipline).
 func (l *ReviewLedger) append(r ReviewRow) error {
-	if l.path != "" {
-		f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			return err
-		}
-		b, err := json.Marshal(r)
-		if err != nil {
-			f.Close()
-			return err
-		}
-		b = append(b, '\n')
-		if _, err := f.Write(b); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
-			return err
-		}
+	if err := appendLedgerLine(l.path, r); err != nil {
+		return err
 	}
 	l.rows = append(l.rows, r)
 	return nil
