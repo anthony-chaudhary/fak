@@ -129,8 +129,11 @@ type Posture struct {
 	// "unknown" (the status probe itself could not run). Empty when fsmonitor is off or a
 	// hook-program path (neither has a builtin daemon to probe).
 	FsmonitorDaemon string `json:"fsmonitor_daemon,omitempty"`
-	Safe            bool   `json:"safe"`            // gc.auto == 0 AND maintenance.auto explicit git-false AND fsmonitor off-or-watching
-	Drift           string `json:"drift,omitempty"` // human reason when !Safe
+	// UntrackedCache is the configured core.untrackedCache ("" = unset → off, drift:
+	// every cold `git status` full-scans the ~10k-file working tree without it, #5069).
+	UntrackedCache string `json:"untracked_cache"`
+	Safe           bool   `json:"safe"`            // gc.auto == 0 AND maintenance.auto explicit git-false AND fsmonitor off-or-watching AND untrackedCache on
+	Drift          string `json:"drift,omitempty"` // human reason when !Safe
 }
 
 // fsmonitor builtin-daemon health classes, from `git fsmonitor--daemon status`.
@@ -267,8 +270,8 @@ func runStep(ctx context.Context, run MaintRunner, opts MaintOptions, tier strin
 	return st
 }
 
-// readPosture reads gc.auto and maintenance.auto from the effective git config and
-// grades the safe posture. An UNSET key reads as "" and is treated as unsafe: the safe
+// readPosture reads gc.auto, maintenance.auto, core.fsmonitor, and core.untrackedCache
+// from the effective git config and grades the safe posture. An UNSET key reads as "" and is treated as unsafe: the safe
 // posture must be EXPLICITLY configured (git's own defaults — gc.auto 6700,
 // maintenance.auto true — are both unsafe for a hot shared clone), so a repo that has
 // not been posture-set refuses the grace tier rather than trusting a silent default.
@@ -277,6 +280,7 @@ func readPosture(ctx context.Context, run MaintRunner, dir string) Posture {
 		GCAuto:          configGet(ctx, run, dir, "gc.auto"),
 		MaintenanceAuto: configGet(ctx, run, dir, "maintenance.auto"),
 		Fsmonitor:       configGet(ctx, run, dir, "core.fsmonitor"),
+		UntrackedCache:  configGet(ctx, run, dir, "core.untrackedCache"),
 	}
 	var drift []string
 	if strings.TrimSpace(p.GCAuto) != "0" {
@@ -298,6 +302,22 @@ func readPosture(ctx context.Context, run MaintRunner, dir string) Posture {
 			drift = append(drift, fmt.Sprintf("core.fsmonitor=%s but builtin daemon is %s (want a watching daemon, or unset core.fsmonitor)",
 				p.Fsmonitor, p.FsmonitorDaemon))
 		}
+	}
+	// core.untrackedCache: the daemon-independent cold-status speedup (#5069, the
+	// follow-up #4603 scoped out). Unset/off means every cold `git status` walks the
+	// whole ~10k-file working tree; TRUE caches untracked-dir mtimes in the index so a
+	// cold status re-scans only dirs that changed. Measured on this hot clone
+	// (2026-07-17, git 2.51, no fsmonitor daemon): steady-state status ~700ms → ~420ms,
+	// first cold run 2082ms → 425ms. Asserted HERE — the posture check, not a setup
+	// verb — so the setting is MANAGED: drift surfaces as a POSTURE_DRIFT incident
+	// instead of silently regressing status latency (operator repair:
+	// `git config core.untrackedCache true`). feature.manyFiles was evaluated and
+	// REJECTED for this tree: beyond the untracked cache it also flips index.version=4
+	// and (git >= 2.40) index.skipHash=true — index FORMAT changes that non-git readers
+	// of .git/index on a shared always-hot clone may not parse — while the measured
+	// cold-status win comes from the untracked cache alone.
+	if !isGitTrue(p.UntrackedCache) {
+		drift = append(drift, fmt.Sprintf("core.untrackedCache=%s (want true — cold `git status` full-scans the tree without it, #5069)", displayConfig(p.UntrackedCache)))
 	}
 	p.Safe = len(drift) == 0
 	p.Drift = strings.Join(drift, "; ")

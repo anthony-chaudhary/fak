@@ -79,9 +79,10 @@ func hasArg(args []string, want string) bool {
 	return false
 }
 
-// safePosture is the shared no-auto-gc posture the hot clone holds.
+// safePosture is the shared no-auto-gc posture the hot clone holds (incl. the
+// core.untrackedCache=true cold-status speedup asserted since #5069).
 func safePosture() map[string]string {
-	return map[string]string{"gc.auto": "0", "maintenance.auto": "false"}
+	return map[string]string{"gc.auto": "0", "maintenance.auto": "false", "core.untrackedCache": "true"}
 }
 
 // scratchGit builds a scratch common-dir with the object-DB subtree present and no
@@ -215,10 +216,12 @@ func TestRunMaintPostureDriftRefusesGrace(t *testing.T) {
 		name    string
 		posture map[string]string
 	}{
-		{"gc.auto nonzero", map[string]string{"gc.auto": "6700", "maintenance.auto": "false"}},
-		{"gc.auto unset", map[string]string{"maintenance.auto": "false"}},
-		{"maintenance.auto true", map[string]string{"gc.auto": "0", "maintenance.auto": "true"}},
-		{"maintenance.auto unset", map[string]string{"gc.auto": "0"}},
+		{"gc.auto nonzero", map[string]string{"gc.auto": "6700", "maintenance.auto": "false", "core.untrackedCache": "true"}},
+		{"gc.auto unset", map[string]string{"maintenance.auto": "false", "core.untrackedCache": "true"}},
+		{"maintenance.auto true", map[string]string{"gc.auto": "0", "maintenance.auto": "true", "core.untrackedCache": "true"}},
+		{"maintenance.auto unset", map[string]string{"gc.auto": "0", "core.untrackedCache": "true"}},
+		{"untrackedCache unset", map[string]string{"gc.auto": "0", "maintenance.auto": "false"}},
+		{"untrackedCache false", map[string]string{"gc.auto": "0", "maintenance.auto": "false", "core.untrackedCache": "false"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -474,7 +477,7 @@ func TestRunMaintLooseBacklogHighFromPreRunCount(t *testing.T) {
 // watching daemon stays safe. It also pins that the daemon is probed ONLY when a git-true
 // value selects the builtin (a hook-program PATH and the off/unset cases run no probe).
 func TestReadPostureFsmonitorHealth(t *testing.T) {
-	base := func() map[string]string { return map[string]string{"gc.auto": "0", "maintenance.auto": "false"} }
+	base := func() map[string]string { return safePosture() }
 	cases := []struct {
 		name        string
 		fsmonitor   string // "" = key unset
@@ -517,6 +520,43 @@ func TestReadPostureFsmonitorHealth(t *testing.T) {
 			}
 			if !tc.wantSafe && tc.driftNeedle != "" && !strings.Contains(p.Drift, tc.driftNeedle) {
 				t.Fatalf("drift %q should mention %q", p.Drift, tc.driftNeedle)
+			}
+		})
+	}
+}
+
+// TestReadPostureUntrackedCache is the #5069 witness: core.untrackedCache is MANAGED by
+// the posture assert — unset or git-false reads as drift (every cold `git status` would
+// silently full-scan the ~10k-file tree), while any git-true spelling is safe. This is
+// what keeps the daemon-independent cold-status speedup from regressing by manual drift.
+func TestReadPostureUntrackedCache(t *testing.T) {
+	cases := []struct {
+		name     string
+		value    string // "" = key unset
+		wantSafe bool
+	}{
+		{"unset-drift", "", false},
+		{"false-drift", "false", false},
+		{"true-safe", "true", true},
+		{"on-safe", "on", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			posture := safePosture()
+			delete(posture, "core.untrackedCache")
+			if tc.value != "" {
+				posture["core.untrackedCache"] = tc.value
+			}
+			f := &fakeMaint{posture: posture}
+			p := readPosture(context.Background(), f.run, t.TempDir())
+			if p.Safe != tc.wantSafe {
+				t.Fatalf("Safe=%v want %v (drift=%q)", p.Safe, tc.wantSafe, p.Drift)
+			}
+			if p.UntrackedCache != tc.value {
+				t.Fatalf("UntrackedCache=%q want %q", p.UntrackedCache, tc.value)
+			}
+			if !tc.wantSafe && !strings.Contains(p.Drift, "core.untrackedCache") {
+				t.Fatalf("drift %q should mention core.untrackedCache", p.Drift)
 			}
 		})
 	}
