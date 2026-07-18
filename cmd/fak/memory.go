@@ -38,6 +38,8 @@ func cmdMemory(args []string) {
 		cmdMemoryRun(args[1:])
 	case "recall":
 		os.Exit(runMemoryRecall(os.Stdout, os.Stderr, args[1:]))
+	case "curate":
+		os.Exit(runMemoryCurate(os.Stdout, os.Stderr, args[1:]))
 	case "-h", "--help", "help":
 		memoryUsage()
 	default:
@@ -70,6 +72,13 @@ func memoryUsage() {
       mirror .claude/memory), re-verifying each note's concrete artifact claims
       at page-in — a stale note is WITHHELD with the failing claim named, a
       prose-only note renders hedged, and the block is budget-bounded.
+
+  fak memory curate --budget N [--dir IMAGE | --store DIR] [--needed IDS] [--apply] [--json]
+      budget-curated forgetting (#3908): select the lowest-witnessed-value cells
+      to evict so the surviving store fits a HARD byte cap, and print the byte
+      budget, the evicted set, and the running regret rate. Ranking is by the
+      persisted witnessed value (memq.ValueAttr), never size. The tombstone
+      eviction is applied ONLY under --apply (fail-closed proposal otherwise).
 
   fak memory explain-promotion --cell ID [--json]
       explain WHY a promoted cell is in durable memory, using ONLY the structured
