@@ -264,7 +264,15 @@ verifiable state operation.
 - **Activation steering is uniquely reachable** (fak ships its own GGUF engine) but research-
   grade; API-served models permit neither it, logit-bias, nor token-grammar. The reliable wins
   are the U-edits and x-edits, which work regardless.
-- **Citation hygiene.** The two in-tree anchors the regime gate and re-anchor nudge cite
-  (`arXiv:2602.03338`, `arXiv:2505.02709`) did not resolve on search during this synthesis and
-  should get a `dos_citation_resolve` pass — the regime gate's load-bearing "do no harm" claim
-  rests on the first.
+- **Citation hygiene — VERIFIED (#5221, arXiv API 2026-07).** Both in-tree anchors the regime gate
+  and re-anchor nudge cite are real papers that say what is claimed. They had read UNRESOLVED only
+  because `dos_citation_resolve` is a legal-reporter checker (the wrong instrument), not because the
+  papers are bad:
+  - `arXiv:2602.03338` = "Accurate Failure Prediction in Agents Does Not Imply Effective Failure
+    Prevention" (Vasudev, Russak, Bikel, Alshikh) — the regime gate's load-bearing "do no harm"
+    anchor: high-offline-accuracy critic models can HARM agent performance at deployment, and the
+    paper proposes a pre-deployment test for whether an intervention will help or harm. Exactly the
+    "failure-prediction ≠ failure-prevention" claim the HEALTHY→withhold gate rests on.
+  - `arXiv:2505.02709` = "Technical Report: Evaluating Goal Drift in Language Model Agents" (Arike,
+    Donoway, Bartsch, Hobbhahn) — the re-anchor nudge's goal-drift anchor: measures how agents
+    deviate from their original objective under competing pressures.
