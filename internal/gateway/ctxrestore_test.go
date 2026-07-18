@@ -109,6 +109,101 @@ func TestStashRestoreSafeNoops(t *testing.T) {
 	}
 }
 
+// TestStashRestoreCompressesLargePayload (#5164): a payload at/above the compression floor is held
+// deflated in the stash (smaller resident bytes, compressed flag set) yet restores VERBATIM, and
+// enumeration still reports the true (uncompressed) span size. A small text turn stays verbatim.
+func TestStashRestoreCompressesLargePayload(t *testing.T) {
+	srv := newTestServer(t)
+	const trace = "t-compress"
+	big := []byte(`{"role":"user","content":"` + strings.Repeat("base64ish-image-bytes ", 512) + `"}`)
+	if len(big) < ctxRestoreCompressThreshold {
+		t.Fatalf("test payload %dB under the compression floor %dB", len(big), ctxRestoreCompressThreshold)
+	}
+	bigID := ctxplan.Digest(big)
+	small := []byte(`{"role":"user","content":"a text turn"}`)
+	smallID := ctxplan.Digest(small)
+
+	srv.stashRestore(trace, bigID, "an image turn", big)
+	srv.stashRestore(trace, smallID, "a text turn", small)
+
+	srv.ctxRestoreMu.Lock()
+	for _, e := range srv.ctxRestore[trace].entries {
+		switch e.id {
+		case bigID:
+			if !e.compressed || len(e.bytes) >= len(big) {
+				t.Errorf("large payload resident form = %dB compressed=%v, want deflated < %dB", len(e.bytes), e.compressed, len(big))
+			}
+			if e.rawLen != len(big) {
+				t.Errorf("large payload rawLen = %d, want %d", e.rawLen, len(big))
+			}
+		case smallID:
+			if e.compressed || string(e.bytes) != string(small) {
+				t.Errorf("small payload must stay verbatim (compressed=%v)", e.compressed)
+			}
+		}
+	}
+	srv.ctxRestoreMu.Unlock()
+
+	// The restored bytes are verbatim — compression is a resident-form detail, never a lossy one.
+	got, err := srv.restoreContext("", ContextRestoreRequest{ID: bigID, TraceID: trace})
+	if err != nil {
+		t.Fatalf("restore compressed entry: %v", err)
+	}
+	if got.Bytes != string(big) {
+		t.Fatalf("restored bytes differ from the dropped turn (len %d vs %d)", len(got.Bytes), len(big))
+	}
+
+	// Enumeration reports the TRUE span size, not the deflated stored size.
+	spans, err := srv.contextSpans("", ContextSpansRequest{TraceID: trace})
+	if err != nil {
+		t.Fatalf("spans: %v", err)
+	}
+	for _, sp := range spans.Spans {
+		if sp.ID == bigID && sp.Bytes != int64(len(big)) {
+			t.Fatalf("span size = %d, want the uncompressed %d", sp.Bytes, len(big))
+		}
+	}
+}
+
+// TestStashRestoreMediaCap (#5164): media-class (large) entries overflow against the smaller
+// media-specific cap, oldest-media-out, while text entries are untouched — an image-heavy session
+// cannot fill all eight flat slots with full-size blobs.
+func TestStashRestoreMediaCap(t *testing.T) {
+	srv := newTestServer(t)
+	const trace = "t-mediacap"
+
+	text := []byte(`{"role":"user","content":"a small text turn"}`)
+	textID := ctxplan.Digest(text)
+	srv.stashRestore(trace, textID, "text", text)
+
+	mediaIDs := make([]string, 0, maxCtxRestoreMediaEntriesPerSession+1)
+	for i := 0; i <= maxCtxRestoreMediaEntriesPerSession; i++ {
+		blob := []byte(`{"role":"user","content":"` + strings.Repeat(string(rune('a'+i)), ctxRestoreMediaThreshold) + `"}`)
+		id := ctxplan.Digest(blob)
+		mediaIDs = append(mediaIDs, id)
+		srv.stashRestore(trace, id, "an image turn", blob)
+	}
+
+	// The oldest media entry was reclaimed; the newer ones and the text entry survive.
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: mediaIDs[0], TraceID: trace}); !errors.Is(err, ErrRestoreMiss) {
+		t.Fatalf("oldest media entry err = %v, want ErrRestoreMiss (reclaimed by the media cap)", err)
+	}
+	for _, id := range mediaIDs[1:] {
+		if _, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace}); err != nil {
+			t.Fatalf("surviving media entry %s: %v", id[:8], err)
+		}
+	}
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: textID, TraceID: trace}); err != nil {
+		t.Fatalf("text entry must be untouched by the media cap: %v", err)
+	}
+
+	srv.ctxRestoreMu.Lock()
+	if n := countMediaEntries(srv.ctxRestore[trace].entries); n != maxCtxRestoreMediaEntriesPerSession {
+		t.Errorf("resident media entries = %d, want %d", n, maxCtxRestoreMediaEntriesPerSession)
+	}
+	srv.ctxRestoreMu.Unlock()
+}
+
 // TestRestoreOverMCP: the verb is listed and callable end-to-end over the MCP dispatch, returning the
 // stashed bytes.
 func TestRestoreOverMCP(t *testing.T) {

@@ -1,8 +1,12 @@
 package gateway
 
 import (
+	"bytes"
+	"compress/flate"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
@@ -44,10 +48,43 @@ const maxCtxRestoreSessions = 8192
 // MOST RECENT task a resuming model is likeliest to ask for is the one kept.
 const maxCtxRestoreEntriesPerSession = 8
 
-// ErrRestoreMiss is returned when no entry addresses the requested id (unknown, evicted, or a
-// session that never tombstoned). Distinct from a refusal so the caller can tell "never had it" from
-// "had it, the gate held".
+// ctxRestoreCompressThreshold is the write-path compression floor (#5164): a dropped turn at or
+// above this raw size is deflate-compressed before it is stashed, so a base64 image blob does not
+// sit verbatim in gateway RAM. Text turns are naturally small and stay verbatim (compression of a
+// few hundred bytes buys nothing); the compressed form is kept only when it is actually smaller,
+// so an incompressible payload never grows the stash.
+const ctxRestoreCompressThreshold = 4 << 10 // 4 KiB
+
+// ctxRestoreMediaThreshold classifies a dropped turn as media-class by its RAW size (#5164): the
+// stash cannot see pixels, but the issue's observation is exactly that "text turns are naturally
+// small; media is the outlier" — so size IS the media signal. A turn at or above this threshold
+// (a base64 image runs hundreds of KB) counts against the smaller media cap below instead of only
+// the flat per-session cap.
+const ctxRestoreMediaThreshold = 32 << 10 // 32 KiB
+
+// maxCtxRestoreMediaEntriesPerSession bounds how many media-class entries one trace retains — the
+// media-specific cap of #5164. The flat 8-entry cap was sized for small text turns; eight full
+// base64 images per trace across maxCtxRestoreSessions traces can pin real proxy memory even
+// compressed. Oldest-media-out on overflow, so the most recent media turn a resuming model is
+// likeliest to ask for is the one kept; text entries are never displaced by this cap.
+const maxCtxRestoreMediaEntriesPerSession = 2
+
+// ErrRestoreMiss is returned when no source holds the requested id (unknown, a session that never
+// tombstoned, or an id this trace held then reclaimed). Distinct from a refusal so the caller can tell
+// "never had it" from "had it, the gate held". An id the trace demonstrably HELD then reclaimed is
+// refined to ErrRestoreEvicted (which wraps this), so a resume can tell reclamation from a bad id
+// without breaking any errors.Is(err, ErrRestoreMiss) branch.
 var ErrRestoreMiss = errors.New("gateway: no restorable context for that id")
+
+// ErrRestoreEvicted refines ErrRestoreMiss for the "existed then evicted" case: the trace DID stash a
+// restore handle for this id, but the bounded per-trace stash later reclaimed it oldest-out on overflow.
+// It WRAPS ErrRestoreMiss (errors.Is(err, ErrRestoreMiss) stays true) so every miss-branch is unaffected,
+// while a resume that wants to distinguish reclamation from a never-real id can errors.Is(err,
+// ErrRestoreEvicted) — the rebind-a-dropped-span-to-a-legible-sentinel axis of the one unified id space
+// (#3062). Best-effort by construction: a whole-table generational reset forgets the eviction record, so
+// this names the COMMON per-trace overflow, not the rare full wipe — a forgotten eviction degrades safely
+// to a plain miss, never to a false "never had it" refusal.
+var ErrRestoreEvicted = fmt.Errorf("%w (evicted from the per-trace stash after capacity overflow)", ErrRestoreMiss)
 
 // ErrRestoreRefused wraps a trust-gate refusal — a sealed or tombstoned span the handle must not
 // resurrect. It carries the ctxplan sentinel (ErrSealed / ErrTombstoned) so a caller can branch on
@@ -65,6 +102,14 @@ type restoreEntry struct {
 	bytes      []byte
 	sealed     bool
 	tombstoned bool
+	// compressed marks bytes as the deflate form of the dropped turn (#5164): the write path
+	// compresses payloads at/above ctxRestoreCompressThreshold, and payload() inflates them back
+	// to the verbatim turn on read. rawLen is always the ORIGINAL (uncompressed) byte length, so
+	// enumeration (fak_context_spans) reports the true span size, never the stored size. media
+	// marks a media-class (large) entry counted against maxCtxRestoreMediaEntriesPerSession.
+	compressed bool
+	rawLen     int
+	media      bool
 	// cluster and kind are the evidence-cluster and evidence-kind edges the enumeration tool
 	// (fak_context_spans) surfaces alongside the handle. They are EMPTY for the current
 	// compaction-tombstone source — a dropped originating task carries no cluster membership — and
@@ -87,6 +132,12 @@ type sessionCtxRestore struct {
 // stash). Re-stashing the same id refreshes it in place (the digest is a pure function of the bytes,
 // so a repeat is the same task). Called from the compaction path (compactAnthropicRawWithReason) on
 // a fired tombstone.
+//
+// Write-path residency control (#5164): a large payload (a base64 image turn) is deflate-compressed
+// before it is stashed and inflated transparently on restore, and media-class entries overflow
+// against the smaller maxCtxRestoreMediaEntriesPerSession cap oldest-media-out — so an image-heavy
+// session cannot pin hundreds of KB per slot times the flat cap in gateway RAM. The restored bytes
+// remain verbatim either way; only the resident form changes.
 func (s *Server) stashRestore(trace, id, excerpt string, taskBytes []byte) {
 	if s == nil || strings.TrimSpace(trace) == "" || strings.TrimSpace(id) == "" || len(taskBytes) == 0 {
 		return
@@ -104,23 +155,86 @@ func (s *Server) stashRestore(trace, id, excerpt string, taskBytes []byte) {
 		sess = &sessionCtxRestore{}
 		s.ctxRestore[trace] = sess
 	}
+	stored, compressed := stashPayload(taskBytes)
+	media := len(taskBytes) >= ctxRestoreMediaThreshold
 	// Refresh in place if we already hold this id (same bytes ⇒ same digest); preserve any gate flags
 	// an operator already set on it, so a re-tombstone cannot silently un-seal a quarantined span.
 	for i := range sess.entries {
 		if sess.entries[i].id == id {
 			sess.entries[i].excerpt = excerpt
-			sess.entries[i].bytes = append([]byte(nil), taskBytes...)
+			sess.entries[i].bytes = stored
+			sess.entries[i].compressed = compressed
+			sess.entries[i].rawLen = len(taskBytes)
+			sess.entries[i].media = media
 			return
 		}
 	}
 	sess.entries = append(sess.entries, restoreEntry{
-		id:      id,
-		excerpt: excerpt,
-		bytes:   append([]byte(nil), taskBytes...),
+		id:         id,
+		excerpt:    excerpt,
+		bytes:      stored,
+		compressed: compressed,
+		rawLen:     len(taskBytes),
+		media:      media,
 	})
+	// Media-specific cap first (#5164): media-class entries are the outlier the flat cap was not
+	// sized for, so they overflow among THEMSELVES, oldest-media-out — a burst of image turns can
+	// never displace more than maxCtxRestoreMediaEntriesPerSession slots, and text entries are
+	// untouched by this pass.
+	if media {
+		for countMediaEntries(sess.entries) > maxCtxRestoreMediaEntriesPerSession {
+			for i := range sess.entries {
+				if sess.entries[i].media {
+					sess.entries = append(sess.entries[:i], sess.entries[i+1:]...)
+					break
+				}
+			}
+		}
+	}
 	if len(sess.entries) > maxCtxRestoreEntriesPerSession {
 		sess.entries = sess.entries[len(sess.entries)-maxCtxRestoreEntriesPerSession:]
 	}
+}
+
+// countMediaEntries reports how many stashed entries are media-class (large-payload). Caller holds
+// ctxRestoreMu.
+func countMediaEntries(entries []restoreEntry) int {
+	n := 0
+	for i := range entries {
+		if entries[i].media {
+			n++
+		}
+	}
+	return n
+}
+
+// stashPayload prepares the stored form of a dropped turn for the stash (#5164): a payload at or
+// above ctxRestoreCompressThreshold is deflate-compressed, and the compressed form is kept only
+// when it is actually smaller than the raw bytes — an incompressible payload (or any compressor
+// error) falls back to a verbatim copy, so the stash never grows and restore never depends on a
+// write-path failure mode. The returned slice is always a private copy.
+func stashPayload(taskBytes []byte) (stored []byte, compressed bool) {
+	if len(taskBytes) >= ctxRestoreCompressThreshold {
+		var buf bytes.Buffer
+		w, err := flate.NewWriter(&buf, flate.DefaultCompression)
+		if err == nil {
+			if _, werr := w.Write(taskBytes); werr == nil && w.Close() == nil && buf.Len() < len(taskBytes) {
+				return buf.Bytes(), true
+			}
+		}
+	}
+	return append([]byte(nil), taskBytes...), false
+}
+
+// payload returns the verbatim dropped-turn bytes of an entry, inflating the deflate form the
+// write path stored for large payloads. An uncompressed entry returns its bytes as-is.
+func (e *restoreEntry) payload() ([]byte, error) {
+	if !e.compressed {
+		return e.bytes, nil
+	}
+	r := flate.NewReader(bytes.NewReader(e.bytes))
+	defer r.Close()
+	return io.ReadAll(r)
 }
 
 // bindTraceOwner records, first-writer-wins, the principal that owns a session trace — the C1
@@ -309,7 +423,11 @@ func (s *Server) restoreFromStash(trace, id string) (CtxRestoreResult, error) {
 		// discloses byte-exact. The refusal is wrapped to ALSO satisfy the historical
 		// ErrRestoreRefused + ctxplan-sentinel contract, so a caller can still branch on WHICH gate
 		// held while the closed READ_TAINT_WITHHELD token is recoverable via screen.RefusalReason.
-		body, serr := screen.ScreenOutbound(screen.Span{Bytes: e.bytes, Sealed: e.sealed, Tombstoned: e.tombstoned})
+		raw, perr := e.payload()
+		if perr != nil {
+			return CtxRestoreResult{}, fmt.Errorf("gateway: stashed restore payload unreadable: %w", perr)
+		}
+		body, serr := screen.ScreenOutbound(screen.Span{Bytes: raw, Sealed: e.sealed, Tombstoned: e.tombstoned})
 		if serr != nil {
 			return CtxRestoreResult{}, restoreTaintRefusal(serr, e.sealed)
 		}

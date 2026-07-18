@@ -101,7 +101,7 @@ func (s *Server) contextSpans(caller string, req ContextSpansRequest) (CtxSpansR
 			row := CtxSpan{
 				ID:              e.id,
 				Descriptor:      e.excerpt,
-				Bytes:           int64(len(e.bytes)),
+				Bytes:           int64(e.rawLen), // the TRUE span size, not the (possibly deflated) stored size (#5164)
 				EvidenceCluster: e.cluster,
 				Sealed:          e.sealed,
 				Tombstoned:      e.tombstoned,
