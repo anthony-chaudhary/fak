@@ -7,6 +7,53 @@ description: "Wire Claude Code or the Anthropic API to fak serve, a kernel-adjud
 
 This guide explains how to put **fak** in front of the Claude Code you already run: one kernel that makes long sessions cheaper (the provider prompt-cache discount survives, old turns are shed, repeated reads can be served locally) and can run a local model in-kernel with no key and no network. On the same seam, every tool call a Claude agent proposes is also evaluated before it executes — dangerous calls dropped, malformed calls repaired, policy violations refused — so the loop stays controlled at no extra cost.
 
+## Put fak in front of Claude Code in 3 steps
+
+The whole integration is **one command**: `fak guard` injects the gateway base URL into
+the Claude Code child for you, proxies your existing subscription byte-for-byte, and
+adjudicates every tool call. Copy-paste:
+
+**1. Get the binary** — one static Go binary, no runtime, no dependencies:
+
+```bash
+go install github.com/anthony-chaudhary/fak/cmd/fak@latest
+# or from a clone:  git clone https://github.com/anthony-chaudhary/fak && cd fak && go build -o fak ./cmd/fak
+```
+
+**2. Launch your normal Claude Code, kernel-adjudicated:**
+
+```bash
+fak guard -- claude
+```
+
+No API key needed — `fak guard` uses your logged-in Claude Pro/Max **subscription** by
+default. It starts an in-process gateway on a private `127.0.0.1` port, injects
+`ANTHROPIC_BASE_URL` into the **child process only** (your shell and other terminals are
+untouched), and forwards your credential + prompt-cache breakpoints unchanged — no cost
+regression.
+
+**3. Watch a verdict.** Work as usual; on exit fak prints what the kernel decided:
+
+```
+fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
+  blocked: POLICY_BLOCK     x4
+  blocked: SELF_MODIFY      x1
+```
+
+A destructive `rm -rf`, a `git push`, or a write into `.git/` is refused *before* it runs
+— a verdict, not a crash. For a one-shot machine-checkable smoke instead of an interactive
+session:
+
+```bash
+fak guard --probe -- claude -p "Reply with exactly the word: pong"
+```
+
+That's the whole loop. Everything below is the detail behind these three steps — the
+`fak guard` internals, running a local model with `--gguf`, an end-to-end proof, manual
+two-terminal wiring, and the capability floor.
+
+---
+
 ## What this integration does
 
 ```
