@@ -341,6 +341,9 @@ class EvaluateTest(unittest.TestCase):
         # Neutralize the #4374 reopen gate as well (own behavior in ReopenGateTest):
         # allow every issue so these cases never make the read-only timeline probe.
         mod.reopen_blocks_close = lambda root, row: (True, None)
+        # Neutralize the #4747 observed-effect gate (own behavior in
+        # ObservedEffectGateTest) so these cases never make its body/label probe.
+        mod.observed_effect_binds_closure = lambda root, row: (True, None)
 
         def fake_reverify(root, sha):
             return reverify_map[sha]
@@ -520,6 +523,7 @@ class StateReadbackTest(unittest.TestCase):
         mod.origin_main_resolvable = lambda root: False  # inert durability gate
         mod.coverage_binds_closure = lambda root, row: (True, None)  # inert #3870 gate
         mod.reopen_blocks_close = lambda root, row: (True, None)     # inert #4374 gate
+        mod.observed_effect_binds_closure = lambda root, row: (True, None)  # inert #4747
         mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
         run, calls = self._fake_gh(view_states)
         mod.run_capture = run
@@ -588,6 +592,7 @@ class StateReadbackTest(unittest.TestCase):
         mod.load_audit = lambda root, audit_json, max_commits: self._audit((2605, "sha1"))
         mod.origin_main_resolvable = lambda root: False
         mod.coverage_binds_closure = lambda root, row: (True, None)  # inert #3870 gate
+        mod.observed_effect_binds_closure = lambda root, row: (True, None)  # inert #4747
         mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
 
         def run(cmd, cwd, timeout):
@@ -962,6 +967,168 @@ class RunCaptureEncodingTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("em—dash", out)   # U+2014 em-dash survives
         self.assertIn("你好", out)     # non-latin survives
+
+
+class ObservedEffectGateTest(unittest.TestCase):
+    """The #4747 observed-effect gate: a MODEL-CORRECTNESS defect (real-weight,
+    architecture, coherence) may only auto-close on OBSERVED-EFFECT evidence — an
+    independent real artifact demonstrating the original symptom is gone. The
+    witnessed harm: #4273 and #4627 were closed after instrumentation/gate code
+    landed while their required real-27B observed artifacts were still missing;
+    the defect stayed operationally present. Instrumentation is enabling work,
+    not resolution evidence — closure without the typed evidence block is
+    REFUSED (typed hold), with it, allowed."""
+
+    # ---- pure classifier -------------------------------------------------
+
+    def test_model_defect_label_without_evidence_holds(self) -> None:
+        mod = load()
+        binds, reason = mod.classify_observed_effect(
+            77, "## Symptom\nreal-weight decode drifts incoherent\n",
+            {"model-defect", "bug"})
+        self.assertFalse(binds)
+        self.assertIn("MODEL_DEFECT_EFFECT_UNOBSERVED", reason)
+
+    def test_model_defect_with_effect_observed_line_binds(self) -> None:
+        mod = load()
+        body = ("## Symptom\nreal-weight decode drifts incoherent\n\n"
+                "Effect-Observed: 1.3k-token real-27B transcript coherent, "
+                "run 2026-07-18, artifact experiments/qwen36/coherence-gate\n")
+        self.assertEqual(
+            mod.classify_observed_effect(77, body, {"model-defect"}), (True, None))
+
+    def test_model_defect_with_checked_effect_box_binds(self) -> None:
+        mod = load()
+        body = ("## Acceptance\n- [x] gate shipped\n"
+                "- [x] effect observed: real-weight symptom gone on 27B artifact\n")
+        self.assertEqual(
+            mod.classify_observed_effect(78, body, {"model-defect"}), (True, None))
+
+    def test_unchecked_effect_box_is_not_evidence(self) -> None:
+        mod = load()
+        body = "## Acceptance\n- [ ] effect observed: pending real 27B run\n"
+        binds, _ = mod.classify_observed_effect(78, body, {"model-defect"})
+        self.assertFalse(binds)
+
+    def test_plain_issue_without_markers_binds(self) -> None:
+        # the gate is high-precision: an ordinary bug never requires the block.
+        mod = load()
+        self.assertEqual(
+            mod.classify_observed_effect(9, "## In scope\n- one change\n", {"bug"}),
+            (True, None))
+
+    def test_terminal_class_declaration_requires_but_is_not_evidence(self) -> None:
+        # `Resolution-Class: effect-observed` DECLARES the required terminal
+        # class (template marker); the declaration itself must never satisfy it.
+        mod = load()
+        body = ("## Required evidence\nResolution-Class: effect-observed\n\n"
+                "## Fix\nkernel corrected\n")
+        binds, reason = mod.classify_observed_effect(80, body, {"bug"})
+        self.assertFalse(binds)
+        self.assertIn("MODEL_DEFECT_EFFECT_UNOBSERVED", reason)
+        # ...and with the evidence line added, it binds.
+        binds2, _ = mod.classify_observed_effect(
+            80, body + "\nEffect-Observed: real artifact attached\n", {"bug"})
+        self.assertTrue(binds2)
+
+    # ---- regression fixtures: the #4273 / #4627 root incidents -----------
+
+    def test_fixture_4273_instrumentation_only_must_not_close(self) -> None:
+        # #4273's live label set; hidden-state taps + comparators landed, but no
+        # independent real-27B artifact showed the repetition gone.
+        mod = load()
+        binds, reason = mod.classify_observed_effect(
+            4273, "## Symptom\nGGUF degenerates into repetition on ~1.3k-token "
+                  "prompts\n## Diagnostic\nhiddentap comparator shipped\n",
+            {"bug", "gguf", "priority/p1", "qwen", "generation", "gen/now",
+             "class:dev"})
+        self.assertFalse(binds)
+        self.assertIn("MODEL_DEFECT_EFFECT_UNOBSERVED", reason)
+        self.assertIn("4273", reason)
+
+    def test_fixture_4627_gate_code_alone_must_not_close(self) -> None:
+        # #4627's live label set; the coherence GATE existing is class 1
+        # (diagnostic shipped), not class 4 (effect observed).
+        mod = load()
+        body = "## C4\ncoherence gate over the int8 Q4_K decode path\n"
+        binds, reason = mod.classify_observed_effect(
+            4627, body,
+            {"gguf", "qwen", "testing", "generation", "gen/now", "class:infra"})
+        self.assertFalse(binds)
+        self.assertIn("MODEL_DEFECT_EFFECT_UNOBSERVED", reason)
+        # with the observed real artifact recorded, the same issue closes.
+        binds2, _ = mod.classify_observed_effect(
+            4627, body + "\nEffect-Observed: real-weights long-prompt run stayed "
+                         "coherent (witness artifact committed)\n",
+            {"gguf", "qwen", "testing", "generation", "gen/now", "class:infra"})
+        self.assertTrue(binds2)
+
+    # ---- evaluate-level wiring ------------------------------------------
+
+    def _audit(self, number, title, sha="wok", subject="shipped"):
+        return {"closure_rate": 0.5, "issues": [
+            {"number": number, "title": title, "bucket": "OPEN_WITNESSED",
+             "witnessed_commits": [{"sha": sha, "subject": subject}]}]}
+
+    def _patch_through_to_effect(self, mod, audit):
+        """Witness + claim-bind + durability + reopen all PASS; coverage sees no
+        multi-part marker — the disposition is decided purely by #4747."""
+        mod.load_audit = lambda root, audit_json, max_commits: audit
+        mod.origin_main_resolvable = lambda root: False
+        mod.reopen_blocks_close = lambda root, row: (True, None)
+        mod.reverify = lambda root, sha: {
+            "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
+            "claim_kind": "code_effect", "touches_code": True, "reason": None}
+
+    def test_evaluate_holds_model_defect_and_never_calls_close(self) -> None:
+        mod = load()
+        self._patch_through_to_effect(
+            mod, self._audit(4273, "fix(inkernel): repetition on long prompts"))
+        mod.fetch_issue_meta = lambda root, number: {
+            "body": "## Symptom\nrepetition on real weights\n",
+            "labels": {"bug", "gguf", "qwen", "generation"}}
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError(
+                "a model-defect issue without observed-effect evidence must "
+                "never reach gh issue close")
+
+        mod.run_capture = boom
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "skip_effect_unobserved")
+        self.assertIn("MODEL_DEFECT_EFFECT_UNOBSERVED", r["reason"])
+        self.assertEqual(p["counts"]["skipped_effect_unobserved"], 1)
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(mod.close_decision("skip_effect_unobserved"), "hold")
+        self.assertIn("effect_unobserved=1", mod.render(p))
+
+    def test_evaluate_model_defect_with_evidence_closes(self) -> None:
+        mod = load()
+        self._patch_through_to_effect(
+            mod, self._audit(4627, "fix(model): coherence holds on int8 Q4_K"))
+        mod.fetch_issue_meta = lambda root, number: {
+            "body": ("## Symptom\nlong-prompt incoherence\n\n"
+                     "Effect-Observed: real-27B long-prompt run coherent, "
+                     "artifact committed\n"),
+            "labels": {"gguf", "qwen", "generation", "testing"}}
+        mod.run_capture = gh_close_then_state()  # readback confirms CLOSED
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "closed")
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["skipped_effect_unobserved"], 0)
+
+    def test_evaluate_dry_run_reflects_effect_hold(self) -> None:
+        mod = load()
+        self._patch_through_to_effect(
+            mod, self._audit(4273, "fix(inkernel): repetition on long prompts"))
+        mod.fetch_issue_meta = lambda root, number: {
+            "body": "## Symptom\nrepetition\n",
+            "labels": {"gguf", "generation"}}
+        p = mod.evaluate(ROOT, limit=10, live=False, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "skip_effect_unobserved")
+        self.assertEqual(p["counts"]["would_close"], 0)
+        self.assertEqual(p["counts"]["skipped_effect_unobserved"], 1)
 
 
 if __name__ == "__main__":

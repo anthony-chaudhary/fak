@@ -89,6 +89,40 @@ COVERAGE_UNKNOWN_HOLD = "COVERAGE_UNKNOWN"
 # A reopen with no newer commit stays open; an unreadable timeline fails CLOSED.
 REOPEN_NO_NEW_COMMIT_HOLD = "REOPENED_NO_NEW_COMMIT"
 REOPEN_UNKNOWN_HOLD = "REOPEN_UNKNOWN"
+# Observed-effect gate (#4747): a MODEL-CORRECTNESS defect (real-weight,
+# architecture, coherence) may only auto-close on OBSERVED-EFFECT evidence — an
+# independent real artifact demonstrating the original symptom is gone.
+# Instrumentation / capture / gate code is an EARLIER resolution class
+# (diagnostic shipped), not resolution evidence: #4273 and #4627 were closed
+# after instrumentation landed while their required real-27B observed artifacts
+# were still missing, and the defect stayed operationally present. The gate
+# fires on high-precision markers only — an explicit model-defect label, a typed
+# terminal-class declaration in the body (`Resolution-Class: effect-observed`,
+# the issue-template marker), or the #4273/#4627 incident label signature
+# (`gguf`+`generation`: a real-weight generation-correctness defect). Evidence
+# is a typed block the close arm can PARSE (never "fix/resolve" commit
+# wording): a checked `effect observed` task box or an `Effect-Observed:
+# <artifact>` line. Missing evidence leaves the issue open with a typed hold
+# reason; an unreadable body fails CLOSED (never a false close on a guess).
+EFFECT_UNOBSERVED_HOLD = "MODEL_DEFECT_EFFECT_UNOBSERVED"
+EFFECT_UNKNOWN_HOLD = "EFFECT_EVIDENCE_UNKNOWN"
+_MODEL_DEFECT_LABELS = {"model-defect", "class:model-defect", "model-correctness"}
+# The #4273/#4627 regression-fixture signature: both root incidents carry
+# `gguf` + `generation` — the real-weight generation-correctness family.
+_MODEL_DEFECT_LABEL_SIGNATURE = frozenset({"gguf", "generation"})
+_TERMINAL_CLASS_RE = re.compile(
+    r"^\s*(?:terminal-)?(?:resolution|required)-class\s*:\s*effect-observed\b",
+    re.IGNORECASE | re.MULTILINE)
+# Typed evidence line: `Effect-Observed: <non-empty artifact reference>`.
+_EFFECT_LINE_RE = re.compile(
+    r"^\s*(?:effect-observed|observed-effect)\s*:\s*\S",
+    re.IGNORECASE | re.MULTILINE)
+# Checked acceptance box whose text records the observed effect. An unchecked
+# `- [ ]` box never matches (it is a promise, not a witness — and coverage
+# #3870 already holds unchecked boxes upstream).
+_EFFECT_BOX_RE = re.compile(
+    r"^\s*[-*]\s+\[[xX]\]\s+.*\b(?:effect\s+observed|observed\s+effect)\b",
+    re.IGNORECASE | re.MULTILINE)
 # `- [ ]` / `* [ ]` GitHub task-list box, unchecked (a `[x]`/`[X]` box never matches).
 _UNCHECKED_BOX_RE = re.compile(r"^\s*[-*]\s+\[\s\]\s+\S", re.MULTILINE)
 _SPINE_FIRST_RE = re.compile(
@@ -281,6 +315,67 @@ def coverage_binds_closure(root: Path, row: dict[str, Any]) -> tuple[bool, str |
     return classify_coverage(number, meta["body"], meta["labels"])
 
 
+def issue_requires_observed_effect(body: str, labels: set[str]) -> bool:
+    """Does this issue's resolution contract terminate at *effect observed*? (#4747)
+
+    High-precision markers only: an explicit model-defect label, the
+    #4273/#4627 incident label signature (`gguf`+`generation`), or a typed
+    terminal-class declaration in the body. Ordinary issues never require the
+    evidence block, so the gate cannot strand the general close arm."""
+    lab = {str(lbl or "").strip().lower() for lbl in (labels or set())}
+    if lab & _MODEL_DEFECT_LABELS:
+        return True
+    if _MODEL_DEFECT_LABEL_SIGNATURE <= lab:
+        return True
+    return bool(_TERMINAL_CLASS_RE.search(body or ""))
+
+
+def has_observed_effect_evidence(body: str) -> bool:
+    """Is there a TYPED observed-effect evidence block in the body? (#4747)
+
+    Evidence is parseable, never inferred from commit wording: an
+    `Effect-Observed: <artifact>` line or a checked `effect observed` task box.
+    The terminal-class DECLARATION (`Resolution-Class: effect-observed`) is a
+    requirement marker, not evidence — it deliberately does not match here."""
+    b = body or ""
+    return bool(_EFFECT_LINE_RE.search(b) or _EFFECT_BOX_RE.search(b))
+
+
+def classify_observed_effect(number: Any, body: str,
+                             labels: set[str]) -> tuple[bool, str | None]:
+    """Pure body/label -> (binds, hold_reason) observed-effect decision (#4747).
+
+    A model-correctness defect binds closure only when the body carries the
+    typed observed-effect evidence block; a diagnostic/instrumentation commit
+    satisfying an earlier resolution class must never close it. Everything
+    without a model-defect marker binds (the gate is deliberately narrow)."""
+    if not issue_requires_observed_effect(body, labels):
+        return True, None
+    if has_observed_effect_evidence(body):
+        return True, None
+    return False, (
+        f"{EFFECT_UNOBSERVED_HOLD}: #{number} is a model-correctness defect "
+        "(terminal resolution class: effect observed) with no observed-effect "
+        "evidence in the body -- record an independent real artifact via an "
+        "'Effect-Observed: <artifact>' line or a checked 'effect observed' "
+        "task box; instrumentation/fix commits alone do not close it")
+
+
+def observed_effect_binds_closure(root: Path,
+                                  row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Does observed-effect evidence permit closing this issue? (#4747)
+
+    Fetches the issue's live body/labels and classifies; an unreadable body
+    holds as EFFECT_EVIDENCE_UNKNOWN -- never a silent close of a possible
+    model-defect issue we could not inspect."""
+    number = row.get("number")
+    meta = fetch_issue_meta(root, number)
+    if meta is None:
+        return False, (f"{EFFECT_UNKNOWN_HOLD}: could not read #{number} "
+                       "body/labels to check observed-effect evidence")
+    return classify_observed_effect(number, meta["body"], meta["labels"])
+
+
 def origin_main_resolvable(root: Path) -> bool:
     """Best-effort refresh + presence check for the origin/main remote-tracking ref.
 
@@ -453,6 +548,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     close_not_persistent = already_counted = 0
     skipped_partial = skipped_coverage_unknown = 0
     skipped_reopened = skipped_reopen_unknown = 0
+    skipped_effect_unobserved = skipped_effect_unknown = 0
     # Unique issue IDs durably closed THIS run — a repeated close tick on an issue
     # already counted here does not inflate the tally (#2641, done condition 3).
     counted: set[int] = set()
@@ -508,6 +604,24 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
                 skipped_coverage_unknown += 1
             else:
                 skipped_partial += 1
+            results.append(item)
+            continue
+        # #4747: a model-correctness defect closes only on OBSERVED-EFFECT
+        # evidence -- an independent real artifact showing the original symptom
+        # gone -- never on an instrumentation/diagnostic commit satisfying an
+        # earlier resolution class (the #4273/#4627 harm). Read-only body/label
+        # probe, runs even in dry-run so the plan reflects the typed hold; an
+        # unreadable body fails CLOSED (skip_effect_unknown).
+        effect_ok, effect_hold = observed_effect_binds_closure(root, row)
+        if not effect_ok:
+            unknown = str(effect_hold or "").startswith(EFFECT_UNKNOWN_HOLD)
+            item["action"] = ("skip_effect_unknown" if unknown
+                              else "skip_effect_unobserved")
+            item["reason"] = effect_hold
+            if unknown:
+                skipped_effect_unknown += 1
+            else:
+                skipped_effect_unobserved += 1
             results.append(item)
             continue
         if not live:
@@ -571,6 +685,8 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             "skipped_coverage_unknown": skipped_coverage_unknown,
             "skipped_reopened": skipped_reopened,
             "skipped_reopen_unknown": skipped_reopen_unknown,
+            "skipped_effect_unobserved": skipped_effect_unobserved,
+            "skipped_effect_unknown": skipped_effect_unknown,
             "skipped_unpushed": skipped_unpushed,
             "close_not_persistent": close_not_persistent,
             "already_counted": already_counted,
@@ -604,6 +720,8 @@ def render(p: dict[str, Any]) -> str:
                  f"coverage_unknown={c.get('skipped_coverage_unknown')} "
                  f"reopened={c.get('skipped_reopened')} "
                  f"reopen_unknown={c.get('skipped_reopen_unknown')} "
+                 f"effect_unobserved={c.get('skipped_effect_unobserved')} "
+                 f"effect_unknown={c.get('skipped_effect_unknown')} "
                  f"unpushed={c.get('skipped_unpushed')} "
                  f"not_persistent={c.get('close_not_persistent')} "
                  f"already_counted={c.get('already_counted')} "
@@ -619,6 +737,7 @@ def close_decision(action: str) -> str:
         return "close"
     if action in {"skip_unwitnessed", "skip_nonresolving", "skip_partial",
                   "skip_coverage_unknown", "skip_reopened", "skip_reopen_unknown",
+                  "skip_effect_unobserved", "skip_effect_unknown",
                   "skip_unpushed", CLOSE_ALREADY_COUNTED}:
         return "hold"
     if action == CLOSE_NOT_PERSISTENT:
