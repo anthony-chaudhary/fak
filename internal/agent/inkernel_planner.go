@@ -785,6 +785,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}
 	cacheobs.Default.ObserveLabeled(cacheobs.Labels{Model: p.modelID, Tenant: tenant},
 		promptTok, genRes.cacheable, matched, eligibleTok)
+	// #3896 provenance axis: split this same turn's prefill by SOURCE, orthogonal to the
+	// depth split above. Every reused token here is a LOCAL prefix hit (the RadixAttention
+	// match on this box); the unmatched remainder was recomputed locally. No external /
+	// disaggregated KV tier feeds the live planner yet, so the external-transfer bucket stays
+	// a structural 0 — the honest witness that disaggregation has not landed. When an L3 /
+	// remote tier serves matches, that share moves into the external bucket at this same tap.
+	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, matched)
+	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalCompute, promptTok-matched)
 
 	// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
 	// (and before the tool-call lift below reads it). A reasoning model (Ornith) opens
