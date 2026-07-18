@@ -817,12 +817,14 @@ func DenyResult(c *abi.ToolCall, v abi.Verdict) *abi.Result {
 }
 
 // Disposition derives the deny-loopback disposition (RETRYABLE / WAIT / ESCALATE /
-// TERMINAL) from the reason's category. MISROUTE and SHELL_DIALECT are model-fixable
-// (RETRYABLE — the model re-routes to the right tool/dialect); the rest steer the
-// loop without another wasted model turn.
+// TERMINAL) from the reason's category. MISROUTE, MALFORMED, SHELL_DIALECT, and
+// POLICY_BLOCK are call-shape refusals: the refused call stays denied, while the
+// next turn may use the sanctioned alternative or continue with unrelated work.
+// A policy refusal must not become a session-wide stop merely because one call
+// crossed the floor (#5197).
 func Disposition(r abi.ReasonCode) string {
 	switch r {
-	case abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect:
+	case abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect, abi.ReasonPolicyBlock:
 		return "RETRYABLE"
 	case abi.ReasonRateLimited, abi.ReasonLeaseHeld:
 		return "WAIT"

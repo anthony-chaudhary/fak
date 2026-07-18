@@ -360,6 +360,29 @@ func TestReapAllIndexAlignedMulti(t *testing.T) {
 	}
 }
 
+func TestPolicyBlockDeniesOnlyTheRefusedCall(t *testing.T) {
+	setup()
+	eng := &countEngine{}
+	abi.RegisterEngine("e", eng)
+	k := New("e", WithAdjudicators([]abi.Adjudicator{fakeAdj{abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonPolicyBlock,
+		By:     "monitor",
+		Meta:   map[string]string{"fix": "delete exact files without recursive flags"},
+	}}}))
+
+	r, v := k.Syscall(context.Background(), call("shell_command", `{"command":"recursive delete"}`))
+	if v.Kind != abi.VerdictDeny || atomic.LoadInt64(&eng.n) != 0 {
+		t.Fatalf("refused call = verdict %v dispatches %d, want DENY and zero dispatch", v.Kind, eng.n)
+	}
+	if got := r.Meta["disposition"]; got != "RETRYABLE" {
+		t.Fatalf("POLICY_BLOCK disposition = %q, want call-scoped RETRYABLE", got)
+	}
+	if got := v.Meta["fix"]; got == "" {
+		t.Fatal("refusal lost its sanctioned alternative")
+	}
+}
+
 func TestDenyNeverReachesDispatch(t *testing.T) {
 	setup()
 	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}})
@@ -670,7 +693,7 @@ func TestDispositionMapping(t *testing.T) {
 		abi.ReasonShellDialect: "RETRYABLE", // #3941: wrong-shell-dialect is model-fixable (re-route the tool)
 		abi.ReasonRateLimited:  "WAIT",
 		abi.ReasonSelfModify:   "ESCALATE",
-		abi.ReasonPolicyBlock:  "TERMINAL",
+		abi.ReasonPolicyBlock:  "RETRYABLE",
 	}
 	for r, want := range cases {
 		if got := Disposition(r); got != want {
@@ -709,25 +732,26 @@ func TestDenyResultWaitCarriesRetryAfter(t *testing.T) {
 }
 
 // TestDenyResultNonWaitNoRetryAfter proves the WAIT guard (criterion 4): a
-// TERMINAL deny never carries retry_after even if its verdict meta happens to hold
+// non-WAIT deny never carries retry_after even if its verdict meta happens to hold
 // one, and a WAIT deny whose verdict carries no hint degrades to today's bare
 // token. So a loop that ignores retry_after is byte-for-byte on the old behavior.
 func TestDenyResultNonWaitNoRetryAfter(t *testing.T) {
 	c := &abi.ToolCall{Tool: "x", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}}
-	// A TERMINAL deny (POLICY_BLOCK) with a stray retry_after in meta: must NOT surface.
-	terminal := DenyResult(c, abi.Verdict{
+	// POLICY_BLOCK is recoverable at the call boundary (#5197), but is not a WAIT
+	// and therefore must not surface an unrelated retry-after hint.
+	recoverable := DenyResult(c, abi.Verdict{
 		Kind:   abi.VerdictDeny,
 		Reason: abi.ReasonPolicyBlock,
 		Meta:   map[string]string{"retry_after": "1s", "retry_after_ms": "1000"},
 	})
-	if terminal.Meta["disposition"] != "TERMINAL" {
-		t.Fatalf("disposition = %q, want TERMINAL", terminal.Meta["disposition"])
+	if recoverable.Meta["disposition"] != "RETRYABLE" {
+		t.Fatalf("disposition = %q, want RETRYABLE", recoverable.Meta["disposition"])
 	}
-	if _, ok := terminal.Meta["retry_after"]; ok {
-		t.Fatal("TERMINAL deny must not surface retry_after (WAIT guard)")
+	if _, ok := recoverable.Meta["retry_after"]; ok {
+		t.Fatal("non-WAIT deny must not surface retry_after (WAIT guard)")
 	}
-	if _, ok := terminal.Meta["retry_after_ms"]; ok {
-		t.Fatal("TERMINAL deny must not surface retry_after_ms (WAIT guard)")
+	if _, ok := recoverable.Meta["retry_after_ms"]; ok {
+		t.Fatal("non-WAIT deny must not surface retry_after_ms (WAIT guard)")
 	}
 	// A WAIT deny with NO hint in its verdict degrades to today's bare-token deny.
 	bare := DenyResult(c, abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited})
