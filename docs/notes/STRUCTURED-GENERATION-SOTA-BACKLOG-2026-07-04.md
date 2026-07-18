@@ -7,6 +7,11 @@ status: research + backlog map
 
 # Structured generation SOTA, fak fit, and backlog split
 
+> Reader-facing writeup of this note:
+> [`docs/explainers/structured-generation-became-infrastructure.md`](../explainers/structured-generation-became-infrastructure.md)
+> — the public positioning page (why the topic feels quiet, the three-layer contrast,
+> and where fak fits). This note remains the sourced backlog/engineering detail.
+
 ## Short answer
 
 Structured generation did not fall out of use. It got absorbed into three louder
