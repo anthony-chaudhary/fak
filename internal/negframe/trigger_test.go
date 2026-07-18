@@ -60,6 +60,13 @@ func TestTriggerRegexpsArePrecompiled(t *testing.T) {
 			t.Fatalf("rule %d has nil pattern", i)
 		}
 	}
+	if raceDetectorEnabled {
+		// The race detector instruments every memory access, which inflates the
+		// count testing.AllocsPerRun observes (~27 vs the real 2), so the steady-
+		// state allocation budget is only meaningful in a non-race build. The
+		// precompiled-pattern check above still runs under -race.
+		t.Skip("allocation budget is not meaningful under go test -race instrumentation")
+	}
 	if allocs := testing.AllocsPerRun(100, func() { _ = Trigger("ordinary positive state") }); allocs > 4 {
 		t.Fatalf("Trigger allocs = %.1f, want <= 4", allocs)
 	}
