@@ -219,13 +219,13 @@ if [ "$popup_mode" != "off" ] && [ "${FLEET_ALLOW_POPUP:-0}" != "1" ]; then
 	fi
 	if [ "$popup_status" -eq 1 ]; then
 		if [ "$popup_mode" = "block" ]; then
-			echo "DESKTOP_POPUP_REGRESSION (blocked): a tracked console-tool spawn would flash a window under background automation." >&2
+			echo "DESKTOP_POPUP_REGRESSION (blocked): a console-tool spawn in the push range would flash a window under background automation." >&2
 			echo "$popup_out" >&2
 			echo "  fix: suppress the spawn (windowgate.ConfigureBackgroundCommand / configureDispatchHelperCommand / creationflags=no_window_creationflags()); then re-push." >&2
 			echo "  override once: FLEET_ALLOW_POPUP=1 git push   (intentional only)" >&2
 			exit 1
 		else
-			echo "DESKTOP_POPUP_REGRESSION (advisory): a tracked console-tool spawn would flash a window under background automation." >&2
+			echo "DESKTOP_POPUP_REGRESSION (advisory): a console-tool spawn in the push range would flash a window under background automation." >&2
 			echo "$popup_out" >&2
 			echo "  fix before others fetch, or hard-enforce with FLEET_POPUP_GUARD=block." >&2
 		fi
