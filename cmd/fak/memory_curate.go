@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/memq"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // curateEnvelope is the `fak memory curate --json` machine surface (#3908 DoD 4
@@ -43,6 +44,8 @@ func runMemoryCurate(stdout, stderr io.Writer, argv []string) int {
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
+	*dir = pathutil.ExpandTilde(*dir)
+	*store = pathutil.ExpandTilde(*store)
 	if *budget <= 0 {
 		fmt.Fprintln(stderr, "fak memory curate: --budget N (a positive byte cap) is required")
 		return 2
