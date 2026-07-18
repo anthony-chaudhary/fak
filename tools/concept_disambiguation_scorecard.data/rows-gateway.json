@@ -1,0 +1,117 @@
+{
+  "rows": [
+    {
+      "id": "ctxrestorecas",
+      "canonical": "ctxrestore_cas",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The durable content-addressed on-disk byte store backing the RAM-only ctxrestore stash, keyed by a dropped media turn's sha256 digest (#5163).",
+      "distinction": "The restart/eviction-surviving on-disk half of ctxrestore; the stash proper is RAM-only and non-durable.",
+      "distinct_from": [
+        "x-context-ctx-requestcontextchange"
+      ],
+      "aliases": [],
+      "grounding": "ctxrestore_cas",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "ctxrestorecasenvdir",
+      "canonical": "ctxRestoreCASEnvDir",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Const naming the FAK_CTXRESTORE_CAS_DIR environment variable that overrides or disables the durable media-restore CAS directory.",
+      "distinction": "The env-var NAME const, distinct from the resolved directory value it selects (ctxRestoreCASDir).",
+      "distinct_from": [
+        "x-context-ctx-requestcontextchange"
+      ],
+      "aliases": [],
+      "grounding": "ctxRestoreCASEnvDir",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fakctxrestorecasdir",
+      "canonical": "FAK_CTXRESTORE_CAS_DIR",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The literal environment-variable string overriding the durable media-restore CAS directory; 'off'/'0'/'none' disable durable persistence.",
+      "distinction": "The literal env string, distinct from the const ctxRestoreCASEnvDir that holds it.",
+      "distinct_from": [
+        "x-context-ctx-requestcontextchange"
+      ],
+      "aliases": [],
+      "grounding": "FAK_CTXRESTORE_CAS_DIR",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "ctxrestorecasdirrel",
+      "canonical": "ctxRestoreCASDirRel",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The default workspace-relative durable media-restore CAS directory (.fak/ctxrestore/cas) used when the env override is unset.",
+      "distinction": "The default relative path, distinct from the env override and from the resolved absolute dir.",
+      "distinct_from": [
+        "x-context-ctx-requestcontextchange"
+      ],
+      "aliases": [],
+      "grounding": "ctxRestoreCASDirRel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "maxctxrestorecasentries",
+      "canonical": "maxCtxRestoreCASEntries",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Cap constant bounding the durable media-restore CAS directory, oldest-modified-out on overflow (the disk analogue of the stash caps).",
+      "distinction": "The durable-store capacity bound, distinct from the RAM stash's maxCtxRestoreEntriesPerSession cap.",
+      "distinct_from": [
+        "x-context-ctx-requestcontextchange"
+      ],
+      "aliases": [],
+      "grounding": "maxCtxRestoreCASEntries",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "ctxrestorecasdirfn",
+      "canonical": "ctxRestoreCASDir",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Helper resolving the durable media-restore CAS directory from the environment at call time; empty string means durable persistence is off.",
+      "distinction": "The resolver accessor, distinct from the env-var name const ctxRestoreCASEnvDir and the default relative path ctxRestoreCASDirRel it chooses between.",
+      "distinct_from": [
+        "x-context-ctx-requestcontextchange"
+      ],
+      "aliases": [],
+      "grounding": "ctxRestoreCASDir",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

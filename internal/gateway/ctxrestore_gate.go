@@ -65,6 +65,12 @@ func (s *Server) gateRestoreByDigest(digest string, gate restoreGate) int {
 	if digest == "" {
 		return 0
 	}
+	// Durable propagation (#5163): suppression must reach EVERY copy, and the durable media CAS
+	// (ctxrestore_cas.go) is a copy that outlives the process while these in-RAM gate flags do not.
+	// Purge the digest's durable entry unconditionally — idempotent, a valid no-op when nothing was
+	// persisted — so a sealed/tombstoned span cannot be paged back in from disk after a restart.
+	// File I/O stays outside the stash lock.
+	purgeRestoreCAS(digest)
 	s.ctxRestoreMu.Lock()
 	defer s.ctxRestoreMu.Unlock()
 	flipped := 0

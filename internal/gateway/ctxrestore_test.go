@@ -169,6 +169,10 @@ func TestStashRestoreCompressesLargePayload(t *testing.T) {
 // media-specific cap, oldest-media-out, while text entries are untouched — an image-heavy session
 // cannot fill all eight flat slots with full-size blobs.
 func TestStashRestoreMediaCap(t *testing.T) {
+	// Witness the RAM cap in isolation: with the durable media CAS (#5163) on, an evicted media
+	// entry is deliberately still restorable from disk — that contract has its own witness in
+	// ctxrestore_cas_test.go. This test is about the in-memory stash bound.
+	t.Setenv(ctxRestoreCASEnvDir, "off")
 	srv := newTestServer(t)
 	const trace = "t-mediacap"
 

@@ -142,6 +142,15 @@ func (s *Server) stashRestore(trace, id, excerpt string, taskBytes []byte) {
 	if s == nil || strings.TrimSpace(trace) == "" || strings.TrimSpace(id) == "" || len(taskBytes) == 0 {
 		return
 	}
+	media := len(taskBytes) >= ctxRestoreMediaThreshold
+	// Durable half (#5163): a media-class payload's ONLY copy is this stash — text has an
+	// out-of-band recovery story, a pasted image does not — so its verbatim bytes are ALSO
+	// persisted to the durable content-addressed store under the same sha256 digest. Best-effort
+	// file I/O, deliberately OUTSIDE ctxRestoreMu (persistence never serializes the stash);
+	// restart/eviction recovery is the read-side CAS fall-through in restoreContext.
+	if media {
+		persistRestoreCAS(id, taskBytes)
+	}
 	s.ctxRestoreMu.Lock()
 	defer s.ctxRestoreMu.Unlock()
 	if s.ctxRestore == nil {
@@ -156,7 +165,6 @@ func (s *Server) stashRestore(trace, id, excerpt string, taskBytes []byte) {
 		s.ctxRestore[trace] = sess
 	}
 	stored, compressed := stashPayload(taskBytes)
-	media := len(taskBytes) >= ctxRestoreMediaThreshold
 	// Refresh in place if we already hold this id (same bytes ⇒ same digest); preserve any gate flags
 	// an operator already set on it, so a re-tombstone cannot silently un-seal a quarantined span.
 	for i := range sess.entries {
@@ -352,6 +360,29 @@ func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRe
 	res, err := s.restoreFromStash(trace, id)
 	if err == nil || !errors.Is(err, ErrRestoreMiss) {
 		return res, err
+	}
+
+	// 1b) The durable media CAS (#5163): the stash is RAM-only and bounded, so a media (image)
+	//     turn evicted by the #5164 media cap — or dropped by a gateway restart — would otherwise
+	//     be gone even though the stash held the payload's ONLY copy. stashRestore persisted
+	//     media-class bytes durably under this same sha256 digest; a stash miss (including the
+	//     evicted refinement, which wraps ErrRestoreMiss) consults it next. The load re-verifies
+	//     the bytes against their digest address (a tampered entry fails closed to a miss), and a
+	//     suppressed digest was purged at gate time (gateRestoreByDigest → purgeRestoreCAS), so the
+	//     durable copy cannot resurrect a sealed/tombstoned span across a restart. The bytes still
+	//     cross the same outbound screen as the stash path before they leave.
+	if raw, ok := loadRestoreCAS(id); ok {
+		if body, serr := screen.ScreenOutbound(screen.Span{Bytes: raw}); serr == nil {
+			return CtxRestoreResult{
+				Schema:     ctxRestoreSchema,
+				TraceID:    trace,
+				ID:         id,
+				Bytes:      string(body),
+				Provenance: "WITNESSED",
+			}, nil
+		}
+		// An unflagged span cannot refuse today; if the screen ever does, fall through to the
+		// remaining sources rather than serve withheld bytes.
 	}
 
 	// 2) Stash miss — the ctxview-elision source (#3062). The trace's retained view planner holds a
