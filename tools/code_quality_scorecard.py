@@ -163,7 +163,11 @@ KPI_WEIGHTS: dict[str, float] = {
 # Directories whose .go is NOT first-party shipped kernel code. testdata holds
 # fixtures (intentionally odd); vendored/generated trees are not ours to grade.
 GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", ".head_build_check",
-                   ".tmp_overlay", "node_modules", "testdata", "vendor", "__pycache__"}
+                   ".tmp_overlay", "_scratch", "node_modules", "testdata", "vendor",
+                   "__pycache__"}
+# A directory-*name* whose whole subtree is an overlay/scratch COPY, matched by prefix
+# in _excluded_go (not by exact name) because its name carries a per-session suffix.
+GO_EXCLUDE_DIR_PREFIXES = (".ov",)  # `.ovl` + `.ov<pid>` — `go build -overlay` scratch
 # `.head_build_check` (a `git archive HEAD` build-probe copy) and `.tmp_overlay` (an
 # overlay-checkout used to price a candidate diff) are two more gitignored full-repo
 # copies of the same kind — walking them double-graded every real .go and inflated the
@@ -182,6 +186,14 @@ GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", ".head_build_check
 # gitignored checkout. A worktree copy is identical to its tracked source by
 # construction — so exclude all four, matching the code-slop scorecard's
 # exclusion set.
+# `_scratch/` (a gitignored throwaway tree — e.g. `_scratch/quarantine/rmrf-iso-<ts>/`
+# holds a full quarantined COPY of cmd/fak from an rm-rf isolation drill) and the
+# `.ov*` overlay dirs (`.ovl/` and per-session `.ov<pid>/` — the `go build -overlay`
+# scratch: an `overlay.json` plus `h<N>.go` substitute sources) are the same class:
+# untracked full-repo / partial COPIES the rglob walk would grade as phantom god-files.
+# A single `_scratch/quarantine` copy of cmd/fak inflated the architecture work-list by
+# 17 phantom god-file/god-function rows here. code-slop's git-ls-files walk already drops
+# them (untracked); this scorecard walks the filesystem, so it must exclude them by name.
 
 _MARKER_RE = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b")
 # A real Go test entry point — used to confirm a _test.go is not just a bare
@@ -607,8 +619,10 @@ def _corrupt_path(rel: str) -> bool:
 def _excluded_go(rel: str) -> bool:
     if _corrupt_path(rel):
         return True
-    parts = set(Path(rel).parts)
-    return bool(parts & GO_EXCLUDE_DIRS)
+    parts = Path(rel).parts
+    if set(parts) & GO_EXCLUDE_DIRS:
+        return True
+    return any(part.startswith(GO_EXCLUDE_DIR_PREFIXES) for part in parts)
 
 
 def list_go_files(root: Path, *, tests: bool) -> list[str]:
