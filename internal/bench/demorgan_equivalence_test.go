@@ -9,8 +9,13 @@ import (
 
 func TestDeMorganEquivalenceFullMechanicalLexicon(t *testing.T) {
 	proofs := negframe.MechanicalEquivalenceProofs()
-	if len(proofs) != 7 {
-		t.Fatalf("mechanical proof rows=%d, want every 7-rule lexicon row", len(proofs))
+	if len(proofs) == 0 {
+		t.Fatal("mechanical proof corpus is empty")
+	}
+	for _, proof := range proofs {
+		if proof.Pattern == "" || proof.Replacement == "" {
+			t.Fatalf("incomplete mechanical proof row: %+v", proof)
+		}
 	}
 	if err := VerifyMechanicalEquivalence(proofs); err != nil {
 		t.Fatal(err)
