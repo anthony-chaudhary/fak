@@ -4,7 +4,9 @@
     "title": "GLM-5.2 CPU serve on a high-RAM no-GPU box: single-stream prefill/decode tok/s for the full ~433GB UD-Q4_K_M. MEMORY: the fak-native all-resident path needs >= ~1.1x model-size of FREE RAM (it loaded ~458GB resident and WEDGED a 1TB host where ~512GB was hugepage-locked, 2026-06-27 / #974); run llama.cpp (mmap, memory-safe) for the baseline, and the fak-native path ONLY when free RAM clears the model+KV.",
     "source": "overlay",
     "value": "frontier",
-    "requires": ["weights"],
+    "requires": [
+      "weights"
+    ],
     "manual": true,
     "run": "BASELINE (memory-safe, mmap): /path/to/llama-bench -m $FAK_GGUF -ngl 0 -t 128 -p 256 -n 64 -r 2   ||   FAK-NATIVE (only if free RAM > ~1.1x GGUF size + KV; else it OOM-wedges the host, #974): FAK_Q4K=1 FAK_GGUF_LOAD_WORKERS=64 fak serve --gguf $FAK_GGUF --context-budget-tokens 8192 --addr 127.0.0.1:8080  then POST /v1/chat/completions",
     "acceptance": "a recorded single-stream prefill+decode tok/s for GLM-5.2 UD-Q4_K_M on a CPU-only host for llama.cpp (mmap baseline) and, where RAM allows, fak-native, in an experiments/benchmark/runs artifact; the fak-native resident-Q4_K load wall-clock + GB/s where it fits",
@@ -17,7 +19,10 @@
     "title": "Qwen3.6-27B Q4_K_M single-stream decode tok/s in fak's OWN Apple-Silicon Metal kernel (engine=inkernel, --metal), NOT coder14b/llama.cpp. The decode-length curve (16/32/64/128 tok) traces the prefill-amortization asymptote. The 36GB Mac needs --context-budget-tokens to bound KV (the full native window is 192GiB -> FitTooBig).",
     "source": "overlay",
     "value": "frontier",
-    "requires": ["metal", "weights"],
+    "requires": [
+      "metal",
+      "weights"
+    ],
     "manual": true,
     "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then curl /v1/chat/completions max_tokens={16,32,64,128} and record completion_tokens/time_total. WARM the serve first (discard the cold 16-tok point). Real mac host/user resolve from the gitignored fak-mac.local.ps1 (see docs/fak/scrubbing-real-values.md).",
     "acceptance": "a recorded warm single-stream decode tok/s curve for Qwen3.6-27B Q4_K_M on the Mac Metal node, labelled WITNESSED (fak own kernel); the cold first-request point flagged separately",
@@ -30,7 +35,10 @@
     "title": "Qwen3.6-27B Q4_K_M warm single-stream decode tok/s at LONG generations (256/512 tok) in fak's own Metal kernel (engine=inkernel, --metal). Extends the collected 16/32/64/128 curve (which climbed 1.63->1.84 tok/s) to confirm where the prefill-amortization asymptote flattens. The MAC-OVERNIGHT-PLAN 'next conditions' item #1.",
     "source": "overlay",
     "value": "witness",
-    "requires": ["metal", "weights"],
+    "requires": [
+      "metal",
+      "weights"
+    ],
     "manual": true,
     "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then curl /v1/chat/completions with prompt_tokens=25 max_tokens={256,512} (finish=length) and record completion_tokens/time_total. WARM the serve first (discard any cold first request). Real mac host/user resolve from the gitignored fak-mac.local.ps1 (see docs/fak/scrubbing-real-values.md).",
     "acceptance": "a recorded warm decode tok/s at 256 and 512 tok for Qwen3.6-27B Q4_K_M on the Mac Metal node, labelled WITNESSED (fak own kernel), plotted against the existing 16/32/64/128 points to show the asymptote",
@@ -43,7 +51,10 @@
     "title": "Qwen3.6-27B Q4_K_M PREFILL (prompt-eval) tok/s vs prompt length in fak's own Metal kernel, plus the resident-prefill A/B (default resident-on vs FAK_METAL_RESIDENT=0, internal/model/metal_prefill.go). A dimension never measured on the Mac node: the upload + GPU round-trip prefill cost. The MAC-OVERNIGHT-PLAN 'next conditions' items #2 (prefill sweep) and #3 (FAK_METAL_RESIDENT resident-forward).",
     "source": "overlay",
     "value": "frontier",
-    "requires": ["metal", "weights"],
+    "requires": [
+      "metal",
+      "weights"
+    ],
     "manual": true,
     "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then for each length send a STREAMED POST /v1/chat/completions (stream=true) with prompt_tokens={128,512,2048,4096} at max_tokens=16, measure TTFT = wall to the first SSE token, and record prefill tok/s = prompt_tokens/TTFT. NOTE the fak serve exposes NO prefill_time in the JSON body: TTFT IS the prefill->decode boundary. Corroborate with the gateway /metrics fak_serving_time_to_first_token_seconds histogram, or read `fak claude-mac-fak --metrics` (its 'throughput: prefill' panel reports prefill tok/s straight from the gateway). A/B ARM: re-launch the serve with FAK_METAL_RESIDENT=0 and repeat to isolate the resident-prefill speedup. WARM first. Real mac host/user resolve from the gitignored fak-mac.local.ps1.",
     "acceptance": "a recorded prefill tok/s (= prompt_tokens/TTFT, from a streamed request; corroborated by /metrics fak_serving_time_to_first_token_seconds or the claude-mac-fak prefill panel) at prompt_tokens 128/512/2048/4096 for Qwen3.6-27B Q4_K_M on the Mac Metal node (resident default), and the FAK_METAL_RESIDENT=0 A/B arm, in an experiments artifact labelled WITNESSED (fak own kernel)",
@@ -56,7 +67,10 @@
     "title": "Qwen3.6-27B Q4_K_M 2-stream concurrency point in fak's own Metal kernel: aggregate decode tok/s of two concurrent completions vs the single-stream warm baseline, to measure concurrency scaling on the 36GB Mac node. A dimension never measured here. The MAC-OVERNIGHT-PLAN 'next conditions' item #4.",
     "source": "overlay",
     "value": "frontier",
-    "requires": ["metal", "weights"],
+    "requires": [
+      "metal",
+      "weights"
+    ],
     "manual": true,
     "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then fire 2 concurrent POST /v1/chat/completions (prompt_tokens=25 max_tokens=128 each) and record aggregate completion_tokens/wall vs the single-stream warm decode. WARM first. Watch KV: 2 streams double KV residency under the 8192 budget. Real mac host/user resolve from the gitignored fak-mac.local.ps1.",
     "acceptance": "a recorded 2-stream aggregate decode tok/s and the per-stream vs single-stream ratio for Qwen3.6-27B Q4_K_M on the Mac Metal node, labelled WITNESSED (fak own kernel)",
@@ -69,7 +83,10 @@
     "title": "fak guard value under a kernel we control: the K1/K2/A1 ablation matrix on an 8-GPU datacenter-class box - the same guarded solved-ticket workload driven against (K1) fak's own inkernel GLM-5.2 serve, (K2) vLLM/SGLang on the same weights+box, (A1) the GLM-5.2 API - each guard-on AND guard-off. Reads the guard-value deltas only kernel control makes measurable: WITNESSED kv_prefix reuse (structurally 0 in proxy mode), clean guard-hop TTFB pricing, wasted-decode tokens on denied canary calls, zero provider-credential child env, and K1 replay-journal determinism.",
     "source": "overlay",
     "value": "frontier",
-    "requires": ["cuda", "weights"],
+    "requires": [
+      "cuda",
+      "weights"
+    ],
     "manual": true,
     "run": "Per docs/notes/GUARD-KERNEL-CONTROL-ABLATION-2026-07-03.md section 2: K1 serve via tools/glm52_mgpu_serve.sh (or tools/glm52_stage_serve_gpu_server.sh on sm_80) -> fak swebench run --agent fleet --gateway 127.0.0.1:8080 --model glm-5.2 --filter smoke, wrapped in fak guard --audit for the guard-on cell; K2 via tools/glm52_sglang_vllm_serve.sh same workload; A1 same workload with the guard's upstream at the Z.ai GLM-5.2 API. Per cell capture: the hash-chained guard journal, fak swebench cache-witness --gateway ... --out <cell>/cache-witness.json, the gateway-usage exit row, and per-turn TTFB. Canary turn per guard-on cell: append a delete_account-class destructive tool call and assert POLICY_BLOCK (trychatdemo liveWitness pattern).",
     "acceptance": "an experiments/benchmark/runs artifact with one row per matrix cell holding journal path + cache-witness.json + usage row; headline: K1 kv_prefix.reused_tokens > 0 (WITNESSED) beside A1 provider cache_read (OBSERVED), the guard-on-minus-off TTFB delta distribution on K1/K2, canary POLICY_BLOCK rows in every guard-on cell, and the K1 double-run journal byte-diff result",
@@ -82,7 +99,10 @@
     "title": "Close the guard-hop latency RSI loop against a live serve we control: guard-on vs guard-off TTFB delta per turn with fak serve as the upstream, on ANY CUDA box with ANY supported weights (does NOT need GLM-5.2 - a small model isolates the hop better). Unsticks tools/guard_hop_rsi.py from PENDING_MEASUREMENT: against an API upstream, provider jitter swamps the ~us adjudication cost; against our own serve the hop is cleanly priceable.",
     "source": "overlay",
     "value": "witness",
-    "requires": ["cuda", "weights"],
+    "requires": [
+      "cuda",
+      "weights"
+    ],
     "manual": true,
     "run": "fak serve --engine inkernel --backend cuda with a small resident model (e.g. qwen2.5-3b Q8_0) -> run the tools/guard_hop_bench.py protocol twice: agent -> gateway direct (guard-off baseline) and fak guard --audit -- <same agent> (guard-on), same prompt set, warm serve, >= 30 turns per arm; record the per-turn TTFB distributions and the on-minus-off delta.",
     "acceptance": "a recorded guard-on vs guard-off TTFB delta distribution (median + p95) against a live fak-kernel serve, labelled WITNESSED-derived timing, folded back into tools/guard_hop_rsi.py so its keep-bit reflects a real measurement instead of PENDING_MEASUREMENT",
@@ -95,11 +115,62 @@
     "title": "Qwen3.6-27B Q4_K_M single-stream CPU decode + prefill tok/s in fak's OWN pure-Go resident-Q4_K/Q8 kernel (cmd/modelbench -q4k, no server), on a GPU-less high-RAM box. The honest FEASIBLE analog of the INFEASIBLE witness-glm52-cpu-throughput datum: GLM-5.2 UD-Q4_K_M (~433G) exceeds this 254G box, but a 27B Q4_K_M (16.5G GGUF, ~22.6G resident) fits with headroom and yields a real 27B-class CPU-decode number the ledger otherwise lacks (only a 1.5B Q8 @ 2.78 tok/s existed). First collected: box-873af63b decode 0.82 tok/s, prefill 2.83 tok/s at P=32.",
     "source": "overlay",
     "value": "frontier",
-    "requires": ["weights"],
+    "requires": [
+      "weights"
+    ],
     "manual": true,
     "run": "Build once: go build -o modelbench.exe ./cmd/modelbench . Preflight (header-only, seconds): modelbench -gguf <box>/.cache/fak-models/gguf/Qwen3.6-27B-Q4_K_M.gguf -q4k -preflight (expect READY, ~15.4GiB est). Then measure: modelbench -gguf <same> -q4k -name qwen3.6-27b-q4k -prefill-sizes 32 -prefill-reps 2 -decode-prompt 16 -decode-steps 32 -decode-reps 2 -out experiments/nightrun/box-873af63b/modelbench-qwen36-27b-q4k-cpu.json . Read decode.tok_per_sec + prefill[0].tok_per_sec STRAIGHT from the artifact and fold a value=cpu-decode-toks ledger row. Two traps: (1) do NOT use `run --apply` here - modelbench prints PREFILL tok/s BEFORE decode, so the first-<num>-tok/s parser banks the WRONG figure; fold by hand from the artifact. (2) On Windows run in the BACKGROUND from the start - a foreground-timeout leaves an unkillable session-0 (Services) orphan holding ~22G resident.",
     "acceptance": "a recorded single-stream CPU decode tok/s (and a P=32 prefill tok/s) for Qwen3.6-27B-Q4_K_M via cmd/modelbench -q4k in an experiments/nightrun/box-873af63b artifact, folded to a docs/nightrun/collected.jsonl row (value cpu-decode-toks), labelled OBSERVED (fak own pure-Go resident-Q4_K kernel)",
     "recheck_days": 30,
     "timeout_sec": 3600
+  },
+  {
+    "id": "witness-deepseek2-fak-native-gpu-throughput",
+    "title": "DeepSeek (deepseek2 arch) single-stream decode + prefill tok/s through fak's OWN in-kernel CUDA engine on an A100 (sm_80) box. tools/deepseek2_fak_native_serve.sh stands the endpoint UP and health-checks a real chat completion but asserts NO throughput number; this collects the first fak-kernel DeepSeek tok/s. Default DeepSeek-V2-Lite (15.7B/2.4B, Q4_K_M ~10GB) is GPU-RESIDENT on one 80GB card (no offload); the big V3 (671B) needs DS_REPO=<v3-quant> CPU_OFFLOAD=1 (~400GB experts on host RAM).",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": [
+      "cuda",
+      "weights",
+      "net"
+    ],
+    "manual": true,
+    "run": "On the GPU host, DETACHED so a disconnect can't orphan the load: systemd-run --unit=deepseek2serve --collect env DS_REPO=bartowski/DeepSeek-V2-Lite-Chat-GGUF PORT=8000 MODEL_ID=deepseek-v2-lite bash tools/deepseek2_fak_native_serve.sh  (big V3 instead: DS_REPO=<v3-quant-repo> DS_GLOB='*Q4_K_M*.gguf' CPU_OFFLOAD=1). POLL: cat /opt/deepseek2/PHASE until DEEPSEEK2_FAK_NATIVE_SERVE_READY (SERVER_EXITED_EARLY / SMOKE_FAIL / HEALTH_TIMEOUT = abort, tail /opt/deepseek2/server.log). WARM once (discard the cold first request), then DECODE sweep: for N in 16 32 64 128 256; do curl -s -m 600 http://127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"deepseek-v2-lite\",\"messages\":[{\"role\":\"user\",\"content\":\"Count slowly starting at one.\"}],\"max_tokens\":'$N',\"temperature\":0,\"stream\":false}'; done and record completion_tokens/time_total = decode tok/s. PREFILL: send a streamed (stream=true) request at prompt_tokens={128,512,2048} max_tokens=16, measure TTFT to the first SSE token, prefill tok/s = prompt_tokens/TTFT. Write experiments/nightrun/<box>/deepseek2-fak-native-gpu-throughput.json and record served_gguf + model_id in-band. Honest comparison arm (separate row, weights/hw/precision/ctx held equal): llama.cpp serving the SAME deepseek2 GGUF.",
+    "acceptance": "a recorded warm single-stream decode tok/s curve (16..256) and a P=128/512/2048 prefill tok/s (=prompt_tokens/TTFT) for the served deepseek2 checkpoint via fak's own in-kernel CUDA engine, in an experiments/nightrun/<box> artifact labelled OBSERVED (fak own kernel), with the served quant/model recorded in-band; the cold first request flagged separately",
+    "recheck_days": 30,
+    "timeout_sec": 14400,
+    "doc": "docs/benchmarks/DEEPSEEK-V4-SELFHOST-BASELINE-RUNBOOK.md"
+  },
+  {
+    "id": "witness-kimi-k3-nvme-ssd-offload-serve",
+    "title": "Kimi-K3 (huge MoE) NVMe/SSD weight-offload serve test: can the experts be served demand-paged from a local NVMe SSD when they exceed RAM+VRAM? The ONLY memory-safe path is llama.cpp mmap (the GGUF on NVMe is page-cache-backed, so evicted expert pages re-read from SSD). fak-native has NO NVMe/expert-paging path \u00e2\u20ac\u201d --cpu-offload-experts keeps experts on HOST RAM only (internal/agent/inkernel_planner.go), and upstream DeepSeek/Kimi-class inference documents no CPU/NVMe offload recipe (internal/bench/deepseekinventory.go), so the fak-native all-resident load WEDGES the host once experts exceed RAM (the GLM-5.2 #974 wedge class). Kimi-K3 weights presence on-box is UNVERIFIED: the run DISCOVERS the gguf and records a BLOCKED finding if absent.",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": [
+      "weights"
+    ],
+    "manual": true,
+    "run": "DISCOVER the checkpoint first (never hardcode a path): GGUF=$(find /mnt /projects /opt /scratch /nvme* \"$HOME/.cache/fak-models/gguf\" -iname '*kimi*k3*.gguf' 2>/dev/null | sort | head -1); [ -n \"$GGUF\" ] || { echo 'KIMI_K3_ABSENT: operator must stage the Kimi-K3 gguf on a LOCAL NVMe SSD; recording BLOCKED finding, no run'; exit 0; }. Confirm $GGUF is on an NVMe SSD (lsblk -d -o NAME,ROTA of its backing device; ROTA=0). BASELINE (memory-safe, NVMe-backed via mmap \u00e2\u20ac\u201d serves weights larger than RAM+VRAM): while running `iostat -x 2` on the NVMe device in the background, <llama.cpp>/build/bin/llama-bench -m \"$GGUF\" -ngl <fit-or-0> -t <cores> -p 128 -n 32 -r 2 (GPU box: raise -ngl to fill VRAM, experts spill to NVMe via mmap; CPU box: -ngl 0). Capture decode/prefill tok/s AND the sustained NVMe read MB/s during decode (proves weights stream from SSD, not RAM). fak-native ARM: do NOT run unless free RAM > model+KV \u00e2\u20ac\u201d it has no NVMe path and will OOM-wedge the host; instead record the typed fak-native infeasibility (host-RAM expert offload only, no NVMe expert-paging).",
+    "acceptance": "a recorded llama.cpp mmap decode+prefill tok/s for Kimi-K3 with the gguf on a local NVMe SSD AND the sustained NVMe read bandwidth during decode (evidence the experts are served from SSD, not resident RAM), in an experiments/nightrun/<box> artifact, alongside a typed note that fak-native offers host-RAM expert offload only and has no NVMe expert-paging path; OR, if no Kimi-K3 gguf is present on-box, a recorded BLOCKED finding naming the absent checkpoint (no fabricated number)",
+    "recheck_days": 30,
+    "timeout_sec": 14400,
+    "doc": "internal/bench/deepseekinventory.go"
+  },
+  {
+    "id": "witness-glm52-fak-native-gpu-throughput",
+    "title": "GLM-5.2 decode + prefill tok/s through fak's OWN in-kernel CUDA engine (--backend cuda --cpu-offload-experts) on the 8xA100 box: the fak-kernel arm no existing task collects. witness-glm52-native-load-10min measures LOAD time only; witness-glm52-cuda-llamacpp-comparison collects the llama.cpp arm 'next to the fak-kernel run' but nothing collects the fak-native GLM-5.2 GPU THROUGHPUT itself; vllm-parity is vLLM, cpu-throughput is CPU-only. tools/glm52_fak_native_serve.sh stands the serve up (~424GB experts on host RAM, dense/router/attention on the A100s) and asserts NO throughput number \u00e2\u20ac\u201d this fills that gap plus a concurrency point.",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": [
+      "cuda",
+      "weights",
+      "net"
+    ],
+    "manual": true,
+    "run": "On the 8xA100 host, DETACHED: systemd-run --unit=glm52fak --collect bash tools/glm52_fak_native_serve.sh. POLL: cat $GLM_DIR/PHASE until GLM52_FAK_NATIVE_SERVE_READY (BUILD_FAK_FAIL / SERVER_EXITED_EARLY / HEALTH_TIMEOUT = abort). WARM once, then single-stream DECODE sweep: for N in 16 32 64 128 256; do curl -s -m 600 http://127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"glm-5.2\",\"messages\":[{\"role\":\"user\",\"content\":\"Count slowly starting at one.\"}],\"max_tokens\":'$N',\"temperature\":0,\"stream\":false}'; done recording completion_tokens/time_total = decode tok/s; PREFILL via streamed TTFT at prompt_tokens={128,512,2048}; then a CONCURRENCY point: fire 2 and 4 concurrent completions (max_tokens=128 each) and record aggregate tok/s vs the single-stream baseline. Write experiments/nightrun/<box>/glm52-fak-native-gpu-throughput.json. Pair with witness-glm52-cuda-llamacpp-comparison (same box+GGUF) so the comparison row carries two measured numbers.",
+    "acceptance": "a recorded warm single-stream decode tok/s curve (16..256), a P=128/512/2048 prefill tok/s, and a 2/4-stream aggregate concurrency point for GLM-5.2 via the pure fak CUDA kernel (--cpu-offload-experts) on the 8xA100 box, in an experiments/nightrun/<box> artifact labelled WITNESSED (fak own kernel)",
+    "recheck_days": 30,
+    "timeout_sec": 14400,
+    "doc": "docs/nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md"
   }
 ]
