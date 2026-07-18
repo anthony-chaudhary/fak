@@ -1,0 +1,3 @@
+# The only dependency: the official OpenAI Python SDK. The verdict call in app.py
+# uses the standard library (urllib), so nothing else is needed.
+openai>=1.0
