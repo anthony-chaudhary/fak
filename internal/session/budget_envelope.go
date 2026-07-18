@@ -11,7 +11,7 @@ import (
 // budget_envelope.go defines the user-facing managed-context budget envelope
 // syntax (#1573). The compact CLI form is a comma-separated key=value list:
 //
-//	turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms
+//	turns=20,calls=50,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms
 //
 // The parsed value is deterministic data only. Runtime callers project it onto the
 // existing session Budget, Pace, TimeBudget, spend, and throughput axes they support.
@@ -78,6 +78,8 @@ func ParseBudgetEnvelope(spec string) (BudgetEnvelope, error) {
 		switch key {
 		case "turns":
 			env.Budget.TurnsLeft, err = parseEnvelopeInt(val, true)
+		case "calls", "tool_calls", "toolcalls", "tools":
+			env.Budget.ToolCallsLeft, err = parseEnvelopeInt(val, false)
 		case "tokens", "output_tokens":
 			env.Budget.TokensLeft, err = parseEnvelopeInt(val, true)
 		case "context", "context_tokens":

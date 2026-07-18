@@ -37,17 +37,19 @@ type QueryBudgetVerdict struct {
 // not run" is a checkable field, never free text. They mirror the refusal-reason
 // discipline the kernel uses elsewhere.
 const (
-	ReasonBudgetTurns     = "BUDGET_TURNS_EXHAUSTED"   // TurnsLeft hit zero
-	ReasonBudgetTokens    = "BUDGET_TOKENS_EXHAUSTED"  // TokensLeft hit zero
-	ReasonBudgetContext   = "BUDGET_CONTEXT_EXHAUSTED" // ContextTokensLeft hit zero
-	ReasonBudgetQueries   = "BUDGET_QUERIES_EXHAUSTED" // ClarificationQueriesLeft hit zero
-	ReasonBudgetSpend     = "BUDGET_SPEND_EXHAUSTED"   // SpendMicroCentsLeft hit zero (priced dollar ceiling); never auto-reset — a spent cap is terminal, not a fresh-window continuation
-	ReasonPaused          = "PAUSED"                   // operator hold; not terminal, the loop waits
-	ReasonDrained         = "DRAINING"                 // operator stop, taken at this boundary
-	ReasonTerminated      = "TERMINATED"               // operator FORCEFUL stop (#2758): in-flight work cancelled at the next safe point, no new work — the deliberate counterpart of DRAINING (which lets the turn finish)
-	ReasonStopped         = "STOPPED"                  // already terminal
-	ReasonBudgetReset     = "BUDGET_RESET"             // budget-drained, then re-armed on a fresh window (Recontinue)
-	ReasonResumeCancelled = "RESUME_CANCELLED"         // a WaitResume parked on a Paused session ended because its context was cancelled (#916)
+	ReasonBudgetTurns     = "BUDGET_TURNS_EXHAUSTED"     // TurnsLeft hit zero
+	ReasonBudgetTokens    = "BUDGET_TOKENS_EXHAUSTED"    // TokensLeft hit zero
+	ReasonBudgetContext   = "BUDGET_CONTEXT_EXHAUSTED"   // ContextTokensLeft hit zero
+	ReasonBudgetQueries   = "BUDGET_QUERIES_EXHAUSTED"   // ClarificationQueriesLeft hit zero
+	ReasonBudgetToolCalls = "BUDGET_TOOLCALLS_EXHAUSTED" // ToolCallsLeft hit zero — the runaway floor (#2887), debited per dispatched tool call, not per turn
+	ReasonBudgetSpend     = "BUDGET_SPEND_EXHAUSTED"     // SpendMicroCentsLeft hit zero (priced dollar ceiling); never auto-reset — a spent cap is terminal, not a fresh-window continuation
+	ReasonPaused          = "PAUSED"                     // operator hold; not terminal, the loop waits
+	ReasonDrained         = "DRAINING"                   // operator stop, taken at this boundary
+	ReasonTerminated      = "TERMINATED"                 // operator FORCEFUL stop (#2758): in-flight work cancelled at the next safe point, no new work — the deliberate counterpart of DRAINING (which lets the turn finish)
+	ReasonStopped         = "STOPPED"                    // already terminal
+	ReasonBudgetReset     = "BUDGET_RESET"               // budget-drained, then re-armed on a fresh window (Recontinue)
+	ReasonResumeCancelled = "RESUME_CANCELLED"           // a WaitResume parked on a Paused session ended because its context was cancelled (#916)
+	ReasonInterrupted     = "INTERRUPTED"                // operator MID-FLIGHT interrupt (#5158), stamped by the loop (not Decide): the arm stops at its next clean turn boundary — softer than DRAINING (no drive-state transition) and never mid-tool, unlike TERMINATED
 )
 
 // Decide is the per-turn boundary gate. Given a session's TraceID it:
@@ -179,6 +181,61 @@ func (t *Table) DebitClarificationQuery(trace string) QueryBudgetVerdict {
 	cur.Budget.ClarificationQueriesLeft--
 	out := t.putLocked(cur)
 	return QueryBudgetVerdict{Proceed: true, Remaining: out.Budget.ClarificationQueriesLeft, State: out}
+}
+
+// DebitToolCall spends one DISPATCHED tool call from the session's runaway floor
+// (#2887, the Hermes cron-hardening angle) and reports whether the loop may proceed
+// with this call. It is the tool-call twin of the turn debit in Decide, but taken
+// per tool call rather than per turn boundary, so a single turn that emits a long
+// tool-call loop is cut at the budget too — the structural floor a scheduled agent's
+// model cannot extend. An unbounded (unconfigured) axis proceeds without a record; a
+// held/terminal session proceeds no new work; a live session with the ceiling already
+// spent drives to Draining/Stopped with ReasonBudgetToolCalls, exactly like a turn or
+// token exhaustion, so the stop is observable in the drive state and witnessed on exit.
+// A nil receiver is a permissive no-op so a loop with no table behaves byte-identically
+// to the pre-axis path.
+func (t *Table) DebitToolCall(trace string) Verdict {
+	if t == nil {
+		return Verdict{Proceed: true, State: DefaultState(trace)}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cur := t.getLocked(trace)
+
+	// Non-advancing run-states: resolve without debiting (mirror Decide).
+	switch cur.Run {
+	case Stopped:
+		return Verdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonStopped), State: cur}
+	case Paused:
+		return Verdict{Proceed: false, Stop: false, Reason: ReasonPaused, State: cur}
+	case Draining:
+		cur.Run = Stopped
+		if cur.Reason == "" {
+			cur.Reason = ReasonDrained
+		}
+		final := t.putLocked(cur)
+		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
+	case Terminating:
+		cur.Run = Stopped
+		if cur.Reason == "" {
+			cur.Reason = ReasonTerminated
+		}
+		final := t.putLocked(cur)
+		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
+	}
+
+	if !cur.Budget.toolCallsBounded() {
+		return Verdict{Proceed: true, State: cur}
+	}
+	if cur.Budget.ToolCallsLeft <= 0 {
+		cur.Run = Draining
+		cur.Reason = ReasonBudgetToolCalls
+		final := t.finalizeDrainLocked(cur)
+		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
+	}
+	cur.Budget.ToolCallsLeft--
+	out := t.putLocked(cur)
+	return Verdict{Proceed: true, State: out}
 }
 
 // finalizeDrainLocked writes a budget-exhausted record straight to Stopped (the

@@ -186,6 +186,20 @@ type Budget struct {
 	// SpendMicroCentsCap is the configured spend-budget size (the denominator a
 	// consumed-share display measures against); 0 = no spend budget.
 	SpendMicroCentsCap int64 `json:"spend_micro_cents_cap,omitempty"`
+	// ToolCallsLeft is the remaining DISPATCHED-tool-call allotment — the runaway
+	// floor a scheduled/dispatched agent cannot extend (#2887, Hermes cron hardening).
+	// Unlike TurnsLeft it is debited per tool call, not per model round-trip, so a
+	// single turn that emits a long tool-call loop is cut at the budget too.
+	// DebitToolCall spends one unit per call and drives the session to Draining with
+	// ReasonBudgetToolCalls when the ceiling is crossed. It follows the spend/query
+	// axis's 0=off convention (not the turns/tokens Unbounded=-1 sentinel), so a
+	// Budget literal that never sets it stays permissive — the zero value is no cap.
+	ToolCallsLeft int `json:"tool_calls_left,omitempty"`
+	// ToolCallsCap is the configured tool-call-budget size, stamped from ToolCallsLeft
+	// at set-time so "0 left with a positive cap = exhausted" is distinguishable from
+	// "0 = unconfigured" once the remaining decrements to zero (the same disambiguation
+	// ClarificationQueriesCap/SpendMicroCentsCap carry).
+	ToolCallsCap int `json:"tool_calls_cap,omitempty"`
 }
 
 // MicroCentsPerCent converts a user-stated cent ceiling (SpendEnvelope.MaxCents)
@@ -211,6 +225,9 @@ func (b Budget) withContextCap() Budget {
 	if b.SpendMicroCentsCap <= 0 && b.SpendMicroCentsLeft > 0 {
 		b.SpendMicroCentsCap = b.SpendMicroCentsLeft
 	}
+	if b.ToolCallsCap <= 0 && b.ToolCallsLeft > 0 {
+		b.ToolCallsCap = b.ToolCallsLeft
+	}
 	return b
 }
 
@@ -222,6 +239,14 @@ func (b Budget) contextBounded() bool  { return b.ContextTokensLeft > 0 }
 func (b Budget) spendBounded() bool    { return b.SpendMicroCentsLeft > 0 }
 func (b Budget) clarificationQueriesBounded() bool {
 	return b.ClarificationQueriesCap > 0 || b.ClarificationQueriesLeft > 0
+}
+
+// toolCallsBounded reports whether a tool-call ceiling is configured. Like the
+// clarification/spend axes it uses the 0=off convention (never the Unbounded=-1
+// sentinel), so a Budget literal that leaves ToolCallsLeft/Cap zero is permissive;
+// a positive cap keeps the axis bounded even after the remaining decrements to zero.
+func (b Budget) toolCallsBounded() bool {
+	return b.ToolCallsCap > 0 || b.ToolCallsLeft > 0
 }
 
 // Pace is the per-turn throttle — how to slow a session WITHOUT pausing it. It is
