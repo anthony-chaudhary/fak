@@ -181,6 +181,15 @@ type WeightSource struct {
 	// used for the overrun bounds check.
 	readerFor []io.ReaderAt
 	sizeFor   []int64
+	// data is r's mapped region when the retained reader is a FAK_GGUF_MMAP memory
+	// map (gguf_mmap.go); dataFor (parallel to readerFor, same fallback-to-ws-level
+	// semantics) is the per-shard analogue for split checkpoints. Nil on the default
+	// os.Open path. Both are wired but deliberately unread for now: TensorBytes
+	// still copies via ReadAt so `defer ws.Close()` stays sound; the later
+	// SSD-offload aliasing slice (#2726/#2722) will serve tensor payloads as
+	// sub-slices of these maps instead of heap copies.
+	data    []byte
+	dataFor [][]byte
 	// closers holds every open shard file; Close shuts them all. For a single-file
 	// checkpoint this is exactly one entry.
 	closers []io.Closer

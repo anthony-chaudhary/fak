@@ -88,6 +88,9 @@ func (s *WeightSource) Tensor(name string) (TensorInfo, bool) {
 
 // TensorBytes reads a named tensor's raw (still-quantized) payload bytes from the
 // shard reader that holds it, bounds-checking the offset and length against the file.
+// It always returns a fresh heap copy — even when the shard reader is a FAK_GGUF_MMAP
+// map (gguf_mmap.go) whose ws.data/ws.dataFor could be aliased — so callers may retain
+// the bytes past ws.Close(); the zero-copy aliasing read is a later SSD-offload slice.
 func (s *WeightSource) TensorBytes(name string) ([]byte, TensorInfo, error) {
 	info, ok := s.Tensor(name)
 	if !ok {

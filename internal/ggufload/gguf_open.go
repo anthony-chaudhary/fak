@@ -31,13 +31,20 @@ func OpenWeights(path string) (*WeightSource, error) {
 
 	splitCount, hasSplit := gg.Uint64("split.count")
 	if !hasSplit || splitCount <= 1 {
-		// Single-file checkpoint.
-		ws, err := NewWeightSource(gg, f, size)
+		// Single-file checkpoint. The retained reader comes from retainShardReader:
+		// the parse-only file itself by default, or a read-only mmap of the file
+		// under FAK_GGUF_MMAP (gguf_mmap.go) — byte-identical either way.
+		r, size, closer, data, err := retainShardReader(path, f, size)
 		if err != nil {
-			_ = f.Close()
 			return nil, err
 		}
-		ws.closers = []io.Closer{f}
+		ws, err := NewWeightSource(gg, r, size)
+		if err != nil {
+			_ = closer.Close()
+			return nil, err
+		}
+		ws.data = data
+		ws.closers = []io.Closer{closer}
 		return ws, nil
 	}
 
@@ -146,15 +153,21 @@ func validShardNo(declared uint64, present bool, i int) bool {
 
 // openWeightsSplitFromFirst assembles the merged WeightSource given an
 // already-open shard 1. It opens shards 2..N, merges their tensor directories,
-// and records which shard reader serves each tensor.
+// and records which shard reader serves each tensor. Each shard's retained
+// reader comes from retainShardReader: the parsed file itself by default, or a
+// read-only mmap of the shard under FAK_GGUF_MMAP (gguf_mmap.go).
 func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File, shard1GG *File, shard1Size int64) (*WeightSource, error) {
+	shard1R, shard1Size, shard1Closer, shard1Data, err := retainShardReader(shard1Path, shard1File, shard1Size)
+	if err != nil {
+		return nil, err
+	}
 	paths, err := shardPaths(shard1Path, count)
 	if err != nil {
-		_ = shard1File.Close()
+		_ = shard1Closer.Close()
 		return nil, err
 	}
 	if len(paths) == 0 || paths[0] != shard1Path {
-		_ = shard1File.Close()
+		_ = shard1Closer.Close()
 		return nil, fmt.Errorf("gguf: shard path derivation mismatch (%s vs %s)", paths[0], shard1Path)
 	}
 
@@ -162,27 +175,34 @@ func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File
 	tensors := make([]TensorInfo, 0, len(shard1GG.Tensors))
 	readerFor := make([]io.ReaderAt, 0, len(shard1GG.Tensors))
 	sizeFor := make([]int64, 0, len(shard1GG.Tensors))
+	dataFor := make([][]byte, 0, len(shard1GG.Tensors))
 	seen := make(map[string]bool, len(shard1GG.Tensors))
 	for _, t := range shard1GG.Tensors {
 		if seen[t.Name] {
-			_ = shard1File.Close()
+			_ = shard1Closer.Close()
 			return nil, fmt.Errorf("gguf: duplicate tensor %s within shard 1", t.Name)
 		}
 		seen[t.Name] = true
 		tensors = append(tensors, t)
-		readerFor = append(readerFor, shard1File)
+		readerFor = append(readerFor, shard1R)
 		sizeFor = append(sizeFor, shard1Size)
+		dataFor = append(dataFor, shard1Data)
 	}
-	closers := []io.Closer{shard1File}
+	closers := []io.Closer{shard1Closer}
 
 	for i := 2; i <= count; i++ {
 		p := paths[i-1]
-		f, gg, sz, err := openAndRead(p)
+		pf, gg, psz, err := openAndRead(p)
 		if err != nil {
 			closeAll(closers)
 			return nil, fmt.Errorf("gguf: open shard %d (%s): %w", i, p, err)
 		}
-		closers = append(closers, f)
+		r, sz, closer, data, err := retainShardReader(p, pf, psz)
+		if err != nil {
+			closeAll(closers)
+			return nil, fmt.Errorf("gguf: open shard %d (%s): %w", i, p, err)
+		}
+		closers = append(closers, closer)
 		if no, ok := gg.Uint64("split.no"); !validShardNo(no, ok, i) {
 			closeAll(closers)
 			return nil, fmt.Errorf("gguf: shard %s declares split.no=%d, want %d or %d", p, no, i-1, i)
@@ -194,20 +214,23 @@ func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File
 			}
 			seen[t.Name] = true
 			tensors = append(tensors, t)
-			readerFor = append(readerFor, f)
+			readerFor = append(readerFor, r)
 			sizeFor = append(sizeFor, sz)
+			dataFor = append(dataFor, data)
 		}
 	}
 
 	merged := *shard1GG
 	merged.Tensors = tensors
-	ws, err := NewWeightSource(&merged, shard1File, shard1Size)
+	ws, err := NewWeightSource(&merged, shard1R, shard1Size)
 	if err != nil {
 		closeAll(closers)
 		return nil, err
 	}
 	ws.readerFor = readerFor
 	ws.sizeFor = sizeFor
+	ws.dataFor = dataFor
+	ws.data = shard1Data
 	ws.closers = closers
 	return ws, nil
 }
