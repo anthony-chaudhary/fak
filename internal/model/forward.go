@@ -43,18 +43,9 @@ func (r rope) apply(hv []float32, p int) {
 // Forward runs a full-prefill forward pass over token ids and returns every hidden
 // state + per-position logits. No KV cache (that is R2); this rung proves the math.
 func (m *Model) Forward(ids []int) *Activations {
-	cfg := m.Cfg
-	H := cfg.HiddenSize
-	seq := len(ids)
-
-	// embedding lookup -> x[t] is the working hidden vector for position t.
-	embed := m.embedRows()
-	x := make([][]float32, seq)
-	for t, id := range ids {
-		x[t] = append([]float32(nil), embed[id*H:(id+1)*H]...)
-		scaleEmbedInPlace(x[t], cfg) // Gemma sqrt(hidden); no-op for Llama
-	}
-	return m.forwardHiddenRows(x)
+	// embedding lookup -> x[t] is the working hidden vector for position t
+	// (the arch embed scale applied inside embedBand).
+	return m.forwardHiddenRows(m.embedBand(ids))
 }
 
 // forwardHiddenRows runs the decoder stack from already-materialized input embeddings.

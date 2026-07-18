@@ -474,12 +474,7 @@ func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 		return nil, fmt.Errorf("model: ForwardTP ffn plan: %w", err)
 	}
 
-	embed := m.embedRows()
-	x := make([][]float32, seq)
-	for t, id := range ids {
-		x[t] = append([]float32(nil), embed[id*H:(id+1)*H]...)
-		scaleEmbedInPlace(x[t], cfg)
-	}
+	x := m.embedBand(ids)
 	act := &Activations{Seq: seq, Hidden: [][]float32{flatten(x)}}
 
 	var subErr error

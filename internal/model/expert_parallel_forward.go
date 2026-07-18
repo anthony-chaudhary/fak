@@ -133,12 +133,7 @@ func (m *Model) ForwardEP(ids []int, ep EPConfig) (*Activations, error) {
 		return nil, fmt.Errorf("model: ForwardEP expert plan: %w", err)
 	}
 
-	embed := m.embedRows()
-	x := make([][]float32, seq)
-	for t, id := range ids {
-		x[t] = append([]float32(nil), embed[id*H:(id+1)*H]...)
-		scaleEmbedInPlace(x[t], cfg)
-	}
+	x := m.embedBand(ids)
 	act := &Activations{Seq: seq, Hidden: [][]float32{flatten(x)}}
 
 	mat := residentKernel{m}
