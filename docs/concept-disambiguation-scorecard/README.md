@@ -14,8 +14,8 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 | Metric | Value |
 |---|---|
 | **Score** | **96.6/100** (grade A) = 9.7/10 |
-| **Coverage** | **94.7%** (1949/2058 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **109** (clarity 0 + coverage 109) |
+| **Coverage** | **94.7%** (1949/2059 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **110** (clarity 0 + coverage 110) |
 | Crystal-clear concepts | 255 of 1724 positioned |
 | As of |  (fak ) |
 
@@ -24,7 +24,7 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1724 concepts - score 96.6/100 (grade A) - disambiguation-debt 109
+concept-disambiguation chart - 1724 concepts - score 96.6/100 (grade A) - disambiguation-debt 110
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####....................... 255
@@ -61,8 +61,8 @@ coverage by family (positioned / discovered):
   cache            ##########################.. 224/242
   plan             ###########################. 285/298
   policy-capability ##########################.. 118/128
+  render-materialize ###########################. 162/171
   context-ctx      ###########################. 175/183
-  render-materialize ###########################. 162/170
   session-runtime  ###########################. 173/181
   score-debt       ##########################.. 78/83
   support-maturity #########################... 29/33
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 94.7%  (1949/2058 confusable tokens positioned)
+namespace coverage  [##############################..] 94.7%  (1949/2059 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1955,8 +1955,8 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 | cache | 224 | 242 | 18 |
 | plan | 285 | 298 | 13 |
 | policy-capability | 118 | 128 | 10 |
+| render-materialize | 162 | 171 | 9 |
 | context-ctx | 175 | 183 | 8 |
-| render-materialize | 162 | 170 | 8 |
 | session-runtime | 173 | 181 | 8 |
 | score-debt | 78 | 83 | 5 |
 | support-maturity | 29 | 33 | 4 |
