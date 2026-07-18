@@ -1,8 +1,12 @@
 package workerworktree
 
 import (
+	"archive/tar"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,17 +86,13 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 		w.Detail = err.Error()
 		return w
 	}
-	tarPath := filepath.Join(tmp, "tree.tar")
-	if err = os.WriteFile(tarPath, archive, 0600); err != nil {
-		w.Detail = err.Error()
-		return w
-	}
+	// Extract the archive in-process rather than shelling out to `tar`: GNU tar
+	// reads a Windows drive path (C:\...) as a remote host:path and fails with
+	// "Cannot connect to C:", which reddened every disambiguation witness on
+	// Windows. This mirrors the in-process extraction in conceptcatalog.CheckGitTree.
 	out := filepath.Join(tmp, "tree")
-	_ = os.MkdirAll(out, 0755)
-	tar := exec.Command("tar", "-xf", tarPath, "-C", out)
-	windowgate.ConfigureBackgroundCommand(tar)
-	if b, err := tar.CombinedOutput(); err != nil {
-		w.Detail = fmt.Sprintf("extract candidate tree: %v: %s", err, b)
+	if err = extractTar(archive, out); err != nil {
+		w.Detail = fmt.Sprintf("extract candidate tree: %v", err)
 		return w
 	}
 	inv, err := conceptcatalog.CheckInvariant(out)
@@ -108,6 +108,56 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 	w.FamilyCoverage = inv.FamilyCoverage
 	w.Detail = inv.Detail
 	return w
+}
+
+// extractTar unpacks a tar archive (as produced by `git archive --format=tar`)
+// into dst using the stdlib reader, so extraction is free of the external `tar`
+// binary and its platform quirks (notably GNU tar treating a Windows C:\ path as
+// a remote host). Path traversal outside dst is rejected.
+func extractTar(archive []byte, dst string) error {
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+	tr := tar.NewReader(bytes.NewReader(archive))
+	for {
+		h, e := tr.Next()
+		if errors.Is(e, io.EOF) {
+			break
+		}
+		if e != nil {
+			return e
+		}
+		clean := filepath.Clean(filepath.FromSlash(h.Name))
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("unsafe archive path %q", h.Name)
+		}
+		target := filepath.Join(dst, clean)
+		if h.FileInfo().IsDir() {
+			if e := os.MkdirAll(target, 0755); e != nil {
+				return e
+			}
+			continue
+		}
+		if h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeRegA {
+			continue
+		}
+		if e := os.MkdirAll(filepath.Dir(target), 0755); e != nil {
+			return e
+		}
+		f, e := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, h.FileInfo().Mode())
+		if e != nil {
+			return e
+		}
+		_, copyErr := io.Copy(f, tr)
+		closeErr := f.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
 }
 
 func (w *DisambiguationWitnesses) compactDetail() string { b, _ := json.Marshal(w); return string(b) }
