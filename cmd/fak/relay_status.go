@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/relay"
 )
 
@@ -72,7 +73,7 @@ func runRelayStatus(stdout, stderr io.Writer, argv []string) int {
 	// The sidecar names are shadow-baton-<relay_id>-leg<N>.json (relay.EmitShadowBaton). A
 	// glob over the relay id peels off exactly this relay's legs; every other file in the dir
 	// is ignored.
-	glob := filepath.Join(*dir, fmt.Sprintf("shadow-baton-%s-leg*.json", relayID))
+	glob := filepath.Join(pathutil.ExpandTilde(*dir), fmt.Sprintf("shadow-baton-%s-leg*.json", relayID))
 	matches, err := filepath.Glob(glob)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak relay status: glob %s: %v\n", glob, err)

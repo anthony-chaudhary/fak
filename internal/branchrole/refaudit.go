@@ -222,6 +222,7 @@ var refClassByExactPath = map[string]string{
 	"internal/modelroute/testdata/issue_audit_bundle_real_3851.json": RefClassFixture,
 	"tools/concept_disambiguation_scorecard.data/rows-witness-proof-20260709.json": RefClassFixture,
 
+	"cmd/fak/hooks_popup_scan.go":            RefClassDevelopmentSource,
 	"cmd/fak/guard_freshness.go":             RefClassPublicFrontDoor,
 	"cmd/fak/help.go":                        RefClassPublicFrontDoor,
 	"cmd/fak/release.go":                     RefClassPublicFrontDoor,
