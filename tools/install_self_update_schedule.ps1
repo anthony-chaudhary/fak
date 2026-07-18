@@ -54,20 +54,27 @@ $fakBin = @(
 ) | Where-Object { $_ -eq 'fak' -or (Test-Path $_) } | Select-Object -First 1
 if (-not $fakBin) { throw "no fak binary found (looked in $RepoRoot\tools\.bin, $Target, PATH)" }
 
-$cmd = '"{0}" self-update --root "{1}" --target "{2}"' -f $fakBin, $RepoRoot, $Target
-$tr  = 'cmd.exe /c {0}' -f $cmd
-
-schtasks /Create /TN $TaskName /SC MINUTE /MO $IntervalMin /TR $tr /RL LIMITED /F | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
-Write-Host "Registered '$TaskName' - every $IntervalMin min, runs: $tr"
-
-# Re-point through conhost --headless so the task never flashes a console window, reusing the
-# host-maintenance hider when it is present on this box (best-effort).
-$hider = 'C:\work\host-maintenance\hide-task-windows.ps1'
-if (Test-Path $hider) {
-  try { & $hider -Task $TaskName | Out-Null; Write-Host "  (windowless via hide-task-windows.ps1)" }
-  catch { Write-Warning "  could not hide window: $_" }
+# Register-ScheduledTask with an S4U principal + StartWhenAvailable (#3322): the
+# migration off the old `schtasks /Create ... /RL LIMITED` Interactive default, which
+# did not run at cold boot before logon and skipped any self-update tick missed while
+# the box was off. S4U runs windowless in session 0 (no console flash, so the old
+# conhost/hide-task-windows step is unnecessary) yet still AS THIS USER;
+# StartWhenAvailable fires a missed tick on wake. Setting an S4U principal needs an
+# ELEVATED shell; the catch below says so.
+$act = New-ScheduledTaskAction -Execute 'cmd.exe' `
+  -Argument ('/c "{0}" self-update --root "{1}" --target "{2}"' -f $fakBin, $RepoRoot, $Target)
+$trg = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+  -RepetitionInterval (New-TimeSpan -Minutes $IntervalMin) -RepetitionDuration (New-TimeSpan -Days 3650)
+$prin = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable -MultipleInstances IgnoreNew
+try {
+  Register-ScheduledTask -TaskName $TaskName -Action $act -Trigger $trg `
+    -Principal $prin -Settings $set -Force -ErrorAction Stop | Out-Null
+} catch {
+  throw ("Register-ScheduledTask failed: $($_.Exception.Message). S4U registration needs an elevated shell -- re-run this installer as Administrator (right-click PowerShell -> Run as administrator).")
 }
+Write-Host "Registered '$TaskName' - every $IntervalMin min, current-user S4U windowless"
 
 if ($RunNow) {
   Write-Host "Running '$TaskName' once now…"

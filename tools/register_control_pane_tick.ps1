@@ -51,12 +51,24 @@ $runner = Join-Path $regDir 'control_pane_tick.cmd'
   "cd /d `"$repoDir`"",
   "`"$Python`" `"$Pane`" tick$liveArg"
 ) | Set-Content -Path $runner -Encoding ASCII
-$tr = "conhost.exe --headless cmd.exe /c `"`"$runner`"`""
-schtasks /Create /TN $TaskName /SC MINUTE /MO $IntervalMin /TR $tr /RL LIMITED /F | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
-schtasks /Change /TN $TaskName /ENABLE | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "schtasks /Change /ENABLE failed ($LASTEXITCODE)" }
-schtasks /Run /TN $TaskName 2>$null | Out-Null
-Write-Output "installed $TaskName (every $IntervalMin min, current-user interactive, headless)"
+# Register-ScheduledTask with an S4U principal + StartWhenAvailable (#3322): the
+# migration off the old `schtasks /Create ... /RL LIMITED` Interactive default, which
+# did not run at cold boot before logon and skipped any tick missed while the box was
+# off. S4U runs windowless in session 0 (no conhost --headless flash-suppression
+# needed) yet still AS THIS USER; StartWhenAvailable fires a missed tick on wake.
+# Setting an S4U principal needs an ELEVATED shell; the catch below says so.
+$act = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c ""{0}""' -f $runner)
+$trg = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+  -RepetitionInterval (New-TimeSpan -Minutes $IntervalMin) -RepetitionDuration (New-TimeSpan -Days 3650)
+$prin = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable -MultipleInstances IgnoreNew
+try {
+  Register-ScheduledTask -TaskName $TaskName -Action $act -Trigger $trg `
+    -Principal $prin -Settings $set -Force -ErrorAction Stop | Out-Null
+} catch {
+  throw ("Register-ScheduledTask failed: $($_.Exception.Message). S4U registration needs an elevated shell -- re-run this installer as Administrator (right-click PowerShell -> Run as administrator).")
+}
+Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+Write-Output "installed $TaskName (every $IntervalMin min, current-user S4U windowless)"
 Write-Output "runner: $runner"
-Write-Output "command: $tr"
