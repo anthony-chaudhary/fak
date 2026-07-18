@@ -14,6 +14,11 @@ keywords:
 
 # Shared workspace, positive state, and the negation operator
 
+> **Audience.** Anyone reasoning about what an agent's context window *should* contain —
+> by the end you'll be able to say why fak treats bounded context as a shared workspace
+> rather than a growing chat log, and how the deterministic negframe operator rewrites
+> kernel-authored negations while the default-deny floor still adjudicates every effect.
+
 An AI agent does not reason over an unlimited transcript. It works inside a bounded context shared by the current task, tool results, policy guidance, and recent conversation. **fak treats that context as a shared workspace to manage**, not as a chat log to grow forever. The analogy is to global-workspace theories: information that remains available can influence many later operations. It is an engineering lens, not a claim that a language model has human consciousness or that fak reproduces a cognitive architecture.
 
 ## 1. A bounded shared workspace

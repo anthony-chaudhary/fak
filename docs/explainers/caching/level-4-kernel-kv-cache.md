@@ -18,6 +18,11 @@ date: 2026-07-10
 
 *You are on **Level 4 of 5** of the [fak caching ladder](README.md).*
 
+> **Audience.** Engineers who know the provider-level view from Levels 1–3 and want the
+> layer underneath. By the end you'll be able to explain why cache reuse is always a
+> prefix in a transformer KV cache, and what kernel ownership adds: bit-exact interior
+> span eviction (`max|Δ| = 0`) and honest evidence when an upstream drops the cache.
+
 > **Short answer.** The provider "prompt cache" from Levels 1–3 is, one layer down, a
 > **transformer KV cache**: the key/value vectors each token produces during prefill.
 > Reuse is always a **prefix** — a contiguous run from token 0 — because attention is

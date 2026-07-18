@@ -16,6 +16,10 @@ date: 2026-07-10
 
 *You are on **Level 1 of 5** of the [fak caching ladder](README.md).*
 
+> **Audience.** Complete beginners — no AI or systems background assumed. By the end
+> you'll be able to say what a prompt cache is, why an agent gets slower and more
+> expensive without one, and why fak treats keeping it warm as its job.
+
 > **Short answer.** An AI agent forgets everything between turns, so every time you ask
 > it something it re-sends the *whole conversation so far* just to ask the next thing.
 > A **prompt cache** lets the provider say "I've already seen that part — no need to

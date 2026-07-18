@@ -132,8 +132,8 @@ splicing on the original bytes so the prefix stays byte-identical — it guarant
 prefix that makes the discount possible, not the discount itself.*
 
 The witnessed version of this at fleet scale: on a 50-turn × 5-agent run
-(Qwen2.5-1.5B, Apple M3 Pro), reuse did **~60.3× less work than the naive re-send loop**,
-and **~4.1× less than a *tuned* warm-cache stack** — the honest, few-fold headline, not
+(Qwen2.5-1.5B, Apple M3 Pro), reuse did **~60.3× less work than the naive re-send loop
+and ~4.1× less than a tuned warm-cache stack** — the honest, few-fold headline, not
 the naive multiplier alone. The naive arm's ~19 hours is modeled from the prefill cost
 curve (validated within ~0.4%), not run live; the artifact and its fences are in
 [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).

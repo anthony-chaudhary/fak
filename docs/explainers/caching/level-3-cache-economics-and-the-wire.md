@@ -18,6 +18,11 @@ date: 2026-07-10
 
 *You are on **Level 3 of 5** of the [fak caching ladder](README.md).*
 
+> **Audience.** Readers comfortable with the ladder's earlier levels who want the money
+> side. By the end you'll be able to price a cache write against its reads, work out the
+> break-even reuse count for the 5-minute and 1-hour tiers, and read fak's realized-saving
+> report without over-crediting it.
+
 > **Short answer.** A prompt cache is not free: the first **write** of a prefix costs
 > *more* than sending it uncached (1.25× base input at the 5-minute tier, 2.0× at the
 > 1-hour tier), and each later **read** costs 0.1×. So caching only wins once enough

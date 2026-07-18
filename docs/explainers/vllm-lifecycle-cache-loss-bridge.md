@@ -10,6 +10,11 @@ controls, with explicit evidence of what happened to the KV cache. Issue
 [#1730](https://github.com/anthony-chaudhary/fak/issues/1730); parents #1178,
 #1193, #1203, #1204.*
 
+> **Audience.** Operators running fak in front of a vLLM worker that sleeps, pauses, or
+> wakes — by the end you'll be able to say which lifecycle transitions silently destroy
+> the KV cache, and how fak bridges session dormancy to those controls with explicit
+> evidence of what happened to the cache.
+
 ## The failure this prevents
 
 An external vLLM worker can go dormant in ways that silently throw the KV cache

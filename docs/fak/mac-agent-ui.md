@@ -248,3 +248,10 @@ go run ./cmd/fak console sessions `
 
 This is the repeatable check that the UI is pointed at the same always-on gateway
 instead of a one-off local process.
+
+## See also
+
+- [Always-On Dogfood Server](always-on-dogfood-server.md) — how the `node-macos-a`
+  gateway this UI targets is stood up, measured, and kill-switched.
+- [Server quickstart](server-quickstart.md) — starting your own `fak serve` endpoint
+  from scratch if you don't have an always-on gateway yet.

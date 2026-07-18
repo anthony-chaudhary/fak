@@ -5,6 +5,10 @@ description: "Two shipped, public Slack surfaces: watch every fak guard session 
 
 # fak guarded sessions from Slack
 
+> **Audience.** Anyone who runs `fak guard` or `fak serve` and has (or can create) a
+> Slack workspace bot — by the end you'll be able to watch every guarded session as a
+> run-card in a channel and chat with a kernel-hosted model from Slack.
+
 Two things fak can do with a Slack channel today, both public and both invokable with
 your own workspace bot:
 

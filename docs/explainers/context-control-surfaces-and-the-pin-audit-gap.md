@@ -5,6 +5,11 @@ description: "A map of every lever an operator or the model has over fak's plann
 
 # Context control surfaces — the middle, the pins, and the audit gap
 
+> **Audience.** Contributors working on fak's context planner (`internal/ctxplan`) —
+> by the end you'll be able to name every lever over the planned view ("the middle"),
+> state what a pin actually guarantees, and locate the one durable gap: pin outcomes
+> are only reconciled at materialize time, so a dry-run preview can lie.
+
 This note maps how much control there is over the planned context view, what
 "the middle" and "pin points" mean concretely, and where the one durable gap
 is. It is a design note, not a change — every claim below is grounded in a
