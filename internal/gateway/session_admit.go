@@ -30,6 +30,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionledger"
 )
 
@@ -121,6 +122,21 @@ func (s *Server) maybeResetOnBudget(ctx context.Context, st SessionState, messag
 	return s.resetOnBudget(ctx, st.TraceID, messages)
 }
 
+// applyBudgetReset lowers the host reset transaction onto the physical gateway
+// boundary: splice the exact seed, then admit the fresh child. The shared Next row
+// is applied only after both effects succeed; every terminal no-render outcome is
+// independently readable as a refusal.
+func (s *Server) applyBudgetReset(ctx context.Context, st SessionState, messages []agent.Message) (string, []agent.Message, servedSessionTurn, bool, bool, bool) {
+	newTrace, seed, reset := s.maybeResetOnBudget(ctx, st, messages)
+	if !reset {
+		return "", messages, servedSessionTurn{}, false, false, false
+	}
+	messages = spliceSeed(seed, messages)
+	turn, ok, canceled := s.beginServedSessionTurn(ctx, newTrace)
+	recordResetSeedNext(newTrace, seed, turn, ok, canceled)
+	return newTrace, messages, turn, ok, canceled, true
+}
+
 // armCoherenceReset latches a hard reset for trace on its NEXT admitted turn — the actuation the
 // #3159 non-holding-rewrite escalation arms. Bounded generationally (like resetHealth) so a
 // long-running gateway minting a trace per session cannot grow the latch set without limit. Empty
@@ -187,7 +203,22 @@ func (s *Server) resetOnCoherenceIfArmed(ctx context.Context, trace string, mess
 	}
 	messages = spliceSeed(seed, messages)
 	st, ok, canceled := s.beginServedSessionTurn(ctx, newTrace)
+	recordResetSeedNext(newTrace, seed, st, ok, canceled)
 	return newTrace, messages, st, ok, canceled
+}
+
+func recordResetSeedNext(trace string, seed []agent.Message, turn servedSessionTurn, ok, canceled bool) {
+	payload := ""
+	if len(seed) > 0 {
+		payload = seed[0].Content
+	}
+	result := sessionctl.ApplyResult{Applied: ok && !canceled}
+	if canceled {
+		result.Refusal = "fresh child admission canceled"
+	} else if !ok {
+		result.Refusal = "fresh child admission refused: " + turn.state.Reason
+	}
+	sessionctl.RecordBudgetResetNextResult(trace, payload, result)
 }
 
 // spliceSeed prepends the carryover seed to a live transcript, keeping any leading

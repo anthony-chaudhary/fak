@@ -472,10 +472,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// Budget drained: opt-in human-like reset (distill seed, re-arm, continue on
 		// the fresh trace) when wired; else the historical 409 directive. Mirrors the
 		// Anthropic wire in messages.go.
-		if newTrace, seed, reset := s.maybeResetOnBudget(ctx, sessionTurn.state, req.Messages); reset {
-			req.Messages = spliceSeed(seed, req.Messages)
+		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, req.Messages); reset {
+			req.Messages = resetMessages
 			reqTrace = newTrace
-			if sessionTurn, ok, canceled = s.beginServedSessionTurn(ctx, reqTrace); canceled {
+			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
+			if canceled {
 				return
 			}
 			if !ok {

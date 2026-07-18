@@ -372,6 +372,13 @@ var (
 // interactive Next contract. The recap re-anchors a newly reopened child
 // session while preserving the exact system-message payload.
 func RecordBudgetResetNext(trace, payload string) {
+	RecordBudgetResetNextResult(trace, payload, ApplyResult{Applied: true})
+}
+
+// RecordBudgetResetNextResult records the physical reset-seed outcome. Gateway
+// front doors call it only after they splice the seed and attempt fresh-child
+// admission, so transaction creation alone can never masquerade as actuation.
+func RecordBudgetResetNextResult(trace, payload string, result ApplyResult) {
 	trace = strings.TrimSpace(trace)
 	if trace == "" || payload == "" {
 		return
@@ -381,7 +388,7 @@ func RecordBudgetResetNext(trace, payload string) {
 		Session: SessionInteractive, Gate: "served-session-reset",
 		Source: "gateway-reset-hook", Payload: payload,
 	}
-	record, err := WitnessMove(move, ApplyResult{Applied: true})
+	record, err := WitnessMove(move, result)
 	if err != nil {
 		return
 	}

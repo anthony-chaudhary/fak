@@ -160,13 +160,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// Budget drained: if the host wired the opt-in human-like reset, distill a
 		// carryover seed, re-arm a fresh session, and continue transparently on the
 		// new trace instead of refusing. Otherwise emit the historical 409 directive.
-		if newTrace, seed, reset := s.maybeResetOnBudget(ctx, sessionTurn.state, req.Messages); reset {
-			req.Messages = spliceSeed(seed, req.Messages)
+		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, req.Messages); reset {
+			req.Messages = resetMessages
 			reqTrace = newTrace
-			if sessionTurn, ok, canceled = s.beginServedSessionTurn(ctx, reqTrace); canceled {
+			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
+			if canceled {
 				return
 			}
-			if !ok { // the fresh session somehow refuses too — fall back, never loop
+			if !ok {
 				writeSessionRefusal(w, sessionTurn.state)
 				return
 			}

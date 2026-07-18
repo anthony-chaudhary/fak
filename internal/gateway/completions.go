@@ -52,10 +52,11 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		// Budget drained: opt-in human-like reset when wired, else the historical
 		// refusal. Mirrors the chat + Anthropic wires.
-		if newTrace, seed, reset := s.maybeResetOnBudget(ctx, sessionTurn.state, messages); reset {
-			messages = spliceSeed(seed, messages)
+		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, messages); reset {
+			messages = resetMessages
 			reqTrace = newTrace
-			if sessionTurn, ok, canceled = s.beginServedSessionTurn(ctx, reqTrace); canceled {
+			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
+			if canceled {
 				return
 			}
 			if !ok {

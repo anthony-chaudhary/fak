@@ -235,10 +235,11 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		if newTrace, seed, reset := s.maybeResetOnBudget(ctx, sessionTurn.state, messages); reset {
-			messages = spliceSeed(seed, messages)
+		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, messages); reset {
+			messages = resetMessages
 			reqTrace = newTrace
-			if sessionTurn, ok, canceled = s.beginServedSessionTurn(ctx, reqTrace); canceled {
+			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
+			if canceled {
 				return
 			}
 			if !ok {

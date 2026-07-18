@@ -717,7 +717,7 @@ func findGatewaySession(rows []gateway.SessionState, trace string) (gateway.Sess
 // intPtr is a small helper so the pointer-typed Priority field reads cleanly.
 func intPtr(v int) *int { return &v }
 
-func TestBudgetResetEmitsSharedNextReopenWitness(t *testing.T) {
+func TestBudgetResetTransactionDoesNotPreclaimNextActuation(t *testing.T) {
 	const trace = "trace-next-budget-reset"
 	const child = "trace-next-budget-reset-child"
 	serveSessions.Reset(trace)
@@ -741,19 +741,8 @@ func TestBudgetResetEmitsSharedNextReopenWitness(t *testing.T) {
 	if !ok || gotChild != child || len(messages) != 1 || messages[0].Role != agent.RoleSystem {
 		t.Fatalf("reset child=%q ok=%v messages=%+v", gotChild, ok, messages)
 	}
-	records := sessionctl.ReadBudgetResetNextRecords(child)
-	if len(records) != 1 {
-		t.Fatalf("Next records=%d want 1", len(records))
-	}
-	record := records[0]
-	if record.Move.Kind != sessionctl.MoveReanchor || record.Move.Render != sessionctl.RenderReopen || record.Move.Session != sessionctl.SessionInteractive {
-		t.Fatalf("move=%+v", record.Move)
-	}
-	if record.Move.Gate != "served-session-reset" || record.Move.Source != "gateway-reset-hook" {
-		t.Fatalf("provenance=%+v", record.Move)
-	}
-	if record.Move.Payload != messages[0].Content || !record.Applied {
-		t.Fatalf("record=%+v rendered=%q", record, messages[0].Content)
+	if records := sessionctl.ReadBudgetResetNextRecords(child); len(records) != 0 {
+		t.Fatalf("reset transaction preclaimed Next actuation: %+v", records)
 	}
 }
 
