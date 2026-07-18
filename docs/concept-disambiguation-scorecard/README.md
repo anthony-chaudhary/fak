@@ -13,9 +13,9 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **96.3/100** (grade A) = 9.6/10 |
-| **Coverage** | **94.3%** (1951/2069 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **118** (clarity 0 + coverage 118) |
+| **Score** | **95.7/100** (grade A) = 9.6/10 |
+| **Coverage** | **93.4%** (1951/2088 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **137** (clarity 0 + coverage 137) |
 | Crystal-clear concepts | 255 of 1724 positioned |
 | As of |  (fak ) |
 
@@ -24,7 +24,7 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1724 concepts - score 96.3/100 (grade A) - disambiguation-debt 118
+concept-disambiguation chart - 1724 concepts - score 95.7/100 (grade A) - disambiguation-debt 137
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####....................... 255
@@ -57,13 +57,13 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (116 concept(s); 39 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       #########################... 292/327
-  cache            ##########################.. 223/241
-  plan             ###########################. 286/301
-  render-materialize ##########################.. 162/173
-  context-ctx      ###########################. 175/183
-  policy-capability ##########################.. 118/126
-  session-runtime  ###########################. 173/179
+  guard-gate       ########################.... 293/336
+  cache            ##########################.. 224/243
+  plan             ###########################. 285/301
+  policy-capability #########################... 119/133
+  render-materialize ##########################.. 162/174
+  session-runtime  ##########################.. 173/183
+  context-ctx      ###########################. 175/184
   score-debt       ##########################.. 78/83
   support-maturity ########################.... 29/34
   witness-proof    ###########################. 126/130
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 94.3%  (1951/2069 confusable tokens positioned)
+namespace coverage  [##############################..] 93.4%  (1951/2088 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1951,13 +1951,13 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 292 | 327 | 35 |
-| cache | 223 | 241 | 18 |
-| plan | 286 | 301 | 15 |
-| render-materialize | 162 | 173 | 11 |
-| context-ctx | 175 | 183 | 8 |
-| policy-capability | 118 | 126 | 8 |
-| session-runtime | 173 | 179 | 6 |
+| guard-gate | 293 | 336 | 43 |
+| cache | 224 | 243 | 19 |
+| plan | 285 | 301 | 16 |
+| policy-capability | 119 | 133 | 14 |
+| render-materialize | 162 | 174 | 12 |
+| session-runtime | 173 | 183 | 10 |
+| context-ctx | 175 | 184 | 9 |
 | score-debt | 78 | 83 | 5 |
 | support-maturity | 29 | 34 | 5 |
 | witness-proof | 126 | 130 | 4 |
