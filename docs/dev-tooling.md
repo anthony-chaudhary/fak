@@ -88,7 +88,7 @@ reds if any of them re-inlines the recipe). You select a **profile** with `$PROF
 | Profile   | `make` target     | `-trimpath` | strip `-s -w` | DWARF   | `CGO_ENABLED` | `-race` | Use |
 |-----------|-------------------|:-----------:|:-------------:|:-------:|:-------------:|:-------:|-----|
 | `release` | `make release`    | ✓           | ✓             | stripped| `0` (static)  | —       | the **shipped** binary — stripped, reproducible-ready, stamped |
-| `dev`     | `make build`      | —           | —             | kept    | `0` (static)  | —       | fast local build; Delve can set a breakpoint and step |
+| `dev`     | `make build`      | —           | —             | kept    | `0` (static)  | —       | fast local build; `dlv` (the Go debugger) can set a breakpoint and step |
 | `race`    | `make build-race` | —           | —             | kept    | `1` (cgo)     | ✓       | opt-in race-detector variant; **not** the static pure-Go binary |
 
 The `dev` profile keeps DWARF/symbols and host paths so a debugger works out of the box; add
