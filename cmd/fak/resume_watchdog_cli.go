@@ -281,7 +281,11 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		}
 		if d.Action == resume.WatchdogLaunch {
 			nextMove.Kind, nextMove.Render = sessionctl.MoveContinue, sessionctl.RenderSystemDirective
-			nextMove.Payload = p.ResumeTarget()
+			// Identify the resume by session id, not p.ResumeTarget(): the resume target is
+			// the account config dir (e.g. .../.claude-secret), and this move is witnessed
+			// into the decision ledger — a raw config-dir path there leaks the account's
+			// secret dir. The actual resume still reads ResumeTarget() directly below.
+			nextMove.Payload = p.Session
 		}
 		result := sessionctl.ApplyResult{Applied: d.Action == resume.WatchdogLaunch}
 		if d.Action != resume.WatchdogLaunch {
