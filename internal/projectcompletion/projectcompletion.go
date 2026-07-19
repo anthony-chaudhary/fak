@@ -20,6 +20,10 @@ type Bucket struct {
 	Standard string  `json:"standard"`
 	Points   float64 `json:"points"`
 	Issues   int     `json:"issues"`
+	// Label is the maturity-qualified completion label ("demo-complete",
+	// "production-complete") for operator renders; Standard stays the stable
+	// machine field existing JSON consumers already read (#4640).
+	Label string `json:"label,omitempty"`
 }
 type UnknownIssue struct {
 	Number  int      `json:"number,omitempty"`
@@ -65,7 +69,7 @@ func Summarize(issues []Issue) Report {
 		}
 		b := buckets[pw.CompletionStandard]
 		if b == nil {
-			b = &Bucket{Standard: pw.CompletionStandard}
+			b = &Bucket{Standard: pw.CompletionStandard, Label: MaturityLabel(pw.CompletionStandard)}
 			buckets[pw.CompletionStandard] = b
 		}
 		b.Points += pw.Contribution
@@ -103,6 +107,43 @@ func Summarize(issues []Issue) Report {
 	}
 	return r
 }
+
+// MaturityLabel renders a completion standard as an explicit maturity-qualified
+// completion label. Operator status must never render a bare "complete" for a
+// non-production leaf (#4640): a closed toy bring-up reads "demo-complete", and
+// a close with no declared standard reads as undeclared, never as complete.
+func MaturityLabel(standard string) string {
+	s := strings.ToLower(strings.TrimSpace(standard))
+	if s == "" {
+		return "closed (maturity undeclared)"
+	}
+	return s + "-complete"
+}
+
+// RenderText is the operator-facing status render for a Report. Every closed
+// bucket carries its maturity-qualified label so a closed toy bring-up stays
+// visibly demo-complete while the parent remains partially production-complete.
+// JSON consumers read the stable Report fields instead of parsing this text.
+func RenderText(r Report) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "production complete: %.2f/%.2f points (%.1f%%) [%s]\n", r.ProductionCompletePoints, r.BaselinePoints, r.ProductionCompletePct, r.Confidence)
+	for _, bucket := range r.ClosedByStandard {
+		label := bucket.Label
+		if label == "" {
+			label = MaturityLabel(bucket.Standard)
+		}
+		fmt.Fprintf(&b, "closed %-14s %.2f points (%d issues)\n", label, bucket.Points, bucket.Issues)
+	}
+	fmt.Fprintf(&b, "open: %.2f points; declared: %.2f points\n", r.OpenPoints, r.DeclaredContribution)
+	for _, u := range r.Unknown {
+		fmt.Fprintf(&b, "unknown #%d %s: %s\n", u.Number, u.Title, u.Status)
+	}
+	for _, d := range r.DenominatorDrift {
+		fmt.Fprintf(&b, "denominator drift: %s\n", d)
+	}
+	return b.String()
+}
+
 func same(a, b float64) bool {
 	d := a - b
 	if d < 0 {

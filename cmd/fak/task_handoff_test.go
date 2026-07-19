@@ -20,7 +20,7 @@ func TestTaskHandoffDryRunPlansIssueCreate(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--existing-json", existingPath, "--parent-issue", "1639", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
+	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--existing-json", existingPath, "--parent-issue", "1639", "--parent-baseline-points", "20", "--completion-standard", "development", "--achieved-maturity", "development", "--json"})
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
@@ -30,6 +30,9 @@ func TestTaskHandoffDryRunPlansIssueCreate(t *testing.T) {
 	}
 	if !got.Review.OK || got.Review.Verdict != "ready" {
 		t.Fatalf("review = %+v, want ok ready", got.Review)
+	}
+	if got.Review.AchievedMaturity != "development" {
+		t.Fatalf("review achieved maturity = %q, want development", got.Review.AchievedMaturity)
 	}
 	if len(got.Planned) != 1 || got.Planned[0].Action != "create" {
 		t.Fatalf("planned = %+v, want one create", got.Planned)
@@ -100,7 +103,7 @@ func TestTaskHandoffEvidenceRefsReachDryRunPlan(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--parent-issue", "1639", "--parent-baseline-points", "20", "--completion-standard", "development", "--json"})
+	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--parent-issue", "1639", "--parent-baseline-points", "20", "--completion-standard", "development", "--achieved-maturity", "development", "--json"})
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errb.String(), out.String())
 	}

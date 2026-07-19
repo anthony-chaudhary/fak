@@ -41,19 +41,44 @@ type IssuePromptRecord struct {
 	FetchError  string `json:"fetch_error,omitempty"`
 	Prompt      string `json:"prompt"`
 	PromptChars int    `json:"prompt_chars"`
+	// Project-work propagation (#4640): the dispatch packet states the issue's
+	// declared estimated work, its contribution against the parent production
+	// baseline, and the completion standard a close would satisfy — as explicit
+	// stable JSON fields, so packet consumers never re-parse the prompt text.
+	// Empty means the issue does not declare the section (a fact the consumer
+	// must see, never a value to guess).
+	WorkEstimate       string `json:"work_estimate,omitempty"`
+	ParentContribution string `json:"parent_contribution,omitempty"`
+	CompletionStandard string `json:"completion_standard,omitempty"`
 }
 
 func BuildIssuePrompt(in IssuePromptInput) IssuePromptRecord {
 	prompt := RenderIssuePrompt(in)
+	estimate, contribution, standard := projectWorkBrief(redactPrivatePromptText(in.Body))
 	return IssuePromptRecord{
-		Schema:      PromptSchema,
-		Issue:       in.Number,
-		Lane:        in.Lane,
-		Title:       strings.TrimSpace(in.Title),
-		FetchError:  strings.TrimSpace(in.FetchError),
-		Prompt:      prompt,
-		PromptChars: len(prompt),
+		Schema:             PromptSchema,
+		Issue:              in.Number,
+		Lane:               in.Lane,
+		Title:              strings.TrimSpace(in.Title),
+		FetchError:         strings.TrimSpace(in.FetchError),
+		Prompt:             prompt,
+		PromptChars:        len(prompt),
+		WorkEstimate:       estimate,
+		ParentContribution: contribution,
+		CompletionStandard: standard,
 	}
+}
+
+// projectWorkBrief extracts the #4636-family project-work sections from an issue
+// body: the estimated work, the contribution against the parent scope baseline,
+// and the completion standard. A missing section returns "" so legacy issues
+// stay byte-identical and the omission stays visible to packet consumers.
+func projectWorkBrief(body string) (estimate, contribution, standard string) {
+	sections := promptMarkdownSections(body)
+	estimate = promptBriefValue(firstPromptSection(sections, "work estimate"))
+	contribution = promptBriefValue(firstPromptSection(sections, "overall completion contribution", "completion contribution", "scope contribution"))
+	standard = promptBriefValue(firstPromptSection(sections, "completion standard"))
+	return estimate, contribution, standard
 }
 
 func RenderIssuePrompt(in IssuePromptInput) string {
@@ -331,6 +356,12 @@ func renderAgentIssueBrief(body string) string {
 	}{
 		{"Work unit", []string{"work unit", "work-unit shape", "issue shape"}},
 		{"Expected steps", []string{"expected steps", "step budget"}},
+		// #4640: the packet states estimated work, parent contribution, and the
+		// completion standard so a worker cannot read a demo leaf as the parent's
+		// production scope.
+		{"Work estimate", []string{"work estimate"}},
+		{"Parent contribution", []string{"overall completion contribution", "completion contribution", "scope contribution"}},
+		{"Completion standard", []string{"completion standard"}},
 		{"Working spine", []string{"working spine"}},
 		{"Assumptions", []string{"assumptions"}},
 		{"Confusion risks", []string{"confusion risks", "known confusion", "unknowns"}},

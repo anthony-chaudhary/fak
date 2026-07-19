@@ -184,6 +184,7 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 	existingJSON := fs.String("existing-json", "", "fixture/list of existing gh issues for dry-run tests")
 	fetchExisting := fs.Bool("fetch-existing", false, "dry-run but query gh to classify create vs update")
 	live := fs.Bool("live", false, "create/update GitHub issues with gh")
+	achievedMaturity := fs.String("achieved-maturity", "", "completion standard the finished task actually reached (production, integrated, staging, development, demo, prototype, experiment, research); fills achieved_maturity when the handoff JSON omits it (#4640)")
 	project := addDogfoodProjectFlags(fs)
 	asJSON := fs.Bool("json", false, "emit machine-readable review/plan/result")
 	var labels stringList
@@ -210,6 +211,10 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 	if err := json.Unmarshal(b, &handoff); err != nil {
 		fmt.Fprintf(stderr, "fak task handoff: parse %s: %v\n", path, err)
 		return 2
+	}
+
+	if strings.TrimSpace(handoff.AchievedMaturity) == "" {
+		handoff.AchievedMaturity = strings.TrimSpace(*achievedMaturity)
 	}
 
 	for i := range handoff.NextSteps {

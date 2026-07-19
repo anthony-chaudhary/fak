@@ -45,3 +45,15 @@ The report separates closed maturity buckets from `production_complete_points`. 
 Example: a 2-point tokenizer demo and 3-point single-request prototype can both close, while a 15-point production serving path remains open. Against a 20-point parent baseline, the truthful result is **0/20 production-complete points (0%)**, with five closed non-production points still visible. This is the model-bring-up guardrail: bring-up evidence is useful, but “model ready” means production-ready only when the production-scoped work and witness are complete.
 
 Rebaseline by editing the parent scope and every child denominator together, with the reason recorded. Never improve the percentage by silently deleting work from the denominator.
+
+## Propagation surfaces and consumer inventory (#4640)
+
+The declared estimate, parent contribution, and completion standard propagate through the operator-visible surfaces; each core path below is migrated and carries its own regression gate:
+
+| Surface | Behavior | Gate |
+|---|---|---|
+| Dispatch packet (`internal/dispatchtick` worker prompt) | The agent issue brief states `Work estimate`, `Parent contribution`, and `Completion standard`; the packet record carries the stable JSON fields `work_estimate`, `parent_contribution`, `completion_standard` (empty = undeclared, never guessed). | `go test ./internal/dispatchtick -run TestIssuePromptPacket` |
+| Completion handoff (`fak task handoff`) | The handoff names its achieved maturity (`achieved_maturity`); the strict project-work gate refuses a bare "done" (`MISSING_ACHIEVED_MATURITY`) and unknown wording (`BAD_ACHIEVED_MATURITY`); the generated issue body renders `Achieved maturity: <standard>-complete`, or `undeclared (treat as not production-complete)`. | `go test ./internal/taskmgr -run 'Maturity|ToyBringup'` |
+| Operator status render (`fak project completion`) | Every closed bucket renders a maturity-qualified label (`demo-complete`, `production-complete`); an undeclared standard renders `closed (maturity undeclared)`; a bare `complete` is never rendered for a non-production leaf. The JSON report keeps `standard` stable and adds `label`. | `go test ./internal/projectcompletion` |
+
+Consumers that predate the shared estimate and still count issues rather than points (for example the epic checklist counter in `internal/epicprogress` and the Python dispatch-status mirrors under `tools/`) remain visible as issue counts, not completion claims; migrating them stays parented under #4636 rather than silently converting counts into production credit.

@@ -58,17 +58,9 @@ func runProjectCompletion(stdout, stderr io.Writer, argv []string) int {
 	if *asJSON {
 		return writeJSON(stdout, report)
 	}
-	fmt.Fprintf(stdout, "production complete: %.2f/%.2f points (%.1f%%) [%s]\n", report.ProductionCompletePoints, report.BaselinePoints, report.ProductionCompletePct, report.Confidence)
-	for _, b := range report.ClosedByStandard {
-		fmt.Fprintf(stdout, "closed %-12s %.2f points (%d issues)\n", b.Standard, b.Points, b.Issues)
-	}
-	fmt.Fprintf(stdout, "open: %.2f points; declared: %.2f points\n", report.OpenPoints, report.DeclaredContribution)
-	for _, u := range report.Unknown {
-		fmt.Fprintf(stdout, "unknown #%d %s: %s\n", u.Number, u.Title, u.Status)
-	}
-	for _, d := range report.DenominatorDrift {
-		fmt.Fprintf(stdout, "denominator drift: %s\n", d)
-	}
+	// The human render lives in the leaf (projectcompletion.RenderText) so its
+	// no-bare-"complete" maturity labeling is testable beside the fold (#4640).
+	fmt.Fprint(stdout, projectcompletion.RenderText(report))
 	if report.Confidence != "complete" {
 		return 1
 	}

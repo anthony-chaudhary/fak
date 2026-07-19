@@ -28,9 +28,15 @@ var handoffKeyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$`)
 // stands, and either one or two concrete next steps or an explicit reason that
 // no follow-up is reasonable.
 type Handoff struct {
-	Schema              string            `json:"schema"`
-	Task                HandoffTask       `json:"task"`
-	CurrentState        string            `json:"current_state"`
+	Schema       string      `json:"schema"`
+	Task         HandoffTask `json:"task"`
+	CurrentState string      `json:"current_state"`
+	// AchievedMaturity names the completion standard the finished task actually
+	// reached (production, integrated, staging, development, demo, prototype,
+	// experiment, research). A handoff that claims "done" without naming its
+	// achieved maturity can read as production-ready when only a demo exists;
+	// the strict project-work gate refuses that ambiguity (#4640).
+	AchievedMaturity    string            `json:"achieved_maturity,omitempty"`
 	Summary             string            `json:"summary,omitempty"`
 	CompletedBy         string            `json:"completed_by,omitempty"`
 	Labels              map[string]string `json:"labels,omitempty"`
@@ -101,6 +107,10 @@ type HandoffReview struct {
 	NextStepKeys []string               `json:"next_step_keys,omitempty"`
 	IssueCount   int                    `json:"issue_count"`
 	IssueReviews []issuecontract.Review `json:"issue_reviews,omitempty"`
+	// AchievedMaturity is the normalized maturity the handoff names for the
+	// completed task — a stable JSON field for downstream status consumers
+	// (#4640). Empty means the handoff did not declare one.
+	AchievedMaturity string `json:"achieved_maturity,omitempty"`
 }
 
 // HandoffReviewOptions turns on the stricter GitHub-issue contract for callers
@@ -186,6 +196,15 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 	if strings.TrimSpace(h.CurrentState) == "" {
 		reasons = append(reasons, "MISSING_CURRENT_STATE")
 	}
+	maturity := normalizeAchievedMaturity(h.AchievedMaturity)
+	if strings.TrimSpace(h.AchievedMaturity) != "" && maturity == "" {
+		reasons = append(reasons, "BAD_ACHIEVED_MATURITY")
+	}
+	if opt.StrictProjectWork && strings.TrimSpace(h.AchievedMaturity) == "" {
+		// A completion handoff must name what maturity it actually reached; a
+		// bare "done" is a production claim by default and is refused (#4640).
+		reasons = append(reasons, "MISSING_ACHIEVED_MATURITY")
+	}
 
 	nextCount := len(h.NextSteps)
 	noNextReason := strings.TrimSpace(h.NoNextStepReason)
@@ -258,13 +277,14 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 	}
 
 	review := HandoffReview{
-		Schema:       SchemaHandoffReview,
-		OK:           len(reasons) == 0,
-		TaskID:       taskID,
-		Reasons:      reasons,
-		NextStepKeys: keys,
-		IssueCount:   nextCount,
-		IssueReviews: issueReviews,
+		Schema:           SchemaHandoffReview,
+		OK:               len(reasons) == 0,
+		TaskID:           taskID,
+		Reasons:          reasons,
+		NextStepKeys:     keys,
+		IssueCount:       nextCount,
+		IssueReviews:     issueReviews,
+		AchievedMaturity: maturity,
 	}
 	switch {
 	case !review.OK:
@@ -363,6 +383,11 @@ func HandoffIssueBody(h Handoff, step HandoffNextStep) string {
 	}
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "- Claimed state: `%s`\n", h.Task.State)
+	if m := normalizeAchievedMaturity(h.AchievedMaturity); m != "" {
+		fmt.Fprintf(&b, "- Achieved maturity: `%s-complete`\n", m)
+	} else {
+		fmt.Fprintln(&b, "- Achieved maturity: undeclared (treat as not production-complete)")
+	}
 	if h.Task.Witness != nil {
 		fmt.Fprintf(&b, "- Completion witness: `%s`", h.Task.Witness.VerifiedState)
 		if src := strings.TrimSpace(h.Task.Witness.Source); src != "" {
@@ -493,6 +518,24 @@ func evidenceRefStrings(refs []EvidenceRef) []string {
 		out = append(out, b.String())
 	}
 	return out
+}
+
+// normalizeAchievedMaturity maps a declared achieved maturity onto the closed
+// completion-standard vocabulary shared with internal/issuecontract. Unknown
+// wording returns "" so the review gate can refuse rather than guess — a bare
+// or novel "complete" claim never silently becomes production (#4640).
+func normalizeAchievedMaturity(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	s = strings.TrimSuffix(s, "-complete")
+	s = strings.TrimSuffix(s, " complete")
+	s = strings.TrimSpace(s)
+	switch s {
+	case "dev":
+		return "development"
+	case "production", "integrated", "staging", "development", "demo", "prototype", "experiment", "research":
+		return s
+	}
+	return ""
 }
 
 func normalizeHandoffGeneration(g string) string {
