@@ -1,0 +1,157 @@
+{
+  "issue": "#1903",
+  "goal": "Land ten numbered dogfood work items in the durable store, one per leg, surviving every rotation (#1903).",
+  "relay_id": "RLY-DOGFOOD-1903",
+  "rotations": 10,
+  "commits_landed": 10,
+  "commits_attributed": 10,
+  "closures_attributed": 10,
+  "attribution_rate": "10/10 (100%)",
+  "pin_id": "pin-dogfood-1903",
+  "pin_digest": "b1090f316e532428e0df8cc9bd03709262d589f7efa94a215ed4f23e922bb1fd",
+  "pin_wire": "{\"pin_id\":\"pin-dogfood-1903\",\"text\":\"Land ten numbered dogfood work items in the durable store, one per leg, surviving every rotation (#1903).\",\"digest\":\"b1090f316e532428e0df8cc9bd03709262d589f7efa94a215ed4f23e922bb1fd\",\"step\":1}",
+  "pin_byte_identical_across_legs": true,
+  "final_reason": "RELAY_GOAL_DONE",
+  "legs": [
+    {
+      "leg": 0,
+      "parent_trace": "dogfood-leg-0",
+      "successor_trace": "dogfood-leg-1",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "7dcfa334c387d0082b7c8bb68a270c113b6a0da7",
+      "commit_attributed": "7dcfa334c387d0082b7c8bb68a270c113b6a0da7",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 1,
+      "parent_trace": "dogfood-leg-1",
+      "successor_trace": "dogfood-leg-2",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "11a85573cb2c4e7672e590ec2f4107b1b9fd15b4",
+      "commit_attributed": "11a85573cb2c4e7672e590ec2f4107b1b9fd15b4",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 2,
+      "parent_trace": "dogfood-leg-2",
+      "successor_trace": "dogfood-leg-3",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "18037da4f6fe217b5628cb16328d0bad79c38179",
+      "commit_attributed": "18037da4f6fe217b5628cb16328d0bad79c38179",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 3,
+      "parent_trace": "dogfood-leg-3",
+      "successor_trace": "dogfood-leg-4",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "88b2827524e883432402ebdd9e37ede917e2e082",
+      "commit_attributed": "88b2827524e883432402ebdd9e37ede917e2e082",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 4,
+      "parent_trace": "dogfood-leg-4",
+      "successor_trace": "dogfood-leg-5",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "4abc6f81c7907e363f0e4022f7b0fe8209b5cf86",
+      "commit_attributed": "4abc6f81c7907e363f0e4022f7b0fe8209b5cf86",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 5,
+      "parent_trace": "dogfood-leg-5",
+      "successor_trace": "dogfood-leg-6",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "f8a514f2d7d5da3641ecb9b5e6175197d26e0991",
+      "commit_attributed": "f8a514f2d7d5da3641ecb9b5e6175197d26e0991",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 6,
+      "parent_trace": "dogfood-leg-6",
+      "successor_trace": "dogfood-leg-7",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "3646aa78216034725c231a7bf1467e8bf39884e7",
+      "commit_attributed": "3646aa78216034725c231a7bf1467e8bf39884e7",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 7,
+      "parent_trace": "dogfood-leg-7",
+      "successor_trace": "dogfood-leg-8",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "3ae51777f456c6f7cedf05fd581b8d97159adbf1",
+      "commit_attributed": "3ae51777f456c6f7cedf05fd581b8d97159adbf1",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 8,
+      "parent_trace": "dogfood-leg-8",
+      "successor_trace": "dogfood-leg-9",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "d2a15b07cfc776d25bc8e61415ab2de21a2f71b5",
+      "commit_attributed": "d2a15b07cfc776d25bc8e61415ab2de21a2f71b5",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    },
+    {
+      "leg": 9,
+      "parent_trace": "dogfood-leg-9",
+      "successor_trace": "dogfood-leg-10",
+      "boundaries": 2,
+      "holds": [
+        "IN_FLIGHT_TOOL_CALL"
+      ],
+      "reason": "RELAY_ROTATED",
+      "at_sha": "ff7fedbfc4279b868d089eb6a63b7da280c80d96",
+      "commit_attributed": "ff7fedbfc4279b868d089eb6a63b7da280c80d96",
+      "fidelity_score": 1,
+      "pin_byte_identical": true
+    }
+  ]
+}
