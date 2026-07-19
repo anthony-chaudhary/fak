@@ -392,6 +392,52 @@ func TestOpenAIAdapterMergesProviderExtraBody(t *testing.T) {
 	}
 }
 
+// TestPerRequestExtraBodyForwarding guards the Responses-wire half of the ExtraBody
+// escape hatch (#5187). The Responses API has no native top_k
+// (chat.go: "OpenAI/xAI/Responses have none, so a top_k for them must go via ExtraBody"),
+// so the openAIResponsesAdapter must merge r.ExtraBody
+// (FAK_PROVIDER_EXTRA_BODY_JSON / top_k / chat_template_kwargs / guided-decode) into the
+// marshaled body top-level, exactly as the chat openAIAdapter does. This is the
+// Responses sibling of TestOpenAIAdapterMergesProviderExtraBody (which only exercises the
+// chat wire): before the merge was wired in, MarshalRequest did a plain json.Marshal and
+// dropped ExtraBody silently, so a documented top_k/guided-decode knob reached the model
+// as a no-op with no error.
+func TestPerRequestExtraBodyForwarding(t *testing.T) {
+	extra, err := ParseExtraBodyJSON(`{"top_k":20,"chat_template_kwargs":{"enable_thinking":false,"preserve_thinking":true}}`)
+	if err != nil {
+		t.Fatalf("ParseExtraBodyJSON: %v", err)
+	}
+	adapter, err := NewTranscriptAdapter(ProviderOpenAIResponses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := adapter.MarshalRequest(adapterRequest{
+		Model:       "Qwen/Qwen3.6-27B",
+		Messages:    []Message{{Role: RoleUser, Content: "hi"}},
+		MaxTokens:   128,
+		Temperature: 0,
+		ExtraBody:   extra,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(body)
+	// The ExtraBody keys must ride on the wire alongside the Responses core body.
+	for _, want := range []string{`"model":"Qwen/Qwen3.6-27B"`, `"top_k":20`, `"enable_thinking":false`, `"preserve_thinking":true`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("Responses request missing %s: %s", want, s)
+		}
+	}
+	// It must remain the Responses shape (input/max_output_tokens), not the chat body —
+	// proof the assertion is exercising openAIResponsesAdapter, not the chat adapter.
+	if !strings.Contains(s, `"input"`) {
+		t.Fatalf("Responses request missing input item shape: %s", s)
+	}
+	if strings.Contains(s, `"messages"`) {
+		t.Fatalf("Responses request unexpectedly carries a chat-shape messages key: %s", s)
+	}
+}
+
 func TestProviderExtraBodyRejectsCoreOverrides(t *testing.T) {
 	for _, raw := range []string{
 		`[]`,
@@ -1652,10 +1698,11 @@ func TestQuarantineOutboundMessagesDoesNotMutateInput(t *testing.T) {
 // TestPerRequestTopKForwarding pins the outbound half of the per-request TopK seam:
 // a top_k set on the request reaches the wire ONLY on the providers with a native
 // field (Anthropic top_k, Gemini topK); OpenAI/xAI/Responses have no native field, so
-// it must NOT appear in their body (the ExtraBody escape hatch is their path, covered
-// by TestOpenAIAdapterMergesProviderExtraBody). This is the sibling of the in-kernel
-// TopK honoring — before this seam, a top_k routed to a remote Anthropic/Gemini backend
-// was silently dropped at the adapterRequest boundary.
+// it must NOT appear in their body — the ExtraBody escape hatch is their path, guarded
+// per-wire by TestOpenAIAdapterMergesProviderExtraBody (chat openAIAdapter) and
+// TestPerRequestExtraBodyForwarding (openAIResponsesAdapter). This is the sibling of the
+// in-kernel TopK honoring — before this seam, a top_k routed to a remote Anthropic/Gemini
+// backend was silently dropped at the adapterRequest boundary.
 func TestPerRequestTopKForwarding(t *testing.T) {
 	k := 20
 	msgs := []Message{{Role: RoleUser, Content: "hi"}}
