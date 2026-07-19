@@ -34,6 +34,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/ghexec"
 	"github.com/anthony-chaudhary/fak/internal/steerpr"
 )
 
@@ -57,6 +58,8 @@ func runSteer(stdout, stderr io.Writer, argv []string) int {
 			return runSteerPRs(stdout, stderr, argv[1:])
 		case "ack":
 			return runSteerAck(stdout, stderr, argv[1:])
+		case "redirect":
+			return runSteerRedirect(stdout, stderr, argv[1:])
 		case "-h", "--help", "help":
 			fmt.Fprintln(stdout, steerUsage)
 			return 0
@@ -71,6 +74,7 @@ const steerUsage = `fak steer — the forming operator PRs on the trunk, and whe
 Usage:
   fak steer prs [--json] [--check] [--base REF] [--head REF] [--max-files N]
   fak steer ack <unit> [--by WHO] [--note TEXT] [--base REF] [--head REF]
+  fak steer redirect <unit> -m "<steer note>" [--by WHO] [--base REF] [--head REF]
 
 prs folds the pending dev->release delta into PR-sized units per (fak <leaf>)
 stamp, bands each by where attention is owed (RESIDUAL/UNVERIFIABLE/CLEARED),
@@ -81,7 +85,14 @@ ack records that a human reviewed a unit: an append-only, attributable ledger
 row bound to the unit's exact member SHA set. The unit then renders as
 "RESIDUAL (acked by WHO)" — never CLEARED: an ack is a human's look, not a
 witness, and it moves neither the machine band nor the residual count. A new
-member commit invalidates the ack (it was a review of a different SHA set).`
+member commit invalidates the ack (it was a review of a different SHA set).
+
+redirect re-aims a unit's INTENT without touching what landed: it files (or
+reopens) a steer follow-up through the trusted gh seam carrying the note, the
+unit's exact member SHA set, and its band at redirect time, then appends a
+countable redirect row to the overlay ledger. Advisory only: a redirect never
+reverts, rewrites, force-pushes, or gates — the next tick changes, the merged
+history does not.`
 
 func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak steer prs", flag.ContinueOnError)
@@ -198,6 +209,135 @@ func runSteerAck(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "acked %s (%d commit(s), band %s) as %s — the machine band is untouched, and a new member commit invalidates this ack\n",
 		unit.Leaf, len(unit.Commits), unit.Band, who)
 	return 0
+}
+
+// steerRedirectFile is the trusted `gh` seam the redirect files its follow-up
+// through (#5030): overridable in tests so a test run never reaches the
+// network. The default routes ONLY through internal/ghexec (the deadlined gh
+// runner, the same trusted seam the comment affordance uses) — a redirect can
+// move a GitHub issue, and can never move git.
+var steerRedirectFile = ghSteerRedirectFollowUp
+
+// runSteerRedirect records an operator redirect against a forming unit
+// (#5030): re-aim the intent's NEXT tick without touching what already landed.
+// It files (or reopens) a steer follow-up through the trusted gh seam carrying
+// the operator's note plus the unit's exact member SHA set and current band,
+// then appends an attributable, append-only redirect row to the overlay
+// ledger so the steer is a first-class, countable event. ADVISORY by
+// construction: no code path from here reaches a git mutation — the
+// structural fence is TestRedirectNeverReachesGitMutation in
+// internal/steerpr, and a redirect that could touch the trunk is a failed
+// implementation of the affordance regardless of how useful it seems.
+func runSteerRedirect(stdout, stderr io.Writer, argv []string) int {
+	// The unit name may come before the flags or after them; accept both.
+	unitArg := ""
+	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
+		unitArg, argv = strings.TrimSpace(argv[0]), argv[1:]
+	}
+	fs := flag.NewFlagSet("fak steer redirect", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	note := fs.String("m", "", "the steer note: where the intent's next tick should aim (required)")
+	by := fs.String("by", "", "who is steering (default: git config user.name; the row must be attributable)")
+	base := fs.String("base", "", "range base ref (default: origin/<release_branch>)")
+	head := fs.String("head", "", "range head ref (default: <release_source> tip)")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	const usage = `usage: fak steer redirect <unit> -m "<steer note>" [--by WHO] [--base REF] [--head REF]`
+	if unitArg == "" && fs.NArg() == 1 {
+		unitArg = strings.TrimSpace(fs.Arg(0))
+	} else if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, usage)
+		return 2
+	}
+	if unitArg == "" {
+		fmt.Fprintln(stderr, usage)
+		return 2
+	}
+
+	root := steerRoot()
+	view, err := buildSteerPRsView(root, *base, *head)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak steer redirect: %v\n", err)
+		return 1
+	}
+	units, _ := view["units"].([]steerpr.Unit)
+	var unit *steerpr.Unit
+	for i := range units {
+		if units[i].Leaf == unitArg {
+			unit = &units[i]
+			break
+		}
+	}
+	if unit == nil {
+		fmt.Fprintf(stderr, "fak steer redirect: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
+			unitArg, releaseStatusString(view["range"]))
+		return 1
+	}
+
+	who := strings.TrimSpace(*by)
+	if who == "" {
+		who = strings.TrimSpace(releasePRPlanGit(root, "config", "user.name"))
+	}
+	bound := ""
+	if len(unit.Resolves) > 0 {
+		// The unit's closure-grade binding: the follow-up reopens/annotates it
+		// rather than filing fresh, so the steer lands where the intent lives.
+		bound = unit.Resolves[0]
+	}
+	rec, err := steerpr.NewRedirect(unit.Leaf, who, *note, steerpr.UnitSHAs(*unit), unit.Band, bound, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak steer redirect: %v\n", err)
+		return 2
+	}
+	// File FIRST, ledger after: a follow-up that never landed is not a
+	// steering event, and the ledger row records where the filed one went.
+	followUp, err := steerRedirectFile(rec)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak steer redirect: file follow-up via gh: %v\n", err)
+		return 1
+	}
+	rec.FollowUp = strings.TrimSpace(followUp)
+	if err := steerpr.AppendRedirect(steerpr.RedirectLedgerPath(root), rec); err != nil {
+		fmt.Fprintf(stderr, "fak steer redirect: append ledger row: %v\n", err)
+		return 1
+	}
+	// Echo the appended row verbatim: the on-disk record IS the outcome.
+	if err := writeIndentedJSON(stdout, rec); err != nil {
+		fmt.Fprintf(stderr, "fak steer redirect: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "redirected %s (%d commit(s), band %s) as %s — follow-up %s; the landed commits are untouched: a redirect re-aims the next tick, never the merge\n",
+		unit.Leaf, len(unit.Commits), unit.Band, who, rec.FollowUp)
+	return 0
+}
+
+// ghSteerRedirectFollowUp is the default trusted gh seam: with a bound issue
+// it reopens best-effort (already-open is fine — the point is the note lands)
+// and posts the anchored note as a comment; without one it files a fresh
+// follow-up issue. Every invocation goes through internal/ghexec — deadlined,
+// prompt-disabled, window-suppressed — and only ever the `gh issue` verb
+// family: GitHub state moves, git never does.
+func ghSteerRedirectFollowUp(r steerpr.Redirect) (string, error) {
+	if r.Issue != "" {
+		num := strings.TrimPrefix(r.Issue, "#")
+		reopen, cancelReopen := ghexec.CommandTimeout(nil, ghexec.DefaultTimeout, "issue", "reopen", num)
+		_, _ = reopen.CombinedOutput() // best-effort: an already-open issue is not an error
+		cancelReopen()
+		comment, cancelComment := ghexec.CommandTimeout(nil, ghexec.DefaultTimeout, "issue", "comment", num, "--body", r.FollowUpBody())
+		defer cancelComment()
+		if out, err := comment.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("gh issue comment %s: %v: %s", num, err, strings.TrimSpace(string(out)))
+		}
+		return r.Issue, nil
+	}
+	create, cancel := ghexec.CommandTimeout(nil, ghexec.DefaultTimeout, "issue", "create", "--title", r.FollowUpTitle(), "--body", r.FollowUpBody())
+	defer cancel()
+	out, err := create.Output()
+	if err != nil {
+		return "", fmt.Errorf("gh issue create: %v", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // buildSteerPRsView resolves the pending delta, grades it, and folds it into the
