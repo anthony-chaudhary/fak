@@ -1,6 +1,6 @@
 ---
 title: "What is fak's managed cache? A plain-English guide"
-description: "fak managed cache steers Anthropic's prompt cache so an idle session re-enters on a cheap read instead of re-paying. On by default everywhere (2026-07-10); on Pro/Max the payoff is usage-limit headroom, not a smaller bill."
+description: "fak managed cache is a family of caching levers — provider 5m prompt cache, star-anchor breakpoint placement, compaction shed, tool-prune, and the 1h-TTL upgrade — that lets an idle session re-enter cheap instead of re-paying. On Pro/Max the payoff is usage-limit headroom, delivered by the family's passive-side levers (the 1h tier is API-key-only in practice)."
 slug: what-is-managed-cache
 keywords:
   - fak managed cache
@@ -20,14 +20,18 @@ date: 2026-07-10
 
 # What is fak's managed cache?
 
-> **Short answer.** "Managed cache" is fak *actively steering* your model provider's
-> prompt cache, instead of just passing your agent's cache settings through. When it is
-> on, a session that goes quiet for a few minutes comes back **cheap** (a ~0.1× cache
-> read) instead of paying full price to rebuild the whole prompt. As of **2026-07-10**
-> fak's fleet launchers turn it **on by default, everywhere** — API key *and* Pro/Max.
-> On an API key the payoff is **dollars**; on a Pro/Max subscription the payoff is
-> **usage-limit headroom** — you burn less of your cap on the turns right after a pause.
-> It **never changes your model's answers**.
+> **Short answer.** "Managed cache" is fak working your model provider's prompt cache on
+> your behalf — and it is a **family of features, not one lever**: riding the provider's
+> 5-minute prompt cache on the client's own breakpoints, star-anchor breakpoint placement
+> (`--vcache-anchor`, default-on), compaction shed (`--compact-history-budget`),
+> tool-prune and defer-cold-tools, in-kernel KV-prefix reuse, volatile-head redaction,
+> and — one member among those — the **1-hour TTL upgrade** that the `--managed-cache`
+> flag governs. With the family at work, a session that goes quiet for a few minutes
+> comes back **cheap** (a ~0.1× cache read) instead of paying full price to rebuild the
+> whole prompt. On an API key the payoff is **dollars**, and the 1h upgrade activates
+> there; on a Pro/Max subscription the payoff is **usage-limit headroom**, delivered by
+> the *other* family members — the 1h tier is rejected on subscription-OAuth in practice,
+> so the guard keeps those seats passive. It **never changes your model's answers**.
 
 *Who this is for: anyone running `fak guard -- claude` (or another agent) who has seen
 the words "managed cache" in the startup banner or the docs and wants to know, in plain
@@ -65,12 +69,20 @@ There are really two different caches people mean:
 
 1. **The provider's prompt cache** — Anthropic's own feature above. fak doesn't own it;
    it rides it.
-2. **fak's managed cache** — fak *actively driving* that provider cache to save you more,
-   instead of just forwarding your agent's own cache markers unchanged.
+2. **fak's managed cache** — the *family* of things fak does so that provider cache (and
+   your context spend generally) works as hard as possible: star-anchor breakpoint
+   placement (`--vcache-anchor`, default-on, so even a client that sent no
+   `cache_control` gets a stable cached front), compaction shed
+   (`--compact-history-budget`), tool-prune and defer-cold-tools, in-kernel KV-prefix
+   reuse when fak runs the model itself, volatile-head redaction, and the **1-hour TTL
+   upgrade**.
 
-When managed cache is **active**, fak does one concrete thing on the wire: it upgrades
-the cache window on the stable front of your prompt from the default **5 minutes** to
-Anthropic's **1-hour** tier.
+The `--managed-cache` flag governs exactly one of those members. When it resolves
+**active**, fak does one concrete thing on the wire: it upgrades the cache window on the
+stable front of your prompt from the default **5 minutes** to Anthropic's **1-hour**
+tier. The rest of the family does its work regardless of that flag's posture — a seat
+where the 1h lever is unavailable is still cached by the provider 5m window on
+well-placed breakpoints, still compacted, still tool-pruned.
 
 Because the 5-minute window already stays warm for free while you're active, the 1-hour
 upgrade has exactly one job: **surviving idle gaps of 5–60 minutes** — you step away, a
@@ -96,25 +108,27 @@ There are **two layers** of default, and they differ — this is the one subtle 
 - **Fleet launchers** — `fak accounts launch`, `fak codex`, the dispatch worker, the
   resume watchdog. Since **2026-07-10** these read `FAK_MANAGED_CACHE`, and an **unset**
   value now resolves to **`on`** (operator policy: best-effort managed cache everywhere).
-  So a worker launched through any of them gets `--managed-cache on` — **active on every
-  seat, subscription included** — unless you set `FAK_MANAGED_CACHE=off` (or `=auto`).
+  So a worker launched through any of them gets `--managed-cache on` — which **activates
+  the 1h upgrade on API-key-billed Anthropic seats** and **downgrades to passive on a
+  subscription-OAuth seat** (the guard refuses the 1h tier there, with the reason in the
+  banner; see below) — unless you set `FAK_MANAGED_CACHE=off` (or `=auto`).
 - **A bare `fak guard`** still reads only the `--managed-cache` flag, whose own default is
   **`auto`** (fak's billing-gated auto — passive on a subscription unless you pass `on`).
   Exporting `FAK_MANAGED_CACHE` does nothing for a bare `fak guard`.
 
 ```bash
-fak guard --managed-cache on   -- claude   # force the 1h upgrade on (any seat)
+fak guard --managed-cache on   -- claude   # request the 1h upgrade (API key: active; subscription-OAuth: downgrades to passive)
 fak guard --managed-cache off  -- claude   # force it off
 fak guard --managed-cache auto -- claude   # billing-gated: on for API key, passive on Pro/Max
 ```
 
 | Mode | What it does |
 |---|---|
-| `on` *(fleet default since 2026-07-10)* | Force the 1-hour upgrade on, regardless of billing. On an API key it saves dollars; on Pro/Max it saves usage-limit headroom (below). |
+| `on` *(fleet default since 2026-07-10)* | Ask for the 1-hour upgrade. On an API key it activates and saves dollars. On a subscription-OAuth seat the guard **refuses it and downgrades to passive** with a witnessed reason: the provider rejects `ttl:"1h"` on that credential class with an HTTP 400 in practice (measured 2026-07-18), so forcing it would fail turns, not save headroom. |
 | `auto` *(bare-guard flag default)* | Turn it **on only when fak can see you're paying per token** (an API key). On a subscription-OAuth seat it stays **passive** — fak's older "never speculate with billing it can't see" rule. Now reachable only by asking for `auto` explicitly. |
 | `off` | Never touch the provider cache; just forward your agent's own cache markers. |
 
-## Do I need it on Pro/Max? Yes — but for headroom, not dollars
+## Do I need it on Pro/Max? Yes — for headroom, and the family delivers it
 
 This is the part the older version of this page got wrong. Here's the honest reasoning.
 
@@ -130,21 +144,30 @@ them faster than an efficient one. Two facts make caching matter there:
 - A **cold prefix rewrite** — what you pay after every idle gap that went cold — is a
   full-price cache **write** across your entire stable head.
 
-So every cold rewrite you *avoid* is usage-cap you *keep*. Managed cache turns the
-5-minute idle window into an hour, which is exactly where those avoidable cold rewrites
-live. The net effect on a subscription: **you get more work done before you hit the
-wall.** That's why the 2026-07-10 policy turns it on for subscription seats too, not just
-API-key ones.
+So every cold rewrite you *avoid* is usage-cap you *keep*, and on a subscription the net
+effect of caching is **more work done before you hit the wall**.
 
-> **Honest caveat (what's proven vs. assumed).** The reasoning above is Anthropic's
+The part to get right is **which lever delivers that on a subscription seat**. It is
+*not* the 1h-TTL upgrade: the provider rejects a `ttl:"1h"` cache_control on a
+subscription-OAuth credential with an HTTP 400 in practice (measured 2026-07-18, even
+with the required beta header — see the
+[measured finding](../cache-frontier/2026-07-18-subscription-oauth-400s-1h-ttl-upgrade-MEASURED.md)),
+so the guard refuses `--managed-cache on` there and **downgrades to passive with a
+witnessed reason in the banner** rather than fail your turns. The headroom on Pro/Max
+comes from the family's other members, which run regardless: the provider's 5-minute
+prompt cache riding well-placed breakpoints, fak's default-on star-anchor placement,
+compaction shed, and tool-prune. Subscription seats serve with large provider
+`cached_prompt_tokens` under exactly that passive posture. The sanctioned way to reach
+the 1h tier itself is API-key billing (`--api-key-env`).
+
+> **Honest caveat (measured, not absolute).** The reasoning above is Anthropic's
 > documented rate-limit accounting; the exact way Pro/Max *subscription* usage is metered
-> isn't fully published. On the fak side, the bug that used to crash forced-cache workers
-> with an HTTP 400 is fixed (fak now adds the beta header the 1-hour tier needs — see
-> [the 1h-TTL fix note](../notes/MANAGED-CACHE-1H-TTL-400-FIX-2026-07-09.md)), so the
-> request is well-formed. Whether the subscription-OAuth wire returns the read-rebate
-> end-to-end is being witnessed via `fak cachevalue report`, not asserted here. The
-> posture is **best-effort**: on any seat where `on` misbehaves, `FAK_MANAGED_CACHE=off`
-> is the express opt-out.
+> isn't fully published. And the OAuth 400 on the 1h tier, while real and re-witnessed
+> (2026-07-18), is not proven universal — the fleet ledger holds at least one 2026-07-10
+> OAuth session that fired 19 upgrades and served fully (3.5M cached prompt tokens). So
+> the honest statement is: the 1h tier is rejected on subscription-OAuth *in practice*,
+> passive is the safe default there, and the API-key path is how you reach 1h. On any
+> seat where the posture misbehaves, `FAK_MANAGED_CACHE=off` is the express opt-out.
 
 On an **API key**, none of the hedging is needed: every avoided rewrite is real dollars
 you opted into managing, and `auto` already activates there on its own.
@@ -152,7 +175,8 @@ you opted into managing, and `auto` already activates there on its own.
 ## What about OpenAI, Gemini, and other models?
 
 Caching itself is now near-universal — but only Anthropic exposes a **steerable cache
-window on the wire fak sits on**, so managed cache (the 1-hour upgrade) is Anthropic-only.
+window on the wire fak sits on**, so the managed-cache family's TTL lever (the 1-hour
+upgrade) is Anthropic-only.
 On the other providers there's simply nothing for fak to steer, so it stays **passive** —
 and that's correct, because those providers cache *automatically* and you already get the
 discount without any marker:
@@ -200,11 +224,12 @@ how the provider bills the unchanged prefix.
 
 Three places tell you, from quickest to most detailed:
 
-1. **The startup banner.** `fak guard` prints one line at launch. Since the 2026-07-10
-   flip a fleet-launched session — subscription included — reads
-   `managed cache — ACTIVE (forced by --managed-cache on): stable-prefix cache_control
-   upgraded to the 1h TTL tier…`. A bare `fak guard` on a subscription with no flag still
-   reads `passive (…)`. That single line is the truth of your session's posture.
+1. **The startup banner.** `fak guard` prints one line at launch. A fleet-launched
+   API-key seat reads `managed cache — ACTIVE (forced by --managed-cache on):
+   stable-prefix cache_control upgraded to the 1h TTL tier…`. A subscription-OAuth seat —
+   even under `--managed-cache on` — reads `passive (…)` with the refusal reason (the
+   provider rejects the 1h tier on that credential class) and the API-key activation
+   path. That single line is the truth of your session's posture.
 2. **The metric.** `/metrics` exposes `fak_gateway_cache_ttl_upgrade_total`, counting
    every upgrade attempt (labeled by outcome), so a zero panel while active means every
    request was ineligible — visible, not silent.
@@ -219,47 +244,56 @@ the quick map so you don't conflate them:
 
 | Term | What it is |
 |---|---|
-| **Managed cache** *(this page)* | The posture: does fak actively upgrade the provider's prompt-cache window on the wire? (`--managed-cache`) |
+| **Managed cache** *(this page)* | The family of levers fak runs on your caching's behalf (breakpoint placement, compaction, tool-prune, the 1h upgrade, …). The `--managed-cache` flag governs one member: whether fak upgrades the provider's prompt-cache window on the wire. |
 | **The provider prompt cache** | Anthropic's (or OpenAI's / Gemini's) own caching feature — cost/latency telemetry that managed cache *steers*. fak preserves and relays it, never claims to author it. |
 | **Kernel / KV cache** | When fak runs the model itself, the reuse it owns directly (prefix reuse, span eviction, O(1) context). Deeper than the API cache; see the note above. |
-| **Context compaction / shedding** | A *separate*, always-on feature: fak drops stale middle turns from a long session while keeping the cached front byte-identical. See [long sessions, keep the cache hit](long-sessions-keep-the-cache-hit.md). |
+| **Context compaction / shedding** | A sibling lever in the managed-cache family, on by default: fak drops stale middle turns from a long session while keeping the cached front byte-identical. See [long sessions, keep the cache hit](long-sessions-keep-the-cache-hit.md). |
 | **Managed context** | The gateway's context program (bounded resident view). Same word "managed", different resource — that's tokens in your window, not the provider's cache. |
 | **Managed-cache restart plan** | A different sense entirely: how `fak resume` prices restarting a *dormant* crashed session warm instead of cold. |
 
 ## Try it
 
 ```bash
-fak guard --managed-cache on -- claude   # force the 1h upgrade (any seat)
+fak guard --managed-cache on -- claude   # request the 1h upgrade (API key: active; subscription-OAuth: passive)
 fak cachevalue report                     # see what caching actually saved
 ```
 
 If you launch through a fleet tool (`fak accounts launch`, `fak codex`, the dispatch
-worker), managed cache is already **on** by default — you don't need the flag. Set
-`FAK_MANAGED_CACHE=off` only on a seat where it misbehaves.
+worker), managed cache is already **on** by default — you don't need the flag. On a
+subscription-OAuth seat that resolves to a passive posture (the family's other levers
+keep caching). Set `FAK_MANAGED_CACHE=off` only on a seat where it misbehaves.
 
 ## FAQ
 
 **Is managed cache on by default?**
 Through fak's fleet launchers, **yes** — since 2026-07-10 an unset `FAK_MANAGED_CACHE`
-resolves to `on`, so fleet workers run it active on every seat, subscription included. A
-bare `fak guard` still defaults its own flag to `auto` (active on an API-key Anthropic
-session, passive on a Pro/Max subscription).
+resolves to `on`. That arms the 1h upgrade on API-key seats; on a subscription-OAuth
+seat the guard downgrades `on` to passive (the provider rejects the 1h tier on that
+credential class), and the family's other levers do the caching. A bare `fak guard`
+still defaults its own flag to `auto` (active on an API-key Anthropic session, passive
+on a Pro/Max subscription).
 
 **Will it save me money on Claude Pro/Max?**
 Not in *dollars* — your subscription price is flat. What it saves is **usage-limit
 headroom**: cache reads cost ~0.1× the compute of a fresh prefix and don't count against
 the rate limit, so avoiding cold prefix rewrites lets you do more work before you hit your
-cap. That's the real reason it's on for subscription seats now (see the section above,
-including the honest caveat about what's witnessed vs. assumed).
+cap. On those seats the headroom comes from the family's passive-side levers — the
+provider 5m cache, star-anchor placement, compaction, tool-prune — not the 1h tier, which
+is rejected on subscription-OAuth in practice (see the section above, including the
+honest caveat about what's measured vs. absolute).
 
 **Does it change my model's answers?**
 No. It only changes how the provider *bills* the unchanged front of your prompt. It's
 byte-safe and forwards your prompt untouched on any ambiguity.
 
 **Can it break a request?**
-No longer. The 1-hour tier needs an extra Anthropic beta header; fak adds it automatically
-when the upgrade fires (the fix for the old forced-cache HTTP 400). It also upgrades only
-the stable-head marker, placing one first if none exists, and refuses volatile prompts.
+Not anymore — two different HTTP 400s used to bite here, and both are handled. First, the
+1-hour tier needs an extra Anthropic beta header; fak adds it automatically when the
+upgrade fires. Second, the provider rejects the 1h tier itself on a subscription-OAuth
+credential even with that header (measured 2026-07-18), so the guard refuses to arm the
+upgrade on those seats and downgrades to passive with the reason in the banner — the
+rejected body is never sent. It also upgrades only the stable-head marker, placing one
+first if none exists, and refuses volatile prompts.
 
 **Does it work with OpenAI / Codex / Cursor / Gemini?**
 Those wires cache *automatically* and expose no `cache_control` TTL for fak to steer, so
@@ -274,9 +308,11 @@ only earns its keep across **idle gaps of 5–60 minutes**, which is most of wha
 agent sessions actually hit.
 
 **What's the difference between managed cache and context compaction?**
-Managed cache changes the *price* of the cached prefix (a longer cache window).
-Compaction changes the *size* of what you send (it drops stale middle turns). They're
-independent and both help long sessions.
+Compaction is itself a member of the managed-cache family. The distinction people
+usually mean is with the family's TTL lever: the `--managed-cache` flag changes the
+*price* of the cached prefix (a longer cache window), while compaction changes the
+*size* of what you send (it drops stale middle turns). They're independent and both
+help long sessions.
 
 ## See also
 

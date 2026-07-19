@@ -55,7 +55,8 @@ forced-on = 400.**
 
 - The provider rejects the 1h-TTL (`ttl:"1h"`) cache_control on the subscription-OAuth
   wire even when the request carries the extended-cache-ttl beta. The 1h tier is not
-  available on this credential class.
+  available on this credential class **in practice** (measured here; see the scope
+  caveats below — this is "rejected in practice", not "proven universally impossible").
 - `--managed-cache` AUTO staying passive on subscription-OAuth
   ([`cmd/fak/guard_managed_cache.go`](../../cmd/fak/guard_managed_cache.go) `oauthSource != ""`
   branch) and the fleet's `FAK_MANAGED_CACHE=auto` posture are **measured-correct**, not
@@ -65,6 +66,28 @@ forced-on = 400.**
   lever they measure is provider-blocked on this credential class. What IS working on these
   seats — provider 5m prompt cache + star-anchor placement + compaction — is not captured
   by those two families.
+
+## Scope and honest caveats
+
+Two caveats keep this finding honest, and both push the same way — read it as "rejected
+in practice / passive is the safe default", not "universally impossible":
+
+- **The upgrade counter measures authoring, not acceptance.** The
+  `cache_ttl_upgrades_upgraded` counter (and the ledger's per-session `upg=` figure)
+  counts fak **authoring** the 1h upgrade on the outbound body. It says nothing about
+  the provider **accepting** the tier — a high upgrade count is a session where fak sent
+  the upgraded body, not proof the 1h window was honored end-to-end.
+- **One measured counterexample exists.** The fleet ledger holds at least one
+  **2026-07-10** subscription-OAuth session that fired **19** upgrades (`upg=19`) and
+  served fully (3.5M cached prompt tokens) — no 400s. So the OAuth 400, while real and
+  re-witnessed here (2026-07-18), is not proven universal across time or seats. The
+  operational conclusion stands unchanged: passive is the safe default on
+  subscription-OAuth, and API-key billing is the sanctioned way to reach the 1h tier.
+
+Also note **why the 400 no longer appears in normal operation**: after 2026-07-10 the
+fleet moved subscription-OAuth seats to the passive default, so the upgrade stops being
+authored on those seats and the rejected body is never sent. This probe reproduced the
+400 only by forcing the ACTIVE posture on a throwaway session.
 
 ## The activation paths that remain
 
@@ -76,8 +99,12 @@ forced-on = 400.**
    1h-TTL 400 and retry the turn once with the upgrade stripped (the byte-identical 5m
    body), so a forced/best-effort `on` DEGRADES to the provider 5m cache instead of failing
    the turn. That would make `--managed-cache on` safe to default everywhere: active where
-   the wire accepts 1h, transparently passive where it does not. Until then, subscription
-   seats must stay AUTO/passive to avoid the crash.
+   the wire accepts 1h, transparently passive where it does not. A first, simpler slice of
+   this landed at the POSTURE layer (2026-07-18): `--managed-cache on` on a subscription-OAuth
+   seat now degrades LOUDLY to passive in `resolveGuardManagedCache` instead of arming the
+   doomed upgrade, so the fleet default-on (`normalizeManagedCacheMode` unset -> on) no longer
+   crash-loops those seats. The gateway-level retry above remains the fuller fix — it also
+   covers a best-effort `on` on a wire whose 1h support is merely unknown rather than known-bad.
 
 ## Provenance
 

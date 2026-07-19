@@ -87,7 +87,9 @@ at 0.1×. That is what the 1-hour tier buys back.
 
 fak's managed-cache posture (`--managed-cache auto|on|off`, `cmd/fak/guard_managed_cache.go`)
 decides whether this guard session actively manages the outbound Anthropic prompt-cache
-beyond forwarding the client's own `cache_control` bytes. When **active**, it arms exactly
+beyond forwarding the client's own `cache_control` bytes. The flag governs one member of
+the wider managed-cache family (star-anchor breakpoint placement, compaction shed,
+tool-prune, and kernel KV reuse all run independently of it). When **active**, it arms exactly
 one lever: it upgrades the *existing* stable system/tools breakpoint from the default 5m
 tier to 1h, so an idle gap past 5 minutes re-enters on a 0.1× read instead of a 2.0× (once)
 re-write. The upgrade is byte-safe by construction — it only touches an existing stable-head
@@ -108,10 +110,14 @@ On the wire this is two coordinated changes:
 so `auto` activates only when fak knows the session bills an **API key** on the Anthropic
 wire — where every multiplier is operator dollars fak owns. On a Pro/Max subscription the
 marginal token price is flat and the provider cache already rides the client's own
-breakpoints, so `auto` stays passive there. (Note: as of the fix above, a fleet launcher
-default of `FAK_MANAGED_CACHE=on` can force the upgrade on every seat to buy usage-limit
-headroom; the subscription-wire read-rebate end-to-end is witnessed via `fak cachevalue
-report`, not assumed.) Pass `--managed-cache on` to force, `off` to opt out.
+breakpoints, so `auto` stays passive there — and the passivity is more than caution: the
+provider rejects a `ttl:"1h"` body on a subscription-OAuth credential with an HTTP 400 in
+practice (measured 2026-07-18, even with the beta union above), so even an explicit
+`--managed-cache on` is refused on those seats and **downgrades to passive with a
+witnessed reason** rather than fail turns. The caching those seats still get comes from
+the rest of the managed-cache family (the provider 5m cache on well-placed breakpoints,
+star-anchor placement, compaction, tool-prune); API-key billing is the sanctioned path to
+the 1h tier. Pass `--managed-cache on` to request it, `off` to opt out.
 
 ## A worked turn (illustrative arithmetic)
 
