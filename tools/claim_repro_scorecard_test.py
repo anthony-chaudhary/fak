@@ -196,7 +196,11 @@ def test_render_markdown() -> None:
         result = crs.collect(root)
         output = crs.render_markdown(result, stamp="2026-06-28")
         assert "# Claim-reproducibility scorecard" in output
-        assert "| **Un-falsifiable claims" in output
+        # Headline LEADS with the unbounded claim-repro-debt integer (drive-to-0),
+        # and demotes the bounded /100 score to a trailing legacy line.
+        assert "Claim-repro-debt:" in output
+        assert "primary metric" in output
+        assert "Legacy bounded score (saturates; not the driver):" in output
         assert "claim-repro-scorecard: 2026-06-28" in output
 
 

@@ -600,11 +600,19 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("")
     out.append("## Headline")
     out.append("")
-    out.append("| Metric | Value |")
+    debt = c.get("claim_repro_debt", 0)
+    out.append(f"**Claim-repro-debt: {debt}** unresolvable witness(es) — the count of "
+               "witnesses that do NOT resolve from a clean clone (a ``Witness: TestFooBar`` "
+               "naming a non-existent test, a ``Reproduce: go run ./cmd/gone`` pointing at a "
+               "deleted binary). This is the **primary metric: unbounded, drive it to 0.**")
+    out.append("")
+    out.append("| Metric (primary first) | Value |")
     out.append("|---|---|")
-    out.append(f"| **Un-falsifiable claims (total HARD defects)** | **{c.get('claim_repro_debt', 0)}** |")
-    out.append(f"| Composite score | {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) |")
+    out.append(f"| **Claim-repro-debt — unresolvable witnesses (unbounded; drive to 0)** | **{debt}** |")
     out.append(f"| Advisory (soft) signals | {c.get('soft_signals', 0)} |")
+    out.append("")
+    out.append(f"Legacy bounded score (saturates; not the driver): "
+               f"{c.get('score', 0)}/100 (grade {c.get('grade', '?')}).")
     out.append("")
     out.append("## Per-KPI")
     out.append("")
