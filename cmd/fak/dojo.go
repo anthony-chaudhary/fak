@@ -302,6 +302,15 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	for _, in := range providerCompletionEpisodesFromSessions(sessionCorpus) {
 		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
+	// And the cross-provider tool-use-reliability cell (#4493): one episode per
+	// provider of first-try tool-call success (non-errored tool_result / total
+	// tool_result) — so the live run renders where every provider fak routes to
+	// sits on tool-call reliability, with no episode for a provider whose
+	// sessions never called a tool and UNMEASURED only when no billed provider
+	// called a tool at all, never a fabricated rate.
+	for _, in := range providerToolcallEpisodesFromCorpus(sessionCorpus) {
+		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
 	report := dojo.Fold(episodes, dojo.FoldOpts{
