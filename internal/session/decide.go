@@ -76,35 +76,11 @@ func (t *Table) Decide(trace string) Verdict {
 	defer t.mu.Unlock()
 	cur := t.getLocked(trace)
 
-	// (2) Non-advancing run-states: resolve without debiting.
-	switch cur.Run {
-	case Stopped:
-		return Verdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonStopped), State: cur}
-	case Paused:
-		// A hold, not an end: the loop must not burn a turn, but the session is not
-		// terminal — a resume flips it back to Running. Stop stays false.
-		return Verdict{Proceed: false, Stop: false, Reason: ReasonPaused, State: cur}
-	case Draining:
-		// The stop was requested earlier; take it at THIS boundary and finalize to
-		// Stopped so a later Decide is idempotent and the record reflects the end.
-		cur.Run = Stopped
-		if cur.Reason == "" {
-			cur.Reason = ReasonDrained
-		}
-		final := t.putLocked(cur)
-		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
-	case Terminating:
-		// The forceful stop (#2758) was signalled mid-turn; the arm has usually
-		// already aborted in-flight work on the terminate signal and calls back in
-		// here to finalize. Same idempotent finalize as Draining, but with the
-		// TERMINATED reason so the record never claims the drain's ran-to-completion
-		// semantics.
-		cur.Run = Stopped
-		if cur.Reason == "" {
-			cur.Reason = ReasonTerminated
-		}
-		final := t.putLocked(cur)
-		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
+	// (2) Non-advancing run-states: resolve without debiting. Shared with DebitToolCall
+	// via nonAdvancingVerdictLocked so the Stopped/Paused/Draining/Terminating
+	// finalization has ONE definition and the two gates cannot drift.
+	if v, done := t.nonAdvancingVerdictLocked(cur); done {
+		return v
 	}
 
 	// (3) Live session: debit one turn, then check the budget. The debit happens
@@ -202,26 +178,9 @@ func (t *Table) DebitToolCall(trace string) Verdict {
 	defer t.mu.Unlock()
 	cur := t.getLocked(trace)
 
-	// Non-advancing run-states: resolve without debiting (mirror Decide).
-	switch cur.Run {
-	case Stopped:
-		return Verdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonStopped), State: cur}
-	case Paused:
-		return Verdict{Proceed: false, Stop: false, Reason: ReasonPaused, State: cur}
-	case Draining:
-		cur.Run = Stopped
-		if cur.Reason == "" {
-			cur.Reason = ReasonDrained
-		}
-		final := t.putLocked(cur)
-		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
-	case Terminating:
-		cur.Run = Stopped
-		if cur.Reason == "" {
-			cur.Reason = ReasonTerminated
-		}
-		final := t.putLocked(cur)
-		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
+	// Non-advancing run-states: resolve without debiting (shared with Decide).
+	if v, done := t.nonAdvancingVerdictLocked(cur); done {
+		return v
 	}
 
 	if !cur.Budget.toolCallsBounded() {
@@ -236,6 +195,47 @@ func (t *Table) DebitToolCall(trace string) Verdict {
 	cur.Budget.ToolCallsLeft--
 	out := t.putLocked(cur)
 	return Verdict{Proceed: true, State: out}
+}
+
+// nonAdvancingVerdictLocked resolves a non-advancing run-state to a non-proceed
+// Verdict WITHOUT debiting any budget: Stopped/Paused report the held/terminal cause,
+// and Draining/Terminating are finalized to Stopped idempotently (a real write, so a
+// later call is stable). It returns (verdict, true) when cur.Run is non-advancing and
+// the caller must return that verdict as-is; (zero, false) when the session is live
+// (Running/Throttled) and the caller proceeds to its own debit path. Caller holds
+// t.mu. This is the shared head of Decide and DebitToolCall — one definition of the
+// run-state finalization so the two hot-path gates cannot drift.
+func (t *Table) nonAdvancingVerdictLocked(cur State) (Verdict, bool) {
+	switch cur.Run {
+	case Stopped:
+		return Verdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonStopped), State: cur}, true
+	case Paused:
+		// A hold, not an end: the loop must not burn a turn, but the session is not
+		// terminal — a resume flips it back to Running. Stop stays false.
+		return Verdict{Proceed: false, Stop: false, Reason: ReasonPaused, State: cur}, true
+	case Draining:
+		// The stop was requested earlier; take it at THIS boundary and finalize to
+		// Stopped so a later call is idempotent and the record reflects the end.
+		cur.Run = Stopped
+		if cur.Reason == "" {
+			cur.Reason = ReasonDrained
+		}
+		final := t.putLocked(cur)
+		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}, true
+	case Terminating:
+		// The forceful stop (#2758) was signalled mid-turn; the arm has usually
+		// already aborted in-flight work on the terminate signal and calls back in
+		// here to finalize. Same idempotent finalize as Draining, but with the
+		// TERMINATED reason so the record never claims the drain's ran-to-completion
+		// semantics.
+		cur.Run = Stopped
+		if cur.Reason == "" {
+			cur.Reason = ReasonTerminated
+		}
+		final := t.putLocked(cur)
+		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}, true
+	}
+	return Verdict{}, false
 }
 
 // finalizeDrainLocked writes a budget-exhausted record straight to Stopped (the
