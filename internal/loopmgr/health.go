@@ -55,6 +55,13 @@ const (
 	// cannot be derived. Distinct from dark — we decline to judge rather than judge
 	// wrongly. (Never returned for a registered job; a registered job has a cadence.)
 	HealthUnknown HealthState = "unknown"
+	// HealthRetired: the loop is registered but the operator put it DOWN (stopped or
+	// disabled — not armed), so it is not expected to tick. Distinct from dark: a dark
+	// loop is SUPPOSED to be running and has gone quiet (an alarm); a retired loop is
+	// intentionally quiet (not an alarm). Never returned by DeriveState — healthRow
+	// assigns it, and only in place of what would otherwise be a dark verdict, so a
+	// retired job neither reddens `loop health --check` nor inflates rollup.Dark.
+	HealthRetired HealthState = "retired"
 )
 
 // HealthThresholds tunes the staleness derivation. The zero value is usable:
@@ -210,11 +217,16 @@ type HealthRow struct {
 // many in each derived state. The roll-up answers "is the fleet of loops healthy"
 // in one line; Dark > 0 is the signal a scheduler gates on.
 type HealthRollup struct {
-	Loops      int `json:"loops"`
-	Live       int `json:"live"`
-	Stale      int `json:"stale"`
-	Dark       int `json:"dark"`
-	Unknown    int `json:"unknown"`
+	Loops   int `json:"loops"`
+	Live    int `json:"live"`
+	Stale   int `json:"stale"`
+	Dark    int `json:"dark"`
+	Unknown int `json:"unknown"`
+	// Retired is the count of registered-but-not-armed (stopped/disabled) jobs. It is
+	// a SIBLING of Dark, never part of it: an operator-retired loop is intentionally
+	// quiet, so it must not redden `loop health --check` (which gates on Dark) nor be
+	// counted among the loops that have gone silently dark.
+	Retired    int `json:"retired,omitempty"`
 	Registered int `json:"registered"`
 	Ledgered   int `json:"ledgered"`
 	// WitnessGap is the fleet-wide sum of per-loop WitnessGap: total ended-but-unwitnessed
@@ -338,7 +350,7 @@ func overlayOSTask(row *HealthRow, w OSTaskInfo, now time.Time) {
 	}
 	age := now.UTC().UnixNano() - w.LastRunUnixNano
 	if age < 0 {
-		age = 0
+		return // a run stamped in the future has not happened yet — it cannot corroborate a within-cadence fire; fail closed, the row stays a plain DARK
 	}
 	if age > row.CadenceSeconds*int64(time.Second) {
 		return // the OS task's own last run is past cadence — it stopped firing too
@@ -427,6 +439,15 @@ func healthRow(id string, snap LoopSnapshot, ledgered bool, job Job, registered 
 			row.AgeSeconds = age / int64(time.Second)
 		}
 	}
+	// A registered job the operator put DOWN (stopped or disabled — not armed) is not
+	// expected to tick, so a dark verdict for it is a false alarm that reddens
+	// `loop health --check` and inflates rollup.Dark for a loop that is intentionally
+	// quiet. Reclassify that ONE case to RETIRED — a distinct, non-dark surfaced state —
+	// so the alarm fires only for loops that are SUPPOSED to be running. A non-armed job
+	// that still reads live/stale keeps its liveness verdict (it is genuinely ticking).
+	if registered && !job.State.Armed() && row.State == HealthDark {
+		row.State = HealthRetired
+	}
 	row.Dark = row.State == HealthDark
 	return row
 }
@@ -482,6 +503,8 @@ func rollup(rows []HealthRow) HealthRollup {
 			r.Dark++
 		case HealthUnknown:
 			r.Unknown++
+		case HealthRetired:
+			r.Retired++
 		}
 		if row.Registered {
 			r.Registered++

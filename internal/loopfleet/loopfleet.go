@@ -244,9 +244,19 @@ func foldLoopmgr(root string, now time.Time, th loopmgr.HealthThresholds) ([]Loo
 	if len(st.Loops) == 0 {
 		return nil, &Skipped{Ledger: "loopmgr", Path: rel, Reason: "no parseable rows"}
 	}
-	cadence := defaultCadence(th)
+	// Each loop is judged against its REGISTERED cadence, exactly as loopmgr's own
+	// FoldHealth does (health.go: a registered job's IntervalSeconds is the truth) —
+	// so a healthy longer-cadence loop (e.g. a 6h garden walk that ticked 3h ago)
+	// draws the SAME live/stale/dark line here as in `fak loop health`, never a false
+	// DARK manufactured by a flat 1h default. A loop absent from the registry (an
+	// ad-hoc, ledger-only loop) falls back to the default horizon as before.
+	cad := registryCadences(root)
 	out := make([]LoopHealth, 0, len(st.Loops))
 	for _, snap := range st.Loops {
+		cadence := defaultCadence(th)
+		if c := cad[snap.LoopID]; c > 0 {
+			cadence = c
+		}
 		out = append(out, deriveRow("loopmgr", rawLoop{
 			kind:             "loopmgr:" + snap.LoopID,
 			lastTickUnixNano: snap.LastEventUnixNano,
@@ -256,6 +266,36 @@ func foldLoopmgr(root string, now time.Time, th loopmgr.HealthThresholds) ([]Loo
 		}, cadence, now, th))
 	}
 	return out, nil
+}
+
+// registryCadences loads the loop registry and returns each registered loop's
+// cadence (seconds). It mirrors the path convention `fak loop health` and the
+// canonical roster read use (FAK_LOOP_REGISTRY, else tools/loop-registry.json), so
+// the cross-ledger fold judges each loopmgr loop against the SAME per-loop cadence
+// loopmgr's own fold does. A missing or unreadable registry yields an empty map —
+// every loop falls back to the default horizon, never an error that would drop the
+// whole loopmgr plane; the registry gap, when it matters, is surfaced by the
+// roster's own registry read.
+func registryCadences(root string) map[string]int64 {
+	regRel := strings.TrimSpace(os.Getenv("FAK_LOOP_REGISTRY"))
+	if regRel == "" {
+		regRel = filepath.Join("tools", "loop-registry.json")
+	}
+	regPath := regRel
+	if !filepath.IsAbs(regPath) {
+		regPath = filepath.Join(root, regRel)
+	}
+	reg, err := loopmgr.LoadRegistry(regPath)
+	if err != nil {
+		return nil
+	}
+	cad := make(map[string]int64, len(reg.Jobs))
+	for id, job := range reg.Jobs {
+		if job.Schedule.IntervalSeconds > 0 {
+			cad[id] = job.Schedule.IntervalSeconds
+		}
+	}
+	return cad
 }
 
 // deriveRow turns a rawLoop + its cadence into a finished LoopHealth: keep rate,
@@ -444,9 +484,14 @@ func single(lp rawLoop) []rawLoop {
 	return []rawLoop{lp}
 }
 
+// isSuccess reports whether a nightrun collection outcome counts as a KEPT run. It
+// mirrors nightrun.CollectedOutcome (collected|passed): "collected" is the run
+// loop's DOMINANT clean-capture outcome and must count, or a healthy collecting loop
+// has its keep rate slandered toward zero. "degraded"/"partial"/"skipped"/"timeout"/
+// "failed" are deliberately not kept — they ran but banked no fresh datum.
 func isSuccess(outcome string) bool {
 	switch strings.ToLower(strings.TrimSpace(outcome)) {
-	case "ok", "success", "succeeded", "passed", "pass":
+	case "ok", "success", "succeeded", "collected", "passed", "pass":
 		return true
 	}
 	return false

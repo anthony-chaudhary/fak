@@ -134,6 +134,13 @@ func TestFoldHealthWithOS_FailsClosed(t *testing.T) {
 				LastRunUnixNano: now.Add(-3 * time.Hour).UnixNano(), // cadence is 1h
 			}},
 		},
+		{
+			name: "task fired 0x0 but its last run is stamped in the FUTURE — a run that has not happened cannot corroborate a tick",
+			witness: map[string]OSTaskInfo{gardenLoopID: {
+				TaskLabel: "FleetStaleWorkGarden", Fired: true,
+				LastRunUnixNano: now.Add(1 * time.Hour).UnixNano(), // ahead of now: was clamped to age 0 pre-fix, fabricating liveness
+			}},
+		},
 	}
 
 	for _, tc := range cases {

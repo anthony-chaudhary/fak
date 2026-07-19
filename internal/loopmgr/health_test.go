@@ -338,6 +338,53 @@ func TestFoldHealth_PureRead(t *testing.T) {
 
 // TestFoldHealth_UnknownWhenNoCadenceAndNoTick covers the decline-to-judge branch: a
 // loop with neither a usable last tick nor a cadence is UNKNOWN, distinct from DARK.
+// TestFoldHealth_RetiredJobIsNotDark pins the stopped/disabled honesty edge: a
+// registered job the operator put DOWN (stopped or disabled — not armed) is not
+// expected to tick, so it reads RETIRED, never DARK. Pre-fix it folded DARK,
+// reddening `loop health --check` (which gates on rollup.Dark) and inflating the
+// dark tally for a loop that is intentionally quiet. The still-armed never-ticked
+// job is the one that must stay DARK.
+func TestFoldHealth_RetiredJobIsNotDark(t *testing.T) {
+	now := time.Unix(2_000_000, 0).UTC()
+	st := Summarize(nil, now) // no ledger: every job has never ticked (dark if armed)
+
+	reg := Registry{Jobs: map[string]Job{}}
+	for _, j := range []struct {
+		id    string
+		state JobState
+	}{
+		{"stopped-loop", JobStopped},
+		{"disabled-loop", JobDisabled},
+		{"armed-loop", JobArmed},
+	} {
+		if err := reg.Put(Job{
+			Schedule: Schedule{JobID: j.id, IntervalSeconds: 3600, MissedRun: MissedSkip},
+			State:    j.state,
+		}, now); err != nil {
+			t.Fatalf("registry.Put(%s): %v", j.id, err)
+		}
+	}
+
+	rep := FoldHealth(st, reg, now, HealthThresholds{})
+
+	if got := rowFor(t, rep, "stopped-loop"); got.State != HealthRetired || got.Dark {
+		t.Errorf("stopped job: state=%q dark=%v, want retired/false", got.State, got.Dark)
+	}
+	if got := rowFor(t, rep, "disabled-loop"); got.State != HealthRetired || got.Dark {
+		t.Errorf("disabled job: state=%q dark=%v, want retired/false", got.State, got.Dark)
+	}
+	if got := rowFor(t, rep, "armed-loop"); got.State != HealthDark || !got.Dark {
+		t.Errorf("armed never-ticked job: state=%q dark=%v, want dark/true", got.State, got.Dark)
+	}
+
+	if rep.Rollup.Dark != 1 {
+		t.Errorf("rollup.Dark = %d, want 1 (only the armed never-ticked loop)", rep.Rollup.Dark)
+	}
+	if rep.Rollup.Retired != 2 {
+		t.Errorf("rollup.Retired = %d, want 2 (stopped + disabled)", rep.Rollup.Retired)
+	}
+}
+
 func TestFoldHealth_UnknownWhenNoCadenceAndNoTick(t *testing.T) {
 	now := time.Unix(4_000_000, 0).UTC()
 	// A loop whose only events carry no usable timestamp AND a zero default horizon.

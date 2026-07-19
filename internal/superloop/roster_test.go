@@ -211,6 +211,44 @@ func TestLoopFleetStatusesSurfacesGapsAsUnmeasured(t *testing.T) {
 	}
 }
 
+// TestLoopFleetStatusesUnknownLivenessIsUnmeasured pins the fabricated-health edge:
+// a folded loop whose liveness loopfleet DECLINED to judge (HealthUnknown — it ran
+// but cannot be placed on the freshness timeline) must fold UNMEASURED, not as a
+// clean live-reading zero. Pre-fix it read Measured=true, Debt=0, Dark=false, so the
+// meta-walk read Satisfied while a member loop's liveness was undetermined.
+func TestLoopFleetStatusesUnknownLivenessIsUnmeasured(t *testing.T) {
+	src := Member{Kind: KindLoopFleet, Ref: "all", Why: "the whole fleet"}
+	folded := []RosterLoop{
+		{Kind: "cadence", State: "live"},
+		{Kind: "ran-no-tick", State: "unknown"}, // ran but unplaceable on the timeline
+	}
+	sts := LoopFleetStatuses(src, folded, nil)
+
+	byRef := map[string]MemberStatus{}
+	for _, st := range sts {
+		byRef[st.Member.Ref] = st
+	}
+	u, ok := byRef["ran-no-tick"]
+	if !ok {
+		t.Fatalf("unknown-liveness loop vanished from enumeration: %+v", sts)
+	}
+	if u.Measured {
+		t.Errorf("unknown-liveness loop Measured=true, want false (a decline-to-judge is a gap, not clean)")
+	}
+	if u.Dark {
+		t.Error("unknown-liveness loop must not carry Dark")
+	}
+
+	// It must block Satisfied at the walk fold, exactly like a skipped ledger.
+	rep := Walk(Super{Name: "fleet-test", Members: []Member{src}}, sts)
+	if rep.Satisfied {
+		t.Error("walk reads Satisfied while a loop's liveness is UNKNOWN — a known gap must block it")
+	}
+	if rep.Unmeasured != 1 {
+		t.Errorf("walk Unmeasured = %d, want 1 (the unknown-liveness loop)", rep.Unmeasured)
+	}
+}
+
 // TestLoopFleetStatusesSelectsOneAndNeverReadsMissingAsClean: a non-"all" Ref
 // selects one loop by identity; a roster loop with no foldable ledger reads
 // UNMEASURED, not clean, and an empty fleet is UNMEASURED too.

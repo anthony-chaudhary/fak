@@ -152,6 +152,65 @@ func TestFoldRealLedgersDrawTheRightLine(t *testing.T) {
 	}
 }
 
+// A registered loop must be judged against its REGISTERED cadence, not a flat 1h
+// default. A 6h garden loop that ticked 3h ago is LIVE in `fak loop health`
+// (registry cadence 21600s) and must read LIVE here too. Pre-fix, foldLoopmgr
+// applied defaultCadence(th)=3600s to EVERY loop, so age 10800s > 2*3600 folded a
+// healthy loop to a false DARK — slandering it and reddening the roster, the
+// rollup, and `loop health --check`, while the two panes disagreed on one loop.
+func TestFoldLoopmgrUsesRegisteredCadenceNotFlatDefault(t *testing.T) {
+	t.Setenv("FAK_LOOP_REGISTRY", "") // deterministic: use the default tools/ path, not a dev's env
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	th := loopmgr.HealthThresholds{DefaultCadenceSeconds: 3600, DarkMultiple: 2}
+	root := t.TempDir()
+
+	// A real hash-chained loopmgr ledger: one run that ended 3h ago — within a 6h
+	// cadence, but 3x past the 1h default the pre-fix code wrongly applied.
+	ledger := filepath.Join(root, ".fak", "loops.jsonl")
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ranAt := func() time.Time { return now.Add(-3 * time.Hour) }
+	for _, ev := range []loopmgr.Event{
+		{LoopID: "garden-item-walk", Kind: loopmgr.EventFire, Source: "schedule"},
+		{LoopID: "garden-item-walk", Kind: loopmgr.EventEnd, Source: "run"},
+	} {
+		if _, err := loopmgr.Append(ledger, ev, loopmgr.WithClock(ranAt)); err != nil {
+			t.Fatalf("append %s: %v", ev.Kind, err)
+		}
+	}
+
+	// Register that loop at a 6h cadence (schema omitted → accepted by Validate; armed).
+	reg := filepath.Join(root, "tools", "loop-registry.json")
+	if err := os.MkdirAll(filepath.Dir(reg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reg, []byte(
+		`{"jobs":{"garden-item-walk":{"schedule":{"job_id":"garden-item-walk","interval_seconds":21600,"missed_run":"skip"},"state":"armed"}}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var got *LoopHealth
+	rep := Fold(root, now, th)
+	for i := range rep.Loops {
+		if rep.Loops[i].Kind == "loopmgr:garden-item-walk" {
+			got = &rep.Loops[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("garden-item-walk missing from fold; loops=%+v", rep.Loops)
+	}
+	if got.CadenceSeconds != 21600 {
+		t.Errorf("CadenceSeconds = %d, want 21600 (registered cadence, not the 3600 default)", got.CadenceSeconds)
+	}
+	if got.State != loopmgr.HealthLive {
+		t.Errorf("State = %q, want LIVE (ticked 3h ago, within its 6h cadence)", got.State)
+	}
+	if got.Dark {
+		t.Error("Dark = true, want false (a healthy 6h loop must not be slandered DARK)")
+	}
+}
+
 // darkMultiple / defaultCadence fall back to the loopmgr defaults when the
 // threshold leaves them zero (or sub-1 for the multiple).
 func TestThresholdFallbacks(t *testing.T) {
@@ -188,12 +247,14 @@ func TestRollupCountsStatesAndDistinctLedgers(t *testing.T) {
 }
 
 func TestIsSuccess(t *testing.T) {
-	for _, ok := range []string{"ok", "success", "SUCCEEDED", " Passed ", "pass"} {
+	for _, ok := range []string{"ok", "success", "SUCCEEDED", " Passed ", "pass", "collected", "COLLECTED"} {
 		if !isSuccess(ok) {
 			t.Errorf("isSuccess(%q) = false, want true", ok)
 		}
 	}
-	for _, bad := range []string{"", "fail", "error", "timeout", "skipped"} {
+	// "degraded" ran but missed its bar (nightrun.CollectedOutcome is false for it);
+	// "partial" banked no clean datum — both are honestly NOT kept.
+	for _, bad := range []string{"", "fail", "error", "timeout", "skipped", "degraded", "partial"} {
 		if isSuccess(bad) {
 			t.Errorf("isSuccess(%q) = true, want false", bad)
 		}

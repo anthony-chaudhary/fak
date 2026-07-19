@@ -215,8 +215,10 @@ func BuildRoster(folded []RosterLoop, registryIDs []string, supers []Super, gaps
 // whole fleet. A Ref of "all" (or empty) enumerates every folded loop; any other
 // Ref selects one loop by its stable identity. Honesty rules, in order:
 //
-//   - every folded loop becomes one MEASURED status carrying its identity as Ref
-//     (dark carries Dark; a stale loop carries one unit of debt; live is clean);
+//   - every folded loop with a DEFINITE liveness verdict becomes one MEASURED status
+//     carrying its identity as Ref (dark carries Dark; a stale loop carries one unit
+//     of debt; live is clean). A loop whose liveness loopfleet DECLINED to judge
+//     (HealthUnknown) folds UNMEASURED — a known gap, exactly like a skipped ledger;
 //   - every skipped ledger becomes one UNMEASURED status — a known gap that blocks
 //     Satisfied, never dropped, never counted as a healthy zero;
 //   - a selected loop with no folded row, or an empty fleet, is UNMEASURED too.
@@ -232,6 +234,19 @@ func LoopFleetStatuses(src Member, folded []RosterLoop, gaps []RosterGap) []Memb
 	out := make([]MemberStatus, 0, len(loops)+len(gaps))
 	for _, l := range loops {
 		if selectOne && l.Kind != ref {
+			continue
+		}
+		// A folded loop whose liveness loopfleet DECLINED to judge (loopmgr.HealthUnknown:
+		// it ran but cannot be placed on the freshness timeline) is a KNOWN GAP, not a
+		// healthy zero. Fold it UNMEASURED — like a skipped ledger — so it blocks Satisfied
+		// and surfaces on the worklist, never a clean, live-reading leaf. A DARK loop, by
+		// contrast, is a DEFINITE verdict and stays measured (worst band, via its Dark flag).
+		if unknownLiveness(l.State) {
+			out = append(out, MemberStatus{
+				Member:   Member{Kind: KindLoopFleet, Ref: l.Kind, Why: src.Why},
+				Measured: false,
+				Detail:   fmt.Sprintf("fleet loop %s — liveness UNKNOWN (ran but unplaceable on the freshness timeline): known gap, not a healthy zero", l.Kind),
+			})
 			continue
 		}
 		// The liveness slice of the meta-walk's worst-first product (#4958): stale = 1
@@ -265,4 +280,14 @@ func LoopFleetStatuses(src Member, folded []RosterLoop, gaps []RosterGap) []Memb
 		return []MemberStatus{{Member: Member{Kind: KindLoopFleet, Ref: src.Ref, Why: src.Why}, Measured: false, Detail: detail}}
 	}
 	return out
+}
+
+// unknownLiveness reports whether a folded loop's liveness verdict is loopfleet's
+// explicit decline-to-judge (loopmgr.HealthUnknown, raw "unknown") or an absent
+// state. Such a loop is UNMEASURED — a known gap — never a clean, live-reading zero.
+// The raw string is matched (not the loopmgr constant) to keep this fold pure of the
+// loopmgr import, exactly as the state arrives stringified at the roster boundary.
+func unknownLiveness(state string) bool {
+	s := strings.TrimSpace(state)
+	return s == "" || s == "unknown"
 }
