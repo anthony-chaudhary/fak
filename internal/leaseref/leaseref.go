@@ -46,9 +46,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
@@ -163,16 +165,32 @@ type Store struct {
 	// ref instead of one for the whole backlog. New/NewInDir wire the real gitStdinRunner.
 	runStdin StdinRunner
 	dir      string
+	// realGit is true ONLY for a Store wired to the real git binary (New/NewInDir). It
+	// gates the no-object-DB probe below: an injected-Runner store (NewWithRunner, the
+	// test seam) models its OWN in-memory object store and is trusted to always be able
+	// to write, so it is NEVER probe-disabled — its algorithm stays byte-for-byte.
+	realGit bool
+	// probeOnce guards a SINGLE object-DB probe (see publishingDisabled). A serve whose
+	// process cwd is NOT a git repo (e.g. a dedicated GPU box serving from /home/USER)
+	// makes `git hash-object -w` exit 128 on EVERY durable-session refresh — ~75 log lines
+	// / 5 min of "hash-object exited 128" and the cross-machine side ref never publishes.
+	// The probe runs at most once, caches publishOff, and disables the publisher CLEANLY
+	// instead of erroring per refresh. A repo with a real object DB leaves publishOff false
+	// and the write path (writeBlob + update-ref) is unchanged.
+	probeOnce  sync.Once
+	publishOff bool
 }
 
 // New is the real-git lease store (git discovers the repo from the process cwd).
-func New() *Store { return &Store{run: gitRunner, runStdin: gitStdinRunner} }
+func New() *Store { return &Store{run: gitRunner, runStdin: gitStdinRunner, realGit: true} }
 
 // NewInDir is the real-git lease store operating in dir — the repo whose
 // refs/fak/locks/* namespace it reads and writes. dir == "" is identical to New()
 // (git discovers the repo from the process cwd). The CLI surface uses this to honor
 // a --dir flag without exposing the unexported real-git runner.
-func NewInDir(dir string) *Store { return &Store{run: gitRunner, runStdin: gitStdinRunner, dir: dir} }
+func NewInDir(dir string) *Store {
+	return &Store{run: gitRunner, runStdin: gitStdinRunner, dir: dir, realGit: true}
+}
 
 // NewWithRunner injects a Runner + dir — the SAME seam as the production path, so a
 // test exercises the whole acquire/read/reap algorithm with no real git. The batched
@@ -233,6 +251,15 @@ func (s *Store) Acquire(ctx context.Context, rec Record) (string, error) {
 // (never a branch/HEAD, never a force). Returns the written ref on success. Shared
 // by Acquire (lock leases) and PublishSession (session descriptors).
 func (s *Store) putBlobRef(ctx context.Context, ref string, v any) (string, error) {
+	if s.publishingDisabled(ctx) {
+		// No git object DB in s.dir (a serve running from a non-repo cwd): a blob write
+		// would fail with `hash-object -w` exit 128 on EVERY call. Disable the side-ref
+		// publisher CLEANLY — a best-effort caller (session_durable.publishBestEffort)
+		// sees success and stops logging a per-refresh error, and the cross-machine
+		// feature is simply off on a non-repo box, the honest post-state. Returns the ref
+		// the caller asked for (nothing was written) so the fail-open contract holds.
+		return ref, nil
+	}
 	blob, err := json.Marshal(v)
 	if err != nil {
 		return "", fmt.Errorf("leaseref: marshal record: %w", err)
@@ -425,6 +452,46 @@ func (s *Store) readRef(ctx context.Context, ref string) (Record, error) {
 		rec.ID = strings.TrimPrefix(ref, refPrefix)
 	}
 	return rec, nil
+}
+
+// publishingDisabled reports whether this store must NOT attempt a side-ref write because
+// its dir has no git object DB — the case a serve running from a non-repo cwd hits, where
+// `git hash-object -w` exits 128 on every publish (the bug this guards: ~75 "hash-object
+// exited 128" log lines / 5 min on a dedicated GPU serve box, and the side ref never
+// lands). The probe is cached (runs at most ONCE via probeOnce) and applies ONLY to a
+// real-git store; an injected-Runner store (the test seam) is never disabled, so its
+// in-memory object model stays authoritative and the existing algorithm tests are
+// byte-for-byte unchanged. On the disabling transition it logs a SINGLE line, replacing
+// the per-refresh error spam with one setup-time notice.
+func (s *Store) publishingDisabled(ctx context.Context) bool {
+	if !s.realGit {
+		return false
+	}
+	s.probeOnce.Do(func() {
+		if s.hasObjectDB(ctx) {
+			return
+		}
+		s.publishOff = true
+		dir := s.dir
+		if dir == "" {
+			if wd, err := os.Getwd(); err == nil {
+				dir = wd
+			}
+		}
+		log.Printf("leaseref: no git object DB in %s; session side-ref publishing disabled", dir)
+	})
+	return s.publishOff
+}
+
+// hasObjectDB reports whether s.dir resolves a git object database — i.e. `git rev-parse
+// --git-dir` exits 0. That is the EXACT precondition `git hash-object -w` needs: with a
+// resolvable git dir it writes the blob; without one it exits 128. --git-dir (not
+// --is-inside-work-tree) is the precise predicate: a bare repo has no work tree yet a
+// perfectly usable object DB. A non-executable git counts as "no object DB", so the
+// publisher disables cleanly rather than erroring on every refresh.
+func (s *Store) hasObjectDB(ctx context.Context) bool {
+	_, code, err := s.run(ctx, s.dir, "rev-parse", "--git-dir")
+	return err == nil && code == 0
 }
 
 // writeBlob writes blob into the object store via `git hash-object -w <file>` (a temp
