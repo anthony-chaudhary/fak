@@ -308,6 +308,113 @@ class SpawnCauseCardTest(unittest.TestCase):
         self.assertTrue(p["ok"])
 
 
+def seat_streak_rows(*rows: tuple[str, int]) -> list[dict]:
+    """Synthetic read_seat_spawn_failure_streaks rows (#4591)."""
+    return [{"seat": tag, "backend": "claude", "streak": n, "last_ts": 1_000_000.0}
+            for tag, n in rows]
+
+
+def seat_inventory_with(*, auth_failed: tuple[str, ...] = ()) -> dict:
+    seats = [{"tag": t, "dispatch_state": "unavailable", "hold_reason": "auth_failed"}
+             for t in auth_failed]
+    return {"schema": "seat-pool/1", "total_seats": max(1, len(seats)),
+            "by_dispatch_state": {"available": 0, "busy": 0, "cooling": 0,
+                                  "unavailable": len(seats)},
+            "seats": seats}
+
+
+class SeatStreakCardTest(unittest.TestCase):
+    """#4591: ONE dead seat with a spawn-fail run-length at threshold flips the
+    card verdict with a NAMED seat + operator action — the per-seat streak the
+    aggregate #4590 rate alarm can stay under in a big pool."""
+
+    def test_seat_at_threshold_flips_the_verdict_with_named_seat(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  seat_streaks=seat_streak_rows(("july17", 3)),
+                  seat_inventory=seat_inventory_with(auth_failed=("july17",)),
+                  spawn_causes=spawn_causes(spawns=4, stale_cred=1))
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "SEAT_SPAWN_FAIL_STREAK")
+        alarm = p["seat_streaks"]["alarm"]
+        self.assertTrue(alarm["red"])
+        self.assertTrue(alarm["seats"][0]["auth_failed"])
+        # The named, actionable reason the issue asks for — seat + count + cause
+        # + the operator command.
+        self.assertTrue(any(
+            "seat july17: 3 spawn-fails in a row (stale_cred) -> fak accounts status" in r
+            for r in p["reasons"]))
+
+    def test_seat_under_threshold_never_flips(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  seat_streaks=seat_streak_rows(("july17", 2)),
+                  seat_inventory=seat_inventory_with(auth_failed=("july17",)))
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "READY_TO_GROW")
+        self.assertFalse(p["seat_streaks"]["alarm"]["red"])
+
+    def test_unjoined_seat_still_flips_without_cause_qualifier(self) -> None:
+        # The streak alone is actionable evidence even when the inventory/cause
+        # join can't confirm stale_cred — the reason just omits the qualifier.
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  seat_streaks=seat_streak_rows(("gem5", 4)))
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "SEAT_SPAWN_FAIL_STREAK")
+        self.assertTrue(any(
+            "seat gem5: 4 spawn-fails in a row -> fak accounts status" in r
+            for r in p["reasons"]))
+
+    def test_seat_streak_does_not_stomp_a_flagged_host(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK", host_safe=False),
+                  seat_streaks=seat_streak_rows(("july17", 3)))
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "HOST_FLAGGED")
+        self.assertTrue(any("seat july17" in r for r in p["reasons"]))
+
+    def test_read_seat_spawn_failure_streaks_reads_the_ledgers(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            (runs / "spawn-failure-streak-seat-claude.json").write_text(json.dumps({
+                "july17": {"count": 3, "last_ts": 1_000_000.0},
+                "ok-seat": {"count": 1, "last_ts": 1_000_100.0},
+            }), encoding="utf-8")
+            (runs / "spawn-failure-streak-seat-opencode.json").write_text(
+                json.dumps({"glm-a": 2}), encoding="utf-8")  # bare-int tolerated
+            (runs / "spawn-failure-streak-claude.json").write_text(
+                json.dumps({"1515": 9}), encoding="utf-8")  # TARGET ledger: ignored
+            rows = mod.read_seat_spawn_failure_streaks(runs)
+        self.assertEqual([(r["seat"], r["backend"], r["streak"]) for r in rows],
+                         [("july17", "claude", 3), ("glm-a", "opencode", 2),
+                          ("ok-seat", "claude", 1)])
+
+
+class NetDeclineCardTest(unittest.TestCase):
+    """#4591 part 2: `live` declining M consecutive fleet-status-history appends
+    raises the net-worker-decline alarm on the card."""
+
+    def test_red_decline_flips_the_verdict(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  fleet_decline={"red": True, "key": "live", "declines": 3,
+                                 "reason": "net worker decline: 'live' fell 3 "
+                                           "consecutive ledger appends (5→4→3→2)"})
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "NET_WORKER_DECLINE")
+        self.assertTrue(any("net worker decline" in r for r in p["reasons"]))
+
+    def test_absent_or_errored_ledger_never_flips(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"), fleet_decline={"_error": "no ledger"})
+        self.assertTrue(p["ok"])
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  fleet_decline={"red": False, "declines": 1, "reason": ""})
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "READY_TO_GROW")
+
 
 class SeatSelectionCardTest(unittest.TestCase):
     def test_read_and_render_surface_seat_selection_summary(self) -> None:

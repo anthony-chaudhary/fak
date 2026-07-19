@@ -5025,8 +5025,194 @@ class TickExitCodeTest(unittest.TestCase):
         emitted = {"spawned", "would_spawn", "no_issue", "no_lane", "lane_busy",
                    "lane_leased", "same_issue_wip", "dirty_path_collision",
                    "multi_lane_scope", "refused", "weekly_capped",
-                   "backend_unhealthy", "backend_health_skip", "spawn_failed"}
+                   "backend_unhealthy", "backend_health_skip", "seat_cooled",
+                   "spawn_failed"}
         self.assertEqual(emitted - mod.BENIGN_ACTIONS, {"spawn_failed"})
+
+
+class SeatKeyedSpawnFailureStreakTest(unittest.TestCase):
+    """#4591 keying fix: the target-keyed pair lets a dead needs_login seat
+    cycling across DIFFERENT issues evade cooldown (every target rotation
+    restarts that counter at 1); the seat-keyed pair accrues ONE run-length per
+    seat regardless of which issue burned the spawn."""
+
+    def test_seat_cycling_across_distinct_issues_accrues_one_streak(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # The EVASION this test pins: 3 failures on 3 DISTINCT targets never
+            # lift any TARGET-keyed run-length above 1 ...
+            for target in (101, 202, 303):
+                self.assertEqual(
+                    mod.bump_spawn_failure_streak(runs, target, "claude"), 1)
+            # ... while the SEAT-keyed run-length sees one seat fail 3x in a row.
+            self.assertEqual(
+                mod.bump_spawn_failure_streak_seat(runs, "july17", "claude"), 1)
+            self.assertEqual(
+                mod.bump_spawn_failure_streak_seat(runs, "july17", "claude"), 2)
+            self.assertEqual(
+                mod.bump_spawn_failure_streak_seat(runs, "july17", "claude"), 3)
+            state = mod.seat_spawn_failure_state(runs, "july17", "claude")
+            self.assertEqual(state["streak"], 3)
+            self.assertTrue(state["cooled"])
+            self.assertFalse(state["reprobe_due"])  # failure just recorded
+
+    def test_streaks_are_per_seat_and_per_backend(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self.assertEqual(mod.bump_spawn_failure_streak_seat(runs, "a", "claude"), 1)
+            self.assertEqual(mod.bump_spawn_failure_streak_seat(runs, "a", "claude"), 2)
+            # a different seat keeps its own independent run-length
+            self.assertEqual(mod.bump_spawn_failure_streak_seat(runs, "b", "claude"), 1)
+            # a different backend never shares the counter
+            self.assertEqual(mod.bump_spawn_failure_streak_seat(runs, "a", "opencode"), 1)
+
+    def test_clean_launch_on_the_seat_clears_it_whatever_the_target(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for _ in range(3):
+                mod.bump_spawn_failure_streak_seat(runs, "a", "claude")
+            # The clear is SEAT-scoped, not same-target-scoped: any clean launch
+            # on the seat breaks the streak.
+            mod.clear_spawn_failure_streak_seat(runs, "a", "claude")
+            self.assertEqual(mod.bump_spawn_failure_streak_seat(runs, "a", "claude"), 1)
+
+    def test_blank_tag_records_nothing_and_never_cools(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self.assertEqual(mod.bump_spawn_failure_streak_seat(runs, "", "claude"), 0)
+            self.assertEqual(mod.bump_spawn_failure_streak_seat(runs, None, "claude"), 0)
+            state = mod.seat_spawn_failure_state(runs, "", "claude")
+            self.assertEqual(state["streak"], 0)
+            self.assertFalse(state["cooled"])
+
+    def test_cooled_seat_earns_a_reprobe_after_the_window(self) -> None:
+        # A permanently-skipped seat could never clear its own streak, so the
+        # cool admits ONE probe spawn every SEAT_STREAK_REPROBE_MIN minutes.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            t0 = 1_000_000.0
+            for _ in range(mod.SPAWN_FAILED_RED_STREAK):
+                mod.bump_spawn_failure_streak_seat(runs, "s", "claude", now_ts=t0)
+            fresh = mod.seat_spawn_failure_state(runs, "s", "claude", now_ts=t0 + 60)
+            self.assertTrue(fresh["cooled"])
+            self.assertFalse(fresh["reprobe_due"])
+            later = mod.seat_spawn_failure_state(
+                runs, "s", "claude",
+                now_ts=t0 + mod.SEAT_STREAK_REPROBE_MIN * 60 + 1)
+            self.assertTrue(later["cooled"])
+            self.assertTrue(later["reprobe_due"])
+
+
+class EvaluateSeatCoolGateTest(unittest.TestCase):
+    """#4591 end-to-end: a dead seat failing spawn across N DISTINCT issues
+    accrues a SEAT streak (while each target streak restarts at 1) and the
+    selector then cools/skips the seat instead of re-handing it a fourth issue."""
+
+    DEAD = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+            "account": {"tag": "dead-seat", "tier": 1, "model": "opus",
+                        "dir": "/acct/dead"}}
+    HEALTHY = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+               "account": {"tag": "fresh-seat", "tier": 1, "model": "opus",
+                           "dir": "/acct/fresh"}}
+
+    @staticmethod
+    def _dead_spawn(*_args, **_kwargs):
+        return {"pid": 999, "log": "resolve-x.log", "issue": 0, "lane": "gateway",
+                "backend": "claude",
+                "early_exit": {"checked": True, "alive": False, "wait_s": 5.0,
+                               "returncode": 1, "log_bytes": 0, "silent": True}}
+
+    def test_dead_seat_cycling_across_issues_is_cooled_by_the_selector(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            EvaluateTest._patch(self, mod, pre=self.DEAD,
+                                pick={"lane": "gateway", "numbers": [101],
+                                      "by_lane_count": {"gateway": 1}})
+            mod.witness_exited_workers = lambda *a, **k: {"skipped": True}
+            mod.release_lane_lease = lambda *a, **k: {"released": True}
+            mod.spawn_issue_worker = self._dead_spawn
+            for i, issue in enumerate((101, 202, 303), start=1):
+                mod.lane_issue_numbers = (
+                    lambda root_, lane, exclude=None, n=issue:
+                    {"lane": "gateway", "numbers": [n],
+                     "by_lane_count": {"gateway": 1}})
+                p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                                 lane=None, live=True, spawn_probe_s=5.0)
+                self.assertEqual(p["action"], "spawn_failed")
+                self.assertEqual(p["target_issue"], issue)
+                # target rotation restarts the TARGET streak every tick (the
+                # evasion #4591 closes) ...
+                self.assertEqual(p["spawn_failed_streak"], 1)
+                # ... but the SEAT streak keeps counting across distinct issues.
+                self.assertEqual(p["seat_streak"], i)
+            # Tick 4: the selector must NOT re-hand the dead seat another issue.
+            mod.lane_issue_numbers = lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("a cooled seat must short-circuit before the lane router"))
+            mod.spawn_issue_worker = lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("a cooled seat must never spawn"))
+            p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                             lane=None, live=False)
+            self.assertFalse(p["ok"])
+            self.assertEqual(p["action"], "seat_cooled")
+            self.assertEqual(p["verdict"], "SEAT_COOLED")
+            self.assertEqual(p["seat_streak"]["seat"], "dead-seat")
+            self.assertEqual(p["seat_streak"]["streak"], 3)
+            self.assertIn("fak accounts status", p["reason"])
+            self.assertEqual(p["seat_cool_reroute"]["reason"],
+                             "reroute did not find a different seat")
+            # A correctly-declined tick, not a malfunction (the scheduled-task
+            # health bit stays green; the CARD reddens via dispatch_status).
+            self.assertEqual(mod.tick_exit_code(p), 0)
+
+    def test_cooled_seat_reroutes_to_a_different_healthy_seat(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            EvaluateTest._patch(self, mod, pre=self.DEAD,
+                                pick={"lane": "gateway", "numbers": [404],
+                                      "by_lane_count": {"gateway": 1}})
+            runs = mod.RUNS_DIRNAME
+            for _ in range(mod.SPAWN_FAILED_RED_STREAK):
+                mod.bump_spawn_failure_streak_seat(runs, "dead-seat", "claude")
+            calls = {"n": 0}
+
+            def preflight(root_, **kw):
+                calls["n"] += 1
+                return self.DEAD if calls["n"] == 1 else self.HEALTHY
+
+            mod.issue_dispatch.preflight = preflight
+            p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                             lane=None, live=False)
+            # Rerouted: the tick proceeds on the fresh seat instead of declining.
+            self.assertEqual(p["verdict"], "WOULD_SPAWN")
+            self.assertEqual(p["account"]["tag"], "fresh-seat")
+            self.assertEqual(p["seat_cool_reroute"]["account"]["tag"], "fresh-seat")
+            self.assertEqual(calls["n"], 2)
+
+    def test_reprobe_window_admits_one_spawn_to_detect_recovery(self) -> None:
+        import time
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            EvaluateTest._patch(self, mod, pre=self.DEAD,
+                                pick={"lane": "gateway", "numbers": [505],
+                                      "by_lane_count": {"gateway": 1}})
+            runs = mod.RUNS_DIRNAME
+            stale = time.time() - (mod.SEAT_STREAK_REPROBE_MIN * 60 + 5)
+            for _ in range(mod.SPAWN_FAILED_RED_STREAK):
+                mod.bump_spawn_failure_streak_seat(runs, "dead-seat", "claude",
+                                                   now_ts=stale)
+            p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                             lane=None, live=False)
+            # reprobe_due -> the gate admits the tick; the seat gets ONE probe.
+            self.assertEqual(p["verdict"], "WOULD_SPAWN")
+            self.assertEqual(p["account"]["tag"], "dead-seat")
 
 
 class AppendFleetTrendRowTest(unittest.TestCase):

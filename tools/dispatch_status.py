@@ -563,6 +563,9 @@ def read_resolve_ticks(root: Path, *, now_ts: float | None = None,
             "seat_adaptive": doc.get("seat_adaptive") or {},
             "seat_selection": doc.get("seat_selection") or {},
             "spawn_failed_streak": doc.get("spawn_failed_streak"),
+            # #4591: the SEAT-keyed run-length stamped alongside (int on a
+            # spawn_failed tick; state dict on a seat_cooled tick).
+            "seat_streak": doc.get("seat_streak"),
             "cause": doc.get("cause"),
             "contract_repair": doc.get("contract_repair") or {},
             "safe_lanes_busy": doc.get("safe_lanes_busy") or [],
@@ -1751,6 +1754,83 @@ def spawn_stale_cred_alarm(breakdown: dict[str, Any] | None) -> dict[str, Any]:
             "reason": reason}
 
 
+# Seat-keyed spawn-failure streak (#4591). The dispatcher persists a per-SEAT
+# consecutive-failure run-length (tools/issue_resolve_dispatch.py
+# bump_spawn_failure_streak_seat) precisely because the target-keyed streak lets
+# a dead needs_login seat cycling across DIFFERENT issues evade every cooldown.
+# A seat at/over this threshold flips the card verdict with a named seat +
+# operator action. Mirrors issue_resolve_dispatch.SPAWN_FAILED_RED_STREAK (kept
+# literal here so the always-on card never imports the heavy dispatcher module).
+_SEAT_SPAWN_FAIL_RED_STREAK = 3
+_SEAT_STREAK_LEDGER_GLOB = "spawn-failure-streak-seat-*.json"
+_SEAT_STREAK_LEDGER_PREFIX = "spawn-failure-streak-seat-"
+
+
+def read_seat_spawn_failure_streaks(runs_dir: Path) -> list[dict[str, Any]]:
+    """Read every per-backend seat-keyed spawn-failure streak ledger (#4591) into
+    flat rows ``{seat, backend, streak, last_ts}``, worst first. Pure-local disk
+    read, best-effort: an unreadable/malformed ledger contributes nothing."""
+    rows: list[dict[str, Any]] = []
+    try:
+        paths = sorted(runs_dir.glob(_SEAT_STREAK_LEDGER_GLOB))
+    except OSError:
+        return rows
+    for path in paths:
+        backend = path.name[len(_SEAT_STREAK_LEDGER_PREFIX):-len(".json")] or "?"
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for tag, v in doc.items():
+            if isinstance(v, dict):
+                streak = _int(v.get("count"), 0) or 0
+                last_ts = v.get("last_ts")
+            else:
+                streak = _int(v, 0) or 0
+                last_ts = None
+            if streak > 0:
+                rows.append({"seat": str(tag), "backend": backend,
+                             "streak": streak, "last_ts": last_ts})
+    rows.sort(key=lambda r: (-r["streak"], r["seat"]))
+    return rows
+
+
+def seat_spawn_fail_alarm(seat_streaks: list[dict[str, Any]] | None,
+                          seat_inventory: dict[str, Any] | None,
+                          spawn_causes: dict[str, Any] | None,
+                          *, threshold: int = _SEAT_SPAWN_FAIL_RED_STREAK) -> dict[str, Any]:
+    """The #4591 verdict flip: join the SEAT-keyed spawn-failure streak with the
+    seat inventory's ``auth_failed`` hold and the trailing ``stale_cred`` cause
+    mix, and go red the moment ANY single seat has ``threshold`` spawn-fails in
+    a row — however many distinct issues it burned them on. Pure fold, so it is
+    table-testable; returns ``{red, seats, reason}`` with ``seats`` = the
+    over-threshold rows annotated ``auth_failed``/``stale_cred``, and a reason
+    of the shape ``seat X: N spawn-fails in a row (stale_cred) -> fak accounts
+    status`` (cause qualifier present only when the join confirms it)."""
+    over = [dict(r) for r in (seat_streaks or [])
+            if _int(r.get("streak"), 0) >= threshold > 0]
+    if not over:
+        return {"red": False, "seats": [], "threshold": threshold, "reason": ""}
+    auth_failed_tags = {
+        _seat_label(s)
+        for s in (seat_inventory or {}).get("seats", [])
+        if str(s.get("hold_reason") or "") == "auth_failed"
+    }
+    stale_cred_seen = bool(_int(
+        (((spawn_causes or {}).get("by_cause") or {}).get("stale_cred") or {}).get("count"), 0))
+    parts: list[str] = []
+    for row in over:
+        row["auth_failed"] = row.get("seat") in auth_failed_tags
+        row["stale_cred"] = stale_cred_seen
+        qualifier = " (stale_cred)" if (row["auth_failed"] or stale_cred_seen) else ""
+        parts.append(f"seat {row.get('seat')}: {row.get('streak')} spawn-fails "
+                     f"in a row{qualifier} -> fak accounts status")
+    return {"red": True, "seats": over, "threshold": threshold,
+            "reason": "; ".join(parts) + " (#4591)"}
+
+
 def parse_ships_per_worker(records: list[str]) -> dict[str, Any]:
     """Fold a list of commit-message records (each ``subject\\n body``) into a
     ships-per-worker attribution (#2065). Pure — the git read lives in the caller.
@@ -2336,6 +2416,24 @@ def _seat_label(seat: dict[str, Any]) -> str:
     return str(seat.get("tag") or seat.get("account") or seat.get("seat") or "?")
 
 
+def read_fleet_net_decline(root: Path, *, window: int = 24) -> dict[str, Any]:
+    """The net-worker-decline alarm (#4591, part 2): fold the trailing
+    ``fleet-status-history.jsonl`` appends (the #4594 per-tick producer) through
+    ``fleet_trend.net_decline_alarm`` — red when ``live`` fell strictly for
+    ``NET_DECLINE_ALARM_STREAK`` consecutive appends. Pure-local ledger read,
+    best-effort: an import/read failure degrades to ``{"_error": ...}`` like the
+    sibling card folds, never raises."""
+    try:
+        sys.path.insert(0, str(root / "tools"))
+        import fleet_trend  # noqa: PLC0415  (lazy: only paid for on the card)
+        rows = fleet_trend.tail(str(root / fleet_trend.DEFAULT_LEDGER), window)
+        out = fleet_trend.net_decline_alarm(rows)
+        out["window"] = window
+        return out
+    except Exception as exc:  # best-effort card fold; never fail the whole card
+        return {"_error": str(exc)}
+
+
 def _limited_seat_labels(labels: list[str], *, limit: int = 4) -> str:
     kept = labels[:limit]
     if len(labels) > limit:
@@ -2572,6 +2670,14 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         # emits, now folded into the default card so a rising stale_cred rate reddens
         # instead of hiding behind the sub-flag. Pure-local, so --fast keeps it.
         spawn_causes_f = pool.submit(spawn_failed_cause_breakdown, root / RUNS_DIRNAME)
+        # Seat-keyed spawn-failure streaks (#4591): the per-seat consecutive-fail
+        # run-lengths the dispatcher persists; joined with seat inventory +
+        # stale_cred below so ONE dead seat cycling across issues reddens the card.
+        seat_streaks_f = pool.submit(read_seat_spawn_failure_streaks,
+                                     root / RUNS_DIRNAME)
+        # Net-worker-decline alarm (#4591 part 2): trailing `live` appends from
+        # the #4594 fleet-status-history ledger, red on M consecutive declines.
+        fleet_decline_f = pool.submit(read_fleet_net_decline, root)
         run_status_f = pool.submit(read_run_status_digests, root)
         merge_f = pool.submit(merge_state, root)
         leases_f = pool.submit(read_lease_state, root, backlog)
@@ -2603,6 +2709,8 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         hook_failures = hook_failures_f.result()
         guard = guard_f.result()
         spawn_causes = spawn_causes_f.result()
+        seat_streaks = seat_streaks_f.result()
+        fleet_decline = fleet_decline_f.result()
         run_status = run_status_f.result()
         merge = merge_f.result()
         leases = leases_f.result()
@@ -2649,6 +2757,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          resolver_preflight=resolver_preflight,
                          low_yield=low_yield, ships=ships, watch=watch,
                          backlog_rate=backlog_rate, spawn_causes=spawn_causes,
+                         seat_streaks=seat_streaks, fleet_decline=fleet_decline,
                          route_health=route_health)
 
 
@@ -3173,6 +3282,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   watch: dict[str, Any] | None = None,
                   backlog_rate: dict[str, Any] | None = None,
                   spawn_causes: dict[str, Any] | None = None,
+                  seat_streaks: list[dict[str, Any]] | None = None,
+                  fleet_decline: dict[str, Any] | None = None,
                   route_health: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
@@ -3342,6 +3453,32 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             ok = False
             verdict = "SPAWN_STALE_CRED_DRAIN"
         reasons.insert(0, spawn_alarm["reason"])
+
+    # Seat-keyed spawn-failure streak (#4591): the #4590 rate alarm above needs
+    # a high AGGREGATE stale_cred fraction; a single dead seat in a big pool
+    # stays under it while still burning one issue per tick. Join the per-SEAT
+    # consecutive-fail run-length the dispatcher persists with the seat
+    # inventory's auth_failed hold and the stale_cred cause mix, and flip the
+    # verdict the moment ANY one seat hits the threshold — the exact drain the
+    # target-keyed streak could never see.
+    seat_alarm = seat_spawn_fail_alarm(seat_streaks, seat_inventory or {},
+                                       spawn_causes)
+    if seat_alarm["red"]:
+        if ok:
+            ok = False
+            verdict = "SEAT_SPAWN_FAIL_STREAK"
+        reasons.insert(0, seat_alarm["reason"])
+
+    # Net-worker-decline alarm (#4591, part 2): `live` stepping strictly down
+    # for M consecutive fleet-status-history appends is a fleet DRAINING —
+    # whatever each individual tick verdict said. Degrades silently when the
+    # ledger is absent/unreadable (fail-open `_error`).
+    fleet_decline = fleet_decline or {}
+    if fleet_decline.get("red"):
+        if ok:
+            ok = False
+            verdict = "NET_WORKER_DECLINE"
+        reasons.insert(0, str(fleet_decline.get("reason") or "net worker decline"))
 
     if not tp_na:
         tp_verdict = throughput.get("verdict")
@@ -3596,6 +3733,11 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "by_cause": spawn_causes.get("by_cause") or {},
             "stale_cred_alarm": spawn_alarm,
         },
+        "seat_streaks": {
+            "rows": seat_streaks or [],
+            "alarm": seat_alarm,
+        },
+        "fleet_decline": fleet_decline,
         "route_health": route_health or {},
         "workers": {
             "silent_count": len(silent),
@@ -3778,9 +3920,11 @@ def render(p: dict[str, Any]) -> str:
         if selection.get("summary"):
             lines.append(f"║ seat pick : {selection.get('summary')}")
         streak = _int(latest_tick.get("spawn_failed_streak"), 0) or 0
-        if streak > 0:
+        seat_streak_n = _int(latest_tick.get("seat_streak"), 0) or 0
+        if streak > 0 or seat_streak_n > 0:
             cause_bit = f", cause={latest_tick.get('cause')}" if latest_tick.get("cause") else ""
-            lines.append(f"║ spawn-fail: streak {streak}{cause_bit} (#4589)")
+            seat_bit = f", seat-streak {seat_streak_n} (#4591)" if seat_streak_n else ""
+            lines.append(f"║ spawn-fail: streak {streak}{seat_bit}{cause_bit} (#4589)")
     resolver_pre = p.get("resolver_preflight") or {}
     if resolver_pre.get("schema"):
         seat = resolver_pre.get("seat") or {}
@@ -4054,9 +4198,11 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         if selection.get("summary"):
             out.append(f"- **seat pick**: {selection.get('summary')}")
         streak = _int(latest_tick.get("spawn_failed_streak"), 0) or 0
-        if streak > 0:
+        seat_streak_n = _int(latest_tick.get("seat_streak"), 0) or 0
+        if streak > 0 or seat_streak_n > 0:
             cause_bit = f", cause `{latest_tick.get('cause')}`" if latest_tick.get("cause") else ""
-            out.append(f"- **spawn-fail streak**: {streak}{cause_bit}")
+            seat_bit = f", seat-streak {seat_streak_n}" if seat_streak_n else ""
+            out.append(f"- **spawn-fail streak**: {streak}{seat_bit}{cause_bit}")
     resolver_pre = payload.get("resolver_preflight") or {}
     resolver_pre_line = _resolver_preflight_summary(resolver_pre)
     if resolver_pre_line:

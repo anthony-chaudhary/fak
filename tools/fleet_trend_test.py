@@ -38,6 +38,60 @@ class SparkTest(unittest.TestCase):
         self.assertEqual(len(s), 8)
 
 
+def _rows(*live: float) -> list[dict]:
+    return [{"ts": f"t{i}", "live": v} for i, v in enumerate(live)]
+
+
+class NetDeclineAlarmTest(unittest.TestCase):
+    """#4591 part 2: `live` falling STRICTLY for NET_DECLINE_ALARM_STREAK
+    consecutive ledger appends is the fleet-drain signature and goes red; any
+    flat/rising tail, short series, or missing key stays green."""
+
+    def test_three_consecutive_declines_are_red(self):
+        out = fleet_trend.net_decline_alarm(_rows(5, 4, 3, 2))
+        self.assertTrue(out["red"])
+        self.assertEqual(out["declines"], 3)
+        self.assertIn("5→4→3→2", out["reason"])
+        self.assertIn("net worker decline", out["reason"])
+
+    def test_a_flat_tick_breaks_the_run(self):
+        # 3→3 is not a decline: only the trailing 3→2 counts (1 < streak).
+        out = fleet_trend.net_decline_alarm(_rows(4, 3, 3, 2))
+        self.assertFalse(out["red"])
+        self.assertEqual(out["declines"], 1)
+        self.assertEqual(out["reason"], "")
+
+    def test_a_recovery_tick_breaks_the_run(self):
+        out = fleet_trend.net_decline_alarm(_rows(5, 4, 3, 4, 3, 2))
+        self.assertFalse(out["red"])
+        self.assertEqual(out["declines"], 2)
+
+    def test_rising_or_flat_series_is_green(self):
+        self.assertFalse(fleet_trend.net_decline_alarm(_rows(1, 2, 3))["red"])
+        self.assertFalse(fleet_trend.net_decline_alarm(_rows(2, 2, 2, 2))["red"])
+
+    def test_short_or_empty_or_keyless_series_is_green(self):
+        self.assertFalse(fleet_trend.net_decline_alarm([])["red"])
+        self.assertFalse(fleet_trend.net_decline_alarm(_rows(3, 2))["red"])
+        self.assertFalse(fleet_trend.net_decline_alarm(
+            [{"ts": "t0", "usable": 3}, {"ts": "t1", "usable": 2}])["red"])
+
+    def test_custom_streak_and_key(self):
+        rows = [{"ts": "t0", "usable": 3}, {"ts": "t1", "usable": 2},
+                {"ts": "t2", "usable": 1}]
+        out = fleet_trend.net_decline_alarm(rows, key="usable", streak=2)
+        self.assertTrue(out["red"])
+        self.assertEqual(out["declines"], 2)
+
+    def test_rows_missing_the_key_are_skipped_not_zeroed(self):
+        # A counter-free append (e.g. an old-schema row) must not fabricate a
+        # 0 that manufactures a decline.
+        rows = _rows(3, 3) + [{"ts": "tx"}] + _rows(2)
+        out = fleet_trend.net_decline_alarm(rows)
+        self.assertEqual(out["declines"], 1)
+        self.assertFalse(out["red"])
+
+
 class MetricsOfTest(unittest.TestCase):
     def test_extracts_load_bearing_scalars(self):
         snap = {

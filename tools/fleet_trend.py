@@ -174,6 +174,45 @@ def metric_trend(rows: list[dict[str, Any]], key: str) -> dict[str, Any] | None:
     }
 
 
+# Net-worker-decline alarm (#4591): how many CONSECUTIVE trailing appends of the
+# `live` series must each strictly decline before the drain alarm fires. Three
+# mirrors SPAWN_FAILED_RED_STREAK (tools/issue_resolve_dispatch.py): one dip is
+# workers finishing, two can be a wind-down — three in a row with no recovery is
+# the drain signature (a dead seat / dying pool bleeding the fleet toward zero).
+NET_DECLINE_ALARM_STREAK = 3
+
+
+def net_decline_alarm(rows: list[dict[str, Any]], *, key: str = "live",
+                      streak: int = NET_DECLINE_ALARM_STREAK) -> dict[str, Any]:
+    """Alarm when the trailing ``key`` series declines STRICTLY for ``streak``
+    consecutive ledger appends (#4591) — the net-worker-decline half of the
+    dead-seat drain fix: a fleet whose live count only ever steps down is
+    draining, whatever each individual tick verdict said. Pure fold over the
+    ledger rows (oldest→newest, the :func:`tail` shape). Returns
+    ``{red, declines, key, first, last, n, reason}`` — ``declines`` is the
+    length of the trailing strict-decline run, ``reason`` non-empty only when
+    red. A short / missing / non-declining series is never red (fail-open)."""
+    series = [_num(r[key]) for r in rows if isinstance(r.get(key), (int, float))]
+    declines = 0
+    for prev, cur in zip(reversed(series[:-1]), reversed(series[1:])):
+        if cur < prev:
+            declines += 1
+        else:
+            break
+    red = declines >= max(1, int(streak))
+    reason = ""
+    if red:
+        window = series[-(declines + 1):]
+        reason = (f"net worker decline: '{key}' fell {declines} consecutive "
+                  f"ledger appends ({'→'.join(_fmt(v) for v in window)}) — the "
+                  f"fleet is draining, not cycling; check seat health "
+                  f"(`fak accounts status`) and the dispatch card (#4591)")
+    return {"red": red, "key": key, "declines": declines,
+            "first": series[0] if series else None,
+            "last": series[-1] if series else None,
+            "n": len(series), "reason": reason}
+
+
 def render_line(rows: list[dict[str, Any]]) -> str:
     """One compact trend line across all METRICS present in the rows: per metric a
     ``label first→last spark (Δ±d over N)``. Empty when there is no history yet, so the

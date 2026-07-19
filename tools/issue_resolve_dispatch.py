@@ -4614,12 +4614,18 @@ def _maybe_dispatch_contract_repair(
             "ok": False, "action": "spawn_failed", "verdict": "SPAWN_FAILED",
             "spawned": spawned,
             "cause": classify_spawn_failed_cause(early),
+            # #4591: a repair spawn burns the same seat — count it against the
+            # seat streak too so a dead seat can't hide behind repair rotations.
+            "seat_streak": bump_spawn_failure_streak_seat(
+                runs_dir, acct.get("tag"), backend),
             "reason": (f"{backend} contract-repair worker pid {spawned['pid']} "
                        f"for issue(s) {nums} exited within {early.get('wait_s')}s "
                        f"with code {early.get('returncode')}"
                        + (" and produced an empty log" if early.get("silent") else ""))})
         _record(runs_dir, payload)
         return payload
+    # A clean repair launch proves the seat is alive: break its streak (#4591).
+    clear_spawn_failure_streak_seat(runs_dir, acct.get("tag"), backend)
     payload.update({
         "ok": True, "action": "repair_spawned", "verdict": "REPAIR_SPAWNED",
         "spawned": spawned,
@@ -4995,6 +5001,27 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             payload["account_cap_reroute"] = account_cap_reroute
         return finish(payload)
 
+    def _seat_cooled_payload(state: dict[str, Any],
+                             reroute: dict[str, Any] | None) -> dict[str, Any]:
+        payload = {
+            "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
+            "max_workers": max_workers, "registry_refresh": reg,
+            "timed_out_workers": reaped, "pruned_sidecars": pruned,
+            "preflight": _preflight_public(pre),
+            "account": _account_public(acct),
+            "seat_streak": state, "ok": False, "action": "seat_cooled",
+            "verdict": "SEAT_COOLED",
+            "reason": (f"seat '{state.get('seat')}' has {state.get('streak')} "
+                       f"spawn-fails in a row (across targets) — cooling the seat "
+                       f"instead of feeding it another issue; run `fak accounts "
+                       f"status` and re-login or replace the seat; one re-probe "
+                       f"spawn is admitted every {SEAT_STREAK_REPROBE_MIN} min "
+                       f"(#4591)"),
+        }
+        if reroute:
+            payload["seat_cool_reroute"] = reroute
+        return finish(payload)
+
     # Active opencode gateway gate (#3866): unlike the passive stub-rate signal, this
     # catches a worker that hangs before producing a terminal log. It is deliberately
     # stateless and fail-open except for the existing prober's typed GATEWAY_DOWN result.
@@ -5063,6 +5090,49 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                 "reroute did not find a different account"
                 if reroute_ok else "reroute preflight refused")
             return _weekly_capped_payload(cap)
+
+    # Seat-keyed spawn-failure cool gate (#4591) — the keying fix. The
+    # target-keyed streak (tick_exit_code / #2636) cannot see a dead needs_login
+    # seat cycling across DIFFERENT issues: every new target restarts that
+    # counter at 1, so the selector re-hands the same dead seat each tick and
+    # the fleet drains with no cooldown and no red card. Here the SAME
+    # run-length is read SEAT-keyed: a routed seat whose streak has reached
+    # SPAWN_FAILED_RED_STREAK is COOLED — try one reroute to a different seat
+    # (mirroring the weekly-cap reroute above), else decline the tick with a
+    # named verdict. A cooled seat earns one re-probe spawn every
+    # SEAT_STREAK_REPROBE_MIN minutes (reprobe_due) so recovery after an
+    # operator re-login is detected; a clean launch clears the streak.
+    # Fail-open: an unreadable ledger reads streak 0 and gates nothing.
+    seat_streak_state = (seat_spawn_failure_state(runs_dir, acct.get("tag"), backend)
+                         if pre_ok else {"cooled": False})
+    seat_cool_reroute: dict[str, Any] | None = None
+    if (pre_ok and seat_streak_state.get("cooled")
+            and not seat_streak_state.get("reprobe_due")):
+        reroute_pre = issue_dispatch.preflight(
+            root, max_workers=eff_max_workers, work_kind=work_kind, product=product)
+        reroute_ok = reroute_pre.get("verdict") == "SPAWN_OK"
+        reroute_acct = reroute_pre.get("account") or {}
+        seat_cool_reroute = {
+            "attempted": True,
+            "from": _account_public(acct),
+            "seat_streak": seat_streak_state,
+            "preflight": _preflight_public(reroute_pre),
+            "account": _account_public(reroute_acct),
+        }
+        if reroute_ok and reroute_acct and not _same_account(acct, reroute_acct):
+            reroute_state = seat_spawn_failure_state(
+                runs_dir, reroute_acct.get("tag"), backend)
+            seat_cool_reroute["reroute_seat_streak"] = reroute_state
+            if reroute_state.get("cooled") and not reroute_state.get("reprobe_due"):
+                seat_cool_reroute["reason"] = "rerouted seat is also cooled"
+                return _seat_cooled_payload(seat_streak_state, seat_cool_reroute)
+            pre, pre_ok, acct = reroute_pre, True, reroute_acct
+            seat_streak_state = reroute_state
+        else:
+            seat_cool_reroute["reason"] = (
+                "reroute did not find a different seat"
+                if reroute_ok else "reroute preflight refused")
+            return _seat_cooled_payload(seat_streak_state, seat_cool_reroute)
 
     # Backend-health gate (the self-suppress half) — AFTER weekly-cap, same shape. If
     # THIS backend is spinning dead (a streak of banner-only/0-byte deaths the cap
@@ -5257,6 +5327,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # tick where the sweep ran, so a dry-run payload stays byte-identical.
         **({"witnessed_slots": witnessed} if live else {}),
         **({"account_cap_reroute": account_cap_reroute} if account_cap_reroute else {}),
+        # Seat-cool reroute audit (#4591): present only when the cooled-seat gate
+        # rerouted this tick to a different seat, so the common path stays
+        # byte-identical to before.
+        **({"seat_cool_reroute": seat_cool_reroute} if seat_cool_reroute else {}),
         "preflight": _preflight_public(pre),
         # Seat-adaptive sizing audit (#3246): which term bound the effective cap this
         # tick (seat_free / host_cap / hard_ceiling / ramp_delta), or that the tick
@@ -5909,20 +5983,27 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # A transient <5s child crash is self-healing noise, not a tick malfunction:
         # count it against THIS target and only redden the health bit once the same
         # target keeps failing (failover not healing it) — see tick_exit_code (#2636).
+        # The SEAT streak is bumped alongside (#4591): the same crash also counts
+        # against the routed seat, so a dead seat cycling across DIFFERENT targets
+        # still accrues one run-length and the cool gate above stops re-handing it.
         payload.update({"ok": False, "action": "spawn_failed",
                         "verdict": "SPAWN_FAILED",
                         "spawned": spawned,
                         "cause": classify_spawn_failed_cause(early),
                         "spawn_failed_streak": bump_spawn_failure_streak(
                             runs_dir, target, backend),
+                        "seat_streak": bump_spawn_failure_streak_seat(
+                            runs_dir, acct.get("tag"), backend),
                         "reason": (f"{backend} worker pid {spawned['pid']} for "
                                    f"#{target} exited within {early.get('wait_s')}s "
                                    f"with code {early.get('returncode')}"
                                    + (" and produced an empty log" if early.get("silent") else ""))})
         _record(runs_dir, payload)
         return finish(payload)
-    # A worker that launched cleanly breaks any prior same-target SPAWN_FAILED streak.
+    # A worker that launched cleanly breaks any prior same-target SPAWN_FAILED streak
+    # and the routed SEAT's cross-target streak (#4591).
     clear_spawn_failure_streak(runs_dir, target, backend)
+    clear_spawn_failure_streak_seat(runs_dir, acct.get("tag"), backend)
     payload.update({"ok": True, "action": "spawned", "verdict": "SPAWNED",
                     "spawned": spawned,
                     "reason": (f"spawned {backend} issue-resolution worker pid "
@@ -6069,6 +6150,7 @@ BENIGN_ACTIONS = frozenset({
     "refused",                                           # preflight backpressure (host at cap / no account)
     "weekly_capped", "backend_unhealthy",                # pool unavailable; declined correctly
     "backend_health_skip",                               # backend majority-stub; planned 0 spawns (#3247)
+    "seat_cooled",                                       # routed seat's spawn-fail streak cooled it (#4591)
 })
 
 
@@ -6136,6 +6218,122 @@ def clear_spawn_failure_streak(runs_dir: Path, target: int | str, backend: str) 
     if str(target) in streaks:
         del streaks[str(target)]
         _write_spawn_failure_streaks(runs_dir, backend, streaks)
+
+
+# --- Seat-keyed spawn-failure streak (#4591) --------------------------------
+# The pair above is TARGET-keyed: it reddens when failover keeps failing on the
+# SAME issue. It is blind to the inverse drain: a dead needs_login SEAT that the
+# selector keeps re-handing across DIFFERENT issues restarts the target counter
+# at 1 every tick, so it never builds a streak, never cools, and bleeds the
+# fleet one issue at a time with no alert (the observed drain that recurred
+# after the #2059/#2075 stale-cred detectors shipped). This pair keys the SAME
+# run-length by account/seat tag instead, persisted per backend in
+# runs/spawn-failure-streak-seat-<backend>.json as
+# {seat_tag: {"count": N, "last_ts": epoch}}. A seat at/over
+# SPAWN_FAILED_RED_STREAK is COOLED: the evaluate() gate reroutes to a
+# different seat or declines the tick instead of feeding the dead seat another
+# issue, and one re-probe spawn is admitted every SEAT_STREAK_REPROBE_MIN
+# minutes so a re-logged-in seat can clear itself (a permanently-skipped seat
+# could never break its own streak).
+SEAT_STREAK_REPROBE_MIN = 30
+
+
+def _spawn_failure_streak_seat_path(runs_dir: Path, backend: str) -> Path:
+    # Per-backend for the same reason as the target-keyed ledger: independent
+    # counters that never clobber each other.
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(backend or "claude")) or "claude"
+    return runs_dir / f"spawn-failure-streak-seat-{safe}.json"
+
+
+def _read_seat_failure_streaks(runs_dir: Path, backend: str) -> dict[str, dict[str, float]]:
+    try:
+        doc = json.loads(
+            _spawn_failure_streak_seat_path(runs_dir, backend).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    for k, v in doc.items():
+        if isinstance(v, dict):
+            try:
+                out[str(k)] = {"count": int(v.get("count") or 0),
+                               "last_ts": float(v.get("last_ts") or 0.0)}
+            except (TypeError, ValueError):
+                continue
+        else:
+            try:  # tolerate a bare-int row (the target-ledger shape)
+                out[str(k)] = {"count": int(v), "last_ts": 0.0}
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _write_seat_failure_streaks(runs_dir: Path, backend: str,
+                                streaks: dict[str, dict[str, float]]) -> None:
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        _spawn_failure_streak_seat_path(runs_dir, backend).write_text(
+            json.dumps(streaks, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass  # fail-open, mirroring the target-keyed ledger
+
+
+def bump_spawn_failure_streak_seat(runs_dir: Path, seat_tag: str | None,
+                                   backend: str,
+                                   now_ts: float | None = None) -> int:
+    """Record one more consecutive SPAWN_FAILED for ``seat_tag`` on ``backend`` —
+    REGARDLESS of which issue the seat was launched at — and return the new
+    run-length. The #4591 keying fix: a dead seat cycling across N distinct
+    targets accrues ONE seat streak of N instead of N fresh target streaks of 1.
+    A blank tag records nothing (returns 0); fail-open like the target ledger."""
+    import time
+    tag = str(seat_tag or "").strip()
+    if not tag:
+        return 0
+    streaks = _read_seat_failure_streaks(runs_dir, backend)
+    prior = streaks.get(tag) or {}
+    row = {"count": int(prior.get("count") or 0) + 1,
+           "last_ts": float(time.time() if now_ts is None else now_ts)}
+    streaks[tag] = row
+    _write_seat_failure_streaks(runs_dir, backend, streaks)
+    return int(row["count"])
+
+
+def clear_spawn_failure_streak_seat(runs_dir: Path, seat_tag: str | None,
+                                    backend: str) -> None:
+    """A clean launch ON THIS SEAT — any target — broke the seat's streak. This
+    is deliberately seat-scoped, not same-target-scoped: the target-keyed clear
+    above was what let a dead seat's evidence evaporate on every issue rotation."""
+    tag = str(seat_tag or "").strip()
+    if not tag:
+        return
+    streaks = _read_seat_failure_streaks(runs_dir, backend)
+    if tag in streaks:
+        del streaks[tag]
+        _write_seat_failure_streaks(runs_dir, backend, streaks)
+
+
+def seat_spawn_failure_state(runs_dir: Path, seat_tag: str | None, backend: str,
+                             now_ts: float | None = None) -> dict[str, Any]:
+    """The routed seat's current seat-keyed streak, folded for the evaluate()
+    cool gate (#4591): ``cooled`` once the run-length reaches
+    SPAWN_FAILED_RED_STREAK, ``reprobe_due`` once SEAT_STREAK_REPROBE_MIN
+    minutes have passed since the last recorded failure (admit ONE probe spawn
+    so recovery is detectable). Fail-open: a blank tag or unreadable ledger
+    reads streak 0, not cooled."""
+    import time
+    tag = str(seat_tag or "").strip()
+    row = _read_seat_failure_streaks(runs_dir, backend).get(tag) if tag else None
+    count = int((row or {}).get("count") or 0)
+    last_ts = float((row or {}).get("last_ts") or 0.0)
+    now = float(time.time() if now_ts is None else now_ts)
+    cooled = count >= SPAWN_FAILED_RED_STREAK
+    return {"seat": tag or None, "backend": backend, "streak": count,
+            "last_ts": last_ts or None, "cooled": cooled,
+            "reprobe_min": SEAT_STREAK_REPROBE_MIN,
+            "reprobe_due": bool(cooled and last_ts
+                                and now - last_ts >= SEAT_STREAK_REPROBE_MIN * 60)}
 
 
 def tick_exit_code(payload: dict[str, Any]) -> int:
