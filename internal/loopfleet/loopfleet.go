@@ -11,6 +11,7 @@
 //	dojo      docs/dojo/history.jsonl       (fak-dojo-ledger/1)
 //	cadence   docs/cadence/history.jsonl    (fak-cadence-ledger/1)
 //	dispatch  .dispatch-runs/progress.jsonl (fleet-issue-resolve-progress/1)
+//	steerpr   docs/nightrun/steerpr-overlay.jsonl (fak.steerpr-overlay.v1, #5023)
 //
 // loopmgr.FoldHealth already unifies the two ledgers reachable WITHIN loopmgr
 // (the loop-event ledger + the job registry) but, by design, does not import the
@@ -169,6 +170,7 @@ func adapters() []adapter {
 		{id: "dojo", relPath: filepath.Join("docs", "dojo", "history.jsonl"), cadence: dailyCadence, fold: foldDojo},
 		{id: "cadence", relPath: filepath.Join("docs", "cadence", "history.jsonl"), cadence: dailyCadence, fold: foldCadence},
 		{id: "dispatch", relPath: filepath.Join(".dispatch-runs", "progress.jsonl"), cadence: hourlyCadence, fold: foldDispatch},
+		{id: "steerpr-overlay", relPath: filepath.Join("docs", "nightrun", "steerpr-overlay.jsonl"), cadence: dailyCadence, fold: foldSteerprOverlay},
 	}
 }
 
@@ -402,6 +404,25 @@ func foldDispatch(rows []map[string]any) []rawLoop {
 		bumpLastTick(&lp, scorecard.StringValue(r["utc"]))
 		kept, _ := r["ok"].(bool)
 		lp.observe(kept, positive(r["closed_now"]) || positive(r["witnessed_open"]))
+	}
+	return single(lp)
+}
+
+// foldSteerprOverlay: the steerpr overlay-maintenance loop (#5023). A tick
+// kept = the row's no-silent-drop invariant holds (commits_seen == assigned +
+// orphans — nothing in the range was silently dropped); witnessed = the row
+// carries the external witness binding loopgate admitted the tick's
+// done-claim on (an empty witness field is an unwitnessed tick, and loopgate
+// guarantees a non-empty one is never self-reported).
+func foldSteerprOverlay(rows []map[string]any) []rawLoop {
+	lp := rawLoop{kind: "steerpr-overlay"}
+	for _, r := range rows {
+		bumpLastTick(&lp, scorecard.StringValue(r["ts"]))
+		seen, seenOK := asFloat(r["commits_seen"])
+		assigned, assignedOK := asFloat(r["assigned"])
+		orphans, orphansOK := asFloat(r["orphans"])
+		kept := seenOK && assignedOK && orphansOK && seen == assigned+orphans
+		lp.observe(kept, strings.TrimSpace(scorecard.StringValue(r["witness"])) != "")
 	}
 	return single(lp)
 }

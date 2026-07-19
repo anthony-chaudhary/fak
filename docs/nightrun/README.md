@@ -164,7 +164,11 @@ For collection, `.fak/nightrun/collected.jsonl` is append-only — one
 `--apply` extends the local runtime ledger; don't hand-edit it. The tracked
 `docs/nightrun/{collected,cache-savings,gateway-usage,harness-resources,fleet-status-history}.jsonl`
 files are historical publication snapshots through the 2026-07-11 migration, not
-live writer targets. This is deliberate: guard exits and scheduled ticks must not
+live writer targets. One exception by design: `docs/nightrun/steerpr-overlay.jsonl`
+(schema `fak.steerpr-overlay.v1`, #5023) is the steerpr overlay-maintenance
+loop's own append-only ledger — one row per tick, idempotent on a re-tick over
+the same range, each committed as an explicit by-path publication; rows are only
+ever appended, never rewritten. This is deliberate: guard exits and scheduled ticks must not
 make a shared working tree dirty or force telemetry-only commits.
 
 A fresh clone therefore starts with no live rows. Readers treat a missing live
