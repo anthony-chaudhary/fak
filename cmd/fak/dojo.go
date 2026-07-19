@@ -311,6 +311,15 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	for _, in := range providerToolcallEpisodesFromCorpus(sessionCorpus) {
 		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
+	// And the context-continuity cell (#4486): ONE episode of
+	// fak_context_restore's restore recall — restored spans over dropped spans —
+	// folded from fak's own durable context-span ledger (the gateway-usage
+	// ledger's compaction-dropped turns). That ledger records drops but no
+	// restore counter yet, so the cell scores UNMEASURED honestly (never a
+	// fabricated 0.0 recall) until a restore field lands on the usage row.
+	for _, in := range dojo.ContextRestoreEpisodes(loadContextSpanLedger(root)) {
+		episodes = append(episodes, dojo.Score("context-span-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
 	report := dojo.Fold(episodes, dojo.FoldOpts{

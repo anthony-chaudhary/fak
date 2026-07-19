@@ -1,0 +1,136 @@
+{
+  "rows": [
+    {
+      "id": "contextrestoreepisodes",
+      "canonical": "ContextRestoreEpisodes",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The pure fold in internal/dojo that turns the context-span ledger's drop/restore counts into the dojo's one scored episode for the context-restore/restore_recall KPI cell.",
+      "distinction": "SCORING of restore recall in the dojo gym - NOT recall (the persisted session core dump) and NOT context-MMU (the live result gate); it reads reduced counts, never the ledger schema, and stays UNMEASURED when restores are unrecorded.",
+      "distinct_from": [
+        "recall"
+      ],
+      "aliases": [],
+      "grounding": "ContextRestoreEpisodes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "loadcontextspanledger",
+      "canonical": "loadContextSpanLedger",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The cmd/fak adapter that reduces the durable gateway-usage ledger's compaction-dropped turns into the ContextSpanLedger counts the pure restore-recall fold consumes.",
+      "distinction": "ADAPTER from the on-disk ledger to reduced counts - NOT compaction (provider prefix reuse on the wire) itself and NOT ContextRestoreEpisodes (the pure fold that scores the counts).",
+      "distinct_from": [
+        "compaction"
+      ],
+      "aliases": [],
+      "grounding": "loadContextSpanLedger",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "dojolevercontextrestore",
+      "canonical": "dojo_lever_context_restore",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The cmd/fak registration file for the context-restore dojo lever - the RegisterLever seam entry that binds the restore-recall KPI cell into fak dojo run and the --live fold.",
+      "distinction": "The LEVER registration (shell wiring) - NOT recall (the persisted session core dump) and NOT claim_context_restore (the internal/dojo claim anchor plus pure fold it delegates to).",
+      "distinct_from": [
+        "recall"
+      ],
+      "aliases": [],
+      "grounding": "dojo_lever_context_restore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "restorerecall",
+      "canonical": "restore_recall",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The context-restore cell's KPI metric: the fraction of dropped context spans a later turn pages back in via fak_context_restore, folded from fak's own context-span ledger.",
+      "distinction": "A dojo KPI METRIC (a claimed-vs-measured calibration fraction) - NOT recall (the persisted session core-dump subsystem) and NOT a quality gate; it scores UNMEASURED honestly until the ledger records restores.",
+      "distinct_from": [
+        "recall"
+      ],
+      "aliases": [],
+      "grounding": "restore_recall",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "claimcontextrestore",
+      "canonical": "claim_context_restore",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The internal/dojo file carrying the context-restore cell's one anchored ESTIMATE claim literal plus the pure restore-recall fold over ContextSpanLedger counts.",
+      "distinction": "The CLAIM anchor the RSI recalibrate arm rewrites - NOT dojo_lever_context_restore (the cmd/fak lever registration and ledger adapter) and NOT the recall subsystem.",
+      "distinct_from": [
+        "recall"
+      ],
+      "aliases": [],
+      "grounding": "claim_context_restore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "contextrestorelever",
+      "canonical": "contextRestoreLever",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The cmd/fak lever type that adapts the workspace's durable context-span ledger and emits the context-restore cell's scored episodes for a dojo run.",
+      "distinction": "The dojo LEVER (shell adapter object) - NOT context-MMU (gating live result bytes into context) and NOT ContextRestoreEpisodes (the pure fold it calls with reduced counts).",
+      "distinct_from": [
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "contextRestoreLever",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "contextspanledger",
+      "canonical": "ContextSpanLedger",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The reduced three-field view (dropped spans, restored spans, restore-recorded honesty bit) of fak's durable context-span drop/restore ledger that the restore-recall fold consumes.",
+      "distinction": "A reduced COUNT view for scoring - NOT the gateway-usage ledger itself (the on-disk source) and NOT context-MMU; its honesty bit separates a genuine zero-restored from restores-not-recorded.",
+      "distinct_from": [
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "ContextSpanLedger",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
