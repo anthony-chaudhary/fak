@@ -239,6 +239,15 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Study: vLLM @b6ff8a2f — witnessed inference/serving borrows (#5261-#5262)](docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md) -- auto-indexed dated note.
+- [Study: SGLang @b8ec5449 — RadixAttention serving engine (#5286-#5288)](docs/notes/CONCEPT-STUDY-SGLANG-2026-07-18.md) -- auto-indexed dated note.
+- [Study: llama.cpp @571d0d54 — CPU/GGUF/offload kernel peer (#5280-#5285)](docs/notes/CONCEPT-STUDY-LLAMACPP-2026-07-18.md) -- auto-indexed dated note.
+- [Study: LMCache @e38ee415 — KV reuse/offload, delta pass (#5263-#5269)](docs/notes/CONCEPT-STUDY-LMCACHE-2026-07-18.md) -- auto-indexed dated note.
+- [Study: TensorRT-LLM @f4c5c935 — GPU serving engine (epic #5256)](docs/notes/CONCEPT-STUDY-TENSORRT-LLM-2026-07-18.md) -- auto-indexed dated note.
+- [Study: TGI @b4adbf2f — HF serving admission borrows (#5266/#5268/#5270)](docs/notes/BORROW-TGI-SERVING-ADMISSION-STUDY-2026-07-18.md) -- auto-indexed dated note.
+- [Study: lmdeploy @67c18b90 — TurboMind + PyTorch engines (#5271/#5273/#5275)](docs/notes/CONCEPT-STUDY-LMDEPLOY-2026-07-18.md) -- auto-indexed dated note.
+- [Study: Mooncake @5d87a43d — KV-centric disaggregated serving (epic #5289)](docs/notes/CONCEPT-STUDY-MOONCAKE-2026-07-18.md) -- auto-indexed dated note.
+- [Study: NVIDIA Dynamo @ea89e8bd — KV-aware router + SLA planner (#5272/#5274/#5276-#5278)](docs/notes/CONCEPT-STUDY-DYNAMO-2026-07-18.md) -- auto-indexed dated note.
 - [Microharness — native in-process Go microagent runtime](docs/notes/MICROHARNESS-2026-07-01.md) -- auto-indexed dated note.
 - [Mac serving-path cache-value witness — contract half landed, Mac-hardware half `not yet` (#2727)](docs/notes/MAC-CACHEVALUE-EXACT-SPAN-WITNESS-2026-07-18.md) -- auto-indexed dated note.
 - [Net tokens/sec on a slow SSD-offloaded MoE — the expert-coalescing lever](docs/notes/MOE-SSD-MULTI-AGENT-NET-TOKS-2026-07-18.md) -- auto-indexed dated note.
