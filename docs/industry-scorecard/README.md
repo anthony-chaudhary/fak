@@ -1,45 +1,49 @@
 ---
 title: "fak industry scorecard — where fak stands in the LLM-serving field"
-description: "Industry-first competitive scorecard: a researched taxonomy of the dimensions that matter in LLM inference-serving + agent infrastructure (vLLM, SGLang, TensorRT-LLM, llama.cpp, …), the current SOTA bar on each, and fak's honest position — most as named gaps. Two driven numbers: coverage (of the field) and parity-debt (honesty of the rows)."
+description: "Industry-first competitive scorecard: a researched taxonomy of the dimensions that matter in LLM inference-serving + agent infrastructure (vLLM, SGLang, TensorRT-LLM, llama.cpp, …), the current SOTA bar on each, and fak's honest position — most as named gaps. The driver is fak's standing on the field + the honest-gap count (unbounded, still open); coverage and parity-debt are the map-quality drivers, now at goal."
 ---
 
 # Industry scorecard — fak vs the LLM-serving field
 
+<!-- industry-scorecard: 2026-07-18 · process: tools/industry_scorecard.py · data: tools/industry_scorecard.data/ -->
+
 This is the **outward** measuring stick — the counterpart of the inward scorecards (hygiene, code, docs). It does not start from what fak happened to measure; it starts from the **industry**. The source of truth is a researched taxonomy of the dimensions a serious operator, buyer, or analyst uses to evaluate an LLM-serving system (`tools/industry_scorecard.data/_taxonomy.json`), each with the current SOTA bar and a dated source. fak is then positioned honestly on every dimension — and for most of them the honest answer is a **named gap**, not a win. Everything below is re-derived from the data by `tools/industry_scorecard.py`; no number is hand-typed.
 
-Two numbers are driven:
+The numbers that are driven (unbounded competitive front first):
 
-- **coverage** — of the industry dimensions that matter, how many the scorecard has considered and positioned fak against (toward 100%).
-- **parity-debt** — of the comparisons that exist, how many are dishonest, incomplete, or unsourced (kept at 0).
+- **standing** — fak's competitive position on the field (a [0,100] number, distinct from the map grade); raise it by turning a gap/parity axis into a measured lead.
+- **honest-gap count** — positioned industry axes fak has not yet turned into a measured number; drive it toward 0 as real benchmarks land.
+- **coverage** (at goal, 100%) and **parity-debt** (at goal, 0) — the map-quality drivers: how much of the field is positioned, and how honest the rows that exist are.
 
 > Regenerate: `python tools/industry_scorecard.py --markdown-dir docs/industry-scorecard`. Update process: [UPDATE-PROCESS.md](UPDATE-PROCESS.md). Full dimension catalog: [taxonomy.md](taxonomy.md).
 
 ## Headline
 
-| Metric | Value |
+The driver is the UNBOUNDED competitive front, not the bounded grade. Lead with fak's **standing** on the field (a real [0,100] competitive-position number, still below its floor) and the **honest-gap count** — the industry axes fak has not yet turned into a measured number (drive it toward 0 by shipping + benchmarking a differentiator). The two map-quality drivers — coverage of the field and parity-debt (honesty of the rows) — are already at goal (100% / 0). The bounded composite **/100 (grade A)** grades only how complete + honest the *map* is; it SATURATES near the top and HIDES the still-open standing gap, so it is demoted to a labeled legacy line below and is NOT the metric to optimize.
+
+| Metric (primary = unbounded competitive front) | Value |
 |---|---|
-| **Coverage** | **100.0%** (91/91 industry dimensions positioned) |
-| **Parity-debt (honesty defects)** | **0** |
-| Coverage-debt (unpositioned dimensions) | 0 |
-| Composite score | 98.8/100 (grade A) — honesty 98.0 × 60% + coverage 100.0% × 40% |
-| Standing | **47.0/100** — 5 lead · 15 parity · 10 trails · 63 honest gap |
-| Measured vs gap | 29 measured · 64 honest gaps |
-| Tracked | 91 dimensions · 104 competitors · 93 positions |
+| **Standing on the field** | **48.3/100** (below the 60 floor — raise it) — 6 lead · 15 parity · 10 trails · 63 honest gap |
+| **Honest gaps to close (drive to 0)** | **64** of 94 positioned axes carry no fak number yet (30 measured) |
+| Coverage of the field (at goal) | 100.0% (91/91 industry dimensions positioned) |
+| Parity-debt — honesty defects (at goal) | 0 · coverage-debt 0 |
+| Tracked | 91 dimensions · 104 competitors · 94 positions |
 | As of | 2026-06-27 (fak 0.31.0) |
 | Advisory signals | 10 fak-freshness · 0 industry-drift |
+| Legacy bounded score (saturates near the top; grades map honesty + coverage, not field standing; hides the still-open industry gap; not the driver) | 98.8/100 (grade A) — honesty 98.0 × 60% + coverage 100.0% × 40% |
 
-> **Read this right.** The score grades how *complete and honest fak's competitive map is* — not how much fak wins. fak is a focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.
+> **Read this right.** The metric to optimize is fak's **standing** on the field (raise it above its floor by turning a gap/parity axis into a measured lead) and the **honest-gap count** (drive it toward 0 as benchmarks land). The bounded /100 grade-A composite grades only map completeness + honesty — it SATURATES near the top once the map is honestly drawn and can no longer tell you how much of the field fak still does not contest, so it is kept only as a labeled legacy line, not the driver. fak is a focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.
 
 ## Standing at a glance
 
 ```text
-industry standing chart — 91 dimensions · 104 competitors · map 98.8/100 (grade A) · standing 47.0/100 · parity-debt 0
+industry standing chart — 91 dimensions · 104 competitors · map 98.8/100 (grade A) · standing 48.3/100 · parity-debt 0
 
 coverage of the field (positioned / in-scope dimensions):
   positioned  [████████████████████████████████]  91/91  (100.0%)
 
 standing on the positioned axes (shown, not hidden):
-  ▲ lead      ██······················ 5
+  ▲ lead      ██······················ 6
   ≈ parity    ██████·················· 15
   ▼ trails    ████···················· 10
   ○ no-claim  ████████████████████████ 63
@@ -81,6 +85,7 @@ coverage by group:
 | ▲ | lead | agent-fleet | Cross-agent fleet serving time (N agents × T turns): work eliminated by shared-prefix fusion | 19 min | 78 min | 4.11× | Tuned warm per-agent KV cache (the SGLang / vLLM / OpenAI-prompt-caching floor) |
 | ▲ | lead | agent-fleet | Marginal value of cross-agent prefix fusion ON TOP of an already-warm per-agent cache | 2.4 × | 1 × | 2.40× | Tuned warm per-agent KV cache, already hot (B) |
 | ▲ | lead | client-compaction | Compact a long session WITHOUT busting the provider prompt-cache prefix (proven byte-identity drop-and-splice vs summarize/clear-and-rewrite) | — | — | — | Anthropic API context-editing; OpenAI Codex CLI; GitHub Copilot CLI; Aider; LangChain (trim_messages / ConversationSummaryMemory) |
+| ▲ | lead | client-compaction | MEASURED load-bearing-fact retention at a bounded peak over a 100/200/300-turn goal — the fidelity a relay's durable externalize buys that the cache-preserving sliding-window drop (the apples-to-apples competitor) cannot | 1 fraction of load-bearing facts retained at 300 turns (hermetic analytic model; higher is better) | 0.064 fraction of load-bearing facts retained at 300 turns (hermetic analytic model; higher is better) | 15.62× | LangChain trim_messages (sliding-window drop) — the one competitor design that ALSO preserves the prompt cache; benchmarked in the same 4-arm sweep against auto-compaction (summarize-in-place) and Anthropic API context-editing (clear_tool_uses + memory tool) |
 | ▲ | lead | model-routing | Model routing granularity: per-aspect + first-class ensemble routing vs whole-request single-model selection | — | — | — | RouteLLM (LMSYS); Martian; NotDiamond; Unify.ai; OpenRouter (+ Fusion); Portkey; LiteLLM Router |
 | ▲ | lead | quantization | int8 / Q8_0 SIMD decode throughput vs the same-rung int8 peer | 2.97 × vs HF int8 | 1 × vs HF int8 | 2.97× | HuggingFace dynamic-int8 (the standard same-rung int8 reference) |
 | ≈ | parity | hardware-shape-neutrality | Hardware-shape neutrality: explicit fences for host-CPU assumptions | 7 of 7 host-shape assumptions explicitly FENCED in the compute HAL contract | — | — | vLLM plugin backends; llama.cpp backend matrix; MLC-LLM / TVM compilation |
@@ -177,7 +182,7 @@ coverage by group:
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (10 unverifiable) |
-| structure | `well_formed` | 100 | 0 | all 93 rows well-formed |
+| structure | `well_formed` | 100 | 0 | all 94 rows well-formed |
 | completeness | `competitor_named` | 100 | 0 | every row names a concrete competitor |
 | completeness | `axis_coverage` | 100 | 0 | all 5 contracted regimes covered |
 | honesty | `baseline_sota` | 100 | 0 | every comparison is vs a tuned / SOTA / next-best baseline |

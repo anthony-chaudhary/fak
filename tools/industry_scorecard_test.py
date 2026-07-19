@@ -329,6 +329,13 @@ def test_render_doc_folder_emits_index_and_group_pages() -> None:
     assert "serving.md" in files  # the group of the single-stream category
     assert "Industry scorecard" in files["README.md"]
     assert "coverage" in files["README.md"].lower()
+    # The Headline LEADS with the unbounded competitive front (standing + honest-gap
+    # count) and DEMOTES the bounded composite to a labeled legacy line -- the same
+    # honest framing the sibling scorecards ship (code-slop, claim-repro, concept-disambig).
+    readme = files["README.md"]
+    assert "primary = unbounded" in readme
+    assert "Legacy bounded score (saturates" in readme
+    assert "Standing on the field" in readme
     # the terminal + gaps + stale renderers run clean
     assert "industry-scorecard:" in isc.render(p)
     assert "backlog" in isc.render_gaps(p)

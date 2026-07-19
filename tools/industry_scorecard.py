@@ -1228,7 +1228,8 @@ def render_index_page(payload: dict[str, Any], data: dict[str, Any],
         "Industry-first competitive scorecard: a researched taxonomy of the dimensions that "
         "matter in LLM inference-serving + agent infrastructure (vLLM, SGLang, TensorRT-LLM, "
         "llama.cpp, …), the current SOTA bar on each, and fak's honest position — most as named "
-        "gaps. Two driven numbers: coverage (of the field) and parity-debt (honesty of the rows).")
+        "gaps. The driver is fak's standing on the field + the honest-gap count (unbounded, still "
+        "open); coverage and parity-debt are the map-quality drivers, now at goal.")
     out.append("# Industry scorecard — fak vs the LLM-serving field")
     out.append("")
     if stamp:
@@ -1244,12 +1245,14 @@ def render_index_page(payload: dict[str, Any], data: dict[str, Any],
                "the honest answer is a **named gap**, not a win. Everything below is re-derived from the "
                "data by `tools/industry_scorecard.py`; no number is hand-typed.")
     out.append("")
-    out.append("Two numbers are driven:")
+    out.append("The numbers that are driven (unbounded competitive front first):")
     out.append("")
-    out.append("- **coverage** — of the industry dimensions that matter, how many the scorecard has "
-               "considered and positioned fak against (toward 100%).")
-    out.append("- **parity-debt** — of the comparisons that exist, how many are dishonest, incomplete, "
-               "or unsourced (kept at 0).")
+    out.append("- **standing** — fak's competitive position on the field (a [0,100] number, distinct "
+               "from the map grade); raise it by turning a gap/parity axis into a measured lead.")
+    out.append("- **honest-gap count** — positioned industry axes fak has not yet turned into a "
+               "measured number; drive it toward 0 as real benchmarks land.")
+    out.append("- **coverage** (at goal, 100%) and **parity-debt** (at goal, 0) — the map-quality "
+               "drivers: how much of the field is positioned, and how honest the rows that exist are.")
     out.append("")
     out.append("> Regenerate: `python tools/industry_scorecard.py --markdown-dir docs/industry-scorecard`. "
                "Update process: [UPDATE-PROCESS.md](UPDATE-PROCESS.md). Full dimension catalog: "
@@ -1257,26 +1260,52 @@ def render_index_page(payload: dict[str, Any], data: dict[str, Any],
     out.append("")
     out.append("## Headline")
     out.append("")
-    out.append("| Metric | Value |")
+    out.append("The driver is the UNBOUNDED competitive front, not the bounded grade. Lead with fak's "
+               "**standing** on the field (a real [0,100] competitive-position number, still below its "
+               "floor) and the **honest-gap count** — the industry axes fak has not yet turned into a "
+               "measured number (drive it toward 0 by shipping + benchmarking a differentiator). The "
+               "two map-quality drivers — coverage of the field and parity-debt (honesty of the rows) "
+               "— are already at goal (100% / 0). The bounded composite **/100 (grade A)** grades only "
+               "how complete + honest the *map* is; it SATURATES near the top and HIDES the still-open "
+               "standing gap, so it is demoted to a labeled legacy line below and is NOT the metric to "
+               "optimize.")
+    out.append("")
+    out.append("| Metric (primary = unbounded competitive front) | Value |")
     out.append("|---|---|")
-    out.append(f"| **Coverage** | **{cov.get('coverage_pct', 0)}%** "
+    standing_val = c.get("standing_score", 0)
+    floor_txt = (f" (below the {STANDING_OK_FLOOR:g} floor — raise it)"
+                 if isinstance(standing_val, (int, float)) and standing_val < STANDING_OK_FLOOR
+                 else "")
+    _o = (c.get("positions") or {}).get("overall", {})
+    out.append(f"| **Standing on the field** | **{standing_val}/100**{floor_txt} — "
+               f"{_o.get('lead', 0)} lead · {_o.get('parity', 0)} parity · "
+               f"{_o.get('trails', 0)} trails · {_o.get('no-claim', 0)} honest gap |")
+    out.append(f"| **Honest gaps to close (drive to 0)** | **{meas.get('gap', 0)}** of "
+               f"{meas.get('rows', 0)} positioned axes carry no fak number yet "
+               f"({meas.get('measured', 0)} measured) |")
+    out.append(f"| Coverage of the field (at goal) | {cov.get('coverage_pct', 0)}% "
                f"({cov.get('covered', 0)}/{cov.get('in_scope', 0)} industry dimensions positioned) |")
-    out.append(f"| **Parity-debt (honesty defects)** | **{c.get('parity_debt', 0)}** |")
-    out.append(f"| Coverage-debt (unpositioned dimensions) | {c.get('coverage_debt', 0)} |")
-    out.append(f"| Composite score | {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) — "
-               f"honesty {c.get('honesty_score', 0)} × {int(HONESTY_WEIGHT*100)}% + "
-               f"coverage {cov.get('coverage_pct', 0)}% × {int(COVERAGE_WEIGHT*100)}% |")
-    out.append(f"| Standing | {_standing_line(c.get('positions') or {})} |")
-    out.append(f"| Measured vs gap | {meas.get('measured', 0)} measured · {meas.get('gap', 0)} honest gaps |")
+    out.append(f"| Parity-debt — honesty defects (at goal) | {c.get('parity_debt', 0)} "
+               f"· coverage-debt {c.get('coverage_debt', 0)} |")
     out.append(f"| Tracked | {c.get('dimensions', 0)} dimensions · {c.get('competitors', 0)} competitors "
                f"· {c.get('rows', 0)} positions |")
     out.append(f"| As of | {c.get('as_of', '?')} (fak {c.get('fak_version', '?')}) |")
     out.append(f"| Advisory signals | {c.get('soft_signals', 0)} fak-freshness · "
                f"{c.get('industry_soft_signals', 0)} industry-drift |")
+    out.append(f"| Legacy bounded score (saturates near the top; grades map honesty + coverage, not "
+               f"field standing; hides the still-open industry gap; not the driver) | "
+               f"{c.get('score', 0)}/100 (grade {c.get('grade', '?')}) — "
+               f"honesty {c.get('honesty_score', 0)} × {int(HONESTY_WEIGHT*100)}% + "
+               f"coverage {cov.get('coverage_pct', 0)}% × {int(COVERAGE_WEIGHT*100)}% |")
     out.append("")
-    out.append("> **Read this right.** The score grades how *complete and honest fak's competitive map "
-               "is* — not how much fak wins. fak is a focused reuse + trust kernel, so most dimensions "
-               "are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.")
+    out.append("> **Read this right.** The metric to optimize is fak's **standing** on the field "
+               "(raise it above its floor by turning a gap/parity axis into a measured lead) and the "
+               "**honest-gap count** (drive it toward 0 as benchmarks land). The bounded /100 grade-A "
+               "composite grades only map completeness + honesty — it SATURATES near the top once the "
+               "map is honestly drawn and can no longer tell you how much of the field fak still does "
+               "not contest, so it is kept only as a labeled legacy line, not the driver. fak is a "
+               "focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps "
+               "(out-of-scope or not-yet-measured), shown plainly below.")
     out.append("")
     out.append("## Standing at a glance")
     out.append("")
