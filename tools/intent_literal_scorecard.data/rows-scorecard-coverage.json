@@ -33,9 +33,9 @@
       "surface": "concept-scorecard-doc",
       "kind": "coverage",
       "invited_intent": "most of the discovered confusable namespace is positioned",
-      "literal": "100.0% = 1271/1271 confusable tree tokens positioned; the denominator is the whole discovered confusable space (not a hand-picked set), so the number is the honest 'the known confusable namespace is positioned' claim as of this scorecard run",
+      "literal": "the fraction of confusable tree tokens positioned against the WHOLE discovered confusable space (not a hand-picked set) - ~98% (2126/2165) at the last run, the residual being the un-positioned tail; because the denominator is the discovered universe it is honest by shape, grading namespace-map completeness, not market coverage or wins",
       "denominator": "external-universe",
-      "grounding": "1271/1271",
+      "grounding": "confusable tokens positioned",
       "disclosure": "Read this right",
       "verdict": "clear",
       "gaps": ["Contrast row: this denominator is the discovered universe, the honest fix to the self-referential framing industry-coverage exposes."]

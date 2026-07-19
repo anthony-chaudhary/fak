@@ -10,8 +10,8 @@
     {
       "id": "serving-metrics",
       "name": "Gateway Prometheus metrics",
-      "path": "internal/gateway/metrics.go",
-      "note": "The operator-facing /metrics surface. HELP text is where a divergent denominator is disclosed (or not)."
+      "path": "internal/gateway/metrics_render.go",
+      "note": "The operator-facing /metrics surface (the writeHelpType/writeCounter/writeGauge exposition, split out of metrics.go into metrics_render.go). HELP text is where a divergent denominator is disclosed (or not)."
     },
     {
       "id": "industry-scorecard-doc",
