@@ -126,6 +126,11 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 			return 0, fmt.Errorf("gguf: tensor %s Q2_0 element count %d is not a multiple of 128", t.Name, elems)
 		}
 		return elems / 128 * blockQ2_0Bytes, nil
+	case TensorQ1_0:
+		if elems%128 != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s Q1_0 element count %d is not a multiple of 128", t.Name, elems)
+		}
+		return elems / 128 * blockQ1_0Bytes, nil
 	default:
 		return 0, fmt.Errorf("gguf: tensor %s type %d does not have a simple f32 payload", t.Name, t.Type)
 	}
@@ -289,6 +294,11 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			return nil, err
 		}
 		dequantQ2_0Scalar(out, raw)
+	case TensorQ1_0:
+		if _, err := checkQuantPayload(t, elems, raw, 128, blockQ1_0Bytes, "Q1_0"); err != nil {
+			return nil, err
+		}
+		dequantQ1_0Scalar(out, raw)
 	case TensorQ4_1:
 		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_1Bytes, "Q4_1"); err != nil {
 			return nil, err
@@ -398,6 +408,22 @@ func dequantQ2_0Scalar(out []float32, raw []byte) {
 		for j := 0; j < 128; j++ {
 			q := (qs[j/4] >> (2 * uint(j%4))) & 0x03
 			out[block*128+j] = float32(int(q)-1) * d
+		}
+	}
+}
+
+// dequantQ1_0Scalar expands the PrismML Q1_0 (g128) 1-bit binary block — the
+// Bonsai-27B 1-bit sibling of Q2_0 (#4871): one little-endian f16 scale d
+// followed by 128 contiguous 1-bit codes, eight low-to-high codes per byte.
+// The code cardinality is 2 (binary, not ternary): 0=-1, 1=+1, so
+// y = (2*code-1)*d. 18 bytes per 128-element block = ~1.125 bpw.
+func dequantQ1_0Scalar(out []float32, raw []byte) {
+	for block, base := 0, 0; block < len(out)/128; block, base = block+1, base+blockQ1_0Bytes {
+		d := f16At(raw, base)
+		qs := raw[base+2 : base+blockQ1_0Bytes]
+		for j := 0; j < 128; j++ {
+			q := (qs[j/8] >> uint(j%8)) & 1
+			out[block*128+j] = float32(2*int(q)-1) * d
 		}
 	}
 }

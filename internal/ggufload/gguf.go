@@ -47,6 +47,10 @@ const (
 	// 4 bits = scale, low 28 bits = four 7-bit sign selectors). 98 bytes per super-block.
 	blockIQ3XXSBytes = 2 + 3*qkK/8
 	blockQ2_0Bytes   = 34 // 128 elements: f16 scale + 2-bit codes
+	// Q1_0 (g128): the 1-bit binary sibling of Q2_0 for the Bonsai-27B 1-bit build
+	// (#4871) — one f16 scale + 128 contiguous 1-bit codes (16 B) per 128-element
+	// group = 18 bytes per block, ~1.125 bpw.
+	blockQ1_0Bytes = 18
 )
 
 // ValueType is the GGUF metadata value type tag (uint8/int32/string/array/... per the
@@ -93,6 +97,11 @@ const (
 	TensorBF16    TensorType = 30
 	TensorMXFP4   TensorType = 39
 	TensorQ2_0    TensorType = 42
+	// TensorQ1_0 is the 1-bit group-128 binary quant (Bonsai-27B 1-bit build,
+	// ~1.125 bpw). 43 is the next tag after the PrismML llama.cpp branch's Q2_0
+	// (ggml type 42, fidan/q2_0-b9587); confirm against a real Q1_0_g128 file
+	// header when one is in hand.
+	TensorQ1_0 TensorType = 43
 )
 
 // Value is one decoded GGUF metadata value: its ValueType tag and the Go value it
@@ -153,6 +162,8 @@ func (t TensorType) String() string {
 		return "MXFP4"
 	case TensorQ2_0:
 		return "Q2_0"
+	case TensorQ1_0:
+		return "Q1_0"
 	default:
 		return fmt.Sprintf("TensorType(%d)", t)
 	}
