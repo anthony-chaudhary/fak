@@ -1,0 +1,7 @@
+2026-07-19T08:00:10.000Z node-b/guard           readiness phase=ready boot=b1 pid=1 [journald] "Started fakguard.service - fak guard control."
+2026-07-19T09:00:00.000Z node-b/guard           process-exit class=crash code=1 boot=b1 pid=1 [journald] "fakguard.service: Main process exited, code=exited, status=1/FAILURE"
+2026-07-19T09:00:05.000Z node-b/guard           manager-restart boot=b1 pid=1 [journald] "fakguard.service: Scheduled restart job, restart counter is at 1."
+2026-07-19T09:00:10.000Z node-b/guard           readiness phase=ready boot=b1 pid=1 [journald] "Started fakguard.service - fak guard control."
+2026-07-19T11:20:00.000Z node-b/guard           boot-change boot=b2 [journald] "journal boot id changed"
+2026-07-19T11:20:00.000Z node-b/guard           readiness phase=ready boot=b2 pid=1 [journald] "Started fakguard.service - fak guard control."
+2026-07-19T12:20:00.000Z node-b/guard           watchdog-timeout boot=b2 pid=1 [journald] "fakguard.service: Watchdog timeout (limit 30s)!"

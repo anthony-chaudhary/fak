@@ -1,0 +1,6 @@
+{"timestamp":"2026-07-17 01:00:00.000000-0700","eventMessage":"com.fak.guard: internal event: WILL_SPAWN, code = 0","processID":1}
+{"timestamp":"2026-07-17 01:00:01.250000-0700","eventMessage":"com.fak.guard: service state: running","processID":611}
+{"timestamp":"2026-07-17 02:15:00.000000-0700","eventMessage":"com.fak.guard: Service exited with abnormal code: 2","processID":611}
+{"timestamp":"2026-07-17 02:15:00.100000-0700","eventMessage":"com.fak.guard: service throttled by 5 seconds","processID":1}
+{"timestamp":"2026-07-17 02:15:05.000000-0700","eventMessage":"com.fak.guard: internal event: WILL_SPAWN, code = 0","processID":1}
+{"timestamp":"2026-07-17 02:15:06.000000-0700","eventMessage":"com.fak.guard: service state: running","processID":702}

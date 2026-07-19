@@ -1,0 +1,4 @@
+2026-07-17T11:00:00.000Z node-a/guard-sync      manager-restart pid=1408 [windows-eventlog] "task scheduler 100: task \\fak\\guard-sync started"
+2026-07-17T11:00:03.000Z node-a/guard-sync      process-exit class=crash code=2147943645 pid=1408 [windows-eventlog] "task scheduler 103: task \\fak\\guard-sync failed result=2147943645"
+2026-07-17T11:05:00.000Z node-a/guard-sync      manager-restart pid=1408 [windows-eventlog] "task scheduler 100: task \\fak\\guard-sync started"
+2026-07-17T11:05:09.000Z node-a/guard-sync      process-exit class=clean code=0 pid=1408 [windows-eventlog] "task scheduler 102: task \\fak\\guard-sync completed"

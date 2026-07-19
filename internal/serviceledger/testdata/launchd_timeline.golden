@@ -1,0 +1,6 @@
+2026-07-17T08:00:00.000Z node-c/guard           manager-restart pid=1 [launchd] "com.fak.guard: internal event: WILL_SPAWN, code = 0"
+2026-07-17T08:00:01.250Z node-c/guard           readiness phase=ready pid=611 [launchd] "com.fak.guard: service state: running"
+2026-07-17T09:15:00.000Z node-c/guard           process-exit class=crash code=2 pid=611 [launchd] "com.fak.guard: Service exited with abnormal code: 2"
+2026-07-17T09:15:00.100Z node-c/guard           manager-restart pid=1 [launchd] "com.fak.guard: service throttled by 5 seconds"
+2026-07-17T09:15:05.000Z node-c/guard           manager-restart pid=1 [launchd] "com.fak.guard: internal event: WILL_SPAWN, code = 0"
+2026-07-17T09:15:06.000Z node-c/guard           readiness phase=ready pid=702 [launchd] "com.fak.guard: service state: running"

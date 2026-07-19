@@ -1,0 +1,6 @@
+{"__CURSOR":"c1","__REALTIME_TIMESTAMP":"1784448010000000","_BOOT_ID":"b1","_PID":"1","UNIT":"fakguard.service","MESSAGE":"Started fakguard.service - fak guard control."}
+{"__CURSOR":"c2","__REALTIME_TIMESTAMP":"1784451600000000","_BOOT_ID":"b1","_PID":"1","_SYSTEMD_UNIT":"fakguard.service","MESSAGE":"fakguard.service: Main process exited, code=exited, status=1/FAILURE"}
+{"__CURSOR":"c3","__REALTIME_TIMESTAMP":"1784451605000000","_BOOT_ID":"b1","_PID":"1","_SYSTEMD_UNIT":"init.scope","MESSAGE":"fakguard.service: Scheduled restart job, restart counter is at 1."}
+{"__CURSOR":"c4","__REALTIME_TIMESTAMP":"1784451610000000","_BOOT_ID":"b1","_PID":"1","UNIT":"fakguard.service","MESSAGE":"Started fakguard.service - fak guard control."}
+{"__CURSOR":"c5","__REALTIME_TIMESTAMP":"1784460000000000","_BOOT_ID":"b2","_PID":"1","UNIT":"fakguard.service","MESSAGE":"Started fakguard.service - fak guard control."}
+{"__CURSOR":"c6","__REALTIME_TIMESTAMP":"1784463600000000","_BOOT_ID":"b2","_PID":"1","_SYSTEMD_UNIT":"fakguard.service","MESSAGE":"fakguard.service: Watchdog timeout (limit 30s)!"}

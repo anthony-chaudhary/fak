@@ -1,0 +1,6 @@
+2026-07-17T08:00:00.000Z node-a/guard           boot-change boot=win-boot-2026-07-17T08:00:00.0000000Z pid=4 [windows-eventlog] "event log 6005: host boot"
+2026-07-17T08:00:10.500Z node-a/guard           readiness phase=ready pid=772 [windows-eventlog] "SCM 7036: fakguard entered running state"
+2026-07-17T09:30:00.250Z node-a/guard           process-exit class=crash code=0 [windows-eventlog] "application error 1000: fakguard.exe --state-dir=C:\\svc --lease-token=[REDACTED]"
+2026-07-17T09:30:02.000Z node-a/guard           process-exit class=crash code=0 pid=772 [windows-eventlog] "SCM 7031: service fakguard terminated unexpectedly"
+2026-07-17T09:31:05.000Z node-a/guard           readiness phase=ready pid=772 [windows-eventlog] "SCM 7036: fakguard entered running state"
+2026-07-17T10:00:00.000Z node-a/guard           desired-change desired=desired-stopped pid=772 [windows-eventlog] "SCM 7040: fakguard start type auto start -> disabled"

@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/serviceledger"
+	"github.com/anthony-chaudhary/fak/internal/servicespec"
 	"github.com/anthony-chaudhary/fak/internal/systemservice"
 )
 
@@ -48,6 +50,15 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	}
 	if args[0] == "run" {
 		return runServiceLoop(stdout, stderr, args[1:])
+	}
+	if args[0] == "events" {
+		return runServiceEvents(stdout, stderr, args[1:])
+	}
+	// The bare `status` verb keeps its platform-manager meaning; the observed-
+	// event ledger rollup (#4753) answers when the operator names a ledger,
+	// either explicitly (--ledger-dir) or via FAK_SERVICE_LEDGER_DIR.
+	if args[0] == "status" && (hasServiceLedgerFlag(args[1:]) || os.Getenv("FAK_SERVICE_LEDGER_DIR") != "") {
+		return runServiceStatus(stdout, stderr, args[1:])
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("service "+action, flag.ContinueOnError)
@@ -247,6 +258,160 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 }
 func serviceUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak service install|status|uninstall|run [--dry-run] [--json]")
+	fmt.Fprintln(w, "       fak service events [--json] [--ledger-dir D] [--service S]")
+	fmt.Fprintln(w, "       fak service events --ingest windows-xml|journald-json|launchd-ndjson --file F --node N --service S [--workload W] [--unit U] [--json]")
+	fmt.Fprintln(w, "       fak service status --ledger-dir D [--json]    (observed-event rollup; also picked when FAK_SERVICE_LEDGER_DIR is set)")
+}
+
+// hasServiceLedgerFlag reports whether the operator explicitly named the
+// observed-event ledger, which routes `status` to the ledger rollup instead
+// of the platform service manager.
+func hasServiceLedgerFlag(args []string) bool {
+	for _, a := range args {
+		if a == "-ledger-dir" || a == "--ledger-dir" ||
+			strings.HasPrefix(a, "-ledger-dir=") || strings.HasPrefix(a, "--ledger-dir=") {
+			return true
+		}
+	}
+	return false
+}
+
+func openServiceLedger(stderr io.Writer, dir string) (*serviceledger.Ledger, int) {
+	if dir == "" {
+		dir = serviceledger.DefaultDir()
+	}
+	led, err := serviceledger.Open(dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak service: open ledger:", err)
+		return nil, 1
+	}
+	return led, 0
+}
+
+func filterServiceEvents(events []serviceledger.Event, service string) []serviceledger.Event {
+	if service == "" {
+		return events
+	}
+	out := events[:0]
+	for _, e := range events {
+		if e.Identity.Service == service {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// runServiceEvents implements `fak service events` (#4753): list the
+// correlated observed-event timeline, or ingest a native manager export
+// through the fixture-tested adapters (windows-xml | journald-json |
+// launchd-ndjson; `--file -` reads stdin, e.g. piped from `wevtutil qe
+// System /f:xml`).
+func runServiceEvents(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("service events", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "machine-readable output (JSONL events / ingest summary)")
+	ledgerDir := fs.String("ledger-dir", "", "observed-event ledger directory (default FAK_SERVICE_LEDGER_DIR, else user config dir)")
+	ingest := fs.String("ingest", "", "ingest a native export: windows-xml|journald-json|launchd-ndjson")
+	file := fs.String("file", "-", "native export file for --ingest (- reads stdin)")
+	node := fs.String("node", "", "identity node for --ingest")
+	service := fs.String("service", "", "identity service (--ingest) / list filter")
+	workload := fs.String("workload", "", "identity workload for --ingest")
+	unit := fs.String("unit", "", "native unit/service-name/label filter for --ingest")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return 2
+	}
+	led, rc := openServiceLedger(stderr, *ledgerDir)
+	if rc != 0 {
+		return rc
+	}
+	if *ingest != "" {
+		var parse func(io.Reader, serviceledger.AdapterConfig) ([]serviceledger.Event, error)
+		switch *ingest {
+		case "windows-xml":
+			parse = serviceledger.AdaptWindowsEventXML
+		case "journald-json":
+			parse = serviceledger.AdaptJournaldExport
+		case "launchd-ndjson":
+			parse = serviceledger.AdaptLaunchdNDJSON
+		default:
+			fmt.Fprintf(stderr, "fak service events: unknown ingest format %q\n", *ingest)
+			return 2
+		}
+		var r io.Reader = os.Stdin
+		if *file != "-" {
+			f, err := os.Open(*file)
+			if err != nil {
+				fmt.Fprintln(stderr, "fak service events:", err)
+				return 1
+			}
+			defer f.Close()
+			r = f
+		}
+		cfg := serviceledger.AdapterConfig{
+			Identity: servicespec.Identity{Node: *node, Service: *service, Workload: *workload},
+			Unit:     *unit,
+		}
+		evs, err := parse(r, cfg)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak service events:", err)
+			return 1
+		}
+		ingested, duplicates, err := led.AppendAll(evs)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak service events:", err)
+			return 1
+		}
+		if *asJSON {
+			_ = json.NewEncoder(stdout).Encode(map[string]int{
+				"ingested": ingested, "duplicates": duplicates, "events": len(led.Events()),
+			})
+		} else {
+			fmt.Fprintf(stdout, "ingested %d event(s), skipped %d duplicate(s)\n", ingested, duplicates)
+		}
+		return 0
+	}
+	events := filterServiceEvents(led.Events(), *service)
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		for _, e := range events {
+			_ = enc.Encode(e)
+		}
+		return 0
+	}
+	serviceledger.WriteTimeline(stdout, events)
+	return 0
+}
+
+// runServiceStatus implements the ledger-backed `fak service status` rollup
+// (#4753): per-workload phase, correlation high-water marks, restart-storm
+// verdict, and stale-but-still-running owners. Exit code 4 flags a detected
+// restart storm or stale owner so scripts can alert without parsing output.
+func runServiceStatus(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("service status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "machine-readable result")
+	ledgerDir := fs.String("ledger-dir", "", "observed-event ledger directory (default FAK_SERVICE_LEDGER_DIR, else user config dir)")
+	service := fs.String("service", "", "only this identity service")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return 2
+	}
+	led, rc := openServiceLedger(stderr, *ledgerDir)
+	if rc != 0 {
+		return rc
+	}
+	events := filterServiceEvents(led.Events(), *service)
+	sts := serviceledger.Status(events, serviceledger.StatusOptions{})
+	if *asJSON {
+		_ = json.NewEncoder(stdout).Encode(sts)
+	} else {
+		serviceledger.WriteStatus(stdout, sts)
+	}
+	for _, st := range sts {
+		if st.RestartStorm || len(st.StaleOwners) > 0 {
+			return 4
+		}
+	}
+	return 0
 }
 func prepareSharedGuardRegistry(registryDir string) error {
 	if err := os.MkdirAll(registryDir, 0o733); err != nil {
