@@ -88,12 +88,18 @@ the "slow SSD box" is riding the resident RAM roofline, which is the dense
 ## The two baselines, side by side (§2.1) — state the denominator or say nothing
 
 - **×vs-uncoalesced** `= net_toks(B) ÷ (B · net_toks(1))`: against B independent
-  un-coalesced streams *each paying its full per-agent SSD stream at full SSD bandwidth* —
-  i.e. effectively B separate boxes. While the batch is SSD-bound this shows the per-stream
-  coalescing win (1.22–1.23× at B=4–16 under uniform-ish skew s=1). **Past B\* it falls
-  below 1 (0.46× at B=128)** — one box riding its RAM roofline loses to B whole boxes, as
-  it must. That is not a defect of coalescing; it is why §2.1 says the defensible headline
-  is **C(B) and the regime transition**, not any bare multiple.
+  un-coalesced streams *each granted the full SSD bandwidth* — i.e. effectively **B separate
+  boxes**, an **OPTIMISTIC upper-baseline** (the landing-review note on #5245). While the
+  batch is SSD-bound this shows the per-stream coalescing win (1.22–1.23× at B=4–16 under
+  uniform-ish skew s=1). **Past B\* it falls below 1 (0.46× at B=128)** — one box riding its
+  RAM roofline loses to B whole boxes, as it must. That is not a defect of coalescing; it is
+  why §2.1 says the defensible headline is **C(B) and the regime transition**, not any bare
+  multiple.
+- **The same-box physics baseline — the un-coalesced shared-SSD floor** (printed under the
+  table): B un-coalesced, un-cached streams time-sharing ONE SSD each stream the full
+  `L·K·e` expert bytes per token, so their aggregate is `BW_ssd/(L·K·e)` = **0.54 tok/s at
+  ANY B** (defaults). The coalesced curve's rise above this constant floor (1.25 → 74.18
+  PROJECTED) is the coalescing+cache win on the same box.
 - **×vs-1agent** `= net_toks(B) ÷ net_toks(1)`: 59.31× at B=128. This is the
   aggregate-over-latency number the affordable-fleet note warns against citing raw —
   report it only as "aggregate, latency-tolerant"; no single user's token gets faster.
@@ -119,6 +125,6 @@ one box says nothing about issues closed per hour.
 Same flags → byte-identical table: the router is a seeded splitmix64 PRNG (no
 `time`, no global `math/rand`), the simulator is the deterministic #5244 LRU, and
 `cmd/coalescebench`'s `TestRunBenchDeterministic` enforces it (plus: seed reaches the
-router, skew concentrates `U(B)`, the §2 arithmetic is pinned exactly, and the bench's
+router, skew concentrates `U(B)`, the §2 arithmetic and the shared-SSD floor are pinned exactly, and the bench's
 per-step unions cross-check the simulator's `DistinctStreamed` count, failing closed on
 disagreement).

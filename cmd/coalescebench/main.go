@@ -24,7 +24,12 @@
 // per §2.1 so the multiple is never stated without its denominator:
 //
 //	×vs-uncoalesced = net_toks(B) ÷ (B · net_toks(1)) — vs B independent un-coalesced
-//	                  streams, each paying the full per-agent SSD stream (the defensible one).
+//	                  streams, EACH granted the full SSD bandwidth (B separate boxes): an
+//	                  OPTIMISTIC upper-baseline, which is why it dips below 1× once the
+//	                  batch goes RAM-bound (#5245 review). The same-box physics is the
+//	                  shared-SSD un-coalesced floor printed under the table:
+//	                  BW_ssd/(L·K·e), constant in B — B un-coalesced, un-cached streams
+//	                  time-sharing one SSD. The defensible headline stays C(B) itself.
 //	×vs-1agent      = net_toks(B) ÷ net_toks(1)       — AGGREGATE over single-agent latency;
 //	                  latency-tolerant only, never a speedup a single user feels.
 //
@@ -275,6 +280,14 @@ func computeRow(cfg benchConfig, b int, u unionStats, pageInsPerStep float64) ro
 	}
 }
 
+// uncoalescedFloor is the same-box, shared-SSD un-coalesced aggregate rate: B un-coalesced,
+// un-cached streams time-sharing ONE SSD each pay the full L·K·e expert bytes per token, so
+// the aggregate is BW_ssd/(L·K·e) tok/s at ANY B — the physical floor the #5245 landing
+// review asked to state beside the optimistic B-separate-boxes ×vs-uncoalesced column.
+func uncoalescedFloor(cfg benchConfig) float64 {
+	return cfg.BWSSDGiB * gib / (float64(cfg.Layers) * float64(cfg.TopK) * cfg.ExpertMiB * mib)
+}
+
 // regimeTransition returns the smallest swept B where the coalesced SSD stream stops
 // binding (SSD_term < RAM_term) — the point the box goes effectively resident.
 func regimeTransition(rows []row) (row, bool) {
@@ -372,7 +385,8 @@ func render(cfg benchConfig, capacity int, rows []row, base row) string {
 	} else {
 		fmt.Fprintf(&sb, "regime transition: not reached within the swept batch sizes — SSD_term >= RAM_term throughout (the expert stream still binds). PROJECTED.\n")
 	}
-	fmt.Fprintf(&sb, "baselines (§2.1): ×vs-uncoalesced = net_toks(B) ÷ (B · net_toks(1)) — vs B independent un-coalesced streams, each paying the full per-agent SSD stream (the defensible headline). ×vs-1agent = net_toks(B) ÷ net_toks(1) — AGGREGATE over single-agent latency; latency-tolerant only, never a speedup a single user feels.\n")
+	fmt.Fprintf(&sb, "un-coalesced shared-SSD floor (PROJECTED): BW_ssd/(L·K·e) = %.2f tok/s aggregate at ANY B — B un-coalesced, un-cached streams time-sharing ONE SSD each stream the full L·K·e expert bytes per token. This is the same-box physics baseline; the coalesced curve's rise above it is the coalescing+cache win.\n", uncoalescedFloor(cfg))
+	fmt.Fprintf(&sb, "baselines (§2.1): ×vs-uncoalesced = net_toks(B) ÷ (B · net_toks(1)) — vs B independent un-coalesced streams EACH granted the full SSD bandwidth (B separate boxes): an OPTIMISTIC upper-baseline, so it dips below 1× once the batch goes RAM-bound; the same-box comparison is the shared-SSD floor above, and the defensible headline is C(B) itself. ×vs-1agent = net_toks(B) ÷ net_toks(1) — AGGREGATE over single-agent latency; latency-tolerant only, never a speedup a single user feels.\n")
 	return sb.String()
 }
 

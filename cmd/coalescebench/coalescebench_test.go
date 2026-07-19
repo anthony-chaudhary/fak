@@ -45,7 +45,7 @@ func TestRunBenchDeterministic(t *testing.T) {
 			t.Fatalf("table row missing PROJECTED label: %q", line)
 		}
 	}
-	for _, want := range []string{"regime transition:", "×vs-uncoalesced", "×vs-1agent", "PROJECTED", "#5251"} {
+	for _, want := range []string{"regime transition:", "un-coalesced shared-SSD floor", "×vs-uncoalesced", "×vs-1agent", "PROJECTED", "#5251"} {
 		if !strings.Contains(first, want) {
 			t.Fatalf("output missing %q:\n%s", want, first)
 		}
@@ -233,6 +233,16 @@ func TestComputeRowRoofline(t *testing.T) {
 	approx(r.NetToks, wantNet, "NetToks")
 	if r.Binding != "RAM" {
 		t.Fatalf("Binding = %q, want RAM", r.Binding)
+	}
+}
+
+// TestUncoalescedFloor pins the shared-SSD un-coalesced baseline the #5245 landing review
+// asked for: BW_ssd/(L·K·e), constant in B. smallCfg: 1 GiB/s over 3·2·1 MiB = 1024/6 tok/s.
+func TestUncoalescedFloor(t *testing.T) {
+	got := uncoalescedFloor(smallCfg())
+	want := 1024.0 / 6.0
+	if math.Abs(got-want) > 1e-12*want {
+		t.Fatalf("uncoalescedFloor = %.15g, want %.15g", got, want)
 	}
 }
 
