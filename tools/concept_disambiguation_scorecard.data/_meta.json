@@ -394,6 +394,11 @@
           "category": "incidental",
           "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
           "token": "guardHandoffBlockCounterPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus KV-prefix reuse counter on the gateway /metrics surface; matches guard-gate only on the 'gate' substring of 'gateway'. It admits/refuses nothing — pure observability, incidental to the guard-gate concept family.",
+          "token": "fak_gateway_kv_prefix_prompt_tokens_by_source_total"
         }
       ],
       "exclude": [
@@ -415,6 +420,7 @@
         "cmdCacheValueGateScore",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
+        "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fleetbarecommitguard",
         "gate_test",
         "gate_verbtier",
@@ -538,6 +544,11 @@
           "category": "incidental",
           "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
           "token": "bumpSessionHandoffBlocks"
+        },
+        {
+          "category": "incidental",
+          "reason": "kernelSession is a local unexported plumbing accessor that returns the *Session a matKernel (sessionQ4KKernel/backendKernel) wraps; not a domain concept, just a type-switch helper for the routed-expert capability gate.",
+          "token": "kernelSession"
         }
       ],
       "id": "session-runtime",
@@ -554,6 +565,7 @@
         "guardsessiontempdir",
         "handoff_session_give_up",
         "interactivesession",
+        "kernelSession",
         "readSessionHandoffBlocks",
         "requireminimaxsession",
         "restartfreshsession",
@@ -748,17 +760,25 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "kernelSession is a local unexported plumbing accessor that returns the *Session a matKernel (sessionQ4KKernel/backendKernel) wraps; not a domain concept, just a type-switch helper for the routed-expert capability gate.",
+          "token": "kernelSession"
+        }
+      ],
       "id": "gateway-engine",
       "ignore": [
-        "engineering",
+        "convkernel",
         "engineer",
         "engineered",
+        "engineering",
         "engineers",
         "gateways",
-        "kernels",
         "kernel32",
-        "kernelwiki",
-        "convkernel"
+        "kernelSession",
+        "kernels",
+        "kernelwiki"
       ],
       "min_files": 3,
       "name": "Gateway / engine family",
@@ -943,13 +963,42 @@
           "category": "incidental",
           "reason": "Go field name for a score signal, not a new support-maturity concept",
           "token": "DomainCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI flag variable feeding Handoff.AchievedMaturity (#4640); the concept is the already-positioned completion-standard maturity vocabulary, not a new maturity notion",
+          "token": "achievedMaturity"
+        },
+        {
+          "category": "incidental",
+          "reason": "render helper emitting maturity-qualified completion labels (demo-complete) for operator status (#4640); reuses the positioned maturity vocabulary",
+          "token": "MaturityLabel"
+        },
+        {
+          "category": "incidental",
+          "reason": "normalizer mapping declared achieved-maturity wording onto the closed completion-standard vocabulary shared with issuecontract (#4640); no new concept",
+          "token": "normalizeAchievedMaturity"
+        },
+        {
+          "category": "incidental",
+          "reason": "handoff review refusal reason for achieved-maturity wording outside the closed vocabulary (#4640); a reason token, not a maturity concept",
+          "token": "BAD_ACHIEVED_MATURITY"
+        },
+        {
+          "category": "incidental",
+          "reason": "strict project-work refusal reason for a completion handoff that names no achieved maturity (#4640); a reason token, not a maturity concept",
+          "token": "MISSING_ACHIEVED_MATURITY"
         }
       ],
       "id": "support-maturity",
       "ignore": [
+        "BAD_ACHIEVED_MATURITY",
         "DecodeInterleaveUnsupported",
         "DomainCoverage",
+        "MISSING_ACHIEVED_MATURITY",
+        "MaturityLabel",
         "SupportsRoutedExpertKQuant",
+        "achievedMaturity",
         "correctnessclass",
         "correctnessdependson",
         "coveragebaseline",
@@ -960,6 +1009,7 @@
         "errmmapunsupported",
         "errstreamingunsupported",
         "immaturity",
+        "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",
         "paritybench",
         "parityreport",
@@ -1095,6 +1145,11 @@
           "category": "incidental",
           "reason": "private formatting helper for one velocity row, not a materialization concept",
           "token": "renderVelocityLeg"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper rendering commitDrainResult summary lines to the fak commit command stdout; restored verbatim alongside commit.go after dbe324f44 wrongly deleted the file while main.go:609 still dispatches runCommitCommand",
+          "token": "renderCommitDrainResult"
         }
       ],
       "id": "render-materialize",
@@ -1112,6 +1167,7 @@
         "materializes",
         "metricsrender",
         "priorwtrendercrash",
+        "renderCommitDrainResult",
         "renderCommitVelocity",
         "renderValidate",
         "renderVelocityLeg",
