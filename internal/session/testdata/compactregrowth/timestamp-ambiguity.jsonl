@@ -1,0 +1,10 @@
+{"timestamp":"2026-07-01T10:00:00.000Z","type":"session_meta","payload":{"id":"regrow-tsambig","cwd":"C:\\work\\fak"}}
+{"timestamp":"2026-07-01T10:00:01.000Z","type":"event_msg","payload":{"type":"task_started"}}
+{"timestamp":"2026-07-01T10:05:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":245000},"last_token_usage":{"input_tokens":245000,"cached_input_tokens":0},"model_context_window":258400}}}
+{"timestamp":"2026-07-01T10:10:00.000Z","type":"compacted","payload":{"message":""}}
+{"timestamp":"2026-07-01T10:10:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":490000},"last_token_usage":{"input_tokens":0,"cached_input_tokens":0},"model_context_window":258400}}}
+{"timestamp":"2026-07-01T10:10:00.000Z","type":"event_msg","payload":{"type":"context_compacted"}}
+{"timestamp":"2026-07-01T10:10:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":515000},"last_token_usage":{"input_tokens":25000,"cached_input_tokens":0},"model_context_window":258400}}}
+{"timestamp":"2026-07-01T10:10:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":575000},"last_token_usage":{"input_tokens":60000,"cached_input_tokens":0},"model_context_window":258400}}}
+{"timestamp":"2026-07-01T10:10:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":725000},"last_token_usage":{"input_tokens":150000,"cached_input_tokens":0},"model_context_window":258400}}}
+{"timestamp":"2026-07-01T10:10:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":935000},"last_token_usage":{"input_tokens":210000,"cached_input_tokens":0},"model_context_window":258400}}}

@@ -163,6 +163,9 @@ func RenderCompactAudit(w io.Writer, res CompactAuditResult, topN int) {
 		fmt.Fprintln(w)
 	}
 
+	// #4768: how fast the window came BACK after each fire, and out of what.
+	writeCompactRegrowthSection(w, a.Regrowth, 12)
+
 	if topN <= 0 {
 		return
 	}

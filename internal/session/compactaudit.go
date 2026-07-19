@@ -155,6 +155,11 @@ type CompactFire struct {
 	Confidence string   `json:"confidence"`
 	Reason     string   `json:"reason"`
 	Anomalies  []string `json:"anomalies,omitempty"`
+
+	// Regrowth is this fire's post-fire trajectory and content-class attribution
+	// (#4768) — how fast the window refilled, out of what, and how the observation
+	// ended. See compactregrowth.go.
+	Regrowth *CompactRegrowth `json:"regrowth,omitempty"`
 }
 
 // CompactSessionReport is one rollout file's compaction health.
@@ -199,6 +204,10 @@ type CompactAggregate struct {
 
 	AnomalyCounts map[string]int `json:"anomaly_counts"`
 	VerdictCounts map[string]int `json:"verdict_counts"`
+
+	// Regrowth is the corpus-wide rebound/attribution roll-up (#4768); nil when no
+	// fire carried post-fire telemetry.
+	Regrowth *CompactRegrowthRollup `json:"regrowth,omitempty"`
 }
 
 // maxRollupRowHead bounds how much of one JSONL row the scanner holds. Every field
@@ -221,6 +230,9 @@ type rollupTokenPayload struct {
 	Info struct {
 		LastTokenUsage struct {
 			InputTokens int `json:"input_tokens"`
+			// CachedInputTokens is the provider's cache-read share of this request's
+			// input — the #4768 join that prices regrowth net of reuse.
+			CachedInputTokens int `json:"cached_input_tokens"`
 		} `json:"last_token_usage"`
 		TotalTokenUsage struct {
 			InputTokens int `json:"input_tokens"`
@@ -246,11 +258,13 @@ type rollupTypedPayload struct {
 // the remainder. This is what makes the scan streaming and body-blind: a 4 MB
 // replacement_history row costs a bounded head and is never held. truncated reports
 // whether the row overran, so the caller can fall back to a prefix probe instead of
-// unmarshalling an incomplete document.
-func readRollupRow(br *bufio.Reader) (head []byte, truncated bool, err error) {
+// unmarshalling an incomplete document. rowLen is the FULL row length including the
+// discarded tail — the #4768 attribution measures rows by length, never by content.
+func readRollupRow(br *bufio.Reader) (head []byte, truncated bool, rowLen int64, err error) {
 	var buf []byte
 	for {
 		chunk, e := br.ReadSlice('\n')
+		rowLen += int64(len(chunk))
 		if len(buf)+len(chunk) <= maxRollupRowHead {
 			buf = append(buf, chunk...)
 		} else if room := maxRollupRowHead - len(buf); room > 0 {
@@ -260,18 +274,18 @@ func readRollupRow(br *bufio.Reader) (head []byte, truncated bool, err error) {
 			truncated = true
 		}
 		if e == nil {
-			return buf, truncated, nil
+			return buf, truncated, rowLen, nil
 		}
 		if errors.Is(e, bufio.ErrBufferFull) {
 			continue // keep draining this over-long row; the excess is dropped above
 		}
 		if errors.Is(e, io.EOF) {
 			if len(buf) == 0 {
-				return nil, truncated, io.EOF
+				return nil, truncated, rowLen, io.EOF
 			}
-			return buf, truncated, nil
+			return buf, truncated, rowLen, nil
 		}
-		return nil, truncated, e
+		return nil, truncated, rowLen, e
 	}
 }
 
@@ -343,9 +357,10 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 
 		pending []*pendingFire
 	)
+	tracker := newRegrowthTracker()
 
 	for {
-		head, truncated, err := readRollupRow(br)
+		head, truncated, rowLen, err := readRollupRow(br)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -413,11 +428,19 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 			if payloadType == "function_call" || payloadType == "custom_tool_call" {
 				toolCalls++
 			}
+			tracker.observeResponseItem(parsed, row.Payload, head, rowLen)
 		case "compacted":
+			nFires := len(rep.Fires)
 			rep, pending, lastFireKind, lastFireTime, haveFire = recordFire(
 				rep, pending, "compacted", ts, turn,
 				lastNonZero, lastNZTurn, lastNZTime, haveNonZero,
 				lastFireKind, lastFireTime, haveFire)
+			if len(rep.Fires) > nFires {
+				tracker.onFire(len(rep.Fires)-1, ts, turn, toolCalls)
+			}
+			// The compacted row's replacement_history is the summary the compactor
+			// injects into the fresh window; attribute it there.
+			tracker.observeCompacted(rowLen)
 		case "event_msg":
 			if parsed && len(row.Payload) > 0 {
 				var p rollupTypedPayload
@@ -429,10 +452,14 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 			case "task_started":
 				turn++
 			case "context_compacted":
+				nFires := len(rep.Fires)
 				rep, pending, lastFireKind, lastFireTime, haveFire = recordFire(
 					rep, pending, "context_compacted", ts, turn,
 					lastNonZero, lastNZTurn, lastNZTime, haveNonZero,
 					lastFireKind, lastFireTime, haveFire)
+				if len(rep.Fires) > nFires {
+					tracker.onFire(len(rep.Fires)-1, ts, turn, toolCalls)
+				}
 			case "token_count":
 				if !parsed || len(row.Payload) == 0 {
 					continue
@@ -460,6 +487,7 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 				}
 				lastNonZero, lastNZTurn, lastNZTime, haveNonZero = resident, turn, ts, true
 				resolvePending(&rep, pending, resident, turn, ts)
+				tracker.observeSample(resident, resident, tp.Info.LastTokenUsage.CachedInputTokens, ts, turn, toolCalls)
 			}
 		}
 	}
@@ -467,6 +495,7 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 	rep.Turns = turn
 	rep.ToolCalls = toolCalls
 	rep.FireCount = len(rep.Fires)
+	tracker.finalize(&rep)
 	finalizeCompactReport(&rep)
 	return rep, nil
 }
@@ -682,6 +711,7 @@ func AggregateCompactReports(reports []CompactSessionReport) CompactAggregate {
 	agg.MedianPostTokens = medianInt(post)
 	agg.MedianShedTokens = medianInt(shed)
 	agg.MedianResidualRatio = round4(medianFloat(residual))
+	agg.Regrowth = rollupCompactRegrowth(reports)
 	return agg
 }
 

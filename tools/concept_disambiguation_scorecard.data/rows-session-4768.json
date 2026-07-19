@@ -1,0 +1,60 @@
+{
+  "rows": [
+    {
+      "id": "median-cache-read-fraction",
+      "canonical": "MedianCacheReadFraction",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Median share of post-compaction window input tokens served as provider cache reads (cached_input_tokens / input_tokens), rolled up per regrowth cohort in the #4768 compact-audit aggregate.",
+      "distinction": "A telemetry-derived pricing statistic over Codex rollout token samples - NOT a cache subsystem: it owns no tensors and no eviction, unlike kv-cache; it prices regrowth net of reuse.",
+      "distinct_from": [
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "MedianCacheReadFraction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "compaction-summary-class",
+      "canonical": "compaction_summary",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Regrowth attribution class for the compacted row's replacement_history: the summary transcript the Codex compactor injects into the fresh window after a fire (#4768), measured by row length only.",
+      "distinction": "A content-class LABEL in the compact-audit regrowth attribution - NOT CompactionBudget (a threshold knob) and NOT the compaction event itself: it names the injected summary bytes attributed to the post-fire window.",
+      "distinct_from": [
+        "x2-context-ctx-compactionbudget"
+      ],
+      "aliases": [],
+      "grounding": "compaction_summary",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "environment-context-marker",
+      "canonical": "environment_context",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Upstream Codex marker (\u003cenvironment_context\u003e) that tags an injected environment header message in rollout transcripts; the #4768 regrowth scanner classifies rows containing it as reinjected instruction payload.",
+      "distinction": "A verbatim upstream protocol marker matched in row heads - NOT a fak-defined concept and NOT compaction-summary-class (compactor output): it marks setup/instruction payload injected by Codex itself.",
+      "distinct_from": [
+        "compaction-summary-class"
+      ],
+      "aliases": [],
+      "grounding": "environment_context",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
