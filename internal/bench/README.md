@@ -121,3 +121,44 @@ never asserts that the literature's inverse-scaling signature must reproduce. Th
 committed witness in `testdata/negation_baseline_observed.json` names the fak-served
 models and host used for the run.
 
+### Negation comprehension suite (`negbench`, #4468)
+
+`negbench` is the standing negation-comprehension witness for the negation-operator
+epic (#4402): it measures whether negation is *understood*, not merely rephrased,
+across four dependency-free (Go stdlib only) task families, each an embedded fixture
+set plus an exact, deterministic scorer:
+
+- **negated cloze** — the correct completion depends on the negation
+  ("A penguin cannot ___"); a positive-only model falls for the `forbidden` trap word.
+- **negated QA** — yes/no questions whose answer flips under negation.
+- **do-not / only adherence** — instruction-following where the constraint is a
+  prohibition ("do not mention _cat_") or an exclusivity ("respond with **only** ACK").
+- **de morgan equivalence** — logical-rewrite pairs scored identical by an embedded
+  truth-table evaluator; the deliberately-wrong rewrite fixture must score non-equivalent.
+
+The scored gate (fast, no env) runs every family against a reference oracle (all pass)
+and a negation-blind degenerate set (the three response-driven families must show
+failures, proving the scorer discriminates rather than always passing):
+
+```sh
+go test ./internal/bench -run TestNegBench -count=1
+```
+
+To score a real model, feed a `{item-id: response-text}` JSON map and write an OBSERVED
+witness (self-verifying digest; flips no gate). With no responses supplied it scores the
+reference oracle:
+
+```bash
+FAK_NEGBENCH_OUT=/tmp/negbench.json \
+FAK_NEGBENCH_MODEL=claude-opus-4-8 FAK_NEGBENCH_HW=win11-fak-bench \
+FAK_NEGBENCH_RESPONSES=/tmp/responses.json \
+  go test ./internal/bench -run TestNegBenchArtifact -count=1 -v
+```
+
+Each family reports per-item pass/fail plus a `passed/total` aggregate and `pass_rate`.
+Read the artifact `families[].pass_rate` for the per-family score and `families[].items[]`
+for the per-item rows (`id`, `prompt`, `expected`, `response`, `pass`, `why`). Score a
+rung's ablation (e.g. `internal/negframe` reframe on vs off) *net* by diffing two
+artifacts. The committed witness `testdata/negbench-reference-oracle.json` is the
+reference-oracle run (model + host named, `OBSERVED`, `enforced: false`).
+

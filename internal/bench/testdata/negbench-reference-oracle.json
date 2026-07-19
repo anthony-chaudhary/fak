@@ -1,0 +1,173 @@
+{
+  "schema": "fak.negbench/1",
+  "provenance": "OBSERVED",
+  "model": "reference-oracle",
+  "host": "DESKTOP-BB3FMHP",
+  "enforced": false,
+  "families": [
+    {
+      "family": "negated-cloze",
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1,
+      "items": [
+        {
+          "family": "negated-cloze",
+          "id": "fish-walk",
+          "prompt": "A fish cannot ___ (one word).",
+          "expected": "walk",
+          "response": "walk",
+          "pass": true
+        },
+        {
+          "family": "negated-cloze",
+          "id": "ice-hot",
+          "prompt": "Ice is not ___ (one word).",
+          "expected": "hot|warm",
+          "response": "hot",
+          "pass": true
+        },
+        {
+          "family": "negated-cloze",
+          "id": "penguin-fly",
+          "prompt": "A penguin cannot ___ (one word).",
+          "expected": "fly",
+          "response": "fly",
+          "pass": true
+        },
+        {
+          "family": "negated-cloze",
+          "id": "sun-night",
+          "prompt": "The sun does not shine at ___ (one word).",
+          "expected": "night",
+          "response": "night",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "family": "negated-qa",
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1,
+      "items": [
+        {
+          "family": "negated-qa",
+          "id": "penguin-fly-neg",
+          "prompt": "Is it correct that a penguin cannot fly? Answer yes or no.",
+          "expected": "yes",
+          "response": "yes",
+          "pass": true
+        },
+        {
+          "family": "negated-qa",
+          "id": "penguin-fly-pos",
+          "prompt": "Can a penguin fly? Answer yes or no.",
+          "expected": "no",
+          "response": "no",
+          "pass": true
+        },
+        {
+          "family": "negated-qa",
+          "id": "water-wet-neg",
+          "prompt": "Is it false that water is wet? Answer yes or no.",
+          "expected": "no",
+          "response": "no",
+          "pass": true
+        },
+        {
+          "family": "negated-qa",
+          "id": "water-wet-pos",
+          "prompt": "Is water wet? Answer yes or no.",
+          "expected": "yes",
+          "response": "yes",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "family": "do-not-only-adherence",
+      "passed": 4,
+      "total": 4,
+      "pass_rate": 1,
+      "items": [
+        {
+          "family": "do-not-only-adherence",
+          "id": "no-cat",
+          "prompt": "Describe a dog in one sentence. Do not mention the word cat.",
+          "expected": "avoid:cat",
+          "response": "A dog is a loyal four-legged companion.",
+          "pass": true
+        },
+        {
+          "family": "do-not-only-adherence",
+          "id": "no-secret",
+          "prompt": "Explain the plan briefly. Do not mention the word secret.",
+          "expected": "avoid:secret",
+          "response": "A dog is a loyal four-legged companion.",
+          "pass": true
+        },
+        {
+          "family": "do-not-only-adherence",
+          "id": "only-ack",
+          "prompt": "Respond with only the token ACK and nothing else.",
+          "expected": "only:ack",
+          "response": "ack",
+          "pass": true
+        },
+        {
+          "family": "do-not-only-adherence",
+          "id": "only-yes",
+          "prompt": "Reply with only the word yes.",
+          "expected": "only:yes",
+          "response": "yes",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "family": "de-morgan-equivalence",
+      "passed": 5,
+      "total": 5,
+      "pass_rate": 1,
+      "items": [
+        {
+          "family": "de-morgan-equivalence",
+          "id": "double-neg",
+          "prompt": "!(!a \u0026 !b)  ==  a | b",
+          "expected": "equiv",
+          "pass": true
+        },
+        {
+          "family": "de-morgan-equivalence",
+          "id": "not-and",
+          "prompt": "!(a \u0026 b)  ==  !a | !b",
+          "expected": "equiv",
+          "pass": true
+        },
+        {
+          "family": "de-morgan-equivalence",
+          "id": "not-and-wrong",
+          "prompt": "!(a \u0026 b)  ==  !a \u0026 !b",
+          "expected": "not-equiv",
+          "pass": true
+        },
+        {
+          "family": "de-morgan-equivalence",
+          "id": "not-or",
+          "prompt": "!(a | b)  ==  !a \u0026 !b",
+          "expected": "equiv",
+          "pass": true
+        },
+        {
+          "family": "de-morgan-equivalence",
+          "id": "not-or3",
+          "prompt": "!(a | b | c)  ==  !a \u0026 !b \u0026 !c",
+          "expected": "equiv",
+          "pass": true
+        }
+      ]
+    }
+  ],
+  "digest": "b8bab26edce1921b0b33e4722145eb36e0faba812f5187e7efcf44d784cb6786"
+}
