@@ -86,7 +86,20 @@ const (
 	// ReasonBlockedByOpenPrereq: a prerequisite named in BlockedBy is still an open candidate this
 	// tick, so the unit is soft-held until the prerequisite closes (leaves the candidate set).
 	ReasonBlockedByOpenPrereq = "blocked_by_open_prereq"
+	// ReasonWedgedObjective: the unit's bound objective shows a sustained-STALL trajectory curve
+	// (ObjectiveSignal "STALL" — flat progress across attempts), so the dispatch order deprioritized
+	// it behind a fresh alternative. A DEMOTION, never a refusal: the unit stays DispKeep, stays in
+	// Order and Keep, and a lone wedged candidate (no fresh alternative outranking it) is still
+	// picked with ReasonFreshest.
+	ReasonWedgedObjective = "wedged_objective_stall"
 )
+
+// ObjectiveSignalStall is the trajctl curve token for a wedged objective (flat progress plus
+// divergence across attempts). It is mirrored here as PLAIN DATA — this pureRoot leaf imports
+// nothing internal, so the caller passes the internal/trajctl Signal's string value, never the
+// type. Any other token ("HEALTHY", "DRIFT", "DETOUR_OVERRUN", or empty for no objective /
+// unknown) leaves the order untouched.
+const ObjectiveSignalStall = "STALL"
 
 // Candidate is one unit of dispatchable work — all the facts the order needs, none of the
 // payload. The caller supplies Key: units that share a non-empty Key are duplicates of one
@@ -159,6 +172,16 @@ type Candidate struct {
 	// additive — a false ReadOnly (every existing caller) prices byte-identically to before, and
 	// the compute axis is untouched (a read-only file footprint asserts nothing about compute).
 	ReadOnly bool `json:"read_only,omitempty"`
+	// ObjectiveSignal is the OPTIONAL trajctl curve signal for this unit's bound objective,
+	// carried as plain data (a string token, never the internal/trajctl type — the pureRoot
+	// no-internal-imports contract): "HEALTHY", "STALL", "DRIFT", "DETOUR_OVERRUN". Only a
+	// sustained-STALL objective (ObjectiveSignalStall, matched case-insensitively) changes the
+	// order: within its priority tier it sorts AFTER every non-wedged candidate — deprioritized,
+	// never refused — and carries ReasonWedgedObjective when a fresh alternative outranks it. It
+	// stays DispKeep and Keep-eligible, so a lone wedged candidate is still picked. Empty (every
+	// existing caller) orders byte-identically to before this field existed — the additive
+	// no-regression guarantee.
+	ObjectiveSignal string `json:"objective_signal,omitempty"`
 }
 
 // ComputeClaim is a candidate's claim over a compute region — the finer-grained twin of the
@@ -197,6 +220,13 @@ func (c Candidate) ageStamp() int64 {
 		return c.CreatedUnix
 	}
 	return c.recency()
+}
+
+// wedgedObjective reports whether the candidate's bound objective is sustained-STALL — the
+// wedged case the dispatch order deprioritizes. Case-insensitive and whitespace-tolerant over
+// the plain-data token; every other signal (including empty) is not wedged.
+func wedgedObjective(c Candidate) bool {
+	return strings.EqualFold(strings.TrimSpace(c.ObjectiveSignal), ObjectiveSignalStall)
 }
 
 // Ranked is one candidate with the planner's verdict attached.
@@ -324,8 +354,11 @@ func (r Result) Pick() string {
 //  3. Disposition per unit, by precedence: a live unit is DispLive; a non-winner (with a Key)
 //     is DispSuperseded by the winner; the winner is DispCooling if it was attempted within the
 //     cooldown window, else DispKeep.
-//  4. DispKeep units are ordered by declared Priority (descending) first, then freshest-first
-//     (oldest-first when Input.PreferOldest), and assigned a rank; Keep lists their IDs.
+//  4. DispKeep units are ordered by declared Priority (descending) first, then non-wedged before
+//     sustained-STALL (ObjectiveSignal "STALL" sorts after fresh work WITHIN its priority tier —
+//     deprioritized, never refused), then freshest-first (oldest-first when Input.PreferOldest),
+//     and assigned a rank; Keep lists their IDs. A wedged kept unit outranked by a fresh
+//     alternative carries ReasonWedgedObjective; a lone wedged unit is still picked (ReasonFreshest).
 //
 // A group whose winner is live or cooling yields NO keep this tick (the dispatcher waits for the
 // freshest rather than running a stale duplicate) — the deliberate v1 posture; a max-backoff
@@ -384,6 +417,9 @@ func Plan(in Input) Result {
 		if ranked[i].Priority != ranked[j].Priority {
 			return ranked[i].Priority > ranked[j].Priority // declared priority leads recency; higher = do-first
 		}
+		if wi, wj := wedgedObjective(ranked[i].Candidate), wedgedObjective(ranked[j].Candidate); wi != wj {
+			return !wi // within a priority tier, fresh work outranks a sustained-STALL (wedged) objective
+		}
 		if in.PreferOldest {
 			return olderFirst(ranked[i], ranked[j]) // drain the longest-waiting backlog first
 		}
@@ -391,9 +427,19 @@ func Plan(in Input) Result {
 	})
 
 	out := Result{Order: ranked}
+	freshKeptAhead := false // has a non-wedged kept unit already been ranked?
 	for i := range out.Order {
 		switch out.Order[i].Disposition {
 		case DispKeep:
+			if wedgedObjective(out.Order[i].Candidate) {
+				if freshKeptAhead {
+					// Deprioritized behind a fresh alternative: ledger WHY with the closed token.
+					// Still kept, still ranked — a demotion, never a refusal.
+					out.Order[i].Reason = ReasonWedgedObjective
+				}
+			} else {
+				freshKeptAhead = true
+			}
 			out.Order[i].Rank = len(out.Keep)
 			out.Keep = append(out.Keep, out.Order[i].ID)
 			out.KeepCount++
