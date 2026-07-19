@@ -19,8 +19,13 @@ import "fmt"
 // session clears in its first minutes). On explicit API billing every one of those multipliers
 // is real dollars the operator opted into managing, so fak managing the wire is the point.
 // On a Pro/Max subscription the marginal token price is flat and the provider cache already
-// rides the client's own breakpoints — fak stays passive there unless forced, so the default
-// never speculates with a wire whose economics it cannot see.
+// rides the client's own breakpoints, so the default never speculates with a wire whose
+// economics it cannot see.
+//
+// On that subscription wire the 1h tier is not merely unprofitable, it is UNAVAILABLE: the
+// provider 400s a ttl:"1h" body on an OAuth credential (witnessed A/B, see the ON branch
+// below), so even an explicit --managed-cache on is refused there and degrades to passive
+// rather than crash-looping the seat. API-key billing stays the one activating posture.
 const (
 	guardManagedCacheAuto = "auto"
 	guardManagedCacheOn   = "on"
@@ -66,6 +71,29 @@ func resolveGuardManagedCache(mode string, in guardManagedCacheInputs) (guardMan
 	case guardManagedCacheOff:
 		return guardManagedCachePosture{mode: mode, active: false, reason: "disabled by --managed-cache off"}, nil
 	case guardManagedCacheOn:
+		// A subscription-OAuth seat CANNOT use the 1h tier: the provider rejects a body
+		// carrying cache_control ttl:"1h" on an OAuth credential with HTTP 400 ("upstream
+		// rejected the request as malformed"), on every turn, so forcing it there does not
+		// manage the cache — it kills the session (the #1850 21/21 instant-crash; the
+		// ad-hoc warning in tools/fleet_resume_watchdog.ps1).
+		//
+		// WITNESSED 2026-07-19 by a same-seat A/B on this Pro/Max box: --managed-cache on
+		// upgraded 3 turns (3 upgrades, ZERO refusals — the splice itself is byte-correct
+		// and the extended-cache-ttl beta IS unioned) and drew 3x HTTP 400 with 0 tokens
+		// observed; --managed-cache off ran the identical command clean (3 turns, 5/727
+		// tokens, 66,775 cache_read). The 400 is the provider refusing the 1h TIER to this
+		// credential class, not a malformed splice fak can fix.
+		//
+		// So DOWNGRADE loudly instead of bricking the seat. The fleet default is on
+		// (normalizeManagedCacheMode maps unset -> on), so an un-configured subscription
+		// launcher would otherwise crash-loop; degrading to passive keeps that default
+		// safe while naming the one activation path that works (--api-key-env) and the
+		// deliberate override (FAK_ABLATE_TTL_1H, read at gateway.Config assembly and
+		// independent of this posture) for anyone testing the tier itself.
+		if in.provider == "anthropic" && in.oauthSource != "" {
+			return guardManagedCachePosture{mode: mode, active: false,
+				reason: "forced on REFUSED — subscription OAuth rejects the 1h TTL tier (HTTP 400 on every turn); activate with --api-key-env, or set FAK_ABLATE_TTL_1H=1 to force the tier anyway"}, nil
+		}
 		return guardManagedCachePosture{mode: mode, active: true, reason: "forced by --managed-cache on"}, nil
 	case guardManagedCacheAuto, "":
 		p := guardManagedCachePosture{mode: guardManagedCacheAuto}

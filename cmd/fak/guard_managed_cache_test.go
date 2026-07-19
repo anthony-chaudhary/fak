@@ -33,8 +33,18 @@ func TestResolveGuardManagedCache(t *testing.T) {
 		{name: "auto local model stays passive", mode: "auto",
 			in:         guardManagedCacheInputs{localModel: true, provider: "anthropic"},
 			wantReason: "local in-kernel model"},
-		{name: "on forces active even on oauth", mode: "on",
+		// Forcing on a subscription-OAuth seat is REFUSED, not honored: the provider 400s a
+		// ttl:"1h" body on an OAuth credential every turn, so honoring the force would brick
+		// the session instead of managing the cache (witnessed A/B, guard_managed_cache.go).
+		{name: "on is refused on subscription oauth and degrades to passive", mode: "on",
 			in:         guardManagedCacheInputs{provider: "anthropic", apiKey: "tok", oauthSource: "env"},
+			wantActive: false, wantReason: "REFUSED"},
+		{name: "on still forces active on api-key billing", mode: "on", in: apiKeyBilled,
+			wantActive: true, wantReason: "forced"},
+		// A non-anthropic wire has no cache_control at all, so a forced on is inert but
+		// harmless there — the OAuth refusal must not leak into other providers.
+		{name: "on stays forced on a non-anthropic wire", mode: "on",
+			in:         guardManagedCacheInputs{provider: "openai", apiKey: "sk-openai", oauthSource: "env"},
 			wantActive: true, wantReason: "forced"},
 		{name: "off disables even on api-key billing", mode: "off", in: apiKeyBilled, wantReason: "disabled"},
 		{name: "unknown mode fails loud", mode: "sometimes", in: apiKeyBilled, wantErr: true},
