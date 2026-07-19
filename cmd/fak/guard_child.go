@@ -791,7 +791,20 @@ func guardChildSpawnAttempt(command []string, injected [][2]string, pinUpstream 
 
 var guardPromptTransportOS = runtime.GOOS
 
+// guardHeadlessChildWindowMode applies the windowless launch flags to a headless
+// (dispatched, non-attended) worker's wrapped agent (#3597). It is indirected through
+// a var so the launch gate is unit-testable on any host: the underlying
+// windowgate.ConfigureBackgroundCommand only sets Windows creation flags
+// (HideWindow + CREATE_NO_WINDOW) and is a no-op on every other platform.
+var guardHeadlessChildWindowMode = windowgate.ConfigureBackgroundCommand
+
 func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, broker *toolprocgate.SpawnBroker, launcher guardChildLauncher, extraEnv ...[2]string) (toolprocgate.SpawnGrant, *exec.Cmd, error) {
+	// #3597: decide headless-ness from the ORIGINAL wrapped argv, before the prompt
+	// transport below can move a `-p` prompt off argv (#4852). A headless one-shot
+	// (`claude -p …`, the shape a dispatched worker launches) paints no attended
+	// console, so its child is launched windowless just below; an attended session
+	// stays interactive and unchanged.
+	headlessChild := !guardChildInteractive(command)
 	command, stdinPrompt, promptOnStdin := guardPromptStdinTransportForOS(command, guardPromptTransportOS)
 	if broker == nil {
 		broker = toolprocgate.NewSpawnBroker()
@@ -816,6 +829,18 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 	}
 	if promptOnStdin {
 		child.Stdin = strings.NewReader(stdinPrompt)
+	}
+	// #3597: a headless dispatched worker has no human attached to a console. The
+	// dispatch seam already launches THIS `fak guard` windowless (configureDispatchSpawn),
+	// but guard then spawns a console `claude` child which — under a windowless parent —
+	// still materializes its own per-worker conhost/OpenConsole pane, pure overhead when
+	// nobody is attached (#2340: 87 stranded panes = 2,829 threads / 54k handles / 2 GB;
+	// #3405: the cost scales linearly with fleet size). Launch that child windowless too.
+	// StartInNewJob/RunInNewJob preserve these creation flags (they only OR in
+	// CREATE_SUSPENDED). Left OFF for an attended/interactive session, which must keep its
+	// inherited terminal handles and visible window; a no-op on non-Windows.
+	if headlessChild {
+		guardHeadlessChildWindowMode(child)
 	}
 	return grant, child, nil
 }
