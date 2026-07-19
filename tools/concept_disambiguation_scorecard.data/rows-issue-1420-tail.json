@@ -20,7 +20,7 @@
       "canonical": "CacheTTLUpgradesUpgraded (applied count)",
       "family": "cache",
       "kind": "metric",
-      "definition": "CacheTTLUpgradesUpgraded is the scalar counter on the gateway usage summary of how many outbound turns actually had their stable-head cache_control breakpoint upgraded to the 1-hour TTL tier.",
+      "definition": "CacheTTLUpgradesUpgraded is the scalar counter on the gateway usage summary of how many outbound turns fak AUTHORED a 1-hour-TTL upgrade of their stable-head cache_control breakpoint (wrote ttl:1h into the outbound body). It counts fak AUTHORING the upgrade, NOT the provider ACCEPTING it: on a subscription-OAuth seat the provider 400s the 1h body, so a nonzero count there is a crash signal, not realized 1h caching.",
       "distinction": "The count of upgrades that FIRED - NOT CacheTTLUpgradeReasons (the keyed why-map explaining each decision) and NOT UpgradeAnthropicStableCacheTTL1h (the rewriter that performs one).",
       "distinct_from": ["x-issue1420-cache-cachettlupgradereasons"],
       "aliases": [],

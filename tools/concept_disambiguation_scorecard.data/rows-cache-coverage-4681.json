@@ -53,7 +53,7 @@
       "canonical": "CacheTTLUpgradesUpgraded (managed-cache TTL-upgrade counter)",
       "family": "cache",
       "kind": "metric",
-      "definition": "gatewayusageledger.CacheTTLUpgradesUpgraded (with CacheTTLUpgradeReasons) is the usage-ledger counter pair recording how many times the managed-cache posture upgraded a stable prefix to the 1h TTL tier and why, surfaced in the weekly cache-value report.",
+      "definition": "gatewayusageledger.CacheTTLUpgradesUpgraded (with CacheTTLUpgradeReasons) is the usage-ledger counter pair recording how many times the managed-cache posture AUTHORED a 1h-TTL upgrade of a stable prefix (wrote ttl:1h into the outbound body) and why, surfaced in the weekly cache-value report. It counts fak AUTHORING, NOT the provider ACCEPTING: on a subscription-OAuth seat the provider 400s the 1h body, so a nonzero count there is a crash signal, not realized 1h caching.",
       "distinction": "It is the LEDGER COUNTER of upgrade events, not guardManagedCacheOn (the \"on\" literal the posture switches on) and not ManagedCacheVars (the /debug/vars struct that reports the current posture).",
       "distinct_from": ["x4-cache-guardmanagedcacheon", "x4-cache-managedcachevars"],
       "aliases": ["CacheTTLUpgradesUpgraded", "CacheTTLUpgradeReasons"],
