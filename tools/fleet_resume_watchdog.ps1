@@ -456,8 +456,20 @@ if ($MaxPerTick -le 0) {
   $capEvidence = $capJson | ConvertFrom-Json
   $MaxPerTick = [int]$capEvidence.cap
 }
+# Continuous-drain of the resume backlog (#3587, DEFAULT OFF) -- .py parity
+# (fleet_resume_watchdog.py tick_launch_cap). On a LIVE tick with FAK_DRAIN_CONTINUOUS=1 one tick
+# drains PAST the per-tick cap: the source governor (`fak resume admit`) + $LaunchSpacingSec become
+# the only rate limiter, so recovery LATENCY decouples from the ~5-min cron instead of being
+# quantized by it. FAK_DRAIN_MAX is a per-tick backstop (a bounded loop guard, not a rate limiter).
+# Two safety rails live in the launch loop below: a governor DEFER ENDS the drain (box saturated),
+# and a fail-open governor reverts $drainCap to $MaxPerTick (no continuous drain without an
+# enforcing rate limiter). DRAIN_MAX floors at $MaxPerTick so a tiny backstop never resumes fewer.
+$drainContinuous = ("$env:FAK_DRAIN_CONTINUOUS").Trim().ToLowerInvariant() -in @('1', 'true', 'yes', 'on')
+$drainMax = if ($env:FAK_DRAIN_MAX) { [int]$env:FAK_DRAIN_MAX } else { 500 }
+$drainCap = if ($Live -and $drainContinuous) { [Math]::Max($MaxPerTick, $drainMax) } else { $MaxPerTick }
 $mode = if ($Live) { 'LIVE' } else { 'DRY-RUN' }
-Note ("TICK $mode plan={0} window=${WindowH}h cap=$MaxPerTick" -f @($plan).Count)
+$drainNote = if ($Live -and $drainContinuous) { " drain=continuous(<=$drainCap)" } else { '' }
+Note ("TICK $mode plan={0} window=${WindowH}h cap=$MaxPerTick$drainNote" -f @($plan).Count)
 $statusLedger = Join-Path $regDir 'resume_watchdog_status.jsonl'
 RecordDrainTick $statusLedger $mode @($plan)
 AppendJsonLine $statusLedger @{ ts = [DateTime]::UtcNow.ToString('o'); phase = 'cap'; mode = $mode; cap_source = $capSource; cap = [int]$MaxPerTick; floor = [int]$capEvidence.floor; ceiling = [int]$capEvidence.ceiling; seat_cap = [int]$capEvidence.seat_cap; healthy_seats = [int]$capEvidence.healthy_seats; headroom = [int]$capEvidence.headroom }
@@ -551,8 +563,11 @@ if ($resumePostureArgs.Count -gt 0 -and -not $FakExe) {
   Note ("  managed-cache posture -> fronting resumed children with ``fak guard {0} --``" -f ($resumePostureArgs -join ' '))
 }
 
-foreach ($p in @($plan)) {
-  if ($launched -ge $MaxPerTick) { Note "  per-tick cap reached ($MaxPerTick)"; break }
+$planArr = @($plan)
+$planCount = $planArr.Count
+for ($idx = 0; $idx -lt $planCount; $idx++) {
+  $p = $planArr[$idx]
+  if ($launched -ge $drainCap) { Note "  per-tick cap reached ($drainCap)"; break }
   $sid = $p.session; $sid8 = $sid.Substring(0, 8)
   $acct = ($p.account -replace '\.claude-?', ''); if (-not $acct) { $acct = 'default' }
   if ("$($p.disp)".ToUpperInvariant().Contains('AUTH')) {
@@ -681,6 +696,14 @@ foreach ($p in @($plan)) {
     Add-Content -Path $ledgerPath -Value $warnRec
     Toast "Resume source governor OFFLINE" "$($admit.Reason) -- live resumes are fail-open (no host-wide rail)" 'warn' 'resume-gate-failopen' 720
   }
+  if ($admit.FailOpen -and $drainContinuous -and $drainCap -gt $MaxPerTick) {
+    # Continuous-drain safety rail (#3587): a fail-open governor cannot bound a storm, so WITHOUT
+    # an enforcing rate limiter the drain must not run past the tick-quantized cap. Revert to
+    # $MaxPerTick for the rest of this tick (idempotent -- only lowers once).
+    $drainCap = $MaxPerTick
+    Note "  drain: source governor UNAVAILABLE -> reverting to per-tick cap ($MaxPerTick) this tick (no continuous drain without the rate limiter)"
+    if ($launched -ge $drainCap) { Note "  per-tick cap reached ($drainCap)"; break }
+  }
   if (-not $admit.Admit) {
     Note "  DEFER $sid8 acct=$acct -- per-source gate: $($admit.Reason)"
     $rec = @{
@@ -693,6 +716,13 @@ foreach ($p in @($plan)) {
       reason = $admit.Reason
     } | ConvertTo-Json -Compress
     Add-Content -Path $ledgerPath -Value $rec
+    # Continuous-drain (#3587): the governor is host-wide, so a DEFER means the box is saturated --
+    # END the drain this tick rather than spinning the rest of the plan into a deferred-row storm
+    # onto capped seats. The tick-quantized default keeps the old per-session skip.
+    if ($drainContinuous) {
+      Note "  drain: source governor DEFER -> box saturated, ending drain this tick"
+      break
+    }
     continue
   }
 
@@ -744,7 +774,10 @@ foreach ($p in @($plan)) {
   $launched++
   Note "  RESUMED $sid8 acct=$acct pid=$($proc.Id) (attempt $attempt/$MaxAttempts; re-eligible if it dies again)"
   Toast "Resumed dead session" "$sid8  ($acct / $($p.project))" 'info' "resume:$sid" 1440
-  if ($LaunchSpacingSec -gt 0 -and $launched -lt $MaxPerTick) {
+  # Pace the next spawn (source-governor spacing witness). Skipped at the drain cap (nothing more
+  # launches this tick) and after the final plan entry (nothing follows -- no trailing dead time,
+  # which matters under continuous-drain where $drainCap >> $planCount).
+  if ($LaunchSpacingSec -gt 0 -and $launched -lt $drainCap -and $idx -lt ($planCount - 1)) {
     Start-Sleep -Seconds $LaunchSpacingSec
   }
 }

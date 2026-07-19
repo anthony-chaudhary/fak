@@ -87,6 +87,25 @@ MAX_ATTEMPTS = int(os.environ.get("FAK_MAX_ATTEMPTS", "8"))
 # burst resumes cleanly instead of self-congesting. 0 restores the old all-at-once
 # behavior; the default is deliberately conservative. Override with FAK_LAUNCH_SPACING_SEC.
 LAUNCH_SPACING_SEC = float(os.environ.get("FAK_LAUNCH_SPACING_SEC", "8"))
+# Continuous-drain of the resume backlog (#3587, gen/next -- DEFAULT OFF). The watchdog runs on
+# a ~5-min cron, so the tick-quantized default caps recovery at FAK_MAX_PER_TICK launches per
+# tick: a worker that dies just after a tick waits ~the full tick period before ANY resume, and
+# a deep backlog (hundreds of dead workers at 100x) drains only MAX_PER_TICK/tick while seats sit
+# free -- resume LATENCY is quantized by the cron, not by real capacity. When FAK_DRAIN_CONTINUOUS
+# =1 on a LIVE tick, one tick keeps draining the plan PAST FAK_MAX_PER_TICK: the source governor
+# (`fak resume admit` -- host-wide per-source concurrency + launch spacing from the shared ledger)
+# plus LAUNCH_SPACING_SEC become the ONLY rate limiter, so latency collapses toward the governor's
+# spacing floor instead of the tick period. Two hard safety rails keep this from becoming a storm:
+#   (1) a governor DEFER ENDS the drain for the tick -- the box is saturated, so never spin the
+#       rest of the plan onto capped seats (and never emit a deferred-row storm); and
+#   (2) if the governor is UNAVAILABLE (fail-open: missing fak / gate error), the drain REVERTS to
+#       the tick-quantized FAK_MAX_PER_TICK -- without an enforcing rate limiter a continuous drain
+#       must NOT outrun per-seat safety.
+# FAK_DRAIN_MAX is a per-tick backstop on total launches (a bounded loop guard, not a rate limiter:
+# the governor bounds the rate long before this in a real box). Default OFF keeps the exact
+# tick-quantized behavior until promotion evidence lands (gen/next: gated until dogfooded).
+DRAIN_CONTINUOUS = _env_flag("FAK_DRAIN_CONTINUOUS")
+DRAIN_MAX = int(os.environ.get("FAK_DRAIN_MAX", "500"))
 # The id of the session this watchdog is running inside (set by the Claude Code
 # harness). Used to refuse self-resume -- a live operator session can briefly look
 # like a stopped autonomous worker. Empty when run outside a Claude session (cron).
@@ -156,6 +175,19 @@ def resolve_probe_mode(setting: str, live: bool) -> str:
     if setting == "auto":
         return "stale" if live else "none"
     return setting
+
+
+def tick_launch_cap(live: bool) -> int:
+    """Max resumes a single tick may SPAWN. Default: FAK_MAX_PER_TICK (tick-quantized recovery,
+    the pre-#3587 behavior). Continuous-drain (#3587): on a LIVE tick with FAK_DRAIN_CONTINUOUS=1
+    the per-tick COUNT is lifted to FAK_DRAIN_MAX -- a bounded backstop, not a rate limiter -- so
+    the source governor + LAUNCH_SPACING_SEC alone bound the launch rate and recovery latency stops
+    being quantized by the ~5-min cron. Dry-run always keeps FAK_MAX_PER_TICK (side-effect-free,
+    and the drain isn't exercised without a live launch). DRAIN_MAX floors at MAX_PER_TICK so a
+    misconfigured tiny backstop can never make continuous-drain resume FEWER than the baseline."""
+    if live and DRAIN_CONTINUOUS:
+        return max(MAX_PER_TICK, DRAIN_MAX)
+    return MAX_PER_TICK
 
 
 RESUME_PROMPT = (
@@ -689,7 +721,12 @@ def main() -> int:
     )
     plan = (load_json(os.path.join(REG_DIR, "resume_plan.json"), {}) or {}).get("plan", []) or []
     mode = "LIVE" if LIVE else "DRY-RUN"
-    note(f"TICK {mode} plan={len(plan)} window={WINDOW_H}h cap={MAX_PER_TICK}")
+    # Effective per-tick launch cap. Continuous-drain (#3587) lifts it to the DRAIN_MAX backstop on
+    # a live tick so the source governor + spacing (not the cron) bound recovery; a fail-open
+    # governor reverts it to MAX_PER_TICK mid-tick (see the launch loop below).
+    drain_cap = tick_launch_cap(LIVE)
+    drain_note = f" drain=continuous(<={drain_cap})" if (LIVE and DRAIN_CONTINUOUS) else ""
+    note(f"TICK {mode} plan={len(plan)} window={WINDOW_H}h cap={MAX_PER_TICK}{drain_note}")
 
     # defense-in-depth: the set of account dir-basenames policy still treats as
     # workers. fleet_sessions.py already excludes non-workers when it writes the
@@ -742,9 +779,9 @@ def main() -> int:
     elif resume_posture_args:
         note("  managed-cache posture -> fronting resumed children with "
              f"`fak guard {' '.join(resume_posture_args)} --`")
-    for p in plan:
-        if launched >= MAX_PER_TICK:
-            note(f"  per-tick cap reached ({MAX_PER_TICK})")
+    for idx, p in enumerate(plan):
+        if launched >= drain_cap:
+            note(f"  per-tick cap reached ({drain_cap})")
             break
         sid = p.get("session", "")
         sid8 = sid[:8]
@@ -777,7 +814,8 @@ def main() -> int:
         # NOT counted as launch pressure by the next gate check, then skip this session
         # (it stays eligible next tick). Fails open (see source_admit_gate).
         admit_ok, admit_reason = source_admit_gate()
-        if admit_ok and admit_reason != "admitted" and not gate_fail_open_warned:
+        governor_unavailable = admit_ok and admit_reason != "admitted"
+        if governor_unavailable and not gate_fail_open_warned:
             # The gate answered WITHOUT a governor verdict (missing fak binary / gate
             # error): still fail open — a broken rail must not strand recovery — but
             # loudly (#2173). One durable session-less warning row per tick (invisible
@@ -789,6 +827,16 @@ def main() -> int:
             record_gate_fail_open(ledger_path, admit_reason)
             toast("Resume source governor OFFLINE",
                   f"{admit_reason} -- live resumes are fail-open (no host-wide rail)", "warn")
+        if governor_unavailable and DRAIN_CONTINUOUS and drain_cap > MAX_PER_TICK:
+            # Continuous-drain safety rail (#3587): a fail-open governor cannot bound a storm, so
+            # WITHOUT an enforcing rate limiter the drain must not run past the tick-quantized cap.
+            # Revert to FAK_MAX_PER_TICK for the rest of this tick (idempotent -- only lowers once).
+            drain_cap = MAX_PER_TICK
+            note("  drain: source governor UNAVAILABLE -> reverting to per-tick cap "
+                 f"({MAX_PER_TICK}) this tick (no continuous drain without the rate limiter)")
+            if launched >= drain_cap:
+                note(f"  per-tick cap reached ({drain_cap})")
+                break
         if not admit_ok:
             note(f"  DEFER {sid8} acct={acct} -- per-source gate: {admit_reason}")
             with open(ledger_path, "a") as fh:
@@ -798,6 +846,13 @@ def main() -> int:
                     "phase": "deferred", "cause": "source_concurrency_gate",
                     "reason": admit_reason,
                 }) + "\n")
+            # Continuous-drain (#3587): the governor is host-wide, so a DEFER means the box is
+            # saturated -- END the drain this tick rather than spinning the rest of the plan into a
+            # deferred-row storm onto capped seats. The tick-quantized default keeps the old
+            # per-session skip (each remaining entry re-checked; bounded anyway by MAX_PER_TICK).
+            if DRAIN_CONTINUOUS:
+                note("  drain: source governor DEFER -> box saturated, ending drain this tick")
+                break
             continue
 
         env = dict(os.environ)
@@ -863,9 +918,11 @@ def main() -> int:
              f"(attempt {attempt}/{MAX_ATTEMPTS}; re-eligible only if it fails recoverably)")
         toast("Resumed dead session", f"{sid8}  ({acct} / {p.get('project')})", "info")
         # Pace the next spawn so a burst does not slam the shared rate budget and trip a
-        # transient 529 that strands the whole batch. Skipped after the final launch of
-        # the tick (nothing follows) and when spacing is disabled (FAK_LAUNCH_SPACING_SEC=0).
-        if LAUNCH_SPACING_SEC > 0 and launched < MAX_PER_TICK:
+        # transient 529 that strands the whole batch. Skipped when spacing is disabled
+        # (FAK_LAUNCH_SPACING_SEC=0), at the drain cap (nothing more launches this tick), and
+        # after the final plan entry (nothing follows -- no trailing dead time before the tick ends,
+        # which matters under continuous-drain where drain_cap >> len(plan)).
+        if LAUNCH_SPACING_SEC > 0 and launched < drain_cap and idx < len(plan) - 1:
             time.sleep(LAUNCH_SPACING_SEC)
 
     # 2. alert on true login-blocked accounts -- once per account blocker.

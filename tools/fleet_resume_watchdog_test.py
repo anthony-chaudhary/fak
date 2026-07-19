@@ -949,6 +949,230 @@ def test_compact_ledger_bounds_do_not_break_once_gate(tmp_path):
         "an operator settle survives compaction and still gates"
 
 
+# ---- continuous-drain of the resume backlog (#3587) ----------------------------
+#
+# Decouple resume LATENCY from the ~5-min cron. On a LIVE tick with FAK_DRAIN_CONTINUOUS=1 a
+# single tick drains the AUTO_RESUME plan PAST FAK_MAX_PER_TICK -- the source governor
+# (`fak resume admit`) + LAUNCH_SPACING_SEC become the only rate limiter, so recovery latency
+# collapses toward the governor's spacing floor instead of the tick period. Two safety rails keep
+# it from becoming a storm: a governor DEFER ENDS the drain for the tick (no launch onto capped
+# seats), and a fail-open governor reverts to the tick-quantized cap. Default OFF is byte-identical
+# to the pre-#3587 tick-quantized behavior (gen/next: gated until dogfooded).
+
+
+def test_tick_launch_cap_default_is_tick_quantized():
+    wd = _reload({"FAK_MAX_PER_TICK": "4", "FAK_DRAIN_CONTINUOUS": None})
+    assert wd.tick_launch_cap(live=True) == 4
+    assert wd.tick_launch_cap(live=False) == 4
+
+
+def test_tick_launch_cap_continuous_live_lifts_to_backstop():
+    wd = _reload({"FAK_MAX_PER_TICK": "4", "FAK_DRAIN_CONTINUOUS": "1", "FAK_DRAIN_MAX": "500"})
+    # a LIVE tick lifts the per-tick COUNT to the backstop so the governor + spacing bound the rate
+    assert wd.tick_launch_cap(live=True) == 500
+    # dry-run stays tick-quantized (side-effect-free; the drain isn't exercised without a live launch)
+    assert wd.tick_launch_cap(live=False) == 4
+
+
+def test_tick_launch_cap_backstop_floors_at_max_per_tick():
+    # a misconfigured tiny backstop can never make continuous-drain resume FEWER than the baseline
+    wd = _reload({"FAK_MAX_PER_TICK": "6", "FAK_DRAIN_CONTINUOUS": "1", "FAK_DRAIN_MAX": "2"})
+    assert wd.tick_launch_cap(live=True) == 6
+
+
+def _drive_tick(tmp_path, monkeypatch, *, backlog, headroom, env):
+    """Drive the REAL main() launch loop against a fixture plan of `backlog` dead sessions and a
+    source governor with `headroom` free seats. Returns (launched_sids, sleeps, ledger_rows).
+
+    Everything with a side effect is faked so this stays pure stdlib (no spawn, no network): the
+    registry refresh + accounts json (subprocess.run), the resume spawn (subprocess.Popen), the
+    source governor (source_admit_gate), and the inter-launch spacing (time.sleep). The governor
+    admits while fewer than `headroom` resumes are live this tick, then DEFERs -- the per-seat rate
+    limiter the issue keeps as the real bound."""
+    import json as _json
+    reg = tmp_path / "reg"
+    log = tmp_path / "log"
+    cfg = tmp_path / "cfg"
+    for d in (reg, log, cfg):
+        d.mkdir(parents=True, exist_ok=True)
+    plan = {"plan": [
+        {"session": f"{i:08d}-2222-3333-4444-555555555555", "account": ".claude-t",
+         "resume_account": ".claude-t", "project": "C--work-fak", "cwd": None,
+         "disp": "STOPPED_APIERR", "rehomed": False,
+         "config_dir": str(cfg), "resume_config_dir": str(cfg)}
+        for i in range(backlog)]}
+    (reg / "resume_plan.json").write_text(_json.dumps(plan), encoding="utf-8")
+
+    base_env = {"FAK_LIVE": "1", "FLEET_REG_DIR": str(reg), "FAK_WATCHDOG_LOG_DIR": str(log),
+                "FAK_MAX_PER_TICK": "4", "FAK_LAUNCH_SPACING_SEC": "5", "FAK_PROBE": "none",
+                "CLAUDE_CODE_SESSION_ID": None}
+    base_env.update(env)
+    wd = _reload(base_env)
+
+    launches: list[list] = []
+    sleeps: list[float] = []
+
+    class _Proc:
+        def __init__(self, pid):
+            self.pid = pid
+
+    def fake_popen(argv, **kw):
+        launches.append(list(argv))
+        return _Proc(9000 + len(launches))
+
+    class _R:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    def fake_run(*a, **k):
+        return _R()
+
+    def fake_gate():
+        # admit while there is still free headroom this tick; DEFER once saturated (host-wide)
+        if len(launches) < headroom:
+            return True, "admitted"
+        return False, "SOURCE_SATURATED"
+
+    monkeypatch.setattr(wd.subprocess, "run", fake_run)
+    monkeypatch.setattr(wd.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(wd.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(wd, "source_admit_gate", fake_gate)
+
+    assert wd.main() == 0
+    rows = []
+    ledger = reg / "resume_ledger.jsonl"
+    if ledger.exists():
+        rows = [_json.loads(x) for x in ledger.read_text(encoding="utf-8").splitlines() if x.strip()]
+    launched_sids = [a[a.index("--resume") + 1] for a in launches if "--resume" in a]
+    return launched_sids, sleeps, rows
+
+
+def test_continuous_drains_full_backlog_in_one_tick(tmp_path, monkeypatch):
+    # Acceptance #1: backlog B, headroom for B -> a single LIVE tick drains ALL B (past
+    # FAK_MAX_PER_TICK=4), with the source governor gating each launch and spacing enforced
+    # BETWEEN launches (but not after the last -- no trailing dead time).
+    launched, sleeps, rows = _drive_tick(
+        tmp_path, monkeypatch, backlog=10, headroom=10,
+        env={"FAK_DRAIN_CONTINUOUS": "1", "FAK_DRAIN_MAX": "500"})
+    assert len(launched) == 10, launched
+    assert len(set(launched)) == 10, "each dead session resumed exactly once"
+    assert sleeps == [5.0] * 9, "spacing honored between launches, skipped after the final one"
+    assert len([r for r in rows if r.get("phase") == "launched"]) == 10
+
+
+def test_baseline_stops_at_max_per_tick(tmp_path, monkeypatch):
+    # The tick-quantized baseline continuous-drain beats: flag OFF, SAME backlog + headroom, one
+    # tick stops at FAK_MAX_PER_TICK=4 -- the tail is stranded until the next cron tick (the p50
+    # death->launch LATENCY the issue removes). ceil(B/cap) ticks to drain vs 1 for continuous.
+    import math
+    launched, _sleeps, _rows = _drive_tick(
+        tmp_path, monkeypatch, backlog=10, headroom=10, env={"FAK_DRAIN_CONTINUOUS": None})
+    assert len(launched) == 4, launched
+    assert math.ceil(10 / 4) > 1, "baseline quantizes the backlog tail across multiple cron ticks"
+
+
+def test_continuous_zero_headroom_does_nothing_no_storm(tmp_path, monkeypatch):
+    # Acceptance #2: with 0 free headroom the drain launches NOTHING (no storm onto capped seats);
+    # exactly one governor DEFER is recorded and the tick ends -- not a deferred-row storm.
+    launched, sleeps, rows = _drive_tick(
+        tmp_path, monkeypatch, backlog=8, headroom=0,
+        env={"FAK_DRAIN_CONTINUOUS": "1", "FAK_DRAIN_MAX": "500"})
+    assert launched == []
+    assert sleeps == []
+    deferred = [r for r in rows if r.get("phase") == "deferred"]
+    assert len(deferred) == 1, "one DEFER then the drain ends -- not one row per remaining entry"
+    assert deferred[0]["cause"] == "source_concurrency_gate"
+
+
+def test_continuous_stops_when_governor_defers_midway(tmp_path, monkeypatch):
+    # The source governor stays the real rate limiter: headroom for only K < B -> the tick launches
+    # exactly K, then the governor DEFERs and the drain ends (never launches past the spacing floor
+    # onto saturated seats, and never emits a deferred row per remaining plan entry).
+    launched, _sleeps, rows = _drive_tick(
+        tmp_path, monkeypatch, backlog=12, headroom=5,
+        env={"FAK_DRAIN_CONTINUOUS": "1", "FAK_DRAIN_MAX": "500"})
+    assert len(launched) == 5, launched
+    assert len([r for r in rows if r.get("phase") == "deferred"]) == 1, \
+        "the drain ends on the first DEFER, not once per remaining entry"
+
+
+def test_continuous_reverts_to_tick_cap_when_governor_fails_open(tmp_path, monkeypatch):
+    # Safety rail: a FAIL-OPEN governor (admit granted WITHOUT a verdict) cannot bound a storm, so
+    # continuous-drain must revert to the tick-quantized FAK_MAX_PER_TICK -- never drain a deep
+    # backlog with no enforcing rate limiter. Modeled by a gate that admits with a non-'admitted'
+    # reason (the fail-open signature).
+    import json as _json
+    reg = tmp_path / "reg"
+    log = tmp_path / "log"
+    cfg = tmp_path / "cfg"
+    for d in (reg, log, cfg):
+        d.mkdir(parents=True, exist_ok=True)
+    plan = {"plan": [
+        {"session": f"{i:08d}-2222-3333-4444-555555555555", "account": ".claude-t",
+         "resume_account": ".claude-t", "project": "C--work-fak", "cwd": None,
+         "disp": "STOPPED_APIERR", "rehomed": False,
+         "config_dir": str(cfg), "resume_config_dir": str(cfg)}
+        for i in range(10)]}
+    (reg / "resume_plan.json").write_text(_json.dumps(plan), encoding="utf-8")
+    wd = _reload({"FAK_LIVE": "1", "FLEET_REG_DIR": str(reg), "FAK_WATCHDOG_LOG_DIR": str(log),
+                  "FAK_MAX_PER_TICK": "4", "FAK_LAUNCH_SPACING_SEC": "0", "FAK_PROBE": "none",
+                  "CLAUDE_CODE_SESSION_ID": None,
+                  "FAK_DRAIN_CONTINUOUS": "1", "FAK_DRAIN_MAX": "500"})
+    launches: list[list] = []
+
+    def fake_popen(argv, **kw):
+        launches.append(list(argv))
+
+        class _P:
+            pid = 9000 + len(launches)
+        return _P()
+
+    class _R:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(wd.subprocess, "run", lambda *a, **k: _R())
+    monkeypatch.setattr(wd.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(wd.time, "sleep", lambda s: None)
+    # fail-open: admit granted but reason != 'admitted' (missing binary / gate error signature)
+    monkeypatch.setattr(wd, "source_admit_gate", lambda: (True, "no-fak-binary"))
+
+    assert wd.main() == 0
+    launched = [a for a in launches if "--resume" in a]
+    assert len(launched) == 4, "a fail-open governor caps the drain at the tick-quantized floor"
+    rows = [__import__("json").loads(x) for x in
+            (reg / "resume_ledger.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert any(r.get("phase") == "gate_fail_open" for r in rows), \
+        "the fail-open is surfaced durably (#2173), never silent"
+
+
+def test_powershell_watchdog_has_continuous_drain_parity():
+    # #3587 parity: the .ps1 (the Windows scheduled-task launcher) carries the SAME drain surface as
+    # the .py so an operator configures the drain once and it applies whichever watchdog the box runs.
+    ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1").read_text(encoding="utf-8")
+    assert "FAK_DRAIN_CONTINUOUS" in ps1 and "FAK_DRAIN_MAX" in ps1
+    assert "$drainCap" in ps1
+    # the loop caps on the drain backstop, not the raw tick count
+    assert "$launched -ge $drainCap" in ps1
+    # a governor DEFER ends the drain (box saturated) -> break, not a per-entry deferred storm
+    assert "box saturated, ending drain this tick" in ps1
+    # a fail-open governor reverts to the tick-quantized cap (no continuous drain without the limiter)
+    assert "reverting to per-tick cap" in ps1
+    # spacing still honored between launches, bounded by the drain cap
+    assert "$launched -lt $drainCap" in ps1
+
+
+def test_py_and_ps1_name_the_same_drain_knobs():
+    # Single-policy intent: the .py and .ps1 launchers MUST read the identical env knobs.
+    wd = _reload({})
+    ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1").read_text(encoding="utf-8")
+    assert hasattr(wd, "tick_launch_cap")
+    assert hasattr(wd, "DRAIN_CONTINUOUS") and hasattr(wd, "DRAIN_MAX")
+    assert "FAK_DRAIN_CONTINUOUS" in ps1 and "FAK_DRAIN_MAX" in ps1
+
+
 if __name__ == "__main__":
     import pytest
 
