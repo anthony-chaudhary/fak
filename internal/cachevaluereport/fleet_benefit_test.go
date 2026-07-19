@@ -76,6 +76,10 @@ func TestFoldFleetBenefitAggregatesUsageSavingsAndExtension(t *testing.T) {
 		rep.ContextExtensionPct == nil || !approxTrack2(*rep.ContextExtensionPct, 20) {
 		t.Fatalf("context extension mismatch: %+v", rep)
 	}
+	// The usage ledger carried the shed, so the citation counts usage rows (#2711).
+	if rep.ShedRows != 1 {
+		t.Fatalf("shed rows = %d, want 1 (the one usage row with a nonzero shed)", rep.ShedRows)
+	}
 	// Owner-split of the avoided dollars: provider = 0.009 − 0.001 = 0.008; fak =
 	// 0.015; and the split must sum EXACTLY to the blended total (0.023).
 	if !approxTrack2(rep.ProviderAPICostAvoidedUSD, 0.008) || !approxTrack2(rep.FakAPICostAvoidedUSD, 0.015) {
@@ -98,6 +102,7 @@ func TestFoldFleetBenefitAggregatesUsageSavingsAndExtension(t *testing.T) {
 		"cache_read=2000 (OBSERVED, Track-2)",
 		"avoided=$0.0230 (provider $0.0080 + fak $0.0150) reduction=53.49%",
 		"session extension: 3000 WITNESSED context token(s) shed = 20.00% of a 15000-token budget",
+		"; cited from 1 ledgered shed session(s)",
 		"provider prompt-cache dollars are OBSERVED/provider-relayed projections",
 	} {
 		if !strings.Contains(out, want) {
@@ -251,5 +256,39 @@ func TestFoldFleetBenefitFallsBackToSavingsRowsForExtensionWhenUsageMissing(t *t
 	}, nil, FleetBenefitOptions{})
 	if rep.ContextExtensionTokens != 300 {
 		t.Fatalf("fallback extension tokens = %d, want both compaction rows summed to 300", rep.ContextExtensionTokens)
+	}
+	// Fallback source ⇒ the citation counts the contributing savings rows (#2711).
+	if rep.ShedRows != 2 {
+		t.Fatalf("fallback shed rows = %d, want 2 (both compaction savings rows)", rep.ShedRows)
+	}
+}
+
+// TestFleetBenefitSessionExtensionHonestZero pins the #2711 done condition: a corpus
+// whose sessions never shed renders an explicit "still zero because X" session-extension
+// line naming the unmet precondition, never a bare 0 or a silently omitted line.
+func TestFleetBenefitSessionExtensionHonestZero(t *testing.T) {
+	usage := []gatewayusageledger.Row{
+		gatewayusageledger.NewRow("exit", "guard", "claude", "g-1", 30*time.Second, nil, gatewayusageledger.Counters{
+			Total: 3, Allowed: 3, InputTokens: 500, OutputTokens: 40,
+		}, time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)),
+	}
+	rep := FoldFleetBenefit(nil, nil, usage, FleetBenefitOptions{ContextBudgetTokens: 15000})
+	if rep.ContextExtensionTokens != 0 || rep.ShedRows != 0 {
+		t.Fatalf("no-shed corpus folded extension=%d rows=%d, want 0/0", rep.ContextExtensionTokens, rep.ShedRows)
+	}
+	out := RenderFleetBenefit(rep)
+	want := "session extension: still zero — no WITNESSED compaction-shed tokens in any of the 1 recorded usage row(s)"
+	if !strings.Contains(out, want) {
+		t.Fatalf("honest-zero render missing %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "0 WITNESSED context token(s) shed") {
+		t.Fatalf("honest-zero render must not show a bare zero figure:\n%s", out)
+	}
+
+	// Same corpus WITHOUT a budget flag: the line must still appear (previously it was
+	// silently omitted), carrying the same reason.
+	repNoBudget := FoldFleetBenefit(nil, nil, usage, FleetBenefitOptions{})
+	if !strings.Contains(RenderFleetBenefit(repNoBudget), "session extension: still zero") {
+		t.Fatalf("budget-less honest-zero line missing:\n%s", RenderFleetBenefit(repNoBudget))
 	}
 }

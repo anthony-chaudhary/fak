@@ -80,6 +80,17 @@ type FleetBenefitReport struct {
 	ContextExtensionTokens uint64 `json:"context_extension_tokens"`
 	ContextBudgetTokens    uint64 `json:"context_budget_tokens,omitempty"`
 
+	// ShedRows counts the ledgered rows (each one session) whose WITNESSED
+	// compaction shed actually contributed to ContextExtensionTokens — the artifact
+	// citation behind the session-extension figure (#2711). When the usage ledger
+	// carries the shed it counts usage rows; when the Track-2 savings fallback
+	// supplies it, it counts the contributing savings rows instead (the two sources
+	// are never mixed, same precedence as ContextExtensionTokens itself). Zero
+	// alongside a non-empty corpus means the formula's precondition (fak compaction
+	// fired and shed) is unmet — the render says so explicitly rather than showing
+	// a bare zero.
+	ShedRows int `json:"shed_rows,omitempty"`
+
 	ContextExtensionPct     *float64 `json:"context_extension_pct,omitempty"`
 	EquivalentContextWindow *float64 `json:"equivalent_context_windows,omitempty"`
 
@@ -207,6 +218,9 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 		rep.CompactionFired += c.CompactionFired
 		rep.CompactionBailed += c.CompactionBailed
 		rep.CompactionShedTokens += c.CompactionShedTokens
+		if c.CompactionShedTokens > 0 {
+			rep.ShedRows++
+		}
 	}
 	rep.ContextExtensionTokens = rep.CompactionShedTokens
 
@@ -219,6 +233,7 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 	}
 
 	var fallbackContextExtension uint64
+	var fallbackShedRows int
 	for _, row := range track2 {
 		normalizeSavingsDimensions(&row)
 		if row.DollarStatus == SavingsDollarStatusBlind {
@@ -243,6 +258,9 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 			rep.FakCompactionTokenEq += fakTokenEqFromRow(row)
 			rep.FakCompactionShedTokensSavings += row.CompactionShedTokens
 			fallbackContextExtension += row.CompactionShedTokens
+			if row.CompactionShedTokens > 0 {
+				fallbackShedRows++
+			}
 		}
 		if row.DollarStatus != SavingsDollarStatusBlind {
 			rep.ObservedActualSpendUSD += row.SpendUSD
@@ -265,6 +283,7 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 	}
 	if rep.ContextExtensionTokens == 0 {
 		rep.ContextExtensionTokens = fallbackContextExtension
+		rep.ShedRows = fallbackShedRows
 	}
 
 	rep.FakAuthoredTokenEq = float64(rep.FakKVPrefixReusedTokens) + rep.FakCompactionTokenEq
@@ -432,15 +451,23 @@ func RenderFleetBenefit(r FleetBenefitReport) string {
 			r.ProviderUSDAvoidedPerDay*30, r.FakUSDAvoidedPerDay*30,
 			r.ProviderUSDAvoidedPerDay*90, r.FakUSDAvoidedPerDay*90, prov)
 	}
-	if r.ContextExtensionTokens > 0 || r.ContextBudgetTokens > 0 {
-		fmt.Fprintf(&b, "  session extension: %d WITNESSED context token(s) shed", r.ContextExtensionTokens)
-		if r.ContextBudgetTokens > 0 && r.EquivalentContextWindow != nil && r.ContextExtensionPct != nil {
-			fmt.Fprintf(&b, " = %.2f%% of a %d-token budget (%.4f window-equivalent)",
-				*r.ContextExtensionPct, r.ContextBudgetTokens, *r.EquivalentContextWindow)
+	if r.ContextExtensionTokens > 0 || r.ContextBudgetTokens > 0 || r.UsageRows > 0 {
+		if r.ContextExtensionTokens == 0 {
+			// Honest zero (#2711): a zero here means the formula's precondition — fak
+			// compaction fired and shed in at least one ledgered session — is unmet.
+			// Say so, with the corpus size, instead of a bare 0 (or no line at all)
+			// that could read as a wiring gap or a silently-stale figure.
+			fmt.Fprintf(&b, "  session extension: still zero — no WITNESSED compaction-shed tokens in any of the %d recorded usage row(s); the formula's precondition (fak compaction fired) is unmet, not a wiring gap\n", r.UsageRows)
 		} else {
-			fmt.Fprintf(&b, " (pass --context-budget-tokens to normalize into window-equivalent)")
+			fmt.Fprintf(&b, "  session extension: %d WITNESSED context token(s) shed", r.ContextExtensionTokens)
+			if r.ContextBudgetTokens > 0 && r.EquivalentContextWindow != nil && r.ContextExtensionPct != nil {
+				fmt.Fprintf(&b, " = %.2f%% of a %d-token budget (%.4f window-equivalent)",
+					*r.ContextExtensionPct, r.ContextBudgetTokens, *r.EquivalentContextWindow)
+			} else {
+				fmt.Fprintf(&b, " (pass --context-budget-tokens to normalize into window-equivalent)")
+			}
+			fmt.Fprintf(&b, "; cited from %d ledgered shed session(s)\n", r.ShedRows)
 		}
-		b.WriteByte('\n')
 	}
 	if r.DollarBlindRows > 0 {
 		fmt.Fprintf(&b, "  pricing: %d savings row(s) dollar-blind; token evidence is counted, dollar fields are not\n", r.DollarBlindRows)
