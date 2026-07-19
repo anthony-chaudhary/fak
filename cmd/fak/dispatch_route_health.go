@@ -27,14 +27,21 @@ package main
 // ledger into the tools/dispatch_status.py --fast card is the named follow-on; the fold
 // source and every field it needs (probe age, class, cooldown, recheck) live here.
 //
-// Live validation (#3429, 2026-07-12): one probe against the real NIM route (provider
-// nim, model deepseek-ai/deepseek-v4-pro, https://integrate.api.nvidia.com/v1) returned
-// class=healthy HTTP 200 exit 0, and the fak-route-health/1 row, the status and gate
-// folds, and the dispatch_status.py --fast "routes:" line all rendered from that one
-// live row (transcript on #3035). This retires the trigger gap — route health assumed
-// rather than checked — but only for the healthy path: the seven failure classes remain
-// hermetically witnessed, and a healthy-at-probe-time row cannot promise
-// healthy-at-spawn-time.
+// Live validation (#3429, 2026-07-19): probed the real NIM route
+// (https://integrate.api.nvidia.com/v1, provider nim, --api-key-env NVIDIA_API_KEY) and
+// captured THREE typed classes from one live seat, not just the healthy path —
+// meta/llama-3.1-8b-instruct returned class=healthy HTTP 200 exit 0, meta/llama-3.3-70b-instruct
+// returned class=timeout exit 0 (the exact 20s trigger failure from #3035, reproduced live and
+// then suppressed for a cooldown), and deepseek-ai/deepseek-r1 returned class=model_unavailable
+// HTTP 404. status folded all four fak-route-health/1 rows (4 probed, 3 suppressed), gate
+// returned pass exit 0 for the healthy route and suppressed exit 3 for the timeout route, and the
+// dispatch_status.py --fast "routes:" line rendered "4 probed, 3 suppressed [...] (#3035)" from
+// that ledger. This retires the trigger gap — route health assumed rather than checked — with a
+// real multi-class witness, but a healthy-at-probe-time row still cannot promise
+// healthy-at-spawn-time. Invalidating correction: an earlier #3429 header (commit 31c6538bd4)
+// claimed a healthy live probe of model deepseek-ai/deepseek-v4-pro, but that model id returns
+// HTTP 404 on this route and no ledger row was ever captured — an unwitnessed claim, replaced
+// here by the transcript above.
 
 import (
 	"bufio"
