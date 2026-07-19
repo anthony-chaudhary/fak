@@ -969,13 +969,7 @@ func computeCollision(a, b Candidate) (Collision, bool) {
 	if ca == nil || cb == nil {
 		return Collision{}, false
 	}
-	if computeMode(ca) == "shared" && computeMode(cb) == "shared" {
-		return Collision{}, false
-	}
-	if normClass(ca.Class) != normClass(cb.Class) {
-		return Collision{}, false
-	}
-	if !rangesOverlap(ca.Range, cb.Range) {
+	if !ComputeClaimsContend(*ca, *cb) {
 		return Collision{}, false
 	}
 	return Collision{
