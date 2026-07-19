@@ -320,6 +320,17 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	for _, in := range dojo.ContextRestoreEpisodes(loadContextSpanLedger(root)) {
 		episodes = append(episodes, dojo.Score("context-span-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
+	// And the cross-provider single-shot-quality cell (#4494): one episode per
+	// provider of provider-firsttry/first_try_green_rate — acceptance-gate
+	// passes with NO retry over dispatch attempts — folded from the dispatch
+	// attempt ledger (the workspace loop ledger's SPAWNED rows, the same source
+	// the dispatch-yield cell reads). That ledger records each dispatch and its
+	// provider but no per-worker acceptance-gate attempt record yet, so the
+	// cell scores UNMEASURED honestly (never a fabricated 0.0 rate) until a
+	// gate-attempt record lands on the ledger row.
+	for _, in := range dojo.ProviderFirstTryEpisodes(loadDispatchFirstTryAttempts(root)) {
+		episodes = append(episodes, dojo.Score("attempt-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
 	report := dojo.Fold(episodes, dojo.FoldOpts{
