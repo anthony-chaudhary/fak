@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "looptoolterminalverbosity",
+      "canonical": "loop_toolterminal_verbosity.go (agent background-completion wake verbosity seam)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The verbosity axis of the background-process completion watcher: decides WHICH terminal tool-process transitions wake a new agent turn (off/error/result/all) and HOW MUCH of the folded toolproc verdict rides into that turn.",
+      "distinction": "loop_observe.go reports in-turn progress to an observer without starting a turn; loop_park.go suspends a turn; loop_constraint.go gates turn admission. This seam alone decides whether a COMPLETED BACKGROUND PROCESS starts a NEW turn, and at what detail.",
+      "distinct_from": [
+        "loopobserve",
+        "looppark",
+        "loopconstraint"
+      ],
+      "aliases": [],
+      "grounding": "loop_toolterminal_verbosity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
