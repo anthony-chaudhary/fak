@@ -43,6 +43,18 @@ func TestFrontDoorForClassifiesEachKind(t *testing.T) {
 			want: FrontNone,
 		},
 		{
+			// #4955: an ENUMERATED fleet loop (KindLoopFleet expands one member into one
+			// status per ledgered loop) classifies like any leaf — a concrete Enter runs.
+			name: "loop-fleet enumerated member with a command is runnable",
+			dec:  DriveDecision{Member: Member{Kind: KindLoopFleet, Ref: "dispatch", Enter: "go run ./cmd/fak dispatch auto --goal throughput"}},
+			want: FrontRunnable, wantCmd: "go run ./cmd/fak dispatch auto --goal throughput",
+		},
+		{
+			name: "loop-fleet enumerated member without a command is surfaced, not run",
+			dec:  DriveDecision{Member: Member{Kind: KindLoopFleet, Ref: "orphan-loop"}},
+			want: FrontNone,
+		},
+		{
 			name: "whitespace-only Enter is nothing to run",
 			dec:  DriveDecision{Member: Member{Kind: KindLoop, Ref: "dojo", Enter: "   "}},
 			want: FrontNone,

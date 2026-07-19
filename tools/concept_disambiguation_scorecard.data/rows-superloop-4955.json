@@ -1,0 +1,100 @@
+{
+  "rows": [
+    {
+      "id": "loop-kindloopfleet",
+      "canonical": "KindLoopFleet (whole-fleet member kind)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "KindLoopFleet is the superloop member kind (#4955) whose single registry member with Ref=all ENUMERATES into one MemberStatus per ledgered loop on the canonical roster, so a walk covers every folded loop without hand-naming each one.",
+      "distinction": "Not KindLoop (one hand-named loop per member) and not KindSuperloop (a container intent descended by the walk): KindLoopFleet is the fleet-wide enumerator whose statuses come from the cross-ledger loop-health fold at read time.",
+      "distinct_from": [
+        "loop-kindloop",
+        "loop-kindsuperloop"
+      ],
+      "aliases": [],
+      "grounding": "KindLoopFleet",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "loop-loopfleetstatuses",
+      "canonical": "superloop.LoopFleetStatuses (fleet member expansion)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "LoopFleetStatuses is the pure expansion behind KindLoopFleet: it turns one fleet member plus the shell-read folded loops and skipped-ledger gaps into per-loop MemberStatus rows, surfacing every gap as UNMEASURED so it blocks Satisfied.",
+      "distinction": "Not the impure cross-ledger fold itself (loopfleet.Fold reads ledgers; this folds its already-read rows), and not BuildRoster (the three-source union readout): LoopFleetStatuses only shapes walk statuses for one enumerating member.",
+      "distinct_from": [
+        "loop-kindloop",
+        "loop-kindsuperloop"
+      ],
+      "aliases": [],
+      "grounding": "LoopFleetStatuses",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "loop-rosterloop",
+      "canonical": "superloop.RosterLoop (folded-loop input row)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "RosterLoop is the plain-data input row the shell hands the pure roster builder for ONE folded loop: its stable identity (Kind), folded state, and dark flag, mirroring a loopfleet.LoopHealth row without importing it.",
+      "distinction": "Not loopfleet.LoopHealth (the impure fold's full health row) and not RosterEntry (the deduped OUTPUT entry tagged with sources): RosterLoop is only the pure package's import-light input shape.",
+      "distinct_from": [
+        "loop-superloops-registry"
+      ],
+      "aliases": [],
+      "grounding": "RosterLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "loop-rostersource-loopregistry",
+      "canonical": "RosterSourceLoopRegistry (loopmgr-registry roster source tag)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "RosterSourceLoopRegistry is the roster source token marking that the loopmgr job registry (the persisted schedule definitions in tools/loop-registry.json) declares a loop, whether or not its ledger has folded rows yet.",
+      "distinction": "Not the superloop registry (registered operator intents; that source is RosterSourceSuperloop) and not the fold source (RosterSourceFold, a measured ledger row): this tag only records a declared loopmgr schedule.",
+      "distinct_from": [
+        "loop-superloops-registry"
+      ],
+      "aliases": [],
+      "grounding": "RosterSourceLoopRegistry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "loop-rostersource-superloop",
+      "canonical": "RosterSourceSuperloop (superloop-registry roster source tag)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "RosterSourceSuperloop is the roster source token marking that the super-loop registry claims an entry: either the entry IS a registered intent, or some intent hand-names the loop as a KindLoop member ref (which also sets Named).",
+      "distinction": "Not the loop-superloops-registry concept (the registry itself) and not RosterSourceLoopRegistry (a loopmgr schedule declaration): this tag records provenance of a roster entry from registered intents.",
+      "distinct_from": [
+        "loop-superloops-registry"
+      ],
+      "aliases": [],
+      "grounding": "RosterSourceSuperloop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

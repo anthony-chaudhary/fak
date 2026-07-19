@@ -52,6 +52,8 @@ func runSuperloop(stdout, stderr io.Writer, argv []string) int {
 		return runSuperloopExplain(stdout, stderr, argv[1:])
 	case "walk":
 		return runSuperloopWalk(stdout, stderr, argv[1:])
+	case "roster":
+		return runRoster(stdout, stderr, argv[1:])
 	case "drive":
 		return runSuperloopDrive(stdout, stderr, argv[1:])
 	case "modelfit":
@@ -286,6 +288,12 @@ func (c *superloopCollector) collect(s superloop.Super, onPath map[string]bool) 
 			// append below.
 			out = append(out, c.trajectory(m)...)
 			continue
+		case superloop.KindLoopFleet:
+			// The whole-fleet member (#4955) ENUMERATES into one status per ledgered
+			// loop from the already-read cross-ledger fold, plus one UNMEASURED status
+			// per skipped ledger (a known gap blocks Satisfied, never a healthy zero).
+			out = append(out, c.loopFleet(m)...)
+			continue
 		case superloop.KindUtilization:
 			st = c.utilization(m)
 		case superloop.KindGarden, superloop.KindSurface:
@@ -391,6 +399,25 @@ func trajectoryStatus(src superloop.Member, oc trajctl.ObjectiveCurve) superloop
 		Debt:     trajctl.SignalDebt(oc.Signal),
 		Detail:   fmt.Sprintf("%s — %s (latest %.2f, delta %+.2f)", oc.Signal, oc.Detail, oc.Latest, oc.Delta),
 	}
+}
+
+// loopFleet is the whole-fleet adapter (issue #4955): it ENUMERATES a single
+// KindLoopFleet registry member into one MemberStatus per ledgered loop, from the
+// SAME cross-ledger fold the collector already read (no extra I/O) — the
+// trajectory() enumeration precedent, one level up. The pure expansion
+// (superloop.LoopFleetStatuses) owns the honesty rules: a skipped ledger surfaces
+// as an UNMEASURED known gap, a Ref of "all" takes the whole fleet, any other Ref
+// selects one loop by its stable identity.
+func (c *superloopCollector) loopFleet(m superloop.Member) []superloop.MemberStatus {
+	folded := make([]superloop.RosterLoop, 0, len(c.loopByKind))
+	for _, lh := range c.loopByKind {
+		folded = append(folded, superloop.RosterLoop{Kind: lh.Kind, State: string(lh.State), Dark: lh.Dark})
+	}
+	gaps := make([]superloop.RosterGap, 0, len(c.skippedLedger))
+	for ledger, reason := range c.skippedLedger {
+		gaps = append(gaps, superloop.RosterGap{Ledger: ledger, Reason: reason})
+	}
+	return superloop.LoopFleetStatuses(m, folded, gaps)
 }
 
 // loopDebt maps a loop-health row to a debt integer for the worst-first fold: a dark
@@ -552,6 +579,12 @@ func superloopUsage(w io.Writer) {
   fak superloop list                  the named super loops + their members
   fak superloop explain <name>        why <name> is a super loop, not a normal loop
   fak superloop walk <name> [--json]  walk its members' status, fold a worst-first plan
+  fak superloop roster [--json]       the ONE canonical loop-fleet roster (#4955): the
+                                      deduped union of every folded loop (loopfleet),
+                                      the loopmgr job registry, and the registered
+                                      super loops — what the operator supervises,
+                                      each counted exactly once; an unfoldable
+                                      ledger surfaces as a KNOWN gap, never dropped
   fak superloop drive <name> [--lane L]  walk, then ENTER the one worst-first member
                                       through the same admission gate any spawn passes
                                       (COLLISION_RISK on lease overlap), and re-fold

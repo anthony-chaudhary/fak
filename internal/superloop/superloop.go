@@ -84,6 +84,19 @@ const (
 	// the concrete objective id on each enumerated status. This joins the existing
 	// controller-of-controllers walk rather than growing a rival walker (issue #2563).
 	KindTrajectory MemberKind = "trajectory"
+	// KindLoopFleet is the WHOLE-FLEET member kind (issue #4955): the same
+	// fleet-enumerating precedent KindTrajectory set, one level up. A SINGLE registry
+	// member with Ref="all" ENUMERATES into one status per ledgered loop on the
+	// canonical roster (the deduped union [BuildRoster] folds: loopfleet's folded
+	// loops + the loopmgr job registry + the registered super loops), so no
+	// ledgered-and-folding loop can be invisible to a walk just because no intent
+	// hand-named it. Like KindTrajectory the statuses are read LIVE by the shell —
+	// from the cross-ledger loop-health fold — via [LoopFleetStatuses]: each
+	// enumerated status carries the concrete loop identity as its Ref, an
+	// absent/unreadable ledger surfaces as an UNMEASURED known gap (never dropped,
+	// never a healthy zero), and any other Ref selects one loop by identity. The
+	// worst-first walk over this roster is the meta-walker follow-on (#4958).
+	KindLoopFleet MemberKind = "loopfleet"
 )
 
 // WorkClass is the gardening-vs-throughput bucket a member's work falls into — the
@@ -121,11 +134,14 @@ const DefaultThroughputTargetPct = 50
 // The throughput test is ref-based rather than kind-based because KindLoop and
 // KindSuperloop carry BOTH backlog-drain members (dispatch, drain-*) and non-drain ones
 // (cadence, dojo, the dogfood probe): only the issue-drain refs are throughput.
+// KindLoopFleet rides the same ref test (#4955): each ENUMERATED fleet loop carries its
+// concrete loop identity as Ref, so every roster loop lands on the gardening/throughput
+// axis the mix fold (and #4956's gate) reads, exactly as if an intent had hand-named it.
 func classifyWork(m Member) WorkClass {
 	switch m.Kind {
 	case KindScorecard, KindGarden, KindSurface:
 		return WorkGardening
-	case KindLoop, KindSuperloop:
+	case KindLoop, KindSuperloop, KindLoopFleet:
 		if isIssueDrain(m.Ref) {
 			return WorkThroughput
 		}
@@ -1181,6 +1197,20 @@ func actionFor(st MemberStatus) string {
 			return fmt.Sprintf("enter `%s` to spend the idle %s capacity", e, st.Member.Ref)
 		}
 		return fmt.Sprintf("put the idle %s capacity to work", st.Member.Ref)
+	case KindLoopFleet:
+		if !st.Measured {
+			return fmt.Sprintf("read `fak superloop roster` — %q has no foldable ledger here (known gap)", st.Member.Ref)
+		}
+		if e := strings.TrimSpace(st.Member.Enter); e != "" {
+			if st.Dark {
+				return fmt.Sprintf("revive via `%s` — fleet loop %s has gone dark", e, st.Member.Ref)
+			}
+			return fmt.Sprintf("drive via `%s`", e)
+		}
+		if st.Dark {
+			return fmt.Sprintf("revive the %s loop — it has gone dark", st.Member.Ref)
+		}
+		return fmt.Sprintf("drive the %s loop", st.Member.Ref)
 	case KindTrajectory:
 		if !st.Measured {
 			return fmt.Sprintf("read the trajctl ledger to fold objective %q's curve", st.Member.Ref)
