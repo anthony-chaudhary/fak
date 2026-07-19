@@ -18,5 +18,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "loopconstraint",
+      "canonical": "loop_constraint.go (agent constraint seam)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "loop_constraint.go is the agent package's loop-side consumer of the out-of-band add-constraint op (#2756): applyConstraints drains the sessionctl constraint mailbox at the turn boundary and carries the tightened floor's standing directive as a system notice, and constraintDenied denies a floor-forbidden tool call before dispatch with a typed receipt carrying the closed CONSTRAINT_* reason.",
+      "distinction": "Not loop_redirect.go (which folds an operator redirect into the live OBJECTIVE - what the session pursues): loop_constraint.go folds operator constraints into the live FLOOR - what the session MAY DO - and enforces it per tool call; and not the trajctl metaloop, which walks intents, not turns.",
+      "distinct_from": [
+        "loop-metaloop"
+      ],
+      "aliases": [],
+      "grounding": "loop_constraint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

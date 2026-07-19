@@ -503,6 +503,17 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			messages = append(messages, Message{Role: RoleSystem, Content: objective})
 		}
 
+		// Constraint apply (#2756): a running session drains any operator
+		// add-constraint op enqueued on the sessionctl mailbox at this boundary —
+		// never mid-turn — folds it into the live per-session floor, and carries
+		// the tightened floor's standing notice as a SYSTEM directive so the model
+		// knows what narrowed. The floor itself binds at tool dispatch below
+		// (constraintDenied). A no-op without a wired trace or a constrained
+		// floor, so the historical loop is byte-for-byte unchanged.
+		if floor := cfg.applyConstraints(); floor != "" {
+			messages = append(messages, Message{Role: RoleSystem, Content: floor})
+		}
+
 		// Context-spike nudge (#2197): when the session's cost ring shows the context
 		// window grew suddenly and materially last turn, splice the advisory into THIS
 		// turn's input so the model corrects its own context use (windowed reads,
@@ -579,6 +590,12 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			var content string
 			ev := traceEvent{Turn: turn + 1, Arm: m.Arm, Tool: tool, RawArgs: rawArgs}
 			switch {
+			case cfg.constraintDenied(tool, &content, &ev):
+				// Out-of-band tightened floor (#2756): a tool the operator forbade
+				// mid-session is denied BEFORE dispatch — never sent — with a typed
+				// receipt carrying the closed CONSTRAINT_* reason (content + ev were
+				// filled by constraintDenied). The next planner turn reads a
+				// structured verdict and adapts; the session keeps running.
 			case sp.barWrite(tool, &m):
 				// Before-consumption write barrier (#1319): this write follows a squashed
 				// speculation (a write behind an unconfirmed speculative read), so it is

@@ -157,7 +157,10 @@ func TestNextDrainHasSingleProductionAuthority(t *testing.T) {
 		}
 		if info.IsDir() {
 			base := filepath.Base(path)
-			if base == ".git" || base == "_scratch" {
+			// Skip scratch and every hidden dir (.git, .fak leftovers, .claude, …):
+			// a snapshot under a dot-dir is never a production authority. The walk
+			// root itself ("../..") also starts with a dot, so exempt it.
+			if path != root && (base == "_scratch" || strings.HasPrefix(base, ".")) {
 				return filepath.SkipDir
 			}
 			return nil

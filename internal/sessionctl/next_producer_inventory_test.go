@@ -93,6 +93,13 @@ func TestModelFacingSyntheticProducersHaveNextWitnesses(t *testing.T) {
 			},
 		},
 		{
+			Producer: syntheticProducer{File: "internal/agent/loop.go", Role: "RoleSystem", Payload: "floor"},
+			Authorities: []callAuthority{
+				{File: "internal/agent/loop_constraint.go", Call: "ApplyPendingConstraints"},
+				{File: "internal/sessionctl/constraint.go", Call: "WitnessMove"},
+			},
+		},
+		{
 			Producer:    syntheticProducer{File: "internal/agent/loop.go", Role: "RoleUser", Payload: "nudge"},
 			Authorities: []callAuthority{{File: "internal/agent/loop.go", Call: "RecordContextAdvisoryNext"}},
 		},
