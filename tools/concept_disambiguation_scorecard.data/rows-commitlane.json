@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "indexlockreclaimdecision",
+      "canonical": "IndexLockReclaimDecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The reap-or-keep verdict for a stale git .git/index.lock: a Reap flag plus a closed-vocabulary reason, decided purely from the commit-lane observer's evidence (lock presence, process-probe success, live-writer count, staleness past the grace window).",
+      "distinction": "It is the ACTUATOR's act-or-not verdict on reclaiming an orphaned .git/index.lock, NOT the commit-lane status Verdict (the observer's clear/busy/stale/blocked lane read) and NOT the witness Decision (a CONFIRMED/REFUTED/ABSTAIN evidence-grading verdict).",
+      "distinct_from": [
+        "decision-witness"
+      ],
+      "aliases": [],
+      "grounding": "IndexLockReclaimDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
