@@ -22,7 +22,9 @@ import (
 // a limit is recorded with a reset_at, and CooledDown(account, now) reports
 // whether it is still within that window. The login overlay (see loginObservation)
 // downgrades an otherwise-Ready seat to LoginCooledDown so CanServe drops it from
-// the pool until the window elapses, then it auto-restores with no manual action.
+// the pool until the window elapses, then it auto-restores with no manual action —
+// unless the owner armed the canary exit gate (#3389, canary.go), which trades that
+// timer-only restore for a witnessed round-trip.
 //
 // The store is keyed by ACCOUNT (not seat name): a usage cap is billed to the
 // upstream account, so every seat sharing that account key must cool together.
@@ -59,6 +61,11 @@ type CooldownEntry struct {
 	// non-servable while ANY signal is active and is re-admitted only after ALL
 	// signals clear. Omitted on legacy v1 rows, which are treated as one Kind signal.
 	Signals map[string]time.Time `json:"signals,omitempty"`
+	// Probation is derived read-time state (#3389): every signal window has
+	// elapsed but the store's canary exit gate is armed, so the account is still
+	// held out of the pool until CanaryExit witnesses one successful round-trip.
+	// Set only on the copy CooledDown returns, never on the stored entry.
+	Probation bool `json:"probation,omitempty"`
 }
 
 // Active reports whether the entry still holds at now (i.e. now is before ResetAt).
@@ -202,6 +209,11 @@ type CooldownStore struct {
 	// both from the entries it reads.
 	degraded      bool
 	degradedSince time.Time
+
+	// canary is the probation gate's injected round-trip probe (#3389, see
+	// canary.go). Nil means the gate is unarmed and cooldown exit stays
+	// timer-only. Process-local, never persisted.
+	canary CooldownCanary
 }
 
 // CooldownStoreSchema tags the persisted file.
@@ -267,7 +279,9 @@ func (s *CooldownStore) Save() error {
 
 // CooledDown reports the active cooldown entry for account at now, and whether one
 // exists. An entry whose window has elapsed is treated as absent (and is pruned on
-// the next Save via Prune).
+// the next Save via Prune) — unless the canary exit gate is armed (#3389, canary.go),
+// in which case the elapsed entry is held in probation (Probation set) until
+// CanaryExit witnesses a successful round-trip.
 func (s *CooldownStore) CooledDown(account string, now time.Time) (CooldownEntry, bool) {
 	if account == "" {
 		return CooldownEntry{}, false
@@ -278,7 +292,15 @@ func (s *CooldownStore) CooledDown(account string, now time.Time) (CooldownEntry
 	}
 	signals, resetAt := activeCooldownSignals(e, now)
 	if len(signals) == 0 {
-		return CooldownEntry{}, false
+		if !s.canaryArmed() {
+			return CooldownEntry{}, false
+		}
+		// Canary-gated exit (#3389): the window elapsing alone does not re-admit
+		// the account. Hold it in probation — still cooled, stored Signals/ResetAt
+		// untouched so reports can say when the window lapsed — until CanaryExit
+		// witnesses one successful round-trip.
+		e.Probation = true
+		return e, true
 	}
 	e.Signals = signals
 	e.ResetAt = resetAt
@@ -328,6 +350,10 @@ func (s *CooldownStore) UpdateOverload(account, signal string, kind CooldownKind
 		return CooldownEntry{}, false
 	}
 	beforeEntry, beforeLatched := s.CooledDown(account, observedAt)
+	// The probation marker is derived read-time state; never write it back. A
+	// cleared observation below is a WITNESSED healthy signal, so it may exit
+	// probation the same way a canary pass does (#3389).
+	beforeEntry.Probation = false
 	signals := beforeEntry.Signals
 	if signals == nil {
 		signals = map[string]time.Time{}
@@ -391,11 +417,19 @@ func (s *CooldownStore) Clear(account string) bool {
 }
 
 // Prune drops entries whose window has elapsed at now. Reports how many were removed.
+// On a canary-armed store (#3389) elapsed entries are in probation, not recovered, so
+// they are retained until CanaryExit (or an explicit Clear) releases them.
 func (s *CooldownStore) Prune(now time.Time) int {
 	n := 0
 	for k, e := range s.entries {
 		signals, resetAt := activeCooldownSignals(e, now)
 		if len(signals) == 0 {
+			if s.canaryArmed() {
+				// Probation hold (#3389): an elapsed entry is awaiting its canary
+				// round-trip, not recovered; dropping it here would silently
+				// re-admit the account on the timer alone.
+				continue
+			}
 			delete(s.entries, k)
 			n++
 			continue

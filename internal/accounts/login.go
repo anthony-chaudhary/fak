@@ -266,11 +266,20 @@ func LoginReasonAction(status LoginStatus, h Home) (string, string) {
 
 // cooldownReasonAction renders the seat-facing reason and next action for an
 // active cooldown, naming the reset time so an operator knows when the seat
-// returns on its own.
+// returns on its own. A probation entry (#3389: window elapsed, canary exit
+// gate armed) says so instead of naming an already-past reset as if it were
+// still pending.
 func cooldownReasonAction(e CooldownEntry) (string, string) {
 	kind := "usage limit"
 	if e.Kind == CooldownRateLimit {
 		kind = "rate limit"
+	}
+	if e.Probation {
+		reason := fmt.Sprintf("%s — window elapsed, in probation awaiting a successful canary round-trip", kind)
+		if e.Reason != "" {
+			reason = fmt.Sprintf("%s (%s) — window elapsed, in probation awaiting a successful canary round-trip", kind, e.Reason)
+		}
+		return reason, "leave it; it re-enters the pool once a canary round-trip succeeds, or run `fak accounts cooldown --clear <account>` if the account is already free"
 	}
 	reason := fmt.Sprintf("%s — resets at %s", kind, e.ResetAt.UTC().Format(time.RFC3339))
 	if e.Reason != "" {
