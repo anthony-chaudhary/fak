@@ -82,6 +82,8 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	unprovenMinutes := fs.Float64("unproven-minutes", rwEnvFloat("FAK_RESUME_UNPROVEN_MINUTES", 10), "with --status, mark red when a launched resume has no progress witness for this many minutes (env FAK_RESUME_UNPROVEN_MINUTES; 0 disables)")
 	monotonicTicks := fs.Int("monotonic-ticks", rwEnvInt("FAK_RESUME_MONOTONIC_TICKS", 3), "with --status, mark red when AUTO_RESUME depth grows for this many consecutive ticks (env FAK_RESUME_MONOTONIC_TICKS)")
 	launchStaleMinutes := fs.Float64("launch-stale-minutes", rwEnvFloat("FAK_RESUME_LAUNCH_STALE_MIN", 30), "with --status, mark red when the plan carries queued sessions but the durable ledger has had no launch for this many minutes — the dead-but-silent auto-resume the status view used to mask off fabricated timestamps (#3460; env FAK_RESUME_LAUNCH_STALE_MIN; 0 disables)")
+	backlogThreshold := fs.Int("backlog-threshold", rwEnvInt("FAK_RESUME_BACKLOG_THRESHOLD", 20), "page when AUTO_RESUME depth stays above this for --backlog-ticks consecutive ticks AND 0 accounts are throttled — BOTTLENECK-MAP §7's \"the cap is the real limiter\" decision as a standing gate (#3582; env FAK_RESUME_BACKLOG_THRESHOLD; 0 disables)")
+	backlogTicks := fs.Int("backlog-ticks", rwEnvInt("FAK_RESUME_BACKLOG_TICKS", 3), "consecutive ticks the AUTO_RESUME backlog must stay above --backlog-threshold before paging (#3582; env FAK_RESUME_BACKLOG_TICKS; 0 disables)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -152,12 +154,34 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	statusLedgerPath := rwWatchdogStatusLedger(regDir)
 	statusEvents := rwLoadWatchdogStatusEvents(ledgerPath)
 	statusEvents = append(statusEvents, rwLoadWatchdogStatusEvents(statusLedgerPath)...)
+	throttledAccounts, throttledKnown := rwThrottledAccounts(regDir)
+	statusTh := watchdogStatusThresholds{
+		silentHours: *silentHours, unprovenMinutes: *unprovenMinutes,
+		monotonicTicks: *monotonicTicks, launchStaleMinutes: *launchStaleMinutes,
+		backlogThreshold: *backlogThreshold, backlogTicks: *backlogTicks,
+		throttledAccounts: throttledAccounts, throttledKnown: throttledKnown,
+	}
 	if *statusOnly {
-		return reportResumeWatchdogStatus(stdout, stderr, tickMode, plan, statusEvents,
-			watchdogStatusThresholds{silentHours: *silentHours, unprovenMinutes: *unprovenMinutes, monotonicTicks: *monotonicTicks, launchStaleMinutes: *launchStaleMinutes}, *asJSON)
+		// A --status read stays side-effect-free: it REPORTS the page (rep.Page) but never
+		// notifies or touches the dedup store. Only a real tick pages, so a monitoring loop
+		// polling --status cannot inflate the occurrence count.
+		return reportResumeWatchdogStatus(stdout, stderr, tickMode, plan, statusEvents, statusTh, *asJSON)
 	}
 	note("TICK %s plan=%d window=%gh cap=%d", tickMode, len(plan), *windowH, *maxPerTick)
 	rwRecordWatchdogStatusTick(statusLedgerPath, tickMode, plan, statusEvents)
+	// Post-reset backlog SLO gate (#3582). Folded from the SAME plan + ledger this tick just
+	// recorded, so the page reflects this tick's depth. statusEvents predates this tick's
+	// depth row on purpose — the fold appends the live plan depth as the current sample.
+	rwEmitBacklogPage(regDir, logDir, resume.FoldWatchdogStatus(resume.WatchdogStatusInput{
+		Mode:                   tickMode,
+		NowUnix:                time.Now().Unix(),
+		BacklogThreshold:       *backlogThreshold,
+		BacklogTicks:           *backlogTicks,
+		ThrottledAccounts:      throttledAccounts,
+		ThrottledAccountsKnown: throttledKnown,
+		Plan:                   plan,
+		Events:                 statusEvents,
+	}).Page, note)
 
 	// Defense-in-depth: the accounts policy still offers as workers. fleet_sessions.py
 	// already excludes non-workers when it writes the plan, but a stale plan file could
@@ -446,6 +470,12 @@ type watchdogStatusThresholds struct {
 	unprovenMinutes    float64
 	monotonicTicks     int
 	launchStaleMinutes float64
+	// The post-reset backlog SLO gate (#3582) and the roster fact it needs. throttledKnown
+	// false (unreadable roster) keeps the gate silent — see rwThrottledAccounts.
+	backlogThreshold  int
+	backlogTicks      int
+	throttledAccounts int
+	throttledKnown    bool
 }
 
 // reportResumeWatchdogStatus renders the read-only drain status (--status): fold the plan +
@@ -459,8 +489,14 @@ func reportResumeWatchdogStatus(stdout, stderr io.Writer, tickMode string, plan 
 		UnprovenSeconds:    int64(th.unprovenMinutes * 60),
 		LaunchStaleSeconds: int64(th.launchStaleMinutes * 60),
 		MonotonicTicks:     th.monotonicTicks,
-		Plan:               plan,
-		Events:             statusEvents,
+
+		BacklogThreshold:       th.backlogThreshold,
+		BacklogTicks:           th.backlogTicks,
+		ThrottledAccounts:      th.throttledAccounts,
+		ThrottledAccountsKnown: th.throttledKnown,
+
+		Plan:   plan,
+		Events: statusEvents,
 	})
 	if asJSON {
 		code := encodeJSONOrFail(stdout, stderr, rep, "fak resume watchdog --status")

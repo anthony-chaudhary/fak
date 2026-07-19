@@ -41,10 +41,45 @@ type WatchdogStatusInput struct {
 	// many seconds, the resume layer is queuing work it never launches — the dead-but-
 	// silent failure a fabricated "resumed just now" would otherwise mask. 0 disables it
 	// (the pure default; the CLI arms it).
-	LaunchStaleSeconds int64                 `json:"launch_stale_seconds,omitempty"`
-	MonotonicTicks     int                   `json:"monotonic_ticks"`
-	Plan               []WatchdogPlanRow     `json:"plan,omitempty"`
-	Events             []WatchdogStatusEvent `json:"events,omitempty"`
+	LaunchStaleSeconds int64 `json:"launch_stale_seconds,omitempty"`
+	MonotonicTicks     int   `json:"monotonic_ticks"`
+	// BacklogThreshold / BacklogTicks arm the post-reset backlog SLO gate (#3582):
+	// BOTTLENECK-MAP §7's manual decision — "if auto_resume is still >= N with 0 throttled
+	// accounts, the cap is the real limiter" — as a standing detector. The gate fires only
+	// when the last BacklogTicks depth samples ALL exceed BacklogThreshold *and* the roster
+	// carries zero throttled accounts, i.e. the backlog outlived the throttle reset, so
+	// recovery capacity (not transient account pressure) is what is binding. BacklogThreshold
+	// <= 0 or BacklogTicks <= 0 disables it (the pure default; the CLI arms it).
+	BacklogThreshold int `json:"backlog_threshold,omitempty"`
+	BacklogTicks     int `json:"backlog_ticks,omitempty"`
+	// ThrottledAccounts is the roster's current throttled-seat count; ThrottledAccountsKnown
+	// says whether that count could actually be read. The gate FAILS CLOSED on an unknown
+	// roster (never pages), because "0 throttled" is exactly what an unreadable roster and a
+	// genuinely clear roster would both look like — and paging on the former is crying wolf.
+	ThrottledAccounts      int  `json:"throttled_accounts,omitempty"`
+	ThrottledAccountsKnown bool `json:"throttled_accounts_known,omitempty"`
+
+	Plan   []WatchdogPlanRow     `json:"plan,omitempty"`
+	Events []WatchdogStatusEvent `json:"events,omitempty"`
+}
+
+// WatchdogPageBacklogPersists is the closed reason code for the post-reset backlog page
+// (#3582): the AUTO_RESUME backlog stayed above threshold across consecutive ticks while
+// zero accounts were throttled.
+const WatchdogPageBacklogPersists = "resume_backlog_persists_after_reset"
+
+// WatchdogPage is the structured page the drain fold emits when a scoped SLO gate trips.
+// Signature is the DEDUP key: it is deliberately built from the gate identity alone (reason
+// + threshold), never from the live depth or a timestamp, so a gate that keeps firing tick
+// after tick refreshes ONE occurrence-counted issue/toast instead of spamming one per tick.
+type WatchdogPage struct {
+	Reason            string `json:"reason"`
+	Signature         string `json:"signature"`
+	Depth             int    `json:"depth"`
+	Threshold         int    `json:"threshold"`
+	Ticks             int    `json:"ticks"`
+	ThrottledAccounts int    `json:"throttled_accounts"`
+	Detail            string `json:"detail"`
 }
 
 // WatchdogStatusEvent is one ledger fact the drain steward can trust without reading
@@ -91,6 +126,9 @@ type WatchdogDrainStatus struct {
 	UnprovenHours            float64              `json:"unproven_hours,omitempty"`
 	MTTRSessions             []WatchdogMTTRRow    `json:"mttr_sessions"`
 	Reasons                  []string             `json:"reasons,omitempty"`
+	// Page is the structured SLO page to route to notify/guardcomplaint, or nil when no
+	// gate tripped. At most one page per fold — the shell dedups it by Page.Signature.
+	Page *WatchdogPage `json:"page,omitempty"`
 }
 
 type watchdogSessionFold struct {
@@ -282,6 +320,14 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 		}
 	}
 
+	// Post-reset backlog SLO gate (#3582). Prepend: when recovery capacity is the binding
+	// limiter, that is the headline an operator (or the MaxPerTick auto-scaler) must read
+	// first — every other reason here is downstream of it.
+	page := foldWatchdogBacklogPage(depthSamples, in)
+	if page != nil {
+		reasons = append([]string{page.Detail}, reasons...)
+	}
+
 	verdict := WatchdogDrainGreen
 	if len(reasons) > 0 {
 		verdict = WatchdogDrainRed
@@ -298,6 +344,51 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 		UnprovenHours:            float64(maxUnproven) / 3600,
 		MTTRSessions:             rows,
 		Reasons:                  reasons,
+		Page:                     page,
+	}
+}
+
+// foldWatchdogBacklogPage decides the post-reset backlog page (#3582): the last BacklogTicks
+// depth samples must ALL sit strictly above BacklogThreshold while the roster reports zero
+// throttled accounts. Depth alone is not the signal — a deep backlog WITH throttled seats is
+// the transient account pressure §4 already expects to clear itself at the next reset, and
+// paging on it would train an operator to ignore the page. It is the backlog that OUTLIVES
+// the throttle that proves recovery capacity is the real limiter.
+//
+// Returns nil (no page) when the gate is disarmed, when the ledger has not yet accumulated
+// BacklogTicks samples, when any sample is at or below threshold, when any seat is throttled,
+// or when the roster could not be read at all.
+func foldWatchdogBacklogPage(samples []watchdogDepthSample, in WatchdogStatusInput) *WatchdogPage {
+	if in.BacklogThreshold <= 0 || in.BacklogTicks <= 0 {
+		return nil
+	}
+	// Fail closed on an unreadable roster: an absent count is not proof of zero throttled.
+	if !in.ThrottledAccountsKnown || in.ThrottledAccounts != 0 {
+		return nil
+	}
+	if len(samples) < in.BacklogTicks {
+		return nil
+	}
+	ordered := append([]watchdogDepthSample(nil), samples...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].at < ordered[j].at })
+	tail := ordered[len(ordered)-in.BacklogTicks:]
+	for _, s := range tail {
+		if s.depth <= in.BacklogThreshold {
+			return nil
+		}
+	}
+	depth := tail[len(tail)-1].depth
+	return &WatchdogPage{
+		Reason: WatchdogPageBacklogPersists,
+		// Gate identity only — stable across every tick this keeps firing, so the shell
+		// refreshes one occurrence-counted issue instead of filing one per tick.
+		Signature:         fmt.Sprintf("%s:threshold=%d", WatchdogPageBacklogPersists, in.BacklogThreshold),
+		Depth:             depth,
+		Threshold:         in.BacklogThreshold,
+		Ticks:             in.BacklogTicks,
+		ThrottledAccounts: 0,
+		Detail: fmt.Sprintf("RESUME BACKLOG PERSISTS AFTER RESET: auto_resume depth stayed > %d for %d consecutive ticks (now %d) with 0 throttled accounts — recovery capacity, not account throttling, is the limiter",
+			in.BacklogThreshold, in.BacklogTicks, depth),
 	}
 }
 

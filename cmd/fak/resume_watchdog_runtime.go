@@ -131,6 +131,10 @@ func renderResumeWatchdogStatus(w io.Writer, rep resume.WatchdogDrainStatus) {
 	for _, r := range rep.Reasons {
 		fmt.Fprintf(w, "  red: %s\n", r)
 	}
+	if rep.Page != nil {
+		// The dedup key an operator can grep for in _paged.json / the filed issue (#3582).
+		fmt.Fprintf(w, "  page: %s (signature %s)\n", rep.Page.Reason, rep.Page.Signature)
+	}
 	if len(rep.MTTRSessions) == 0 {
 		fmt.Fprintln(w, "  no AUTO_RESUME rows or watchdog ledger sessions found")
 		return
