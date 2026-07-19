@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/operatorbrief"
 	"github.com/anthony-chaudhary/fak/internal/programreport"
+	"github.com/anthony-chaudhary/fak/internal/steerpr"
 	"github.com/anthony-chaudhary/fak/internal/worktype"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -110,11 +111,15 @@ func TestOperatorBriefRejectsWrongSchema(t *testing.T) {
 }
 
 func TestOperatorBriefCollectsMissingInputs(t *testing.T) {
-	oldCadence, oldProgram, oldMilestone, oldHeaviness := operatorCollectCadence, operatorCollectProgram, operatorCollectMilestone, operatorCollectHeaviness
+	oldCadence, oldProgram, oldMilestone, oldHeaviness, oldOSP := operatorCollectCadence, operatorCollectProgram, operatorCollectMilestone, operatorCollectHeaviness, operatorCollectOSP
 	defer func() {
 		operatorCollectCadence, operatorCollectProgram, operatorCollectMilestone = oldCadence, oldProgram, oldMilestone
-		operatorCollectHeaviness = oldHeaviness
+		operatorCollectHeaviness, operatorCollectOSP = oldHeaviness, oldOSP
 	}()
+	// Stub the OSP collect arm to a measured, empty overlay so this test stays
+	// deterministic (the real arm shells to `fak steer prs`); the OSP-specific
+	// behaviour is covered by TestOperatorBriefCollectOSP.
+	operatorCollectOSP = func(root string) operatorbrief.OSP { return operatorbrief.OSP{} }
 
 	var cadenceArgs struct {
 		timeout    int
@@ -226,6 +231,118 @@ func TestOperatorBriefCollectsMissingInputs(t *testing.T) {
 	if len(brief.Strengths) == 0 || len(brief.Learning) == 0 {
 		t.Fatalf("collect brief should retain strengths and learning: %+v", brief)
 	}
+}
+
+// TestOperatorBriefCollectOSP proves the #5126 arm: `fak operator brief --collect`
+// (with no explicit --osp) folds the OSP overlay via the collect producer. A
+// failing producer must fold as an unmeasured osp source and must NOT red the
+// brief; a measured producer must surface OSP-bucketed entries and an ok stamp.
+func TestOperatorBriefCollectOSP(t *testing.T) {
+	oldCadence, oldProgram, oldMilestone, oldHeaviness, oldOSP := operatorCollectCadence, operatorCollectProgram, operatorCollectMilestone, operatorCollectHeaviness, operatorCollectOSP
+	defer func() {
+		operatorCollectCadence, operatorCollectProgram, operatorCollectMilestone = oldCadence, oldProgram, oldMilestone
+		operatorCollectHeaviness, operatorCollectOSP = oldHeaviness, oldOSP
+	}()
+	// Minimal passing stubs for the sibling collectors so their arms don't
+	// return 1 before the OSP arm runs — this test only exercises OSP.
+	operatorCollectCadence = func(root, date string, timeout int, scoresFrom string) (cadencereport.Report, error) {
+		return cadencereport.FoldWithMaturity(
+			cadencereport.Scores{Debt: 1, GradeDebt: 1, Measured: 3, TrendDirection: "flat", OK: true},
+			cadencereport.Maturity{Score: 80, Grade: "B", Capabilities: 4, RouteLane: "maturity", RouteItem: "dogfood", OK: true},
+			cadencereport.Work{WindowDays: 7, Commits: 3, Ships: 2},
+			cadencereport.Releases{Version: "v1.0.0", ActionKind: "wait", OK: true},
+			cadencereport.FoldOpts{Workspace: root, Commit: "abc1234", Date: date},
+		), nil
+	}
+	operatorCollectProgram = func(root, date, cacheLedger string) (programreport.Report, error) {
+		p := programreport.InterpretPrograms([]programreport.Signal{
+			{Class: worktype.KernelOptimization, Label: "kernel-optimization", Frontier: "perf", Direction: "advancing", Activity: 1, OK: true},
+		})
+		return programreport.Fold(p, programreport.FoldOpts{Workspace: root, Commit: "abc1234", Date: date}), nil
+	}
+	operatorCollectMilestone = func(root, date, repo, epicsFrom string) (milestonereport.Report, error) {
+		m := milestonereport.Maturity{Cells: 1, Matured: 1, Highest: "M4", ProgressPct: 57.1, Dist: map[string]int{"M4": 1}, OK: true}
+		e := milestonereport.InterpretEpics(
+			[]milestonereport.EpicSpec{{Number: 7, Title: "operator brief"}},
+			[]milestonereport.EpicCounts{{Number: 7, Closed: 1, Total: 1, Source: "label"}},
+			"",
+		)
+		return milestonereport.Fold(m, e, milestonereport.FoldOpts{Workspace: root, Commit: "abc1234", Date: date}), nil
+	}
+	operatorCollectHeaviness = func(root string) (scorecard.Payload, error) {
+		return scorecard.Payload{
+			Schema: heavinessscore.Schema, OK: true, Verdict: "OK", Finding: "light", Workspace: root,
+			Corpus: map[string]any{heavinessscore.DebtKey: 0, "heaviness_pressure": 0, "verbs": 3, "front_door_flags": 2, "refusal_reasons": 2},
+		}, nil
+	}
+
+	briefWithOSP := func(t *testing.T, osp operatorbrief.OSP) operatorbrief.Report {
+		t.Helper()
+		called := false
+		operatorCollectOSP = func(root string) operatorbrief.OSP { called = true; return osp }
+		var out, errb bytes.Buffer
+		code := runOperatorBrief(&out, &errb, []string{
+			"--workspace", t.TempDir(), "--date", "2026-06-30", "--collect", "--json",
+		})
+		if code != 0 {
+			t.Fatalf("collect brief exit = %d, stderr=%s", code, errb.String())
+		}
+		if !called {
+			t.Fatalf("--collect did not invoke the OSP collect arm")
+		}
+		var brief operatorbrief.Report
+		if err := json.Unmarshal(out.Bytes(), &brief); err != nil {
+			t.Fatalf("parse collect brief: %v\n%s", err, out.String())
+		}
+		return brief
+	}
+
+	// A failing producer folds as an unmeasured osp source without redding.
+	t.Run("failing producer folds unmeasured", func(t *testing.T) {
+		brief := briefWithOSP(t, operatorbrief.OSP{Unreadable: true, Note: "collect steer prs exited 1: boom"})
+		s := ospSource(t, brief.Sources)
+		if s.Status != "unmeasured" || s.Finding != "osp_unmeasured" {
+			t.Fatalf("osp source = {%q,%q}, want {unmeasured, osp_unmeasured}", s.Status, s.Finding)
+		}
+		if len(brief.Human) != 0 {
+			t.Fatalf("unmeasured overlay must never page a human: %+v", brief.Human)
+		}
+	})
+
+	// A measured producer surfaces OSP entries with no explicit --osp flag.
+	t.Run("measured producer surfaces osp entries", func(t *testing.T) {
+		brief := briefWithOSP(t, operatorbrief.OSP{
+			Schema: steerpr.Schema,
+			Units:  []steerpr.Unit{{Leaf: "gateway", Title: "fix(gateway): tighten fold", Band: steerpr.BandUnverifiable, Commits: make([]steerpr.Commit, 1)}},
+		})
+		s := ospSource(t, brief.Sources)
+		if s.Status != "ok" {
+			t.Fatalf("measured osp source status = %q, want ok", s.Status)
+		}
+		if !hasSource(brief.Watch, "osp") {
+			t.Fatalf("measured overlay's unverifiable unit should reach the watch bucket: %+v", brief.Watch)
+		}
+	})
+}
+
+func ospSource(t *testing.T, srcs []operatorbrief.SourceState) operatorbrief.SourceState {
+	t.Helper()
+	for _, s := range srcs {
+		if s.Name == "osp" {
+			return s
+		}
+	}
+	t.Fatalf("no osp source stamp in %+v", srcs)
+	return operatorbrief.SourceState{}
+}
+
+func hasSource(items []operatorbrief.Item, source string) bool {
+	for _, it := range items {
+		if it.Source == source {
+			return true
+		}
+	}
+	return false
 }
 
 func sourcePresent(srcs []operatorbrief.SourceState, name string) bool {

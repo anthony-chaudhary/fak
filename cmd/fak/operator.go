@@ -30,6 +30,7 @@ var (
 	operatorCollectProgram   = collectProgramBriefReport
 	operatorCollectMilestone = collectMilestoneBriefReport
 	operatorCollectHeaviness = collectHeavinessBriefReport
+	operatorCollectOSP       = collectOSPBriefInput
 )
 
 func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
@@ -150,6 +151,15 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *ospPath != "" {
 		o := loadOSPBriefInput(*ospPath, os.Stdin)
+		in.OSP = &o
+	}
+	if *ospPath == "" && *collect {
+		// Unlike the program/milestone/heaviness collect arms, the OSP overlay
+		// is an optional source that must NEVER red the brief (#5126): a producer
+		// that exits non-zero or emits no parseable envelope folds as unmeasured,
+		// exactly as a missing --osp payload would, so --collect still exits as it
+		// would have without the overlay.
+		o := operatorCollectOSP(root)
 		in.OSP = &o
 	}
 	if *previousPath != "" {
@@ -346,6 +356,34 @@ func loadOSPBriefInput(path string, stdin io.Reader) operatorbrief.OSP {
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return operatorbrief.OSP{Unreadable: true, Note: fmt.Sprintf("parse %s: %v", path, err)}
+	}
+	return operatorbrief.OSP{Schema: env.Schema, Units: env.Units}
+}
+
+// collectOSPBriefInput runs `fak steer prs --json` in-process and folds its
+// {schema, units} envelope into an operatorbrief.OSP for the --collect path.
+// Per #5126 the overlay is an optional source that must never red the brief: a
+// producer that exits non-zero or emits no parseable envelope returns an
+// Unreadable OSP so the source folds as unmeasured (never a clean zero), exactly
+// as a missing --osp payload does through loadOSPBriefInput. The root argument
+// mirrors the other collect arms' signature so the arm can be stubbed uniformly;
+// `fak steer prs` resolves its own steerRoot() from the same process.
+func collectOSPBriefInput(root string) operatorbrief.OSP {
+	var out, errb bytes.Buffer
+	code := runSteerPRs(&out, &errb, []string{"--json"})
+	var env struct {
+		Schema string         `json:"schema"`
+		Units  []steerpr.Unit `json:"units"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		detail := strings.TrimSpace(errb.String())
+		if detail == "" {
+			detail = strings.TrimSpace(out.String())
+		}
+		if detail == "" {
+			detail = "no JSON output"
+		}
+		return operatorbrief.OSP{Unreadable: true, Note: fmt.Sprintf("collect steer prs exited %d: %s", code, detail)}
 	}
 	return operatorbrief.OSP{Schema: env.Schema, Units: env.Units}
 }
