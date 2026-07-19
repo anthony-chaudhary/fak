@@ -178,9 +178,23 @@ func (c Config) expertIntermediate() int {
 // backend explicitly supports resident routed k-quant experts. Such a backend
 // must reach the per-expert loop: the older host-batched GLM shortcut otherwise
 // consumes the same Q4_K tensors first and silently bypasses device execution.
+// Keying on the session CAPABILITY (not the concrete kernel type) is what makes
+// the live glm_moe_dsa decode reachable: decodeBandGLMDsa builds backendKernel,
+// never sessionQ4KKernel, so the old type-assert always missed the device routed
+// path and the host scalar batch always won (#5111). splitKernel and
+// residentKernel expose no session here (nil) — under --cpu-offload-experts the
+// experts are host-pinned by design — and non-capable backends (cpu-ref, Metal)
+// return false, so their paths stay byte-identical. supportsRoutedExpertKQuant is
+// nil-safe on a nil receiver.
 func routedExpertKQuantActive(mat matKernel) bool {
-	sk, ok := mat.(sessionQ4KKernel)
-	return ok && sk.s.supportsRoutedExpertKQuant()
+	var sess *Session
+	switch mk := mat.(type) {
+	case sessionQ4KKernel:
+		sess = mk.s
+	case backendKernel:
+		sess = mk.s
+	}
+	return sess.supportsRoutedExpertKQuant()
 }
 
 // expertSwiGLU runs one expert's dense SwiGLU over xn and returns its [H] output.
@@ -199,9 +213,20 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 		!m.has(expertName(layer, expert, "gate_proj.bias")) &&
 		!m.has(expertName(layer, expert, "up_proj.bias")) &&
 		!m.has(expertName(layer, expert, "down_proj.bias")) {
-		if sk, ok := mat.(sessionQ4KKernel); ok {
+		// Admit both sessionQ4KKernel (the generic blockStep kernel) AND backendKernel
+		// (what decodeBandGLMDsa actually builds). expertSwiGLUHAL itself gates on
+		// supportsRoutedExpertKQuant + halW, so a non-capable backend returns ok=false
+		// and falls through unchanged (#5111).
+		var sess *Session
+		switch mk := mat.(type) {
+		case sessionQ4KKernel:
+			sess = mk.s
+		case backendKernel:
+			sess = mk.s
+		}
+		if sess != nil {
 			if xf, ok := xn.([]float32); ok {
-				if out, ok := sk.s.expertSwiGLUHAL(gn, un, dn, xf); ok {
+				if out, ok := sess.expertSwiGLUHAL(gn, un, dn, xf); ok {
 					return out
 				}
 			}

@@ -101,7 +101,13 @@ func (k backendKernel) mul(name string, x any, out, in int) []float32 {
 				" stored=[" + itoa(qt.out) + "," + itoa(qt.in) + "]" +
 				" requested=[" + itoa(out) + "," + itoa(in) + "]")
 		}
-		return kQuantMatRows(qt, xf)
+		// A resident raw k-quant expert weight (Q5_K/Q6_K down_proj). A backend that can
+		// keep routed experts resident (cuda: fcuda_q5k/q6k_matmul_f32) stages it on the
+		// device via glmDsaWeightHAL below; every other backend keeps the host k-quant GEMV
+		// (its FAK_KQ_INT8 int8 path when enabled) — bit-identical to before this seam (#5111).
+		if !s.supportsRoutedExpertKQuant() {
+			return kQuantMatRows(qt, xf)
+		}
 	}
 	wt := s.glmDsaWeightHAL(name, out, in)
 	xt := uploadHostF32Class(be, []int{in}, xf, compute.MemoryActivation, "glm-dsa-activation "+name)
@@ -221,12 +227,15 @@ func (s *Session) glmDsaWeightHAL(name string, out, in int) compute.Tensor {
 	if s.M.has(name) {
 		return s.weightHAL(name)
 	}
-	if s.M.kqw[name] != nil {
-		// A resident raw k-quant weight reached the DEVICE upload path. The backend HAL has no
-		// kernels for this store; callers that want correctness on mixed Q5_K/Q6_K weights must
-		// route through backendKernel.mul's host k-quant fallback or use --cpu-offload-experts.
-		// Name the misconfiguration explicitly instead of falling through to the opaque
-		// "missing resident weight" panic below.
+	if qt := s.M.kqw[name]; qt != nil {
+		// A resident raw k-quant expert weight (Q5_K/Q6_K) reached the DEVICE upload path.
+		// A routed-kquant-capable backend (cuda) stages it verbatim and dequantizes in the
+		// GEMV tile (weightHALKQuant); this is the reachability #5111 restores. Any other
+		// backend has no device kernel for this store, so keep the explicit misconfiguration
+		// panic instead of the opaque "missing resident weight" one below.
+		if s.supportsRoutedExpertKQuant() {
+			return s.weightHALKQuant(name, qt)
+		}
 		panic("model: glmDsaWeightHAL got resident raw expert-quant weight " + name +
 			" on the device upload path; route through the host k-quant fallback or serve with --cpu-offload-experts")
 	}
