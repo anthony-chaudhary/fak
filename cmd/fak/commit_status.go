@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/commitlane"
@@ -13,11 +15,17 @@ import (
 
 var commitStatusFn = commitlane.Status
 
+// removeIndexLockFn removes a reclaimed stale .git/index.lock. Indirected so the
+// reclaim actuator is testable without touching a real lock file.
+var removeIndexLockFn = os.Remove
+
 func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("commit status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	asJSON := fs.Bool("json", false, "emit the commit-lane status as JSON")
+	reclaim := fs.Bool("reclaim-stale-index-lock", false, "reclaim an orphaned .git/index.lock when the lane evidence proves it stale with no live writer (dry-run unless --apply)")
+	apply := fs.Bool("apply", false, "with --reclaim-stale-index-lock, actually remove the lock (default: dry-run)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -31,6 +39,9 @@ func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak commit status: %v\n", err)
 		return 1
 	}
+	if *reclaim {
+		return runIndexLockReclaim(stdout, stderr, rep, *apply)
+	}
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, rep); err != nil {
 			fmt.Fprintf(stderr, "fak commit status: %v\n", err)
@@ -39,6 +50,33 @@ func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	renderCommitStatus(stdout, rep)
+	return 0
+}
+
+// runIndexLockReclaim applies the stale-.git/index.lock reclaim decision derived from
+// the lane report (#5294). It NEVER removes a lock the decision would keep: only the
+// present + probe-ok + no-live-writer + stale-past-grace signature reaps, and even then
+// only with --apply — the default is a dry-run that reports what it would do. A lock
+// another session already cleared is idempotent success, not an error.
+func runIndexLockReclaim(stdout, stderr io.Writer, rep commitlane.Report, apply bool) int {
+	d := commitlane.DecideIndexLockReclaim(rep)
+	if !d.Reap {
+		fmt.Fprintf(stdout, "index.lock: no reclaim (%s) %s\n", d.Reason, d.Path)
+		return 0
+	}
+	if !apply {
+		fmt.Fprintf(stdout, "index.lock: WOULD reclaim (%s) %s — re-run with --apply to remove\n", d.Reason, d.Path)
+		return 0
+	}
+	if err := removeIndexLockFn(d.Path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stdout, "index.lock: already cleared %s\n", d.Path)
+			return 0
+		}
+		fmt.Fprintf(stderr, "fak commit status: reclaim failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "index.lock: reclaimed stale orphan (%s) %s\n", d.Reason, d.Path)
 	return 0
 }
 
