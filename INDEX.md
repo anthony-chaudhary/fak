@@ -239,6 +239,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Microharness — native in-process Go microagent runtime](docs/notes/MICROHARNESS-2026-07-01.md) -- auto-indexed dated note.
 - [Mac serving-path cache-value witness — contract half landed, Mac-hardware half `not yet` (#2727)](docs/notes/MAC-CACHEVALUE-EXACT-SPAN-WITNESS-2026-07-18.md) -- auto-indexed dated note.
 - [Net tokens/sec on a slow SSD-offloaded MoE — the expert-coalescing lever](docs/notes/MOE-SSD-MULTI-AGENT-NET-TOKS-2026-07-18.md) -- auto-indexed dated note.
 - [The monotone-tighten self-amendment envelope](docs/notes/RESEARCH-MONOTONE-TIGHTEN-SELF-AMENDMENT-2026-07-17.md) -- auto-indexed dated note.
