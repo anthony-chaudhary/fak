@@ -2283,15 +2283,28 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     # to recent history.
     if base_sha:
         (out_log.with_suffix(BASE_SHA_SIDECAR_SUFFIX)).write_text(base_sha, encoding="utf-8")
-    # #3181: record the isolated worktree so the witness sweep can land its diff under
-    # the lane lease and reap it. Best effort — a write failure never blocks the spawn.
+    # #3181: record the isolated worktree in the SAME sidecar contract the shared
+    # witness sweep already consumes for the Go spine — `fak dispatch witness --live`
+    # (cmd/fak/dispatch_tick_witness.landAndReapWorkerWorktree) scans this same
+    # `.dispatch-runs` dir, reads `<log>.worktree` as a PLAIN path, the pinned base from
+    # `<log>.basesha`, and the scoped commit paths from `<log>.lease-tree.json`, then on
+    # the worker's exit applies its diff-since-base onto the trunk as its own stamped
+    # commit (under the lane lease this dispatcher holds) and reaps the worktree. The
+    # base sidecar MUST carry the SHA the worktree was pinned to (not a bare HEAD): the
+    # worker commits IN its detached worktree, so a HEAD-diff would be empty and its
+    # whole change would evaporate. Best effort — a write failure never blocks the spawn.
     if wt_info.get("worktree"):
         try:
             out_log.with_suffix(".worktree").write_text(
-                json.dumps({"path": wt_info["worktree"],
-                            "base_sha": wt_info.get("base_sha"),
-                            "lane": lane, "issue": issue}),
-                encoding="utf-8")
+                str(wt_info["worktree"]), encoding="utf-8")
+            if wt_info.get("base_sha"):
+                out_log.with_suffix(BASE_SHA_SIDECAR_SUFFIX).write_text(
+                    str(wt_info["base_sha"]), encoding="utf-8")
+            lease_tree = [t for t in ((lease or {}).get("tree") or [])
+                          if isinstance(t, str)]
+            if lease_tree:
+                out_log.with_suffix(".lease-tree.json").write_text(
+                    json.dumps(lease_tree), encoding="utf-8")
         except OSError:
             pass
     result: dict[str, Any] = {"pid": proc.pid, "log": str(out_log), "issue": issue,

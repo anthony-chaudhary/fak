@@ -6075,28 +6075,42 @@ class SpawnIssueWorkerWorktreeTest(unittest.TestCase):
             seen["cwd"] = cwd
             return FakeProc()
 
+        runs = Path(td) / "runs"
         with mock.patch.object(m.subprocess, "Popen", fake_popen), \
              mock.patch.dict(os.environ, env_overrides, clear=False):
             res = m.spawn_issue_worker(
                 ["python", "-c", "pass"], {"PATH": os.environ.get("PATH", "")},
-                Path(td), Path(td) / "runs", 3181, "tools", "claude",
+                Path(td), runs, 3181, "tools", "claude",
+                lease={"acquired": True, "id": "L1", "holder": "h",
+                       "tree": ["tools/**"]},
                 base_sha="basecafe", worktree_git=self._fake_git())
-        return m, seen, res
+        return m, seen, res, runs
 
     def test_worktree_spawn_off_uses_root_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            _, seen, res = self._spawn({"FLEET_WORKER_WORKTREE": "0"}, td)
+            _, seen, res, runs = self._spawn({"FLEET_WORKER_WORKTREE": "0"}, td)
             self.assertEqual(seen["cwd"], str(Path(td)))
             self.assertNotIn("worktree", res)
+            self.assertEqual(list(runs.glob("*.worktree")), [])  # off -> no sidecar
 
     def test_worktree_spawn_on_uses_worktree_cwd_pinned_at_base_sha(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            m, seen, res = self._spawn(
+            m, seen, res, runs = self._spawn(
                 {"FLEET_WORKER_WORKTREE": "1",
                  "FLEET_WORKER_WORKTREE_ROOT": str(Path(td) / "wt")}, td)
             self.assertNotEqual(seen["cwd"], str(Path(td)))
             self.assertTrue(m.worker_worktree.is_worker_worktree(str(seen["cwd"])))
             self.assertEqual(res.get("worktree"), seen["cwd"])
+            # Sidecar contract the shared witness sweep consumes: a PLAIN worktree path,
+            # the pinned base, and the lease tree for a scoped land.
+            wt_side = list(runs.glob("*.worktree"))
+            self.assertEqual(len(wt_side), 1)
+            self.assertEqual(wt_side[0].read_text(encoding="utf-8"), seen["cwd"])
+            base_side = list(runs.glob("*.basesha"))
+            self.assertEqual(base_side[0].read_text(encoding="utf-8"), "basecafe")
+            tree_side = list(runs.glob("*.lease-tree.json"))
+            self.assertEqual(json.loads(tree_side[0].read_text(encoding="utf-8")),
+                             ["tools/**"])
 
 
 if __name__ == "__main__":

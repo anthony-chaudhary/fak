@@ -750,14 +750,16 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_log = log_dir / f"dispatch-{lane}-{stamp}.log"
     # #3181: opt-in per-worker worktree isolation, shared helper/flag with the Go spine.
+    # Record the worktree as a PLAIN path in `<log>.worktree` — the same sidecar shape
+    # the shared witness sweep consumes (cmd/fak/dispatch_tick_witness). The land+reap
+    # sweep scans `resolve-*.log`, so this tick site's build-isolation lands via its
+    # per-issue resolve children; the breadcrumb keeps the contract identical.
     spawn_cwd, env, wt_info = worker_worktree.isolate_spawn(
         Path(cwd), lane, lane, cwd, env, git=worktree_git)
     if wt_info.get("worktree"):
         try:
             out_log.with_suffix(".worktree").write_text(
-                json.dumps({"path": wt_info["worktree"],
-                            "base_sha": wt_info.get("base_sha"), "lane": lane}),
-                encoding="utf-8")
+                str(wt_info["worktree"]), encoding="utf-8")
         except OSError:
             pass
     exe = shutil.which(command[0]) or command[0]
