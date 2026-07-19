@@ -86,19 +86,28 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	// this producer existed. The tick-lead / never-dip-below property is unit-witnessed in
 	// dispatchtick.TestEvaluatePreflightForecastFloorRaisesReactiveTick.
 	in, forecast := dispatchFoldForecastFloor(in, dispatchForecastTargetIPH(), dispatchForecastSessionMinutes())
+	// The dual-cadence lazy pull (#3371): this call is the BASE tick; each registered
+	// consumer of an EXPENSIVE observation (the gate, rate_budget, and fresh_seat
+	// folds below) declares its needs plus an execution interval, and a costly probe
+	// is gathered only on a tick where a currently-registered DUE consumer declares
+	// it -- between due ticks the fold consumes the LAST pulled observation instead
+	// of re-scanning. Unset FAK_DISPATCH_CADENCE leaves every consumer due every
+	// tick, so every probe is still gathered every tick -- byte-identical to before
+	// the due-filter existed.
+	slow, lazySkipped := dispatchGatherSlowProbes(root, product, time.Now())
 	// The fifth cap term (#2221, G3 of epic #2218): fold the MEASURED guard-hook
 	// latency rollup UP into admission so a slow kernel earns spawn reluctance. The
 	// four in-struct terms only flow caps DOWN; this composes gate health on top and
 	// can only lower the effective cap, never raise it.
 	res := dispatchtick.EvaluatePreflight(in)
-	res = dispatchtick.ApplyGateBackpressure(res, dispatchPreflightGate(root))
+	res = dispatchtick.ApplyGateBackpressure(res, slow.Gate)
 	// The rate_budget cap term (docs/safe-to-raise-cap-checklist.md): fold the MEASURED,
 	// backend-scoped burst of GENUINE concurrency rate-limit worker exits UP into
 	// admission so a fleet storming a throttled seat backs off (and routes to another
 	// provider) instead of re-storming it. Fake 429s -- weekly caps, model caps, login
 	// walls -- are excluded by the reason=rate_limit taxonomy filter; it only lowers the
 	// effective cap, so a zero-signal fold is byte-identical to before.
-	res = dispatchtick.ApplyRateLimitBackpressure(res, dispatchPreflightRateLimit(root, product))
+	res = dispatchtick.ApplyRateLimitBackpressure(res, slow.RateLimit)
 	// The host_churn cap term: fold the MEASURED whole-host process-spawn burst DOWN into
 	// admission so a new dispatcher backs off when the box is ALREADY in a spawn storm --
 	// typically several independent dispatchers co-launching waves in the same window, the
@@ -117,7 +126,7 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	// trap). min-of-limits via fleetcap.AvailableFrom: the term only LOWERS the
 	// effective cap; a healthy pool (ceiling >= cap) or an absent roster (ceiling 0,
 	// the fold abstains) leaves the preflight byte-identical to before.
-	res = dispatchApplyFreshSeatCeiling(res, dispatchLiveFreshSeatCeiling(root, product))
+	res = dispatchApplyFreshSeatCeiling(res, slow.FreshSeatCeiling)
 	out := res.Map()
 	// #3109 self-heal: preflight is otherwise refuse-only on unattributed_live -- it
 	// counts orphaned worker PIDs (a botched teardown's `claude` descendant still
@@ -165,6 +174,16 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 			"target_iph":       forecast.TargetRatePerHour,
 			"session_min":      forecast.MedianSessionMinutes,
 			"required_workers": forecast.RequiredWorkers,
+		}
+	}
+	// Surface the due-filter's work (#3371) so an operator (and the tick log) can see
+	// WHICH expensive probes this base tick served from the last pulled observation
+	// instead of re-gathering. Attached only when the armed cadence actually skipped a
+	// gather, so the common (unarmed / all-due) payload stays byte-identical.
+	if len(lazySkipped) > 0 {
+		out["lazy_pull"] = map[string]any{
+			"cadence_ms": dispatchLazyCadence().Milliseconds(),
+			"skipped":    lazySkipped,
 		}
 	}
 	return out, timings, nil
@@ -800,6 +819,161 @@ func dispatchApplyFreshSeatCeiling(res dispatchtick.PreflightResult, ceiling int
 	return res
 }
 
+// ---- Dual-cadence lazy pull (#3371) ----
+//
+// One BASE tick (each dispatchPreflightTimed call) drives every consumer, but each
+// consumer of an EXPENSIVE observation carries its own execution interval; a costly
+// probe (a hook-observation file scan, a witness-sidecar sweep, a fleetaccounts
+// roster annotation) is gathered only on a tick where a due consumer declares a need
+// for it. Between due ticks the consumer's fold runs on the LAST pulled observation
+// -- the term never silently vanishes, only the gather is elided. Clean-room Go of
+// the dual-cadence planner pattern: due = never-run or interval elapsed; needed =
+// any due consumer's declared need equals the probe path or nests under it.
+
+// Probe paths the slow consumers declare. Dotted paths so a need can address a
+// nested observation under a probe (the exact-or-prefix match in
+// lazyPullProbeNeeded).
+const (
+	dispatchProbePathHooklat   = "gate.hooklat"
+	dispatchProbePathRateExits = "rate_limit.worker_exits"
+	dispatchProbePathFreshSeat = "seat.fresh_ceiling"
+)
+
+// dispatchLazyCadenceEnv arms the dual cadence: a Go duration (e.g. "60s") is
+// the execution interval of every registered slow consumer; unset, "0", or "off"
+// leaves the due-filter disabled -- every consumer due every base tick, so every
+// probe is gathered every tick exactly as before #3371.
+const dispatchLazyCadenceEnv = "FAK_DISPATCH_CADENCE"
+
+// dispatchLazyCadence resolves the per-consumer execution interval from
+// dispatchLazyCadenceEnv. Empty/"0"/"off"/unparseable/non-positive all yield 0
+// (disabled), so a garbled write can never starve a fold of a fresh observation.
+func dispatchLazyCadence() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(dispatchLazyCadenceEnv))
+	if raw == "" || raw == "0" || strings.EqualFold(raw, "off") {
+		return 0
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return 0
+}
+
+// lazyPullConsumer is one registered consumer of the preflight's expensive
+// observations: the probe paths it Needs and the Interval at which it executes. A
+// non-positive Interval means due every base tick.
+type lazyPullConsumer struct {
+	Name     string
+	Needs    []string
+	Interval time.Duration
+}
+
+// dispatchLazyPullConsumers is the currently-registered consumer set: the three
+// slow folds wired through dispatchGatherSlowProbes, each declaring exactly the
+// expensive observation it folds. All share the one operator cadence.
+func dispatchLazyPullConsumers() []lazyPullConsumer {
+	interval := dispatchLazyCadence()
+	return []lazyPullConsumer{
+		{Name: "hooklat_backpressure", Needs: []string{dispatchProbePathHooklat}, Interval: interval},
+		{Name: "rate_budget", Needs: []string{dispatchProbePathRateExits}, Interval: interval},
+		{Name: "fresh_seat", Needs: []string{dispatchProbePathFreshSeat}, Interval: interval},
+	}
+}
+
+// lazyPullConsumerDue reports whether a consumer is due at 'at': never run (zero
+// lastRun), a non-positive interval (every tick), or its interval elapsed.
+func lazyPullConsumerDue(c lazyPullConsumer, lastRun, at time.Time) bool {
+	if lastRun.IsZero() || c.Interval <= 0 {
+		return true
+	}
+	return at.Sub(lastRun) >= c.Interval
+}
+
+// dueLazyPullConsumers filters the registered consumers to those due at 'at' given
+// each consumer's last execution instant.
+func dueLazyPullConsumers(consumers []lazyPullConsumer, lastRun map[string]time.Time, at time.Time) []lazyPullConsumer {
+	due := make([]lazyPullConsumer, 0, len(consumers))
+	for _, c := range consumers {
+		if lazyPullConsumerDue(c, lastRun[c.Name], at) {
+			due = append(due, c)
+		}
+	}
+	return due
+}
+
+// lazyPullProbeNeeded reports whether any DUE consumer declares the probe: a need
+// matches by exact path or by nesting under it (need "gate.hooklat.p99" pulls probe
+// "gate.hooklat"; a sibling sharing a string prefix does not match). No due consumer
+// declaring it means the expensive gather is skipped this tick.
+func lazyPullProbeNeeded(due []lazyPullConsumer, probe string) bool {
+	for _, c := range due {
+		for _, n := range c.Needs {
+			if n == probe || strings.HasPrefix(n, probe+".") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// dispatchSlowProbes is the typed bundle of the expensive slow-cadence
+// observations the preflight folds consume. Every zero value is the corresponding
+// fold's fail-open abstain, so a probe that has never been gathered can only leave
+// the preflight untouched, never wrongly gate it.
+type dispatchSlowProbes struct {
+	Gate             dispatchtick.GateCheck
+	RateLimit        dispatchtick.RateLimitCheck
+	FreshSeatCeiling int
+}
+
+// dispatchLazyPullState is the process-lifetime dual-cadence state: which (root,
+// product) scope the cache belongs to, each consumer's last execution instant, and
+// the last pulled observations. A scope change drops everything -- another
+// workspace's or backend's observations must never be served.
+var dispatchLazyPullState = struct {
+	sync.Mutex
+	root    string
+	product string
+	lastRun map[string]time.Time
+	probes  dispatchSlowProbes
+}{}
+
+// dispatchGatherSlowProbes is the lazy pull itself: compute the due consumer set for
+// this base tick, gather ONLY the expensive probes a due consumer declares (serving
+// the last pulled observation for the rest), and mark the due consumers executed.
+// It returns the observation bundle plus the probe paths skipped this tick (empty
+// whenever the cadence is unarmed -- every consumer due -- so the caller's payload
+// stays byte-identical in the common case).
+func dispatchGatherSlowProbes(root, product string, at time.Time) (dispatchSlowProbes, []string) {
+	s := &dispatchLazyPullState
+	s.Lock()
+	defer s.Unlock()
+	if s.root != root || s.product != product {
+		s.root, s.product = root, product
+		s.lastRun = map[string]time.Time{}
+		s.probes = dispatchSlowProbes{}
+	}
+	if s.lastRun == nil {
+		s.lastRun = map[string]time.Time{}
+	}
+	due := dueLazyPullConsumers(dispatchLazyPullConsumers(), s.lastRun, at)
+	var skipped []string
+	pull := func(probe string, gather func()) {
+		if lazyPullProbeNeeded(due, probe) {
+			gather()
+			return
+		}
+		skipped = append(skipped, probe)
+	}
+	pull(dispatchProbePathHooklat, func() { s.probes.Gate = dispatchProbeHooklat(root) })
+	pull(dispatchProbePathRateExits, func() { s.probes.RateLimit = dispatchProbeRateLimit(root, product) })
+	pull(dispatchProbePathFreshSeat, func() { s.probes.FreshSeatCeiling = dispatchProbeFreshSeat(root, product) })
+	for _, c := range due {
+		s.lastRun[c.Name] = at
+	}
+	return s.probes, skipped
+}
+
 var dispatchKernelCache = struct {
 	sync.Mutex
 	at    time.Time
@@ -834,6 +1008,12 @@ var dispatchProbeProcesses = dispatchProbeProcessesNative
 var dispatchProbeCodexProcessRows = dispatchScanCodexProcessRowsNative
 var dispatchProbeWorkerProcessRows = dispatchScanWorkerProcessRowsNative
 var dispatchReadAccountRoster = dispatchReadAccountRosterNative
+
+// The expensive slow-cadence probe seams the #3371 due-filter gathers through, so a
+// test can witness a gather happening (or being skipped) without a live host.
+var dispatchProbeHooklat = dispatchPreflightGate
+var dispatchProbeRateLimit = dispatchPreflightRateLimit
+var dispatchProbeFreshSeat = dispatchLiveFreshSeatCeiling
 
 // dispatchReadAccountRosterNative builds the dispatch account roster and then drops
 // seats with an ACTIVE account cooldown from the servable pool. Both dispatch pickers
