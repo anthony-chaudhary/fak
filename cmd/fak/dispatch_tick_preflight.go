@@ -108,6 +108,16 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	// ChurnCheck (the fold abstains), so a box without the self-monitor is byte-identical to
 	// before. It only lowers the effective cap, never raises it.
 	res = dispatchtick.ApplyChurnBackpressure(res, dispatchPreflightChurn())
+	// The fresh_seat cap term (#3579): fold fleetaccounts' AUTHORITATIVE fresh-account
+	// ceiling (BuildCapacityPreflight's TrueConcurrentCeiling -- distinct session slots
+	// that can actually serve fresh) into the launch cap. The seat gate above counts
+	// session-LEASE slots; when most accounts are walled the lease pool can still show
+	// free slots, so admission would size a wave larger than the accounts that can
+	// serve and birth clustered REFUSE_NO_ACCOUNT non-starters (the "seats not slots"
+	// trap). min-of-limits via fleetcap.AvailableFrom: the term only LOWERS the
+	// effective cap; a healthy pool (ceiling >= cap) or an absent roster (ceiling 0,
+	// the fold abstains) leaves the preflight byte-identical to before.
+	res = dispatchApplyFreshSeatCeiling(res, dispatchLiveFreshSeatCeiling(root, product))
 	out := res.Map()
 	// #3109 self-heal: preflight is otherwise refuse-only on unattributed_live -- it
 	// counts orphaned worker PIDs (a botched teardown's `claude` descendant still
@@ -721,6 +731,73 @@ func dispatchPreflightSeat(root string, _ io.Writer, product string) dispatchtic
 		Leased:   dispatchtick.IntPtr(pool.LeasedSeats),
 		Depleted: pool.Depleted,
 	}
+}
+
+// dispatchFreshSeatLimiting is the cap_terms.limiting value recorded when the
+// fleetaccounts fresh-seat ceiling (#3579) is the binding launch-cap term, so a
+// downsized or refused wave names WHICH term held it (the acceptance's third leg).
+const dispatchFreshSeatLimiting = "fresh_seat"
+
+// dispatchLiveFreshSeatCeiling resolves the AUTHORITATIVE fresh-seat ceiling for
+// the product: fleetaccounts.BuildCapacityPreflight(...).TrueConcurrentCeiling, the
+// count of fresh distinct session slots a dispatcher may safely size a wave against.
+// Codex carries no fleetaccounts roster, so it abstains (0); a missing/empty roster
+// also yields 0, which the fold treats as "no signal" (fail-open), so a box without
+// the roster stays byte-identical to before this term existed.
+func dispatchLiveFreshSeatCeiling(root, product string) int {
+	if product == "codex" {
+		return 0
+	}
+	paths := fleetaccounts.ResolvePaths(filepath.Join(root, "tools"))
+	pol := fleetaccounts.LoadPolicy(paths)
+	reg := fleetaccounts.LoadRegistry(paths.RegistryPath)
+	return dispatchFreshSeatCeilingFromRoster(fleetaccounts.AnnotatedRoster(paths.Home, paths.ConfigHome, pol, reg), product)
+}
+
+// dispatchFreshSeatCeilingFromRoster is the pure roster->ceiling core (testable with a
+// fake seat pool): BuildCapacityPreflight folds annotated rows into fresh/stale/blocked
+// session slots and TrueConcurrentCeiling is the fresh count. Required is passed as 0
+// because the WAVE cap fold below does the sizing; only the ceiling is consumed here.
+func dispatchFreshSeatCeilingFromRoster(rows []fleetaccounts.Account, product string) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	return fleetaccounts.BuildCapacityPreflight(rows, product, 0).TrueConcurrentCeiling
+}
+
+// dispatchApplyFreshSeatCeiling folds the fresh-seat ceiling (#3579) into an
+// already-evaluated preflight as an additional lowering cap term, making the effective
+// launch cap min(host cap, session slots, fresh-seat ceiling) via fleetcap.AvailableFrom
+// (the MIN-of-positive-limits helper built for exactly this). Monotonic like every other
+// preflight term: it can only LOWER the cap, never raise it.
+//
+// Abstains (byte-identical result) when the preflight already refused for a
+// higher-precedence reason, when the ceiling carries no signal (<= 0: codex, an absent
+// roster), or when the ceiling is not binding (>= the existing cap -- a healthy pool).
+// A binding ceiling downsizes the wave and records itself as cap_terms.limiting; when it
+// leaves no headroom above the live count the verdict flips to REFUSE_NO_SEAT with a
+// reason naming the ceiling, so the fleet stops bursting into walled seats instead of
+// birthing clustered REFUSE_NO_ACCOUNT non-starters.
+func dispatchApplyFreshSeatCeiling(res dispatchtick.PreflightResult, ceiling int) dispatchtick.PreflightResult {
+	if !res.OK || ceiling <= 0 {
+		return res
+	}
+	hold := fleetcap.AvailableFrom(res.Cap, ceiling)
+	if hold >= res.Cap {
+		return res // healthy pool: the ceiling is not the binding term
+	}
+	res.Cap = hold
+	res.Headroom = hold - res.Live
+	res.CapTerms.EffectiveCap = hold
+	res.CapTerms.Limiting = dispatchFreshSeatLimiting
+	if res.Headroom > 0 {
+		return res // downsized wave, still SPAWN_OK; cap_terms records the binding term
+	}
+	res.OK = false
+	res.Verdict = dispatchtick.PreflightRefuseNoSeat
+	res.Reason = fmt.Sprintf("fresh-seat ceiling %d <= %d live worker(s): the lease pool may still show free session slots, but only %d fresh distinct seat(s) can actually serve -- refusing rather than launch onto walled seats (a seat frees when an account's wall resets)",
+		ceiling, res.Live, ceiling)
+	return res
 }
 
 var dispatchKernelCache = struct {
