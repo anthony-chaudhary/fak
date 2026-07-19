@@ -1873,10 +1873,21 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("")
     out.append("## Corpus")
     out.append("")
+    # The headline LEADS with the UNBOUNDED slop-debt integer (drive-to-0): it is the
+    # true driver, and — unlike the /100 score — it does not saturate, so every genuine
+    # fix moves it. The bounded score is demoted to a clearly-labeled secondary line
+    # ("legacy bounded score (saturates; not the driver)"). The --json payload keys
+    # (corpus.slop_debt / grade / score / breakdown) are unchanged; this is markdown-only.
+    out.append(f"**Slop-debt (total HARD defects): {c.get('slop_debt', 0)}** — the primary, "
+               "unbounded metric. Drive it to 0; every retired clone/dead symbol/vacuous "
+               "test moves it. (The /100 score below saturates at zero defects and is NOT "
+               "the driver.)")
+    out.append("")
     out.append("| Metric | Value |")
     out.append("|---|---|")
-    out.append(f"| Slop-score | {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) |")
     out.append(f"| **Slop-debt (total HARD defects)** | **{c.get('slop_debt', 0)}** |")
+    out.append(f"| Legacy bounded score (saturates; not the driver) | "
+               f"{c.get('score', 0)}/100 (grade {c.get('grade', '?')}) |")
     out.append(f"| Soft signals (advisory) | {c.get('soft_signals', 0)} |")
     out.append("")
     out.append("## Per-KPI (worst-first)")
