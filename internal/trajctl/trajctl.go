@@ -113,6 +113,7 @@ type Row struct {
 	Score      *ScoreRow      `json:"score,omitempty"`
 	Steer      *SteerDecision `json:"steer,omitempty"`
 	Annotation *Annotation    `json:"annotation,omitempty"`
+	Summary    *SummaryRow    `json:"summary,omitempty"`
 }
 
 // State is the folded ledger: latest objective record by id, plus score and
@@ -138,7 +139,11 @@ func ScoreRecord(s ScoreRow) Row {
 }
 
 // Append writes one validated row to path as JSONL, creating parent directories.
+// Every row is scrubbed of absolute paths and the local hostname first (see
+// ScrubRow): this is the single persistence choke point, so no ledger row can leak
+// machine layout regardless of the caller.
 func Append(path string, row Row) error {
+	row = ScrubRow(row)
 	if err := Validate(row); err != nil {
 		return err
 	}
@@ -189,6 +194,10 @@ func Fold(rows []Row) State {
 			st.Steers = append(st.Steers, *row.Steer)
 		case KindAnnotation:
 			st.Annotations = append(st.Annotations, *row.Annotation)
+		case KindSummary:
+			// A compacted objective's summary rebuilds its representative curve
+			// points so the curve fold still folds over compacted history.
+			st.Scores = append(st.Scores, summaryPoints(*row.Summary)...)
 		}
 	}
 	return st
@@ -223,17 +232,17 @@ func Validate(row Row) error {
 	}
 	switch row.Kind {
 	case KindObjective:
-		if row.Objective == nil || row.Score != nil || row.Steer != nil {
+		if row.Objective == nil || row.Score != nil || row.Steer != nil || row.Summary != nil {
 			return errors.New("trajctl: objective row must carry exactly one objective")
 		}
 		return validateObjective(*row.Objective)
 	case KindScore:
-		if row.Score == nil || row.Objective != nil || row.Steer != nil {
+		if row.Score == nil || row.Objective != nil || row.Steer != nil || row.Summary != nil {
 			return errors.New("trajctl: score row must carry exactly one score")
 		}
 		return validateScore(*row.Score)
 	case KindAnnotation:
-		if row.Annotation == nil || row.Objective != nil || row.Score != nil || row.Steer != nil {
+		if row.Annotation == nil || row.Objective != nil || row.Score != nil || row.Steer != nil || row.Summary != nil {
 			return errors.New("trajctl: annotation row must carry exactly one annotation")
 		}
 		if row.Annotation.ObjectiveID == "" || row.Annotation.Signal == "" {
@@ -241,10 +250,15 @@ func Validate(row Row) error {
 		}
 		return nil
 	case KindSteer:
-		if row.Steer == nil || row.Objective != nil || row.Score != nil {
+		if row.Steer == nil || row.Objective != nil || row.Score != nil || row.Summary != nil {
 			return errors.New("trajctl: steer row must carry exactly one steer decision")
 		}
 		return validateSteer(*row.Steer)
+	case KindSummary:
+		if row.Summary == nil || row.Objective != nil || row.Score != nil || row.Steer != nil || row.Annotation != nil {
+			return errors.New("trajctl: summary row must carry exactly one summary")
+		}
+		return validateSummary(*row.Summary)
 	default:
 		return fmt.Errorf("trajctl: unknown row kind %q", row.Kind)
 	}
