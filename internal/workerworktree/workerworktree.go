@@ -34,10 +34,13 @@ package workerworktree
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -71,8 +74,42 @@ const (
 	// so it can only ever REDUCE race exposure, never do worse. Set 0/false/off to force
 	// the shared-index baseline as an escape.
 	IsolatedLandEnv = "FAK_LAND_ISOLATED_INDEX"
-	keyHashLen      = 12
+	// IsolatedLandRetryEnv bounds how many compare-and-swap attempts landIsolated
+	// makes before giving up and falling back to the baseline shared path (#3570).
+	// A lost CAS (a peer landed in the gap) re-resolves HEAD, re-seeds the throwaway
+	// index from the new base, re-applies the captured diff and re-attempts the CAS
+	// instead of dropping straight into the racy shared-index fallback — the fallback
+	// #3547 exists to avoid, which under contention would fire on nearly every land.
+	// Unset/invalid/<1 → defaultIsolatedLandRetry attempts.
+	IsolatedLandRetryEnv = "FAK_LAND_ISOLATED_RETRY"
+	// defaultIsolatedLandRetry is the total CAS attempts (first try + retries) when
+	// IsolatedLandRetryEnv is unset. Small: each retry means a peer is actively
+	// landing, and the baseline fallback below still exists as the final resort.
+	defaultIsolatedLandRetry = 5
+	keyHashLen               = 12
 )
+
+// casRetrySleep sleeps a short jittered backoff before a lost-CAS retry so N
+// colliding landers spread out instead of re-contending the ref in lockstep.
+// Package var so unit tests stub it to a no-op (#3570).
+var casRetrySleep = func(attempt int) {
+	time.Sleep(time.Duration(rand.Intn(15*attempt)+1) * time.Millisecond)
+}
+
+// isolatedLandRetryCap reads IsolatedLandRetryEnv: the total bounded CAS attempts
+// for one landIsolated call. Unset, unparsable, or <1 falls back to the default —
+// fail-open to a sane bound, never to an unbounded loop.
+func isolatedLandRetryCap() int {
+	v := strings.TrimSpace(os.Getenv(IsolatedLandRetryEnv))
+	if v == "" {
+		return defaultIsolatedLandRetry
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return defaultIsolatedLandRetry
+	}
+	return n
+}
 
 // GitRunner runs one `git` subcommand under root and returns (rc, stdout). It
 // never raises: an exec failure is reported as a non-zero rc so every caller
@@ -533,12 +570,21 @@ func writePatch(diff string) (string, func(), error) {
 //     a stale base can never silently revert a peer's concurrent work — a lost CAS
 //     falls back instead.
 //
+// A LOST CAS is not a fallback trigger anymore (#3570): a peer landing in the gap
+// just moved the base, so the loop below re-resolves HEAD, re-seeds the throwaway
+// index from the new base, re-applies the same captured diff and re-attempts the
+// CAS — optimistic concurrency, bounded by IsolatedLandRetryEnv with a short
+// jittered backoff. Under contention the old behavior collapsed nearly every land
+// into the racy shared-index fallback precisely when isolation mattered most.
+//
 // Returns (result, handled). handled=false means "could not isolate safely — use the
-// baseline shared path": detached HEAD, unresolved identity, apply conflict, a lost
-// CAS, or any git error. Thus enabling this can only REDUCE the race window on the
-// happy path, never regress the baseline. On success the shared working tree is synced
-// for `paths` (git checkout <new> -- paths) so trunk builders see the landed change,
-// matching the baseline post-state; a sync hiccup is reported but does NOT unland.
+// baseline shared path": detached HEAD, unresolved identity, apply conflict (a
+// GENUINE same-path overlap, including a conflicting re-apply after a lost CAS),
+// exhausted CAS attempts, or any git error. Thus enabling this can only REDUCE the
+// race window on the happy path, never regress the baseline. On success the shared
+// working tree is synced for `paths` (git checkout <new> -- paths) so trunk builders
+// see the landed change, matching the baseline post-state; a sync hiccup is reported
+// but does NOT unland.
 func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner) (Result, bool) {
 	// The branch to move. Detached HEAD → no branch ref to CAS safely; fall back.
 	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
@@ -572,60 +618,86 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 	defer os.Remove(idx)
 	env := map[string]string{"GIT_INDEX_FILE": idx}
 
-	// Seed the throwaway index with trunk HEAD's tree.
-	if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
-		return Result{}, false
-	}
-	// Stage the worker diff into the throwaway index ONLY (--cached never touches the
-	// working tree). A conflict here means a concurrent change to the SAME paths — let
-	// the baseline path adjudicate it exactly as today rather than force it.
+	// The captured diff and the signed message are attempt-invariant: write them once
+	// so every CAS attempt stages byte-identical content under the same subject.
 	patch, cleanupPatch, err := writePatch(diff)
 	if err != nil {
 		return Result{}, false
 	}
 	defer cleanupPatch()
-	if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
-		return Result{}, false
-	}
-	rc, tree := runEnv(genv, root, env, []string{"write-tree"})
-	treeSHA := strings.TrimSpace(tree)
-	if rc != 0 || treeSHA == "" {
-		return Result{}, false
-	}
-	var disambiguation *DisambiguationWitnesses
-	if disambiguationRelevant(paths) {
-		var valid bool
-		disambiguation, valid = verifyAppliedDisambiguation(root, wtPath, treeSHA)
-		if !valid {
-			return Result{OK: false, Path: root, Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}, true
-		}
-	}
 	ctMsg, cleanupMsg, err := composeSignedMsg(msgFile, nm, em)
 	if err != nil {
 		return Result{}, false
 	}
 	defer cleanupMsg()
-	rc, commit := runEnv(genv, root, env, []string{"commit-tree", treeSHA, "-p", oldHEAD, "-F", ctMsg})
-	newCommit := strings.TrimSpace(commit)
-	if rc != 0 || newCommit == "" {
-		return Result{}, false
+
+	// Bounded optimistic-concurrency loop (#3570): each attempt seeds the throwaway
+	// index from the CURRENT base, builds the commit as a child of that exact base,
+	// and CASes the branch forward. Only a lost CAS loops; every other hiccup still
+	// falls back immediately, exactly as before.
+	attempts := isolatedLandRetryCap()
+	var disambiguation *DisambiguationWitnesses
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 {
+			// A peer is actively landing: back off briefly, then re-resolve the base
+			// the peer just moved so this attempt re-builds on the NEW HEAD.
+			casRetrySleep(attempt)
+			rc, head := run(git, root, []string{"rev-parse", "HEAD"})
+			oldHEAD = strings.TrimSpace(head)
+			if rc != 0 || oldHEAD == "" {
+				return Result{}, false
+			}
+		}
+		// Seed the throwaway index with the current trunk HEAD's tree.
+		if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
+			return Result{}, false
+		}
+		// Stage the worker diff into the throwaway index ONLY (--cached never touches
+		// the working tree). A conflict here — first try or re-apply after a lost CAS —
+		// means a concurrent change to the SAME paths; let the baseline path adjudicate
+		// it exactly as today rather than force it.
+		if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
+			return Result{}, false
+		}
+		rc, tree := runEnv(genv, root, env, []string{"write-tree"})
+		treeSHA := strings.TrimSpace(tree)
+		if rc != 0 || treeSHA == "" {
+			return Result{}, false
+		}
+		disambiguation = nil
+		if disambiguationRelevant(paths) {
+			var valid bool
+			disambiguation, valid = verifyAppliedDisambiguation(root, wtPath, treeSHA)
+			if !valid {
+				return Result{OK: false, Path: root, Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}, true
+			}
+		}
+		rc, commit := runEnv(genv, root, env, []string{"commit-tree", treeSHA, "-p", oldHEAD, "-F", ctMsg})
+		newCommit := strings.TrimSpace(commit)
+		if rc != 0 || newCommit == "" {
+			return Result{}, false
+		}
+		// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit
+		// in the gap fails this → retry on the peer's new HEAD (#3570); the throwaway
+		// commit built on the stale base is simply abandoned, unreferenced.
+		if rc, _ := run(git, root, []string{"update-ref", branch, newCommit, oldHEAD}); rc != 0 {
+			continue
+		}
+		// The ref moved but the shared working tree still holds OLD content for `paths`
+		// (we never touched it). Sync just those paths so trunk builders see the landed
+		// change, matching the baseline post-state. A sync failure does NOT unland.
+		detail := "cas-attempts=" + strconv.Itoa(attempt) + "/" + strconv.Itoa(attempts)
+		coArgs := append([]string{"checkout", newCommit, "--"}, paths...)
+		if rc, out := run(git, root, coArgs); rc != 0 {
+			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
+		}
+		return Result{OK: true, Applied: true, Committed: true,
+			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
+			Detail: detail, Disambiguation: disambiguation}, true
 	}
-	// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit in
-	// the gap fails this → fall back so the diff re-applies onto the peer's new HEAD.
-	if rc, _ := run(git, root, []string{"update-ref", branch, newCommit, oldHEAD}); rc != 0 {
-		return Result{}, false
-	}
-	// The ref moved but the shared working tree still holds OLD content for `paths` (we
-	// never touched it). Sync just those paths so trunk builders see the landed change,
-	// matching the baseline post-state. A sync failure does NOT unland the commit.
-	detail := ""
-	coArgs := append([]string{"checkout", newCommit, "--"}, paths...)
-	if rc, out := run(git, root, coArgs); rc != 0 {
-		detail = "landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
-	}
-	return Result{OK: true, Applied: true, Committed: true,
-		Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
-		Detail: detail, Disambiguation: disambiguation}, true
+	// Every bounded attempt lost its CAS — genuine sustained contention. Fall back to
+	// the baseline shared path as the final resort rather than loop unbounded.
+	return Result{}, false
 }
 
 // composeSignedMsg writes msgFile's content to a new temp file with a Signed-off-by

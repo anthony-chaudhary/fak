@@ -43,6 +43,23 @@ func (f *fakeGit) reply(verb string, rc int, out string) *fakeGit {
 	return f
 }
 
+// replyOnce enqueues a single-use reply for verb, consumed before byVerb; chained
+// calls sequence responses so a test can model state that CHANGES between calls —
+// e.g. HEAD moving after a lost CAS, then holding still for the retry (#3570).
+func (f *fakeGit) replyOnce(verb string, rc int, out string) *fakeGit {
+	if f.replies == nil {
+		f.replies = map[string][](struct {
+			rc  int
+			out string
+		}){}
+	}
+	f.replies[verb] = append(f.replies[verb], struct {
+		rc  int
+		out string
+	}{rc, out})
+	return f
+}
+
 func (f *fakeGit) run(root string, args []string) (int, string) {
 	f.calls = append(f.calls, append([]string{}, args...))
 	verb := ""
@@ -61,14 +78,21 @@ func (f *fakeGit) run(root string, args []string) (int, string) {
 }
 
 // runEnv is the GitEnvRunner face of the same fake: it records the overlay env and
-// the args, and replies from the same per-verb table so an isolated-land sequence
-// (read-tree/apply/write-tree/commit-tree) is stubbed exactly like a plain call.
+// the args, and replies from the same per-verb table (single-use queue first, like
+// run) so an isolated-land sequence (read-tree/apply/write-tree/commit-tree) is
+// stubbed exactly like a plain call — including a retry whose re-apply behaves
+// differently from the first apply (#3570).
 func (f *fakeGit) runEnv(root string, env map[string]string, args []string) (int, string) {
 	f.envCalls = append(f.envCalls, append([]string{}, args...))
 	f.lastEnv = env
 	verb := ""
 	if len(args) > 0 {
 		verb = args[0]
+	}
+	if queue := f.replies[verb]; len(queue) > 0 {
+		r := queue[0]
+		f.replies[verb] = queue[1:]
+		return r.rc, r.out
 	}
 	if r, ok := f.byVerb[verb]; ok {
 		return r.rc, r.out
@@ -552,6 +576,10 @@ func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
 	if len(co) != 1 || !contains(co[0], "x") || !contains(co[0], "--") {
 		t.Fatalf("want a path-scoped working-tree sync checkout: %v", g.calls)
 	}
+	// Detail records the CAS attempts used even on a first-try win (#3570).
+	if !strings.Contains(res.Detail, "cas-attempts=1") {
+		t.Fatalf("Detail must record attempts used, got %q", res.Detail)
+	}
 }
 
 func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing.T) {
@@ -604,15 +632,116 @@ func TestLandIsolatedApplyConflictFallsBackNotCommits(t *testing.T) {
 	}
 }
 
-func TestLandIsolatedLostCASFallsBackWithoutSyncingWorktree(t *testing.T) {
-	// A peer commit lands in the gap → update-ref old-value mismatch.
+// stubCASSleep silences the lost-CAS retry backoff for the duration of a test so
+// retry tests assert sequencing, not wall-clock jitter.
+func stubCASSleep(t *testing.T) {
+	t.Helper()
+	saved := casRetrySleep
+	casRetrySleep = func(int) {}
+	t.Cleanup(func() { casRetrySleep = saved })
+}
+
+func TestLandIsolatedLostCASRetriesReseedFromNewHEADAndLands(t *testing.T) {
+	stubCASSleep(t)
+	// A peer lands in the CAS gap: the first update-ref loses; HEAD then reads as
+	// the peer's new tip and holds still, so the SECOND attempt must re-seed from
+	// that new base and win — not fall back into the racy shared-index path (#3570).
+	g := isolatedHappyFake().
+		replyOnce("rev-parse", 0, "oldhead000\n").
+		replyOnce("rev-parse", 0, "newhead111\n").
+		replyOnce("update-ref", 1, "fatal: update_ref failed: ref moved").
+		replyOnce("update-ref", 0, "")
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	if !handled || !res.OK || !res.Committed || !res.Applied {
+		t.Fatalf("retry after a lost CAS must land, not fall back: handled=%v res=%+v", handled, res)
+	}
+	// The retry re-seeded the throwaway index from the peer's NEW head…
+	if len(g.envCallsWithPrefix("read-tree", "oldhead000")) != 1 || len(g.envCallsWithPrefix("read-tree", "newhead111")) != 1 {
+		t.Fatalf("retry must re-seed the index from the re-resolved HEAD: %v", g.envCalls)
+	}
+	// …re-staged the SAME captured diff into it…
+	if len(g.envCallsWithPrefix("apply", "--cached")) != 2 {
+		t.Fatalf("each attempt must re-apply the captured diff --cached: %v", g.envCalls)
+	}
+	// …and re-built the commit as a child of that new head.
+	ct := g.envCallsWithPrefix("commit-tree")
+	if len(ct) != 2 || !contains(ct[1], "newhead111") {
+		t.Fatalf("retry commit-tree must parent the new HEAD: %v", g.envCalls)
+	}
+	// The second CAS pinned the NEW head as old-value — still compare-and-swap, never force.
+	ur := g.callsWithPrefix("update-ref", "refs/heads/main")
+	if len(ur) != 2 || len(ur[1]) != 4 || ur[1][3] != "newhead111" {
+		t.Fatalf("retry must CAS against the re-resolved HEAD: %v", g.calls)
+	}
+	// Detail records attempts used so the land record shows the contention.
+	if !strings.Contains(res.Detail, "cas-attempts=2") {
+		t.Fatalf("Detail must record the attempts used, got %q", res.Detail)
+	}
+	// Exactly one working-tree sync, for the winning commit only.
+	if co := g.callsWithPrefix("checkout"); len(co) != 1 {
+		t.Fatalf("want exactly one post-win worktree sync: %v", g.calls)
+	}
+}
+
+func TestLandIsolatedRetryReapplyConflictFallsBack(t *testing.T) {
+	stubCASSleep(t)
+	// Attempt 1 stages clean but loses the CAS; the re-apply onto the peer's new
+	// HEAD conflicts on the same hunk — a genuine overlap, so the baseline path
+	// must adjudicate it (handled=false), exactly as a first-try conflict does.
+	g := isolatedHappyFake().
+		replyOnce("apply", 0, "").
+		replyOnce("apply", 1, "error: patch does not apply").
+		replyOnce("update-ref", 1, "fatal: update_ref failed: ref moved")
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	if handled {
+		t.Fatalf("a conflicting re-apply must fall back to the baseline, got %+v", res)
+	}
+	if len(g.envCallsWithPrefix("commit-tree")) != 1 || len(g.callsWithPrefix("update-ref")) != 1 {
+		t.Fatalf("the conflicted retry must not build/CAS a second commit: env=%v calls=%v", g.envCalls, g.calls)
+	}
+	if len(g.callsWithPrefix("checkout")) != 0 {
+		t.Fatalf("no land happened — the shared working tree must stay untouched: %v", g.calls)
+	}
+}
+
+func TestLandIsolatedLostCASRetryCapHonoredThenFallsBack(t *testing.T) {
+	stubCASSleep(t)
+	t.Setenv(IsolatedLandRetryEnv, "3")
+	// A CAS that NEVER wins (HEAD keeps moving under us): the loop must be bounded
+	// by the cap, then fall back — and never sync the shared working tree.
 	g := isolatedHappyFake().reply("update-ref", 1, "fatal: update_ref failed: ref moved")
 	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
 	if handled {
-		t.Fatalf("a lost CAS must fall back to baseline, got %+v", res)
+		t.Fatalf("exhausted CAS attempts must fall back to baseline, got %+v", res)
+	}
+	if n := len(g.callsWithPrefix("update-ref")); n != 3 {
+		t.Fatalf("retry cap of 3 must yield exactly 3 CAS attempts, got %d: %v", n, g.calls)
+	}
+	if n := len(g.envCallsWithPrefix("read-tree")); n != 3 {
+		t.Fatalf("each attempt must re-seed the throwaway index, want 3 seeds got %d: %v", n, g.envCalls)
 	}
 	if len(g.callsWithPrefix("checkout")) != 0 {
 		t.Fatalf("a lost CAS must not touch the shared working tree: %v", g.calls)
+	}
+}
+
+func TestIsolatedLandRetryCapDefaultsAndParses(t *testing.T) {
+	// t.Setenv registers restoration of any ambient value; then truly unset so the
+	// check reads the genuine absent-env default (same pattern as the #3619 pin).
+	t.Setenv(IsolatedLandRetryEnv, "")
+	os.Unsetenv(IsolatedLandRetryEnv)
+	if got := isolatedLandRetryCap(); got != 5 {
+		t.Fatalf("absent env must default to 5 attempts, got %d", got)
+	}
+	for _, bad := range []string{"banana", "0", "-2"} {
+		t.Setenv(IsolatedLandRetryEnv, bad)
+		if got := isolatedLandRetryCap(); got != 5 {
+			t.Fatalf("invalid %q must fall back to the default cap, got %d", bad, got)
+		}
+	}
+	t.Setenv(IsolatedLandRetryEnv, "1")
+	if got := isolatedLandRetryCap(); got != 1 {
+		t.Fatalf("cap 1 must mean a single attempt (retries off), got %d", got)
 	}
 }
 
