@@ -22,4 +22,15 @@
 // A witness that could not be obtained is marked absent (Witnessed.Present ==
 // false). Absence is an explicit signal the decision layer MUST escalate on, never
 // infer around: a green absence is not a green witness.
+//
+// The package also holds fence #3 (leaf #4479): the closed ACTION VOCABULARY on
+// the output side. SupervisorAction (action.go) is a sealed six-verb union —
+// spawn / replace / replan / widen / escalate / hold — where each verb carries
+// only the typed args its deterministic admission call needs and Lower executes
+// it through exactly that existing call (the dos_arbitrate lane admission, the
+// dispatch admit path, the fak.escalation.v1 packet emit, or nothing for hold).
+// Every executed action returns its witnessed artifact (a lease row / admit
+// receipt / packet head); anything outside the union is rejected before any
+// verb runs. No action reaches a raw shell or a private spawn path, so the
+// agent's authority is exactly a human operator's.
 package supervisoragent
