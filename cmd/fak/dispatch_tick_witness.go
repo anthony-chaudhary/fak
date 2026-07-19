@@ -86,22 +86,61 @@ func landAndReapWorkerWorktree(root, stem, base string) {
 // TestDispatchLandVerify can pin a red/green witness without a real toolchain.
 var dispatchLandVerify workerworktree.VerifyHook = worktreeWorkerGoBuildVerify
 
+// dispatchLandRefusedAttempts bounds the total Land attempts (first try + retries)
+// one sweep makes for one worktree when the land is refused by the readback race
+// (#3613). Small on purpose: each refusal means a peer commit swept our paths in
+// the gap, and layer 2 (the isolated-index land, with its own #3570 CAS retry)
+// already absorbs most contention before this outer bound is ever consulted.
+const dispatchLandRefusedAttempts = 3
+
+// Seams for the #3613 refused-land retry, injectable so the retry test pins the
+// land/reap sequencing hermetically: the land itself, the reap that destroys the
+// worktree, and the between-attempt backoff.
+var dispatchLandWorktreeOnce = func(root, wtPath, base string, tree []string) workerworktree.Result {
+	return landWorkerWorktreeVerified(root, wtPath, base, tree, nil)
+}
+var dispatchReapWorktree = func(root, wtPath string) workerworktree.Result {
+	return workerworktree.Reap(root, wtPath, nil)
+}
+var dispatchLandRetrySleep = func(attempt int) {
+	time.Sleep(time.Duration(250*attempt) * time.Millisecond)
+}
+
 // landAndReapWorkerWorktreeDefault is the production land+reap: apply the worktree's
 // diff-since-base onto the trunk as the worker's own stamped commit (scoped to its
 // declared lease tree), then force-remove the worktree. Both fail-open.
+//
+// #3613: a refused land is no longer unconditionally forgotten. A refusal carrying
+// the workerworktree.LandReadbackMismatchToken race class is TRANSIENT — a
+// concurrent commit on the shared index swept this worker's paths, and the
+// worktree still holds the ONLY copy of the diff — so the land is re-attempted
+// (bounded, backed off) on the moved HEAD before the reap destroys it.
+// Deterministic refusals (red verify, apply conflict) never retry: replaying them
+// cannot change the verdict. After the bound is exhausted the reap still runs —
+// the pre-#3613 fail-open final resort, so a pathological race can never leak
+// worktrees without bound — with every attempt surfaced as a countable line.
 func landAndReapWorkerWorktreeDefault(root, wtPath, base string, tree []string) {
 	// No commit-message file: Land derives the subject from the worktree tip so the
 	// landed commit keeps the worker's own #N-citing, (fak <leaf>)-stamped subject.
 	// verify=dispatchLandVerify (#3178): a red `go build ./...` in the worktree refuses
 	// the land (nothing applied/committed) so a broken edit never reaches main.
-	res := landWorkerWorktreeVerified(root, wtPath, base, tree, nil)
+	res := dispatchLandWorktreeOnce(root, wtPath, base, tree)
+	attempt := 1
+	for !res.OK && workerworktree.LandRefusalRetryable(res.Reason) && attempt < dispatchLandRefusedAttempts {
+		fmt.Fprintf(os.Stderr, "fak dispatch: worktree land refused for %s (attempt %d/%d): %s — retrying before reap (#3613)\n",
+			filepath.Base(wtPath), attempt, dispatchLandRefusedAttempts, res.Reason)
+		dispatchLandRetrySleep(attempt)
+		attempt++
+		res = dispatchLandWorktreeOnce(root, wtPath, base, tree)
+	}
 	if !res.OK && strings.TrimSpace(res.Reason) != "" {
 		// Surface WHY a worker produced no commit — a refused land is silent otherwise,
 		// leaving an operator to guess whether the worker crashed or was refused (#3178).
-		fmt.Fprintf(os.Stderr, "fak dispatch: worktree land refused for %s: %s\n",
-			filepath.Base(wtPath), res.Reason)
+		// The attempt count makes each race-refusal a countable witness line (#3613).
+		fmt.Fprintf(os.Stderr, "fak dispatch: worktree land refused for %s (%d/%d attempts): %s\n",
+			filepath.Base(wtPath), attempt, dispatchLandRefusedAttempts, res.Reason)
 	}
-	_ = workerworktree.Reap(root, wtPath, nil)
+	_ = dispatchReapWorktree(root, wtPath)
 }
 
 // landWorkerWorktreeVerified lands a worker's worktree diff-since-base onto the trunk

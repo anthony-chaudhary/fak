@@ -86,8 +86,25 @@ const (
 	// IsolatedLandRetryEnv is unset. Small: each retry means a peer is actively
 	// landing, and the baseline fallback below still exists as the final resort.
 	defaultIsolatedLandRetry = 5
-	keyHashLen               = 12
+	// LandReadbackMismatchToken is the structured refusal token landReadbackVerify
+	// stamps on Result.Reason when a path-scoped commit does not carry the worker's
+	// intended paths (the #3547 shared-index sweep). Exported so the dispatch land
+	// seam routes exactly this transient race class into a bounded re-land (#3613)
+	// instead of matching free text.
+	LandReadbackMismatchToken = "LAND_READBACK_MISMATCH"
+	keyHashLen                = 12
 )
+
+// LandRefusalRetryable reports whether a refused Land is worth re-attempting on
+// the same worktree (#3613). True only for the readback-mismatch race class: a
+// concurrent commit on the shared index swept the worker's paths, so the refusal
+// is TRANSIENT — the worktree still holds the only copy of the diff, and a
+// re-land on the moved HEAD re-applies it cleanly. Every other refusal (red
+// verify, apply conflict, disambiguation invariant, git fault) is deterministic
+// for the same inputs: replaying it cannot change the verdict.
+func LandRefusalRetryable(reason string) bool {
+	return strings.Contains(reason, LandReadbackMismatchToken)
+}
 
 // casRetrySleep sleeps a short jittered backoff before a lost-CAS retry so N
 // colliding landers spread out instead of re-contending the ref in lockstep.
@@ -789,7 +806,7 @@ func landReadbackVerify(root string, paths []string, git GitRunner) (bool, strin
 		}
 	}
 	if len(missing) > 0 {
-		return false, "LAND_READBACK_MISMATCH: trunk HEAD " + shortSHA(sha) +
+		return false, LandReadbackMismatchToken + ": trunk HEAD " + shortSHA(sha) +
 			" does not carry intended path(s) " + strings.Join(missing, ", ") +
 			" after commit — shared-index race, land not trusted (#3547)"
 	}
