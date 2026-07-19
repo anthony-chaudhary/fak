@@ -470,6 +470,7 @@ var tier = map[string]int{
 	"servicelease":          1, // #4752 (parent #4748): lease/generation/incarnation fencing layer over fak.service.v1 — the four durable facts (Generation, Incarnation, Lease, FencingToken) plus the pure LocalRestartAllowed/RemoteReassignAllowed rules that keep two owners from ever being simultaneously valid across a partition. Imports only servicespec(1), off the hot path.
 	"serviceledger":         1, // #4753 (parent #4748): portable append-only observed-state event ledger (fak.service.events.v1) folding Windows Event/SCM, journald, launchd, and fak supervisor receipts into one schema correlated by servicespec identity + boot/incarnation/lease facts; exactly-once by (source, source_uid), secrets/private-host redaction before persist. Imports only servicespec(1), off the hot path.
 	"sharedtask":            2, // in-memory reference fold for collaborative task records — patch, conflict, scope, event, and journal semantics adapters reuse instead of inventing per-adapter task-state contracts; rides the a2achan(2) mailbox for its live seam, hence mechanism. Off the hot path.
+	"loaddebounce":          1, // #3376 (parent #3365, scale-to-100 #1333): clean-room per-worker load publisher — a pure Coalescer state machine that publishes only on change (last==current dedup) and coalesces a rapid burst behind a reset-on-every-change debounce window so only the LATEST value emits. Clock is injected per call, so the debounce is exercised with zero goroutines/timers/wall-clock. Inspired by ai-dynamo worker_metrics.rs; stdlib-only (time), imports nothing internal, off the hot path. Intended landing: cmd/fak/dispatch_tick_preflight.go:45 (OSWorkerProcs); analog internal/gateway/serving_autoscaler.go:64.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -501,7 +502,7 @@ var pureRoot = map[string]bool{
 	"guardsessions": true, "guardvars": true, "guideddecode": true, "harnessprofile": true, "harnessres": true, "horizonrecovery": true, "hwgatelint": true,
 	"intlist": true, "issuesmallness": true, "jsonlledger": true, "knownbad": true, "knownenv": true,
 	"l3region": true, "leakcheck": true, "lifecycle": true, "linkstate": true, "livecodebench": true,
-	"loopindex": true, "looporphan": true, "looprecover": true, "loopunblock": true, "macbench": true, "maputil": true,
+	"loaddebounce": true, "loopindex": true, "looporphan": true, "looprecover": true, "loopunblock": true, "macbench": true, "maputil": true,
 	"mathx": true, "memorycotravel": true, "memoryread": true, "memorystability": true, "metalgemm": true, "modelscore": true,
 	"mutationbudget": true, "negframe": true, "newleaf": true, "newmodel": true, "nodecompare": true, "numfmt": true,
 	"orphanscan": true, "pathlint": true, "pathutil": true, "planaudit": true, "polymodel": true, "popularizationtickets": true,
