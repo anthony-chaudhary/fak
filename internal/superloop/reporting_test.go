@@ -81,19 +81,42 @@ func TestTendReportingMirrorsTheReportChannelFamily(t *testing.T) {
 		}
 	}
 
-	// Rooted: the root walk reaches it, so a dark feeder surfaces at `fak superloop walk tend`.
+	// Rooted THROUGH the fleet meta-walker (#4958): the reporting family is
+	// re-parented as ONE KindSuperloop child of tend-fleet — a loop family the
+	// generic meta-walk supervises through the identical SubwalkStatus fold — and
+	// tend descends tend-fleet, so a dark feeder still surfaces at
+	// `fak superloop walk tend` (now via the fleet meta-walk, counted once).
+	fleet, ok := Lookup("tend-fleet")
+	if !ok {
+		t.Fatal("tend-fleet not registered")
+	}
+	var fleetDescends bool
+	for _, m := range fleet.Members {
+		if m.Kind == KindSuperloop && m.Ref == "tend-reporting" {
+			fleetDescends = true
+		}
+	}
+	if !fleetDescends {
+		t.Error("tend-fleet must descend tend-reporting as its ONE reporting-family child (#4862 re-parent), else the feeder family escapes the fleet meta-walk")
+	}
 	tend, ok := Lookup("tend")
 	if !ok {
 		t.Fatal("tend not registered")
 	}
-	var descends bool
+	var rootDescends, direct bool
 	for _, m := range tend.Members {
+		if m.Kind == KindSuperloop && m.Ref == "tend-fleet" {
+			rootDescends = true
+		}
 		if m.Kind == KindSuperloop && m.Ref == "tend-reporting" {
-			descends = true
+			direct = true
 		}
 	}
-	if !descends {
-		t.Error("tend must descend tend-reporting, else an unwalked feeder family can go dark without the root walk noticing")
+	if !rootDescends {
+		t.Error("tend must descend tend-fleet, else the fleet meta-walk (and the reporting family beneath it) can go dark without the root walk noticing")
+	}
+	if direct {
+		t.Error("tend still descends tend-reporting DIRECTLY — the #4862 re-parent moved it beneath tend-fleet; a second parent under the same root would fold its liveness debt twice")
 	}
 }
 

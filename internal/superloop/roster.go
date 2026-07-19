@@ -234,14 +234,14 @@ func LoopFleetStatuses(src Member, folded []RosterLoop, gaps []RosterGap) []Memb
 		if selectOne && l.Kind != ref {
 			continue
 		}
-		debt := 0
-		if !l.Dark && l.State == "stale" {
-			debt = 1 // slipping past its cadence; a dark loop's urgency rides the Dark flag
-		}
+		// The liveness slice of the meta-walk's worst-first product (#4958): stale = 1
+		// unit, live = 0, and a dark loop's urgency rides the Dark flag (tier 0, never
+		// double-counted). The shell re-applies FleetDebt once the progress (#4956) and
+		// follow-on (#4957) verdicts are read, so this stays the single source of truth.
 		out = append(out, MemberStatus{
 			Member:   Member{Kind: KindLoopFleet, Ref: l.Kind, Why: src.Why},
 			Measured: true,
-			Debt:     debt,
+			Debt:     FleetDebt(l.State, l.Dark, "", ""),
 			Dark:     l.Dark,
 			Detail:   fmt.Sprintf("fleet loop %s — state %s", l.Kind, l.State),
 		})

@@ -42,6 +42,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/relay"
 )
 
 // WalkSchema is the versioned payload tag the `--json` walk emits.
@@ -160,6 +162,214 @@ func isIssueDrain(ref string) bool {
 	return strings.Contains(r, "dispatch") ||
 		strings.Contains(r, "drain") ||
 		strings.Contains(r, "issue-resolve")
+}
+
+// --- the per-member PROGRESS verdict: SPINNING vs advancing (issue #4956) ----
+//
+// The liveness verdict (loopmgr.DeriveState, folded by the shell into Dark/Debt)
+// answers "is it ticking?"; it can never answer "is it PRODUCING?". A member that
+// fires on cadence while its ledger-verified progress advances by nothing used to
+// read clean — the walk saw DARK (not ticking) but never SPINNING (ticking, zero
+// verified progress). The progress verdict sits ALONGSIDE the liveness verdict —
+// it deliberately does not overload Dark/Debt/Measured — and reuses the relay
+// G-track machinery wholesale rather than forking it: "advanced" is the EXACT
+// [relay.NoProgressEscape.Advances] rule (the verified step count rose past the
+// high-water mark), the progress itself arrives as a [relay.VerifiedProgress]
+// (read by the shell through relay.ReadVerifiedProgress — the intent ledger's own
+// rows, NEVER a self-reported keep), the benign park is the exact
+// [relay.IdleAwareEscape] rule, and the two closed reason tokens are relay's own
+// (RELAY_NO_PROGRESS / RELAY_IDLE_PARKED) so a supervisor can dos_check_reason
+// the verdict instead of parsing free text.
+
+// MemberProgress is the closed per-member progress verdict. The zero value ""
+// means the progress axis was not read at all (non-loop members, dark members):
+// surface-only, never weighed.
+type MemberProgress string
+
+const (
+	// ProgressAdvancing: the ledger-verified step count rose past the window's
+	// high-water mark — real, re-verifiable forward movement. Healthy.
+	ProgressAdvancing MemberProgress = "advancing"
+	// ProgressSpinning: the member is TICKING (live/stale) but its verified
+	// progress did not advance, and its work class is throughput (issue-drain) —
+	// live-but-producing-nothing, the state this verdict exists to surface. It
+	// carries relay.ReasonNoProgress (RELAY_NO_PROGRESS): an OPERATOR_GATE —
+	// escalate for a revive/redirect, never auto-replan.
+	ProgressSpinning MemberProgress = "spinning"
+	// ProgressIdleParked: a non-throughput (report/calibration/watch) member with
+	// no advance whose idleness is POSITIVELY proven — the watched invariant HOLDS
+	// against a durable witness AND the ledger confirms zero admitted pending work
+	// (the relay idle rule). Benign; carries relay.ReasonIdleParked
+	// (RELAY_IDLE_PARKED). Never an alarm, never debt.
+	ProgressIdleParked MemberProgress = "idle-parked"
+	// ProgressIdleUnproven: a non-throughput member with no advance that could NOT
+	// prove it is idle (unknown invariant, unread pending count, or pending work).
+	// Fail closed: it never reads as a benign park — but it is not slandered as
+	// SPINNING either, because a report/calibration cadence is legitimately idle;
+	// only a throughput member trips SPINNING (the classifyWork mix axis decides).
+	ProgressIdleUnproven MemberProgress = "idle-unproven"
+	// ProgressUnmeasured: the verified-progress read itself was unverifiable — no
+	// intent-ledger anchor, or an unreachable ledger. Treated as NO progress
+	// (never as clean/advancing) but SURFACE-ONLY: it adds no debt and never
+	// fabricates a measured zero, the same posture nightIssueProgress keeps when
+	// no ledger exists (the shell's night issue-progress read in cmd/fak).
+	ProgressUnmeasured MemberProgress = "unmeasured"
+)
+
+// ProgressRead is the evidence the shell hands [ClassifyProgress] for one TICKING
+// member — all of it read from durable state through the relay seams, none of it
+// narrated by the member itself.
+type ProgressRead struct {
+	// Baseline is the verified-progress read pinning the high-water mark the
+	// window starts from. The zero value (no verified read) fails closed to
+	// high-water 0 — exactly the relay.NoProgressEscape zero-value start, where a
+	// first verified step counts as progress.
+	Baseline relay.VerifiedProgress `json:"baseline"`
+	// Now is the verified-progress read at walk time; "advanced" is judged Now
+	// against the Baseline high-water with the exact Advances rule.
+	Now relay.VerifiedProgress `json:"now"`
+	// Idle is the durable idle evidence (invariant witness verdict + admitted
+	// pending count) consulted ONLY for a non-throughput member with no advance —
+	// the relay watch-goal idle rule. The zero value proves nothing, so it never
+	// parks a member benign.
+	Idle relay.IdleObservation `json:"idle"`
+}
+
+// ClassifyProgress folds one member's ledger-verified progress read into the
+// closed progress verdict plus its closed reason token ("" when no closed reason
+// binds). ticking is the LIVENESS input: SPINNING is specifically
+// ticking-with-no-verified-advance, so a non-ticking (dark) member returns the
+// zero verdict — its urgency is already carried by the liveness verdict, never
+// double-counted here. Decision order, each step reusing the relay rule it names:
+//
+//  1. advanced?     relay.NoProgressEscape.Advances against the Baseline
+//     high-water — ProgressAdvancing, healthy.
+//  2. unverifiable? a Now read that is not ProgressVerified is treated as NO
+//     progress but stays surface-only — ProgressUnmeasured, never a fabricated
+//     zero, never clean.
+//  3. throughput?   classifyWork decides who may trip SPINNING: only an
+//     issue-drain member earns RELAY_NO_PROGRESS on zero advance.
+//  4. idle?         everything else takes the relay.IdleAwareEscape park rule —
+//     RELAY_IDLE_PARKED only when the invariant HOLDS with zero admitted pending
+//     work; an unproven idle stays unproven (fail closed, no benign park).
+func ClassifyProgress(m Member, ticking bool, read ProgressRead) (MemberProgress, string) {
+	if !ticking {
+		return "", ""
+	}
+	esc := relay.IdleAwareEscape{}
+	esc.Escape.ObserveLeg(read.Baseline) // pin the window's verified high-water mark
+	if esc.Escape.Advances(read.Now) {
+		return ProgressAdvancing, ""
+	}
+	if read.Now.Verdict != relay.ProgressVerified {
+		return ProgressUnmeasured, ""
+	}
+	if classifyWork(m) == WorkThroughput {
+		return ProgressSpinning, relay.ReasonNoProgress
+	}
+	if out := esc.ObserveLeg(read.Now, read.Idle); out.Parked {
+		return ProgressIdleParked, out.Reason
+	}
+	return ProgressIdleUnproven, ""
+}
+
+// --- the per-member ORPHANED-FOLLOWON verdict (issue #4957) -----------------
+//
+// The progress verdict (#4956) answers "is this loop producing at its OWN grain?";
+// it can never answer "is anyone advancing what it produced?". A loop tick that
+// emits a downstream issue — a durable relay.ArtifactIssue baton pointer ("#1234"),
+// or the issue an a2achan.WorkerStatus names — reads as advancing even while that
+// emitted work sits untouched: progress at the loop grain, zero progress at the
+// fleet grain. The follow-on verdict sits ALONGSIDE the liveness and progress
+// verdicts (it deliberately does not overload Dark/Debt/Progress): the shell joins
+// the member's emitted refs against LIVE issue state — durable, re-verifiable
+// ground truth, never a self-narrated field — and this package folds the pure read
+// into a closed verdict, fail-closed exactly like ClassifyProgress: an unreadable
+// emission is NEVER fabricated into an orphan (the missing-ledger asymmetry
+// relay.ReadVerifiedProgress keeps). This leaf only WITNESSES orphaned emissions;
+// the chase/close action points at the member's own front door — it never re-files
+// or re-dispatches the emitted work (that is #4958's live-binding job).
+
+// MemberFollowon is the closed per-member follow-on verdict. The zero value ""
+// means the follow-on axis was not read at all (no emissions read — non-loop
+// members, loops that emitted nothing): surface-only, never weighed.
+type MemberFollowon string
+
+const (
+	// FollowonAdvancing: every resolved emission advanced or closed within the
+	// member's cadence window — the emitted work is being carried. Clean.
+	FollowonAdvancing MemberFollowon = "advancing"
+	// FollowonOrphaned: at least one emitted issue is OPEN with no advance within
+	// the cadence window — the member produced work nobody picks up. DEBT: it
+	// carries relay.ReasonOrphanedFollowon (RELAY_ORPHANED_FOLLOWON) and ranks in
+	// the debt band so the operator chases/closes the orphan.
+	FollowonOrphaned MemberFollowon = "orphaned"
+	// FollowonUnknown: an emission was unreadable/unresolvable (gh outage, a ref
+	// this host cannot join). FAIL CLOSED, surface-only: never orphaned — an
+	// orphan is never fabricated from an absence (the ProgressUnmeasured
+	// asymmetry) — but never clean either.
+	FollowonUnknown MemberFollowon = "unknown"
+)
+
+// FollowonEmission is one emitted downstream ref plus the LIVE issue state the
+// shell resolved it against — durable open/advance ground truth, never the
+// member's own narration.
+type FollowonEmission struct {
+	// Ref is the emitted downstream ref in relay artifact form ("#1234" — a
+	// relay.ArtifactIssue pointer, or the issue an a2achan.WorkerStatus names).
+	Ref string `json:"ref"`
+	// Resolved is true when the live issue state behind Ref was actually read.
+	// False fails the whole member's verdict closed to FollowonUnknown.
+	Resolved bool `json:"resolved"`
+	// Open is the live issue state (true = still open). Meaningful only when
+	// Resolved.
+	Open bool `json:"open,omitempty"`
+	// Advanced is true when the issue advanced (was updated or closed) within
+	// the member's cadence window, judged by the shell against the durable
+	// updated/closed timestamps. Meaningful only when Resolved.
+	Advanced bool `json:"advanced,omitempty"`
+}
+
+// FollowonRead is the evidence the shell hands [ClassifyFollowon] for one member —
+// the emitted refs joined against live issue state, all of it read from durable
+// state (baton artifacts + issue state), none of it narrated by the member itself.
+type FollowonRead struct {
+	// Emissions are the member's emitted follow-on refs with their resolved live
+	// state. Empty means the axis was not read at all (surface-only).
+	Emissions []FollowonEmission `json:"emissions,omitempty"`
+}
+
+// ClassifyFollowon folds one member's emitted-work read into the closed follow-on
+// verdict plus its closed reason token ("" when no closed reason binds). Decision
+// order, fail-closed like ClassifyProgress:
+//
+//  1. nothing read?  no emissions — the zero verdict: the axis was not read,
+//     surface-only, never weighed (a loop that emitted nothing owes nothing HERE).
+//  2. unresolvable?  ANY emission whose live state could not be read fails the
+//     whole verdict closed to FollowonUnknown — surface-only, NEVER orphaned: an
+//     orphan is never fabricated from an absence, the same asymmetry
+//     relay.ReadVerifiedProgress keeps for a missing ledger.
+//  3. all carried?   every resolved emission advanced or closed within the
+//     cadence window — FollowonAdvancing, clean.
+//  4. orphaned.      at least one emission is OPEN with no advance within the
+//     window — FollowonOrphaned + relay.ReasonOrphanedFollowon.
+func ClassifyFollowon(m Member, read FollowonRead) (MemberFollowon, string) {
+	if len(read.Emissions) == 0 {
+		return "", ""
+	}
+	orphaned := false
+	for _, e := range read.Emissions {
+		if !e.Resolved {
+			return FollowonUnknown, ""
+		}
+		if e.Open && !e.Advanced {
+			orphaned = true
+		}
+	}
+	if orphaned {
+		return FollowonOrphaned, relay.ReasonOrphanedFollowon
+	}
+	return FollowonAdvancing, ""
 }
 
 // Member is one constituent a super loop walks. Ref names the surface (scorecard
@@ -472,11 +682,13 @@ var registry = []Super{
 		},
 	},
 	{
-		// tend-reporting is the FEEDER-LIVENESS intent, and the sibling of tend-scoreboards
-		// (issue #4863). The two split the reporting family along the only line that matters
-		// operationally: tend-scoreboards asks "is the posted NUMBER healthy?" (scorecard
-		// debt); tend-reporting asks "is the FEEDER that posts it still alive?" (loop
-		// liveness). A feed can go dark for a week with every scorecard at floor, so the
+		// tend-reporting is the FEEDER-LIVENESS intent (issue #4863), the counterpart of
+		// tend-scoreboards. The two split the reporting family along the only line that
+		// matters operationally: tend-scoreboards asks "is the posted NUMBER healthy?"
+		// (scorecard debt); tend-reporting asks "is the FEEDER that posts it still alive?"
+		// (loop liveness). Since #4958 it is parented under tend-fleet — a loop FAMILY is
+		// exactly what the generic fleet meta-walker supervises — while tend-scoreboards
+		// stays a direct root member (numbers are not loops). A feed can go dark for a week with every scorecard at floor, so the
 		// number-walk cannot answer the liveness question — before this intent, nothing
 		// entered the worst-first feeder to bring it back up; `fak slack beat` (the surface
 		// pointer tend-scoreboards carries) only pulses DELIVERY, and is never weighed.
@@ -518,6 +730,33 @@ var registry = []Super{
 		},
 	},
 	{
+		// tend-fleet is the GENERIC operator meta-walker (issue #4958): ONE intent that
+		// walks the whole supervised loop fleet worst-first on the PRODUCT of the three
+		// per-loop dimensions — liveness (dark/stale), verified progress (SPINNING,
+		// #4956), and follow-on (ORPHANED, #4957) — so a loop that is up-but-not-working
+		// or emitting work nobody advances can no longer hide behind a live cadence.
+		//
+		// Its first member is the KindLoopFleet enumeration over the canonical roster
+		// (#4955): every ledgered loop becomes one status ranked by fleetwalk.go's
+		// product debt, and every unfoldable ledger surfaces as an UNMEASURED known gap
+		// that blocks Satisfied. Its second member is the reporting family (#4862)
+		// re-parented here as ONE KindSuperloop child — the feeder loops are exactly a
+		// loop family the meta-walker supervises, read through the identical
+		// SubwalkStatus fold every other descended intent gets (no special claim path,
+		// no new field). Driving the worst member goes through `fak superloop drive
+		// tend-fleet` / `fak superloop fleet run` — the SAME region-admission gate any
+		// spawn passes; the meta-walker holds no private spawn path.
+		Name:   "tend-fleet",
+		Title:  "meta-walk the loop fleet — worst-first on liveness × progress × follow-on",
+		About:  "enumerate every ledgered loop from the canonical roster and rank worst-first on the product of the three loop dimensions (dark/stale × spinning × orphaned), then enter the worst member through its own front door",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 20, TokenCeiling: 150000, MaxWorkers: 2},
+		Members: []Member{
+			{Kind: KindLoopFleet, Ref: "all", Why: "every ledgered loop the operator supervises (#4955), each counted once — a spinning or orphaned loop out-ranks a clean live leaf by the product, and a skipped ledger surfaces as a known gap"},
+			{Kind: KindSuperloop, Ref: "tend-reporting", Why: "the reporting-family feeders (#4862) as ONE child of the fleet meta-walk: a loop family supervised through the identical descend fold, so a dark feeder surfaces exactly like any other fleet loop"},
+		},
+	},
+	{
 		// tend is the ROOT intent — the recursion case made real: a super loop whose
 		// every member is itself a super loop. Walking it descends each registered
 		// intent (the shell walks sub-super-loops inline and folds each sub-report via
@@ -537,7 +776,7 @@ var registry = []Super{
 			{Kind: KindSuperloop, Ref: "improve-trajectory", Why: "trajectory health: are the steered objectives on-course, or drifting/stalling off their intended curve?"},
 			{Kind: KindSuperloop, Ref: "manage-benchmarks", Why: "benchmark collection feeds the outward-facing numbers"},
 			{Kind: KindSuperloop, Ref: "tend-scoreboards", Why: "the reporting family: are the scoreboard numbers fak posts to Slack (product, release, steerability, milestone) healthy, and are the feeds delivering?"},
-			{Kind: KindSuperloop, Ref: "tend-reporting", Why: "the other half of the reporting family: are the FEEDERS that post those numbers still alive, or has one gone dark unnoticed?"},
+			{Kind: KindSuperloop, Ref: "tend-fleet", Why: "the generic fleet meta-walker (#4958): every ledgered loop worst-first on liveness × progress × follow-on, with the reporting-family feeders (#4862) re-parented beneath it as one child"},
 			{Kind: KindSuperloop, Ref: "run-the-night", Why: "the overnight productivity meta-loop: are issues draining and is every account limit + node actually being used?"},
 		},
 	},
@@ -728,6 +967,27 @@ type MemberStatus struct {
 	Measured  bool   `json:"measured"`
 	Container bool   `json:"container"`
 	Detail    string `json:"detail"`
+	// Progress is the per-member PROGRESS verdict (issue #4956) sitting ALONGSIDE
+	// the liveness verdict: spinning / advancing / idle-parked / idle-unproven /
+	// unmeasured, from [ClassifyProgress]. "" means the progress axis was not read
+	// (non-loop members, dark members) — surface-only, never weighed.
+	Progress MemberProgress `json:"progress,omitempty"`
+	// ProgressReason is the closed reason token bound to Progress —
+	// relay.ReasonNoProgress on spinning, relay.ReasonIdleParked on a proven
+	// benign park, "" otherwise — so the verdict is checkable against
+	// dos_check_reason, never free text.
+	ProgressReason string `json:"progress_reason,omitempty"`
+	// FollowOn is the per-member FOLLOW-ON verdict (issue #4957) sitting alongside
+	// liveness and progress: orphaned / advancing / unknown, from [ClassifyFollowon]
+	// over the shell's emitted-refs-vs-live-issue-state read. "" means the
+	// follow-on axis was not read — surface-only, never weighed (see fleetwalk.go
+	// for how the meta-walk folds it into the worst-first product, #4958).
+	FollowOn MemberFollowon `json:"follow_on,omitempty"`
+	// FollowOnReason is the closed reason token bound to FollowOn —
+	// relay.ReasonOrphanedFollowon on orphaned, "" otherwise — so the verdict is
+	// checkable against dos_check_reason, never free text (the ProgressReason
+	// discipline, #4957).
+	FollowOnReason string `json:"follow_on_reason,omitempty"`
 }
 
 // WorkItem is one worst-first entry in the walk's plan: enter this member next, and
@@ -740,8 +1000,19 @@ type WorkItem struct {
 	Debt      int    `json:"debt"`
 	Dark      bool   `json:"dark"`
 	Container bool   `json:"container"`
-	Action    string `json:"action"`
-	Detail    string `json:"detail"`
+	// Progress / ProgressReason carry the member's progress verdict (#4956)
+	// through to the rendered worklist, so a SPINNING entry names its closed
+	// reason (RELAY_NO_PROGRESS) machine-readably alongside the revive action.
+	Progress       MemberProgress `json:"progress,omitempty"`
+	ProgressReason string         `json:"progress_reason,omitempty"`
+	// FollowOn / FollowOnReason carry the member's follow-on verdict (#4957) the
+	// same way, so an ORPHANED-FOLLOWON entry names its closed reason
+	// (RELAY_ORPHANED_FOLLOWON) machine-readably alongside its chase/redirect
+	// action.
+	FollowOn       MemberFollowon `json:"follow_on,omitempty"`
+	FollowOnReason string         `json:"follow_on_reason,omitempty"`
+	Action         string         `json:"action"`
+	Detail         string         `json:"detail"`
 	// Allocation is this member's divided share of the intent's declared budget —
 	// the top-of-cascade input the drive rung binds to the member's budget.* / cap
 	// env when it enters. It is a reservation, not an enforcement: no cap is applied
@@ -807,14 +1078,22 @@ type WalkReport struct {
 	// target AND progress was measured: the issues still owed against the headline. A
 	// positive shortfall keeps Satisfied false — the declared target is a gate, not a
 	// decoration. 0 when there is no target, no measurement, or the target is met.
-	IssueShortfall int            `json:"issue_shortfall,omitempty"`
-	Satisfied      bool           `json:"satisfied"`
-	Members        int            `json:"members"`
-	Walked         int            `json:"walked"`
-	Unmeasured     int            `json:"unmeasured"`
-	Dark           int            `json:"dark"`
-	Worklist       []WorkItem     `json:"worklist"`
-	Statuses       []MemberStatus `json:"statuses"`
+	IssueShortfall int  `json:"issue_shortfall,omitempty"`
+	Satisfied      bool `json:"satisfied"`
+	Members        int  `json:"members"`
+	Walked         int  `json:"walked"`
+	Unmeasured     int  `json:"unmeasured"`
+	Dark           int  `json:"dark"`
+	// Spinning counts measured members whose progress verdict is SPINNING —
+	// ticking on cadence with zero advanced verified progress (#4956). Like Dark
+	// it blocks Satisfied: a fleet that fires without producing is not tended.
+	Spinning int `json:"spinning,omitempty"`
+	// Orphaned counts measured members whose follow-on verdict is ORPHANED —
+	// emitting work nobody advances (#4957). Like Dark and Spinning it blocks
+	// Satisfied: a loop whose output piles up unowned is not tended.
+	Orphaned int            `json:"orphaned,omitempty"`
+	Worklist []WorkItem     `json:"worklist"`
+	Statuses []MemberStatus `json:"statuses"`
 	// Budget is the intent's declared generation-budget envelope folded into one row
 	// per contract dimension (Time/Tokens/Workers/Review), each carrying the declared
 	// cap and the per-worklist-member share. Always four rows: an unbudgeted dimension
@@ -911,8 +1190,9 @@ func WithIssueProgress(progressed int) WalkOpt {
 // (a gone-dark loop or an unreadable member is the most urgent thing to enter), then
 // by debt descending, ties broken by the member's declared order (stable). The
 // intent is SATISFIED only when total debt is at-or-below Floor AND every member was
-// measured AND none is dark AND any declared issue-target with measured progress is met
-// — an unread or dark member, or an unmet headline, can never read as clean. Live
+// measured AND none is dark AND none is SPINNING (#4956: ticking with zero advanced
+// verified progress) AND any declared issue-target with measured progress is met — an
+// unread, dark, or spinning member, or an unmet headline, can never read as clean. Live
 // measurements the pure package cannot read (e.g. issue progress) arrive via WalkOpts.
 func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 	var cfg walkConfig
@@ -952,6 +1232,12 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 		}
 		if st.Dark {
 			rep.Dark++
+		}
+		if st.Progress == ProgressSpinning {
+			rep.Spinning++
+		}
+		if st.FollowOn == FollowonOrphaned {
+			rep.Orphaned++
 		}
 	}
 
@@ -1016,12 +1302,16 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 			continue
 		}
 		rep.Worklist = append(rep.Worklist, WorkItem{
-			Member:    st.Member,
-			Debt:      st.Debt,
-			Dark:      st.Dark,
-			Container: st.Container,
-			Action:    actionFor(st),
-			Detail:    workDetail(st),
+			Member:         st.Member,
+			Debt:           st.Debt,
+			Dark:           st.Dark,
+			Container:      st.Container,
+			Progress:       st.Progress,
+			ProgressReason: st.ProgressReason,
+			FollowOn:       st.FollowOn,
+			FollowOnReason: st.FollowOnReason,
+			Action:         actionFor(st),
+			Detail:         workDetail(st),
 		})
 	}
 	// Re-rank the filtered worklist 1..N so the printed ranks are contiguous.
@@ -1052,7 +1342,7 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 		rep.IssueShortfall = s.IssueTarget - cfg.issueProgressed
 	}
 
-	rep.Satisfied = rep.Unmeasured == 0 && rep.Dark == 0 && rep.TotalDebt <= s.Floor && rep.IssueShortfall == 0
+	rep.Satisfied = rep.Unmeasured == 0 && rep.Dark == 0 && rep.Spinning == 0 && rep.Orphaned == 0 && rep.TotalDebt <= s.Floor && rep.IssueShortfall == 0
 	rep.Verdict, rep.Finding, rep.Reason, rep.NextAction = walkVerdict(s, rep)
 	return rep
 }
@@ -1136,17 +1426,22 @@ func SubwalkStatus(m Member, rep WalkReport) MemberStatus {
 // tier ranks a member status into a worst-first band (lower = enter sooner):
 //
 //	0  a dark / unmeasured LEAF — its status is bad or unknown; most urgent
-//	1  a measured leaf carrying debt
+//	1  a measured leaf carrying debt, SPINNING (#4956: ticking, zero advanced
+//	   verified progress), or ORPHANED (#4957: emitting work nobody advances) —
+//	   so a spinning or orphaned member out-ranks every clean live leaf even
+//	   before its shell-side debt term lands
 //	2  a container (garden / super loop) — descend to learn its status
 //	3  a measured, clean, live leaf — nothing to do
 //
 // workEligible reports whether a status belongs on the worklist — the exact inverse of
 // the clean-and-measured drop condition. A container (always surfaced for descent), an
-// unmeasured or dark member, or any debt-bearing leaf is work to enter; a measured,
-// clean, live leaf is not. Shared by the worklist filter and the mix pre-count so the
-// two can never disagree on what counts as "work to enter".
+// unmeasured or dark member, any debt-bearing leaf, a SPINNING member, or an ORPHANED
+// member (#4957: emitting work nobody advances) is work to enter; a measured, clean,
+// live leaf is not. Shared by the worklist filter and the mix pre-count so the two can
+// never disagree on what counts as "work to enter".
 func workEligible(st MemberStatus) bool {
-	return st.Container || !st.Measured || st.Dark || st.Debt > 0
+	return st.Container || !st.Measured || st.Dark || st.Debt > 0 ||
+		st.Progress == ProgressSpinning || st.FollowOn == FollowonOrphaned
 }
 
 func tier(st MemberStatus) int {
@@ -1156,10 +1451,36 @@ func tier(st MemberStatus) int {
 	if st.Dark || !st.Measured {
 		return 0
 	}
-	if st.Debt > 0 {
+	if st.Debt > 0 || st.Progress == ProgressSpinning || st.FollowOn == FollowonOrphaned {
 		return 1
 	}
 	return 3
+}
+
+// spinningAction is the revive/redirect entry for a SPINNING member. Unlike a dark
+// loop (restart it), a spinning one IS running — the action is to redirect it at
+// work that advances its verified ledger, or stop paying for its ticks.
+func spinningAction(st MemberStatus) string {
+	if e := strings.TrimSpace(st.Member.Enter); e != "" {
+		return fmt.Sprintf("revive/redirect via `%s` — %s is SPINNING (%s: ticking, zero advanced verified progress)",
+			e, st.Member.Ref, relay.ReasonNoProgress)
+	}
+	return fmt.Sprintf("revive/redirect the %s loop — SPINNING (%s: ticking, zero advanced verified progress)",
+		st.Member.Ref, relay.ReasonNoProgress)
+}
+
+// orphanedAction is the chase/redirect entry for an ORPHANED member (#4957). Unlike a
+// dark loop (restart it) or a spinning one (make it produce), an orphaned loop
+// produces fine — the action is to route its EMITTED work to an owner who advances
+// it, or stop emitting into the void. It names the closed relay token so the verdict
+// stays checkable against dos_check_reason, never free text.
+func orphanedAction(st MemberStatus) string {
+	if e := strings.TrimSpace(st.Member.Enter); e != "" {
+		return fmt.Sprintf("chase/redirect via `%s` — %s is ORPHANED (%s: emits follow-on work nobody advances; route its output to an owner)",
+			e, st.Member.Ref, relay.ReasonOrphanedFollowon)
+	}
+	return fmt.Sprintf("chase/redirect the %s loop — ORPHANED (%s: emits follow-on work nobody advances; route its output to an owner)",
+		st.Member.Ref, relay.ReasonOrphanedFollowon)
 }
 
 func actionFor(st MemberStatus) string {
@@ -1173,6 +1494,12 @@ func actionFor(st MemberStatus) string {
 		}
 		return fmt.Sprintf("enter the %s scorecard's reduce loop (its skill) to retire debt", st.Member.Ref)
 	case KindLoop:
+		if st.Progress == ProgressSpinning {
+			return spinningAction(st)
+		}
+		if st.FollowOn == FollowonOrphaned {
+			return orphanedAction(st)
+		}
 		if e := strings.TrimSpace(st.Member.Enter); e != "" {
 			if st.Dark {
 				return fmt.Sprintf("revive via `%s` — %s has gone dark", e, st.Member.Ref)
@@ -1200,6 +1527,12 @@ func actionFor(st MemberStatus) string {
 	case KindLoopFleet:
 		if !st.Measured {
 			return fmt.Sprintf("read `fak superloop roster` — %q has no foldable ledger here (known gap)", st.Member.Ref)
+		}
+		if st.Progress == ProgressSpinning {
+			return spinningAction(st)
+		}
+		if st.FollowOn == FollowonOrphaned {
+			return orphanedAction(st)
 		}
 		if e := strings.TrimSpace(st.Member.Enter); e != "" {
 			if st.Dark {
@@ -1237,6 +1570,14 @@ func workDetail(st MemberStatus) string {
 	if st.Dark {
 		return "DARK — " + firstNonEmpty(st.Detail, "loop has gone quiet past its cadence")
 	}
+	if st.Progress == ProgressSpinning {
+		return "SPINNING — " + firstNonEmpty(st.Detail,
+			"ticking on cadence with zero advanced verified progress ("+relay.ReasonNoProgress+")")
+	}
+	if st.FollowOn == FollowonOrphaned {
+		return "ORPHANED-FOLLOWON — " + firstNonEmpty(st.Detail,
+			"emitted follow-on work open with no advance past its cadence window ("+relay.ReasonOrphanedFollowon+")")
+	}
 	return firstNonEmpty(st.Detail, st.Member.Why)
 }
 
@@ -1250,6 +1591,18 @@ func walkVerdict(s Super, rep WalkReport) (verdict, finding, reason, next string
 	if rep.Dark > 0 {
 		return "ACTION", "superloop_dark",
 			fmt.Sprintf("walking %q: %d member loop(s) have gone DARK; revive them before chasing debt (debt %d)", s.Name, rep.Dark, rep.TotalDebt),
+			"worst-first: " + worklistHead(rep)
+	}
+	if rep.Spinning > 0 {
+		return "ACTION", "superloop_spinning",
+			fmt.Sprintf("walking %q: %d member loop(s) are SPINNING (%s) — ticking on cadence with zero advanced verified progress; revive or redirect them before chasing debt (debt %d)",
+				s.Name, rep.Spinning, relay.ReasonNoProgress, rep.TotalDebt),
+			"worst-first: " + worklistHead(rep)
+	}
+	if rep.Orphaned > 0 {
+		return "ACTION", "superloop_orphaned",
+			fmt.Sprintf("walking %q: %d member loop(s) are ORPHANED (%s) — emitting follow-on work nobody advances; chase or redirect their output before chasing debt (debt %d)",
+				s.Name, rep.Orphaned, relay.ReasonOrphanedFollowon, rep.TotalDebt),
 			"worst-first: " + worklistHead(rep)
 	}
 	if rep.TotalDebt > s.Floor {
