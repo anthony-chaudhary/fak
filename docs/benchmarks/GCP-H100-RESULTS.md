@@ -28,7 +28,7 @@ description: "The first end-to-end run of fak's own CUDA engine on a live GCP H1
 | Model | Qwen2.5-3B-Instruct, `qwen2.5-3b-instruct-q8_0.gguf` |
 | Harness | `tools/gcp_bench.py --tier a3-high-h100-1g --engine all --spot` |
 | Lifecycle | provision -> ship source -> build (llama.cpp CUDA + fak CUDA) -> bench -> collect -> teardown (always; instance deleted, no leak) |
-| Artifacts | `experiments/benchmark/runs/by-machine/gcp-a3-high-h100-1g/` |
+| Artifacts | `experiments/benchmark/catalog.json` (durable index — survives absent run dirs). The raw run dir `experiments/benchmark/runs/by-machine/gcp-a3-high-h100-1g/` is private-by-default (gitignored: fleet infra tells); regenerate it via the Harness row above. |
 
 ## Head-to-head (single-stream, pp512 / tg128)
 

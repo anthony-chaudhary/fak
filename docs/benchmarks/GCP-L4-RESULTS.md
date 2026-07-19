@@ -23,7 +23,7 @@ backend `selected: "cuda"`, tier `sm_89`, and nonzero prefill/decode tok/s.
 | Machine | GCP `g2-standard-32`, 1x L4, 32 vCPU, 128 GB RAM, `us-central1-b` |
 | Model | Qwen2.5-3B-Instruct, `qwen2.5-3b-instruct-q8_0.gguf` |
 | Harness | `python tools/gcp_bench.py --tier g2-l4-32 --zone us-central1-b --engine all --max-run-hours 2` |
-| Artifacts | `experiments/benchmark/runs/by-machine/gcp-g2-l4-32/20260629T132955Z-gcp/` |
+| Artifacts | `experiments/benchmark/catalog.json` (durable index — survives absent run dirs). The raw run dir `experiments/benchmark/runs/by-machine/gcp-g2-l4-32/20260629T132955Z-gcp/` is private-by-default (gitignored: fleet infra tells); regenerate it via the Harness row above. |
 
 ## Head-to-head (single-stream, pp512 / tg128)
 
