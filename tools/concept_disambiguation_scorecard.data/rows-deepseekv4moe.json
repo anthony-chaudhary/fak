@@ -1,0 +1,60 @@
+{
+  "rows": [
+    {
+      "id": "simulateexpertcachebatch",
+      "canonical": "SimulateExpertCacheBatch",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Deterministic weight-free simulator replaying B agents advancing one decode step together; streams each distinct (layer,expert) group once per step and reports coalesced page-ins (DistinctStreamed) vs B un-coalesced streams (NaiveStreamed) and CoalesceRatio.",
+      "distinction": "Cross-AGENT sibling of SimulateExpertCache: measures the coalescing win when several agents' top-K selections overlap within one shared decode step, where SimulateExpertCache replays a single agent's sequential per-token route against the same LRU.",
+      "distinct_from": [
+        "cov5304-simulate-expert-cache"
+      ],
+      "aliases": [],
+      "grounding": "SimulateExpertCacheBatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "expertcachebatchadmission",
+      "canonical": "ExpertCacheBatchAdmission",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Result struct pairing a byte-bounded ExpertCachePlan with a BatchCoalesceTrace: the admitted routed-group capacity plus the cross-agent coalescing evidence measured under exactly that capacity.",
+      "distinction": "The batch admission RESULT (plan + coalesce trace over B agents) rather than the single-agent per-token hit/miss trace: it stays weight-free and additionally carries the plan that bounds the step working set.",
+      "distinct_from": [
+        "cov5304-expert-cache-trace"
+      ],
+      "aliases": [],
+      "grounding": "ExpertCacheBatchAdmission",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "admitexpertcachebatchtrace",
+      "canonical": "AdmitExpertCacheBatchTrace",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Computes a byte-bounded routed-group capacity via PlanExpertCache then simulates the supplied B-agent batch steps under that exact capacity, failing closed when one step's distinct union exceeds the plan.",
+      "distinction": "Adds the B-agent batch-simulate + step-union bound on top of the bare capacity planner PlanExpertCache: it both plans and admits a coalesced batch trace, where PlanExpertCache only sizes the resident set.",
+      "distinct_from": [
+        "cov5304-plan-expert-cache"
+      ],
+      "aliases": [],
+      "grounding": "AdmitExpertCacheBatchTrace",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
