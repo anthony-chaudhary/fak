@@ -64,6 +64,18 @@ func TestPlace(t *testing.T) {
 			wantWhy:   ReasonNoneEligible,
 		},
 		{
+			// Witness 3c: BOTH hosts at capacity (primary and the spill target) ->
+			// the placement declines to spill anywhere and stays local.
+			name: "both_hosts_full_declines",
+			hosts: []Heartbeat{
+				hostASaturated,
+				{Hostname: "host-b", LiveHeadroom: 0, Saturation: 0.97, TS: now},
+			},
+			threshold: 0.90,
+			wantLocal: true,
+			wantWhy:   ReasonNoneEligible,
+		},
+		{
 			// Witness 3b: no hosts configured (single-host default) -> stay local.
 			name:      "no_hosts_stays_local",
 			hosts:     nil,
