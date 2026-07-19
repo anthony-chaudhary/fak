@@ -157,6 +157,16 @@ type Record struct {
 	// RevokedAtUnix is the unix-seconds instant the revoke row was appended (0 when not
 	// revoked) — the companion to RevokedBy.
 	RevokedAtUnix int64 `json:"revoked_at_unix,omitempty"`
+	// OccurrenceCount is how many crash events this row COALESCES (#3586): one root
+	// cause that killed N workers is one row carrying N, not N rows. It is stamped by
+	// CoalesceCrashes/WithOccurrences and climbs while the signature's window stays
+	// live. Zero on a hand-recorded row; omitempty keeps a pre-#3586 row byte-identical.
+	OccurrenceCount int64 `json:"occurrence_count,omitempty"`
+	// LastSeenAtUnix is the newest observation instant folded into OccurrenceCount —
+	// the companion that makes a coalesced row readable as a span ("first seen at
+	// DiscoveredAtUnix, still crashing at LastSeenAtUnix") rather than a bare count. It
+	// only ever moves forward. Zero on a non-coalesced row.
+	LastSeenAtUnix int64 `json:"last_seen_at_unix,omitempty"`
 	// RevokeReason is the free-text justification the operator stamps when revoking:
 	// "signature was spurious", "tree was wrong", "fix landed without a green".
 	// Unlike Witness (a closed vocabulary of evidence kinds) this is human prose — a
