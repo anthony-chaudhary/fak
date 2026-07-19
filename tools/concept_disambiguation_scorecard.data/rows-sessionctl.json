@@ -1,0 +1,117 @@
+{
+  "rows": [
+    {
+      "id": "gatedaction",
+      "canonical": "GatedAction",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "GatedAction is the sessionctl payload of one call the adjudication gate refused with an ESCALATE disposition, parked on the out-of-band operator inbox (#2757): the tool name, the raw proposed args, the closed refusal reason, and the gate's preview — what an external operator reads to approve or deny the action.",
+      "distinction": "The parked PAYLOAD an operator judges, not a gate itself: unlike toolprocgate (which gates background tool process transitions) GatedAction carries an already-refused reversibility/ESCALATE call awaiting an external verdict; the call was never dispatched.",
+      "distinct_from": [
+        "x-issue1420-guard-gate-toolprocgate"
+      ],
+      "aliases": [],
+      "grounding": "GatedAction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "parkgatedaction",
+      "canonical": "ParkGatedAction",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "ParkGatedAction is the sessionctl blocking park op of the out-of-band operator inbox (#2757): it publishes one GatedAction as an addressable pending action and blocks the calling loop until an operator verdict arrives, the park window elapses, or the context is cancelled, witnessing every outcome on the trace's park Next records at the consume point.",
+      "distinction": "The loop-side WAIT half of the inbox: unlike ResolveGatedAction (the operator-side verdict op that wakes it) ParkGatedAction is called by the parked arm itself, and unlike GatedAction (the payload) it is the rendezvous; timeout and abort are explicit closed-reason outcomes, never silent drops.",
+      "distinct_from": [
+        "gatedaction"
+      ],
+      "aliases": [],
+      "grounding": "ParkGatedAction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "resolvegatedaction",
+      "canonical": "ResolveGatedAction",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "ResolveGatedAction is the typed operator approve/deny op of the out-of-band inbox (#2757): it resolves the pending action addressed by id with a ParkVerdict (approve, optionally carrying modified args, or deny), waking the parked loop exactly once; malformed verdicts and unknown/already-resolved ids refuse with the closed PARK_MALFORMED / PARK_UNKNOWN_ACTION reasons.",
+      "distinction": "The operator-side WAKE half of the inbox: unlike ParkGatedAction (the loop's blocking wait) it is sent out of band and never blocks; unlike the reversibility gate's _fak_confirm echo (agent self-confirm) it is an EXTERNAL verdict addressed to one specific parked action.",
+      "distinct_from": [
+        "parkgatedaction"
+      ],
+      "aliases": [],
+      "grounding": "ResolveGatedAction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "pendinggatedactions",
+      "canonical": "PendingGatedActions",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "PendingGatedActions is the read op of the out-of-band operator inbox (#2757): it returns the addressable queue of parked gated actions for a session trace in park order, as a snapshot copy — the list an operator (CLI 'fak session pending', the spine-bound route) consults before resolving one action by id.",
+      "distinction": "A read-only LIST of parked GatedAction payloads: unlike ResolveGatedAction it decides nothing, and unlike ConstraintPendingLen (the add-constraint mailbox depth) it enumerates gate-refused calls awaiting an external verdict, keyed for addressable resolution.",
+      "distinct_from": [
+        "resolvegatedaction"
+      ],
+      "aliases": [],
+      "grounding": "PendingGatedActions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "enablegateparking",
+      "canonical": "EnableGateParking",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "EnableGateParking opens the out-of-band operator inbox for one session trace (#2757) and sets its park window (a non-positive timeout selects DefaultParkTimeout): from then on the loop parks ESCALATE-gated denies for that session instead of returning them straight to the model. Parking is opt-in per session so a run with no operator listening keeps the historical gate behavior byte-for-byte.",
+      "distinction": "The opt-in SWITCH of the inbox: unlike ParkGatedAction it parks nothing itself, and unlike GateParkingEnabled (the loop-side predicate that reads it) it is the operator-side write that opens the inbox and bounds each park.",
+      "distinct_from": [
+        "pendinggatedactions"
+      ],
+      "aliases": [],
+      "grounding": "EnableGateParking",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateparkingenabled",
+      "canonical": "GateParkingEnabled",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "GateParkingEnabled is the loop-side predicate of the out-of-band operator inbox (#2757): it reports whether EnableGateParking opened the inbox for a session trace — the check the agent dispatch seam makes before parking an ESCALATE-gated deny, so an unopened inbox falls straight through to the historical deny path.",
+      "distinction": "The read PREDICATE paired with EnableGateParking's write: it never opens, parks, or resolves anything; a false answer is the byte-for-byte historical loop, not a refusal.",
+      "distinct_from": [
+        "enablegateparking"
+      ],
+      "aliases": [],
+      "grounding": "GateParkingEnabled",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

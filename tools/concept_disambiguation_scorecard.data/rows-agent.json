@@ -37,5 +37,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "looppark",
+      "canonical": "loop_park.go (agent park seam)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "loop_park.go is the agent package's loop-side consumer of the out-of-band operator approve/deny inbox (#2757): parkEscalatedDeny intercepts an ESCALATE-gated deny at the dispatch site when the session's inbox is open, parks it on the sessionctl pending-action queue, and honors the external verdict — approve re-proposes the call through the normal syscall boundary (byte-identical plus the gate's confirm echo, or operator-modified args freshly adjudicated), deny/timeout abort with a typed receipt carrying the closed PARK_* reason.",
+      "distinction": "Not loop_constraint.go (which folds operator constraints into the live FLOOR before dispatch): loop_park.go resolves a call the gate ALREADY refused with an ESCALATE disposition, parking it for an EXTERNAL operator verdict instead of returning the deny straight to the model; and not the trajctl metaloop, which walks intents, not turns.",
+      "distinct_from": [
+        "loopconstraint"
+      ],
+      "aliases": [],
+      "grounding": "loop_park",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

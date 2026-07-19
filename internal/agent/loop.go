@@ -126,6 +126,12 @@ type traceEvent struct {
 	By          string // which rung decided ("" on the baseline arm)
 	Disposition string // RETRYABLE/WAIT/ESCALATE/TERMINAL on a deny
 	Note        string
+	// ConfirmToken is the reversibility gate's deterministic confirm token when
+	// this event is an ESCALATE-gated deny ("" otherwise) — loop-internal plumbing
+	// for the out-of-band operator inbox (#2757): an approved park re-proposes the
+	// call byte-identical + the confirm echo. Deliberately NOT copied into
+	// CallTrace, so the artifact rows never carry the token.
+	ConfirmToken string
 }
 
 // CallTrace is one tool call's adjudicated outcome, recorded per arm so a run is
@@ -205,6 +211,7 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine 
 	case v.Kind == abi.VerdictDeny:
 		ev.Reason = r.Meta["reason"]
 		ev.Disposition = r.Meta["disposition"]
+		ev.ConfirmToken = v.Meta["confirm_token"]
 		ev.Note = "DENIED (deny-as-value): " + r.Meta["reason"] + "/" + r.Meta["disposition"]
 		// Owned-loop transcript: hand the model a REAL typed tool_result error on the
 		// originating call ID carrying {reason, disposition, fix} from the closed
@@ -632,6 +639,14 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 					ev.Note = "ROUTE REFUSED (fail-loud): " + rerr.Error()
 				} else {
 					content, ev = execViaKernel(ctx, k, tool, rawArgs, engine, ev)
+					// Out-of-band operator inbox (#2757): an ESCALATE-gated deny
+					// parks on the sessionctl pending-action queue for an external
+					// approve/deny when the session's inbox is open; the returned
+					// content/ev already honor the verdict (approved re-dispatch,
+					// or the typed abort receipt). A no-op without a wired trace,
+					// an open inbox, or an ESCALATE deny, so the historical loop
+					// is byte-for-byte unchanged.
+					content, ev = cfg.parkEscalatedDeny(ctx, k, tool, rawArgs, engine, content, ev)
 				}
 			default:
 				content, ev = execNaive(tool, rawArgs, &m, ev)
