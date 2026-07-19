@@ -1,0 +1,42 @@
+{
+  "rows": [
+    {
+      "id": "superlooporphaned",
+      "canonical": "superloop_orphaned (walk ORPHANED finding)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "superloop_orphaned is the superloop walk-verdict finding token emitted when at least one member loop is ORPHANED: a tick emitted downstream follow-on work — a relay ArtifactIssue baton pointer or the issue an a2achan.WorkerStatus names — that nobody advanced or closed within its cadence window (#4957). It binds the closed relay reason RELAY_ORPHANED_FOLLOWON and demands chasing or redirecting the emitted output through the member's own front door, never an auto-refile.",
+      "distinction": "Not superloop_dark (the member stopped ticking — the liveness axis) and not superloop_spinning (the member ticks but its OWN ledger-verified progress high-water did not advance — the loop-grain progress axis): superloop_orphaned is the FLEET-grain follow-on axis — the loop DID advance at its own grain (it emitted work) but that emitted work is stalled downstream. Fail-closed like superloop_spinning: an unreadable or unresolvable emission (FollowonUnknown) never earns the token, so an orphan is never fabricated from an absence.",
+      "distinct_from": [
+        "superloopspinning",
+        "loop-kindloopfleet"
+      ],
+      "aliases": [],
+      "grounding": "superloop_orphaned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fleetdebt",
+      "canonical": "FleetDebt (fleet-product ranking key)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "FleetDebt is the superloop fleet-walk ranking key (#4958): the liveness x progress x follow-on PRODUCT minus one, so a clean live member folds to debt 0 and the ordinary worst-first sort (tier, then debt descending) ranks the fleet with no rival walker. A product, not a sum, because the axes compound — a stale loop that is also spinning pays cadence cost for zero verified output on two grains at once, and outranks either fault alone.",
+      "distinction": "Not a single-axis finding token: superloop_dark, superloop_spinning, and superloop_orphaned each name WHICH axis is in debt, whereas FleetDebt is the SCALAR fold that compounds all three into one comparable magnitude the worst-first sort orders on. Distinct from superloop_debt (the aggregate measured member debt over a floor): FleetDebt is the per-member product-of-axes, and an unread axis multiplies by 1 so it never fabricates debt.",
+      "distinct_from": [
+        "superloopspinning",
+        "superlooporphaned"
+      ],
+      "aliases": [],
+      "grounding": "FleetDebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

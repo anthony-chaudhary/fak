@@ -1,0 +1,383 @@
+{
+  "rows": [
+    {
+      "id": "sharedtask-reasonartifactwitness",
+      "canonical": "ReasonArtifactWitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Go constant naming the shared-task patch-result reason ARTIFACT_WITNESS_MISSING: a disaggregated artifact ref was removed without a digest-shaped deletion witness, so the fold quarantines the patch.",
+      "distinction": "The Go identifier for the wire token ARTIFACT_WITNESS_MISSING; names one missing-witness verdict reason on the shared-task co-editing surface rather than a general witness status.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "ReasonArtifactWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-artifactwitnessmissing",
+      "canonical": "ARTIFACT_WITNESS_MISSING",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Wire reason token on a shared-task patch result: an artifact-ref deletion lacked the digest-shaped deletion witness the contract requires, so the write is held as quarantined.",
+      "distinction": "The serialized wire value carried in patch-result JSON; ReasonArtifactWitness is the Go constant that names it.",
+      "distinct_from": [
+        "sharedtask-reasonartifactwitness"
+      ],
+      "aliases": [],
+      "grounding": "ARTIFACT_WITNESS_MISSING",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-reasonbodywitness",
+      "canonical": "ReasonBodyWitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Go constant naming the shared-task patch-result reason BODY_WITNESS_MISSING: a disaggregated note-body or task-body ref changed without a digest-shaped deletion witness.",
+      "distinction": "Body-ref sibling of ReasonArtifactWitness: the same deletion-witness rule applied to note and task body refs instead of artifact refs.",
+      "distinct_from": [
+        "sharedtask-reasonartifactwitness"
+      ],
+      "aliases": [],
+      "grounding": "ReasonBodyWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-bodywitnessmissing",
+      "canonical": "BODY_WITNESS_MISSING",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Wire reason token on a shared-task patch result: a body-ref deletion lacked its digest-shaped deletion witness, so the fold holds the patch as quarantined.",
+      "distinction": "Body-ref counterpart of ARTIFACT_WITNESS_MISSING; ReasonBodyWitness is the Go constant naming it.",
+      "distinct_from": [
+        "sharedtask-artifactwitnessmissing"
+      ],
+      "aliases": [],
+      "grounding": "BODY_WITNESS_MISSING",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-reasonmissingdecision",
+      "canonical": "ReasonMissingDecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Go constant naming the shared-task patch-result reason MISSING_DECISION: a replace of /open_decisions/\u003cid\u003e/state addressed a decision ID not present on the record.",
+      "distinction": "Names one typed-conflict reason on the shared-task record surface, not a decision log or routing verdict.",
+      "distinct_from": [
+        "x2-decision-decisionjournal"
+      ],
+      "aliases": [],
+      "grounding": "ReasonMissingDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-missingdecision",
+      "canonical": "MISSING_DECISION",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Wire reason token in shared-task patch-result JSON: the targeted open-decision ID does not exist on the current record, so the resolution write returns a typed conflict.",
+      "distinction": "The serialized wire value; ReasonMissingDecision is the Go constant that names it.",
+      "distinct_from": [
+        "sharedtask-reasonmissingdecision"
+      ],
+      "aliases": [],
+      "grounding": "MISSING_DECISION",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-decisionid",
+      "canonical": "DecisionID",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Stable identifier field of one open decision row on a shared task record; append id-newness and state resolution are both keyed by it.",
+      "distinction": "A record field naming one decision instance on the co-editing surface, not a journal entry or a routing decision.",
+      "distinct_from": [
+        "x2-decision-decisionjournal"
+      ],
+      "aliases": [],
+      "grounding": "DecisionID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-opendecisions",
+      "canonical": "OpenDecisions",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Append-only list field /open_decisions on the shared task record holding unresolved Decision rows; stale appends still merge by decision-ID newness.",
+      "distinction": "The collection field on the record; DecisionID keys one row inside it.",
+      "distinct_from": [
+        "sharedtask-decisionid"
+      ],
+      "aliases": [],
+      "grounding": "OpenDecisions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-approvaldecisionid",
+      "canonical": "ApprovalDecisionID",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Store policy field naming the open-decision ID whose approved state unlocks patches the policy holds as APPROVAL_REQUIRED.",
+      "distinction": "A policy binding to a decision ID, not a field of the decision row itself.",
+      "distinct_from": [
+        "sharedtask-decisionid"
+      ],
+      "aliases": [],
+      "grounding": "ApprovalDecisionID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-replacedecisionstate",
+      "canonical": "replaceDecisionState",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Fold helper applying replace /open_decisions/\u003cdecision_id\u003e/state: resolves a decision in place and returns a typed conflict for a missing ID.",
+      "distinction": "The apply-op helper for decision resolution, distinct from the DecisionID field it dereferences.",
+      "distinct_from": [
+        "sharedtask-decisionid"
+      ],
+      "aliases": [],
+      "grounding": "replaceDecisionState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-duplicatedecision",
+      "canonical": "DUPLICATE_DECISION",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Wire conflict reason in shared-task patch results: an append proposed an open decision whose DecisionID already exists on the record (id-newness rule).",
+      "distinction": "Fires on append of an already-present ID; MISSING_DECISION fires on resolution of an absent ID.",
+      "distinct_from": [
+        "sharedtask-missingdecision"
+      ],
+      "aliases": [],
+      "grounding": "DUPLICATE_DECISION",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-decisionstatepath",
+      "canonical": "decisionStatePath",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Fold helper parsing an op path of the form /open_decisions/\u003cdecision_id\u003e/state into its decision ID.",
+      "distinction": "The path parser used by replaceDecisionState, not the state-writing operation itself.",
+      "distinct_from": [
+        "sharedtask-replacedecisionstate"
+      ],
+      "aliases": [],
+      "grounding": "decisionStatePath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-reasonunsupportedpatch",
+      "canonical": "ReasonUnsupportedPatch",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Go constant naming the shared-task patch-result reason UNSUPPORTED_PATCH: the op and path combination falls outside the contract's closed patch grammar.",
+      "distinction": "A per-patch denial reason on the co-editing write-gate, not a feature-maturity score.",
+      "distinct_from": [
+        "x2-support-maturity-supportmaturity"
+      ],
+      "aliases": [],
+      "grounding": "ReasonUnsupportedPatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-unsupportedpatch",
+      "canonical": "UNSUPPORTED_PATCH",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Wire reason token in shared-task patch-result JSON: the fold denied a patch whose op or path is outside the supported contract grammar.",
+      "distinction": "The serialized wire value; ReasonUnsupportedPatch is the Go constant naming it.",
+      "distinct_from": [
+        "sharedtask-reasonunsupportedpatch"
+      ],
+      "aliases": [],
+      "grounding": "UNSUPPORTED_PATCH",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-resultforunsupported",
+      "canonical": "resultForUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Fold helper building the denied patch result carrying UNSUPPORTED_PATCH at the record's current revision.",
+      "distinction": "The constructor for the unsupported verdict, not the reason token it carries.",
+      "distinct_from": [
+        "sharedtask-reasonunsupportedpatch"
+      ],
+      "aliases": [],
+      "grounding": "resultForUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-denialpolicy",
+      "canonical": "DenialPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Store policy field selecting how the shared-task fold reports a policy-refused patch: deny outright or hold as quarantined.",
+      "distinction": "Shapes write-side verdicts on the co-editing gate, not an outbound capability or fetch policy.",
+      "distinct_from": [
+        "x2-policy-capability-fetchpolicy"
+      ],
+      "aliases": [],
+      "grounding": "DenialPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-viewpolicy",
+      "canonical": "ViewPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Reader-scope redaction policy for shared-task views: MaxScope plus IncludeQuarantined decide what View and EventsView reveal to a caller.",
+      "distinction": "Read-side redaction policy; DenialPolicy shapes write-side verdicts on the same surface.",
+      "distinct_from": [
+        "sharedtask-denialpolicy"
+      ],
+      "aliases": [],
+      "grounding": "ViewPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-normalizeviewpolicy",
+      "canonical": "normalizeViewPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Fold helper defaulting an empty ViewPolicy scope before redaction so an unset reader scope never widens visibility.",
+      "distinction": "The normalization helper, not the ViewPolicy type it clamps.",
+      "distinct_from": [
+        "sharedtask-viewpolicy"
+      ],
+      "aliases": [],
+      "grounding": "normalizeViewPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-disaggregatedstore",
+      "canonical": "disaggregatedStore",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Fold predicate reporting whether an artifact ref points at a disaggregated store, which makes a digest-shaped deletion witness mandatory on removal.",
+      "distinction": "A shared-task witness-rule predicate, not a commit or process guard; it matches this family only through the substring in disaggregated.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-acceptancegate"
+      ],
+      "aliases": [],
+      "grounding": "disaggregatedStore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sharedtask-disaggregatedbodyref",
+      "canonical": "disaggregatedBodyRef",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Fold predicate reporting whether a note or task body ref is disaggregated and therefore requires a digest-shaped deletion witness on removal.",
+      "distinction": "Body-ref sibling of disaggregatedStore under the same witness rule.",
+      "distinct_from": [
+        "sharedtask-disaggregatedstore"
+      ],
+      "aliases": [],
+      "grounding": "disaggregatedBodyRef",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

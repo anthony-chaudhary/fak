@@ -1337,21 +1337,30 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
     out.append("")
     out.append("## Headline")
     out.append("")
-    out.append("| Metric | Value |")
-    out.append("|---|---|")
-    out.append(f"| **Score** | **{c.get('score', 0)}/100** (grade {c.get('grade', '?')}) "
-               f"= {round(c.get('score', 0) / 10.0, 1)}/10 |")
-    out.append(f"| **Coverage** | **{cov.get('coverage_pct', 0)}%** "
-               f"({cov.get('covered', 0)}/{cov.get('discovered', 0)} confusable tree tokens positioned) |")
-    out.append(f"| **Disambiguation-debt** | **{c.get('disambiguation_debt', 0)}** "
-               f"(clarity {c.get('clarity_defects', 0)} + coverage {c.get('coverage_debt', 0)}) |")
-    out.append(f"| Crystal-clear concepts | {c.get('crystal_concepts', 0)} of {c.get('rows', 0)} positioned |")
-    out.append(f"| As of | {c.get('as_of', '?')} (fak {c.get('fak_version', '?')}) |")
+    out.append("The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positive "
+               "counters that climb without a ceiling. The old bounded /100 score SATURATES near the "
+               "top - it hides the real, still-open work - so it is demoted to a labeled legacy line "
+               "below and is NOT the metric to optimize.")
     out.append("")
-    out.append("> **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE "
-               "confusable namespace discovered in the tree, not the few concepts already catalogued. A "
-               "low coverage number is the honest statement that most similar-sounding names are not yet "
-               "disambiguated - which is exactly the debt this scorecard exists to retire.")
+    out.append("| Metric (primary = unbounded driver) | Value |")
+    out.append("|---|---|")
+    out.append(f"| **Disambiguation-debt (drive to 0)** | **{c.get('disambiguation_debt', 0)}** "
+               f"(clarity {c.get('clarity_defects', 0)} + coverage {c.get('coverage_debt', 0)}) |")
+    out.append(f"| **Crystal-clear concepts (and climbing)** | **{c.get('crystal_concepts', 0)}** "
+               f"crystal of {c.get('rows', 0)} positioned |")
+    out.append(f"| **Confusable tokens positioned (covered / discovered)** | "
+               f"**{cov.get('covered', 0)} / {cov.get('discovered', 0)}** "
+               f"({cov.get('coverage_pct', 0)}% of the discovered confusable space) |")
+    out.append(f"| As of | {c.get('as_of', '?')} (fak {c.get('fak_version', '?')}) |")
+    out.append(f"| Legacy bounded score (saturates; not the driver) | {c.get('score', 0)}/100 "
+               f"(grade {c.get('grade', '?')}) |")
+    out.append("")
+    out.append("> **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt "
+               "(drive it toward 0) and the counters that climb without a ceiling (crystal concepts, "
+               "confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued "
+               "namespace is clean it sits near 100 and can no longer tell you how much confusable "
+               "space is still un-disambiguated - so it is kept only as a labeled legacy line, not the "
+               "driver.")
     out.append("")
     out.append("## Standing at a glance")
     out.append("")

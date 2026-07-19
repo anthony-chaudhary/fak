@@ -113,5 +113,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "fakgatewaykvprefixprompttokensbysourcetotal",
+      "canonical": "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The gateway's per-turn split of in-kernel prompt tokens by PROVENANCE source (local_compute / local_cache_hit / external_kv_transfer), orthogonal to the reuse-depth family; the three sum to the by-source prompt tokens. external_kv_transfer isolates the disaggregation dividend — tokens a remote / L3 KV tier served that a single box would otherwise have re-prefilled.",
+      "distinction": "Splits the SAME prompt tokens by WHERE reuse came from (source axis); distinct from x2-gateway-engine-fakgatewaykvprefix, the reuse-DEPTH family that measures HOW MUCH was reused.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewaykvprefix"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

@@ -1,0 +1,384 @@
+{
+  "rows": [
+    {
+      "id": "cov5307-policy-knob-registry",
+      "canonical": "PolicyKnobRegistry (amendable-knob registry)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/policy/amendment.go PolicyKnobRegistry: the registry of policy KNOBS an amendment may legally touch - iterated when validating a proposed policy amendment.",
+      "distinction": "The set of AMENDABLE knobs (what an amendment may change) - NOT capability-floor (the fixed base floor) and NOT PolicyReloadFunc (the reload callback).",
+      "distinct_from": [
+        "cov5307-policy-reload-func",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "PolicyKnobRegistry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-policy-reload-func",
+      "canonical": "PolicyReloadFunc (guard policy reload callback)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/gateway (cmd/fak/guard_allow_watcher.go): PolicyReloadFunc is the callback the allow-overlay watcher invokes to hot-reload the guard policy when an overlay file changes on disk.",
+      "distinction": "The RELOAD callback fired on overlay change - NOT PolicyKnobRegistry (the amendable-knob set) and NOT the overlay files themselves; it re-applies policy, it does not define it.",
+      "distinct_from": [
+        "cov5307-policy-knob-registry",
+        "policy-manifest"
+      ],
+      "aliases": [],
+      "grounding": "PolicyReloadFunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-source-policy",
+      "canonical": "SourcePolicy (resume source-governor policy)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/resume (cmd/fak/resume.go): SourcePolicy is the source-governor policy the resume path evaluates - the rules deciding whether a stalled source/account may be resumed given its ledger.",
+      "distinction": "The RESUME source-governor policy - NOT ViewPolicy (a shared-task scope policy) and NOT the guard capability floor; it governs source resumption, not tool admission or view scope.",
+      "distinct_from": [
+        "cov5307-view-policy",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "SourcePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-view-policy",
+      "canonical": "ViewPolicy (shared-task view-scope policy)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/sharedtask (cmd/fak/sharedtask_endpoint.go): ViewPolicy caps what a shared-task viewer may see - a MaxScope on the shared-task endpoint's returned data.",
+      "distinction": "A shared-task VIEW-SCOPE cap - NOT SourcePolicy (a resume governor) and NOT PolicyKnobRegistry; it limits visibility, not resumption or amendment.",
+      "distinct_from": [
+        "cov5307-source-policy",
+        "cov5307-policy-knob-registry"
+      ],
+      "aliases": [],
+      "grounding": "ViewPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-env-adapter-capability",
+      "canonical": "EnvAdapterCapability (benchmark env-adapter capability)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/frontierswe/env_adapter.go EnvAdapterCapability: describes what a benchmark environment adapter can do (the capabilities it exposes to the harness), so a run only attempts supported operations.",
+      "distinction": "A benchmark ADAPTER's capability descriptor - NOT the guard capability-floor (tool-admission capabilities) and NOT HarnessPosture (a compaction posture); it is a SWE-bench env feature set.",
+      "distinct_from": [
+        "cov5307-harness-posture",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "EnvAdapterCapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-harness-posture",
+      "canonical": "HarnessPosture (harness compaction-coherence posture)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_precompact.go: HarnessPosture (compactcohere.Posture) is the harness's compaction-coherence posture from a snapshot - how aggressively the harness may compact while staying coherent.",
+      "distinction": "A compaction-COHERENCE posture of the harness - NOT EnvAdapterCapability (a benchmark env feature set) and NOT a policy knob; it tunes compaction behavior, not admission.",
+      "distinct_from": [
+        "cov5307-env-adapter-capability",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "HarnessPosture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-build-model-preflight",
+      "canonical": "BuildModelPreflight (model preflight builder)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/ggufload BuildModelPreflight: builds the model PREFLIGHT report (can this GGUF load and fit) consumed by modelbench before a run.",
+      "distinction": "Builds the MODEL-load preflight - NOT dispatchPreflightSeat (a dispatch worker seat check) and NOT a policy knob; it validates a model load, not a fleet seat.",
+      "distinct_from": [
+        "cov5307-dispatch-preflight-seat",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "BuildModelPreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-dispatch-preflight-seat",
+      "canonical": "dispatchPreflightSeat (dispatch worker seat check)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cmd/fak/dispatch_tick_preflight.go dispatchPreflightSeat: returns the SeatCheck for a product's dispatch preflight - whether a worker seat is available/healthy before launching.",
+      "distinction": "A dispatch SEAT availability check - NOT BuildModelPreflight (a model-load preflight) and NOT the preflight worker-cap gate; it checks one product's seat.",
+      "distinct_from": [
+        "cov5307-build-model-preflight",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "dispatchPreflightSeat",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-fak-ctx-yield-ceiling",
+      "canonical": "FAK_CTX_YIELD_CEILING (resident-token yield ceiling)",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "internal/compactcohere/compactcohere.go: env ceiling on the resident-token yield terms in the compaction-coherence score; a non-positive value disables every resident-token term.",
+      "distinction": "A CEILING on resident-token yield scoring - NOT observeCompaction (which records a compaction outcome) and NOT injectionReachedContext; it tunes the compaction-coherence math.",
+      "distinct_from": [
+        "cov5307-observe-compaction",
+        "cov5307-injection-reached-context"
+      ],
+      "aliases": [],
+      "grounding": "FAK_CTX_YIELD_CEILING",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-injection-reached-context",
+      "canonical": "injectionReachedContext (injection-in-context flag)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "internal/agentdojo/agentdojo.go injectionReachedContext: whether a prompt-injection payload actually reached the model context (i.e. was NOT quarantined) on an agentdojo trial.",
+      "distinction": "A security-eval FLAG (did the injection reach context?) - NOT FAK_CTX_YIELD_CEILING (a compaction knob) and NOT observeCompaction; it measures quarantine escape, not compaction.",
+      "distinct_from": [
+        "cov5307-fak-ctx-yield-ceiling",
+        "cov5307-observe-compaction"
+      ],
+      "aliases": [],
+      "grounding": "injectionReachedContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-observe-compaction",
+      "canonical": "observeCompaction (compaction-outcome metric)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "internal/gateway/metrics_observe.go observeCompaction: records a compaction OUTCOME (a CompactOutcome, and whether compaction was off) into the gateway metrics.",
+      "distinction": "A METRICS recorder for compaction outcomes - NOT FAK_CTX_YIELD_CEILING (a scoring ceiling) and NOT injectionReachedContext (a security flag); it emits telemetry.",
+      "distinct_from": [
+        "cov5307-fak-ctx-yield-ceiling",
+        "cov5307-injection-reached-context"
+      ],
+      "aliases": [],
+      "grounding": "observeCompaction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-fak-goal-loop",
+      "canonical": "FAK_GOAL_LOOP (primary goal-loop id env)",
+      "family": "loop",
+      "kind": "config",
+      "definition": "cmd/fak/commit_review.go: env carrying the goal-loop id, read FIRST (before FAK_LOOP_ID) to stamp which autonomous goal loop produced a commit review.",
+      "distinction": "The PRIMARY loop-id source (preferred over FAK_LOOP_ID) - NOT FAK_LOOP_REGISTRY (the registry path) and NOT SuccessLoops (a record of succeeded loops).",
+      "distinct_from": [
+        "cov5307-fak-loop-id",
+        "cov5307-fak-loop-registry"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GOAL_LOOP",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-fak-loop-id",
+      "canonical": "FAK_LOOP_ID (fallback loop id env)",
+      "family": "loop",
+      "kind": "config",
+      "definition": "cmd/fak/commit_review.go: env carrying the loop id, used as the FALLBACK when FAK_GOAL_LOOP is unset, to attribute a commit review to its loop.",
+      "distinction": "The FALLBACK loop-id source (after FAK_GOAL_LOOP) - NOT FAK_GOAL_LOOP (the primary) and NOT FAK_LOOP_REGISTRY (the registry location).",
+      "distinct_from": [
+        "cov5307-fak-goal-loop",
+        "cov5307-fak-loop-registry"
+      ],
+      "aliases": [],
+      "grounding": "FAK_LOOP_ID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-fak-loop-registry",
+      "canonical": "FAK_LOOP_REGISTRY (loop-registry path env)",
+      "family": "loop",
+      "kind": "config",
+      "definition": "cmd/fak/loop.go: env overriding the path to the loop REGISTRY (the on-disk record of known loops), when set.",
+      "distinction": "The loop-REGISTRY file location - NOT FAK_GOAL_LOOP / FAK_LOOP_ID (a single loop's id) and NOT gardenTickLoopID (one specific loop's constant id).",
+      "distinct_from": [
+        "cov5307-fak-goal-loop",
+        "cov5307-garden-tick-loop-id"
+      ],
+      "aliases": [],
+      "grounding": "FAK_LOOP_REGISTRY",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-garden-tick-loop-id",
+      "canonical": "gardenTickLoopID (garden stale-work tick loop id)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "cmd/fak/garden.go gardenTickLoopID = 'garden-stale-work-tick': the fixed loop-id constant identifying the garden stale-work tick loop in the registry.",
+      "distinction": "ONE loop's fixed id constant - NOT FAK_LOOP_REGISTRY (the registry of all loops) and NOT SuccessLoops (loops that succeeded); it names the garden tick loop.",
+      "distinct_from": [
+        "cov5307-fak-loop-registry",
+        "cov5307-success-loops"
+      ],
+      "aliases": [],
+      "grounding": "gardenTickLoopID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-success-loops",
+      "canonical": "SuccessLoops (succeeded-loop signature rows)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "internal/codexlifecycle/taskpath.go SuccessLoops: the list of loop signature rows (SigRow) for loops that reached success on a task path - the record of which loops closed out.",
+      "distinction": "A RECORD of loops that SUCCEEDED - NOT a loop id env (FAK_GOAL_LOOP / FAK_LOOP_ID) and NOT gardenTickLoopID (a single loop's name); it is an outcome ledger.",
+      "distinct_from": [
+        "cov5307-garden-tick-loop-id",
+        "cov5307-fak-goal-loop"
+      ],
+      "aliases": [],
+      "grounding": "SuccessLoops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-engine-route",
+      "canonical": "EngineRoute (routing target's engine route)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "internal/modelroute/account.go Target.EngineRoute: returns the engine-route string for a routing Target - which serving engine/backend a routed request lands on.",
+      "distinction": "The ENGINE-ROUTE string of a target - NOT DecisionRecord (the recorded routing decision) and NOT HarnessCandidates; it names the engine, not the decision or the options.",
+      "distinct_from": [
+        "cov5307-decision-record",
+        "decision"
+      ],
+      "aliases": [],
+      "grounding": "EngineRoute",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-decision-record",
+      "canonical": "DecisionRecord (recorded routing decision)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "internal/modelroute (gateway/routing_observability.go): DecisionRecord is the recorded routing DECISION (version, chosen target, overhead) emitted for observability after a route resolves.",
+      "distinction": "The RECORDED routing decision (for telemetry) - NOT EngineRoute (the chosen engine string inside it) and NOT the live Decision being made; it is the observability artifact.",
+      "distinct_from": [
+        "cov5307-engine-route",
+        "decision"
+      ],
+      "aliases": [],
+      "grounding": "DecisionRecord",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-eviction-policy",
+      "canonical": "EvictionPolicy (radix-KV eviction policy)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "internal/agent/inkernel_planner.go (inKernelRadixEvictionPolicyFromEnv): the radixkv.EvictionPolicy selecting how the in-kernel radix KV cache evicts prefixes under pressure.",
+      "distinction": "The radix-KV EVICTION policy (how prefixes are dropped) - NOT a guard/admission policy and NOT SourcePolicy; it governs cache reclamation, not tool or source admission.",
+      "distinct_from": [
+        "evict",
+        "cov5307-source-policy"
+      ],
+      "aliases": [],
+      "grounding": "EvictionPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov5307-support-maturity",
+      "canonical": "supportmaturity (support-maturity rung scale)",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "internal/supportmaturity (internal/milestonereport uses M4Correct): the support-maturity rung scale (M0..M4) grading how mature a subsystem's support is; maturedRung = M4Correct is the top rung a milestone requires.",
+      "distinction": "The MATURITY RUNG scale (M0..M4 support grades) - NOT a single milestone report and NOT capability-floor; it is the ladder milestones are scored against.",
+      "distinct_from": [
+        "support-maturity",
+        "maturity"
+      ],
+      "aliases": [],
+      "grounding": "supportmaturity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

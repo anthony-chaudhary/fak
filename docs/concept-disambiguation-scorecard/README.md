@@ -11,75 +11,77 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 ## Headline
 
-| Metric | Value |
-|---|---|
-| **Score** | **98.9/100** (grade A) = 9.9/10 |
-| **Coverage** | **98.3%** (2115/2152 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **37** (clarity 0 + coverage 37) |
-| Crystal-clear concepts | 285 of 1902 positioned |
-| As of |  (fak ) |
+The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positive counters that climb without a ceiling. The old bounded /100 score SATURATES near the top - it hides the real, still-open work - so it is demoted to a labeled legacy line below and is NOT the metric to optimize.
 
-> **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
+| Metric (primary = unbounded driver) | Value |
+|---|---|
+| **Disambiguation-debt (drive to 0)** | **9** (clarity 0 + coverage 9) |
+| **Crystal-clear concepts (and climbing)** | **362** crystal of 1979 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2188 / 2197** (99.6% of the discovered confusable space) |
+| As of |  (fak ) |
+| Legacy bounded score (saturates; not the driver) | 99.7/100 (grade A) |
+
+> **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1902 concepts - score 98.9/100 (grade A) - disambiguation-debt 37
+concept-disambiguation chart - 1979 concepts - score 99.7/100 (grade A) - disambiguation-debt 9
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #####....................... 285
+  * crystal       ######...................... 362
   o defined       ############################ 1617
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (62 concept(s); 0 crystal)
-  cache            *********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (203 concept(s); 33 crystal)
-  context-ctx      **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (174 concept(s); 22 crystal)
+  attention        ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (65 concept(s); 3 crystal)
+  cache            **************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (208 concept(s); 38 crystal)
+  context-ctx      ***************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (179 concept(s); 27 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
-  decision         *********oooooooooooooooooo (27 concept(s); 9 crystal)
+  decision         ******************oooooooooooooooooo (36 concept(s); 18 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
-  evict            ******ooooooooooooooooooooooooooooooo (37 concept(s); 6 crystal)
-  gateway-engine   *******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (122 concept(s); 7 crystal)
-  guard-gate       *********************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (272 concept(s); 57 crystal)
-  layout           ***oooooooo        (11 concept(s); 3 crystal)
-  loop             *******************ooooooooooooooooooooooooooooooooo (52 concept(s); 19 crystal)
-  plan             *****************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (248 concept(s); 17 crystal)
-  policy-capability **************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (112 concept(s); 14 crystal)
-  pool             **ooooooooooooooooooooooooooooo (31 concept(s); 2 crystal)
+  evict            ********ooooooooooooooooooooooooooooooo (39 concept(s); 8 crystal)
+  gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
+  guard-gate       *************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (288 concept(s); 73 crystal)
+  layout           ****oooooooo       (12 concept(s); 4 crystal)
+  loop             ************************ooooooooooooooooooooooooooooooooo (57 concept(s); 24 crystal)
+  plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
+  policy-capability *********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (119 concept(s); 21 crystal)
+  pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
   render-materialize ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (151 concept(s); 3 crystal)
-  score-debt       ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (67 concept(s); 3 crystal)
+  score-debt       ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (68 concept(s); 4 crystal)
   session-runtime  ****************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (165 concept(s); 16 crystal)
-  support-maturity *****ooooooooooooooooo (22 concept(s); 5 crystal)
+  support-maturity ************ooooooooooooooooo (29 concept(s); 12 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (117 concept(s); 40 crystal)
+  witness-proof    ************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 48 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ###########################. 349/358
-  gateway-engine   ###########################. 160/166
-  policy-capability ###########################. 134/138
-  support-maturity #########################... 30/34
-  witness-proof    ###########################. 127/131
-  attention        ###########################. 69/72
-  context-ctx      ############################ 189/191
-  evict            ###########################. 42/44
-  loop             ###########################. 67/69
-  decision         ###########################. 39/40
-  layout           ##########################.. 12/13
-  plan             ############################ 304/305
-  pool             ###########################. 35/36
-  cache            ############################ 249/249
+  loop             ##########################.. 72/77
+  policy-capability ############################ 140/142
+  decision         ###########################. 48/49
+  render-materialize ############################ 173/174
+  attention        ############################ 72/72
+  cache            ############################ 254/254
+  context-ctx      ############################ 194/194
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  render-materialize ############################ 173/173
-  score-debt       ############################ 83/83
+  evict            ############################ 44/44
+  gateway-engine   ############################ 166/166
+  guard-gate       ############################ 365/365
+  layout           ############################ 13/13
+  plan             ############################ 306/306
+  pool             ############################ 36/36
+  score-debt       ############################ 84/84
   session-runtime  ############################ 188/188
+  support-maturity ############################ 37/37
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
+  witness-proof    ############################ 135/135
 
-namespace coverage  [###############################.] 98.3%  (2115/2152 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2188/2197 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -98,6 +100,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | | Verdict | Kind | Family | Canonical - definition |
 |---|---|---|---|---|
+| * | crystal | config | attention | **attn_gate** - The Qwen3.5-hybrid attention output-gate flag (attnGate in the qwen35/GGUF config) - whether the attention block multiplies its output by a learned per-head gate. |
+| * | crystal | symbol | attention | **attn_q_norm** - The per-head query-normalization weight tensor (blk.N.attn_q_norm.weight, canonicalized to self_attn.q_norm.weight) that applies QK-norm to the attention query projection in Qwen3.5-class GGUFs. |
+| * | crystal | config | attention | **full_attention_interval** - The Qwen3.5 hybrid-attention layer period (cfg.FullAttentionInterval, GGUF full_attention_interval): every Nth layer runs full (global) attention while the rest run the local/linear path. |
 | * | crystal | symbol | cache | **PromptCacheKey** - The OpenAI Responses-wire cross-shard cache-routing hint (prompt_cache_key): a stable key derived from the cacheable HEAD that pins requests sharing a prefix onto one upstream automatic-prefix-cache node (#5186). |
 | * | crystal | symbol | cache | **SilentCacheInvalidation** - The post-fire reconciliation signal (#2791): a compaction that FIRED - which by construction proves the protected prefix was spliced byte-identically, since verifySplicedBody turns any byte-inequality into a prefix_mismatch identity return - yet whose provider reported zero cache_read and nonzero cache_creation, evidencing the provider re-created the very prefix fak preserved (a TTL expiry or capacity eviction fak cannot prevent). |
 | * | crystal | cli-verb | cache | **cachesweep (stale-cache reaping verb)** - internal/cachesweep (the package) and `fak cachesweep` (the verb) reap stale or orphaned cache artifacts the dispatcher and session layers leave behind, bounded by a lane-aware scan so a sweep never touches a live session's working set. |
@@ -121,6 +126,10 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | cache | **Hardware-aware cache** - The placement POLICY that knows each tier's physical character (HBM / DRAM / NUMA-far / CXL / disk / remote) and demotes hot entries one tier colder under pressure. |
 | * | crystal | symbol | cache | **KV transfer** - The migration DIRECTIVE emitted by hardware-aware placement: migrate / offload / restore / route a KV span between tiers. |
 | * | crystal | symbol | cache | **local_cache_hit** - A served prompt token reused from a KV prefix already resident on THIS box (an in-session prefix or a shared local KV store); one of the three cacheobs provenance-axis buckets (#3896, vLLM's by_source label). |
+| * | crystal | symbol | cache | **CacheGiB** - coalescebench config field: the resident expert-cache budget in GiB (the RAM tier sitting over SSD) that bounds how many routed (layer,expert) groups stay resident in the deterministic LRU the bench replays through. |
+| * | crystal | symbol | cache | **SimulateExpertCacheBatch** - Deterministic weight-free simulator replaying B agents advancing one decode step together; streams each distinct (layer,expert) group once per step and reports coalesced page-ins (DistinctStreamed) vs B un-coalesced streams (NaiveStreamed) and CoalesceRatio. |
+| * | crystal | symbol | cache | **ExpertCacheBatchAdmission** - Result struct pairing a byte-bounded ExpertCachePlan with a BatchCoalesceTrace: the admitted routed-group capacity plus the cross-agent coalescing evidence measured under exactly that capacity. |
+| * | crystal | symbol | cache | **AdmitExpertCacheBatchTrace** - Computes a byte-bounded routed-group capacity via PlanExpertCache then simulates the supplied B-agent batch steps under that exact capacity, failing closed when one step's distinct union exceeds the plan. |
 | * | crystal | symbol | cache | **RelaunchCacheAffinityEnv** - The resume-package Go const holding the FAK_RESUME_CACHE_AFFINITY env-var name; the watchdog relaunch threads RelaunchCacheAffinityKey(session) onto the child env under this key (#5189). |
 | * | crystal | config | cache | **CacheTTL1h** - CacheTTL1h (internal/gateway/cache_pricing.go) is the extended 1-hour ephemeral provider prompt-cache TTL tier, priced above the 5-minute default. |
 | * | crystal | symbol | cache | **UpgradeAnthropicStableCacheTTL1h** - UpgradeAnthropicStableCacheTTL1h (internal/agent/anthropic_cachebp.go) rewrites an Anthropic request body to upgrade stable cache_control breakpoints to the 1h TTL tier, returning a typed upgrade outcome. |
@@ -131,6 +140,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | cache | **FAK_ABLATE_TTL_1H** - FAK_ABLATE_TTL_1H is the ablation-harness env arm (internal/ablate) that force-enables the gateway's 1h TTL upgrade lever (Config.CacheTTL1H) independently of the guard's managed-cache posture, so the upgrade's effect can be measured A/B. |
 | * | crystal | concept | cache | **managed-cache restart plan** - The managed-cache restart plan (internal/resume) is the OTHER sense of the phrase: Plan prices restarting a dormant rate-limit-crashed session (RESUME_FULL vs CUT, with RESET always priced) against the projected provider-cache posture, and Diagnose detects which transcripts need one - turning a blind cold re-prefill into a restart with the cache managed. |
 | * | crystal | symbol | cache | **FAK_RESUME_CACHE_AFFINITY** - Env-var name carrying the transcript-UUID-derived relaunch cache-affinity route onto a resumed claude --resume child, so the warm provider cache route survives the OS relaunch (#4140/#5189). |
+| * | crystal | symbol | cache | **MedianCacheReadFraction** - Median share of post-compaction window input tokens served as provider cache reads (cached_input_tokens / input_tokens), rolled up per regrowth cohort in the #4768 compact-audit aggregate. |
 | * | crystal | subsystem | context-ctx | **context-MMU (ctxmmu)** - A write-time (post-tool) gate on tool RESULTS that decides if bytes enter context as-is, must be quarantined, or paged out to a pointer. |
 | * | crystal | subsystem | context-ctx | **KV-MMU (kvmmu)** - The bridge that turns ctxmmu's logical quarantine verdict into a mechanical one by evicting K/V spans from the kernel's attention cache. |
 | * | crystal | subsystem | context-ctx | **recall (session core dump)** - The persisted session core-dump: a page table over a content-addressed swap device, reloadable in a fresh process where a sealed page stays sealed. |
@@ -139,6 +149,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | context-ctx | **contextq (materializer)** - On-demand context materializer: turns a search query into typed handles, materialization verdicts, omissions, and a render plan over CDB images. |
 | * | crystal | symbol | context-ctx | **CtxViewPlanner** - Stateless, shared context-view planner wired to the gateway: one per server, shared across all requests, disabled by default. |
 | * | crystal | symbol | context-ctx | **CompactionView** - A LOSSY compaction model: strips recovery handles off elided spans to show token savings without recoverability. |
+| * | crystal | concept | context-ctx | **fak_context** - The fak-managed conversation-context lifecycle (the fak_context_ events - session_fak_context_events, context_lifecycle_events) surfaced by vcache/cachevalue status. |
+| * | crystal | subsystem | context-ctx | **fak_context_planner** - The failure-domain/component (fak_context_planner) that plans the fak conversation-context window - the vcache CausePlanning path deciding what context to keep or compact for the next turn. |
+| * | crystal | symbol | context-ctx | **context_compacted** - The transcript event marker (event_msg/context_compacted) the codex lifecycle emits when a session's context was compacted - the paired real compaction marker used by compactaudit. |
 | * | crystal | symbol | context-ctx | **ContextRestoreEpisodes** - The pure fold in internal/dojo that turns the context-span ledger's drop/restore counts into the dojo's one scored episode for the context-restore/restore_recall KPI cell. |
 | * | crystal | symbol | context-ctx | **loadContextSpanLedger** - The cmd/fak adapter that reduces the durable gateway-usage ledger's compaction-dropped turns into the ContextSpanLedger counts the pure restore-recall fold consumes. |
 | * | crystal | symbol | context-ctx | **dojo_lever_context_restore** - The cmd/fak registration file for the context-restore dojo lever - the RegisterLever seam entry that binds the restore-recall KPI cell into fak dojo run and the --live fold. |
@@ -153,6 +166,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | context-ctx | **maxCtxRestoreCASEntries** - Cap constant bounding the durable media-restore CAS directory, oldest-modified-out on overflow (the disk analogue of the stash caps). |
 | * | crystal | symbol | context-ctx | **ctxRestoreCASDir** - Helper resolving the durable media-restore CAS directory from the environment at call time; empty string means durable persistence is off. |
 | * | crystal | concept | context-ctx | **managed context** - managed context is fak's gateway-owned context program - the SLO-reported alternative to client-managed context (internal/productscorecard ManagedContextSLOReport). |
+| * | crystal | symbol | context-ctx | **compaction_summary** - Regrowth attribution class for the compacted row's replacement_history: the summary transcript the Codex compactor injects into the fresh window after a fire (#4768), measured by row length only. |
+| * | crystal | symbol | context-ctx | **environment_context** - Upstream Codex marker (<environment_context>) that tags an injected environment header message in rollout transcripts; the #4768 regrowth scanner classifies rows containing it as reinjected instruction payload. |
 | * | crystal | symbol | cross-cluster | **core-image manifest** - internal/recall's Manifest: the persisted core image of a finished session - the page table, the frozen quarantine-clearance state, and a frozen world-version marker, with the bytes themselves living in a sibling cas.json swap device. |
 | * | crystal | symbol | cross-cluster | **policy manifest (on-disk JSON)** - internal/policy's Manifest: the on-disk capability-floor JSON an operator edits to configure the authorization intent - the abstract policy is compiled from this into an in-memory decision table. |
 | * | crystal | symbol | cross-cluster | **session.Verdict** - internal/session's Verdict: what Decide returns to the agent turn loop at each boundary - Proceed (gate the next turn), MaxTokens (per-turn output cap), the drive State, Stop, and a closed Reason naming why the slot freed. |
@@ -175,17 +190,34 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | decision | **Decision (kernel)** - Tool-call verdict explanation trace showing why fak gave this verdict |
 | * | crystal | symbol | decision | **Decision (scheduler)** - Loop admission advisory: whether to fire a scheduled loop now |
 | * | crystal | symbol | decision | **Decision (shared-task)** - Shared-task execution state tracking and reconciliation record |
+| * | crystal | symbol | decision | **ModelDecision** - The modelaccept record (type ModelDecision) capturing the accept/reject decision for one model in the inventory (keyed byDecision). |
+| * | crystal | symbol | decision | **ReasonMissingDecision** - Go constant naming the shared-task patch-result reason MISSING_DECISION: a replace of /open_decisions/<id>/state addressed a decision ID not present on the record. |
+| * | crystal | symbol | decision | **MISSING_DECISION** - Wire reason token in shared-task patch-result JSON: the targeted open-decision ID does not exist on the current record, so the resolution write returns a typed conflict. |
+| * | crystal | symbol | decision | **DecisionID** - Stable identifier field of one open decision row on a shared task record; append id-newness and state resolution are both keyed by it. |
+| * | crystal | symbol | decision | **OpenDecisions** - Append-only list field /open_decisions on the shared task record holding unresolved Decision rows; stale appends still merge by decision-ID newness. |
+| * | crystal | symbol | decision | **ApprovalDecisionID** - Store policy field naming the open-decision ID whose approved state unlocks patches the policy holds as APPROVAL_REQUIRED. |
+| * | crystal | symbol | decision | **replaceDecisionState** - Fold helper applying replace /open_decisions/<decision_id>/state: resolves a decision in place and returns a typed conflict for a missing ID. |
+| * | crystal | symbol | decision | **DUPLICATE_DECISION** - Wire conflict reason in shared-task patch results: an append proposed an open decision whose DecisionID already exists on the record (id-newness rule). |
+| * | crystal | symbol | decision | **decisionStatePath** - Fold helper parsing an op path of the form /open_decisions/<decision_id>/state into its decision ID. |
 | * | crystal | symbol | decision | **ClosureDecision** - The typed outcome of the shipgate high-risk closure gate: whether the closure is allowed, whether enforcement was on, whether dry-run would have blocked, and the closed-vocabulary reason (#3860). |
 | * | crystal | concept | dev-tier | **frontdoor verb** - A top-level `fak` verb classified TierFrontdoor by internal/devindex: the product surface an operator FACES (what `fak help` lists), and the headline heaviness input counted by the frontdoor_verbs meter. |
 | * | crystal | concept | dev-tier | **dev verb** - A top-level verb NOT classified frontdoor (TierDev): the `fak dev <verb>` tooling tier - repo-workflow verbs, scorecards, RSI. It stays MEASURED in the dev_verbs meter even after its bare spelling is gated behind `fak dev` (the honesty fence: hidden from the front door, not from the meter). |
 | * | crystal | concept | dev-tier | **fak dev (namespace)** - The CLI namespace that dispatches the dev-tier verbs (resolveDevVerb, cmd/fak/dev.go) and behind which the bare dev spellings are gated - a COMMAND surface that reads devindex to decide what is dev-tier. |
 | * | crystal | subsystem | dev-tier | **devindex** - internal/devindex: the CATALOG that classifies every verb's tier (TierFrontdoor / TierDev / TierHidden) from the live dispatch switch - the WITNESSED source the two operator-heaviness meters read to split frontdoor_verbs from dev_verbs. |
 | * | crystal | symbol | evict | **EvictionVictim** - cacheprice.EvictionVictim(residents) returns the INDEX of the disaggregated-KV-pool prefix to evict first: the lowest retention DENSITY (DisaggregationRetentionValue per CapacityTokens), compared exactly by cross-multiplication (float-free), ties breaking toward the larger footprint. |
+| * | crystal | metric | evict | **CostEvictions** - The radixkv counter (Stats.CostEvictions) tallying evictions made by the legacy cost-aware eviction strategy. |
+| * | crystal | symbol | evict | **EvictionLRU** - The radixkv EvictionPolicy enum value (EvictionLRU) selecting least-recently-used eviction ordering. |
 | * | crystal | symbol | evict | **evict (KV cache)** - Physical tensor span removal and RoPE re-rotation in KV cache for memory compaction |
 | * | crystal | symbol | evict | **evict (playbook)** - Logical span pruning from rendered playbook under token budget |
 | * | crystal | symbol | evict | **evict (session pool)** - Model instance eviction from a bounded LRU session pool |
 | * | crystal | symbol | evict | **INSUFFICIENT_NONEVICTING_HBM** - The #4801 typed refusal verdict returned when accelerator memory reachable WITHOUT evicting any peer workload is below the artifact size plus runtime headroom. |
 | * | crystal | doc-term | evict | **non-evicting (placement constraint)** - The #4801 placement constraint that accelerator capacity may only be counted when it is reachable WITHOUT displacing any peer workload, making eviction unavailable as a way to close a shortfall. |
+| * | crystal | config | gateway-engine | **FAK_AWQ_KERNEL** - The env/CPUID gate (FAK_AWQ_KERNEL) that opts into the AWQ 4-bit matmul kernel on amd64; unset leaves the default path provably untouched. |
+| * | crystal | config | gateway-engine | **FAK_INKERNEL_BATCH** - The env gate (FAK_INKERNEL_BATCH) enabling the in-kernel decode path to co-batch concurrent requests; unset decodes byte-identically via serial Session.Step per lane. |
+| * | crystal | config | gateway-engine | **FAK_INKERNEL_RADIX** - The env gate (FAK_INKERNEL_RADIX, budget via FAK_INKERNEL_RADIX_BUDGET) enabling in-kernel radix prefix reuse in the decode planner. |
+| * | crystal | config | gateway-engine | **FeatureVDSO** - The ablation feature (FeatureVDSO) - the one runtime-settable rung-1 sweep knob selecting the vDSO fast path in the ablation registry. |
+| * | crystal | symbol | gateway-engine | **KernelLedger** - The cachevalue-status source field (Sources.KernelLedger, JSON kernel_ledger) naming the kernel-side ledger a savings report reads from. |
+| * | crystal | symbol | gateway-engine | **NewVLLMEngine** - The constructor (NewVLLMEngine(VLLMConfig)) that builds fak's vLLM engine adapter, defaulting an empty WorkerID and normalizing trailing slashes. |
 | * | crystal | subsystem | gateway-engine | **kernel** - The fak core: the one implementation of abi.Kernel that coordinates adjudication, vDSO lookup, engine dispatch, and result admission across the tool-call path. |
 | * | crystal | subsystem | gateway-engine | **gateway** - The kernel-adjudicated wire: the HTTP and MCP-RPC surface that fronts the kernel for non-Go clients, re-validating untrusted wire arguments before they reach it. |
 | * | crystal | subsystem | gateway-engine | **engine** - The inference-engine seam (EngineDriver): the abstract backend interface the kernel dispatches allowed tool calls to (mock, HTTP upstream, fused in-kernel model). |
@@ -193,6 +225,14 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | gateway-engine | **model (in-kernel model)** - The in-kernel inference core: a pure-Go forward pass that runs chat token decode over a loaded GGUF checkpoint across several architectures and quant schemes. |
 | * | crystal | symbol | gateway-engine | **engines registry** - The runtime registry (abi.Registry.engines) that maps engine IDs to their EngineDriver implementations: the kernel's dispatch table of all registered inference backends. |
 | * | crystal | symbol | gateway-engine | **fak_gateway_kv_prefix_prompt_tokens_by_source_total** - The gateway's per-turn split of in-kernel prompt tokens by PROVENANCE source (local_compute / local_cache_hit / external_kv_transfer), orthogonal to the reuse-depth family; the three sum to the by-source prompt tokens. external_kv_transfer isolates the disaggregation dividend — tokens a remote / L3 KV tier served that a single box would otherwise have re-prefilled. |
+| * | crystal | config | guard-gate | **FAK_SECRETGATE** - The env opt-in (FAK_SECRETGATE) that arms internal/secretgate Admit; when off, Admit is a no-op and only the normgate secret check runs. |
+| * | crystal | config | guard-gate | **FLEET_CODEX_LOOP_GATE** - The env gate (FLEET_CODEX_LOOP_GATE) controlling whether the fleet dispatch tick admits the codex-loop step (dispatch_tick_codex_gate). |
+| * | crystal | config | guard-gate | **FLEET_DOGFOOD_GUARD** - The dispatch guard (FLEET_DOGFOOD_GUARD) gating the fleet's self-dogfooding path in dispatch_tick/worker. |
+| * | crystal | symbol | guard-gate | **GATED_UNGRADED** - The livecodebench abstain status (GATED_UNGRADED) returned when the grader cannot run against a healthy Docker-isolated host - an honest abstain, never a fabricated zero. |
+| * | crystal | symbol | guard-gate | **gateFileAdmissionTree** - The hooks tree-twin gate (gateFileAdmissionTree) implementing FILE_ADMISSION in the gate tree, built so it never fires on the grandfathered evidence files. |
+| * | crystal | symbol | guard-gate | **gate_weight** - The MoE router gate weight (gateWeights[i]) for a routed expert - the softmax weight AttributeRoute folds one token's expert picks by, and a Qwen3.5 HAL layer weight. |
+| * | crystal | config | guard-gate | **guardLifecycleSocketEnv** - The constant (guardLifecycleSocketEnv = FAK_GUARD_LIFECYCLE_SOCKET) naming the env var that carries the guard lifecycle IPC socket path used by precompact/stophook. |
+| * | crystal | config | guard-gate | **guardLifecycleTokenEnv** - The constant (guardLifecycleTokenEnv = FAK_GUARD_LIFECYCLE_TOKEN) naming the env var that carries the guard lifecycle IPC auth token used by precompact/stophook. |
 | * | crystal | symbol | guard-gate | **gateVerbTierTree (whole-tree verb-tier gate)** - Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653). |
 | * | crystal | subsystem | guard-gate | **guard_mcp (guard MCP self-query install)** - The cmd/fak/guard_mcp.go module: it wires fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_context_*) into the guarded child by injecting an MCP server registration into the child's launch config, mirroring the install shape of guard_precompact.go / guard_codex.go. |
 | * | crystal | subsystem | guard-gate | **guard_codex (guard Codex-provider wiring)** - The cmd/fak/guard_codex.go module: the first-class `fak guard -- codex` wiring, fak's OpenAI-Codex provider install path (credential resolve plus config rewrite) that lets the guard front a Codex child the same way it fronts an Anthropic one. |
@@ -250,9 +290,21 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | guard-gate | **DefaultGatedSinks (default egress-sink policy)** - The reasonable default GatedSinks configuration: gates EGRESS (exfiltration) and DESTRUCTIVE (irreversible mutation) sinks on session taint, but NOT EXEC (preserves dev work). |
 | * | crystal | symbol | guard-gate | **ContractGate (contract validation gate)** - A named validation checkpoint in an official run contract (browseraction/terminalbench/toolsandbox) that gates promotion: candidate_task_ids, official_harness_pin, same_task_ids_required, etc. |
 | * | crystal | concept | guard-gate | **guardrail (safety boundary)** - A safety boundary or constraint that prevents an AI system from taking harmful actions; often implemented as policy checks or refusal reasons. |
+| * | crystal | symbol | guard-gate | **GatedAction** - GatedAction is the sessionctl payload of one call the adjudication gate refused with an ESCALATE disposition, parked on the out-of-band operator inbox (#2757): the tool name, the raw proposed args, the closed refusal reason, and the gate's preview — what an external operator reads to approve or deny the action. |
+| * | crystal | symbol | guard-gate | **ParkGatedAction** - ParkGatedAction is the sessionctl blocking park op of the out-of-band operator inbox (#2757): it publishes one GatedAction as an addressable pending action and blocks the calling loop until an operator verdict arrives, the park window elapses, or the context is cancelled, witnessing every outcome on the trace's park Next records at the consume point. |
+| * | crystal | symbol | guard-gate | **ResolveGatedAction** - ResolveGatedAction is the typed operator approve/deny op of the out-of-band inbox (#2757): it resolves the pending action addressed by id with a ParkVerdict (approve, optionally carrying modified args, or deny), waking the parked loop exactly once; malformed verdicts and unknown/already-resolved ids refuse with the closed PARK_MALFORMED / PARK_UNKNOWN_ACTION reasons. |
+| * | crystal | symbol | guard-gate | **PendingGatedActions** - PendingGatedActions is the read op of the out-of-band operator inbox (#2757): it returns the addressable queue of parked gated actions for a session trace in park order, as a snapshot copy — the list an operator (CLI 'fak session pending', the spine-bound route) consults before resolving one action by id. |
+| * | crystal | symbol | guard-gate | **EnableGateParking** - EnableGateParking opens the out-of-band operator inbox for one session trace (#2757) and sets its park window (a non-positive timeout selects DefaultParkTimeout): from then on the loop parks ESCALATE-gated denies for that session instead of returning them straight to the model. Parking is opt-in per session so a run with no operator listening keeps the historical gate behavior byte-for-byte. |
+| * | crystal | symbol | guard-gate | **GateParkingEnabled** - GateParkingEnabled is the loop-side predicate of the out-of-band operator inbox (#2757): it reports whether EnableGateParking opened the inbox for a session trace — the check the agent dispatch seam makes before parking an ESCALATE-gated deny, so an unopened inbox falls straight through to the historical deny path. |
+| * | crystal | symbol | guard-gate | **disaggregatedStore** - Fold predicate reporting whether an artifact ref points at a disaggregated store, which makes a digest-shaped deletion witness mandatory on removal. |
+| * | crystal | symbol | guard-gate | **disaggregatedBodyRef** - Fold predicate reporting whether a note or task body ref is disaggregated and therefore requires a digest-shaped deletion witness on removal. |
+| * | crystal | subsystem | layout | **guard_format_layout** - The guard exit-summary block LAYOUT (guard_format_layout.go) - the pure text layout of the guard summary onto which color is layered at print time (guardColorizeSummary). |
 | * | crystal | symbol | layout | **Layout (tensor)** - Tensor element physical arrangement: RowMajor, ColMajor, or other ordering |
 | * | crystal | symbol | layout | **Layout (ctxplan)** - Base/Current/Recent/Deep region profile for layout-aware planning |
 | * | crystal | symbol | layout | **MLA KV layout seam** - Attention cache variant seam interface: standardKVLayout vs mlaKVLayout |
+| * | crystal | symbol | loop | **loop_constraint.go (agent constraint seam)** - loop_constraint.go is the agent package's loop-side consumer of the out-of-band add-constraint op (#2756): applyConstraints drains the sessionctl constraint mailbox at the turn boundary and carries the tightened floor's standing directive as a system notice, and constraintDenied denies a floor-forbidden tool call before dispatch with a typed receipt carrying the closed CONSTRAINT_* reason. |
+| * | crystal | symbol | loop | **loop_park.go (agent park seam)** - loop_park.go is the agent package's loop-side consumer of the out-of-band operator approve/deny inbox (#2757): parkEscalatedDeny intercepts an ESCALATE-gated deny at the dispatch site when the session's inbox is open, parks it on the sessionctl pending-action queue, and honors the external verdict — approve re-proposes the call through the normal syscall boundary (byte-identical plus the gate's confirm echo, or operator-modified args freshly adjudicated), deny/timeout abort with a typed receipt carrying the closed PARK_* reason. |
+| * | crystal | metric | loop | **loop_count** - The dispatch codex-loop iteration counter (LoopCount, JSON loop_count) reported per session tick - how many times the codex loop has re-entered for one session. |
 | * | crystal | concept | loop | **loop (the ring)** - The generic engineering abstraction: sense -> decide -> act -> witness, at any altitude (tool-call / turn / session / fleet / RSI / intent). |
 | * | crystal | subsystem | loop | **super loop (fak superloop)** - A read-only operator-INTENT walker: an interior node that reads its member loops' status worst-first and folds a worklist, mutating nothing at its own altitude. |
 | * | crystal | subsystem | loop | **fak loop (loopmgr ledger + governor)** - The durable hash-chained loop ledger (.fak/loops.jsonl) plus the admission governor (loopmgr.Admit): it records loop events and folds them into an advisory admit/refuse, it does not schedule or spawn. |
@@ -272,6 +324,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | loop | **superloop.RosterLoop (folded-loop input row)** - RosterLoop is the plain-data input row the shell hands the pure roster builder for ONE folded loop: its stable identity (Kind), folded state, and dark flag, mirroring a loopfleet.LoopHealth row without importing it. |
 | * | crystal | symbol | loop | **RosterSourceLoopRegistry (loopmgr-registry roster source tag)** - RosterSourceLoopRegistry is the roster source token marking that the loopmgr job registry (the persisted schedule definitions in tools/loop-registry.json) declares a loop, whether or not its ledger has folded rows yet. |
 | * | crystal | symbol | loop | **RosterSourceSuperloop (superloop-registry roster source tag)** - RosterSourceSuperloop is the roster source token marking that the super-loop registry claims an entry: either the entry IS a registered intent, or some intent hand-names the loop as a KindLoop member ref (which also sets Named). |
+| * | crystal | symbol | loop | **superloop_spinning (walk SPINNING finding)** - superloop_spinning is the superloop walk-verdict finding token emitted when at least one member loop is SPINNING: ticking on cadence (live/stale) while its ledger-verified progress high-water mark did not advance (#4956). It binds the closed relay reason RELAY_NO_PROGRESS and demands a revive/redirect, never an auto-replan. |
+| * | crystal | symbol | loop | **superloop_orphaned (walk ORPHANED finding)** - superloop_orphaned is the superloop walk-verdict finding token emitted when at least one member loop is ORPHANED: a tick emitted downstream follow-on work — a relay ArtifactIssue baton pointer or the issue an a2achan.WorkerStatus names — that nobody advanced or closed within its cadence window (#4957). It binds the closed relay reason RELAY_ORPHANED_FOLLOWON and demands chasing or redirecting the emitted output through the member's own front door, never an auto-refile. |
+| * | crystal | concept | plan | **replanning** - The property/act of re-deriving a plan for the same turn (ctxplan PlanView, supervisoragent action) - a deterministic re-admission that reuses the existing admit receipt, not a new authority. |
 | * | crystal | symbol | plan | **RolePlan** - Binds one execution Role to its own modelroute Subject (independent model constraints), an independent per-axis Budget, an escalation target, and a result fold. |
 | * | crystal | symbol | plan | **RolePlanSet** - The declared multi-role execution plan: an ordered list of RolePlans plus a top-level fold that composes the roles' results into the final answer. |
 | * | crystal | symbol | plan | **CandidateBlockedBy (dispatch prereq grammar)** - dispatchtick.CandidateBlockedBy parses a dispatch candidate's blocked-by grammar - which other candidates a candidate must wait on before it becomes eligible for a lane. |
@@ -289,6 +344,10 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | plan | **Plan (planner)** - Planner's chosen resident view: selected set, elided set, and accounting |
 | * | crystal | symbol | plan | **Plan (memq)** - Static pre-execution Explain output: pipeline steps, effects, and mutations |
 | * | crystal | symbol | plan | **Candidate** - Scored span the planner may keep resident with cost, benefit, and density metrics |
+| * | crystal | symbol | policy-capability | **cmdPolicy** - The argv handler for the fak policy subcommand (func cmdPolicy in cmd/fak) - the CLI entry that inspects and prints the effective admission policy. |
+| * | crystal | symbol | policy-capability | **FirePolicy** - The rsiloop decision rule (rsiloop.FirePolicy) that decides whether an RSI tuning step fires at a given horizon margin (BaselineFirePolicy fires at MinHorizonMargin 0). |
+| * | crystal | config | policy-capability | **FLEET_POLICY_DIR** - The env var (FLEET_POLICY_DIR) naming a DIRECTORY of fleet dispatch-policy files loaded at tick preflight. |
+| * | crystal | config | policy-capability | **FLEET_POLICY_PATH** - The env var (FLEET_POLICY_PATH) naming a SINGLE fleet dispatch-policy file loaded at tick preflight. |
 | * | crystal | symbol | policy-capability | **AdjudicateMemoryWrite (memq)** - memq.AdjudicateMemoryWrite is the deny-by-structure rule set (#2912) that judges a candidate durable memory write by structure alone - size, transient-error phrasing, negative tool-claim, one-off narrative - and returns an AdmissionVerdict whose Reason is from a closed vocabulary, with no model call, clock, or I/O. |
 | * | crystal | config | policy-capability | **ContainmentPolicy (toolprocgate)** - toolprocgate.ContainmentPolicy bounds the blast radius of a console/terminal crash - the per-surface live-agent cap, the surface-quarantine fault threshold, and the fleet-breaker storm thresholds - that DecideContainment folds into a closed containment verdict (ADMIT / REFUSE_COLOCATION / QUARANTINE_SURFACE / BREAKER_OPEN) for a proposed spawn. |
 | * | crystal | config | policy-capability | **AuditIndependencePolicy (modelroute)** - modelroute.AuditIndependencePolicy is the versioned admission policy EvaluateAuditIndependence folds to decide whether an AUDITOR may audit an AUTHOR - its required identity axes, family/provider/harness/endpoint/account diversity knobs, and alias roster - returning a closed ADMIT/REFUSE/UNKNOWN verdict with a closed reason vocabulary. |
@@ -300,9 +359,13 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | policy-capability | **abi.Verdict** - The discriminated-union decision an adjudicator returns, keyed by kind (Allow, Deny, Defer, Transform, Quarantine, RequireWitness) with typed payloads. |
 | * | crystal | symbol | policy-capability | **reason code** - The closed, additive vocabulary of refusal reasons (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, ...) that every deny verdict cites, never free text. |
 | * | crystal | config | policy-capability | **posture (tool admission)** - The policy's default behavior after all provable refusal checks pass: PostureFailClosed (deny everything not allowed) or PostureAdmitAndLog (admit low-risk reads with forensic metadata). |
+| * | crystal | symbol | policy-capability | **DenialPolicy** - Store policy field selecting how the shared-task fold reports a policy-refused patch: deny outright or hold as quarantined. |
+| * | crystal | symbol | policy-capability | **ViewPolicy** - Reader-scope redaction policy for shared-task views: MaxScope plus IncludeQuarantined decide what View and EventsView reveal to a caller. |
+| * | crystal | symbol | policy-capability | **normalizeViewPolicy** - Fold helper defaulting an empty ViewPolicy scope before redaction so an unset reader scope never widens visibility. |
 | * | crystal | symbol | policy-capability | **CrossAuditPolicy** - The shipgate enforcement policy for high-risk issue closures: the calibrated auditor-family allowlist, required calibration version, receipt freshness window, and staged-enablement prerequisites that decide whether a closure receipt opens the gate (#3860). |
 | * | crystal | symbol | policy-capability | **DefaultCrossAuditPolicy** - The calibrated CrossAuditPolicy instance built from the measured issue-3854 calibration evidence (two independent families at issue-resolution-audit/v2) with the issue-3859 dogfood loop not green, so the closure gate ships enforcement-capable but in dry-run (#3860). |
 | * | crystal | symbol | policy-capability | **AdjudicateClosure** - The fail-closed shipgate decision function for a high-risk issue closure: structural deny first, then a calibrated, independent, fresh PASS receipt or an audited break-glass; runs dry-run while the calibration and dogfood prerequisites are unmet (#3860). |
+| * | crystal | config | pool | **DISPATCH_POOL** - The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE. |
 | * | crystal | symbol | pool | **Pool (session)** - Bounded-LRU session state container with a fixed ceiling on concurrent sessions |
 | * | crystal | symbol | pool | **PoolProfile** - Pooling character of a residency tier describing host count, coherence model, and shareability |
 | * | crystal | symbol | render-materialize | **RenderPlan** - Prompt-assembly layout: stable prefix of reused views plus volatile tail of raw faults |
@@ -311,6 +374,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | score-debt | **scorecard** - One deterministic measurement of a surface that folds reality into a single *_debt integer plus an A-F grade (the family is documented in the scorecard skill). |
 | * | crystal | subsystem | score-debt | **scorecard control pane** - The fold that sums every scorecard's *_debt into one portfolio number with a pinned ratchet that reds only on a regression above baseline. |
 | * | crystal | metric | score-debt | **disambiguation-debt** - This scorecard's integer: clarity defects of positioned concepts plus coverage gaps (confusable tree tokens with no row). |
+| * | crystal | symbol | score-debt | **FleetDebt (fleet-product ranking key)** - FleetDebt is the superloop fleet-walk ranking key (#4958): the liveness x progress x follow-on PRODUCT minus one, so a clean live member folds to debt 0 and the ordinary worst-first sort (tier, then debt descending) ranks the fleet with no rival walker. A product, not a sum, because the axes compound — a stale loop that is also spinning pays cadence cost for zero verified output on two grains at once, and outranks either fault alone. |
 | * | crystal | symbol | session-runtime | **ForkSessionID** - The forked session id whose lookahead rollout produced a RolloutEvidence/Lesson (#5204): the twin session spun off to roll the trajectory forward under the fork-rollout runner. |
 | * | crystal | symbol | session-runtime | **SessionFleet** - gateway.SessionFleet aggregates the cross-MACHINE SessionFleetMachine rows that the live `fak guard` provider exposes through `/debug/vars` for `fak info`. |
 | * | crystal | subsystem | session-runtime | **sessionjournal (package)** - internal/sessionjournal is the crash-survivable session-event journal: a boot-epoch fold of open/beat/close events over guard_sessions.jsonl that classifies each session LIVE/CRASHED/STALE/CLOSED for resume targeting. |
@@ -327,6 +391,13 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | session-runtime | **session.State** - Live, mutable per-session control record: run-state, budget, priority, pace, and revision (an optimistic-concurrency guard). |
 | * | crystal | subsystem | session-runtime | **sessionimage.Image** - Loaded, integrity-verified portable session archive: drive (session.json), recall manifest, ctxplan index, trajectory corpus, and image.json meta. |
 | * | crystal | symbol | session-runtime | **SessionPlanner** - Persistent per-session context planner: a long-lived lossless store plus candidate index that ingests each turn's new messages incrementally. |
+| * | crystal | symbol | support-maturity | **errReplicaUnsupported** - The sentinel error (errReplicaUnsupported) the portable NUMA replica-store path returns when a caller asks for a NUMA-replicated allocation the platform cannot provide. |
+| * | crystal | metric | support-maturity | **FamilyCoverage** - The covmatrix/conceptcatalog measure (FamilyCoverage, JSON family_coverage) of how much of one model architecture's family is supported - a per-family fraction on the complete-model-support face. |
+| * | crystal | config | support-maturity | **Qwen35GDNParityCosineMin** - The acceptance floor constant (model.Qwen35GDNParityCosineMin) - the minimum cosine similarity the Qwen3.5 gated-delta-net path must hit against the reference to pass parity. |
+| * | crystal | symbol | support-maturity | **TestVerbTierCoverageIsTotal** - The named coverage guarantee (TestVerbTierCoverageIsTotal) referenced by the verb-tier gate: it reds CI when any live dispatch verb resolves to no tier, asserting verb-tier coverage is total. |
+| * | crystal | symbol | support-maturity | **ReasonUnsupportedPatch** - Go constant naming the shared-task patch-result reason UNSUPPORTED_PATCH: the op and path combination falls outside the contract's closed patch grammar. |
+| * | crystal | symbol | support-maturity | **UNSUPPORTED_PATCH** - Wire reason token in shared-task patch-result JSON: the fold denied a patch whose op or path is outside the supported contract grammar. |
+| * | crystal | symbol | support-maturity | **resultForUnsupported** - Fold helper building the denied patch result carrying UNSUPPORTED_PATCH at the record's current revision. |
 | * | crystal | concept | support-maturity | **support** - A capability is supported when fak has an implemented path that accepts the case without asserting how broadly it is exercised, whether every answer is right, how it compares to a peer, or whether it is production-mature. |
 | * | crystal | metric | support-maturity | **coverage** - Coverage is the measured fraction of a declared or discovered universe that has rows, tests, witnesses, or other positioned evidence. |
 | * | crystal | concept | support-maturity | **correctness** - Correctness is the property that the implementation's behavior matches its stated contract or oracle for the case being judged. |
@@ -343,12 +414,20 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | concept | vfs | **T3 scratchpad** - The agent's expire-by-default working scratchpad / tmpfs - files that exist for this task and are meant to be thrown away |
 | * | crystal | concept | vfs | **T4 durable memory** - Promoted, verified, forgettable cross-session memory - facts that earned durability through the write/promotion gate and survive the task |
 | * | crystal | concept | vfs | **T5 KV-cache substrate** - The physical KV-cache substrate: where a span's key/value tensors actually sit and how they are addressed and evicted |
+| * | crystal | config | witness-proof | **DISPATCH_WITNESS_REQUIREMENT** - The env var (DISPATCH_WITNESS_REQUIREMENT) declaring what witness a dispatch worker must produce, forwarded into the guard Witness field. |
+| * | crystal | symbol | witness-proof | **WitnessedFiles** - The logvault accessor (v.WitnessedFiles) returning the set of files a run actually witnessed under a prefix (e.g. dispatch-runs), used by guard_audit. |
+| * | crystal | symbol | witness-proof | **witnessPath** - The filesystem path parameter (witnessPath) to a witness artifact read by graders (GradeWitness, AnalyzeNegatedQA). |
+| * | crystal | symbol | witness-proof | **WitnessToolDescriptors** - The conceptbench witness constant (WitnessToolDescriptors, bound to mcp.go toolDescriptors()) naming the ResolveTool referee surface a scenario grades against. |
 | * | crystal | symbol | witness-proof | **q2_0_witness_test** - The stub-build (non-Apple-Silicon) test file q2_0_witness_test.go: it pins the ternary Q2_0 reference's math obligations -- bit layout, ternary code set, round-trip error bound, and ref-GEMV-vs-dense parity -- in every build that cannot execute the Metal kernel. |
 | * | crystal | symbol | witness-proof | **CollectiveWitnessed** - Input field on the #4801 ReservationEnvelope recording that a real NCCL collective smoke test passed across the exact reserved GPU ranks, before any artifact transfer begins. |
 | * | crystal | symbol | witness-proof | **ReservationCollectiveUnwitnessed** - The #4801 typed refusal verdict returned when every resource bar clears but no NCCL collective has been proven across the exact reserved ranks. |
 | * | crystal | symbol | witness-proof | **COLLECTIVE_WITNESS_MISSING** - The wire/JSON string value of the #4801 ReservationCollectiveUnwitnessed verdict, consumed by #4788 to gate the artifact transfer. |
 | * | crystal | symbol | witness-proof | **witnessedReservationEnvelope** - Unexported constructor returning the #4801 candidate reservation exactly as directly witnessed: the non-evicting reach read back from the lab GPU nodes, scrubbed to a node-class label. |
 | * | crystal | symbol | witness-proof | **WitnessedPlacement** - Exported accessor returning the current #4801 typed placement verdict, derived by AdmitPlacement from the witnessed envelope; the artifact #4788 gates its transfer on. |
+| * | crystal | symbol | witness-proof | **ReasonArtifactWitness** - Go constant naming the shared-task patch-result reason ARTIFACT_WITNESS_MISSING: a disaggregated artifact ref was removed without a digest-shaped deletion witness, so the fold quarantines the patch. |
+| * | crystal | symbol | witness-proof | **ARTIFACT_WITNESS_MISSING** - Wire reason token on a shared-task patch result: an artifact-ref deletion lacked the digest-shaped deletion witness the contract requires, so the write is held as quarantined. |
+| * | crystal | symbol | witness-proof | **ReasonBodyWitness** - Go constant naming the shared-task patch-result reason BODY_WITNESS_MISSING: a disaggregated note-body or task-body ref changed without a digest-shaped deletion witness. |
+| * | crystal | symbol | witness-proof | **BODY_WITNESS_MISSING** - Wire reason token on a shared-task patch result: a body-ref deletion lacked its digest-shaped deletion witness, so the fold holds the patch as quarantined. |
 | * | crystal | symbol | witness-proof | **AuditRefute** - The shipgate closure-gate verdict token REFUTE: the independent cross-model auditor affirmatively refuted the closure claim, so a high-risk issue closure is blocked at the ship gate (#3860). |
 | * | crystal | symbol | witness-proof | **WitnessStatus (assume-check wiring field)** - assumecheck.WitnessStatus: the per-assumption registry field that declares HOW that assumption's witness is wired - the value WitnessWired, or one of the generic probe kinds. |
 | * | crystal | symbol | witness-proof | **ProgressWitnessed (watchdog resume counter)** - info_watchdog ProgressWitnessed: the watchdog COUNTER of how many resume/progress events were witnessed for a run, which drives the info pane's "N resumed" line. |
@@ -2134,9 +2213,9 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
+| honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1902 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1979 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2148,25 +2227,25 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 349 | 358 | 9 |
-| gateway-engine | 160 | 166 | 6 |
-| policy-capability | 134 | 138 | 4 |
-| support-maturity | 30 | 34 | 4 |
-| witness-proof | 127 | 131 | 4 |
-| attention | 69 | 72 | 3 |
-| context-ctx | 189 | 191 | 2 |
-| evict | 42 | 44 | 2 |
-| loop | 67 | 69 | 2 |
-| decision | 39 | 40 | 1 |
-| layout | 12 | 13 | 1 |
-| plan | 304 | 305 | 1 |
-| pool | 35 | 36 | 1 |
-| cache | 249 | 249 | 0 |
+| loop | 72 | 77 | 5 |
+| policy-capability | 140 | 142 | 2 |
+| decision | 48 | 49 | 1 |
+| render-materialize | 173 | 174 | 1 |
+| attention | 72 | 72 | 0 |
+| cache | 254 | 254 | 0 |
+| context-ctx | 194 | 194 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| render-materialize | 173 | 173 | 0 |
-| score-debt | 83 | 83 | 0 |
+| evict | 44 | 44 | 0 |
+| gateway-engine | 166 | 166 | 0 |
+| guard-gate | 365 | 365 | 0 |
+| layout | 13 | 13 | 0 |
+| plan | 306 | 306 | 0 |
+| pool | 36 | 36 | 0 |
+| score-debt | 84 | 84 | 0 |
 | session-runtime | 188 | 188 | 0 |
+| support-maturity | 37 | 37 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
+| witness-proof | 135 | 135 | 0 |
 

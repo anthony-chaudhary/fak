@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "superloopspinning",
+      "canonical": "superloop_spinning (walk SPINNING finding)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "superloop_spinning is the superloop walk-verdict finding token emitted when at least one member loop is SPINNING: ticking on cadence (live/stale) while its ledger-verified progress high-water mark did not advance (#4956). It binds the closed relay reason RELAY_NO_PROGRESS and demands a revive/redirect, never an auto-replan.",
+      "distinction": "Not the dark finding (a member that stopped ticking — the liveness axis) and not the debt finding (aggregate measured debt over the floor): superloop_spinning is the progress axis — the member IS ticking but produced nothing a successor could re-verify via relay.ReadVerifiedProgress.",
+      "distinct_from": [
+        "loop-kindloopfleet",
+        "loop-kindloop"
+      ],
+      "aliases": [],
+      "grounding": "superloop_spinning",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

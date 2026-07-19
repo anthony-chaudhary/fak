@@ -1,0 +1,745 @@
+{
+  "rows": [
+    {
+      "id": "x-disambig-loopcount",
+      "canonical": "loop_count",
+      "family": "loop",
+      "kind": "metric",
+      "definition": "The dispatch codex-loop iteration counter (LoopCount, JSON loop_count) reported per session tick - how many times the codex loop has re-entered for one session.",
+      "distinction": "A COUNT of codex-loop re-entries used for gating/telemetry - NOT the loop lease/park (looppark) and NOT a crash-loop detector (loop-crashloop); it only tallies iterations.",
+      "distinct_from": [
+        "looppark",
+        "loop-crashloop"
+      ],
+      "aliases": [],
+      "grounding": "LoopCount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-attngate",
+      "canonical": "attn_gate",
+      "family": "attention",
+      "kind": "config",
+      "definition": "The Qwen3.5-hybrid attention output-gate flag (attnGate in the qwen35/GGUF config) - whether the attention block multiplies its output by a learned per-head gate.",
+      "distinction": "A per-layer attention ARCHITECTURE flag (output gating) - NOT a guard/gate admission check and NOT the MoE router gate weight (gateWeight); it lives in the model config, not the control plane.",
+      "distinct_from": [
+        "x-attention-selfattn"
+      ],
+      "aliases": [],
+      "grounding": "attnGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-attnqnorm",
+      "canonical": "attn_q_norm",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The per-head query-normalization weight tensor (blk.N.attn_q_norm.weight, canonicalized to self_attn.q_norm.weight) that applies QK-norm to the attention query projection in Qwen3.5-class GGUFs.",
+      "distinction": "The QUERY-side RMSNorm weight inside attention - NOT the block input norm (attn_norm) and NOT the value projection (attn_v); it normalizes Q before the score.",
+      "distinct_from": [
+        "x-attention-attnv"
+      ],
+      "aliases": [],
+      "grounding": "attn_q_norm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fullattentioninterval",
+      "canonical": "full_attention_interval",
+      "family": "attention",
+      "kind": "config",
+      "definition": "The Qwen3.5 hybrid-attention layer period (cfg.FullAttentionInterval, GGUF full_attention_interval): every Nth layer runs full (global) attention while the rest run the local/linear path.",
+      "distinction": "The CADENCE of full-attention layers in a hybrid stack - NOT the attention kind itself (flashAttention) and NOT the sliding-window size; it is how often full attention recurs.",
+      "distinct_from": [
+        "x-attention-flashattention"
+      ],
+      "aliases": [],
+      "grounding": "FullAttentionInterval",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-cmdpolicy",
+      "canonical": "cmdPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The argv handler for the fak policy subcommand (func cmdPolicy in cmd/fak) - the CLI entry that inspects and prints the effective admission policy.",
+      "distinction": "The COMMAND-dispatch entrypoint for policy inspection - NOT a policy object itself (fetchPolicy/tierPolicy) and NOT the admission decision; it is the argv switch case that routes to policy code.",
+      "distinct_from": [
+        "x2-policy-capability-fetchpolicy"
+      ],
+      "aliases": [],
+      "grounding": "cmdPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-firepolicy",
+      "canonical": "FirePolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The rsiloop decision rule (rsiloop.FirePolicy) that decides whether an RSI tuning step fires at a given horizon margin (BaselineFirePolicy fires at MinHorizonMargin 0).",
+      "distinction": "The FIRE/no-fire rule for the RSI self-tuning loop - NOT an admission policy (fetchPolicy) and NOT a preemption policy; it governs when to trigger a tune, not what to admit.",
+      "distinct_from": [
+        "x2-policy-capability-nativepreemptionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "FirePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fleetpolicydir",
+      "canonical": "FLEET_POLICY_DIR",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "The env var (FLEET_POLICY_DIR) naming a DIRECTORY of fleet dispatch-policy files loaded at tick preflight.",
+      "distinction": "Points at a DIRECTORY of policy files - NOT the single-file FLEET_POLICY_PATH and NOT an in-code admission policy; it is a load-location knob read from the environment.",
+      "distinct_from": [
+        "x2-policy-capability-fetchpolicy"
+      ],
+      "aliases": [],
+      "grounding": "FLEET_POLICY_DIR",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fleetpolicypath",
+      "canonical": "FLEET_POLICY_PATH",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "The env var (FLEET_POLICY_PATH) naming a SINGLE fleet dispatch-policy file loaded at tick preflight.",
+      "distinction": "Points at ONE policy FILE - NOT the directory form FLEET_POLICY_DIR and NOT the policy object it loads; a single-path environment knob.",
+      "distinct_from": [
+        "x2-policy-capability-fetchpolicy"
+      ],
+      "aliases": [],
+      "grounding": "FLEET_POLICY_PATH",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fakcontext",
+      "canonical": "fak_context",
+      "family": "context-ctx",
+      "kind": "concept",
+      "definition": "The fak-managed conversation-context lifecycle (the fak_context_ events - session_fak_context_events, context_lifecycle_events) surfaced by vcache/cachevalue status.",
+      "distinction": "The fak-side CONTEXT lifecycle object/event stream - NOT the Go command context (commandContext) and NOT a single context budget; it is fak's model of the running conversation window.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "fak_context",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fakcontextplanner",
+      "canonical": "fak_context_planner",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "The failure-domain/component (fak_context_planner) that plans the fak conversation-context window - the vcache CausePlanning path deciding what context to keep or compact for the next turn.",
+      "distinction": "The PLANNER that shapes the fak context window - NOT the base context plan struct (basecontextplan) and NOT the raw context lifecycle events (fak_context); it is the decision component, cited as a WITNESSED planning failure domain.",
+      "distinct_from": [
+        "x2-context-ctx-basecontextplan"
+      ],
+      "aliases": [],
+      "grounding": "fak_context_planner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-contextcompacted",
+      "canonical": "context_compacted",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The transcript event marker (event_msg/context_compacted) the codex lifecycle emits when a session's context was compacted - the paired real compaction marker used by compactaudit.",
+      "distinction": "The AFTER-THE-FACT compaction EVENT marker - NOT the compaction budget (compactionbudget) that triggers it and NOT the regrowth that follows; it records that a compaction happened.",
+      "distinct_from": [
+        "x2-context-ctx-compactionbudget"
+      ],
+      "aliases": [],
+      "grounding": "context_compacted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-costevictions",
+      "canonical": "CostEvictions",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "The radixkv counter (Stats.CostEvictions) tallying evictions made by the legacy cost-aware eviction strategy.",
+      "distinction": "The COUNTER for cost-aware evictions - NOT the eviction policy enum (EvictionLRU) that selects a strategy and NOT a single evicted entry (evictionvictim); it is a running tally.",
+      "distinct_from": [
+        "x2-evict-evictedcount"
+      ],
+      "aliases": [],
+      "grounding": "CostEvictions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-evictionlru",
+      "canonical": "EvictionLRU",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "The radixkv EvictionPolicy enum value (EvictionLRU) selecting least-recently-used eviction ordering.",
+      "distinction": "The LRU POLICY selector - NOT the cost-aware counter (CostEvictions) and NOT the act of evicting to a budget (evicttobudget); it names which ordering the evictor uses.",
+      "distinct_from": [
+        "evict-kvevictcostaware"
+      ],
+      "aliases": [],
+      "grounding": "EvictionLRU",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-dispatchpool",
+      "canonical": "DISPATCH_POOL",
+      "family": "pool",
+      "kind": "config",
+      "definition": "The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE.",
+      "distinction": "A worker's POOL-membership label from the environment - NOT the in-memory seat pool (buildseatpool) and NOT a paged KV pool (pagedkvpool); it is a routing/grouping key, not an allocator.",
+      "distinct_from": [
+        "x2-pool-buildseatpool"
+      ],
+      "aliases": [],
+      "grounding": "DISPATCH_POOL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-dispatchwitnessrequirement",
+      "canonical": "DISPATCH_WITNESS_REQUIREMENT",
+      "family": "witness-proof",
+      "kind": "config",
+      "definition": "The env var (DISPATCH_WITNESS_REQUIREMENT) declaring what witness a dispatch worker must produce, forwarded into the guard Witness field.",
+      "distinction": "The REQUIREMENT setting for a dispatch worker's witness - NOT a witness result (witnessResult) and NOT the witness status (witnessStatus); it states what must be witnessed, not the outcome.",
+      "distinct_from": [
+        "x2-witness-proof-witnessresult"
+      ],
+      "aliases": [],
+      "grounding": "DISPATCH_WITNESS_REQUIREMENT",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-witnessedfiles",
+      "canonical": "WitnessedFiles",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The logvault accessor (v.WitnessedFiles) returning the set of files a run actually witnessed under a prefix (e.g. dispatch-runs), used by guard_audit.",
+      "distinction": "The LIST of files a run witnessed - NOT the witness file PATH (witnessPath) and NOT the witness event (eventWitness); it enumerates witnessed artifacts.",
+      "distinct_from": [
+        "x2-witness-proof-eventwitness"
+      ],
+      "aliases": [],
+      "grounding": "WitnessedFiles",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-witnesspath",
+      "canonical": "witnessPath",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The filesystem path parameter (witnessPath) to a witness artifact read by graders (GradeWitness, AnalyzeNegatedQA).",
+      "distinction": "The PATH to one witness file on disk - NOT the enumerated WitnessedFiles set and NOT the witness content; it is where a grader reads the witness from.",
+      "distinct_from": [
+        "x2-witness-proof-witnessresult"
+      ],
+      "aliases": [],
+      "grounding": "witnessPath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-witnesstooldescriptors",
+      "canonical": "WitnessToolDescriptors",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The conceptbench witness constant (WitnessToolDescriptors, bound to mcp.go toolDescriptors()) naming the ResolveTool referee surface a scenario grades against.",
+      "distinction": "A witness POINTER to the tool-descriptor referee surface - NOT a witnessed-files list and NOT a witness result; it identifies WHERE the referee reads tool descriptors.",
+      "distinct_from": [
+        "x2-witness-proof-witnessfor"
+      ],
+      "aliases": [],
+      "grounding": "WitnessToolDescriptors",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-errreplicaunsupported",
+      "canonical": "errReplicaUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The sentinel error (errReplicaUnsupported) the portable NUMA replica-store path returns when a caller asks for a NUMA-replicated allocation the platform cannot provide.",
+      "distinction": "A capability-UNSUPPORTED sentinel for NUMA replicas - NOT a maturity score (maturityScore) and NOT a general exact-span-supported flag; it marks one allocation feature as absent on this platform.",
+      "distinct_from": [
+        "x2-support-maturity-exactspansupported"
+      ],
+      "aliases": [],
+      "grounding": "errReplicaUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-familycoverage",
+      "canonical": "FamilyCoverage",
+      "family": "support-maturity",
+      "kind": "metric",
+      "definition": "The covmatrix/conceptcatalog measure (FamilyCoverage, JSON family_coverage) of how much of one model architecture's family is supported - a per-family fraction on the complete-model-support face.",
+      "distinction": "Coverage of a MODEL/architecture family's support - NOT this scorecard's confusable-token coverage and NOT a maturity score; it grades model-support breadth, keyed by architecture.",
+      "distinct_from": [
+        "x2-support-maturity-maturityscore"
+      ],
+      "aliases": [],
+      "grounding": "FamilyCoverage",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-qwen35gdnparitycosinemin",
+      "canonical": "Qwen35GDNParityCosineMin",
+      "family": "support-maturity",
+      "kind": "config",
+      "definition": "The acceptance floor constant (model.Qwen35GDNParityCosineMin) - the minimum cosine similarity the Qwen3.5 gated-delta-net path must hit against the reference to pass parity.",
+      "distinction": "A PARITY acceptance THRESHOLD (cosine floor) for Qwen3.5 GDN - NOT a coverage fraction and NOT a maturity score; it is a device-vs-reference correctness gate value.",
+      "distinct_from": [
+        "x-goal25b-support-maturity-qwen36parity"
+      ],
+      "aliases": [],
+      "grounding": "Qwen35GDNParityCosineMin",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-testverbtiercoverageistotal",
+      "canonical": "TestVerbTierCoverageIsTotal",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The named coverage guarantee (TestVerbTierCoverageIsTotal) referenced by the verb-tier gate: it reds CI when any live dispatch verb resolves to no tier, asserting verb-tier coverage is total.",
+      "distinction": "The TOTAL-verb-tier-coverage assertion - NOT a maturity score and NOT model FamilyCoverage; it guarantees every dispatch verb has a declared tier, parsed through the same verb parser the gate uses.",
+      "distinct_from": [
+        "x2-support-maturity-supportmaturity"
+      ],
+      "aliases": [],
+      "grounding": "TestVerbTierCoverageIsTotal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fakawqkernel",
+      "canonical": "FAK_AWQ_KERNEL",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The env/CPUID gate (FAK_AWQ_KERNEL) that opts into the AWQ 4-bit matmul kernel on amd64; unset leaves the default path provably untouched.",
+      "distinction": "The opt-in switch for the AWQ dequant matmul KERNEL - NOT the in-kernel batch/radix decode features and NOT an engine; it selects one quantized matmul implementation.",
+      "distinct_from": [
+        "x2-gateway-engine-fakkernel"
+      ],
+      "aliases": [],
+      "grounding": "FAK_AWQ_KERNEL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fakinkernelbatch",
+      "canonical": "FAK_INKERNEL_BATCH",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The env gate (FAK_INKERNEL_BATCH) enabling the in-kernel decode path to co-batch concurrent requests; unset decodes byte-identically via serial Session.Step per lane.",
+      "distinction": "The in-kernel CO-BATCHING toggle - NOT the AWQ kernel (FAK_AWQ_KERNEL) and NOT the in-kernel radix budget (FAK_INKERNEL_RADIX); it controls cross-request batching in decode.",
+      "distinct_from": [
+        "x2-gateway-engine-inkernelchat"
+      ],
+      "aliases": [],
+      "grounding": "FAK_INKERNEL_BATCH",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fakinkernelradix",
+      "canonical": "FAK_INKERNEL_RADIX",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The env gate (FAK_INKERNEL_RADIX, budget via FAK_INKERNEL_RADIX_BUDGET) enabling in-kernel radix prefix reuse in the decode planner.",
+      "distinction": "The in-kernel RADIX prefix-reuse toggle - NOT the co-batching gate (FAK_INKERNEL_BATCH) and NOT the AWQ kernel; it governs prefix sharing, sized by an edge-token budget.",
+      "distinct_from": [
+        "x2-gateway-engine-inkernelchat"
+      ],
+      "aliases": [],
+      "grounding": "FAK_INKERNEL_RADIX",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-featurevdso",
+      "canonical": "FeatureVDSO",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The ablation feature (FeatureVDSO) - the one runtime-settable rung-1 sweep knob selecting the vDSO fast path in the ablation registry.",
+      "distinction": "A runtime ablation FEATURE flag for the vDSO fast path - NOT an engine and NOT an in-kernel decode toggle; it is an ablation-registry rung, swept to measure a fast-path's effect.",
+      "distinct_from": [
+        "x2-gateway-engine-evvdsohit"
+      ],
+      "aliases": [],
+      "grounding": "FeatureVDSO",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-kernelledger",
+      "canonical": "KernelLedger",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The cachevalue-status source field (Sources.KernelLedger, JSON kernel_ledger) naming the kernel-side ledger a savings report reads from.",
+      "distinction": "The KERNEL ledger SOURCE label in a savings report - NOT the savings ledger or usage ledger it sits beside and NOT an engine; it identifies where kernel-side numbers come from.",
+      "distinct_from": [
+        "x2-gateway-engine-fakkernel"
+      ],
+      "aliases": [],
+      "grounding": "KernelLedger",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-newvllmengine",
+      "canonical": "NewVLLMEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The constructor (NewVLLMEngine(VLLMConfig)) that builds fak's vLLM engine adapter, defaulting an empty WorkerID and normalizing trailing slashes.",
+      "distinction": "The CONSTRUCTOR for the vLLM engine adapter - NOT the engine interface (routeEngine/httpEngine) and NOT the vLLM config struct; it instantiates one engine binding.",
+      "distinct_from": [
+        "x2-gateway-engine-httpengine"
+      ],
+      "aliases": [],
+      "grounding": "NewVLLMEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-faksecretgate",
+      "canonical": "FAK_SECRETGATE",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The env opt-in (FAK_SECRETGATE) that arms internal/secretgate Admit; when off, Admit is a no-op and only the normgate secret check runs.",
+      "distinction": "The opt-in for the SECRET admission gate - NOT the file-admission gate (gateFileAdmissionTree) and NOT a guard lifecycle env; it arms secret scanning specifically.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-procguard"
+      ],
+      "aliases": [],
+      "grounding": "FAK_SECRETGATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fleetcodexloopgate",
+      "canonical": "FLEET_CODEX_LOOP_GATE",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The env gate (FLEET_CODEX_LOOP_GATE) controlling whether the fleet dispatch tick admits the codex-loop step (dispatch_tick_codex_gate).",
+      "distinction": "The dispatch-tick GATE for the codex loop - NOT the loop_count metric it guards and NOT a guard lifecycle env; it is an admit/deny switch at the tick.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-acceptancegate"
+      ],
+      "aliases": [],
+      "grounding": "FLEET_CODEX_LOOP_GATE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-fleetdogfoodguard",
+      "canonical": "FLEET_DOGFOOD_GUARD",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The dispatch guard (FLEET_DOGFOOD_GUARD) gating the fleet's self-dogfooding path in dispatch_tick/worker.",
+      "distinction": "The GUARD for fleet self-dogfooding - NOT the codex-loop gate (FLEET_CODEX_LOOP_GATE) and NOT the secret gate; it guards the dogfood workflow specifically.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-procguard"
+      ],
+      "aliases": [],
+      "grounding": "FLEET_DOGFOOD_GUARD",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-gatedungraded",
+      "canonical": "GATED_UNGRADED",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The livecodebench abstain status (GATED_UNGRADED) returned when the grader cannot run against a healthy Docker-isolated host - an honest abstain, never a fabricated zero.",
+      "distinction": "An ABSTAIN grade label (gated, ungraded) - NOT a guard/gate admission check and NOT a failing score; it marks a result withheld because the execution host was unusable.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-acceptancegate"
+      ],
+      "aliases": [],
+      "grounding": "GATED_UNGRADED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-gatefileadmissiontree",
+      "canonical": "gateFileAdmissionTree",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The hooks tree-twin gate (gateFileAdmissionTree) implementing FILE_ADMISSION in the gate tree, built so it never fires on the grandfathered evidence files.",
+      "distinction": "The FILE_ADMISSION gate's tree-twin implementation - NOT the secret gate (FAK_SECRETGATE) and NOT the acceptance gate; it decides file admission inside the hooks gate tree.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-acceptancegate"
+      ],
+      "aliases": [],
+      "grounding": "gateFileAdmissionTree",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-gateweight",
+      "canonical": "gate_weight",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The MoE router gate weight (gateWeights[i]) for a routed expert - the softmax weight AttributeRoute folds one token's expert picks by, and a Qwen3.5 HAL layer weight.",
+      "distinction": "The ROUTER gate WEIGHT for a MoE expert - NOT an admission gate/guard and NOT the attention output gate (attnGate); it is a numeric routing coefficient, not a control-plane check.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-acceptancegate"
+      ],
+      "aliases": [],
+      "grounding": "gateWeight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-guardlifecyclesocketenv",
+      "canonical": "guardLifecycleSocketEnv",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The constant (guardLifecycleSocketEnv = FAK_GUARD_LIFECYCLE_SOCKET) naming the env var that carries the guard lifecycle IPC socket path used by precompact/stophook.",
+      "distinction": "Names the SOCKET-PATH env for guard-lifecycle IPC - NOT the paired token env (guardLifecycleTokenEnv) and NOT an admission gate; it is the transport address, not the auth secret.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-procguard"
+      ],
+      "aliases": [],
+      "grounding": "guardLifecycleSocketEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-guardlifecycletokenenv",
+      "canonical": "guardLifecycleTokenEnv",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The constant (guardLifecycleTokenEnv = FAK_GUARD_LIFECYCLE_TOKEN) naming the env var that carries the guard lifecycle IPC auth token used by precompact/stophook.",
+      "distinction": "Names the AUTH-TOKEN env for guard-lifecycle IPC - NOT the socket-path env (guardLifecycleSocketEnv) and NOT an admission gate; it is the shared secret, not the transport address.",
+      "distinct_from": [
+        "x-ci-coverage-guard-gate-procguard"
+      ],
+      "aliases": [],
+      "grounding": "guardLifecycleTokenEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-guardformatlayout",
+      "canonical": "guard_format_layout",
+      "family": "layout",
+      "kind": "subsystem",
+      "definition": "The guard exit-summary block LAYOUT (guard_format_layout.go) - the pure text layout of the guard summary onto which color is layered at print time (guardColorizeSummary).",
+      "distinction": "The guard summary TEXT layout - NOT a KV tensor layout (mlakvlayout/standardkvlayout) and NOT a model layout; it lays out human-readable guard output, not memory.",
+      "distinct_from": [
+        "x-layout-standardkvlayout"
+      ],
+      "aliases": [],
+      "grounding": "guard_format_layout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-modeldecision",
+      "canonical": "ModelDecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The modelaccept record (type ModelDecision) capturing the accept/reject decision for one model in the inventory (keyed byDecision).",
+      "distinction": "A per-MODEL acceptance decision record - NOT a routing decision (routeDecision) and NOT a tier decision (tierDecision); it records whether one model is accepted into support.",
+      "distinct_from": [
+        "x2-decision-routedecision"
+      ],
+      "aliases": [],
+      "grounding": "ModelDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-replanning",
+      "canonical": "replanning",
+      "family": "plan",
+      "kind": "concept",
+      "definition": "The property/act of re-deriving a plan for the same turn (ctxplan PlanView, supervisoragent action) - a deterministic re-admission that reuses the existing admit receipt, not a new authority.",
+      "distinction": "Re-deriving the SAME turn's plan (idempotent re-admission) - NOT the initial plan step (planstep) and NOT a new authorization; replanning the same turn twice cannot drift.",
+      "distinct_from": [
+        "x-cov-plan-planstep"
+      ],
+      "aliases": [],
+      "grounding": "replanning",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

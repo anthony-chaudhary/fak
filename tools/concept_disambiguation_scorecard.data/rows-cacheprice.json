@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "evictionvictim",
+      "canonical": "EvictionVictim",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "cacheprice.EvictionVictim(residents) returns the INDEX of the disaggregated-KV-pool prefix to evict first: the lowest retention DENSITY (DisaggregationRetentionValue per CapacityTokens), compared exactly by cross-multiplication (float-free), ties breaking toward the larger footprint.",
+      "distinction": "A pure pricing/SELECTION function over RemoteResident value structs — it only RANKS which prefix should go and returns an index; it never mutates a live cache. Distinct from engine evictors that actually remove a span.",
+      "distinct_from": [
+        "x2-evict-tryevict"
+      ],
+      "aliases": [],
+      "grounding": "EvictionVictim",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
