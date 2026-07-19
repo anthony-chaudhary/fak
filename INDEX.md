@@ -239,6 +239,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Managed-cache family — own-sessions audit from the durable gateway-usage ledgers](docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md) -- auto-indexed dated note.
 - [Study: vLLM @b6ff8a2f — witnessed inference/serving borrows (#5261-#5262)](docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md) -- auto-indexed dated note.
 - [Study: SGLang @b8ec5449 — RadixAttention serving engine (#5286-#5288)](docs/notes/CONCEPT-STUDY-SGLANG-2026-07-18.md) -- auto-indexed dated note.
 - [Study: llama.cpp @571d0d54 — CPU/GGUF/offload kernel peer (#5280-#5285)](docs/notes/CONCEPT-STUDY-LLAMACPP-2026-07-18.md) -- auto-indexed dated note.
