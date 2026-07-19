@@ -124,3 +124,38 @@ func TestHygieneCompareNxVerdict(t *testing.T) {
 		t.Fatalf("compare must render continuous value instead of /100 score: %q", out)
 	}
 }
+
+// TestUntrackedDirBloat pins the advisory bloat canary: a wholly-untracked directory
+// past the threshold is flagged with the remedy, a normal small dir is not, and the
+// heaviest dir leads. Parity with Python untracked_dir_bloat.
+func TestUntrackedDirBloat(t *testing.T) {
+	var big []string
+	for i := 0; i < 150; i++ {
+		big = append(big, ".st_full/internal/pkg"+itoa(i)+"/x.go")
+	}
+	hits := untrackedDirBloat(big, []string{".st_full/"}, 100)
+	if len(hits) != 1 || !strings.Contains(hits[0], "150 untracked files") ||
+		!strings.Contains(hits[0], "gitignore it") || !strings.Contains(hits[0], "/.st_full/") {
+		t.Fatalf("want one bloat hit naming count + remedy, got %v", hits)
+	}
+
+	var small []string
+	for i := 0; i < 12; i++ {
+		small = append(small, "internal/newpkg/f"+itoa(i)+".go")
+	}
+	if got := untrackedDirBloat(small, []string{"internal/newpkg/"}, 100); len(got) != 0 {
+		t.Fatalf("a small in-progress dir is not bloat, got %v", got)
+	}
+
+	var mixed []string
+	for i := 0; i < 300; i++ {
+		mixed = append(mixed, ".st_full/a"+itoa(i))
+	}
+	for i := 0; i < 120; i++ {
+		mixed = append(mixed, ".st_gen/b"+itoa(i))
+	}
+	got := untrackedDirBloat(mixed, []string{".st_gen/", ".st_full/"}, 100)
+	if len(got) != 2 || !strings.HasPrefix(got[0], ".st_full/") {
+		t.Fatalf("want heaviest-first ordering, got %v", got)
+	}
+}

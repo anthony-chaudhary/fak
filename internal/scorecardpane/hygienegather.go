@@ -7,6 +7,7 @@ package scorecardpane
 // public entry the cmd wiring calls.
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -563,7 +564,60 @@ var scratchRE = regexp.MustCompile(`\.(txt|csv|log|tmp|out|err)$|(^|/)(report|ag
 // exemptDataDirs mirrors the Python EXEMPT_DATA_DIRS prefixes for clutter exemption.
 var exemptDataDirs = []string{"experiments/", "testdata/", "internal/"}
 
-// worktreeClutter is the advisory concurrency canary: untracked, non-ignored scratch.
+// worktreeDirBloat is the advisory threshold: a wholly-untracked directory holding
+// more than this many non-ignored files is a scratch/overlay/snapshot tree (a
+// .st_full/ mirror, a stray build dir), not a normal in-progress feature. Mirrors the
+// Python WORKTREE_DIR_BLOAT.
+const worktreeDirBloat = 100
+
+// untrackedDirBloat flags a single wholly-untracked directory carrying an outsized
+// volume of non-ignored files — the "new non-gitignored dir with a huge volume of
+// files" that buries real WIP in `git status` and gets re-scanned (and double-counted)
+// by every tree-walking gate. othersDirs is `git ls-files --others --directory` output
+// (git collapses a fully-untracked directory to one `dir/` entry, so each candidate is
+// the shallowest wholly-untracked subtree); others is the un-collapsed file list used to
+// size it. Returns one summary line per over-size directory, heaviest first, with the
+// remedy. Never debt — it varies by working tree. Mirrors Python untracked_dir_bloat.
+func untrackedDirBloat(others, othersDirs []string, threshold int) []string {
+	type hit struct {
+		n   int
+		msg string
+	}
+	var hits []hit
+	for _, d := range othersDirs {
+		if !strings.HasSuffix(d, "/") {
+			continue
+		}
+		n := 0
+		for _, f := range others {
+			if strings.HasPrefix(f, d) {
+				n++
+			}
+		}
+		if n > threshold {
+			rule := "/" + strings.TrimSuffix(d, "/") + "/"
+			hits = append(hits, hit{n, fmt.Sprintf(
+				"%s — %d untracked files (non-ignored) — gitignore it "+
+					"(add '%s' or a root-anchored prefix rule) or remove it", d, n, rule)})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].n != hits[j].n {
+			return hits[i].n > hits[j].n
+		}
+		return hits[i].msg < hits[j].msg
+	})
+	out := make([]string, len(hits))
+	for i, h := range hits {
+		out[i] = h.msg
+	}
+	return out
+}
+
+// worktreeClutter is the advisory concurrency canary: untracked, non-ignored scratch —
+// scratch-shaped FILES, plus any wholly-untracked DIRECTORY with an outsized file volume
+// (a new non-gitignored snapshot/overlay tree). The bloat lines lead so the loudest
+// signal is not truncated by the render cap.
 func worktreeClutter(root string) []string {
 	others := gitLines([]string{"ls-files", "--others", "--exclude-standard"}, root)
 	var out []string
@@ -591,7 +645,9 @@ func worktreeClutter(root string) []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	othersDirs := gitLines([]string{"ls-files", "--others", "--exclude-standard",
+		"--directory", "--no-empty-directory"}, root)
+	return append(untrackedDirBloat(others, othersDirs, worktreeDirBloat), out...)
 }
 
 // --- small string helpers --------------------------------------------------
