@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 	"github.com/anthony-chaudhary/fak/internal/fleetcap"
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/turntaxmeter"
 )
 
@@ -128,6 +129,19 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	// the fold abstains) leaves the preflight byte-identical to before.
 	res = dispatchApplyFreshSeatCeiling(res, slow.FreshSeatCeiling)
 	out := res.Map()
+	// Cross-provider seat failover readout (#3575, gen/next). When the primary product's
+	// seats are walled (REFUSE_NO_ACCOUNT) for a debounced run of ticks and
+	// FLEET_DISPATCH_FALLBACK_PRODUCT names a servable alternative pool (e.g. an ambient
+	// codex login while the Claude roster is capped), surface the failover decision --
+	// which pool refused, which product would take the work -- so the tick can route the
+	// launch elsewhere instead of parking on a wall only a peer finishing can move
+	// (CONCEPT-IDEAL 1.2). Gated: with the knob unset the helper returns (nil,false) and
+	// nothing is attached, so the common preflight payload stays byte-identical. The
+	// launch-target SWITCH itself (lease/witness on the fallback backend) is the promotion
+	// step the tick consumes this readout for; this shell only decides and reports it.
+	if fb, ok := dispatchFallbackReadout(root, stderr, workKind, product, res.Verdict); ok {
+		out["fallback"] = fb
+	}
 	// #3109 self-heal: preflight is otherwise refuse-only on unattributed_live -- it
 	// counts orphaned worker PIDs (a botched teardown's `claude` descendant still
 	// carrying the dispatch marker but holding NO seat lease) as pool depletion and
@@ -657,6 +671,61 @@ func dispatchPreflightHostFromProcesses(processes dispatchtick.ProcGuardInput) d
 		Flagged:      res.ActionableFlaggedCount,
 		FlaggedNames: res.ActionableNames(),
 	}
+}
+
+// dispatchFallbackReadout gathers the live facts for the pure cross-provider failover
+// decision (#3575) and returns its legible payload block, or (nil, false) when the feature
+// is inert -- so the common preflight payload stays byte-identical to before the knob
+// existed. It is inert unless FLEET_DISPATCH_FALLBACK_PRODUCT names a product distinct from
+// the primary AND the primary preflight refused REFUSE_NO_ACCOUNT this tick (the seat wall
+// the failover targets; any other verdict holds on the primary).
+//
+// The debounce count is the trailing run of consecutive REFUSE_NO_ACCOUNT tick verdicts for
+// THIS product, folded from the durable loop ledger (the same store the #3523 no-seat park
+// keys on) plus 1 for the current in-flight tick, which is not yet recorded. The fallback
+// pool's own account/seat probe runs ONLY once that debounce is satisfied, so a below-
+// threshold refused tick spends no extra probe. Fail-open: an unreadable ledger folds to a
+// zero prior count (this tick alone), never an error path.
+func dispatchFallbackReadout(root string, stderr io.Writer, workKind, primaryProduct, primaryVerdict string) (map[string]any, bool) {
+	fallback := strings.TrimSpace(os.Getenv(dispatchtick.FallbackProductEnv))
+	if fallback == "" || fallback == primaryProduct {
+		return nil, false
+	}
+	if primaryVerdict != dispatchtick.PreflightRefuseNoAccount {
+		return nil, false
+	}
+	// Trailing consecutive REFUSE_NO_ACCOUNT verdicts for this product (newest first).
+	// Resolve the ledger exactly as recordDispatchTickLoop's writer does
+	// (filepath.Join(root, defaultLoopLedger())) so the debounce reader and the tick
+	// writer agree on one path.
+	events, _ := loopmgr.Load(filepath.Join(root, defaultLoopLedger()))
+	reasons := make([]string, 0, len(events))
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind != loopmgr.EventAdmit || dispatchtick.ProductForBackend(ev.Principal) != primaryProduct {
+			continue
+		}
+		reasons = append(reasons, ev.Reason)
+	}
+	threshold := dispatchtick.DefaultFallbackDebounceTicks
+	consecutive := dispatchtick.CountTrailingNoAccountRefusals(reasons) + 1 // + this tick
+	in := dispatchtick.FallbackProductInput{
+		Enabled:             true,
+		PrimaryProduct:      primaryProduct,
+		FallbackProduct:     fallback,
+		PrimaryVerdict:      primaryVerdict,
+		ConsecutiveRefusals: consecutive,
+		DebounceThreshold:   threshold,
+	}
+	// Probe the fallback pool only when the debounce is met (an idle below-threshold tick
+	// must not spend an extra account/seat scan against a provider it will not use).
+	if consecutive >= threshold {
+		acct := dispatchPreflightAccount(root, stderr, workKind, fallback)
+		seat := dispatchPreflightSeat(root, stderr, fallback)
+		in.FallbackServable = acct.Available && !seat.Depleted
+		in.FallbackReason = firstString(acct.Reason, acct.Error)
+	}
+	return dispatchtick.DecideFallbackProduct(in).Map(), true
 }
 
 func dispatchPreflightAccount(root string, _ io.Writer, workKind, product string) dispatchtick.AccountCheck {
