@@ -769,3 +769,29 @@ docs/dispatch-status.md
 # Node-local, regenerable, never source — the same class as /.tmp_overlay/ and
 # /.head_build_check/ above.
 /.probe/
+
+# `.st_*` — per-session snapshot / overlay / commit-ladder scratch. A session that
+# has to land on a churning shared trunk freezes a workspace to work against: an
+# ad-hoc `.st_ladder.sh` builds `.st_full/` — a FULL mirror of the repo tree (its own
+# .gitignore, AGENTS.md, internal/**, cmd/**, docs/**; ~180MB, 11k+ files) — regens a
+# scorecard against that frozen copy in `.st_out/`/`.st_gen/`, and drives the commit
+# through `fak commit`, dropping `.st_fc*.json` / `.st_ladder.log` / `.st_full_base`
+# receipts and `.st_overlay*`/`.st_probe/`/`.st_pinned.txt` overlay state along the way.
+# ALL of it is regenerable, node-local scratch — never source. Left unignored, `.st_full`
+# alone dumps 11k+ entries into `git status` (burying real WIP), leaks into fak's durable
+# `fak-wip` leaf checkpoints, AND — exactly like /.head_build_check/ above — makes every
+# tree-walking governance gate scan a second mirrored copy of the whole repo and
+# double-count. Root-anchored prefix so the whole ad-hoc family is caught by one rule and
+# a tracked file that merely starts with "st" elsewhere is untouched.
+/.st_*
+
+# `.tmp-<issue>-head` / `.tmp-<n>-*` — a per-session HEAD-archive checkout (a `git archive
+# HEAD | tar -x` copy of a package, e.g. `.tmp-3620-head/` holding cmd/fak) used to A/B a
+# change against clean HEAD without touching the shared index. Regenerable, node-local
+# scratch — the sibling of /.tmp/ and /.tmp_overlay/ above, just issue-suffixed.
+/.tmp-*
+
+# `.mcwitness/` — witness-cache reconnaissance scratch (a `main.go` spike parked in a
+# dot-dir so `go build`/`go test` skip it). Regenerable, never source — same class as
+# /.probe/ above.
+/.mcwitness/
