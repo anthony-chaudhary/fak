@@ -575,6 +575,12 @@ func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.Rout
 	if err != nil {
 		return payload, err
 	}
+	// Operator pause hold (#5031): move each `fak steer pause`d unit's bound issue into the
+	// skipped set under the existing BLOCKED_BY_HUMAN token before anything downstream picks.
+	// Runs BEFORE the prereq hold on purpose -- a paused prerequisite stays in
+	// SkippedHumanBlocked (still open), so a dependent of it remains correctly held. Reads the
+	// ledger fresh each tick (never the routed cache), so a resume takes effect next tick.
+	payload = holdSteerPausedForRoute(root, payload)
 	// Dependency soft-hold: after the known-bad hold, hold back any dispatchable leaf whose
 	// "depends-on:/blocked-by: #N" prerequisite is still an OPEN candidate this tick. Runs AFTER
 	// known-bad on purpose -- a known-bad-held prerequisite stays in SkippedHumanBlocked (still

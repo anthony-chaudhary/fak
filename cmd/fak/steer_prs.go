@@ -60,6 +60,10 @@ func runSteer(stdout, stderr io.Writer, argv []string) int {
 			return runSteerAck(stdout, stderr, argv[1:])
 		case "redirect":
 			return runSteerRedirect(stdout, stderr, argv[1:])
+		case "pause":
+			return runSteerPause(stdout, stderr, argv[1:])
+		case "resume":
+			return runSteerResume(stdout, stderr, argv[1:])
 		case "-h", "--help", "help":
 			fmt.Fprintln(stdout, steerUsage)
 			return 0
@@ -75,6 +79,8 @@ Usage:
   fak steer prs [--json] [--check] [--base REF] [--head REF] [--max-files N]
   fak steer ack <unit> [--by WHO] [--note TEXT] [--base REF] [--head REF]
   fak steer redirect <unit> -m "<steer note>" [--by WHO] [--base REF] [--head REF]
+  fak steer pause <unit> [-m "<reason>"] [--by WHO] [--base REF] [--head REF]
+  fak steer resume <unit> [--by WHO]
 
 prs folds the pending dev->release delta into PR-sized units per (fak <leaf>)
 stamp, bands each by where attention is owed (RESIDUAL/UNVERIFIABLE/CLEARED),
@@ -92,7 +98,14 @@ reopens) a steer follow-up through the trusted gh seam carrying the note, the
 unit's exact member SHA set, and its band at redirect time, then appends a
 countable redirect row to the overlay ledger. Advisory only: a redirect never
 reverts, rewrites, force-pushes, or gates — the next tick changes, the merged
-history does not.`
+history does not.
+
+pause stops the fleet spending on a unit's bound intent: the bound issue is
+skipped with BLOCKED_BY_HUMAN (the dispatcher's existing backpressure token)
+from the next dispatch tick until resume releases it. Pause is not a kill: an
+in-flight worker still finishes and lands cleanly; the intent is simply not
+picked up again while held. resume releases the hold — a pause with no resume
+would silently starve the intent, so the verbs ship as a pair.`
 
 func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak steer prs", flag.ContinueOnError)
@@ -190,7 +203,9 @@ func runSteerAck(stdout, stderr io.Writer, argv []string) int {
 
 	who := strings.TrimSpace(*by)
 	if who == "" {
-		who = strings.TrimSpace(releasePRPlanGit(root, "config", "user.name"))
+		// --get pins the invocation provably read-only for the architest
+		// steer-overlay floor (a bare `git config key value` would write).
+		who = strings.TrimSpace(releasePRPlanGit(root, "config", "--get", "user.name"))
 	}
 	ack, err := steerpr.NewAck(unit.Leaf, who, steerpr.UnitSHAs(*unit), *note, time.Now())
 	if err != nil {
@@ -277,7 +292,9 @@ func runSteerRedirect(stdout, stderr io.Writer, argv []string) int {
 
 	who := strings.TrimSpace(*by)
 	if who == "" {
-		who = strings.TrimSpace(releasePRPlanGit(root, "config", "user.name"))
+		// --get pins the invocation provably read-only for the architest
+		// steer-overlay floor (a bare `git config key value` would write).
+		who = strings.TrimSpace(releasePRPlanGit(root, "config", "--get", "user.name"))
 	}
 	bound := ""
 	if len(unit.Resolves) > 0 {
@@ -382,6 +399,17 @@ func buildSteerPRsView(root, base, head string) (map[string]any, error) {
 			acked[u.Leaf] = a
 		}
 	}
+	// The paused state rides BESIDE the band too (#5031): an active pause is an
+	// operator's live hold on the unit's bound intent, shown with paused-since
+	// so paused time is visible — a silently paused intent would be
+	// indistinguishable from a finished one.
+	pauses := steerpr.ActivePauses(steerpr.LoadPauses(steerpr.PauseLedgerPath(root)))
+	paused := map[string]steerpr.Pause{}
+	for _, u := range units {
+		if p, ok := pauses[u.Leaf]; ok {
+			paused[u.Leaf] = p
+		}
+	}
 	return map[string]any{
 		"schema":             steerPRsSchema,
 		"base":               baseRef,
@@ -399,6 +427,7 @@ func buildSteerPRsView(root, base, head string) (map[string]any, error) {
 		"units":              units,
 		"unstamped":          unstamped,
 		"acks":               acked,
+		"pauses":             paused,
 	}, nil
 }
 
@@ -475,11 +504,17 @@ func writeSteerPRs(view map[string]any, maxFiles int) string {
 		releaseStatusShortSHA(releaseStatusString(view["base_sha"])), releaseStatusShortSHA(releaseStatusString(view["head_sha"])))
 	b.WriteString("Worst-attention-first: RESIDUAL owes you a look; CLEARED the kernel already witnessed.\n")
 	acked, _ := view["acks"].(map[string]steerpr.Ack)
+	pausedNow, _ := view["pauses"].(map[string]steerpr.Pause)
 	for _, unit := range units {
 		// The acked state renders as a suffix beside the honest band — an acked
 		// residual reads "RESIDUAL (acked by X)", never CLEARED.
 		a, ok := acked[unit.Leaf]
 		fmt.Fprintf(&b, "\n## [%s] %s — %d commit(s)\n\n", steerpr.BandLabel(unit.Band, a, ok), unit.Leaf, len(unit.Commits))
+		// A live hold renders with paused-since (#5031): paused time must be
+		// visible, or a paused intent is indistinguishable from a finished one.
+		if p, held := pausedNow[unit.Leaf]; held {
+			fmt.Fprintf(&b, "**PAUSED** by %s since %s — dispatch skips %s (BLOCKED_BY_HUMAN); release with `fak steer resume %s`.\n", p.By, p.At, p.Issue, unit.Leaf)
+		}
 		fmt.Fprintf(&b, "**Title:** `%s`\n", unit.Title)
 		if len(unit.Resolves) > 0 {
 			fmt.Fprintf(&b, "Closes %s.\n", strings.Join(unit.Resolves, ", "))
