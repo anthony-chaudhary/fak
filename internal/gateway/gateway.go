@@ -1458,6 +1458,15 @@ type Server struct {
 	// bill it is differenced against is OBSERVED (provider-relayed). Its own mutex; zero-value ready.
 	resumeProj resumeProjMetrics
 
+	// observers is the stratified ASYNC observer rung on the result-admission chain (#2434):
+	// non-blocking ResultObservers handed a READ-ONLY copy of each admitted result AFTER the
+	// blocking chain settles, delivered off the turn path under a per-rung latency budget and
+	// sample rate, with N-failures-in-window auto-disable + a HOOK_UNHEALTHY journal row. It is
+	// the observability dual of the blocking abi.ResultAdmitter — it cannot block or mutate. Its
+	// own metric family (fak_gateway_observer_*) renders self-contained via writeMetrics, like
+	// resumeProj. Built in New; nil-safe for a bare Server (every method no-ops on nil).
+	observers *observerStratum
+
 	// guardRecoveryPrompt is the one-shot model-visible hint the guard host supplies
 	// after a prior run ended with guard refusals. It is popped on the first served
 	// Anthropic Messages request so a resume sees the recovery context once, without
@@ -1840,6 +1849,7 @@ func New(cfg Config) (*Server, error) {
 		deferColdTools:               cfg.DeferColdTools || envEnabled("FAK_DEFER_COLD_TOOLS"),
 		cacheStream:                  cacheStream,
 		rungObs:                      rungObs,
+		observers:                    newObserverStratum(observerJournalPath(), logf),
 		feed:                         newCoherenceFeed(0),
 		sessionFeed:                  newSessionFeed(0),
 		activity:                     newSessionActivity(),

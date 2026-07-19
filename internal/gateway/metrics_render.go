@@ -266,6 +266,7 @@ func (s *Server) renderMetrics() string {
 	m.writeRoutingMetrics(&b)            // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
 	outputNegframeAudit.writeMetrics(&b) // #3567: negative-framing spans in model OUTPUT prose (sampled shadow, observe-only)
 	s.resumeProj.writeMetrics(&b)        // #941: resume projected-vs-observed residual (self-contained family)
+	s.observers.writeMetrics(&b)         // #2434: async result-observer lag + auto-disable (self-contained family)
 	s.writeFleetMembershipMetrics(&b)    // #42: live fleet membership/health/drain/failover transitions, per worker
 	s.writeAdmissionMetrics(&b)          // #35: native serving-scheduler admission family (fak_sched_*), when a controller is wired
 	s.writePreemptionMetrics(&b)         // #31: native KV preemption/swap/recompute family, when a preemptor is wired

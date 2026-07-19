@@ -207,6 +207,7 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		}
 	}
 	var admissions []ResultAdmission
+	var observed []ObservedResult
 	var quarantinedIdx []int
 	for i := range messages {
 		if messages[i].Role != agent.RoleTool {
@@ -291,6 +292,18 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			fresh:        fresh,
 		}
 		admissions = append(admissions, adm)
+		// Capture a read-only snapshot for the async observer stratum (#2434). messages[i].Content
+		// is the SETTLED admitted content at this point (the blocking chain rewrote it in place on a
+		// quarantine/transform; unchanged on a plain allow), so an observer sees exactly the bytes
+		// the turn forwarded — as a value copy it can neither block nor mutate them.
+		observed = append(observed, ObservedResult{
+			TraceID:      traceID,
+			ToolCallID:   messages[i].ToolCallID,
+			Tool:         tool,
+			ResultDigest: resultDigest,
+			Verdict:      wv.Kind,
+			Content:      messages[i].Content,
+		})
 	}
 	s.annotateResultLivelock(traceID, admissions)
 	// Both defenses fire on a FIRST-arrival quarantine only (quarantinedIdx holds the fresh
@@ -304,6 +317,10 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			return admissions, err
 		}
 	}
+	// The blocking chain has settled; hand the observer stratum read-only copies async, OFF the
+	// turn path (#2434). This is fire-and-forget: a slow or failing observer degrades against its
+	// own budget/health, never against this result or this turn.
+	s.observers.dispatch(ctx, observed)
 	return admissions, nil
 }
 
