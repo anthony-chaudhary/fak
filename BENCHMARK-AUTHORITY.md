@@ -37,7 +37,7 @@ For benchmark governance, contribution rules, and historical rationale, use the 
 
 > **🧠 The *why*:** `WHY-REUSE-WINS-2026-06-21.md` (private companion — not published) (v1) argues — and stress-tests — *why* these reuse numbers matter more than the headline alone: reuse is a **different class** of optimization (work-elimination on the `N` axis, not work-acceleration on the `κ` axis), so it's **exact, training-free, and composes multiplicatively** on top of every per-token trick. Follows the v2 SOTA-only framing — leads with the absolute competitive number (**19.0 min vs 78 min = 4.1× less work**, conservative marginal 2.4–2.7×), shows **no naive-loop numbers**, and centers cross-agent reuse as the layer that is `fak`'s. No new numbers; fences where the "works across everything / no fine-tuning" framing is overstated (and where addressable reuse, [#228](https://github.com/anthony-chaudhary/fak/issues/228), widens it).
 
-**Last updated:** 2026-07-07
+**Last updated:** 2026-07-19
 **Status:** Living document — update when new model results ship
 
 > **🔁 Provenance vs. public reproducibility (read before you `git show` a commit below).**
@@ -107,6 +107,7 @@ For benchmark governance, contribution rules, and historical rationale, use the 
 | **FrontierSWE time-to-solution — fak-routed vs raw harness (C15 of epic [#1706](https://github.com/anthony-chaudhary/fak/issues/1706), [#1721](https://github.com/anthony-chaudhary/fak/issues/1721)) — GATED, no number until witnessed** | **GATED — no TTS number is claimed. Claim boundary: no wall-clock/turn-count TTS ratio until (a) the official FrontierSWE grader produced both arms' reward.json grader output (C13 [#1719](https://github.com/anthony-chaudhary/fak/issues/1719)) and (b) score-parity holds — fak `correctness`/`speedup` >= raw (C11 [#1717](https://github.com/anthony-chaudhary/fak/issues/1717))** | harness-agnostic (claude-code shim first) | raw FrontierSWE harness (same task/model/budget/retry) | _gated_ | `docs/benchmarks/FRONTIERSWE-RESULTS.md` (authority) + `docs/benchmarks/FRONTIERSWE-TTS-RUNBOOK.md` (raw-vs-fak recipe). Offline projection only, NOT a measurement: `fak frontierswe describe --tts`; scoring runtime green (`go test ./internal/frontierswe`). Measured TTS is the C13/C14 residual — see [FRONTIERSWE-RESULTS.md](docs/benchmarks/FRONTIERSWE-RESULTS.md) |
 | **Full-span four-band trace + µs decide tail under same-process load (G5/R6 of epic [#2218](https://github.com/anthony-chaudhary/fak/issues/2218), [#2223](https://github.com/anthony-chaudhary/fak/issues/2223))** | **loaded p99 ≈ 30–34 µs vs quiet ≈ 13.5–14 µs (×2.1–2.5) · p50 nearly flat (×1.17–1.19) · >100 µs share ~3× (0.18–0.19% → 0.56–0.58%) · trace: all 4 bands walkable in ONE process, every DENY carrying a consequence class (retry_turn / forked_outcome / clean_stop)** — OBSERVED research-grade, no gate flipped | n/a — kernel `Decide` fold + real `superloop.Walk`/`EvaluatePreflight`, hermetic, no model | quiet arm of the SAME process/run (within-run only; per-band totals never cross-multiplied) | _this commit_ | `docs/benchmarks/fullspan/fullspan-trace-20260707.json` + `tailload-20260707-run{1,2}.json` (two full 200k-sample runs; loaded p99 agrees within 14.2%) + sheet `docs/benchmarks/FULLSPAN-TAILLOAD-RESULTS.md`. Hardware named in-artifact: AMD Ryzen 9 9950X (16C/32T), 256 GiB RAM, WSL2 Ubuntu 24.04 on a Windows 11 host. Reproduce: `FAK_BENCH_HW=… FAK_TAILLOAD_OUT=… go test ./internal/bench/ -run TestWriteTailLoadArtifact -count=1`. **Fences:** three-clocks (no end-to-end field — structurally enforced by test), trace B0 spans are one-shot cold costs (do NOT compare to the warmed 362 ns M3 Pro anchor), WSL2-virtualized tails, coarse-clock hosts refuse to write artifacts |
 | **Served-inline proxy-dedup hit-rate — how often `--vdso-proxy-fill` actually fires on an agent read pattern ([#1350](https://github.com/anthony-chaudhary/fak/issues/1350), epic [#1351](https://github.com/anthony-chaudhary/fak/issues/1351))** | **WITNESSED: read-only-*shaped* names (`get_`/`read_`/`search_`/…) serve 5/14 read-only proposals = 35.7%, and every served hit is a cross-turn re-read (W3 5/5; within-turn W1/W2 1/0 and force-fresh 1/0 serve nothing); Claude-native `Read`/`Grep`/`Glob` names serve 0/14 = 0% (the read-only NAME gate does not recognize them); the canonical guard-trace-e2e dominant path serves 0/2 = 0% for the same structural reason. Saves the EXECUTION of a duplicate/repeat read (the client round-trip), NOT the surviving call's tokens. Recommendation: keep `--vdso-proxy-fill` OPT-IN until the name gate recognizes native read tools (or scope default-on to MCP/snake_case reads)** | n/a — kernel served-inline seam (`adjudicateProposedServed` + `admitInboundResults`), no model/GPU | a miss is byte-identical to today (`TestServedInline_Miss`); denominator = read-only-proposed calls per turn | `7b07af0ca` (dominant-path arm) / `953bff575` (dedup sheet) | `internal/gateway/testdata/served_inline_dedup_report.json` (modeled `representative-coding-session-v1`, 6 turns, per-win-class decomposition) + `internal/gateway/testdata/served_inline_guardtrace_report.json` (canonical `guard-trace-e2e` fixture, per-turn counts + `fallback_reason`) + sheet `docs/benchmarks/SERVED-INLINE-DEDUP-RESULTS.md`. **Provenance:** the SERVE is WITNESSED (fak's real in-process seam served these calls, not a model of what it would do); the dedup trace redundancy is MODELED (a named, reproducible transcript) and the guard-trace arm is an AUTHORED shared fixture with real Claude Code native names — **neither is a captured live `/v1/messages` session** (that promotion path stays open). Reproduce: `go test ./internal/gateway -run TestServedInlineDedup -count=1` + `go test ./internal/gateway -run TestServedInlineGuardTrace -count=1`. **Fence:** a near-zero rate on the dominant path is a valid, publishable result that down-ranks the lever, not a defect — the 0% is the name gate, independent of how redundant the reads are |
+| **Governed-agent overhead (observer-effect) + pilot-survival demonstrator** ([#3292](https://github.com/anthony-chaudhary/fak/issues/3292), Workstream E of epic [#3256](https://github.com/anthony-chaudhary/fak/issues/3256)) | **Overhead WITHIN its declared envelope: in-kernel decide 362 ns / hook p99 ~175 ms < 250 ms budget / meter 0-alloc — signed net (vDSO −520 tok saving, cross-agent +28,986 tok cost). Survival: governed cuts false-done 0.50→0.00 (net +3,900 tok), one-holder leases, runaway/injection caps — ungoverned does none** | n/a — fak's own mediation overhead + survival levers (no model/GPU) | fak-off / naive self-report loop / ungoverned control, per lever | _this commit_ | Detailed section [Governed-agent overhead + pilot-survival demonstrator](#governed-agent-overhead-observer-effect-budget--pilot-survival-demonstrator-2026-07-19--the-corporate-what-does-it-cost--will-it-survive-proof). On-box witnesses: `go test ./internal/turntaxmeter ./internal/loopgate -count=1` → `ok` (2026-07-19). Binds existing artifacts (`turntaxmeter/{overheadbudget,hooklat,sampler}.go`, `loopgate/testdata/verified-vs-naive-loop.report.json`, `perf-dos-hook-cost.md`, `perf-runaway-guard.md`, `SELF-TAX-TREND.md`, `cmd/turntaxdemo -selfcheck`); adds no new measured number. Provenance-labeled per row; false-done corpus SIMULATED, safety-floor re-run peer-red-trunk-gated |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →
@@ -116,6 +117,92 @@ For benchmark governance, contribution rules, and historical rationale, use the 
 > hardware-independent and reproduce the committed JSON exactly; only the live
 > wall-clocks are single-box (within-run ratios authoritative per
 > [BENCHMARK-GOVERNANCE.md "Within-Run Ratios"](BENCHMARK-GOVERNANCE.md#within-run-ratios--single-box-discipline)).
+
+---
+
+## Governed-agent overhead (observer-effect budget) + pilot-survival demonstrator (2026-07-19) — the corporate "what does it cost / will it survive" proof
+
+**Date:** 2026-07-19
+**Issue:** [#3292](https://github.com/anthony-chaudhary/fak/issues/3292) (Workstream E / proof of epic [#3256](https://github.com/anthony-chaudhary/fak/issues/3256), the all-in-one agent runtime MLP)
+**Standards:** [observer-effect](docs/standards/observer-effect.md) · [net-true-value](docs/standards/net-true-value.md)
+**On-box witnesses (this row):** `go test ./internal/turntaxmeter -count=1` → `ok` · `go test ./internal/loopgate -count=1` → `ok` (both green on win/amd64, 2026-07-19)
+**Artifacts:** `internal/turntaxmeter/{overheadbudget,hooklat,sampler}.go` · `internal/loopgate/testdata/verified-vs-naive-loop.report.json` · `docs/perf-dos-hook-cost.md` · `docs/perf-runaway-guard.md` · `docs/benchmarks/SELF-TAX-TREND.md` · `cmd/turntaxdemo` `-selfcheck`
+
+### What this witnesses (and why it is one row, two axes)
+
+The corporate objection to a governance layer is two questions: *"what does it cost me?"* and
+*"will the pilot survive production?"* This row answers **both** from committed evidence, never
+narrated. It does not add a new measured number — it **binds** the already-witnessed overhead
+and survival artifacts into the single authority the issue names ("land both in
+BENCHMARK-AUTHORITY.md with traced artifacts"), each provenance-labeled and net of what it saves,
+so no naive-baseline strawman is smuggled in.
+
+### Axis 1 — observer-effect overhead vs its DECLARED envelope (not a naive baseline)
+
+The self-tax plane declares an **envelope** per lifecycle rung — a scope-stated ceiling, not a
+promise of zero cost (the epic's explicit non-goal: a gate that costs 8% and saves 40% is a net
+win). A breach names ONE closed-vocabulary token, `OVERHEAD_BUDGET_EXCEEDED`
+(`internal/turntaxmeter/overheadbudget.go`), verifiable via `dos check-reason`. The measured
+overhead sits **within** that envelope:
+
+| Rung / meter | Measured overhead | Declared envelope | Verdict | Provenance |
+|---|---|---|---|---|
+| In-kernel adjudication decide (per tool call) | **362 ns** allow (M3 Pro), p50 ~1,300 ns in-process | 5 µs compute-rung `MaxNS` | within envelope | OBSERVED (`experiments/mac-m3pro-kernel-…json`; `docs/perf-dos-hook-cost.md`) |
+| Guard hook tail (pretool+posttool, fleet) | **~85 ms mean / ~175 ms p99** | `DefaultHookP99BudgetMS` = **250 ms** | within envelope (`GATE_LATENCY_REGRESSION` not fired) | OBSERVED (2026-07-01 guard-audit, `hooklat.go`) |
+| Meter's OWN per-event cost (the observer effect itself) | **0 B / 0 allocs**, 1-in-N sampled | zero-alloc cost cap | within cap | WITNESSED on-box (`sampler_cost_test.go`, green 2026-07-19) |
+| Envelope table itself | v0.1 declared calibration | — | fail-open on undeclared rungs | MODELED (`overheadbudget.go` doc: generous, not a measured p99) |
+
+**Net of what it saves** (signed, workload-dependent — never an average): the same plane's
+`SELF-TAX-TREND.md` folds the net line — vDSO self-ablation nets **−520 tokens (a SAVING)** while
+a tool-light cross-agent turn nets **+28,986 tokens (a COST)**. The overhead is real and bounded;
+whether it is net-positive is a property of the workload, stated as such.
+
+### Axis 2 — pilot-survival demonstrator: governed stops what ungoverned does not
+
+Three survival levers, each a **captured** governed-vs-ungoverned contrast with a traced artifact —
+not a narrated claim:
+
+| Survival lever | Ungoverned (control) | Governed runtime | Traced artifact | Provenance |
+|---|---|---|---|---|
+| **False "done"** (verified progress catches it) | naive self-report loop accepts, false-done rate **0.50**, ships 34 slop units, 5,100 rework tokens | witnessed exit-gate re-arms, false-done **0.00**, 15 slop units, 0 rework; **net +3,900 tokens** after 1,200 gate-cost | `internal/loopgate/testdata/verified-vs-naive-loop.report.json` | gate MECHANISM WITNESSED (drives real `loopgate.Adjudicate`), corpus **SIMULATED**; live-agent dojo run `not yet` |
+| **Collision** (leases prevent it) | two workers write the same tree concurrently | `dos arbitrate` admits ONE holder per lane, refuses the second | acquired live this session: `dos arbitrate --lane compute --kind cluster` → `outcome:"acquire"`, tree `internal/compute/**` | WITNESSED (this session) |
+| **Runaway** (a resource cap stops it) | one `llama-cli` with no thread bound climbed to **129,427 threads** and pinned the host | `fak process-guard` flags >2,000 threads / a sustained >90%/core CPU pin; opt-in reaper (never touches protected/own tree) | `docs/perf-runaway-guard.md` (witnessed incident + shipped guard) | OBSERVED (incident) + shipped guard |
+| **Injected/destructive result** (safety floor stops it) | baseline admits **1** prompt-injection and executes **1** destructive op | fak admits **0**, executes **0** on the same trace | `cmd/turntaxdemo -selfcheck` pinned invariants (`selfcheckExpect`, airline suite) | committed invariant; on-box re-run currently BLOCKED (peer-red trunk, below) |
+
+### Honesty fences
+
+- **This binds, it does not re-measure.** Every number above traces to an already-committed
+  artifact with its own provenance; this row is the authority binding the issue asks for, not a
+  fresh benchmark. The two on-box witnesses (`turntaxmeter`, `loopgate`) were re-run green on
+  win/amd64 on 2026-07-19 to confirm the cited artifacts still hold on this host.
+- **The overhead envelope is DECLARED (v0.1), not a measured p99.** It exists so a *gross*
+  regression (an order of magnitude over) reads back as a structured `OVERHEAD_BUDGET_EXCEEDED`
+  breach while normal jitter stays OK. Tightening a row toward a measured fleet p99 is the
+  named self-tax follow-on, not this row.
+- **The false-done corpus is SIMULATED.** `verified-vs-naive-loop.report.json` labels its own
+  provenance `SIMULATED`: it drives the *real* shipping gate against hand-authored episode
+  traces, so it proves the gate's mechanism, not a wall-clock tok/s. A live-agent run over a real
+  dojo episode corpus is host/agent-gated and remains `not yet`.
+- **The safety-floor contrast is committed but not re-run here.** `cmd/turntaxdemo -selfcheck`
+  encodes the injection/destructive invariants (baseline 1→fak 0 on both), but on 2026-07-19 the
+  demo could not be rebuilt on this host: the trunk was peer-red (`internal/agent`,
+  `internal/policy` carried in-flight peer edits that broke the full build), so the demo binary —
+  which imports the kernel registrations — did not compile. The invariant is cited from its
+  committed pin; a green-trunk re-run (`go run ./cmd/turntaxdemo -selfcheck`) is the reproduce
+  handle.
+
+### Verification
+
+- `go test ./internal/turntaxmeter -count=1` → `ok` (the observer-effect meter: declared
+  envelope + `OVERHEAD_BUDGET_EXCEEDED`, the hook-latency p99 fold, and the sampler's own
+  zero-alloc cost cap). Run green on win/amd64, 2026-07-19.
+- `go test ./internal/loopgate -count=1` → `ok` (the verified-vs-naive false-done demonstrator).
+  Run green on win/amd64, 2026-07-19.
+- `dos check-reason OVERHEAD_BUDGET_EXCEEDED` / `dos check-reason GATE_LATENCY_REGRESSION`
+  resolve both breach tokens as real closed-vocabulary members (declared in `dos.toml`).
+- Green-trunk only: `go run ./cmd/turntaxdemo -selfcheck` asserts the safety-floor invariants and
+  exits non-zero on drift; `go run ./cmd/turntaxdemo -print` renders the governed-vs-ungoverned
+  turn-tax side by side.
 
 ---
 
@@ -173,6 +260,126 @@ B0 57,004 ns (5); reported per band and never combined.
 - `go test ./internal/bench/ -count=1` → PASS (structure asserted everywhere;
   distribution/duration assertions gate on measured clock resolution).
 - Reproduce commands in the sheet; artifacts carry config + hardware in-band.
+
+---
+
+## Governed-Agent Overhead (Observer-Effect) + Pilot-Survival Demonstrator ([#3292](https://github.com/anthony-chaudhary/fak/issues/3292), epic [#3256](https://github.com/anthony-chaudhary/fak/issues/3256))
+
+**Date:** 2026-07-19
+**Commit:** _this commit_
+**Issue:** [#3292](https://github.com/anthony-chaudhary/fak/issues/3292) — Workstream E (proof) of the all-in-one agent-runtime epic [#3256](https://github.com/anthony-chaudhary/fak/issues/3256); governed by the observer-effect + net-true-value standards.
+**Label:** WITNESSED overhead anchors ⊕ OBSERVED fleet tax − MODELED declared envelope; **no gate asserted or flipped** — this row folds already-committed witnesses into the two answers the corporate objection needs.
+
+### What this answers (and why)
+
+The corporate objection to a governance layer is two questions at once: *"what does it
+cost me?"* (the runtime's own per-turn overhead) and *"will my pilot survive production?"*
+(the market's #1 stall — runaway cost, agent collisions, false "done"). This row answers
+**both from witnesses**, not narration, and keeps them on **separate axes** the way the rest
+of this sheet keeps the turn-tax and the safety floor apart.
+
+The overhead half is measured against the **declared observer-effect envelope**
+(`internal/turntaxmeter/overheadbudget.go`, the T2 ticket of the self-tax plane epic
+[#1147](https://github.com/anthony-chaudhary/fak/issues/1147)), not against a naive-baseline
+strawman: a budget is *an envelope with a stated scope, not a promise of zero cost* — a rung
+that costs a few µs but deletes a model round-trip is a **net win**, and the plane says so
+(the net line below) rather than reding on the µs alone.
+
+### Results — (1) per-turn overhead, each anchor provenance-labeled
+
+The per-governed-turn tax decomposed by lifecycle rung, each anchor a committed artifact
+already on this sheet, each judged against its declared `overheadbudget.go` ceiling:
+
+| Rung / span | Measured anchor | Provenance | Declared envelope (`overheadbudget.go`) | Verdict |
+|---|---:|---|---:|---|
+| adjudicator `decide` (per tool-call adjudication tax) | **362 ns** allow · 560–605 ns w/ ArgPredicates | WITNESSED (M3 Pro; `kernel-latency-mac-m3pro-20260620.json`) | 5,000 ns | within (≈14×) |
+| vDSO `serve` (hottest rung — rides every served call) | **~3.4 µs** p50 wall-clock (3,459 / 4,823 ns) | WITNESSED, single-box wall-clock (varies run-to-run; `examples/turntax/EXAMPLE-OUTPUT.md`) | 10,000 ns | within (~3×) |
+| result admission (`ctxmmu`/`normgate`) | 1.8–14 µs scan · 3.3–15.8 µs `Admit` | WITNESSED (M3 Pro; same kernel-latency artifact) | 10,000 ns | within, tail-touching |
+| registry-read floor the decide path folds | ~0.55 ns/op · **0 allocs** · FLAT N=1→1000 | WITNESSED (`internal/abi/registry_scaling_test.go`) | n/a (drop-in-cost floor) | flat |
+| `witness` `confirm` (audit — spawns `git`) | subprocess-bound (host/disk, not kernel compute) | MODELED envelope (`SubprocessBound`) | 50 ms | scope-stated wide |
+| guard-hook per-tool-call tax (dominant **fleet** wall-clock cost) | ~85 ms mean · ~175 ms p99 | OBSERVED (2026-07-01 guard-audit; n=13, **Thin** — alarm abstains) | declared v0.1 ceiling; breach names `GATE_LATENCY_REGRESSION` | rolled up, not yet gated |
+| **the meter's OWN cost** (the observer-effect fence itself) | **0 heap allocs/op** for `Sampler.ShouldSample` | WITNESSED — `testing.AllocsPerRun` is deterministic per host, not a noisy wall-clock | declared cap = 0 allocs/event | **within cap** |
+
+The last row is the load-bearing honesty move: an overhead you never bounded you cannot
+honestly report, so the **instrument that measures the tax is itself measured** and pinned at
+zero allocations per hot-path event (rate-bound gate + `internal/spec` `AcceptanceMeter`
+per-sample cost together bound *how much each sample costs* and *how often one fires*).
+
+### Results — net of what it saves (not a naive strawman)
+
+The overhead is only actionable net of the round-trips the same mediation deletes. On the
+canonical `fak turntax` replay (deterministic, live kernel counters — not a model):
+
+| Net line | Value | Provenance |
+|---|---:|---|
+| turns saved (forced 5 = grammar+dedup · elision 4 = pure+static) | **+9** | WITNESSED (kernel `Counters.Transforms` + `VDSOHits`) |
+| tokens saved @ hosted-flash | 11,880 | WITNESSED (deterministic replay) |
+| vDSO lever contribution (real ON/OFF path swap, 9−2) | 7 turns == `VDSOHits` | WITNESSED |
+| anti-inflation control (clean happy path) | **saves exactly 0** | WITNESSED (`TestRun_HappyPathSavesNothing`) |
+
+A few-µs adjudication tax against 9 deleted model round-trips is the net-win the envelope
+exists to let the plane state honestly — and the happy-path control saving **0** proves the
+headline reflects real avoided errors, not a fixed per-call discount.
+
+### Results — (2) pilot-survival demonstrator (captured, governed vs ungoverned)
+
+The survival axis is captured as a **true side-by-side**: the SAME trace replayed WITHOUT fak
+(left) and WITH fak (right) through one live kernel replay (`turnbench.RunWithCalls`), so
+neither column is modeled — both are readings of one grounded run.
+
+| Scenario (`cmd/guarddemo -selfcheck`) | WITHOUT fak (ungoverned) | WITH fak (governed) | Provenance |
+|---|---:|---:|---|
+| `guard-redteam` (poisoned result + destructive payload) | **4 breaches** | **0** | WITNESSED (deterministic replay) |
+| `turntax-airline` | 2 breaches | 0 | WITNESSED |
+| `turntax-happy` (anti-fear-mongering control) | 0 | 0 | WITNESSED |
+
+Mapped to the epic's market-named survival trio — each stopped by a governed mechanism with a
+green, third-party-rederivable witness:
+
+| Survival failure (market evidence, epic #3256) | Ungoverned outcome | Governed mechanism | Witness (green today) |
+|---|---|---|---|
+| **runaway** (loop burns budget; the ~$47k 11-day A2A loop) | spends until a human notices | `internal/doomloop` — effort vs **VERIFIED** forward progress (never a self-report), reversible re-anchor nudge, tops out at an operator escalation record | `go test ./internal/doomloop` → PASS; refusal token `DOOM_LOOP` in `dos.toml` |
+| **collision** (two agents overwrite the same region) | last-writer-wins corruption | `dos arbitrate` lane lease — `acquire` vs a structured `REFUSE` on a held lane | WITNESSED **live this run**: `dos arbitrate --lane compute` returned `acquire` (disjoint tree); a held lane returns REFUSE |
+| **false-done** (self-reported "done" that isn't) | trusts the agent's word | VERIFIED-not-self-reported progress + `dos_verify` (git-evidence, not the worker's claim) | the same `doomloop` VERIFIED-progress axis; `dos_verify` reason vocabulary |
+
+### Honesty fences
+
+- **Per-turn overhead is a per-rung fold of committed single-box anchors** (M3 Pro decide/admit,
+  fleet-audit hook tax), judged against the **declared** `overheadbudget.go` envelope — it is
+  *explicitly re-budgeted against* that envelope, not a single summed end-to-end per-turn
+  kernel-ns total. Emitting one auto-folded `kernel_ns` span per turn is the **T1
+  ([#1149](https://github.com/anthony-chaudhary/fak/issues/1149)) follow-on** (lifecycle spans do
+  not yet carry elapsed-ns); the always-on fak-on-vs-fak-off CI gate is T6/T7/T8. This is a
+  curated fold today, like the sibling [`SELF-TAX-TREND.md`](docs/benchmarks/SELF-TAX-TREND.md)
+  row — not an auto-emitted JSON.
+- **Envelope ceilings are v0.1 DECLARED calibration, not measured p99s** — generous by design so
+  a *gross* (order-of-magnitude) regression reads back as a structured `OVERHEAD_BUDGET_EXCEEDED`
+  breach while normal jitter stays OK. Tightening a row toward a measured p99 is the T1 follow-on.
+- **This is fak's *mediation* overhead, not raw-inference parity** ([#306](https://github.com/anthony-chaudhary/fak/issues/306)) — the two axes are cross-linked, never blended.
+- **The survival trio is witnessed at the mechanism level** (guarddemo captures the
+  poison/destructive safety-survival; runaway/collision/false-done are each green at
+  `doomloop`/`dos arbitrate`/`dos_verify`). A **single unified `runaway ⊕ collision ⊕ false-done`
+  side-by-side capture** in one demo binary is the named follow-on; it is blocked today only by a
+  peer-red trunk (untracked in-flight `internal/agent`/`internal/policy` edits do not build the
+  full binary on this host), not by a missing mechanism.
+- The `guard-hook` fleet tax is **Thin** (n=13): the percentiles print, the alarm does **not**
+  fire until the tail accumulates — a single slow spike must not red the plane.
+
+### Verification
+
+- `go test ./internal/turntaxmeter -count=1` → **PASS** (this host): pins the declared envelope
+  (`TestOverBudgetSpanReadsBackAsBreach`, `TestVDSOServeBudgetDeclaredAndBreaches`,
+  `TestBudgetTokenIsStable`, `TestWitnessRungIsSubprocessBound`) **and** the observer-effect cost
+  fence (`TestSamplerShouldSampleUnderCostCap` = 0 allocs/event, `TestSamplerRateHonoredUnderLoad`).
+- `go test ./internal/doomloop -count=1` → **PASS** (this host): the false-done / runaway
+  verified-progress classifier.
+- `dos check-reason OVERHEAD_BUDGET_EXCEEDED` / `GATE_LATENCY_REGRESSION` / `DOOM_LOOP` → resolve
+  as real members of the closed refusal vocabulary (`dos.toml [reasons.*]`).
+- Survival + turn-tax side-by-side (green when the full tree builds; peer-red today):
+  `go run ./cmd/guarddemo -selfcheck` and `go run ./cmd/turntaxdemo -selfcheck` assert the
+  documented governed=0-breach invariants and exit non-zero on drift.
+- Net-of-savings anchors: `TestRun_HappyPathSavesNothing`, `TestRun_VDSOAblationIsARealPathSwap`
+  in `internal/turnbench/turnbench_test.go`; captured output in `examples/turntax/EXAMPLE-OUTPUT.md`.
 
 ---
 
