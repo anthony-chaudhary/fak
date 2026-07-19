@@ -185,6 +185,25 @@ type HealthRow struct {
 	// Nil means the loop has not measured that metric yet; 0 is a real debt-free
 	// measurement and must still be rendered.
 	LearningDebt *int64 `json:"learning_debt,omitempty"`
+
+	// OSFiredNoLedgerRow is the #4989 OS-scheduler rung: true iff this row is DARK in
+	// the ledger plane AND a mapped OS task fired successfully (LastTaskResult 0x0)
+	// within its cadence window. It sits ALONGSIDE Dark/State (never overloads them):
+	// the ledger gap is a real fact, but the loop is demonstrably alive at the OS
+	// layer, so the row is fired-but-no-ledger-row (likely `--check` instead of
+	// `tick`, or a genuinely no-op tick), NOT a loop that stopped running. Only ever
+	// set on a DARK row; fails closed (an absent/unhealthy/unplaceable/stale OS
+	// witness never promotes a row out of DARK).
+	OSFiredNoLedgerRow bool `json:"os_fired_no_ledger_row,omitempty"`
+
+	// OSTaskLabel is the corroborating OS task's label (e.g. "FleetStaleWorkGarden"),
+	// carried onto the row for the reader ONLY when OSFiredNoLedgerRow is set. Empty
+	// on every other row, including a fail-closed DARK one.
+	OSTaskLabel string `json:"os_task_label,omitempty"`
+
+	// OSLastRunUnixNano is the corroborating OS task's last-run time, carried for the
+	// reader ONLY when OSFiredNoLedgerRow is set. 0 otherwise.
+	OSLastRunUnixNano int64 `json:"os_last_run_unix_nano,omitempty"`
 }
 
 // HealthRollup is the fleet-wide summary across all rows: how many loops, and how
@@ -205,6 +224,12 @@ type HealthRollup struct {
 	// (per-row WitnessCollapse). A scheduler can gate on WitnessCollapse > 0 the way it
 	// already gates on Dark > 0.
 	WitnessCollapse int `json:"witness_collapse"`
+	// OSFiredNoLedgerRow is the count of rows promoted by the #4989 OS-scheduler rung:
+	// ledger-DARK loops whose mapped OS task fired 0x0 within cadence. It is a SUBSET of
+	// Dark (each such row is still counted in Dark), never a sibling tally — a reader
+	// sees "N of the dark loops are actually firing at the OS layer, just not writing a
+	// ledger row".
+	OSFiredNoLedgerRow int `json:"os_fired_no_ledger_row,omitempty"`
 }
 
 // HealthReport is the full read-only fold: the schema tag, the time it was folded,
@@ -216,17 +241,55 @@ type HealthReport struct {
 	Rollup     HealthRollup `json:"rollup"`
 }
 
+// OSTaskInfo is the corroborating OS-scheduler signal for one loop (#4989): did its
+// mapped OS task fire successfully (LastTaskResult 0x0), and when. It is the SECOND
+// liveness plane — the ledger plane reads last-appended-row-vs-cadence and so cannot
+// see a task that fired on cadence but wrote no ledger row. It is trusted to promote a
+// row out of false-DARK ONLY when it fired AND its last run is placeable in time AND
+// that run falls within the loop's cadence window; every other shape fails closed (see
+// overlayOSTask), because the rung's one unacceptable failure is fabricating liveness
+// for a loop that is really dead.
+type OSTaskInfo struct {
+	// TaskLabel is the OS task's name (e.g. "FleetStaleWorkGarden"), carried onto the
+	// row for the reader when the witness corroborates.
+	TaskLabel string
+	// Fired is true iff the task's LastTaskResult decoded to success (0x0). A task
+	// that ran but failed, or whose result is unknown, is not a witness.
+	Fired bool
+	// LastRunUnixNano is when the task last ran. 0 means unreadable — which fails
+	// closed: an unplaceable run cannot prove the task fired within cadence.
+	LastRunUnixNano int64
+}
+
 // FoldHealth is the read-only health fold. It joins the folded loop ledger (st, from
 // Summarize) with the job registry (reg, the cadence definition) and derives one
 // HealthRow per loop seen in EITHER input, plus a roll-up. It is PURE: no clock read
 // (now is supplied), no I/O, no mutation of its inputs.
+//
+// It is exactly FoldHealthWithOS with no OS witness — the ledger plane alone — so the
+// existing ledger-only callers stay byte-identical.
+func FoldHealth(st Status, reg Registry, now time.Time, th HealthThresholds) HealthReport {
+	return FoldHealthWithOS(st, reg, now, th, nil)
+}
+
+// FoldHealthWithOS is FoldHealth plus the #4989 OS-scheduler rung. After each row is
+// derived from the ledger plane, a DARK row whose loop id has a corroborating
+// OSTaskInfo (fired 0x0, last run placeable AND within the loop's cadence) is
+// surfaced as OSFiredNoLedgerRow — fired-but-no-ledger-row — instead of being left as
+// a false-DARK. The promotion sits ALONGSIDE the liveness verdict: State/Dark are
+// untouched (a --json consumer gating on Dark keeps its meaning) and the OS tally is a
+// SUBSET of Dark in the roll-up, never a sibling. Fail-closed at every edge: a nil
+// witness map, an unmapped loop, a non-fired task, an unreadable last-run, or a
+// last-run past cadence all leave the row a plain DARK with no OS evidence attached. A
+// non-DARK row is never touched — the rung explains a dark ledger, it does not
+// decorate a healthy row.
 //
 // The union is deliberate. A loop present in the ledger but absent from the registry
 // is an ad-hoc loop (judged against the default horizon). A loop present in the
 // registry but absent from the ledger is the canonical DARK loop — registered to a
 // schedule, never observed ticking — which a ledger-only fold would render as silence.
 // Folding the union surfaces it.
-func FoldHealth(st Status, reg Registry, now time.Time, th HealthThresholds) HealthReport {
+func FoldHealthWithOS(st Status, reg Registry, now time.Time, th HealthThresholds, osTasks map[string]OSTaskInfo) HealthReport {
 	snaps := map[string]LoopSnapshot{}
 	for _, loop := range st.Loops {
 		snaps[loop.LoopID] = loop
@@ -241,7 +304,11 @@ func FoldHealth(st Status, reg Registry, now time.Time, th HealthThresholds) Hea
 	for _, id := range ids {
 		snap, ledgered := snaps[id]
 		job, registered := jobs[id]
-		rows = append(rows, healthRow(id, snap, ledgered, job, registered, now, th))
+		row := healthRow(id, snap, ledgered, job, registered, now, th)
+		if w, ok := osTasks[id]; ok {
+			overlayOSTask(&row, w, now)
+		}
+		rows = append(rows, row)
 	}
 
 	return HealthReport{
@@ -250,6 +317,35 @@ func FoldHealth(st Status, reg Registry, now time.Time, th HealthThresholds) Hea
 		Rows:       rows,
 		Rollup:     rollup(rows),
 	}
+}
+
+// overlayOSTask folds one loop's OS-scheduler witness onto its row (#4989). It is the
+// sole promotion path and is fail-closed by construction: it attaches OS evidence ONLY
+// when the row is DARK (the rung explains a dark ledger, nothing else), the task fired
+// 0x0, its last run is readable (>0), the row carries a cadence to bound the run
+// against, AND that run falls within one cadence window ending at now. Any other shape
+// returns with the row unchanged — no OS evidence attached, the row stays a plain
+// DARK. State and Dark are never mutated.
+func overlayOSTask(row *HealthRow, w OSTaskInfo, now time.Time) {
+	if row.State != HealthDark {
+		return // the rung only overlays a dark row; a live/stale row is left untouched
+	}
+	if !w.Fired || w.LastRunUnixNano <= 0 {
+		return // a non-fired task or an unplaceable run is not a witness — fail closed
+	}
+	if row.CadenceSeconds <= 0 {
+		return // no cadence to bound the OS run against — fail closed
+	}
+	age := now.UTC().UnixNano() - w.LastRunUnixNano
+	if age < 0 {
+		age = 0
+	}
+	if age > row.CadenceSeconds*int64(time.Second) {
+		return // the OS task's own last run is past cadence — it stopped firing too
+	}
+	row.OSFiredNoLedgerRow = true
+	row.OSTaskLabel = w.TaskLabel
+	row.OSLastRunUnixNano = w.LastRunUnixNano
 }
 
 // unionIDs returns the sorted union of loop ids across the ledger snapshots and the
@@ -396,6 +492,9 @@ func rollup(rows []HealthRow) HealthRollup {
 		r.WitnessGap += int(row.WitnessGap)
 		if row.WitnessCollapse {
 			r.WitnessCollapse++
+		}
+		if row.OSFiredNoLedgerRow {
+			r.OSFiredNoLedgerRow++
 		}
 	}
 	return r
