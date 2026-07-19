@@ -73,6 +73,7 @@ except (AttributeError, ValueError):
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import issue_dispatch  # noqa: E402  (refresh_registry/preflight/worker_env/spawn_detached)
+import worker_worktree  # noqa: E402  (#3181: per-worker worktree isolation, shared with the Go spine)
 import issue_worker_prompt  # noqa: E402  (render the per-issue resolution prompt)
 import dispatch_worker  # noqa: E402  (child_env for the opencode backend)
 import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
@@ -2205,7 +2206,8 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        base_sha: str | None = None,
                        spawn_probe_s: float = 0.0,
                        log_prefix: str = "resolve",
-                       prompt_payload: str | None = None) -> dict[str, Any]:
+                       prompt_payload: str | None = None,
+                       worktree_git: "Callable[..., Any] | None" = None) -> dict[str, Any]:
     """Launch a detached worker (claude or opencode) on one issue; record pid.
 
     The log keeps the backend-neutral ``resolve-<N>-<stamp>.log`` name so the close
@@ -2222,6 +2224,15 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_log = log_dir / f"{log_prefix}-{issue}-{stamp}.log"
+    # #3181: opt-in per-worker worktree isolation behind FLEET_WORKER_WORKTREE, the same
+    # gate + fail-open helper the Go spine (#3168) uses. When on, the worker edits in its
+    # own detached worktree pinned at base_sha (the repo HEAD this dispatcher already
+    # records) with GOCACHE/GOTMPDIR redirected inside it; the ``.worktree`` sidecar hands
+    # the land+reap sweep the path + base SHA to land the diff under the lane lease this
+    # dispatcher holds. Any worktree fault fails open to the shared-trunk ``cwd`` — flag
+    # off is byte-identical to today.
+    spawn_cwd, env, wt_info = worker_worktree.isolate_spawn(
+        Path(cwd), lane, str(issue), cwd, env, base_sha=base_sha, git=worktree_git)
     prompt_file: Path | None = None
     prompt_stdin = None
     if backend == "opencode":
@@ -2254,7 +2265,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
         fh.write("# fak-spawn %s issue=%s lane=%s backend=%s argv0=%s\n" % (
             stamp, issue, lane, backend, os.path.basename(exe)))
         fh.flush()
-        proc = subprocess.Popen(argv, cwd=str(cwd), env=env,
+        proc = subprocess.Popen(argv, cwd=str(spawn_cwd), env=env,
                                 stdin=prompt_stdin if prompt_stdin is not None else subprocess.DEVNULL,
                                 stdout=fh, stderr=subprocess.STDOUT, **kwargs)
     finally:
@@ -2272,8 +2283,21 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     # to recent history.
     if base_sha:
         (out_log.with_suffix(BASE_SHA_SIDECAR_SUFFIX)).write_text(base_sha, encoding="utf-8")
+    # #3181: record the isolated worktree so the witness sweep can land its diff under
+    # the lane lease and reap it. Best effort — a write failure never blocks the spawn.
+    if wt_info.get("worktree"):
+        try:
+            out_log.with_suffix(".worktree").write_text(
+                json.dumps({"path": wt_info["worktree"],
+                            "base_sha": wt_info.get("base_sha"),
+                            "lane": lane, "issue": issue}),
+                encoding="utf-8")
+        except OSError:
+            pass
     result: dict[str, Any] = {"pid": proc.pid, "log": str(out_log), "issue": issue,
                               "lane": lane, "backend": backend}
+    if wt_info.get("worktree"):
+        result["worktree"] = wt_info["worktree"]
     if prompt_file is not None:
         result["prompt_file"] = str(prompt_file)
     acct = write_account_sidecar(out_log, account)

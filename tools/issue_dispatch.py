@@ -59,6 +59,7 @@ except (AttributeError, ValueError):
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch_worker  # noqa: E402  (sibling tool: build_command/child_env)
 import fleet_accounts  # noqa: E402  (the switcher: optional setup-token read)
+import worker_worktree  # noqa: E402  (#3181: per-worker worktree isolation, shared with the Go spine)
 
 SCHEMA = "fleet-issue-dispatch/1"
 WAVE_SCHEMA = "fleet-issue-dispatch-wave/1"
@@ -729,16 +730,36 @@ def worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str,
 
 
 def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
-                   log_dir: Path, lane: str, guarded: bool = True) -> dict[str, Any]:
+                   log_dir: Path, lane: str, guarded: bool = True,
+                   worktree_git: "Callable[..., Any] | None" = None) -> dict[str, Any]:
     """Launch the worker DETACHED so it outlives this tick; log to a dated file.
 
     ``guarded`` records whether THIS worker is fronted by ``fak guard`` so the in-flight
     marker self-describes its guard status; a later tick reads it via
     ``guarded_worker_in_flight`` as the build-integrity gate before an unguarded escape
-    lands a self-source commit."""
+    lands a self-source commit.
+
+    #3181: when ``FLEET_WORKER_WORKTREE`` is on, isolate the worker in its own detached
+    worktree pinned at trunk HEAD (``worktree_git`` is the injectable git runner) —
+    ``cwd`` becomes that worktree and GOCACHE/GOTMPDIR are redirected inside it, the same
+    gate + fail-open contract as the Go spine (#3168). A ``.worktree`` sidecar records the
+    path + base SHA so the witness sweep can land the diff under the lane lease and reap.
+    FAIL-OPEN: any worktree fault leaves ``cwd``/``env`` untouched (shared-trunk spawn as
+    before), and flag-off is byte-identical to today."""
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_log = log_dir / f"dispatch-{lane}-{stamp}.log"
+    # #3181: opt-in per-worker worktree isolation, shared helper/flag with the Go spine.
+    spawn_cwd, env, wt_info = worker_worktree.isolate_spawn(
+        Path(cwd), lane, lane, cwd, env, git=worktree_git)
+    if wt_info.get("worktree"):
+        try:
+            out_log.with_suffix(".worktree").write_text(
+                json.dumps({"path": wt_info["worktree"],
+                            "base_sha": wt_info.get("base_sha"), "lane": lane}),
+                encoding="utf-8")
+        except OSError:
+            pass
     exe = shutil.which(command[0]) or command[0]
     argv = [exe, *command[1:]]
     kwargs: dict[str, Any] = {}
@@ -752,7 +773,7 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     else:
         kwargs["start_new_session"] = True
     fh = open(out_log, "w", encoding="utf-8")
-    proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+    proc = subprocess.Popen(argv, cwd=str(spawn_cwd), env=env, stdin=subprocess.DEVNULL,
                             stdout=fh, stderr=subprocess.STDOUT, **kwargs)
     # Stamp this lane AND its pinned account as in flight so a later tick spreads off
     # both (cross-tick lane + account de-confliction). Best-effort and pid-keyed;
@@ -760,7 +781,10 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     marker = _write_inflight_marker(log_dir, lane, proc.pid,
                                     account=env.get("CLAUDE_CONFIG_DIR"),
                                     guarded=guarded)
-    return {"pid": proc.pid, "log": str(out_log), "inflight": marker}
+    result = {"pid": proc.pid, "log": str(out_log), "inflight": marker}
+    if wt_info.get("worktree"):
+        result["worktree"] = wt_info["worktree"]
+    return result
 
 
 def _build_launch(root: Path, lane: str | None) -> tuple[list[str], list[str], bool]:

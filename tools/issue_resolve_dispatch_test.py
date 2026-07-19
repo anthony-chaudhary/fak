@@ -6053,5 +6053,51 @@ class CloseOpenWitnessedTest(unittest.TestCase):
             {})
 
 
+class SpawnIssueWorkerWorktreeTest(unittest.TestCase):
+    """#3181: spawn_issue_worker edits in a per-worker worktree pinned at base_sha
+    when the flag is on, fails open to the shared-trunk cwd when off."""
+
+    def _fake_git(self):
+        def git(root, args):
+            if args and args[0] == "rev-parse":
+                return 0, "deadbeef\n"
+            return 0, ""
+        return git
+
+    def _spawn(self, env_overrides, td):
+        m = load()
+        seen: dict[str, object] = {}
+
+        class FakeProc:
+            pid = 5150
+
+        def fake_popen(argv, cwd=None, env=None, **kw):
+            seen["cwd"] = cwd
+            return FakeProc()
+
+        with mock.patch.object(m.subprocess, "Popen", fake_popen), \
+             mock.patch.dict(os.environ, env_overrides, clear=False):
+            res = m.spawn_issue_worker(
+                ["python", "-c", "pass"], {"PATH": os.environ.get("PATH", "")},
+                Path(td), Path(td) / "runs", 3181, "tools", "claude",
+                base_sha="basecafe", worktree_git=self._fake_git())
+        return m, seen, res
+
+    def test_worktree_spawn_off_uses_root_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            _, seen, res = self._spawn({"FLEET_WORKER_WORKTREE": "0"}, td)
+            self.assertEqual(seen["cwd"], str(Path(td)))
+            self.assertNotIn("worktree", res)
+
+    def test_worktree_spawn_on_uses_worktree_cwd_pinned_at_base_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m, seen, res = self._spawn(
+                {"FLEET_WORKER_WORKTREE": "1",
+                 "FLEET_WORKER_WORKTREE_ROOT": str(Path(td) / "wt")}, td)
+            self.assertNotEqual(seen["cwd"], str(Path(td)))
+            self.assertTrue(m.worker_worktree.is_worker_worktree(str(seen["cwd"])))
+            self.assertEqual(res.get("worktree"), seen["cwd"])
+
+
 if __name__ == "__main__":
     unittest.main()

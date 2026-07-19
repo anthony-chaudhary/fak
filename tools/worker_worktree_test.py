@@ -537,5 +537,67 @@ class WorktreeBuildPoisonTest(unittest.TestCase):
                 mod.reap_worker_worktree(repo, b["path"])
 
 
+class WorktreeSpawnFlagTest(unittest.TestCase):
+    """The FLEET_WORKER_WORKTREE gate mirrors the Go spine's truthy/falsy grammar."""
+
+    def test_worktree_spawn_flag_unset_is_off(self) -> None:
+        self.assertFalse(mod.worktree_isolation_enabled({}))
+
+    def test_worktree_spawn_flag_offish_values_are_off(self) -> None:
+        for v in ("", "0", "off", "false", "no", "disable", "disabled", " OFF "):
+            self.assertFalse(mod.worktree_isolation_enabled({"FLEET_WORKER_WORKTREE": v}),
+                             f"{v!r} should read OFF")
+
+    def test_worktree_spawn_flag_any_other_value_is_on(self) -> None:
+        for v in ("1", "on", "true", "yes", "enable"):
+            self.assertTrue(mod.worktree_isolation_enabled({"FLEET_WORKER_WORKTREE": v}),
+                            f"{v!r} should read ON")
+
+
+class WorktreeSpawnIsolateTest(unittest.TestCase):
+    """isolate_spawn is the shared fail-open composer both Python spawn sites call."""
+
+    def _fake_ok_git(self):
+        # rev-parse HEAD -> a base sha; worktree add/list succeed; nothing else touched.
+        return FakeGit(replies={"rev-parse": (0, "deadbeef\n"),
+                                "worktree": (0, "")})
+
+    def test_worktree_spawn_off_returns_cwd_and_env_unchanged(self) -> None:
+        env = {"PATH": "/x"}
+        git = self._fake_ok_git()
+        cwd, out_env, info = mod.isolate_spawn(
+            Path("/repo"), "tools", "3181", "/repo", env, enabled=False, git=git)
+        self.assertEqual(cwd, "/repo")
+        self.assertIs(out_env, env)          # untouched object -> byte-identical spawn
+        self.assertFalse(info["enabled"])
+        self.assertIsNone(info["worktree"])
+        self.assertEqual(git.calls, [])      # OFF never shells to git
+
+    def test_worktree_spawn_on_uses_worktree_cwd_and_isolated_build(self) -> None:
+        env = {"PATH": "/x"}
+        with tempfile.TemporaryDirectory() as td:
+            cwd, out_env, info = mod.isolate_spawn(
+                Path("/repo"), "tools", "3181", "/repo", env,
+                enabled=True, wt_root=Path(td), git=self._fake_ok_git())
+        self.assertTrue(info["enabled"])
+        self.assertTrue(mod.is_worker_worktree(cwd), f"{cwd} not a worker worktree")
+        self.assertEqual(info["worktree"], cwd)
+        self.assertEqual(info["base_sha"], "deadbeef")
+        # Build is redirected INSIDE the worktree so it can't poison a sibling.
+        self.assertTrue(out_env["GOCACHE"].startswith(cwd))
+        self.assertTrue(out_env["GOTMPDIR"].startswith(cwd))
+
+    def test_worktree_spawn_on_fails_open_when_git_errors(self) -> None:
+        env = {"PATH": "/x"}
+        # rev-parse fails -> no base sha -> prepare fails -> caller's cwd/env returned.
+        git = FakeGit(replies={"rev-parse": (1, "")})
+        cwd, out_env, info = mod.isolate_spawn(
+            Path("/repo"), "tools", "3181", "/repo", env, enabled=True, git=git)
+        self.assertEqual(cwd, "/repo")
+        self.assertIs(out_env, env)
+        self.assertTrue(info["enabled"])
+        self.assertIn("failopen", info)
+
+
 if __name__ == "__main__":
     unittest.main()

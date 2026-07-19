@@ -1600,5 +1600,57 @@ class WaveBusySkipTest(unittest.TestCase):
         self.assertIn("lease refs: tools", mod.render_wave(p))
 
 
+class SpawnDetachedWorktreeTest(unittest.TestCase):
+    """#3181: spawn_detached edits in a per-worker worktree when the flag is on,
+    fails open to the shared-trunk cwd when off (byte-identical to today)."""
+
+    def _fake_git(self):
+        calls: list[list[str]] = []
+
+        def git(root, args):
+            calls.append(list(args))
+            if args and args[0] == "rev-parse":
+                return 0, "deadbeef\n"
+            return 0, ""
+
+        git.calls = calls  # type: ignore[attr-defined]
+        return git
+
+    def _spawn(self, env_overrides, td):
+        m = load()
+        seen: dict[str, object] = {}
+
+        class FakeProc:
+            pid = 4321
+
+        def fake_popen(argv, cwd=None, env=None, **kw):
+            seen["cwd"] = cwd
+            seen["env"] = env
+            return FakeProc()
+
+        with mock.patch.object(m.subprocess, "Popen", fake_popen), \
+             mock.patch.dict(os.environ, env_overrides, clear=False):
+            res = m.spawn_detached(
+                ["python", "-c", "pass"], {"PATH": os.environ.get("PATH", "")},
+                Path(td), Path(td) / "runs", "tools",
+                worktree_git=self._fake_git())
+        return m, seen, res
+
+    def test_worktree_spawn_off_uses_root_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            _, seen, res = self._spawn({"FLEET_WORKER_WORKTREE": "0"}, td)
+            self.assertEqual(seen["cwd"], str(Path(td)))
+            self.assertNotIn("worktree", res)
+
+    def test_worktree_spawn_on_uses_worktree_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m, seen, res = self._spawn(
+                {"FLEET_WORKER_WORKTREE": "1",
+                 "FLEET_WORKER_WORKTREE_ROOT": str(Path(td) / "wt")}, td)
+            self.assertNotEqual(seen["cwd"], str(Path(td)))
+            self.assertTrue(m.worker_worktree.is_worker_worktree(str(seen["cwd"])))
+            self.assertEqual(res.get("worktree"), seen["cwd"])
+
+
 if __name__ == "__main__":
     unittest.main()

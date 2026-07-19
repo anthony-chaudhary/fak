@@ -100,6 +100,13 @@ from typing import Any, Callable, Sequence
 # leaked worker worktree too.
 WORKTREE_ROOT_ENV = "FLEET_WORKER_WORKTREE_ROOT"
 WORKTREE_MARKER = "fak-worker-wt"
+# The gate that turns per-worker worktree isolation ON, shared verbatim with the Go
+# spine: cmd/fak/dispatch_tick_worker.go:workerWorktreeEnabled reads the SAME env var
+# with the SAME truthy/falsy grammar, so the native Go spawn site (#3168) and the two
+# Python spawn sites (#3181) obey ONE flag under ONE fail-open contract. Default OFF
+# restores the shared-trunk spawn byte-for-byte.
+WORKTREE_ENABLE_ENV = "FLEET_WORKER_WORKTREE"
+_ENABLE_OFF_VALUES = frozenset({"", "0", "off", "false", "no", "disable", "disabled"})
 # A worktree dir name is <marker>-<lane>-<short-key>; the key is hashed so an
 # arbitrary issue/wave label can never inject a path separator or `..`.
 _KEY_HASH_LEN = 12
@@ -143,6 +150,21 @@ def _safe_key(key: str) -> str:
     flat segment."""
     raw = (str(key) or "worker").encode("utf-8", errors="replace")
     return hashlib.sha1(raw).hexdigest()[:_KEY_HASH_LEN]
+
+
+def worktree_isolation_enabled(environ: "dict[str, str] | None" = None) -> bool:
+    """True when ``FLEET_WORKER_WORKTREE`` selects per-worker worktree isolation.
+
+    Mirrors ``cmd/fak/dispatch_tick_worker.go:workerWorktreeEnabled`` EXACTLY — unset or
+    an off-ish value (``0``/``off``/``false``/``no``/``disable``/``disabled``/empty) is
+    OFF, any other value is ON — so the two Python spawn sites gate on the identical
+    grammar as the Go spine. Pure: reads ``os.environ`` (or an injected mapping for
+    tests) and touches no git."""
+    env = os.environ if environ is None else environ
+    raw = env.get(WORKTREE_ENABLE_ENV)
+    if raw is None:
+        return False
+    return str(raw).strip().lower() not in _ENABLE_OFF_VALUES
 
 
 def worktree_dir_name(lane: str, key: str) -> str:
@@ -268,6 +290,45 @@ def prepare_worker_worktree(root: Path, lane: str, key: str, *,
                 "reason": f"git worktree add failed (rc {rc}): {out.strip()[-200:]} "
                           "— fail open", "detail": out.strip()[-500:]}
     return {"ok": True, "path": str(wt), "base_sha": base, "reused": False}
+
+
+def isolate_spawn(root: Path, lane: str, key: str, cwd: str | Path,
+                  env: dict[str, str], *, base_sha: str | None = None,
+                  enabled: bool | None = None, wt_root: Path | None = None,
+                  git: GitRunner | None = None) -> "tuple[str, dict[str, str], dict[str, Any]]":
+    """Compose the ``(cwd, env)`` a dispatch worker should spawn under, applying #3181
+    per-worker worktree isolation when the gate is on — the Python twin of the
+    ``cmd/fak/dispatch_tick.go`` #3168 block, so all three spawn sites share ONE
+    contract.
+
+    Returns ``(spawn_cwd, spawn_env, info)``:
+
+      * Isolation OFF (default) or ANY worktree step faults -> the caller's original
+        ``(cwd, env)`` UNCHANGED. A worktree-layer fault therefore never wedges a spawn:
+        the worker runs in the shared trunk exactly as before, so the flag-OFF path is
+        byte-identical to today (the fail-open contract the Go spine already keeps).
+      * Isolation ON and :func:`prepare_worker_worktree` succeeds -> the worker's own
+        detached worktree path as ``cwd`` and :func:`worktree_env` layered onto ``env``
+        (GOCACHE/GOTMPDIR redirected inside the worktree so a broken build there can
+        never red a sibling).
+
+    ``info`` carries ``enabled`` plus, on success, ``worktree``/``base_sha`` (the
+    land+reap hook the witness sweep reads off the spawner's ``.worktree`` sidecar) or,
+    on a fault, the ``failopen`` reason. ``git`` is the injectable runner so the whole
+    decision is unit-testable without touching real git."""
+    on = worktree_isolation_enabled() if enabled is None else enabled
+    info: dict[str, Any] = {"enabled": bool(on), "worktree": None}
+    if not on:
+        return str(cwd), env, info
+    res = prepare_worker_worktree(root, lane, str(key), base_sha=base_sha,
+                                  wt_root=wt_root, git=git)
+    if res.get("ok") and res.get("path"):
+        wt = str(res["path"])
+        info.update(worktree=wt, base_sha=res.get("base_sha"),
+                    reused=bool(res.get("reused")))
+        return wt, worktree_env(env, Path(wt)), info
+    info["failopen"] = res.get("reason")
+    return str(cwd), env, info
 
 
 def reap_worker_worktree(root: Path, wt_path: str | Path, *,
