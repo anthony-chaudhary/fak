@@ -147,24 +147,41 @@ other in mind produces the "I lowered the budget and nothing changed" surprise.
   the [long-context defaults doctrine](../long-context-defaults.md): HardContextCap is
   a hard cap, not a target, and the resident budget must leave output reserve.
 
-### managed cache - the knob, the lever, the tier, and the restart plan
+### managed cache - the family, the knob, the lever, the tier, and the restart plan
 
-"Managed cache" names fak actively DRIVING the provider's prompt cache instead of
-merely forwarding the client's `cache_control` bytes. Several names ride that
-phrase; they live at different layers, two collide in spelling, and one is a
-different sense entirely:
+"Managed cache" is used two ways that constantly get conflated: (a) the **family**
+of features by which fak shapes the provider prompt cache, and (b) the specific
+`--managed-cache` posture that arms just ONE of them (the 1h-TTL upgrade). Reading
+(b) as if it were (a) is the recurring confusion - it makes our own sessions look
+"uncached" when they are not. Several names ride the phrase; they live at different
+layers, two collide in spelling, and one is a different sense entirely:
 
-- **managed cache** (the posture: `fak guard --managed-cache auto|on|off`, epic
-  #1844 C6) - should THIS guard session actively manage the prompt cache on the
-  outbound Anthropic wire? AUTO activates only when the session provably bills an
-  operator API key (`--api-key-env` resolved a key, no subscription token pinned);
-  subscription OAuth, non-Anthropic wires, and local models stay passive - fak
-  never speculates with billing it cannot see. `resolveGuardManagedCache` resolves
-  the knob once at startup into **guardManagedCachePosture** (mode, active,
-  reason), rendered in the banner. *Not* the Prompt cache (the provider feature it
-  manages), *not* vCache (the virtual control plane fak builds), and *not*
-  managed context (the gateway's context program - same "managed", different
-  resource).
+- **managed cache** (the FAMILY) - the set of features that shape provider prompt
+  caching: the provider 5m prompt cache (riding the client's own `cache_control`
+  breakpoints), tool-prune, star-anchor breakpoint placement, compaction shed,
+  defer-cold-tools, and the 1h-TTL upgrade, among others. On our own OAuth Claude
+  Code seats this family is EFFECTIVE BY DEFAULT - carried by the 5m prompt cache
+  (median cache-read share ~78-85% on substantial sessions) and tool-prune (~96-99%
+  of sessions); the other members are inert-by-design or provider-blocked there. So
+  "is caching working on our sessions?" = yes, via this family - *even though* the
+  `--managed-cache` posture below resolves passive. Audit:
+  `docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md`.
+
+- **managed cache** (the POSTURE: `fak guard --managed-cache auto|on|off`, epic
+  #1844 C6) - should THIS guard session author the 1h-TTL upgrade on the outbound
+  Anthropic wire? It governs ONLY the 1h-TTL member, not the whole family. AUTO
+  activates only when the session provably bills an operator API key (`--api-key-env`
+  resolved a key, no subscription token pinned); subscription OAuth, non-Anthropic
+  wires, and local models stay passive - fak never speculates with billing it cannot
+  see. Forced `on` does NOT override that on a subscription-OAuth seat: the provider
+  400s a `ttl:"1h"` body on an OAuth credential every turn, so `on` DEGRADES to
+  passive there (guard fix `43cbdb14a4da`) instead of crash-looping the seat - on
+  OAuth, `auto` and `on` cache identically. `resolveGuardManagedCache` resolves the
+  knob once at startup into **guardManagedCachePosture** (mode, active, reason),
+  rendered in the banner. *Not* the Prompt cache (the provider feature it manages),
+  *not* the family above (this posture is one member of it), *not* vCache (the
+  virtual control plane fak builds), and *not* managed context (the gateway's
+  context program - same "managed", different resource).
 
 - **Config.CacheTTL1H** (the gateway LEVER, `internal/gateway/gateway.go`) vs
   **CacheTTL1h** (the pricing TIER, `internal/gateway/cache_pricing.go`) - one
@@ -178,7 +195,13 @@ different sense entirely:
   ablation arm that forces the same lever for A/B measurement, independent of
   posture. Every attempt is witnessed by `fak_gateway_cache_ttl_upgrade_total`
   (outcome-labelled; recorded only while the lever is on, so a zero panel with
-  the lever active means every head was ineligible - visible, not silent).
+  the lever active means every head was ineligible - visible, not silent). These
+  upgrade counters (`fak_gateway_cache_ttl_upgrade_total`,
+  `cache_ttl_upgrades_upgraded`, `CacheTTLUpgraded`) count fak AUTHORING the upgrade
+  on the outbound body, NOT the provider ACCEPTING it - so a nonzero upgrade count
+  on a subscription-OAuth seat is a crash signal (each authored turn is a provider
+  400), not a success. `upgraded` and `placed_and_upgraded` are both authoring
+  outcomes; only skip reasons like `volatile_head` mean no upgrade was written.
 
 - **managed-cache restart plan** (`internal/resume`) - the OTHER sense of the
   phrase: not a live session's wire posture but the restart verdict for a
@@ -1838,3 +1861,17 @@ Fold predicate reporting whether a note or task body ref is disaggregated and th
 coalescebench config field: the resident expert-cache budget in GiB (the RAM tier sitting over SSD) that bounds how many routed (layer,expert) groups stay resident in the deterministic LRU the bench replays through.
 
 **Distinct from:** A bench INPUT KNOB naming the cache SIZE budget (GiB -> whole resident groups via capacityGroups), not a cache mechanism or trace: distinct from enginecache (an engine-level KV/weight cache) and from the SimulateExpertCacheBatch simulator it feeds.
+
+
+### handleFakAgentSessions (gateway route)
+
+Server.handleFakAgentSessions is the /v1/fak/agent/sessions HTTP handler (#3258, epic #3256): POST a goal and it runs ONE kernel-governed owned-loop agent session (agent.RunGovernedArm over the server's planner) and streams the session back as NDJSON events — session.start, per-call adjudicated call rows, session.end with the ArmMetrics witness.
+
+**Distinct from:** It is the HTTP front door that RUNS a governed agent session end to end and streams its events; unlike applySessionControl (a session-table mutator) or the session capacity/slot vocabulary, it owns no capacity accounting — every tool call it makes crosses the in-kernel syscall boundary.
+
+
+### IndexLockReclaimDecision
+
+The reap-or-keep verdict for a stale git .git/index.lock: a Reap flag plus a closed-vocabulary reason, decided purely from the commit-lane observer's evidence (lock presence, process-probe success, live-writer count, staleness past the grace window).
+
+**Distinct from:** It is the ACTUATOR's act-or-not verdict on reclaiming an orphaned .git/index.lock, NOT the commit-lane status Verdict (the observer's clear/busy/stale/blocked lane read) and NOT the witness Decision (a CONFIRMED/REFUTED/ABSTAIN evidence-grading verdict).
