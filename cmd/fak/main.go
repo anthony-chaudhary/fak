@@ -272,6 +272,10 @@ func main() {
 	case "micro":
 		// The native in-process Go microagent runtime front door (see cmdMicro).
 		cmdMicro(os.Args[2:])
+	case "microbench":
+		// Per-agent RSS + CPU density witness for the in-process microagent host
+		// vs the guarded-CLI baseline (#2008; mock engine, no spend).
+		cmdMicroBench(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "serve-wiring":
