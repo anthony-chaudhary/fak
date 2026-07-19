@@ -968,9 +968,43 @@ _COMMON_ACRONYMS = {
 }
 
 
+# A wholly-untracked directory holding more than this many non-ignored files is a
+# scratch/overlay/snapshot tree (a `.st_full/` mirror, a stray build dir) — advisory
+# bloat, not debt. Generous on purpose: a normal in-progress feature is tens of files,
+# not hundreds, so only an egregious dump trips it.
+WORKTREE_DIR_BLOAT = 100
+
+
+def untracked_dir_bloat(others: list[str], others_dirs: list[str],
+                        threshold: int = WORKTREE_DIR_BLOAT) -> list[str]:
+    """Advisory: a single wholly-untracked directory carrying an outsized volume of
+    non-ignored files — the "new non-gitignored dir with a huge volume of files" that
+    buries real WIP in ``git status`` and gets re-scanned (and double-counted) by every
+    tree-walking governance gate. ``others_dirs`` is ``git ls-files --others --directory``
+    output: git collapses a fully-untracked directory to a single ``dir/`` entry there, so
+    each candidate is the shallowest wholly-untracked subtree (no double counting).
+    ``others`` is the un-collapsed file list used to size it. Returns one summary line per
+    over-size directory, heaviest first — with the concrete remedy (gitignore it or remove
+    it). Never debt: it varies by working tree, exactly like the scratch-file canary."""
+    hits: list[tuple[int, str]] = []
+    for d in others_dirs:
+        if not d.endswith("/"):
+            continue
+        n = sum(1 for f in others if f.startswith(d))
+        if n > threshold:
+            rule = "/" + d.rstrip("/") + "/"
+            hits.append((n, f"{d} — {n} untracked files (non-ignored) — gitignore it "
+                            f"(add '{rule}' or a root-anchored prefix rule) or remove it"))
+    hits.sort(key=lambda x: (-x[0], x[1]))
+    return [msg for _, msg in hits]
+
+
 def _worktree_clutter(root: Path) -> list[str]:
-    """Untracked, non-ignored scratch files (the concurrency canary). Limited to
-    scratch-shaped names so genuine in-progress source is not flagged."""
+    """Untracked, non-ignored scratch the concurrency canary surfaces (advisory, never
+    debt): scratch-shaped FILES (limited to scratch-shaped names so genuine in-progress
+    source is not flagged), plus any wholly-untracked DIRECTORY carrying an outsized file
+    volume (a new non-gitignored snapshot/overlay tree). The bloat lines lead so the
+    loudest signal is not truncated by the render cap."""
     others = _git_lines(["ls-files", "--others", "--exclude-standard"], root)
     scratch_re = re.compile(r"\.(txt|csv|log|tmp|out|err)$|(^|/)(report|agent-report)\.json$")
     out: list[str] = []
@@ -981,7 +1015,9 @@ def _worktree_clutter(root: Path) -> list[str]:
         is_root_data = "/" not in f and f.split(".")[-1] in {"csv", "json", "txt", "log", "out", "err"}
         if is_root_data or scratch_re.search(f):
             out.append(f)
-    return sorted(out)
+    others_dirs = _git_lines(["ls-files", "--others", "--exclude-standard",
+                              "--directory", "--no-empty-directory"], root)
+    return untracked_dir_bloat(others, others_dirs) + sorted(out)
 
 
 def collect(workspace: Path) -> dict[str, Any]:

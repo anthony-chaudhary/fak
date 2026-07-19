@@ -282,6 +282,31 @@ def test_live_collect() -> None:
     assert isinstance(p["kpis"], list) and len(p["kpis"]) == len(rh.KPI_WEIGHTS)
 
 
+def test_untracked_dir_bloat_flags_huge_dir() -> None:
+    # `git ls-files --others --directory` collapses a wholly-untracked tree to one
+    # `dir/` entry; the un-collapsed list sizes it. A 150-file dir trips the canary.
+    others = [f".st_full/internal/pkg{i}/x.go" for i in range(150)]
+    others_dirs = [".st_full/"]
+    hits = rh.untracked_dir_bloat(others, others_dirs, threshold=100)
+    assert len(hits) == 1, hits
+    assert ".st_full/" in hits[0] and "150 untracked files" in hits[0]
+    # names the remedy (gitignore rule or removal) so the reader knows what to do
+    assert "gitignore it" in hits[0] and "/.st_full/" in hits[0]
+
+
+def test_untracked_dir_bloat_ignores_small_dir() -> None:
+    # a normal in-progress feature (tens of files) is not bloat — no false positive.
+    others = [f"internal/newpkg/f{i}.go" for i in range(12)]
+    assert rh.untracked_dir_bloat(others, ["internal/newpkg/"], threshold=100) == []
+
+
+def test_untracked_dir_bloat_orders_heaviest_first() -> None:
+    others = ([f".st_full/a{i}" for i in range(300)]
+              + [f".st_gen/b{i}" for i in range(120)])
+    hits = rh.untracked_dir_bloat(others, [".st_gen/", ".st_full/"], threshold=100)
+    assert len(hits) == 2 and hits[0].startswith(".st_full/"), hits
+
+
 # --- self-contained runner (mirrors docs_scorecard_test.py) ----------------
 
 def main() -> int:
