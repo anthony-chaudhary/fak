@@ -16,13 +16,17 @@ package main
 // (changeDetectorBaseline) is reported, so the verb stays green on the existing backlog
 // and surfaces exactly the NEW change-detector an operator must convert to an invariant.
 //
-// One SOFT family also runs over _test.go and is reported separately (rep.Soft), never
-// counted toward the gate:
+// Two SOFT families are reported separately (rep.Soft), never counted toward the gate:
 //
-//	internal/boundarylint  SKIP_DEBT  a bare t.Skip/Skipf/SkipNow with no platform/short/env guard
+//	internal/boundarylint  SKIP_DEBT          a bare t.Skip/Skipf/SkipNow with no platform/short/env guard
+//	internal/boundarylint  UNPARSEABLE_SOURCE a .go file the scanner could not parse, so no rule ran over it
 //
-// Skip debt is a trend to watch, not a build-reddener, so it stays out of Count/OK/exit
-// and feeds the qa-process scorecard's SOFT skip_debt KPI as a work-list of skip sites.
+// Both are trends to watch, not build-reddeners, so they stay out of Count/OK/exit. Skip
+// debt feeds the qa-process scorecard's SOFT skip_debt KPI as a work-list of skip sites.
+// UNPARSEABLE_SOURCE closes a fail-OPEN blind spot: an unparseable file otherwise yields
+// zero findings and is indistinguishable from a clean one, so the linter would report
+// success over source it never read. It stays SOFT because this shared trunk carries
+// peers' half-written files and the compiler remains the authority on real syntax errors.
 //
 // These checks already existed as the package test TestBoundaryPolicy — so fak
 // COULD prove them under `go test`, but fak itself never RAN them. This verb is the
@@ -147,6 +151,19 @@ func runBoundary(stdout, stderr io.Writer, argv []string) int {
 		soft = append(soft, boundaryTell{Code: f.Code, Linter: "boundarylint-soft", Detail: f.String()})
 	}
 
+	// boundarylint-soft: UNPARSEABLE_SOURCE — a .go file the scanner could not parse, so
+	// no rule ran over it. Without this the file contributes zero findings and reads as
+	// clean, i.e. the linter reports success over source it never read. Also SOFT: this
+	// trunk carries peers' half-written files, and the compiler owns real syntax errors.
+	unparseable, err := boundarylint.ScanUnparseable([]string{root + "/cmd", root + "/internal"})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak boundary: boundarylint-unparseable: %v\n", err)
+		return 2
+	}
+	for _, f := range unparseable {
+		soft = append(soft, boundaryTell{Code: f.Code, Linter: "boundarylint-soft", Detail: f.String()})
+	}
+
 	byLinter := map[string]int{}
 	for _, t := range tells {
 		byLinter[t.Linter]++
@@ -187,7 +204,7 @@ func writeBoundaryHuman(w io.Writer, rep boundaryReport) {
 	}
 	// The SOFT work-list prints even on a clean gate: it is a trend to watch, not a failure.
 	if len(rep.Soft) > 0 {
-		fmt.Fprintf(w, "soft: %d skip-debt site(s) (SKIP_DEBT — reported, not gated)\n", len(rep.Soft))
+		fmt.Fprintf(w, "soft: %d site(s) (SKIP_DEBT, UNPARSEABLE_SOURCE — reported, not gated)\n", len(rep.Soft))
 		for _, t := range rep.Soft {
 			fmt.Fprintf(w, "  %s\n", t.Detail)
 		}

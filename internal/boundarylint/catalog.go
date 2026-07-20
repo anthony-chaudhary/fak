@@ -55,6 +55,12 @@ var Catalog = []CatalogEntry{
 		Note:   "SOFT (not gated): a bare t.Skip/Skipf/SkipNow removes a test from the suite unconditionally, so a presence KPI still counts it while the body never runs. A skip guarded by testing.Short()/runtime.GOOS/os.Getenv is an honest conditional and is not flagged; a deliberate always-skip is //boundarylint:ignore SKIP_DEBT with a tracking issue. Reported by `fak boundary` and folded as a qa-process scorecard KPI, never a build gate.",
 	},
 	{
+		Code:   "UNPARSEABLE_SOURCE",
+		Title:  "source the linter could not parse, reported as a skip instead of a clean pass",
+		Status: StatusSoft,
+		Note:   "SOFT (not gated): a file parser.ParseFile cannot read yields zero findings, which is indistinguishable from a clean file — the scanner reports success over source it never read. ScanUnparseable records the skip so it is visible and greppable; the inverse of the fail-OPEN default, and the detector-side analogue of the adjudicator's MALFORMED on undecidable input. Kept SOFT because a shared peer-dirty trunk carries half-written .go files from live sessions; the compiler stays the authority on validity. Reported by `fak boundary`, never a build gate.",
+	},
+	{
 		Code:   "UNCHECKED_HTTP_STATUS",
 		Title:  "response body used without checking StatusCode",
 		Status: StatusProposed,

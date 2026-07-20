@@ -77,7 +77,7 @@ var ignoreRe = regexp.MustCompile(`//\s*boundarylint:ignore\s+([A-Z0-9_,\s]+)`)
 func Scan(roots []string, rules []Rule) ([]Finding, error) {
 	return scanFiltered(roots, rules, func(path string) bool {
 		return strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")
-	})
+	}, false)
 }
 
 // ScanTests is Scan's counterpart for the test suite: it walks ONLY _test.go files.
@@ -87,12 +87,15 @@ func Scan(roots []string, rules []Rule) ([]Finding, error) {
 func ScanTests(roots []string, rules []Rule) ([]Finding, error) {
 	return scanFiltered(roots, rules, func(path string) bool {
 		return strings.HasSuffix(path, "_test.go")
-	})
+	}, false)
 }
 
-// scanFiltered is the shared walk behind Scan and ScanTests: keep decides which
-// file paths are parsed and linted.
-func scanFiltered(roots []string, rules []Rule, keep func(path string) bool) ([]Finding, error) {
+// scanFiltered is the shared walk behind Scan, ScanTests and ScanUnparseable: keep
+// decides which file paths are parsed and linted. reportUnparseable turns a file the
+// parser could not read into an UNPARSEABLE_SOURCE finding instead of a silent skip;
+// only ScanUnparseable sets it, so the gating walks keep their fail-open behavior and
+// a peer's half-written file cannot red the build (see rules_unparseable.go).
+func scanFiltered(roots []string, rules []Rule, keep func(path string) bool, reportUnparseable bool) ([]Finding, error) {
 	var findings []Finding
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -111,7 +114,14 @@ func scanFiltered(roots []string, rules []Rule, keep func(path string) bool) ([]
 			fset := token.NewFileSet()
 			file, perr := parser.ParseFile(fset, path, nil, parser.ParseComments)
 			if perr != nil {
-				return nil // not parseable as a standalone file; the compiler owns that error
+				// A file the linter could not read yields zero findings, which reads as
+				// "clean" — the silent fail-OPEN this scanner used to take. Record the
+				// skip so it is visible and greppable instead (#4070); the gating walks
+				// leave reportUnparseable false and still defer to the compiler.
+				if reportUnparseable {
+					findings = append(findings, unparseableFinding(path, perr))
+				}
+				return nil
 			}
 			rel := filepath.ToSlash(path)
 			ignores := collectIgnores(fset, file)
