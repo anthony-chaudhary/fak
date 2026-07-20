@@ -17,7 +17,11 @@ Dual-track serving is fak's plan to reach large-scale disaggregated inference al
 > here — only the plan, the capability-honesty table, and the de-dup map.
 >
 > **Provenance:** every `[SHIPPED]/[PARTIAL]/[SEAM-ONLY]/[GAP]` mark below carries a
-> `file:line` pointer verified against the working tree at commit `89abc5d` (2026-06-22).
+> `file:line` pointer re-verified against the working tree at commit `32586e6bc` (2026-07-20)
+> by re-running the [§11](#11-how-to-re-verify) anchor sweep (#2728). The prior stamp was
+> `89abc5d` (2026-06-22); that sweep had since **broken** — `KVCache.Evict` and `StepBatch`
+> had both moved file, and the "expect: no real substrate" collective anchor had started
+> matching a real NCCL process group. Those are corrected below.
 > Line numbers drift; re-verify with the `rg` anchors in [§11](#11-how-to-re-verify). **No
 > benchmark number is asserted in this doc** — every parity claim is gated on a *measured*
 > run by the bench-harness sibling (#44),
@@ -35,7 +39,7 @@ Dual-track serving is fak's plan to reach large-scale disaggregated inference al
    (no NCCL communicator, no world-size, no device-mesh — [§7](#7-track-b-fleet-scale-is-not-co-equal-near-term)).
    Building Track A *forces* the shared spine that Track B then reuses.
 3. **fak's earned lead is the reason Track B exists:** bit-exact middle-span KV `Evict`
-   (`internal/model/kv.go:60`) — quarantine eviction the SOTA engines structurally **cannot**
+   (`internal/model/kvcache.go:94`) — quarantine eviction the SOTA engines structurally **cannot**
    do. That value-add **rides on top of** the base items; it is out of scope for base-item
    parity ([§9](#9-non-goals)).
 4. **Track B fleet-scale is NOT co-equal near-term.** Native is co-equal only at the
@@ -58,14 +62,27 @@ The real design question is **sequencing and de-dup, not track selection.**
 
 ## 3. Ride-first sequencing — and why
 
-Native multi-node parallelism is **greenfield**. The real distributed substrate does not
-exist in the tree: an `rg` sweep finds **no** `ncclCommInitRank` / `rcclAllReduce` /
-`nvshmem`, **no** `world_size`/`worldSize`, **no** `init_process_group` / `DeviceMesh`. What
-*does* exist is a single-box **simulation** + a named swap-in seam (`model.Collective` /
-`LocalCollective` `internal/model/tensor_parallel.go:140`, `compute.CollectiveBackend`
-`internal/compute/compute.go:347` with a CPU-reference impl), and a CUDA backend that
-hardcodes one device (`cudaSetDevice(0)` `internal/compute/cuda_kernels.cu:52`). Expert
-parallelism fails closed (`ForwardTP` errors on MoE, `internal/model/tensor_parallel_forward.go:82`).
+Native multi-node parallelism is **no longer wholly greenfield, but it is build-gated.** The
+2026-06-22 stamp of this section claimed an `rg` sweep found **no** `ncclCommInitRank` /
+`world_size` / `DeviceMesh` anywhere in the tree. Re-running that sweep at `32586e6bc`
+**falsifies** it: `internal/compute/cuda_nccl_pg.cu` is a real multi-process NCCL
+process-group bootstrap (`ncclGetUniqueId` → `ncclCommInitRank` → `ncclAllReduce`), bridged
+to the `model.Collective` seam by `internal/compute/cuda_collective_pg.go`, and the CUDA
+backend now exposes per-rank device binding (`fcuda_set_device(int device)`
+`internal/compute/cuda_kernels.cu:233`, `fcuda_malloc_on` `:242`) rather than only the
+hardcoded `cudaSetDevice(0)` probe at `:63`.
+
+What that does **not** yet earn is a parity claim. Both files are compiled only under
+`-tags cuda,nccl` with `FAK_CUDA_NCCL=1`; the default `go build ./cmd/fak` and even a plain
+`-tags cuda` build link none of it, and both carry an explicit self-declared
+`STATUS: unverified on a GPU-free host`. So the substrate is **[PARTIAL]** — real code behind
+an opt-in build gate, never yet witnessed on this host — not the **[GAP]** this section used
+to assert, and not **[SHIPPED]**. The single-box **simulation** + swap-in seam remain what the
+default binary actually runs (`model.Collective` / `LocalCollective`
+`internal/model/tensor_parallel.go:140`, `compute.CollectiveBackend`
+`internal/compute/compute.go:347` with a CPU-reference impl). Expert
+parallelism still fails closed (`ForwardTP` errors on MoE, `internal/model/tensor_parallel_forward.go:82`) —
+that row re-verified exact and unchanged.
 
 So Track B's fleet-scale engine **cannot exist** until that communicator/world-size/device-mesh
 layer is built. Track A reaches many-node *parity* first by orchestrating engines that already
@@ -105,18 +122,20 @@ incomplete · **[SEAM-ONLY]** the interface/seam exists, no production impl behi
 | **Engine seam** | **[PARTIAL]** `agent.StreamingPlanner` adds a content callback for streaming-capable HTTP planners, but the native in-kernel engine still exposes a one-shot `Complete`; `ctx` is not yet a per-step cancel/control point inside decode | `internal/agent/stream.go` (`StreamingPlanner`, `CompleteStream`); `internal/modelengine/modelengine.go:139` (`Complete`), `:151` (`sess.Generate` one-shot) | vLLM-V1 `EngineCore` admit→per-step-decode→stream→reclaim lifecycle |
 | **Streaming** | **[PARTIAL]** live prose deltas now stream on the OpenAI wire and on Anthropic `/v1/messages` when backed by Anthropic passthrough or a generic streaming planner; tool-call bytes are still held until whole-turn adjudication; non-streaming planners still synthesize SSE post-turn | `internal/gateway/stream_proxy.go`; `internal/gateway/messages_stream_passthrough.go`; `internal/gateway/messages_stream_planner.go` | vLLM-V1 / SGLang flush each decoded token live → real-TTFT SSE, inter-token gaps == TPOT |
 | **Incremental detokenizer** | **[GAP]** whole reply detokenized once; no streaming detokenizer | — (prerequisite, #48) | streaming detokenizer feeding per-token SSE |
-| **Continuous-batching scheduler** | **[SEAM-ONLY]** `StepBatch` per-step primitive exists; **no** admit/evict loop. `GenerateBatch` runs static fixed-B and re-feeds EOS into finished slots | `internal/model/batch.go:1122` (`StepBatch`), `:1148` (`GenerateBatch`) | vLLM-V1 `EngineCore` / SGLang `Scheduler` iteration loop: admit, retire, rebuild running batch each step |
-| **Chunked prefill** | **[PARTIAL]** rectangular equal-length panel ≤512 tokens; ragged batches fall back to serial prefill | `internal/model/batch.go:761` (`rectangularPrefillLen`); `internal/model/batch.go:47` (`batchRectPrefillMaxTokens=512`) | chunked prefill (vLLM-V1 default) packs different requests' prefill chunks + decode into one ragged varlen batch |
+| **Continuous-batching scheduler** | **[SEAM-ONLY]** `StepBatch` per-step primitive exists; **no** admit/evict loop. `GenerateBatch` runs static fixed-B and re-feeds EOS into finished slots | `internal/model/batch_step.go:7` (`StepBatch`), `:142` (`GenerateBatch`) | vLLM-V1 `EngineCore` / SGLang `Scheduler` iteration loop: admit, retire, rebuild running batch each step |
+| **Chunked prefill** | **[PARTIAL]** rectangular equal-length panel ≤512 tokens; ragged batches fall back to serial prefill | `internal/model/batch_prefill.go:50` (`rectangularPrefillLen`); `internal/model/batch.go:46` (`batchRectPrefillMaxTokens=512`) | chunked prefill (vLLM-V1 default) packs different requests' prefill chunks + decode into one ragged varlen batch |
 | **Request admission / priority** | **[GAP]** "budget" == matmul worker count (thread-pool width), not request admission | `internal/model/budget.go:50` (`SetWorkerBudget`) | waiting queue + FCFS/priority policy + KV/token budget + preemption + `max-num-seqs` |
-| **Paged / block KV** | **[GAP]** contiguous-append flat `[]float32` per layer; `Evict` memmoves to compact | `internal/model/kv.go:18` (`KVCache`) | vLLM PagedAttention `BlockManager` / SGLang token-to-KV-pool: fixed blocks + block table, O(1) evict, COW prefix share |
+| **Paged / block KV** | **[GAP]** contiguous-append flat `[]float32` per layer; `Evict` memmoves to compact | `internal/model/kvcache.go:11` (`KVCache`) | vLLM PagedAttention `BlockManager` / SGLang token-to-KV-pool: fixed blocks + block table, O(1) evict, COW prefix share |
 | **Radix prefix cache** | **[SHIPPED]** real RadixAttention trie (longest-prefix walk, edge split, LRU, ref-count leases) — but **single-process, in-memory** | `internal/radixkv/radixkv.go:72` (`Tree`) | SGLang RadixAttention (same algo) + a *distributed* residency index (Mooncake / LMCache) sharded across replicas |
-| **Bit-exact middle-span Evict** | **[SHIPPED]** single-rotation re-RoPE from stored pre-RoPE `Kraw` → cache byte-identical to one that never saw the span | `internal/model/kv.go:60` (`Evict`) | **None.** vLLM `reset_prefix_cache` / SGLang `flush_cache` drop whole prefixes/LRU leaves only — a genuine structural value-add |
-| **Exact-span on a ridden engine** | **[PARTIAL]** degrades to whole-prefix flush — `SupportsExactSpan` is false for SGLang **and** vLLM | `internal/enginecache/enginecache.go:132` (`SupportsExactSpan`), `:148` (`/flush_cache`), `:156` (`/reset_prefix_cache`) | engines expose only coarse whole-prefix reset over HTTP; neither can evict a named middle span |
+| **Bit-exact middle-span Evict** | **[SHIPPED]** single-rotation re-RoPE from stored pre-RoPE `Kraw` → cache byte-identical to one that never saw the span | `internal/model/kvcache.go:94` (`Evict`) | **None.** vLLM `reset_prefix_cache` / SGLang `flush_cache` drop whole prefixes/LRU leaves only — a genuine structural value-add |
+| **Exact-span on a ridden engine** | **[PARTIAL]** degrades to whole-prefix flush — `SupportsExactSpan` is false for SGLang, vLLM **and** MLX (#2724 kept the same fence) | `internal/enginecache/enginecache.go:272` (`SupportsExactSpan`), `:288` (`/flush_cache`), `:296` (`/reset_prefix_cache`); `internal/engine/mlx.go:97` (`engine.cache.whole-prefix`) | engines expose only coarse whole-prefix reset over HTTP; none can evict a named middle span |
 | **KV transport / P/D data plane** | **[PARTIAL]** metadata descriptor + governance contract documented; `BytesMoved` is a reported counter, **no path copies KV bytes** | `internal/cachemeta/kvtransfer.go:54` (`FromKVTransfer`), `docs/serving/kv-transport-governance-nixl-mooncake-lmcache.md` (governance contract) | vLLM `KVConnector` (NIXL/LMCache), SGLang + Mooncake: RDMA/NVLink byte movers on the wire |
 | **Pipeline parallelism** | codec **[SHIPPED]** / transport **[SEAM-ONLY]**: real bit-exact hidden-state codec + a `TCPTransport`, but its only peer is `EchoFrames` (identity echo), no band-running worker | `internal/model/pipeline.go:159` (`MarshalHidden`); `internal/model/pipeline_transport.go:30` (`TCPTransport`), `:105` (`EchoFrames`) | per-rank worker process that runs its band on GPU and forwards to the next rank over NCCL P2P |
-| **Tensor parallelism** | **[SEAM-ONLY] / [GAP]**: single-box host-array **simulation** + swap-in seam shipped; real NCCL/world-size/device-mesh/per-rank-device GAP | `internal/model/tensor_parallel.go:140` (`Collective`/`LocalCollective`); `internal/compute/compute.go:347` (`CollectiveBackend`, cpu-ref only); `internal/compute/cuda_kernels.cu:52` (`cudaSetDevice(0)`) | vLLM/SGLang: `init_distributed_environment` builds TP/PP/EP groups over a NCCL world (world_size/rank/local_rank) + custom all-reduce |
+| **Tensor parallelism** | **[PARTIAL]** (was [SEAM-ONLY]/[GAP] @`89abc5d`): single-box host-array **simulation** + swap-in seam is what the default binary runs, but a real multi-process NCCL communicator + per-rank device binding now exist **behind an opt-in build gate** (`-tags cuda,nccl`, `FAK_CUDA_NCCL=1`), self-declared `unverified on a GPU-free host`. Not witnessed here — no parity claim | `internal/model/tensor_parallel.go:140` (`Collective`/`LocalCollective`); `internal/compute/compute.go:431` (`CollectiveBackend`, cpu-ref only); `internal/compute/cuda_nccl_pg.cu` (`ncclCommInitRank`), `internal/compute/cuda_collective_pg.go` (`//go:build cuda && nccl`); `internal/compute/cuda_kernels.cu:233` (`fcuda_set_device`), `:63` (`cudaSetDevice(0)` probe) | vLLM/SGLang: `init_distributed_environment` builds TP/PP/EP groups over a NCCL world (world_size/rank/local_rank) + custom all-reduce |
 | **Expert parallelism (MoE)** | **[GAP]** `ForwardTP` fails closed on MoE | `internal/model/tensor_parallel_forward.go:82` | all-to-all expert dispatch (e.g. DeepEP) |
 | **Serving metrics** | **[SHIPPED]** normalized `fak_serving_*` Prometheus schema covers TTFT, TPOT, ITL, goodput, running/waiting queue depth, KV-cache utilization, and prefix-cache hit rate with `worker`/`engine`/`model` labels. Track A has a scrape emitter that relabels vLLM/SGLang rows into the schema, including current vLLM `kv_cache_usage_perc` and prefix hit/query counters; Track B has the native emitter seam and the gateway's measured inference/admission signals feed the same row shape. | `internal/gateway/serving_metrics.go`; `internal/gateway/serving_metrics_test.go` | `vllm:time_to_first_token_seconds`, `vllm:time_per_output_token_seconds`, `vllm:num_requests_running/waiting`, `vllm:kv_cache_usage_perc`, `vllm:prefix_cache_hits/queries` |
+| **MLX ride adapter (Apple-Silicon)** | **[SHIPPED] as a ride adapter** (#2724): `fak serve --engine mlx` fronts mlx-lm / vllm-mlx over the same OpenAI-compatible dispatch as the vLLM/SGLang/Dynamo adapters, with `ParseMLXPrometheus` re-tagging `vllm:*` rows under `engine="mlx"` and an empty-surface-fabricates-nothing fence. **No in-kernel MLX/Metal implementation**, and **no measured throughput number** — the head-to-head bench (#2723) is still OPEN | `internal/engine/mlx.go:47` (`MLXEngineID`), `:198` (`abi.RegisterEngine`); `docs/supported/engines.md` (MLX row) | mlx-lm / vllm-mlx serving on Apple Silicon with unified-memory zero-copy CPU/GPU sharing |
+| **Model-weight paging → disk/SSD tier** | **[SEAM-ONLY]** (#2726): `pagedRing` is a bounded per-weight LRU resident cache (byte budget, LRU victim, pinned-exemption, bit-equal to a resident `MatMul` on hit *and* miss) — but it is **standalone, off the live serve path**, f32-only, no async H2D, and links nothing new into the default binary. The **disk/SSD tier itself is still [GAP]**: nothing streams model weights from SSD on demand, so this does **not** back a >unified-memory serve claim | `internal/model/paging_ring.go:45` (`pagedRing`), `:67` (`newPagedRing`); `internal/model/paging.go` (page-in/page-out primitive, off serve path) | `ssd-llm` / KTransformers / MoE-Infinity stream layers or experts from SSD with predictive prefetch |
 
 ## 6. The four explicit honesty calls
 
@@ -137,16 +156,17 @@ So no downstream issue silently overclaims:
    synthesize SSE from the finished turn. This is enough for real prose TTFT, not yet the
    full vLLM/SGLang per-step engine lifecycle. *[PARTIAL]*
 3. **PP is SEAM-ONLY for serving.** `internal/model/pipeline.go:159` `MarshalHidden`/
-   `UnmarshalHidden` (bit-exact hidden-state codec) and `internal/model/pipeline_transport.go:30`
+   `UnmarshalHidden` (bit-exact hidden-state codec) and `internal/model/pipeline_transport.go:31`
    `TCPTransport` are real and loopback-proven byte-identical — but `TCPTransport`'s only peer
-   is `EchoFrames` (`pipeline_transport.go:105`), an identity echo, not a band-running worker.
+   is `EchoFrames` (`pipeline_transport.go:106`), an identity echo, not a band-running worker.
    No cross-node serve loop exists. #30
    / #85 reduce this to "implement one
    `Send` + a worker serve loop", still unwritten. *[SEAM-ONLY]*
 4. **L7 trust DEGRADES to whole-prefix flush on Track A.** fak's bit-exact middle-span `Evict`
-   ships (`internal/model/kv.go:60`, single-rotation re-RoPE from `Kraw`) — the thing
-   vLLM/SGLang structurally **cannot** do. But `internal/enginecache/enginecache.go:132`
-   `SupportsExactSpan` returns **false** for `EngineSGLang` and `EngineVLLM`, so on a ridden
+   ships (`internal/model/kvcache.go:94`, single-rotation re-RoPE from `Kraw`) — the thing
+   vLLM/SGLang structurally **cannot** do. But `internal/enginecache/enginecache.go:272`
+   `SupportsExactSpan` returns **false** for `EngineSGLang`, `EngineVLLM` **and** the MLX
+   adapter added by #2724, so on a ridden
    engine exact-span collapses to a whole-prefix flush (`/flush_cache`, `/reset_prefix_cache`).
    Bit-exact span eviction is a **Track-B-only** guarantee. *[SHIPPED in-kernel / DEGRADED on ride]*
 
@@ -155,16 +175,23 @@ So no downstream issue silently overclaims:
 Native parallelism (TP, EP, the device-mesh / collective-comms layer) is **greenfield**, and
 that is the named blocking prerequisite for Track B fleet-scale:
 
-- `compute.Backend`'s base interface (`internal/compute/compute.go:294`) exposes no collective
-  op; the optional `CollectiveBackend` (`compute.go:347`) declares
-  `AllReduceSum/AllGather/ReduceScatter/AllToAll` but its **only** implementation is the
-  single-box CPU reference — no device communicator behind it. The CUDA backend does not
-  implement it.
-- `internal/compute/cuda_kernels.cu:52` hardcodes `cudaSetDevice(0)` — no per-rank device
-  binding.
-- There is **no** NCCL/RCCL communicator, **no** `world_size`/rank-as-process, **no**
-  device-mesh anywhere in the tree. "rank" is exclusively a loop/shard index.
-- EP is explicitly fail-closed (`internal/model/tensor_parallel_forward.go:82`).
+- `compute.Backend`'s base interface (`internal/compute/compute.go:337`) exposes no collective
+  op; the optional `CollectiveBackend` (`compute.go:431`) declares
+  `AllReduceSum/AllGather/ReduceScatter/AllToAll`, and in the **default** build its only
+  implementation is still the single-box CPU reference.
+- **Corrected @`32586e6bc` (#2728):** a real NCCL/rank-as-process communicator *does* now exist —
+  `internal/compute/cuda_nccl_pg.cu` (`ncclGetUniqueId` → `ncclCommInitRank` → `ncclAllReduce`)
+  with its Go bridge `internal/compute/cuda_collective_pg.go`, plus per-rank device binding
+  (`fcuda_set_device` / `fcuda_malloc_on`, `cuda_kernels.cu:233`/`:242`). The earlier
+  "no NCCL communicator / no per-rank device binding / no rank-as-process anywhere in the tree"
+  bullets were **true at `89abc5d` and are false now**; they are retired here.
+- What still gates the conclusion: that substrate compiles **only** under `-tags cuda,nccl`
+  with `FAK_CUDA_NCCL=1`, is excluded from the default `go build ./cmd/fak` *and* from a plain
+  `-tags cuda` build, and both files self-declare `STATUS: unverified on a GPU-free host`.
+  Reduction order is NCCL ring/tree, so it is an **Approx** peer (argmax-exact + cosine),
+  never `max|Δ|=0` vs the host reduce it replaces.
+- EP is explicitly fail-closed (`internal/model/tensor_parallel_forward.go:82` — re-verified
+  exact at `32586e6bc`).
 
 Therefore: **Track B is co-equal only at single-node → small-cluster scope.** Fleet-scale
 native serving is sequenced *behind* the shared spine and the collective-comms substrate, and
@@ -185,6 +212,7 @@ track. (Shared spine is in [§4](#4-the-shared-spine-built-once-both-tracks-plug
 | #39 | SGLang adapter behind the seam (RadixAttention signal + scheduler metrics) |
 | #38 | Dynamo interop — **resolved as fak-governs / Dynamo-routes**: `engine.DynamoEngine` dispatches through Dynamo's public OpenAI-compatible frontend, normalizes Dynamo P/D worker metrics, and records the trust boundary in [`dynamo-interop.md`](dynamo-interop.md). |
 | #37 | Orchestrate external P/D disaggregation + govern KV-transport bridge (NIXL/Mooncake/LMCache) — governance contract documented, live wiring is a later step |
+| #2724 | MLX ride-adapter fronting mlx-lm / vllm-mlx on Apple Silicon — *not* a child of #50; it arrived via the Mac epic #2722 and lands in Track A because it rides an external engine behind the same seam |
 | *(rides free)* | Speculative decoding inherited from the ridden engine (native verify/accept is a later Track-B lever; not separately filed in this block) |
 
 **Track B — NATIVE (single-node → small-cluster; NOT chasing raw single-GPU tok/s vs vLLM):**
@@ -258,18 +286,81 @@ the live equivalents above; until then, **trust this table over the inline numbe
 Line numbers drift. Re-anchor any claim with ripgrep from the repo root:
 
 ```bash
-rg -n 'func \(c \*KVCache\) Evict'            internal/model/kv.go                 # honesty-call 4
+rg -n 'func \(c \*KVCache\) Evict'            internal/model/kvcache.go            # honesty-call 4
 rg -n 'func SupportsExactSpan'                internal/enginecache/enginecache.go  # honesty-call 4
 rg -n 'writeChatCompletionStream|segmentContent' internal/gateway/http.go         # honesty-call 2
 rg -n 'BaseURL|planner +agent.Planner'        internal/gateway/gateway.go          # honesty-call 1
 rg -n 'EchoFrames|type TCPTransport'          internal/model/pipeline_transport.go # honesty-call 3
-rg -n 'func \(bs \*BatchSession\) StepBatch'  internal/model/batch.go              # scheduler seam
+rg -n 'func \(bs \*BatchSession\) StepBatch'  internal/model/batch_step.go         # scheduler seam
 rg -n 'ServingScrapeEmitter|fak_serving_kv_cache_usage_perc' internal/gateway        # serving metrics
-rg -n 'cudaSetDevice'                         internal/compute/cuda_kernels.cu     # parallelism greenfield
-rg -n 'ncclCommInitRank|world_size|DeviceMesh' .                                   # expect: no real substrate
+rg -n 'cudaSetDevice|fcuda_set_device'        internal/compute/cuda_kernels.cu     # per-rank device binding
+rg -n 'MLXEngineID|engine.cache.whole-prefix' internal/engine/mlx.go               # MLX ride adapter (#2724)
+rg -n 'type pagedRing|func newPagedRing'      internal/model/paging_ring.go        # weight paging (#2726)
+rg -n 'ncclCommInitRank' internal/compute/cuda_nccl_pg.cu                          # expect: REAL, build-gated
+rg -n 'go:build cuda && nccl' internal/compute/cuda_collective_pg.go               # ...the gate that fences it
 ```
+
+**Two anchors above were repaired by #2728 and one expectation was inverted.** At `89abc5d`
+the first and sixth commands pointed at `internal/model/kv.go` and `internal/model/batch.go`;
+both symbols have since moved file (`kvcache.go`, `batch_step.go`), so the sweep silently
+matched **nothing** and stopped catching drift — the failure mode a re-verify block exists to
+prevent. The last command previously read `rg -n 'ncclCommInitRank|world_size|DeviceMesh' .`
+with the comment `# expect: no real substrate`; that expectation is now **false** (see
+[§7](#7-track-b-fleet-scale-is-not-co-equal-near-term)), so it is replaced by the two commands
+that assert the honest current shape: the substrate is real **and** it is build-gated.
+
+## 12. The Mac humility fence (#2691) is NOT retired — and why
+
+#2728 exists to *lift* the #2691 humility fence once the Mac offload epic (#2722) lands real
+numbers, so that a doc does not keep asserting a limitation after it is fixed. Re-checked at
+`32586e6bc`, **the fence is not yet earned away and stays exactly as written.** #2728's own
+scope says to drop it "only to the extent actually earned"; the extent earned is zero.
+
+**Retirement evidence — what this pass DID retire.** The `[GAP]` on a native
+NCCL/rank-as-process/device-mesh substrate ([§3](#3-ride-first-sequencing--and-why),
+[§7](#7-track-b-fleet-scale-is-not-co-equal-near-term)) and two dead `rg` anchors
+([§11](#11-how-to-re-verify)). Those were stale *against* the tree — the doc understated
+what shipped — and re-running the sweep is what caught them.
+
+**Promotion evidence — what earned a new row.** #2724 (MLX ride adapter) and #2726
+(`pagedRing` weight cache), both marked at the rung their committed code actually reaches:
+`[SHIPPED] as a ride adapter` and `[SEAM-ONLY]`, with the disk/SSD tier left `[GAP]`.
+
+**Why the prefill fence survives.** The fence's number — a 10–15 minute first local turn on an
+Apple-Silicon laptop, single-stream — is closed only by epic #2722's child 3 (#2725). #2725 is
+CLOSED, but its resolving commit `840349e` shipped *diagnosis*, not a speedup: it refined
+`FAK_QPROFILE` into a per-stage isolation split (gdn-recurrence / full-attn / qk-norm /
+norm+act) plus env-gated stage skips, so an operator can finally *name* the serial wall. Its
+own message states the before/after wall-clock ladder is "operator-gated on the [Apple-Silicon]
+node — **not run or fabricated on this Metal-less host**," and the default path is
+byte-identical. A sharper instrument is not a faster prefill. Its results artifact
+[`docs/notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md`](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md)
+says the same in its own words — status `SHIPPED` for the diagnostic and correctness witness
+(logit cosine `0.999999`, greedy token-parity), `Blocked` for the wall-clock ladder, and
+"**No prefill time was run, estimated, or fabricated here.**"
+
+Two of the five children are also still OPEN, including the one that produces the numbers:
+
+| Child | State | Bearing on the fence |
+|---|---|---|
+| #2723 head-to-head fak vs llama.cpp vs MLX | **OPEN** | the working spine; until it runs, *no* Mac TTFT/ITL/throughput number is falsifiable |
+| #2724 MLX ride adapter | CLOSED | real adapter, but rides an external engine — earns no fak-speed claim |
+| #2725 prefill root-cause | CLOSED | instrumentation only; wall-clock ladder never run |
+| #2726 weight paging | CLOSED | off the serve path, no SSD tier |
+| #2727 Mac cache-value P&L | **OPEN** | no end-to-end Mac cache-value witness |
+
+**Invalidating assumption (the one to attack first).** This section assumes #2725's shipped
+instrumentation did not *incidentally* speed up prefill — inferred from its commit message
+("default path byte-identical," env-gated, nil-guarded) and from the absence of any recorded
+run, **not** from a measurement. Nobody has timed a first local turn on Apple Silicon at
+`32586e6bc`. One before/after wall-clock ladder on that node invalidates this section
+immediately: if the number moved, the fence should be rewritten to the new number in the same
+pass, and this section retired. That run is #2723's job and cannot be performed from a
+Metal-less host — attempting to assert it from here is the exact failure #2728 was filed to
+prevent.
 
 ---
 
 *Parent epic:* epic(serving) #50. ·
-*This doc closes* docs(serving) #49.
+*This doc closes* docs(serving) #49. ·
+*Capability table + §11 sweep re-verified by* docs(mac) #2728 *(epic #2722).*
