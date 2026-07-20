@@ -423,11 +423,25 @@ The planning flags, exactly as `fak issue fanout --help` describes them:
 - `--max` — cap candidates (`0` = full taxonomy; floor `3`).
 - `--json` — emit the machine-readable fan-out plan (feed to `fak issue cohort --from-plan`).
 
+The project-work sizing flags stamp the epic-rollup fields on every generated candidate.
+`--parent-issue` and `--parent-baseline-points` together switch sizing on: supply both and each
+candidate carries a parent ref, an `Estimate: N points` line, and a `Contribution: N/M points`
+line; omit either and the candidates carry no rollup denominator at all.
+
+- `--parent-issue` — parent issue number for project-work denominator binding.
+- `--parent-baseline-points` — declared parent production-scope baseline points.
+- `--completion-standard` — generated child maturity (default `production`).
+- `--target-envelope` — production target operating envelope (stamped only under the
+  `production` completion standard).
+- `--witnessed-envelope` — currently witnessed operating envelope (same `production`-only rule).
+
 Two further modes ride the same verb. `--live` files the planned candidates as GitHub issues
 via `gh`, after a bounded marker-key (`fanout-<leaf>-<slug>`) dedupe against existing issues so
 a rerun files zero — `--repo owner/repo` targets a non-current repo, `--dedupe-cap N` bounds the
 existing-issue scan (default `300`), and `--existing-json FILE` swaps a fixture in for the live
-`gh` query. `--adoption` measures the default instead of planning: given `--leaves` (shipped
+`gh` query. `--live` also *requires* `--parent-issue` and `--parent-baseline-points`: filing
+refuses outright when either is missing, so a plan that renders fine can still be unfilable —
+set both before reaching for `--live`. `--adoption` measures the default instead of planning: given `--leaves` (shipped
 leaves to audit) and `--markers` (the filed `fanout-<leaf>-<slug>` keys), it reports which leaves
 cleared the fan-out floor versus which are gaps, exiting `1` on any gap.
 
