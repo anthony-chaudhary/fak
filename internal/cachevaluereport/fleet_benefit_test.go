@@ -292,3 +292,164 @@ func TestFleetBenefitSessionExtensionHonestZero(t *testing.T) {
 		t.Fatalf("budget-less honest-zero line missing:\n%s", RenderFleetBenefit(repNoBudget))
 	}
 }
+
+// Live fleet aggregate quoted in #3662, reproduced here so the per-work fold is pinned
+// against the real corpus it was designed from rather than a toy fixture.
+const (
+	liveSpendUSD     = 2187.29
+	liveAvoidedUSD   = 7994.70
+	liveDecisions    = 419702
+	liveExitSessions = 2159
+)
+
+// TestFleetBenefitCostPerUnitOfAgenticWork pins the #3662 fold: the cumulative totals
+// divided by the WORK done (kernel decisions, exit sessions, multi-turn turns) rather
+// than by the calendar, reproduced from the LIVE aggregate. It also pins the honesty
+// fence that makes the block publishable — the dollar axis renders OBSERVED and carries
+// the thin-window PROVISIONAL flag, the token axis renders WITNESSED and does NOT, and
+// the two are never blended into one figure.
+func TestFleetBenefitCostPerUnitOfAgenticWork(t *testing.T) {
+	// Multi-turn corpus (turns >= 2): 20 turns over 2000 prompt / 1600 reused tokens
+	// → 100 prompt and 80 reused per turn, a 0.8 reuse ratio. The third row is
+	// SINGLE-turn with a huge prompt: it must be excluded from every per-turn
+	// denominator (it had no previous turn to reuse from), so if the turns >= 2 gate
+	// ever regresses, prompt/turn explodes and this test fails loudly.
+	track1 := []cachevalueledger.Row{
+		{Date: "2026-06-22", SessionType: "run", Turns: 10, PromptTokens: 1000, ReusedTokens: 800},
+		{Date: "2026-06-23", SessionType: "run", Turns: 10, PromptTokens: 1000, ReusedTokens: 800},
+		{Date: "2026-06-23", SessionType: "run", Turns: 1, PromptTokens: 999999, ReusedTokens: 0},
+	}
+	// Savings rows dated exactly 2 days apart → span 2.0d, under the 3d floor, so the
+	// dollar-per-work numbers must inherit PROVISIONAL (acceptance criterion 4).
+	// Provider rebate 6000.00 + fak compaction 1994.70 − 0 premium = 7994.70 avoided.
+	track2 := []SavingsRow{
+		{
+			Date: "2026-06-22", Provider: "anthropic", Mechanism: "provider_prompt_cache",
+			CacheReadTokens: 2_000_000, SavedTokenEquiv: 1_000_000, NetSavedTokenEquiv: 1_000_000,
+			RebateUSD: 6000.00, WritePremiumUSD: 0, SpendUSD: liveSpendUSD,
+		},
+		{
+			Date: "2026-06-24", Provider: "fak", Mechanism: "compaction_shed",
+			CompactionShedTokens: 50_000, SavedTokenEquiv: 50_000, NetSavedTokenEquiv: 50_000,
+			CompactionSavedUSD: 1994.70,
+		},
+	}
+	// liveExitSessions exit rows carrying liveDecisions kernel decisions between them;
+	// the remainder rides on the first row so the fleet total is EXACTLY the live figure.
+	base := uint64(liveDecisions / liveExitSessions)
+	usage := make([]gatewayusageledger.Row, 0, liveExitSessions)
+	for i := 0; i < liveExitSessions; i++ {
+		c := gatewayusageledger.Counters{Total: base, Allowed: base}
+		if i == 0 {
+			c.Total += uint64(liveDecisions) - base*uint64(liveExitSessions)
+			c.Allowed = c.Total
+			c.CompactionFired = 1
+			c.CompactionShedTokens = 4000 // → 4000/20 = 200 shed tok/turn
+		}
+		usage = append(usage, gatewayusageledger.NewRow("exit", "guard", "claude", "g-1",
+			90*time.Second, nil, c, time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)))
+	}
+
+	rep := FoldFleetBenefit(track1, track2, usage, FleetBenefitOptions{})
+
+	// Preconditions: the fixture really does reproduce the live aggregate.
+	if rep.KernelDecisions != liveDecisions || rep.ExitSessions != liveExitSessions {
+		t.Fatalf("fixture denominators = %d decisions / %d exit sessions, want %d/%d",
+			rep.KernelDecisions, rep.ExitSessions, liveDecisions, liveExitSessions)
+	}
+	if !approxTrack2(rep.ObservedActualSpendUSD, liveSpendUSD) || !approxTrack2(rep.ObservedAPICostAvoidedUSD, liveAvoidedUSD) {
+		t.Fatalf("fixture dollars = spend %.2f avoided %.2f, want %.2f/%.2f",
+			rep.ObservedActualSpendUSD, rep.ObservedAPICostAvoidedUSD, liveSpendUSD, liveAvoidedUSD)
+	}
+	// The single-turn row is excluded from every per-turn denominator.
+	if rep.MultiTurnTurns != 20 || rep.MultiTurnPromptTokens != 2000 || rep.MultiTurnReusedTokens != 1600 {
+		t.Fatalf("multi-turn denominators = %d turns / %d prompt / %d reused, want 20/2000/1600 (single-turn row must be excluded)",
+			rep.MultiTurnTurns, rep.MultiTurnPromptTokens, rep.MultiTurnReusedTokens)
+	}
+
+	// Dollar axis (OBSERVED): avoided / spend / counterfactual per unit of work.
+	if rep.AvoidedUSDPerDecision == nil || !approxTrack2(*rep.AvoidedUSDPerDecision, liveAvoidedUSD/liveDecisions) {
+		t.Fatalf("avoided $/decision = %v, want %.12f", rep.AvoidedUSDPerDecision, liveAvoidedUSD/liveDecisions)
+	}
+	if rep.SpendUSDPerDecision == nil || !approxTrack2(*rep.SpendUSDPerDecision, liveSpendUSD/liveDecisions) {
+		t.Fatalf("spend $/decision = %v, want %.12f", rep.SpendUSDPerDecision, liveSpendUSD/liveDecisions)
+	}
+	if rep.CounterfactualUSDPerDecision == nil || !approxTrack2(*rep.CounterfactualUSDPerDecision, (liveSpendUSD+liveAvoidedUSD)/liveDecisions) {
+		t.Fatalf("counterfactual $/decision = %v, want %.12f", rep.CounterfactualUSDPerDecision, (liveSpendUSD+liveAvoidedUSD)/liveDecisions)
+	}
+	// The counterfactual pair must close: spend + avoided == counterfactual, per decision.
+	if !approxTrack2(*rep.SpendUSDPerDecision+*rep.AvoidedUSDPerDecision, *rep.CounterfactualUSDPerDecision) {
+		t.Fatalf("per-decision counterfactual pair does not close: %.12f + %.12f != %.12f",
+			*rep.SpendUSDPerDecision, *rep.AvoidedUSDPerDecision, *rep.CounterfactualUSDPerDecision)
+	}
+	if rep.AvoidedUSDPerExitSession == nil || !approxTrack2(*rep.AvoidedUSDPerExitSession, liveAvoidedUSD/liveExitSessions) {
+		t.Fatalf("avoided $/exit-session = %v, want %.12f", rep.AvoidedUSDPerExitSession, liveAvoidedUSD/liveExitSessions)
+	}
+
+	// Token axis (WITNESSED): saved token-equiv and work size per multi-turn turn.
+	if rep.SavedTokenEqPerTurn == nil || !approxTrack2(*rep.SavedTokenEqPerTurn, rep.TotalSavedTokenEq/20) {
+		t.Fatalf("saved-tok-eq/turn = %v, want %.12f", rep.SavedTokenEqPerTurn, rep.TotalSavedTokenEq/20)
+	}
+	if rep.TotalSavedTokenEq <= 0 {
+		t.Fatalf("fixture must fold a positive saved token-equiv, got %.2f", rep.TotalSavedTokenEq)
+	}
+	if rep.PromptTokensPerTurn == nil || !approxTrack2(*rep.PromptTokensPerTurn, 100) ||
+		rep.ReusedTokensPerTurn == nil || !approxTrack2(*rep.ReusedTokensPerTurn, 80) ||
+		rep.ShedTokensPerTurn == nil || !approxTrack2(*rep.ShedTokensPerTurn, 200) {
+		t.Fatalf("work per turn = prompt %v reused %v shed %v, want 100/80/200",
+			rep.PromptTokensPerTurn, rep.ReusedTokensPerTurn, rep.ShedTokensPerTurn)
+	}
+
+	// A 2.0d savings span is under the 3d floor, so the dollar-per-work numbers are
+	// PROVISIONAL (acceptance criterion 4).
+	if !rep.RateProvisional {
+		t.Fatalf("span %.2fd should be PROVISIONAL under the %.0fd floor", rep.SpanDays, minHonestSpanDays)
+	}
+
+	out := RenderFleetBenefit(rep)
+	for _, want := range []string{
+		"cost per unit of agentic work:",
+		// Dollar lines: OBSERVED, list-priced, and flagged PROVISIONAL.
+		"$/decision (OBSERVED, list-priced projection; over 419702 decision(s)): spend $0.005212 vs counterfactual $0.024260 = avoided $0.019049 [PROVISIONAL: span < 3d]",
+		"$/exit-session (OBSERVED, list-priced projection; over 2159 session(s)): avoided $3.702964 [PROVISIONAL: span < 3d]",
+		// Token lines: WITNESSED, and the explicit ratio x size x count decomposition.
+		"saved-tok-eq/turn (WITNESSED; over 20 multi-turn turn(s)):",
+		"work per turn (WITNESSED): prompt=100.00 reused_prefix=80.00 shed=200.00 token(s)",
+		"three-factor decomposition (WITNESSED): reuse_ratio 0.8000 x 100.00 prompt tok/turn x 20 turn(s) = 1600 reused token(s)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("per-work render missing %q:\n%s", want, out)
+		}
+	}
+	// The fence must not blend: the WITNESSED token lines carry no dollar sign and no
+	// PROVISIONAL flag (that flag belongs to the OBSERVED dollar projection alone).
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "(WITNESSED") {
+			continue
+		}
+		if strings.Contains(line, "PROVISIONAL") || strings.Contains(line, "$") {
+			t.Fatalf("WITNESSED per-work line blended an OBSERVED dollar/PROVISIONAL marker: %q", line)
+		}
+	}
+}
+
+// TestFleetBenefitPerWorkUndefinedWithoutDenominators pins the "nil means UNDEFINED, not
+// zero" contract: a corpus with no decisions, no exit sessions and no multi-turn turns
+// must omit the per-work block entirely rather than render a 0.00 that would read as a
+// measured floor.
+func TestFleetBenefitPerWorkUndefinedWithoutDenominators(t *testing.T) {
+	// One SINGLE-turn track1 row: real work, but no turn that could have reused a prefix.
+	track1 := []cachevalueledger.Row{
+		{Date: "2026-06-22", SessionType: "run", Turns: 1, PromptTokens: 5000, ReusedTokens: 0},
+	}
+	rep := FoldFleetBenefit(track1, nil, nil, FleetBenefitOptions{})
+	if rep.AvoidedUSDPerDecision != nil || rep.SpendUSDPerDecision != nil ||
+		rep.CounterfactualUSDPerDecision != nil || rep.AvoidedUSDPerExitSession != nil ||
+		rep.SavedTokenEqPerTurn != nil || rep.PromptTokensPerTurn != nil ||
+		rep.ReusedTokensPerTurn != nil || rep.ShedTokensPerTurn != nil {
+		t.Fatalf("zero-denominator corpus must leave every per-work ratio nil (UNDEFINED): %+v", rep)
+	}
+	if out := RenderFleetBenefit(rep); strings.Contains(out, "cost per unit of agentic work") {
+		t.Fatalf("per-work block must be omitted when every denominator is zero:\n%s", out)
+	}
+}

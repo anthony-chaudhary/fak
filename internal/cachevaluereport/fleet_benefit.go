@@ -168,6 +168,40 @@ type FleetBenefitReport struct {
 	ProviderTokenEqPerDay    float64   `json:"provider_token_eq_per_day,omitempty"`
 	FakTokenEqPerDay         float64   `json:"fak_token_eq_per_day,omitempty"`
 
+	// Cost per unit of agentic WORK (#3662). Everything above divides the cumulative
+	// totals by TIME (SpanDays) or by WINDOW (ContextBudgetTokens); these divide by
+	// the work actually done, using denominators this same fold already aggregates
+	// (KernelDecisions, ExitSessions, MultiTurnTurns). Nothing new is measured — the
+	// run-rate is only made legible as the three-factor product
+	// (per-turn reuse ratio) x (work per turn) x (turn count) instead of a bare
+	// calendar rate.
+	//
+	// PROVENANCE IS SPLIT AND NEVER BLENDED, each field inheriting the fence of the
+	// numerator it divides: every *USD*-denominated per-work number is OBSERVED (a
+	// projection priced at list $/MTok from provider-relayed counters, never a
+	// reconciled invoice) and carries RateProvisional under a thin span; every
+	// *token*-denominated per-work number is WITNESSED. A nil pointer means the
+	// denominator was zero — the metric is UNDEFINED, not zero — matching FakSharePct
+	// and EquivalentContextWindow so an empty corpus never renders a measured-looking 0.
+	//
+	// MultiTurn* are gated on turns >= 2, the same multi-turn corpus
+	// cachevalueledger.ScoreLedger gates its reuse ratio on: a single-turn cold run has
+	// no previous turn to reuse from, so folding it in would deflate per-turn work size
+	// with turns that could never have reused anything.
+	MultiTurnTurns        uint64 `json:"multi_turn_turns,omitempty"`
+	MultiTurnPromptTokens uint64 `json:"multi_turn_prompt_tokens,omitempty"`
+	MultiTurnReusedTokens uint64 `json:"multi_turn_reused_tokens,omitempty"`
+
+	AvoidedUSDPerDecision        *float64 `json:"avoided_usd_per_decision,omitempty"`
+	AvoidedUSDPerExitSession     *float64 `json:"avoided_usd_per_exit_session,omitempty"`
+	SpendUSDPerDecision          *float64 `json:"observed_spend_usd_per_decision,omitempty"`
+	CounterfactualUSDPerDecision *float64 `json:"counterfactual_usd_per_decision,omitempty"`
+
+	SavedTokenEqPerTurn *float64 `json:"saved_token_eq_per_turn,omitempty"`
+	PromptTokensPerTurn *float64 `json:"prompt_tokens_per_turn,omitempty"`
+	ReusedTokensPerTurn *float64 `json:"reused_tokens_per_turn,omitempty"`
+	ShedTokensPerTurn   *float64 `json:"shed_tokens_per_turn,omitempty"`
+
 	Provenance string `json:"provenance"`
 	Finding    string `json:"finding"`
 }
@@ -230,6 +264,17 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 		}
 		rep.Track1Sessions++
 		rep.FakKVPrefixReusedTokens += row.ReusedTokens
+		// Per-turn work size (#3662) is folded over the MULTI-TURN corpus only, the
+		// same turns >= 2 gate cachevalueledger.ScoreLedger uses: a single-turn cold
+		// run has no previous turn to reuse from, so counting its prompt would deflate
+		// "work per turn" with turns that could never have reused a prefix. Note this
+		// is deliberately NARROWER than FakKVPrefixReusedTokens above, which stays the
+		// all-sessions KV-reuse total feeding fak_share.
+		if row.Turns >= 2 {
+			rep.MultiTurnTurns += row.Turns
+			rep.MultiTurnPromptTokens += row.PromptTokens
+			rep.MultiTurnReusedTokens += row.ReusedTokens
+		}
 	}
 
 	var fallbackContextExtension uint64
@@ -321,6 +366,7 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 		rep.ContextExtensionPct = &pct
 	}
 	rep.fillRunRate()
+	rep.fillPerWorkCost()
 	rep.fillFinding()
 	return rep
 }
@@ -346,6 +392,47 @@ func (r *FleetBenefitReport) fillRunRate() {
 	r.USDAvoidedPerWeek = r.USDAvoidedPerDay * 7
 	r.ProviderTokenEqPerDay = r.ProviderPromptCacheTokenEq / r.SpanDays
 	r.FakTokenEqPerDay = r.FakAuthoredTokenEq / r.SpanDays
+}
+
+// fillPerWorkCost folds the cumulative dollars and token-equiv into cost per unit of
+// agentic WORK (#3662), dividing by denominators this fold already aggregates —
+// kernel decisions, exit sessions, multi-turn turns — rather than by the calendar.
+// It measures nothing new: it re-expresses the same totals so "$X/day" is legible as
+// what one unit of agentic work cost with vs without fak.
+//
+// Each ratio is left nil when its denominator is zero, so an empty or single-turn
+// corpus reports the metric as UNDEFINED instead of a 0.00 that would read as a
+// measured floor. The dollar axis (OBSERVED, list-priced projection) and the token
+// axis (WITNESSED) are computed into separate fields and never blended into one
+// figure — the render prints them on separate, separately-fenced lines.
+func (r *FleetBenefitReport) fillPerWorkCost() {
+	if decisions := float64(r.KernelDecisions); decisions > 0 {
+		// The counterfactual pair: what one kernel decision actually cost, against
+		// what it would have cost with no cache work at all. Both OBSERVED.
+		avoided := r.ObservedAPICostAvoidedUSD / decisions
+		spend := r.ObservedActualSpendUSD / decisions
+		counterfactual := r.ObservedCounterfactualUSD / decisions
+		r.AvoidedUSDPerDecision = &avoided
+		r.SpendUSDPerDecision = &spend
+		r.CounterfactualUSDPerDecision = &counterfactual
+	}
+	if sessions := float64(r.ExitSessions); sessions > 0 {
+		avoided := r.ObservedAPICostAvoidedUSD / sessions
+		r.AvoidedUSDPerExitSession = &avoided
+	}
+	if turns := float64(r.MultiTurnTurns); turns > 0 {
+		// Work-per-turn size: the "massiveness" of a turn that MultiTurnTurns alone
+		// only counts. Shed rides on ContextExtensionTokens (WITNESSED fak-authored
+		// compaction shed), the same axis the session-extension figure cites.
+		saved := r.TotalSavedTokenEq / turns
+		prompt := float64(r.MultiTurnPromptTokens) / turns
+		reused := float64(r.MultiTurnReusedTokens) / turns
+		shed := float64(r.ContextExtensionTokens) / turns
+		r.SavedTokenEqPerTurn = &saved
+		r.PromptTokensPerTurn = &prompt
+		r.ReusedTokensPerTurn = &reused
+		r.ShedTokensPerTurn = &shed
+	}
 }
 
 func providerTokenEqFromRow(row SavingsRow) float64 {
@@ -450,6 +537,43 @@ func RenderFleetBenefit(r FleetBenefitReport) string {
 		fmt.Fprintf(&b, "  projection (OBSERVED, straight-line at current rate): 30d ~= provider $%.0f + fak $%.0f; 90d ~= provider $%.0f + fak $%.0f%s\n",
 			r.ProviderUSDAvoidedPerDay*30, r.FakUSDAvoidedPerDay*30,
 			r.ProviderUSDAvoidedPerDay*90, r.FakUSDAvoidedPerDay*90, prov)
+	}
+	// Cost per unit of agentic work (#3662): the same cumulative totals divided by the
+	// work done rather than by the calendar. The dollar lines and the token lines are
+	// printed SEPARATELY, each carrying its own OBSERVED/WITNESSED tag, so a
+	// list-priced projection can never be read as a witnessed count. The dollar lines
+	// inherit the thin-window PROVISIONAL flag the run-rate above already computed.
+	if r.AvoidedUSDPerDecision != nil || r.AvoidedUSDPerExitSession != nil || r.SavedTokenEqPerTurn != nil {
+		prov := ""
+		if r.RateProvisional {
+			prov = fmt.Sprintf(" [PROVISIONAL: span < %.0fd]", minHonestSpanDays)
+		}
+		fmt.Fprintf(&b, "  cost per unit of agentic work:\n")
+		if r.SpendUSDPerDecision != nil && r.CounterfactualUSDPerDecision != nil && r.AvoidedUSDPerDecision != nil {
+			fmt.Fprintf(&b, "    $/decision (OBSERVED, list-priced projection; over %d decision(s)): spend $%.6f vs counterfactual $%.6f = avoided $%.6f%s\n",
+				r.KernelDecisions, *r.SpendUSDPerDecision, *r.CounterfactualUSDPerDecision, *r.AvoidedUSDPerDecision, prov)
+		}
+		if r.AvoidedUSDPerExitSession != nil {
+			fmt.Fprintf(&b, "    $/exit-session (OBSERVED, list-priced projection; over %d session(s)): avoided $%.6f%s\n",
+				r.ExitSessions, *r.AvoidedUSDPerExitSession, prov)
+		}
+		if r.SavedTokenEqPerTurn != nil {
+			fmt.Fprintf(&b, "    saved-tok-eq/turn (WITNESSED; over %d multi-turn turn(s)): %.2f\n",
+				r.MultiTurnTurns, *r.SavedTokenEqPerTurn)
+		}
+		if r.PromptTokensPerTurn != nil && r.ReusedTokensPerTurn != nil && r.ShedTokensPerTurn != nil {
+			fmt.Fprintf(&b, "    work per turn (WITNESSED): prompt=%.2f reused_prefix=%.2f shed=%.2f token(s)\n",
+				*r.PromptTokensPerTurn, *r.ReusedTokensPerTurn, *r.ShedTokensPerTurn)
+			// The explicit ratio x size x count decomposition. It is an identity by
+			// construction (reuse ratio x prompt/turn x turns == reused tokens), which
+			// is the point: the aggregate is shown to BE the three-factor product, so
+			// the volume thesis is legible instead of implicit inside a summed total.
+			if *r.PromptTokensPerTurn > 0 {
+				ratio := *r.ReusedTokensPerTurn / *r.PromptTokensPerTurn
+				fmt.Fprintf(&b, "    three-factor decomposition (WITNESSED): reuse_ratio %.4f x %.2f prompt tok/turn x %d turn(s) = %d reused token(s)\n",
+					ratio, *r.PromptTokensPerTurn, r.MultiTurnTurns, r.MultiTurnReusedTokens)
+			}
+		}
 	}
 	if r.ContextExtensionTokens > 0 || r.ContextBudgetTokens > 0 || r.UsageRows > 0 {
 		if r.ContextExtensionTokens == 0 {
