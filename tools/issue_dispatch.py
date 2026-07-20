@@ -806,6 +806,86 @@ def _build_launch(root: Path, lane: str | None) -> tuple[list[str], list[str], b
     return command, launch_command, guarded
 
 
+# --- #3610: cross-worker floor cache-warm -----------------------------------------
+# The startup floor (system prompt + tool schemas, ~35.8k — internal/gateway/
+# ctxfootprint.go) is byte-identical across every claude worker of a wave, but the
+# launcher fires N Popens back-to-back, so each member pays a full provider
+# cache-WRITE. Priming that prefix ONCE and spacing the members inside the cache TTL
+# turns N writes into 1 write + (N-1) reads (~10% cost).
+#
+# BOTH knobs default OFF (warm) / ZERO (stagger): an unset config reproduces today's
+# launch behaviour byte-for-byte, because this is the shared wave path every fleet
+# lane dispatches through.
+#
+# TTL sizing: do NOT size the stagger against Anthropic's default 5-min TTL. fak
+# forces the stable-prefix 1h-TTL upgrade by default (an UNSET FAK_MANAGED_CACHE
+# resolves to `on` — cmd/fak/guard_cache_posture.go:14-19), so the live budget is
+# plausibly 1h, which makes a modest stagger nearly free. The posture can still
+# degrade to PASSIVE on a subscription-OAuth seat, so it must be READ, not assumed —
+# which is why the default here is 0.0 (opt-in) rather than a guessed interval.
+WARM_FLOOR_ENV = "FLEET_WARM_FLOOR"
+LAUNCH_STAGGER_ENV = "FLEET_LAUNCH_STAGGER_S"
+WARM_FLOOR_TIMEOUT_S = 120.0
+
+# Injectable so a test can observe the stagger without actually sleeping.
+_sleep = time.sleep
+
+
+def _env_flag(env: dict[str, str], name: str) -> bool:
+    return (env.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(env: dict[str, str], name: str, default: float) -> float:
+    try:
+        return max(0.0, float((env.get(name) or "").strip()))
+    except ValueError:
+        return default
+
+
+def warm_floor_prefix(root: Path, *, live: bool,
+                      timeout_s: float = WARM_FLOOR_TIMEOUT_S,
+                      run: "Callable[..., Any] | None" = None) -> dict[str, Any]:
+    """Issue exactly ONE floor-warm pre-request for the whole wave (#3610).
+
+    Runs the same guarded argv a member runs, with only the trailing user turn
+    swapped (``dispatch_worker.build_warm_floor_command``), so the prefix it primes is
+    the prefix the members re-enter on. Blocking with a bounded timeout: the write must
+    LAND before member 1 launches, or there is nothing warm to read.
+
+    FAIL-OPEN by construction — a warm fault (no binary, timeout, non-zero exit) is
+    recorded and the wave proceeds unstaggered-but-correct. Warming is a cost
+    optimization; it must never be able to block a dispatch.
+
+    Never spends tokens on a dry run: ``live=False`` returns a ``would_warm`` record.
+    """
+    command = dispatch_worker.build_warm_floor_command("claude")
+    launch_command, guarded = dispatch_worker.guarded_launch_command(
+        command, dispatch_worker.WARM_FLOOR_LANE, "claude", root)
+    rec: dict[str, Any] = {"guarded": guarded,
+                           "command": launch_command or command}
+    if not live:
+        rec["would_warm"] = True
+        return rec
+    if not launch_command:
+        rec["error"] = "no warm-floor command resolved"
+        return rec
+    runner = run or subprocess.run
+    exe = shutil.which(launch_command[0]) or launch_command[0]
+    started = time.monotonic()
+    try:
+        proc = runner([exe, *launch_command[1:]], cwd=str(root),
+                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                      stderr=subprocess.STDOUT, timeout=timeout_s)
+        rec["returncode"] = getattr(proc, "returncode", None)
+        rec["warmed"] = rec["returncode"] == 0
+    except subprocess.TimeoutExpired:
+        rec["error"] = f"warm-floor pre-request exceeded {timeout_s}s"
+    except OSError as exc:
+        rec["error"] = f"warm-floor pre-request failed: {exc}"
+    rec["elapsed_s"] = round(time.monotonic() - started, 3)
+    return rec
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
              live: bool, refresh: bool = True) -> dict[str, Any]:
     # Refresh the account registry from live sessions FIRST, so the switcher routes
@@ -1230,7 +1310,8 @@ def _write_wave_artifacts(runs_dir: Path, payload: dict[str, Any]) -> None:
 
 
 def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
-                  refresh: bool = True) -> dict[str, Any]:
+                  refresh: bool = True, warm_floor: bool | None = None,
+                  stagger_s: float | None = None) -> dict[str, Any]:
     """One WAVE tick: spawn up to ``max_workers`` workers across pairwise
     tree-disjoint lanes in a single tick, each on its own seat, never exceeding the
     dispatch_preflight cap.
@@ -1240,7 +1321,19 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     already-admitted leases via ``dos arbitrate`` (a colliding lane is skipped BEFORE
     any agent launches); each admitted lane draws the next distinct seat; and
     ``dispatch_preflight`` is re-checked per spawn so the live population provably
-    never exceeds the cap. A wave sidecar records ``{wave_id, size, lanes, seats}``."""
+    never exceeds the cap. A wave sidecar records ``{wave_id, size, lanes, seats}``.
+
+    #3610: ``warm_floor`` primes the shared ~35.8k floor prefix with ONE pre-request
+    before any member spawns, and ``stagger_s`` spaces consecutive member launches so
+    workers 2..N re-enter that warm prefix as a cache READ. Both default to their env
+    knobs (``FLEET_WARM_FLOOR`` / ``FLEET_LAUNCH_STAGGER_S``) and are off/zero unset,
+    so an unconfigured wave launches exactly as it does today."""
+    env = os.environ
+    if warm_floor is None:
+        warm_floor = _env_flag(env, WARM_FLOOR_ENV)
+    if stagger_s is None:
+        stagger_s = _env_float(env, LAUNCH_STAGGER_ENV, 0.0)
+    stagger_s = max(0.0, float(stagger_s))
     reg = refresh_registry(root) if refresh else {"ok": None, "skipped": True}
     first_preflight: dict[str, Any] | None = preflight(
         root, max_workers=max_workers, work_kind=work_kind)
@@ -1270,6 +1363,8 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     busy = marker_busy | lease_busy_set
 
     leases: list[dict[str, Any]] = []   # accumulating disjoint-tree leases (priced)
+    warm_record: dict[str, Any] | None = None   # #3610 once-per-wave warm latch
+    staggered = 0                               # #3610 count of delayed launches
     members: list[dict[str, Any]] = []
     skipped_busy: list[str] = []
     baseline_live: int | None = None
@@ -1376,6 +1471,19 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
                 "arbitrate": dec.get("reason"),
             }
             if live:
+                # #3610: prime the shared floor prefix ONCE, lazily — here rather than
+                # before the loop, so a wave that ends up spawning nothing (every lane
+                # busy, cap reached, arbiter refused) never pays for a warm it cannot
+                # use. `warm_record is None` is the once-per-wave latch.
+                if warm_floor and warm_record is None:
+                    warm_record = warm_floor_prefix(root, live=True)
+                    payload["warm_floor"] = warm_record
+                # Space consecutive launches inside the cache TTL. `members` is appended
+                # AFTER the spawn, so a truthy `members` means at least one member is
+                # already out: the delay lands BETWEEN spawns, never before the first.
+                if stagger_s > 0 and members:
+                    _sleep(stagger_s)
+                    staggered += 1
                 member["spawned"] = _spawn_wave_member(
                     root, c["lane"], seat, wave_id, rank, free_seats,
                     int(seats.get("shortfall") or 0))
@@ -1388,6 +1496,11 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     payload.update({"size": size, "lanes": lanes_used, "members": members,
                     "seats_used": seats_used, "cap": cap_seen, "refusal": refusal,
                     "skipped_busy": skipped_busy})
+    # #3610: the launch-cache posture is always reported (even off/zero) so an auditor
+    # reads the knob's live value from the tick record instead of inferring it.
+    payload["launch_cache"] = {"warm_floor": bool(warm_floor),
+                               "stagger_s": stagger_s,
+                               "staggered_spawns": staggered}
     if last_preflight:
         payload["last_preflight"] = last_preflight
     if preflight_hint:
@@ -1453,6 +1566,16 @@ def render_wave(p: dict[str, Any]) -> str:
         pid = f" pid={sp.get('pid')}" if sp.get("pid") else ""
         lines.append(f"    [{m.get('rank')}] {str(m.get('lane') or '-'):<12} "
                      f"{m.get('issues')} issues  seat={tag}{pid}")
+    # #3610: the launch-cache posture, so an operator reads whether the wave paid N
+    # floor cache-writes or 1 write + (N-1) reads without opening the JSON.
+    lc = p.get("launch_cache") or {}
+    if lc.get("warm_floor") or lc.get("stagger_s"):
+        warm = p.get("warm_floor") or {}
+        state = ("warmed" if warm.get("warmed") else
+                 "would-warm" if warm.get("would_warm") else
+                 f"warm-failed ({warm.get('error')})" if warm.get("error") else "off")
+        lines.append(f"  floor     : {state}; stagger={lc.get('stagger_s')}s "
+                     f"x{lc.get('staggered_spawns')} launch(es)")
     if p.get("refusal"):
         lines.append(f"  stopped   : {p.get('refusal')}")
     hint = p.get("preflight_hint")
@@ -1600,6 +1723,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-refresh", action="store_true",
                     help="skip the per-tick account-registry refresh (route off the "
                          "cached snapshot; for inspection / when a fresh scan just ran)")
+    ap.add_argument("--warm-floor", action="store_true", default=None,
+                    help="#3610: prime the shared ~35.8k floor prefix with ONE "
+                         "pre-request before the wave spawns, so members 2..N read "
+                         "that cache instead of each paying a full cache-write "
+                         f"(default: off; {WARM_FLOOR_ENV} sets it fleet-wide)")
+    ap.add_argument("--stagger-s", type=float, default=None,
+                    help="#3610: seconds between consecutive wave launches, to space "
+                         "members inside the cache TTL (default: 0.0 = today's "
+                         f"back-to-back spawn; {LAUNCH_STAGGER_ENV} retunes it). Note "
+                         "fak forces the 1h stable-prefix TTL by default, so the "
+                         "budget is usually far wider than the provider's 5-min floor")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
@@ -1612,7 +1746,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.wave:
         payload = evaluate_wave(root, max_workers=args.max_workers,
                                 work_kind=args.work_kind, live=args.live,
-                                refresh=not args.no_refresh)
+                                refresh=not args.no_refresh,
+                                warm_floor=args.warm_floor,
+                                stagger_s=args.stagger_s)
         print(json.dumps(payload, indent=2) if args.json else render_wave(payload))
         return 0 if payload.get("ok") else 1
     payload = evaluate(root, max_workers=args.max_workers, work_kind=args.work_kind,

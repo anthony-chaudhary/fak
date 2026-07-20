@@ -714,6 +714,143 @@ class WaveTest(unittest.TestCase):
             self.assertEqual(rec["seats"], ["acct-0", "acct-1"])
 
 
+class WaveLaunchCacheTest(unittest.TestCase):
+    """#3610 cross-worker floor cache-warm: ONE warm pre-request per wave (not per
+    member) primes the byte-identical ~35.8k floor prefix, and a stagger knob spaces
+    consecutive launches inside the cache TTL so members 2..N read that prefix instead
+    of each paying a full cache-write. Both knobs are off/zero by default, so an
+    unconfigured wave must launch exactly as it does today.
+
+    Borrows WaveTest's `_wire` stub harness (by reference, not by subclassing — a
+    subclass would re-run every WaveTest case) so nothing live spawns and no token is
+    spent; the warm runner and the sleep are both injected."""
+
+    SPAWN_OK = WaveTest.SPAWN_OK
+    _wire = WaveTest._wire
+
+    def _live_wave(self, mod, root, *, n=3, **kw):
+        """A live wave of `n` disjoint lanes with the spawn stubbed out."""
+        cands = [{"lane": f"lane{i}", "issues": 9 - i, "tree": [f"lane{i}/**"]}
+                 for i in range(n)]
+        self._wire(mod, seats=[_seat(i) for i in range(n)], candidates=cands,
+                   no_spawn=False)
+        self.spawned: list[str] = []
+        mod._spawn_wave_member = lambda root, lane, *a, **k: (
+            self.spawned.append(lane) or {"pid": 1, "log": "x.log"})
+        return mod.evaluate_wave(root, max_workers=n, work_kind="engineering",
+                                 live=True, **kw)
+
+    def test_warm_floor_fires_exactly_once_per_wave_not_once_per_member(self) -> None:
+        mod = load()
+        calls: list[bool] = []
+        mod.warm_floor_prefix = lambda root, **kw: (
+            calls.append(kw.get("live")) or {"warmed": True})
+        with tempfile.TemporaryDirectory() as d:
+            p = self._live_wave(mod, Path(d), n=3, warm_floor=True)
+        self.assertEqual(len(self.spawned), 3, "all three members must still spawn")
+        # THE assertion the issue turns on: 3 members, ONE warm — a per-member warm
+        # would pay the floor N times over and defeat the whole optimization.
+        self.assertEqual(calls, [True], "warm must fire once per WAVE, not per member")
+        self.assertEqual(p["warm_floor"], {"warmed": True})
+        self.assertTrue(p["launch_cache"]["warm_floor"])
+
+    def test_warm_floor_is_off_by_default_and_never_fires(self) -> None:
+        mod = load()
+        def boom(*a, **k):
+            raise AssertionError("an unconfigured wave must not issue a warm request")
+        mod.warm_floor_prefix = boom
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop(mod.WARM_FLOOR_ENV, None)
+            with tempfile.TemporaryDirectory() as d:
+                p = self._live_wave(mod, Path(d), n=2)
+        self.assertEqual(len(self.spawned), 2)
+        self.assertNotIn("warm_floor", p)
+        self.assertFalse(p["launch_cache"]["warm_floor"])
+
+    def test_warm_floor_is_skipped_when_the_wave_spawns_nothing(self) -> None:
+        mod = load()
+        def boom(*a, **k):
+            raise AssertionError("a wave with no members must not pay for a warm")
+        mod.warm_floor_prefix = boom
+        # No seats -> no member ever reaches the spawn arm, so the lazy latch must
+        # never fire: warming a prefix nothing will read is pure waste.
+        self._wire(mod, seats=[], candidates=[
+            {"lane": "tools", "issues": 9, "tree": ["tools/**"]}])
+        with tempfile.TemporaryDirectory() as d:
+            p = mod.evaluate_wave(Path(d), max_workers=2, work_kind="engineering",
+                                  live=True, warm_floor=True)
+        self.assertEqual(p["size"], 0)
+
+    def test_stagger_delays_between_consecutive_spawns_only(self) -> None:
+        mod = load()
+        slept: list[float] = []
+        mod._sleep = slept.append
+        with tempfile.TemporaryDirectory() as d:
+            p = self._live_wave(mod, Path(d), n=3, stagger_s=7.5)
+        self.assertEqual(len(self.spawned), 3)
+        # 3 members -> 2 gaps. The delay lands BETWEEN launches: member 1 is never
+        # held back (nothing is warm yet for it to wait on).
+        self.assertEqual(slept, [7.5, 7.5])
+        self.assertEqual(p["launch_cache"]["stagger_s"], 7.5)
+        self.assertEqual(p["launch_cache"]["staggered_spawns"], 2)
+
+    def test_zero_stagger_reproduces_todays_back_to_back_launch(self) -> None:
+        mod = load()
+        slept: list[float] = []
+        mod._sleep = slept.append
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop(mod.LAUNCH_STAGGER_ENV, None)
+            with tempfile.TemporaryDirectory() as d:
+                p = self._live_wave(mod, Path(d), n=3)
+        self.assertEqual(len(self.spawned), 3)
+        self.assertEqual(slept, [], "an unset stagger must never sleep")
+        self.assertEqual(p["launch_cache"]["stagger_s"], 0.0)
+        self.assertEqual(p["launch_cache"]["staggered_spawns"], 0)
+
+    def test_env_knobs_supply_the_defaults(self) -> None:
+        mod = load()
+        calls: list[int] = []
+        mod.warm_floor_prefix = lambda root, **kw: calls.append(1) or {"warmed": True}
+        slept: list[float] = []
+        mod._sleep = slept.append
+        with mock.patch.dict("os.environ", {mod.WARM_FLOOR_ENV: "1",
+                                            mod.LAUNCH_STAGGER_ENV: "2.5"}):
+            with tempfile.TemporaryDirectory() as d:
+                p = self._live_wave(mod, Path(d), n=2)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(slept, [2.5])
+        self.assertEqual(p["launch_cache"]["stagger_s"], 2.5)
+
+    def test_dry_run_warm_never_spends_tokens(self) -> None:
+        mod = load()
+        ran: list[int] = []
+        rec = mod.warm_floor_prefix(ROOT, live=False, run=lambda *a, **k: ran.append(1))
+        self.assertTrue(rec["would_warm"])
+        self.assertEqual(ran, [], "a dry run must not issue the pre-request")
+
+    def test_warm_failure_is_recorded_and_never_blocks_the_wave(self) -> None:
+        mod = load()
+        def explode(*a, **k):
+            raise OSError("no claude binary here")
+        rec = mod.warm_floor_prefix(ROOT, live=True, run=explode)
+        # FAIL-OPEN: warming is a cost optimization, so a fault must degrade to
+        # today's unwarmed launch, never refuse the dispatch.
+        self.assertIn("error", rec)
+        self.assertFalse(rec.get("warmed"))
+
+    def test_warm_command_shares_the_worker_prefix_and_differs_only_in_the_turn(self):
+        mod = load()
+        dw = mod.dispatch_worker
+        worker = dw.build_command("tools", "claude")
+        warm = dw.build_warm_floor_command("claude")
+        # The premise of #3610: everything the provider caches (binary + flags, hence
+        # system prompt + tool schemas) is identical; ONLY the trailing user turn —
+        # which sits AFTER the cached prefix — differs.
+        self.assertEqual(warm[:-1], worker[:-1])
+        self.assertNotEqual(warm[-1], worker[-1])
+        self.assertEqual(warm[-1], dw.WARM_FLOOR_PROMPT)
+
+
 class BusyLanesTest(unittest.TestCase):
     """busy_lanes folds the inflight markers spawn_detached writes into the set of
     lanes with a LIVE worker, pruning dead / stale / garbage markers in one pass so

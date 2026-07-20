@@ -119,6 +119,15 @@ CLAUDE_AGENT_PROMPT = "/dos-dispatch-loop --lane {lane}"
 OPENCODE_AGENT = "dos-dispatch"
 OPENCODE_MESSAGE = "dispatch lane {lane}"
 
+# The trailing user turn of the floor-warm pre-request (#3610). Deliberately trivial:
+# the point is the PREFIX in front of it (system prompt + tool schemas, the ~35.8k
+# floor pinned by internal/gateway/ctxfootprint.go), not the answer. The prompt sits
+# AFTER that prefix on the wire, so it cannot perturb the bytes being cached.
+WARM_FLOOR_PROMPT = "respond with the single word: warm"
+# build_command rejects an empty lane, and the lane only ever reaches the trailing
+# prompt (which build_warm_floor_command discards) — so this placeholder never travels.
+WARM_FLOOR_LANE = "warm-floor"
+
 
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -178,6 +187,23 @@ def build_command(lane: str, backend: str) -> list[str]:
             OPENCODE_MESSAGE.format(lane=lane),
         ]
     raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+
+
+def build_warm_floor_command(backend: str) -> list[str]:
+    """Pure: the argv for ONE floor-warm pre-request (#3610).
+
+    Derived from :func:`build_command` by swapping ONLY the trailing user turn, so the
+    cacheable prefix in front of it — the backend binary, its flags, and therefore the
+    system prompt + tool schemas the provider caches — is byte-identical to a real
+    worker's by construction rather than by a re-typed duplicate that can drift. That
+    identity is the whole premise of the issue: prime the prefix once, then let workers
+    2..N read it instead of each paying a fresh cache-write.
+
+    Lane-independent on purpose: the lane appears only in the trailing prompt (which
+    sits AFTER the cached prefix), so one warm request serves every lane in the wave.
+    """
+    cmd = build_command(WARM_FLOOR_LANE, backend)
+    return [*cmd[:-1], WARM_FLOOR_PROMPT]
 
 
 def child_env(

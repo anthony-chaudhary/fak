@@ -183,9 +183,18 @@ will pick from; each worker selects the top-ranked leaf on the lane it leases.
 
 ## Step 1.5 — Size the wave: ramp rungs (the next tick IS the ramp)
 
-Nothing in the stack sleeps between spawns — there is no stagger flag anywhere.
-The ramp primitive is running the launcher *again*, smaller first. Pick the rung
-from evidence, not appetite; `<N>` below is what Steps 2–3 get:
+Three pacing knobs now exist, each with a DIFFERENT intent — don't confuse them for
+a ramp, and don't collapse them into one:
+
+- `--stagger-s` / `FLEET_LAUNCH_STAGGER_S` (`issue_dispatch.py --wave`, #3610) — spaces
+  members inside the prompt-cache TTL so workers 2..N READ the warm ~35.8k floor prefix
+  instead of each paying a cache-write. Pairs with `--warm-floor`. Default 0.0 (off).
+- `--settle-s` (`cmd/fak/dispatch_wave.go`) — spawn settling in the Go wave driver.
+- `Invoke-SpawnPacing` (`launch_wave_detached.ps1`) — jittered anti-burst protection for
+  per-account rate limits. Its jitter deliberately DE-synchronizes spawns; keep it.
+
+None of them is a ramp. The ramp primitive is still running the launcher *again*,
+smaller first. Pick the rung from evidence, not appetite; `<N>` below is what Steps 2–3 get:
 
 | Rung | When | How |
 |---|---|---|
