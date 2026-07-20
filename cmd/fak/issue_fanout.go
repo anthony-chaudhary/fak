@@ -45,12 +45,27 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 	adoption := fs.Bool("adoption", false, "measure the default instead of planning: report which --leaves cleared the fan-out floor vs gaps (exit 1 on any gap)")
 	leaves := fs.String("leaves", "", "with --adoption: comma-separated shipped leaves to audit")
 	markers := fs.String("markers", "", "with --adoption: comma-separated filed fan-out marker keys (fanout-<leaf>-<slug>)")
+	coverage := fs.Bool("coverage", false, "score the defaults on the REAL repo: gather witnesses from git + gh and report spine coverage and fan-out coverage with per-leaf evidence (exit 1 if either rate is short)")
+	since := fs.String("since", "90 days ago", "with --coverage: the window of 'recently shipped' (any git --since selector)")
+	scanCap := fs.Int("scan-cap", issuefanout.DefaultCoverageScanCap, "with --coverage: tracker export size for the marker scan (fan-out markers live in OLDER issues, so this is much larger than --dedupe-cap; a scan that hits the cap reports NOT PROVEN)")
 	live := fs.Bool("live", false, "file the planned candidates as GitHub issues via gh, after marker-key dedupe (default: plan only)")
 	repo := fs.String("repo", "", "with --live: owner/repo for gh (default: current repo)")
 	dedupeCap := fs.Int("dedupe-cap", issuefanout.DefaultDedupeCap, "with --live: bounded existing-issue scan for marker-key dedupe")
 	existingJSON := fs.String("existing-json", "", "with --live: fixture of existing issues (JSON [{number,body}]) instead of querying gh")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+
+	if *coverage {
+		if fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "fak issue fanout --coverage: takes no positional args (witnesses are gathered from git and gh)")
+			return 2
+		}
+		if *adoption {
+			fmt.Fprintln(stderr, "fak issue fanout: --coverage and --adoption are alternative meters — --coverage gathers its own witnesses, --adoption takes them via --leaves/--markers")
+			return 2
+		}
+		return emitFanoutCoverage(stdout, stderr, *since, *repo, *scanCap, *asJSON, fanoutCoverageDeps{gh: gh})
 	}
 
 	if *adoption {
