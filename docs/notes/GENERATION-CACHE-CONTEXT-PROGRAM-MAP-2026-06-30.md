@@ -99,6 +99,64 @@ a documented worst-case bound and the cluster could be promoted to `gen/now`
 without any CUDA-node measurement. That is an operator modeling decision, not an
 evidence gap, and it is the cheapest path to promotion.
 
+## Compaction-Wiring Residue (#4667), 2026-07-19 Triage
+
+#4667 ("wire the existing deterministic compactor into the live linear-history
+loop") carried no `generation` label and no milestone. It is recorded here
+rather than in the table above because the evidence pass could **not** bind a
+stream label, and a silent non-classification would read as an oversight.
+
+**Classified `needs-triage`, no `gen/*` stream label, no milestone.** The issue
+as written is not a coherent unit of work, so any stream binding would be the
+guess that this repo's intake rule forbids.
+
+Its stated premise — that `CompactAnthropicHistory(` has no production caller —
+is a grep false positive, verified at HEAD. That symbol is a three-line
+byte-only wrapper (`internal/agent/anthropic_compact.go:251`) over
+`CompactAnthropicHistoryWithOutcome` (`:329`), and *that* is called in
+production from `internal/gateway/messages.go:706`
+(`compactAnthropicRawWithReason`), default-on at
+`DefaultCompactHistoryBudget = 48000` resident tokens
+(`internal/gateway/gateway.go:68`). The search matched the wrapper nobody
+calls, not the implementation everybody calls. The compactor is wired.
+
+DoD item 1 is additionally unreachable as written. The compactor anchors on a
+`cache_control` breakpoint inside a raw Anthropic `/v1/messages` JSON body;
+`runArm` holds decoded `[]Message` behind a provider-agnostic planner. Feeding
+it that bails `CompactReasonNonJSON` on every call, so implementing item 1
+literally would manufacture a fire witness that can never fire.
+
+**The residue that is real**, and the only part worth dispatching: `grep -n
+"CtxView\|SessionPlanner\|Budget\|resident\|compact" internal/agent/loop.go`
+returns zero matches. `runArm` has no resident-token bound of any kind — only
+`maxTurns`, a turn bound. That is the eval harness, not the flagship runtime,
+and it is a much smaller claim than the issue's title makes.
+
+Scoped to that residue alone, the work would read `gen/next`: the `CtxViewPlanner`
+seam exists but in-process construction is gated **off**
+(`NewCtxViewPlanner`, `internal/agent/ctxplan_seam.go:69`), so wiring it needs a
+gate plus a dogfood run — this map's own `gen/next` shape. That reading is
+recorded as conditional, not applied. Binding `gen/next` now would surface the
+issue in the `generation-next` dispatch view carrying its unreachable item 1,
+where the next agent re-derives the same refusal; three workers have already
+spent a pass on it.
+
+Promotion evidence (what lets a stream label bind): a human rescope that
+retitles to bounding the `fak agent` eval-harness loop by resident tokens, drops
+items 1, 3, and 6, and keeps the fixture ask. At that point `gen/next` binds on
+this map's existing criteria and `needs-triage` comes off.
+
+Demotion/retirement evidence: if the operator confirms the flagship gateway path
+at `messages.go:706` is the one authoritative context policy and the eval
+harness is deliberately turn-bounded, #4667 retires as already-satisfied rather
+than moving horizons — items 3 and 6 are then satisfied elsewhere and nothing
+remains.
+
+Invalidating assumption: this triage infers item 1 is unreachable from `runArm`
+being provider-agnostic *today*. If the author meant the anthropic **adapter**
+boundary — where a raw JSON body does exist — item 1 becomes reachable and this
+entire re-scope is wrong. That is the question to put to the author first.
+
 ## Promotion Rules
 
 Promote `gen/next` cache/context work toward `gen/now` only when all of these
