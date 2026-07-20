@@ -6113,5 +6113,120 @@ class SpawnIssueWorkerWorktreeTest(unittest.TestCase):
                              ["tools/**"])
 
 
+class UnresolvedAcceptanceGateTest(unittest.TestCase):
+    """#5070: a contract whose ``## Acceptance gate`` explicitly needs operator
+    input is held BEFORE worker spawn, even when its aggregate score clears the
+    floor. Drives the real admission seam (issue_contract_review ->
+    issue_contract_hold_reason) with only the `fak issue contract` shell-out
+    stubbed, so the gate is the thing under test, not a mock of it."""
+
+    #: The gate #2806 carried when the live resolver wrongly admitted it.
+    UNRESOLVED_GATE = "unknown -- needs operator input"
+    #: #5070's own gate: concrete, and it happens to contain the word
+    #: "unresolved" -- the confusion risk a naive substring match would trip on.
+    CONCRETE_GATE = ("`tools/issue_resolve_dispatch_test.py` regression covering "
+                     "unresolved and concrete acceptance-gate controls.")
+
+    @staticmethod
+    def _body(gate: str, *, trailer: str = "") -> str:
+        return (f"## Working spine\nHold unexecutable contracts.\n\n"
+                f"## Acceptance gate\n{gate}\n\n"
+                f"## Lane\ntools\n{trailer}")
+
+    @staticmethod
+    def _passing_runner(*_a, **_k):
+        """A `fak issue contract` run that PASSES the numeric floor, so the only
+        thing that can hold the contract is the acceptance-gate check."""
+        return subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps({
+                "ok": True,
+                "reviews": [{"ok": True, "reasons": [], "missing_fields": [],
+                             "score": {"total": 100},
+                             "spine_priority": {"total": 100}}],
+            }), stderr="")
+
+    def _review(self, body: str) -> dict:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            return mod.issue_contract_review(
+                Path(td), {"number": 2806, "title": "t", "body": body}, 2806,
+                runner=self._passing_runner)
+
+    @staticmethod
+    def _holds(mod, contract: dict) -> bool:
+        """The module's own admission predicate, mirrored: this is exactly what
+        the resolver's `_contract_holds` reads before it spawns or leases."""
+        return bool(contract.get("unavailable") or not contract.get("ok") or
+                    int(contract.get("score") or 0)
+                    < mod.DEFAULT_ISSUE_CONTRACT_MIN_SCORE)
+
+    def test_unresolved_gate_holds_a_score_passing_contract(self) -> None:
+        mod = load()
+        contract = self._review(self._body(self.UNRESOLVED_GATE))
+        # The score cleared the floor -- the hold is the gate's doing alone.
+        self.assertEqual(contract["score"], mod.DEFAULT_ISSUE_CONTRACT_MIN_SCORE)
+        self.assertFalse(contract["ok"])
+        self.assertTrue(self._holds(mod, contract))
+        reason = mod.issue_contract_hold_reason(contract)
+        self.assertTrue(reason.startswith(mod.ACCEPTANCE_GATE_HOLD_REASON), reason)
+        self.assertIn("needs operator input", reason)
+
+    def test_concrete_gate_stays_dispatchable(self) -> None:
+        mod = load()
+        contract = self._review(self._body(self.CONCRETE_GATE))
+        self.assertTrue(contract["ok"])
+        self.assertFalse(self._holds(mod, contract))
+        self.assertEqual(contract["acceptance_gate_hold"], "")
+        self.assertEqual(mod.issue_contract_hold_reason(contract),
+                         "issue contract passed")
+
+    def test_operator_prose_outside_the_gate_never_holds(self) -> None:
+        """The declared confusion risk: bind the Acceptance gate section only."""
+        mod = load()
+        body = self._body(
+            self.CONCRETE_GATE,
+            trailer="\n## Coordination\nPing the operator; needs operator input "
+                    "before the milestone is set.\n")
+        contract = self._review(body)
+        self.assertTrue(contract["ok"])
+        self.assertFalse(self._holds(mod, contract))
+
+    def test_unresolved_vocabulary_forms(self) -> None:
+        mod = load()
+        for gate in ("unknown -- needs operator input", "unknown", "TBD",
+                     "To be determined", "unresolved: awaiting operator decision",
+                     "- unknown, pending operator sign-off", "???"):
+            with self.subTest(gate=gate):
+                self.assertTrue(mod.unresolved_acceptance_gate(self._body(gate)),
+                                f"expected a hold for {gate!r}")
+
+    def test_concrete_vocabulary_forms_stay_dispatchable(self) -> None:
+        mod = load()
+        for gate in (self.CONCRETE_GATE,
+                     "`go test ./internal/dispatchtick` is green.",
+                     "make ci green; the unknown-flake list is unchanged.",
+                     "A render witness the operator reviewed already."):
+            with self.subTest(gate=gate):
+                self.assertEqual(mod.unresolved_acceptance_gate(self._body(gate)),
+                                 "", f"unexpected hold for {gate!r}")
+
+    def test_crlf_body_still_binds_the_gate(self) -> None:
+        """A GitHub-authored body arrives CRLF; the gate must bind there too, or
+        the check silently no-ops on exactly the live issues it exists for."""
+        mod = load()
+        crlf = self._body(self.UNRESOLVED_GATE).replace("\n", "\r\n")
+        self.assertIn("\r\n", crlf)
+        self.assertTrue(mod.unresolved_acceptance_gate(crlf))
+        self.assertEqual(mod.unresolved_acceptance_gate(
+            self._body(self.CONCRETE_GATE).replace("\n", "\r\n")), "")
+
+    def test_no_acceptance_gate_section_is_not_a_gate_hold(self) -> None:
+        """A body with no gate section is the score gate's business, not this
+        check's -- it must stay additive-no-regression."""
+        mod = load()
+        self.assertEqual(mod.unresolved_acceptance_gate("## Lane\ntools\n"), "")
+        self.assertEqual(mod.unresolved_acceptance_gate(None), "")
+
+
 if __name__ == "__main__":
     unittest.main()

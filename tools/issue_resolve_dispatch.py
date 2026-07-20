@@ -632,6 +632,59 @@ def _issue_record_for_contract(issue: dict[str, Any] | None,
     }
 
 
+# The typed hold token an explicitly-unresolved acceptance gate earns (#5070).
+ACCEPTANCE_GATE_HOLD_REASON = "acceptance-gate-unresolved"
+
+# The "## Acceptance gate" section of an issue contract, up to the next heading.
+# ONLY this section binds the hold: prose elsewhere in the body that merely
+# mentions an operator is never a hold. The heading terminator is `[ \t\r]*\n`
+# rather than `$\n` on purpose -- a GitHub-authored body arrives CRLF, and `$`
+# does not match before the `\r`, which would silently disable the whole gate.
+_ACCEPTANCE_GATE_SECTION = re.compile(
+    r"^[ \t]*#{1,6}[ \t]*acceptance[ \t]+gate[ \t\r]*\n"
+    r"(.*?)(?=^[ \t]*#{1,6}[ \t]|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL)
+# Explicit unresolved vocabulary that LEADS the gate -- a bare token line
+# ("TBD") or a token heading the sentence ("unknown -- needs operator input").
+# Anchored at the start so a concrete gate that merely uses the word later
+# ("... covering unresolved and concrete controls") stays dispatchable.
+_GATE_UNRESOLVED_TOKEN = re.compile(
+    r"^(?:unknown|unresolved|tbd|to be determined|\?+)(?:\s*(?:$|[-–—:,;.]))")
+# An unambiguous operator-input phrase anywhere in the gate section.
+_GATE_OPERATOR_INPUT = re.compile(
+    r"\b(?:needs?|requires?|awaiting|pending|blocked on)\s+(?:an?\s+)?"
+    r"operator\s+(?:input|decision|answer|review|sign-?off)\b")
+
+
+def unresolved_acceptance_gate(body: Any) -> str:
+    """The verbatim acceptance-gate line that marks a contract as explicitly
+    NOT executable yet, or ``""`` when the gate names a concrete witness (#5070).
+
+    The always-on loop must spend a leased seat only on an executable contract. A
+    score-only pass admitted #2806 whose gate read ``unknown -- needs operator
+    input``: the aggregate score cleared the floor while the issue's own contract
+    said the acceptance witness was still open, so a worker burned a `cmd` slot
+    triaging instead of shipping. The explicit body contract is authoritative over
+    the numeric score when it says operator input is still required.
+
+    Binds the ``## Acceptance gate`` section ONLY, and within it only the first
+    meaningful line, matched against explicit unresolved vocabulary that LEADS the
+    gate or an unambiguous operator-input phrase. Prose that merely mentions an
+    operator, or a concrete gate that happens to contain the word "unresolved",
+    never matches -- fail-closed on the declared vocabulary, not on keywords."""
+    text = body if isinstance(body, str) else ""
+    section = _ACCEPTANCE_GATE_SECTION.search(text)
+    if not section:
+        return ""
+    line = next((s for s in (ln.strip() for ln in section.group(1).splitlines()) if s), "")
+    if not line:
+        return ""
+    probe = line.lstrip("-*+> \t").strip().strip("`*_").strip().lower()
+    if _GATE_UNRESOLVED_TOKEN.match(probe) or _GATE_OPERATOR_INPUT.search(probe):
+        return line[:200]
+    return ""
+
+
 def issue_contract_review(root: Path, issue: dict[str, Any] | None,
                           number: int | None,
                           runner: Any = subprocess.run) -> dict[str, Any]:
@@ -640,12 +693,12 @@ def issue_contract_review(root: Path, issue: dict[str, Any] | None,
     # issue is body + overlay, so a repair worker's landed overlay flips the very
     # next review without any GitHub write.
     overlay = read_contract_overlay(root / RUNS_DIRNAME, number)
+    record = _issue_record_for_contract(issue, number, overlay)
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
                                          delete=False) as f:
             tmp = Path(f.name)
-            json.dump([_issue_record_for_contract(issue, number, overlay)],
-                      f, ensure_ascii=False)
+            json.dump([record], f, ensure_ascii=False)
             f.write("\n")
         cmd = [
             *_fak_command_prefix(root),
@@ -677,9 +730,15 @@ def issue_contract_review(root: Path, issue: dict[str, Any] | None,
     score = ((review.get("score") or {}).get("total") if isinstance(review, dict) else 0) or 0
     spine = ((review.get("spine_priority") or {}).get("total")
              if isinstance(review, dict) else 0) or 0
+    # Fail-closed on an explicitly-unresolved acceptance gate even when the
+    # aggregate score clears the floor: the body contract is authoritative when
+    # it says the acceptance witness still needs operator input (#5070).
+    gate_hold = unresolved_acceptance_gate(record.get("body"))
     return {
-        "ok": bool(proc.returncode == 0 and doc.get("ok") and review.get("ok")),
+        "ok": bool(proc.returncode == 0 and doc.get("ok") and review.get("ok")
+                   and not gate_hold),
         "unavailable": False,
+        "acceptance_gate_hold": gate_hold,
         "score": int(score),
         "spine_priority": int(spine),
         "review": review,
@@ -690,6 +749,11 @@ def issue_contract_review(root: Path, issue: dict[str, Any] | None,
 def issue_contract_hold_reason(contract: dict[str, Any]) -> str:
     if contract.get("unavailable"):
         return str(contract.get("reason") or "issue contract unavailable")
+    # A typed hold, reported ahead of the score terms: this contract can score
+    # arbitrarily well and still be un-dispatchable (#5070).
+    gate_hold = str(contract.get("acceptance_gate_hold") or "")
+    if gate_hold:
+        return f"{ACCEPTANCE_GATE_HOLD_REASON}: {gate_hold}"
     review = contract.get("review") if isinstance(contract.get("review"), dict) else {}
     parts = [str(r) for r in (review.get("reasons") or []) if r]
     parts.extend(f"missing:{m}" for m in (review.get("missing_fields") or []) if m)
