@@ -147,9 +147,14 @@ Shipped pieces that already live in these tiers — with the gaps named, not hid
 
 - **T1** — `internal/vdso/pathscope.go` scopes read paths; the self-modify floor in
   `internal/adjudicator/decide.go` refuses writes into `.git/`, kernel, credential paths
-  (`SELF_MODIFY`); `internal/egressfloor` refuses the SSRF/cloud-metadata class. *Gap:* a
-  first-class, policy-configurable **mount view** (what tree exists to the agent at all),
-  not just per-op deny rules — tracked as child work off this spine and adjacent to
+  (`SELF_MODIFY`); `internal/egressfloor` refuses the SSRF/cloud-metadata class. *Gap:* the
+  first-class, policy-configurable **mount view** (what tree exists to the agent at all,
+  not just per-op deny rules) is **half-landed** —
+  [#2577](https://github.com/anthony-chaudhary/fak/issues/2577) shipped the `mount_view`
+  manifest namespace and the deny-by-default kernel `policy.MountViewRefusal`, but nothing
+  on the request path calls it, so a declared view is inert and `fak preflight` still
+  ALLOWs an out-of-view `Read`. Wiring it into the call-side adjudicator is
+  [#5310](https://github.com/anthony-chaudhary/fak/issues/5310); adjacent work is
   [#2358](https://github.com/anthony-chaudhary/fak/issues/2358). The shipped T1/T2 floor
   running *inside a sandbox fak did not provision* is witnessed end-to-end in
   [`examples/vm-fs-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/vm-fs-guard/)

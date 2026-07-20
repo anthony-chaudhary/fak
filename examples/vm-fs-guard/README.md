@@ -90,30 +90,50 @@ This witness captures the **shipped** filesystem floor: the call-side `SELF_MODI
 refusal and the result-side read *quarantine*, both live kernel decisions. It is
 deliberately **not** the full T1 story yet:
 
-- The issue's ideal (a) is an *out-of-view Read refused by the **mount view***. The
-  first-class, policy-configurable **mount view** — what tree exists to the agent at all,
-  not just per-op deny rules — is the named next increment
-  ([#2577](https://github.com/anthony-chaudhary/fak/issues/2577)); today the shipped floor
-  refuses out-of-scope **writes** (SELF_MODIFY), which this witness shows.
+- The issue's ideal (a) is an *out-of-view Read refused by the **mount view***. **This is
+  still not witnessed here, and the reason changed.**
+  [#2577](https://github.com/anthony-chaudhary/fak/issues/2577) closed having landed the
+  mount-view *kernel* — the `mount_view` manifest namespace plus `policy.MountViewRefusal`,
+  a correct and unit-tested deny-by-default reference monitor over paths — but **not its
+  enforcement wiring**. Nothing on the request path calls it, so a declared view is inert
+  and no CLI verb can refuse an out-of-view read. Witnessed against a manifest whose view
+  covers `src` only:
+
+  ```text
+  $ fak preflight --policy mv.json --tool Read --args '{"file_path":"secrets/id_rsa"}'
+  verdict=ALLOW reason=NONE by=monitor      # out of view, yet ALLOWed
+  ```
+
+  Corroborating: `fak policy --check` prints all 17 floor dimensions and the mount view is
+  in none of them. Wiring it is
+  [#5310](https://github.com/anthony-chaudhary/fak/issues/5310). Until that lands, the
+  shipped floor refuses out-of-scope **writes** (SELF_MODIFY), which is what this witness
+  shows — a write-side T1 refusal standing in for a read-side one.
 - The single **unified read syscall** spanning local tree query *and* remote-document
   retrieval under one trust gate ([#2578](https://github.com/anthony-chaudhary/fak/issues/2578))
-  is now witnessed directly: the *same* result-admit floor quarantines a poisoned **remote**
-  document and a poisoned **local** file, and the vDSO counts a repeated local query as a
-  cache-hit — pinned offline by
+  **has landed** and is witnessed directly: the *same* result-admit floor quarantines a
+  poisoned **remote** document and a poisoned **local** file, and the vDSO counts a repeated
+  local query as a cache-hit — pinned offline by
   [`internal/vdso/t2_read_seam_witness_test.go`](../../internal/vdso/t2_read_seam_witness_test.go).
   This `fak demo` run shows the T2 quarantine through the result-admitter; the seam test
   proves it is backend-agnostic (local *and* remote, one floor, one cache).
 
-**Promotion evidence** (what moves this from `gen/next` toward `now`): #2577 landing a
-mount-view refusal turns witness (a) into a read-side out-of-view `Read → DENY`, and #2578
-landing the unified read syscall lets one verb produce both the T1 refusal and the T2
-quarantine over local *and* remote reads. **Demotion/retirement evidence**: if the epic
-retires the "fak is the VFS, not the VM" claim (e.g. fak grows a T0 provider), this
-witness — which exists to back exactly that claim — is retired with it.
-**Invalidating assumption**: this stands in a container/microVM as a T0 substitute for the
-real E2B/Fly/Cloudflare platforms; if the boundary behaves differently on a real guest
+**Promotion evidence** (what moves this from `gen/next` toward `now`): #5310 wiring
+`MountViewRefusal` into the call-side adjudicator turns witness (a) into a real read-side
+out-of-view `Read → DENY DEFAULT_DENY` that `run.sh` can assert next to the existing
+write-side rung — at which point all three of the issue's captures (out-of-view read,
+quarantine, ledger) are live CLI decisions rather than two-of-three. #2578 has already
+promoted: the T2 half is witnessed over local *and* remote reads.
+**Demotion/retirement evidence**: if the epic retires the "fak is the VFS, not the VM"
+claim (e.g. fak grows a T0 provider), this witness — which exists to back exactly that
+claim — is retired with it.
+**Invalidating assumptions**: (1) this stands in a container/microVM as a T0 substitute for
+the real E2B/Fly/Cloudflare platforms; if the boundary behaves differently on a real guest
 kernel (gVisor/Firecracker syscall interception) than in this substitute, the witness must
-be re-run there before the strategic claim rests on it.
+be re-run there before the strategic claim rests on it. (2) A *closed* tier issue does not
+mean an *enforced* tier — #2577 closed on the kernel half alone, and the gap was invisible
+until the manifest was driven through `fak preflight`. Read a tier's claim against a live
+verdict, not against its issue state.
 
 ## Where this fits
 

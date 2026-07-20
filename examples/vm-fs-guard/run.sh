@@ -32,9 +32,12 @@
 # on every run.
 #
 # Honest fence: the shipped T1 floor refuses out-of-scope *writes* (SELF_MODIFY) into
-# regions the sandbox's disk holds; the read-side *mount view* that hides a whole tree
-# from the agent (#2577) and the single unified read syscall spanning local + remote
-# (#2578) are the named next increments off the spine. See README.md.
+# regions the sandbox's disk holds. The read-side *mount view* that hides a whole tree from
+# the agent is NOT witnessed below: #2577 landed its kernel (policy.MountViewRefusal + the
+# `mount_view` manifest field) but not its enforcement wiring, so a declared view is inert
+# on the request path — `fak preflight` ALLOWs an out-of-view Read today (#5310 wires it).
+# The unified read syscall spanning local + remote (#2578) HAS landed and is witnessed by
+# internal/vdso/t2_read_seam_witness_test.go. See README.md § Honest boundary.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
