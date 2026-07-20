@@ -31,6 +31,7 @@ the individual proof pages and [`00-METHOD.md`](00-METHOD.md).
 | The supported Apple Metal GEMM path matches its CPU reference | [`metalgemm.md`](metalgemm.md) | Metal hardware-backed numerical witness |
 | A shipped proof is bound to repository history | [`witness.md`](witness.md) and [the DOS binding section](#dos-binding--the-proof-section-is-itself-witnessed) | Independent git-evidence witness |
 | A benchmark comparison isolates the claimed effect | [`bench-ab-isolation.md`](bench-ab-isolation.md) and [`isolation-bench.md`](isolation-bench.md) | Controlled A/B measurement |
+| Every guard, adjudication rung, and hook declares its failure mode | [`failclosed-audit.md`](failclosed-audit.md) | Enumerated coverage ledger + drift gate |
 
 If the claim is not in this short route table, use the
 [master ledger](#master-ledger), which groups every maintained proof by numerical,
