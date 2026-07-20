@@ -26,6 +26,19 @@ folds the call-side adjudicator chain for one filesystem tool call, and `fak dem
 the result-side admitter (`Kernel.AdmitResult`) over a poisoned read. The result is
 bit-identical on every run, and the full script normally completes in a few seconds after Go compilation. Captured output: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
+**On a dirty shared trunk, skip the build** — point the witness at a prebuilt binary:
+
+```bash
+FAK_BIN=/path/to/fak examples/vm-fs-guard/run.sh
+```
+
+`run.sh` builds `./cmd/fak` from the *working tree*, so a peer's half-landed change
+elsewhere in the module (a committed caller whose definition is still uncommitted) reds
+that build and the witness never reaches its first verdict — a build failure, not an FS
+verdict. The witness itself only needs `fak preflight` and `fak demo`, so any recent
+binary reproduces it. This is what makes the run reproducible on a live multi-session
+checkout rather than only in a clean clone.
+
 ## What it proves
 
 The disk belongs to the sandbox; the *decisions* belong to fak. Three FS-syscall classes,
