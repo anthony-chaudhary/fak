@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -146,8 +148,41 @@ func TestExposeAllowlistFiltersDiscoveryAndGuardsCall(t *testing.T) {
 func TestExposeEmptyExposesFullSurface(t *testing.T) {
 	srv := newExposeServer(t) // no allowlist
 	got := toolsListNames(t, srv)
-	if len(got) != len(toolDescriptors()) {
-		t.Fatalf("no-allowlist tools/list returned %d tools, want the full %d", len(got), len(toolDescriptors()))
+	// Pin the exact inventory, not just its size: a count-only assertion lets a
+	// rename (count unchanged) or a net-zero add+drop through silently. Adding,
+	// dropping, or renaming an exposed tool must fail here and be re-pinned
+	// deliberately, so the wire-visible MCP surface never drifts unreviewed.
+	wantInventory := []string{
+		"fak_adjudicate",
+		"fak_admit",
+		"fak_capabilities",
+		"fak_changes",
+		"fak_context_change",
+		"fak_context_restore",
+		"fak_context_spans",
+		"fak_context_value",
+		"fak_feature_query",
+		"fak_index_claims",
+		"fak_index_docs",
+		"fak_index_freshness",
+		"fak_index_lane",
+		"fak_index_leaves",
+		"fak_index_verbs",
+		"fak_index_work",
+		"fak_memory_drivers",
+		"fak_memory_explain",
+		"fak_memory_run",
+		"fak_read",
+		"fak_resume_history",
+		"fak_revoke",
+		"fak_session_reset",
+		"fak_syscall",
+		"fak_tools_search",
+		"fak_trajquery",
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, wantInventory) {
+		t.Fatalf("exposed MCP tool inventory drifted:\n got: %v\nwant: %v", got, wantInventory)
 	}
 	present := false
 	for _, n := range got {
