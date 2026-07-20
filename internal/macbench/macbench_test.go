@@ -163,6 +163,42 @@ func TestPlanRecoveryGatewayReadyWaitsForResult(t *testing.T) {
 	}
 }
 
+// A watch log that no longer exists must not read as "the watcher just has not
+// polled yet". Nightrun artifacts are host-local and rotate (.gitignore keeps
+// experiments/nightrun/*/ out of git), so once a run's log ages out there is
+// nothing left to wait for -- telling an operator to keep waiting is why #2611
+// sat for 16 days looking benign.
+func TestPlanRecoveryMissingLogIsNotMistakenForFirstPoll(t *testing.T) {
+	absent := false
+	plan := PlanRecovery(RecoverySignals{WatcherRunning: true, LogPresent: &absent})
+	if plan.State != "log_missing" {
+		t.Fatalf("plan state=%q, want log_missing: %+v", plan.State, plan)
+	}
+	if plan.Severity == "info" {
+		t.Fatalf("a missing watch log must not be info severity: %+v", plan)
+	}
+	if hasRecoveryAction(plan, "wait-first-poll") {
+		t.Fatalf("missing log must not advise waiting for a first poll: %+v", plan.Actions)
+	}
+	for _, want := range []string{"confirm-log-path", "start-fresh-watch"} {
+		if !hasRecoveryAction(plan, want) {
+			t.Fatalf("recovery plan missing action %q: %+v", want, plan.Actions)
+		}
+	}
+}
+
+// An unknown (never-inspected) log path keeps the pre-existing verdict, so a
+// --result-only recover call is unchanged by the log_missing branch.
+func TestPlanRecoveryUnknownLogPresenceKeepsFirstPollVerdict(t *testing.T) {
+	plan := PlanRecovery(RecoverySignals{WatcherRunning: true})
+	if plan.State != "no_health_report" || plan.Severity != "info" {
+		t.Fatalf("plan state=%q severity=%q, want no_health_report/info: %+v", plan.State, plan.Severity, plan)
+	}
+	if !hasRecoveryAction(plan, "wait-first-poll") {
+		t.Fatalf("unknown log presence should still advise waiting: %+v", plan.Actions)
+	}
+}
+
 func TestElapsedSecondsFloorsNonPositiveDurations(t *testing.T) {
 	got := elapsedSeconds(time.Now().Add(time.Second))
 	if got != 0.001 {

@@ -65,9 +65,14 @@ type RecoverySignals struct {
 	WatcherRunning bool
 	ResultPresent  bool
 	LatestReport   *Report
-	TailnetOnline  *bool
-	SSHReachable   *bool
-	WakeHelper     *bool
+	// LogPresent reports whether the watch log the caller named actually
+	// exists. nil means no log path was inspected, so presence is unknown.
+	// A known-false value is NOT the same as "the watcher has not polled
+	// yet": there is no log to poll into, so waiting cannot make progress.
+	LogPresent    *bool
+	TailnetOnline *bool
+	SSHReachable  *bool
+	WakeHelper    *bool
 }
 
 type RecoveryPlan struct {
@@ -146,6 +151,24 @@ func PlanRecovery(sig RecoverySignals) RecoveryPlan {
 			Title:  "restart macbench watch",
 			Detail: "Start `fak macbench watch` with the same sanitized log and result paths.",
 		}}
+		return plan
+	}
+	if boolKnownFalse(sig.LogPresent) {
+		plan.State = "log_missing"
+		plan.Severity = "action"
+		plan.Summary = "macbench watch log is absent at the named path; there is no evidence to recover from"
+		plan.Actions = []RecoveryAction{
+			{
+				ID:     "confirm-log-path",
+				Title:  "confirm the watch log path",
+				Detail: "Check the run id and box directory: the watch log does not exist at the path passed to --log.",
+			},
+			{
+				ID:     "start-fresh-watch",
+				Title:  "start a fresh watch run",
+				Detail: "Nightrun artifacts are host-local and rotate, so a run whose log has aged out cannot be revived. Start `fak macbench watch` and bind follow-up work to the NEW run id.",
+			},
+		}
 		return plan
 	}
 	if sig.LatestReport == nil {

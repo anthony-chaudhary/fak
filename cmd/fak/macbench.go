@@ -564,10 +564,18 @@ func runMacBenchRecover(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak macbench recover: %v\n", err)
 		return 2
 	}
+	// Only claim log presence when a --log path was actually named; otherwise
+	// leave it unknown so a --result-only call keeps its existing verdict.
+	var logPresent *bool
+	if strings.TrimSpace(*logPath) != "" {
+		present := status.LogPresent
+		logPresent = &present
+	}
 	plan := macbench.PlanRecovery(macbench.RecoverySignals{
 		WatcherRunning: *watcherRunning,
 		ResultPresent:  status.ResultPresent,
 		LatestReport:   status.LatestReport,
+		LogPresent:     logPresent,
 		TailnetOnline:  tailnet,
 		SSHReachable:   ssh,
 		WakeHelper:     wake,
