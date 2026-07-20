@@ -120,17 +120,66 @@ func TestDeepSeekAnthropicUnsupportedContentBlockRefused(t *testing.T) {
 }
 
 // TestDeepSeekAnthropicEffort covers effort validation across the two levels, unset,
-// and a rejected typo.
+// and a rejected typo. A canonical tier DeepSeek does not name is NOT a rejection any
+// more — it saturates to the nearest supported tier (#4069) — but a token off fak's
+// ladder entirely still fails loud, which is what the typo fence was ever for.
 func TestDeepSeekAnthropicEffort(t *testing.T) {
 	for _, ok := range []string{"", "high", "max", "MAX"} {
 		if err := ValidateDeepSeekAnthropicEffort(ok); err != nil {
 			t.Errorf("effort %q rejected: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"maximum", "low", "extreme"} {
-		if err := ValidateDeepSeekAnthropicEffort(bad); err == nil {
-			t.Errorf("effort %q accepted, want rejection", bad)
+	// Canonical tiers outside DeepSeek's set now pass validation by saturating.
+	for _, ok := range []string{"maximum", "low", "none", "xhigh", "ultracode"} {
+		if err := ValidateDeepSeekAnthropicEffort(ok); err != nil {
+			t.Errorf("canonical effort %q rejected, want saturation: %v", ok, err)
 		}
+	}
+	// Off-ladder tokens carry no ordering to clamp with, so they still refuse.
+	for _, bad := range []string{"extreme", "wat-9000", "hihg"} {
+		if err := ValidateDeepSeekAnthropicEffort(bad); err == nil {
+			t.Errorf("off-ladder effort %q accepted, want rejection", bad)
+		}
+	}
+}
+
+// TestDeepSeekAnthropicEffortSaturates pins the concrete clamp targets and, crucially,
+// that the SATURATED tier is what the profile carries — validation passing is not the
+// same claim as the right tier reaching the wire.
+func TestDeepSeekAnthropicEffortSaturates(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", ""}, // control stays unset
+		{"high", "high"},
+		{"max", "max"},
+		{"xhigh", "max"},     // over-range: tie breaks upward
+		{"ultracode", "max"}, // xhigh alias
+		{"maximum", "max"},   // max alias
+		{"low", "high"},      // under-range collapses up to the nearest
+		{"medium", "high"},
+		{"none", "high"},
+		{"  XHigh  ", "max"}, // normalized
+	} {
+		got, err := ResolveDeepSeekAnthropicEffort(tc.in)
+		if err != nil {
+			t.Errorf("ResolveDeepSeekAnthropicEffort(%q) errored: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("ResolveDeepSeekAnthropicEffort(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		// The profile must carry the saturated tier, not the caller's raw one.
+		prof, err := NewDeepSeekAnthropicProfile("k", "deepseek-v4-pro", tc.in)
+		if err != nil {
+			t.Errorf("profile with effort %q refused: %v", tc.in, err)
+			continue
+		}
+		if prof.Effort != tc.want {
+			t.Errorf("profile effort for %q = %q, want saturated %q", tc.in, prof.Effort, tc.want)
+		}
+	}
+	// An off-ladder effort still refuses the whole profile.
+	if _, err := NewDeepSeekAnthropicProfile("k", "deepseek-v4-pro", "extreme"); err == nil {
+		t.Error("profile accepted off-ladder effort \"extreme\", want refusal")
 	}
 }
 

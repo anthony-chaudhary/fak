@@ -187,3 +187,78 @@ func effortLabel(effort string) string {
 	}
 	return strings.ToLower(strings.TrimSpace(effort))
 }
+
+// --- the ORDERING lens on the same ladder: saturate an unsupported tier (#4069) ---
+//
+// The multipliers above are the VOLUME lens (how many output tokens a rung spends). What
+// follows is the ORDER lens on the SAME rungs: where each label sits on the monotone
+// none<minimal<low<medium<high<xhigh<max ladder, so a canonical tier a provider does not
+// offer can CLAMP to the nearest tier it does offer instead of erroring the whole request.
+//
+// WHY ORDINAL RANK AND NOT THE MULTIPLIER. Distance has to mean "how many rungs apart",
+// not "how many output tokens apart" — the multipliers are deliberately rough and
+// overridable (ParseEffortCosts), so routing a request on them would let an operator's
+// --effort-cost override silently re-target which provider tier a request lands on. The
+// rank ladder is fixed. TestEffortRankAgreesWithMultiplierOrder pins the two lenses so
+// they cannot drift apart.
+
+// effortRanks is the canonical ORDINAL ladder, carrying the same alias set as
+// DefaultEffortMultipliers so the two lenses speak about exactly the same rungs.
+var effortRanks = map[string]int{
+	"none": 0, "minimal": 1,
+	"low":    2,
+	"medium": 3, "default": 3, "normal": 3, // the neutral anchor
+	"high":  4,
+	"xhigh": 5, "very-high": 5, "ultra": 5, "ultracode": 5,
+	"max": 6, "maximum": 6,
+}
+
+// effortRank places a label on the ordinal ladder. The ok=false result is load-bearing: it
+// separates a tier fak KNOWS but a provider lacks (saturate it) from a token fak has never
+// heard of (a typo — the caller should still fail loud). Case- and space-insensitive.
+func effortRank(effort string) (int, bool) {
+	r, ok := effortRanks[strings.ToLower(strings.TrimSpace(effort))]
+	return r, ok
+}
+
+// SaturateEffort clamps a canonical reasoning-effort tier to the NEAREST tier in supported,
+// measured in rungs on the monotone ladder. This is graceful cross-vocabulary degradation:
+// a provider that offers only {high,max} should run an "xhigh" request at max and a "low"
+// request at high, rather than refusing a request it can serve perfectly well at an
+// adjacent tier.
+//
+// TIES BREAK UPWARD. "xhigh" sits exactly one rung from both "high" and "max"; it resolves
+// to "max". Rounding a tie toward MORE reasoning keeps the degradation conservative — the
+// caller asked for more thinking than the provider names, so the nearer of the two errs
+// toward honoring that rather than quietly halving it.
+//
+// It returns "" — never a guess — when the tier cannot be placed: a blank effort, a tier
+// outside the ladder (a typo like "extreem"), an empty supported set, or a supported set
+// naming only unrecognized tokens. "" is the NEUTRAL result, the same discipline Of keeps
+// with its 1.0 anchor: an un-placeable effort never silently becomes some other tier. A
+// caller that must distinguish "leave the control unset" from "reject a typo" checks the
+// blankness of its own input, not of this result.
+//
+// Pure: same canonical + same supported => same tier, no clock, no I/O.
+func SaturateEffort(canonical string, supported []string) string {
+	want, ok := effortRank(canonical)
+	if !ok {
+		return ""
+	}
+	best, bestDist, bestRank := "", -1, -1
+	for _, s := range supported {
+		r, ok := effortRank(s)
+		if !ok {
+			continue // a supported tier fak cannot place cannot be a clamp target
+		}
+		d := r - want
+		if d < 0 {
+			d = -d
+		}
+		// nearest rung wins; on an exact tie the HIGHER rung wins.
+		if bestDist < 0 || d < bestDist || (d == bestDist && r > bestRank) {
+			best, bestDist, bestRank = strings.ToLower(strings.TrimSpace(s)), d, r
+		}
+	}
+	return best
+}

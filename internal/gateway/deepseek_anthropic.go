@@ -152,15 +152,41 @@ const (
 	DeepSeekAnthropicEffortMax  = "max"
 )
 
-// ValidateDeepSeekAnthropicEffort accepts an empty effort (control unset) or one of the
-// two documented levels, and refuses anything else so a typo'd effort is caught here
-// rather than silently ignored by the upstream.
-func ValidateDeepSeekAnthropicEffort(effort string) error {
-	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "", DeepSeekAnthropicEffortHigh, DeepSeekAnthropicEffortMax:
-		return nil
+// deepSeekAnthropicWireEfforts is the effort vocabulary this route can put on the wire —
+// the clamp target set for ResolveDeepSeekAnthropicEffort.
+var deepSeekAnthropicWireEfforts = []string{DeepSeekAnthropicEffortHigh, DeepSeekAnthropicEffortMax}
+
+// ResolveDeepSeekAnthropicEffort maps a CANONICAL fak effort tier onto the two levels this
+// route speaks, SATURATING to the nearest supported tier rather than erroring a request the
+// provider can serve one rung away (#4069). fak's canonical ladder carries rungs DeepSeek
+// simply does not name (none/minimal/low/medium/xhigh), and refusing them made a caller's
+// perfectly ordinary `--effort low` fail the whole request; it now runs at high, and xhigh
+// runs at max (the tie breaks upward — see modelroute.SaturateEffort).
+//
+// The TYPO FENCE this replaced is preserved exactly where it earns its keep. Saturation is
+// only ever applied to a tier fak can PLACE on its ladder; a token off the ladder entirely
+// ("extreem") is still refused, because it carries no ordering to clamp with and is far
+// likelier a mistake than an intent. So the route degrades gracefully across a known
+// vocabulary gap while still failing loud on a genuinely unknown one.
+//
+// Returns ("", nil) for a blank effort: the control stays unset, which is not an error.
+func ResolveDeepSeekAnthropicEffort(effort string) (string, error) {
+	if strings.TrimSpace(effort) == "" {
+		return "", nil
 	}
-	return fmt.Errorf("deepseek-anthropic: invalid output_config.effort %q; want %q or %q", effort, DeepSeekAnthropicEffortHigh, DeepSeekAnthropicEffortMax)
+	if tier := modelroute.SaturateEffort(effort, deepSeekAnthropicWireEfforts); tier != "" {
+		return tier, nil
+	}
+	return "", fmt.Errorf("deepseek-anthropic: unknown output_config.effort %q; want a canonical effort tier (none/minimal/low/medium/high/xhigh/max), which is saturated to %q or %q", effort, DeepSeekAnthropicEffortHigh, DeepSeekAnthropicEffortMax)
+}
+
+// ValidateDeepSeekAnthropicEffort reports whether an effort can reach the wire at all: nil
+// for a blank control and for any canonical tier (which ResolveDeepSeekAnthropicEffort
+// saturates into range), an error only for a tier off fak's ladder. Callers that need the
+// tier actually sent should use ResolveDeepSeekAnthropicEffort instead.
+func ValidateDeepSeekAnthropicEffort(effort string) error {
+	_, err := ResolveDeepSeekAnthropicEffort(effort)
+	return err
 }
 
 // DeepSeekAnthropicCacheControlProvenance is the provenance label for a cache_control
@@ -190,7 +216,9 @@ type DeepSeekAnthropicProfile struct {
 	// Model is the DeepSeek V4 id to put on the wire (already resolved via
 	// ResolveDeepSeekAnthropicModel).
 	Model string
-	// Effort, if set, is emitted as output_config.effort ("high"/"max").
+	// Effort, if set, is emitted as output_config.effort. It holds a tier DeepSeek names
+	// ("high"/"max"); NewDeepSeekAnthropicProfile has already saturated any other
+	// canonical tier onto that set (#4069).
 	Effort string
 }
 
@@ -203,7 +231,8 @@ func NewDeepSeekAnthropicProfile(apiKey, requestedModel, effort string) (DeepSee
 	if err != nil {
 		return DeepSeekAnthropicProfile{}, err
 	}
-	if err := ValidateDeepSeekAnthropicEffort(effort); err != nil {
+	wireEffort, err := ResolveDeepSeekAnthropicEffort(effort)
+	if err != nil {
 		return DeepSeekAnthropicProfile{}, err
 	}
 	wireModel := model
@@ -214,7 +243,7 @@ func NewDeepSeekAnthropicProfile(apiKey, requestedModel, effort string) (DeepSee
 		BaseURL: modelroute.DeepSeekAnthropicBaseURL,
 		APIKey:  apiKey,
 		Model:   wireModel,
-		Effort:  effort,
+		Effort:  wireEffort,
 	}, nil
 }
 
@@ -332,7 +361,10 @@ func (p DeepSeekAnthropicProfile) PostMessages(ctx context.Context, client *http
 	if strings.TrimSpace(p.Model) == "" {
 		return nil, fmt.Errorf("deepseek-anthropic: profile has no model; build it with NewDeepSeekAnthropicProfile")
 	}
-	if err := ValidateDeepSeekAnthropicEffort(p.Effort); err != nil {
+	// Saturate here too, not just in the constructor: a profile can be hand-built as a
+	// struct literal, and the tier that reaches the wire must be one DeepSeek names.
+	wireEffort, err := ResolveDeepSeekAnthropicEffort(p.Effort)
+	if err != nil {
 		return nil, err
 	}
 	if err := FenceContentBlocks(messages); err != nil {
@@ -349,10 +381,10 @@ func (p DeepSeekAnthropicProfile) PostMessages(ctx context.Context, client *http
 			Type string `json:"type"`
 		}{Type: "enabled"}
 	}
-	if e := strings.TrimSpace(p.Effort); e != "" {
+	if wireEffort != "" {
 		body.OutputConfig = &struct {
 			Effort string `json:"effort"`
-		}{Effort: e}
+		}{Effort: wireEffort}
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
