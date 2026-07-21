@@ -1436,6 +1436,79 @@ summary  = "A distilled look-ahead Lesson asserted more authority than the witne
 fix      = "Emit the lesson at the authority its evidence proves: a W2 rollout may flag a RISK (not a FACT); a W1/W0 rollout may assert nothing (fold it as a hypothesis, not a steer). Earn W3 (a witnessed commit / green suite / benchmark row) before asserting a FACT. Floor: internal/lookahead DistillLesson."
 see_also = ["internal/lookahead/lookahead.go", "internal/trajctl/trajctl.go", "docs/notes/CONCEPT-LOOKAHEAD-RESET-2026-07-17.md"]
 
+# The read-mostly overlay fence (#5032, epic #5015): the steer/prplan overlay
+# (internal/steerpr + `fak steer prs` + `fak release prplan`) rebuilds the operator's unit
+# of ATTENTION over the PR-free trunk. Its entire thesis is that the PR's gate function and
+# its observability/steering function are separable -- you can have the second without the
+# first. As the overlay grows (a hook here, a --check there, a CI wiring), the pressure to
+# "just fail the commit when it's RESIDUAL" is enormous and entirely natural; continuous
+# merge would die by accretion, not decision. OVERLAY_WOULD_GATE names that regression
+# CLASS so any wiring that would let the overlay block a merge or fail a commit is refused
+# with a citable token instead of landing one instance at a time. The structural floor is
+# the architest steer-overlay gate family (`go test ./internal/architest -run Overlay`),
+# which pins the fold leaf pure/git-free, every overlay subprocess provably read-only, and
+# the --check exit code reachable only from the operator CLI dispatch.
+[reasons.OVERLAY_WOULD_GATE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A change would wire the read-mostly steer/prplan overlay into a blocking path: an overlay code path reaching a git mutation (commit/push/reset/revert/merge/rebase/force-push), an overlay call that can fail a commit, or a --check exit code consumed by a commit, hook, or promotion path. The overlay's contract is observability WITHOUT a merge gate; a gating overlay is refused as a class, not patched as an instance."
+fix      = "Keep the overlay advisory: derive git state only through read-only verbs (log/rev-parse/show/...), let --check report RESIDUAL solely from an operator or CI reporting invocation, and keep commit/hook/promotion paths free of overlay references (fold/render helpers stay fair game -- rendering is the overlay's job). If a gate is genuinely wanted, build it in the kernel's witness path (dos commit-audit / shipgate), never in the overlay. Floor: `go test ./internal/architest -run Overlay`."
+see_also = ["internal/steerpr", "internal/architest/steer_overlay_floor_test.go", "cmd/fak/steer_prs.go", "cmd/fak/release_prplan.go", "dos check-reason"]
+
+# The SPINNING progress verdict (#4956): the superloop walk's liveness verdict answers
+# "is the loop ticking?", never "is it PRODUCING?" -- a loop that fires on cadence while
+# its ledger-verified progress advances by nothing used to read clean. The walk now folds
+# a per-loop PROGRESS verdict alongside liveness (superloop.ClassifyProgress): "advanced"
+# is the exact relay.NoProgressEscape.Advances rule (verified step count rose past the
+# high-water mark) over a relay.ReadVerifiedProgress read of the intent ledger -- never a
+# self-reported keep. Only a THROUGHPUT (issue-drain) member trips this token on zero
+# advance; a report/calibration cadence is legitimately idle and takes the idle rule
+# (RELAY_IDLE_PARKED below). The token is relay's own G6 escape constant
+# (internal/relay/noprogress.go ReasonNoProgress) lifted into the declared vocabulary so
+# the walk's SPINNING finding resolves through dos_check_reason instead of free text.
+# Floor: go test ./internal/superloop -run 'Spinning|ClassifyProgress'.
+[reasons.RELAY_NO_PROGRESS]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A relay/loop is SPINNING: ticking on cadence (live/stale) while its ledger-verified progress high-water mark did not advance -- legs/ticks are being spent with nothing a successor could re-verify. The read is relay.ReadVerifiedProgress over the intent ledger (never a self-reported keep) and 'advanced' is the exact NoProgressEscape.Advances rule; in the superloop walk only a throughput (issue-drain) member trips it, ranked as SPINNING debt worst-first."
+fix      = "Escalate for a revive/redirect -- never auto-replan: point the loop at work that advances its verified ledger (the walk's worklist prints the revive/redirect entry per member), or stop paying for its ticks. If the loop believes it IS progressing, make its progress re-verifiable: record ledger rows with re-readable refs so ReadVerifiedProgress can see them. Floor: go test ./internal/superloop -run 'Spinning|ClassifyProgress'; go test ./internal/relay -run NoProgress."
+see_also = ["internal/relay/noprogress.go", "internal/superloop/superloop.go", "cmd/fak/superloop.go", "RELAY_IDLE_PARKED"]
+
+# The benign twin of RELAY_NO_PROGRESS (#4956): a watch/report member with no advance
+# whose idleness is POSITIVELY proven -- the watched invariant HOLDS against a durable
+# witness AND the ledger confirms zero admitted pending work (internal/relay/idle.go's
+# IdleAwareEscape rule; relay's own vocabulary files this park under its true-drain
+# family). Advisory, not a refusal: a correctly-idle watch loop parked on this token is
+# healthy, and declaring it keeps the walk's benign park distinct from UNCLASSIFIED
+# prose. Fail closed upstream: an UNPROVEN idle (unknown invariant, unread pending
+# count, or pending work) never earns this token.
+[reasons.RELAY_IDLE_PARKED]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "A watch/report relay or loop parked idle BENIGNLY: it made no verified progress this leg, but its watched invariant HOLDS against ground truth AND its ledger confirms zero admitted pending work (the positively-proven idle rule). Not a halt and not SPINNING -- a correctly-idle watch loop simply has nothing owed; it re-arms on a witnessed external event."
+fix      = "Nothing to fix on a genuine park. If the member should NOT be idle, the park is disproven at the source: admit the pending work to its ledger (the nonzero pending count defeats the park) or record the invariant violation, and the next leg falls through to the ordinary no-progress path (RELAY_NO_PROGRESS). Floor: go test ./internal/relay -run Idle; go test ./internal/superloop -run ClassifyProgress."
+see_also = ["internal/relay/idle.go", "internal/superloop/superloop.go", "RELAY_NO_PROGRESS"]
+
+# The FOLLOW-ON sibling of RELAY_NO_PROGRESS (#4957): the progress verdict answers "is
+# this loop producing at its OWN grain?"; this token answers "is anyone advancing what
+# it PRODUCED?". A loop tick that emits downstream work (a durable relay.ArtifactIssue
+# baton pointer, or the issue an a2achan.WorkerStatus names) reads as advancing even
+# while the emitted issue sits OPEN with no advance past the cadence window -- progress
+# at the loop grain, zero at the fleet grain. superloop.ClassifyFollowon folds the
+# shell's emitted-refs-vs-live-issue-state join into the closed ORPHANED verdict and
+# emits this token; fail-closed: an UNREADABLE emission is never fabricated into an
+# orphan (FollowonUnknown, surface-only). The fleet meta-walk (#4958) weighs ORPHANED
+# into its worst-first product (liveness x progress x follow-on) so an orphaned loop
+# out-ranks every clean live leaf; the witness only surfaces the orphan -- the
+# chase/redirect goes through the member's own front door, never a private re-dispatch.
+# Floor: go test ./internal/superloop -run 'Followon|Orphaned'.
+[reasons.RELAY_ORPHANED_FOLLOWON]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A member loop is ORPHANED-FOLLOWON: work it emitted (a durable baton issue ref) is OPEN with no advance within its cadence window -- the loop produces fine, but nobody advances its output, so its ticks buy nothing downstream. The verdict is superloop.ClassifyFollowon over durable issue/artifact state (never the member's own narration); the fleet meta-walk ranks it as ORPHANED debt worst-first."
+fix      = "Chase or close the emitted work through the member's OWN front door (the walk's worklist prints the chase/redirect entry): route the orphaned issue to an owner who advances it, or stop emitting into the void. Never re-file or re-dispatch from the witness path. If the emission is genuinely being carried, make the advance visible: update/close the issue so the durable state shows it. Floor: go test ./internal/superloop -run 'Followon|Orphaned'; go test ./cmd/fak -run SuperloopFleet."
+see_also = ["internal/relay/orphanfollowon.go", "internal/superloop/superloop.go", "internal/superloop/fleetwalk.go", "cmd/fak/superloop_fleet.go", "RELAY_NO_PROGRESS"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).
