@@ -227,6 +227,15 @@ func buildArtifact(id decodeIdentity, prompt, ref, got []int, boundary int) repl
 		art.Classification = "duplicate"
 	case pos+1 < len(ref) && pos < len(got) && got[pos] == ref[pos+1]:
 		art.Classification = "omission"
+	case pos == len(ref)-2 && pos < len(got) &&
+		got[pos] == genToken(id, append(append([]int(nil), prompt...), ref[:pos+1]...)):
+		// Terminal boundary: the omitted token was the LAST generated token, so
+		// the faithful continuation shifts a token BEYOND the reference budget
+		// into pos while the reference truncated to EOS there. ref[pos+1] is that
+		// EOS (not a real generated token), so the shift-by-one match above cannot
+		// fire; re-derive the faithful successor from the committed prefix (which
+		// includes the boundary token) to recognize the omission.
+		art.Classification = "omission"
 	case len(ref) != len(got):
 		art.Classification = "accounting_mismatch"
 	default:
