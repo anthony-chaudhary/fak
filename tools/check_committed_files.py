@@ -18,12 +18,22 @@ Rules:
   * SOFT junk  — *.log / *.tmp / report.json / agent-report.json — refused UNLESS
     under a data dir (fak/experiments/, fak/testdata/) where such files are real
     committed evidence, or on the small kept-exception allowlist.
+  * BY-MACHINE private-by-default (STAGED-ONLY) — a NEW addition under
+    experiments/benchmark/runs/by-machine/ (with or without the fak/ prefix) is a
+    raw per-machine benchmark run drop: regenerable harness output that routinely
+    carries infra tells (cloud instance names/zones, credential paths, VM hostnames,
+    accelerator SKUs, GPU topology). It is PRIVATE-BY-DEFAULT and refused at
+    commit-time only. This does NOT run in --audit-tree: the ~50 grandfathered
+    evidence artifacts already tracked under by-machine/ (gitignore is inert for
+    tracked paths) must keep CI green. To PUBLISH a scrubbed run artifact, promote
+    it deliberately with ALLOW_STRAY_FILE=1.
   * Large file — anything larger than MAX_BYTES (default 25 MiB) — refused (use
     Git LFS, trim it, or override).
 
 Modes: --audit-staged (pre-commit, staged additions) | --audit-tree (CI/DoD).
 Exit: 0 clean, 1 violation, 2 could-not-run (hook fails open on 2).
-Escape (staged): ALLOW_STRAY_FILE=1.  Override the size cap: --max-bytes N.
+Escape (staged): ALLOW_STRAY_FILE=1 (skips ALL staged checks, incl. by-machine).
+Override the size cap: --max-bytes N.
 """
 from __future__ import annotations
 import argparse
@@ -102,6 +112,30 @@ PRIVATE_ONLY = [
     (re.compile(r"^tools/bench_slack(_test)?\.py$"),
      "sunset Python Slack/DGX bridge — belongs in the private repo, not the public tree"),
 ]
+
+# By-machine private-by-default: raw per-machine benchmark run drops live under
+# experiments/benchmark/runs/by-machine/<machine>/<UTC>-<label>/ (or the fak/-nested
+# form in the private superrepo). They are regenerable harness output and routinely
+# carry infrastructure tells — cloud instance names + zones, credential file paths,
+# VM hostnames + accelerator SKUs, private multi-GPU topology — so commit 62bed967e
+# widened .gitignore to make the WHOLE tree private-by-default. This is the commit-time
+# backstop that ignore rule cannot provide: a `git add -f` of a new raw drop, or a
+# silent revert of the ignore line, would re-clutter the public tree (this exact
+# regression class re-added 192 nightrun files once). It is STAGED-ONLY by design —
+# _is_private_bymachine_addition is consulted ONLY on the staged-additions branch of
+# main(), NEVER in _classify — because ~50 grandfathered evidence artifacts are already
+# legitimately tracked under by-machine/ (gitignore is inert for tracked paths) and the
+# --audit-tree gate MUST stay green over them. Deliberate promotion of a scrubbed
+# artifact still works via the ALLOW_STRAY_FILE=1 escape (which skips all staged checks).
+_PRIVATE_BYMACHINE = re.compile(r"^(fak/)?experiments/benchmark/runs/by-machine/")
+
+
+def _is_private_bymachine_addition(path: str) -> bool:
+    """True iff a NEWLY-ADDED path is a raw per-machine benchmark run drop that is
+    private-by-default. Applied only on the staged-additions branch (--audit-staged);
+    it is deliberately NOT part of _classify, so --audit-tree never fires it on the
+    grandfathered evidence files still legitimately tracked under by-machine/."""
+    return bool(_PRIVATE_BYMACHINE.match(path))
 
 # Secret files: credentials / private keys must NEVER enter a forever-history
 # public tree. Path-based and fail-closed (it fires even when the bytes are
@@ -200,6 +234,16 @@ def main() -> int:
     bad = []
     for n in sorted(set(names)):
         reason = _classify(n, root, a.max_bytes)
+        # STAGED-ONLY: a new raw by-machine run drop that _classify admits (it is under
+        # the experiments/ data dir, so soft-junk rules don't apply) is still refused at
+        # commit-time. Guarded by a.audit_staged so --audit-tree never fires it on the
+        # grandfathered evidence files. Fallback (only when _classify is silent) so a
+        # more-specific junk/secret reason still wins the message.
+        if reason is None and a.audit_staged and _is_private_bymachine_addition(n):
+            reason = ("raw benchmark run drop under experiments/benchmark/runs/by-machine/ "
+                      "is PRIVATE-BY-DEFAULT (regenerable harness output with infra tells) — "
+                      "promote a scrubbed artifact deliberately with ALLOW_STRAY_FILE=1, or "
+                      "keep it gitignored")
         if reason:
             bad.append((n, reason))
     if not bad:
