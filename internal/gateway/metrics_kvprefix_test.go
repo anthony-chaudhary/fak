@@ -62,6 +62,47 @@ func TestMetricsExposesKVPrefixReuse(t *testing.T) {
 	}
 }
 
+// TestMetricsExposesKVPrefixBySource covers the provenance axis (#3896): the same in-kernel
+// prompt tokens split by WHERE they were served from, orthogonal to the reuse-depth family.
+// The process-global tap may carry counts from sibling tests, so the family-present check
+// asserts the three source series exist, and the live-read asserts an ObserveBySource on the
+// external-transfer bucket (the disaggregation dividend) moves the scraped counter.
+func TestMetricsExposesKVPrefixBySource(t *testing.T) {
+	srv := newTestServer(t)
+
+	for _, want := range []string{
+		"# TYPE fak_gateway_kv_prefix_prompt_tokens_by_source_total counter",
+		`fak_gateway_kv_prefix_prompt_tokens_by_source_total{source="local_compute"} `,
+		`fak_gateway_kv_prefix_prompt_tokens_by_source_total{source="local_cache_hit"} `,
+		`fak_gateway_kv_prefix_prompt_tokens_by_source_total{source="external_kv_transfer"} `,
+	} {
+		if text := srv.renderMetrics(); !strings.Contains(text, want) {
+			t.Fatalf("metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+
+	// Live read: booking external-transfer tokens (the disaggregation dividend) must move the
+	// external_kv_transfer series, and the scraped value must be >= what the tap now holds.
+	before := cacheobs.Default.SourceSnapshot()
+	cacheobs.Default.ObserveBySource(cacheobs.SourceExternalTransfer, 512)
+	after := cacheobs.Default.SourceSnapshot()
+	if after.ExternalTransferTokens != before.ExternalTransferTokens+512 {
+		t.Fatalf("external-transfer bucket did not rise by 512: before=%d after=%d", before.ExternalTransferTokens, after.ExternalTransferTokens)
+	}
+
+	line := metricLine(srv.renderMetrics(), `fak_gateway_kv_prefix_prompt_tokens_by_source_total{source="external_kv_transfer"}`)
+	if line == "" {
+		t.Fatalf("no external_kv_transfer line after observe:\n%s", srv.renderMetrics())
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(line[strings.LastIndex(line, "}")+1:]))
+	if err != nil {
+		t.Fatalf("parse %q: %v", line, err)
+	}
+	if uint64(n) < after.ExternalTransferTokens {
+		t.Fatalf("scraped external-transfer %d < observed %d", n, after.ExternalTransferTokens)
+	}
+}
+
 type kvMemoryStatsPlanner struct {
 	stats        agent.KVMemoryStats
 	req          agent.RequestMemoryStats

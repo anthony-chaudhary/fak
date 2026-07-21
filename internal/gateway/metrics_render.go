@@ -650,6 +650,17 @@ func writeKVPrefixMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_kv_prefix_reuse_ratio",
 		"Realized in-kernel KV-prefix cache-hit: reused / prompt tokens across served turns (0 until the first turn). A single append-only agent climbs toward ~1 (the frozen ceiling); flexibility, cold fan-out, or a divergent prefix drives it down — the frozen-trajectory cache cliff, measured live.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_reuse_ratio %s\n", promFloat(s.ReuseRatio))
+	// The provenance split (#3896, vLLM's by_source axis): the SAME prompt tokens decomposed by
+	// WHERE each was served from, orthogonal to the reuse-depth family above. The three buckets
+	// sum to the by-source prompt tokens (parts == total). external_kv_transfer stays 0 until a
+	// remote / disaggregated KV tier feeds the planner — the live witness that disaggregation is
+	// not yet wired, and the exact series that lights up the moment it is.
+	src := cacheobs.Default.SourceSnapshot()
+	writeHelpType(b, "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
+		"In-kernel prompt tokens by PROVENANCE (#3896). source=\"local_compute\": recomputed here (a miss); source=\"local_cache_hit\": served from a locally-resident KV prefix (the RadixAttention match); source=\"external_kv_transfer\": pulled across the fabric from the external / disaggregated KV tier. Sums to the by-source prompt tokens; external_kv_transfer is 0 until a remote tier feeds the planner. Orthogonal to fak_gateway_kv_prefix_reused_tokens_total (which splits by depth, not source).", "counter")
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_prompt_tokens_by_source_total{source=\"local_compute\"} %d\n", src.LocalComputeTokens)
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_prompt_tokens_by_source_total{source=\"local_cache_hit\"} %d\n", src.LocalHitTokens)
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_prompt_tokens_by_source_total{source=\"external_kv_transfer\"} %d\n", src.ExternalTransferTokens)
 }
 
 // writeCacheAttributionMetrics renders the owner/mechanism split for cache-like value. The
