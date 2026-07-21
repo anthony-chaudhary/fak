@@ -22,8 +22,8 @@ func TestCheckFreshDetectsHeadlineFamilyAndNoop(t *testing.T) {
 	readme := filepath.Join(root, filepath.FromSlash(GeneratedReadme))
 	original, _ := os.ReadFile(readme)
 	cases := []struct{ name, old, new string }{
-		{"score headline", "**Score** |", "**Score stale** |"},
-		{"family count", "Crystal-clear concepts |", "Crystal-clear concepts stale |"},
+		{"score headline", "Legacy bounded score (saturates; not the driver) |", "Legacy bounded score (saturates; not the driver) stale |"},
+		{"family count", "**Crystal-clear concepts (and climbing)** |", "**Crystal-clear concepts (and climbing)** stale |"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
