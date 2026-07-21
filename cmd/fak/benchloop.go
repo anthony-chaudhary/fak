@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/benchloop"
@@ -15,6 +16,14 @@ import (
 func cmdBenchLoop(argv []string) { os.Exit(runBenchLoop(os.Stdout, os.Stderr, argv)) }
 
 func runBenchLoop(stdout, stderr io.Writer, argv []string) int {
+	// The --no-reuse escape hatch is bench-loop-wide (status|next|run share no flag
+	// set), so it is intercepted here and exported as FAK_BENCH_NO_REUSE=1 BEFORE any
+	// benchloop.Load, flipping the launch gate from reuse_run (skip) to collect_local
+	// (force re-run). Follow-up to #4600's env-only escape hatch.
+	argv, force := stripNoReuseFlag(argv)
+	if force {
+		_ = os.Setenv(benchloop.NoReuseEnv, "1")
+	}
 	if len(argv) == 0 {
 		return benchLoopStatus(stdout, stderr, nil)
 	}
@@ -39,6 +48,39 @@ func runBenchLoop(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak bench-loop: unknown subcommand %q\n", sub)
 		benchLoopUsage(stderr)
 		return 2
+	}
+}
+
+// stripNoReuseFlag pulls the bench-loop-wide --no-reuse escape hatch out of argv
+// before any per-subcommand flag set sees it, returning the remaining args and
+// whether the flag was present and truthy. Both --no-reuse and -no-reuse are
+// accepted, in either order relative to the subcommand token; an explicit
+// --no-reuse=false/0/off/no leaves the gate on (the hatch is opt-in force-rerun).
+func stripNoReuseFlag(argv []string) ([]string, bool) {
+	rest := make([]string, 0, len(argv))
+	force := false
+	for _, a := range argv {
+		switch {
+		case a == "--no-reuse" || a == "-no-reuse":
+			force = true
+		case strings.HasPrefix(a, "--no-reuse=") || strings.HasPrefix(a, "-no-reuse="):
+			force = noReuseFlagTruthy(a[strings.IndexByte(a, '=')+1:])
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return rest, force
+}
+
+// noReuseFlagTruthy mirrors the reuse gate's own truthiness: an explicit
+// 0/false/no/off (or empty) value leaves reuse enabled; anything else forces a
+// re-run. Bare --no-reuse (no value) is handled by the caller as force=true.
+func noReuseFlagTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -165,15 +207,17 @@ func benchLoopUsage(w io.Writer) {
 	fmt.Fprint(w, `fak bench-loop - benchmark super-loop manager
 
 usage:
-  fak bench-loop status [--json] [--workspace DIR] [--now STAMP]
-  fak bench-loop next   [--json] [--workspace DIR] [--now STAMP]
+  fak bench-loop status [--json] [--no-reuse] [--workspace DIR] [--now STAMP]
+  fak bench-loop next   [--json] [--no-reuse] [--workspace DIR] [--now STAMP]
   fak bench-loop walk   [--json]
-  fak bench-loop run    [nightrun run flags...]
+  fak bench-loop run    [--no-reuse] [nightrun run flags...]
   fak bench-loop fleet  [status|dispatch] [--apply] [--json] [--now STAMP] [--plan-json FILE]
   fak bench-loop install [--interval MINUTES] [--remove]
 
 status folds the benchmark registry, recorded run catalog, nightrun ledger,
-local capability-aware next selection, and benchmark-authority gap. run delegates
+local capability-aware next selection, and benchmark-authority gap. --no-reuse
+exports FAK_BENCH_NO_REUSE=1 so the launch gate forces a re-run (collect_local)
+instead of skipping a redundant same-lineage run (reuse_run). run delegates
 to fak nightrun run, which is dry-run unless --apply is passed. fleet walks the
 benchmark machine plan and queues one idempotent request per node; fleet dispatch atomically claims and witnesses requests; install keeps both
 tick always on via the Windows Task Scheduler (use cron elsewhere).
