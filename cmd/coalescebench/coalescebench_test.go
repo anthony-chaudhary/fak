@@ -156,10 +156,14 @@ func TestUnionSize(t *testing.T) {
 func TestSampleTopKDistinctInRange(t *testing.T) {
 	r := newRNG(42)
 	w := layerWeights(1, 32, 1.5)[0]
+	// k is the requested top-k; the invariant is that sampleTopK returns exactly k
+	// distinct experts, so assert the relation len(sel)==k rather than freezing a
+	// magic count that would only churn if k itself changed.
+	const k = 5
 	for trial := 0; trial < 50; trial++ {
-		sel := sampleTopK(r, w, 5)
-		if len(sel) != 5 {
-			t.Fatalf("trial %d: got %d experts, want 5", trial, len(sel))
+		sel := sampleTopK(r, w, k)
+		if len(sel) != k {
+			t.Fatalf("trial %d: got %d experts, want %d", trial, len(sel), k)
 		}
 		seen := map[int]bool{}
 		for _, e := range sel {
