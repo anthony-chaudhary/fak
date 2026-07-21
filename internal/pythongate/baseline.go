@@ -578,4 +578,11 @@ var grandfathered = []string{
 	"tools/workload_tune_sweep.py",
 	"tools/worktree_doctor_test.py",
 	"tools/worktree_doctor.py",
+	"tools/agent_walltime_test.py",
+	"tools/bench_migrate_test.py",
+	"tools/ctxbench_test.py",
+	"tools/fak_phase0_gate_test.py",
+	"tools/public_evidence_manifest_test.py",
+	"tools/skill_lifecycle_test.py",
+	"tools/transcript_workload_test.py",
 }
