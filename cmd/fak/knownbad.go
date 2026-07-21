@@ -88,7 +88,7 @@ func cmdKnownBad(argv []string) {
 
 func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim|resolve|revoke|report|correlate)")
+		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim|resolve|revoke|report|correlate|compact)")
 		return 2
 	}
 	switch argv[0] {
@@ -106,11 +106,13 @@ func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 		return runKnownBadReport(stdout, stderr, argv[1:], nowUnix)
 	case "correlate":
 		return runKnownBadCorrelate(stdout, stderr, argv[1:], nowUnix)
+	case "compact":
+		return runKnownBadCompact(stdout, stderr, argv[1:], nowUnix)
 	case "-h", "--help", "help":
-		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve | revoke | report | correlate  (fleet-wide known-bad signature ledger)")
+		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve | revoke | report | correlate | compact  (fleet-wide known-bad signature ledger)")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve|revoke|report|correlate)\n", argv[0])
+		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve|revoke|report|correlate|compact)\n", argv[0])
 		return 2
 	}
 }
@@ -982,6 +984,90 @@ func appendKnownBadRow(path string, rec knownbad.Record) error {
 	defer f.Close()
 	_, err = f.WriteString(line + "\n")
 	return err
+}
+
+// knownBadCompactResult is the JSON shape `fak knownbad compact --json` emits: the
+// CompactStats reduction, the resolved ledger path, and whether the ledger was actually
+// rewritten. Wrote is false for an already-minimal ledger (a clean no-op re-compact) and
+// for a --dry-run, so a caller can tell a real GC from an inspection.
+type knownBadCompactResult struct {
+	Ledger string                `json:"ledger"`
+	DryRun bool                  `json:"dry_run"`
+	Wrote  bool                  `json:"wrote"`
+	Stats  knownbad.CompactStats `json:"stats"`
+}
+
+// runKnownBadCompact folds the append-to-supersede ledger down to its minimal current
+// state (#3471): it drops superseded and expired rows, keeps every live signature's latest
+// row, and keeps a bounded tail of resolved/revoked history. It rewrites the ledger ONLY
+// when the fold actually reduced it — an already-minimal ledger (or --dry-run) is left
+// byte-untouched, so a re-compact is a clean no-op.
+func runKnownBadCompact(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
+	fs := flag.NewFlagSet("knownbad compact", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
+	keepTerminal := fs.Int("keep-terminal", -1, "resolved/revoked signatures to retain, most-recently-retracted first (-1 = keep all audit history, 0 = live-only)")
+	dryRun := fs.Bool("dry-run", false, "report the reduction without rewriting the ledger")
+	asJSON := fs.Bool("json", false, "emit the compaction result as JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak knownbad compact: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	path := knownBadLedgerPath(*ledger)
+	records, err := readKnownBadLedger(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak knownbad compact: %v\n", err)
+		return 1
+	}
+	kept, stats := knownbad.Compact(records, nowUnix, *keepTerminal)
+	// The fold emits kept rows in original append order, so KeptRows == InputRows means
+	// nothing was dropped and the rewrite would be byte-identical: skip it (clean no-op).
+	res := knownBadCompactResult{Ledger: path, DryRun: *dryRun, Stats: stats}
+	if stats.KeptRows != stats.InputRows && !*dryRun {
+		if err := writeKnownBadLedger(path, kept); err != nil {
+			fmt.Fprintf(stderr, "fak knownbad compact: %v\n", err)
+			return 1
+		}
+		res.Wrote = true
+	}
+	if *asJSON {
+		return knownBadEmitJSON(stdout, stderr, res)
+	}
+	note := ""
+	if *dryRun {
+		note = " (dry-run: ledger unchanged)"
+	} else if !res.Wrote {
+		note = " (already minimal: ledger unchanged)"
+	}
+	fmt.Fprintf(stdout, "compacted known-bad ledger %s: %d -> %d rows (superseded=%d expired=%d terminal_dropped=%d; live=%d terminal=%d kept)%s\n",
+		path, stats.InputRows, stats.KeptRows, stats.SupersededDropped, stats.ExpiredDropped,
+		stats.TerminalDropped, stats.LiveKept, stats.TerminalKept, note)
+	return 0
+}
+
+// writeKnownBadLedger atomically rewrites the ledger with exactly records, one
+// knownbad.MarshalLine row per line — the whole-file replacement the compact GC needs (the
+// other verbs only ever append). An empty record set writes an empty file, collapsing a
+// ledger with nothing worth keeping.
+func writeKnownBadLedger(path string, records []knownbad.Record) error {
+	var b strings.Builder
+	for _, rec := range records {
+		line, err := knownbad.MarshalLine(rec)
+		if err != nil {
+			return err
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return writeFileAtomic(path, []byte(b.String()), 0o644)
 }
 
 // readKnownBadLedger reads the ledger file and folds it to records. A missing
