@@ -34,9 +34,11 @@ const reasonBlockedByKnownBad = "BLOCKED_BY_KNOWN_BAD"
 // known-bad ledger from the workspace and applies the hold to the freshly built payload.
 // It FAILS OPEN -- a missing ledger (nothing recorded yet) or a read error must never
 // stall dispatch, so on any problem the payload is returned unchanged. The clock is read
-// here (the only impurity); the fold in applyKnownBadHold takes `now` as data.
+// here (the only impurity); the fold in applyKnownBadHold takes `now` as data. The read
+// goes through the stat-keyed cache (#3471): this runs on EVERY route/tick, so an
+// unchanged ledger must not be re-read and re-parsed each time.
 func holdKnownBadForRoute(root string, payload dispatchtick.RouterPayload) dispatchtick.RouterPayload {
-	records, err := readKnownBadLedger(filepath.Join(root, knownbad.DefaultLedgerRel))
+	records, err := readKnownBadLedgerCached(filepath.Join(root, knownbad.DefaultLedgerRel))
 	if err != nil || len(records) == 0 {
 		return payload
 	}
