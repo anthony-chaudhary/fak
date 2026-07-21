@@ -117,7 +117,7 @@ func (a2aGate) Tools() []string        { return []string{ToolSend, ToolRecv} }
 func (a2aGate) Caps() []abi.Capability { return []abi.Capability{CapA2ASend, CapA2ARecv} }
 func (a2aGate) Adjudicate(_ context.Context, c *abi.ToolCall) abi.Verdict {
 	if c == nil {
-		return abi.Verdict{Kind: abi.VerdictDefer}
+		return abi.Verdict{Kind: abi.VerdictDefer, By: "a2achan/gate"}
 	}
 	switch c.Tool {
 	case ToolSend:
@@ -131,7 +131,7 @@ func (a2aGate) Adjudicate(_ context.Context, c *abi.ToolCall) abi.Verdict {
 	case ToolRecv:
 		return gateRecv(c.Caps)
 	}
-	return abi.Verdict{Kind: abi.VerdictDefer}
+	return abi.Verdict{Kind: abi.VerdictDefer, By: "a2achan/gate"}
 }
 
 // a2aIngress is the registered ResultAdmitter for the recv tool: it folds the
