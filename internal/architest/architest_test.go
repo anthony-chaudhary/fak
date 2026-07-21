@@ -50,6 +50,9 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
+	"envconfiglint":        1, // CONFIG_NOT_ENV ratchet banning new non-secret env reads; imports windowgate(1), off the hot path.
+	"flowcredit":           1, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
+	"stallpage":            1, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
 	"agenticbench":         1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"ailuminate":           1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":         1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
