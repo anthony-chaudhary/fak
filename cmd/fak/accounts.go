@@ -1485,17 +1485,3 @@ func loginWarningsText(ws []accounts.LoginWarning) string {
 	sort.Strings(out)
 	return strings.Join(out, ",")
 }
-
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
-func yesNo(v bool) string {
-	if v {
-		return "yes"
-	}
-	return "no"
-}
