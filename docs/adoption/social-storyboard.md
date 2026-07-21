@@ -33,7 +33,7 @@ adoption, and simulated work is labeled simulated.
 - **As a thread:** post the cards in order, card 0 as the hook, cards 1–5 one per
   reply, card 6 as the call to action. Trim to whichever concepts fit the venue.
 - **As a carousel:** one slide per card. The **Diagram** row names the visual to
-  place on the slide; where a bespoke card image is not drawn yet it is tagged
+  place on the slide; where a dedicated card image is not drawn yet it is tagged
   `[B-pending]` and points at the visual-assets dimension of the epic so the slide
   has a stand-in until the art lands.
 - **Honesty fence:** keep the witnessed bar. The reuse figure is the **tuned

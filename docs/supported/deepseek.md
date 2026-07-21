@@ -69,7 +69,7 @@ fak serve --provider anthropic \
 
 Run the model on a tuned engine exposing the OpenAI surface, then front it. This
 is the path for a self-hosted bring-up — see [Bring V4 up on a GPU node](#bring-v4-up-on-a-gpu-node)
-for the turnkey script and the **architecture floor** you must confirm first.
+for the one-command script and the **architecture floor** you must confirm first.
 
 ```bash
 # On the serving node (see the self-host runbook for engine flags):
@@ -117,7 +117,7 @@ saving and must never be presented as fak cache savings. fak's own cache economi
 
 ## Bring V4 up on a GPU node
 
-The turnkey path is [`scripts/dgx-deepseek-serve.sh`](../../scripts/dgx-deepseek-serve.sh):
+The one-command path is [`scripts/dgx-deepseek-serve.sh`](../../scripts/dgx-deepseek-serve.sh):
 it detects your GPUs, **gates on the DeepSeek-V4 architecture floor**, launches the
 OpenAI server on `:8000`, health-checks `/models`, and prints the exact `fak serve`
 + wire-witness commands.
@@ -136,7 +136,7 @@ OpenAI server on `:8000`, health-checks `/models`, and prints the exact `fak ser
 > [PR #24162](https://github.com/ggml-org/llama.cpp/pull/24162) for Unsloth quants)
 > serves **V4-Flash** on sm_80 via CUDA V4-op kernels + a software-emulated FP8 path
 > — the same route that overcame the sm_90 wall for GLM-5.2 on A100. V4-Flash GGUFs
-> (≈103–162 GB) fit **resident** on 8×A100-80 GB. The turnkey harness is
+> (≈103–162 GB) fit **resident** on 8×A100-80 GB. The one-command harness is
 > [`tools/deepseekv4_stage_serve_gpu_server.sh`](../../tools/deepseekv4_stage_serve_gpu_server.sh).
 > This is the interim serve path; the fak-native V4 kernel is a separate track
 > ([#3016](https://github.com/anthony-chaudhary/fak/issues/3016)–[#3019](https://github.com/anthony-chaudhary/fak/issues/3019)).

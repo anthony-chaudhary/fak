@@ -252,7 +252,7 @@ go run ./cmd/deletioncert -selfcheck -out deletioncert.json
 go run ./cmd/agentbenchdemo
 go run ./cmd/agentbenchdemo -selfcheck
 go run ./cmd/fanoutdemo               # the issue fan-out planner, spine-first guard + full plan
-go run ./cmd/fanoutdemo -selfcheck    # fan-out invariants: refusal enforced, every follow-on dispatchable
+go run ./cmd/fanoutdemo -selfcheck    # → "the fan-out invariants hold (15 dispatchable follow-ons across 7 areas · spine-first refusal enforced)", exit 0 — deterministic, no key/network
 go run ./cmd/fanoutdemo -json         # the refusal + the fak.issue-fanout-plan.v1 plan as JSON
 ```
 
