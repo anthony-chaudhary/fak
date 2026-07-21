@@ -135,7 +135,7 @@ var tier = map[string]int{
 	"qwen36parity":         1,                // Qwen3.6 Mac parity witness grader/scrubber over JSON artifacts; stdlib-only, off the hot path.
 	"whatschanged":         1,                // read-only peer code-diff readout over git log/diff-tree; stdlib-only, off the hot path.
 	"modver":               1,                // per-module version derivation over git log/ls-files (the version-everything spine); imports appversion(1)+windowgate(1), off the hot path.
-	"livecodebench":        1,                // pure LiveCodeBench fixture/report smoke; no network/model, off the hot path.
+	"livecodebench":        1,                // LiveCodeBench fixture/report smoke; no network/model, off the hot path. NOT pureRoot: gradedarm imports benchcatalog(1) for WitnessSameTasks, so it sits in the foundation sub-DAG, not the pure-primitive set.
 	"logvault":             2,                // central chain-aware log-vault capture engine (epic #2447): incremental mirrors of the durable log stores (guard-audit/dos/dispatch/harness) + a hash-chained vault manifest + the scrub-gated off-box sync rung (#2454); imports flock(1)+wirescreen(2), off the hot path.
 	"readmevisualaudit":    1,                // README visual-audit fold over git ls-files + text parsing; imports strmatch(1)+windowgate(1), off the hot path.
 	"toolcoverage":         1,                // read-only tools/*.py sibling-test coverage audit over skills/CI references; stdlib-only, off the hot path.
@@ -508,7 +508,7 @@ var pureRoot = map[string]bool{
 	"fusedturn": true, "ghspam": true, "godsplitplan": true, "growthgate": true,
 	"guardsessions": true, "guardvars": true, "guideddecode": true, "harnessprofile": true, "harnessres": true, "horizonrecovery": true, "hostplacement": true, "hwgatelint": true,
 	"intlist": true, "issuesmallness": true, "jsonlledger": true, "knownbad": true, "knownenv": true,
-	"l3region": true, "leakcheck": true, "lifecycle": true, "linkstate": true, "livecodebench": true,
+	"l3region": true, "leakcheck": true, "lifecycle": true, "linkstate": true,
 	"loaddebounce": true, "loopindex": true, "looporphan": true, "looprecover": true, "loopunblock": true, "macbench": true, "maputil": true,
 	"mathx": true, "memorycotravel": true, "memoryread": true, "memorystability": true, "metalgemm": true, "modelscore": true,
 	"mutationbudget": true, "negframe": true, "newleaf": true, "newmodel": true, "nodecompare": true, "numfmt": true,
