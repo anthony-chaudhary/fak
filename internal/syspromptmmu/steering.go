@@ -31,6 +31,26 @@ import (
 //
 // Tier: mechanism (2). Imports cachemeta(1) + stdlib only.
 
+// SteeringEnvVar is the opt-in request-path knob (#5047): the env var the owned-loop
+// builder reads to select a terseness level. Unset/empty/invalid ⇒ SteeringOff (steering
+// stays off — the forward path does not move unless a level is deliberately configured).
+const SteeringEnvVar = "FAK_STEERING_LEVEL"
+
+// SteeringOff is the level-0 no-op sentinel: steering is opt-in, so the absence of a
+// configured level (and any out-of-range level, which SteeringSegment refuses) reports as
+// SteeringOff — no steering block is appended and the value is byte-identical to before.
+const SteeringOff = 0
+
+// SteeringSegment is the exported request-path entry to the steering producer: the
+// agent-side owned-loop builder (#5047 wiring) calls it to append the sentinel-wrapped
+// terseness segment for `level` strictly AFTER the cache breakpoint. It is steeringSegment
+// (the #3308 internal producer) promoted to the package API — same bytes, same CLOSED
+// 1..4 domain, same fail-safe no-op: SteeringOff and any out-of-range level return ok
+// false and the zero segment, so an unknown level can never fabricate a steering block.
+func SteeringSegment(level int) (cachemeta.PromptSegment, bool) {
+	return steeringSegment(level)
+}
+
 // steeringSentinelOpen / steeringSentinelClose wrap every steering block so it is
 // identifiable in a realized overlay: a later turn finds the sentinel and swaps the block
 // in place (through the overlay splice, never an edit of the resident prefix). The
