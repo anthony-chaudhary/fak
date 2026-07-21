@@ -245,3 +245,38 @@ func TestFleetReplayAggregateGeneralizes(t *testing.T) {
 		t.Fatalf("a poisoned variant of the shared cell must be refused, never aliased")
 	}
 }
+
+// TestRemoteDRAMPoolProfilePresent is the #5082 witness: the peer-DRAM-over-RDMA paging
+// rung (TierRemoteDRAM, #4306) has a pooling profile, and it is the off-box remote shape —
+// reachable from many hosts but NOT coherent, advertising a zero-copy (RDMA) share kind.
+// Before this entry a span resident in borrowed peer DRAM read a zero-value PoolProfile
+// (Hosts 0, copy-only), so FabricShareable()/FleetReuse saw the tier as unreachable.
+func TestRemoteDRAMPoolProfilePresent(t *testing.T) {
+	pp := DefaultPoolProfiles()
+	rd, ok := pp[TierRemoteDRAM]
+	if !ok {
+		t.Fatalf("TierRemoteDRAM must have a DefaultPoolProfiles entry")
+	}
+	if !rd.Reachable() {
+		t.Fatalf("borrowed peer DRAM is reachable from other hosts of the fabric (copy-in on access), want Reachable()=true; Hosts=%d", rd.Hosts)
+	}
+	if rd.FabricShareable() {
+		t.Fatalf("peer DRAM is paged back on access, never attended in place — it must NOT be FabricShareable() (non-coherent)")
+	}
+	if !rd.Share.ZeroCopy() {
+		t.Fatalf("peer DRAM transfers zero-copy over the NIC's DMA engine — Share %q must advertise ZeroCopy()", rd.Share)
+	}
+}
+
+// TestEveryLadderTierHasPoolProfile is the durable totality guard the issue asks for: every
+// tier in the DefaultTierProfiles ladder MUST carry a DefaultPoolProfiles entry, so the next
+// tier added to the ladder cannot silently read a zero-value pooling character (the exact
+// gap TierRemoteDRAM fell into).
+func TestEveryLadderTierHasPoolProfile(t *testing.T) {
+	pools := DefaultPoolProfiles()
+	for tier := range DefaultTierProfiles() {
+		if _, ok := pools[tier]; !ok {
+			t.Errorf("tier %q is in DefaultTierProfiles but has no DefaultPoolProfiles entry", tier)
+		}
+	}
+}

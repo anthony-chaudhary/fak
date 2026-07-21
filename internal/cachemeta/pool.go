@@ -63,18 +63,26 @@ func (p PoolProfile) FabricShareable() bool {
 // the DefaultTierProfiles ladder. HBM/DRAM/NUMA-far are host-private (one host attends
 // them); CXL is the SWITCH-POOLED, coherent, zero-copy tier shared across a pod of
 // hosts (the value a CXL.mem memory pool adds); disk is a host-local store; a remote
-// tier is reachable but copy-only (an RDMA transfer, not a coherent attend). The Hosts
-// counts are order-of-magnitude stand-ins (a pod-sized CXL pool); an operator
-// overrides them with their fabric's real topology, exactly as TierProfile numbers are
-// overridden — the FabricShareable logic is identical against measured values.
+// tier is reachable but copy-only (an RDMA transfer, not a coherent attend). The
+// peer-DRAM-over-RDMA paging rung (TierRemoteDRAM, #4306) has the SAME pooling character
+// as the off-box TierRemote: reachable from many hosts of the fabric but NOT coherent —
+// a span there is paged back on access over an RDMA copy, never attended in place — so
+// it is Reachable() (a non-owner stages a copy instead of re-prefilling) but not
+// FabricShareable() (no coherent zero-copy attend). Without this entry a span resident
+// in borrowed peer DRAM read a zero-value PoolProfile (Hosts 0, copy-only), making the
+// tier look unreachable rather than what it is. The Hosts counts are order-of-magnitude
+// stand-ins (a pod-sized pool); an operator overrides them with their fabric's real
+// topology, exactly as TierProfile numbers are overridden — the FabricShareable logic is
+// identical against measured values.
 func DefaultPoolProfiles() map[ResidencyTier]PoolProfile {
 	return map[ResidencyTier]PoolProfile{
-		TierHBM:     {Tier: TierHBM, Hosts: 1, Coherent: true, Share: ShareDmabuf},
-		TierDRAM:    {Tier: TierDRAM, Hosts: 1, Coherent: true, Share: ShareMmap},
-		TierNUMAFar: {Tier: TierNUMAFar, Hosts: 1, Coherent: true, Share: ShareMmap},
-		TierCXL:     {Tier: TierCXL, Hosts: 8, Coherent: true, Share: ShareCXLHDM},
-		TierDisk:    {Tier: TierDisk, Hosts: 1, Coherent: false, Share: ShareCopy},
-		TierRemote:  {Tier: TierRemote, Hosts: 8, Coherent: false, Share: ShareRDMA},
+		TierHBM:        {Tier: TierHBM, Hosts: 1, Coherent: true, Share: ShareDmabuf},
+		TierDRAM:       {Tier: TierDRAM, Hosts: 1, Coherent: true, Share: ShareMmap},
+		TierNUMAFar:    {Tier: TierNUMAFar, Hosts: 1, Coherent: true, Share: ShareMmap},
+		TierCXL:        {Tier: TierCXL, Hosts: 8, Coherent: true, Share: ShareCXLHDM},
+		TierDisk:       {Tier: TierDisk, Hosts: 1, Coherent: false, Share: ShareCopy},
+		TierRemote:     {Tier: TierRemote, Hosts: 8, Coherent: false, Share: ShareRDMA},
+		TierRemoteDRAM: {Tier: TierRemoteDRAM, Hosts: 8, Coherent: false, Share: ShareRDMA},
 	}
 }
 
