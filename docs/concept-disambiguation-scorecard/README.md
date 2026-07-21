@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **18** (clarity 0 + coverage 18) |
-| **Crystal-clear concepts (and climbing)** | **364** crystal of 1981 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2156 / 2174** (99.2% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **17** (clarity 0 + coverage 17) |
+| **Crystal-clear concepts (and climbing)** | **365** crystal of 1982 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2157 / 2174** (99.2% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 99.5/100 (grade A) |
 
@@ -26,10 +26,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1981 concepts - score 99.5/100 (grade A) - disambiguation-debt 18
+concept-disambiguation chart - 1982 concepts - score 99.5/100 (grade A) - disambiguation-debt 17
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ######...................... 364
+  * crystal       ######...................... 365
   o defined       ############################ 1617
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -44,7 +44,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ********ooooooooooooooooooooooooooooooo (39 concept(s); 8 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
-  guard-gate       *************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (288 concept(s); 73 crystal)
+  guard-gate       **************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (289 concept(s); 74 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
   loop             *************************ooooooooooooooooooooooooooooooooo (58 concept(s); 25 crystal)
   plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
@@ -60,14 +60,14 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   decision         ##########################.. 49/52
-  guard-gate       ############################ 346/349
   policy-capability ###########################. 137/140
   support-maturity ##########################.. 37/40
+  guard-gate       ############################ 347/349
   loop             ###########################. 71/73
-  session-runtime  ############################ 185/187
   cache            ############################ 254/255
   evict            ###########################. 44/45
   render-materialize ############################ 171/172
+  session-runtime  ############################ 186/187
   witness-proof    ############################ 135/136
   attention        ############################ 72/72
   context-ctx      ############################ 193/193
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 99.2%  (2156/2174 confusable tokens positioned)
+namespace coverage  [################################] 99.2%  (2157/2174 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -226,6 +226,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | gateway-engine | **model (in-kernel model)** - The in-kernel inference core: a pure-Go forward pass that runs chat token decode over a loaded GGUF checkpoint across several architectures and quant schemes. |
 | * | crystal | symbol | gateway-engine | **engines registry** - The runtime registry (abi.Registry.engines) that maps engine IDs to their EngineDriver implementations: the kernel's dispatch table of all registered inference backends. |
 | * | crystal | symbol | gateway-engine | **fak_gateway_kv_prefix_prompt_tokens_by_source_total** - The gateway's per-turn split of in-kernel prompt tokens by PROVENANCE source (local_compute / local_cache_hit / external_kv_transfer), orthogonal to the reuse-depth family; the three sum to the by-source prompt tokens. external_kv_transfer isolates the disaggregation dividend — tokens a remote / L3 KV tier served that a single box would otherwise have re-prefilled. |
+| * | crystal | symbol | guard-gate | **guardSessionStart (fak guard-sessionstart hook)** - guard_sessionstart.go is the `fak guard-sessionstart` command: a Claude Code SessionStart hook whose stdout is injected into the FIRST turn. It emits guardSessionStartHint, the one-line affordance naming the fak substrate MCP verbs (fak_index_work, fak_admit/fak_adjudicate, fak_memory_run, fak_tools_search), and is toggled by FAK_GUARD_AFFORDANCE_MODE (on/off). |
 | * | crystal | config | guard-gate | **FAK_SECRETGATE** - The env opt-in (FAK_SECRETGATE) that arms internal/secretgate Admit; when off, Admit is a no-op and only the normgate secret check runs. |
 | * | crystal | config | guard-gate | **FLEET_CODEX_LOOP_GATE** - The env gate (FLEET_CODEX_LOOP_GATE) controlling whether the fleet dispatch tick admits the codex-loop step (dispatch_tick_codex_gate). |
 | * | crystal | config | guard-gate | **FLEET_DOGFOOD_GUARD** - The dispatch guard (FLEET_DOGFOOD_GUARD) gating the fleet's self-dogfooding path in dispatch_tick/worker. |
@@ -2217,7 +2218,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1981 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1982 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2230,14 +2231,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | decision | 49 | 52 | 3 |
-| guard-gate | 346 | 349 | 3 |
 | policy-capability | 137 | 140 | 3 |
 | support-maturity | 37 | 40 | 3 |
+| guard-gate | 347 | 349 | 2 |
 | loop | 71 | 73 | 2 |
-| session-runtime | 185 | 187 | 2 |
 | cache | 254 | 255 | 1 |
 | evict | 44 | 45 | 1 |
 | render-materialize | 171 | 172 | 1 |
+| session-runtime | 186 | 187 | 1 |
 | witness-proof | 135 | 136 | 1 |
 | attention | 72 | 72 | 0 |
 | context-ctx | 193 | 193 | 0 |
