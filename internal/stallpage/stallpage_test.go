@@ -27,7 +27,7 @@ func TestFromSampleCrossingEarnsHumanOperatorPage(t *testing.T) {
 	if !ok {
 		t.Fatal("handle high-water crossing produced no page")
 	}
-	if page.Advice.Axis != "handles" || page.Advice.Threshold != 30_000 {
+	if page.Advice.Axis != "handle_high_water" || page.Advice.Threshold != 30_000 {
 		t.Fatalf("advice = %+v, want unchanged 30000-handle high-water", page.Advice)
 	}
 	if page.Triage.Disposition != choicetriage.HumanResidual || !page.Triage.NeedsHuman {
