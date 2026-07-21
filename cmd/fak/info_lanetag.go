@@ -188,7 +188,11 @@ func guardInfoLaneRevTag(rep modver.Report, changed []string) string {
 // path. Report-only — it needs nothing from modver's internals, so cmd/fak carries no new
 // coupling to the version-everything spine beyond the exported Snapshot/Report surface.
 func guardInfoModuleForPath(rep modver.Report, path string) string {
-	path = filepath.ToSlash(path)
+	// Normalize Windows-style separators cross-platform before prefix-matching:
+	// filepath.ToSlash only rewrites the OS separator (a no-op for a backslash on a
+	// Linux runner), so a backslash working-set path would never prefix-match a
+	// slash-keyed module name. Replace backslashes explicitly on every platform.
+	path = strings.ReplaceAll(filepath.ToSlash(path), `\`, "/")
 	best := ""
 	for _, m := range rep.Modules {
 		n := m.Name
