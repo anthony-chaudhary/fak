@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/resume"
 )
@@ -87,7 +88,11 @@ func rwEmitBacklogPage(regDir, logDir string, page *resume.WatchdogPage, note fu
 	if b, err := os.ReadFile(storePath); err == nil {
 		_ = json.Unmarshal(b, &store)
 	}
-	now := rwNowISO()
+	// A standing page refreshes many times within a single wall-clock second, so the
+	// first/last-seen span must be recorded at sub-second resolution — the second-granular
+	// rwNowISO() would collapse FirstSeen and LastSeen into the same string and erase the
+	// occurrence span the operator reads ("open since X, still tripped at Y").
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	rec, seen := store[page.Signature]
 	rec.Reason = page.Reason
 	rec.Count++
