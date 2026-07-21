@@ -75,6 +75,8 @@ const allZeroGolden = `
       "live": false,
       "disposition": "cooling",
       "reason": "cooldown",
+      "cooling_since": 999940,
+      "cooling_until": 1000540,
       "recency": 999970,
       "rank": -1
     },
@@ -717,6 +719,48 @@ func TestAllZeroPriorityByteIdenticalResult(t *testing.T) {
 	if gotStr != want {
 		t.Fatalf("all-zero-priority Result drifted from the pinned golden.\n--- got ---\n%s\n--- want ---\n%s",
 			gotStr, want)
+	}
+}
+
+// TestCoolingVerdictCarriesWindow (#3715): a DispCooling verdict declares its cooldown window —
+// CoolingSince is the last attempt, CoolingUntil is when the unit re-enters the pool — under the
+// exact JSON keys internal/dispatchaging.Candidate reads (cooling_since / cooling_until), so an
+// aging caller building Candidates from these dispositions inherits the pause window verbatim.
+// Every other disposition carries a zero window (omitempty: the keys are absent), the additive
+// no-regression direction.
+func TestCoolingVerdictCarriesWindow(t *testing.T) {
+	r := Plan(Input{NowUnix: base, CooldownSeconds: 600, Candidates: []Candidate{
+		{ID: "cooling", Key: "C", UpdatedUnix: base - 30, LastAttemptUnix: base - 60},
+		{ID: "kept", Key: "K", UpdatedUnix: base - 100},
+	}})
+	var cool, kept *Ranked
+	for i := range r.Order {
+		switch r.Order[i].ID {
+		case "cooling":
+			cool = &r.Order[i]
+		case "kept":
+			kept = &r.Order[i]
+		}
+	}
+	if cool == nil || cool.Disposition != DispCooling {
+		t.Fatalf("cooling unit not ranked DispCooling: %+v", cool)
+	}
+	if cool.CoolingSince != base-60 || cool.CoolingUntil != base-60+600 {
+		t.Errorf("cooling window = [%d, %d], want [%d, %d] (last attempt -> attempt+cooldown)",
+			cool.CoolingSince, cool.CoolingUntil, base-60, base-60+600)
+	}
+	if kept == nil || kept.CoolingSince != 0 || kept.CoolingUntil != 0 {
+		t.Errorf("kept unit carries a cooling window %+v, want zero (additive no-regression)", kept)
+	}
+	// Bind the JSON seam: the window serializes under dispatchaging.Candidate's key names.
+	b, err := json.Marshal(cool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{`"cooling_since":999940`, `"cooling_until":1000540`} {
+		if !strings.Contains(string(b), key) {
+			t.Errorf("cooling row JSON %s missing %s (the dispatchaging seam)", b, key)
+		}
 	}
 }
 

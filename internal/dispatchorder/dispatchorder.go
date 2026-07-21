@@ -243,6 +243,15 @@ type Ranked struct {
 	// BlockedByOpen names the still-OPEN prerequisite(s) that caused a DispBlocked soft hold —
 	// the subset of BlockedBy present in this tick's candidate set (sorted). Empty otherwise.
 	BlockedByOpen []string `json:"blocked_by_open,omitempty"`
+	// CoolingSince / CoolingUntil declare the cooldown window behind a DispCooling verdict
+	// (unix seconds): the span from the unit's last attempt to the moment it re-enters the
+	// pool. The keys deliberately mirror internal/dispatchaging.Candidate's cooling_since /
+	// cooling_until, so an aging caller building Candidates from these dispositions (or
+	// re-feeding a Result's order JSON) inherits the window verbatim and PAUSES the unit's
+	// starvation clock over the ineligible span instead of dropping it (#3715). Zero on every
+	// other disposition — the omitempty keeps non-cooling rows byte-identical.
+	CoolingSince int64 `json:"cooling_since,omitempty"`
+	CoolingUntil int64 `json:"cooling_until,omitempty"`
 	// Recency is the freshness value the unit was judged on (echoed for transparency).
 	Recency int64 `json:"recency"`
 	// Rank is the 0-based dispatch position among DispKeep units; -1 for everything else.
@@ -396,6 +405,7 @@ func Plan(in Input) Result {
 			r.Disposition, r.Reason, r.BlockedByOpen = DispBlocked, ReasonBlockedByOpenPrereq, blocked[c.ID]
 		case cooldown > 0 && c.LastAttemptUnix > 0 && in.NowUnix-c.LastAttemptUnix < cooldown:
 			r.Disposition, r.Reason = DispCooling, ReasonCooldown
+			r.CoolingSince, r.CoolingUntil = c.LastAttemptUnix, c.LastAttemptUnix+cooldown
 		default:
 			r.Disposition, r.Reason = DispKeep, ReasonFreshest
 		}
