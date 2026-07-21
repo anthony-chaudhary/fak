@@ -239,6 +239,9 @@ func WriteTimeline(w io.Writer, events []Event) {
 			if c.Receipt != "" {
 				line += " receipt=" + c.Receipt
 			}
+			if c.Session != "" {
+				line += " session=" + c.Session
+			}
 		}
 		line += " [" + e.Source + "]"
 		if e.Detail != "" {

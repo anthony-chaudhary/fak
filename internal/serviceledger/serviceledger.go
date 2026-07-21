@@ -87,6 +87,9 @@ type Correlation struct {
 	Checkpoint        string `json:"checkpoint,omitempty"`
 	Request           string `json:"request,omitempty"`
 	Receipt           string `json:"receipt,omitempty"`
+	// Session is the resumed interactive session identity (#4756): which
+	// desktop session lineage the workload re-entered after a bridge resume.
+	Session string `json:"session,omitempty"`
 }
 
 // Event is one fak.service.events.v1 row. The identity axis reuses the landed
