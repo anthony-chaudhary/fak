@@ -33,6 +33,28 @@ var privateOnly = []patternReason{
 	{regexp.MustCompile(`^cmd/slackgc/`), "private lab Slack-housekeeping tool — belongs in the private repo, not the public tree"},
 }
 
+// privateByMachine matches a raw per-machine benchmark run drop under
+// experiments/benchmark/runs/by-machine/ (or the fak/-nested superrepo form). These are
+// regenerable harness output carrying infra tells (instance names/zones, credential paths,
+// hostnames, accelerator SKUs, GPU topology); commit 62bed967e made the whole tree
+// private-by-default in .gitignore, and this is the commit-time backstop that ignore rule
+// cannot provide (a `git add -f` or a silent ignore-line revert would re-clutter the tree).
+//
+// STAGED-ONLY, on purpose: it is enforced by gateFileAdmission over d.AddedRenamedPaths
+// (the --diff-filter=AR new-additions set) and is NOT part of the shared classifyFileWith,
+// so the tree twin (gateFileAdmissionTree) never fires it on the ~50 grandfathered evidence
+// files already tracked under by-machine/ (gitignore is inert for tracked paths) — CI stays
+// green. Mirrors _is_private_bymachine_addition in check_committed_files.py, applied only on
+// the staged-additions branch of main(). The ALLOW_STRAY_FILE escape skips the whole gate at
+// the runner (cmd/fak/hooks.go), so deliberate promotion of a scrubbed artifact still works.
+var privateByMachine = regexp.MustCompile(`^(fak/)?experiments/benchmark/runs/by-machine/`)
+
+const privateByMachineReason = "raw benchmark run drop under experiments/benchmark/runs/by-machine/ is PRIVATE-BY-DEFAULT (regenerable harness output with infra tells) — promote a scrubbed artifact deliberately with ALLOW_STRAY_FILE=1, or keep it gitignored"
+
+// isPrivateByMachineAddition reports whether a NEWLY-ADDED path is a raw by-machine run drop.
+// Consulted only on the staged-additions branch (gateFileAdmission), never by the tree twin.
+func isPrivateByMachineAddition(p string) bool { return privateByMachine.MatchString(p) }
+
 var hardJunk = []*regexp.Regexp{
 	regexp.MustCompile(`(^|/)__pycache__/`),
 	regexp.MustCompile(`(^|/)\.pytest_cache/`),
@@ -63,7 +85,26 @@ var keepExceptions = map[string]bool{"fak/demorace-err.log": true}
 
 func gateFileAdmission(d *StagedDiff) ([]Finding, error) {
 	// check_committed_files.py uses --diff-filter=AR; the scan body is shared with the tree twin.
-	return classifyPathsFindings(d, d.AddedRenamedPaths), nil
+	seen := map[string]bool{}
+	var findings []Finding
+	for _, p := range d.AddedRenamedPaths {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		why := classifyFileWith(d, p)
+		// STAGED-ONLY fallback (mirrors main()'s staged branch in check_committed_files.py):
+		// a new raw by-machine run drop the shared classifier admits (it is under the
+		// experiments/ data dir, so soft-junk rules don't apply) is still refused here. NOT in
+		// classifyFileWith, so the tree twin keeps the grandfathered evidence files green.
+		if why == "" && isPrivateByMachineAddition(p) {
+			why = privateByMachineReason
+		}
+		if why != "" {
+			findings = append(findings, Finding{Gate: "FILE_ADMISSION", File: p, Detail: why})
+		}
+	}
+	return findings, nil
 }
 
 func startsWithAny(s string, prefixes []string) bool {

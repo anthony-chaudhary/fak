@@ -110,6 +110,71 @@ func TestFileAdmission_OversizedBlobCap(t *testing.T) {
 	}
 }
 
+// TestFileAdmission_ByMachineHelper pins the staged-only by-machine helper's decisions:
+// a raw per-machine run drop (root-hoisted, fak/-nested, and the historically-leaky dgx*
+// class) is refused; a normal path or the tracked aggregate catalog is not.
+func TestFileAdmission_ByMachineHelper(t *testing.T) {
+	// The dgxN-form host segment is assembled at runtime so this source carries no literal
+	// private-GPU-host-alias needle — the "no literal needle in tests" convention
+	// gate_publicleak.go documents (its own AUDIT_NEEDLES list is split the same way). The
+	// by-machine rule keys off the path PREFIX, not the host, so this changes nothing asserted.
+	dgxN := "dgx" + "2"
+	refused := []string{
+		"experiments/benchmark/runs/by-machine/node-macos-a/20260718-x/score.json",
+		"fak/experiments/benchmark/runs/by-machine/node-macos-a/20260718-x/score.json",
+		"experiments/benchmark/runs/by-machine/dgx-a100-01/20260718-run/witness.json",
+		"fak/experiments/benchmark/runs/by-machine/" + dgxN + "/20260718-run/manifest.json",
+	}
+	for _, p := range refused {
+		if !isPrivateByMachineAddition(p) {
+			t.Errorf("by-machine addition should be refused: %q", p)
+		}
+	}
+	allowed := []string{
+		"internal/foo/bar.go",
+		"experiments/benchmark/catalog.json",    // tracked aggregate, OUTSIDE by-machine/
+		"experiments/benchmark/runs/summary.md", // sibling under runs/, not by-machine/
+	}
+	for _, p := range allowed {
+		if isPrivateByMachineAddition(p) {
+			t.Errorf("normal path must not be a by-machine addition: %q", p)
+		}
+	}
+}
+
+// TestFileAdmission_ByMachineStagedOnly proves the by-machine rule is STAGED-ONLY: the staged
+// gate refuses a NEW drop, the shared classifier stays silent (so it is NOT in _classify), and
+// the tree twin does NOT refuse a by-machine path — the invariant that keeps the ~50
+// grandfathered evidence files green in --audit-tree.
+func TestFileAdmission_ByMachineStagedOnly(t *testing.T) {
+	p := "experiments/benchmark/runs/by-machine/dgx-a100-01/20260718-run/score.json"
+
+	// STAGED: gateFileAdmission (over AddedRenamedPaths) refuses it.
+	d := &StagedDiff{Root: t.TempDir(), AddedRenamedPaths: []string{p}, fileCache: map[string]fileEntry{}}
+	findings, err := gateFileAdmission(d)
+	if err != nil {
+		t.Fatalf("gateFileAdmission: %v", err)
+	}
+	if !hasFindingFor(findings, "FILE_ADMISSION", "PRIVATE-BY-DEFAULT") {
+		t.Fatalf("staged gate must refuse a new by-machine drop; got %+v", findings)
+	}
+
+	// SHARED classifier (used by the tree twin) must be SILENT — the rule is staged-only.
+	if why := classifyFileWith(d, p); why != "" {
+		t.Errorf("classifyFileWith must not fire the by-machine rule (staged-only); got %q", why)
+	}
+
+	// TREE twin: a by-machine path in the tracked set is NOT refused (grandfathered evidence).
+	tree := &TrackedTree{Root: t.TempDir(), Paths: []string{p}, fileCache: map[string]fileEntry{}}
+	tf, err := gateFileAdmissionTree(tree)
+	if err != nil {
+		t.Fatalf("gateFileAdmissionTree: %v", err)
+	}
+	if len(tf) != 0 {
+		t.Errorf("tree gate must NOT refuse a grandfathered by-machine path; got %+v", tf)
+	}
+}
+
 // TestFileAdmission_LiveTreeNoOpsArtifact asserts the real tracked tree carries no
 // operator-private operational artifact — the false-positive guard on real data and the
 // regression guard for the dispatch-status.md leak (untracked in the same change). Skipped

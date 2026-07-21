@@ -190,6 +190,10 @@ func TestParity_FileAdmission(t *testing.T) {
 		{"clean", map[string]string{"src/x.go": "package x\n"}, false},
 		{"secrets-dir", map[string]string{"secrets/db.txt": "pw\n"}, true},
 		{"pycache", map[string]string{"a/__pycache__/x.pyc": "junk\n"}, true},
+		// STAGED-ONLY by-machine private-by-default: a new raw run drop is blocked in BOTH
+		// enforcers (root-hoisted + fak/-nested + the dgx* class), proving lockstep.
+		{"bymachine-drop", map[string]string{"experiments/benchmark/runs/by-machine/dgx-a100/20260718-x/score.json": "{}\n"}, true},
+		{"bymachine-fak-nested", map[string]string{"fak/experiments/benchmark/runs/by-machine/node-a/20260718-x/witness.json": "{}\n"}, true},
 	})
 }
 
