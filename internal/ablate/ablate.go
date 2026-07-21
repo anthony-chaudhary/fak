@@ -85,6 +85,14 @@ const (
 	FeatureTTL1H          = "ttl_1h"
 	FeaturePrefixGuard    = "prefix_guard"
 	FeatureUncachedTrim   = "uncached_trim"
+
+	// FeatureNegframeReframe gates the emit-time positive-voice reframe fak runs over the
+	// prose it injects at SessionStart (#3566, guard_sessionstart.go). It is the steerability
+	// A/B's (#3546) on/off lever: DEFAULT-ON, so an unset env REFRAMES (treatment arm) and
+	// FAK_ABLATE_NEGFRAME_REFRAME=0 / FAK_ABLATE=negframe_reframe routes the injected prose
+	// UNREFRAMED (control arm). Unlike the wire levers this one changes model-visible prefix
+	// BYTES rather than provider cache retention, so it is carded on the context_view plane.
+	FeatureNegframeReframe = "negframe_reframe"
 )
 
 // envFeature reports whether a registered concept uses the subprocess env rung.
@@ -617,6 +625,28 @@ func cacheEffectForFeature(feature string, on bool, arm metrics.Arm, c FeatureCo
 		return wireCacheEffect(feature, on, "prefix_guard", "lossless", "guards prefix stability before relying on provider-cache economics"), true
 	case FeatureUncachedTrim:
 		return wireCacheEffect(feature, on, "uncached_trim", "lossy", "sheds or rewrites uncached context; prefix integrity covers only the guarded cacheable prefix"), true
+	case FeatureNegframeReframe:
+		e := CacheEffect{
+			Feature:    feature,
+			Owner:      "fak",
+			Plane:      "context_view",
+			Component:  "negframe_reframe",
+			Dependency: "subprocess_env",
+			Fidelity:   "lossless",
+			Evidence:   "configured",
+		}
+		// Default-on: the ON arm is the reframed treatment, the OFF arm restores the raw
+		// negative-framed injection #3546 measures against. The reframe is token-superset-safe
+		// and idempotent, so it rewrites voice without dropping a load-bearing contract token.
+		if !on {
+			e.Status = "inactive"
+			e.Fidelity = "no-op"
+			e.Reason = "negframe reframe disabled for this arm; fak injects raw negative-framed prose (the #3546 control arm)"
+			return e, true
+		}
+		e.Status = "active"
+		e.Reason = "fak-authored injected prose is routed through the emit-time positive-voice reframe; changes model-visible prefix bytes, so an arm flip breaks prefix reuse by design"
+		return e, true
 	default:
 		return CacheEffect{}, false
 	}

@@ -88,6 +88,7 @@ func registerBuiltins() {
 		FeatureWireScreen: "FAK_WIRE_SCREEN", FeatureWireRedact: "FAK_WIRE_REDACT", FeatureToonWire: "FAK_TOON_WIRE",
 		FeatureBreakpointPlan: "FAK_ABLATE_BP_PLAN", FeatureTTL1H: "FAK_ABLATE_TTL_1H",
 		FeaturePrefixGuard: "FAK_ABLATE_PREFIX_GUARD", FeatureUncachedTrim: "FAK_ABLATE_UNCACHED_TRIM",
+		FeatureNegframeReframe: "FAK_ABLATE_NEGFRAME_REFRAME",
 	}
 	Register(Concept{Token: FeatureVDSO, Runtime: func(bool) {}, Owner: "fak", Reversible: true, PrefixStable: true})
 	for token, variable := range env {

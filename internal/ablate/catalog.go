@@ -104,6 +104,16 @@ var featureCards = map[string]FeatureCard{
 		Fidelity:   "lossy",
 		Summary:    "sheds or rewrites uncached context; prefix integrity covers only the guarded cacheable prefix",
 	},
+	FeatureNegframeReframe: {
+		Token:      FeatureNegframeReframe,
+		Owner:      "fak",
+		Plane:      "context_view",
+		Component:  "negframe_reframe",
+		Dependency: "subprocess_env",
+		Fidelity:   "lossless",
+		EnvVar:     "FAK_ABLATE_NEGFRAME_REFRAME",
+		Summary:    "routes fak-authored injected prose through the emit-time positive-voice reframe (default ON); the OFF arm restores raw negative-framed injection for the #3546 steerability control",
+	},
 }
 
 func init() {
