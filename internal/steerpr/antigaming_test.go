@@ -104,7 +104,10 @@ func TestAntiGamingBandForTakesOnlyAWitnessVerdict(t *testing.T) {
 func TestAntiGamingCommitBandInputSetIsPinned(t *testing.T) {
 	pinned := map[string][]string{
 		"Commit": {"SHA", "Subject", "Leaf", "Type", "Resolves", "Mentions", "Files", "Verdict", "Band"},
-		"Unit":   {"Leaf", "Title", "Commits", "Types", "Resolves", "Mentions", "Files", "Band", "Curve"},
+		// Partial (#5027) is membership completeness — N of M expected commits
+		// landed. It is RENDER-ONLY state and provably cannot reach the band; see
+		// TestAntiGamingPartialCannotImproveABand.
+		"Unit": {"Leaf", "Title", "Commits", "Types", "Resolves", "Mentions", "Files", "Band", "Curve", "Partial"},
 	}
 	got := map[string][]string{
 		"Commit": fieldNames(reflect.TypeOf(Commit{})),
@@ -245,6 +248,84 @@ func TestAntiGamingAckedResidualRendersHonestly(t *testing.T) {
 	// The band an operator would read renders RESIDUAL, never CLEARED.
 	if string(u.Band) != string(BandResidual) {
 		t.Errorf("rendered band = %q, want %q: an acked residual must render RESIDUAL, never CLEARED", u.Band, BandResidual)
+	}
+}
+
+// TestAntiGamingPartialCannotImproveABand discharges the obligation the pin
+// above imposes on #5027's new Unit.Partial field: proving the band fold ignores
+// it.
+//
+// The laundering path this closes is specific and tempting. A "complete" unit
+// reads as finished, and the obvious bad inference is that a finished intent
+// deserves a cleaner band — collapsing "all the work arrived" into "all the work
+// was proven". Those are different facts. A 12-of-12 complete unit made entirely
+// of CLAIM_UNWITNESSED commits is fully assembled and fully unproven, and it must
+// still render RESIDUAL.
+//
+// The proof is structural: FoldBand takes []Commit, and Partial lives on Unit,
+// so it is not even in the fold's input type. This asserts the property end to
+// end anyway, because the structural argument would quietly stop holding if a
+// future refactor moved the fold to take a Unit.
+func TestAntiGamingPartialCannotImproveABand(t *testing.T) {
+	unwitnessed := []Commit{
+		{SHA: "p1", Subject: "feat(steerpr): unproven (fak steerpr)", Leaf: "steerpr", Type: "feat", Verdict: VerdictUnwitnessed},
+		{SHA: "p2", Subject: "feat(steerpr): also unproven (fak steerpr)", Leaf: "steerpr", Type: "feat", Verdict: VerdictUnwitnessed},
+	}
+	units, _ := FoldUnits(unwitnessed)
+	if len(units) != 1 {
+		t.Fatalf("FoldUnits() = %d units, want 1", len(units))
+	}
+	want := units[0].Band
+	if want != BandResidual {
+		t.Fatalf("baseline band = %q, want %q", want, BandResidual)
+	}
+
+	// Every partial state, including the most "finished"-looking one, must leave
+	// the band exactly where the witness rungs put it.
+	forges := []struct {
+		name string
+		exp  Expectation
+		ok   bool
+	}{
+		{"complete 2 of 2", Expectation{Total: 2, Source: SourceFanout}, true},
+		{"over-complete 2 of 1", Expectation{Total: 1, Source: SourceFanout}, true},
+		{"complete via cohort", Expectation{Total: 2, Source: SourceCohort}, true},
+		{"forming 2 of 9", Expectation{Total: 9, Source: SourceFanout}, true},
+		{"unknown denominator", Expectation{}, false},
+	}
+	for _, f := range forges {
+		t.Run(f.name, func(t *testing.T) {
+			u := units[0].WithPartial(f.exp, f.ok)
+			if u.Partial == nil {
+				t.Fatal("WithPartial produced no partial state")
+			}
+			if u.Band != want {
+				t.Errorf("unit band = %q after binding partial %+v, want %q: membership completeness "+
+					"must not move the band — \"all the work arrived\" is not \"all the work was proven\"",
+					u.Band, u.Partial, want)
+			}
+			// Re-derive the band the way any honest re-tick does; a Partial must not
+			// leak in through the fold either.
+			if got := FoldBand(u.Commits); got != want {
+				t.Errorf("FoldBand() = %q with partial %+v bound, want %q", got, u.Partial, want)
+			}
+			// And the posted number must not deflate.
+			if got := Residual([]Unit{u}); got != 1 {
+				t.Errorf("Residual() = %d, want 1: a complete unit of unwitnessed commits still owes attention", got)
+			}
+		})
+	}
+
+	// AttachPartials is the bulk path the CLI uses; it must be equally inert.
+	bulk := []Unit{units[0]}
+	AttachPartials(bulk, func(Unit) (Expectation, bool) {
+		return Expectation{Total: 1, Source: SourceFanout}, true // maximally "complete"
+	})
+	if bulk[0].Band != want {
+		t.Errorf("AttachPartials moved the band to %q, want %q", bulk[0].Band, want)
+	}
+	if got := Residual(bulk); got != 1 {
+		t.Errorf("Residual() = %d after AttachPartials, want 1", got)
 	}
 }
 

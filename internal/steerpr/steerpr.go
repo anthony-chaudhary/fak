@@ -111,6 +111,13 @@ type Unit struct {
 	// claim confirmed", Curve says "is the objective progressing". A unit with no
 	// bound objective leaves this nil — the common case, and not a warning.
 	Curve *Curve `json:"curve,omitempty"`
+	// Partial, when set, is this unit's membership completeness: N of M expected
+	// commits landed (see partial.go). A third orthogonal axis — Band says "was
+	// each claim confirmed", Curve says "is the objective progressing", Partial
+	// says "is the intent all here yet". A set Partial whose Expected is nil means
+	// the denominator was NOT DERIVABLE, which is explicitly reported and is never
+	// rendered complete.
+	Partial *Partial `json:"partial,omitempty"`
 }
 
 // BandFor maps one witness verdict to the band it implies.
