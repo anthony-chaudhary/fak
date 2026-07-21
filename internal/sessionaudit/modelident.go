@@ -138,7 +138,7 @@ func StrictModelCostUSD(model string, input, cacheWrite, cacheRead, output int64
 		if err != nil {
 			return 0, err
 		}
-		return rawCostUSD(r, input, cacheWrite, cacheRead, output), nil
+		return (float64(input)*r.Input + float64(cacheWrite)*r.CacheWrite + float64(cacheRead)*r.CacheRead + float64(output)*r.Output) / 1e6, nil
 	}
 	if claudeFamilySpelling(model) {
 		// An unresolved Claude spelling must NOT borrow a neighboring tier via
@@ -146,7 +146,7 @@ func StrictModelCostUSD(model string, input, cacheWrite, cacheRead, output int64
 		return 0, fmt.Errorf("%w: unresolved Claude-family id %q", ErrUnknownModelPricing, model)
 	}
 	if r, ok := PriceFor(model); ok {
-		return rawCostUSD(r, input, cacheWrite, cacheRead, output), nil
+		return (float64(input)*r.Input + float64(cacheWrite)*r.CacheWrite + float64(cacheRead)*r.CacheRead + float64(output)*r.Output) / 1e6, nil
 	}
 	return 0, fmt.Errorf("%w: %q", ErrUnknownModelPricing, model)
 }
