@@ -9,6 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopfleet"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/programreport"
+	"github.com/anthony-chaudhary/fak/internal/stallscan"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
@@ -32,6 +33,11 @@ type Inputs struct {
 	Fleet       *loopfleet.Report
 	OSP         *OSP
 	Previous    *Report
+
+	// Reboot carries per-sample host-reboot advice from stallscan. Advised
+	// crossings surface as human-authority pages (approve and schedule a reboot),
+	// deduplicated by (axis, process) so one sustained crossing pages once.
+	Reboot []stallscan.RebootAdvice
 
 	// TriageGate selects the decenter-the-human paging policy applied during
 	// Fold: "enforce" re-partitions the human bucket through choicetriage so the
@@ -321,6 +327,11 @@ func Fold(in Inputs) Report {
 		r.Sources = append(r.Sources, ospState(in.OSP))
 	}
 
+	// Host-reboot advice leads the human bucket: a crossed reboot high-water is the
+	// most time-critical operator page (the box is on a curve to a hard freeze), so it
+	// must drive NextAction ahead of the missing-report pages that empty sources add.
+	addReboot(&r, in.Reboot)
+
 	if in.Cadence == nil {
 		r.addHuman("cadence", "page", "cadence report missing", "scores, maturity, work, and releases are not in this brief", "generate `fak cadence --json` and pass it with --cadence")
 	} else {
@@ -471,6 +482,32 @@ func addHeaviness(r *Report, h scorecard.Payload) {
 	default:
 		r.addBackground("heaviness", "operator surface light", detail, "keep the operator surface flat as agents add capabilities")
 	}
+}
+
+// addReboot surfaces host-reboot advice as operator pages. A reboot is a genuine
+// operator-authority decision, so each advised crossing is a read-only recommendation
+// (approve and schedule a reboot) — never an automatic reboot. Advice is deduplicated
+// by (axis, process): the Item's Title carries only those two, so two samples of one
+// sustained crossing (a fresh PID, a higher count) collapse to a single page under the
+// human-bucket dedupe. The "approve" in the action keeps the page HUMAN_RESIDUAL under
+// the decenter-the-human triage — a host reboot is authority a person holds.
+func addReboot(r *Report, advice []stallscan.RebootAdvice) {
+	for _, a := range advice {
+		if !a.Advised {
+			continue
+		}
+		title := fmt.Sprintf("%s %s crossed", strmatch.FirstNonBlank(a.Process, "host"), humanAxis(a.Axis))
+		r.addHuman("host-reboot", "decision", title, a.Reason,
+			"approve and schedule a host reboot at a safe checkpoint; do not reboot the host automatically")
+	}
+}
+
+// humanAxis renders a stallscan reboot axis token as operator-facing prose:
+// "handle_high_water" -> "handle high-water". Unknown axes fall back to a plain
+// underscore-to-space rewrite.
+func humanAxis(axis string) string {
+	a := strings.ReplaceAll(axis, "_high_water", " high-water")
+	return strings.ReplaceAll(a, "_", " ")
 }
 
 func (r *Report) finalize() {
