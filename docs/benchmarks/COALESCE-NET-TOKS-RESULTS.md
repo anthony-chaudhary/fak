@@ -99,7 +99,7 @@ the "slow SSD box" is riding the resident RAM roofline, which is the dense
   table): B un-coalesced, un-cached streams time-sharing ONE SSD each stream the full
   `L·K·e` expert bytes per token, so their aggregate is `BW_ssd/(L·K·e)` = **0.54 tok/s at
   ANY B** (defaults). The coalesced curve's rise above this constant floor (1.25 → 74.18
-  PROJECTED) is the coalescing+cache win on the same box.
+  PROJECTED) is the modeled fak-kernel coalescing+cache win on the same box.
 - **×vs-1agent** `= net_toks(B) ÷ net_toks(1)`: 59.31× at B=128. This is the
   aggregate-over-latency number the affordable-fleet note warns against citing raw —
   report it only as "aggregate, latency-tolerant"; no single user's token gets faster.
