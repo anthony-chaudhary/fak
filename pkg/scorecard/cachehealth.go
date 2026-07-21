@@ -86,6 +86,16 @@ type CacheHealthFacts struct {
 	ShedEffectiveness          *float64 // shed fired / (fired + bailed) (see ShedEffectivenessHealth)
 	WitnessedObservedAgreement *float64 // 1 - gross/net divergence (see WitnessedObservedAgreement)
 	UpgradeFiredRate           *float64 // upgrades / (upgrades + refusals) (see UpgradeFiredHealth)
+
+	// ObservedProviderReuse is the OBSERVED provider cache-read share (0..1), provider-relayed.
+	// CONTEXT ONLY: it is deliberately NOT a scored WITNESSED family — it is never added to
+	// CacheHealthComponents, componentHealth, or the folded health number. It is surfaced in the
+	// corpus so a low WITNESSED cache-health reads honestly next to a high provider-cache reuse:
+	// "the provider's own prefix cache is carrying the caching while fak's managed levers are
+	// passive" (e.g. a subscription-OAuth seat whose 1h upgrade the provider rejects) reads very
+	// differently from cold caching across the board. Keeping it out of the score preserves the
+	// WITNESSED/OBSERVED separation the rest of this card depends on. nil = no evidence.
+	ObservedProviderReuse *float64
 }
 
 // componentHealth returns the caller-supplied health for one family key, or nil when absent.
@@ -261,18 +271,25 @@ func ComposeCacheHealth(f CacheHealthFacts) Payload {
 	if worklist == nil {
 		worklist = []CacheHealthRow{}
 	}
+	extra := map[string]any{
+		"cache_health":          Round3(number),
+		"cache_health_worklist": worklist,
+		"components_present":    present,
+		"components_total":      len(CacheHealthComponents),
+		"pass_line":             CacheHealthPassLine,
+	}
+	// OBSERVED provider cache-read reuse is CONTEXT, not a scored family: surface it so a low
+	// WITNESSED cache_health reads honestly next to a healthy provider-cache reuse (the provider
+	// cache carrying it while fak's own levers are passive). Never folded into the health number.
+	if f.ObservedProviderReuse != nil {
+		extra["observed_provider_reuse"] = Round3(clamp01(*f.ObservedProviderReuse))
+	}
 	return Fold(CacheHealthSchema, cacheHealthKPIs(f), CacheHealthDebtKey, nil, Messages{
 		Finding:         "fleet cache-health carries debt: a cache family fell below the health pass line -- work the worst-first worklist",
 		FindingClean:    "fleet cache-health clean: every cache family with evidence clears the health pass line",
 		NextAction:      "raise the worst-first family (reuse the metric behind it): managed-cache posture / realized reuse / shed effectiveness / witnessed-observed agreement / upgrade-fired rate",
 		NextActionClean: "hold the line; keep every cache family above the health pass line and tighten the ratchet",
 		Grade:           GradeStd,
-		ExtraCorpus: map[string]any{
-			"cache_health":          Round3(number),
-			"cache_health_worklist": worklist,
-			"components_present":    present,
-			"components_total":      len(CacheHealthComponents),
-			"pass_line":             CacheHealthPassLine,
-		},
+		ExtraCorpus:     extra,
 	})
 }

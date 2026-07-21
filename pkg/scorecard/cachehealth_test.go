@@ -152,6 +152,43 @@ func TestComposeCacheHealthPayload(t *testing.T) {
 	}
 }
 
+// TestObservedProviderReuseIsContextNotScored pins the WITNESSED/OBSERVED separation: the
+// OBSERVED provider cache-read share is surfaced in the corpus for honesty but is NEVER folded
+// into the scored family set or the health number. A seat whose managed levers are passive
+// (low WITNESSED families) but whose provider cache is healthy must read F on the SCORE yet
+// carry the high observed reuse as context.
+func TestObservedProviderReuseIsContextNotScored(t *testing.T) {
+	// Two low WITNESSED families + a high OBSERVED provider reuse (the subscription-seat shape).
+	f := CacheHealthFacts{
+		ManagedCachePosture:   hp(0.0),
+		ShedEffectiveness:     hp(0.214),
+		ObservedProviderReuse: hp(0.744),
+	}
+	// The scored number and family count must be identical with and without the context field.
+	withCtx := ComposeCacheHealth(f)
+	f.ObservedProviderReuse = nil
+	without := ComposeCacheHealth(f)
+	if withCtx.Corpus["components_present"] != without.Corpus["components_present"] {
+		t.Fatalf("observed reuse changed components_present: %v vs %v",
+			withCtx.Corpus["components_present"], without.Corpus["components_present"])
+	}
+	if withCtx.Corpus["cache_health"].(float64) != without.Corpus["cache_health"].(float64) {
+		t.Fatalf("observed reuse moved the scored health number: %v vs %v",
+			withCtx.Corpus["cache_health"], without.Corpus["cache_health"])
+	}
+	// Scored families are still exactly the two WITNESSED ones (not lifted by the 74% context).
+	if cp := withCtx.Corpus["components_present"]; cp != 2 {
+		t.Fatalf("components_present = %v, want 2 (observed reuse must not add a scored family)", cp)
+	}
+	// The context IS surfaced when present, and ABSENT when nil.
+	if got, ok := withCtx.Corpus["observed_provider_reuse"].(float64); !ok || got < 0.743 || got > 0.745 {
+		t.Fatalf("observed_provider_reuse corpus = %v, want ~0.744", withCtx.Corpus["observed_provider_reuse"])
+	}
+	if _, present := without.Corpus["observed_provider_reuse"]; present {
+		t.Fatalf("observed_provider_reuse must be absent when nil: %v", without.Corpus["observed_provider_reuse"])
+	}
+}
+
 // TestCacheHealthComponentHelpers pins the family-metric conversions (reused, not re-derived).
 func TestCacheHealthComponentHelpers(t *testing.T) {
 	// PostureHealth: 0..100 pct -> 0..1; nil passes through.
