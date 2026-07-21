@@ -364,6 +364,49 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  /v1/leases/{op}:
+    post:
+      tags: [fak-native]
+      summary: Single-arbiter fenced lease write
+      description: |
+        The write half of the dev-server lease plane: a fenced write against the
+        coordinator clone's `refs/fak/locks/*` store, serialized through the
+        gateway so the coordinator acts as a single arbiter rather than one more
+        racing clone (#2299, epic #2254). `op` is a closed verb set —
+        `acquire | renew | release`; any other segment is 404. `renew` and
+        `release` must present the `generation` fencing token the caller believes
+        it holds, so the arbiter can refuse a stale writer. Deny-as-value: a
+        refusal is a `200` with `ok:false` and a closed `reason`
+        (`LEASE_HELD | STALE_LEASE | LEASE_CONTENDED | NO_LEASE`); HTTP error
+        status is reserved for transport/infrastructure facts. The arbiter is
+        injected by the host CLI; a deployment that did not wire it returns 404.
+      parameters:
+        - name: op
+          in: path
+          required: true
+          description: The fenced-write verb.
+          schema:
+            type: string
+            enum: [acquire, renew, release]
+      responses:
+        '200':
+          description: The deny-as-value verdict of the fenced write.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaseWriteResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Lease write plane is not configured, or the verb is unknown.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500':
+          description: The coordinator failed to write its local ref store.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /v1/sessions:
     get:
       tags: [fak-native]
@@ -1254,6 +1297,127 @@ paths:
         '405':
           description: Wrong HTTP method (GET only).
 
+  /v1/fak/sharedtask/{task_id}:
+    get:
+      tags: [fak-native]
+      summary: Scope-redacted view of one shared task record
+      description: |
+        The shared-task record co-editing surface (#3885), adjudicated by the
+        internal/sharedtask fold. GET `/v1/fak/sharedtask/{task_id}` returns the
+        record view redacted by the caller's reader scope (`?scope=` —
+        agent | fleet | tenant | public, default fleet); GET
+        `{task_id}/events` applies the same policy to the historical event
+        catch-up. Inert by default: 404 unless the host installed a provider
+        (`SetSharedTaskProvider`) AND the operator enabled the surface
+        (`FAK_SHAREDTASK=1`).
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string, enum: [agent, fleet, tenant, public] }
+      responses:
+        '200':
+          description: The scope-redacted task view (or event-log view).
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Surface disabled, or no such task.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+    post:
+      tags: [fak-native]
+      summary: Create or co-edit a shared task record through the fold's write-gate
+      description: |
+        POST `/v1/fak/sharedtask/{task_id}` creates the record
+        (`fak.shared-task.v1` envelope); POST `{task_id}/patch` submits a
+        `fak.shared-patch.v1` envelope, and the fold adjudicates it into a
+        `fak.shared-patch-result.v1`: 200 accepted (revision advances, event row
+        emitted), 409 typed conflict (base / current / proposed), 403 denied,
+        202 quarantined or needs-approval. Concurrent clients patching the same
+        record is the designed case (per docs/shared-task-record-contract.md).
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Patch accepted — the adjudicated patch result.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '201':
+          description: Record created.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '202':
+          description: Patch held — quarantined ref or approval required.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Patch denied (scope widening forbidden or policy denial).
+        '404':
+          description: Surface disabled.
+        '409':
+          description: Stale non-commuting write — typed conflict carrying base / current / proposed.
+
+  /v1/fak/agent/sessions:
+    post:
+      tags: [fak-native]
+      summary: Run one kernel-governed agent session from a goal, streamed
+      description: |
+        The agent-runtime spine (#3258, epic #3256): POST a goal and the gateway
+        drives fak's OWN agent loop (`agent.RunGovernedArm` — the fak arm of the
+        owned loop) to a terminal state over the server's configured planner
+        (offline mock, `--gguf` in-kernel, or the proxy upstream). Every proposed
+        tool call crosses the in-kernel syscall boundary — adjudication, vDSO
+        dedup, result quarantine — and the witnessed decision trace streams back
+        as NDJSON (`application/x-ndjson`), one JSON event per line:
+        `session.start` (trace id, goal, effective turn cap), one `call` row per
+        adjudicated tool call (turn, tool, verdict, closed deny reason,
+        deciding rung), and a terminal `session.end` carrying the ArmMetrics
+        witness (turns, denies, quarantines, task completion). A loop failure
+        after the stream opened is the terminal in-stream `error` event, detail
+        kept off the wire. `max_turns` narrows the server's native turn cap,
+        never widens it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goal]
+              properties:
+                goal:
+                  type: string
+                  description: The goal the governed loop is seeded with.
+                max_turns:
+                  type: integer
+                  description: Optional per-session turn cap; <= 0 or above the server cap falls back to the server cap.
+      responses:
+        '200':
+          description: NDJSON event stream — session.start, per-call rows, session.end (or a terminal in-stream error event).
+          content:
+            application/x-ndjson:
+              schema: { type: object, additionalProperties: true }
+        '400':
+          description: Malformed body or missing goal.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405':
+          description: Wrong HTTP method (POST only).
+
   /v1/fak/account/rehome:
     post:
       tags: [fak-native]
@@ -1970,6 +2134,28 @@ components:
               liveness: { type: string, description: self | peer-live | peer-dead | peer-unknown. }
               reclaimable: { type: boolean, description: True only on peer-dead (a positively dead owner); everything else fails closed. }
               evidence: { type: string, description: The comparison that decided the class. }
+
+    LeaseWriteResult:
+      type: object
+      description: |
+        The deny-as-value verdict of one single-arbiter fenced lease write —
+        the wire mirror of the coordinator's fence decision plus the assigned
+        token. `ok` is the only admit state; a non-empty `reason` names the
+        closed refusal class. `generation` is the assigned fencing token on an
+        accepted acquire/renew; `current_generation`/`holder` name what the
+        live lease actually is, so a refusal states who owns it.
+      properties:
+        ok: { type: boolean, description: The only admit state; false is a refusal (still HTTP 200). }
+        reason: { type: string, description: 'The closed refusal class: LEASE_HELD | STALE_LEASE | LEASE_CONTENDED | NO_LEASE.' }
+        op: { type: string, description: Echoes the verb (acquire | renew | release). }
+        id: { type: string, description: The lease id (ref basename under refs/fak/locks/). }
+        holder: { type: string, description: The live lease's holder identity. }
+        generation: { type: integer, description: The assigned fencing token on an accepted acquire/renew. }
+        current_generation: { type: integer, description: The generation the live lease actually carries. }
+        tree_globs: { type: array, items: { type: string }, description: The repo-relative tree globs an acquire covers. }
+        detail: { type: string, description: Human-readable elaboration of the verdict. }
+        observed_unix: { type: integer, description: Unix seconds the arbiter decided. }
+        source: { type: string, description: What the arbiter decided against; carries the OBSERVED qualifier. }
 
     # ----- OpenAI chat wire ---------------------------------------------------
     ChatRequest:
