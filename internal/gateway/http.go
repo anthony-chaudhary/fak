@@ -27,7 +27,7 @@ const maxBody = 4 << 20
 
 // maxTranscriptBody bounds an inbound /v1/messages or /v1/chat/completions body.
 // A RESUMED long-context session re-sends its whole transcript every turn, so the
-// request body legitimately grows past the 4 MiB tool-args cap — a 388k-token
+// request body legitimately grows past the 4 MiB tool-args cap â€” a 388k-token
 // resume serializes to several MiB of JSON. 32 MiB matches the real Anthropic
 // request-body ceiling, so the gateway never refuses a body the upstream would
 // have accepted (the silent-truncation 400 in #-resume).
@@ -36,7 +36,7 @@ const maxTranscriptBody = 32 << 20
 // gatewayRoute pairs a ServeMux registration pattern with its handler. Handler
 // builds the mux from routeTable() rather than a sequence of inline HandleFunc
 // calls so that the served HTTP surface has a single, enumerable source of
-// truth — which the OpenAPI spec drift gate (openapi_spec_test.go) ranges over
+// truth â€” which the OpenAPI spec drift gate (openapi_spec_test.go) ranges over
 // to assert docs/fak/openapi.yaml documents every route (#205, F-007: the spec
 // the client SDKs are generated from must not drift behind the served surface).
 type gatewayRoute struct {
@@ -44,7 +44,7 @@ type gatewayRoute struct {
 	handler http.HandlerFunc
 }
 
-// routeTable is the canonical, ordered list of the gateway's HTTP routes — the
+// routeTable is the canonical, ordered list of the gateway's HTTP routes â€” the
 // single source of truth Handler registers and the OpenAPI spec test verifies
 // against. ServeMux dispatch is by pattern specificity, not registration order,
 // so building the mux from this slice is behavior-identical to inline
@@ -59,12 +59,12 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/a2a/v1/tasks/", s.handleA2ATask},
 		// OpenAI-compatible surface.
 		{"/v1/chat/completions", s.handleChatCompletions},
-		// Legacy OpenAI text-completion wire — the pre-chat surface vLLM/SGLang/
+		// Legacy OpenAI text-completion wire â€” the pre-chat surface vLLM/SGLang/
 		// llama.cpp-server all still serve, for older clients and eval harnesses. No
 		// tools on this wire, so no tool-call adjudication; adapts onto the same served
 		// completion path as the chat route.
 		{"/v1/completions", s.handleCompletions},
-		// OpenAI Responses API — a client-facing inbound route so a Responses-native
+		// OpenAI Responses API â€” a client-facing inbound route so a Responses-native
 		// agent (Codex CLI, the Terminal-Bench terminus agent) can route its model
 		// traffic through the kernel's tool-call adjudication, the same as the chat
 		// wire. Buffered only; stream:true is refused (#925).
@@ -76,7 +76,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/messages/count_tokens", s.handleAnthropicCountTokens},
 		// Native Gemini generateContent surface (/v1beta/models/{model}:{method}).
 		{"/v1beta/", s.handleGeminiGenerateContent},
-		// fak-native surface — one POST, one verdict.
+		// fak-native surface â€” one POST, one verdict.
 		{"/v1/fak/syscall", s.handleFakSyscall},
 		{"/v1/fak/adjudicate", s.handleFakAdjudicate},
 		{"/v1/fak/admit", s.handleFakAdmit},
@@ -98,7 +98,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		// /v1/fak/session/changes is the DRIVE-state revision stream (#630): a
 		// cursor-drained tail of every session-table Rev bump. Registered as an EXACT
 		// path so net/http.ServeMux matches it ahead of the /v1/fak/session/ subtree
-		// (a longer, exact pattern wins) — a session whose id is literally "changes"
+		// (a longer, exact pattern wins) â€” a session whose id is literally "changes"
 		// is not addressable, which is fine (ids are gateway-minted gw-<n>).
 		{"/v1/fak/session/changes", s.handleFakSessionChanges},
 		// /v1/fak/session/ is the DRIVE-state control surface: GET /v1/fak/session/{id}
@@ -122,7 +122,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		// /v1/fak/account/rehome is the operator "switch seat now" button: force the
 		// live guarded session onto the next available account (the on-demand form of
 		// the 403-triggered account failover). Inert (404) unless the host installs a
-		// swap function via SetAccountRehomeFunc — fak guard does, on the pinned
+		// swap function via SetAccountRehomeFunc â€” fak guard does, on the pinned
 		// Claude-subscription path. See account_rehome.go.
 		{"/v1/fak/account/rehome", s.handleFakAccountRehome},
 		{"/v1/models", s.handleModels},
@@ -131,9 +131,17 @@ func (s *Server) routeTable() []gatewayRoute {
 		// projection) and presence (session descriptors + lease liveness
 		// classification), observed from refs/fak/locks/* at request time.
 		// Read-only; injected by the host CLI (SetLeasePlaneProviders), 404 when
-		// unwired. /v1/sessions is the cross-machine guard-session presence view —
+		// unwired. /v1/sessions is the cross-machine guard-session presence view â€”
 		// distinct from /v1/fak/sessions, the served-session DRIVE-state snapshot.
 		{"/v1/leases", s.handleLeases},
+		// Multi-node dev-server WRITE plane (#2299, epic #2254 plane 1 — the atomicity
+		// closure): POST /v1/leases/{acquire,renew,release} is the single-arbiter fenced
+		// write over the coordinator clone's refs/fak/locks/* store. Registered as the
+		// /v1/leases/ subtree so a longer, exact /v1/leases (the read plane) still wins;
+		// the subtree handler routes on the trailing verb segment. Serialized through the
+		// gateway (leaseWriteMu) so the coordinator is a single arbiter. Injected by the
+		// host CLI (SetLeaseWriteFunc), 404 when unwired. See leasewrite.go.
+		{"/v1/leases/", s.handleLeaseWrite},
 		{"/v1/sessions", s.handleLeaseSessions},
 		// MCP-over-HTTP, operational endpoints.
 		{"/mcp", s.handleMCPHTTP},
@@ -168,7 +176,7 @@ func (s *Server) Handler() http.Handler {
 // and lying about readiness; (3) Serve then runs against the already-bound listener.
 func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	if s.requireKey == "" && !loopbackOnly(addr) {
-		s.logf("WARNING: binding %s with NO --require-key set — the kernel gateway is exposed without authentication", addr)
+		s.logf("WARNING: binding %s with NO --require-key set â€” the kernel gateway is exposed without authentication", addr)
 	}
 	tBind := time.Now()
 	ln, err := net.Listen("tcp", addr)
@@ -182,7 +190,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 // Serve runs the gateway HTTP surface on an already-bound listener until ctx is
 // done, then drains gracefully within a bounded shutdown window. ListenAndServe is
 // Serve over a freshly bound socket; a caller that needs the chosen port up front
-// — a test binding 127.0.0.1:0, or a host handing fak a pre-opened socket — binds
+// â€” a test binding 127.0.0.1:0, or a host handing fak a pre-opened socket â€” binds
 // its own listener and calls Serve directly. It mirrors net/http.Server's
 // ListenAndServe/Serve split.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
@@ -191,7 +199,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// also caps body-delivery TIME (MaxBytesReader only caps SIZE).
 	//
 	// WriteTimeout bounds the WHOLE handler measured from the end of the request
-	// headers — and a NON-streaming turn writes the body only AFTER the model finishes,
+	// headers â€” and a NON-streaming turn writes the body only AFTER the model finishes,
 	// so a slow LOCAL backend whose single turn takes minutes (a multi-thousand-token
 	// prefill, or an in-kernel cpu-offload GLM-5.2 decode at ~0.17 tok/s) trips the
 	// deadline DURING the decode: the handler logs a clean 200 but the connection is
@@ -208,18 +216,18 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		IdleTimeout:       durEnv("FAK_HTTP_IDLE_TIMEOUT_S", 120*time.Second),
 		// Route net/http's own diagnostics (per-request panic recovery, TLS/keepalive
 		// errors) through the SAME sink as every other gateway log. Left nil, net/http
-		// falls back to the std logger → os.Stderr, which UNDER `fak guard` is the child
+		// falls back to the std logger â†’ os.Stderr, which UNDER `fak guard` is the child
 		// harness's controlling TTY: a recovered handler panic then dumps a multi-line
 		// goroutine stack straight into the agent's TUI and corrupts the display (#2772).
-		// s.logf already honors the operator's --log choice — muted by default to keep the
-		// terminal clean, streamed to a file/stderr when asked — so binding ErrorLog to it
+		// s.logf already honors the operator's --log choice â€” muted by default to keep the
+		// terminal clean, streamed to a file/stderr when asked â€” so binding ErrorLog to it
 		// makes those diagnostics obey the same policy instead of bypassing it. Zero flags
 		// so we don't double-stamp the timestamp s.logf already adds.
 		ErrorLog: log.New(logfWriter{logf: s.logf}, "", 0),
 	}
 	// Disable Nagle on accepted TCP connections. Without TCP_NODELAY the kernel
 	// coalesces small writes (Nagle), adding 40-200ms of buffering on a high-RTT
-	// link — felt on streamed chat-completion deltas and the small fak-native verdict
+	// link â€” felt on streamed chat-completion deltas and the small fak-native verdict
 	// replies. nodelayListener sets NoDelay(true) on every accepted *net.TCPConn; it
 	// wraps the listener here so BOTH entry points get it (ListenAndServe's freshly
 	// bound socket AND a Serve caller that handed us its own listener). A non-TCP
@@ -236,7 +244,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.startLoops(ctx)
 	s.logf("fak gateway listening on http://%s  (engine=%s model=%s vdso=%v auth=%v)",
 		ln.Addr(), s.engineID, s.model, s.k.VDSOEnabled(), s.requireKey != "")
-	// Surface fak's core value-add — realized in-kernel KV-prefix reuse — at startup so it
+	// Surface fak's core value-add â€” realized in-kernel KV-prefix reuse â€” at startup so it
 	// is discoverable without scraping /metrics or waiting for a long --debug-stats session
 	// (epic #1072). The cacheobs tap is the SAME WITNESSED signal /metrics renders; at boot
 	// it is idle (no served turn yet) and climbs per in-kernel turn. A pure-proxy workload
@@ -260,7 +268,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 // pre-formatted message per line (a panic recovery arrives as a single multi-line write), so
 // we forward it verbatim minus the trailing newline; when logf is the guard default no-op the
 // message is dropped and nothing reaches the terminal. A nil logf is tolerated for the same
-// reason the Serve path assumes it non-nil — belt-and-braces, never a nil-deref.
+// reason the Serve path assumes it non-nil â€” belt-and-braces, never a nil-deref.
 type logfWriter struct {
 	logf func(format string, args ...any)
 }
@@ -278,15 +286,15 @@ func (w logfWriter) Write(p []byte) (int, error) {
 // from cache (saved=N tok, the snapshot's ReusedTokens) so an operator sees the cliff live (#1076).
 func cacheBootSummary(s cacheobs.Stats) string {
 	if s.Turns == 0 {
-		return "idle — realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)"
+		return "idle â€” realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)"
 	}
-	return fmt.Sprintf("reuse %.0f%% (saved=%d tok) over %d turns (frozen=%d partial=%d cold=%d) — WITNESSED, by=vdso",
+	return fmt.Sprintf("reuse %.0f%% (saved=%d tok) over %d turns (frozen=%d partial=%d cold=%d) â€” WITNESSED, by=vdso",
 		s.ReuseRatio*100, s.ReusedTokens, s.Turns, s.FrozenTurns, s.PartialTurns, s.ColdTurns)
 }
 
 // nodelayListener wraps ln so every accepted *net.TCPConn has Nagle disabled
 // (TCP_NODELAY). It is a pass-through for a listener whose Accept does not yield a
-// *net.TCPConn — a test's in-memory pipe or a Unix socket — so wrapping is always
+// *net.TCPConn â€” a test's in-memory pipe or a Unix socket â€” so wrapping is always
 // safe. Returning the bare net.Listener interface keeps Serve's signature unchanged.
 func nodelayListener(ln net.Listener) net.Listener {
 	return &noDelayTCPListener{Listener: ln}
@@ -304,7 +312,7 @@ func (l *noDelayTCPListener) Accept() (net.Conn, error) {
 	}
 	if tc, ok := c.(*net.TCPConn); ok {
 		// Best-effort: a SetNoDelay failure (already-closed conn) is not fatal to the
-		// connection — let the handler proceed and surface any real error on use.
+		// connection â€” let the handler proceed and surface any real error on use.
 		_ = tc.SetNoDelay(true)
 	}
 	return c, nil
@@ -314,7 +322,7 @@ func (l *noDelayTCPListener) Accept() (net.Conn, error) {
 // set (authExempt) when RequireKey is set. With no key configured it is a
 // pass-through (drop-in, loopback default). The comparison is constant-time over
 // SHA-256 digests so the reject latency leaks neither the secret's bytes nor its
-// length — this is the gateway's only auth primitive on a network-reachable
+// length â€” this is the gateway's only auth primitive on a network-reachable
 // security kernel.
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	want := sha256.Sum256([]byte(s.requireKey))
@@ -337,7 +345,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 // authExempt reports whether a request may skip the bearer check on an
 // authenticated gateway. Two cases:
 //
-//   - /healthz is ALWAYS exempt — it is the unauthenticated liveness probe a
+//   - /healthz is ALWAYS exempt â€” it is the unauthenticated liveness probe a
 //     load balancer or a `fak claude-mac-fak --debug` preflight hits before it
 //     holds a token, and it carries only the planner/engine words (no counts).
 //   - /metrics and /debug/vars are exempt ONLY for a loopback caller. They are
@@ -345,7 +353,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 //     that an operator clicks straight from the host or an SSH tunnel; gating
 //     them behind the bearer is what makes those panel links 401. A REMOTE
 //     caller still needs the token, so request counts, token volumes, the model
-//     id, and uptime are never exposed to the open internet — matching the
+//     id, and uptime are never exposed to the open internet â€” matching the
 //     conventional "metrics open on loopback, gated off-box" posture.
 func authExempt(r *http.Request) bool {
 	if r.URL.Path == "/healthz" {
@@ -362,7 +370,7 @@ func authExempt(r *http.Request) bool {
 // interface, classifying by IP VALUE (net.ParseIP + IsLoopback) rather than a
 // string prefix so a spoofed RemoteAddr host cannot masquerade as local. An
 // unparseable RemoteAddr is treated as NOT loopback (fail closed). RemoteAddr is
-// the kernel-observed peer of the TCP connection, set by net/http — it is not a
+// the kernel-observed peer of the TCP connection, set by net/http â€” it is not a
 // client-supplied header (unlike X-Forwarded-For, which is deliberately ignored
 // here so a proxied header can never grant the exemption).
 func requestFromLoopback(r *http.Request) bool {
@@ -378,10 +386,10 @@ func requestFromLoopback(r *http.Request) bool {
 // gatewayCredential extracts the presented secret from any of the auth schemes a
 // fak gateway fronts. The OpenAI/fak-native surfaces send
 // "Authorization: Bearer <tok>"; the native Anthropic surface (/v1/messages) is
-// driven by clients — Claude Code, the Anthropic SDKs — that authenticate with the
+// driven by clients â€” Claude Code, the Anthropic SDKs â€” that authenticate with the
 // "x-api-key: <tok>" header instead; the native Gemini surface
-// (/v1beta/models/{model}:generateContent) is driven by clients — Gemini CLI, the
-// google-genai SDKs — that authenticate with "x-goog-api-key: <tok>" (or, for raw
+// (/v1beta/models/{model}:generateContent) is driven by clients â€” Gemini CLI, the
+// google-genai SDKs â€” that authenticate with "x-goog-api-key: <tok>" (or, for raw
 // REST, "?key=<tok>"). Accepting all of them is what lets an authenticated
 // (non-loopback) gateway serve any native client wire over its base-URL redirect;
 // without the matching arm every such client 401s even though the gateway speaks
@@ -412,7 +420,7 @@ func gatewayCredential(r *http.Request) (string, bool) {
 // PROPOSED tool_call through k.Decide BEFORE the caller sees it: denied calls are
 // dropped, grammar-repaired calls have their arguments rewritten to the canonical
 // form, and a fak-aware client gets the full per-call adjudication in the `fak`
-// extension. It NEVER executes the client's tools — the client does.
+// extension. It NEVER executes the client's tools â€” the client does.
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -436,7 +444,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Validate the sampling params on ingress (#326). A negative max_tokens or an
-	// out-of-range temperature/top_p is a CLIENT error — reject it here with a 400
+	// out-of-range temperature/top_p is a CLIENT error â€” reject it here with a 400
 	// rather than forwarding bad input that the upstream silently answers anyway (a
 	// wire-contract deviation the proxy used to swallow). Same well-formedness floor
 	// as the empty-messages check above, applied before an upstream round-trip is spent.
@@ -447,7 +455,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Request-model pass-through (#82): forward the client's requested model to the
 	// upstream verbatim, falling back to the gateway's configured model only when the
 	// client omitted one. This stops the gateway silently serving a DIFFERENT model
-	// than the client asked for — an unknown model now reaches the upstream and
+	// than the client asked for â€” an unknown model now reaches the upstream and
 	// surfaces its 404 instead of a misleading 200. --model stays the advertised
 	// /v1/models id and the default. reqModel is also the response-model fallback
 	// when the upstream omits a served-model field.
@@ -493,7 +501,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if reqTrace, req.Messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, req.Messages, sessionTurn); canceled {
 		return
 	}
-	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
+	if !ok { // the fresh reset trace somehow refuses â€” fall back, never loop
 		writeSessionRefusal(w, sessionTurn.state)
 		return
 	}
@@ -520,8 +528,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// Forward the client's per-request sampling params to the upstream model. Each
 	// option is a no-op when its field is absent (max_tokens 0, nil temperature/top_p,
-	// empty stop), so an OpenAI client that omits them gets the planner default —
-	// identical to the pre-seam behavior — while one asking for a long completion is
+	// empty stop), so an OpenAI client that omits them gets the planner default â€”
+	// identical to the pre-seam behavior â€” while one asking for a long completion is
 	// no longer hard-capped at the planner's 1024-token floor (#62).
 	began := time.Now()
 	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools,
@@ -546,7 +554,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		// Map the upstream failure to an honest status. Log the detail for the operator
-		// but return a GENERIC message — the planner error embeds up to 400 bytes of the
+		// but return a GENERIC message â€” the planner error embeds up to 400 bytes of the
 		// upstream provider's raw body, which must not cross the trust boundary to a
 		// (possibly unauthenticated) downstream caller.
 		s.logf("gateway: upstream model error: %v", err)
@@ -559,7 +567,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// Tool-call conformance: the upstream's finish_reason announced tool calls but
 	// NONE survived parsing + the text-lift fallback. Proceeding would skip
-	// adjudication on a call the model intended to make — the exact silent-no-op a
+	// adjudication on a call the model intended to make â€” the exact silent-no-op a
 	// non-OpenAI-shaped emitter (e.g. a GLM-5.2 variant burying calls in
 	// reasoning_content) causes. Fail closed: never let an unparsed tool call cross
 	// the gateway as a benign empty turn.
@@ -574,7 +582,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// Echo the model the UPSTREAM reported it served (#82); fall back to the client's
 	// requested model (or, if it omitted one, the configured model) when the upstream
-	// did not name a served model. Never just s.model — that is the silent-substitution
+	// did not name a served model. Never just s.model â€” that is the silent-substitution
 	// this fix removes.
 	respModel := comp.Model
 	if respModel == "" {
@@ -601,8 +609,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 }
 
 // applyAdjudicatedTurn folds one adjudicated proposal set into the assistant
-// message the OpenAI wire will carry — refused-body blanking, vDSO served-inline
-// text, the livelock advisory note — and returns the finish_reason the choice
+// message the OpenAI wire will carry â€” refused-body blanking, vDSO served-inline
+// text, the livelock advisory note â€” and returns the finish_reason the choice
 // reports: "tool_calls" while calls survive, "stop" when every proposal was
 // refused or served inline (with the deny summary in-band when the content is
 // otherwise empty), else the upstream's own finish.
@@ -618,7 +626,7 @@ func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudicati
 	// vDSO served-inline (vDSO live in the hot path): a re-proposed read-only call the
 	// vDSO already holds fresh is answered LOCALLY and folded into the assistant content
 	// (the OpenAI assistant message carries tool_calls, never results), the call dropped
-	// from kept so the client never re-runs it — the engine round-trip is saved.
+	// from kept so the client never re-runs it â€” the engine round-trip is saved.
 	if servedText != "" {
 		if asst.Content != "" {
 			asst.Content += "\n" + servedText
@@ -650,15 +658,15 @@ func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudicati
 // validateSampling enforces the OpenAI sampling-param contract on an inbound chat
 // request, returning a client-facing 400 message for the first invalid field (or ""
 // when every present field is in range). It catches the unambiguous wire-contract
-// violations the proxy otherwise forwarded verbatim — a negative max_tokens, a
-// temperature outside [0, 2], a top_p outside [0, 1] — so bad client input surfaces
+// violations the proxy otherwise forwarded verbatim â€” a negative max_tokens, a
+// temperature outside [0, 2], a top_p outside [0, 1] â€” so bad client input surfaces
 // as a 400 instead of the model silently answering it (#326).
 //
 // max_tokens == 0 is deliberately NOT rejected. The wire field is an omitempty int,
 // so an explicit "max_tokens":0 and an omitted field both decode to Go 0 and are
 // indistinguishable here; 0 therefore falls through to the planner default (the
-// documented semantics). Only values that cannot be a zero-value default — negatives
-// and out-of-band floats — are caught, which keeps the check free of false positives
+// documented semantics). Only values that cannot be a zero-value default â€” negatives
+// and out-of-band floats â€” are caught, which keeps the check free of false positives
 // on a client that simply omitted a field.
 func validateSampling(req ChatRequest) string {
 	if req.MaxTokens < 0 {
@@ -685,17 +693,17 @@ func validateSamplingRanges(temperature, topP *float64) string {
 
 // upstreamErrorStatus maps a planner error to the HTTP status, an OpenAI-style
 // error `code`, and a client-facing message the proxy should return. An
-// *agent.UpstreamUnreachableError (a deterministic dial failure — refused / DNS
+// *agent.UpstreamUnreachableError (a deterministic dial failure â€” refused / DNS
 // NXDOMAIN / TLS) becomes a 502 with the distinct code "upstream_unreachable" so a
 // client can tell a misconfigured --base-url apart from a 5xx or a parse failure,
 // instead of the opaque code:null "upstream model error" (#346). An
 // *agent.UpstreamStatusError carries the upstream provider's OWN status: a 4xx (a
-// request error the client can act on — an unknown model 404, a malformed argument
+// request error the client can act on â€” an unknown model 404, a malformed argument
 // 400) is SURFACED to the client with that same status, so it is no longer masked
 // as a misleading 200 or a generic 502 (#82); a 5xx (the upstream itself failed)
 // becomes a 502 Bad Gateway. Any other planner error (transient transport failure,
 // response parse error) is also a 502. The provider's raw body / underlying dial
-// detail is NEVER forwarded — only the status + classification cross the boundary —
+// detail is NEVER forwarded â€” only the status + classification cross the boundary â€”
 // so an upstream error message cannot leak to a possibly-unauthenticated caller.
 func upstreamErrorStatus(err error) (status int, code, msg string) {
 	if status, code, msg, ok := admissionErrorStatus(err); ok {
@@ -708,7 +716,7 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 	// An in-kernel device-allocation failure (e.g. the model decode OOM'd on a small GPU under
 	// a large prompt) is a LOCAL resource exhaustion the caller can act on, not an upstream
 	// failure. It is in-kernel by construction (only the in-kernel planner produces it), so the
-	// specific, actionable message is safe and reachable only on a genuine local OOM — a real
+	// specific, actionable message is safe and reachable only on a genuine local OOM â€” a real
 	// upstream error can never be this type. 503 (retryable with a smaller request) over 502.
 	var oom *agent.InKernelOOMError
 	if errors.As(err, &oom) {
@@ -743,31 +751,31 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 	var ue *agent.UpstreamUnreachableError
 	if errors.As(err, &ue) {
 		return http.StatusBadGateway, "upstream_unreachable",
-			"upstream unreachable — check that --base-url points at a running server"
+			"upstream unreachable â€” check that --base-url points at a running server"
 	}
 	// An upstream that opened the stream then went SILENT mid-turn (the idle-deadline trip in
 	// the streaming planner). This is a timeout, not a generic upstream failure: 504 Gateway
 	// Timeout with a distinct code so a client/harness can tell a stalled provider apart from a
-	// 4xx request error or a parse failure — instead of the opaque code:null "upstream model
+	// 4xx request error or a parse failure â€” instead of the opaque code:null "upstream model
 	// error". Placed before the status/fallthrough cases for the same reason as unreachable.
 	var stalled *agent.UpstreamStalledError
 	if errors.As(err, &stalled) {
 		return http.StatusGatewayTimeout, "upstream_stalled",
-			"upstream stalled — the model or provider opened the stream then went silent within the idle window"
+			"upstream stalled â€” the model or provider opened the stream then went silent within the idle window"
 	}
 	// A 429/5xx that fak's retry loop DELIBERATELY stopped at the in-handler ceiling (#2258):
 	// the provider-named wait was longer than a wrapped client can hold open, so fak surfaced
 	// the truth NOW instead of sleeping past the client's own request timeout. This unwraps to
-	// a *UpstreamStatusError, so it MUST precede the generic `se` arm below — otherwise a
+	// a *UpstreamStatusError, so it MUST precede the generic `se` arm below â€” otherwise a
 	// ceiling bail wears the costume of a plain throttle and the message tells the model to
 	// "back off and retry," the one thing that cannot work here: an immediate in-handler retry
 	// hits the same wall, and the wait exceeds what the client can absorb. That misdirection is
-	// exactly the "if the model is confused it should be able to query and recover" gap — the
+	// exactly the "if the model is confused it should be able to query and recover" gap â€” the
 	// generic 429 wording steers a confused agent into a futile retry loop instead of recovery.
 	//
 	// So give it a distinct code and a message aimed at the wrapped MODEL, not just an operator:
 	// stop retrying this turn, the condition will NOT self-heal in-handler, and the recovery is
-	// to PARK/RESUME (a supervisor — `fak guard`, #2256 — carries it across the reset) or to
+	// to PARK/RESUME (a supervisor â€” `fak guard`, #2256 â€” carries it across the reset) or to
 	// re-issue the whole turn AFTER the named wait, not to hammer it now. The status stays the
 	// real upstream status and the Retry-After still rides downstream (writeUpstreamErr), so a
 	// harness that DOES honor Retry-After backs off correctly; the code+message are the
@@ -782,22 +790,22 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 			status = rc.Cause.Status
 		}
 		return status, "upstream_retry_ceiling",
-			fmt.Sprintf("upstream is rate-limited/overloaded (HTTP %d) and fak already retried: the provider-named wait (~%s) is LONGER than this client can hold a request open, so fak surfaced the truth now instead of sleeping past your timeout. Do NOT retry this turn immediately — an in-handler retry hits the same wall. Recover instead: let a supervisor park and resume it across the reset (fak guard, which carries the turn), or re-issue the whole turn only AFTER the wait named in the Retry-After response header. This will not self-heal by hammering.",
+			fmt.Sprintf("upstream is rate-limited/overloaded (HTTP %d) and fak already retried: the provider-named wait (~%s) is LONGER than this client can hold a request open, so fak surfaced the truth now instead of sleeping past your timeout. Do NOT retry this turn immediately â€” an in-handler retry hits the same wall. Recover instead: let a supervisor park and resume it across the reset (fak guard, which carries the turn), or re-issue the whole turn only AFTER the wait named in the Retry-After response header. This will not self-heal by hammering.",
 				status, rc.Wait.Round(time.Second))
 	}
 	var se *agent.UpstreamStatusError
 	if errors.As(err, &se) {
 		// A 4xx is a REQUEST error the client can act on. Until now every 4xx collapsed
-		// into one opaque code:null "upstream rejected the request (HTTP n)" — a 401
+		// into one opaque code:null "upstream rejected the request (HTTP n)" â€” a 401
 		// (bad credential), a 403 (login/org/permission denied), a 429 (rate limit), a
 		// 413 (too large), and a 404 (unknown model) were indistinguishable except by the
 		// bare number, even though each calls for a DIFFERENT fix. Split them into
-		// distinct, actionable OpenAI-style codes + messages so the wrapped agent — and
-		// an operator reading the wire — sees WHICH 4xx hit and what to do, not just "not
+		// distinct, actionable OpenAI-style codes + messages so the wrapped agent â€” and
+		// an operator reading the wire â€” sees WHICH 4xx hit and what to do, not just "not
 		// 200". The upstream status passes straight through in every arm (no remap):
 		// remapping 429 in particular would silently break both fak's own backoff
 		// (chat.go retryableStatus keys on the literal 429) and any downstream client's.
-		// Every message is built from se.Status + fixed literals ONLY — the upstream's
+		// Every message is built from se.Status + fixed literals ONLY â€” the upstream's
 		// raw Body (and err.Error(), which embeds it) NEVER crosses the trust boundary to
 		// a possibly-unauthenticated downstream caller (#82/#346 invariant). The `type`
 		// the client sees comes from errType(status) at the writeErrCode site (401/403 ->
@@ -812,16 +820,16 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		// honor, whereas a 529 has no retry-after a client can trust and wants exponential
 		// backoff + jitter (and, past a couple tries, provider failover). Surfacing it as a
 		// generic 502 "upstream model error" (the fallthrough below) flattens it into a
-		// crash and strips the client's ability to apply the right posture — so give it a
+		// crash and strips the client's ability to apply the right posture â€” so give it a
 		// distinct status + code. The matching `type` (overloaded_error) comes from
 		// errType(529) at the write site. The Retry-After echo (if the provider sent one)
 		// still happens at writeUpstreamErr, harmlessly.
 		if se.Status == 529 { // statusOverloaded (agent.statusOverloaded is unexported)
 			return 529, "upstream_overloaded",
-				"upstream is overloaded (HTTP 529) — the provider is over capacity (not a rate limit and not a crash); back off with exponential jitter, and consider failing over"
+				"upstream is overloaded (HTTP 529) â€” the provider is over capacity (not a rate limit and not a crash); back off with exponential jitter, and consider failing over"
 		}
 		// A 503 the upstream tagged with a Retry-After is an OVERLOAD the client should
-		// back off on, not a generic gateway fault — surface the real 503 (and the
+		// back off on, not a generic gateway fault â€” surface the real 503 (and the
 		// Retry-After echo happens at the write site) so a wrapped agent waits instead of
 		// hammering. Every other 5xx (except the 529 above) stays the opaque 502 below: the
 		// upstream itself failed in a way the client cannot time. code stays "" (the
@@ -829,7 +837,7 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		// from the genuinely-overloaded 503/529.
 		if se.Status == http.StatusServiceUnavailable && se.RetryAfter != "" {
 			return http.StatusServiceUnavailable, "",
-				"upstream temporarily unavailable (HTTP 503) — back off and retry (see the Retry-After response header)"
+				"upstream temporarily unavailable (HTTP 503) â€” back off and retry (see the Retry-After response header)"
 		}
 	}
 	return http.StatusBadGateway, "", "upstream model error"
@@ -842,7 +850,7 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 			s.metrics.observeUpstreamError(err)
 			// A PERSISTENT 403 (one that survived the agent's bounded transient-recovery arm):
 			// snapshot its scrubbed body to the operator-only /debug/vars drilldown so the reason
-			// for the denial — org-disabled vs model-not-permitted vs abuse gate — is not lost.
+			// for the denial â€” org-disabled vs model-not-permitted vs abuse gate â€” is not lost.
 			// The body never crosses to the downstream client (upstreamErrorStatus builds the
 			// client message from fixed literals only); this is the operator's private copy.
 			var se *agent.UpstreamStatusError
@@ -852,21 +860,21 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 		}
 	}
 	status, code, msg = upstreamErrorStatus(err)
-	// On the TRUSTED LOCAL path (fak guard, loopback-bound — s.exposeUpstreamErrorDetail),
+	// On the TRUSTED LOCAL path (fak guard, loopback-bound â€” s.exposeUpstreamErrorDetail),
 	// fold the upstream's OWN 400 detail into the message so the wrapped agent sees WHICH
 	// field it got wrong and can self-correct, instead of the generic "check the model name,
 	// roles, and parameter ranges". This is the one place the #82/#346 no-leak boundary is
 	// relaxed, and only here: the caller is the trusted child, not a possibly-unauthenticated
 	// remote. The detail is scrubbed (secret-shaped runs redacted) and bounded by the same
 	// scrubForbiddenDetail used for the operator-only 403 drilldown, so a credential an
-	// upstream echoed into its body can never ride out. Off (the default) — and every
-	// externally-exposed serve — keeps the generic string byte-for-byte. Scoped to 400 (the
+	// upstream echoed into its body can never ride out. Off (the default) â€” and every
+	// externally-exposed serve â€” keeps the generic string byte-for-byte. Scoped to 400 (the
 	// reported case); 401/403 stay generic (see follow-up note on ExposeUpstreamErrorDetail).
 	if s != nil && s.exposeUpstreamErrorDetail && status == http.StatusBadRequest {
 		var se *agent.UpstreamStatusError
 		if errors.As(err, &se) {
 			if detail := scrubForbiddenDetail(se.Body); detail != "" {
-				msg = msg + " — upstream said: " + detail
+				msg = msg + " â€” upstream said: " + detail
 				if s.upstreamBadRequestNotify != nil {
 					s.upstreamBadRequestNotify(detail)
 				}
@@ -875,11 +883,11 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 	}
 	// Name WHICH account/seat hit an account-scoped block (a 403 wall, a 429 ceiling, a
 	// usage cap) so the operator/wrapped agent reading the message that STOPPED the turn
-	// knows which seat to switch off or wait on — the roster on /debug/vars shows the
+	// knows which seat to switch off or wait on â€” the roster on /debug/vars shows the
 	// active seat, but the blocking message never did, so a multi-account session could not
 	// tell which of its seats got walled. Gated on the SAME trusted-local path as the 400
 	// fold (fak guard, loopback-bound): the seat name is display metadata, but on an
-	// externally-exposed serve the caller may be untrusted, so it stays off there — and it
+	// externally-exposed serve the caller may be untrusted, so it stays off there â€” and it
 	// is empty anyway on a plain serve, which wires no endpoints provider. Purely additive
 	// (the generic message is preserved as a prefix), and only for the account-scoped codes,
 	// so a request-shaped error (bad model, too large) is never dressed up as an account
@@ -897,11 +905,11 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 // HTTP status/code/message via plannerErrorStatus), echoes the upstream's
 // Retry-After header downstream when the failure carried one, then writes the
 // OpenAI-style error envelope. Centralizing it here is what lets EVERY served
-// wire — chat, completions, responses, gemini, both Anthropic messages paths,
-// and the streaming proxy — surface the same distinct codes AND the same
+// wire â€” chat, completions, responses, gemini, both Anthropic messages paths,
+// and the streaming proxy â€” surface the same distinct codes AND the same
 // Retry-After signal without each handler re-deriving it. The Retry-After value
 // is the upstream's header VERBATIM; fak never parses it, so a malformed provider
-// value can never reach fak's control flow — it only ever becomes a response
+// value can never reach fak's control flow â€” it only ever becomes a response
 // header (or, absent, a clean no-op). It must be set BEFORE writeErrCode, which
 // calls w.WriteHeader and freezes the header block.
 func (s *Server) writeUpstreamErr(w http.ResponseWriter, err error) {
@@ -956,7 +964,7 @@ func writeChatCompletionStream(w http.ResponseWriter, resp ChatResponse) {
 	}
 
 	// Content chunks: stream the adjudicated content as incremental fragments, one
-	// SSE event per fragment, the way a real OpenAI stream delivers tokens — rather
+	// SSE event per fragment, the way a real OpenAI stream delivers tokens â€” rather
 	// than collapsing the whole reply into a single delta. segmentContent preserves
 	// every byte, so concatenating the content deltas reproduces the reply exactly.
 	for _, seg := range segmentContent(choice.Message.Content) {
@@ -1085,7 +1093,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// fak-native surface — the simplest non-Go integration: one POST, one verdict.
+// fak-native surface â€” the simplest non-Go integration: one POST, one verdict.
 // ---------------------------------------------------------------------------
 
 // handleFakSyscall adjudicates AND executes a single tool call through the kernel
@@ -1130,7 +1138,7 @@ func (s *Server) handleFakAdmit(w http.ResponseWriter, r *http.Request) {
 	req.TraceID = s.useHTTPTrace(w, r, req.TraceID)
 	wv, env, err := s.admit(r.Context(), req.Tool, rawArgs(req.Result), req.Witness, req.TraceID)
 	if err != nil {
-		// A REMOTE engine-cache reset failure is a gateway/upstream fault — surface it
+		// A REMOTE engine-cache reset failure is a gateway/upstream fault â€” surface it
 		// as a 502 (the same fail-closed signal the proxy returns), with a generic
 		// message so the upstream error body never crosses the trust boundary. Any
 		// other admit error is a client-side 400.
@@ -1204,7 +1212,7 @@ type EventsResponse struct {
 }
 
 // handleFakEvents drains the durable, hash-chained audit journal
-// (internal/journal) after the client's ?since= cursor — the Seq of the last row
+// (internal/journal) after the client's ?since= cursor â€” the Seq of the last row
 // it saw; 0 returns the whole retained tail. It mirrors the /v1/fak/changes
 // cursor protocol but over the persisted verdict ledger rather than the live
 // coherence bus. It serves the bounded in-memory tail without re-reading disk;
@@ -1306,7 +1314,7 @@ func (s *Server) handleFakPolicyReload(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFakRouteReload forces a reload of the installed model-routing manifest in
-// place (#4003) — the route-plane twin of handleFakPolicyReload. It drives the SAME
+// place (#4003) â€” the route-plane twin of handleFakPolicyReload. It drives the SAME
 // modelroute.Watcher the background poll loop uses (installed by the host via
 // SetRouteWatcher), so a manual reload and the poll loop share the last-good gate and
 // the atomic Live swap. A malformed edit is REJECTED (last-good kept) and reported as
@@ -1393,15 +1401,15 @@ func (s *Server) handleFakTraceObserve(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFakSession is the session DRIVE-state control surface, the read-write
-// generalization of /v1/fak/trace (which carries exactly one bit — taint). It is
+// generalization of /v1/fak/trace (which carries exactly one bit â€” taint). It is
 // mounted on the /v1/fak/session/ subtree; the remainder is "{trace_id}" for an
 // observe (GET) or "{trace_id}/{verb}" for a control verb (POST). The observe and
 // control implementations are injected by cmd/fak so this package stays
-// session-internals-blind, mirroring resetTrace/observeTrace. A nil injection ⇒
-// 404 (never a silent clean reading) — the same fail-closed posture as the trace
+// session-internals-blind, mirroring resetTrace/observeTrace. A nil injection â‡’
+// 404 (never a silent clean reading) â€” the same fail-closed posture as the trace
 // routes with no ledger.
 // ownsSessionLoop reports whether THIS serve process drives an owned agent loop
-// (agent.RunArm) — the loop that drains the operator/machine steer bus at its turn
+// (agent.RunArm) â€” the loop that drains the operator/machine steer bus at its turn
 // boundary (drainSteer, #850). Only the native serve path (`fak serve --native`)
 // constructs such a loop; the default proxy path forwards a single upstream turn and
 // owns no loop, so a steer to a proxy-served session can never be consumed. The check
@@ -1448,7 +1456,7 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 		// steer is its own shape (operator input to a RUNNING session, #760): a different
 		// body and a different sink (the a2achan bus, not the drive table). Dispatch it
 		// before the generic control path. A refused steer (tainted/over-scoped/uncapped)
-		// is the adjudication floor's deny — distinct from the control 409 — so it maps to
+		// is the adjudication floor's deny â€” distinct from the control 409 â€” so it maps to
 		// 422 (unprocessable), not 409 (terminal/stale rev).
 		if verb == "steer" {
 			if s.steerSession == nil {
@@ -1475,10 +1483,10 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			}
 			querying := sr.querying()
 			// Honest steer contract (#3528): a steer is only ever CONSUMED by an owned agent
-			// loop — the native RunArm loop drains the a2achan Session bus at its turn boundary
+			// loop â€” the native RunArm loop drains the a2achan Session bus at its turn boundary
 			// (drainSteer, #850). The default PROXY serve forwards a single upstream turn and
 			// owns no such loop, so an enqueued steer there would sit in a mailbox nothing
-			// drains — an accepted-but-never-applied phantom. Refuse it at ingress with the
+			// drains â€” an accepted-but-never-applied phantom. Refuse it at ingress with the
 			// closed STEER_NO_OWNED_LOOP reason rather than return a false 202, so the operator
 			// learns the steer will not land instead of trusting a lie. Ordered AFTER the shape
 			// checks (404 not-configured, 400 empty) and BEFORE the floor Send, so a bad request
@@ -1545,7 +1553,7 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// planner names the /v1/chat/completions backend ("mock" | "proxy" | "inkernel")
 	// so a probe can detect the silent offline-mock fallback that New also warns
-	// about at boot — scripted responses must never be mistaken for model output.
+	// about at boot â€” scripted responses must never be mistaken for model output.
 	// #1115: in_kernel_model_but_chat_is_mock exposes when kernel has real weights
 	// loaded (for fak_syscalls) but chat uses mock due to missing tokenizer.
 	health := map[string]any{
@@ -1568,7 +1576,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// #3051: a local backend that is UP (listener bound) but has not finished its
-	// one-time warmup — weight load, CUDA-graph capture, DeepGEMM/JIT compile — must
+	// one-time warmup â€” weight load, CUDA-graph capture, DeepGEMM/JIT compile â€” must
 	// not report ready, or the operator's first real turn absorbs the full ~500s
 	// tax. When the host armed the warmup gate at boot, /healthz stays ok:false with
 	// warmup_pending until a synthetic warmup inference returns its first token
@@ -1582,7 +1590,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		health["time_to_ready_ms"] = ttr.Milliseconds()
 	}
 	// #2336: a recent recovered panic on a served completion route disqualifies
-	// the unqualified ok:true — a green liveness probe over crashing completions
+	// the unqualified ok:true â€” a green liveness probe over crashing completions
 	// keeps watchdogs routing work to a broken native serve. Window-bounded
 	// (servedFailureWindow), so an aged-out failure restores the plain report.
 	if route, msg, age, failed := s.servedFailure.recent(time.Now()); failed {
@@ -1615,7 +1623,7 @@ func (s *Server) decodeSyscall(w http.ResponseWriter, r *http.Request) (SyscallR
 }
 
 // decodeJSON reads a bounded body and decodes JSON. It does NOT reject unknown
-// fields — drop-in OpenAI compatibility requires ignoring extra fields — but the
+// fields â€” drop-in OpenAI compatibility requires ignoring extra fields â€” but the
 // DTOs have no Ref field, so a client cannot smuggle a kernel CAS handle.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	// The chat-completions passthrough carries the same resumed transcript as the
@@ -1639,7 +1647,7 @@ func decodeRequestBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 // rejectInvalidSampling writes the sampling-validation 400 and returns true when a
 // validator reports a problem (a non-empty msg), so the caller returns immediately;
-// an empty msg returns false to continue. It folds the "validator message → 400"
+// an empty msg returns false to continue. It folds the "validator message â†’ 400"
 // block the chat, completions, and responses sampling wires share (#326).
 func rejectInvalidSampling(w http.ResponseWriter, msg string) bool {
 	if msg != "" {
@@ -1695,7 +1703,7 @@ func errType(status int) string {
 	case status == http.StatusTooManyRequests:
 		// 429 gets the OpenAI/Anthropic-standard rate_limit_error type so a client that
 		// branches on `type` (back off on a rate limit, don't on a malformed request)
-		// classifies it correctly — without this it fell through to invalid_request_error
+		// classifies it correctly â€” without this it fell through to invalid_request_error
 		// and was indistinguishable from a 400.
 		return "rate_limit_error"
 	case status == 529:
@@ -1713,7 +1721,7 @@ func errType(status int) string {
 
 // serveWriteTimeoutDefault picks the WriteTimeout default for the backend the gateway is
 // serving, so a non-streaming turn never trips the deadline DURING a long synchronous decode
-// (#1015). A LOCAL model — the in-kernel fused model — answers a single turn in seconds to
+// (#1015). A LOCAL model â€” the in-kernel fused model â€” answers a single turn in seconds to
 // MINUTES (a cpu-offload GLM-5.2 decode is multi-minute), and the whole response is written
 // only after that turn finishes, so any finite write deadline measured from the request
 // headers races the decode: 0 (no timeout) is the only correct default there. A "proxy" to a
@@ -1722,7 +1730,7 @@ func errType(status int) string {
 // harmless for them. FAK_HTTP_WRITE_TIMEOUT_S overrides this in every case (durEnv).
 func serveWriteTimeoutDefault(kind string) time.Duration {
 	if kind == "inkernel" {
-		return 0 // a local model turn can legitimately run for minutes — no whole-handler deadline
+		return 0 // a local model turn can legitimately run for minutes â€” no whole-handler deadline
 	}
 	return 90 * time.Second
 }
