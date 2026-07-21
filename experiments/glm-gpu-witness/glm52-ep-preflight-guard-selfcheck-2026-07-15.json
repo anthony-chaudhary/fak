@@ -1,0 +1,28 @@
+{
+  "schema": "fak.glm52-ep-preflight-guard-selfcheck.v1",
+  "captured_at": "2026-07-15T00:00:00Z",
+  "issue": 4952,
+  "kind": "guard-logic self-check — SYNTHETIC per-GPU VRAM values, NO GPU in the loop",
+  "not_a_witness_for": "the sanctioned 8-rank GPU-node LOAD_READY + serve read-back (that remains the open #4952 definition-of-done; this proves only the pre-flight gate's arithmetic and messaging)",
+  "summary": "tools/glm52_ep_witness.sh now reads each visible GPU's live free/total VRAM ONCE before the CUDA build + rank spawn and refuses with a single actionable message, instead of surfacing N opaque per-rank FitTooBig walls after spawn. The #4952 report ('needs 73.23 GiB, device has 71.41 GiB' on every rank) was an environmental stale-residency refusal misread as a code regression; the load plan is already rank-local / EP-aware (internal/ggufload.EstimateExpertParallelLoadMemoryPlan). This gate stops the next such run from being misfiled.",
+  "required_free_derivation": {
+    "formula": "internal/compute.RequiredFreeBytes(<per-rank plan total bytes>, headroom) — the exact inverse of BudgetAfterHeadroom, the single home of the load-time fit arithmetic, so the pre-flight threshold can never disagree with the in-process RefuseMemoryPlanIfTooBig gate",
+    "headroom": 0.05,
+    "provenance": "per-rank plan totals from experiments/glm-gpu-witness/glm52-ep-load-plan-witness-2026-06-30.json (weights) + the #4952 ~2.08 GiB KV @ --context-budget-tokens 4096",
+    "ranks_8": {"plan_total_gib": 73.23, "required_free_gib": 77.1},
+    "ranks_7": {"plan_total_gib": 81.33, "required_free_gib": 85.6, "note": "exceeds an ~79 GiB-usable 80 GiB-class sm_80 card — RANKS=7 needs a bigger card or >=8 ranks"}
+  },
+  "code_under_test": [
+    "tools/glm52_ep_witness.sh (EP_PREFLIGHT gate)",
+    "internal/compute.RequiredFreeBytes + TestRequiredFreeBytesIsExactFitBoundary"
+  ],
+  "scenarios": [
+    {"name": "A stale-residency (reproduces #4952)", "ranks": 8, "free_gib_per_gpu": 75.2, "total_gib_per_gpu": 80.0, "required_gib": 77.1, "verdict": "EP_PREFLIGHT_REFUSE (8/8 short ~1.9 GiB) — likely stale residency", "exit": 93},
+    {"name": "B pristine", "ranks": 8, "free_gib_per_gpu": 78.6, "total_gib_per_gpu": 80.0, "required_gib": 77.1, "verdict": "EP_PREFLIGHT_OK — proceeds to build+serve", "exit": 0},
+    {"name": "C config-too-tight", "ranks": 7, "free_gib_per_gpu": 78.6, "total_gib_per_gpu": 80.0, "required_gib": 85.6, "verdict": "EP_PREFLIGHT_REFUSE (7/7 CARD TOO SMALL — need > card total) — raise RANKS / lower context", "exit": 93},
+    {"name": "D no nvidia-smi", "ranks": 8, "free_gib_per_gpu": null, "verdict": "EP_PREFLIGHT_SKIP (fail-open) — proceeds", "exit": 0},
+    {"name": "E one dirty GPU", "ranks": 8, "free_gib_per_gpu": "70.3 on gpu3, 78.6 elsewhere", "total_gib_per_gpu": 80.0, "required_gib": 77.1, "verdict": "EP_PREFLIGHT_REFUSE (1/8 short ~6.8 GiB)", "exit": 93}
+  ],
+  "reproduce": "extract the '# --- pre-flight per-GPU free-VRAM gate' block from tools/glm52_ep_witness.sh, stub log()/OUT/DONE/VIS/RANKS and a mock nvidia-smi that echoes 'free, total' MiB per '-i <idx>', and run the five scenarios above (no GPU needed).",
+  "fail_open": "the gate never blocks a run when nvidia-smi is absent or returns no reading (non-NVIDIA / CI host), and is overridable via REQUIRE_FREE_GIB for any other RANKS/context/model."
+}
