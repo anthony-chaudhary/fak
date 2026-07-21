@@ -53,9 +53,10 @@ var knownPaneDivergence = map[string]string{
 	"guard_accuracy_debt": "python-only: `go run ./cmd/fak score guard-accuracy` folded in the Python pane only",
 	"commit_debt":         "python-only: commit_subject_coverage.py folded in the Python pane only",
 	// Go-pane-only — port into tools/scorecard_control_pane.py SCORECARDS, or retire from Go:
-	"antipattern_debt":  "go-only: antipattern-scorecard folded in the Go pane only",
-	"negframe_debt":     "go-only: negframe folded in the Go pane only",
-	"negation_tax_debt": "go-only: negation-tax folded in the Go pane only",
+	"antipattern_debt":       "go-only: antipattern-scorecard folded in the Go pane only",
+	"negframe_debt":          "go-only: negframe folded in the Go pane only",
+	"negation_tax_debt":      "go-only: negation-tax folded in the Go pane only",
+	"negation_operator_debt": "go-only: negation-operator folded in the Go pane only",
 }
 
 // knownKeyDrift enumerates debt keys folded in BOTH panes but under a different card
