@@ -48,13 +48,13 @@ import (
 // runs sharing a decodeIdentity MUST produce the same token stream; this is the
 // "seed or deterministic oracle" the acceptance criteria require.
 type decodeIdentity struct {
-	ModelID     string        `json:"model"`
-	TokenizerID string        `json:"tokenizer"`
-	Engine      Engine        `json:"engine"`
-	Seed        uint64        `json:"seed"`
-	Revision    string        `json:"module_revision"`
-	Baseline    string        `json:"baseline"`
-	Tolerance   string        `json:"tolerance"`
+	ModelID     string `json:"model"`
+	TokenizerID string `json:"tokenizer"`
+	Engine      Engine `json:"engine"`
+	Seed        uint64 `json:"seed"`
+	Revision    string `json:"module_revision"`
+	Baseline    string `json:"baseline"`
+	Tolerance   string `json:"tolerance"`
 }
 
 const (
@@ -104,9 +104,9 @@ func decodeReference(id decodeIdentity, prompt []int) []int {
 type resumeBug int
 
 const (
-	resumeCorrect          resumeBug = iota // faithful resume from the checkpoint
-	resumeDuplicateBoundary                 // re-emits the boundary token (dup)
-	resumeSkipBoundary                      // drops the boundary token (omission)
+	resumeCorrect           resumeBug = iota // faithful resume from the checkpoint
+	resumeDuplicateBoundary                  // re-emits the boundary token (dup)
+	resumeSkipBoundary                       // drops the boundary token (omission)
 )
 
 // resumeFromBoundary models an interrupt after k committed generated tokens

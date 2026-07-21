@@ -74,8 +74,10 @@ func TestRegisteredRungsAreAddressableByName(t *testing.T) {
 // the live fence above forbids in the registered chain.
 type namedRung struct{ by string }
 
-func (r namedRung) Adjudicate(context.Context, *abi.ToolCall) abi.Verdict { return abi.Verdict{By: r.by} }
-func (r namedRung) Caps() []abi.Capability                               { return nil }
+func (r namedRung) Adjudicate(context.Context, *abi.ToolCall) abi.Verdict {
+	return abi.Verdict{By: r.by}
+}
+func (r namedRung) Caps() []abi.Capability { return nil }
 
 // TestRungNameTotality_FailsOnUnnamedRung witnesses the first acceptance criterion: the
 // checker fails on a rung whose probed By is empty, and its message names the offending

@@ -14,15 +14,15 @@
 // Every verification failure returns a distinct closed-vocabulary refusal from
 // internal/abi (never free text), grouped by the nature of the failure:
 //   - MALFORMED       — structurally broken envelope or body (bad JSON, unknown
-//                        field, wrong alg, un-decodable signature, invalid inner
-//                        manifest, inverted window).
+//     field, wrong alg, un-decodable signature, invalid inner
+//     manifest, inverted window).
 //   - OVERSIZE        — the envelope exceeds the byte budget.
 //   - TRUST_VIOLATION — authenticity failure (no root key, wrong signature, wrong
-//                        issuer): the org cannot be proven to have issued it.
+//     issuer): the org cannot be proven to have issued it.
 //   - UNWITNESSED     — freshness failure (before not_before, past expires, or a
-//                        rolled-back version): it cannot be witnessed as current.
+//     rolled-back version): it cannot be witnessed as current.
 //   - POLICY_BLOCK    — the envelope's own min_version rule blocks this binary
-//                        (the running binary is too old to apply the policy).
+//     (the running binary is too old to apply the policy).
 //
 // The verifier is a PURE function of its inputs: the caller passes `now`, the
 // highest version it has ever accepted (anti-rollback), and the running binary

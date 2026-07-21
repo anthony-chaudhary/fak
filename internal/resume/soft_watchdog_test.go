@@ -61,8 +61,8 @@ func TestSoftWatchdogHealthyOrWithinGraceDumpsNothing(t *testing.T) {
 		name string
 		in   SoftWatchdogObservation
 	}{
-		{"healthy progressing session", softObs(true, trajctl.SignalHealthy, 3 * time.Minute)},
-		{"stalled but inside grace window", softObs(true, trajctl.SignalStall, 30 * time.Second)},
+		{"healthy progressing session", softObs(true, trajctl.SignalHealthy, 3*time.Minute)},
+		{"stalled but inside grace window", softObs(true, trajctl.SignalStall, 30*time.Second)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

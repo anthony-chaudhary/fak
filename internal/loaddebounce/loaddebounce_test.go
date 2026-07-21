@@ -12,7 +12,7 @@ type fakeClock struct{ t time.Time }
 
 func newFakeClock() *fakeClock { return &fakeClock{t: time.Unix(0, 0).UTC()} }
 
-func (f *fakeClock) now() time.Time         { return f.t }
+func (f *fakeClock) now() time.Time          { return f.t }
 func (f *fakeClock) advance(d time.Duration) { f.t = f.t.Add(d) }
 
 // TestDedupIdenticalSamplesEmitOnce is DoD witness #1: N identical consecutive
@@ -25,7 +25,7 @@ func TestDedupIdenticalSamplesEmitOnce(t *testing.T) {
 
 	const n = 8
 	for i := 0; i < n; i++ {
-		p.Sample(7)                    // identical value every time
+		p.Sample(7)                       // identical value every time
 		clk.advance(2 * time.Millisecond) // let the debounce window elapse
 		p.Flush()
 	}
