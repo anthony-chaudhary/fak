@@ -465,11 +465,11 @@ func TestAuditCompactCorpusWalksAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("audit corpus: %v", err)
 	}
-	if res.Aggregate.Sessions != 5 {
-		t.Errorf("sessions = %d, want 5 fixtures", res.Aggregate.Sessions)
+	if res.Aggregate.Sessions != 6 {
+		t.Errorf("sessions = %d, want 6 fixtures", res.Aggregate.Sessions)
 	}
-	if res.Aggregate.Fires != 5 {
-		t.Errorf("fires = %d, want 5 (2 healthy + 1 dup-session + 1 ineffective + 1 missing-post)", res.Aggregate.Fires)
+	if res.Aggregate.Fires != 7 {
+		t.Errorf("fires = %d, want 7 (2 healthy + 1 dup-session + 1 ineffective + 1 missing-post + 2 image-wedge)", res.Aggregate.Fires)
 	}
 
 	// The cwd filter keeps only this repo's sessions.
