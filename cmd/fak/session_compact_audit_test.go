@@ -50,8 +50,8 @@ func TestSessionCompactAuditJSONScrubbed(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
 		t.Fatalf("json: %v\n%s", err, out.String())
 	}
-	if res.Aggregate.Sessions != 5 {
-		t.Errorf("sessions = %d, want 5", res.Aggregate.Sessions)
+	if res.Aggregate.Sessions != 6 {
+		t.Errorf("sessions = %d, want 6", res.Aggregate.Sessions)
 	}
 	if res.Root != "" {
 		t.Errorf("scrubbed root = %q, want empty", res.Root)
