@@ -273,6 +273,11 @@ func canonicalGGUFArch(arch string) string {
 		return "glm_moe_dsa"
 	case "deepseek-v2", "deepseek-v3", "deepseek3", "deepseekv2", "deepseekv3":
 		return "deepseek2"
+	case "kimi-k2", "kimi_k2", "kimi2", "kimi-k3", "kimi_k3", "kimi3", "kimi":
+		// Kimi K2/K3 (Moonshot) is a scaled-up DeepSeek-V3: same MLA + DeepSeekMoE
+		// backbone, no DSA indexer, so the Moonshot-branded spellings collapse onto
+		// "deepseek2" and ride the MLA+MoE forward instead of the #934 refusal.
+		return "deepseek2"
 	case "bonsai", "ternary-bonsai", "qwen3.6", "qwen36":
 		return "qwen35"
 	}
