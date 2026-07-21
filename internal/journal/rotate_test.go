@@ -172,6 +172,9 @@ func TestCutIfOversizedProductionBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// CutIfOversized mutates j in place to point at the successor; close whatever
+	// handle j holds so Windows can remove the TempDir (open files block unlink).
+	defer j.Close()
 	for i := 0; i < 8; i++ {
 		j.append(Row{Kind: "DECIDE", Tool: strings.Repeat("x", 64)})
 	}
