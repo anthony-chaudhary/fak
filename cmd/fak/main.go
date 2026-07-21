@@ -548,6 +548,12 @@ func main() {
 		cmdComplain(os.Args[2:])
 	case "learning-debt-dispatch":
 		cmdLearningDebtDispatch(os.Args[2:])
+	case "harness-debt-dispatch":
+		// The harness-strength fan-out (#4414, epic #4396, under self-ablation #607 /
+		// open ablation registry #2828): consume the sibling model-strength
+		// classifier's --json verdict and file one deduped deletion issue per HARD
+		// scaffold graded REDUNDANT or HOBBLING (LOAD_BEARING files nothing).
+		cmdHarnessDebtDispatch(os.Args[2:])
 	case "stopfailure":
 		cmdStopFailure(os.Args[2:])
 	case "cluster":
