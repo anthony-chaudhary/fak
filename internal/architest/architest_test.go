@@ -274,7 +274,6 @@ var tier = map[string]int{
 	"goalpark":         1, // durable long Retry-After goal parking and exactly-once supervisor claim (#4805)
 	"codexmcphealth":   2, // Codex MCP transport health diagnostic (#1445): fresh stdio smoke + stale-child inventory/reap fold over subprocess evidence. Tool-shaped mechanism leaf, off the hot path, imports only stdlib.
 	"pythongate":       2, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
-	"envconfiglint":    2, // CONFIG_NOT_ENV env-var-vs-config ratchet (#2863): scans committed Go source (git grep over HEAD) for os.Getenv/os.LookupEnv reads and refuses any NEW name that is not a declared secret, against a frozen grandfathered baseline. Same tool-shaped witness leaf as pythongate (reads tree, folds, emits offenses); shells to git off the hot path, imports only windowgate(1).
 	"ctxknobs":         1, // MANUAL-OVERLAY COUNTER ratchet (#2199): walks cmd/fak flags/env + .claude/skills for context knobs, classifies operator-debug vs user-required, refuses a NEW user-required overlay against a frozen baseline (NEW_USER_REQUIRED_KNOB). Pure filesystem walk + fold, stdlib-only, imports nothing internal, off the hot path.
 	"knobcensus":       2, // knob census (#2210): classifies every cmd/fak flag/env + skill knob as INTENT vs HOUSEKEEPING over a tree walk. Tool-shaped mechanism leaf; imports ctxknobs(1)+stdlib, off the hot path.
 	"treedoctor":       2, // tree-hygiene doctor over safecommit's lock seam plus git worktree reads; mechanism/tool leaf, off the hot path.
@@ -1010,9 +1009,13 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // defconfig (internal/registrations). `agent` registers the "localtools" engine from its
 // init() and is pulled in directly by cmd/fak, never blank-imported. `gateway` registers
 // a per-Server metrics observer from New(), and the server itself is wired by cmd/fak.
+// `computeadmit` registers its COLLISION_RISK reason code lazily from NewSubmitAdmitter
+// (idempotent registerReasonOnce), i.e. when the Kernel.Submit adjudication fold constructs
+// the gate — never from init(), so a defconfig blank-import would not even fire it; it is
+// wired by its constructor at the Submit seam, not as a passive driver.
 // A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
