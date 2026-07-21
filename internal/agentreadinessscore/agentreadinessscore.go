@@ -560,23 +560,43 @@ func codexRecipeGaps(text string, present bool) []string {
 	return gaps
 }
 
-// dispatchVerbs is the set of top-level verbs the binary dispatches, parsed from the
-// func main() switch in cmd/fak/main.go.
+// dispatchVerbFns names the top-level verb-routing functions main() delegates to in
+// cmd/fak/main.go. main() switches on os.Args[1]; dispatchPrimaryVerb switches on the
+// same verb name (it is a routing-table split of that switch, not a subcommand switch
+// like cmdPolicy's argv[0] switch — those must NOT leak in). If the routing table is
+// split across a new helper, add its `func <name>(` header here so real verbs keep
+// resolving.
+var dispatchVerbFns = []string{"func main()", "func dispatchPrimaryVerb("}
+
+// dispatchVerbs is the set of top-level verbs the binary dispatches, parsed from every
+// top-level routing switch in cmd/fak/main.go (func main() plus the dispatchPrimaryVerb
+// routing-table split main() delegates to).
 func dispatchVerbs(mainGoText string) map[string]bool {
 	verbs := map[string]bool{}
 	if mainGoText == "" {
 		return verbs
 	}
 	lines := strings.Split(mainGoText, "\n")
+	for _, fn := range dispatchVerbFns {
+		collectCaseVerbs(lines, fn, verbs)
+	}
+	return verbs
+}
+
+// collectCaseVerbs adds every quoted `case "verb":` label in the body of the function
+// whose header line begins with fnPrefix. The body runs from the header to the first
+// column-0 `}` (the function's own closing brace); nested switch/closure braces are
+// indented, so they never end the scan early.
+func collectCaseVerbs(lines []string, fnPrefix string, verbs map[string]bool) {
 	start := -1
 	for i, ln := range lines {
-		if strings.HasPrefix(ln, "func main()") {
+		if strings.HasPrefix(ln, fnPrefix) {
 			start = i
 			break
 		}
 	}
 	if start < 0 {
-		return verbs
+		return
 	}
 	for _, ln := range lines[start+1:] {
 		if ln == "}" {
@@ -590,7 +610,6 @@ func dispatchVerbs(mainGoText string) map[string]bool {
 			verbs[sm[1]] = true
 		}
 	}
-	return verbs
 }
 
 // commandVerbs returns every CLI verb an agent would paste from this doc, in appearance order.

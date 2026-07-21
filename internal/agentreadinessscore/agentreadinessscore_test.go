@@ -524,6 +524,59 @@ func TestDispatchVerbsParsesOnlyMainSwitch(t *testing.T) {
 	}
 }
 
+// The real cmd/fak/main.go splits its routing table: main() delegates most verbs to
+// dispatchPrimaryVerb, which switches on the same verb name. Verbs routed there resolve
+// at runtime just as much as main()'s own cases, so dispatchVerbs must parse both — and
+// still keep a subcommand switch (cmdPolicy's argv[0] switch) out.
+func TestDispatchVerbsParsesPrimaryVerbSplit(t *testing.T) {
+	const fixture = `package main
+
+func main() {
+	if dispatchPrimaryVerb(os.Args[1], os.Args[2:], start, &verb) {
+		return
+	}
+	switch os.Args[1] {
+	case "serve":
+		cmdServe(os.Args[2:])
+	default:
+		usage()
+	}
+}
+
+func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *string) bool {
+	switch name {
+	case "preflight":
+		cmdPreflight(args)
+	case "commit":
+		os.Exit(runObservedGitOperation(start, *verb, args, func() int {
+			return runCommitCommand(os.Stdout, os.Stderr, args)
+		}))
+	case "worktree":
+		cmdWorktreeVerb(args)
+	default:
+		return false
+	}
+	return true
+}
+
+func cmdPolicy(argv []string) {
+	switch argv[0] {
+	case "budget":
+		runBudget(argv[1:])
+	}
+}
+`
+	verbs := dispatchVerbs(fixture)
+	for _, v := range []string{"serve", "preflight", "commit", "worktree"} {
+		if !verbs[v] {
+			t.Errorf("dispatchVerbs missing routed verb %q: %v", v, verbs)
+		}
+	}
+	if verbs["budget"] {
+		t.Error("cmdPolicy sub-switch verb budget must not leak in via the second dispatcher")
+	}
+}
+
 func TestCommandVerbsExtractsCommandContextOnly(t *testing.T) {
 	fenced := "```bash\n" +
 		"go run ./cmd/fak preflight --policy p.json\n" +
