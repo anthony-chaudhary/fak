@@ -15,21 +15,21 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **9** (clarity 0 + coverage 9) |
-| **Crystal-clear concepts (and climbing)** | **362** crystal of 1979 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2188 / 2197** (99.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **19** (clarity 1 + coverage 18) |
+| **Crystal-clear concepts (and climbing)** | **364** crystal of 1981 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2156 / 2174** (99.2% of the discovered confusable space) |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 99.7/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.7/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1979 concepts - score 99.7/100 (grade A) - disambiguation-debt 9
+concept-disambiguation chart - 1981 concepts - score 98.7/100 (grade A) - disambiguation-debt 19
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ######...................... 362
+  * crystal       ######...................... 364
   o defined       ############################ 1617
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -40,13 +40,13 @@ clarity mix by family (each cell = one concept):
   cache            **************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (208 concept(s); 38 crystal)
   context-ctx      ***************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (179 concept(s); 27 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
-  decision         ******************oooooooooooooooooo (36 concept(s); 18 crystal)
+  decision         *******************oooooooooooooooooo (37 concept(s); 19 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ********ooooooooooooooooooooooooooooooo (39 concept(s); 8 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
   guard-gate       *************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (288 concept(s); 73 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
-  loop             ************************ooooooooooooooooooooooooooooooooo (57 concept(s); 24 crystal)
+  loop             *************************ooooooooooooooooooooooooooooooooo (58 concept(s); 25 crystal)
   plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
   policy-capability *********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (119 concept(s); 21 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
@@ -59,29 +59,29 @@ clarity mix by family (each cell = one concept):
   witness-proof    ************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 48 crystal)
 
 coverage by family (positioned / discovered):
-  loop             ##########################.. 72/77
-  policy-capability ############################ 140/142
-  decision         ###########################. 48/49
-  render-materialize ############################ 173/174
+  decision         ##########################.. 49/52
+  guard-gate       ############################ 346/349
+  policy-capability ###########################. 137/140
+  support-maturity ##########################.. 37/40
+  loop             ###########################. 71/73
+  session-runtime  ############################ 185/187
+  cache            ############################ 254/255
+  evict            ###########################. 44/45
+  render-materialize ############################ 171/172
+  witness-proof    ############################ 135/136
   attention        ############################ 72/72
-  cache            ############################ 254/254
-  context-ctx      ############################ 194/194
+  context-ctx      ############################ 193/193
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  evict            ############################ 44/44
   gateway-engine   ############################ 166/166
-  guard-gate       ############################ 365/365
   layout           ############################ 13/13
-  plan             ############################ 306/306
+  plan             ############################ 301/301
   pool             ############################ 36/36
-  score-debt       ############################ 84/84
-  session-runtime  ############################ 188/188
-  support-maturity ############################ 37/37
+  score-debt       ############################ 83/83
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
-  witness-proof    ############################ 135/135
 
-namespace coverage  [################################] 99.6%  (2188/2197 confusable tokens positioned)
+namespace coverage  [################################] 99.2%  (2156/2174 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -134,7 +134,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | cache | **CacheTTL1h** - CacheTTL1h (internal/gateway/cache_pricing.go) is the extended 1-hour ephemeral provider prompt-cache TTL tier, priced above the 5-minute default. |
 | * | crystal | symbol | cache | **UpgradeAnthropicStableCacheTTL1h** - UpgradeAnthropicStableCacheTTL1h (internal/agent/anthropic_cachebp.go) rewrites an Anthropic request body to upgrade stable cache_control breakpoints to the 1h TTL tier, returning a typed upgrade outcome. |
 | * | crystal | metric | cache | **fak_gateway_cache_ttl_upgrade_total** - fak_gateway_cache_ttl_upgrade_total is the /metrics counter witnessing managed-cache TTL upgrades by outcome label. |
-| * | crystal | concept | cache | **managed cache** - managed cache is fak guard's per-session posture over the provider prompt-cache on the outbound Anthropic wire (--managed-cache auto|on|off, epic #1844 C6): ACTIVE means fak itself drives cache_control bytes - today the stable-prefix 1h TTL upgrade - with AUTO activating only when the session provably bills an operator API key (--api-key-env); subscription OAuth, non-Anthropic wires, and local models stay passive. |
+| * | crystal | concept | cache | **managed cache** - managed cache (the FAMILY) is the set of features by which fak shapes the provider prompt cache on the client's behalf: the provider 5m prompt cache riding the client's own cache_control breakpoints, tool-prune, star-anchor breakpoint placement (--vcache-anchor), compaction shed (--compact-history-budget), defer-cold-tools, in-kernel KV-prefix reuse (when fak runs the model itself), the 1h-TTL upgrade, and volatile-head redaction, among others. On our own OAuth Claude Code seats the family is EFFECTIVE BY DEFAULT - carried by the 5m prompt cache (median cache-read share ~78-85% on substantial sessions) and tool-prune (~96-99% of sessions) - so caching IS working even though the --managed-cache posture resolves passive; the other members are inert-by-design or provider-blocked there. Audit: docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md. |
 | * | crystal | symbol | cache | **guardManagedCachePosture** - guardManagedCachePosture (cmd/fak/guard_managed_cache.go) is the resolved managed-cache decision for one guard session - mode, active, and the operator-facing reason - rendered once in the startup banner so the session's cache posture is explicit instead of inferred from flag defaults. |
 | * | crystal | config | cache | **Config.CacheTTL1H** - Config.CacheTTL1H (internal/gateway/gateway.go) is the gateway LEVER an active managed-cache posture arms: when true, each outbound Anthropic request's existing stable-head cache_control breakpoint is upgraded to the 1-hour tier (maybeUpgradeAnthropicCacheTTL1H -> agent.UpgradeAnthropicStableCacheTTL1h), so an idle gap past 5 minutes re-enters on a 0.1x cache read instead of re-writing the prefix. |
 | * | crystal | config | cache | **FAK_ABLATE_TTL_1H** - FAK_ABLATE_TTL_1H is the ablation-harness env arm (internal/ablate) that force-enables the gateway's 1h TTL upgrade lever (Config.CacheTTL1H) independently of the guard's managed-cache posture, so the upgrade's effect can be measured A/B. |
@@ -182,6 +182,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | cross-cluster | **blob CAS store** - internal/blob's Store: the content-addressed blob store (CAS) - digest->bytes with pin-aware bounded eviction (pinned digests, e.g. a vDSO tier-2 entry or a held quarantine handle, are never evicted), preserving the 'a cache hit equals a fresh call' invariant. |
 | * | crystal | symbol | cross-cluster | **page-in refusal** - internal/ctxplan's Refusal: a selected span the trust gate declined to page in (sealed, or its bytes went missing) - reported to the caller, never rendered into the fresh history. |
 | * | crystal | symbol | cross-cluster | **effect refusal** - internal/memq's Refusal: a cell an effect declined to touch (sealed / tombstoned / page-in refused) - recorded with a reason on the executor's result. |
+| * | crystal | symbol | decision | **IndexLockReclaimDecision** - The reap-or-keep verdict for a stale git .git/index.lock: a Reap flag plus a closed-vocabulary reason, decided purely from the commit-lane observer's evidence (lock presence, process-probe success, live-writer count, staleness past the grace window). |
 | * | crystal | symbol | decision | **ContainmentDecision (toolprocgate)** - The closed verdict-plus-evidence struct returned by DecideContainment in internal/toolprocgate that adjudicates whether a tool-process spawn is admitted, deferred, or refused based on crash-blast-radius containment policy (fleet breaker, surface quarantine, co-location cap), carrying the ContainmentVerdict, the one-bit Admit gate, a reason, and the fault-window evidence so a refusal is auditable. |
 | * | crystal | symbol | decision | **SteerDecision (trajctl)** - One regime-gate steering decision for one objective at one turn boundary (internal/trajctl/steer.go): an Action (nudge/arm/suppress/none) plus the Signal that triggered it and the ObjectiveID it targets, produced by DecideNudge or SteerSweep when the recent score curve is unhealthy (STALL/DRIFT/DETOUR_OVERRUN) and ledgered as one JSONL row via AppendSteerDecisions. |
 | * | crystal | symbol | decision | **WalkDecision (gardenbundle)** - One budgeted item's triage outcome from a garden walk (internal/gardenbundle/walk.go): a Disposition (act/review/defer), the ready Action command to run, a Reason, and a Perform flag, emitted worst-first for each issue the walk inspected so the dispatch garden can split human-needed from fleet-drivable work. |
@@ -304,6 +305,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | layout | **MLA KV layout seam** - Attention cache variant seam interface: standardKVLayout vs mlaKVLayout |
 | * | crystal | symbol | loop | **loop_constraint.go (agent constraint seam)** - loop_constraint.go is the agent package's loop-side consumer of the out-of-band add-constraint op (#2756): applyConstraints drains the sessionctl constraint mailbox at the turn boundary and carries the tightened floor's standing directive as a system notice, and constraintDenied denies a floor-forbidden tool call before dispatch with a typed receipt carrying the closed CONSTRAINT_* reason. |
 | * | crystal | symbol | loop | **loop_park.go (agent park seam)** - loop_park.go is the agent package's loop-side consumer of the out-of-band operator approve/deny inbox (#2757): parkEscalatedDeny intercepts an ESCALATE-gated deny at the dispatch site when the session's inbox is open, parks it on the sessionctl pending-action queue, and honors the external verdict — approve re-proposes the call through the normal syscall boundary (byte-identical plus the gate's confirm echo, or operator-modified args freshly adjudicated), deny/timeout abort with a typed receipt carrying the closed PARK_* reason. |
+| * | crystal | symbol | loop | **loop_toolterminal_verbosity.go (agent background-completion wake verbosity seam)** - The verbosity axis of the background-process completion watcher: decides WHICH terminal tool-process transitions wake a new agent turn (off/error/result/all) and HOW MUCH of the folded toolproc verdict rides into that turn. |
 | * | crystal | metric | loop | **loop_count** - The dispatch codex-loop iteration counter (LoopCount, JSON loop_count) reported per session tick - how many times the codex loop has re-entered for one session. |
 | * | crystal | concept | loop | **loop (the ring)** - The generic engineering abstraction: sense -> decide -> act -> witness, at any altitude (tool-call / turn / session / fleet / RSI / intent). |
 | * | crystal | subsystem | loop | **super loop (fak superloop)** - A read-only operator-INTENT walker: an interior node that reads its member loops' status worst-first and folds a worklist, mutating nothing at its own altitude. |
@@ -548,7 +550,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | cache | **vcache_context_snapshot (vCache context state dump)** - cmd/fak/cachevalue_status.go + cachevalue_status_session.go: the vCache CONTEXT SNAPSHOT dependency - a point-in-time dump of the modeled virtual-cache context state that the status report and session analysis read. |
 | o | defined | metric | cache | **CacheReadFraction (prompt-served-from-cache share)** - cachevaluereport.CacheReadFraction is the share of prompt tokens the provider served from its prompt cache (cache_read / prompt_tokens), surfaced in the cache-value audit row and the TUI savings overview. |
 | o | defined | metric | cache | **FakCompactionCacheReadTokens (compaction-point cache_read counter)** - gateway.FakCompactionCacheReadTokens is the OBSERVED provider cache_read token count at a session's compaction point - the tokens the provider evidenced as cache_reads, surfaced in cache_pricing and the /debug/vars attribution block. |
-| o | defined | metric | cache | **CacheTTLUpgradesUpgraded (managed-cache TTL-upgrade counter)** - gatewayusageledger.CacheTTLUpgradesUpgraded (with CacheTTLUpgradeReasons) is the usage-ledger counter pair recording how many times the managed-cache posture upgraded a stable prefix to the 1h TTL tier and why, surfaced in the weekly cache-value report. |
+| o | defined | metric | cache | **CacheTTLUpgradesUpgraded (managed-cache TTL-upgrade counter)** - gatewayusageledger.CacheTTLUpgradesUpgraded (with CacheTTLUpgradeReasons) is the usage-ledger counter pair recording how many times the managed-cache posture AUTHORED a 1h-TTL upgrade of a stable prefix (wrote ttl:1h into the outbound body) and why, surfaced in the weekly cache-value report. It counts fak AUTHORING, NOT the provider ACCEPTING: on a subscription-OAuth seat the provider 400s the 1h body, so a nonzero count there is a crash signal, not realized 1h caching. |
 | o | defined | concept | cache | **MiniCache (memq outlier exemption)** - memq's MiniCache (#4018) is the opt-in divergence-outlier exemption that carves the top-K most-divergent cells out of a lossy fold set before the fold, keeping them bit-exact so the most information-dense cells survive a lossy compression step. |
 | o | defined | symbol | cache | **ReplayKVCacheMulti (offline eviction-policy replay)** - compute.ReplayKVCacheMulti replays every requested KVEvictPolicy against an offline KV-replay event trace and scores each by realized reuse under a token budget, the oracle behind the kvreplay benchmark and the expert-residency LFU comparison. |
 | o | defined | symbol | cache | **CacheBreakEvent (witnessed cache-prefix break)** - metrics.CacheBreakEvent is the struct type for one witnessed cache-prefix break - the cause, the token cost, and the event count - produced by WitnessCacheBreak and accumulated into a CacheBreakReport via FoldCacheBreaks. |
@@ -620,7 +622,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | concept | cache | **cache attribution (owner/plane per-mechanism line)** - Cache attribution is the owner/plane labeling that tags every reuse saving with WHO authored it (Owner: fak vs provider/external) and WHICH plane produced it (kernel_tool_cache, local_kv, provider_prompt_cache, provider_prompt_cache_control, context_compression, context_view). It surfaces as the guard-info cache-attribution line (guardInfoCacheAttributionText) and the cachevalue-status plane rows, so a provider's observed cache_read is never read as fak's own witnessed reuse (epic #1490 honest per-mechanism attribution). |
 | o | defined | subsystem | cache | **uncached_trim (compaction shed of uncached spans)** - uncached_trim (ablate.FeatureUncachedTrim, env FAK_ABLATE_UNCACHED_TRIM) is the compaction mechanism that sheds history spans NOT protected by a provider cache_control breakpoint — it trims only uncached tokens so the cached prefix the provider is keyed on survives intact. The ablation harness toggles it to measure its isolated savings (the UncachedTrimResults / UncachedTrimShed accounting). |
 | o | defined | config | cache | **GOCACHE (Go build cache)** - GOCACHE is the Go toolchain's on-disk build-artifact cache. internal/nightrun's preflightGoCache provisions a per-run GOCACHE under the build temp dir so a night run's compiles don't fail with 'build cache is required, but could not be located' on a HOME-less runner; export HOME or GOCACHE to keep a persistent cache across runs. |
-| o | defined | config | cache | **managed-cache posture flag (auto|on|off)** - The managed-cache posture is the operator knob (--managed-cache / $FAK_MANAGED_CACHE, named by the fleetManagedCacheEnv const) that normalizeManagedCacheMode resolves to auto|on|off: auto stays PASSIVE on a subscription-OAuth seat and resolves ACTIVE on an API-key-billed seat, on forces the stable-prefix 1h-TTL cache upgrade, off disables it. The accounts and codex launchers splice the resolved flag into `fak guard`. |
+| o | defined | config | cache | **managed-cache posture flag (auto|on|off)** - The managed-cache posture is the operator knob (--managed-cache / $FAK_MANAGED_CACHE, named by the fleetManagedCacheEnv const) that normalizeManagedCacheMode resolves to auto|on|off, arming ONLY the 1h-TTL member of the managed-cache family: auto stays PASSIVE on a subscription-OAuth seat and resolves ACTIVE on an API-key-billed seat; on REQUESTS the stable-prefix 1h-TTL upgrade but DEGRADES to passive on a subscription-OAuth seat (guard_managed_cache.go, since 43cbdb14a4da) so it only actually arms on an API-key-billed seat; off disables it. The rest of the managed-cache family (the 5m prompt cache, tool-prune) runs regardless of this knob. The accounts and codex launchers splice the resolved flag into `fak guard`. |
 | o | defined | subsystem | cache | **internal/cacheprice (canonical price-constant pin)** - internal/cacheprice is the single source of the canonical cache price multipliers and constants that the gateway pricing model, the resume planner, and the compaction fire-gate all pin to (the #2798 acceptance), so no consumer hard-codes a divergent cache_read/cache_write coefficient and drifts the value accounting. |
 | o | defined | symbol | cache | **ReplayKVCache (KV-admission replay policy)** - ReplayKVCache is the victim-ranking KV eviction policy that internal/compute's KV-admission cost model simulates on every miss (issue #2672, epic #2236 matrix row M5) to score whether re-admitting an evicted span pays off, feeding the KVEvictPolicy victim ranking. |
 | o | defined | subsystem | cache | **anthropic_cachebp (offensive cache-breakpoint placement module)** - internal/agent/anthropic_cachebp.go is the OFFENSIVE half of the kernel's cache-prefix control: it PLACES a cache_control breakpoint on the stable system+tools head of an outbound Anthropic request when the caller left none, and upgrades an existing one to the 1h TTL tier, so a raw/minimal caller still gets provider prompt-cache reuse. It houses PlaceAnthropicCacheBreakpoint(WithOutcome) and UpgradeAnthropicStableCacheTTL1h. |
@@ -689,7 +691,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | cache | **vcacheGovernorDecisionOrder** - vcacheGovernorDecisionOrder (internal/gateway/vcache_families.go) is the fixed render order of governor decisions on the vCache metrics surface. |
 | o | defined | symbol | cache | **vcacheWindowHasCacheActivity** - vcacheWindowHasCacheActivity (internal/gateway/vcache_families.go) is the predicate: does an observed turn window contain any cache read/write activity at all. |
 | o | defined | metric | cache | **CacheTTLUpgradeReasons (upgrade why-map)** - CacheTTLUpgradeReasons is the reason-keyed tally on a gateway usage summary (cmd/fak/serve.go, internal/gatewayusageledger) recording, per cause (volatile_head, no_stable_breakpoint), how many outbound turns skipped or took the 1-hour prompt-cache TTL upgrade. |
-| o | defined | metric | cache | **CacheTTLUpgradesUpgraded (applied count)** - CacheTTLUpgradesUpgraded is the scalar counter on the gateway usage summary of how many outbound turns actually had their stable-head cache_control breakpoint upgraded to the 1-hour TTL tier. |
+| o | defined | metric | cache | **CacheTTLUpgradesUpgraded (applied count)** - CacheTTLUpgradesUpgraded is the scalar counter on the gateway usage summary of how many outbound turns fak AUTHORED a 1-hour-TTL upgrade of their stable-head cache_control breakpoint (wrote ttl:1h into the outbound body). It counts fak AUTHORING the upgrade, NOT the provider ACCEPTING it: on a subscription-OAuth seat the provider 400s the 1h body, so a nonzero count there is a crash signal, not realized 1h caching. |
 | o | defined | concept | cache | **provider_prompt_cache (mechanism id)** - provider_prompt_cache is the cache-value ledger Mechanism label (internal/cachevaluereport, cmd/fak/cachevalue_savings.go) tagging token-equivalent savings the PROVIDER's prompt cache delivered, as opposed to savings fak itself authored. |
 | o | defined | metric | cache | **ProviderPromptCacheTokenEquiv (savings figure)** - ProviderPromptCacheTokenEquiv is the aggregated token-equivalent value (internal/cachevaluereport/track2.go) attributed to the provider prompt cache in a Track-2 cache-value rollup period. |
 | o | defined | symbol | cache | **ColdCache (rehydrate/compact cold prompt-cache reason)** - ColdCache is the rehydrate reason and compact option indicating that the prompt/message-span cache is cold, so a prompt-cache preserving path no longer has warm-cache value to protect. |
@@ -2213,13 +2215,13 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
+| grounded | `grounded` | 84 | 1 | 1 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1979 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1981 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
-| grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
@@ -2227,25 +2229,25 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| loop | 72 | 77 | 5 |
-| policy-capability | 140 | 142 | 2 |
-| decision | 48 | 49 | 1 |
-| render-materialize | 173 | 174 | 1 |
+| decision | 49 | 52 | 3 |
+| guard-gate | 346 | 349 | 3 |
+| policy-capability | 137 | 140 | 3 |
+| support-maturity | 37 | 40 | 3 |
+| loop | 71 | 73 | 2 |
+| session-runtime | 185 | 187 | 2 |
+| cache | 254 | 255 | 1 |
+| evict | 44 | 45 | 1 |
+| render-materialize | 171 | 172 | 1 |
+| witness-proof | 135 | 136 | 1 |
 | attention | 72 | 72 | 0 |
-| cache | 254 | 254 | 0 |
-| context-ctx | 194 | 194 | 0 |
+| context-ctx | 193 | 193 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| evict | 44 | 44 | 0 |
 | gateway-engine | 166 | 166 | 0 |
-| guard-gate | 365 | 365 | 0 |
 | layout | 13 | 13 | 0 |
-| plan | 306 | 306 | 0 |
+| plan | 301 | 301 | 0 |
 | pool | 36 | 36 | 0 |
-| score-debt | 84 | 84 | 0 |
-| session-runtime | 188 | 188 | 0 |
-| support-maturity | 37 | 37 | 0 |
+| score-debt | 83 | 83 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
-| witness-proof | 135 | 135 | 0 |
 
