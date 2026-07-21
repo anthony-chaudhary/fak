@@ -13,6 +13,9 @@ import (
 )
 
 func TestZZReplayRealCorpus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real-corpus replay-witness in -short mode")
+	}
 	root := os.Getenv("FAK_ROLLOUT_DIR")
 	if root == "" {
 		root = filepath.Join(os.Getenv("HOME"), ".codex", "sessions")
