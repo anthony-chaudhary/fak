@@ -241,7 +241,7 @@ func applySessionControlDurable(ctx context.Context, tbl *session.Table, mirror 
 		return st, ok, err
 	}
 	switch verb {
-	case "run", "budget", "pace", "priority":
+	case "run", "budget", "pace", "priority", "wall", "throughput":
 		if err := mirror.writeThrough(ctx, traceID, st); err != nil {
 			return st, false, err
 		}

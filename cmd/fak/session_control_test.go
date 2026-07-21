@@ -73,6 +73,90 @@ func TestApplySessionControlDispatchesEveryVerb(t *testing.T) {
 	}
 }
 
+// TestApplySessionControlWiresEnvelopeAxes proves the three envelope axes the control
+// route previously parsed and dropped (#2762) now land on their Table axes: the spend
+// ceiling rides the budget verb, and the wall / throughput verbs apply their own axes.
+// The read projection surfaces all three so `fak session status` is honest, and a
+// missing body for either new verb is a usage error.
+func TestApplySessionControlWiresEnvelopeAxes(t *testing.T) {
+	tbl := session.NewTable()
+	const trace = "envelope-axes-1"
+
+	// budget with a spend ceiling: the priced axis must land, not be silently dropped.
+	const spend = 2500 * session.MicroCentsPerCent // $25.00
+	st, ok, err := applySessionControl(tbl, trace, "budget", gateway.SessionControlRequest{
+		Budget: &gateway.SessionBudget{TurnsLeft: -1, TokensLeft: -1, SpendMicroCentsLeft: spend},
+	})
+	if err != nil || !ok || st.Budget.SpendMicroCentsLeft != spend {
+		t.Fatalf("spend ceiling dropped: budget=%+v ok=%v err=%v", st.Budget, ok, err)
+	}
+	if st.Budget.SpendMicroCentsCap != spend {
+		t.Fatalf("spend cap not derived: budget=%+v", st.Budget)
+	}
+
+	// wall: the envelope must arm the wall-clock limit and start the clock.
+	st, ok, err = applySessionControl(tbl, trace, "wall", gateway.SessionControlRequest{
+		Wall: &gateway.SessionWall{LimitNanos: int64(45 * time.Minute)},
+	})
+	if err != nil || !ok || !st.Time.Bounded() || st.Time.LimitNanos != int64(45*time.Minute) || !st.Time.Running() {
+		t.Fatalf("wall axis not applied: time=%+v ok=%v err=%v", st.Time, ok, err)
+	}
+
+	// throughput: both the soft expected rate and the enforced floor must land.
+	st, ok, err = applySessionControl(tbl, trace, "throughput", gateway.SessionControlRequest{
+		Throughput: &gateway.SessionThroughput{ExpectedTokensPerSec: 40, MinTokensPerSec: 10},
+	})
+	if err != nil || !ok || st.Throughput.ExpectedTokensPerSec != 40 || st.Throughput.MinTokensPerSec != 10 || !st.Throughput.Bounded() {
+		t.Fatalf("throughput axis not applied: throughput=%+v ok=%v err=%v", st.Throughput, ok, err)
+	}
+
+	// The read projection surfaces all three axes so `fak session status` is honest.
+	proj := toGatewaySessionState(st)
+	if !proj.Time.Bounded || proj.Time.LimitSeconds != int64(45*time.Minute/time.Second) {
+		t.Fatalf("wall not projected: %+v", proj.Time)
+	}
+	if proj.Throughput.ExpectedTokensPerSec != 40 || proj.Throughput.MinTokensPerSec != 10 {
+		t.Fatalf("throughput not projected: %+v", proj.Throughput)
+	}
+	if proj.Budget.SpendMicroCentsLeft != spend {
+		t.Fatalf("spend not projected: %+v", proj.Budget)
+	}
+
+	// A missing body for either new verb is a usage error (the route maps to 400).
+	if _, _, err := applySessionControl(tbl, trace, "wall", gateway.SessionControlRequest{}); err == nil {
+		t.Fatal("wall verb without a body must return an error")
+	}
+	if _, _, err := applySessionControl(tbl, trace, "throughput", gateway.SessionControlRequest{}); err == nil {
+		t.Fatal("throughput verb without a body must return an error")
+	}
+}
+
+// TestControlThroughputFloorDrainsServedSession is the operator-facing witness for the
+// throughput axis (#2762): an operator sets a sustained-rate floor through the control
+// route, a crawling served turn is debited (its real duration now forwarded through
+// debitSession), and the session drains with THROUGHPUT_BELOW_FLOOR — the next served
+// decision takes the stop at the boundary, exactly like a token/spend exhaustion.
+func TestControlThroughputFloorDrainsServedSession(t *testing.T) {
+	const trace = "throughput-floor-served"
+	t.Cleanup(func() { serveSessions.Reset(trace) })
+
+	if _, ok, err := controlSession(context.Background(), trace, "throughput",
+		gateway.SessionControlRequest{Throughput: &gateway.SessionThroughput{ExpectedTokensPerSec: 40, MinTokensPerSec: 10}}); err != nil || !ok {
+		t.Fatalf("set throughput floor: ok=%v err=%v", ok, err)
+	}
+	// 110 tokens over 20s = 5.5 tok/s sustained: past the grace window and under the
+	// 10 tok/s floor. Without the DurationNanos forward, ObservedNanos stays 0 and this
+	// never drains — the regression this fix closes.
+	st := debitSession(context.Background(), trace, gateway.SessionUsage{CompletionTokens: 110, DurationNanos: int64(20 * time.Second)})
+	if st.Run != "draining" || st.Reason != session.ReasonThroughputFloor {
+		t.Fatalf("below-floor served turn = {Run:%q Reason:%q}, want draining/%s", st.Run, st.Reason, session.ReasonThroughputFloor)
+	}
+	v := decideSession(context.Background(), trace)
+	if v.Proceed || !v.Stop || v.Reason != session.ReasonThroughputFloor {
+		t.Fatalf("post-floor decide = %+v, want stop with %s", v, session.ReasonThroughputFloor)
+	}
+}
+
 // TestApplySessionControlCAS proves if_rev is the optimistic-concurrency guard: a
 // matching rev applies the write; a stale rev loses the race (ok=false).
 func TestApplySessionControlCAS(t *testing.T) {
