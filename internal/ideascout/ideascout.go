@@ -1,6 +1,7 @@
 package ideascout
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/ghexec"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
@@ -1138,18 +1138,12 @@ func ghJSON(args []string, out any) error {
 }
 
 func runGH(args []string, timeout time.Duration) (string, string, error) {
-	cmd := exec.Command("gh", args...)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	// WaitDelay is the straggler backstop: if the AfterFunc kill leaves a grandchild
+	cmd, cancel := ghexec.CommandTimeout(context.Background(), timeout, args...)
+	defer cancel()
+	// WaitDelay is the straggler backstop: if the deadline kill leaves a grandchild
 	// holding the output pipe open, cmd.Run could still block past the timeout;
 	// WaitDelay forces the pipes closed so the deadline is real (issue #3483).
 	cmd.WaitDelay = 10 * time.Second
-	timer := time.AfterFunc(timeout, func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-	})
-	defer timer.Stop()
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
