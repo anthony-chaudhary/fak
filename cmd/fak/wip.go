@@ -414,6 +414,21 @@ func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, no
 		return res, nil
 	}
 
+	// Tree-based debounce against the session ref: the clean-check above only fires when the
+	// working tree matches HEAD, so a persistently-dirty tree checkpointed twice (unchanged
+	// between the two runs) writes the SAME tree each time. Minting a fresh commit for that
+	// unchanged tree stamps a newer CheckpointedAt that wins wipAnchorCAS and churns the ref;
+	// worse, the commit hash is wall-clock-second sensitive (author/committer date + the
+	// CheckpointedAt stamp), so an unchanged tree would non-deterministically mint a duplicate
+	// ref whenever the two runs straddle a second boundary. If the current checkpoint already
+	// captured this exact tree, keep it — an unchanged tree never needs a new checkpoint.
+	if curOID, has, cerr := wipCurrentOID(ctx, repo, res.Ref); cerr == nil && has {
+		if curTree, terr := gitWipOut(ctx, repo, nil, "rev-parse", curOID+"^{tree}"); terr == nil && curTree == tree {
+			res.Object, res.Superseded = curOID, true
+			return res, nil
+		}
+	}
+
 	names, err := gitWipOut(ctx, repo, nil, "diff", "--name-only", head, tree)
 	if err != nil {
 		return res, err
