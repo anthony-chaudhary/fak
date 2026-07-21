@@ -58,6 +58,22 @@ type Row struct {
 	GoalState    string   `json:"goal_state,omitempty"`
 	LoopState    string   `json:"loop_state,omitempty"`
 	EndedAt      string   `json:"ended_at,omitempty"`
+
+	// GatewayURL and Bearer publish the session's live loopback gateway so a second
+	// process can discover and authenticate to it from the index alone, with no prior
+	// port knowledge. Bearer is read-scoped: it admits status reads, not control. Both
+	// are omitempty — a session that has not bound a gateway simply omits them.
+	GatewayURL string `json:"gateway_url,omitempty"`
+	Bearer     string `json:"bearer,omitempty"`
+}
+
+// WithGateway stamps the published loopback gateway URL and its read-scoped bearer onto
+// the row, returning it for chaining off NewRow. It is the one seam that records how an
+// operator (or a sibling process) reaches a live session's status endpoint.
+func (r Row) WithGateway(url, bearer string) Row {
+	r.GatewayURL = strings.TrimSpace(url)
+	r.Bearer = strings.TrimSpace(bearer)
+	return r
 }
 
 // Handle derives a short, stable, human-referenceable id for a guard session from its
