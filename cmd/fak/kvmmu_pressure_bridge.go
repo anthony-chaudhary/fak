@@ -21,6 +21,7 @@ package main
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
@@ -178,6 +179,11 @@ func probedTierProfilesForHost(backend compute.Backend, residentBytes int64) map
 		probe.CXLPresent = true
 		probe.CXLBytes = cxlTotal
 	}
+	// The peer-DRAM-over-RDMA rung (#4306/#5083) enters the ladder only when a neighbor has
+	// registered a lendable region under an active lease. The roster lives ABOVE cachemeta so
+	// the policy plane never imports the RDMA fabric HAL; a lapsed/reclaimed lease folds to
+	// zero and drops the rung (fail-closed), same prove-it-or-drop-it rule as the far tiers.
+	probe = applyPeerDRAMLenders(probe, defaultPeerDRAMRoster.snapshot(), time.Now().UnixMilli())
 	return cachemeta.ProbedTierProfiles(probe)
 }
 

@@ -445,6 +445,15 @@ func (rt *serveRuntime) wireGateway(sf *serveFlags) {
 	// enumerator is the fenced follow-on #1074 / #987; when it lands, serve.go passes it here
 	// instead of nil and the sweep fires on real residency with no other change. KV is nil for the
 	// same reason (a nil-provider sweep never calls it). See wireKVPressureRelief's honest fence.
+	// Seed the peer-DRAM lender roster from FAK_PEER_DRAM_LENDER (#5083) BEFORE the first
+	// post-decode sweep runs probedTierProfilesForHost, so an operator declaration of a
+	// neighbor's lendable DRAM makes the peer-DRAM-over-RDMA rung (#4306) reachable in this
+	// live serve. Absent the env var this registers nothing and the rung stays out of the
+	// ladder, byte-identical to today. (The live RDMA discovery transport is #3199.)
+	if n := registerPeerDRAMLendersFromEnv(); n > 0 {
+		fmt.Fprintf(os.Stderr, "fak serve: registered %d peer-DRAM lender(s) from %s → remote-DRAM paging rung active (#5083)\n", n, peerDRAMLenderEnvVar)
+	}
+
 	wireKVPressureRelief(rt.srv, rt.chatBackend, nil, nil)
 
 	// Stream every drive-state revision on /v1/fak/session/changes (#630). Wired
