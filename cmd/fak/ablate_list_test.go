@@ -47,8 +47,8 @@ func TestAblateListHuman(t *testing.T) {
 	}
 
 	// Header sanity: the count in the banner must match the catalog size.
-	if !strings.Contains(got, "the cache-lever catalog (8 levers") {
-		t.Errorf("--list banner does not report 8 levers; catalog size drifted or banner stale:\n%s", got)
+	if !strings.Contains(got, "the cache-lever catalog (9 levers") {
+		t.Errorf("--list banner does not report 9 levers; catalog size drifted or banner stale:\n%s", got)
 	}
 }
 
