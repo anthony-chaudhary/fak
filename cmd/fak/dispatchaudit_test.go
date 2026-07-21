@@ -30,7 +30,9 @@ func TestRunDispatchAuditQuarantinesSuspiciousRawWorkerText(t *testing.T) {
 	writeDispatchAuditFixture(t, runsDir, "resolve-1798-20260701-010003.backend", "codex")
 
 	var stdout, stderr strings.Builder
-	code := runDispatchAudit(&stdout, &stderr, []string{"--runs-dir", runsDir})
+	// --window-h=0: the fixture stamp is historic; this test exercises the
+	// quarantine fold, not the #3478 retrospective window.
+	code := runDispatchAudit(&stdout, &stderr, []string{"--runs-dir", runsDir, "--window-h", "0"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr.String())
 	}

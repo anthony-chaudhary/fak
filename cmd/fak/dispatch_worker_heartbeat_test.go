@@ -45,7 +45,9 @@ func TestRunDispatchAuditHeartbeatRecordsStartedRow(t *testing.T) {
 
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	var stdout, stderr strings.Builder
-	code := runDispatchAudit(&stdout, &stderr, []string{"--runs-dir", runsDir, "--heartbeat", "--ledger", ledger})
+	// --window-h=0: the fixture stamps are historic; this test exercises the
+	// heartbeat rows, not the #3478 retrospective window.
+	code := runDispatchAudit(&stdout, &stderr, []string{"--runs-dir", runsDir, "--heartbeat", "--ledger", ledger, "--window-h", "0"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr.String())
 	}
