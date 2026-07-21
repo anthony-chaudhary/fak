@@ -239,6 +239,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Org-policy signing, freshness, and key-distribution model (epic #5315, W2 #5320)](docs/notes/RESEARCH-org-policy-signing-model-2026-07-20.md) -- auto-indexed dated note.
 - [Managed-cache family — own-sessions audit from the durable gateway-usage ledgers](docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md) -- auto-indexed dated note.
 - [Study: vLLM @b6ff8a2f — witnessed inference/serving borrows (#5261-#5262)](docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md) -- auto-indexed dated note.
 - [Study: SGLang @b8ec5449 — RadixAttention serving engine (#5286-#5288)](docs/notes/CONCEPT-STUDY-SGLANG-2026-07-18.md) -- auto-indexed dated note.
