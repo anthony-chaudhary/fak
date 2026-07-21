@@ -415,7 +415,7 @@ func TestDetectors_RepeatFailureAndSuccessLoop(t *testing.T) {
 		t.Errorf("success_loops = %+v, want one row of 8", ra.Behavior.SuccessLoops)
 	}
 	// The rows are scrubbed: hashed signatures, never command text.
-	if sig := ra.Behavior.RepeatFailures[0].Sig; strings.Contains(sig, "go test") || len(sig) != 8 {
+	if sig := ra.Behavior.RepeatFailures[0].Sig; strings.Contains(sig, "go test") || len(sig) != 8 { //boundarylint:ignore CHANGE_DETECTOR_TEST 8 is the fixed hex width of the scrubbed signature hash (a deliberate fixed-width invariant, like sha256 hex being 64), not a growable enumeration total
 		t.Errorf("sig = %q, want an 8-hex hash, never the command", sig)
 	}
 }
