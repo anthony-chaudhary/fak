@@ -105,7 +105,18 @@ type ManagedCacheVars struct {
 	Upgraded uint64            `json:"upgraded"`
 	Reasons  map[string]uint64 `json:"reasons,omitempty"`
 	Wire     string            `json:"wire,omitempty"`
+	// Finding carries the #3620 live-watchdog verdict: FindingUpgradeNeverFired when an
+	// ACTIVE session on a wire that HAS the 1h-TTL lever accrued enough upgrade-eligible
+	// turns with every one refused and zero "upgraded" outcomes — the lever's payoff never
+	// arrived even though the posture claims it. Empty on a healthy, passive, short, or
+	// lever-less session, so the field's presence is itself the alarm.
+	Finding string `json:"finding,omitempty"`
 }
+
+// FindingUpgradeNeverFired is the ManagedCacheVars.Finding value for the #3620 watchdog:
+// posture=ACTIVE, at least the attempt floor accrued, zero upgraded outcomes observed. The
+// guard exit banner prints the same token so the live pane and the exit artifact agree.
+const FindingUpgradeNeverFired = "UPGRADE_NEVER_FIRED"
 
 // WireHasNo1hTTLLever reports whether the resolved wire lacks the Anthropic 1h-TTL upgrade
 // lever — true only on the OpenAI Responses (codex) wire, where the managed-cache lever is the
