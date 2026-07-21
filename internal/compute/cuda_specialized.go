@@ -11,7 +11,7 @@ package compute
 import "C"
 
 import (
-	"fmt"
+	"sync/atomic"
 	"unsafe"
 )
 
