@@ -166,22 +166,29 @@ func runDispatchOrder(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-// readDispatchInput returns the raw JSON bytes from the --in file or stdin, plus an exit code.
-func readDispatchInput(stderr io.Writer, path string) ([]byte, int) {
+// readDispatchStdinOrFile returns the raw JSON bytes from the --in file (or stdin
+// when path is "" or "-"), plus an exit code. label prefixes any error so callers
+// name the failing subcommand.
+func readDispatchStdinOrFile(stderr io.Writer, path, label string) ([]byte, int) {
 	if path == "" || path == "-" {
 		raw, err := io.ReadAll(os.Stdin)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak dispatch order: read stdin: %v\n", err)
+			fmt.Fprintf(stderr, "%s: read stdin: %v\n", label, err)
 			return nil, 1
 		}
 		return raw, 0
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak dispatch order: read %q: %v\n", path, err)
+		fmt.Fprintf(stderr, "%s: read %q: %v\n", label, path, err)
 		return nil, 1
 	}
 	return raw, 0
+}
+
+// readDispatchInput returns the raw JSON bytes from the --in file or stdin, plus an exit code.
+func readDispatchInput(stderr io.Writer, path string) ([]byte, int) {
+	return readDispatchStdinOrFile(stderr, path, "fak dispatch order")
 }
 
 // parseCandidates accepts either a bare JSON array of candidates or an object with a

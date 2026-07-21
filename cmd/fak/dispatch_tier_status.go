@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
@@ -114,20 +113,7 @@ func runDispatchTierStatus(stdout, stderr io.Writer, argv []string) int {
 }
 
 func readTierStatusInput(stderr io.Writer, path string) ([]byte, int) {
-	if path == "" || path == "-" {
-		raw, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak dispatch tier-status: read stdin: %v\n", err)
-			return nil, 1
-		}
-		return raw, 0
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak dispatch tier-status: read %q: %v\n", path, err)
-		return nil, 1
-	}
-	return raw, 0
+	return readDispatchStdinOrFile(stderr, path, "fak dispatch tier-status")
 }
 
 // parseTierStatusInputs accepts a bare JSON array of issue rows or an object with an

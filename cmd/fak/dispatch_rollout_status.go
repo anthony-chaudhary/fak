@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
@@ -133,20 +132,7 @@ func runDispatchRolloutStatus(stdout, stderr io.Writer, argv []string) int {
 }
 
 func readRolloutStatusInput(stderr io.Writer, path string) ([]byte, int) {
-	if path == "" || path == "-" {
-		raw, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak dispatch rollout-status: read stdin: %v\n", err)
-			return nil, 1
-		}
-		return raw, 0
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak dispatch rollout-status: read %q: %v\n", path, err)
-		return nil, 1
-	}
-	return raw, 0
+	return readDispatchStdinOrFile(stderr, path, "fak dispatch rollout-status")
 }
 
 // rolloutStatusClasses is the closed set of work classes a caller may name. A typo
