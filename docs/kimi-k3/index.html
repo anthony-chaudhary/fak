@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kimi K3 for Claude Code, through fak</title>
+  <meta name="description" content="Run Moonshot Kimi K3 from Claude Code through fak, with native max reasoning and the wire contract handled for you.">
+  <meta name="theme-color" content="#08130f">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Kimi K3 for Claude Code, through fak">
+  <meta property="og:description" content="Claude Code on the outside. Kimi K3 on the inside. One guarded launch path.">
+  <meta property="og:image" content="social-card.svg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="../../visuals/brand/fak-favicon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --ink: #eef8ef;
+      --muted: #a9b9ae;
+      --forest: #08130f;
+      --forest-2: #0d1d16;
+      --panel: rgba(18, 38, 28, .78);
+      --line: rgba(210, 236, 218, .14);
+      --acid: #b9f227;
+      --mint: #76e6a5;
+      --orange: #ff8b55;
+      --shadow: 0 28px 80px rgba(0, 0, 0, .34);
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; background: var(--forest); }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 76% 6%, rgba(185, 242, 39, .12), transparent 28rem),
+        radial-gradient(circle at 10% 38%, rgba(118, 230, 165, .08), transparent 34rem),
+        var(--forest);
+      font-family: var(--sans);
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .18;
+      background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: linear-gradient(to bottom, black, transparent 82%);
+    }
+    a { color: inherit; }
+    .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+    .nav {
+      min-height: 82px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-weight: 800; letter-spacing: -.02em; }
+    .brand img { width: 38px; height: 38px; }
+    .brand small { color: var(--muted); font-weight: 500; margin-left: 4px; }
+    .nav-links { display: flex; align-items: center; gap: 24px; font-size: 14px; }
+    .nav-links a { color: var(--muted); text-decoration: none; }
+    .nav-links a:hover { color: var(--ink); }
+    .nav-cta { border: 1px solid var(--line); padding: 10px 15px; border-radius: 999px; }
+    .hero {
+      min-height: 720px;
+      display: grid;
+      grid-template-columns: 1.04fr .96fr;
+      gap: 72px;
+      align-items: center;
+      padding: 88px 0 78px;
+    }
+    .eyebrow { display: flex; align-items: center; gap: 10px; color: var(--mint); font: 700 12px/1 var(--mono); text-transform: uppercase; letter-spacing: .13em; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--acid); box-shadow: 0 0 0 6px rgba(185,242,39,.11); }
+    h1 { max-width: 770px; margin: 25px 0 23px; font-size: clamp(54px, 7vw, 92px); line-height: .94; letter-spacing: -.067em; font-weight: 820; }
+    h1 em { color: var(--acid); font-style: normal; }
+    .lede { max-width: 650px; color: var(--muted); font-size: clamp(18px, 2vw, 22px); line-height: 1.55; }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 34px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 14px 19px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 760; transition: transform .18s ease, border-color .18s ease; }
+    .button:hover { transform: translateY(-2px); }
+    .button.primary { color: #122006; background: var(--acid); box-shadow: 0 12px 35px rgba(185,242,39,.16); }
+    .button.secondary { border: 1px solid var(--line); background: rgba(255,255,255,.025); }
+    .proof-row { display: flex; gap: 28px; margin-top: 44px; color: var(--muted); font-size: 13px; }
+    .proof-row span::before { content: "✓"; color: var(--mint); font-weight: 900; margin-right: 7px; }
+    .terminal-wrap { position: relative; }
+    .orbit { position: absolute; width: 330px; height: 330px; border-radius: 50%; border: 1px solid rgba(185,242,39,.17); right: -82px; top: -70px; }
+    .orbit::after { content: ""; position: absolute; width: 13px; height: 13px; border-radius: 50%; background: var(--acid); top: 46px; left: 48px; box-shadow: 0 0 28px var(--acid); }
+    .terminal { position: relative; overflow: hidden; border: 1px solid rgba(222,246,228,.18); border-radius: 14px; background: rgba(5, 13, 9, .92); box-shadow: var(--shadow); transform: rotate(1.1deg); }
+    .terminal-bar { display: flex; align-items: center; gap: 7px; height: 45px; padding: 0 16px; background: rgba(255,255,255,.045); border-bottom: 1px solid var(--line); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #365044; }
+    .terminal-label { margin-left: auto; color: #6f8478; font: 11px var(--mono); }
+    .terminal-body { padding: 26px 26px 30px; font: 13px/1.75 var(--mono); }
+    .prompt { color: var(--acid); }
+    .dim { color: #6f8478; }
+    .key { color: #7ddfaa; }
+    .value { color: #f4d68a; }
+    .removed { color: #78877e; text-decoration: line-through; }
+    .terminal-rule { height: 1px; background: var(--line); margin: 18px 0; }
+    .reply { color: #dce9df; }
+    .cursor { display: inline-block; width: 7px; height: 14px; margin-left: 4px; vertical-align: -2px; background: var(--acid); animation: blink 1.1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .strip { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(255,255,255,.018); }
+    .strip-inner { min-height: 98px; display: grid; grid-template-columns: 180px repeat(3, 1fr); align-items: center; gap: 28px; }
+    .strip-title { color: #769083; font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+    .strip-item { font-size: 15px; font-weight: 710; }
+    .strip-item small { display: block; color: var(--muted); font-weight: 450; margin-top: 2px; }
+    section { padding: 108px 0; }
+    .section-kicker { color: var(--mint); font: 700 12px var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    h2 { max-width: 780px; margin: 14px 0 18px; font-size: clamp(38px, 5vw, 64px); line-height: 1.02; letter-spacing: -.05em; }
+    .section-intro { max-width: 670px; margin-bottom: 52px; color: var(--muted); font-size: 18px; }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .card { min-height: 255px; padding: 28px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: 0 16px 50px rgba(0,0,0,.11); }
+    .step-num { color: var(--acid); font: 700 12px var(--mono); }
+    .card h3 { margin: 52px 0 12px; font-size: 22px; letter-spacing: -.03em; }
+    .card p { margin: 0; color: var(--muted); font-size: 15px; }
+    .flow { display: grid; grid-template-columns: 1fr 100px 1fr 100px 1fr; align-items: center; margin-top: 55px; }
+    .node { min-height: 156px; display: grid; place-content: center; text-align: center; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.025); }
+    .node strong { display: block; font-size: 19px; }
+    .node span { color: var(--muted); font: 12px var(--mono); margin-top: 7px; }
+    .node.kernel { border-color: rgba(185,242,39,.38); box-shadow: inset 0 0 42px rgba(185,242,39,.04); }
+    .arrow { height: 1px; background: linear-gradient(90deg, var(--line), var(--mint), var(--line)); position: relative; }
+    .arrow::after { content: "›"; position: absolute; right: 2px; top: -15px; color: var(--mint); font-size: 22px; }
+    .launch-panel { display: grid; grid-template-columns: .78fr 1.22fr; gap: 70px; align-items: start; padding: 54px; border: 1px solid rgba(185,242,39,.22); border-radius: 18px; background: linear-gradient(135deg, rgba(185,242,39,.07), rgba(118,230,165,.025)); box-shadow: var(--shadow); }
+    .launch-panel h2 { font-size: clamp(35px, 4vw, 54px); }
+    .launch-panel p { color: var(--muted); }
+    .tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+    .tag { padding: 5px 9px; border-radius: 5px; background: rgba(118,230,165,.1); color: var(--mint); font: 11px var(--mono); }
+    pre { margin: 0 0 12px; padding: 18px; overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; background: #06100b; color: #dce9df; font: 12px/1.7 var(--mono); white-space: pre-wrap; word-break: break-word; }
+    .fine { color: #799084; font-size: 12px; }
+    footer { padding: 50px 0 58px; border-top: 1px solid var(--line); }
+    .footer-inner { display: flex; justify-content: space-between; align-items: center; gap: 30px; color: var(--muted); font-size: 13px; }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 18px; }
+    .footer-links a { text-decoration: none; }
+    .footer-links a:hover { color: var(--ink); }
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr; min-height: auto; gap: 70px; padding-top: 68px; }
+      .terminal-wrap { width: min(620px, 100%); }
+      .strip-inner { grid-template-columns: 1fr 1fr; padding: 26px 0; }
+      .steps { grid-template-columns: 1fr; }
+      .card { min-height: 210px; }
+      .card h3 { margin-top: 34px; }
+      .flow { grid-template-columns: 1fr; gap: 13px; }
+      .arrow { width: 1px; height: 36px; margin: 0 auto; background: linear-gradient(var(--line), var(--mint), var(--line)); }
+      .arrow::after { content: "⌄"; top: 14px; left: -6px; }
+      .launch-panel { grid-template-columns: 1fr; gap: 32px; padding: 36px; }
+    }
+    @media (max-width: 580px) {
+      .shell { width: min(100% - 28px, 1180px); }
+      .nav { min-height: 68px; }
+      .brand small, .nav-links > a:not(.nav-cta) { display: none; }
+      h1 { font-size: clamp(48px, 15vw, 67px); }
+      .hero { padding: 54px 0 60px; }
+      .actions { display: grid; }
+      .button { width: 100%; }
+      .proof-row { flex-direction: column; gap: 8px; margin-top: 28px; }
+      .terminal { transform: none; }
+      .terminal-body { padding: 20px 17px 23px; font-size: 11px; }
+      .orbit { display: none; }
+      .strip-inner { grid-template-columns: 1fr; gap: 17px; }
+      .strip-title { padding-bottom: 5px; border-bottom: 1px solid var(--line); }
+      section { padding: 76px 0; }
+      .launch-panel { padding: 26px 20px; }
+      .footer-inner { align-items: flex-start; flex-direction: column; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <header class="shell nav">
+    <a class="brand" href="https://github.com/anthony-chaudhary/fak" aria-label="fak repository">
+      <img src="../../visuals/brand/fak-mark.svg" alt="fak">
+      <span>fak <small>agent kernel</small></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary navigation">
+      <a href="#how">How it works</a>
+      <a href="#launch">Launch</a>
+      <a class="nav-cta" href="https://github.com/anthony-chaudhary/fak">View on GitHub ↗</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="shell hero">
+      <div>
+        <div class="eyebrow"><span class="pulse"></span> First-class Moonshot route</div>
+        <h1>Claude Code.<br><em>Kimi K3</em> inside.</h1>
+        <p class="lede">Run Moonshot's Kimi K3 behind the Claude Code workflow you already know. fak handles the model-specific wire contract—and keeps the agent boundary explicit.</p>
+        <div class="actions">
+          <a class="button primary" href="#launch">Launch Kimi K3 <span aria-hidden="true">→</span></a>
+          <a class="button secondary" href="https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md#moonshot-kimi-k3">Read the operator guide</a>
+        </div>
+        <div class="proof-row" aria-label="Integration attributes">
+          <span>Native max reasoning</span>
+          <span>Streaming preserved</span>
+          <span>OpenAI-compatible API</span>
+        </div>
+      </div>
+
+      <div class="terminal-wrap" aria-label="Kimi K3 request preview">
+        <div class="orbit" aria-hidden="true"></div>
+        <div class="terminal">
+          <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="terminal-label">fak → api.moonshot.ai</span></div>
+          <div class="terminal-body">
+            <div><span class="prompt">$</span> ./scripts/claude-kimi-k3.sh</div>
+            <div class="dim">routing Claude Code through fak…</div>
+            <div class="terminal-rule"></div>
+            <div>{</div>
+            <div>&nbsp; <span class="key">"model"</span>: <span class="value">"kimi-k3"</span>,</div>
+            <div>&nbsp; <span class="key">"reasoning_effort"</span>: <span class="value">"max"</span>,</div>
+            <div>&nbsp; <span class="removed">"temperature": 0.2,</span></div>
+            <div>&nbsp; <span class="removed">"top_p": 0.95</span></div>
+            <div>}</div>
+            <div class="terminal-rule"></div>
+            <div class="reply">Kimi K3 is ready. What are we building?<span class="cursor"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="strip">
+      <div class="shell strip-inner">
+        <div class="strip-title">The exact route</div>
+        <div class="strip-item">Moonshot global API<small>api.moonshot.ai/v1</small></div>
+        <div class="strip-item">Kimi K3<small>reasoning_effort: max</small></div>
+        <div class="strip-item">Claude Code<small>Bash + PowerShell launchers</small></div>
+      </div>
+    </div>
+
+    <section id="how" class="shell">
+      <div class="section-kicker">Less adapter archaeology</div>
+      <h2>One command. The right contract.</h2>
+      <p class="section-intro">Generic OpenAI defaults are not Kimi K3 defaults. fak identifies the model, shapes the request, and keeps reasoning available across turns.</p>
+      <div class="steps">
+        <article class="card"><div class="step-num">01 / LAUNCH</div><h3>Keep your Claude workflow</h3><p>Start with the repository's opt-in Bash or PowerShell launcher. Claude Code remains the interface and task loop.</p></article>
+        <article class="card"><div class="step-num">02 / NORMALIZE</div><h3>Send K3-native controls</h3><p>fak sets max reasoning and removes incompatible generic sampling fields before the request reaches Moonshot.</p></article>
+        <article class="card"><div class="step-num">03 / PRESERVE</div><h3>Carry reasoning forward</h3><p>Buffered and streamed reasoning content is parsed separately, then preserved for coherent follow-up turns.</p></article>
+      </div>
+      <div class="flow" aria-label="Request path">
+        <div class="node"><strong>Claude Code</strong><span>familiar agent loop</span></div>
+        <div class="arrow" aria-hidden="true"></div>
+        <div class="node kernel"><strong>fak</strong><span>normalize · route · guard</span></div>
+        <div class="arrow" aria-hidden="true"></div>
+        <div class="node"><strong>Kimi K3</strong><span>Moonshot global API</span></div>
+      </div>
+    </section>
+
+    <section id="launch" class="shell">
+      <div class="launch-panel">
+        <div>
+          <div class="section-kicker">Start in sixty seconds</div>
+          <h2>Bring one key.<br>Run one script.</h2>
+          <p>Build fak, expose your Moonshot API key, and choose the launcher for your shell. Override variables are documented in the operator guide.</p>
+          <a class="button secondary" href="https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md#moonshot-kimi-k3">Full setup and overrides ↗</a>
+        </div>
+        <div>
+          <div class="tabs"><span class="tag">macOS / Linux</span></div>
+          <pre><code>export MOONSHOT_API_KEY="your-key"
+./scripts/claude-kimi-k3.sh</code></pre>
+          <div class="tabs"><span class="tag">PowerShell</span></div>
+          <pre><code>$env:MOONSHOT_API_KEY = "your-key"
+.\scripts\claude-kimi-k3.ps1</code></pre>
+          <div class="fine">Your credential stays in the environment. The launcher resolves it by name; it does not write the secret into the repository.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <div>fak × Moonshot Kimi K3 · open-source integration</div>
+      <div class="footer-links"><a href="https://github.com/anthony-chaudhary/fak">Repository</a><a href="https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/kimi_k3.go">Wire contract</a><a href="https://github.com/anthony-chaudhary/fak/issues/5147">Implementation witness</a></div>
+    </div>
+  </footer>
+</body>
+</html>

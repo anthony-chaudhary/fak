@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Kimi K3 for Claude Code, through fak</title>
+  <desc id="desc">A dark green social card with a terminal showing fak routing Claude Code to Kimi K3.</desc>
+  <defs>
+    <radialGradient id="glow" cx="78%" cy="8%" r="75%"><stop offset="0" stop-color="#b9f227" stop-opacity=".2"/><stop offset="1" stop-color="#08130f" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse"><path d="M64 0H0V64" fill="none" stroke="#d2ecda" stroke-opacity=".06"/></pattern>
+    <filter id="shadow"><feDropShadow dx="0" dy="20" stdDeviation="24" flood-opacity=".35"/></filter>
+  </defs>
+  <rect width="1200" height="630" fill="#08130f"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <g transform="translate(74 65)">
+    <rect width="48" height="48" rx="12" fill="#b9f227"/>
+    <path d="M13 17h22M13 24h15M13 31h19" stroke="#132006" stroke-width="4" stroke-linecap="round"/>
+    <text x="62" y="34" fill="#eef8ef" font-family="Inter,Arial,sans-serif" font-weight="800" font-size="28">fak</text>
+    <text x="112" y="34" fill="#819488" font-family="Inter,Arial,sans-serif" font-size="17">agent kernel</text>
+  </g>
+  <g transform="translate(74 180)">
+    <text fill="#76e6a5" font-family="Consolas,monospace" font-weight="700" font-size="16" letter-spacing="2">FIRST-CLASS MOONSHOT ROUTE</text>
+    <text y="83" fill="#eef8ef" font-family="Inter,Arial,sans-serif" font-weight="800" font-size="68" letter-spacing="-4">Claude Code.</text>
+    <text y="157" fill="#b9f227" font-family="Inter,Arial,sans-serif" font-weight="800" font-size="68" letter-spacing="-4">Kimi K3 inside.</text>
+    <text y="210" fill="#a9b9ae" font-family="Inter,Arial,sans-serif" font-size="21">Native max reasoning. The wire contract handled.</text>
+  </g>
+  <g transform="translate(750 145) rotate(1)" filter="url(#shadow)">
+    <rect width="382" height="350" rx="16" fill="#06100b" stroke="#d2ecda" stroke-opacity=".2"/>
+    <path d="M0 48H382" stroke="#d2ecda" stroke-opacity=".13"/>
+    <circle cx="22" cy="24" r="5" fill="#365044"/><circle cx="39" cy="24" r="5" fill="#365044"/><circle cx="56" cy="24" r="5" fill="#365044"/>
+    <text x="277" y="29" fill="#6f8478" font-family="Consolas,monospace" font-size="11">fak → moonshot</text>
+    <g transform="translate(24 84)" font-family="Consolas,monospace" font-size="16">
+      <text fill="#b9f227">$ <tspan fill="#eef8ef">claude-kimi-k3</tspan></text>
+      <text y="43" fill="#6f8478">normalizing request…</text>
+      <text y="92" fill="#dce9df">{</text>
+      <text y="122" fill="#76e6a5">  "model": <tspan fill="#f4d68a">"kimi-k3"</tspan>,</text>
+      <text y="152" fill="#76e6a5">  "reasoning_effort": <tspan fill="#f4d68a">"max"</tspan></text>
+      <text y="182" fill="#dce9df">}</text>
+      <text y="235" fill="#dce9df">Kimi K3 is ready.</text>
+      <rect x="184" y="222" width="8" height="17" fill="#b9f227"/>
+    </g>
+  </g>
+  <text x="74" y="578" fill="#819488" font-family="Consolas,monospace" font-size="15">github.com/anthony-chaudhary/fak</text>
+</svg>
