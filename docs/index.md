@@ -163,6 +163,8 @@ fak guard -- claude          # or: fak guard --provider openai -- opencode
 |---|---|
 | **The principles fak is built to satisfy** | [Charter](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CHARTER.md) |
 | **Structured-output decoding SOTA + fak's ride-mode surface (#907)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-structured-output-decoding-2026-06-26.md) |
+| **Prior art + threat model for a centrally-administered org policy plane (epic #5315)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-org-policy-plane-prior-art-2026-07-20.md) |
+| **Org-policy precedence lattice: compiled-in FROZEN floor > central > operator > agent-self (R3 / #5318)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-org-policy-precedence-2026-07-20.md) |
 | **Keeping a stable core as models × backends × features multiply** | [Combinatorial-growth epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md) |
 | **Constructing many on-demand "views" of the token history at marginal cost (attention/KV side-cars, re-attend tiers)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONTEXT-VIEWS-AT-MARGINAL-COST-2026-07-04.md) |
 | **The quick answers** | [FAQ](FAQ.md) |
