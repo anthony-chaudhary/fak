@@ -227,7 +227,7 @@ func serveNUMARow(f serveHostFacts) serveReadinessRow {
 	default:
 		row.Status = sevOK
 		row.Finding = fmt.Sprintf("%d NUMA nodes online — cross-socket memory bandwidth applies", f.NUMANodes)
-		row.Remediation = fmt.Sprintf("size the decode worker set to the %d nodes and interleave weight placement for best bandwidth", f.NUMANodes)
+		row.Remediation = fmt.Sprintf("size the decode worker threadpool to the %d nodes and interleave weight placement for best bandwidth", f.NUMANodes)
 	}
 	row.Tier = serveTierLabel(row.Status)
 	return row
