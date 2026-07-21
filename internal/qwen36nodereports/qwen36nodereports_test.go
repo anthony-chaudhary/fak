@@ -106,7 +106,9 @@ func TestArchiveCandidatesPrefersNewestBundle(t *testing.T) {
 func TestExtractRejectsUnsafeZipMemberPaths(t *testing.T) {
 	root := t.TempDir()
 	for name, want := range map[string]string{"../escape.txt": "unsafe zip member path", "C:/Users/Public/escape.txt": "unsafe zip member path"} {
-		archive := filepath.Join(root, strings.ReplaceAll(name, "/", "_")+".zip")
+		// The archive FILE name must stay portable (Windows rejects ':' in a path);
+		// only the zip MEMBER name below carries the unsafe path under test.
+		archive := filepath.Join(root, strings.NewReplacer("/", "_", ":", "_", "\\", "_").Replace(name)+".zip")
 		writeZip(t, archive, map[string][]byte{name: []byte("bad")})
 		_, err := ExtractArchive(archive, filepath.Join(root, "out"), false)
 		if err == nil || !strings.Contains(err.Error(), want) {
