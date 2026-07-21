@@ -55,6 +55,31 @@ Then update the catalog:
 python tools/bench_catalog.py update
 ```
 
+> **Note: run dirs are private by default.** The whole
+> `experiments/benchmark/runs/by-machine/` tree is gitignored, so a new run drop
+> will **not** appear in `git status` — that is expected, not a bug. Raw drops are
+> regenerable harness output and routinely carry infrastructure tells (cloud
+> instance names and zones, credential file paths, VM hostnames, accelerator SKUs,
+> local box paths) that must not reach a public clone.
+>
+> The durable public record is the catalog entry: `experiments/benchmark/catalog.json`
+> stays tracked, `update` merges into it (union, never scan-and-replace), and
+> `fak bench-runs list/summary/table/best` read the catalog and work normally.
+> Only `fak bench-runs show` degrades to catalog-entry-only output when the run dir
+> is absent from a clone.
+>
+> To **publish** an artifact, redact it and promote it deliberately. Note there is
+> no per-file scrubber today: `tools/scrub_public_copy.py` is the export-time,
+> repo-wide pass (`--export-dir` over a `git archive HEAD` snapshot), and
+> `tools/scrub_hardware_names.py` only rewrites lab hardware names in `.md` prose.
+> Review the artifact by hand against the tell classes above, then:
+>
+> ```bash
+> git add -f experiments/benchmark/runs/by-machine/<machine-id>/<run-dir>/<file>.json
+> ```
+>
+> A bare `git add` can no longer publish a run drop silently.
+
 ### Query Results
 
 ```bash

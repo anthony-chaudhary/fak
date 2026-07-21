@@ -26,7 +26,7 @@ experiments/benchmark/
 │   └── mac-m3pro/
 │       └── specs.json
 ├── runs/                                 # All benchmark runs
-│   ├── by-machine/                       # Primary: machine-first view
+│   ├── by-machine/                       # Primary: machine-first view (gitignored, see below)
 │   │   ├── anthony-laptop/
 │   │   │   ├── 20250106-120000-rtx4070-q8/
 │   │   │   │   ├── manifest.json         # Run metadata
@@ -49,6 +49,35 @@ experiments/benchmark/
     ├── scaling-curves.html
     └── cost-per-token.html
 ```
+
+### Visibility: `runs/by-machine/` is Private by Default
+
+`runs/by-machine/` is the primary *query* view, not a published one. The whole tree
+is gitignored, so raw per-machine run drops are private by default in every clone
+and never show up in `git status`. Two reasons:
+
+- They are regenerable harness output, not source.
+- They routinely carry infrastructure tells — cloud instance names and zones,
+  credential file paths, VM hostnames, accelerator SKUs, private multi-GPU topology,
+  local box paths — that must not reach a public clone.
+
+The durable public record is the tracked aggregate `catalog.json`. `tools/bench_catalog.py`
+builds it by UNION (merge, not scan-and-replace) and `validate` treats an absent run dir
+as a warning by design, precisely so the artifacts can be gitignored on a driver or
+agent-host clone. `fak bench-runs list/summary/table/best` read the catalog and are
+unaffected; only `show` degrades to catalog-entry-only output.
+
+gitignore is inert for already-tracked paths, so evidence artifacts committed before
+this rule — the authority anchors and the doc-cited run dirs — keep resolving in a
+public clone.
+
+**Promotion path.** To publish a new artifact, redact it first, then promote it
+deliberately with `git add -f <path>`. A bare `git add` can no longer do it
+silently. There is no per-file scrubber today — `tools/scrub_public_copy.py` is
+the export-time, repo-wide pass (`--export-dir` over a `git archive HEAD`
+snapshot) and `tools/scrub_hardware_names.py` only rewrites lab hardware names in
+`.md` prose — so a run artifact must be reviewed by hand against the tell classes
+above. Mechanizing that per-artifact check is a known gap.
 
 ### Naming Convention
 
