@@ -157,7 +157,23 @@ type Aggregate struct {
 	PerModel              map[string]ModelCounts `json:"per_model"`
 	PerBucket             map[string]ModelCounts `json:"per_bucket"`
 	PerTier               map[string]ModelCounts `json:"per_tier"`
-	Distributions         Distributions          `json:"dist"`
+	// ModelIdentities maps every billed raw model id in PerModel to its typed
+	// canonical identity, so the cost artifact carries the RAW and CANONICAL
+	// spellings side by side with resolution provenance (#4635). Non-billed
+	// harness rows are omitted.
+	ModelIdentities map[string]ModelIdentity `json:"model_identities,omitempty"`
+	// UnpricedModels is the explicit UNKNOWN cost hold (#4635): billed raw
+	// model ids with NO pricing provenance at all (no canonical fleet id, no
+	// published card). Their cost is UNKNOWN — excluded from TotalCostUSD and
+	// held, never reported as $0.
+	UnpricedModels []string `json:"unpriced_models,omitempty"`
+	// UnverifiedClaudeIDs are Claude-family spellings that did NOT resolve to
+	// a canonical fleet id but WERE neighbor-priced into TotalCostUSD by the
+	// legacy tier-substring heuristic. Their dollars rest on a heuristic, not
+	// identity provenance — the #4635 overmatch hazard, surfaced explicitly so
+	// a gate can hold on it.
+	UnverifiedClaudeIDs []string      `json:"unverified_claude_ids,omitempty"`
+	Distributions       Distributions `json:"dist"`
 }
 
 type Namespace struct {
@@ -231,6 +247,13 @@ type CompactTotals struct {
 	CacheReadShare     float64 `json:"cache_read_share"`
 	IORatio            float64 `json:"io_ratio"`
 	EstimatedCostUSD   float64 `json:"estimated_cost_usd"`
+	// UnpricedModels / UnverifiedClaudeIDs mirror the aggregate's explicit
+	// UNKNOWN cost hold (#4635) into the machine-readable totals, so a consumer
+	// reading EstimatedCostUSD sees IN THE SAME RECORD that unpriced models are
+	// HELD (excluded, cost unknown) and that any unverified Claude spellings
+	// were neighbor-priced by heuristic — never that unknown meant free.
+	UnpricedModels      []string `json:"unpriced_models,omitempty"`
+	UnverifiedClaudeIDs []string `json:"unverified_claude_ids,omitempty"`
 }
 
 type CompactTier struct {
@@ -533,7 +556,31 @@ func AggregateSessions(sessions []Session) Aggregate {
 		agg.PerBucket[b] = addModelCounts(agg.PerBucket[b], c)
 		t := ModelTier(model)
 		agg.PerTier[t] = addModelCounts(agg.PerTier[t], c)
+		if nonBilled(model) {
+			continue
+		}
+		// Typed identity + explicit UNKNOWN hold (#4635): raw and canonical ids
+		// both land in the artifact, and a model with no pricing provenance is
+		// HELD by name instead of dissolving into a silent $0 (or, for a
+		// Claude-family spelling, a neighboring tier's price).
+		if agg.ModelIdentities == nil {
+			agg.ModelIdentities = map[string]ModelIdentity{}
+		}
+		mi := ResolveModelID(model)
+		agg.ModelIdentities[model] = mi
+		if _, err := StrictModelCostUSD(model, 0, 0, 0, 0); err != nil {
+			if _, priced := PriceFor(model); priced {
+				// Legacy substring pricing DID charge this id (necessarily a
+				// Claude-family spelling — every non-Claude card is admitted by
+				// the strict path), so its dollars are heuristic, not identity.
+				agg.UnverifiedClaudeIDs = append(agg.UnverifiedClaudeIDs, model)
+			} else {
+				agg.UnpricedModels = append(agg.UnpricedModels, model)
+			}
+		}
 	}
+	sort.Strings(agg.UnpricedModels)
+	sort.Strings(agg.UnverifiedClaudeIDs)
 	for ns, models := range nsModels {
 		var top string
 		var topOut, totalOut, opusOut int64
@@ -616,9 +663,11 @@ func BuildCompactReport(sessions []Session, agg Aggregate, nsPrefix string, sinc
 			CacheReadTokens:    agg.Totals.CacheRead,
 			CacheCreateTokens:  agg.Totals.CacheCreate,
 			TotalContextTokens: totalContext,
-			CacheReadShare:     floatRatioValue(float64(agg.Totals.CacheRead), float64(totalContext)),
-			IORatio:            floatRatioValue(float64(totalContext), float64(agg.Totals.Output)),
-			EstimatedCostUSD:   agg.TotalCostUSD,
+			CacheReadShare:      floatRatioValue(float64(agg.Totals.CacheRead), float64(totalContext)),
+			IORatio:             floatRatioValue(float64(totalContext), float64(agg.Totals.Output)),
+			EstimatedCostUSD:    agg.TotalCostUSD,
+			UnpricedModels:      agg.UnpricedModels,
+			UnverifiedClaudeIDs: agg.UnverifiedClaudeIDs,
 		},
 		Tiers:             compactTiers(agg),
 		TopLongContext:    compactLongContext(ok, 10),
@@ -715,11 +764,23 @@ func PriceFor(model string) (Rates, bool) {
 	return Rates{}, false
 }
 
+// CostUSD is the LEGACY lenient cost path: substring tier matching, and 0 for
+// a model with no card. It cannot distinguish "free" from "unknown", so report
+// surfaces must pair it with the explicit UNKNOWN hold the aggregate carries
+// (Aggregate.UnpricedModels / UnverifiedClaudeIDs); callers that need the
+// fail-closed contract use StrictModelCostUSD (#4635).
 func CostUSD(model string, input, cacheWrite, cacheRead, output int64) float64 {
 	r, ok := PriceFor(model)
 	if !ok {
 		return 0
 	}
+	return rawCostUSD(r, input, cacheWrite, cacheRead, output)
+}
+
+// rawCostUSD prices the four billable token axes under one rate card — the one
+// formula both the legacy (CostUSD) and fail-closed (StrictModelCostUSD) paths
+// share, so the two can never diverge on arithmetic, only on admission.
+func rawCostUSD(r Rates, input, cacheWrite, cacheRead, output int64) float64 {
 	return (float64(input)*r.Input + float64(cacheWrite)*r.CacheWrite + float64(cacheRead)*r.CacheRead + float64(output)*r.Output) / 1e6
 }
 
@@ -1131,7 +1192,29 @@ func compactRecommendations(rep CompactReport) []CompactRecommendation {
 	if rec, ok := compactConfusionPressure(rep.Confusion); ok {
 		out = append(out, rec)
 	}
+	if rec, ok := compactUnpricedHold(rep.Totals); ok {
+		out = append(out, rec)
+	}
 	return out
+}
+
+// compactUnpricedHold raises the gate-able UNKNOWN-cost hold (#4635) whenever
+// the window billed a model with no pricing provenance (cost UNKNOWN, held —
+// never $0) or a Claude-family spelling that was neighbor-priced without a
+// canonical identity. High severity: either way EstimatedCostUSD is not yet
+// evidence-grade for the window, which is precisely what a cost gate must see.
+func compactUnpricedHold(t CompactTotals) (CompactRecommendation, bool) {
+	if len(t.UnpricedModels) == 0 && len(t.UnverifiedClaudeIDs) == 0 {
+		return CompactRecommendation{}, false
+	}
+	return compactRecommendation(
+		"unpriced_model_hold",
+		"high",
+		"pin each held model id in the canonical identity table (or its published rate card) before trusting EstimatedCostUSD for this window",
+		"billed model ids without pricing provenance are HELD as UNKNOWN cost, never reported as $0 or a neighboring model's price",
+		fmt.Sprintf("unpriced=%s unverified_claude=%s",
+			strings.Join(t.UnpricedModels, ","), strings.Join(t.UnverifiedClaudeIDs, ",")),
+	), true
 }
 
 func compactOpusCostPressure(tiers []CompactTier) (CompactRecommendation, bool) {
