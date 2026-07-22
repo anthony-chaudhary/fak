@@ -30,6 +30,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -223,4 +225,94 @@ func ctxvalueURL(base string) string {
 		return ""
 	}
 	return base + "/v1/fak/ctxvalue"
+}
+
+// --- Orphan reap for the per-session step-advice sidecars (issue #5353) ---
+//
+// CaptureAndWrite above rewrites one stepadvice-<id>.json per live trace every
+// turn end, so a running trace owns exactly one file. But when the trace ends
+// nothing deletes it: the file is now a disposable KB sidecar with no reader,
+// and orphans accrete one per dead trace (193 seen on the live tree — pure count
+// growth, the WIP-ref leak shape). These two best-effort helpers, kept beside the
+// writer so the delete shape can never drift from the write shape, bound that
+// growth. ReapClosedAdvice removes the CLOSING trace's own file on the clean-exit
+// (SessionEnd) boundary; SweepStaleAdvice removes any sidecar a crashed trace
+// left behind — one whose clean-exit delete never ran — once it is older than a
+// grace floor, so a live trace's current-turn file is never taken.
+
+// advicePrefix / adviceSuffix bracket a per-session sidecar's base name: the
+// exact shape stepbaton.Path writes (stepadvice-<sanitized id>.json). Kept beside
+// the sweep that globs for them so the match can never drift from the write path.
+const advicePrefix = "stepadvice-"
+const adviceSuffix = ".json"
+
+// DefaultStaleFloor is the grace age below which SweepStaleAdvice will not touch a
+// sidecar. It sits far above any plausible turn cadence (a live trace rewrites its
+// file every turn end, seconds to minutes apart), so a current-turn file is never
+// mistaken for an orphan; only a file untouched for a full day — necessarily from
+// a trace whose clean-exit delete never ran — is swept.
+const DefaultStaleFloor = 24 * time.Hour
+
+// ReapClosedAdvice removes the closing trace's own stepadvice-<id>.json from dir —
+// the clean-exit half of the reap, called on the SessionEnd boundary where the
+// trace is gone and the file has no reader. It deletes exactly the one path
+// stepbaton.Path would write for id. BEST-EFFORT: an already-absent file is a
+// success (nil), and any other remove error is returned for the caller to log,
+// never to fail a hook (mirroring the toolproc journal compactor's contract). An
+// empty dir or id is a no-op.
+func ReapClosedAdvice(dir, id string) error {
+	if strings.TrimSpace(dir) == "" || strings.TrimSpace(id) == "" {
+		return nil
+	}
+	if err := os.Remove(stepbaton.Path(dir, id)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// SweepStaleAdvice removes every stepadvice-*.json in dir last modified before
+// now-floor and returns the count removed — the crash-recovery half. A host that
+// dies without a clean SessionEnd never runs ReapClosedAdvice, so its sidecar
+// would leak forever; the age floor collects it while KEEPING any file a live
+// trace rewrote within the floor (its current-turn file). BEST-EFFORT throughout:
+// a missing dir is not an error (nothing to sweep), a stat or remove failure on
+// one entry is skipped so a single stuck file never aborts the pass, a
+// concurrent peer delete of the same orphan simply is not counted, and floor <= 0
+// falls back to DefaultStaleFloor so a mis-wired zero can never sweep a live file.
+func SweepStaleAdvice(dir string, floor time.Duration, now time.Time) (int, error) {
+	if strings.TrimSpace(dir) == "" {
+		return 0, nil
+	}
+	if floor <= 0 {
+		floor = DefaultStaleFloor
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil // no dir yet — nothing to sweep
+		}
+		return 0, err
+	}
+	cutoff := now.Add(-floor)
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, advicePrefix) || !strings.HasSuffix(name, adviceSuffix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue // races a peer write — keep it, a later pass retries
+		}
+		if info.ModTime().After(cutoff) {
+			continue // younger than the floor — a live trace's current file
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err == nil {
+			removed++
+		}
+	}
+	return removed, nil
 }

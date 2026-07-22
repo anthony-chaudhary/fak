@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/hostfault"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/stepbatoncapture"
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
@@ -168,11 +169,39 @@ func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool
 	// there, not here. replaceFileAtomic owns the Windows rename-under-contention
 	// retry; a swap still contended after that is left for the next stop.
 	if kind == "stop" {
+		// Reap the closing trace's step-advice sidecar (#5353). SessionEnd is the
+		// clean-exit boundary the stepbatoncapture writer's per-turn overwrite has no
+		// counterpart for: the stepadvice-<session>.json it rewrote each turn now has
+		// no reader, and orphans accrete one per dead trace. The delete of the closing
+		// trace's own file, plus an age sweep of any sidecar a CRASHED trace left
+		// behind (its clean-exit delete never ran) past the grace floor, run here on
+		// the same rare once-per-session boundary as the compaction below. Both are
+		// BEST-EFFORT and their errors are deliberately swallowed — a KB advisory
+		// sidecar must never mask the compaction fault or fail the hook (the fail-open
+		// contract runToolprocHook renders). The sidecars live at <root>/.fak beside
+		// the journal's <root>/.fak/toolproc, so the sidecar dir is the journal's
+		// grandparent; deriving it from journalPath keeps the reap hermetic under a
+		// test's temp --journal.
+		adviceDir := stepAdviceDirFromJournal(journalPath)
+		_ = stepbatoncapture.ReapClosedAdvice(adviceDir, payload.SessionID)
+		_, _ = stepbatoncapture.SweepStaleAdvice(adviceDir, stepbatoncapture.DefaultStaleFloor, time.Now())
 		if _, err := toolproc.CompactJournalFile(journalPath, toolproc.JournalCompactThresholdBytes, toolproc.JournalCompactTailKeep); err != nil {
 			return fmt.Errorf("journal compaction: %w", err)
 		}
 	}
 	return evErr
+}
+
+// stepAdviceDirFromJournal locates the per-session step-advice sidecar directory
+// from the toolproc journal path. Both are anchored at <root>/.fak by the guard
+// wiring — the journal at <root>/.fak/toolproc/journal.jsonl, the sidecars at
+// <root>/.fak (the trajctl ledger's own dir) — so the sidecar dir is the
+// journal's grandparent. An empty journal path yields "" so the reap no-ops.
+func stepAdviceDirFromJournal(journalPath string) string {
+	if strings.TrimSpace(journalPath) == "" {
+		return ""
+	}
+	return filepath.Dir(filepath.Dir(journalPath))
 }
 
 // appendJournalLines appends lines to the journal at journalPath and closes the
