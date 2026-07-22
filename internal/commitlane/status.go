@@ -2,8 +2,10 @@
 //
 // It observes the two local files that normally block a path-scoped commit:
 // <gitdir>/fak-commit.lock, owned by fak's safecommit path, and <gitdir>/index.lock,
-// owned by git itself. It never removes either file. Process inventory is best-effort
-// and only used to make a lock owner or likely queue visible.
+// owned by git itself — plus the <gitdir>/next-index-<pid>.lock temp files git leaves
+// behind when an index writer dies mid-write (#5338). It never removes any of them.
+// Process inventory is best-effort and only used to make a lock owner or likely queue
+// visible.
 package commitlane
 
 import (
@@ -53,31 +55,48 @@ type FileStatFunc func(path string) FileFact
 
 type ProcessListFunc func(ctx context.Context) ([]Process, error)
 
+// GlobFunc lists the paths matching a shell pattern. It is the read-only seam behind
+// the next-index-*.lock residue scan (default filepath.Glob) so tests can enumerate a
+// fixture set without a real .git directory.
+type GlobFunc func(pattern string) ([]string, error)
+
+// PIDAliveFunc reports whether a pid is currently running. It is the seam behind the
+// dead-owner half of the next-index residue evidence (default safecommit.ProcessAlive).
+type PIDAliveFunc func(pid int) bool
+
 type Options struct {
 	Dir           string
 	Runner        Runner
 	ProbeLock     ProbeLockFunc
 	Stat          FileStatFunc
 	ProcessList   ProcessListFunc
+	Glob          GlobFunc
+	PIDAlive      PIDAliveFunc
 	Now           func() time.Time
 	StaleIndexAge time.Duration
 }
 
 type Report struct {
-	Schema       string        `json:"schema"`
-	OK           bool          `json:"ok"`
-	Verdict      string        `json:"verdict"`
-	Reason       string        `json:"reason,omitempty"`
-	NextAction   string        `json:"next_action,omitempty"`
-	RepoRoot     string        `json:"repo_root,omitempty"`
-	GitDir       string        `json:"git_dir,omitempty"`
-	CommitLock   CommitLock    `json:"commit_lock"`
-	IndexLock    IndexLock     `json:"index_lock"`
-	Owner        *ProcessFact  `json:"owner,omitempty"`
-	Queue        []ProcessFact `json:"queue,omitempty"`
-	LiveWriters  []ProcessFact `json:"live_writers,omitempty"`
-	ProcessProbe string        `json:"process_probe"`
-	Errors       []string      `json:"errors,omitempty"`
+	Schema     string     `json:"schema"`
+	OK         bool       `json:"ok"`
+	Verdict    string     `json:"verdict"`
+	Reason     string     `json:"reason,omitempty"`
+	NextAction string     `json:"next_action,omitempty"`
+	RepoRoot   string     `json:"repo_root,omitempty"`
+	GitDir     string     `json:"git_dir,omitempty"`
+	CommitLock CommitLock `json:"commit_lock"`
+	IndexLock  IndexLock  `json:"index_lock"`
+	// NextIndexLocks is the observed .git/next-index-<pid>.lock residue: the temp files
+	// git writes a new index into before renaming it over .git/index. A writer that dies
+	// mid-write leaves one behind forever — git never reaps them, so they accumulate
+	// alongside the recurring index.lock wedge (#5338). Observation only; nothing here
+	// removes a file.
+	NextIndexLocks []NextIndexLock `json:"next_index_locks,omitempty"`
+	Owner          *ProcessFact    `json:"owner,omitempty"`
+	Queue          []ProcessFact   `json:"queue,omitempty"`
+	LiveWriters    []ProcessFact   `json:"live_writers,omitempty"`
+	ProcessProbe   string          `json:"process_probe"`
+	Errors         []string        `json:"errors,omitempty"`
 }
 
 type CommitLock struct {
@@ -95,6 +114,18 @@ type IndexLock struct {
 	AgeSeconds int64  `json:"age_seconds,omitempty"`
 	StaleHint  bool   `json:"stale_hint,omitempty"`
 	Detail     string `json:"detail,omitempty"`
+}
+
+// NextIndexLock is one observed .git/next-index-<pid>.lock temp file. Unlike index.lock
+// its name carries the writing process's pid, so "dead owner" is provable DIRECTLY
+// (OwnerAlive) rather than inferred from the absence of a matching live writer.
+type NextIndexLock struct {
+	Path       string `json:"path"`
+	PID        int    `json:"pid,omitempty"`
+	OwnerAlive bool   `json:"owner_alive,omitempty"`
+	ModTime    string `json:"mod_time,omitempty"`
+	AgeSeconds int64  `json:"age_seconds,omitempty"`
+	StaleHint  bool   `json:"stale_hint,omitempty"`
 }
 
 type FileFact struct {
@@ -160,6 +191,11 @@ func Status(ctx context.Context, opts Options) (Report, error) {
 
 	rep.CommitLock = probeCommitLock(filepath.Join(rep.GitDir, "fak-commit.lock"), opts.ProbeLock)
 	rep.IndexLock = probeIndexLock(filepath.Join(rep.GitDir, "index.lock"), opts.Stat, now, opts.StaleIndexAge)
+	nextIndex, nerr := probeNextIndexLocks(rep.GitDir, opts.Glob, opts.Stat, opts.PIDAlive, now, opts.StaleIndexAge)
+	rep.NextIndexLocks = nextIndex
+	if nerr != "" {
+		rep.Errors = append(rep.Errors, "next-index scan: "+nerr)
+	}
 
 	procs, perr := opts.ProcessList(ctx)
 	if perr != nil {
@@ -186,6 +222,12 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.ProcessList == nil {
 		opts.ProcessList = DefaultProcessList
+	}
+	if opts.Glob == nil {
+		opts.Glob = filepath.Glob
+	}
+	if opts.PIDAlive == nil {
+		opts.PIDAlive = safecommit.ProcessAlive
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -276,6 +318,60 @@ func probeIndexLock(path string, stat FileStatFunc, now time.Time, staleAge time
 		}
 	}
 	return out
+}
+
+// NextIndexGlob is the filename pattern git leaves behind when an index writer dies
+// between creating its temp index and renaming it over .git/index.
+const NextIndexGlob = "next-index-*.lock"
+
+// nextIndexPIDRe extracts the writing process's pid from a next-index temp filename.
+var nextIndexPIDRe = regexp.MustCompile(`(?i)^next-index-(\d+)\.lock$`)
+
+// probeNextIndexLocks enumerates the .git/next-index-<pid>.lock residue and ages each
+// entry, exactly like probeIndexLock does for the single index.lock. It NEVER removes a
+// file — the reap decision is DecideNextIndexReclaim's and the removal is the CLI
+// actuator's. A file that vanishes between the glob and the stat is simply dropped: it
+// is already gone, so there is nothing left to reclaim. Returns a non-empty string when
+// the scan itself failed, so the caller can surface it as a report error rather than
+// silently reporting "no residue" from a broken probe.
+func probeNextIndexLocks(gitDir string, glob GlobFunc, stat FileStatFunc, alive PIDAliveFunc, now time.Time, staleAge time.Duration) ([]NextIndexLock, string) {
+	if strings.TrimSpace(gitDir) == "" {
+		return nil, ""
+	}
+	matches, err := glob(filepath.Join(gitDir, NextIndexGlob))
+	if err != nil {
+		return nil, err.Error()
+	}
+	sort.Strings(matches)
+	out := make([]NextIndexLock, 0, len(matches))
+	for _, path := range matches {
+		f := stat(path)
+		if !f.Exists {
+			// Raced away (or unstattable) between the glob and the stat — nothing to reap.
+			continue
+		}
+		row := NextIndexLock{Path: path}
+		if m := nextIndexPIDRe.FindStringSubmatch(filepath.Base(path)); m != nil {
+			if pid, cerr := strconv.Atoi(m[1]); cerr == nil && pid > 0 {
+				row.PID = pid
+				row.OwnerAlive = alive(pid)
+			}
+		}
+		if !f.ModTime.IsZero() {
+			age := now.Sub(f.ModTime)
+			if age < 0 {
+				age = 0
+			}
+			row.ModTime = f.ModTime.UTC().Format(time.RFC3339)
+			row.AgeSeconds = int64(age / time.Second)
+			row.StaleHint = staleAge > 0 && age >= staleAge
+		}
+		out = append(out, row)
+	}
+	if len(out) == 0 {
+		return nil, ""
+	}
+	return out, ""
 }
 
 func finalize(rep *Report) {

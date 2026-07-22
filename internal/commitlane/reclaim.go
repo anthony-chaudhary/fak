@@ -47,6 +47,11 @@ const (
 	// grace window — a writer could be mid-write between process samples. Keep until it
 	// ages past the window.
 	ReclaimKeepFresh IndexLockReclaimReason = "keep_fresh"
+	// ReclaimKeepLiveOwner: a next-index-<pid>.lock whose named pid is STILL RUNNING.
+	// Only reachable for next-index residue, whose filename carries its writer's pid —
+	// index.lock has no owner to name. Keep: that process may still rename the temp file
+	// over .git/index, and deleting it would corrupt an in-flight index write.
+	ReclaimKeepLiveOwner IndexLockReclaimReason = "keep_live_owner"
 )
 
 // IndexLockReclaimDecision is the read-only verdict on whether a stale git index.lock
@@ -83,4 +88,51 @@ func DecideIndexLockReclaim(rep Report) IndexLockReclaimDecision {
 		d.Reason = ReclaimReapStale
 	}
 	return d
+}
+
+// NextIndexReclaim is the per-file reclaim verdict for one observed
+// .git/next-index-<pid>.lock temp file, in the same closed reason vocabulary as the
+// index.lock decision so a loop can match reasons without parsing prose.
+type NextIndexReclaim struct {
+	Path   string                 `json:"path"`
+	PID    int                    `json:"pid,omitempty"`
+	Reap   bool                   `json:"reap"`
+	Reason IndexLockReclaimReason `json:"reason"`
+}
+
+// DecideNextIndexReclaim maps a lane Report to one verdict per observed next-index temp
+// file WITHOUT touching any file. It carries the SAME evidence bar as the index.lock
+// decision — the probe must have run cleanly (a failed probe fails CLOSED) and no
+// matching live git/fak writer may exist — and then adds the two per-file gates:
+//
+//   - the named owner pid must be DEAD. This is evidence index.lock cannot offer: a
+//     next-index filename embeds the pid of the process writing it, so a live owner is a
+//     direct refutation of "orphaned", not an inference from a process-name match.
+//   - the file must be stale past the grace window, so a writer that is merely slow
+//     between process samples is never raced.
+//
+// Reap is again the sole fall-through: it is unreachable unless every guard passes.
+func DecideNextIndexReclaim(rep Report) []NextIndexReclaim {
+	if len(rep.NextIndexLocks) == 0 {
+		return nil
+	}
+	out := make([]NextIndexReclaim, 0, len(rep.NextIndexLocks))
+	for _, lock := range rep.NextIndexLocks {
+		d := NextIndexReclaim{Path: lock.Path, PID: lock.PID}
+		switch {
+		case rep.ProcessProbe != "ok":
+			d.Reason = ReclaimKeepProbeFailed
+		case len(rep.LiveWriters) > 0:
+			d.Reason = ReclaimKeepLiveWriter
+		case lock.OwnerAlive:
+			d.Reason = ReclaimKeepLiveOwner
+		case !lock.StaleHint:
+			d.Reason = ReclaimKeepFresh
+		default:
+			d.Reap = true
+			d.Reason = ReclaimReapStale
+		}
+		out = append(out, d)
+	}
+	return out
 }

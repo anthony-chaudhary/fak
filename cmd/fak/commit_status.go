@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/commitlane"
@@ -15,8 +16,9 @@ import (
 
 var commitStatusFn = commitlane.Status
 
-// removeIndexLockFn removes a reclaimed stale .git/index.lock. Indirected so the
-// reclaim actuator is testable without touching a real lock file.
+// removeIndexLockFn removes a reclaimed stale .git/index.lock or an orphaned
+// .git/next-index-<pid>.lock. Indirected so the reclaim actuator is testable without
+// touching a real lock file.
 var removeIndexLockFn = os.Remove
 
 func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
@@ -24,8 +26,8 @@ func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	asJSON := fs.Bool("json", false, "emit the commit-lane status as JSON")
-	reclaim := fs.Bool("reclaim-stale-index-lock", false, "reclaim an orphaned .git/index.lock when the lane evidence proves it stale with no live writer (dry-run unless --apply)")
-	apply := fs.Bool("apply", false, "with --reclaim-stale-index-lock, actually remove the lock (default: dry-run)")
+	reclaim := fs.Bool("reclaim-stale-index-lock", false, "reclaim an orphaned .git/index.lock, and sweep leftover .git/next-index-<pid>.lock residue, when the lane evidence proves them stale with no live writer (dry-run unless --apply)")
+	apply := fs.Bool("apply", false, "with --reclaim-stale-index-lock, actually remove the reclaimed files (default: dry-run)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -54,30 +56,119 @@ func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
 }
 
 // runIndexLockReclaim applies the stale-.git/index.lock reclaim decision derived from
-// the lane report (#5294). It NEVER removes a lock the decision would keep: only the
-// present + probe-ok + no-live-writer + stale-past-grace signature reaps, and even then
-// only with --apply — the default is a dry-run that reports what it would do. A lock
-// another session already cleared is idempotent success, not an error.
+// the lane report (#5294), then sweeps the orphaned .git/next-index-<pid>.lock residue
+// git leaves behind and never reaps (#5338). It NEVER removes a file the decision would
+// keep: only the present + probe-ok + no-live-writer + stale-past-grace signature reaps,
+// and even then only with --apply — the default is a dry-run that reports what it would
+// do. A file another session already cleared is idempotent success, not an error.
+//
+// The two sweeps share one flag because they share one cause: an index writer that died
+// mid-write leaves BOTH the lock that wedges the lane and the temp file that accumulates
+// behind it. Reclaiming only the lock is what let 60+ next-index files pile up.
 func runIndexLockReclaim(stdout, stderr io.Writer, rep commitlane.Report, apply bool) int {
+	code := 0
 	d := commitlane.DecideIndexLockReclaim(rep)
-	if !d.Reap {
+	switch {
+	case !d.Reap:
 		fmt.Fprintf(stdout, "index.lock: no reclaim (%s) %s\n", d.Reason, d.Path)
-		return 0
-	}
-	if !apply {
+	case !apply:
 		fmt.Fprintf(stdout, "index.lock: WOULD reclaim (%s) %s — re-run with --apply to remove\n", d.Reason, d.Path)
+	default:
+		err := removeIndexLockFn(d.Path)
+		switch {
+		case err == nil:
+			fmt.Fprintf(stdout, "index.lock: reclaimed stale orphan (%s) %s\n", d.Reason, d.Path)
+		case errors.Is(err, os.ErrNotExist):
+			fmt.Fprintf(stdout, "index.lock: already cleared %s\n", d.Path)
+		default:
+			fmt.Fprintf(stderr, "fak commit status: reclaim failed: %v\n", err)
+			code = 1
+		}
+	}
+	if c := runNextIndexReclaim(stdout, stderr, rep, apply); c != 0 {
+		code = c
+	}
+	return code
+}
+
+// runNextIndexReclaim reaps the orphaned .git/next-index-<pid>.lock residue under the
+// same flag, the same --apply gate and the same actuator as the index.lock reclaim,
+// removing only the files DecideNextIndexReclaim proved reapable (dead named owner, no
+// live writer, stale past the grace window). Output is summarized rather than per-file:
+// this residue accumulates into the dozens, and an operator needs the count and the keep
+// reasons — not sixty identical lines. Prints nothing when there is no residue, so a
+// clean repo's reclaim output is unchanged.
+func runNextIndexReclaim(stdout, stderr io.Writer, rep commitlane.Report, apply bool) int {
+	decisions := commitlane.DecideNextIndexReclaim(rep)
+	if len(decisions) == 0 {
 		return 0
 	}
-	if err := removeIndexLockFn(d.Path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(stdout, "index.lock: already cleared %s\n", d.Path)
-			return 0
+	var reapable []commitlane.NextIndexReclaim
+	kept := map[commitlane.IndexLockReclaimReason]int{}
+	for _, d := range decisions {
+		if d.Reap {
+			reapable = append(reapable, d)
+			continue
 		}
-		fmt.Fprintf(stderr, "fak commit status: reclaim failed: %v\n", err)
+		kept[d.Reason]++
+	}
+	switch {
+	case len(reapable) == 0:
+		fmt.Fprintf(stdout, "next-index residue: %d file(s) — no reclaim (%s)\n", len(decisions), keepReasonSummary(kept))
+		return 0
+	case !apply:
+		fmt.Fprintf(stdout, "next-index residue: %d file(s) — WOULD reclaim %d%s — re-run with --apply to remove\n",
+			len(decisions), len(reapable), keptSuffix(kept))
+		return 0
+	}
+	removed, code := 0, 0
+	for _, d := range reapable {
+		// An already-cleared file is success: a peer session reclaiming the same residue
+		// concurrently is the expected case on a shared trunk, not a failure.
+		if err := removeIndexLockFn(d.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "fak commit status: next-index reclaim failed: %v\n", err)
+			code = 1
+			continue
+		}
+		removed++
+	}
+	fmt.Fprintf(stdout, "next-index residue: reclaimed %d of %d stale orphan(s)%s\n", removed, len(decisions), keptSuffix(kept))
+	return code
+}
+
+// keepReasonSummary renders the kept-file tally as a stable, sorted, closed-vocabulary
+// string (e.g. "keep_fresh=2, keep_live_owner=1") so an operator — and a test — can read
+// WHY files survived without a per-file dump.
+func keepReasonSummary(kept map[commitlane.IndexLockReclaimReason]int) string {
+	if len(kept) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(kept))
+	for reason, n := range kept {
+		parts = append(parts, fmt.Sprintf("%s=%d", reason, n))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ", ")
+}
+
+func keptSuffix(kept map[commitlane.IndexLockReclaimReason]int) string {
+	if len(kept) == 0 {
+		return ""
+	}
+	return " (kept " + keepReasonSummary(kept) + ")"
+}
+
+// runCommitReclaimAlias backs `fak commit --reclaim-stale-index-lock`, the alias that
+// makes the recovery reachable from where the wedge is actually hit (#5338). It resolves
+// the report and hands off to the SAME decision + actuator path as
+// `fak commit status --reclaim-stale-index-lock`, so the two entry points cannot drift.
+func runCommitReclaimAlias(stdout, stderr io.Writer, dir string, apply bool) int {
+	rep, err := commitStatusFn(context.Background(), commitlane.Options{Dir: dir})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak commit: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "index.lock: reclaimed stale orphan (%s) %s\n", d.Reason, d.Path)
-	return 0
+	return runIndexLockReclaim(stdout, stderr, rep, apply)
 }
 
 func renderCommitStatus(w io.Writer, rep commitlane.Report) {

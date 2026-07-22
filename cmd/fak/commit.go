@@ -106,6 +106,8 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	reviewEndpoint := fs.String("review-endpoint", envOrDefault("FAK_REVIEW_ENDPOINT", "http://127.0.0.1:8080/v1"), "OpenAI-compatible base URL for --review-model")
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var holding the bearer token for --review-endpoint (empty value sends no token)")
 	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit")
+	reclaimLock := fs.Bool("reclaim-stale-index-lock", false, "RECOVERY (no commit): reclaim an orphaned .git/index.lock, and sweep leftover .git/next-index-<pid>.lock residue, when the lane evidence proves them stale with no live writer — dry-run unless --apply. Same path as `fak commit status --reclaim-stale-index-lock`")
+	reclaimApply := fs.Bool("apply", false, "with --reclaim-stale-index-lock, actually remove the reclaimed files (default: dry-run)")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -116,6 +118,15 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 	*dir = pathutil.ExpandTilde(*dir)
 	paths = append(paths, fs.Args()...)
+
+	// --reclaim-stale-index-lock aliases the `fak commit status` recovery onto `fak commit`
+	// itself (#5338). A committer meets the lock wedge HERE, so the way out has to be
+	// discoverable from `fak commit --help` — not only from a sibling subcommand they have
+	// no reason to run while their commit is refusing. It is a RECOVERY mode, not a commit:
+	// it needs neither a message nor paths, and returns before any commit machinery runs.
+	if *reclaimLock {
+		return runCommitReclaimAlias(stdout, stderr, *dir, *reclaimApply)
+	}
 
 	// --preview is a no-op dry run: lint the message + paths so a bad subject/stamp is caught
 	// BEFORE the commit lands (on the shared trunk you cannot amend — a sibling may push your
@@ -625,6 +636,12 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 		fmt.Fprintf(stdout, ": %s", res.Detail)
 	}
 	fmt.Fprintln(stdout)
+	// A LOCK_BUSY refusal is the exact moment a committer needs the reclaim path, and the
+	// exact moment they cannot go looking for it. Name it inline (#5338). It stays advisory:
+	// the reclaim itself still refuses unless the lane evidence proves the lock orphaned.
+	if res.Reason == safecommit.ReasonLockBusy {
+		fmt.Fprintln(stdout, "  wedged? if the holder is dead, `fak commit --reclaim-stale-index-lock` shows what is reclaimable (add --apply to remove); `fak commit status` shows the live owner")
+	}
 	renderCommitScore(stdout, res)
 	renderCommitVelocity(stdout, res)
 	renderCommitReview(stdout, res)
