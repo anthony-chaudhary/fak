@@ -592,6 +592,10 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// surface that count here (silence is not success). Best-effort, empty when
 		// nothing is outstanding.
 		emit(guardToolprocSummary(time.Now()))
+		// The injected-directive negframe signal (#3568): which arm of the #3546 steerability
+		// A/B this session ran, plus the post-reframe residual negatives and the
+		// fail-safe-to-verbatim fallbacks. Best-effort — silent when nothing was injected.
+		emit(guardNegframeSummary())
 		emit(guardTrajectoryWarningLine())
 		// The context-health verdict (#3099): fold this session's LIVE trajectory
 		// corpus through the #3098 HEALTHY/STALL/DRIFT/DETOUR_OVERRUN scorer + the
