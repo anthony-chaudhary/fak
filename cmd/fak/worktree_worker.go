@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
@@ -48,7 +53,12 @@ fak worktree <subcommand>
                    Apply the worktree's diff-since-base onto the trunk as one
                    signed-off commit. Prints {ok, applied, committed, ...}.
       reap --worktree D
-                   Force-remove a finished worker worktree. Prints {ok, removed, ...}.
+                   Force-remove ONE finished worker worktree. Prints {ok, removed, ...}.
+      reap --all-cold [--apply] [--age-floor-min N]
+                   Bulk cold sweep: enumerate every worker worktree and reap only the
+                   COLD ones (their lane lease is dead AND they are past the age floor).
+                   DRY-RUN by default — reports the would-reap set and deletes nothing;
+                   pass --apply (or FAK_WORKTREE_COLD_COLLECT=apply) to actually collect.
       list         List the live per-worker worktrees. Prints {count, paths}.
 `))
 }
@@ -171,21 +181,193 @@ func worktreeWorkerLand(argv []string) {
 }
 
 func worktreeWorkerReap(argv []string) {
-	fs := flag.NewFlagSet("worktree worker reap", flag.ExitOnError)
-	worktree := fs.String("worktree", "", "the worker's worktree dir to force-remove (required)")
-	root := fs.String("root", "", "repo root (default: discover from cwd)")
-	fs.Parse(argv)
+	flags := flag.NewFlagSet("worktree worker reap", flag.ExitOnError)
+	worktree := flags.String("worktree", "", "the worker's worktree dir to force-remove (single-worktree mode)")
+	allCold := flags.Bool("all-cold", false, "bulk mode: enumerate ALL worker worktrees and reap only the COLD ones (dead lane lease AND past the age floor). DRY-RUN unless --apply")
+	apply := flags.Bool("apply", false, "with --all-cold, actually delete the cold worktrees (default: dry-run report only). Env "+worktreeColdApplyEnv+"=apply is equivalent")
+	ageFloorMin := flags.Int("age-floor-min", int(workerworktree.DefaultColdAgeFloor/time.Minute), "with --all-cold, the age grace floor in minutes — a dead-lease worktree younger than this is kept")
+	root := flags.String("root", "", "repo root (default: discover from cwd)")
+	flags.Parse(argv)
+
+	repoRoot := worktreeWorkerRoot(*root)
+
+	if *allCold {
+		worktreeWorkerReapAllCold(repoRoot, *apply, time.Duration(*ageFloorMin)*time.Minute)
+		return
+	}
 
 	if strings.TrimSpace(*worktree) == "" {
-		fmt.Fprintln(os.Stderr, "fak worktree worker reap: --worktree is required")
+		fmt.Fprintln(os.Stderr, "fak worktree worker reap: --worktree is required (or pass --all-cold for the bulk cold sweep)")
 		os.Exit(2)
 	}
-	repoRoot := worktreeWorkerRoot(*root)
 	res := workerworktree.Reap(repoRoot, strings.TrimSpace(*worktree), nil)
 	worktreeWorkerEmit(res)
 	if !res.OK {
 		os.Exit(1)
 	}
+}
+
+// worktreeColdApplyEnv opts the bulk cold sweep into DELETING rather than reporting.
+// The sweep DEFAULTS to a dry-run — it deletes only under an explicit apply opt-in
+// (this env set to "apply", or the --apply flag) — mirroring the census keep-side
+// default the sibling deleters land (#5079 grace-prune, #5349 growthgate's
+// FAK_GARDEN_GROWTH_COLLECT=apply). A false reap of a live worker's worktree corrupts
+// an in-flight land, so the collect side is never the default.
+const worktreeColdApplyEnv = "FAK_WORKTREE_COLD_COLLECT"
+
+// worktreeColdReapItem is one worktree's line in the bulk-sweep ledger: the pure
+// cold decision (path, age, lease-live, eligible, reason) plus its on-disk bytes and,
+// under --apply, whether it was actually removed.
+type worktreeColdReapItem struct {
+	workerworktree.ColdWorktree
+	Bytes   int64 `json:"bytes"`
+	Removed bool  `json:"removed,omitempty"`
+}
+
+// worktreeColdReapOut is the single JSON object the bulk cold sweep prints: the mode
+// (dry-run|apply), the age floor, the per-worktree decision ledger, and the roll-up
+// counts/bytes. In dry-run Reaped is always 0 and Bytes is the reclaimable total.
+type worktreeColdReapOut struct {
+	Mode        string                 `json:"mode"`
+	AgeFloorMin int                    `json:"age_floor_min"`
+	Worktrees   []worktreeColdReapItem `json:"worktrees"`
+	WouldReap   int                    `json:"would_reap"`
+	Reaped      int                    `json:"reaped"`
+	Bytes       int64                  `json:"bytes"`
+	ReapedBytes int64                  `json:"reaped_bytes"`
+}
+
+// worktreeWorkerReapAllCold is the bulk cold sweep (#5351): enumerate every worker
+// worktree, decide which are COLD (dead lane lease AND past the age floor) via the
+// pure workerworktree.ColdReapList plan, and — only under an explicit apply opt-in —
+// Reap each cold one with the SAME per-id workerworktree.Reap the single mode uses.
+// The default is a DRY-RUN that ledgers the would-reap set and deletes nothing.
+func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Duration) {
+	if !apply && strings.EqualFold(strings.TrimSpace(os.Getenv(worktreeColdApplyEnv)), "apply") {
+		apply = true
+	}
+	out := worktreeColdReapReport(repoRoot, apply, ageFloor, time.Now())
+	worktreeWorkerEmit(out)
+	// The human one-liner goes to stderr so stdout stays exactly one JSON object.
+	kept := len(out.Worktrees) - out.WouldReap
+	if apply {
+		fmt.Fprintf(os.Stderr, "reaped %d/%d cold worktrees (%s), %d live/young kept (apply)\n",
+			out.Reaped, out.WouldReap, humanBytes(out.ReapedBytes), kept)
+	} else {
+		fmt.Fprintf(os.Stderr, "would reap %d cold worktrees (%s), 0 deleted (dry-run; pass --apply to collect), %d live/young kept\n",
+			out.WouldReap, humanBytes(out.Bytes), kept)
+	}
+}
+
+// worktreeColdReapReport is the core of the bulk cold sweep, split out so a test drives
+// it directly against a real repo without going through argv/stdout. It enumerates the
+// worker worktrees, decides the cold set via workerworktree.ColdReapList under the
+// lease-liveness gate, and — only when apply is true — Reaps each cold one. It NEVER
+// deletes in dry-run: Reaped/ReapedBytes stay 0 and Bytes is the reclaimable total.
+func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration, now time.Time) worktreeColdReapOut {
+	if ageFloor <= 0 {
+		ageFloor = workerworktree.DefaultColdAgeFloor
+	}
+	oracle := worktreeLiveLeaseOracle(repoRoot, now)
+	plan := workerworktree.ColdReapList(repoRoot, nil, now, ageFloor, oracle)
+
+	out := worktreeColdReapOut{
+		Mode:        "dry-run",
+		AgeFloorMin: int(ageFloor / time.Minute),
+		Worktrees:   make([]worktreeColdReapItem, 0, len(plan)),
+	}
+	if apply {
+		out.Mode = "apply"
+	}
+	for _, c := range plan {
+		item := worktreeColdReapItem{ColdWorktree: c, Bytes: worktreeDirBytes(c.Path)}
+		if c.Eligible {
+			out.WouldReap++
+			out.Bytes += item.Bytes
+			if apply {
+				if res := workerworktree.Reap(repoRoot, c.Path, nil); res.Removed {
+					item.Removed = true
+					out.Reaped++
+					out.ReapedBytes += item.Bytes
+				}
+			}
+		}
+		out.Worktrees = append(out.Worktrees, item)
+	}
+	return out
+}
+
+// worktreeLiveLeaseOracle builds the lease-liveness gate the bulk cold sweep keys on:
+// a worktree is protected (treated as live) when a LIVE lane lease shares its lane. It
+// reads leaseref's live records — the SAME TTL-based liveness the dispatcher's own lane
+// admission uses (acquireDispatchLaneLease) — so it keys on the lease's own expiry, not
+// a dead pid (a dead pid on a lease is EXPECTED and does not alone prove staleness).
+// FAIL TOWARD KEEPING: if the lease store cannot be read, every worktree is protected,
+// so an unreadable store never causes a false reap.
+func worktreeLiveLeaseOracle(root string, now time.Time) workerworktree.LeaseLiveFn {
+	live, _, err := leaseref.NewInDir(root).Live(context.Background(), now)
+	if err != nil {
+		return func(string) bool { return true }
+	}
+	lanes := map[string]bool{}
+	for _, rec := range live {
+		for _, lane := range dispatchLeaseLanes(rec.ID) {
+			lanes[strings.ToLower(lane)] = true
+		}
+	}
+	return func(wtPath string) bool {
+		lane := workerworktree.LaneOf(wtPath)
+		if lane == "" {
+			return true // unclassifiable worktree -> keep
+		}
+		return lanes[strings.ToLower(lane)]
+	}
+}
+
+// dispatchLeaseLanes returns the candidate lane token(s) a dispatch lease id binds to.
+// Lease ids are "resolve-<lane>" (a lane lease) or "resolve-<lane>-<issue>" (an issue
+// lease) — see dispatchLaneLeaseID / dispatchIssueLeaseID. Both the full tail and the
+// issue-suffix-stripped tail are returned so a worktree lane matches either form; a
+// non-resolve id yields nothing.
+func dispatchLeaseLanes(id string) []string {
+	rest := strings.TrimPrefix(id, "resolve-")
+	if rest == id || rest == "" {
+		return nil
+	}
+	out := []string{rest}
+	if i := strings.LastIndex(rest, "-"); i > 0 && isDigitsOnly(rest[i+1:]) {
+		out = append(out, rest[:i])
+	}
+	return out
+}
+
+func isDigitsOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// worktreeDirBytes is the on-disk size of a worktree, for the reclaimable-bytes ledger.
+// Best-effort: an unreadable dir or entry is skipped (counts 0), never an error — the
+// bytes total is a report field, not a gate.
+func worktreeDirBytes(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, ierr := d.Info(); ierr == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 // worktreeWorkerListOut is the list JSON: a count and the sorted live-worktree
