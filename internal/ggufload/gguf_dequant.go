@@ -131,6 +131,11 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 			return 0, fmt.Errorf("gguf: tensor %s Q1_0 element count %d is not a multiple of 128", t.Name, elems)
 		}
 		return elems / 128 * blockQ1_0Bytes, nil
+	case TensorHQQ4:
+		if elems%qkHQQ4 != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s HQQ4 element count %d is not a multiple of %d", t.Name, elems, qkHQQ4)
+		}
+		return elems / qkHQQ4 * blockHQQ4Bytes, nil
 	default:
 		return 0, fmt.Errorf("gguf: tensor %s type %d does not have a simple f32 payload", t.Name, t.Type)
 	}
@@ -299,6 +304,11 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			return nil, err
 		}
 		dequantQ1_0Scalar(out, raw)
+	case TensorHQQ4:
+		if _, err := checkQuantPayload(t, elems, raw, qkHQQ4, blockHQQ4Bytes, "HQQ4"); err != nil {
+			return nil, err
+		}
+		dequantHQQ4Scalar(out, raw)
 	case TensorQ4_1:
 		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_1Bytes, "Q4_1"); err != nil {
 			return nil, err
@@ -424,6 +434,33 @@ func dequantQ1_0Scalar(out []float32, raw []byte) {
 		for j := 0; j < 128; j++ {
 			q := (qs[j/8] >> uint(j%8)) & 1
 			out[block*128+j] = float32(2*int(q)-1) * d
+		}
+	}
+}
+
+// dequantHQQ4Scalar expands a 4-bit HQQ (Half-Quadratic Quantization) group — the
+// Bonsai VLM vision-tower quant (#4876). Unlike the ggml k-quants, HQQ reconstructs
+// in the QUANTIZED domain: y = scale*(q - zero), where q is the raw 4-bit code
+// (0..15) and BOTH scale and zero are learned fp16 per-group parameters. Each
+// qkHQQ4=64-element group packs a little-endian f16 scale, a little-endian f16 zero,
+// then qkHQQ4/2 bytes of split-half interleaved 4-bit codes — the low nibble of byte
+// j is element j, the high nibble is element j+qkHQQ4/2 (the Q4_0/Q4_1 nibble order,
+// NOT re-centered by -8). This is the pure HQQ dequant math (mobiusml/hqq
+// Quantizer.dequantize, W_r=(W_q-zero)*scale); the group size (64), the fp16
+// scale/zero encoding, and the GGUF block/tag layout are the invalidating
+// assumptions to confirm against a real Bonsai mmproj header (see TensorHQQ4).
+func dequantHQQ4Scalar(out []float32, raw []byte) {
+	for block := 0; block < len(out)/qkHQQ4; block++ {
+		base := block * blockHQQ4Bytes
+		scale := f16At(raw, base)
+		zero := f16At(raw, base+2)
+		qs := raw[base+4 : base+blockHQQ4Bytes]
+		yi := block * qkHQQ4
+		for j := 0; j < qkHQQ4/2; j++ {
+			q0 := float32(int(qs[j] & 0x0f))
+			q1 := float32(int(qs[j] >> 4))
+			out[yi+j] = scale * (q0 - zero)
+			out[yi+j+qkHQQ4/2] = scale * (q1 - zero)
 		}
 	}
 }

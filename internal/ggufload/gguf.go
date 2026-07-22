@@ -51,6 +51,17 @@ const (
 	// (#4871) — one f16 scale + 128 contiguous 1-bit codes (16 B) per 128-element
 	// group = 18 bytes per block, ~1.125 bpw.
 	blockQ1_0Bytes = 18
+	// HQQ 4-bit (Bonsai VLM vision tower, #4876): Half-Quadratic Quantization is a
+	// distinct scheme from the ggml k-quants — its reconstruction is affine in the
+	// QUANTIZED domain, y = scale*(q - zero), with an fp16 scale AND an fp16 zero-point
+	// per group (Q4_1 folds a min in the DEQUANTIZED domain instead, and Q4_0/Q4_K
+	// re-center codes by a fixed offset, not a learned per-group zero). Group size is
+	// the HQQ 4-bit default of 64; the block packs one f16 scale, one f16 zero, then
+	// qkHQQ4/2 bytes of split-half interleaved 4-bit codes (byte j low nibble = element
+	// j, high nibble = element j+qkHQQ4/2) = 36 bytes per 64-element group ≈ 4.5 bpw
+	// (4 code bits + 2×16/64 metadata bits). See dequantHQQ4Scalar for the math.
+	qkHQQ4         = 64
+	blockHQQ4Bytes = 2 + 2 + qkHQQ4/2
 )
 
 // ValueType is the GGUF metadata value type tag (uint8/int32/string/array/... per the
@@ -102,6 +113,12 @@ const (
 	// (ggml type 42, fidan/q2_0-b9587); confirm against a real Q1_0_g128 file
 	// header when one is in hand.
 	TensorQ1_0 TensorType = 43
+	// TensorHQQ4 is the 4-bit HQQ (Half-Quadratic Quantization) vision-tower quant
+	// shipped by the Bonsai VLM mmproj (#4876). ggml has no HQQ enum, so this tag is
+	// a fak-local assignment (next after Q1_0=43); confirm the real tag against a
+	// live Bonsai mmproj header before treating it as canonical — the same
+	// confirm-when-a-file-is-in-hand caveat Q1_0 carries.
+	TensorHQQ4 TensorType = 44
 )
 
 // Value is one decoded GGUF metadata value: its ValueType tag and the Go value it
@@ -164,6 +181,8 @@ func (t TensorType) String() string {
 		return "Q2_0"
 	case TensorQ1_0:
 		return "Q1_0"
+	case TensorHQQ4:
+		return "HQQ4"
 	default:
 		return fmt.Sprintf("TensorType(%d)", t)
 	}
