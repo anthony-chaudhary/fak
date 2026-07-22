@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -46,6 +47,13 @@ SLACK = ("--slack" in sys.argv) or _env_flag("FAK_DISPATCH_SLACK")
 SLACK_DRY = "--slack-dry-run" in sys.argv
 PGREP_TIMEOUT_S = float(os.environ.get("FAK_SUPERVISOR_PGREP_TIMEOUT_S", "5"))
 VERDICT_TIMEOUT_S = float(os.environ.get("FAK_SUPERVISOR_VERDICT_TIMEOUT_S", "60"))
+# Retention bound (#3497, #5346): the per-tick supervisor-<ts>.log/.log.err pair
+# expires after LOG_RETAIN_DAYS, pruned at the launch site (the only place that
+# creates a pair) so the bound lives with the write and a quiet fleet does no
+# work. The exact twin of the resume watchdog's prune -- same 14-day default so
+# both watchdogs age their per-tick pairs out in lockstep. The tick log
+# (watchdog.log) is a different shape and is never pruned. 0 or negative disables.
+LOG_RETAIN_DAYS = float(os.environ.get("FAK_SUPERVISOR_LOG_RETAIN_DAYS", "14"))
 
 
 def now_iso() -> str:
@@ -103,6 +111,39 @@ def supervisor_alive() -> list[int]:
         return []
 
 
+def prune_supervisor_logs(log_dir: str, retain_days: float | None = None,
+                          now: float | None = None) -> int:
+    """Expire per-tick ``supervisor-<ts>.log`` / ``.log.err`` pairs older than the
+    retention window. Called at the launch site -- the only place that CREATES a
+    pair -- so the bound lives with the write and a quiet fleet does no work. The
+    exact twin of ``fleet_resume_watchdog.prune_resume_logs`` (#5346): same age
+    cutoff, same ``.log``/``.log.err`` pair shape, same directory. Only the
+    per-tick pair prefix/suffix shape is touched (never watchdog.log, which is a
+    different shape). A file held open by a live child (Windows mandatory lock)
+    survives via the per-file skip; those are recent anyway. Returns the number of
+    files removed."""
+    days = LOG_RETAIN_DAYS if retain_days is None else retain_days
+    if days <= 0:
+        return 0
+    cutoff = (time.time() if now is None else now) - days * 86400.0
+    removed = 0
+    try:
+        entries = list(os.scandir(log_dir))
+    except OSError:
+        return 0
+    for e in entries:
+        if not (e.name.startswith("supervisor-")
+                and (e.name.endswith(".log") or e.name.endswith(".log.err"))):
+            continue
+        try:
+            if e.is_file() and e.stat().st_mtime < cutoff:
+                os.unlink(e.path)
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def main() -> int:
     run_loop = os.path.join(JOB_DIR, "scripts", "run_supervise_loop.py")
 
@@ -137,6 +178,9 @@ def main() -> int:
         pass
 
     os.makedirs(LOG_DIR, exist_ok=True)
+    pruned = prune_supervisor_logs(LOG_DIR)
+    if pruned:
+        note(f"PRUNED  {pruned} expired supervisor log file(s) (>{LOG_RETAIN_DAYS:g}d)")
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = os.path.join(LOG_DIR, f"supervisor-{ts}.log")
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -63,6 +64,39 @@ def test_toast_routes_to_slack_when_module_flag_set(monkeypatch):
     wd.toast("Fleet supervisor respawned", "was READY; relaunched pid=42 target=4")
     assert posted["title"] == "Fleet supervisor respawned"
     assert posted["level"] == "warn"
+
+
+def _aged(path, days):
+    t = time.time() - days * 86400
+    os.utime(path, (t, t))
+
+
+def test_prune_supervisor_logs_removes_only_expired_pairs(tmp_path):
+    # Mirror of the resume twin's retention test (#5346): a stale supervisor-<ts>
+    # .log/.log.err pair must be pruned while a pair inside the window and the
+    # differently-shaped tick log (watchdog.log) survive.
+    old_log = tmp_path / "supervisor-20260101T000000Z.log"
+    old_err = tmp_path / "supervisor-20260101T000000Z.log.err"
+    fresh = tmp_path / "supervisor-20260701T000000Z.log"
+    tick_log = tmp_path / "watchdog.log"  # wrong shape: never pruned here
+    for p in (old_log, old_err, fresh, tick_log):
+        p.write_text("x", encoding="utf-8")
+    _aged(old_log, 20)
+    _aged(old_err, 20)
+    _aged(tick_log, 20)
+    removed = wd.prune_supervisor_logs(str(tmp_path), retain_days=14)
+    assert removed == 2
+    assert not old_log.exists() and not old_err.exists(), "expired pair must be pruned"
+    assert fresh.exists(), "a pair inside the window must survive"
+    assert tick_log.exists(), "the tick log is not a per-tick pair -- never pruned"
+
+
+def test_prune_supervisor_logs_zero_retention_disables(tmp_path):
+    p = tmp_path / "supervisor-20260101T000000Z.log"
+    p.write_text("x", encoding="utf-8")
+    _aged(p, 365)
+    assert wd.prune_supervisor_logs(str(tmp_path), retain_days=0) == 0
+    assert p.exists()
 
 
 if __name__ == "__main__":
