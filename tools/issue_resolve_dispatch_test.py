@@ -5454,6 +5454,145 @@ class SameIssueWipCollisionTest(unittest.TestCase):
         self.assertIn("CLAIM_NO_COMMIT", reason)
 
 
+class SameIssueWipOrientationDocTest(unittest.TestCase):
+    """#4321 -- an orientation doc named in a resolve log is not same-issue WIP.
+
+    The SAME_ISSUE_WIP scan infers "the prior resolver left this path dirty" from the
+    path being MENTIONED in that resolver's log. Every worker prompt orders the worker
+    to read the repo's orientation docs by name, so those names land in every log
+    regardless of what the worker touched -- and those same files are chronically
+    dirty in the one shared trunk checkout. The ledger investigation behind #4321
+    measured ~175/180 SAME_ISSUE_WIP hits on AGENTS.md alone; this repo's own
+    .dispatch-runs/collision-holds.jsonl shows the identical defect under different
+    names (README.md 78 / llms.txt 63 / INDEX.md 42 = 183 of 208 same_issue_wip
+    path-hits, vs 25 on a real code path). The concentration is therefore NOT a
+    property of AGENTS.md, and the issue's proposed fix of splitting AGENTS.md into
+    fragments would have relocated the magnet rather than removed it.
+    """
+
+    def _log(self, runs, now, body):
+        import os
+        log = runs / "resolve-2718-20260705-191407.log"
+        log.write_text(body, encoding="utf-8")
+        os.utime(log, (now - 60, now - 60))
+        return log
+
+    def test_orientation_doc_alone_does_not_collide(self) -> None:
+        """A log that names ONLY orientation docs no longer refuses the issue."""
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # The backticked form the real worker prompt uses ("orient with
+            # `AGENTS.md`", "the doc map `llms.txt`"). Note text_mentions_repo_path's
+            # `(?![\\w./-])` lookahead means a name ending a sentence ("AGENTS.md.")
+            # does NOT match -- the fixture mirrors the phrasing that does.
+            self._log(runs, now,
+                      "Read `AGENTS.md` first, then the doc map `llms.txt`, "
+                      "plus `README.md`\n"
+                      "Final report: left as uncommitted working-tree changes.\n")
+            scan = mod.same_issue_wip_collision(
+                runs, 2718, ["AGENTS.md", "llms.txt", "README.md"], now_ts=now)
+
+        self.assertFalse(scan["collides"])
+        self.assertEqual(scan["dirty_paths"], [])
+        # The suppression is auditable, not silent.
+        self.assertEqual(sorted(scan["orientation_paths"]),
+                         ["AGENTS.md", "README.md", "llms.txt"])
+
+    def test_real_wip_path_still_collides_alongside_orientation_docs(self) -> None:
+        """The guard is narrowed, not disabled: a genuine dirty code path still
+        refuses, and the orientation doc is dropped from the refusal's path list."""
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._log(runs, now,
+                      "Oriented with `AGENTS.md`\n"
+                      "Final report: cmd/fak/knownbad.go left uncommitted\n")
+            scan = mod.same_issue_wip_collision(
+                runs, 2718, ["AGENTS.md", "cmd/fak/knownbad.go"], now_ts=now)
+
+        self.assertTrue(scan["collides"])
+        self.assertEqual(scan["dirty_paths"], ["cmd/fak/knownbad.go"])
+        self.assertEqual(scan["orientation_paths"], ["AGENTS.md"])
+
+    def test_dirty_path_guard_still_protects_a_real_agents_md_issue(self) -> None:
+        """The narrowing is scoped to the log-mention INFERENCE. An issue whose own
+        BODY names AGENTS.md as its work site is still refused by the dirty-path
+        guard, so a real AGENTS.md edit cannot land on a peer's uncommitted one."""
+        mod = load()
+        scan = mod.dirty_path_collision(
+            "fix(docs): tighten the commit rule in `AGENTS.md`", ["AGENTS.md"])
+        self.assertTrue(scan["collides"])
+        self.assertEqual(scan["dirty_paths"], ["AGENTS.md"])
+
+
+class RefusalClassTest(unittest.TestCase):
+    """#4321 -- lane-lease and working-tree co-tenancy are separate refusal classes.
+
+    Both mechanisms wear the word "collision" in this launcher (the lane-lease
+    refusal's own reason text says "refusing COLLISION_RISK"), which is how ~369
+    working-tree refusals got folded in with lease contention during ledger analysis.
+    They share no fix: a lane-lease refusal clears itself when the holding peer
+    finishes, while a working-tree refusal clears only on a human/peer commit or
+    revert. Carrying the class as a FIELD is what stops the two being conflated by
+    verdict-name pattern matching.
+    """
+
+    def test_classes_are_distinct_and_table_driven(self) -> None:
+        mod = load()
+        self.assertEqual(mod.refusal_class("LANE_LEASE_HELD"),
+                         mod.REFUSAL_CLASS_LANE_LEASE)
+        self.assertEqual(mod.refusal_class("SAME_ISSUE_WIP"),
+                         mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+        self.assertEqual(mod.refusal_class("DIRTY_PATH_COLLISION"),
+                         mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+        self.assertNotEqual(mod.REFUSAL_CLASS_LANE_LEASE,
+                            mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+        # Unclassified verdicts stay "" -- a new refusal code must be classified on
+        # purpose rather than inherit a class from a substring of its name.
+        self.assertEqual(mod.refusal_class("MULTI_LANE_SCOPE"), "")
+        self.assertEqual(mod.refusal_class("SOME_NEW_COLLISION"), "")
+        self.assertEqual(mod.refusal_class(""), "")
+
+    def test_launch_gate_blocker_carries_the_class(self) -> None:
+        mod = load()
+        gate = mod.launch_gate_blocked("SAME_ISSUE_WIP", "why", "next")
+        self.assertEqual(gate["blockers"][0]["refusal_class"],
+                         mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+        # An unclassified hold is unchanged -- no empty field is invented for it.
+        plain = mod.launch_gate_blocked("FORCE_REASON_REQUIRED", "why", "next")
+        self.assertNotIn("refusal_class", plain["blockers"][0])
+
+    def test_collision_ledger_rows_carry_the_class(self) -> None:
+        """Rows on the collision ledger are co-tenancy by construction -- both when
+        freshly written and when read back from a pre-#4321 row with no class."""
+        import json
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            mod.record_collision_holds(runs, [{
+                "issue": 4321, "kind": "same_issue_wip", "lane": "tools",
+                "title": "t", "reason": "r", "dirty_paths": ["AGENTS.md"],
+            }], live=True, now_ts=1_000_000.0)
+            ledger = runs / "collision-holds.jsonl"
+            written = json.loads(ledger.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(written["refusal_class"],
+                             mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+            # A legacy row with no class reads back as co-tenancy, not as "".
+            with ledger.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"ts": 1_000_000.0, "issue": 4322,
+                                    "kind": "dirty_path"}) + "\n")
+            recs = {r["issue"]: r for r in mod.collision_held_records(
+                runs, ttl_h=3, now_ts=1_000_100.0)}
+            self.assertEqual(recs[4322]["refusal_class"],
+                             mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+
+
 class CandidatePriorityTest(unittest.TestCase):
     """candidate_priority maps priority/P* labels to the dispatchorder Candidate.priority
     integer (P0>P1>P2, 0 when unlabeled) -- #3222 DoD item 5."""

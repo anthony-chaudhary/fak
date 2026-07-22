@@ -224,6 +224,33 @@ DEFAULT_REPAIR_COOLDOWN_MIN = 360
 # working-tree changes without a commit. If the same issue is immediately picked
 # again, the second worker stacks onto uncommitted WIP that no live lease owns.
 SAME_ISSUE_WIP_LOOKBACK_MIN = 24 * 60
+# Orientation docs are NOT same-issue WIP evidence (#4321). The SAME_ISSUE_WIP scan
+# infers "the prior resolver left this path dirty" from the path being NAMED in that
+# resolver's log. Every worker prompt orders the worker to read the repo's
+# orientation docs by name ("orient with AGENTS.md", "the doc map llms.txt"), so
+# those names appear in EVERY resolve log regardless of what the worker touched.
+# They are also chronically dirty in the one shared trunk checkout — a co-edit
+# magnet. The two facts multiply into a false positive on essentially every issue:
+# the ledger investigation behind #4321 measured ~175/180 SAME_ISSUE_WIP hits on
+# AGENTS.md alone, and this repo's own .dispatch-runs/collision-holds.jsonl shows
+# the same defect wearing different names (README.md 78, llms.txt 63, INDEX.md 42 —
+# 183 of 208 same_issue_wip path-hits — vs 25 hits on a real code path). So the
+# concentration is NOT an AGENTS.md property and splitting AGENTS.md into fragments
+# would not have fixed it; it would relocate the magnet. Mention of an orientation
+# doc is evidence the worker was told to READ it, never that it left it dirty.
+# Narrow by construction: this suppresses the log-mention INFERENCE only. The
+# dirty-path guard, which keys on the ISSUE text, still refuses when an issue's own
+# body names one of these files as its work site, so a genuine AGENTS.md issue is
+# still protected from landing on a peer's uncommitted edit.
+SAME_ISSUE_WIP_ORIENTATION_DOCS = frozenset({
+    "AGENTS.md", "CLAUDE.md", "README.md", "INDEX.md",
+    "CONTRIBUTING.md", "llms.txt", "llms-full.txt",
+})
+
+
+def is_orientation_doc(path: str) -> bool:
+    """True for a repo-root orientation doc every worker prompt names by rote."""
+    return normalize_repo_path(path) in SAME_ISSUE_WIP_ORIENTATION_DOCS
 # Active guard-livelock spawn hold: once a live guarded worker is repeatedly
 # receiving the same quarantined tool_result, adding more resolver workers just
 # consumes seats while the guard bug is already witnessed. This launcher-side
@@ -320,16 +347,49 @@ def launch_gate_for_guard(guarded: bool, backend: str) -> dict[str, Any]:
     }
 
 
+# Refusal CLASS, distinct from the refusal CODE (#4321). Two mechanisms wear the
+# word "collision" in this launcher and were therefore folded together in ledger
+# analysis: the fenced lane-lease refusal (LANE_LEASE_HELD, whose reason text even
+# says "refusing COLLISION_RISK") and the two working-tree co-tenancy refusals
+# (SAME_ISSUE_WIP / DIRTY_PATH_COLLISION). They are NOT the same failure and do not
+# share a fix. A lane-lease refusal means a live peer holds the lane's fenced lease:
+# it clears on its own when that peer finishes or the TTL lapses, and the right
+# response is to wait or pick a disjoint lane. A working-tree co-tenancy refusal
+# means uncommitted WIP sits in the one shared checkout with no live lease owning
+# it: nothing clears it but a human/peer commit or revert, and the right response is
+# commit-by-path landing or the sanctioned detached per-worker worktree (#1334 /
+# epic #3165). Stamping the class as its own FIELD lets a ledger reader separate the
+# two by data instead of pattern-matching verdict names that both read "collision".
+REFUSAL_CLASS_LANE_LEASE = "lane_lease"
+REFUSAL_CLASS_WORKTREE_COTENANCY = "worktree_cotenancy"
+_REFUSAL_CLASSES = {
+    "LANE_LEASE_HELD": REFUSAL_CLASS_LANE_LEASE,
+    "SAME_ISSUE_WIP": REFUSAL_CLASS_WORKTREE_COTENANCY,
+    "DIRTY_PATH_COLLISION": REFUSAL_CLASS_WORKTREE_COTENANCY,
+}
+
+
+def refusal_class(verdict: str) -> str:
+    """Contention class for a refusal verdict; "" when the verdict is neither.
+
+    Deliberately a lookup over an explicit table rather than a substring rule: a
+    future refusal code must be classified on purpose, not inherit a class because
+    its name happens to contain "COLLISION" or "LEASE".
+    """
+    return _REFUSAL_CLASSES.get(str(verdict or "").strip().upper(), "")
+
+
 def launch_gate_blocked(code: str, reason: str, next_action: str) -> dict[str, Any]:
     """Machine-readable launch hold for a tick that never reached command pricing."""
-    return {
-        "ready": False,
-        "blockers": [{
-            "code": code,
-            "reason": reason,
-            "next_action": next_action,
-        }],
+    blocker: dict[str, Any] = {
+        "code": code,
+        "reason": reason,
+        "next_action": next_action,
     }
+    contention = refusal_class(code)
+    if contention:
+        blocker["refusal_class"] = contention
+    return {"ready": False, "blockers": [blocker]}
 
 
 def _audit_path_from_log(log: Path, root: Path) -> Path | None:
@@ -1786,6 +1846,11 @@ def collision_held_records(
                 "issue": n,
                 "number": n,
                 "kind": kind,
+                # Every row on THIS ledger is working-tree co-tenancy by
+                # construction; default rows written before #4321 to that class so
+                # a reader never has to special-case the backfill.
+                "refusal_class": str(row.get("refusal_class")
+                                     or REFUSAL_CLASS_WORKTREE_COTENANCY),
                 "lane": str(row.get("lane") or ""),
                 "title": str(row.get("title") or "")[:200],
                 "reason": str(row.get("reason") or "")[:240],
@@ -1835,6 +1900,9 @@ def record_collision_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
                     "ts": now,
                     "issue": issue,
                     "kind": str(r.get("kind") or "")[:40],
+                    # #4321: the contention CLASS, so a ledger reader never folds a
+                    # working-tree co-tenancy refusal in with a lane-lease one.
+                    "refusal_class": REFUSAL_CLASS_WORKTREE_COTENANCY,
                     "lane": str(r.get("lane") or "")[:80],
                     "title": str(r.get("title") or "")[:200],
                     "reason": str(r.get("reason") or "")[:240],
@@ -3541,13 +3609,20 @@ def same_issue_wip_collision(
     recent ``resolve-<issue>-*.log`` (or no-commit witness) for the SAME issue and
     a still-dirty repo path named in that artifact. Unrelated dirty paths and old
     logs fail open so a hot shared tree can still dispatch disjoint work.
+
+    Orientation docs (#4321) are excluded from the named-path intersection: the
+    worker prompt names them by rote in every log, so their presence proves only
+    that the worker was told to read them. See SAME_ISSUE_WIP_ORIENTATION_DOCS.
+    Excluded names are still reported under ``orientation_paths`` so the
+    suppression is auditable rather than silent.
     """
     if issue is None or lookback_min <= 0 or not runs_dir.is_dir() or not dirty_paths:
-        return {"collides": False, "dirty_paths": []}
+        return {"collides": False, "dirty_paths": [], "orientation_paths": []}
     import time
     now = now_ts if now_ts is not None else time.time()
     horizon = now - lookback_min * 60
     matches: list[dict[str, Any]] = []
+    orientation: list[str] = []
     for log in sorted(runs_dir.glob(f"resolve-{int(issue)}-*.log"),
                       key=lambda p: p.stat().st_mtime if p.exists() else 0,
                       reverse=True):
@@ -3572,7 +3647,13 @@ def same_issue_wip_collision(
         dirty = []
         for p in dirty_paths:
             norm = normalize_repo_path(p)
-            if norm and text_mentions_repo_path(text, norm) and norm not in dirty:
+            if not norm or not text_mentions_repo_path(text, norm):
+                continue
+            if is_orientation_doc(norm):
+                if norm not in orientation:
+                    orientation.append(norm)
+                continue
+            if norm not in dirty:
                 dirty.append(norm)
         if dirty:
             matches.append({
@@ -3583,7 +3664,8 @@ def same_issue_wip_collision(
                 "dirty_paths": dirty,
             })
     if not matches:
-        return {"collides": False, "dirty_paths": []}
+        return {"collides": False, "dirty_paths": [],
+                "orientation_paths": orientation}
     paths: list[str] = []
     for match in matches:
         for p in match.get("dirty_paths") or []:
@@ -3593,6 +3675,7 @@ def same_issue_wip_collision(
         "collides": True,
         "issue": int(issue),
         "dirty_paths": paths,
+        "orientation_paths": orientation,
         "evidence": matches[:3],
     }
 
@@ -5926,6 +6009,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "ok": False,
             "action": "same_issue_wip",
             "verdict": "SAME_ISSUE_WIP",
+            "refusal_class": REFUSAL_CLASS_WORKTREE_COTENANCY,
             "reason": reason,
         })
         if issue_override is None:
@@ -5953,6 +6037,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "ok": False,
             "action": "dirty_path_collision",
             "verdict": "DIRTY_PATH_COLLISION",
+            "refusal_class": REFUSAL_CLASS_WORKTREE_COTENANCY,
             "reason": reason,
         })
         if issue_override is None:
@@ -6030,6 +6115,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     payload["lease"] = lease
     if lease.get("refused"):
         payload.update({"ok": False, "action": "lane_leased", "verdict": "LANE_LEASE_HELD",
+                        "refusal_class": REFUSAL_CLASS_LANE_LEASE,
                         "reason": (f"lane '{chosen_lane}' lease is held by a live peer "
                                    f"(fence {lease.get('reason') or lease.get('fence_verdict') or '?'}); "
                                    f"refusing COLLISION_RISK — the fenced "
