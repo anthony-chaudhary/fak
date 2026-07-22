@@ -46,6 +46,7 @@ func TestServeStdioStartupMatrix(t *testing.T) {
 		registry   []byte
 		create     bool
 		quarantine bool
+		refuse     bool
 		strictOld  bool
 	}{
 		{name: "absent"},
@@ -53,7 +54,8 @@ func TestServeStdioStartupMatrix(t *testing.T) {
 		{name: "valid", registry: valid, create: true},
 		{name: "malformed-json", registry: []byte(`{"version":`), create: true, quarantine: true, strictOld: true},
 		{name: "nul-filled", registry: bytes.Repeat([]byte{0}, 128), create: true, quarantine: true, strictOld: true},
-		{name: "unsupported-version", registry: []byte(`{"version":"fak.session-descriptors.v999","descriptors":[]}`), create: true, quarantine: true, strictOld: true},
+		{name: "unsupported-version", registry: []byte(`{"version":"fak.session-descriptors.v999","descriptors":[]}`), create: true, refuse: true, strictOld: true},
+		{name: "unsupported-version-nomagic", registry: []byte(`{"version":"session-descriptors-legacy","descriptors":[]}`), create: true, quarantine: true, strictOld: true},
 	}
 
 	for _, tc := range cases {
@@ -70,7 +72,7 @@ func TestServeStdioStartupMatrix(t *testing.T) {
 			// corrupt FileStore.List result as fatal instead of quarantining it.
 			if tc.strictOld {
 				if _, err := session.NewFileStore(registry).List(); err == nil {
-					t.Fatal("pre-#4647 strict registry control unexpectedly accepted corrupt fixture")
+					t.Fatal("pre-#4647 strict registry control unexpectedly accepted corrupt-or-incompatible fixture")
 				}
 			}
 
@@ -96,6 +98,42 @@ func TestServeStdioStartupMatrix(t *testing.T) {
 			result := runStdioStartupProcess(t, exe, root, policyPath, registry, fakeHome, 12*time.Second)
 			if result.timedOut {
 				t.Fatalf("initialize exceeded bounded timeout\nstderr:\n%s", result.stderr)
+			}
+			if tc.refuse {
+				// Post-#3424: a magic-prefixed forward-incompatible schema jump must
+				// refuse startup and leave the operator's ledger intact -- never
+				// quarantine it and never emit a JSON-RPC frame.
+				if result.err == nil {
+					t.Fatalf("incompatible ledger unexpectedly started serve\nstdout:\n%s\nstderr:\n%s", result.stdout, result.stderr)
+				}
+				if strings.TrimSpace(result.stdout) != "" {
+					t.Fatalf("refusal contaminated MCP stdout: %q", result.stdout)
+				}
+				if !strings.Contains(result.stderr, "LEDGER_SCHEMA_INCOMPATIBLE") || !strings.Contains(result.stderr, "refusing to start") {
+					t.Fatalf("missing incompatible-ledger refusal diagnostic:\n%s", result.stderr)
+				}
+				got, err := os.ReadFile(registry)
+				if err != nil {
+					t.Fatalf("incompatible ledger must be left intact: %v", err)
+				}
+				if !bytes.Equal(got, tc.registry) {
+					t.Fatalf("refusal altered the incompatible ledger: got %q want %q", got, tc.registry)
+				}
+				matches, err := filepath.Glob(registry + ".corrupt-*")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(matches) != 0 {
+					t.Fatalf("incompatible ledger unexpectedly quarantined: %v", matches)
+				}
+				afterBytes, err := os.ReadFile(sentinel)
+				if err != nil {
+					t.Fatalf("read user-state sentinel: %v", err)
+				}
+				if sha256.Sum256(afterBytes) != before {
+					t.Fatalf("refusing serve touched default user state %s", sentinel)
+				}
+				return
 			}
 			if result.err != nil {
 				t.Fatalf("serve process failed: %v\nstdout:\n%s\nstderr:\n%s", result.err, result.stdout, result.stderr)
