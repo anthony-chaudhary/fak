@@ -47,6 +47,13 @@ const (
 	// ActAdvisory: the member surfaced a condition whose remediation is owned
 	// elsewhere (release_staleness -> #1367). Reported, never auto-acted by the tick.
 	ActAdvisory ActKind = "advisory"
+	// ActGrowthReap: an oversized, COLD, disposable log crossed its growthgate
+	// budget — collect (reap) the reapable set. The growthgate detector already
+	// runs on the tick, but its ACTION verdict was reported and never acted; this
+	// binds it to the collector. Idempotent: an os.Remove of an already-gone file
+	// is a no-op. Deletes stay default-off (ledger-only) until the soak opt-in
+	// flips them on, so a surfaced verdict inherits surfacing + dry-run untouched.
+	ActGrowthReap ActKind = "growth-reap"
 )
 
 // memberActs binds each member key to the remediation the tick takes when that
@@ -57,6 +64,7 @@ var memberActs = map[string]ActKind{
 	"orphaned_runs":     ActSurface,
 	"stale_leases":      ActReap,
 	"release_staleness": ActAdvisory,
+	"growthgate":        ActGrowthReap,
 }
 
 // ActDecision is one member's tick decision: which remediation applies, whether
@@ -168,6 +176,8 @@ func verb(a ActKind) string {
 		return "reap expired lease(s)"
 	case ActSurface:
 		return "surface recovery worklist"
+	case ActGrowthReap:
+		return "collect oversized disposable log(s)"
 	case ActAdvisory:
 		return "defer to the release path"
 	default:
