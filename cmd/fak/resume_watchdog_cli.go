@@ -192,6 +192,13 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		SelfSID:        selfSID,
 		WorkerAccounts: rwWorkerAccounts(home),
 		MaxAttempts:    *maxAttempts,
+		// Liveness gate (#3459): never fire a second `claude --resume` onto a session a live
+		// driver is already advancing. The plan (fleet_sessions.py) walks the on-disk
+		// transcripts and can classify a stale/older copy as STOPPED_APIERR while a newer copy
+		// under another account dir is alive; this consults the same audited process census
+		// `fak resume admit` counts with, so a live session is skipped regardless of the plan's
+		// disposition. Fail-open: an unreadable process table yields an empty set (inert).
+		LiveSIDs: liveResumeSIDs(),
 		// Honor an operator's durable pause/drain/stop of a specific session (`fak resume
 		// hold`). Keyed by the Claude transcript UUID the plan row carries — the one key the
 		// watchdog and the operator surface share (the descriptor registry is guardTraceID-

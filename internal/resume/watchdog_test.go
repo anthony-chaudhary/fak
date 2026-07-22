@@ -36,6 +36,40 @@ func TestDecideWatchdogRowSelfGuard(t *testing.T) {
 	}
 }
 
+func TestDecideWatchdogRowLivenessGuard(t *testing.T) {
+	// #3459 regression: the same session UUID exists as a stale/older copy the plan
+	// classified STOPPED_APIERR (crashed, queued) AND a newer copy under another account dir
+	// that a live `claude --resume` is actively advancing. With the session id in the live
+	// census the row must be SKIPPED, never launched — no second driver onto a live
+	// transcript, whatever disposition the stale copy carried.
+	row := WatchdogPlanRow{Session: "94aea02a", Account: ".claude-day26NEW-netra", Disp: "STOPPED_APIERR"}
+	g := WatchdogGuards{LiveSIDs: map[string]bool{"94aea02a": true}}
+	if d := DecideWatchdogRow(row, g, nil, OutcomeRecoverable); d.Action != WatchdogSkipLive {
+		t.Fatalf("live-driven session: action = %s, want skip_live", d.Action)
+	}
+	// The gate beats the retry gate: WITHOUT the live census the same row LAUNCHES (a
+	// recoverable STOPPED_APIERR under the cap), so the skip is the liveness gate's doing.
+	if d := DecideWatchdogRow(row, WatchdogGuards{}, nil, OutcomeRecoverable); d.Action != WatchdogLaunch {
+		t.Fatalf("precondition: without the live census the row should launch, got %s (%s)", d.Action, d.Reason)
+	}
+	// Fail-open per key: a nil map and a census that names only OTHER sessions both leave
+	// the guard inert — an unreadable/partial process table must never strand a real crash.
+	for name, g := range map[string]WatchdogGuards{
+		"nil census":   {},
+		"other sids":   {LiveSIDs: map[string]bool{"someone-else": true}},
+		"empty census": {LiveSIDs: map[string]bool{}},
+	} {
+		if d := DecideWatchdogRow(row, g, nil, OutcomeUnknown); d.Action == WatchdogSkipLive {
+			t.Fatalf("%s: liveness guard must be inert (fail-open), got %s", name, d.Action)
+		}
+	}
+	// The self-guard still comes first: a row that is BOTH self and live reports skip_self.
+	self := WatchdogGuards{SelfSID: "94aea02a", LiveSIDs: map[string]bool{"94aea02a": true}}
+	if d := DecideWatchdogRow(row, self, nil, OutcomeUnknown); d.Action != WatchdogSkipSelf {
+		t.Fatalf("self vs live = %s, want skip_self (the self-guard is first)", d.Action)
+	}
+}
+
 func TestDecideWatchdogRowWorkerPolicyGuard(t *testing.T) {
 	row := WatchdogPlanRow{Session: "sid-1", Account: ".claude-tombstoned"}
 	g := WatchdogGuards{WorkerAccounts: map[string]bool{".claude-x": true}}

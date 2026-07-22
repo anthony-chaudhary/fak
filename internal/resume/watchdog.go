@@ -97,6 +97,12 @@ const (
 	// WatchdogSkipSelf: the row IS the session this watchdog runs inside — never
 	// self-resume (two `claude` processes would race one transcript).
 	WatchdogSkipSelf WatchdogAction = "skip_self"
+	// WatchdogSkipLive: a live `claude --resume <sid>` process is ALREADY driving this
+	// session (some OTHER account dir holds a newer, actively-advancing copy) — launching
+	// would race a second driver onto a live transcript. The generalization of the
+	// self-guard to any live driver, closing the "queued a live session as crashed" harm
+	// (#3459): a stale/older copy can classify STOPPED_APIERR while the session is alive.
+	WatchdogSkipLive WatchdogAction = "skip_live"
 	// WatchdogSkipNonWorker: the row's account is not an offered worker under the current
 	// fleet policy (tombstoned/excluded) — a stale plan must not resurrect it.
 	WatchdogSkipNonWorker WatchdogAction = "skip_non_worker"
@@ -125,6 +131,16 @@ type WatchdogGuards struct {
 	WorkerAccounts map[string]bool `json:"worker_accounts,omitempty"`
 	// MaxAttempts is the retry gate's give-up cap; <= 0 takes DefaultMaxResumeAttempts.
 	MaxAttempts int `json:"max_attempts,omitempty"`
+	// LiveSIDs is the set of session ids a live `claude --resume <sid>` process is currently
+	// driving — the SHELL folds it from the same audited process census `fak resume admit`
+	// counts with (liveResumeSIDs / procguard.CollectRelations). A nil/empty map, or a
+	// session with no entry, leaves the liveness guard INERT (fail-open, per-key — an
+	// unreadable process table must never strand a genuinely-crashed session). The plan is
+	// written by fleet_sessions.py off the on-disk transcripts, which can classify a
+	// stale/older copy as crashed while a newer copy under another account dir is alive
+	// (#3459); this gate is the driver-side defense-in-depth that refuses to launch a second
+	// driver regardless of what disposition the stale copy produced.
+	LiveSIDs map[string]bool `json:"live_sids,omitempty"`
 	// DriveStates maps a session id (the Claude transcript UUID the plan row carries) to the
 	// operator drive-state the SHELL folded from the durable drive-state store. A nil/empty
 	// map, a session with no entry, or a running/throttled/unknown token all leave the
@@ -152,6 +168,17 @@ func DecideWatchdogRow(row WatchdogPlanRow, g WatchdogGuards, history []Attempt,
 	if g.SelfSID != "" && row.Session == g.SelfSID {
 		return WatchdogRowDecision{Action: WatchdogSkipSelf,
 			Reason: "this is the live session running the watchdog (self-resume guard)"}
+	}
+	// Liveness guard (#3459): a live `claude --resume` process is already driving this
+	// session under some account dir — the plan classified a stale/older transcript copy as
+	// crashed while a newer copy is actively advancing. Sits right below the self-guard (the
+	// same "never race two drivers on one transcript" rule, generalized past the watchdog's
+	// own session) and above every disposition-dependent gate, so a live driver is honored
+	// no matter what STOPPED_* disposition the stale copy carried. Fail-open per key: an
+	// absent/empty census (unreadable process table) leaves it inert.
+	if g.LiveSIDs[row.Session] {
+		return WatchdogRowDecision{Action: WatchdogSkipLive,
+			Reason: "a live claude --resume process is already driving this session (liveness guard)"}
 	}
 	// Operator-hold: an operator deliberately paused/drained/stopped this session via the
 	// durable drive-state store. It sits ABOVE the policy and retry gates (and the shell has
