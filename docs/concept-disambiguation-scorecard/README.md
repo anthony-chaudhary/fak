@@ -15,18 +15,18 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **17** (clarity 0 + coverage 17) |
+| **Disambiguation-debt (drive to 0)** | **22** (clarity 0 + coverage 22) |
 | **Crystal-clear concepts (and climbing)** | **365** crystal of 1982 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2157 / 2174** (99.2% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2157 / 2179** (99.0% of the discovered confusable space) |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 99.5/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 99.4/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1982 concepts - score 99.5/100 (grade A) - disambiguation-debt 17
+concept-disambiguation chart - 1982 concepts - score 99.4/100 (grade A) - disambiguation-debt 22
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ######...................... 365
@@ -59,16 +59,16 @@ clarity mix by family (each cell = one concept):
   witness-proof    ************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 48 crystal)
 
 coverage by family (positioned / discovered):
-  decision         ##########################.. 49/52
+  decision         ##########################.. 49/53
+  guard-gate       ############################ 347/350
   policy-capability ###########################. 137/140
   support-maturity ##########################.. 37/40
-  guard-gate       ############################ 347/349
   loop             ###########################. 71/73
+  render-materialize ############################ 171/173
+  session-runtime  ############################ 186/188
+  witness-proof    ############################ 135/137
   cache            ############################ 254/255
   evict            ###########################. 44/45
-  render-materialize ############################ 171/172
-  session-runtime  ############################ 186/187
-  witness-proof    ############################ 135/136
   attention        ############################ 72/72
   context-ctx      ############################ 193/193
   cross-cluster    ............................ 0/0
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 99.2%  (2157/2174 confusable tokens positioned)
+namespace coverage  [################################] 99.0%  (2157/2179 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -2230,16 +2230,16 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| decision | 49 | 52 | 3 |
+| decision | 49 | 53 | 4 |
+| guard-gate | 347 | 350 | 3 |
 | policy-capability | 137 | 140 | 3 |
 | support-maturity | 37 | 40 | 3 |
-| guard-gate | 347 | 349 | 2 |
 | loop | 71 | 73 | 2 |
+| render-materialize | 171 | 173 | 2 |
+| session-runtime | 186 | 188 | 2 |
+| witness-proof | 135 | 137 | 2 |
 | cache | 254 | 255 | 1 |
 | evict | 44 | 45 | 1 |
-| render-materialize | 171 | 172 | 1 |
-| session-runtime | 186 | 187 | 1 |
-| witness-proof | 135 | 136 | 1 |
 | attention | 72 | 72 | 0 |
 | context-ctx | 193 | 193 | 0 |
 | cross-cluster | 0 | 0 | 0 |
