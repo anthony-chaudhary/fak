@@ -29,8 +29,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/wipref"
 	"github.com/anthony-chaudhary/fak/internal/wiprecon"
+	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
 // wipOrphanTicket is the fully-rendered tracking ticket for one QUARANTINE orphan.
