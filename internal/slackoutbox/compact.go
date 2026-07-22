@@ -70,6 +70,18 @@ type CompactOpts struct {
 	Sleep         func(time.Duration) // seal-quiesce wait seam; nil => o's compactSleep, then time.Sleep
 	DryRun        bool                // compute the report without mutating anything
 
+	// MaxPendingAge bounds how long an UNDELIVERED (non-terminal: pending/sending/failed)
+	// row survives compaction. It defaults OFF (0 => keep every pending row FOREVER, the
+	// fail-safe delivery contract Enqueue rests on): a normal caller never sets it. Only a
+	// caller that knows delivery can never happen here — a headless box with no Slack token,
+	// whose guard STARTING/COMPLETED status cards would otherwise accumulate without bound
+	// (census #5345 row 10, #5354) — sets it. When >0, a non-terminal row whose last activity
+	// predates this floor is dropped as undeliverable, the retention bound for a spool that
+	// never drains. The age reference is the row's last transition time, or its EnqueuedAt
+	// when it has never transitioned; an unparseable/absent age KEEPS the row — compaction
+	// never drops on a guess, and never drops a row younger than the floor.
+	MaxPendingAge time.Duration
+
 	held bool // internal: the caller already holds drain.lock (the in-drain auto path)
 }
 
@@ -102,18 +114,19 @@ func (c CompactOpts) norm(o *Outbox) CompactOpts {
 // CompactReport is what one pass did (or, for a dry run, would do), for the verb's
 // human/JSON output.
 type CompactReport struct {
-	ScannedRows        int   `json:"scanned_rows"`         // spool rows folded from archive+seal
-	KeptRows           int   `json:"kept_rows"`            // survivors written back to the archive
-	DroppedPosted      int   `json:"dropped_posted"`       // posted rows past RetainPosted
-	DroppedSuperseded  int   `json:"dropped_superseded"`   // superseded rows past RetainSettled
-	DroppedUnchanged   int   `json:"dropped_unchanged"`    // no-op (unchanged) rows past RetainSettled
-	DroppedRefused     int   `json:"dropped_refused"`      // refused rows past RetainSettled
-	DroppedReaped      int   `json:"dropped_reaped"`       // reaped (ephemeral-deleted) rows past RetainSettled
-	DroppedDead        int   `json:"dropped_dead"`         // dead rows past RetainDead (unretried)
-	CollapsedDrainPass int   `json:"collapsed_drain_pass"` // drain_pass heartbeats folded to one
-	DroppedCards       int   `json:"dropped_cards"`        // finalized run-card files removed
-	SpoolBytesBefore   int64 `json:"spool_bytes_before"`   // archive+seal spool bytes folded
-	SpoolBytesAfter    int64 `json:"spool_bytes_after"`    // rewritten archive spool bytes
+	ScannedRows        int   `json:"scanned_rows"`              // spool rows folded from archive+seal
+	KeptRows           int   `json:"kept_rows"`                 // survivors written back to the archive
+	DroppedPosted      int   `json:"dropped_posted"`            // posted rows past RetainPosted
+	DroppedSuperseded  int   `json:"dropped_superseded"`        // superseded rows past RetainSettled
+	DroppedUnchanged   int   `json:"dropped_unchanged"`         // no-op (unchanged) rows past RetainSettled
+	DroppedRefused     int   `json:"dropped_refused"`           // refused rows past RetainSettled
+	DroppedReaped      int   `json:"dropped_reaped"`            // reaped (ephemeral-deleted) rows past RetainSettled
+	DroppedDead        int   `json:"dropped_dead"`              // dead rows past RetainDead (unretried)
+	DroppedPending     int   `json:"dropped_pending,omitempty"` // undelivered rows past MaxPendingAge (0 => off)
+	CollapsedDrainPass int   `json:"collapsed_drain_pass"`      // drain_pass heartbeats folded to one
+	DroppedCards       int   `json:"dropped_cards"`             // finalized run-card files removed
+	SpoolBytesBefore   int64 `json:"spool_bytes_before"`        // archive+seal spool bytes folded
+	SpoolBytesAfter    int64 `json:"spool_bytes_after"`         // rewritten archive spool bytes
 	StateBytesBefore   int64 `json:"state_bytes_before"`
 	StateBytesAfter    int64 `json:"state_bytes_after"`
 	DryRun             bool  `json:"dry_run,omitempty"`
@@ -249,7 +262,7 @@ func (o *Outbox) rewriteArchive(opts CompactOpts, rep *CompactReport) (int, erro
 		if rep != nil {
 			rep.ScannedRows++
 		}
-		keep, class := keepRow(s, opts)
+		keep, class := keepRow(r, s, opts)
 		if !keep {
 			if rep != nil {
 				switch class {
@@ -265,6 +278,8 @@ func (o *Outbox) rewriteArchive(opts CompactOpts, rep *CompactReport) (int, erro
 					rep.DroppedReaped++
 				case stateDead:
 					rep.DroppedDead++
+				case classPendingAged:
+					rep.DroppedPending++
 				}
 			}
 			continue
@@ -308,12 +323,19 @@ func (o *Outbox) rewriteArchive(opts CompactOpts, rep *CompactReport) (int, erro
 	return kept, nil
 }
 
+// classPendingAged is the keepRow drop bucket for an UNDELIVERED row past MaxPendingAge.
+// It is not a row state (a pending row carries no transition) — only a report-bucket label.
+const classPendingAged = "pending_aged"
+
 // keepRow decides whether a folded row survives compaction. Non-terminal rows (still owed
-// a delivery) always survive; a terminal row survives until it is older than its retention
-// window — dead rows get a far longer window than settled/posted because an operator may
-// still retry them, but not an unbounded one. class is the drop bucket when keep is false.
-// An unparseable timestamp (zero At) keeps the row — compaction never drops on a guess.
-func keepRow(s rowState, opts CompactOpts) (keep bool, class string) {
+// a delivery) survive forever by default; a terminal row survives until it is older than its
+// retention window — dead rows get a far longer window than settled/posted because an
+// operator may still retry them, but not an unbounded one. When MaxPendingAge is set (only a
+// caller that knows delivery can never happen sets it — see CompactOpts.MaxPendingAge) a
+// non-terminal row past that floor is dropped as undeliverable. class is the drop bucket when
+// keep is false. An unparseable timestamp (zero At) keeps the row — compaction never drops on
+// a guess. r supplies the pending-age reference (EnqueuedAt) for a never-transitioned row.
+func keepRow(r Row, s rowState, opts CompactOpts) (keep bool, class string) {
 	switch s.State {
 	case statePosted:
 		if s.At.IsZero() || opts.Now.Sub(s.At) < opts.RetainPosted {
@@ -348,8 +370,31 @@ func keepRow(s rowState, opts CompactOpts) (keep bool, class string) {
 		}
 		return false, stateDead
 	default: // pending / sending / failed / unknown — all still owed a delivery
+		return keepPending(r, s, opts)
+	}
+}
+
+// keepPending decides whether an UNDELIVERED (non-terminal) row survives. With MaxPendingAge
+// unset (0) it always survives — the fail-safe delivery contract (a row Enqueue accepted is
+// never lost to compaction). With MaxPendingAge set, a row whose last activity predates the
+// floor is dropped as undeliverable; the age is the last transition time (sending/failed) or,
+// for a never-transitioned pending row, EnqueuedAt. A row with no determinable age is KEPT —
+// compaction never drops on a guess, and never drops a row younger than the floor.
+func keepPending(r Row, s rowState, opts CompactOpts) (keep bool, class string) {
+	if opts.MaxPendingAge <= 0 {
 		return true, ""
 	}
+	at := s.At // last transition (sending/failed); zero for a never-transitioned pending row
+	if at.IsZero() {
+		at, _ = time.Parse(time.RFC3339, r.EnqueuedAt)
+	}
+	if at.IsZero() { // no parseable age — keep (never drop on a guess)
+		return true, ""
+	}
+	if opts.Now.Sub(at) < opts.MaxPendingAge { // younger than the floor — always kept
+		return true, ""
+	}
+	return false, classPendingAged
 }
 
 // collapse renders a folded rowState as the single transition that reproduces it on the
@@ -380,7 +425,7 @@ func (o *Outbox) compactPreview(opts CompactOpts) (*CompactReport, error) {
 	rep := &CompactReport{DryRun: true, CollapsedDrainPass: snap.drainPasses}
 	for _, r := range snap.Rows {
 		rep.ScannedRows++
-		keep, class := keepRow(snap.States[r.Nonce], opts)
+		keep, class := keepRow(r, snap.States[r.Nonce], opts)
 		if keep {
 			rep.KeptRows++
 			continue
@@ -398,6 +443,8 @@ func (o *Outbox) compactPreview(opts CompactOpts) (*CompactReport, error) {
 			rep.DroppedReaped++
 		case stateDead:
 			rep.DroppedDead++
+		case classPendingAged:
+			rep.DroppedPending++
 		}
 	}
 	dropped, err := o.gcCards(opts, true)
@@ -470,7 +517,7 @@ func (o *Outbox) compactionDue(snap *Snapshot, opts CompactOpts) bool {
 			continue
 		}
 		terminal++
-		if keep, _ := keepRow(s, opts); !keep {
+		if keep, _ := keepRow(r, s, opts); !keep {
 			return true
 		}
 	}
@@ -538,8 +585,8 @@ func CompactReportLine(rep *CompactReport) string {
 		verb = "would compact"
 	}
 	return fmt.Sprintf(
-		"%s: scanned %d  kept %d  dropped(posted %d superseded %d refused %d reaped %d dead %d)  cards %d  drain_pass→1 (from %d)  spool %d→%dB  state %d→%dB",
+		"%s: scanned %d  kept %d  dropped(posted %d superseded %d refused %d reaped %d dead %d pending %d)  cards %d  drain_pass→1 (from %d)  spool %d→%dB  state %d→%dB",
 		verb, rep.ScannedRows, rep.KeptRows, rep.DroppedPosted, rep.DroppedSuperseded, rep.DroppedRefused,
-		rep.DroppedReaped, rep.DroppedDead, rep.DroppedCards, rep.CollapsedDrainPass, rep.SpoolBytesBefore, rep.SpoolBytesAfter,
+		rep.DroppedReaped, rep.DroppedDead, rep.DroppedPending, rep.DroppedCards, rep.CollapsedDrainPass, rep.SpoolBytesBefore, rep.SpoolBytesAfter,
 		rep.StateBytesBefore, rep.StateBytesAfter)
 }

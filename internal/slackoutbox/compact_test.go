@@ -148,6 +148,94 @@ func TestCompactDropsDeadOnlyPastLongWindow(t *testing.T) {
 	}
 }
 
+// enqueueAt enqueues a pending row stamped with an explicit EnqueuedAt so its age can be
+// measured against a known floor. Enqueue preserves a non-empty EnqueuedAt verbatim.
+func enqueueAt(t *testing.T, o *Outbox, text string, at time.Time) string {
+	t.Helper()
+	n, err := o.Enqueue(Row{Channel: "C1", Text: text, EnqueuedAt: at.UTC().Format(time.RFC3339)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestCompactMaxPendingAgeBoundsUndelivered is the #5354 leak fence: with MaxPendingAge set,
+// an UNDELIVERED (pending) row past the floor is dropped, a younger one is kept, and a
+// delivered (posted) row is governed by its own window — never by the pending floor. With the
+// knob OFF (the default) every pending row survives forever, the fail-safe delivery contract.
+func TestCompactMaxPendingAgeBoundsUndelivered(t *testing.T) {
+	base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+
+	// Knob OFF (default 0): both pending rows — even a very old one — survive.
+	off := noSleepOutbox(t, base)
+	oldOff := enqueueAt(t, off, "old-pending", base.Add(-30*24*time.Hour))
+	youngOff := enqueueAt(t, off, "young-pending", base.Add(-time.Hour))
+	repOff, err := off.Compact(CompactOpts{Now: base}) // MaxPendingAge unset
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repOff.DroppedPending != 0 {
+		t.Fatalf("default-off dropped a pending row: %+v", repOff)
+	}
+	snapOff := mustLoad(t, off)
+	if !hasNonce(snapOff, oldOff) || !hasNonce(snapOff, youngOff) {
+		t.Fatal("default-off (MaxPendingAge==0) must keep every pending row forever")
+	}
+
+	// Knob ON: an old pending row drops past the floor; a young one and a within-window
+	// posted (delivered) row both survive.
+	on := noSleepOutbox(t, base)
+	oldPend := enqueueAt(t, on, "old-pending", base.Add(-48*time.Hour))
+	youngPend := enqueueAt(t, on, "young-pending", base.Add(-time.Hour))
+	posted := enqueueAt(t, on, "delivered", base.Add(-48*time.Hour))  // older than the pending floor...
+	setState(t, on, posted, statePosted, "1.1", base.Add(-time.Hour)) // ...but posted recently: kept by RetainPosted
+
+	rep, err := on.Compact(CompactOpts{Now: base, MaxPendingAge: 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.DroppedPending != 1 {
+		t.Fatalf("want exactly one pending drop, got %+v", rep)
+	}
+	if rep.DroppedPosted != 0 {
+		t.Fatalf("MaxPendingAge must not touch a within-window posted row: %+v", rep)
+	}
+	snap := mustLoad(t, on)
+	if hasNonce(snap, oldPend) {
+		t.Fatal("an undelivered pending row past MaxPendingAge must be dropped")
+	}
+	if !hasNonce(snap, youngPend) {
+		t.Fatal("an undelivered pending row younger than MaxPendingAge must be kept")
+	}
+	if !hasNonce(snap, posted) || snap.PostedTS(posted) != "1.1" {
+		t.Fatal("a delivered (posted) row must survive — governed by RetainPosted, not the pending floor")
+	}
+}
+
+// TestCompactMaxPendingAgeKeepsUnagedRow proves the fail-toward-keeping invariant: a pending
+// row whose EnqueuedAt is absent or unparseable has no determinable age, so it is KEPT even
+// with MaxPendingAge set — compaction never drops on a guess.
+func TestCompactMaxPendingAgeKeepsUnagedRow(t *testing.T) {
+	base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	o := noSleepOutbox(t, base)
+
+	// EnqueuedAt is preserved verbatim by Enqueue, so a garbage stamp round-trips as unparseable.
+	bad, err := o.Enqueue(Row{Channel: "C1", Text: "no-age", EnqueuedAt: "not-a-timestamp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := o.Compact(CompactOpts{Now: base, MaxPendingAge: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.DroppedPending != 0 {
+		t.Fatalf("an unaged pending row must never be dropped: %+v", rep)
+	}
+	if !hasNonce(mustLoad(t, o), bad) {
+		t.Fatal("a pending row with no parseable age must survive (never drop on a guess)")
+	}
+}
+
 func TestCompactCollapsesDrainPassHeartbeats(t *testing.T) {
 	base := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	o := noSleepOutbox(t, base)

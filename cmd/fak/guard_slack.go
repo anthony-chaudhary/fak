@@ -35,6 +35,15 @@ const (
 	// guardSessionReplyTextLimit keeps a reply comfortably under Slack's ~4000-char text
 	// ceiling; a longer launch banner is chunked across replies.
 	guardSessionReplyTextLimit = 3500
+
+	// guardOutboxMaxPendingAge is the generous floor past which an UNDELIVERED guard status
+	// card is dropped from the spool on a box with no Slack token. A STARTING/COMPLETED status
+	// card that has sat undelivered for days has no value — nobody wants an ancient status card
+	// backfilled if a token later appears — and without this bound the spool grows without
+	// limit on the headless fleet (census #5345 row 10, #5354): 12k rows / 13MB and climbing,
+	// every row an undrained guard-session card. Generous by design: a card younger than this
+	// is always kept, so a transient token outage never drops a still-deliverable card.
+	guardOutboxMaxPendingAge = 72 * time.Hour
 )
 
 type guardSessionThreadMeta struct {
@@ -64,6 +73,20 @@ func resolveGuardSessionsToken() string {
 		return strings.TrimSpace(r.Value)
 	}
 	return ""
+}
+
+// boundUndeliveredOutbox runs one wire-free bounded compaction that drops UNDELIVERED spool
+// rows older than guardOutboxMaxPendingAge. It is invoked on the no-token guard-finalize path
+// — the exact path that leaks, where the outbox can never drain — so the spool stays bounded
+// even though nothing will ever deliver its cards (census #5345 row 10, #5354). Best-effort:
+// any error (a busy drainer holding the lock, a filesystem fault) leaves the spool intact —
+// this fails TOWARD keeping, never dropping a row it could not positively age out.
+func boundUndeliveredOutbox() {
+	ob, err := openOutbox()
+	if err != nil {
+		return
+	}
+	_, _ = ob.Compact(slackoutbox.CompactOpts{MaxPendingAge: guardOutboxMaxPendingAge})
 }
 
 func enqueueGuardSessionThread(traceID, provider string, command []string, auditPath string, startedAt time.Time) (slackoutbox.Row, error) {
@@ -420,6 +443,12 @@ func (c *guardSessionCard) finalize(text string) {
 	sent, updateErr := c.enqueueUpdateSent(text)
 	token := resolveGuardSessionsToken()
 	if token == "" {
+		// No delivery surface on this box: the STARTING/COMPLETED status cards this guard
+		// enqueued can never drain, so the spool grows without bound (census #5345 row 10,
+		// #5354). Bound it wire-free by dropping UNDELIVERED cards past a generous age floor —
+		// no token needed. The just-enqueued outcome reply/edit are fresh (well under the
+		// floor), so this never drops the truth we just recorded; only ancient status cards go.
+		boundUndeliveredOutbox()
 		return
 	}
 	ob, err := openOutbox()

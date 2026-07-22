@@ -50,7 +50,7 @@ func (o *Outbox) Limits() (*Limits, error) {
 			continue
 		}
 		lim.TerminalRows++
-		if keep, _ := keepRow(s, opts); !keep {
+		if keep, _ := keepRow(r, s, opts); !keep {
 			lim.DroppableRows++
 		}
 	}
