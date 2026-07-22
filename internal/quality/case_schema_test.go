@@ -53,6 +53,10 @@ func TestCanonicalV1RejectsMalformedProvenance(t *testing.T) {
 		{"baseline provenance", func(c *QualityCase) { c.Metadata.Baseline.Revision = "" }, "metadata.baseline"},
 		{"tier", func(c *QualityCase) { c.Metadata.Tier.Name = "weekly" }, "pr, nightly, or release"},
 		{"cost", func(c *QualityCase) { c.Metadata.Cost.MemoryMiB = 0 }, "metadata.cost"},
+		{"timeout absent", func(c *QualityCase) { c.Metadata.Cost.TimeoutSeconds = 0 }, "positive timeout_seconds"},
+		{"timeout below runtime", func(c *QualityCase) { c.Metadata.Cost.RuntimeSeconds = 100 }, "timeout_seconds must be >= runtime_seconds"},
+		{"owner", func(c *QualityCase) { c.Metadata.Owner = "" }, "metadata.owner"},
+		{"family", func(c *QualityCase) { c.Metadata.Family = "smoke" }, "metadata.family"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
