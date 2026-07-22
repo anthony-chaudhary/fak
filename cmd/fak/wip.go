@@ -629,32 +629,40 @@ func wipStatus(ctx context.Context, repo string, nowUnix int64) (wipref.StatusRe
 }
 
 // wipListRecords reads every live checkpoint ref and decodes its stamp from the
-// commit message — the shared raw listing behind both the status fold and the reap
-// fold. A ref whose stamp is missing or unparseable is still listed, labelled from
+// commit message — the shared raw listing behind the status fold, the reap fold,
+// reconcile, and attribute. It pulls the ref name, the object, AND the stamp-bearing
+// commit message in a SINGLE `git for-each-ref` (%(contents)) instead of a `git log`
+// per ref: the local checkpoint namespace routinely holds thousands of refs, and a
+// subprocess-per-ref fan-out made status/reconcile/attribute O(refs) in git spawns —
+// slow enough to time out (>2m at ~4k refs), which is what left the reconciliation
+// spine effectively unrunnable. Fields are NUL-separated and every record ends with a
+// NUL, so a multi-line message survives intact — a commit object can never contain a
+// NUL — and splitting the whole stream on NUL yields [refname, objectname, contents]
+// triples. A ref whose stamp is missing or unparseable is still listed, labelled from
 // its ref name (so nothing silently vanishes from a maintenance pass).
 func wipListRecords(ctx context.Context, repo string) ([]wipref.RefRecord, error) {
 	pattern := strings.TrimSuffix(wipref.RefNamespace, "/")
-	out, errStr, code, err := gitWip(ctx, repo, nil, "for-each-ref", "--format=%(refname) %(objectname)", pattern)
+	out, errStr, code, err := gitWip(ctx, repo, nil,
+		"for-each-ref", "--format=%(refname)%00%(objectname)%00%(contents)%00", pattern)
 	if err != nil {
 		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}
 	if code != 0 {
 		return nil, fmt.Errorf("git for-each-ref exited %d: %s", code, strings.TrimSpace(errStr))
 	}
+	fields := strings.Split(out, "\x00")
 	var recs []wipref.RefRecord
-	for _, ln := range strings.Split(out, "\n") {
-		ln = strings.TrimSpace(ln)
-		if ln == "" {
+	// Consume [refname, objectname, contents] triples. for-each-ref appends a newline
+	// after each record's trailing NUL, so every refname after the first carries a
+	// leading '\n' — TrimSpace clears it. The short tail after the final NUL is ignored.
+	for i := 0; i+2 < len(fields); i += 3 {
+		ref := strings.TrimSpace(fields[i])
+		obj := strings.TrimSpace(fields[i+1])
+		if ref == "" || obj == "" {
 			continue
 		}
-		fields := strings.Fields(ln)
-		if len(fields) < 2 {
-			continue
-		}
-		ref, obj := fields[0], fields[1]
-		msg, merr := gitWipOut(ctx, repo, nil, "log", "-1", "--format=%B", obj)
-		stamp, ok := wipref.DecodeStamp(msg)
-		if merr != nil || !ok {
+		stamp, ok := wipref.DecodeStamp(fields[i+2])
+		if !ok {
 			stamp = wipref.Stamp{SessionID: wipref.SessionFromRef(ref)}
 		}
 		recs = append(recs, wipref.RefRecord{Ref: ref, Object: obj, Stamp: stamp})
