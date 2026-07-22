@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchaging"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
@@ -944,7 +945,10 @@ func dispatchProgressIntSlice(v any) []int {
 // standing readout carries the anti-starvation census (#3590): starved_count, aging_count, and
 // oldest_wait_seconds. The candidate JSON is the same {id, base_weight, ready_since} array
 // dispatch-aging consumes (so the two surfaces share one input), read via the shared
-// decodeCandidates. An empty path returns a nil map (no fold, no new keys) — additive by design,
+// decodeCandidates. Before the fold, each candidate inherits its live cooldown window from the
+// runs-dir recently-attempted screen (overlayLiveCoolingWindows, #3715), so a cooling unit's
+// wait clock is PAUSED over the span it was ineligible instead of counting phantom starvation.
+// An empty path returns a nil map (no fold, no new keys) — additive by design,
 // so a progress reader predating aging sees no change. A read/parse failure is surfaced by the
 // caller as aging_error rather than failing the whole progress tick.
 func dispatchProgressFoldAging(root, candidatesPath string, now time.Time) (map[string]any, error) {
@@ -963,12 +967,44 @@ func dispatchProgressFoldAging(root, candidatesPath string, now time.Time) (map[
 	if err != nil {
 		return nil, fmt.Errorf("aging candidates %s: %w", path, err)
 	}
+	overlayLiveCoolingWindows(cands, cooldownIssueRowsAt(filepath.Join(root, dispatchProgressRunsDir), dispatchtick.DefaultCooldownMinutes, now))
 	res := dispatchaging.Fold(cands, dispatchaging.DefaultParams(now.Unix()))
 	return map[string]any{
 		"starved_count":       res.StarvedCount,
 		"aging_count":         res.AgingCount,
 		"oldest_wait_seconds": res.OldestWaitSeconds,
 	}, nil
+}
+
+// overlayLiveCoolingWindows stamps each ready candidate's CoolingSince/CoolingUntil from the
+// live dispatch path's recently-attempted screen (#3715): a candidate whose ID is an issue
+// number with a recorded worker attempt inherits that attempt's latest cooldown window (last
+// attempt -> next eligible, exactly the span dispatch_tick's cooldown skip enforced), so the
+// aging fold PAUSES its wait clock over the ineligible span instead of accruing phantom
+// starvation pressure — and a unit that just cooled never queue-jumps on wait it could not have
+// used. A candidate that already declares a window keeps it (the supplied input wins), a
+// non-numeric ID or a never-attempted issue is untouched, and with no runs dir the row set is
+// empty — so non-cooling candidates fold byte-identically to before (the additive direction).
+func overlayLiveCoolingWindows(cands []dispatchaging.Candidate, rows []dispatchCooldownRow) {
+	if len(cands) == 0 || len(rows) == 0 {
+		return
+	}
+	byIssue := make(map[int]dispatchCooldownRow, len(rows))
+	for _, row := range rows {
+		byIssue[row.Issue] = row
+	}
+	for i, c := range cands {
+		if c.CoolingUntil != 0 {
+			continue // an explicitly declared window wins over the derived one
+		}
+		n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(c.ID), "#"))
+		if err != nil {
+			continue
+		}
+		if row, ok := byIssue[n]; ok {
+			cands[i].CoolingSince, cands[i].CoolingUntil = row.LastAttemptUnix, row.NextEligibleUnix
+		}
+	}
 }
 
 func renderDispatchProgress(p map[string]any) string {
