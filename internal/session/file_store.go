@@ -8,10 +8,57 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
-const descriptorFileVersion = "fak.session-descriptors.v1"
+// descriptorFileMagic is the self-describing schema-header magic on the durable
+// session ledger — the forward-compat header for the live-deployment upgrade
+// seam (#3424, mirroring #3395's L3 cache-record magic+version header). A ledger
+// whose Version carries this magic but a version this fak build does not support
+// is an INCOMPATIBLE SCHEMA JUMP across the version boundary, not corruption: the
+// records are intact but unreadable by this binary, so the runtime refuses to
+// start loudly (IncompatibleSchemaError) rather than quarantining them — because
+// quarantine-and-start-empty would silently drop every live durable session
+// across the upgrade seam, the exact loss the drain/cutover path exists to
+// prevent. A version with no recognizable magic is still treated as genuine
+// corruption and quarantined.
+const descriptorFileMagic = "fak.session-descriptors."
+
+const descriptorFileVersion = descriptorFileMagic + "v1"
+
+// ledgerSchemaIncompatibleReason is the stable, greppable named reason surfaced
+// when the durable session ledger's schema is incompatible with this build. It
+// is the "refuses with a named reason rather than partially migrating" contract
+// from #3424's acceptance criteria.
+const ledgerSchemaIncompatibleReason = "LEDGER_SCHEMA_INCOMPATIBLE"
+
+// IncompatibleSchemaError reports that the durable session ledger carries a
+// well-formed schema header (descriptorFileMagic) at a version this fak build
+// does not support — an incompatible schema jump across a live-deployment
+// upgrade seam (#3424). Unlike CorruptDescriptorFileError it is NOT quarantined:
+// the records are intact but unreadable by this version, so the runtime refuses
+// to start against them rather than partially migrating or silently dropping
+// live sessions. Recover by rolling back to a fak build that supports
+// FileVersion, or by running a forward migration for Supported.
+type IncompatibleSchemaError struct {
+	FileVersion string
+	Supported   string
+}
+
+func (e *IncompatibleSchemaError) Error() string {
+	return fmt.Sprintf("%s: durable session ledger schema %q is incompatible with this fak build (supports %q); refusing to start rather than dropping live sessions — roll back to a build that supports %q, or run a forward migration",
+		ledgerSchemaIncompatibleReason, e.FileVersion, e.Supported, e.FileVersion)
+}
+
+// IsIncompatibleSchema reports whether err is a refuse-to-start incompatible
+// schema jump on the durable session ledger. It is deliberately distinct from
+// IsCorruptDescriptorFile: an incompatible jump must NOT be recovered by
+// quarantine (which would drop live sessions), it must halt the upgrade loudly.
+func IsIncompatibleSchema(err error) bool {
+	var target *IncompatibleSchemaError
+	return errors.As(err, &target)
+}
 
 // fileStoreFaultHook is a test-only crash-boundary seam. Production leaves it nil.
 // Tests install it only in isolated helper processes, so concurrent callers never
@@ -159,6 +206,13 @@ func (s *FileStore) loadLocked() (map[string]Descriptor, error) {
 		return nil, corruptDescriptorFileError(RecoveryCauseDecode, fmt.Errorf("decode session descriptor file: %w", err))
 	}
 	if doc.Version != descriptorFileVersion {
+		// Forward-compat header check (#3424): a well-formed schema magic at an
+		// unsupported version is an incompatible upgrade-seam jump — refuse
+		// loudly instead of quarantining, so no live session is silently
+		// dropped. A version with no recognizable magic is genuine corruption.
+		if strings.HasPrefix(doc.Version, descriptorFileMagic) {
+			return nil, &IncompatibleSchemaError{FileVersion: doc.Version, Supported: descriptorFileVersion}
+		}
 		return nil, corruptDescriptorFileError(RecoveryCauseVersion, fmt.Errorf("unsupported session descriptor file version %q", doc.Version))
 	}
 	byID := make(map[string]Descriptor, len(doc.Descriptors))
