@@ -365,7 +365,20 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref reap: intents: %v\n", ierr)
 		rc = 1
 	}
-	fmt.Fprintf(stdout, "reaped %d expired lease(s), %d expired session(s), %d lapsed intent(s)\n", len(leases), len(sessions), len(intents))
+	// Fourth sweep (#5348): the filesystem-side orphan .lock reaper, completing the
+	// ref-side Reap/ReapSessions/ReapIntents trio. A holder killed mid-CAS leaves a
+	// ghost <git-common-dir>/refs/fak/locks/*.lock that git never removes; ReapLockFiles
+	// deletes only a .lock older than the lease TTL it guards (maxAge 0 => the 2400 s
+	// DefaultLockFileMaxAge), keeps a fresh (possibly-live) CAS, and fails closed on a
+	// future-dated mtime. Best-effort like the sweeps above: a failure is reported but
+	// never suppresses the others.
+	orphanLocks, keptLocks, kerr := store.ReapLockFiles(ctx, now, 0)
+	if kerr != nil {
+		fmt.Fprintf(stderr, "fak leaseref reap: locks: %v\n", kerr)
+		rc = 1
+	}
+	fmt.Fprintf(stdout, "reaped %d expired lease(s), %d expired session(s), %d lapsed intent(s), %d orphan lock(s) (%d live lock(s) kept)\n",
+		len(leases), len(sessions), len(intents), len(orphanLocks), len(keptLocks))
 	return rc
 }
 

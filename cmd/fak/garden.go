@@ -180,31 +180,33 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 	results := gardenbundle.Collect(root, "", time.Duration(*timeout)*time.Second, false)
 	plan := gardenbundle.PlanTick(results, *dryRun)
 
-	reaped, sessions, surfaced := performGardenTick(stdout, stderr, plan, *dir, *dryRun)
-	witnessGardenTick(ledgerPath, plan, reaped, sessions, surfaced)
+	reaped, sessions, surfaced, lockFiles := performGardenTick(stdout, stderr, plan, *dir, *dryRun)
+	witnessGardenTick(ledgerPath, plan, reaped, sessions, surfaced, lockFiles)
 
 	if *asJSON {
 		out := map[string]any{
-			"schema":          "fak.garden-tick.v1",
-			"workspace":       root,
-			"commit":          gardenbundle.HeadCommit(root),
-			"dry_run":         plan.DryRun,
-			"acted":           plan.Acted(),
-			"reaped_leases":   reaped,
-			"reaped_sessions": sessions,
-			"surfaced_runs":   surfaced,
-			"plan":            plan,
+			"schema":            "fak.garden-tick.v1",
+			"workspace":         root,
+			"commit":            gardenbundle.HeadCommit(root),
+			"dry_run":           plan.DryRun,
+			"acted":             plan.Acted(),
+			"reaped_leases":     reaped,
+			"reaped_sessions":   sessions,
+			"reaped_lock_files": lockFiles,
+			"surfaced_runs":     surfaced,
+			"plan":              plan,
 		}
 		return encodeJSONOrFail(stdout, stderr, out, "fak garden tick")
 	}
-	renderGardenTick(stdout, plan, reaped, sessions, surfaced)
+	renderGardenTick(stdout, plan, reaped, sessions, surfaced, lockFiles)
 	return 0
 }
 
 // performGardenTick executes the side effects the plan calls for. Under dry-run no
 // decision has Perform=true, so this is a pure report. It returns the count of
-// reaped leases / sessions and the count of orphan-run worklists surfaced.
-func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir string, dryRun bool) (reaped, sessions, surfaced int) {
+// reaped leases / sessions, the count of orphan-run worklists surfaced, and the
+// count of orphan .lock files swept.
+func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir string, dryRun bool) (reaped, sessions, surfaced, lockFiles int) {
 	for _, d := range plan.Decisions {
 		if !d.Perform {
 			continue
@@ -236,16 +238,31 @@ func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir
 			surfaced++
 		}
 	}
+	// Orphan .lock sweep (#5348): run ONCE PER TICK, unconditionally — independent
+	// of whether any lease RECORD is expired. A ghost <git-common-dir>/refs/fak/locks/
+	// *.lock (a holder killed mid-CAS) can outlive its lease even when no lease record
+	// is stale, so gating this on the stale_leases ActReap decision above would leave
+	// it uncollected. ReapLockFiles is fail-safe by construction (namespace-confined,
+	// age-bounded at the lease TTL, future-mtime kept). Dry-run performs no delete,
+	// mirroring the reap decisions above (which never Perform under dry-run).
+	if !dryRun {
+		store := leaseref.NewInDir(dir)
+		locks, _, lerr := store.ReapLockFiles(context.Background(), time.Now(), 0)
+		if lerr != nil {
+			fmt.Fprintf(stderr, "fak garden tick: reap orphan locks: %v\n", lerr)
+		} else {
+			lockFiles += len(locks)
+		}
+	}
 	_ = stdout
-	_ = dryRun
-	return reaped, sessions, surfaced
+	return reaped, sessions, surfaced, lockFiles
 }
 
 // witnessGardenTick records the tick's run-end in the loop ledger, so a witnessed
 // run end (the tick + its findings) lives in the ledger and `fak loop health` shows
 // the loop alive. A ledger append failure is non-fatal: the remediation already
 // happened; losing the witness line shouldn't fail the tick.
-func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, sessions, surfaced int) {
+func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles int) {
 	if ledgerPath == "" {
 		return
 	}
@@ -253,14 +270,15 @@ func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, se
 	summary := fmt.Sprintf("garden tick clean: %d member(s), nothing to act on", len(plan.Decisions))
 	if plan.DryRun {
 		summary = fmt.Sprintf("garden tick dry-run: would reap %d, surface %d (no side effect)", plan.ToReap, plan.ToSurface)
-	} else if plan.Acted() {
-		summary = fmt.Sprintf("garden tick acted: reaped %d lease(s) + %d session(s), surfaced %d orphan worklist(s)", reaped, sessions, surfaced)
+	} else if plan.Acted() || lockFiles > 0 {
+		summary = fmt.Sprintf("garden tick acted: reaped %d lease(s) + %d session(s) + %d orphan lock(s), surfaced %d orphan worklist(s)", reaped, sessions, lockFiles, surfaced)
 	}
 	metrics := map[string]int64{
-		"reaped_leases":   int64(reaped),
-		"reaped_sessions": int64(sessions),
-		"surfaced_runs":   int64(surfaced),
-		"advisory":        int64(plan.Advisory),
+		"reaped_leases":     int64(reaped),
+		"reaped_sessions":   int64(sessions),
+		"reaped_lock_files": int64(lockFiles),
+		"surfaced_runs":     int64(surfaced),
+		"advisory":          int64(plan.Advisory),
 	}
 	_, _ = loopmgr.Append(ledgerPath, loopmgr.Event{
 		LoopID:  gardenTickLoopID,
@@ -298,7 +316,7 @@ func registerGardenTickLoop(registryPath string) error {
 
 // renderGardenTick prints the act-pass as an aligned snapshot: one row per member
 // decision, then the summary of what the tick actually did.
-func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions, surfaced int) {
+func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles int) {
 	mode := "act"
 	if plan.DryRun {
 		mode = "dry-run"
@@ -318,8 +336,8 @@ func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions,
 		fmt.Fprintf(w, "  -> dry-run: would reap %d expired lease(s), surface %d orphan worklist(s); nothing performed\n", plan.ToReap, plan.ToSurface)
 		return
 	}
-	if plan.Acted() {
-		fmt.Fprintf(w, "  -> acted: reaped %d lease(s) + %d session(s), surfaced %d orphan worklist(s)\n", reaped, sessions, surfaced)
+	if plan.Acted() || lockFiles > 0 {
+		fmt.Fprintf(w, "  -> acted: reaped %d lease(s) + %d session(s) + %d orphan lock(s), surfaced %d orphan worklist(s)\n", reaped, sessions, lockFiles, surfaced)
 	} else {
 		fmt.Fprintln(w, "  -> garden tick clean: nothing to act on")
 	}
