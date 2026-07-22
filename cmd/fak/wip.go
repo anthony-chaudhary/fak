@@ -1013,7 +1013,9 @@ func wipReconcile(ctx context.Context, repo string) (wipReconcileResult, error) 
 // refs/fak/locks/* — the liveness signal that distinguishes a crashed owner (no live
 // lease) from one still working. Read-only over the lease namespace.
 func wipLiveSessions(ctx context.Context, repo string) (map[string]bool, error) {
-	recs, _, err := leaseref.NewInDir(repo).LiveRegistrations(ctx, time.Now())
+	store := leaseref.NewInDir(repo)
+	now := time.Now()
+	recs, _, err := store.LiveRegistrations(ctx, now)
 	if err != nil {
 		return nil, fmt.Errorf("read live leases: %w", err)
 	}
@@ -1021,6 +1023,22 @@ func wipLiveSessions(ctx context.Context, repo string) (map[string]bool, error) 
 	for _, r := range recs {
 		if r.SessionID != "" {
 			live[r.SessionID] = true
+		}
+	}
+	// #5343: a wip checkpoint stamps the STABLE Claude session UUID (wipSessionOf), but a
+	// lock lease's SessionID is the VOLATILE agent-claude-<pid> trace id, so the UUID could
+	// never hit the set built above — every ref read non-LIVE, even a live one. ALSO index the
+	// LIVE guard-session descriptors by the Claude UUID they now carry (AgentUUID), so a
+	// checkpoint stamped with that UUID resolves LIVE. This is STRICTLY ADDITIVE: it only ever
+	// ADDS a live match, so a currently-kept ref can never become newly reclaimable — the same
+	// fail-toward-keeping rule the lease cascade (internal/leaseref/liveness.go) obeys.
+	sessions, _, serr := store.LiveSessions(ctx, now)
+	if serr != nil {
+		return nil, fmt.Errorf("read live sessions: %w", serr)
+	}
+	for _, d := range sessions {
+		if d.AgentUUID != "" {
+			live[d.AgentUUID] = true
 		}
 	}
 	return live, nil
