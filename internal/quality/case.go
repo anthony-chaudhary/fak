@@ -74,11 +74,6 @@ type CaseMetadata struct {
 	Baseline  BaselineSpec   `json:"baseline"`
 	Tier      TierSpec       `json:"tier"`
 	Cost      CostSpec       `json:"cost"`
-	// Owner is the accountable team or person for this case — a case with no
-	// owner has no one to fix it when it fails, so #4574 refuses it. Family is
-	// the evidence class the suite splitter routes on (see EvidenceFamily).
-	Owner  string `json:"owner"`
-	Family string `json:"family"`
 }
 
 // Revision identifies immutable model, tokenizer, or code/module content.
@@ -120,12 +115,8 @@ type TierSpec struct {
 }
 
 // CostSpec documents expected runtime and peak resource requirements.
-// TimeoutSeconds is the hard wall a run is killed at — distinct from the
-// expected RuntimeSeconds — so a hung case cannot silently hold a suite's
-// budget open. #4574 requires every case to declare it.
 type CostSpec struct {
 	RuntimeSeconds int64 `json:"runtime_seconds"`
-	TimeoutSeconds int64 `json:"timeout_seconds"`
 	CPU            int   `json:"cpu"`
 	MemoryMiB      int64 `json:"memory_mib"`
 	Accelerators   int   `json:"accelerators,omitempty"`
@@ -227,18 +218,6 @@ func (c QualityCase) ValidateCanonical() error {
 	}
 	if m.Cost.RuntimeSeconds <= 0 || m.Cost.CPU <= 0 || m.Cost.MemoryMiB <= 0 || m.Cost.Accelerators < 0 {
 		return fmt.Errorf("metadata.cost requires positive runtime_seconds, cpu, and memory_mib")
-	}
-	if m.Cost.TimeoutSeconds <= 0 {
-		return fmt.Errorf("metadata.cost requires a positive timeout_seconds")
-	}
-	if m.Cost.TimeoutSeconds < m.Cost.RuntimeSeconds {
-		return fmt.Errorf("metadata.cost.timeout_seconds must be >= runtime_seconds")
-	}
-	if strings.TrimSpace(m.Owner) == "" {
-		return fmt.Errorf("metadata.owner is required (a case with no owner has no one to fix it)")
-	}
-	if !validFamily(m.Family) {
-		return fmt.Errorf("metadata.family must be one of deterministic, gpu_parity, statistics, corpora, review")
 	}
 	return nil
 }

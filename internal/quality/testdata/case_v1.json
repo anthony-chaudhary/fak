@@ -26,9 +26,7 @@
     "tolerance": {"metric": "exact-token", "revision": "policy:exact-v1"},
     "baseline": {"id": "canonical-v1-reference", "revision": "sha256:baseline-v1"},
     "tier": {"name": "pr"},
-    "cost": {"runtime_seconds": 1, "timeout_seconds": 30, "cpu": 1, "memory_mib": 32},
-    "owner": "quality-team",
-    "family": "deterministic"
+    "cost": {"runtime_seconds": 1, "cpu": 1, "memory_mib": 32}
   },
   "tags": ["schema", "greedy", "cpu"]
 }
