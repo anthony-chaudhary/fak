@@ -119,9 +119,13 @@ func wipUsage(w io.Writer) {
   fak wip unfence <file> [-C <repo>]
       Remove a //go:build wip_<slug> fence once the defining symbol has landed. Idempotent.
 
-  fak wip reap [-C <repo>] [--json] [--dry-run]
+  fak wip reap [-C <repo>] [--json] [--dry-run] [--census]
       Delete redundant checkpoint refs whose delta has LANDED in HEAD (the owner
       committed it). Fail-safe: an unlanded checkpoint is always kept.
+      --census is a READ-ONLY reporting mode (deletes nothing): it classifies every
+      refs/fak/wip/* ref by owner-state — LANDED / LIVE / CLOSED_CLEAN_ESTIMATE /
+      CLOSED_DIRTY_RECOVERABLE / UNKNOWN — and prints the counts (+ a --json breakdown),
+      so #5340 can size how many dead-session checkpoints are safe to collect.
 
   fak wip attribute [-C <repo>] [--json] [--orphans]
       Attribute every dirty working-tree hunk to the session that checkpointed it
@@ -691,8 +695,15 @@ func runWipReap(stdout, stderr io.Writer, argv []string) int {
 	repo := fs.String("C", "", "run in this git repo (default: cwd)")
 	asJSON := fs.Bool("json", false, "emit the reap result as JSON")
 	dryRun := fs.Bool("dry-run", false, "report what would be reaped without deleting any ref")
+	census := fs.Bool("census", false, "read-only: classify every checkpoint ref by owner-state and print the counts (deletes NOTHING; #5340)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
+	}
+	// --census is a SEPARATE, read-only reporting path: it classifies every ref and
+	// never touches the delete path below (no update-ref -d). It intentionally ignores
+	// --dry-run — the census has no mutate mode to preview.
+	if *census {
+		return runWipCensus(context.Background(), stdout, stderr, *repo, *asJSON)
 	}
 	res, err := wipReap(context.Background(), *repo, *dryRun)
 	if err != nil {
