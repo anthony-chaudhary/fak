@@ -115,6 +115,20 @@ const (
 	CauseThreadLeak  Cause = "thread_leak"      // a process's thread count climbing into the hundreds/thousands (terminal thread lag)
 )
 
+// Deliberately NOT an axis: desktop-heap free%. Issue #3403 scoped two new axes —
+// (A) system-handle-total and (B) a per-desktop desktop-heap-free% with a
+// desktop_heap cause. (A) shipped (SystemHandleTotal / CauseHandleLeak above,
+// commit 30947eee2 + the growth/reboot follow-ons). (B) is intentionally omitted,
+// not deferred: the deep-research note that is #3403's OWN provenance refutes it
+// for this fleet. Desktop heap (the SharedSection ceiling) is charged only when a
+// process links user32.dll and CREATES GUI objects — windows, menus, DCs; the fak
+// fleet is headless (pwsh/node/fak draw nothing), so a desktop_heap_free_pct axis
+// would read ~100% free forever and the desktop_heap cause could never fire live —
+// an inert axis, not an observability gain (net-true-value: no real witness). The
+// real canary, if a GUI-heavy workload ever runs here, is Win32k Event 243
+// ("desktop heap allocation failed"), not a polled percentage.
+// See docs/notes/RESEARCH-windows-handles-terminal-limits-2026-07-08.md §B.
+
 // Thresholds are the decision boundaries. They are exported and defaulted so a
 // caller (or a test) can tune them, and so the live self-monitor can be made
 // more/less sensitive without code change. Defaults are calibrated to the
