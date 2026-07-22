@@ -2,6 +2,8 @@ package hooks
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -249,5 +251,48 @@ func TestGateDuplication_TrivialPruneKeepsQualifyingCandidate(t *testing.T) {
 	}
 	if findings[0].File != "internal/foo/new.go" {
 		t.Errorf("finding file = %q, want internal/foo/new.go", findings[0].File)
+	}
+}
+
+// The neighborhood read must NOT fan out one `git show :<rel>` subprocess per tracked sibling —
+// that O(neighborhood) spawn count (720 on a cmd/fak commit) is what wedged the pre-commit hook
+// under fleet git contention (a saturated fsmonitor daemon, many peer git processes). neighborBytes
+// reads the sibling from the working tree instead. Driven over a REAL on-disk sibling with an EMPTY
+// fileCache (so a seeded cache cannot mask a disk miss) and a recording runner: the clone still
+// fires, and `git show` is never invoked once.
+func TestGateDuplication_NeighborhoodReadsDiskNotGitShow(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "foo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "existing.go"), []byte(siblingFile(dupBlock)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var showCalls int
+	d := &StagedDiff{
+		Root:        root,
+		ctx:         context.Background(),
+		Treeish:     ":",
+		AddedByFile: map[string][]AddedLine{"internal/foo/new.go": addedLinesOf(siblingFile(dupBlock))},
+		fileCache:   map[string]fileEntry{}, // EMPTY -> neighborBytes must hit disk, not a seeded cache
+		run: func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			for _, a := range args {
+				if a == "show" {
+					showCalls++
+				}
+			}
+			return "internal/foo/existing.go", 0, nil // the `git ls-files *.go` listing
+		},
+	}
+	findings, err := gateDuplication(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("the on-disk sibling clone should fire exactly one finding, got %d: %+v", len(findings), findings)
+	}
+	if showCalls != 0 {
+		t.Errorf("neighborhood read spawned `git show` %d time(s); the per-file fan-out that wedged the pre-commit hook must be gone (disk read only)", showCalls)
 	}
 }

@@ -2,7 +2,9 @@ package hooks
 
 import (
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/clonescan"
@@ -178,8 +180,8 @@ func trackedGoByDir(d *StagedDiff, want map[string]bool, maxNeighborhood int) (m
 		}
 		tree := make(map[string]string, len(rels))
 		for _, rel := range rels {
-			if b, ok := d.FileBytes(rel); ok {
-				tree[rel] = string(b)
+			if b, ok := d.neighborBytes(rel); ok {
+				tree[rel] = b
 			}
 		}
 		if len(tree) > 0 {
@@ -187,6 +189,28 @@ func trackedGoByDir(d *StagedDiff, want map[string]bool, maxNeighborhood int) (m
 		}
 	}
 	return byDir, nil
+}
+
+// neighborBytes returns the source of a DUPLICATION neighborhood sibling WITHOUT the per-file
+// `git show :<rel>` subprocess that StagedDiff.FileBytes spawns. That fan-out is the gate's real
+// cost: one `git show` process per tracked non-test .go file in a touched directory — 720 on a
+// cmd/fak commit — which under fleet git contention (a saturated fsmonitor daemon, many peer
+// `git` processes) takes tens of seconds and WEDGES the pre-commit hook (the commit-lane hang).
+// The neighborhood read only needs the sibling's current tracked source to tokenize it, so a
+// single os.ReadFile of the working-tree copy is both far cheaper (no process spawn) and more
+// faithful for a clone advisory: a block that was MOVED (deleted from the sibling on disk, added
+// to the new file) is correctly NOT flagged, where the staged-blob read would still see the old
+// copy and cry duplicate. Cache-aware: a warmed entry (or a unit test's pre-seeded fileCache) is
+// reused verbatim, so no disk is touched there. A disk miss is a skip (fail-open, never a false
+// DUPLICATION), matching FileBytes' own missing-file contract.
+func (d *StagedDiff) neighborBytes(rel string) (string, bool) {
+	if e, ok := d.fileCache[rel]; ok {
+		return string(e.data), e.exists
+	}
+	b, err := os.ReadFile(filepath.Join(d.Root, filepath.FromSlash(rel)))
+	exists := err == nil
+	d.fileCache[rel] = fileEntry{data: b, exists: exists}
+	return string(b), exists
 }
 
 // isGoNonTest reports whether rel is a Go source file that is not a test file. Test files are
