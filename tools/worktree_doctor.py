@@ -100,6 +100,15 @@ DEFAULT_MASTER_REF = "origin/master"  # last-resort fallback; main() AUTO-DETECT
 # both .../<uuid>/scratchpad/<name> and C:/work/pr-work/<name> qualify regardless of root.
 DISPOSABLE_MARKERS = ("scratchpad", "pr-work")
 
+# How many days of sweep-archive <date> day-directories to KEEP before reaping. The sweep
+# writes a full post-mortem copy of every dirty swept worktree under
+# worktree-archive/<date>/ — a recovery convenience, not live state — and nothing used to
+# collect it (one day alone held 16 copies = 4.6GB). Age with a generous floor is the right
+# signal here: an OLD day past the window is safe to delete, a RECENT one is not (someone may
+# still want to recover a same-week accidental sweep). 7 days recovers a same-week mistake
+# while bounding the ~4.6GB/2-week growth. Overridable via --archive-retention-days.
+DEFAULT_ARCHIVE_RETENTION_DAYS = 7
+
 
 def _git(args, cwd=None):
     """Run a git command; return (rc, stdout, stderr). Never raises on nonzero."""
@@ -615,6 +624,49 @@ def _default_archive_dir():
     return os.path.join(base, datetime.date.today().isoformat())
 
 
+def reap_stale_archive_days(archive_dir, keep_days=DEFAULT_ARCHIVE_RETENTION_DAYS, today=None):
+    """Delete worktree-archive/<date> day-directories older than the retention window.
+
+    `archive_dir` is THIS run's day dir (.../worktree-archive/<YYYY-MM-DD>); its PARENT is
+    the base that holds every day. We only ever remove a SIBLING whose name parses as an ISO
+    date STRICTLY older than (today - keep_days): the current run's day is skipped by path,
+    every day inside the window is kept, and any non-date entry — a stray file, or a custom
+    --archive-dir whose layout we don't recognize — is left untouched. An archive day is a
+    post-mortem copy of an ALREADY-swept dirty worktree, i.e. a recovery convenience, so an
+    old day past the floor is safe to delete while a recent one is not. Deleting by the day's
+    own date (not mtime) keeps the decision deterministic and immune to a touch. Best-effort;
+    returns the sorted list of removed day names."""
+    import datetime
+    import shutil
+    today = today or datetime.date.today()
+    cutoff = today - datetime.timedelta(days=keep_days)
+    norm = os.path.normpath(archive_dir)
+    base = os.path.dirname(norm)
+    current = os.path.basename(norm)  # the day this run writes into — NEVER remove it
+    removed = []
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return removed  # base not created yet (nothing ever swept) -> nothing to reap
+    for name in sorted(names):
+        if name == current:
+            continue
+        day_path = os.path.join(base, name)
+        if not os.path.isdir(day_path):
+            continue
+        try:
+            day = datetime.date.fromisoformat(name)
+        except ValueError:
+            continue  # not a <date> day dir -> leave anything unrecognized alone
+        if day < cutoff:
+            try:
+                shutil.rmtree(day_path)
+                removed.append(name)
+            except OSError:
+                pass
+    return removed
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Converge to one worktree on the trunk, safely.")
     ap.add_argument("--repo", default=".", help="repo path (default: cwd)")
@@ -643,6 +695,12 @@ def main(argv=None):
     ap.add_argument("--archive-dir", default=None,
                     help="where sweep archives a dirty worktree's work before removal "
                          "(default: %%LOCALAPPDATA%%/Fleet/watchdog/worktree-archive/<date>)")
+    ap.add_argument("--archive-retention-days", type=int, default=DEFAULT_ARCHIVE_RETENTION_DAYS,
+                    metavar="N",
+                    help="on a real --sweep-disposable run, reap sweep-archive <date> "
+                         "day-directories older than N days (recover a same-week accidental "
+                         f"sweep, bound the archive's growth; default {DEFAULT_ARCHIVE_RETENTION_DAYS}). "
+                         "The current run's day and any day inside the window are never removed.")
     args = ap.parse_args(argv)
 
     # Anchor on the REAL trunk: detect origin/HEAD unless the operator pinned --master-ref.
@@ -668,6 +726,11 @@ def main(argv=None):
                      dry_run=not args.sweep_disposable) if cands else []
     if any(r.get("removed") for r in swept):
         sigs = collect(args.repo, master_ref, fetch=False)  # refresh after real removals
+    # Reap stale archive days on every REAL sweep run (even one that swept nothing today):
+    # the sweep is the only mutating mode, so the reaper — also a mutation — follows the same
+    # gate, keeping the default report-only run side-effect-free. Never touches today's day.
+    archive_reaped = (reap_stale_archive_days(archive_dir, keep_days=args.archive_retention_days)
+                      if args.sweep_disposable else [])
 
     plan = make_plan(sigs, master_ref, allow_branches=args.allow_branch, trunk=trunk)
     pruned = do_prune(plan, dry_run=not args.prune) if plan["prune"] else []
@@ -690,6 +753,7 @@ def main(argv=None):
         print(json.dumps({"master_ref": master_ref, "trunk": trunk,
                           "plan": plan, "pruned": pruned, "swept": swept,
                           "archive_dir": archive_dir,
+                          "archive_reaped": archive_reaped,
                           "deletable_branches": deletable,
                           "branch_results": branch_results,
                           "remote_pruned": remote_pruned,
@@ -712,6 +776,9 @@ def main(argv=None):
                     print(f"  - reaped {r['path']}{tag}")
                 else:
                     print(f"  - FAILED {r['path']}: {r['error']}")
+        if archive_reaped:
+            print(f"  reaped {len(archive_reaped)} stale archive day(s) "
+                  f"(> {args.archive_retention_days}d): {', '.join(archive_reaped)}")
         if pruned:
             print("")
             for r in pruned:

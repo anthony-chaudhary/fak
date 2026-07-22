@@ -5,6 +5,9 @@ These exercise the PURE decision surface (issues_of / safe_to_remove / make_plan
 parse_worktree_list) with synthetic worktree records, so the safety rule — never
 remove a worktree that has uncommitted work, an in-progress merge, or commits not
 yet on master — is proven without touching a real repo."""
+import datetime
+import os
+import tempfile
 import unittest
 
 import worktree_doctor as wd
@@ -287,6 +290,83 @@ class SweepCandidates(unittest.TestCase):
         got = wd.sweep_candidates(sigs, fresh_seconds=0,
                                   keep_paths=["/tmp/scratchpad/keepme"])
         self.assertEqual(got, [])
+
+
+def _seed_day(base, name, files=("base-commit.txt",)):
+    """Create base/<name>/ (a stand-in archive day) with a dummy file, so a survivor is a
+    real on-disk directory and a reap actually has content to remove."""
+    day = os.path.join(base, name)
+    os.makedirs(day, exist_ok=True)
+    for f in files:
+        with open(os.path.join(day, f), "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+    return day
+
+
+class ArchiveDayRetention(unittest.TestCase):
+    """The sweep-archive reaper: prune worktree-archive/<date> days older than the window,
+    while the current run's day, every day inside the window, and any non-date entry survive.
+    Age (with a generous floor) is the signal — an archive day is a recovery convenience, so
+    an OLD day past the window is safe to delete and a RECENT one is not."""
+
+    def test_reaps_only_stale_days_keeps_fresh_and_today(self):
+        today = datetime.date(2026, 7, 22)
+        keep = 7  # cutoff = 2026-07-15; a day strictly older than that is stale
+        with tempfile.TemporaryDirectory() as base:
+            fresh = [today.isoformat(),                                   # today's run
+                     (today - datetime.timedelta(days=1)).isoformat(),    # yesterday
+                     (today - datetime.timedelta(days=keep)).isoformat()] # exactly at the floor -> kept
+            stale = [(today - datetime.timedelta(days=keep + 1)).isoformat(),  # one day past -> reaped
+                     (today - datetime.timedelta(days=30)).isoformat()]        # long past -> reaped
+            self.assertIn("2026-07-14", stale)  # the ticket's 4.6GB day (22 - 8) lands in the reap set
+            for d in fresh + stale:
+                _seed_day(base, d)
+            # non-<date> siblings must be left completely alone (a stray file, an unrelated dir)
+            _seed_day(base, "notes-not-a-date")
+            with open(os.path.join(base, "README.txt"), "w", encoding="utf-8") as fh:
+                fh.write("keep me\n")
+
+            archive_dir = os.path.join(base, today.isoformat())
+            removed = wd.reap_stale_archive_days(archive_dir, keep_days=keep, today=today)
+
+            self.assertEqual(removed, sorted(stale))
+            for d in stale:
+                self.assertFalse(os.path.isdir(os.path.join(base, d)), f"{d} should be reaped")
+            for d in fresh:
+                self.assertTrue(os.path.isdir(os.path.join(base, d)), f"{d} must survive")
+            self.assertTrue(os.path.isdir(os.path.join(base, "notes-not-a-date")))
+            self.assertTrue(os.path.isfile(os.path.join(base, "README.txt")))
+
+    def test_never_removes_the_current_run_day_even_if_it_parses_old(self):
+        # Safety guard: the day THIS run writes into is skipped by path, so even a current
+        # archive_dir whose own date is far past the window is never deleted.
+        today = datetime.date(2020, 1, 15)  # cutoff = 2020-01-08
+        with tempfile.TemporaryDirectory() as base:
+            _seed_day(base, "2020-01-01")   # the current run's day: old, but must be spared
+            _seed_day(base, "2019-12-01")   # a genuinely stale peer day -> reaped
+            archive_dir = os.path.join(base, "2020-01-01")
+            removed = wd.reap_stale_archive_days(archive_dir, keep_days=7, today=today)
+            self.assertEqual(removed, ["2019-12-01"])
+            self.assertTrue(os.path.isdir(os.path.join(base, "2020-01-01")))
+            self.assertFalse(os.path.isdir(os.path.join(base, "2019-12-01")))
+
+    def test_missing_base_dir_is_a_noop(self):
+        # nothing has ever been swept -> the base doesn't exist -> reap is a clean no-op.
+        with tempfile.TemporaryDirectory() as base:
+            archive_dir = os.path.join(base, "never", "2026-07-22")
+            self.assertEqual(wd.reap_stale_archive_days(archive_dir, keep_days=7,
+                                                        today=datetime.date(2026, 7, 22)), [])
+
+    def test_zero_window_still_spares_today(self):
+        # a 0-day window reaps every past day but STILL never removes the current run's day.
+        today = datetime.date(2026, 7, 22)
+        with tempfile.TemporaryDirectory() as base:
+            _seed_day(base, today.isoformat())
+            _seed_day(base, (today - datetime.timedelta(days=1)).isoformat())
+            archive_dir = os.path.join(base, today.isoformat())
+            removed = wd.reap_stale_archive_days(archive_dir, keep_days=0, today=today)
+            self.assertEqual(removed, [(today - datetime.timedelta(days=1)).isoformat()])
+            self.assertTrue(os.path.isdir(os.path.join(base, today.isoformat())))
 
 
 if __name__ == "__main__":
