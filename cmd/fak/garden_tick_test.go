@@ -72,7 +72,7 @@ func TestWitnessGardenTickRecordsRunEnd(t *testing.T) {
 		{Key: "stale_leases", Label: "stale leases", State: "action"},
 	}, false)
 
-	witnessGardenTick(ledger, plan, 2, 1, 0, 0)
+	witnessGardenTick(ledger, plan, 2, 1, 0, 0, 0)
 
 	events, _, err := loopmgr.LoadPrefix(ledger)
 	if err != nil {

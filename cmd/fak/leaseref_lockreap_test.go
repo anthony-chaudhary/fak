@@ -85,8 +85,14 @@ func TestGardenTickReapsOrphanLocks(t *testing.T) {
 	fresh := lockReapWriteLock(t, locks, "session-live.lock", now, 5*time.Millisecond)
 	future := lockReapWriteLock(t, locks, "skewed.lock", now, -48*time.Hour)
 
+	// Keep the once-per-tick growth collect (#5349) off the real Fleet tree/ledger:
+	// census only the temp repo (which has no oversized files), never delete.
+	t.Setenv("FAK_FLEET_DIR", "")
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("FAK_GARDEN_GROWTH_LEDGER", filepath.Join(t.TempDir(), "growth-reap.jsonl"))
+
 	var stdout, stderr bytes.Buffer
-	reaped, sessions, surfaced, lockFiles := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, false)
+	reaped, sessions, surfaced, lockFiles, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
@@ -118,7 +124,7 @@ func TestGardenTickDryRunKeepsOrphanLocks(t *testing.T) {
 	stale := lockReapWriteLock(t, locks, "session-dead.lock", now, 5*time.Hour)
 
 	var stdout, stderr bytes.Buffer
-	_, _, _, lockFiles := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, true)
+	_, _, _, lockFiles, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, true, false)
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
