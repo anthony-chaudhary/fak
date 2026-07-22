@@ -274,7 +274,7 @@ func gatherGrowthArtifacts(root string, now time.Time) ([]growthgate.Artifact, e
 			}
 			return nil
 		}
-		if !isGrowthCandidate(d.Name()) {
+		if !isGrowthCandidate(path) {
 			return nil
 		}
 		info, ierr := d.Info()
@@ -291,10 +291,21 @@ func gatherGrowthArtifacts(root string, now time.Time) ([]growthgate.Artifact, e
 	return out, err
 }
 
-// isGrowthCandidate is the cheap suffix pre-filter: only append-only classes.
-func isGrowthCandidate(name string) bool {
-	n := strings.ToLower(name)
-	return strings.HasSuffix(n, ".jsonl") || strings.HasSuffix(n, ".log") || strings.HasSuffix(n, ".err")
+// isGrowthCandidate is the cheap pre-filter over the WHOLE path: it admits the
+// append-only suffixes anywhere (.jsonl/.log/.err), PLUS every file under a
+// .dispatch-runs/ tree regardless of suffix. The per-run dispatch sidecars
+// (.txt/.witness/.json/.wave) are disposable dispatch traces that ClassifyPath
+// already labels ClassDispatchLog, but a suffix-only filter dropped them at the
+// walk so the growth census never saw the 5006-file tree. The widen is
+// deliberately PATH-SCOPED to .dispatch-runs/: we do NOT admit .json/.txt as global
+// suffixes, which would sweep repo source configs into the census as ClassOther
+// noise (toward #5352).
+func isGrowthCandidate(path string) bool {
+	p := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
+	if strings.Contains(p, ".dispatch-runs/") {
+		return true
+	}
+	return strings.HasSuffix(p, ".jsonl") || strings.HasSuffix(p, ".log") || strings.HasSuffix(p, ".err")
 }
 
 // renderGrowthReport prints the human census: verdict, per-class totals, and the

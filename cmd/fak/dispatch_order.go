@@ -102,11 +102,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchAttemptBudget(stdout, stderr, argv[1:])
 	case "timeout-ledger":
 		return runDispatchTimeoutLedger(stdout, stderr, argv[1:])
+	case "reap":
+		return runDispatchReap(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, timeout-ledger, or reap)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -311,6 +313,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch skip-ledger [--in FILE] [--workspace DIR] [--cooldown-min N] [--now UNIX] [--json]
   fak dispatch attempt-budget [--in FILE] [--budget N] [--now UNIX] [--json]
   fak dispatch timeout-ledger [--in FILE] [--workspace DIR] [--now UNIX] [--json]
+  fak dispatch reap  [--dir .dispatch-runs] [--floor-hours N] [--apply] [--ledger FILE] [--top N] [--json]
 
 auto is the self-sizing front door to the multi-account wave: it folds the live ceilings (the
 preflight's effective cap, the switcher's fresh account session slots, the router's ready

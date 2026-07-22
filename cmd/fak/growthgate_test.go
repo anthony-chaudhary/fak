@@ -40,11 +40,14 @@ func TestGrowthgateCleanDir(t *testing.T) {
 func TestGatherGrowthArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	writes := map[string]string{
-		"a.jsonl":         "one\ntwo\n",
-		"b.log":           "log line\n",
-		"c.err":           "err\n",
-		"skip.txt":        "not a growth class\n",
-		".git/objects.db": "should be pruned\n",
+		"a.jsonl":                    "one\ntwo\n",
+		"b.log":                      "log line\n",
+		"c.err":                      "err\n",
+		"skip.txt":                   "not a growth class\n",
+		"config.json":                "repo source config, not a growth class\n",
+		".dispatch-runs/run.witness": "a per-run sidecar, admitted by path\n",
+		".dispatch-runs/trace.json":  "a per-run sidecar json, admitted by path\n",
+		".git/objects.db":            "should be pruned\n",
 	}
 	for rel, body := range writes {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
@@ -66,16 +69,21 @@ func TestGatherGrowthArtifacts(t *testing.T) {
 			t.Errorf("artifact %s has non-positive size %d", a.Path, a.Size)
 		}
 	}
-	if len(arts) != 3 {
-		t.Fatalf("gathered %d artifacts, want 3: %v", len(arts), got)
+	// The three append-only suffixes PLUS the two .dispatch-runs/ sidecars admitted
+	// by path regardless of suffix — but NOT the top-level .txt/.json repo files.
+	if len(arts) != 5 {
+		t.Fatalf("gathered %d artifacts, want 5: %v", len(arts), got)
 	}
-	for _, want := range []string{"a.jsonl", "b.log", "c.err"} {
+	for _, want := range []string{"a.jsonl", "b.log", "c.err", "run.witness", "trace.json"} {
 		if !got[want] {
 			t.Errorf("gatherer missed %s", want)
 		}
 	}
 	if got["skip.txt"] {
-		t.Error("gatherer should skip .txt")
+		t.Error("gatherer should skip a top-level .txt")
+	}
+	if got["config.json"] {
+		t.Error("gatherer should NOT admit a top-level repo .json (narrow path-admit, not a global suffix widen)")
 	}
 	if got["objects.db"] {
 		t.Error("gatherer should prune .git")
@@ -170,14 +178,27 @@ func TestGrowthgateReapActuator(t *testing.T) {
 	}
 }
 
-// TestIsGrowthCandidate pins the suffix pre-filter.
+// TestIsGrowthCandidate pins the path pre-filter: the append-only suffixes anywhere,
+// PLUS any file under a .dispatch-runs/ tree regardless of suffix — but never a
+// .txt/.json/.witness/.wave OUTSIDE that tree (the widen is path-scoped, not a global
+// suffix admit that would sweep repo source configs).
 func TestIsGrowthCandidate(t *testing.T) {
-	for _, y := range []string{"x.jsonl", "X.LOG", "run.err", "a.b.jsonl"} {
+	for _, y := range []string{
+		"x.jsonl", "X.LOG", "run.err", "a.b.jsonl",
+		".dispatch-runs/resolve-42.witness",         // sidecar admitted by path
+		".dispatch-runs/dispatch-ci-20260717.wave",  // sidecar admitted by path
+		"repo/.dispatch-runs/pins.txt",              // nested under the dispatch tree
+		"C:\\work\\fak\\.dispatch-runs\\trace.json", // backslash path normalizes
+	} {
 		if !isGrowthCandidate(y) {
 			t.Errorf("isGrowthCandidate(%q) = false, want true", y)
 		}
 	}
-	for _, n := range []string{"x.txt", "x.json", "x.go", "log"} {
+	for _, n := range []string{
+		"x.txt", "config.json", "x.go", "log",
+		"a.witness", "b.wave", // these suffixes are NOT admitted outside .dispatch-runs/
+		".dispatch-runs-backup/x.txt", // the "/" boundary matters — not the dispatch tree
+	} {
 		if isGrowthCandidate(n) {
 			t.Errorf("isGrowthCandidate(%q) = true, want false", n)
 		}
