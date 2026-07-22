@@ -82,8 +82,25 @@ func TestCUDAMatMulF16ApproxMatchesRef(t *testing.T) {
 		if c < cudaFP16CosineMin {
 			t.Fatalf("%s: fp16 MatMul cosine %.6f < recorded fp16 gate %.6f (cudaFP16CosineMin)", lay.name, c, cudaFP16CosineMin)
 		}
+		// #4267: grade the fp16 device path as an error DISTRIBUTION BESIDE the scalar cosine.
+		// A scalar cosine is a whole-vector reduction — a handful of catastrophically-wrong
+		// elements barely moves a cosine sitting near 1.0, so a LOCALIZED numeric fault can clear
+		// the 0.997 floor (TestApproxErrorDistributionCatchesLocalizedFaultCosinePasses proves it
+		// on the CPU-reference path). The path passes only if cosine >= floor AND close-fraction
+		// >= floor AND relative-p999 <= bound, so those blown elements can no longer hide: they
+		// collapse the close-fraction and spike the tail. RECORDED floors (approx_distribution_test.go,
+		// mirroring zml's minimum_close_fraction=0.999); a HEALTHY fp16 GEMM — F32-accumulate keeps
+		// per-element relative error well under approxDefaultRelTol — clears them, and the realized
+		// distribution is measured on the GPU node the same honest way as the cosine.
+		rep := compareDistribution(yRef, yCu, approxDefaultAbsTol, approxDefaultRelTol)
+		if !rep.passes(approxMinCloseFraction, approxMaxRelP999) {
+			t.Fatalf("%s: fp16 MatMul distribution gate: closeFraction=%.6f (floor %.4f) relP999=%.6f (bound %.4f) — cosine=%.6f cleared %.4f, so this is a LOCALIZED fault the scalar gate hid (#4267)",
+				lay.name, rep.CloseFraction, approxMinCloseFraction, rep.P999, approxMaxRelP999, c, cudaFP16CosineMin)
+		}
 		t.Logf("#484 fp16 MatMul (%s): cosine=%.8f maxAbs=%.2e gate=%.4f (device=%s tier=%s class=%s)",
 			lay.name, c, maxAbsDelta(yRef, yCu), cudaFP16CosineMin, cb.Name(), cb.Tier(), cb.Class())
+		t.Logf("#4267 fp16 MatMul (%s) distribution: closeFraction=%.6f p50=%.4f p99=%.4f relP999=%.4f RMSE=%.4f (floors closeFrac>=%.4f relP999<=%.4f)",
+			lay.name, rep.CloseFraction, rep.P50, rep.P99, rep.P999, rep.RMSE, approxMinCloseFraction, approxMaxRelP999)
 	}
 }
 
@@ -117,8 +134,18 @@ func TestCUDABatchedMatMulF16ApproxMatchesRef(t *testing.T) {
 		if c < cudaFP16CosineMin {
 			t.Fatalf("%s: fp16 BatchedMatMul cosine %.6f < recorded fp16 gate %.6f", lay.name, c, cudaFP16CosineMin)
 		}
+		// #4267: distribution gate beside cosine (see TestCUDAMatMulF16ApproxMatchesRef) — the
+		// prefill GEMM is graded the same way so a localized fault on the wider P>1 output can't
+		// hide behind a whole-vector cosine either.
+		rep := compareDistribution(YRef, YCu, approxDefaultAbsTol, approxDefaultRelTol)
+		if !rep.passes(approxMinCloseFraction, approxMaxRelP999) {
+			t.Fatalf("%s: fp16 BatchedMatMul distribution gate: closeFraction=%.6f (floor %.4f) relP999=%.6f (bound %.4f) — cosine=%.6f cleared %.4f, a LOCALIZED fault the scalar gate hid (#4267)",
+				lay.name, rep.CloseFraction, approxMinCloseFraction, rep.P999, approxMaxRelP999, c, cudaFP16CosineMin)
+		}
 		t.Logf("#484 fp16 BatchedMatMul (%s, P=%d): cosine=%.8f maxAbs=%.2e gate=%.4f",
 			lay.name, P, c, maxAbsDelta(YRef, YCu), cudaFP16CosineMin)
+		t.Logf("#4267 fp16 BatchedMatMul (%s, P=%d) distribution: closeFraction=%.6f p99=%.4f relP999=%.4f RMSE=%.4f (floors closeFrac>=%.4f relP999<=%.4f)",
+			lay.name, P, rep.CloseFraction, rep.P99, rep.P999, rep.RMSE, approxMinCloseFraction, approxMaxRelP999)
 	}
 	t.Logf("#484 fp16 witness: throughput vs the F32 device path is BenchmarkCUDABatchedMatMul{F16,F32}; "+
 		"compare the fp16 GEMM tok/s against the F16 cell of internal/model/bench_llamacpp.py (run on a CUDA node via tools/run_484_acceptance_on_gpu.sh). device=%s tier=%s class=%s",
