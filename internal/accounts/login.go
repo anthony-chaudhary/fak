@@ -72,6 +72,12 @@ type LoginObservation struct {
 	Peers        []string       `json:"peers,omitempty"`
 	TokenTwin    []string       `json:"token_twin,omitempty"`
 	Warnings     []LoginWarning `json:"warnings,omitempty"`
+	// CredKind names the seat's credential kind (#5331): empty/omitted for the historical
+	// subscription-OAuth seat, "api_key" for an Anthropic API-key seat. APIKeyEnv names the
+	// env var holding that key (a REFERENCE, never the secret) and is set only on an api_key
+	// seat — so a consumer of the --json surface can tell an org/API seat from an OAuth one.
+	CredKind  CredKind `json:"cred_kind,omitempty"`
+	APIKeyEnv string   `json:"api_key_env,omitempty"`
 }
 
 // LoginSummary is the rollup over a LoginReport.
@@ -212,6 +218,8 @@ func (r Registry) loginObservation(h Home, si SeatIdentity, cd *CooldownStore, n
 		Canonical:    si.Canonical,
 		Peers:        append([]string(nil), si.Peers...),
 		TokenTwin:    append([]string(nil), si.TokenTwin...),
+		CredKind:     h.CredKind,
+		APIKeyEnv:    h.APIKeyEnv,
 	}
 	if obs.IdentityRole == "" && obs.CanServe && obs.Account == "" {
 		obs.IdentityRole = RoleNoLogin
@@ -239,6 +247,9 @@ func (r Registry) loginObservation(h Home, si SeatIdentity, cd *CooldownStore, n
 func LoginReasonAction(status LoginStatus, h Home) (string, string) {
 	switch status {
 	case LoginReady:
+		if h.CredentialKind() == CredKindAPIKey {
+			return "API key present in $" + h.APIKeyEnv, ""
+		}
 		return "config home has live credentials", ""
 	case LoginTombstoned:
 		if h.RehomeTo != "" {
@@ -250,6 +261,10 @@ func LoginReasonAction(status LoginStatus, h Home) (string, string) {
 	case LoginMissingDir:
 		return "config directory is missing", "restore the directory or tombstone/rehome the seat"
 	case LoginNeedsLogin:
+		if h.CredentialKind() == CredKindAPIKey {
+			return "API key env var $" + h.APIKeyEnv + " is unset or empty",
+				"export $" + h.APIKeyEnv + " with this account's Anthropic API key (the registry keeps only the reference, never the secret)"
+		}
 		return "config directory exists but has no live credentials", "run /login for this CLAUDE_CONFIG_DIR or rehome the seat"
 	case LoginIdentityMismatch:
 		action := "log out and re-login this CLAUDE_CONFIG_DIR with the browser profile that belongs to this seat"

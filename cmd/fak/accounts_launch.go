@@ -370,7 +370,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", ucErr)
 		return 2
 	}
-	guardCacheArgs := guardCachePostureArgs(mcMode, os.Getenv(fleetGuardAPIKeyEnvEnv))
+	guardCacheArgs := guardCachePostureArgs(mcMode, launchSeatAPIKeyEnv(home))
 	argv := buildLaunchArgv(fakBin, launchOpts{
 		command:         command,
 		useGuard:        p.useGuard,
@@ -452,6 +452,21 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	return res.Code
 }
 
+// launchSeatAPIKeyEnv resolves the --api-key-env reference an account-switched launch
+// fronts `fak guard` with. An API-KEY seat (CredKindAPIKey, #5331) carries its OWN env-var
+// reference in the registry — the seat's credential IS that key, so guard must bill it
+// (and managed cache resolves ACTIVE on the Anthropic wire) — and it wins over the
+// fleet-wide $FAK_GUARD_API_KEY_ENV knob. Every other seat keeps the historical behavior:
+// the fleet knob, possibly empty (omit --api-key-env; subscription OAuth bills the seat).
+func launchSeatAPIKeyEnv(home accounts.Home) string {
+	if home.CredentialKind() == accounts.CredKindAPIKey {
+		if env := strings.TrimSpace(home.APIKeyEnv); env != "" {
+			return env
+		}
+	}
+	return strings.TrimSpace(os.Getenv(fleetGuardAPIKeyEnvEnv))
+}
+
 // printAccountsLaunchPlan renders the human-readable launch plan summary to stderr: the resolved
 // seat, identity, login, the guard/permissions/ultracode/model posture (Claude-only words gated
 // off for other agents), the managed-cache word, and the broker-sanitized command + agent_run
@@ -473,6 +488,10 @@ func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, h
 	fmt.Fprintf(stderr, "  CLAUDE_CONFIG_DIR = <account-dir>\n")
 	if id.Email != "" {
 		fmt.Fprintf(stderr, "  identity          = %s\n", id.Email)
+	} else if home.CredentialKind() == accounts.CredKindAPIKey && home.APIKeyEnv != "" {
+		// An API-key seat (#5331) has no OAuth email; its identity is the key held in the env
+		// var the registry references (never the secret itself).
+		fmt.Fprintf(stderr, "  identity          = api-key seat ($%s — env-var reference, key never stored)\n", home.APIKeyEnv)
 	}
 	fmt.Fprintf(stderr, "  login             = %s (can_serve=%t)\n", home.LoginStatus(), home.CanServe())
 	// Name the posture that produced the verdict, not just the verdict: under the default `auto`
@@ -504,7 +523,9 @@ func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, h
 	fmt.Fprintf(stderr, "  ultracode         = %s\n", ultracodeWord)
 	fmt.Fprintf(stderr, "  model             = %s\n", modelWord)
 	if p.useGuard {
-		fmt.Fprintf(stderr, "  managed-cache     = %s\n", accountsLaunchManagedCacheWord(mcMode, os.Getenv(fleetGuardAPIKeyEnvEnv)))
+		// Name the same api-key-env resolution the real guard argv used (an api-key seat's own
+		// reference wins over the fleet knob, #5331) so the summary matches the launch.
+		fmt.Fprintf(stderr, "  managed-cache     = %s\n", accountsLaunchManagedCacheWord(mcMode, launchSeatAPIKeyEnv(home)))
 	}
 	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(grant.SanitizedArgv, " "))
 	fmt.Fprintf(stderr, "  agent_run         = %s policy_digest=%s broker=%s\n",

@@ -81,6 +81,7 @@ type accountsCmd struct {
 	checkDiff                                        *bool
 
 	addName, addChrome, addToken, addSuffix, addFrom           *string
+	addAPIKeyEnv                                               *string
 	addReserved, addNoLogin, addNoSync, addAdopt               *bool
 	addForce, addProbeIdentity, addNoProbeIdentity, probeIdent *bool
 
@@ -130,6 +131,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	addNoSync := fs.Bool("no-sync", false, "(add) skip regenerating the roster views after adding (just write the registry)")
 	addAdopt := fs.Bool("adopt", false, "(add) enroll by ADOPTING an existing login instead of running `claude setup-token`: copy the source seat's live credential bundle (.credentials.json and/or .oauth-token) into the new isolated dir. Turns the current default login into a rotation seat in one command")
 	addFrom := fs.String("from", "", "(add --adopt) source seat to copy the login bundle from: a seat name, a config-dir path, or empty for the default ~/.claude seat")
+	addAPIKeyEnv := fs.String("api-key-env", "", "(add) enroll an API-KEY seat (#5331): NAME of the env var holding the account's Anthropic API key (e.g. ANTHROPIC_API_KEY). The registry stores only this REFERENCE, never the secret; `launch` fronts guard with --api-key-env + ACTIVE managed cache. Mutually exclusive with --adopt/--no-login/--token")
 	addForce := fs.Bool("force", false, "(add --adopt) reconcile an EXISTING target dir/registry row in place (refresh creds + re-derive identity + upsert) instead of refusing")
 	addProbeIdentity := fs.Bool("probe-identity", false, "(add --adopt) reconcile the adopted seat's identity against a live OAuth profile probe of its credential, preferring the credential over stale on-disk .claude.json metadata (always on for enroll-current)")
 	addNoProbeIdentity := fs.Bool("no-probe-identity", false, "(add --adopt) opt OUT of the default identity probe: record the adopted seat's on-disk .claude.json metadata as-is and hit no network (the pre-probe disk-only behavior); enroll-current ignores this and always probes")
@@ -202,6 +204,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 		addToken:            addToken,
 		addSuffix:           addSuffix,
 		addFrom:             addFrom,
+		addAPIKeyEnv:        addAPIKeyEnv,
 		addReserved:         addReserved,
 		addNoLogin:          addNoLogin,
 		addNoSync:           addNoSync,
@@ -256,6 +259,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	checkDiff := c.checkDiff
 	addName, addReserved, addChrome, addNoLogin, addToken := c.addName, c.addReserved, c.addChrome, c.addNoLogin, c.addToken
 	addSuffix, addNoSync, addAdopt, addFrom, addForce := c.addSuffix, c.addNoSync, c.addAdopt, c.addFrom, c.addForce
+	addAPIKeyEnv := c.addAPIKeyEnv
 	addProbeIdentity, addNoProbeIdentity, probeIdent := c.addProbeIdentity, c.addNoProbeIdentity, c.probeIdent
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmArchive := c.rmRehome, c.rmReason, c.rehomeAddr, c.rehomeKey, c.rmArchive
 	roleFlag, launchGuard, launchSkipPerms, launchCommand := c.roleFlag, c.launchGuard, c.launchSkipPerms, c.launchCommand
@@ -367,6 +371,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			adopt:           *addAdopt,
 			from:            *addFrom,
 			force:           *addForce,
+			apiKeyEnv:       *addAPIKeyEnv,
 			probeIdentity:   *addProbeIdentity,
 			noProbeIdentity: *addNoProbeIdentity,
 			probeURL:        enrollProfileURL(),
@@ -927,6 +932,12 @@ func probeStatusIdentities(stderr io.Writer, report *accounts.LoginReport, profi
 	for i := range report.Seats {
 		s := &report.Seats[i]
 		if s.Dir == "" || !s.HasCreds {
+			continue
+		}
+		if s.CredKind == accounts.CredKindAPIKey {
+			// An api-key seat's identity is the KEY's org/workspace, not an OAuth profile —
+			// there is no disk OAuth credential to resolve, so the profile probe does not
+			// apply. TODO(#5331): probe the key's org via the Console/profile endpoint.
 			continue
 		}
 		res := accounts.ResolveCredentialIdentity(s.Dir, probe)

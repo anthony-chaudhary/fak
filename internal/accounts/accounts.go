@@ -91,6 +91,13 @@ type Identity struct {
 	// TokenFP share one rate-limit bucket regardless of what their .claude.json says, so
 	// Reconcile uses it to collapse phantom duplicates the email/UUID alone would miss.
 	TokenFP string `json:"token_fp,omitempty"`
+	// APIKeyEnv, when non-empty, marks this as an API-KEY seat's identity (CredKindAPIKey,
+	// #5331): the credential is an Anthropic API key held in the environment variable of
+	// this NAME (never the secret — this is the reference, mirroring modelroute's CredEnv).
+	// It is the disk-independent credential handle AccountKey folds into an "apikey:" bucket
+	// when no org/workspace UUID is known, so two seats on the same key env collapse.
+	// DeriveAPIKeyIdentity fills it; an OAuth seat leaves it empty.
+	APIKeyEnv string `json:"api_key_env,omitempty"`
 }
 
 // AccountKey is the identity a seat collapses onto for dedup: two seats with the same
@@ -105,6 +112,12 @@ func (id Identity) AccountKey() string {
 	}
 	if id.TokenFP != "" {
 		return "tok:" + id.TokenFP
+	}
+	// An API-key seat (#5331) has no OAuth login/UUID and no setup token; offline it
+	// buckets on its env-var reference so two seats on the same key env still collapse.
+	// TODO(#5331): once a live probe resolves the key's org UUID, AccountUUID above wins.
+	if id.APIKeyEnv != "" {
+		return APIKeyBucketKey(id.APIKeyEnv)
 	}
 	return ""
 }
@@ -152,6 +165,17 @@ type Home struct {
 	Enabled       *bool  `json:"enabled,omitempty"`
 	Reserved      bool   `json:"reserved,omitempty"`
 	ChromeProfile string `json:"chrome_profile,omitempty"`
+	// CredKind names the credential KIND this seat's identity is derived from (#5331). Empty
+	// (the default, and every pre-#5331 registry) reads as CredKindOAuth — the historical
+	// subscription-OAuth seat. CredKindAPIKey marks an Anthropic API-key seat whose credential
+	// is an API key held in the env var APIKeyEnv names. It is AUTHORED (like the policy
+	// attributes above), so Discover/MergeDiscovered preserve it across a rescan.
+	CredKind CredKind `json:"cred_kind,omitempty"`
+	// APIKeyEnv is the NAME of the environment variable holding this seat's Anthropic API key
+	// (e.g. "ANTHROPIC_API_KEY"). It is a REFERENCE, never the secret — the same posture as
+	// modelroute.Account.CredEnv. Set only on a CredKindAPIKey seat; `fak accounts launch`
+	// fronts the guard with `--api-key-env <APIKeyEnv>` so the child reads the key from env.
+	APIKeyEnv string `json:"api_key_env,omitempty"`
 	// Tombstone audit trail, canonical here so the generated views need not strand it: when
 	// this seat was retired and why. RehomeTo (above) is the third audit field. Empty for a
 	// live seat. These move the job roster's tombstoned_accounts prose into the registry.
@@ -599,8 +623,23 @@ func (r Registry) Validate() error {
 		default:
 			return fmt.Errorf("accounts: home %q has unknown status %q", h.Name, h.Status)
 		}
+		switch h.CredKind {
+		case "", CredKindOAuth, CredKindAPIKey:
+		default:
+			return fmt.Errorf("accounts: home %q has unknown cred_kind %q", h.Name, h.CredKind)
+		}
+		// An API-key seat (#5331) MUST carry a valid env-var NAME as its credential reference
+		// — never a pasted secret — and its identity is that key, not a dir, so it is exempt
+		// from the active-home dir requirement below.
+		if h.CredentialKind() == CredKindAPIKey {
+			if !ValidAPIKeyEnvName(h.APIKeyEnv) {
+				return fmt.Errorf("accounts: api-key home %q needs a valid api_key_env env-var name (never the secret), got %q", h.Name, h.APIKeyEnv)
+			}
+		} else if h.APIKeyEnv != "" {
+			return fmt.Errorf("accounts: home %q sets api_key_env %q but is not an api_key seat", h.Name, h.APIKeyEnv)
+		}
 		if h.Active() {
-			if h.Dir == "" {
+			if h.Dir == "" && h.CredentialKind() != CredKindAPIKey {
 				return fmt.Errorf("accounts: active home %q has no dir", h.Name)
 			}
 		} else {
@@ -1123,9 +1162,16 @@ func (r Registry) MergeDiscovered(home string) (Registry, error) {
 		}
 		if ok {
 			// Known seat: adopt the scan's canonical Dir + fresh Identity, preserve all
-			// authored policy fields already in out.Homes[idx].
+			// authored policy fields already in out.Homes[idx]. An API-key seat's dir carries
+			// the same config-home markers the scan keys on, so the disk-shaped discovery would
+			// mis-derive it as a credential-less OAuth home; re-derive it by its stored KIND
+			// (from the env-var reference, #5331) instead of overwriting with the scan identity.
 			out.Homes[idx].Dir = d.Dir
-			out.Homes[idx].Identity = d.Identity
+			if out.Homes[idx].CredentialKind() == CredKindAPIKey {
+				out.Homes[idx].Identity = out.Homes[idx].DerivedIdentity()
+			} else {
+				out.Homes[idx].Identity = d.Identity
+			}
 			continue
 		}
 		// A dir the registry does not know BY NAME but whose account identity matches a
@@ -1146,8 +1192,13 @@ func (r Registry) MergeDiscovered(home string) (Registry, error) {
 		covered[d.Name] = true
 	}
 	for i := range out.Homes {
-		if !covered[out.Homes[i].Name] && out.Homes[i].Dir != "" {
-			out.Homes[i].Identity = DeriveIdentity(out.Homes[i].Dir)
+		// An API-key seat carries its credential as an env-var reference, not a dir, so it
+		// must be refreshed even when it has no Dir the scan could cover (#5331).
+		if covered[out.Homes[i].Name] {
+			continue
+		}
+		if out.Homes[i].Dir != "" || out.Homes[i].CredentialKind() == CredKindAPIKey {
+			out.Homes[i].Identity = out.Homes[i].DerivedIdentity()
 		}
 	}
 	return out, nil
@@ -1158,7 +1209,9 @@ func (r Registry) MergeDiscovered(home string) (Registry, error) {
 // written). It mutates the receiver's Homes and returns it for chaining.
 func (r Registry) Refresh() Registry {
 	for i := range r.Homes {
-		r.Homes[i].Identity = DeriveIdentity(r.Homes[i].Dir)
+		// DerivedIdentity dispatches on credential KIND so an API-key seat re-derives from
+		// its env-var reference (#5331) instead of being mis-read as a credential-less home.
+		r.Homes[i].Identity = r.Homes[i].DerivedIdentity()
 	}
 	return r
 }

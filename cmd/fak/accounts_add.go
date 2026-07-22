@@ -46,6 +46,13 @@ type addParams struct {
 	from  string
 	force bool
 
+	// apiKeyEnv, when non-empty, enrolls an API-KEY seat (CredKindAPIKey, #5331) instead of a
+	// subscription-OAuth seat: it is the NAME of the environment variable holding the account's
+	// Anthropic API key (e.g. "ANTHROPIC_API_KEY"). The registry stores ONLY this reference,
+	// never the secret. This path runs no setup-token and copies no credential bundle — the
+	// credential is the env var — so it is mutually exclusive with --adopt/--no-login/--token.
+	apiKeyEnv string
+
 	// probeIdentity (adopt only) reconciles the adopted seat's identity against the account its
 	// live credential ACTUALLY serves — a network probe of the OAuth profile endpoint — and
 	// prefers the credential over stale on-disk .claude.json metadata, overwriting the seeded
@@ -115,6 +122,22 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		return 1
 	}
 
+	// API-KEY seat (#5331): --api-key-env names the env var holding the account's Anthropic API
+	// key (a REFERENCE, never the secret). It is a distinct credential KIND with no setup-token
+	// and no bundle to copy, so it is mutually exclusive with the OAuth acquisition flags, and
+	// the value must look like an env-var NAME so a pasted key is refused before anything is written.
+	apiKeyEnv := strings.TrimSpace(p.apiKeyEnv)
+	if apiKeyEnv != "" {
+		if p.adopt || p.noLogin || p.token != "" {
+			fmt.Fprintln(stderr, "fak accounts: --api-key-env cannot be combined with --adopt/--no-login/--token (an api-key seat carries no setup-token or copied bundle)")
+			return 1
+		}
+		if !accounts.ValidAPIKeyEnvName(apiKeyEnv) {
+			fmt.Fprintf(stderr, "fak accounts: --api-key-env %q is not a valid env-var NAME (want e.g. ANTHROPIC_API_KEY; never paste the secret)\n", apiKeyEnv)
+			return 2
+		}
+	}
+
 	// Canonicalize the roster name to carry the suffix (the host convention, e.g. day26 ->
 	// day26-netra), so the registry name matches the dir basename and `remove --name <name>`
 	// uses the same handle the rosters show.
@@ -130,7 +153,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	// `--adopt --force` is the deliberate exception: it reconciles an already-seeded dir in
 	// place (refresh creds, re-derive identity, upsert the row). A tombstoned (.DELETED) dir
 	// is never a reconcile target.
-	reconcile := p.adopt && p.force
+	reconcile := (p.adopt || apiKeyEnv != "") && p.force
 	if _, err := os.Stat(dir); err == nil {
 		if !reconcile {
 			fmt.Fprintf(stderr, "fak accounts: config dir already exists: %s (pick another --name, or pass --adopt --force to reconcile it)\n", dir)
@@ -177,7 +200,18 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	// disk state; setup-token derives it from the profile probe. Set in the branch below.
 	var id accounts.ProbedIdentity
 
-	if p.adopt {
+	if apiKeyEnv != "" {
+		// API-KEY seat (#5331): there is NO credential to obtain or copy — the credential is the
+		// Anthropic API key held in the $apiKeyEnv env var, and the registry keeps only the NAME.
+		// Identity is derived from the KEY's org/workspace; offline that probe cannot run, so id
+		// stays empty here (no OAuth email/uuid) and the seat's stable identity is its env-var
+		// reference (DeriveAPIKeyIdentity at the upsert below). TODO(#5331): a live Console/profile
+		// probe of the key would fill the org email/uuid.
+		fmt.Fprintf(stdout, "api-key seat: credential is $%s (reference only; the key is never stored in the registry)\n", apiKeyEnv)
+		if _, present := os.LookupEnv(apiKeyEnv); !present {
+			fmt.Fprintf(stdout, "note: $%s is not set in this environment yet; the seat enrolls now and reads it at launch\n", apiKeyEnv)
+		}
+	} else if p.adopt {
 		// ADOPT: copy an EXISTING login's bundle from the source seat into the isolated dir,
 		// instead of minting a fresh setup-token. The source is already an enrolled, twin-clean
 		// login, so the credential is proven by being live; we still twin-check a copied
@@ -280,29 +314,38 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	// binding, not current disk. A duplicate (a different active seat already owns this account) is
 	// refused unless --force; a rebind of this seat onto its own new account is enroll-current's job,
 	// so it is surfaced, not blocked; an unprobed identity warns rather than guesses.
-	switch col := accounts.DetectEnrollCollision(reg, rosterName, id); col.Kind {
-	case accounts.EnrollDuplicate:
-		if !p.force {
-			// The dir was created THIS run (a duplicate-refuse implies !force, and reconcile needs
-			// force, so an existing dir would have been refused earlier). Remove it so a refused
-			// hijack leaves no half-seat behind — the registry (the authority) was never touched.
-			if !reconcile {
-				_ = os.RemoveAll(dir)
+	// An api-key seat has no probed OAuth account to collide on (its identity is the key's
+	// org, which we don't probe offline), so the login-hijack check does not apply — skip it
+	// rather than warn "could not verify identity collision" on every api-key enroll (#5331).
+	if apiKeyEnv == "" {
+		switch col := accounts.DetectEnrollCollision(reg, rosterName, id); col.Kind {
+		case accounts.EnrollDuplicate:
+			if !p.force {
+				// The dir was created THIS run (a duplicate-refuse implies !force, and reconcile needs
+				// force, so an existing dir would have been refused earlier). Remove it so a refused
+				// hijack leaves no half-seat behind — the registry (the authority) was never touched.
+				if !reconcile {
+					_ = os.RemoveAll(dir)
+				}
+				fmt.Fprintf(stderr, "fak accounts: REFUSED (identity-hijack): %s\n", col.Detail)
+				fmt.Fprintf(stderr, "  enrolling it as %q would collapse two seats onto one rate-limit bucket; pass --force to override, or remove seat %q first\n", rosterName, col.ConflictSeat)
+				return 1
 			}
-			fmt.Fprintf(stderr, "fak accounts: REFUSED (identity-hijack): %s\n", col.Detail)
-			fmt.Fprintf(stderr, "  enrolling it as %q would collapse two seats onto one rate-limit bucket; pass --force to override, or remove seat %q first\n", rosterName, col.ConflictSeat)
-			return 1
+			fmt.Fprintf(stderr, "fak accounts: warning: --force enrolling a duplicate of seat %q (%s)\n", col.ConflictSeat, col.Account)
+		case accounts.EnrollRebind:
+			fmt.Fprintf(stdout, "note: %s\n", col.Detail)
+		case accounts.EnrollUnknown:
+			fmt.Fprintf(stderr, "fak accounts: warning: could not verify identity collision (%s)\n", col.Detail)
 		}
-		fmt.Fprintf(stderr, "fak accounts: warning: --force enrolling a duplicate of seat %q (%s)\n", col.ConflictSeat, col.Account)
-	case accounts.EnrollRebind:
-		fmt.Fprintf(stdout, "note: %s\n", col.Detail)
-	case accounts.EnrollUnknown:
-		fmt.Fprintf(stderr, "fak accounts: warning: could not verify identity collision (%s)\n", col.Detail)
 	}
 
-	// Step 5: seed markers so every consumer recognizes the seat.
-	if err := seedClaudeJSON(dir, id); err != nil {
-		fmt.Fprintf(stderr, "fak accounts: warning: seed .claude.json: %v\n", err)
+	// Step 5: seed markers so every consumer recognizes the seat. An api-key seat has no
+	// OAuth oauthAccount to seed (id is empty and its identity is the key), so skip the
+	// .claude.json identity seed for it; projects/ + settings.json still land below.
+	if apiKeyEnv == "" {
+		if err := seedClaudeJSON(dir, id); err != nil {
+			fmt.Fprintf(stderr, "fak accounts: warning: seed .claude.json: %v\n", err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "projects"), 0o755); err != nil {
 		fmt.Fprintf(stderr, "fak accounts: warning: create projects/ marker: %v\n", err)
@@ -328,6 +371,13 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		Reserved:      p.reserved,
 		ChromeProfile: p.chrome,
 		Identity:      accounts.DeriveIdentity(dir),
+	}
+	if apiKeyEnv != "" {
+		// API-KEY seat (#5331): mark the credential kind + env-var reference, and derive identity
+		// from the KEY reference (never a disk OAuth probe, which would read it as credential-less).
+		home.CredKind = accounts.CredKindAPIKey
+		home.APIKeyEnv = apiKeyEnv
+		home.Identity = accounts.DeriveAPIKeyIdentity(dir, apiKeyEnv, os.LookupEnv)
 	}
 	verb := upsertHome(&reg, home)
 	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
@@ -370,7 +420,11 @@ func dryRunAddPlan(stdout, stderr io.Writer, p addParams, reg accounts.Registry,
 	fmt.Fprintf(stdout, "DRY RUN: no dir created, no credential copied, no probe, no registry write, no view sync\n")
 	fmt.Fprintf(stdout, "  target dir:    %s\n", dir)
 	fmt.Fprintf(stdout, "  roster name:   %s (reserved=%v)\n", rosterName, p.reserved)
-	if p.adopt {
+	if env := strings.TrimSpace(p.apiKeyEnv); env != "" {
+		// API-key seat (#5331): the credential is the env-var REFERENCE; nothing is minted or copied.
+		fmt.Fprintf(stdout, "  credential:    would record the env-var REFERENCE $%s (kind=api_key; the key itself is never stored)\n", env)
+		fmt.Fprintf(stdout, "  identity:      would derive from the key reference (offline; no OAuth profile probe)\n")
+	} else if p.adopt {
 		src, err := resolveSourceSeat(p.homeDir, p.from, reg)
 		if err != nil {
 			// A missing/invalid source is a read-only refusal that must fire under --dry-run too.
@@ -631,6 +685,11 @@ func upsertHome(reg *accounts.Registry, home accounts.Home) string {
 			if home.ChromeProfile != "" {
 				existing.ChromeProfile = home.ChromeProfile
 			}
+			// Carry the credential KIND + api-key reference from the incoming row (#5331): an
+			// api-key add lands them; a plain OAuth reconcile of the same name clears them, which
+			// is the intended "convert this seat's kind" semantics of an explicit re-enroll.
+			existing.CredKind = home.CredKind
+			existing.APIKeyEnv = home.APIKeyEnv
 			// A reconcile re-activates a seat that had been tombstoned.
 			existing.Status = ""
 			existing.Enabled = nil
