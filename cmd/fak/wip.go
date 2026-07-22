@@ -128,11 +128,15 @@ func wipUsage(w io.Writer) {
       (OWNED), to several (SHARED), or to none (ORPHAN — unattributed, at-risk WIP).
       With --orphans, print only the ORPHAN hunks (exit 3 if any exist).
 
-  fak wip reconcile [-C <repo>] [--json]
+  fak wip reconcile [-C <repo>] [--json] [--file-ticket] [--dry-run]
       For every checkpoint whose owning session no longer holds a live lease
       (CRASHED), decide the one safe action: DISCARD_WITNESSED (delta landed in
       HEAD), RECLAIM (unlanded, applies cleanly), or QUARANTINE (unlanded, conflicts).
       A live owner's checkpoint is SKIPped. Advisory: prints decisions, mutates nothing.
+      With --file-ticket, bind each QUARANTINE orphan to ONE idempotent GitHub tracking
+      ticket (keyed by session+start-SHA; a matching ticket already open is reused, not
+      duplicated). --dry-run (and an unavailable gh) prints the exact ticket instead of
+      filing it; the ticket pass never changes the reconcile exit code.
 
   fak wip sweep-guard [-C <repo>] [--session <id>] [--json]
       Warn before a broad 'git add' sweeps WIP that is not yours. Grades every dirty
@@ -922,23 +926,38 @@ func runWipReconcile(stdout, stderr io.Writer, argv []string) int {
 	verbFlagUsage(fs, "wip")
 	repo := fs.String("C", "", "run in this git repo (default: cwd)")
 	asJSON := fs.Bool("json", false, "emit the reconciliation decisions as JSON")
+	fileTicket := fs.Bool("file-ticket", false, "on a QUARANTINE verdict, bind the orphan to ONE idempotent GitHub tracking ticket (keyed by session+start-SHA)")
+	dryRun := fs.Bool("dry-run", false, "with --file-ticket, print the exact ticket that would be filed instead of filing it (also the automatic behavior when gh is unavailable)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
-	res, err := wipReconcile(context.Background(), *repo)
+	ctx := context.Background()
+	res, err := wipReconcile(ctx, *repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak wip reconcile: %v\n", err)
 		return 1
 	}
-	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, res, "fak wip reconcile")
-	}
-	if len(res.Decisions) == 0 {
+	switch {
+	case *asJSON:
+		if code := encodeJSONOrFail(stdout, stderr, res, "fak wip reconcile"); code != 0 {
+			return code
+		}
+	case len(res.Decisions) == 0:
 		fmt.Fprintln(stdout, "no checkpoints to reconcile")
-		return 0
+	default:
+		for _, d := range res.Decisions {
+			fmt.Fprintf(stdout, "%s\t%s\t%s\n", d.Action, d.Session, d.Reason)
+		}
 	}
-	for _, d := range res.Decisions {
-		fmt.Fprintf(stdout, "%s\t%s\t%s\n", d.Action, d.Session, d.Reason)
+	// Opt-in follow-up: file (or dry-run print) one idempotent ticket per QUARANTINE
+	// orphan. Advisory only — it never changes the reconcile exit code. In --json mode
+	// its human lines go to stderr so stdout stays pure JSON.
+	if *fileTicket {
+		tout := stdout
+		if *asJSON {
+			tout = stderr
+		}
+		wipReconcileFileTickets(ctx, tout, stderr, *repo, res.Decisions, *dryRun, newWipTicketGH())
 	}
 	return 0
 }
