@@ -20,6 +20,17 @@ snapshot's open-count, recorded once; ``resolved_toward_target`` is
 ``baseline_open - open_now`` clamped at 0, and ``target_remaining`` is
 ``max(0, target - resolved)``.
 
+CAUTION: ``resolved_toward_target`` is a NET-open reduction — it credits the whole
+backlog drop, including human/foreign closes and other loops' work, so a stale
+baseline (recorded days ago) can make it read "target met" while THIS loop has
+barely closed anything. The honest, backlog-independent metric is
+``closures_toward_target`` / ``closures_target_remaining``, which fold only the
+loop's OWN gross witnessed closures (``closed_by_loop_total``) toward the target
+and never drift with new-issue inflow. This mirrors ``cmd/fak``'s
+``dispatchProgressClosuresTowardTarget`` (#2639). The quiescent / ``TARGET_MET``
+heartbeat gates on ``closures_target_remaining`` so the loop never reports "done"
+until it has actually driven ``target`` closures itself.
+
     python tools/issue_resolve_progress.py                 # snapshot only (dry)
     python tools/issue_resolve_progress.py --close --live  # snapshot + close witnessed
     python tools/issue_resolve_progress.py --target 50 --json
@@ -185,10 +196,22 @@ def run_close(root: Path, *, live: bool, audit_path: Path | None,
     except ValueError:
         return {"_error": (err or out or "no JSON").strip()[-300:], "closed": 0}
     counts = doc.get("counts") or {}
+    # Surface EVERY skip bucket the close-arm reports, not just skipped_unwitnessed +
+    # skipped_unpushed. A NO_CLOSES tick used to read all-zeros here even when the
+    # close-arm was HOLDING N issues under the coverage gate (skipped_partial =
+    # unchecked DoD boxes) — so a progress.jsonl reader saw "nothing closed" with no
+    # WHY. Fold the full skipped_* breakdown (issue_resolve_witnessed.py emits
+    # skipped_partial / skipped_coverage_unknown / skipped_reopened / skipped_effect_*
+    # / skipped_nonresolving alongside skipped_unwitnessed / skipped_unpushed) so the
+    # real hold reason is visible in the tick.
+    skip_breakdown = {k: int(v or 0) for k, v in counts.items()
+                      if isinstance(k, str) and k.startswith("skipped_")}
     return {"verdict": doc.get("verdict"), "closed": int(counts.get("closed") or 0),
             "would_close": int(counts.get("would_close") or 0),
             "skipped": int(counts.get("skipped_unwitnessed") or 0),
             "skipped_unpushed": int(counts.get("skipped_unpushed") or 0),
+            "skipped_partial": int(counts.get("skipped_partial") or 0),
+            "skip_breakdown": skip_breakdown,
             "pushed_gate": doc.get("pushed_gate"),
             "failed": int(counts.get("failed") or 0)}
 
@@ -206,8 +229,8 @@ def _metric_ints(rec: dict[str, Any]) -> dict[str, int]:
     metrics: dict[str, int] = {}
     for key in (
         "target", "open_now", "baseline_open", "resolved_toward_target",
-        "target_remaining", "witnessed_open", "closed_now",
-        "closed_by_loop_total",
+        "target_remaining", "closures_toward_target", "closures_target_remaining",
+        "witnessed_open", "closed_now", "closed_by_loop_total",
     ):
         if rec.get(key) is not None:
             metrics[key] = int(rec[key])
@@ -255,18 +278,24 @@ def record_loop_tick(root: Path, rec: dict[str, Any],
         status_reason = "AUDIT_UNAVAILABLE"
 
     # #1453: when the target is met and this tick has genuinely nothing to do
-    # — open-count read OK, target_remaining==0, no closeable witnessed issue,
-    # nothing closed, and the close-audit healthy — collapse the four-event
-    # fire/admit/end/witness churn into a single scannable TARGET_MET heartbeat.
-    # A reader scanning loops.jsonl for "is the fleet doing useful work?" then
-    # sees one quiescent marker per tick instead of 4 no-op activity records.
-    # The guard deliberately stays FULL-fat whenever there is real signal — a
-    # closure this tick, a witnessed-open issue still to close, an open-count
-    # failure, or an audit error (AUDIT_UNAVAILABLE) — so a broken audit or
-    # pending work is never hidden behind the quiescent path.
+    # — open-count read OK, no closeable witnessed issue, nothing closed, and the
+    # close-audit healthy — collapse the four-event fire/admit/end/witness churn into
+    # a single scannable TARGET_MET heartbeat. A reader scanning loops.jsonl for "is
+    # the fleet doing useful work?" then sees one quiescent marker per tick instead of
+    # 4 no-op activity records.
+    #
+    # The "target met" leg gates on closures_target_remaining (the loop's OWN gross
+    # witnessed closes toward the target), NOT target_remaining (the net-open drop that
+    # a stale baseline / new-issue inflow erases to 0). Gating on the drifty metric let
+    # a loop that had closed only ~21 report a green TARGET_MET heartbeat because
+    # ambient backlog drift beat a target of 50 — masking a stalled loop as done. When
+    # closures_target_remaining is absent (an old record / a failed snapshot) the gate
+    # fails toward FULL-fat, never a false quiescent. The guard also stays full-fat
+    # whenever there is real signal — a closure this tick, a witnessed-open issue still
+    # to close, an open-count failure, or an audit error (AUDIT_UNAVAILABLE).
     quiescent = (
         bool(rec.get("ok"))
-        and rec.get("target_remaining") == 0
+        and rec.get("closures_target_remaining") == 0
         and not rec.get("witnessed_open")
         and not rec.get("closed_now")
         and not rec.get("audit_error")
@@ -275,8 +304,8 @@ def record_loop_tick(root: Path, rec: dict[str, Any],
         events: list[dict[str, Any]] = [{
             "loop_id": LOOP_ID, "run_id": run_id, "kind": "end",
             "status": "claimed_done", "reason": "TARGET_MET",
-            "summary": ("target met (remaining=0, witnessed_open=0); quiescent "
-                        "heartbeat — no closures pending"),
+            "summary": ("target met (own witnessed closes >= target, witnessed_open=0); "
+                        "quiescent heartbeat — no closures pending"),
             "metrics": metrics, "evidence": evidence,
         }]
     else:
@@ -360,6 +389,17 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
     target_remaining = (max(0, target - resolved) if resolved is not None
                         else None)
 
+    # Backlog-independent close-N accounting (mirrors cmd/fak
+    # dispatchProgressClosuresTowardTarget, #2639): resolved_toward_target above is the
+    # NET-open reduction (baseline_open - open_now), which new-issue inflow — or a
+    # 5-day-stale baseline — can erase to 0 even while this loop has closed only a
+    # handful. These fold the loop's OWN gross witnessed closures (closed_total) toward
+    # the target, so the curve never drifts with backlog and never reads "done" until
+    # the loop has actually driven `target` closures itself. This is the honest metric
+    # the quiescent/TARGET_MET heartbeat gates on.
+    closures_toward_target = min(target, closed_total)
+    closures_target_remaining = max(0, target - closed_total)
+
     # A snapshot is OK as long as we got a live open-count — that is the proof
     # metric. A closure-audit hiccup (e.g. `dos` momentarily unreachable under a
     # hidden-window scheduled task) only blanks the witnessed count for this tick;
@@ -371,6 +411,8 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
         "schema": SCHEMA, "utc": _now(), "target": target, "ok": ok,
         "open_now": open_now, "baseline_open": baseline_open,
         "resolved_toward_target": resolved, "target_remaining": target_remaining,
+        "closures_toward_target": closures_toward_target,
+        "closures_target_remaining": closures_target_remaining,
         "witnessed_open": len(witnessed), "witnessed_numbers": witnessed[:50],
         "closed_now": closed_now, "closed_by_loop_total": closed_total,
         "contract_forced_bypass_total": forced_bypass_total,
@@ -386,22 +428,30 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
 
 def render(p: dict[str, Any]) -> str:
     tgt = p.get("target")
+    # The HONEST progress bar tracks the loop's OWN gross witnessed closes toward the
+    # target (backlog-independent). resolved_toward_target is shown separately as the
+    # drifty net-open reduction so it can never be mistaken for "done".
+    closures = p.get("closures_toward_target")
+    closures_rem = p.get("closures_target_remaining")
     res = p.get("resolved_toward_target")
     rem = p.get("target_remaining")
     bar = ""
-    if isinstance(res, int) and isinstance(tgt, int) and tgt > 0:
-        filled = min(tgt, res)
+    if isinstance(closures, int) and isinstance(tgt, int) and tgt > 0:
+        filled = min(tgt, closures)
         width = 30
         n = int(width * filled / tgt)
         bar = "[" + "#" * n + "-" * (width - n) + f"] {filled}/{tgt}"
     lines = [
         f"issue-resolve-progress: open={p.get('open_now')} "
-        f"(baseline {p.get('baseline_open')})  toward {tgt}: {bar or f'{res}/{tgt}'}",
+        f"(baseline {p.get('baseline_open')})  witnessed closures toward {tgt}: "
+        f"{bar or f'{closures}/{tgt}'}",
         f"  witnessed-open (closeable now): {p.get('witnessed_open')}  "
         f"{p.get('witnessed_numbers') or ''}",
         f"  closed this tick: {p.get('closed_now')}  "
         f"closed-by-loop total: {p.get('closed_by_loop_total')}  "
-        f"remaining to {tgt}: {rem}",
+        f"closures remaining to {tgt}: {closures_rem}",
+        f"  net-open reduction (baseline-open, drifts with backlog): {res}  "
+        f"net-open remaining: {rem}",
     ]
     fb = p.get("contract_forced_bypass_total")
     if isinstance(fb, int) and fb > 0:
@@ -409,8 +459,21 @@ def render(p: dict[str, Any]) -> str:
                      f"overrides recorded in the audit ledger (#2637)")
     cr = p.get("close_result")
     if cr:
-        lines.append(f"  close arm: verdict={cr.get('verdict')} closed={cr.get('closed')} "
-                     f"would_close={cr.get('would_close')} failed={cr.get('failed')}")
+        line = (f"  close arm: verdict={cr.get('verdict')} closed={cr.get('closed')} "
+                f"would_close={cr.get('would_close')} failed={cr.get('failed')}")
+        # When nothing closed, surface WHY: a NO_CLOSES tick used to render an
+        # unexplained closed=0. `partial` = issues held on unchecked DoD boxes
+        # (coverage gate); `unpushed` = a resolving commit not yet on origin.
+        partial = cr.get("skipped_partial")
+        unpushed = cr.get("skipped_unpushed")
+        holds = []
+        if isinstance(partial, int) and partial > 0:
+            holds.append(f"partial={partial}")
+        if isinstance(unpushed, int) and unpushed > 0:
+            holds.append(f"unpushed={unpushed}")
+        if holds:
+            line += "  held: " + " ".join(holds)
+        lines.append(line)
     if p.get("audit_error"):
         lines.append(f"  ! audit error: {p['audit_error']}")
     return "\n".join(lines)

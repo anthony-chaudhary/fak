@@ -115,6 +115,7 @@ class LoopLedgerTest(unittest.TestCase):
             "schema": mod.SCHEMA, "utc": "2026-06-25T10:20:00Z", "target": 50,
             "ok": True, "open_now": 195, "baseline_open": 483,
             "resolved_toward_target": 288, "target_remaining": 0,
+            "closures_toward_target": 50, "closures_target_remaining": 0,
             "witnessed_open": 0, "witnessed_numbers": [], "closed_now": 0,
             "closed_by_loop_total": 672, "close_live": True, "close_result": None,
             "audit_error": None,
@@ -128,6 +129,31 @@ class LoopLedgerTest(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "claimed_done")
         self.assertEqual(rows[0]["reason"], "TARGET_MET")
 
+    def test_record_loop_tick_full_fat_when_backlog_drift_beats_target(self) -> None:
+        # THE HONESTY FIX: a stale baseline / new-issue inflow can drive the net-open
+        # metric (target_remaining) to 0 while the loop itself has barely closed
+        # anything. That must NOT collapse into a green TARGET_MET heartbeat — the gate
+        # keys on closures_target_remaining (own gross witnessed closes), so a loop with
+        # target_remaining==0 but closures_target_remaining>0 stays FULL-fat and honest.
+        mod = load()
+        rows: list[dict[str, object]] = []
+        rec = {
+            "schema": mod.SCHEMA, "utc": "2026-06-25T10:22:00Z", "target": 50,
+            "ok": True, "open_now": 1286, "baseline_open": 1463,
+            "resolved_toward_target": 177, "target_remaining": 0,
+            "closures_toward_target": 21, "closures_target_remaining": 29,
+            "witnessed_open": 0, "witnessed_numbers": [], "closed_now": 0,
+            "closed_by_loop_total": 21, "close_live": True, "close_result": None,
+            "audit_error": None,
+        }
+        mod.record_loop_tick(
+            ROOT, rec, ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-PROGRESS-DRIFT",
+        )
+        self.assertEqual([r["kind"] for r in rows], ["fire", "admit", "end", "witness"])
+        self.assertNotEqual(rows[2]["reason"], "TARGET_MET")
+
     def test_record_loop_tick_audit_error_stays_full_when_target_met(self) -> None:
         # A broken close-audit must NOT be hidden by the quiescent path even when
         # the target is met — AUDIT_UNAVAILABLE still emits the full record set so
@@ -138,6 +164,7 @@ class LoopLedgerTest(unittest.TestCase):
             "schema": mod.SCHEMA, "utc": "2026-06-25T10:21:00Z", "target": 50,
             "ok": True, "open_now": 195, "baseline_open": 483,
             "resolved_toward_target": 288, "target_remaining": 0,
+            "closures_toward_target": 50, "closures_target_remaining": 0,
             "witnessed_open": 0, "witnessed_numbers": [], "closed_now": 0,
             "closed_by_loop_total": 672, "close_live": True, "close_result": None,
             "audit_error": "dos unreachable",
@@ -262,7 +289,26 @@ class EvaluateTest(unittest.TestCase):
                              max_commits=100)
         self.assertEqual(p["closed_now"], 2)
         self.assertEqual(p["closed_by_loop_total"], 2)    # history 0 + 2
+        self.assertEqual(p["closures_toward_target"], 2)  # min(target, own closes)
+        self.assertEqual(p["closures_target_remaining"], 48)  # 50 - 2 (backlog-independent)
         self.assertEqual(p["close_result"]["verdict"], "CLOSED")
+
+    def test_closures_are_backlog_independent(self) -> None:
+        # The honest counter credits the loop's OWN witnessed closes, never the net-open
+        # drop: 60 own closes zero closures_target_remaining even though open_now never
+        # moved from baseline (net-open reduction stays 0). This is the anti-stale-baseline
+        # invariant — the bar reads "done" only on real loop work, not ambient drift.
+        mod = load()
+        self._stub(mod, open_now=483, witnessed=[], history=60)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            mod.save_baseline(root / mod.RUNS_DIRNAME, 483)  # baseline == open: net drop 0
+            p = mod.evaluate(root, target=50, do_close=False, live=False,
+                             max_commits=100)
+        self.assertEqual(p["resolved_toward_target"], 0)     # net-open unmoved
+        self.assertEqual(p["target_remaining"], 50)          # drifty metric still "not done"
+        self.assertEqual(p["closures_toward_target"], 50)    # min(50, 60 own closes)
+        self.assertEqual(p["closures_target_remaining"], 0)  # 60 >= 50 → honestly done
 
     def test_close_dry_run_does_not_count(self) -> None:
         mod = load()
@@ -327,6 +373,56 @@ class EvaluateTest(unittest.TestCase):
                              max_commits=100)
         self.assertEqual(p["contract_forced_bypass_total"], 0)
         self.assertNotIn("force-bypassed", mod.render(p))
+
+
+class RunCloseTest(unittest.TestCase):
+    def test_run_close_surfaces_skipped_partial_and_breakdown(self) -> None:
+        # A NO_CLOSES tick must explain WHY: run_close folds the FULL skipped_* breakdown
+        # (not just skipped_unwitnessed / skipped_unpushed) so a coverage-gate hold
+        # (skipped_partial = unchecked DoD boxes) is visible instead of an unexplained
+        # closed=0/would_close=0 all-zeros summary.
+        mod = load()
+        doc = {
+            "verdict": "NO_CLOSES", "pushed_gate": "active",
+            "counts": {"closed": 0, "would_close": 0, "skipped_unwitnessed": 0,
+                       "skipped_unpushed": 0, "skipped_partial": 3,
+                       "skipped_coverage_unknown": 1, "failed": 0},
+        }
+        mod.run_capture = lambda cmd, cwd, timeout: (0, json.dumps(doc), "")
+        out = mod.run_close(Path("."), live=False, audit_path=None, limit=3)
+        self.assertEqual(out["verdict"], "NO_CLOSES")
+        self.assertEqual(out["skipped_partial"], 3)
+        self.assertEqual(out["skip_breakdown"]["skipped_partial"], 3)
+        self.assertEqual(out["skip_breakdown"]["skipped_coverage_unknown"], 1)
+        # only skipped_* buckets are folded into the breakdown — not closed/would_close
+        self.assertNotIn("closed", out["skip_breakdown"])
+        self.assertEqual(out["pushed_gate"], "active")
+
+    def test_run_close_bad_json_is_safe(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (0, "not json", "boom")
+        out = mod.run_close(Path("."), live=False, audit_path=None, limit=1)
+        self.assertEqual(out["closed"], 0)
+        self.assertIn("_error", out)
+
+    def test_render_surfaces_partial_hold_reason(self) -> None:
+        # The render's close-arm line explains a NO_CLOSES tick with the hold reason.
+        mod = load()
+        p = {
+            "target": 50, "open_now": 1286, "baseline_open": 1463,
+            "resolved_toward_target": 177, "target_remaining": 0,
+            "closures_toward_target": 21, "closures_target_remaining": 29,
+            "witnessed_open": 3, "witnessed_numbers": [5245, 5111, 4591],
+            "closed_now": 0, "closed_by_loop_total": 21,
+            "contract_forced_bypass_total": 0,
+            "close_result": {"verdict": "NO_CLOSES", "closed": 0, "would_close": 0,
+                             "failed": 0, "skipped_partial": 3, "skipped_unpushed": 0},
+            "audit_error": None,
+        }
+        text = mod.render(p)
+        self.assertIn("witnessed closures toward 50", text)  # honest bar label
+        self.assertIn("held: partial=3", text)               # the WHY on NO_CLOSES
+        self.assertIn("net-open reduction", text)            # drifty metric shown apart
 
 
 if __name__ == "__main__":
