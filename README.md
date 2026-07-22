@@ -122,6 +122,7 @@ Go 1.26+; no external Go dependencies. Source builds, archives, and containers: 
 ## Going deeper
 
 - **Use it:** [tutorial](docs/fak/tutorial.md) · [integration guides](docs/integrations/) · [examples](examples/README.md)
+- **Run Claude Code on your own Mac's local model:** `fak claude-mac-fak` points Claude Code at your Mac's own `fak serve` gateway (Qwen3.6-27B). The first local turn is slow (10–15 min prefill on an M3 Pro) and single-stream; the wow is that it works end to end and is fully observable via the preflight panel — [walkthrough](docs/fak/mac-agent-ui.md).
 - **Operate it:** [serving](docs/serving/README.md) · [observability](docs/fak/observability.md) · [deployment](docs/fak/deployment-guide.md)
 - **Understand it:** [performance outcomes and proofs](docs/performance.md) · [managed cache](docs/explainers/what-is-managed-cache.md) · [external system architecture](docs/architecture.md) · [concepts and story](docs/concepts-and-story.md)
 - **Verify it:** [benchmark route](docs/benchmark-methodology.md) · [current benchmark authority](BENCHMARK-AUTHORITY.md) · [claims ledger](CLAIMS.md) · [reproduction packet](docs/repro-packet.md)
