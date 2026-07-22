@@ -3,6 +3,7 @@ package leaseref
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -123,6 +124,29 @@ func (f *fakeGit) runStdin(ctx context.Context, dir, stdin string, args ...strin
 			}
 		}
 		return "", 0, nil
+	}
+	// cat-file --batch: read one ref/oid per stdin line, emit the real git --batch record
+	// format so the batched session reader is exercised end to end. A resolvable ref yields
+	// `<oid> blob <size>\n<payload>\n`; an unresolvable one yields `<object> missing\n` with
+	// no payload — exactly what real git streams, in the same order the inputs were fed.
+	if len(args) >= 2 && args[0] == "cat-file" && args[1] == "--batch" {
+		var b strings.Builder
+		for _, line := range strings.Split(stdin, "\n") {
+			ref := strings.TrimSpace(line)
+			if ref == "" {
+				continue
+			}
+			id, ok := f.refs[ref]
+			if !ok {
+				b.WriteString(ref + " missing\n")
+				continue
+			}
+			blob := f.blobs[id]
+			fmt.Fprintf(&b, "%s blob %d\n", id, len(blob))
+			b.Write(blob)
+			b.WriteByte('\n')
+		}
+		return b.String(), 0, nil
 	}
 	return "", 0, nil
 }
