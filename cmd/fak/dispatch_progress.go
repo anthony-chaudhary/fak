@@ -45,6 +45,12 @@ type dispatchProgressOptions struct {
 	Weekly     bool
 	Since      string
 	Until      string
+	// FileIssues turns the weekly retro's lane-wedge section into fingerprinted,
+	// deduped improvement-ticket candidates (#3338). Dry-run unless Confirm is set;
+	// MaxIssues (>0) caps a run worst-first. Weekly-only — see runDispatchProgress.
+	FileIssues bool
+	Confirm    bool
+	MaxIssues  int
 	// AgingCandidates points at a ready-set JSON file (the same {id, base_weight,
 	// ready_since} array dispatch-aging consumes). When set, the progress readout folds
 	// it through dispatchaging so the standing census (starved/aging counts, oldest
@@ -79,6 +85,13 @@ func runDispatchProgress(stdout, stderr io.Writer, argv []string) int {
 			}
 		} else {
 			fmt.Fprint(stdout, renderDispatchWeeklyReport(report))
+		}
+		if opts.FileIssues {
+			// The retro already computed the wedges; --file-issues turns the persistent
+			// ones into deduped ticket candidates (#3338). Dry-run unless --confirm.
+			return runDispatchWeeklyWedgeAudit(stdout, stderr,
+				filepath.Join(opts.Workspace, dispatchProgressRunsDir),
+				report, opts.Confirm, opts.MaxIssues)
 		}
 		return 0
 	}
@@ -115,6 +128,9 @@ func parseDispatchProgressFlags(stderr io.Writer, argv []string) (dispatchProgre
 	weekly := fs.Bool("weekly", false, "render a ledger-only weekly throughput retrospective without live mutation")
 	since := fs.String("since", "", "weekly report window start (RFC3339 or YYYY-MM-DD; default: now-7d)")
 	until := fs.String("until", "", "weekly report window end (RFC3339 or YYYY-MM-DD; default: now)")
+	fileIssues := fs.Bool("file-issues", false, "with --weekly: emit a fingerprinted, deduped improvement-ticket candidate per PERSISTENT lane wedge (dry-run unless --confirm)")
+	confirm := fs.Bool("confirm", false, "with --weekly --file-issues: actually open a gh issue per NEW wedge (default: dry-run, print only)")
+	maxIssues := fs.Int("max-issues", 0, "with --weekly --file-issues --confirm: hard cap on issues filed per run, worst-first (0 = no cap)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	agingCandidates := fs.String("aging-candidates", "", "ready-set JSON ({id, base_weight, ready_since}) to fold through dispatchaging for the starved/oldest-wait readout (#3590)")
 	if err := fs.Parse(argv); err != nil {
@@ -141,6 +157,12 @@ func parseDispatchProgressFlags(stderr io.Writer, argv []string) (dispatchProgre
 		fmt.Fprintln(stderr, "fak dispatch progress: --max-commits must be > 0")
 		return dispatchProgressOptions{}, 2
 	}
+	// The wedge lens reads the weekly retro's lane-wedge section, so it has no input
+	// outside --weekly. Refuse the combination up front rather than silently no-op.
+	if *fileIssues && !*weekly {
+		fmt.Fprintln(stderr, "fak dispatch progress: --file-issues requires --weekly")
+		return dispatchProgressOptions{}, 2
+	}
 	return dispatchProgressOptions{
 		Workspace:  root,
 		Target:     *target,
@@ -154,6 +176,9 @@ func parseDispatchProgressFlags(stderr io.Writer, argv []string) (dispatchProgre
 		Weekly:     *weekly,
 		Since:      strings.TrimSpace(*since),
 		Until:      strings.TrimSpace(*until),
+		FileIssues: *fileIssues,
+		Confirm:    *confirm,
+		MaxIssues:  *maxIssues,
 
 		AgingCandidates: strings.TrimSpace(*agingCandidates),
 	}, 0
