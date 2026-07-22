@@ -113,6 +113,18 @@ reproduce identically on any box with Go. `ctxdemo` is also model-free in `-prin
 `-bars` modes, but it lives in the research track because its main job is explaining
 multi-agent context reuse rather than onboarding.
 
+`fanoutdemo` clears the same lowest-common-denominator bar — no model, no GPU, no
+download, no provider key, no network — but it stays in the product track rather than the
+front door, because it explains the issue fan-out planner to someone already running fak
+instead of onboarding a stranger to the kernel. Its `-selfcheck` is the deterministic
+witness: it re-drives the spine-first refusal and the full plan, prints `the fan-out
+invariants hold (15 dispatchable follow-ons across 7 areas · spine-first refusal
+enforced)`, and exits `0`; two `-json` runs are byte-identical, so it reproduces on any
+box with Go. It would earn a front-door card once a stranger can run it cold without
+first reading the planner's contract; archive it if `fak issue fanout` stops being a
+shipped verb. The standing assumption — invalidated the moment the demo reads live
+GitHub issues instead of its frozen spine fixture — is that its input stays offline.
+
 `trychatdemo` remains in that LCD path by default and its `-selfcheck` never needs a key
 or network. Its opt-in latest-model arm uses an OpenAI Responses-compatible endpoint and
 records the exact provider/model/rung/as-of metadata in each JSON transcript. On
