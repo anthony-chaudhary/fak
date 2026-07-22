@@ -366,3 +366,100 @@ func TestLeaserefFenceEndToEnd(t *testing.T) {
 		t.Fatalf("renew = %+v, want ok gen=2 with RenewedAt set", rn)
 	}
 }
+
+// TestLeaserefAuditFoldsExpiredSessions pins the session-blindness fix: store.List
+// EXCLUDES session descriptors (the leaseref namespace split), so a leases-only audit
+// reported OK even while session refs were TTL-expired — the garden tick's reaper (which
+// already reaps sessions) was never gated on. This drives the audit against a REAL git
+// temp repo with ZERO stale leases and proves (1) a LIVE session alone stays OK, then
+// (2) an EXPIRED session descriptor trips verdict ACTION and is surfaced in the
+// expired_session_* fields, with the lease side still clean.
+func TestLeaserefAuditFoldsExpiredSessions(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	store := leaseref.NewInDir(dir)
+	ctx := context.Background()
+	now := time.Now()
+
+	// A single LIVE lease (no stale lease at all) so the lease side of the audit
+	// stays clean: any ACTION verdict here can only come from a session.
+	if _, err := store.Acquire(ctx, leaseref.Record{ID: "live-lane", TreeGlobs: []string{"a/**"}, Holder: "A:1", AcquiredAt: now.Unix(), TTLSeconds: 3600}); err != nil {
+		t.Fatalf("Acquire live lease: %v", err)
+	}
+	// A LIVE session descriptor (fresh UpdatedAt, long TTL).
+	if _, err := store.PublishSession(ctx, leaseref.SessionDescriptor{ID: "sess-live", Host: "h1", PCBState: "RUNNING", UpdatedAt: now.Unix(), TTLSecs: 1800}); err != nil {
+		t.Fatalf("PublishSession live: %v", err)
+	}
+
+	type auditEnv struct {
+		Verdict                string   `json:"verdict"`
+		LiveCount              int      `json:"live_count"`
+		ExpiredCount           int      `json:"expired_count"`
+		LiveDescriptorCount    int      `json:"live_descriptor_count"`
+		ExpiredDescriptorCount int      `json:"expired_descriptor_count"`
+		ExpiredDescriptorIDs   []string `json:"expired_descriptor_ids"`
+	}
+	runAudit := func() auditEnv {
+		t.Helper()
+		var out, errb bytes.Buffer
+		if code := runLeaseref(&out, &errb, []string{"audit", "--dir", dir}); code != 0 {
+			t.Fatalf("leaseref audit exit=%d stderr=%q", code, errb.String())
+		}
+		var env auditEnv
+		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+			t.Fatalf("audit JSON unmarshal: %v\nout=%s", err, out.String())
+		}
+		return env
+	}
+
+	// With only LIVE leases and a LIVE session, the audit is OK: a live session is
+	// counted as live and never forces ACTION on its own.
+	before := runAudit()
+	if before.Verdict != "OK" {
+		t.Fatalf("audit verdict = %q with only-live state, want OK (%+v)", before.Verdict, before)
+	}
+	if before.LiveDescriptorCount != 1 || before.ExpiredDescriptorCount != 0 {
+		t.Fatalf("audit sessions = live %d expired %d, want 1/0 (%+v)", before.LiveDescriptorCount, before.ExpiredDescriptorCount, before)
+	}
+	if before.ExpiredCount != 0 {
+		t.Fatalf("audit expired lease count = %d, want 0 (%+v)", before.ExpiredCount, before)
+	}
+
+	// Publish an EXPIRED session descriptor (UpdatedAt far in the past, small TTL).
+	// The lease side stays clean (zero stale leases), so the ONLY thing that can trip
+	// the verdict is the expired session the leases-only audit was structurally blind to.
+	if _, err := store.PublishSession(ctx, leaseref.SessionDescriptor{ID: "sess-dead", Host: "h2", PCBState: "RUNNING", UpdatedAt: now.Unix() - 7200, TTLSecs: 60}); err != nil {
+		t.Fatalf("PublishSession expired: %v", err)
+	}
+
+	after := runAudit()
+	if after.Verdict != "ACTION" {
+		t.Fatalf("audit verdict = %q with an expired session and zero stale leases, want ACTION (%+v)", after.Verdict, after)
+	}
+	if after.ExpiredCount != 0 {
+		t.Fatalf("audit expired lease count = %d, want 0 — the ACTION must come from the session, not a lease (%+v)", after.ExpiredCount, after)
+	}
+	if after.ExpiredDescriptorCount != 1 {
+		t.Fatalf("audit expired_descriptor_count = %d, want 1 (%+v)", after.ExpiredDescriptorCount, after)
+	}
+	if len(after.ExpiredDescriptorIDs) != 1 || after.ExpiredDescriptorIDs[0] != "sess-dead" {
+		t.Fatalf("audit expired_descriptor_ids = %v, want [sess-dead]", after.ExpiredDescriptorIDs)
+	}
+	if after.LiveDescriptorCount != 1 {
+		t.Fatalf("audit live_descriptor_count = %d, want 1 (the live session still counts live) (%+v)", after.LiveDescriptorCount, after)
+	}
+}

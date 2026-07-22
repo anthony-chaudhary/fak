@@ -386,12 +386,26 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	*dir = pathutil.ExpandTilde(*dir)
 	store := leaseref.NewInDir(*dir)
-	recs, err := store.List(context.Background())
+	ctx := context.Background()
+	recs, err := store.List(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak leaseref audit: %v\n", err)
 		return 1
 	}
 	now := time.Now()
+	// store.List EXCLUDES session descriptors (refs/fak/locks/session-*) by the
+	// leaseref namespace split (internal/leaseref/session.go), so a leases-only
+	// audit is structurally blind to a stale SESSION: it would report OK while the
+	// fleet's session refs are TTL-expired, so the garden tick's stale_leases member
+	// never sets Perform=true and performGardenTick's ActReap case — which already
+	// calls store.ReapSessions — is never reached. Fold expired session descriptors
+	// in so the verdict trips on them too. A read failure is handled the same way as
+	// the lease read above: report to stderr and return 1.
+	liveDescriptors, expiredDescriptorIDs, serr := store.LiveSessions(ctx, now)
+	if serr != nil {
+		fmt.Fprintf(stderr, "fak leaseref audit: %v\n", serr)
+		return 1
+	}
 	var liveIDs, expiredIDs []string
 	var liveRows, expiredRows []map[string]any
 	for _, r := range recs {
@@ -405,21 +419,30 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	verdict := "OK"
 	reason := fmt.Sprintf("%d live lease(s), 0 expired under refs/fak/locks/*", len(liveIDs))
-	if len(expiredIDs) > 0 {
+	if len(expiredIDs) > 0 || len(expiredDescriptorIDs) > 0 {
 		verdict = "ACTION"
-		reason = fmt.Sprintf("%d live, %d EXPIRED lease(s) under refs/fak/locks/* (%s) — run `fak leaseref reap`",
-			len(liveIDs), len(expiredIDs), strings.Join(expiredIDs, ", "))
+		parts := []string{fmt.Sprintf("%d live, %d EXPIRED lease(s)", len(liveIDs), len(expiredIDs))}
+		if len(expiredIDs) > 0 {
+			parts[0] += fmt.Sprintf(" (%s)", strings.Join(expiredIDs, ", "))
+		}
+		if len(expiredDescriptorIDs) > 0 {
+			parts = append(parts, fmt.Sprintf("%d EXPIRED session descriptor(s)", len(expiredDescriptorIDs)))
+		}
+		reason = strings.Join(parts, ", ") + " under refs/fak/locks/* — run `fak leaseref reap`"
 	}
 	env := map[string]any{
-		"schema":        "fak.leaseref-audit-control-pane.v1",
-		"ok":            true,
-		"verdict":       verdict,
-		"reason":        reason,
-		"live_count":    len(liveIDs),
-		"expired_count": len(expiredIDs),
-		"expired_ids":   expiredIDs,
-		"live":          liveRows,
-		"would_reap":    expiredRows,
+		"schema":                   "fak.leaseref-audit-control-pane.v1",
+		"ok":                       true,
+		"verdict":                  verdict,
+		"reason":                   reason,
+		"live_count":               len(liveIDs),
+		"expired_count":            len(expiredIDs),
+		"expired_ids":              expiredIDs,
+		"live":                     liveRows,
+		"would_reap":               expiredRows,
+		"live_descriptor_count":    len(liveDescriptors),
+		"expired_descriptor_count": len(expiredDescriptorIDs),
+		"expired_descriptor_ids":   expiredDescriptorIDs,
 	}
 	return emitLeaserefJSON(stdout, stderr, env, "audit")
 }
