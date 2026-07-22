@@ -164,6 +164,88 @@ def test_render_human_smoke():
         json.loads(wd.render_json(rep, live=False))
 
 
+class _FakeCP:
+    """A stand-in subprocess.CompletedProcess for the injected tick runner."""
+
+    def __init__(self, returncode: int = 0):
+        self.returncode = returncode
+        self.stdout = ""
+        self.stderr = ""
+
+
+def test_garden_tick_invoked_on_live_path():
+    calls: list = []
+
+    def runner(argv, **kw):
+        calls.append((argv, kw))
+        return _FakeCP(0)
+
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "fak"
+        repo.mkdir(parents=True)
+        res = wd.run_garden_tick(repo, live=True, runner=runner)
+    assert res["invoked"] is True
+    assert len(calls) == 1, "live path must shell the acting garden tick exactly once"
+    argv = calls[0][0]
+    assert "garden" in argv and "tick" in argv, f"expected `fak garden tick`, got {argv}"
+    assert "--growth-apply" not in argv, "growth stays ledger-only SOAK -- never apply"
+    # non-dry-run on the live path, and runs at the repo root
+    assert "--dry-run" not in argv
+    assert calls[0][1].get("cwd") == str(repo)
+
+
+def test_garden_tick_skipped_on_dry_run():
+    calls: list = []
+
+    def runner(argv, **kw):
+        calls.append(argv)
+        return _FakeCP(0)
+
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "fak"
+        repo.mkdir(parents=True)
+        res = wd.run_garden_tick(repo, live=False, runner=runner)
+    assert res["invoked"] is False
+    assert calls == [], "dry-run watchdog path must not shell the acting garden tick"
+
+
+def test_garden_tick_spawn_error_is_best_effort():
+    def boom(argv, **kw):
+        raise OSError("fak not found on PATH")
+
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "fak"
+        repo.mkdir(parents=True)
+        res = wd.run_garden_tick(repo, live=True, runner=boom)
+    assert res["invoked"] is True
+    assert res["error"] is not None, "a spawn error must be captured, not raised"
+    assert res["returncode"] is None
+
+
+def test_garden_tick_nonzero_does_not_flip_watchdog_exit():
+    # A non-zero garden-tick rc must never change the watchdog's own success exit.
+    def runner(argv, **kw):
+        return _FakeCP(returncode=7)
+
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "fak"
+        (repo / ".dos" / "markers").mkdir(parents=True)
+        rc = wd.main(["--repo", str(repo), "--json", "--live"], tick_runner=runner)
+    assert rc == 0, "a clean live sweep exits 0 even when garden tick returns nonzero"
+
+
+def test_garden_tick_failure_through_main_does_not_flip_exit():
+    # Even a raising tick runner is swallowed: exit stays driven only by the sweep.
+    def boom(argv, **kw):
+        raise OSError("boom")
+
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "fak"
+        (repo / ".dos" / "markers").mkdir(parents=True)
+        rc = wd.main(["--repo", str(repo), "--json", "--live"], tick_runner=boom)
+    assert rc == 0, "a garden-tick spawn error must not flip the watchdog's exit"
+
+
 def _run_all() -> int:
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

@@ -43,6 +43,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from dispatch_worker import install_no_window_subprocess_defaults
 import time
 from dataclasses import dataclass, field
@@ -294,7 +295,47 @@ def render_json(rep: StaleReport, live: bool) -> str:
     }, indent=2)
 
 
-def main(argv: list[str] | None = None) -> int:
+# The Go durable loop `fak garden tick` (cmd/fak/garden.go performGardenTick) is the
+# ACTING collector for the git-ref stale-work classes -- expired session descriptors
+# `refs/fak/locks/session-*` (ReapSessions, #5344), orphan `.lock` files (ReapLockFiles,
+# #5348), over-budget growth logs (collectGrowthLogs, #5349) and expired leases
+# (store.Reap). Those reapers are INERT in production because nothing on this fleet
+# invokes `fak garden tick` (see #5355). This watchdog already runs hourly at the repo
+# root under FleetStaleWorkGarden, so we piggy-back the tick onto that existing cadence.
+GARDEN_TICK_TIMEOUT_S = 900  # generous first-drain budget over the ~14k-ref backlog
+
+
+def run_garden_tick(repo: Path, live: bool, *,
+                    timeout_s: int = GARDEN_TICK_TIMEOUT_S,
+                    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run
+                    ) -> dict:
+    """Best-effort trigger for the Go `fak garden tick` durable loop (issue #5355).
+
+    NON-dry-run on the live path only; the dry-run watchdog path skips it, mirroring
+    how the watchdog gates its own deletions on --live. We deliberately DO NOT pass
+    --growth-apply: growth stays in ledger-only SOAK, since flipping apply would delete
+    thousands of real files unattended (a separate follow-on flips it post-soak).
+
+    Fail-open: any non-zero exit, timeout, or spawn error is captured and returned, never
+    raised, so a garden-tick failure can never change the watchdog's own success exit.
+    The subprocess wall-clock cap sits above the tick's own --timeout so a hung child
+    cannot wedge the hourly watchdog.
+    """
+    if not live:
+        return {"invoked": False, "reason": "dry-run", "returncode": None, "error": None}
+    argv = ["fak", "garden", "tick", "--timeout", str(timeout_s)]
+    result: dict = {"invoked": True, "argv": argv, "returncode": None, "error": None}
+    try:
+        cp = runner(argv, cwd=str(repo), capture_output=True, text=True,
+                    timeout=timeout_s + 120, check=False)
+        result["returncode"] = cp.returncode
+    except (OSError, subprocess.SubprocessError) as exc:  # spawn error / timeout / etc.
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
+def main(argv: list[str] | None = None,
+         tick_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", default=str(DEFAULT_REPO),
@@ -318,6 +359,18 @@ def main(argv: list[str] | None = None) -> int:
                        args.wip_stale_hours, args.live)
 
     print(render_json(rep, args.live) if args.json else render_human(rep, args.live))
+
+    # Best-effort: trigger the Go stale-work reapers on this same hourly cadence (#5355).
+    # Logged to stderr so it never corrupts the JSON stdout, and never affects our exit.
+    tick = run_garden_tick(repo, args.live, runner=tick_runner)
+    if not tick["invoked"]:
+        print(f"garden-tick: skipped ({tick['reason']})", file=sys.stderr)
+    elif tick["error"] is not None:
+        print(f"garden-tick: FAILED ({tick['error']}) -- best-effort, ignored",
+              file=sys.stderr)
+    else:
+        print(f"garden-tick: rc={tick['returncode']} ({' '.join(tick['argv'])})",
+              file=sys.stderr)
 
     if args.fail_on_stale and rep.has_stale:
         return 2
