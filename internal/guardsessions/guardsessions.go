@@ -15,10 +15,12 @@ package guardsessions
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -148,13 +150,26 @@ func Record(regDir string, row Row) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	b, err := json.Marshal(row)
 	if err != nil {
+		f.Close()
 		return err
 	}
-	_, err = f.Write(append(b, '\n'))
-	return err
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	// Close the append handle BEFORE compacting: the rewrite renames a temp file over the
+	// index, which a lingering write handle would refuse on Windows (sharing violation).
+	if err := f.Close(); err != nil {
+		return err
+	}
+	// Best-effort, size-gated fold-and-rewrite AFTER the append has durably landed. The
+	// index must not grow without bound, but a compaction failure must NEVER fail a guard
+	// launch (Record's best-effort contract), so its result is deliberately discarded and
+	// the append's success is what Record reports.
+	_, _ = Compact(regDir)
+	return nil
 }
 
 // Load folds the append-only index into the latest row per handle, newest-start first. A
@@ -172,31 +187,40 @@ func LoadFile(path string) []Row {
 		return nil
 	}
 	defer f.Close()
+	rows, _ := foldReader(f)
+	return rows
+}
 
-	// Fold to the latest row per handle: a later row for the same handle (a re-record)
-	// wins, so the index stays correct even if a session is recorded more than once.
+// foldReader is the SINGLE fold both the read path (LoadFile) and the rewrite path
+// (CompactFile) share, so a compaction can never diverge from what a reader computes. It
+// folds the append-only JSONL stream to the latest row per handle (a later row for the same
+// handle — a re-record — wins), skipping blank/malformed/wrong-schema lines exactly as the
+// query side does, then sorts newest-start first. rawLines counts every non-blank line it
+// saw (valid or not), so a caller can weigh the append log against its folded footprint.
+func foldReader(r io.Reader) (rows []Row, rawLines int) {
 	latest := map[string]Row{}
 	order := []string{}
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
 		}
-		var r Row
-		if json.Unmarshal([]byte(line), &r) != nil {
+		rawLines++
+		var row Row
+		if json.Unmarshal([]byte(line), &row) != nil {
 			continue
 		}
-		if r.Schema != Schema || strings.TrimSpace(r.Handle) == "" {
+		if row.Schema != Schema || strings.TrimSpace(row.Handle) == "" {
 			continue
 		}
-		if _, seen := latest[r.Handle]; !seen {
-			order = append(order, r.Handle)
+		if _, seen := latest[row.Handle]; !seen {
+			order = append(order, row.Handle)
 		}
-		latest[r.Handle] = r
+		latest[row.Handle] = row
 	}
-	rows := make([]Row, 0, len(order))
+	rows = make([]Row, 0, len(order))
 	for _, h := range order {
 		rows = append(rows, latest[h])
 	}
@@ -205,7 +229,7 @@ func LoadFile(path string) []Row {
 	sort.SliceStable(rows, func(i, j int) bool {
 		return startUnix(rows[i]) > startUnix(rows[j])
 	})
-	return rows
+	return rows, rawLines
 }
 
 // startUnix parses a row's RFC3339 start into unix seconds, 0 on any parse failure (so an
@@ -275,4 +299,111 @@ func LiveInteractive(rows []Row) []Row {
 		}
 	}
 	return out
+}
+
+// The compaction gate constants mirror the sibling resume_ledger.jsonl inline compaction
+// (cmd/fak/resume_watchdog_runtime.go rwCompactResumeLedger, #3497): a cheap byte early-out
+// keeps small files off the read path, and a redundancy check keeps a file already near its
+// folded size byte-untouched. Held conservatively high so a rewrite is a rare, amortized
+// event, not a per-append cost.
+//
+//   - compactMinBytes: matches #3497's 512 KiB FAK_RESUME_LEDGER_COMPACT_BYTES default. Below
+//     this size the index is left alone with only an os.Stat spent (no read).
+//   - compactMinLines / compactMultiple: rewrite only when the raw line count exceeds
+//     max(compactMinLines, compactMultiple*distinctHandles) — i.e. the log carries several
+//     superseded rows per live handle. A near-folded file (few dead rows) never rewrites.
+const (
+	compactMinBytes = 512 * 1024
+	compactMinLines = 64
+	compactMultiple = 4
+)
+
+// Compact runs the size-gated fold-and-rewrite over the guard-session index under regDir.
+// It is the best-effort seam Record triggers after an append; a caller may also invoke it
+// directly. Returns the number of superseded lines the fold collapsed (0 when the gate held).
+func Compact(regDir string) (int, error) {
+	return CompactFile(IndexPath(regDir))
+}
+
+// CompactFile rewrites the append-only guard-session index at path to exactly its folded
+// LoadFile output — one row per handle, newest-start first — when the raw line count has
+// outgrown its folded footprint. The rewrite is LOSSLESS by construction: it writes the
+// same set every reader already computes (foldReader is the shared fold), so a superseded
+// row it drops was already dead weight the read path ignored. It returns the number of
+// superseded lines collapsed (0 when the gate held or nothing was rewritten) and never
+// surfaces an internal I/O error as a failure — a compaction that cannot proceed simply
+// leaves the append-only file in place.
+//
+// Concurrency: the box is shared — many `fak guard` launches append to this file
+// concurrently — so a naive read-fold-rename can DROP a row appended between the snapshot
+// read and the rename. This is handled the way #3497 relies on a conservative gate plus an
+// atomic rename, and tightened here for the per-append trigger: (1) any bytes appended past
+// the snapshot offset are carried verbatim into the rewrite before the rename, so a row that
+// arrives during the fold survives (LoadFile re-folds them on the next read, so a duplicate
+// or newer handle simply wins there); (2) the temp file has a unique name, so two guard
+// launches that cross the gate at once cannot clobber each other's staging file. A RESIDUAL
+// micro-window remains — a line appended after the tail re-read but before os.Rename is lost
+// — and is NOT fully closed: it is bounded by the conservative gate (a rewrite is rare) and
+// self-heals, since a dropped guard-session row re-records on the session's next lifecycle
+// transition and the atomic rename never exposes a torn file to a reader.
+func CompactFile(path string) (int, error) {
+	st, err := os.Stat(path)
+	if err != nil || st.Size() < compactMinBytes {
+		return 0, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, nil
+	}
+	snap := int64(len(data))
+	rows, rawLines := foldReader(bytes.NewReader(data))
+	distinct := len(rows)
+	limit := compactMinLines
+	if m := compactMultiple * distinct; m > limit {
+		limit = m
+	}
+	if rawLines <= limit {
+		// Already near its folded size: leave the file BYTE-untouched.
+		return 0, nil
+	}
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	for _, row := range rows {
+		if err := enc.Encode(row); err != nil {
+			return 0, nil
+		}
+	}
+	// Carry any lines appended after the snapshot so a concurrent O_APPEND writer's row is
+	// not lost to the rename. The tail is copied verbatim; LoadFile re-folds it on the next
+	// read. A line appended after THIS read (before the rename) is the residual micro-window
+	// documented above.
+	if tf, terr := os.Open(path); terr == nil {
+		if _, serr := tf.Seek(snap, io.SeekStart); serr == nil {
+			if tail, rerr := io.ReadAll(tf); rerr == nil && len(bytes.TrimSpace(tail)) > 0 {
+				buf.Write(tail)
+			}
+		}
+		tf.Close()
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), IndexFileName+".compact-*")
+	if err != nil {
+		return 0, nil
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(buf.Bytes()); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return 0, nil
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return 0, nil
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return 0, nil
+	}
+	return rawLines - distinct, nil
 }

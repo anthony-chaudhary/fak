@@ -1,8 +1,12 @@
 package guardsessions
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -197,5 +201,193 @@ func TestLiveInteractiveExcludesDispatcherAndIncompleteRows(t *testing.T) {
 	incomplete := NewInteractiveRow("bad", "claude", 2, "", "", "", time.Now(), nil)
 	if got := LiveInteractive([]Row{legacy, incomplete}); len(got) != 0 {
 		t.Fatalf("LiveInteractive = %+v, want none", got)
+	}
+}
+
+// countIndexLines returns the number of non-blank lines in the index file at path.
+func countIndexLines(t *testing.T, path string) int {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	n := 0
+	for _, ln := range strings.Split(string(b), "\n") {
+		if strings.TrimSpace(ln) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// writeSupersededIndex writes a raw append-only index at path holding `handles` distinct
+// handles, each re-recorded across enough rounds that the raw file exceeds the compaction
+// byte gate. The latest row per handle carries the final round as its PID, so a correct fold
+// keeps exactly that row per handle. Any extra lines (blank/malformed/foreign) are appended
+// verbatim after the valid rows. Returns the folded rows LoadFile should yield.
+func writeSupersededIndex(t *testing.T, path string, handles int, extra ...string) {
+	t.Helper()
+	base := time.Unix(1_700_000_000, 0)
+	seeds := make([]Row, handles)
+	for i := 0; i < handles; i++ {
+		seeds[i] = NewRow(fmt.Sprintf("trace-%d", i), "claude", 0, "/w/some/padded/working/dir", "audit-journal.jsonl", "nonce-value", base.Add(time.Duration(i)*time.Second))
+	}
+	var buf strings.Builder
+	bytesWritten := 0
+	round := 0
+	for bytesWritten <= compactMinBytes+8192 {
+		for i := 0; i < handles; i++ {
+			r := seeds[i]
+			r.PID = round // the latest round wins the fold
+			b, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			buf.Write(b)
+			buf.WriteByte('\n')
+			bytesWritten += len(b) + 1
+		}
+		round++
+	}
+	for _, e := range extra {
+		buf.WriteString(e)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(buf.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCompactFileFoldsSupersededRowsToOneRowPerHandle proves a file with many superseded
+// rows per handle compacts to exactly one row per handle and that LoadFile returns the
+// IDENTICAL folded set before and after — the losslessness invariant.
+func TestCompactFileFoldsSupersededRowsToOneRowPerHandle(t *testing.T) {
+	dir := t.TempDir()
+	path := IndexPath(dir)
+	const handles = 4
+	writeSupersededIndex(t, path, handles)
+
+	before := LoadFile(path)
+	if len(before) != handles {
+		t.Fatalf("folded before = %d, want %d", len(before), handles)
+	}
+	rawBefore := countIndexLines(t, path)
+	if rawBefore <= handles {
+		t.Fatalf("test setup did not create superseded rows: %d raw lines for %d handles", rawBefore, handles)
+	}
+
+	dropped, err := CompactFile(path)
+	if err != nil {
+		t.Fatalf("CompactFile: %v", err)
+	}
+	if dropped != rawBefore-handles {
+		t.Fatalf("dropped = %d, want %d", dropped, rawBefore-handles)
+	}
+
+	after := LoadFile(path)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("folded set changed across compaction:\n before=%+v\n after =%+v", before, after)
+	}
+	if got := countIndexLines(t, path); got != handles {
+		t.Fatalf("compacted file has %d lines, want one per handle (%d)", got, handles)
+	}
+}
+
+// TestCompactFileUnderGateLeavesBytesUntouched proves a small file below the size gate is
+// left BYTE-for-BYTE untouched (only an os.Stat is spent).
+func TestCompactFileUnderGateLeavesBytesUntouched(t *testing.T) {
+	dir := t.TempDir()
+	path := IndexPath(dir)
+	base := time.Unix(1_700_000_000, 0)
+	for i := 0; i < 3; i++ {
+		if err := Record(dir, NewRow(fmt.Sprintf("t-%d", i), "claude", i, "/w", "a.jsonl", "n", base.Add(time.Duration(i)*time.Second))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pre, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropped, err := CompactFile(path)
+	if err != nil {
+		t.Fatalf("CompactFile: %v", err)
+	}
+	if dropped != 0 {
+		t.Fatalf("dropped = %d, want 0 under the gate", dropped)
+	}
+	post, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(pre, post) {
+		t.Fatalf("small file was rewritten under the gate")
+	}
+}
+
+// TestCompactFileDropsMalformedAndForeignLikeLoadFile proves the rewrite physically drops a
+// malformed line and a wrong-schema line EXACTLY as LoadFile already drops them on read, and
+// that the folded set is unchanged across the rewrite.
+func TestCompactFileDropsMalformedAndForeignLikeLoadFile(t *testing.T) {
+	dir := t.TempDir()
+	path := IndexPath(dir)
+	const handles = 3
+	const malformed = "not json at all"
+	const foreign = `{"schema":"some.other.v1","handle":"gforeign0","trace_id":"tf"}`
+	writeSupersededIndex(t, path, handles, malformed, foreign, "")
+
+	before := LoadFile(path)
+	if len(before) != handles {
+		t.Fatalf("folded before = %d, want %d", len(before), handles)
+	}
+	if _, err := CompactFile(path); err != nil {
+		t.Fatalf("CompactFile: %v", err)
+	}
+	after := LoadFile(path)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("folded set changed across compaction:\n before=%+v\n after =%+v", before, after)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, malformed) {
+		t.Fatalf("malformed line survived the rewrite: %q", text)
+	}
+	if strings.Contains(text, "some.other.v1") {
+		t.Fatalf("foreign-schema line survived the rewrite: %q", text)
+	}
+	if got := countIndexLines(t, path); got != handles {
+		t.Fatalf("compacted file has %d lines, want %d (one per valid handle)", got, handles)
+	}
+}
+
+// TestRecordCompactionTriggerNeverFailsRecord drives Record past the size gate and proves
+// (1) the best-effort compaction trigger never returns an error that fails a guard launch,
+// and (2) the trigger actually fires — the folded index ends far smaller than the raw
+// append count, while Load still returns every distinct handle.
+func TestRecordCompactionTriggerNeverFailsRecord(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Unix(1_700_000_000, 0)
+	const handles = 3
+	appended := 0
+	cum := 0
+	for cum < 2*compactMinBytes {
+		for i := 0; i < handles; i++ {
+			r := NewRow(fmt.Sprintf("trace-%d", i), "claude", appended, "/w/some/padded/working/dir", "audit-journal.jsonl", "nonce-value", base.Add(time.Duration(i)*time.Second))
+			if err := Record(dir, r); err != nil {
+				t.Fatalf("Record must never fail on its compaction trigger: %v", err)
+			}
+			b, _ := json.Marshal(r)
+			cum += len(b) + 1
+			appended++
+		}
+	}
+	lines := countIndexLines(t, IndexPath(dir))
+	if lines >= appended {
+		t.Fatalf("index not compacted by the Record trigger: %d lines for %d appends", lines, appended)
+	}
+	if rows := Load(dir); len(rows) != handles {
+		t.Fatalf("folded rows = %d, want %d distinct handles", len(rows), handles)
 	}
 }
