@@ -118,6 +118,36 @@
           "category": "incidental",
           "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
           "token": "CacheValueGateDebtKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "private TTL bound on the keychain exec memo — a rate-limit over /usr/bin/security calls, not a member of the cache vocabulary (vCache/KV/provider prompt-cache)",
+          "token": "claudeKeychainCacheTTL"
+        },
+        {
+          "category": "incidental",
+          "reason": "private memo record for one keychain service probe result; implementation detail of the exec rate-limit, not a cache concept",
+          "token": "claudeKeychainCacheEntry"
+        },
+        {
+          "category": "incidental",
+          "reason": "mutex guarding the private keychain probe memo; implementation detail, not a cache concept",
+          "token": "claudeKeychainCacheMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "the private keychain probe memo map itself; implementation detail of the exec rate-limit, not a cache concept",
+          "token": "claudeKeychainCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "test-injectable clock for the private keychain probe memo; implementation detail, not a cache concept",
+          "token": "claudeKeychainCacheNow"
+        },
+        {
+          "category": "incidental",
+          "reason": "test helper clearing the private keychain probe memo between cases; implementation detail, not a cache concept",
+          "token": "resetClaudeKeychainCache"
         }
       ],
       "id": "cache",
@@ -167,6 +197,11 @@
         "cachevalue_test",
         "cachewritemult",
         "caching",
+        "claudeKeychainCache",
+        "claudeKeychainCacheEntry",
+        "claudeKeychainCacheMu",
+        "claudeKeychainCacheNow",
+        "claudeKeychainCacheTTL",
         "cmdCacheValueGateScore",
         "compactcachereads",
         "compactlastcacherd",
@@ -191,6 +226,7 @@
         "promptcachehittokens",
         "promptcachemisstokens",
         "pycache",
+        "resetClaudeKeychainCache",
         "runCacheValueGateScore",
         "tokencache",
         "uncached",
@@ -988,11 +1024,17 @@
           "category": "incidental",
           "reason": "strict project-work refusal reason for a completion handoff that names no achieved maturity (#4640); a reason token, not a maturity concept",
           "token": "MISSING_ACHIEVED_MATURITY"
+        },
+        {
+          "category": "incidental",
+          "reason": "platform-capability probe: reports whether the darwin exec seam for the macOS Keychain is wired in this build; not a support-maturity grid concept",
+          "token": "ClaudeKeychainSupported"
         }
       ],
       "id": "support-maturity",
       "ignore": [
         "BAD_ACHIEVED_MATURITY",
+        "ClaudeKeychainSupported",
         "DecodeInterleaveUnsupported",
         "DomainCoverage",
         "MISSING_ACHIEVED_MATURITY",
