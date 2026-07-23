@@ -319,3 +319,92 @@ func TestRealGitDecisionRoundTrip(t *testing.T) {
 		t.Fatalf("commit anchor should still have 2 after a pre-commit append, got %d", len(again))
 	}
 }
+
+// TestCompactSentinelNoteBoundsSentinelNote proves the unbounded-sentinel fold
+// (census #5345): the empty-tree sentinel note — the ONE object every pre-commit
+// refusal appends to — is bounded to a keep-last-N tail, while a commit-anchored note
+// (bounded forensic evidence) is NEVER touched, HEAD never moves, and a second fold is
+// a no-op. This is the collector for the only unbounded producer on
+// refs/notes/fak/decisions.
+func TestCompactSentinelNoteBoundsSentinelNote(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	mustGit := func(args ...string) string {
+		t.Helper()
+		out, code, err := gitRunner(ctx, dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: run error: %v", args, err)
+		}
+		if code != 0 {
+			t.Fatalf("git %v: exit %d: %s", args, code, out)
+		}
+		return out
+	}
+
+	mustGit("init", "-q")
+	mustGit("config", "user.email", "witness@test")
+	mustGit("config", "user.name", "witness test")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	mustGit("add", "f.txt")
+	mustGit("commit", "-q", "-m", "seed")
+	head := strings.TrimSpace(mustGit("rev-parse", "HEAD"))
+
+	rec := NewRecorderWithRunner(gitRunner, dir)
+
+	// A missing sentinel note is a no-op (nothing appended yet).
+	if dropped, err := rec.CompactSentinelNote(ctx, 2); err != nil || dropped != 0 {
+		t.Fatalf("compact of a missing sentinel note = (%d,%v), want (0,nil)", dropped, err)
+	}
+
+	// One commit-anchored decision (bounded forensic evidence — must survive the fold).
+	if err := rec.AppendDecision(ctx, head, Decision{Op: "commit", Verdict: VerdictAllow, Lane: "witness"}); err != nil {
+		t.Fatalf("append commit-anchored: %v", err)
+	}
+	// Five pre-commit refusals all pile onto the single empty-tree sentinel note.
+	for i := 0; i < 5; i++ {
+		if err := rec.AppendDecision(ctx, "", Decision{Op: "commit", Verdict: VerdictRefuse, ReasonClass: "OFF_TRUNK"}); err != nil {
+			t.Fatalf("append pre-commit refusal %d: %v", i, err)
+		}
+	}
+	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != 5 {
+		t.Fatalf("sentinel should hold 5 refusals before the fold, got %d", len(pre))
+	}
+
+	// maxLines <= 0 is a fail-safe no-op: it must NOT truncate the record.
+	if dropped, err := rec.CompactSentinelNote(ctx, 0); err != nil || dropped != 0 {
+		t.Fatalf("compact(0) = (%d,%v), want (0,nil) fail-safe", dropped, err)
+	}
+	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != 5 {
+		t.Fatalf("compact(0) must keep all 5, got %d", len(pre))
+	}
+
+	// Fold to the last 2 refusals: 3 dropped.
+	if dropped, err := rec.CompactSentinelNote(ctx, 2); err != nil || dropped != 3 {
+		t.Fatalf("compact(2) = (%d,%v), want (3,nil)", dropped, err)
+	}
+	if pre, err := rec.ReadDecisions(ctx, ""); err != nil || len(pre) != 2 {
+		t.Fatalf("sentinel should hold 2 refusals after the fold, got %d (err=%v)", len(pre), err)
+	}
+	// The commit-anchored note is untouched — the fold never bleeds across anchors.
+	if again, _ := rec.ReadDecisions(ctx, head); len(again) != 1 || again[0].Verdict != VerdictAllow {
+		t.Fatalf("commit-anchored note must survive the sentinel fold, got %+v", again)
+	}
+	// HEAD never moved and the side ref still exists.
+	if now := strings.TrimSpace(mustGit("rev-parse", "HEAD")); now != head {
+		t.Fatalf("HEAD moved during fold: %s -> %s", head, now)
+	}
+	if _, code, _ := gitRunner(ctx, dir, "show-ref", "--verify", "--quiet", decisionsRef); code != 0 {
+		t.Fatalf("%s should still exist after the fold", decisionsRef)
+	}
+
+	// Idempotent: a second fold to the same bound drops nothing.
+	if dropped, err := rec.CompactSentinelNote(ctx, 2); err != nil || dropped != 0 {
+		t.Fatalf("second compact(2) = (%d,%v), want (0,nil) idempotent", dropped, err)
+	}
+}

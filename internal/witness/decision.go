@@ -200,3 +200,74 @@ func (rec *Recorder) ReadDecisions(ctx context.Context, commitSHA string) ([]Dec
 	}
 	return decisions, nil
 }
+
+// CompactSentinelNote bounds the ONE note object every pre-commit refusal
+// appends to. A pre-commit refusal (AppendDecision with commitSHA=="") anchors to the
+// empty-tree sentinel, and `git notes append` concatenates each JSON line onto that
+// single note forever — the only UNBOUNDED producer on refs/notes/fak/decisions. A
+// commit-anchored note is one-per-commit, bounded forensic evidence, and is NEVER
+// touched here: this method rewrites the sentinel object and nothing else.
+//
+// It keeps the most-recent maxLines decision lines (recency = forensic value) and
+// force-overwrites just the sentinel note with that tail, returning the number of
+// dropped lines. It writes ONLY to refs/notes/fak/decisions (the dedicated side ref)
+// and ONLY to the empty-tree object — never main / HEAD / refs/heads, never a push;
+// the `-f` overwrite is scoped by --ref to this one note. It is best-effort and
+// idempotent: a missing sentinel note, or one already within the bound, is a no-op
+// (0, nil). maxLines <= 0 is a fail-safe no-op — a mis-wired zero KEEPS everything
+// rather than truncating the whole forensic record.
+func (rec *Recorder) CompactSentinelNote(ctx context.Context, maxLines int) (dropped int, err error) {
+	if maxLines <= 0 {
+		return 0, nil
+	}
+
+	out, code, runErr := rec.run(ctx, rec.dir,
+		"notes", "--ref="+decisionsRef, "show", EmptyTreeSHA)
+	if runErr != nil {
+		return 0, fmt.Errorf("witness: run git notes show sentinel: %w", runErr)
+	}
+	if code != 0 {
+		// No note on the sentinel yet (git notes show exits non-zero for an object
+		// with no note): nothing to compact.
+		return 0, nil
+	}
+
+	var lines []string
+	for _, raw := range strings.Split(out, "\n") {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		lines = append(lines, raw)
+	}
+	if len(lines) <= maxLines {
+		return 0, nil
+	}
+	tail := lines[len(lines)-maxLines:]
+
+	f, err := os.CreateTemp("", "fak-decision-fold-*.json")
+	if err != nil {
+		return 0, fmt.Errorf("witness: temp fold payload: %w", err)
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if _, err := f.WriteString(strings.Join(tail, "\n") + "\n"); err != nil {
+		f.Close()
+		return 0, fmt.Errorf("witness: write fold payload: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return 0, fmt.Errorf("witness: close fold payload: %w", err)
+	}
+
+	// Rewrite the sentinel note to just the kept tail. `git notes add -f` overwrites
+	// the note for EXACTLY this one object on the side ref named by --ref; it never
+	// touches main / HEAD and never pushes — the compactor's one legitimate overwrite.
+	_, code, runErr = rec.run(ctx, rec.dir,
+		"notes", "--ref="+decisionsRef, "add", "-f", "-F", tmp, EmptyTreeSHA)
+	if runErr != nil {
+		return 0, fmt.Errorf("witness: run git notes add (fold): %w", runErr)
+	}
+	if code != 0 {
+		return 0, fmt.Errorf("witness: git notes add (fold) exited %d", code)
+	}
+	return len(lines) - maxLines, nil
+}
