@@ -352,6 +352,9 @@ Three of its members watch **stale work** specifically:
   `@latest` (the trunk moving far past the last release tag) into a loud red.
 - `stale_leases` — `fak leaseref audit`: expired cross-machine leases under `refs/fak/locks/*`,
   reported read-only (it reaps nothing). Advisory; the remedy is the explicit `fak leaseref reap`.
+- `growthgate` — `fak growthgate --json`: the standing-bloat twin of the stale-work rungs —
+  unbounded append-only ledger/log growth over its per-class byte budgets. Advisory (non-gating);
+  its ACTION verdict is wired to the acting tick's growth-collect edge below (#5349).
 
 ```bash
 fak garden            # human snapshot of every member, stale-work members included
@@ -365,6 +368,22 @@ To run the pass **unattended**, install an OS-scheduler unit whose command is `f
 restarts it if it has stopped — the same probe/restart/lease/debounce machinery that keeps the
 fleet supervisors alive (`FAK_WATCHDOG_AUTOHEAL=off` disables it; `=warn` logs without
 restarting). `FAK_GARDEN=off` is the env-side brake on the garden pass itself.
+
+`fak garden tick` is the **acting** counterpart of the read-only fold: on an hourly cadence it
+takes the documented, idempotent remediation for each surfaced condition — reap expired leases,
+surface the orphan-run worklist, sweep orphan `*.lock` residue — and, for the `growthgate`
+member, runs the **growth-collect** act-edge (`ActGrowthReap`, #5349) that binds growthgate's
+reported-never-acted ACTION verdict to its collector. Once per non-`--dry-run` tick it censuses
+the repo root **plus** the Fleet tree (`FAK_FLEET_DIR`, else `%LOCALAPPDATA%/Fleet`; skipped when
+neither resolves), partitions it with `growthgate.ReapPlan` — COLD, over its class budget, **and**
+a disposable class (HOT files within the 300 s heat window and non-disposable WALs/chained ledgers
+are never in the set) — and **always appends the would-reap set to the reap ledger**
+(`FAK_GARDEN_GROWTH_LEDGER`, else `%LOCALAPPDATA%/Fleet/growthgate-reap.jsonl`) as the soak
+evidence. It is **delete-safe by default**: nothing is removed unless the apply opt-in is set
+(`FAK_GARDEN_GROWTH_COLLECT=apply` or `fak garden tick --growth-apply`) — the #5079 grace-prune
+precedent, delete-on-schedule stays ledger-only until the ledger has shown a correct reap set over
+a soak window; flipping apply on is a separate follow-on. `--dry-run` performs no side effect at
+all. The `reaped_growth_logs` counter is threaded into the tick's JSON envelope and witness metrics.
 
 ### Walking the item backlog — `fak garden walk`
 
