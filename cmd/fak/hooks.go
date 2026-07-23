@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -110,6 +113,60 @@ func gateModeDefault(modeEnv, escapeEnv, def string) (mode string, escaped bool)
 	return mode, strings.TrimSpace(os.Getenv(escapeEnv)) == "1"
 }
 
+// errCheckBudgetExceeded marks a pre-commit gate that a per-gate wall-clock budget cut off
+// before it returned. The pre-commit loop treats it exactly like any other could-not-run error
+// — the gate is SKIPPED (fail-open) — but names it so a wedged or deliberately-slow gate is
+// reported, never silently dropped.
+var errCheckBudgetExceeded = errors.New("pre-commit gate exceeded its time budget")
+
+// defaultCheckBudget bounds how long ONE pre-commit gate's Check may run before the hook treats
+// it as could-not-run and skips it (fail-open). A gate over the staged diff finishes in well
+// under a second; the cap exists only so a gate that HANGS on a lock or an O(refs) lease/fold —
+// the #5335 wedge, observed blocking every commit in the clone at near-zero CPU — can never
+// wedge the whole lane. Fail-open only ever SKIPS a slow gate; it can never add a block, so the
+// safe direction is the only direction. Override with FAK_PRECOMMIT_CHECK_BUDGET_MS
+// (milliseconds); a non-positive override is ignored, because disabling the bound reintroduces
+// the wedge.
+const defaultCheckBudget = 60 * time.Second
+
+// resolveCheckBudget returns the FAK_PRECOMMIT_CHECK_BUDGET_MS override (when it parses to a
+// positive millisecond count) or defaultCheckBudget.
+func resolveCheckBudget() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("FAK_PRECOMMIT_CHECK_BUDGET_MS")); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return defaultCheckBudget
+}
+
+// checkWithinBudget runs one gate's Check under a wall-clock budget. Returning within budget it
+// yields the gate's own (findings, error) verbatim. On budget expiry it returns
+// (nil, errCheckBudgetExceeded) and ABANDONS the still-running Check: the goroutine sends its
+// result into a buffered channel and exits (at worst when the process does), so a hung gate can
+// never block the commit. Gate.Check takes no context and so cannot be cancelled — abandonment
+// is the only bound available, and it is safe here because a pre-commit gate is a read-only
+// computation over the staged diff.
+func checkWithinBudget(g hooks.Gate, d *hooks.StagedDiff, budget time.Duration) ([]hooks.Finding, error) {
+	type outcome struct {
+		findings []hooks.Finding
+		err      error
+	}
+	done := make(chan outcome, 1) // buffered: an abandoned Check still sends and exits, never leaking
+	go func() {
+		f, e := g.Check(d)
+		done <- outcome{f, e}
+	}()
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case o := <-done:
+		return o.findings, o.err
+	case <-timer.C:
+		return nil, errCheckBudgetExceeded
+	}
+}
+
 func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("hooks pre-commit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -129,6 +186,7 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	budget := resolveCheckBudget()
 	var allFindings []hooks.Finding
 	blocked := false
 	for _, g := range hooks.PreCommitGates() {
@@ -136,9 +194,14 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		if mode == "off" || escaped {
 			continue
 		}
-		findings, gerr := g.Check(d)
+		findings, gerr := checkWithinBudget(g, d, budget)
 		if gerr != nil {
-			// a single gate that could-not-run is skipped (fail-open), the others still run.
+			// A single gate that could-not-run — or ran past its wall-clock budget (#5335) — is
+			// skipped (fail-open); the other gates still run. A budget cut-off is reported so a
+			// wedged or deliberately-slow gate is visible, never a silent bypass of a real check.
+			if errors.Is(gerr, errCheckBudgetExceeded) && !*asJSON {
+				fmt.Fprintf(stderr, "pre-commit: gate %s exceeded its %s budget; skipped (fail-open, #5335)\n", g.Name, budget)
+			}
 			continue
 		}
 		if len(findings) == 0 {
