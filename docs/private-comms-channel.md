@@ -42,6 +42,31 @@ transcript, or staged private bridge source. The commit-time admission and publi
 enforce that boundary; see the
 [GPU-server private boundary](gpu-server-private-boundary.md) for ownership and gate details.
 
+## When a readback fails: which class, which fix
+
+A failed readback is not one condition. The bridge client separates the classes because
+they have different fixes, and until #5103 they all surfaced under a single
+`READBACK_WEDGED` token — which sent operators to restart sessions that were never the
+problem. Read the class before acting.
+
+| Class | What it proves | Operator action |
+|---|---|---|
+| `READBACK_WEDGED: sentinel_missing` | The hub answered this session's tail request and the client parsed the reply, but the command's completion marker was not in it. The transport is healthy; the session's shell is wedged. | Restart the control bridge for that session on the server. This is the only class that warrants it, and it is server-side: an authorized operator must do it from the server console, because the boundary allows no inbound login. |
+| `HUB_UNRESPONSIVE: hub_timeout` | The poll itself deadlined or errored, so no reply was ever inspected. A slow or unreachable control transport. | Retry in a quieter window with a longer timeout. Do not restart anything; the session is not implicated. The transport oscillates, so a failure here is not durable. |
+| `HUB_UNRESPONSIVE: no_tail_reply` | Every poll succeeded and the hub answered nothing at all. | Check that the hub process is running and still joined to the control channel. Again a hub-side condition, not a session one. |
+| `HUB_UNRESPONSIVE: tail_reply_unrecognized` | The hub replied, but no reply matched the shape this client parses — client/hub protocol drift. | Update the client's reply parser in the private tree. Restarting sessions cannot fix a parser mismatch. |
+
+Two consequences worth keeping. First, a spent probe budget never reports a wedged shell:
+if the loop never polled, it cannot have observed a missing marker, and it says so.
+Second, the same session can produce different classes minutes apart — a short fail-fast
+probe can deadline (`hub_timeout`) while a full-budget check on the same session reaches
+the hub and reports `sentinel_missing`. That is not a contradiction; it means the shell is
+wedged *and* the transport is slow, and only the first needs an operator.
+
+Run the client's `selftest` verb before committing to a long command. It uses the full
+timeout instead of the short fail-fast probe budget, so it is the cheapest way to learn
+which class you are in.
+
 ## Public readback
 
 When lab capacity is being considered for dev-worker dispatch, follow the scrub and schema
