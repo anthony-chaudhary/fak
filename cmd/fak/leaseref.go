@@ -71,6 +71,8 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		return runLeaserefAnnounceView(stdout, stderr, rest)
 	case "sync":
 		return runLeaserefSync(stdout, stderr, rest)
+	case "drain":
+		return runLeaserefDrain(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, leaserefUsage)
 		return 0
@@ -204,6 +206,22 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       just-acquired local lease the remote has not seen. Deletions do not ride a
       refspec: a released/reaped lease converges on peers via TTL expiry plus their
       own 'reap'. Side refs only — no branch, HEAD, or tag ever moves.
+
+  fak leaseref drain [--apply] [--remote R] [--dir DIR]
+      DRAIN the expired guard-session descriptors on a remote (default origin) that
+      the no-prune 'sync' deliberately leaves behind: for each PROVEN-EXPIRED
+      refs/fak/locks/session-<id> it delete-pushes the one-sided :ref refspec — the
+      targeted per-id convergence, never a blanket prune — so origin's expired
+      backlog actually drains instead of being re-materialized on every fetch (#5358).
+      DRY-RUN BY DEFAULT: with no --apply it reports which ids WOULD be delete-pushed
+      and mutates nothing. --apply performs the live drain (opting into the pre-push
+      bulk-deletion gate the hook reserves for this drainer) and reaps each drained id
+      locally too, so this clone's own later sync push cannot resurrect it. A LIVE
+      descriptor is never a target; the live drain of the real fleet remote is an
+      explicit operator step, not an automatic sweep.
+      Targets are proven expired from the LOCAL ref view, so to drain a remote's
+      backlog first import it: 'fak leaseref sync --fetch-only' (or the glob fetch),
+      then 'fak leaseref drain' (report) and 'fak leaseref drain --apply' (drain).
 
 This is VISIBILITY, not atomic acquisition across machines: it lets an arbiter SEE a
 cross-machine conflict and does not arbitrate a same-fetch-window race. The fenced
@@ -679,6 +697,45 @@ func runLeaserefSync(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return emitLeaserefJSON(stdout, stderr, res, "sync")
+}
+
+// runLeaserefDrain is the sanctioned session-descriptor drainer (#5358): it delete-pushes the
+// PROVEN-EXPIRED refs/fak/locks/session-* descriptors to origin — the targeted per-id
+// convergence the no-prune sync deliberately omits, so origin's expired-descriptor backlog
+// (the ~5882-ref treadmill) can actually drain instead of being re-materialized on every fetch.
+//
+// DRY-RUN BY DEFAULT, like every retention collector: with no --apply it reports exactly which
+// ids WOULD be delete-pushed and deletes NOTHING. --apply performs the live drain: it opts into
+// the pre-push bulk-deletion gate (FLEET_ALLOW_REF_PRUNE=1 — the escape the hook reserves for
+// THIS drainer) and removes only the proven-expired descriptors on origin, reaping each locally
+// too so this clone's own later glob sync push cannot resurrect them. A live descriptor is
+// never a target. The live drain of the real fleet remote is thus an explicit operator step,
+// never an automatic sweep.
+func runLeaserefDrain(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref drain", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
+	remote := fs.String("remote", "origin", "the git remote (name or URL) to drain expired descriptors from")
+	apply := fs.Bool("apply", false, "PERFORM the delete-push (default: dry-run, report the target set and mutate nothing)")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	*dir = pathutil.ExpandTilde(*dir)
+	if *apply {
+		// Opt into the pre-push bulk-deletion gate (tools/githooks/pre-push): this verb IS the
+		// sanctioned expired-ref drainer the hook reserves that escape for. Set on the one-shot CLI
+		// process so the push child inherits it; a dry-run never touches it.
+		os.Setenv("FLEET_ALLOW_REF_PRUNE", "1")
+	}
+	store := leaseref.NewInDir(*dir)
+	res, err := store.ConvergeDescriptorDrain(context.Background(), *remote, time.Now(), *apply)
+	if err != nil {
+		// A partial best-effort failure still carries an accurate report + counts; surface both.
+		fmt.Fprintf(stderr, "fak leaseref drain: %v\n", err)
+		emitLeaserefJSON(stdout, stderr, res, "drain")
+		return 1
+	}
+	return emitLeaserefJSON(stdout, stderr, res, "drain")
 }
 
 func emitLeaserefJSON(stdout, stderr io.Writer, v any, sub string) int {
