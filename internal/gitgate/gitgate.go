@@ -161,6 +161,12 @@ var defaultHazards = []hazard{
 	// `git push --mirror` overwrites EVERY remote ref (and deletes remote refs
 	// absent locally) — catastrophic on a shared remote (a superset of force-push).
 	{sub: "push", long: "--mirror", law: "push-mirror refused: `git push --mirror` overwrites EVERY remote ref and deletes remote refs absent locally — catastrophic on a shared remote. Push specific refs without --mirror."},
+	// `git push --prune` deletes every remote ref absent from THIS clone under the
+	// pushed refspec (no --mirror needed) — the converge that emptied the fleet's
+	// refs/fak/locks/* and refs/fak/wip/* from a stale clone (#5360). Same catastrophe
+	// class as --mirror; scoped to push so a safe fetch/remote prune (local-tracking
+	// cleanup) stays deferred.
+	{sub: "push", long: "--prune", law: "push-prune refused: `git push --prune` deletes every remote ref absent from THIS clone under the pushed refspec — on a shared fleet remote where each clone holds only a subset of refs, that mass-deletes peers' branches, lock leases, and WIP checkpoint refs (a superset of push --delete). Push specific refs without --prune; a safe `git fetch --prune` prunes only local remote-tracking refs."},
 }
 
 const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (AGENTS.md). Add explicit paths instead."

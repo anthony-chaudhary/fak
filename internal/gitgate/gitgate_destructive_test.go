@@ -76,9 +76,17 @@ func TestClassifyDestructiveAndOffTrunk(t *testing.T) {
 
 		// ---- catastrophic remote / history rewrite -------------------------
 		{"push mirror", "git push --mirror origin", true, "push-mirror"},
+		{"push prune", "git push --prune origin refs/fak/locks/*", true, "push-prune"},
+		{"push prune flag last", "git push origin refs/heads/* --prune", true, "push-prune"},
 		{"filter-branch", "git filter-branch --tree-filter rm HEAD", true, "history-rewrite"},
 		{"filter-repo", "git filter-repo --path secret --invert-paths", true, "history-rewrite"},
 		{"clone mirror OK", "git clone --mirror https://example.com/x.git", false, ""},
+		// The SAFE neighbors carry the weight: --prune is refused ONLY on push. A
+		// `git fetch --prune` prunes local remote-tracking refs (standard hygiene) and
+		// `git remote prune` likewise touches nothing on the remote — both must defer.
+		{"fetch prune OK", "git fetch --prune origin", false, ""},
+		{"fetch prune all OK", "git fetch --all --prune", false, ""},
+		{"remote prune OK", "git remote prune origin", false, ""},
 
 		// ---- persistent hook-disable via config -----------------------------
 		{"config hooksPath set", "git config core.hooksPath /dev/null", true, "skip-hooks"},
