@@ -435,6 +435,36 @@
           "category": "incidental",
           "reason": "Prometheus KV-prefix reuse counter on the gateway /metrics surface; matches guard-gate only on the 'gate' substring of 'gateway'. It admits/refuses nothing — pure observability, incidental to the guard-gate concept family.",
           "token": "fak_gateway_kv_prefix_prompt_tokens_by_source_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported secretload.SecretSource impl — the macOS Keychain rung of guard's OAuth token ladder (#5363); a source in an existing ladder, not a new guard/gate concept",
+          "token": "guardOAuthKeychainSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "display label for the keychain rung in the loader's looked-in diagnostics; not a concept",
+          "token": "guardOAuthKeychainSourceName"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainSupported so cmd/fak tests stub platform support; not a concept",
+          "token": "guardKeychainSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainAccessToken for tests; not a concept",
+          "token": "guardKeychainAccessToken"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainCred for tests; not a concept",
+          "token": "guardKeychainCred"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainAPIKey for tests; not a concept",
+          "token": "guardKeychainAPIKey"
         }
       ],
       "exclude": [
@@ -474,6 +504,12 @@
         "guardHandoffBlockCeilingEnv",
         "guardHandoffBlockCounterPath",
         "guardHandoffBlockCounterRel",
+        "guardKeychainAPIKey",
+        "guardKeychainAccessToken",
+        "guardKeychainCred",
+        "guardKeychainSupported",
+        "guardOAuthKeychainSource",
+        "guardOAuthKeychainSourceName",
         "guardOperatorQuestionEscalationSink",
         "guardOperatorQuestionEscalationSlackSource",
         "guardOperatorQuestionEscalationSlackText",
@@ -1029,6 +1065,11 @@
           "category": "incidental",
           "reason": "platform-capability probe: reports whether the darwin exec seam for the macOS Keychain is wired in this build; not a support-maturity grid concept",
           "token": "ClaudeKeychainSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainSupported (platform-capability probe for the darwin keychain exec); not a support-maturity grid concept",
+          "token": "guardKeychainSupported"
         }
       ],
       "id": "support-maturity",
@@ -1050,6 +1091,7 @@
         "errInterleaveUnsupported",
         "errmmapunsupported",
         "errstreamingunsupported",
+        "guardKeychainSupported",
         "immaturity",
         "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",

@@ -502,6 +502,10 @@ func cmdGuard(argv []string) {
 		apiKey               string
 		pinUpstream          bool
 		oauthSource          string
+		// keychainAPIKey marks apiKey as Claude Code's saved API key adopted from the
+		// macOS Keychain (#5363) — not an --api-key-env value — so the startup report's
+		// auth line and the managed-cache reason can name the real source.
+		keychainAPIKey bool
 		// credPath is the on-disk .credentials.json path fak is pinning upstream, populated
 		// only when pinUpstream is true. It is threaded through to the post-crash auth-recovery
 		// check (guardMaybeRecoverAuthCrash) so a wrapped-agent exit caused by an expired
@@ -540,6 +544,7 @@ func cmdGuard(argv []string) {
 		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
 		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
+		keychainAPIKey = us.keychainAPIKey
 		// resolveGuardUpstream armed the spend meter with the agent name (Opus
 		// default). Re-arm with the statically-known upstream model so a non-default
 		// tier prices at its own rate — e.g. a claude-fable-5 session bills 2x Opus
@@ -566,6 +571,9 @@ func cmdGuard(argv []string) {
 		}
 		if us.ambientKeyOverridden && !*quiet {
 			fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")
+		}
+		if us.keychainAPIKey && !*quiet {
+			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription login found; using Claude Code's saved API key from the macOS Keychain upstream (API billing — the same key the wrapped agent itself authenticates with, so the billed account is unchanged).")
 		}
 		// Pinned Claude subscription: the OAuth access token fak holds upstream is
 		// short-lived (the provider rotates it ~hourly, and Claude Code rewrites the
@@ -667,10 +675,11 @@ func cmdGuard(argv []string) {
 	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, guardManagedCacheInputs{
 		// ALONGSIDE mode still has a real provider wire on the proxy side, so only the
 		// PURE local branch (no upstream at all) turns the cache posture off.
-		localModel:  localModel && !localAlongside,
-		provider:    up,
-		apiKey:      apiKey,
-		oauthSource: oauthSource,
+		localModel:     localModel && !localAlongside,
+		provider:       up,
+		apiKey:         apiKey,
+		oauthSource:    oauthSource,
+		keychainAPIKey: keychainAPIKey,
 	})
 	if mcErr != nil {
 		fmt.Fprintln(os.Stderr, "fak guard:", mcErr)
@@ -1385,6 +1394,7 @@ func cmdGuard(argv []string) {
 		pinUpstream:          pinUpstream,
 		apiKey:               apiKey,
 		apiKeyEnv:            *apiKeyEnv,
+		keychainAPIKey:       keychainAPIKey,
 		oauthSource:          oauthSource,
 		mcache:               mcache,
 		contextBudgetLimit:   contextBudgetLimit,
