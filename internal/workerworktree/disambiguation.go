@@ -54,7 +54,13 @@ func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationW
 	worktree := readDisambiguation(wtPath, "HEAD")
 	post := readDisambiguation(root, treeSHA)
 	all := &DisambiguationWitnesses{Before: before, Worktree: worktree, PostApply: post}
-	ok := post.Fresh && post.SemanticValid && post.CriticalClean && post.Coverage+0.0001 >= before.Coverage && post.CoverageDebt <= before.CoverageDebt && !coverageFamilyRegressed(before.FamilyCoverage, post.FamilyCoverage)
+	// Freshness is a NON-REGRESSION check, mirroring the coverage terms beside it: a land must
+	// never turn a fresh HEAD stale, but it is not required to repair a peer's pre-existing
+	// staleness. Requiring absolute post.Fresh over-refused every isolated land whenever an
+	// unrelated doc-regen left the tree stale at HEAD (before.Fresh already false), even for a
+	// diff that regressed nothing. See #5359.
+	freshNonRegress := post.Fresh || !before.Fresh
+	ok := freshNonRegress && post.SemanticValid && post.CriticalClean && post.Coverage+0.0001 >= before.Coverage && post.CoverageDebt <= before.CoverageDebt && !coverageFamilyRegressed(before.FamilyCoverage, post.FamilyCoverage)
 	if !ok && post.Detail == "" {
 		all.PostApply.Detail = fmt.Sprintf("coverage %.2f -> %.2f; coverage debt %d -> %d", before.Coverage, post.Coverage, before.CoverageDebt, post.CoverageDebt)
 	}
