@@ -51,6 +51,46 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 push_updates="$(cat)"
 pushed_tips="$(printf '%s\n' "$push_updates" | awk 'NF >= 4 && $2 !~ /^0+$/ { print $2 }' | sort -u)"
 
+# Bulk remote-ref deletion gate  --  reason: REF_PRUNE  (Toward #5360)
+#
+# The 2026-07-22 origin converge deleted refs/fak/locks/session-* (14278 -> 5882) and
+# emptied refs/fak/wip/* (4061 -> 0) in one window -- the signature of a `git push
+# --prune` (or a bulk `git push origin :a :b ...`) from a stale clone deleting every
+# ref it had not fetched. gitgate now refuses `git push --prune` for kernel-routed
+# agents, but a NON-kernel actor (a peer VM, a human, a foreign clone) bypasses the
+# kernel; this push-seam gate binds any actor whose clone installs the hook.
+#
+# It counts DELETION rows on the pre-push stdin -- a ref update whose LOCAL oid is the
+# all-zeros SHA (`<local ref> 000..0 <remote ref> <remote oid>`), the same shape line
+# 52 excludes from the build tips. An EXPLICIT bulk deletion (`git push origin :a :b`)
+# always surfaces here; whether `--prune`'s IMPLICIT deletions also reach this stdin is
+# unverified in this clone (the gitgate rung is the primary --prune guard), so this
+# stays ADVISORY (warn) by default -- a wrongly-blocking push seam is a fleet ship
+# outage, and the sanctioned `fak sync push` is no-prune so it deletes nothing here.
+#
+# Mode (env FLEET_REFPRUNE_GUARD):  warn (default) | block | off
+# Bound (env FLEET_REFPRUNE_MAX):   deletions strictly above this trip the gate (default 25).
+# Escape:  FLEET_ALLOW_REF_PRUNE=1 git push   always allows (the sanctioned expired-ref
+#          drainer #5358, which deletes a bounded proven-expired set on purpose).
+refprune_mode="${FLEET_REFPRUNE_GUARD:-warn}"
+refprune_max="${FLEET_REFPRUNE_MAX:-25}"
+if [ "$refprune_mode" != "off" ] && [ "${FLEET_ALLOW_REF_PRUNE:-0}" != "1" ]; then
+	del_count="$(printf '%s\n' "$push_updates" | awk 'NF >= 4 && $2 ~ /^0+$/ { c++ } END { print c+0 }')"
+	if [ "$del_count" -gt "$refprune_max" ]; then
+		if [ "$refprune_mode" = "block" ]; then
+			echo "REF_PRUNE (blocked): this push deletes $del_count remote refs (> $refprune_max)." >&2
+			echo "  a bulk remote-ref deletion on the shared fleet remote drops peers' branches, lock leases, and WIP checkpoint refs." >&2
+			echo "  fix: push specific refs without --prune; delete refs one intended ref at a time." >&2
+			echo "  override once: FLEET_ALLOW_REF_PRUNE=1 git push   (the sanctioned expired-ref drainer only)" >&2
+			exit 1
+		else
+			echo "REF_PRUNE (advisory): this push deletes $del_count remote refs (> $refprune_max)." >&2
+			echo "  if unintended, abort now: a bulk deletion drops peers' branches, lock leases, and WIP refs (see #5360)." >&2
+			echo "  hard-enforce with FLEET_REFPRUNE_GUARD=block; the sanctioned drainer sets FLEET_ALLOW_REF_PRUNE=1." >&2
+		fi
+	fi
+fi
+
 # The architest tier table must not drift between pushes. GitHub Actions can report
 # TestEveryPackageDeclaresTier red after a direct push, but the local push boundary is
 # the earliest in-repo place to refuse the same recurrence (#1145). Use `fak hygiene`
