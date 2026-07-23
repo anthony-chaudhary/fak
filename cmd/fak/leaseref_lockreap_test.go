@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 )
 
 // lockReapInitRepo initialises a REAL git temp repo (skipped when git is unavailable,
@@ -92,12 +94,12 @@ func TestGardenTickReapsOrphanLocks(t *testing.T) {
 	t.Setenv("FAK_GARDEN_GROWTH_LEDGER", filepath.Join(t.TempDir(), "growth-reap.jsonl"))
 
 	var stdout, stderr bytes.Buffer
-	reaped, sessions, surfaced, lockFiles, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
+	reaped, sessions, surfaced, lockFiles, _, intents := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
-	if reaped != 0 || sessions != 0 || surfaced != 0 {
-		t.Fatalf("lease/session/surface counts = %d/%d/%d, want 0/0/0 (empty plan)", reaped, sessions, surfaced)
+	if reaped != 0 || sessions != 0 || surfaced != 0 || intents != 0 {
+		t.Fatalf("lease/session/surface/intent counts = %d/%d/%d/%d, want 0/0/0/0 (empty plan)", reaped, sessions, surfaced, intents)
 	}
 	if lockFiles != 1 {
 		t.Fatalf("lockFiles = %d, want 1 (only the stale lock is reaped)", lockFiles)
@@ -124,7 +126,7 @@ func TestGardenTickDryRunKeepsOrphanLocks(t *testing.T) {
 	stale := lockReapWriteLock(t, locks, "session-dead.lock", now, 5*time.Hour)
 
 	var stdout, stderr bytes.Buffer
-	_, _, _, lockFiles, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, true, false)
+	_, _, _, lockFiles, _, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, true, false)
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
@@ -162,5 +164,49 @@ func TestLeaserefReapReportsLockSweep(t *testing.T) {
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Fatalf("reap wrongly removed the fresh live lock: %v", err)
+	}
+}
+
+// TestGardenTickReapsExpiredIntents proves the reap-parity wiring in performGardenTick
+// (#5345): the automatic tick now sweeps lapsed intent leases too, not just leases +
+// sessions + orphan .locks. A refs/fak/locks/intent-<key> whose TTL has expired is
+// reaped under an EMPTY plan (no ActReap decision fires), while nothing else is touched;
+// a second tick reaps nothing (idempotent). This closes the same reaper asymmetry that
+// bit sessions in #5344 — before this wiring only the manual `fak leaseref reap` swept
+// intents, so the scheduled loop grew the intent namespace unbounded.
+func TestGardenTickReapsExpiredIntents(t *testing.T) {
+	dir := lockReapInitRepo(t)
+	now := time.Now()
+
+	// Seed one already-expired intent: claim it an hour in the past with a 60s TTL, so
+	// its expiry sits ~59 min before the tick's real-clock ReapIntents(time.Now()) call.
+	store := leaseref.NewInDir(dir)
+	past := now.Add(-time.Hour)
+	if _, v, err := store.ClaimIntent(context.Background(), leaseref.IntentRecord{Target: "#77", Holder: "gc-parity", TTLSeconds: 60}, past); err != nil || !v.OK {
+		t.Fatalf("seed expired intent: ok=%v err=%v", v.OK, err)
+	}
+
+	// Keep the once-per-tick growth collect off the real Fleet tree/ledger.
+	t.Setenv("FAK_FLEET_DIR", "")
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("FAK_GARDEN_GROWTH_LEDGER", filepath.Join(t.TempDir(), "growth-reap.jsonl"))
+
+	var stdout, stderr bytes.Buffer
+	reaped, sessions, surfaced, lockFiles, _, intents := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+	if intents != 1 {
+		t.Fatalf("intents = %d, want 1 (the lapsed intent is reaped on the tick)", intents)
+	}
+	if reaped != 0 || sessions != 0 || surfaced != 0 || lockFiles != 0 {
+		t.Fatalf("collateral reap lease/session/surface/lock = %d/%d/%d/%d, want 0/0/0/0", reaped, sessions, surfaced, lockFiles)
+	}
+
+	// The intent ref is gone: a second tick reaps nothing (idempotent, like the other sweeps).
+	var so2, se2 bytes.Buffer
+	_, _, _, _, _, intents2 := performGardenTick(&so2, &se2, gardenbundle.TickPlan{}, dir, dir, false, false)
+	if intents2 != 0 {
+		t.Fatalf("second tick intents = %d, want 0 (idempotent reap)", intents2)
 	}
 }

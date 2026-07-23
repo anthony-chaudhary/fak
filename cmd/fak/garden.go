@@ -184,8 +184,8 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 	plan := gardenbundle.PlanTick(results, *dryRun)
 
 	growthApply := growthApplyEnabled(*growthApplyFlag)
-	reaped, sessions, surfaced, lockFiles, collected := performGardenTick(stdout, stderr, plan, *dir, root, *dryRun, growthApply)
-	witnessGardenTick(ledgerPath, plan, reaped, sessions, surfaced, lockFiles, collected)
+	reaped, sessions, surfaced, lockFiles, collected, intents := performGardenTick(stdout, stderr, plan, *dir, root, *dryRun, growthApply)
+	witnessGardenTick(ledgerPath, plan, reaped, sessions, surfaced, lockFiles, collected, intents)
 
 	if *asJSON {
 		out := map[string]any{
@@ -197,22 +197,24 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 			"reaped_leases":      reaped,
 			"reaped_sessions":    sessions,
 			"reaped_lock_files":  lockFiles,
+			"reaped_intents":     intents,
 			"reaped_growth_logs": collected,
 			"surfaced_runs":      surfaced,
 			"plan":               plan,
 		}
 		return encodeJSONOrFail(stdout, stderr, out, "fak garden tick")
 	}
-	renderGardenTick(stdout, plan, reaped, sessions, surfaced, lockFiles, collected)
+	renderGardenTick(stdout, plan, reaped, sessions, surfaced, lockFiles, collected, intents)
 	return 0
 }
 
 // performGardenTick executes the side effects the plan calls for. Under dry-run no
 // decision has Perform=true, so this is a pure report. It returns the count of
 // reaped leases / sessions, the count of orphan-run worklists surfaced, the count
-// of orphan .lock files swept, and the count of oversized disposable logs the
-// growthgate collect reaped (0 in the ledger-only default).
-func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir, root string, dryRun, growthApply bool) (reaped, sessions, surfaced, lockFiles, collected int) {
+// of orphan .lock files swept, the count of oversized disposable logs the growthgate
+// collect reaped (0 in the ledger-only default), and the count of lapsed intent
+// leases reaped (the reap-parity sweep, #5345).
+func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir, root string, dryRun, growthApply bool) (reaped, sessions, surfaced, lockFiles, collected, intents int) {
 	for _, d := range plan.Decisions {
 		if !d.Perform {
 			continue
@@ -259,6 +261,19 @@ func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir
 		} else {
 			lockFiles += len(locks)
 		}
+		// Intent-lease reap (#5345 reap parity): run ONCE PER TICK, unconditionally —
+		// closing the same reaper asymmetry that bit sessions (#5344). A lapsed
+		// refs/fak/locks/intent-<key> accretes independently of whether any lease RECORD
+		// is expired, so gating this on the ActReap decision above (as the lease/session
+		// reaps are) would leave the intent namespace uncollected on the automatic loop —
+		// the CLI's `fak leaseref reap` already sweeps all three kinds. Same best-effort,
+		// idempotent contract as the ReapLockFiles sweep just above.
+		ints, ierr := store.ReapIntents(context.Background(), time.Now())
+		if ierr != nil {
+			fmt.Fprintf(stderr, "fak garden tick: reap intents: %v\n", ierr)
+		} else {
+			intents += len(ints)
+		}
 		// growthgate collect (#5349): run ONCE PER TICK over the repo + Fleet trees,
 		// the acting half of the ActGrowthReap edge. DELETE-SAFE by default: it appends
 		// the would-reap set to the reap ledger every tick (the soak evidence) but
@@ -267,14 +282,14 @@ func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir
 		collected += collectGrowthLogs(stderr, growthCensusRoots(root), growthApply, growthReapLedgerPath())
 	}
 	_ = stdout
-	return reaped, sessions, surfaced, lockFiles, collected
+	return reaped, sessions, surfaced, lockFiles, collected, intents
 }
 
 // witnessGardenTick records the tick's run-end in the loop ledger, so a witnessed
 // run end (the tick + its findings) lives in the ledger and `fak loop health` shows
 // the loop alive. A ledger append failure is non-fatal: the remediation already
 // happened; losing the witness line shouldn't fail the tick.
-func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected int) {
+func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected, intents int) {
 	if ledgerPath == "" {
 		return
 	}
@@ -282,13 +297,14 @@ func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, se
 	summary := fmt.Sprintf("garden tick clean: %d member(s), nothing to act on", len(plan.Decisions))
 	if plan.DryRun {
 		summary = fmt.Sprintf("garden tick dry-run: would reap %d, surface %d (no side effect)", plan.ToReap, plan.ToSurface)
-	} else if plan.Acted() || lockFiles > 0 || collected > 0 {
-		summary = fmt.Sprintf("garden tick acted: reaped %d lease(s) + %d session(s) + %d orphan lock(s) + %d growth log(s), surfaced %d orphan worklist(s)", reaped, sessions, lockFiles, collected, surfaced)
+	} else if plan.Acted() || lockFiles > 0 || collected > 0 || intents > 0 {
+		summary = fmt.Sprintf("garden tick acted: reaped %d lease(s) + %d session(s) + %d intent(s) + %d orphan lock(s) + %d growth log(s), surfaced %d orphan worklist(s)", reaped, sessions, intents, lockFiles, collected, surfaced)
 	}
 	metrics := map[string]int64{
 		"reaped_leases":      int64(reaped),
 		"reaped_sessions":    int64(sessions),
 		"reaped_lock_files":  int64(lockFiles),
+		"reaped_intents":     int64(intents),
 		"reaped_growth_logs": int64(collected),
 		"surfaced_runs":      int64(surfaced),
 		"advisory":           int64(plan.Advisory),
@@ -329,7 +345,7 @@ func registerGardenTickLoop(registryPath string) error {
 
 // renderGardenTick prints the act-pass as an aligned snapshot: one row per member
 // decision, then the summary of what the tick actually did.
-func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected int) {
+func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected, intents int) {
 	mode := "act"
 	if plan.DryRun {
 		mode = "dry-run"
@@ -349,8 +365,8 @@ func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions,
 		fmt.Fprintf(w, "  -> dry-run: would reap %d expired lease(s), surface %d orphan worklist(s); nothing performed\n", plan.ToReap, plan.ToSurface)
 		return
 	}
-	if plan.Acted() || lockFiles > 0 || collected > 0 {
-		fmt.Fprintf(w, "  -> acted: reaped %d lease(s) + %d session(s) + %d orphan lock(s) + %d growth log(s), surfaced %d orphan worklist(s)\n", reaped, sessions, lockFiles, collected, surfaced)
+	if plan.Acted() || lockFiles > 0 || collected > 0 || intents > 0 {
+		fmt.Fprintf(w, "  -> acted: reaped %d lease(s) + %d session(s) + %d intent(s) + %d orphan lock(s) + %d growth log(s), surfaced %d orphan worklist(s)\n", reaped, sessions, intents, lockFiles, collected, surfaced)
 	} else {
 		fmt.Fprintln(w, "  -> garden tick clean: nothing to act on")
 	}
