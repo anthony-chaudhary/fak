@@ -315,6 +315,15 @@ type Model struct {
 	// Set via SetExpertParallelRank from the serve's FAK_EP_RANK.
 	epRank    int
 	epRankSet bool
+
+	// epCoord is rank 0's coordinated-decode driver in a SHARDED EP serve (#4835). When set,
+	// every Prefill/Step on this model's sessions first broadcasts the forward it is about to
+	// run to the follower ranks, so ONE request produces one tokenize/sample on rank 0 and N
+	// local expert contributions — replacing the HTTP mirror that ran the whole request N
+	// times. nil (the default, and every non-sharded serve) leaves the forward entry points
+	// byte-identical: the hook reads this one nil field and returns. Set via
+	// SetEPDecodeCoordinator; follower ranks run RunEPFollower instead and never set it.
+	epCoord *EPDecodeCoordinator
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying

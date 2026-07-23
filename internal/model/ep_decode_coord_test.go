@@ -2,6 +2,7 @@ package model
 
 import (
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,20 +20,25 @@ func TestEPDecodeFrameRoundTrip(t *testing.T) {
 	cases := []struct {
 		name string
 		op   epDecodeOp
+		pos  int
 		ids  []int
 	}{
-		{"prefill", epOpPrefill, []int{1, 2, 3, 1 << 20}},
-		{"prefill-empty", epOpPrefill, nil},
-		{"step", epOpStep, []int{7}},
-		{"shutdown", epOpShutdown, nil},
+		{"prefill", epOpPrefill, 0, []int{1, 2, 3, 1 << 20}},
+		{"prefill-empty", epOpPrefill, 0, nil},
+		{"prefill-resumed", epOpPrefill, 4096, []int{5}},
+		{"step", epOpStep, 29, []int{7}},
+		{"shutdown", epOpShutdown, 0, nil},
 	}
 	for _, c := range cases {
-		op, ids, err := decodeEPDecodeFrame(encodeEPDecodeFrame(c.op, c.ids))
+		op, pos, ids, err := decodeEPDecodeFrame(encodeEPDecodeFrame(c.op, c.pos, c.ids))
 		if err != nil {
 			t.Fatalf("%s: decode round-trip: %v", c.name, err)
 		}
 		if op != c.op {
 			t.Fatalf("%s: op = %d, want %d", c.name, op, c.op)
+		}
+		if pos != c.pos {
+			t.Fatalf("%s: pos = %d, want %d", c.name, pos, c.pos)
 		}
 		if len(ids) != len(c.ids) {
 			t.Fatalf("%s: got %d ids, want %d", c.name, len(ids), len(c.ids))
@@ -44,15 +50,22 @@ func TestEPDecodeFrameRoundTrip(t *testing.T) {
 		}
 	}
 
-	// Fail-closed: truncation, an op/count mismatch, and an unknown op must all be rejected.
-	if _, _, err := decodeEPDecodeFrame([]byte{byte(epOpStep), 2, 0}); err == nil {
+	// Fail-closed: truncation, an op/count mismatch, an unknown op, and a negative position
+	// must all be rejected — a desynced follower must error, never mis-drive its forward.
+	if _, _, _, err := decodeEPDecodeFrame([]byte{byte(epOpStep), 2, 0}); err == nil {
 		t.Fatal("truncated frame was not rejected")
 	}
-	if _, _, err := decodeEPDecodeFrame([]byte{byte(epOpStep), 2, 0, 0, 0, 9, 0, 0, 0, 9, 0, 0, 0}); err == nil {
-		t.Fatal("STEP frame with count=2 was not rejected")
+	if _, _, _, err := decodeEPDecodeFrame(append(encodeEPDecodeFrame(epOpStep, 0, []int{9}), 0, 0, 0, 0)); err == nil {
+		t.Fatal("STEP frame with a trailing id was not rejected")
 	}
-	if _, _, err := decodeEPDecodeFrame([]byte{0x7f, 0, 0, 0, 0}); err == nil {
+	if _, _, _, err := decodeEPDecodeFrame(encodeEPDecodeFrame(epOpShutdown, 0, []int{1})); err == nil {
+		t.Fatal("SHUTDOWN frame with an id was not rejected")
+	}
+	if _, _, _, err := decodeEPDecodeFrame([]byte{0x7f, 0, 0, 0, 0, 0, 0, 0, 0}); err == nil {
 		t.Fatal("unknown op was not rejected")
+	}
+	if _, _, _, err := decodeEPDecodeFrame(encodeEPDecodeFrame(epOpPrefill, -1, []int{1})); err == nil {
+		t.Fatal("negative position was not rejected")
 	}
 }
 
@@ -167,21 +180,23 @@ func TestEPCoordinatedDecodeMatchesScalarReference(t *testing.T) {
 			local.SetExpertParallelRank(g.Rank())
 			local.SetExpertParallelCollective(NewDistCommCollective(g))
 			if g.Rank() == 0 {
-				t1, err := epFrontDecode(g, local.NewSession(), prompt1, n)
+				// Rank 0 installs the coordinator and then decodes through the ORDINARY
+				// Session.Generate loop — no bespoke EP driver. That is the whole point of the
+				// Prefill/Step seam: the live serve's real decode loop is what drives the group.
+				coord, err := NewEPDecodeCoordinator(g)
 				if err != nil {
 					return nil, err
 				}
-				t2, err := epFrontDecode(g, local.NewSession(), prompt2, n)
-				if err != nil {
-					return nil, err
-				}
-				if err := epShutdownFollowers(g); err != nil {
+				local.SetEPDecodeCoordinator(coord)
+				t1 := local.NewSession().Generate(prompt1, n)
+				t2 := local.NewSession().Generate(prompt2, n)
+				if err := coord.Shutdown(); err != nil {
 					return nil, err
 				}
 				return packToks(t1, t2), nil
 			}
 			// Followers contribute only local expert work + collectives, then exit on SHUTDOWN.
-			if err := epFollowerDecode(g, local); err != nil {
+			if err := RunEPFollower(g, local.NewSession); err != nil {
 				return nil, err
 			}
 			return nil, nil
@@ -198,6 +213,86 @@ func TestEPCoordinatedDecodeMatchesScalarReference(t *testing.T) {
 		assertToksEqual(t, ranks, "request 1", got[0], want1)
 		assertToksEqual(t, ranks, "request 2", got[1], want2)
 		t.Logf("coordinated EP decode ranks=%d: rank-0-owned sampling reproduces the scalar reference exactly, followers owned no tokenization/sampling", ranks)
+	}
+}
+
+// TestEPFollowerRefusesMirrorDesync pins the one failure this protocol must never take
+// silently. If rank 0 resumes a session from a restored prefix-cache snapshot it prefills only
+// the divergent SUFFIX, at a position the follower's fresh mirror never computed. The follower
+// would then feed a hidden state built from a different context into the same per-layer
+// AllReduce, and the reduce would sum a garbage partial into a plausible-looking answer. The
+// follower must refuse instead — this is the guard the serve wiring depends on.
+func TestEPFollowerRefusesMirrorDesync(t *testing.T) {
+	full, cfg, _, _, _ := glmFixtureRoutedLayer(t)
+	if cfg.NumExperts < 2 {
+		t.Skipf("fixture NumExperts=%d has no multi-rank sharding", cfg.NumExperts)
+	}
+	const ranks = 2
+	plan, err := ExpertParallelPlan(cfg.NumExperts, ranks)
+	if err != nil {
+		t.Fatalf("ExpertParallelPlan(%d): %v", ranks, err)
+	}
+
+	// Each case optionally runs ONE real coordinated prefill first — that opens a live mirror
+	// session on the follower AND supplies rank 0's own half of its collectives — and then emits
+	// the desynced frame the follower must refuse. Without the real prefill the refusal would
+	// only prove the trivial "no mirror session yet" branch.
+	cases := []struct {
+		name      string
+		openFirst bool
+		op        epDecodeOp
+		pos       int
+		ids       []int
+		want      string
+	}{
+		// Rank 0 resumed a session from a restored prefix-cache snapshot and prefills only the
+		// divergent suffix, at a position the follower's mirror never computed.
+		{"suffix-prefill-after-cache-hit", true, epOpPrefill, 9, []int{4, 5}, "mirror desync"},
+		// Rank 0's step position ran ahead of the mirror (a forward it never announced).
+		{"step-ahead-of-mirror", true, epOpStep, 7, []int{4}, "mirror desync"},
+		// A step before any prefill opened a mirror session at all.
+		{"step-before-prefill", false, epOpStep, 0, []int{3}, "before any PREFILL"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, errs := runEPGroupTimeout(t, ranks, 30*time.Second, func(g *DistComm) ([]float32, error) {
+				s := plan.Shards[g.Rank()]
+				local := modelWithExpertBandForTest(full, s.Lo, s.Hi)
+				local.SetExpertParallelRanks(ranks)
+				local.SetExpertParallelRank(g.Rank())
+				local.SetExpertParallelCollective(NewDistCommCollective(g))
+				if g.Rank() != 0 {
+					return nil, RunEPFollower(g, local.NewSession)
+				}
+				if c.openFirst {
+					// A real coordinated prefill: announces PREFILL at pos 0 and runs rank 0's
+					// own forward, so the follower's mirrored forward finds its AllReduce peer.
+					coord, err := NewEPDecodeCoordinator(g)
+					if err != nil {
+						return nil, err
+					}
+					local.SetEPDecodeCoordinator(coord)
+					local.NewSession().Prefill([]int{1, 2, 3})
+					local.SetEPDecodeCoordinator(nil)
+				}
+				// Now the desynced frame, broadcast directly — the shape rank 0 emits when its
+				// session resumed from a prefix cache the follower never saw.
+				if _, err := g.BroadcastFromRoot(encodeEPDecodeFrame(c.op, c.pos, c.ids)); err != nil {
+					return nil, nil // the follower already bailed; that is the expected outcome
+				}
+				return nil, nil
+			})
+			if errs[0] != nil {
+				t.Fatalf("rank 0: %v", errs[0])
+			}
+			if errs[1] == nil {
+				t.Fatalf("follower accepted the desynced %s frame instead of failing closed — it would have reduced a partial computed from a different context", c.name)
+			}
+			if !strings.Contains(errs[1].Error(), c.want) {
+				t.Fatalf("follower refused for the wrong reason: got %q, want it to contain %q", errs[1], c.want)
+			}
+			t.Logf("follower failed closed as required: %v", errs[1])
+		})
 	}
 }
 

@@ -614,6 +614,12 @@ func (s *Session) Prefill(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
+	// Coordinated expert-parallel serve (#4835): announce this forward to the follower ranks
+	// and hold the group until it completes, so they replay it and reach the same per-layer
+	// AllReduces. Inert (one nil field read) unless a coordinator is installed on rank 0.
+	if rel := s.epAnnounce(epOpPrefill, ids); rel != nil {
+		defer rel()
+	}
 	if s.M.Cfg.usesMLAMoELayout() {
 		s.requireGLMDsaSession()
 		var last []float32
@@ -835,6 +841,10 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
+	// Coordinated expert-parallel serve (#4835) — see the note in Prefill.
+	if rel := s.epAnnounce(epOpStep, []int{id}); rel != nil {
+		defer rel()
+	}
 	if s.M.Cfg.usesMLAMoELayout() {
 		s.requireGLMDsaSession()
 		return s.glmDsaHead(s.tokenHiddenGLMDsa(id, s.Cache.Len()))
