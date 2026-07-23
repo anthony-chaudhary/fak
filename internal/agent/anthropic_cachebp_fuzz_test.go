@@ -269,6 +269,37 @@ func consumeEmptyObject(counts map[string]int) bool {
 	return false
 }
 
+// multiTTLSpliceCount verifies out is in plus N pure insertions of the ttl-1h key (each
+// with an optional leading comma, exactly spliceTTL1hIntoObject's emission) and returns N.
+// Any other delta — a removed byte, a foreign insertion — fails the test. Fail-closed by
+// construction: a divergence that is not a recognized splice is fatal.
+func multiTTLSpliceCount(t testing.TB, in, out []byte) int {
+	t.Helper()
+	withComma := []byte("," + cacheControlTTL1h)
+	bare := []byte(cacheControlTTL1h)
+	n, i, j := 0, 0, 0
+	for j < len(out) {
+		if i < len(in) && in[i] == out[j] {
+			i++
+			j++
+			continue
+		}
+		switch {
+		case bytes.HasPrefix(out[j:], withComma):
+			j += len(withComma)
+		case bytes.HasPrefix(out[j:], bare):
+			j += len(bare)
+		default:
+			t.Fatalf("ttl upgrade changed bytes outside a cache_control ttl splice at out[%d]\nin: %q\nout: %q", j, in, out)
+		}
+		n++
+	}
+	if i != len(in) {
+		t.Fatalf("ttl upgrade dropped input bytes (consumed %d of %d)\nin: %q\nout: %q", i, len(in), in, out)
+	}
+	return n
+}
+
 // checkUpgradeByteSafety returns whether an upgrade actually fired.
 func checkUpgradeByteSafety(t testing.TB, in []byte) bool {
 	t.Helper()
@@ -282,14 +313,16 @@ func checkUpgradeByteSafety(t testing.TB, in []byte) bool {
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		t.Fatalf("upgraded body does not re-decode: %v\nin: %q\nout: %q", err, in, out)
 	}
-	removed, added, ok := confinedContiguousDelta(in, out)
-	if !ok || !isJSONWhitespaceOnly(removed) {
-		t.Fatalf("ttl upgrade changed bytes outside the cache_control splice (removed %q)\nin: %q\nout: %q", removed, in, out)
+	// The upgrade is all-or-nothing over the head arrays (#5363): a multi-breakpoint head
+	// (Claude Code marks both the last tool and the system blocks) legally receives ONE ttl
+	// splice PER head breakpoint — Anthropic requires non-increasing TTLs in tools → system
+	// → messages order, so a partial upgrade would 400 upstream. The byte-safety property is
+	// therefore N pure insertions of the ttl key, nothing else.
+	n := multiTTLSpliceCount(t, in, out)
+	if n < 1 {
+		t.Fatalf("ttl upgrade reported fired but spliced nothing\nin: %q\nout: %q", in, out)
 	}
-	if d := len(added); d != len(cacheControlTTL1h) && d != len(cacheControlTTL1h)+1 {
-		t.Fatalf("ttl upgrade added %d bytes, want the ttl key (%d, or +1 with comma)\nadded: %q", d, len(cacheControlTTL1h), added)
-	}
-	if got, want := bytes.Count(out, []byte(`"ttl":"1h"`)), bytes.Count(in, []byte(`"ttl":"1h"`))+1; got != want {
+	if got, want := bytes.Count(out, []byte(`"ttl":"1h"`)), bytes.Count(in, []byte(`"ttl":"1h"`))+n; got != want {
 		t.Fatalf("ttl upgrade: %d 1h ttl literals, want %d\nin: %q\nout: %q", got, want, in, out)
 	}
 	assertLiteralInTarget(t, out, oc.Target, cacheControlTTL1h, in)
