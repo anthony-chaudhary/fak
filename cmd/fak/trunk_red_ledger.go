@@ -274,29 +274,59 @@ type trunkRedClassRollup struct {
 }
 
 // trunkRedSummary is the folded value view: the distinct shared breaks currently
-// witnessed, worst (most clones stuck) first.
+// witnessed, worst (most clones stuck) first. Classes whose base the trunk has
+// PROVABLY moved past are folded out of the live view and only counted, so a wall
+// of stale rows never buries the breaks that are still biting.
 type trunkRedSummary struct {
-	Ledger  string                `json:"ledger"`
-	Total   int                   `json:"total"`   // total witness rows
-	Classes []trunkRedClassRollup `json:"classes"` // distinct shared breaks
+	Ledger          string                `json:"ledger"`
+	Total           int                   `json:"total"`   // LIVE witness rows (resolved rows excluded)
+	Classes         []trunkRedClassRollup `json:"classes"` // distinct LIVE shared breaks
+	ResolvedClasses int                   `json:"resolved_classes,omitempty"`
+	ResolvedRows    int                   `json:"resolved_rows,omitempty"`
 }
 
 // summarizeTrunkRed folds ledger content into distinct convergence classes. Malformed
 // or foreign lines are skipped. Classes are ordered by session spread (how much of the
 // fleet is stuck), then row count, then class key — the worst shared break first.
-func summarizeTrunkRed(content string) trunkRedSummary {
+//
+// resolved is the KEEP-SIDE resolve predicate: it must return true ONLY when the
+// break recorded against baseSha is PROVABLY resolved (see trunkRedGitResolver).
+// A resolved class is folded out of the live view and counted in
+// ResolvedClasses/ResolvedRows instead. nil, an empty base, or ANY uncertainty in
+// the predicate keeps the row — a hidden live break is far worse than a surfaced
+// stale one. The predicate is consulted once per distinct base.
+func summarizeTrunkRed(content string, resolved func(baseSha string) bool) trunkRedSummary {
 	rows := jsonlledger.Parse(content, func(r trunkRedRecord) bool {
 		return r.Schema == trunkRedRecordSchema
 	})
+	resolvedByBase := map[string]bool{}
+	baseResolved := func(baseSha string) bool {
+		base := strings.TrimSpace(baseSha)
+		if resolved == nil || base == "" {
+			return false // nothing checkable — KEEP
+		}
+		v, ok := resolvedByBase[base]
+		if !ok {
+			v = resolved(base)
+			resolvedByBase[base] = v
+		}
+		return v
+	}
 	byClass := map[string]*trunkRedClassRollup{}
 	order := []string{}
 	sessionsByClass := map[string]map[string]struct{}{}
 	anonByClass := map[string]bool{}
 	gatesByClass := map[string]map[string]struct{}{}
+	resolvedClasses := map[string]struct{}{}
 	sum := trunkRedSummary{}
 	for _, r := range rows {
-		sum.Total++
 		class := r.Class()
+		if baseResolved(r.BaseSha) {
+			sum.ResolvedRows++
+			resolvedClasses[class] = struct{}{}
+			continue
+		}
+		sum.Total++
 		roll, ok := byClass[class]
 		if !ok {
 			roll = &trunkRedClassRollup{
@@ -355,13 +385,65 @@ func summarizeTrunkRed(content string) trunkRedSummary {
 		}
 		return a.Class < b.Class
 	})
+	sum.ResolvedClasses = len(resolvedClasses)
 	return sum
+}
+
+// trunkRedGitResolver returns the production resolve predicate for summarizeTrunkRed:
+// a base sha is PROVABLY resolved only when it is a STRICT ancestor of origin/main
+// (`git merge-base --is-ancestor` exits 0 and the base is not the origin/main tip
+// itself) — the trunk has moved PAST the commit the red was proven at, so the break
+// was very likely fixed upstream. EVERY uncertainty — no repo root, an unresolvable
+// sha, origin/main missing (fresh clone, no remote), any git error — reports NOT
+// resolved, keeping the row surfaced: a hidden live break is far worse than a stale
+// one. Results are memoized per base so a large ledger shells git once per distinct
+// base.
+func trunkRedGitResolver(root string) func(baseSha string) bool {
+	cache := map[string]bool{}
+	return func(baseSha string) bool {
+		base := strings.TrimSpace(baseSha)
+		if strings.TrimSpace(root) == "" || base == "" {
+			return false // nothing checkable — KEEP
+		}
+		v, ok := cache[base]
+		if !ok {
+			v = trunkRedBaseMergedPast(root, base)
+			cache[base] = v
+		}
+		return v
+	}
+}
+
+// trunkRedBaseMergedPast reports whether base is a STRICT ancestor of origin/main.
+// Any git failure (unresolvable base, no origin/main, command error) is NOT-resolved.
+func trunkRedBaseMergedPast(root, base string) bool {
+	baseOut, err := gitOut(root, "rev-parse", "--verify", base+"^{commit}")
+	if err != nil {
+		return false
+	}
+	tipOut, err := gitOut(root, "rev-parse", "--verify", "origin/main^{commit}")
+	if err != nil {
+		return false
+	}
+	baseFull, tipFull := strings.TrimSpace(baseOut), strings.TrimSpace(tipOut)
+	if baseFull == "" || tipFull == "" || baseFull == tipFull {
+		return false // strictness: the trunk must have moved PAST the base
+	}
+	if _, err := gitOut(root, "merge-base", "--is-ancestor", baseFull, tipFull); err != nil {
+		return false // not an ancestor, or git failed — either way KEEP
+	}
+	return true
 }
 
 // renderTrunkRed formats the folded view for a human reader.
 func renderTrunkRed(sum trunkRedSummary) string {
 	var b strings.Builder
 	if sum.Total == 0 {
+		if sum.ResolvedRows > 0 {
+			fmt.Fprintf(&b, "fak trunk-red: no LIVE shared breaks — %d resolved class(es) across %d witness row(s) folded out (base already merged past on origin/main).\n", sum.ResolvedClasses, sum.ResolvedRows)
+			fmt.Fprintf(&b, "  ledger: %s", sum.Ledger)
+			return strings.TrimRight(b.String(), "\n")
+		}
 		fmt.Fprintf(&b, "fak trunk-red: no pre-existing trunk-red admissions recorded.\n")
 		fmt.Fprintf(&b, "  ledger: %s\n", sum.Ledger)
 		b.WriteString("  A build gate records one row here each time it admits a commit/push over a break it proved was ALREADY red on the trunk (a peer's, not yours).")
@@ -393,6 +475,9 @@ func renderTrunkRed(sum trunkRedSummary) string {
 		if c.FirstTs != "" {
 			fmt.Fprintf(&b, "      %s .. %s\n", c.FirstTs, c.LastTs)
 		}
+	}
+	if sum.ResolvedRows > 0 {
+		fmt.Fprintf(&b, "  (+ %d resolved class(es) across %d row(s) folded out: base already merged past on origin/main)\n", sum.ResolvedClasses, sum.ResolvedRows)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -430,7 +515,7 @@ func runTrunkRed(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak trunk-red: read %s: %v\n", ledger, err)
 		return 1
 	}
-	sum := summarizeTrunkRed(content)
+	sum := summarizeTrunkRed(content, trunkRedGitResolver(repoRoot()))
 	sum.Ledger = ledger
 	if *jsonFlag {
 		enc := json.NewEncoder(stdout)

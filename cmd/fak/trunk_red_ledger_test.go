@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -157,7 +159,7 @@ func TestSummarizeTrunkRedFoldsAndOrders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	sum := summarizeTrunkRed(string(content))
+	sum := summarizeTrunkRed(string(content), nil)
 	if sum.Total != 3 {
 		t.Fatalf("want 3 total rows, got %d", sum.Total)
 	}
@@ -174,6 +176,146 @@ func TestSummarizeTrunkRedFoldsAndOrders(t *testing.T) {
 	}
 	if strings.Join(top.Gates, ",") != "commit,pre-push" {
 		t.Fatalf("class x should record both gates; got %v", top.Gates)
+	}
+}
+
+// trunkRedTestLedger marshals synthetic records into JSONL content, so the
+// resolve-filter tests never depend on the live ledger or the writer path.
+func trunkRedTestLedger(t *testing.T, recs ...trunkRedRecord) string {
+	t.Helper()
+	var b strings.Builder
+	for _, rec := range recs {
+		rec.Schema = trunkRedRecordSchema
+		line, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("marshal row: %v", err)
+		}
+		b.Write(line)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func TestSummarizeTrunkRedResolveFilter(t *testing.T) {
+	// Synthetic ledger: a class whose base resolves (2 rows), a class that does
+	// not (1 row), and a class with NO base sha (never provably resolved).
+	content := trunkRedTestLedger(t,
+		trunkRedRecord{Gate: "commit", BaseSha: "deadbase", Packages: []string{"pkg/dead"}, FirstBreak: "Gone", Session: "sess-1"},
+		trunkRedRecord{Gate: "pre-push", BaseSha: "deadbase", Packages: []string{"pkg/dead"}, FirstBreak: "Gone", Session: "sess-2"},
+		trunkRedRecord{Gate: "commit", BaseSha: "livebase", Packages: []string{"pkg/live"}, FirstBreak: "Live", Session: "sess-3"},
+		trunkRedRecord{Gate: "commit", BaseSha: "", Packages: []string{"pkg/unknown"}, FirstBreak: "NoBase", Session: "sess-4"},
+	)
+
+	classPkgs := func(sum trunkRedSummary) []string {
+		var got []string
+		for _, c := range sum.Classes {
+			got = append(got, strings.Join(c.Packages, " "))
+		}
+		sort.Strings(got)
+		return got
+	}
+
+	cases := []struct {
+		name                string
+		resolved            func(baseSha string) bool
+		wantPkgs            []string
+		wantTotal           int
+		wantResolvedClasses int
+		wantResolvedRows    int
+	}{
+		{
+			name:                "resolved base folds out, unresolved surfaces",
+			resolved:            func(base string) bool { return base == "deadbase" },
+			wantPkgs:            []string{"pkg/live", "pkg/unknown"},
+			wantTotal:           2,
+			wantResolvedClasses: 1,
+			wantResolvedRows:    2,
+		},
+		{
+			name:     "nil resolver keeps everything",
+			resolved: nil,
+			wantPkgs: []string{"pkg/dead", "pkg/live", "pkg/unknown"},
+			// All 4 rows stay live.
+			wantTotal: 4,
+		},
+		{
+			// The production resolver maps EVERY git error / missing origin/main
+			// to false — the erroring/unknown case must KEEP the class.
+			name:      "erroring resolver (always unknown) keeps every class",
+			resolved:  func(string) bool { return false },
+			wantPkgs:  []string{"pkg/dead", "pkg/live", "pkg/unknown"},
+			wantTotal: 4,
+		},
+		{
+			// KEEP-SIDE invariant: an empty base can never be PROVABLY resolved,
+			// even against a resolver that claims everything is.
+			name:                "empty base survives an always-true resolver",
+			resolved:            func(string) bool { return true },
+			wantPkgs:            []string{"pkg/unknown"},
+			wantTotal:           1,
+			wantResolvedClasses: 2,
+			wantResolvedRows:    3,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sum := summarizeTrunkRed(content, tc.resolved)
+			if got := classPkgs(sum); strings.Join(got, "|") != strings.Join(tc.wantPkgs, "|") {
+				t.Fatalf("surfaced classes = %v, want %v", got, tc.wantPkgs)
+			}
+			if sum.Total != tc.wantTotal {
+				t.Fatalf("Total (live rows) = %d, want %d", sum.Total, tc.wantTotal)
+			}
+			if sum.ResolvedClasses != tc.wantResolvedClasses {
+				t.Fatalf("ResolvedClasses = %d, want %d", sum.ResolvedClasses, tc.wantResolvedClasses)
+			}
+			if sum.ResolvedRows != tc.wantResolvedRows {
+				t.Fatalf("ResolvedRows = %d, want %d", sum.ResolvedRows, tc.wantResolvedRows)
+			}
+		})
+	}
+}
+
+func TestRenderTrunkRedResolvedNote(t *testing.T) {
+	content := trunkRedTestLedger(t,
+		trunkRedRecord{Gate: "commit", BaseSha: "deadbase", Packages: []string{"pkg/dead"}, Session: "sess-1"},
+		trunkRedRecord{Gate: "commit", BaseSha: "livebase", Packages: []string{"pkg/live"}, Session: "sess-2"},
+	)
+
+	t.Run("live view notes the folded-out classes", func(t *testing.T) {
+		sum := summarizeTrunkRed(content, func(base string) bool { return base == "deadbase" })
+		out := renderTrunkRed(sum)
+		if !strings.Contains(out, "pkg/live") || strings.Contains(out, "pkg/dead") {
+			t.Fatalf("live view must show pkg/live and fold pkg/dead out:\n%s", out)
+		}
+		if !strings.Contains(out, "1 resolved class(es) across 1 row(s) folded out") {
+			t.Fatalf("live view should note the folded-out resolved classes:\n%s", out)
+		}
+	})
+
+	t.Run("all-resolved view is not the empty view", func(t *testing.T) {
+		sum := summarizeTrunkRed(content, func(string) bool { return true })
+		out := renderTrunkRed(sum)
+		if strings.Contains(out, "no pre-existing trunk-red admissions recorded") {
+			t.Fatalf("an all-resolved ledger is not an empty ledger:\n%s", out)
+		}
+		if !strings.Contains(out, "no LIVE shared breaks") || !strings.Contains(out, "2 resolved class(es) across 2 witness row(s)") {
+			t.Fatalf("all-resolved view should say every class folded out:\n%s", out)
+		}
+	})
+}
+
+func TestTrunkRedGitResolverKeepSide(t *testing.T) {
+	// No repo root / empty base: never provably resolved, no git shelled.
+	if trunkRedGitResolver("")("abc123") {
+		t.Fatalf("an empty root must never prove a base resolved")
+	}
+	if trunkRedGitResolver(t.TempDir())("") {
+		t.Fatalf("an empty base must never prove resolved")
+	}
+	// A non-repo dir makes every git call error: fail-open KEEP (false).
+	if trunkRedGitResolver(t.TempDir())("abc123") {
+		t.Fatalf("git errors must report NOT resolved (keep-side)")
 	}
 }
 
