@@ -621,10 +621,16 @@
           "category": "incidental",
           "reason": "kernelSession is a local unexported plumbing accessor that returns the *Session a matKernel (sessionQ4KKernel/backendKernel) wraps; not a domain concept, just a type-switch helper for the routed-expert capability gate.",
           "token": "kernelSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "external iTerm2-set environment marker, read only to detect the terminal host for the guard --split overlay plan; not a fak session-runtime concept",
+          "token": "ITERM_SESSION_ID"
         }
       ],
       "id": "session-runtime",
       "ignore": [
+        "ITERM_SESSION_ID",
         "SessionAutonomous",
         "SessionClass",
         "SessionInteractive",
