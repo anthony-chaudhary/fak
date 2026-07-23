@@ -111,6 +111,13 @@ func NewRecorder() *Recorder { return &Recorder{run: gitRunner} }
 // package shells out to git.
 func NewRecorderWithRunner(r Runner, dir string) *Recorder { return &Recorder{run: r, dir: dir} }
 
+// NewRecorderForDir is the real-git recorder bound to an EXPLICIT repo dir instead
+// of NewRecorder's cwd discovery. A caller that already knows the repo root — the
+// garden tick folding the sentinel note across the exact workspace it is gardening —
+// uses this so the fold targets that repo's refs/notes/fak/decisions rather than
+// whatever the process cwd happens to be.
+func NewRecorderForDir(dir string) *Recorder { return &Recorder{run: gitRunner, dir: dir} }
+
 // anchorFor returns the SHA a decision's note is keyed to. An empty/blank
 // commitSHA is a pre-commit refusal (no commit was produced); it anchors to the
 // empty-tree sentinel so the append always has a valid, history-free target.

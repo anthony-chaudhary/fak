@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
 // lockReapInitRepo initialises a REAL git temp repo (skipped when git is unavailable,
@@ -94,7 +95,7 @@ func TestGardenTickReapsOrphanLocks(t *testing.T) {
 	t.Setenv("FAK_GARDEN_GROWTH_LEDGER", filepath.Join(t.TempDir(), "growth-reap.jsonl"))
 
 	var stdout, stderr bytes.Buffer
-	reaped, sessions, surfaced, lockFiles, _, intents := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
+	reaped, sessions, surfaced, lockFiles, _, intents, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
@@ -126,7 +127,7 @@ func TestGardenTickDryRunKeepsOrphanLocks(t *testing.T) {
 	stale := lockReapWriteLock(t, locks, "session-dead.lock", now, 5*time.Hour)
 
 	var stdout, stderr bytes.Buffer
-	_, _, _, lockFiles, _, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, true, false)
+	_, _, _, lockFiles, _, _, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, true, false)
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
@@ -192,7 +193,7 @@ func TestGardenTickReapsExpiredIntents(t *testing.T) {
 	t.Setenv("FAK_GARDEN_GROWTH_LEDGER", filepath.Join(t.TempDir(), "growth-reap.jsonl"))
 
 	var stdout, stderr bytes.Buffer
-	reaped, sessions, surfaced, lockFiles, _, intents := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
+	reaped, sessions, surfaced, lockFiles, _, intents, _ := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
@@ -205,8 +206,65 @@ func TestGardenTickReapsExpiredIntents(t *testing.T) {
 
 	// The intent ref is gone: a second tick reaps nothing (idempotent, like the other sweeps).
 	var so2, se2 bytes.Buffer
-	_, _, _, _, _, intents2 := performGardenTick(&so2, &se2, gardenbundle.TickPlan{}, dir, dir, false, false)
+	_, _, _, _, _, intents2, _ := performGardenTick(&so2, &se2, gardenbundle.TickPlan{}, dir, dir, false, false)
 	if intents2 != 0 {
 		t.Fatalf("second tick intents = %d, want 0 (idempotent reap)", intents2)
+	}
+}
+
+// TestGardenTickFoldsSentinelDecisionsNote proves the decisions-note fold wiring in
+// performGardenTick (#5361, census row 12): the automatic tick bounds the empty-tree
+// sentinel note — the ONE unbounded producer on refs/notes/fak/decisions that every
+// pre-commit refusal appends to — folding it to a keep-last-N tail and reporting the
+// dropped-line count. FAK_GARDEN_DECISIONS_KEEP tightens the bound so a small seed
+// exercises the fold; a dry-run tick performs NO fold, and a second acting tick at the
+// same bound folds nothing more (idempotent). The library fold itself is proven in
+// internal/witness; this asserts performGardenTick actually invokes it and threads the
+// count through the tick's return.
+func TestGardenTickFoldsSentinelDecisionsNote(t *testing.T) {
+	dir := lockReapInitRepo(t)
+
+	// Keep the once-per-tick growth collect off the real Fleet tree/ledger.
+	t.Setenv("FAK_FLEET_DIR", "")
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("FAK_GARDEN_GROWTH_LEDGER", filepath.Join(t.TempDir(), "growth-reap.jsonl"))
+	// Tighten the keep bound so five seeded refusals exceed it and the fold has work.
+	t.Setenv("FAK_GARDEN_SENTINEL_KEEP", "2")
+
+	// Seed the empty-tree sentinel note with five pre-commit refusals (commitSHA=="").
+	rec := witness.NewRecorderForDir(dir)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		if err := rec.AppendDecision(ctx, "", witness.Decision{Op: "commit", Verdict: witness.VerdictRefuse, ReasonClass: "OFF_TRUNK"}); err != nil {
+			t.Fatalf("seed refusal %d: %v", i, err)
+		}
+	}
+
+	// A DRY-RUN tick performs no fold even with a fat sentinel note (mirrors the reaps).
+	var dso, dse bytes.Buffer
+	if _, _, _, _, _, _, dryFolded := performGardenTick(&dso, &dse, gardenbundle.TickPlan{}, dir, dir, true, false); dryFolded != 0 {
+		t.Fatalf("dry-run folded = %d, want 0 (no side effect under dry-run)", dryFolded)
+	}
+	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != 5 {
+		t.Fatalf("dry-run must not touch the sentinel note, got %d lines, want 5", len(pre))
+	}
+
+	// An acting tick folds the note to the last 2 lines: 3 dropped.
+	var stdout, stderr bytes.Buffer
+	_, _, _, _, _, _, folded := performGardenTick(&stdout, &stderr, gardenbundle.TickPlan{}, dir, dir, false, false)
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+	if folded != 3 {
+		t.Fatalf("folded = %d, want 3 (5 refusals folded to the last 2)", folded)
+	}
+	if post, _ := rec.ReadDecisions(ctx, ""); len(post) != 2 {
+		t.Fatalf("sentinel note should hold 2 lines after the fold, got %d", len(post))
+	}
+
+	// Idempotent: a second acting tick at the same bound folds nothing more.
+	var so2, se2 bytes.Buffer
+	if _, _, _, _, _, _, folded2 := performGardenTick(&so2, &se2, gardenbundle.TickPlan{}, dir, dir, false, false); folded2 != 0 {
+		t.Fatalf("second tick folded = %d, want 0 (idempotent)", folded2)
 	}
 }

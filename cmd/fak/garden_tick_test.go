@@ -72,7 +72,7 @@ func TestWitnessGardenTickRecordsRunEnd(t *testing.T) {
 		{Key: "stale_leases", Label: "stale leases", State: "action"},
 	}, false)
 
-	witnessGardenTick(ledger, plan, 2, 1, 0, 0, 0, 3)
+	witnessGardenTick(ledger, plan, 2, 1, 0, 0, 0, 3, 4)
 
 	events, _, err := loopmgr.LoadPrefix(ledger)
 	if err != nil {
@@ -93,5 +93,8 @@ func TestWitnessGardenTickRecordsRunEnd(t *testing.T) {
 	}
 	if ev.Metrics["reaped_intents"] != 3 {
 		t.Fatalf("reaped_intents metric = %d, want 3", ev.Metrics["reaped_intents"])
+	}
+	if ev.Metrics["folded_sentinel_lines"] != 4 {
+		t.Fatalf("folded_sentinel_lines metric = %d, want 4", ev.Metrics["folded_sentinel_lines"])
 	}
 }

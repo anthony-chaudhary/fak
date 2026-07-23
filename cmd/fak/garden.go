@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
 func cmdGarden(argv []string) { os.Exit(runGarden(os.Stdout, os.Stderr, argv)) }
@@ -184,27 +186,28 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 	plan := gardenbundle.PlanTick(results, *dryRun)
 
 	growthApply := growthApplyEnabled(*growthApplyFlag)
-	reaped, sessions, surfaced, lockFiles, collected, intents := performGardenTick(stdout, stderr, plan, *dir, root, *dryRun, growthApply)
-	witnessGardenTick(ledgerPath, plan, reaped, sessions, surfaced, lockFiles, collected, intents)
+	reaped, sessions, surfaced, lockFiles, collected, intents, folded := performGardenTick(stdout, stderr, plan, *dir, root, *dryRun, growthApply)
+	witnessGardenTick(ledgerPath, plan, reaped, sessions, surfaced, lockFiles, collected, intents, folded)
 
 	if *asJSON {
 		out := map[string]any{
-			"schema":             "fak.garden-tick.v1",
-			"workspace":          root,
-			"commit":             gardenbundle.HeadCommit(root),
-			"dry_run":            plan.DryRun,
-			"acted":              plan.Acted(),
-			"reaped_leases":      reaped,
-			"reaped_sessions":    sessions,
-			"reaped_lock_files":  lockFiles,
-			"reaped_intents":     intents,
-			"reaped_growth_logs": collected,
-			"surfaced_runs":      surfaced,
-			"plan":               plan,
+			"schema":                "fak.garden-tick.v1",
+			"workspace":             root,
+			"commit":                gardenbundle.HeadCommit(root),
+			"dry_run":               plan.DryRun,
+			"acted":                 plan.Acted(),
+			"reaped_leases":         reaped,
+			"reaped_sessions":       sessions,
+			"reaped_lock_files":     lockFiles,
+			"reaped_intents":        intents,
+			"reaped_growth_logs":    collected,
+			"folded_sentinel_lines": folded,
+			"surfaced_runs":         surfaced,
+			"plan":                  plan,
 		}
 		return encodeJSONOrFail(stdout, stderr, out, "fak garden tick")
 	}
-	renderGardenTick(stdout, plan, reaped, sessions, surfaced, lockFiles, collected, intents)
+	renderGardenTick(stdout, plan, reaped, sessions, surfaced, lockFiles, collected, intents, folded)
 	return 0
 }
 
@@ -212,9 +215,10 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 // decision has Perform=true, so this is a pure report. It returns the count of
 // reaped leases / sessions, the count of orphan-run worklists surfaced, the count
 // of orphan .lock files swept, the count of oversized disposable logs the growthgate
-// collect reaped (0 in the ledger-only default), and the count of lapsed intent
-// leases reaped (the reap-parity sweep, #5345).
-func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir, root string, dryRun, growthApply bool) (reaped, sessions, surfaced, lockFiles, collected, intents int) {
+// collect reaped (0 in the ledger-only default), the count of lapsed intent leases
+// reaped (the reap-parity sweep, #5345), and the count of decision-note lines folded
+// off the empty-tree sentinel note (census row 12, #5361).
+func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir, root string, dryRun, growthApply bool) (reaped, sessions, surfaced, lockFiles, collected, intents, folded int) {
 	for _, d := range plan.Decisions {
 		if !d.Perform {
 			continue
@@ -280,16 +284,32 @@ func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir
 		// removes NOTHING unless the apply opt-in is set. Dry-run skips it entirely,
 		// mirroring the lock sweep above (which never deletes under dry-run).
 		collected += collectGrowthLogs(stderr, growthCensusRoots(root), growthApply, growthReapLedgerPath())
+		// Decisions-note fold (#5361, census row 12): run ONCE PER TICK, bounding the ONE
+		// unbounded producer on refs/notes/fak/decisions — the empty-tree sentinel note that
+		// every pre-commit refusal (OFF_TRUNK / PATHSPEC_RACE / LEASE_HELD) appends to
+		// forever. CompactSentinelNote keeps the most-recent sentinelNoteKeepLines lines
+		// (recency = forensic value) and force-overwrites ONLY that one sentinel note on the
+		// side ref; commit-anchored notes are bounded per-object evidence and are NEVER
+		// touched, and it never touches main / HEAD / refs/heads and never pushes. Bind the
+		// recorder to `root` (the gardened repo) so the fold hits its decisions ref, not the
+		// process cwd's. Best-effort + idempotent, same contract as the sweeps above: a fold
+		// error is logged and swallowed so it never fails the tick. Dry-run skips it.
+		fold, ferr := witness.NewRecorderForDir(root).CompactSentinelNote(context.Background(), sentinelKeepLines())
+		if ferr != nil {
+			fmt.Fprintf(stderr, "fak garden tick: fold decisions sentinel note: %v\n", ferr)
+		} else {
+			folded += fold
+		}
 	}
 	_ = stdout
-	return reaped, sessions, surfaced, lockFiles, collected, intents
+	return reaped, sessions, surfaced, lockFiles, collected, intents, folded
 }
 
 // witnessGardenTick records the tick's run-end in the loop ledger, so a witnessed
 // run end (the tick + its findings) lives in the ledger and `fak loop health` shows
 // the loop alive. A ledger append failure is non-fatal: the remediation already
 // happened; losing the witness line shouldn't fail the tick.
-func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected, intents int) {
+func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected, intents, folded int) {
 	if ledgerPath == "" {
 		return
 	}
@@ -297,17 +317,18 @@ func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, se
 	summary := fmt.Sprintf("garden tick clean: %d member(s), nothing to act on", len(plan.Decisions))
 	if plan.DryRun {
 		summary = fmt.Sprintf("garden tick dry-run: would reap %d, surface %d (no side effect)", plan.ToReap, plan.ToSurface)
-	} else if plan.Acted() || lockFiles > 0 || collected > 0 || intents > 0 {
-		summary = fmt.Sprintf("garden tick acted: reaped %d lease(s) + %d session(s) + %d intent(s) + %d orphan lock(s) + %d growth log(s), surfaced %d orphan worklist(s)", reaped, sessions, intents, lockFiles, collected, surfaced)
+	} else if plan.Acted() || lockFiles > 0 || collected > 0 || intents > 0 || folded > 0 {
+		summary = fmt.Sprintf("garden tick acted: reaped %d lease(s) + %d session(s) + %d intent(s) + %d orphan lock(s) + %d growth log(s) + %d folded sentinel line(s), surfaced %d orphan worklist(s)", reaped, sessions, intents, lockFiles, collected, folded, surfaced)
 	}
 	metrics := map[string]int64{
-		"reaped_leases":      int64(reaped),
-		"reaped_sessions":    int64(sessions),
-		"reaped_lock_files":  int64(lockFiles),
-		"reaped_intents":     int64(intents),
-		"reaped_growth_logs": int64(collected),
-		"surfaced_runs":      int64(surfaced),
-		"advisory":           int64(plan.Advisory),
+		"reaped_leases":         int64(reaped),
+		"reaped_sessions":       int64(sessions),
+		"reaped_lock_files":     int64(lockFiles),
+		"reaped_intents":        int64(intents),
+		"reaped_growth_logs":    int64(collected),
+		"folded_sentinel_lines": int64(folded),
+		"surfaced_runs":         int64(surfaced),
+		"advisory":              int64(plan.Advisory),
 	}
 	_, _ = loopmgr.Append(ledgerPath, loopmgr.Event{
 		LoopID:  gardenTickLoopID,
@@ -345,7 +366,7 @@ func registerGardenTickLoop(registryPath string) error {
 
 // renderGardenTick prints the act-pass as an aligned snapshot: one row per member
 // decision, then the summary of what the tick actually did.
-func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected, intents int) {
+func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected, intents, folded int) {
 	mode := "act"
 	if plan.DryRun {
 		mode = "dry-run"
@@ -365,8 +386,8 @@ func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions,
 		fmt.Fprintf(w, "  -> dry-run: would reap %d expired lease(s), surface %d orphan worklist(s); nothing performed\n", plan.ToReap, plan.ToSurface)
 		return
 	}
-	if plan.Acted() || lockFiles > 0 || collected > 0 || intents > 0 {
-		fmt.Fprintf(w, "  -> acted: reaped %d lease(s) + %d session(s) + %d intent(s) + %d orphan lock(s) + %d growth log(s), surfaced %d orphan worklist(s)\n", reaped, sessions, intents, lockFiles, collected, surfaced)
+	if plan.Acted() || lockFiles > 0 || collected > 0 || intents > 0 || folded > 0 {
+		fmt.Fprintf(w, "  -> acted: reaped %d lease(s) + %d session(s) + %d intent(s) + %d orphan lock(s) + %d growth log(s) + %d folded sentinel line(s), surfaced %d orphan worklist(s)\n", reaped, sessions, intents, lockFiles, collected, folded, surfaced)
 	} else {
 		fmt.Fprintln(w, "  -> garden tick clean: nothing to act on")
 	}
@@ -379,6 +400,33 @@ func renderGardenTick(w io.Writer, plan gardenbundle.TickPlan, reaped, sessions,
 // after the reap ledger has shown a correct set over a soak window (#5079
 // grace-prune precedent: delete-on-schedule stays opt-in until soaked).
 const growthCollectApplyEnv = "FAK_GARDEN_GROWTH_COLLECT"
+
+// sentinelNoteKeepLines bounds the empty-tree sentinel decisions note (the one
+// unbounded producer on refs/notes/fak/decisions — every pre-commit refusal piles
+// line-by-line onto it fleet-lifetime). The tick folds it to the most-recent N lines
+// (recency = forensic value); commit-anchored notes are per-object bounded evidence
+// and are never folded. 2000 is a deliberately generous forensic tail — a deep window
+// of recent refusals while still bounding unbounded growth. The keep-N policy lives
+// here at the wiring, not in the witness library (which takes maxLines as a parameter).
+const sentinelNoteKeepLines = 2000
+
+// sentinelKeepEnv lets an operator (or a test) tighten or widen the sentinel-note
+// keep-N bound without a rebuild. A positive integer overrides sentinelNoteKeepLines;
+// an absent / non-positive / unparseable value falls back to the default rather than
+// the library's fail-safe no-op, so a fat-fingered env can never silently DISABLE the
+// collector (only re-tune it).
+const sentinelKeepEnv = "FAK_GARDEN_SENTINEL_KEEP"
+
+// sentinelKeepLines resolves the keep-last-N bound for the tick's sentinel-note fold:
+// FAK_GARDEN_SENTINEL_KEEP when it parses to a positive int, else sentinelNoteKeepLines.
+func sentinelKeepLines() int {
+	if v := strings.TrimSpace(os.Getenv(sentinelKeepEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return sentinelNoteKeepLines
+}
 
 // growthApplyEnabled reports whether the tick's growthgate collect may os.Remove
 // files this run. Default-off: the first landing appends the would-reap set to the
