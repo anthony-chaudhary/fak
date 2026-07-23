@@ -58,6 +58,17 @@ func (s *Server) beginServedSessionTurn(ctx context.Context, trace string) (serv
 	if trace == "" {
 		return turn, true, false
 	}
+	// Deployment SESSION CEILING (#3425, epic #3256): when the operator configured a
+	// maximum concurrent-governed-session count (FAK_MAX_SESSIONS) and the box is at/over
+	// it, backpressure a NEW session's turn here — before the model is consulted — with
+	// the closed reason SESSION_CEILING_SATURATED. A trace already resident in the session
+	// registry is never refused (sessionCeilingRefusal), so an in-flight loop is never
+	// sacrificed to admit a new one. Inert (nil) when no ceiling is configured, so the
+	// default serve path is byte-for-byte historical. See session_ceiling.go.
+	if ref := s.sessionCeilingRefusal(ctx, trace); ref != nil {
+		turn.state = *ref
+		return turn, false, false
+	}
 	// Control-plane SPEND CAP (#3273): if a scope this trace belongs to (session / agent
 	// / team / tenant) has crossed its versioned budget, the kernel refuses the turn here
 	// — before the model is consulted — carrying the closed reason and the pause/kill run
@@ -335,6 +346,24 @@ func (s *Server) sessionAdmits(ctx context.Context, trace string) (bool, Session
 // write. The error code is "session_<state>" so a client can branch on it, and the
 // operator's reason token (if any) rides the message.
 func writeSessionRefusal(w http.ResponseWriter, st SessionState) {
+	// Deployment session-ceiling backpressure (#3425) is NOT operator DRIVE control: the
+	// request is well-formed and the session is not held — the DEPLOYMENT is at capacity.
+	// Emit 503 (Service Unavailable) with a Retry-After hint and the closed reason token,
+	// so a client/autoscaler backs off and retries rather than reading a 409 as a terminal
+	// operator stop. In-flight sessions are unaffected; only this new session is shed.
+	if st.Reason == ReasonSessionCeilingSaturated {
+		w.Header().Set("Retry-After", "5")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": map[string]any{
+				"message": "deployment at its configured concurrent-session ceiling (FAK_MAX_SESSIONS); new session refused — retry when headroom frees. Sessions already in flight are unaffected.",
+				"type":    errType(http.StatusServiceUnavailable),
+				"code":    "session_ceiling_saturated",
+				"param":   nil,
+			},
+			"reason": st.Reason,
+		})
+		return
+	}
 	msg := "session " + st.TraceID + " is " + st.Run + " (operator control); request refused"
 	if st.Reason != "" {
 		msg += ": " + st.Reason

@@ -1221,6 +1221,25 @@ summary  = "A dispatch spawn would OPEN a new concurrent objective while fleet b
 fix      = "Converge before broadening: pause or meet an active objective to get back under the WIP cap, or continue an already-open objective (never held) instead of opening a new one. The signal is re-derived from the trajctl ledger -- lower it by converging, not by editing a file. Tune posture with --focus-hold / FLEET_DISPATCH_FOCUS_HOLD. Floor: go test ./internal/dispatchtick -run TestEvaluateFocusAdmission."
 see_also = ["internal/dispatchtick/preflight_focus.go", "internal/focusscore/focusscore.go", "cmd/fak/dispatch_tick_focus.go", "RATE_LIMIT_BACKOFF", "COLLISION_RISK"]
 
+# Deployment session-ceiling backpressure (#3425, epic #3256 Workstream E: the all-in-one
+# deployment). The runtime-boundary projection of the fleet's admission machinery for the
+# SINGLE deployment: an operator configures the maximum number of concurrent governed
+# sessions the box holds (FAK_MAX_SESSIONS), the runtime publishes live saturation vs that
+# ceiling as the /metrics gauge fak_gateway_session_saturation, and past the ceiling a NEW
+# session's admission is shed at the served boundary with this closed reason — a 503 +
+# Retry-After, before the model is consulted. A trace already RESIDENT in the session
+# registry is always admitted, so an in-flight loop is never sacrificed to admit a new one.
+# Doctrine: no silent caps — when the deployment bounds concurrency it SAYS so, with a
+# reason, and fails closed under pressure rather than thrashing the loops in flight. Inert
+# (never fires) when no ceiling is configured.
+# Floor: `go test ./internal/gateway -run TestSessionCeiling`.
+[reasons.SESSION_CEILING_SATURATED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "the all-in-one deployment is at its configured concurrent-governed-session ceiling (FAK_MAX_SESSIONS): a NEW session's admission is backpressured at the served boundary (503 + Retry-After) with this reason, before the model is consulted. Sessions already in flight are never refused — only the new session is shed — so saturation sheds new load instead of degrading the loops already running."
+fix      = "let an in-flight session finish (headroom frees the next scrape) and retry the new session, or scale the deployment out / raise FAK_MAX_SESSIONS if the host genuinely has capacity. Size the ceiling from the sizing model in docs/fak/deployment-guide.md and watch the fak_gateway_session_saturation gauge to scale BEFORE saturation. A zero/unset ceiling never fires this. Floor: go test ./internal/gateway -run TestSessionCeiling."
+see_also = ["internal/gateway/session_ceiling.go", "internal/gateway/session_admit.go", "docs/fak/deployment-guide.md", "RATE_LIMIT_BACKOFF", "GATE_PRESSURE"]
+
 # Verification-ladder INDETERMINATE (#1210, C2/G2 of the agent-programming-grammar
 # epic #1208): the first-class verdict the declarable verification ladder
 # (docs/standards/verification-ladder-spec.md) folds to when a cheap rung could NOT

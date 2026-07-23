@@ -48,6 +48,70 @@ bare-metal examples below use.
 
 ---
 
+## Capacity & sizing (how big a box, and when it saturates)
+
+Two questions decide the box: **how many concurrent governed sessions does this host
+hold**, and **how do I see it saturating before the in-flight loops degrade?** fak
+answers the second directly — configure a ceiling and the runtime publishes live
+saturation and backpressures past it — and gives you the inputs to answer the first.
+
+### The sizing model
+
+A host holds `N` concurrent governed sessions, bounded by whichever resource runs out
+first:
+
+```
+N = min( RAM_usable / per_session_RAM , cores × loops_per_core )
+```
+
+The two serving shapes have very different `per_session_RAM` and CPU profiles:
+
+| Shape | What each session costs | Dominant limit | Where the numbers come from |
+|---|---|---|---|
+| **Proxy** (`--base-url`) | HTTP + adjudication + per-session cache/ctxmmu state on the fak box; the model (weights + KV) lives upstream. Per-session RAM is small (low MB); throughput is CPU-bound on adjudication. | cores × `loops_per_core` | Measure per-session overhead with #3292's governed-overhead harness; watch `fak_gateway_operation_duration_seconds` for the per-op CPU cost. |
+| **In-kernel** (`--gguf`) | Resident model weights (shared across all sessions) **plus** a per-session KV cache = context_tokens × bytes/token. Per-session RAM is dominated by KV. | `RAM_usable / per_session_KV` (and VRAM, if GPU) | `fak serve --gguf … --plan-json` prints the header-derived weight + KV footprint before any load (#4361); size `per_session_RAM` from its KV demand at your context budget. |
+
+**Illustrative only** — replace with a measured run on *your* host and model (the
+numbers below are shape, not a claim about any host):
+
+| Shape | Host | per-session RAM | Derived `N` | Set `FAK_MAX_SESSIONS` |
+|---|---|---|---|---|
+| Proxy | 8 vCPU / 16 GB | ~8 MB | CPU-bound: ~4 loops/core → ~32 | `32` |
+| In-kernel, 7B Q4, 8k ctx | 16-core / 64 GB + 24 GB VRAM | ~1.1 GB KV | (64−`weights`) / 1.1 → size to VRAM/RAM | measured `N` |
+
+Derive the real figures from #3292's harness (per-session overhead), `--plan-json`
+(memory footprint), and the live saturation gauge below — do not ship these placeholders
+as a capacity promise.
+
+### The live saturation signal
+
+Set the derived ceiling and the runtime exposes headroom and fails **closed** past it —
+no silent cap:
+
+- **Configure** the ceiling: `FAK_MAX_SESSIONS=<N>` in the serving environment. Unset or
+  `0` is unbounded (the historical default — no gauge, no backpressure).
+- **Watch** it on `/metrics`: `fak_gateway_session_saturation` (live governed sessions ÷
+  ceiling, in `[0,1+]`), alongside `fak_gateway_session_ceiling` and
+  `fak_gateway_sessions_live`. Alert/scale out as it approaches `1.0`.
+- **Backpressure** past the ceiling: a **new** session's admission is refused with
+  HTTP `503` + `Retry-After` and the closed reason `SESSION_CEILING_SATURATED`
+  (`dos check-reason SESSION_CEILING_SATURATED`). Sessions **already in flight are never
+  refused** — saturation sheds *new* load rather than degrading the loops already running.
+
+This is the deployment-boundary projection of the fleet's admission machinery, scoped to
+the single all-in-one deployment. It is inert until you set a ceiling, so it never
+surprises an existing deployment.
+
+> **Generation:** `gen/next` foundation. The saturation gauge, the ceiling, and the
+> backpressure are shipped and gated behind `FAK_MAX_SESSIONS`; the *measured* sizing
+> table is the promotion evidence still owed — replace the illustrative rows above with
+> witnessed per-session overhead/KV numbers from a real run. Invalidating assumption: that
+> the governed-session count (`fak_sessions`) is the right saturation axis for your
+> workload — if a single session fans out to many concurrent upstream requests, size on
+> request concurrency (the native scheduler's `fak_sched_*` family) instead.
+
+---
+
 ## Production readiness checklist
 
 Clear every item before a network-facing deploy. Sources for each are in
@@ -76,6 +140,11 @@ Clear every item before a network-facing deploy. Sources for each are in
   with `FAK_RATELIMIT_KEY` (`trace`|`tool`|`global`) cap per-key load.
 - [ ] **Health + metrics wired.** Probe `/healthz`; scrape `/metrics`
   (Prometheus). See [observability.md](observability.md).
+- [ ] **Session ceiling sized** (optional, recommended for the all-in-one). Set
+  `FAK_MAX_SESSIONS=<N>` from the [Capacity & sizing](#capacity--sizing-how-big-a-box-and-when-it-saturates)
+  model and alert on `fak_gateway_session_saturation` before it hits `1.0`. Past the
+  ceiling, new sessions get `503` + `SESSION_CEILING_SATURATED`; in-flight loops are
+  never sacrificed. Unset = unbounded.
 - [ ] **Run as non-root.** The container image already runs as `nonroot`; on bare
   metal use a dedicated service user (the systemd unit below uses `DynamicUser`).
 - [ ] **Version pinned.** Pin a release (`FAK_VERSION` for the installer, an image
