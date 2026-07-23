@@ -68,9 +68,40 @@ func TestReclaimStaleIndexLockDryRunKeepsLock(t *testing.T) {
 	}
 }
 
-func TestReclaimStaleIndexLockRefusesWhenLiveWriter(t *testing.T) {
+// TestReclaimStaleIndexLockReapsDespiteUnrelatedByNameWriter witnesses #5335 item 3 at
+// the CLI layer: a STALE index.lock reaps even when an unrelated by-name git/fak writer
+// is running in the shared tree. index.lock carries no owner pid, so a by-name writer is
+// never proof THIS lock is held; refusing here false-closed the verb forever in the exact
+// multi-peer tree it exists for, while fak commit's safecommit reaped on age anyway.
+func TestReclaimStaleIndexLockReapsDespiteUnrelatedByNameWriter(t *testing.T) {
 	withCommitStatusFn(t, func(_ context.Context, _ commitlane.Options) (commitlane.Report, error) {
 		rep := reapableReport()
+		rep.LiveWriters = []commitlane.ProcessFact{{PID: 4242, Match: "git_writer"}}
+		return rep, nil
+	})
+	var removed string
+	withRemoveIndexLockFn(t, func(p string) error { removed = p; return nil })
+
+	var out, errb bytes.Buffer
+	code := runCommitStatus(&out, &errb, []string{"--reclaim-stale-index-lock", "--apply"})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, errb.String())
+	}
+	if removed != "repo/.git/index.lock" {
+		t.Fatalf("a stale lock must reap despite a by-name writer; removed = %q", removed)
+	}
+	if !strings.Contains(out.String(), "reclaimed stale orphan") {
+		t.Fatalf("output missing reclaim confirmation:\n%s", out.String())
+	}
+}
+
+// TestReclaimFreshIndexLockRefusesWhenLiveWriter preserves the author's caution for the
+// FRESH case: a young lock with a live writer is kept, because the writer may genuinely
+// be mid-write between process samples. Only staleness bypasses the live-writer gate.
+func TestReclaimFreshIndexLockRefusesWhenLiveWriter(t *testing.T) {
+	withCommitStatusFn(t, func(_ context.Context, _ commitlane.Options) (commitlane.Report, error) {
+		rep := reapableReport()
+		rep.IndexLock.StaleHint = false // fresh: within the grace window
 		rep.LiveWriters = []commitlane.ProcessFact{{PID: 4242, Match: "git_writer"}}
 		return rep, nil
 	})
@@ -83,7 +114,7 @@ func TestReclaimStaleIndexLockRefusesWhenLiveWriter(t *testing.T) {
 		t.Fatalf("exit = %d, stderr=%q", code, errb.String())
 	}
 	if called {
-		t.Fatal("must NOT remove a lock while a live writer is present")
+		t.Fatal("must NOT remove a fresh lock while a live writer is present")
 	}
 	if !strings.Contains(out.String(), "no reclaim (keep_live_writer)") {
 		t.Fatalf("output missing keep reason:\n%s", out.String())

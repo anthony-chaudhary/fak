@@ -58,9 +58,11 @@ func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
 // runIndexLockReclaim applies the stale-.git/index.lock reclaim decision derived from
 // the lane report (#5294), then sweeps the orphaned .git/next-index-<pid>.lock residue
 // git leaves behind and never reaps (#5338). It NEVER removes a file the decision would
-// keep: only the present + probe-ok + no-live-writer + stale-past-grace signature reaps,
-// and even then only with --apply — the default is a dry-run that reports what it would
-// do. A file another session already cleared is idempotent success, not an error.
+// keep: the present + stale-past-grace signature reaps (index.lock has no owner pid, so
+// staleness alone refutes a holder — an unrelated by-name writer or a failed probe only
+// gate a FRESH lock, matching safecommit's age-only reap; #5335 item 3), and even then
+// only with --apply — the default is a dry-run that reports what it would do. A file
+// another session already cleared is idempotent success, not an error.
 //
 // The two sweeps share one flag because they share one cause: an index writer that died
 // mid-write leaves BOTH the lock that wedges the lane and the temp file that accumulates
