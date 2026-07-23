@@ -137,29 +137,11 @@ func TestIDFDefusesUbiquitousTags(t *testing.T) {
 		hUbiq, lUbiq, hDisc)
 }
 
-// recallFixture pairs a natural-language intent with the card a user means. The
-// intents deliberately include morphological variants ("compacting") and
-// tag-shaped noise ("tool", "mcp") so the stemming + IDF rungs are what decide.
-var recallFixture = []struct {
-	intent string
-	want   string
-}{
-	// Realistic multi-word intents both rankers should satisfy (no-regression
-	// evidence).
-	{"prove a commit matches its diff", "dos_commit_audit"},
-	{"which agent may take this lane right now", "dos_arbitrate"},
-	{"search for a tool schema on demand", "fak_tools_search"},
-	{"compacting my resident context window", "memory-driver:compact"},
-	{"did this phase actually ship", "dos_verify"},
-	{"commit stamp for a path", "fak index lane"},
-	// Sparse morphological intents: the ONLY signal is a variant the flat
-	// substring scorer cannot reach ("compaction" is not a substring of
-	// "compact"), so the baseline misses them and the hybrid's stemming rung
-	// catches them. This is where the recall delta comes from.
-	{"compaction", "memory-driver:compact"},
-	{"auditing", "dos_commit_audit"},
-	{"citations", "dos_citation_resolve"},
-}
+// The labeled intent set this A/B grades on now lives in eval.go as
+// DefaultIntentFixture (#3162), so the relative A/B below and the absolute
+// recall@K / MRR floors in eval_test.go cannot drift apart. The intents
+// deliberately include morphological variants ("compacting") and tag-shaped
+// noise ("tool", "mcp") so the stemming + IDF rungs are what decide.
 
 // rankLexicalBaseline reproduces the pre-#3235 rankCards using the retained flat
 // score, so the A/B compares two full rankers over identical inputs.
@@ -188,21 +170,10 @@ func rankLexicalBaseline(cards []FeatureCard, q string) []FeatureCard {
 	return out
 }
 
+// recallAt delegates to the shared eval harness (#3162) so this A/B and the
+// recorded floors grade with exactly the same metric definition.
 func recallAt(rank func([]FeatureCard, string) []FeatureCard, cards []FeatureCard, k int) float64 {
-	hits := 0
-	for _, tc := range recallFixture {
-		got := rank(cards, tc.intent)
-		for i, c := range got {
-			if i >= k {
-				break
-			}
-			if c.Name == tc.want {
-				hits++
-				break
-			}
-		}
-	}
-	return float64(hits) / float64(len(recallFixture))
+	return EvalRetrieval(rank, cards, DefaultIntentFixture, k).RecallAtK
 }
 
 // TestHybridRankerImprovesRecallAtK is the before/after recall witness (the
