@@ -28,8 +28,10 @@ run that row's linked first check. If this is your first installation, use the d
   unsupported or unavailable prerequisites are not silently replaced by the offline proof.
 
 The [guided first session](docs/fak/tutorial.md) expands the default path with captured
-output. [`README.md`](README.md) is the concise product and mode front door; this page is
-the builder's install-and-run reference.
+output. The [governed-agent quickstart](docs/fak/governed-agent-quickstart.md) is the
+fastest route to a running, kernel-governed agent — offline, floor + audit + a visible
+DENY — in under 10 minutes. [`README.md`](README.md) is the concise product and mode front
+door; this page is the builder's install-and-run reference.
 ---
 
 ## 0. Prerequisites

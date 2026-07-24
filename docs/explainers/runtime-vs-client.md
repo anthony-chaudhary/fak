@@ -186,6 +186,9 @@ boundary, one anchor. (Driving tickets: #5152, #5153, #5161; captured by #5162.)
 
 ## Where to go deeper
 
+- See both runtimes decide, offline, in one sitting: [Governed agent in 10
+  minutes](../fak/governed-agent-quickstart.md) — one command for a governed session, then
+  the server-side floor + audit + DENY path, no key or GPU.
 - Point your existing agent at the gateway runtime: [Run your agent through
   fak](../integrations/README.md) and the [Claude Code guide](../integrations/claude.md).
 - Why one binary carries both runtimes: [One binary is the whole

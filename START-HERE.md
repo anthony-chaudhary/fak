@@ -37,6 +37,7 @@ Everything below is the route map — choose the job you have now.
 | You want to… | Current route | Next action |
 |---|---|---|
 | Understand what fak manages | [README](README.md) | Choose `fak guard`, `fak serve`, or the offline proof from the first-screen table. |
+| Stand up a governed agent, offline, in ~10 min | [Governed-agent quickstart](docs/fak/governed-agent-quickstart.md) | Run the one-command governed session, then the server-side floor + audit + DENY path. |
 | Evaluate the kernel locally | [Reproducibility packet](docs/repro-packet.md) | Run its copy-paste proof and compare the three expected results. |
 | Add fak beside one agent | [`fak guard` quickstart](README.md#manage-one-local-agent-fak-guard) | Launch the agent you already use through `fak guard`. |
 | Run a shared or durable endpoint | [Server quickstart](docs/fak/server-quickstart.md) | Start `fak serve`, then call its health and model endpoints. |

@@ -26,7 +26,7 @@ fak agent --offline
 
 Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
 
-**Next action:** run it and check those three rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md).
+**Next action:** run it and check those three rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md); to stand up a running, server-side governed agent — offline, with a default-deny floor, an audit journal, and a visible DENY — in under 10 minutes, follow the [governed-agent quickstart](docs/fak/governed-agent-quickstart.md).
 
 ## One managed agent, two ways to run the kernel
 
