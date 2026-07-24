@@ -119,7 +119,7 @@ func TestParseClaudeKeychainCred(t *testing.T) {
 
 // TestHasClaudeCredentialsKeychainFallback pins #5363's core behavior change: a config
 // home with no credential FILES reads as logged-in when the keychain holds the login,
-// and a placeholder credentials file (the july4-netra rule) no longer masks it. With no
+// and a placeholder credentials file (the July-4 rule) no longer masks it. With no
 // keychain seam (non-darwin, or an un-stubbed test) the disk-only answer is unchanged.
 func TestHasClaudeCredentialsKeychainFallback(t *testing.T) {
 	dir := t.TempDir()
