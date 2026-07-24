@@ -23,8 +23,10 @@
 
     "Agent",
     "AskUserQuestion",
+    "DeferredToolPlaceholder",
     "EnterPlanMode",
     "Monitor",
+    "ReportFindings",
     "ScheduleWakeup",
     "SendMessage",
     "StructuredOutput",
@@ -90,6 +92,14 @@
     "mcp__dos__dos_commit_audit",
     "mcp__dos__dos_citation_resolve",
     "mcp__dos__acme_lane_hint",
+    "mcp__fak__fak_adjudicate",
+    "mcp__fak__fak_admit",
+    "mcp__fak__fak_syscall",
+    "mcp__fak__fak_read",
+    "mcp__fak__fak_changes",
+    "mcp__fak__fak_memory_drivers",
+    "mcp__fak__fak_memory_explain",
+    "mcp__fak__fak_trajquery",
     "mcp__fak__fak_tools_search",
     "mcp__fak__fak_index_lane",
     "mcp__fak__fak_index_leaves",
@@ -141,7 +151,9 @@
   ],
 
   "deny": {
-    "delete_file": "POLICY_BLOCK"
+    "delete_file": "POLICY_BLOCK",
+    "mcp__atlassian__confluence_delete_page": "POLICY_BLOCK",
+    "mcp__atlassian__confluence_delete_attachment": "POLICY_BLOCK"
   },
 
   "arg_rules": [
@@ -151,7 +163,7 @@
     { "tool": "Bash", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
       "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>); recursive/forced deletes are operator-only" },
     { "tool": "Bash", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
-      "fix": "run the command without sudo; if elevation is genuinely required, print the exact command and ask the operator to run it" },
+      "fix": "run the command without sudo — only a LOCAL escalation is refused (a remote one like `ssh host 'sudo …'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it" },
     { "tool": "Bash", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK",
       "fix": "disk/device operations are operator-only; print the exact command and what it is for, and ask the operator" },
     { "tool": "Bash", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK" },
@@ -184,7 +196,7 @@
     { "tool": "shell_command", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
       "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>); recursive/forced deletes are operator-only" },
     { "tool": "shell_command", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
-      "fix": "run the command without sudo; if elevation is genuinely required, print the exact command and ask the operator to run it" },
+      "fix": "run the command without sudo — only a LOCAL escalation is refused (a remote one like `ssh host 'sudo …'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it" },
     { "tool": "shell_command", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK",
       "fix": "disk/device operations are operator-only; print the exact command and what it is for, and ask the operator" },
     { "tool": "shell_command", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK" },
@@ -211,7 +223,7 @@
     { "tool": "functions.shell_command", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
       "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>); recursive/forced deletes are operator-only" },
     { "tool": "functions.shell_command", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
-      "fix": "run the command without sudo; if elevation is genuinely required, print the exact command and ask the operator to run it" },
+      "fix": "run the command without sudo — only a LOCAL escalation is refused (a remote one like `ssh host 'sudo …'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it" },
     { "tool": "functions.shell_command", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK",
       "fix": "disk/device operations are operator-only; print the exact command and what it is for, and ask the operator" },
     { "tool": "functions.shell_command", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK" },

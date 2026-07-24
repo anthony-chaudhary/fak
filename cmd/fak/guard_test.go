@@ -169,6 +169,28 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"fak MCP context value allowed", "mcp__fak__fak_context_value", `{}`, abi.VerdictAllow},
 		{"fak MCP effectful memory run remains denied by default", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
 
+		// The self-service verbs witnessed as DEFAULT_DENY friction in real guarded
+		// sessions (the guard's own appeal channel among them) are admitted: pure
+		// reads or kernel-re-adjudicated executions, never a capability grant.
+		{"fak MCP appeal channel fak_admit allowed", "mcp__fak__fak_admit", `{"tool":"Read","intent":"appeal"}`, abi.VerdictAllow},
+		{"fak MCP dry-run fak_adjudicate allowed", "mcp__fak__fak_adjudicate", `{"tool":"Bash","arguments":{}}`, abi.VerdictAllow},
+		{"fak MCP kernel-mediated fak_syscall allowed (inner call re-adjudicates)", "mcp__fak__fak_syscall", `{"tool":"Read","arguments":{}}`, abi.VerdictAllow},
+		{"fak MCP memory drivers listing allowed (pure read)", "mcp__fak__fak_memory_drivers", `{}`, abi.VerdictAllow},
+		{"harness ReportFindings allowed (review output, no effect)", "ReportFindings", `{"findings":[]}`, abi.VerdictAllow},
+		{"harness DeferredToolPlaceholder allowed (schema plumbing)", "DeferredToolPlaceholder", `{}`, abi.VerdictAllow},
+
+		// A coarse operator overlay grant (mcp__atlassian__ prefix) must never admit
+		// irreversible external destruction: the name-deny outranks every allow layer.
+		{"confluence delete_page denied by name", "mcp__atlassian__confluence_delete_page", `{"page_id":"1"}`, abi.VerdictDeny},
+		{"confluence delete_attachment denied by name", "mcp__atlassian__confluence_delete_attachment", `{"attachment_id":"1"}`, abi.VerdictDeny},
+
+		// The sudo rule is structural (#sudo_local): a REMOTE escalation is the ssh
+		// command's argument, governed by the remote host — only local sudo is refused.
+		{"remote sudo over ssh allowed (structural sudo rule)", "Bash", `{"command":"ssh gpu-box 'sudo systemctl restart tritonserver'"}`, abi.VerdictAllow},
+		{"quoted sudo text allowed (structural sudo rule)", "Bash", `{"command":"echo 'sudo make install'"}`, abi.VerdictAllow},
+		{"local sudo still denied", "Bash", `{"command":"sudo rm f"}`, abi.VerdictDeny},
+		{"local doas launder denied (structural sudo rule)", "Bash", `{"command":"doas id"}`, abi.VerdictDeny},
+
 		// Admitting orchestration does NOT widen the danger floor: a still-unlisted tool fails
 		// closed, and a destructive Bash arg is still refused even though Bash is allowed.
 		{"unlisted tool still fails closed", "exfiltrate_to_prod", `{"target":"prod"}`, abi.VerdictDeny},
