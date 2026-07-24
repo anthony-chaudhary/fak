@@ -942,7 +942,7 @@ func DeriveIdentity(dir string) Identity {
 
 // hasClaudeCredentials reports whether a config home has a credential Claude can
 // actually use. A placeholder .credentials.json with a claudeAiOauth object but no
-// access/refresh token is not a login; that was the july4-netra drift where fak said
+// access/refresh token is not a login; that was the July-4 drift where fak said
 // "ready" while Claude and the job switcher correctly saw a missing session/login.
 // Legacy/minimal fixtures that only prove the file exists still read as credentials
 // when they do not carry a claudeAiOauth object.
