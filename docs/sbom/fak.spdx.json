@@ -1,0 +1,91 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "fak-0.41.0",
+  "documentNamespace": "https://github.com/anthony-chaudhary/fak/docs/sbom/fak-0.41.0",
+  "creationInfo": {
+    "created": "2026-07-24T00:00:00Z",
+    "creators": [
+      "Tool: go-list-m-all",
+      "Organization: fak project"
+    ],
+    "comment": "Generated from the build inputs at commit 1a9fcd5ad, Go toolchain go1.26.5. Regenerate and re-verify with the commands in docs/air-gapped-deployment-kit.md#regenerate-and-verify-this-sbom. The authoritative source is `go version -m <binary>`, which reports the module set actually linked into the shipped artifact; `go list -m all` and go.sum agree with it at this commit."
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-fak",
+      "name": "github.com/anthony-chaudhary/fak",
+      "versionInfo": "v0.41.0",
+      "downloadLocation": "https://github.com/anthony-chaudhary/fak",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "supplier": "Organization: fak project",
+      "sourceInfo": "The Go module is the repository root. Built CGO_ENABLED=0 -trimpath via scripts/build.sh; see docs/supply-chain-reproducibility.md for the double-build byte-identity witness.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/github.com/anthony-chaudhary/fak@v0.41.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-golang-org-x-term",
+      "name": "golang.org/x/term",
+      "versionInfo": "v0.44.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/term/@v/v0.44.0.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "supplier": "Organization: Go project (golang.org/x extended standard library)",
+      "sourceInfo": "Direct requirement in go.mod. go.sum module digest: h1:0rLvDRCtNj0gZkyIXhCyOb2OAzEhLVqc4B+hrsBhrmc= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:7ze4MdzUzLXpSAoFP1H0bOI9aXDqveSvatT5vKcFh2Y=",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/golang.org/x/term@v0.44.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-golang-org-x-sys",
+      "name": "golang.org/x/sys",
+      "versionInfo": "v0.46.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/sys/@v/v0.46.0.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "supplier": "Organization: Go project (golang.org/x extended standard library)",
+      "sourceInfo": "Indirect requirement in go.mod (pulled in by golang.org/x/term). go.sum module digest: h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/golang.org/x/sys@v0.46.0"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-fak"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-fak",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-golang-org-x-term"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-golang-org-x-term",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-golang-org-x-sys"
+    }
+  ]
+}

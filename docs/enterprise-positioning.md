@@ -83,7 +83,7 @@ status. The `Fence #` column points to the note below that cites the in-repo wit
 | 4 | Agents as first-class **non-human identities** + kill-switch | Industry NHI framing | First-class agent identity record + fleet kill-switch | `[TICKETED #3274]` | [4] |
 | 5 | **Audit is not native to MCP/A2A** (no tamper-evident event log at the boundary) | Open standards-body gap | Hash-chained audit journal (`internal/journal`) + A2A ingress quarantine + structured refusals | `[SHIPPED]` | [5] |
 | 6 | Prompt-injection via **poisoned tool results** | Guardrails / result-admit category | `QUARANTINE` verdict — suspicious tool *results* held out of context by structure | `[SHIPPED]` | [6] |
-| 7 | **One static binary, air-gapped**, no dependency supply chain | Regulated industry; OSS-proxy supply-chain attack | Single static Go binary, runs offline (`--gguf`/mock); air-gap deployment kit + SBOM | **Partial** — binary/offline `[SHIPPED]`, deployment kit + SBOM `[TICKETED #3279]` | [7] |
+| 7 | **One static binary, air-gapped**, minimal dependency supply chain | Regulated industry; OSS-proxy supply-chain attack | Single static Go binary, runs offline (`--gguf`/mock); [air-gapped deployment kit](air-gapped-deployment-kit.md) + [SPDX SBOM](sbom/fak.spdx.json) | **Partial** — binary/offline, kit doc, SBOM, and the zero-network governed-session witness (mock-planner seam) `[SHIPPED]`; `--gguf` model-backed air-gap witness + a kernel bind-safety refusal `[TICKETED #3279]` | [7] |
 | 8 | Fleet agents **clobbering the same files** concurrently | Concurrency governance | File-lease arbitration (`dos_arbitrate`, lock-mode tree-disjointness rule) | `[SHIPPED]` (decision kernel) | [8] |
 | 9 | **PII/secret redaction** before bytes leave the box | Gateway governance parity | Pre-send wirescreen redactor (`[REDACTED:<kind>]`, original pinned in CAS) | `[SHIPPED]`, default-inert; flagship passthrough `[TICKETED #555]` | [9] |
 
@@ -145,9 +145,15 @@ attribution collected in the epic research brief.
    base-URL change (41 of 47 surveyed harnesses; see the
    [compatibility matrix](integrations/compatibility-matrix.md)) and runs fully offline with
    a local model (`--gguf`) or the mock planner — no external dependency on the request path.
-   **Not yet shipped:** a packaged air-gapped deployment kit with an SBOM, which is
-   [#3279](https://github.com/anthony-chaudhary/fak/issues/3279). The *property* (one binary,
-   offline) is real today; the packaged *kit* is ticketed.
+   The packaged kit now ships: [air-gapped deployment kit](air-gapped-deployment-kit.md)
+   carries the hardened bring-up, a captured zero-network governed-session witness, the
+   regulated-deployment checklist, and a generated [SPDX SBOM](sbom/fak.spdx.json).
+   **Honest dependency posture:** two `golang.org/x` extended-stdlib modules and a 4-line
+   `go.sum` — *not* the older "zero external deps, no `go.sum`" phrasing, which is stale.
+   **Still ticketed on [#3279](https://github.com/anthony-chaudhary/fak/issues/3279):** the
+   `--gguf` *model-backed* air-gap witness (the captured one uses the mock-planner seam), and
+   a kernel refusal for an auth-less bind on a routable interface — the listener defaults to
+   loopback, but nothing refuses `--addr 0.0.0.0` without a token door today.
 8. **File-lease arbitration.** `dos_arbitrate` is a pure admission kernel: given the leases
    already held, it decides whether a new worker may take a file-tree lane, using a lock-mode
    tree-disjointness rule (shared/shared may overlap; anything with an exclusive holder must
@@ -173,8 +179,9 @@ The honest scope, stated once, so nothing above has to be walked back:
   fence above). We sell on operational pain, not a regulatory clock.
 - **No hard cost kill-switch yet.** Row 3 observes and warns; the hard kill/pause is #3273.
 - **No non-human-identity product yet.** Row 4 is entirely ticketed (#3274).
-- **No packaged air-gap kit yet.** The single-binary/offline property ships; the packaged kit
-  + SBOM is #3279.
+- **No model-backed air-gap witness yet.** The kit doc and SBOM ship, and the captured
+  zero-network governed session is real — but at the mock-planner seam. The `--gguf`
+  model-backed air-gapped run, and a kernel bind-safety refusal, remain #3279.
 - **Redaction is off by default and gated on the flagship route.** Row 9 is real but fenced
   on both axes.
 - **No market-share or "most secure" claim.** This page maps gaps to surfaces; it makes no
