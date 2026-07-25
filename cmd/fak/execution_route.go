@@ -83,6 +83,12 @@ func runExecutionRoute(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// Surface every candidate excluded ahead of the winner on stderr so the
+	// operator sees WHY a harness was skipped (health/requirement) without parsing
+	// the JSON on stdout, which stays the machine-readable decision alone.
+	for _, r := range decision.Harness.Rejected {
+		fmt.Fprintf(stderr, "execution-route: skipped harness %q: %s\n", r.Candidate, r.Reason)
+	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(decision); err != nil {

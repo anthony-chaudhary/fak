@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/executionroute"
@@ -120,6 +121,11 @@ func TestExecutionRouteCLIRoutesAroundUnhealthyFleetSeat(t *testing.T) {
 	}
 	if got.Model.Plan.Primary() == "" {
 		t.Fatal("missing model plan")
+	}
+	// The excluded candidate and its reason are surfaced on stderr for the operator,
+	// while stdout stays pure JSON.
+	if e := errOut.String(); !strings.Contains(e, `skipped harness "claude"`) || !strings.Contains(e, "cooldown") {
+		t.Fatalf("stderr=%q want a skipped-claude cooldown summary", e)
 	}
 }
 
