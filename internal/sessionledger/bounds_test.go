@@ -207,6 +207,28 @@ func TestLegacyWholeStateFileIsRetiredNotLoaded(t *testing.T) {
 	}
 }
 
+// TestDefaultDirNeverTouchesOperatorConfigUnderTest: no test in this repo sets
+// FAK_SESSION_LEDGER_DIR, and the gateway suite reaches OpenDefault through the
+// served-turn seam -- so before this guard, `go test ./internal/gateway/` opened
+// the real operator ledger, appended to it, and retired its legacy file.
+func TestDefaultDirNeverTouchesOperatorConfigUnderTest(t *testing.T) {
+	t.Setenv("FAK_SESSION_LEDGER_DIR", "")
+	got := DefaultDir()
+	if cfg, err := os.UserConfigDir(); err == nil {
+		if strings.HasPrefix(got, filepath.Join(cfg, "fak")) {
+			t.Fatalf("DefaultDir under test resolved into the operator config dir: %s", got)
+		}
+	}
+	if !strings.Contains(got, "fak-test-session-ledger") {
+		t.Fatalf("DefaultDir under test = %s, want an isolated per-test-binary dir", got)
+	}
+	// An explicit override still wins.
+	t.Setenv("FAK_SESSION_LEDGER_DIR", filepath.Join(t.TempDir(), "explicit"))
+	if DefaultDir() == got {
+		t.Fatal("explicit FAK_SESSION_LEDGER_DIR was ignored")
+	}
+}
+
 // TestEvictionKeepsChainUsable: past MaxNodes the ledger forgets oldest-first and
 // Chain returns the surviving suffix rather than failing outright.
 func TestEvictionKeepsChainUsable(t *testing.T) {

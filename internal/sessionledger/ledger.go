@@ -30,6 +30,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -157,9 +158,23 @@ func (l *Ledger) putNode(e Entry) {
 	}
 }
 
+// underTest reports whether this is a `go test` binary. Only the test harness
+// registers test.v on the default flag set, and it does so before any test runs.
+// Checked via flag rather than importing testing, which would add test flags to
+// the production CLI.
+func underTest() bool { return flag.Lookup("test.v") != nil }
+
 func DefaultDir() string {
 	if d := os.Getenv("FAK_SESSION_LEDGER_DIR"); d != "" {
 		return d
+	}
+	// A test binary must never open the OPERATOR's ledger. No test in this repo
+	// sets FAK_SESSION_LEDGER_DIR, and the gateway suite reaches this seam through
+	// handleAnthropicMessages -- so `go test ./internal/gateway/` was appending to
+	// the real ledger under the user's config dir, and (with the legacy retirement
+	// below) renaming their live file aside. Isolate per test binary instead.
+	if underTest() {
+		return filepath.Join(os.TempDir(), fmt.Sprintf("fak-test-session-ledger-%d", os.Getpid()))
 	}
 	if d, err := os.UserConfigDir(); err == nil {
 		return filepath.Join(d, "fak", "session-ledger")
