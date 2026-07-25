@@ -207,6 +207,52 @@ func TestLegacyWholeStateFileIsRetiredNotLoaded(t *testing.T) {
 	}
 }
 
+// TestSecondRetirementDoesNotClobberTheFirst: while a mixed fleet is rolling, an
+// older build keeps recreating ledger.json and each new process retires it again.
+// os.Rename overwrites on POSIX, so a naive retirement would destroy the file the
+// previous one preserved -- the exact loss this path exists to prevent.
+func TestSecondRetirementDoesNotClobberTheFirst(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, legacyName)
+	write := func(marker string) {
+		body := fmt.Sprintf(`{"heads":{},"nodes":{},"marker":%q}`, marker)
+		if err := os.WriteFile(legacy, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("first-generation")
+	if _, err := Open(dir); err != nil {
+		t.Fatal(err)
+	}
+	write("second-generation") // an older binary recreated it
+	if _, err := Open(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]bool{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, marker := range []string{"first-generation", "second-generation"} {
+			if strings.Contains(string(b), marker) {
+				got[marker] = true
+			}
+		}
+	}
+	if !got["first-generation"] {
+		t.Fatal("the FIRST retired generation was clobbered by the second")
+	}
+	if !got["second-generation"] {
+		t.Fatal("the second retired generation is missing")
+	}
+}
+
 // TestDefaultDirNeverTouchesOperatorConfigUnderTest: no test in this repo sets
 // FAK_SESSION_LEDGER_DIR, and the gateway suite reaches OpenDefault through the
 // served-turn seam -- so before this guard, `go test ./internal/gateway/` opened

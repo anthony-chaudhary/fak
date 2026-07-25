@@ -129,8 +129,28 @@ func retireLegacy(dir string) {
 	if _, err := os.Stat(old); err != nil {
 		return
 	}
-	_ = os.Rename(old, old+".legacy")
+	_ = os.Rename(old, freeLegacyName(old+".legacy"))
 	_ = os.Remove(filepath.Join(dir, legacyName+".tmp"))
+}
+
+// freeLegacyName returns a destination that does not already exist. Retirement
+// happens more than once in practice: while a mixed fleet is rolling, an older
+// build keeps recreating ledger.json and each new process retires it again. A
+// bare os.Rename OVERWRITES its destination on POSIX, which would silently
+// destroy the previously retired file -- the one case this whole path exists to
+// prevent. Falls back to the plain name only after an absurd number of tries,
+// which cannot happen without something else being badly wrong.
+func freeLegacyName(base string) string {
+	if _, err := os.Stat(base); errors.Is(err, os.ErrNotExist) {
+		return base
+	}
+	for i := 1; i < 10000; i++ {
+		candidate := fmt.Sprintf("%s.%d", base, i)
+		if _, err := os.Stat(candidate); errors.Is(err, os.ErrNotExist) {
+			return candidate
+		}
+	}
+	return base
 }
 
 // applyRecord folds one decoded line into state. Caller holds the lock (or is
