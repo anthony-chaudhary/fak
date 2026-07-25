@@ -23,7 +23,12 @@ param(
   [switch]$Live,
   [int]$MaxAgeDays = 7,
   [int]$EveryHours = 6,
-  [string]$TaskName = 'FleetStaleWorkWatchdog',
+  # The live task is named FleetStaleWorkGarden (the canonical label emitted by
+  # `fak cron emit --label FleetStaleWorkGarden`, targeted by the autoheal set in
+  # watchdog_autoheal.go and by migrate_fleet_tasks_to_s4u.ps1). Keep this default
+  # aligned so a reinstall UPDATES the existing task in place instead of spawning a
+  # second, differently-named stale-work loop (#3323).
+  [string]$TaskName = 'FleetStaleWorkGarden',
   # Resolve the sibling watchdog in THIS clone so registering from any checkout
   # schedules that checkout's script -- not a hardcoded operator path.
   [string]$Watchdog = (Join-Path $PSScriptRoot 'stale_work_watchdog.py'),
@@ -74,8 +79,12 @@ $trigger    = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
 # Registering an S4U principal can require elevation; if that is denied, fall back to a
 # current-user Interactive principal, which registers unelevated (a 6h cadence makes the
 # occasional console flash a non-issue). Either way the janitor runs as THIS user.
+# The execution limit must comfortably exceed the watchdog's own garden-tick
+# subprocess cap (1020 s): a PT10M limit guillotined the tick mid-reap right after
+# its ~10-minute measure phase, so the wired collectors never acted (#5355). PT25M
+# leaves headroom for the tick plus the file sweep on a loaded box.
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-               -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+               -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 25)
 $principalMode = 'S4U (windowless)'
 try {
   $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
