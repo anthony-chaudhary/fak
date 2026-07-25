@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/executionroute"
+	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
@@ -32,6 +33,9 @@ func runExecutionRoute(stdout, stderr io.Writer, argv []string) int {
 	compactAt := fs.Float64("compact-at", .80, "compact+resume threshold from 0 to 1")
 	sourceDesc := fs.String("source-descriptor", "", "source session descriptor: path to a JSON file, or inline JSON (with --target-descriptor, computes eligibility instead of the boolean fallback)")
 	targetDesc := fs.String("target-descriptor", "", "target envelope descriptor: path to a JSON file, or inline JSON (with --source-descriptor, computes eligibility instead of the boolean fallback)")
+	fleetStatus := fs.String("fleet-status", "", "live harness health: path to (or inline JSON of) a `fak fleet-accounts status --json` report; excludes unavailable/draining/cooldown candidates and records a reason for each")
+	healthMaxAge := fs.Int64("health-max-age", 0, "freshness bound in seconds for --fleet-status readings (0 = no bound); a reading older than this is treated as stale and its candidate excluded")
+	requireHealth := fs.Bool("require-health", false, "with --fleet-status, exclude a candidate that has no live health reading (fail closed)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -57,6 +61,11 @@ func runExecutionRoute(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "execution-route: target descriptor: %v\n", err)
 		return 2
 	}
+	health, err := loadFleetHealth(*fleetStatus, *healthMaxAge, *requireHealth)
+	if err != nil {
+		fmt.Fprintf(stderr, "execution-route: fleet status: %v\n", err)
+		return 2
+	}
 	var ordered []string
 	for _, item := range strings.Split(*candidates, ",") {
 		if item = strings.TrimSpace(item); item != "" {
@@ -66,6 +75,7 @@ func runExecutionRoute(stdout, stderr io.Writer, argv []string) int {
 	decision, err := executionroute.Route(executionroute.Request{
 		HarnessCandidates: ordered,
 		Harness:           executionroute.HarnessRequirements{Wire: harnessprofile.Wire(*wire), Repoint: harnessprofile.RepointMechanism(*repoint), Rotatable: *rotatable},
+		Health:            health,
 		Model:             modelroute.Subject{Aspect: modelroute.Aspect(*aspect), Tool: *tool, Complexity: modelroute.Complexity(*complexity)},
 		Session:           executionroute.SessionSubject{ID: *sessionID, PreserveContinuity: *continuity, Portable: *portable, ContextUtilization: *context, CompactAt: *compactAt, Source: source, Target: target},
 	}, harnessprofile.Profiles(), modelroute.DefaultManifest())
@@ -80,6 +90,32 @@ func runExecutionRoute(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// loadFleetHealth turns a --fleet-status flag value (a path to, or inline JSON of,
+// a `fak fleet-accounts status --json` report) into the routing health input via
+// the fleetaccounts adapter. An empty spec yields an inert report, leaving harness
+// selection on the static requirements alone. maxAgeSeconds is the freshness bound
+// and requireEvidence makes an unmeasured candidate fail closed.
+func loadFleetHealth(spec string, maxAgeSeconds int64, requireEvidence bool) (executionroute.HealthReport, error) {
+	if strings.TrimSpace(spec) == "" {
+		return executionroute.HealthReport{}, nil
+	}
+	raw := []byte(spec)
+	if !strings.HasPrefix(strings.TrimSpace(spec), "{") {
+		b, err := os.ReadFile(spec)
+		if err != nil {
+			return executionroute.HealthReport{}, err
+		}
+		raw = b
+	}
+	var report fleetaccounts.StatusReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		return executionroute.HealthReport{}, err
+	}
+	health := executionroute.HealthFromFleetStatus(report.Accounts, maxAgeSeconds)
+	health.RequireEvidence = requireEvidence
+	return health, nil
 }
 
 // loadSessionDescriptor reads a SessionDescriptor from a flag value that is

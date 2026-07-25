@@ -51,18 +51,25 @@ type SessionSubject struct {
 	Target *SessionDescriptor `json:"target,omitempty"`
 }
 
-// Request is the cross-plane subject routed as one unit.
+// Request is the cross-plane subject routed as one unit. Health, when populated,
+// is the live harness-candidate health input: it excludes unavailable / draining
+// / cooldown / stale candidates before the static requirements pick a winner. An
+// empty Health leaves selection on the static requirements alone.
 type Request struct {
 	HarnessCandidates []string            `json:"harness_candidates,omitempty"`
 	Harness           HarnessRequirements `json:"harness_requirements,omitempty"`
+	Health            HealthReport        `json:"health,omitempty"`
 	Model             modelroute.Subject  `json:"model"`
 	Session           SessionSubject      `json:"session"`
 }
 
-// HarnessDecision records both the selected profile and why it won.
+// HarnessDecision records the selected profile, why it won, and — for an audit of
+// the live-health/requirement gate — every candidate skipped ahead of it with the
+// deterministic reason it was excluded. Rejected preserves operator order.
 type HarnessDecision struct {
-	Profile harnessprofile.HarnessProfile `json:"profile"`
-	Reason  string                        `json:"reason"`
+	Profile  harnessprofile.HarnessProfile `json:"profile"`
+	Reason   string                        `json:"reason"`
+	Rejected []HarnessRejection            `json:"rejected,omitempty"`
 }
 
 // SessionDecision is declarative: downstream session machinery performs Action.
@@ -90,7 +97,7 @@ type Decision struct {
 // Route composes harness selection, the existing model-routing oracle, and session
 // lifecycle selection. Candidate order is operator policy and is therefore stable.
 func Route(req Request, profiles []harnessprofile.HarnessProfile, manifest modelroute.Manifest) (Decision, error) {
-	harness, err := selectHarness(req.HarnessCandidates, req.Harness, profiles)
+	harness, err := selectHarness(req.HarnessCandidates, req.Harness, req.Health, profiles)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -105,36 +112,57 @@ func Route(req Request, profiles []harnessprofile.HarnessProfile, manifest model
 	}, nil
 }
 
-func selectHarness(candidates []string, requirements HarnessRequirements, profiles []harnessprofile.HarnessProfile) (HarnessDecision, error) {
+// selectHarness walks the candidates in operator order and returns the first that
+// satisfies BOTH the static requirements AND the live health gate, recording a
+// deterministic rejection reason for every candidate skipped ahead of it. Order
+// is preserved: among equally eligible profiles the earliest operator candidate
+// wins, exactly as before health was consulted. An empty candidate list falls
+// back to the declared profile order.
+func selectHarness(candidates []string, requirements HarnessRequirements, health HealthReport, profiles []harnessprofile.HarnessProfile) (HarnessDecision, error) {
 	if len(profiles) == 0 {
 		return HarnessDecision{}, fmt.Errorf("execution route: no harness profiles are declared")
 	}
-	ordered := profiles
-	if len(candidates) > 0 {
-		ordered = make([]harnessprofile.HarnessProfile, 0, len(candidates))
+	type entry struct {
+		name    string
+		profile harnessprofile.HarnessProfile
+		found   bool
+	}
+	var ordered []entry
+	explicitOrder := len(candidates) > 0
+	if explicitOrder {
 		for _, candidate := range candidates {
-			if p, ok := findProfile(candidate, profiles); ok {
-				ordered = append(ordered, p)
-			}
+			p, ok := findProfile(candidate, profiles)
+			ordered = append(ordered, entry{name: candidate, profile: p, found: ok})
+		}
+	} else {
+		for _, p := range profiles {
+			ordered = append(ordered, entry{name: p.Name, profile: p, found: true})
 		}
 	}
-	for _, p := range ordered {
-		if requirements.Wire != "" && p.Wire != requirements.Wire {
+	var rejected []HarnessRejection
+	for _, e := range ordered {
+		if !e.found {
+			rejected = append(rejected, HarnessRejection{Candidate: e.name, Reason: "unknown harness profile"})
 			continue
 		}
-		if requirements.Repoint != "" && !p.HasRepoint(requirements.Repoint) {
+		if reason, bad := requirementReason(e.profile, requirements); bad {
+			rejected = append(rejected, HarnessRejection{Candidate: e.name, Reason: reason})
 			continue
 		}
-		if requirements.Rotatable && (p.ConfigHomeGlob == "" || p.Identity == harnessprofile.IdentityNone) {
+		if reason, bad := health.healthReason(healthKeys(e.name, e.profile)...); bad {
+			rejected = append(rejected, HarnessRejection{Candidate: e.name, Reason: reason})
 			continue
 		}
 		reason := "first declared profile satisfying requirements"
-		if len(candidates) > 0 {
+		if explicitOrder {
 			reason = "first candidate satisfying requirements"
 		}
-		return HarnessDecision{Profile: p, Reason: reason}, nil
+		if health.active() {
+			reason += " and live health"
+		}
+		return HarnessDecision{Profile: e.profile, Reason: reason, Rejected: rejected}, nil
 	}
-	return HarnessDecision{}, fmt.Errorf("execution route: no harness candidate satisfies wire=%q repoint=%q rotatable=%t", requirements.Wire, requirements.Repoint, requirements.Rotatable)
+	return HarnessDecision{Rejected: rejected}, fmt.Errorf("execution route: no harness candidate satisfies wire=%q repoint=%q rotatable=%t and live health", requirements.Wire, requirements.Repoint, requirements.Rotatable)
 }
 
 func findProfile(candidate string, profiles []harnessprofile.HarnessProfile) (harnessprofile.HarnessProfile, bool) {
