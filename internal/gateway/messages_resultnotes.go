@@ -25,13 +25,18 @@ import (
 // ledger screened it (fresh) — not on every replayed turn (#2417).
 func resultAdmissionNote(adms []ResultAdmission) string {
 	n := 0
-	redacted := 0 // warn-first SECRET_REDACTED transforms: masked in place, NOT held out
+	redacted := 0    // warn-first SECRET_REDACTED transforms: masked in place, NOT held out
+	piiRedacted := 0 // warn-first PII_REDACTED transforms (#5378): masked in place, NOT held out
 	counts := map[string]int{}
 	order := make([]string, 0, 4)
 	livelocks := make([]string, 0, 1)
 	for _, a := range adms {
 		if a.Verdict.Kind == "TRANSFORM" && a.Verdict.Reason == reasonSecretRedacted {
 			redacted++
+			continue
+		}
+		if a.Verdict.Kind == "TRANSFORM" && a.Verdict.Reason == reasonPIIRedacted {
+			piiRedacted++
 			continue
 		}
 		if a.Verdict.Kind != "QUARANTINE" {
@@ -51,10 +56,10 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 		}
 	}
 	if n == 0 {
-		// No held-out result. If a credential span was MASKED in place (the warn-first
-		// default), say so in one line — the rest of the result is in context, so this is
-		// a WARN, not a "held out" banner, and never baits a re-read.
-		return secretRedactedWarn(redacted)
+		// No held-out result. If a credential or PII span was MASKED in place (the
+		// warn-first default), say so in one line each — the rest of the result is in
+		// context, so this is a WARN, not a "held out" banner, and never baits a re-read.
+		return joinNonEmpty(secretRedactedWarn(redacted), piiRedactedWarn(piiRedacted))
 	}
 	noun, verb := "tool result", "was"
 	if n > 1 {
@@ -100,10 +105,23 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 	if len(livelocks) > 0 {
 		note += " " + strings.Join(livelocks, " ")
 	}
-	if w := secretRedactedWarn(redacted); w != "" {
-		note += " " + w // a mixed turn: some held, some masked-in-place
+	if w := joinNonEmpty(secretRedactedWarn(redacted), piiRedactedWarn(piiRedacted)); w != "" {
+		note += " " + w // a mixed turn: some held, some masked-in-place (secret and/or PII)
 	}
 	return note
+}
+
+// joinNonEmpty joins the non-empty warn lines with a single space, so a turn that masked
+// both a credential and a PII span surfaces both one-liners without a stray leading/trailing
+// space when only one (or neither) fired.
+func joinNonEmpty(parts ...string) string {
+	kept := parts[:0]
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 // freshAdmissionNotes selects the admissions the held-out banner should announce THIS

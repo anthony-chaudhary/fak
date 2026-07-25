@@ -26,7 +26,9 @@ const (
 	ReasonSecretDiscovered                   // a tool RESULT bore a secret, caught on discovery (the on-discovery event; distinct from ReasonSecretExfil, the egress verdict) [#884]
 	ReasonSecretRedacted                     // a credential span in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, distinct from the SECRET_EXFIL seal
 	ReasonShellDialect                       // a command in the wrong shell dialect for the tool (a PowerShell cmdlet submitted to the POSIX Bash tool) — it fails `command not found` (exit 127) before doing anything; MODEL-FIXABLE by re-routing to the PowerShell tool or the POSIX equivalent [#3941]
-	// 17.. reserved for additive core reasons; register out-of-tree names via
+	ReasonPIIRedacted                        // a general-PII span (email/phone/national-id/PAN/IBAN) in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, the PII twin of ReasonSecretRedacted [#5378]
+	ReasonPIIExfil                           // result/args matched a general-PII pattern and the fail-closed posture (or an obfuscation-only hit) SEALED the whole result, the PII twin of ReasonSecretExfil [#5378]
+	// 19.. reserved for additive core reasons; register out-of-tree names via
 	// RegisterReason.
 	ReasonCoreMax ReasonCode = 1023
 )
@@ -48,6 +50,8 @@ var coreReasonNames = map[ReasonCode]string{
 	ReasonSecretDiscovered: "RESULT_SECRET_DISCOVERED",
 	ReasonSecretRedacted:   "SECRET_REDACTED",
 	ReasonShellDialect:     "SHELL_DIALECT",
+	ReasonPIIRedacted:      "PII_REDACTED",
+	ReasonPIIExfil:         "PII_EXFIL",
 }
 
 // ReasonName resolves a reason code to its stable name, consulting the closed
@@ -124,4 +128,4 @@ func sortStrings(s []string) {
 
 // CoreReasonCount is the size of the closed core vocabulary (excludes NONE) —
 // referenced by tests asserting the closed reason set.
-const CoreReasonCount = 15
+const CoreReasonCount = 17

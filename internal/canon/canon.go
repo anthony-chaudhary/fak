@@ -394,9 +394,16 @@ func Decoded(s string) string {
 type Findings struct {
 	Secret    bool
 	Injection bool
+	// PII is the general-PII axis (#5378): email/phone/national-id/PAN/IBAN. It is a
+	// SEPARATE axis the served-path redaction seam (normgate) consults directly and is
+	// deliberately NOT folded into Any() — Any() is the legacy secret+injection quarantine
+	// trigger the recall re-screen keys on, and PII redaction is a warn-first mask, not a
+	// hard quarantine, so widening Any() would change unrelated re-screen behavior.
+	PII bool
 }
 
-// Any reports whether the scan revealed any threat.
+// Any reports whether the scan revealed a secret or injection threat — the legacy
+// quarantine trigger. PII is intentionally excluded (see Findings.PII).
 func (f Findings) Any() bool { return f.Secret || f.Injection }
 
 // Scan canonicalizes body and reports whether its canonical views reveal a secret
@@ -454,6 +461,17 @@ func Scan(body []byte) Findings {
 			break
 		}
 	}
+	// PII (#5378): the general-PII needle set, scanned on the SAME canonical views as
+	// secrets so an obfuscated email/card (base64/homoglyph/bidi) is caught too. A raw-
+	// locatable hit is masked in place by normgate's warn-first default; an obfuscation-only
+	// hit (no raw span) seals, exactly like the secret axis (see canon.RawPIIComplete).
+	for _, v := range []string{norm, dec, rev} {
+		if combinedPII.MatchString(v) {
+			f.PII = true
+			break
+		}
+	}
+
 	if !f.Injection {
 		// de-separated (squeeze) pass for distinctive markers only.
 		for _, v := range []string{squeezeAlnum(norm), squeezeAlnum(dec), squeezeAlnum(rev)} {

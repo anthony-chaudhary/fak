@@ -138,8 +138,8 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "normgate"}
 	}
 	f := canon.Scan(body)
-	secret, injection := f.Secret, f.Injection
-	if !secret && !injection {
+	secret, injection, pii := f.Secret, f.Injection, f.PII
+	if !secret && !injection && !pii {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "normgate"} // let ctxmmu handle oversize/verbatim
 	}
 
@@ -154,13 +154,24 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 	if secret {
 		return g.admitSecret(ctx, c, r, body)
 	}
-	if !trustedLocal(c, r) {
-		if !highConfidenceInjection(body) {
-			return g.transformOut(ctx, r, body, "paged-low-confidence", "low-confidence injection-shaped content (retrievable, not sealed)")
+	// Injection is checked before PII: an injection hit pages the WHOLE result out
+	// (quarantine or retrievable transform), which already removes any co-occurring PII
+	// from context, so the injection policy subsumes the PII one for a mixed body.
+	if injection {
+		if !trustedLocal(c, r) {
+			if !highConfidenceInjection(body) {
+				return g.transformOut(ctx, r, body, "paged-low-confidence", "low-confidence injection-shaped content (retrievable, not sealed)")
+			}
+			return g.quarantineOut(ctx, r, abi.ReasonTrustViolation, body)
 		}
-		return g.quarantineOut(ctx, r, abi.ReasonTrustViolation, body)
+		return g.transformOut(ctx, r, body, "paged-trusted-local", "trusted-local injection-shaped content (retrievable, not sealed)")
 	}
-	return g.transformOut(ctx, r, body, "paged-trusted-local", "trusted-local injection-shaped content (retrievable, not sealed)")
+	// PII only (#5378): general-PII (email/phone/national-id/PAN/IBAN) rides the SAME
+	// warn-first seam as secrets — masked in place by default, sealed under the opt-in
+	// fail_closed posture (or when caught only on an obfuscated view). This is the
+	// gateway-parity gap #3280 measured: a customer's email or card in a tool result
+	// passed through unmasked because the redactor only matched credential shapes.
+	return g.admitPII(ctx, c, r, body)
 }
 
 type injectionSignal struct {
@@ -322,6 +333,57 @@ func secretPostureSeals() bool {
 	return posture == adjudicator.SecretFailClosed
 }
 
+// admitPII is the warn-first general-PII policy (#5378), the PII twin of admitSecret. It
+// routes a detected PII needle (email/phone/national-id/PAN/IBAN) to one of three outcomes:
+//
+//   - fail_closed posture (OPT-IN) -> SEAL the whole result (quarantineOut / PII_EXFIL);
+//   - an OBFUSCATED needle with no raw-locatable span (canon.RawPIIComplete false) -> SEAL:
+//     the in-place redactor cannot reach a needle that only surfaces on a de-obfuscated view;
+//   - otherwise (the DEFAULT) -> REDACT the PII span(s) in place and keep the rest of the
+//     legitimate output in context (redactPIIOut / PII_REDACTED). No paged-out stub.
+//
+// PII deliberately SHARES the secret fail_closed posture (secretPostureSeals): the
+// fail-closed governance stance is a single knob, so one manifest choice governs both the
+// credential and the PII rung — consistent with the #5378 ask ("same opt-in fail-closed
+// seal ... consistent with the secret path"). A separate PII-specific posture is a clean
+// follow-on if an operator ever needs to seal one class but not the other.
+func (g *Gate) admitPII(ctx context.Context, c *abi.ToolCall, r *abi.Result, body []byte) abi.Verdict {
+	if secretPostureSeals() {
+		return g.quarantineOut(ctx, r, abi.ReasonPIIExfil, body)
+	}
+	if !canon.RawPIIComplete(body) {
+		return g.quarantineOut(ctx, r, abi.ReasonPIIExfil, body)
+	}
+	return g.redactPIIOut(ctx, r, body)
+}
+
+// redactPIIOut masks the PII span(s) in body IN PLACE and admits the redacted result as a
+// Transform — the rest of the output stays in context. The PII twin of redactOut: it pages
+// nothing out and mints no held handle, because the redacted body carries no live PII
+// (canon.RedactPII is verified to re-screen clean). The verdict is a Transform carrying
+// ReasonPIIRedacted so the banner reads as a WARN, not the loud PII_EXFIL seal.
+func (g *Gate) redactPIIOut(ctx context.Context, r *abi.Result, body []byte) abi.Verdict {
+	red, masked := canon.RedactPII(body)
+	if masked == 0 {
+		// Detector said PII but the redactor masked nothing (a detection/redaction skew) —
+		// take the safe direction and seal rather than admit the unredacted body.
+		return g.quarantineOut(ctx, r, abi.ReasonPIIExfil, body)
+	}
+	atomic.AddInt64(&g.transform, 1)
+	redRef, ok := putBytes(ctx, red)
+	if !ok {
+		return abi.Verdict{Kind: abi.VerdictDefer, By: "normgate"}
+	}
+	r.Payload = redRef
+	if r.Meta == nil {
+		r.Meta = map[string]string{}
+	}
+	r.Meta["normgate"] = "pii-redacted"
+	r.Meta["masked_spans"] = fmt.Sprintf("%d", masked)
+	return abi.Verdict{Kind: abi.VerdictTransform, Reason: abi.ReasonPIIRedacted, By: "normgate",
+		Payload: abi.TransformPayload{NewArgs: redRef}}
+}
+
 // redactOut masks the credential span(s) in body IN PLACE and admits the redacted
 // result as a Transform — the rest of the output stays in context. Unlike quarantineOut
 // it pages nothing out and mints no held handle: the redacted body carries no live
@@ -390,6 +452,8 @@ func detectorFor(reason abi.ReasonCode) string {
 	switch reason {
 	case abi.ReasonSecretExfil:
 		return "canonical_secret"
+	case abi.ReasonPIIExfil:
+		return "canonical_pii"
 	case abi.ReasonTrustViolation:
 		return "canonical_injection"
 	default:
