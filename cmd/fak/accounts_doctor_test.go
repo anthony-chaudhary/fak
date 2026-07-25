@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,6 +203,87 @@ func TestAccountsDoctorIdentityMismatchRequiresRelogin(t *testing.T) {
 	if !strings.Contains(got, "identity_mismatch") || !strings.Contains(got, "relogin") ||
 		!strings.Contains(got, "CLAUDE_CONFIG_DIR=") {
 		t.Fatalf("doctor should route identity mismatch to relogin:\n%s", got)
+	}
+}
+
+// TestAccountsDoctorRecoveryWorklistClassifies pins #3580: a needs-login seat classifies
+// as recoverable (action login) and a weekly usage-capped seat as hard, and the worklist
+// reports the servable-seat gain from reclaiming the recoverable one.
+func TestAccountsDoctorRecoveryWorklistClassifies(t *testing.T) {
+	home := t.TempDir()
+	ready := mkHome(t, home, ".claude-capped-seat", "capped@example.test", true)
+	needs := mkHome(t, home, ".claude-needs-seat", "needs@example.test", false)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"capped-seat","dir":"` + jsonPath(ready) + `"},` +
+		`{"name":"needs-seat","dir":"` + jsonPath(needs) + `"}` +
+		`],"roles":{"active":"capped-seat","anchor":"capped-seat"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wire a fresh weekly usage LIMIT probe for the ready seat so it folds to wait_reset (hard).
+	rd := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", rd)
+	line := `{"ts":"` + time.Now().UTC().Format(time.RFC3339) + `","account":".claude-capped-seat","status":"LIMIT","reset":"3pm"}`
+	if err := os.WriteFile(filepath.Join(rd, "probe_ledger.jsonl"), []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"doctor", "--json", "--registry", regPath, "--home", home})
+	if rc != 1 {
+		t.Fatalf("doctor rc=%d, want 1 (actionable seats); stderr=%s\nout=%s", rc, errb.String(), out.String())
+	}
+	var rep acctDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("doctor --json did not parse: %v\n%s", err, out.String())
+	}
+	byName := map[string]doctorSeat{}
+	for _, s := range rep.Seats {
+		byName[s.Name] = s
+	}
+	if got := byName["needs-seat"].Recovery; got != recoveryRecoverable {
+		t.Fatalf("needs-seat recovery = %q, want %q", got, recoveryRecoverable)
+	}
+	if got := byName["capped-seat"].Recovery; got != recoveryHard {
+		t.Fatalf("capped-seat recovery = %q, want %q; seat=%+v", got, recoveryHard, byName["capped-seat"])
+	}
+	if rep.Recovery.HardWalled != 1 {
+		t.Fatalf("hard_walled = %d, want 1; worklist=%+v", rep.Recovery.HardWalled, rep.Recovery)
+	}
+	if rep.Recovery.ServableSeatGain != 1 || len(rep.Recovery.Recoverable) != 1 {
+		t.Fatalf("recoverable worklist = %+v, want one seat / gain 1", rep.Recovery)
+	}
+	rs := rep.Recovery.Recoverable[0]
+	if rs.Name != "needs-seat" || rs.Action != "login" || rs.SeatGain != 1 {
+		t.Fatalf("recoverable[0] = %+v, want needs-seat/login/gain 1", rs)
+	}
+}
+
+// TestAccountsDoctorRecoveryWorklistEmptyWhenOfferable pins #3580 acceptance #3: a
+// fully-offerable roster yields an empty worklist (no recoverable seats, zero gain).
+func TestAccountsDoctorRecoveryWorklistEmptyWhenOfferable(t *testing.T) {
+	t.Setenv("FLEET_REG_DIR", "")
+	home := t.TempDir()
+	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"ready-seat","dir":"` + jsonPath(ready) + `"}` +
+		`],"roles":{"active":"ready-seat","anchor":"ready-seat"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{"doctor", "--json", "--registry", regPath, "--home", home}); rc != 0 {
+		t.Fatalf("doctor on clean registry rc=%d, want 0; out=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	var rep acctDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("doctor --json did not parse: %v\n%s", err, out.String())
+	}
+	if len(rep.Recovery.Recoverable) != 0 || rep.Recovery.ServableSeatGain != 0 || rep.Recovery.HardWalled != 0 {
+		t.Fatalf("fully-offerable worklist = %+v, want empty", rep.Recovery)
 	}
 }
 

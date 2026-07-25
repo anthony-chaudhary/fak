@@ -24,6 +24,13 @@ import (
 // config dir vanished, through the exact same audited path as `remove`). Everything
 // judgment-shaped (re-login, credits, duplicate collapse) stays a reported action with
 // the exact command, never an auto-mutation.
+//
+// The `recovery_worklist` key folds the walled seats by recoverability (#3580): the
+// `recoverable` list names the seats one operator action away from serving (a `login` or a
+// credential `re-read` per #3216) with the servable-seat gain if reclaimed, and
+// `hard_walled` counts the seats a usage/credit/access wall leaves only time can clear —
+// so an operator can grow effective supply from seats already owned instead of provisioning
+// new accounts. A fully-offerable roster yields an empty worklist.
 const doctorSchema = "fak.accounts.doctor.v1"
 
 // doctorAction is the closed per-seat recovery vocabulary. Exactly one action is
@@ -54,17 +61,53 @@ type doctorSeat struct {
 	Source    string       `json:"source,omitempty"`
 	Applied   bool         `json:"applied,omitempty"`
 	ApplyNote string       `json:"apply_note,omitempty"`
+	// Recovery splits a walled seat by whether an operator action reclaims it NOW
+	// (recoverable) vs a hard wall that only time/billing/admin clears (hard). Empty
+	// on a healthy seat or a cleanup-only action (prune/dedupe/enable-or-remove),
+	// which grow no servable supply.
+	Recovery string `json:"recovery,omitempty"`
+}
+
+// The recovery split: a walled seat is either one operator action away from serving
+// (recoverable — a `claude /login` or a credential re-read per #3216) or hard-walled
+// (only a usage-cap reset, a credit top-up, or an upstream access-restore clears it).
+const (
+	recoveryRecoverable = "recoverable"
+	recoveryHard        = "hard"
+)
+
+// recoverySeat is one entry on the doctor recovery worklist: a walled seat an operator
+// can reclaim now, the action word (`login` / `re-read credential`), the exact command,
+// and the servable-seat gain (+1 seat) if reclaimed.
+type recoverySeat struct {
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Action   string `json:"action"`
+	Command  string `json:"command,omitempty"`
+	SeatGain int    `json:"seat_gain"`
+}
+
+// recoveryWorklist is the actionable "grow servable supply now" fold surfaced under the
+// documented `recovery_worklist` key: the seats one operator action away from serving,
+// the count of hard-walled seats that can only wait, and the total servable-seat gain if
+// every recoverable seat is reclaimed. Empty (recoverable:[], gains 0) when the roster is
+// fully offerable — the cheapest new seat is often a walled one already owned.
+type recoveryWorklist struct {
+	Recoverable      []recoverySeat `json:"recoverable"`
+	HardWalled       int            `json:"hard_walled"`
+	ServableSeatGain int            `json:"servable_seat_gain"`
 }
 
 // acctDoctorReport is the machine-readable doctor surface.
 type acctDoctorReport struct {
-	Schema      string       `json:"schema"`
-	Registry    string       `json:"registry"`
-	ProbeLedger bool         `json:"probe_ledger_consulted"`
-	Seats       []doctorSeat `json:"seats"`
-	Actionable  int          `json:"actionable"`
-	AutoFixable int          `json:"auto_fixable"`
-	Applied     int          `json:"applied"`
+	Schema      string           `json:"schema"`
+	Registry    string           `json:"registry"`
+	ProbeLedger bool             `json:"probe_ledger_consulted"`
+	Seats       []doctorSeat     `json:"seats"`
+	Actionable  int              `json:"actionable"`
+	AutoFixable int              `json:"auto_fixable"`
+	Applied     int              `json:"applied"`
+	Recovery    recoveryWorklist `json:"recovery_worklist"`
 }
 
 type acctFixSummary struct {
@@ -192,6 +235,61 @@ func foldDoctorReportCounts(report *acctDoctorReport) {
 			}
 		}
 	}
+	foldRecoveryWorklist(report)
+}
+
+// classifyRecovery maps a folded per-seat action onto the recoverable/hard split and the
+// operator action word. Recoverable = one login or credential re-read away from serving;
+// hard = only a cap reset, a credit top-up, or an upstream access-restore clears it. An
+// identity_mismatch (creds present but disk disagrees, the #3216 mislabel) is reclaimed by
+// re-reading the credential, not a fresh login. Cleanup-only actions and healthy seats grow
+// no servable supply, so they carry no class.
+func classifyRecovery(action doctorAction, status string) (class, actionWord string) {
+	switch action {
+	case doctorRelogin:
+		if accounts.LoginStatus(status) == accounts.LoginIdentityMismatch {
+			return recoveryRecoverable, "re-read credential"
+		}
+		return recoveryRecoverable, "login"
+	case doctorHydrate:
+		return recoveryRecoverable, "re-read credential"
+	case doctorWaitReset:
+		return recoveryHard, "wait for reset"
+	case doctorTopUp:
+		return recoveryHard, "top up credit"
+	case doctorAccessBlocked:
+		return recoveryHard, "restore access"
+	default:
+		return "", ""
+	}
+}
+
+// foldRecoveryWorklist classifies each not-yet-applied seat as recoverable/hard and folds
+// the actionable recovery worklist: which walled seats an operator can reclaim now, by what
+// action, and the servable-seat gain (one seat per reclaimed seat). Pure post-pass over the
+// folded seats, so a fully-offerable roster yields an empty worklist.
+func foldRecoveryWorklist(report *acctDoctorReport) {
+	work := recoveryWorklist{Recoverable: []recoverySeat{}}
+	for i := range report.Seats {
+		s := &report.Seats[i]
+		if s.Applied {
+			s.Recovery = ""
+			continue
+		}
+		class, action := classifyRecovery(s.Action, s.Status)
+		s.Recovery = class
+		switch class {
+		case recoveryRecoverable:
+			work.Recoverable = append(work.Recoverable, recoverySeat{
+				Name: s.Name, Status: s.Status, Action: action,
+				Command: firstNonEmpty(s.Command, s.Source), SeatGain: 1,
+			})
+			work.ServableSeatGain++
+		case recoveryHard:
+			work.HardWalled++
+		}
+	}
+	report.Recovery = work
 }
 
 func summarizeAccountFixes(report acctDoctorReport) acctFixSummary {
@@ -472,6 +570,12 @@ func printDoctorTable(w io.Writer, report acctDoctorReport, write bool) {
 	}
 	tw.Flush()
 	fmt.Fprintf(w, "actionable: %d  auto-fixable: %d  applied: %d\n", report.Actionable, report.AutoFixable, report.Applied)
+	rw := report.Recovery
+	fmt.Fprintf(w, "recovery worklist: %d recoverable seat(s), servable-seat gain +%d (%d hard-walled)\n",
+		len(rw.Recoverable), rw.ServableSeatGain, rw.HardWalled)
+	for _, s := range rw.Recoverable {
+		fmt.Fprintf(w, "  reclaim %s via %s: %s\n", s.Name, s.Action, firstNonEmpty(s.Command, "(no command)"))
+	}
 	if !write && report.AutoFixable > 0 {
 		fmt.Fprintln(w, "run `fak accounts doctor --write` to apply the auto-fixable repairs")
 	}
