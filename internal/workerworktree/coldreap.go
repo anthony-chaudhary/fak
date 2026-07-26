@@ -25,6 +25,20 @@ import (
 // alone prove staleness. On top of that a worktree younger than the age floor is kept
 // even when its lease looks dead, to tolerate a lease-record lag during a land. Both
 // gates err toward KEEPING: a false keep only wastes disk; a false reap loses work.
+//
+// THE THIRD GATE — UNLANDED WORK. Lease-death plus age prove nobody is WATCHING a
+// worktree; they say nothing about whether it still HOLDS work. A worker that died
+// after editing but before landing leaves a dead lease, ages past the floor, and reads
+// as textbook cold while carrying the only copy of its diff — so the first two gates
+// alone turn "a false reap loses work" into exactly that. Measured 2026-07-26: of 20
+// cold-eligible worktrees, 17 carried uncommitted entries and one held 15 modified
+// TRACKED files after 253h. This gate closes that hole by asking git what the worktree
+// still contains, and keeps any worktree that answers with anything at all.
+//
+// Kept-because-dirty is reported as HeldByWork rather than folded into the generic
+// keep, because the two demand different operator actions: a live or young worktree
+// needs only WAITING, while one holding unlanded work needs a decision — land it or
+// abandon it. The sweep cannot make that call, so it surfaces it instead of guessing.
 
 // DefaultColdAgeFloor is the grace window a worker worktree must exceed before it is
 // eligible for the cold sweep even with a dead lease. It absorbs a brief lease-record
@@ -48,6 +62,16 @@ type ColdWorktree struct {
 	LeaseLive bool   `json:"lease_live"`
 	Eligible  bool   `json:"eligible"`
 	Reason    string `json:"reason"`
+	// Unlanded is the number of uncommitted `git status --porcelain` entries the
+	// worktree still carries, or -1 when git could not be asked. It is 0 for a
+	// worktree the earlier gates already kept, which is NOT a cleanliness claim —
+	// the probe is skipped there because its answer cannot change the verdict.
+	Unlanded int `json:"unlanded"`
+	// HeldByWork marks a worktree that passed BOTH the lease and age gates and was
+	// kept only because it still holds unlanded work. This is the set an operator
+	// must triage — land it or abandon it — and the set an --even-if-unlanded
+	// override promotes back to reapable.
+	HeldByWork bool `json:"held_by_work,omitempty"`
 }
 
 // WorktreeAge returns how long ago the worktree directory was last modified — the age
@@ -84,24 +108,69 @@ func LaneOf(wtPath string) string {
 	return rest[:cut]
 }
 
+// UnlandedCount reports how many uncommitted entries a worker worktree still carries,
+// counting BOTH tracked modifications and untracked files: a worker that died before
+// landing may hold its only new source file as untracked, so ignoring `??` would reap
+// exactly the work this gate exists to protect. Git's own ignore rules already exclude
+// build output, so an ignored artifact tree does not read as work.
+//
+// Returns -1 when git could not be asked (a missing directory, a broken worktree
+// registration, git absent). That is deliberately NOT 0: the sweep treats "cannot tell"
+// as "carries work" and keeps the worktree, so a probe failure never over-reaps.
+func UnlandedCount(wtPath string, git GitRunner) int {
+	rc, out := run(git, wtPath, []string{"status", "--porcelain"})
+	if rc != 0 {
+		return -1
+	}
+	n := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // coldEligible is the PURE reap decision for ONE worktree: cold iff its lane lease is
-// NOT live AND it is at least ageFloor old. Returns the verdict plus a human reason for
-// the ledger. Both keep-branches document WHY the worktree was spared.
-func coldEligible(leaseLive bool, age, ageFloor time.Duration) (bool, string) {
+// NOT live, it is at least ageFloor old, AND it carries no unlanded work. Returns the
+// verdict, whether it was kept SOLELY for unlanded work, and a human reason for the
+// ledger. Every keep-branch documents WHY the worktree was spared.
+//
+// unlanded is the UnlandedCount reading: 0 means nothing uncommitted, a positive count
+// means real content, and -1 means the probe could not answer — which keeps the
+// worktree, since an unreadable tree is the case where a wrong reap is least recoverable.
+func coldEligible(leaseLive bool, age, ageFloor time.Duration, unlanded int) (eligible, heldByWork bool, reason string) {
 	if leaseLive {
-		return false, "kept: worker lane lease still live"
+		return false, false, "kept: worker lane lease still live"
 	}
 	if age < ageFloor {
-		return false, fmt.Sprintf("kept: lease dead but age %s under grace floor %s",
+		return false, false, fmt.Sprintf("kept: lease dead but age %s under grace floor %s",
 			age.Round(time.Second), ageFloor.Round(time.Second))
 	}
-	return true, fmt.Sprintf("cold: lease dead and age %s past grace floor %s",
+	if unlanded < 0 {
+		return false, true, "kept: lease dead and past floor, but its working tree could not be read — refusing to reap what cannot be inspected"
+	}
+	if unlanded > 0 {
+		return false, true, fmt.Sprintf("kept: lease dead and age %s past floor, but %d uncommitted entr%s remain — land or abandon before reaping",
+			age.Round(time.Second), unlanded, plural(unlanded, "y", "ies"))
+	}
+	return true, false, fmt.Sprintf("cold: lease dead, age %s past grace floor %s, working tree clean",
 		age.Round(time.Second), ageFloor.Round(time.Second))
+}
+
+// plural picks the singular or plural suffix for n, so a reason line reads as prose
+// ("1 uncommitted entry" / "9 uncommitted entries") in an operator-facing ledger.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // ColdReapList enumerates the live worker worktrees (via Count — the same read `list`
 // uses) and decides which are COLD, DELETING NOTHING. A worktree is cold iff leaseLive
-// reports its lane lease dead AND WorktreeAge puts it past ageFloor. The caller applies
+// reports its lane lease dead, WorktreeAge puts it past ageFloor, AND UnlandedCount
+// finds nothing uncommitted still in it. The caller applies
 // Reap to the Eligible entries, and only under an explicit apply opt-in — this function
 // is the dry-run plan. A nil leaseLive is treated as "cannot prove liveness", so every
 // worktree is kept (fail toward keeping).
@@ -117,13 +186,23 @@ func ColdReapList(root string, git GitRunner, now time.Time, ageFloor time.Durat
 			live = leaseLive(p)
 		}
 		age := WorktreeAge(p, now)
-		eligible, reason := coldEligible(live, age, ageFloor)
+		// Probe the working tree ONLY for a worktree the first two gates would
+		// otherwise release. A live or young worktree is kept whatever its status
+		// says, so asking git there would spend a subprocess per worktree to reach
+		// the same verdict — and this sweep runs over every worktree in the namespace.
+		unlanded := 0
+		if !live && age >= ageFloor {
+			unlanded = UnlandedCount(p, git)
+		}
+		eligible, heldByWork, reason := coldEligible(live, age, ageFloor, unlanded)
 		out = append(out, ColdWorktree{
-			Path:      p,
-			AgeSec:    int64(age / time.Second),
-			LeaseLive: live,
-			Eligible:  eligible,
-			Reason:    reason,
+			Path:       p,
+			AgeSec:     int64(age / time.Second),
+			LeaseLive:  live,
+			Eligible:   eligible,
+			Reason:     reason,
+			Unlanded:   unlanded,
+			HeldByWork: heldByWork,
 		})
 	}
 	return out

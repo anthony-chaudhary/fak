@@ -195,7 +195,7 @@ func TestWorktreeColdReapPlanEndToEnd(t *testing.T) {
 	}
 
 	// DRY-RUN: exactly oldWT is eligible; nothing is deleted.
-	dry := worktreeColdReapReport(repo, false, floor, now)
+	dry := worktreeColdReapReport(repo, false, floor, now, false)
 	if dry.Mode != "dry-run" || dry.Reaped != 0 {
 		t.Fatalf("dry-run must delete nothing: mode=%s reaped=%d", dry.Mode, dry.Reaped)
 	}
@@ -225,7 +225,7 @@ func TestWorktreeColdReapPlanEndToEnd(t *testing.T) {
 	}
 
 	// APPLY: oldWT is reaped, the protected/young ones survive.
-	got := worktreeColdReapReport(repo, true, floor, now)
+	got := worktreeColdReapReport(repo, true, floor, now, false)
 	if got.Mode != "apply" || got.Reaped != 1 || got.WouldReap != 1 {
 		t.Fatalf("apply want reaped=1 would_reap=1 mode=apply, got %+v", got)
 	}
