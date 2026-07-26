@@ -58,8 +58,20 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	fs.Var(&rungs, "rungs", "rung-attribution mode: per-rung lever-flip over a turnbench trace (bare --rungs = full sweep; --rungs=grammar,ifc-sink for a subset)")
 	report := fs.String("report", "", "load a saved AblationReport JSON (e.g. from experiments/ablate/) and re-render its table/deltas — no trace, engine, or replay")
 	engineIDFlag := fs.String("engine", "mock", "engine id (the offline mock by default)")
+	models := fs.String("models", "", "model-strength axis: comma list of tiers to grade each feature across (known: "+strings.Join(ablate.KnownModelTiers(), ",")+"); omitted keeps the legacy single-tier output")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+
+	// --models is the MODEL-STRENGTH axis (#4412): grade every feature arm's marginal
+	// delta across a weak -> strong ladder so a scaffold the model still NEEDS separates
+	// from one it has OUTGROWN. Parsed UP FRONT — before any trace load or replay — so a
+	// typo costs a usage error rather than a whole sweep. Empty means the axis never
+	// runs, which is what preserves the legacy output.
+	tiers, tierErr := ablate.ParseModelTiers(*models)
+	if tierErr != nil {
+		fmt.Fprintln(stderr, "fak ablate:", tierErr)
+		return 2
 	}
 
 	// --list is the "see what I can try" surface behind FeatureCatalog(): it needs no
@@ -94,7 +106,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintln(stderr, "fak ablate:", err)
 			return 1
 		}
-		return emitAblation(stdout, stderr, rep, *out, *asJSON)
+		return emitAblation(stdout, stderr, rep, *out, *asJSON, tiers)
 	}
 
 	// --rungs is the RUNG axis (issue #3972): rather than sweep cache levers, ablate the
@@ -199,7 +211,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		for _, d := range dropped {
 			fmt.Fprintf(stderr, "fak ablate: arm %q dropped: %s\n", d.ArmID, d.Reason)
 		}
-		return emitAblation(stdout, stderr, rep, *out, *asJSON)
+		return emitAblation(stdout, stderr, rep, *out, *asJSON, tiers)
 	}
 
 	rep, err := ablate.Sweep(ctx(), t, engineID, engineModel, configs, *baseline)
@@ -207,7 +219,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak ablate:", err)
 		return 1
 	}
-	return emitAblation(stdout, stderr, rep, *out, *asJSON)
+	return emitAblation(stdout, stderr, rep, *out, *asJSON, tiers)
 }
 
 func runAblatePlan(t *bench.Trace, engineID, engineModel string, configs []ablate.FeatureConfig, baseline string) (*ablate.Report, error) {
@@ -234,10 +246,24 @@ func anyEnvGated(features []string) bool {
 	return false
 }
 
+// ablateTierScorer is the TierScorer runAblate hands the model-strength axis (#4412).
+// Production binds the STUB: no live per-tier measurement is wired yet, so a real run
+// reports UNMEASURED rather than a fabricated grade. A test swaps in a fake with fixed
+// per-tier outcomes — the same injection idiom as ablateArmRunner above.
+var ablateTierScorer ablate.TierScorer = ablate.StubTierScorer{}
+
 // emitAblation writes the assembled report to the requested sinks — an --out file, --json
 // to stdout, or the human table — and returns the process exit code. Shared by the
 // in-process and subprocess rungs so both render identically.
-func emitAblation(stdout, stderr io.Writer, rep *ablate.Report, outPath string, asJSON bool) int {
+//
+// tiers is the --models ladder: non-empty runs the model-strength axis over the report
+// BEFORE any sink sees it, so the file, the JSON, and the table all carry the same
+// verdicts. Empty skips the axis entirely, leaving the legacy output untouched.
+func emitAblation(stdout, stderr io.Writer, rep *ablate.Report, outPath string, asJSON bool, tiers []string) int {
+	if err := ablate.AnnotateModelStrength(ctx(), rep, tiers, ablateTierScorer, ablate.StrengthParams{}); err != nil {
+		fmt.Fprintln(stderr, "fak ablate:", err)
+		return 1
+	}
 	if outPath != "" {
 		if err := os.WriteFile(outPath, rep.JSON(), 0o644); err != nil {
 			fmt.Fprintln(stderr, "fak ablate:", err)
@@ -328,6 +354,47 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 			formatAblationTokenEquivDelta(r.FakTokenEquiv()-base.FakTokenEquiv()),
 			int64(r.PrefixIntegrity.PrefixMismatch)-int64(base.PrefixIntegrity.PrefixMismatch))
 	}
+	printModelStrength(w, rep)
+}
+
+// printModelStrength renders the #4412 model-strength axis: one block per feature arm
+// carrying its per-tier marginal-delta trajectory and the verdict folded from it. It
+// prints NOTHING when no arm carries a card, which is what keeps a run without
+// --models byte-identical to the legacy table.
+func printModelStrength(w io.Writer, rep *ablate.Report) {
+	graded := 0
+	for i := range rep.Runs {
+		if rep.Runs[i].ModelStrength != nil {
+			graded++
+		}
+	}
+	if graded == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\nmodel-strength axis (verdict per feature, classified on the strongest tier):\n")
+	for i := range rep.Runs {
+		ms := rep.Runs[i].ModelStrength
+		if ms == nil {
+			continue
+		}
+		fmt.Fprintf(w, "  %-10s %-12s %s\n", rep.Runs[i].ArmID, ms.Verdict, modelStrengthTrajectory(ms))
+		fmt.Fprintf(w, "             %s\n", ms.Reason)
+	}
+}
+
+// modelStrengthTrajectory renders the per-tier deltas as `weak=+0.2000 strong=-0.0500`.
+// An unmeasured rung prints "unmeasured" rather than a 0.0000 delta — a rung nobody
+// scored must not read as a rung that scored zero.
+func modelStrengthTrajectory(ms *ablate.ModelStrength) string {
+	parts := make([]string, 0, len(ms.Tiers))
+	for _, td := range ms.Tiers {
+		if !td.Measured {
+			parts = append(parts, td.Tier+"=unmeasured")
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%+.4f", td.Tier, td.Delta))
+	}
+	return strings.Join(parts, " ")
 }
 
 func formatAblationTokenEquiv(v float64) string {
