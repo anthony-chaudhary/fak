@@ -258,7 +258,37 @@ func (m *gatewayMetrics) observePlacement(out agent.BreakpointOutcome) {
 		m.placementAttempts = map[string]uint64{}
 	}
 	m.placementAttempts[outcome]++
+	// #3622: fold the same outcome through the LIVE monitor. The counter above is cumulative and
+	// unwatched — a head that turns volatile mid-session just stops incrementing "placed", which
+	// reads exactly like a session that went quiet — so the rolling refused fraction is what turns
+	// the tally into a signal. Lazily built for a directly-constructed gatewayMetrics (the same
+	// posture inferE2EHist takes), so a Server assembled without newGatewayMetrics still monitors.
+	if m.anchorMon == nil {
+		m.anchorMon = metrics.NewAnchorRefusalMonitor(metrics.AnchorRefusalThresholds{})
+	}
+	m.anchorMon.Observe(outcome)
 	m.compactMu.Unlock()
+}
+
+// anchorRefusalReport folds the session's placement-outcome mix into the operator readout the
+// #3622 alarm is carried on. Returns nil — leaving the summary's JSON field absent — until the
+// session has actually attempted a placement, so a cold or non-Anthropic session reports nothing
+// rather than a fabricated 0% refusal it never measured. Taken under compactMu, the same lock
+// observePlacement writes the monitor under, so the report can never tear mid-fold.
+func (m *gatewayMetrics) anchorRefusalReport() *metrics.AnchorRefusalReport {
+	if m == nil {
+		return nil
+	}
+	m.compactMu.Lock()
+	defer m.compactMu.Unlock()
+	if m.anchorMon == nil {
+		return nil
+	}
+	r := m.anchorMon.Report()
+	if r.Turns == 0 {
+		return nil
+	}
+	return &r
 }
 
 // observeUncachedTrim records oversized-result elision as a fak-authored uncached-token saving.

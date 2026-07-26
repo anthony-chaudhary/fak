@@ -76,6 +76,45 @@ long-horizon guard use has cumulative counters:
   session-extension tokens. Pass `--context-budget-tokens N` to normalize shed tokens into
   percent/window-equivalent for a specific session budget.
 
+## Fleet Posture Census
+
+The aggregate above answers "what did the ledgers record?". `fak cachevalue census`
+(#3650) answers the live-fleet question the trust-but-verify epic needs first: how much
+of the fleet running *right now* has managed cache ACTIVE, and among those, how many ever
+fired a 1h-TTL upgrade?
+
+```bash
+fak cachevalue census          # render the census: ACTIVE share, and upgrade-fired share among ACTIVE
+fak cachevalue census --json   # the same fold as JSON, for a periodic poster or dashboard
+```
+
+It reads the guard-session index every `fak guard` launch appends to, keeps the LIVE rows,
+GETs each worker's `/debug/vars` with that session's read-scoped bearer, and folds the
+`managed_cache` posture block (`guardvars.ManagedCacheVars`) into
+`fak-managed-cache-adoption-census/1` — `cachevaluereport.FoldCensus`, pure and
+deterministic: rows in, report out. Three rules keep both headlines honest:
+
+- **An unreadable worker is UNKNOWN, never PASSIVE.** A failed scrape (no published
+  gateway, a refused bearer, an unparseable answer) is excluded from both the numerator
+  and the denominator, so a dark slice of the fleet can never manufacture a low adoption
+  number.
+- **An absent `managed_cache` block IS an affirmative PASSIVE witness.** That block's
+  producer omits it only when the lever is off and nothing was observed, so a worker that
+  answered without one is counted as PASSIVE rather than dropped into UNKNOWN.
+- **A wire with no 1h-TTL lever leaves the upgrade denominator.** On the OpenAI Responses
+  wire fak's managed-cache lever is the pinned `prompt_cache_key`, so an ACTIVE worker
+  there can never fire an upgrade; counting it would report a fleet-wide failure that is
+  really a wire without the lever.
+
+This is deliberately not the weekly digest's posture-adoption line (#3646), which INFERS
+posture from durable exit rows and so reads an ACTIVE worker that fired nothing as
+passive. The census reads the resolved posture flag off the live worker, so
+ACTIVE-with-no-evidence and genuinely PASSIVE stay distinct. It is a diagnostic read, not
+a gate: a mostly-PASSIVE fleet reports `MOSTLY_PASSIVE` and still exits 0, and an empty or
+entirely dark fleet reports `INSUFFICIENT` rather than a fabricated zero. Cadence today is
+the weekly digest plus an operator running the census on demand; `--json` is the
+poster-ready surface if the census itself is ever put on a schedule.
+
 ## Honesty Fences
 
 - **#1066 marginal-over-warm-KV fence.** The published Track-1 number is realized

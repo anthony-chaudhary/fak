@@ -129,6 +129,13 @@ type gatewayMetrics struct {
 	uncachedTrimShed     uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
 	ttlUpgrades          map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
 	placementAttempts    map[string]uint64 // WITNESSED: offensive cache-breakpoint placement attempts by outcome ("placed" | agent.BreakpointReason*). "placed" is the fak-authored slice — a breakpoint spliced onto a caller that sent none, so the provider cache_read it earns is fak-unlocked; "already_set" is the Claude-Code shape fak leaves alone (the client's cache, not fak's).
+	// anchorMon is the LIVE loop over that same placement stream (#3622): the counter above is a
+	// cumulative tally nobody watches, so a session whose head turns volatile mid-conversation just
+	// stops incrementing "placed" and nothing fires. The monitor folds each outcome into a rolling
+	// refused fraction over DECISIVE turns only and raises ANCHOR_REFUSED_RISING on the crossing.
+	// Guarded by compactMu — the same lock observePlacement already holds, so the fold costs no new
+	// synchronization and can never race the counter it mirrors.
+	anchorMon *metrics.AnchorRefusalMonitor
 
 	// ctxViewMu guards ctxplan planned-view rewrites. This is a CONTEXT-plane witness,
 	// but not a history-compaction attempt: the planner materialized an O(1) resident
@@ -456,6 +463,7 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		compactBailReasons:       map[string]uint64{},
 		ttlUpgrades:              map[string]uint64{},
 		placementAttempts:        map[string]uint64{},
+		anchorMon:                metrics.NewAnchorRefusalMonitor(metrics.AnchorRefusalThresholds{}),
 		reqMemoryObserved:        map[string]uint64{},
 		reqMemoryPlan:            map[requestMemoryMetricKey]*requestMemoryMetricStats{},
 		reqMemoryTokens:          map[requestMemoryTokenKey]*requestMemoryTokenStats{},
@@ -768,6 +776,18 @@ type AdjudicationSummary struct {
 	// in which case the exit line prints turns only and omits the wall-clock dual.
 	E2ELatencySumSeconds float64 `json:"e2e_latency_sum_seconds,omitempty"`
 	E2ELatencyCount      uint64  `json:"e2e_latency_count,omitempty"`
+
+	// AnchorPlacement is the session's breakpoint-placement outcome MIX and the rolling
+	// volatile-head verdict over it (#3622) — the live-loop half of the placement counters the
+	// Prometheus surface already renders. The counters are cumulative and unwatched: a session
+	// whose head turns volatile mid-conversation simply stops incrementing "placed", which reads
+	// identically to a session that went quiet. This carries the fraction, the dominant refusal
+	// outcome, and how many times ANCHOR_REFUSED_RISING was raised, so the guard exit banner can
+	// say the anchor stopped earning caching instead of leaving the operator to diff two counters.
+	// A pointer with omitempty: nil — and the JSON field absent — on any session that never
+	// attempted a placement, so a non-Anthropic or cold session's summary is byte-identical to
+	// before this field existed.
+	AnchorPlacement *metrics.AnchorRefusalReport `json:"anchor_placement,omitempty"`
 }
 
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
@@ -810,6 +830,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.DeferColdTurns, sum.DeferColdCount = m.toolDeferSnapshot()
 	sum.DeferColdToolNames = m.toolDeferNamesSnapshot()
 	sum.DeferStandDownTurns, sum.DeferStandDownReasons = m.toolDeferStandDownSnapshot()
+	sum.AnchorPlacement = m.anchorRefusalReport()
 	sum.ToolRefTurns, sum.ToolRefConverted = m.toolRefSanitizeSnapshot()
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	sum.ToolFeedbackTurns, _ = m.toolFeedbackSnapshot()
