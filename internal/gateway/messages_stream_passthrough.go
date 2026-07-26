@@ -81,6 +81,24 @@ type anthropicPassthrough struct {
 	// immediate stop) leaves it zero, so prefill is reported as "not measured" rather
 	// than as the full turn.
 	firstTokenAt time.Time
+
+	// --- warm-continue (replay-as-context) state, #3353 -------------------------
+	// asstText accumulates the assistant TEXT already relayed to the client this turn,
+	// off-wire, so a mid-stream worker death can replay it as a prefill turn on a fresh
+	// worker (dynamo RetryManager.track_response) instead of ending the caller's SSE with
+	// a terminal error. See messages_stream_warmcontinue.go for the resume mechanism.
+	asstText strings.Builder
+	// continuing is set while re-issuing after a death: onEvent then suppresses the
+	// continuation's own message_start echo/notes so the client sees ONE unbroken turn.
+	continuing bool
+	// sawThinking keeps the replay honest: a thinking turn cannot be prefilled (Anthropic
+	// rejects an assistant prefill with extended thinking enabled), so warm-continue is not
+	// attempted once a thinking block has been relayed.
+	sawThinking bool
+	// openClientBlock is the client index of the currently open relayed content block, or
+	// -1 when none is open. A warm-continue closes a dangling block before the continuation
+	// opens a fresh one, so the resumed stream stays well-formed.
+	openClientBlock int
 }
 
 // markFirstToken stamps the time-to-first-token boundary on the first content delta of
@@ -177,6 +195,13 @@ func (p *anthropicPassthrough) flushHeldTools() {
 func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 	switch ev.Event {
 	case "message_start":
+		// A warm-continue re-issue (#3353) opens its OWN upstream stream with its own
+		// message_start; the client is already mid-turn, so swallow the duplicate frame
+		// (and the start-of-turn notes) and keep the single unbroken client turn.
+		if p.continuing {
+			p.start() // idempotent no-op; the client stream is already open
+			return nil
+		}
 		// First event from the real API. Arm the result-side floor ONCE (so a
 		// tainted inbound result still refuses a later exfil call, exactly as the
 		// buffered path does), then open the client stream. Running admit here —
@@ -226,15 +251,23 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			p.toolOrder = append(p.toolOrder, d.Index)
 			return nil // HELD until adjudicated
 		}
+		if d.ContentBlock.Type == "thinking" || d.ContentBlock.Type == "redacted_thinking" {
+			// A thinking turn cannot be replayed as an assistant prefill, so once one is
+			// relayed warm-continue (#3353) stands down for this turn (canWarmContinue).
+			p.sawThinking = true
+		}
 		oi := p.outIdx
 		p.outIdx++
 		p.passIdx[d.Index] = oi
+		p.openClientBlock = oi // a warm-continue closes this if it is still open on death
 		relayWithIndex(p.send, "content_block_start", ev.Data, oi)
 
 	case "content_block_delta":
 		var d struct {
 			Index int `json:"index"`
 			Delta struct {
+				Type        string `json:"type"`
+				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
 			} `json:"delta"`
 		}
@@ -251,6 +284,12 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		}
 		if oi, ok := p.passIdx[d.Index]; ok {
 			relayWithIndex(p.send, "content_block_delta", ev.Data, oi)
+			// Accumulate relayed assistant TEXT off-wire so a mid-stream worker death can
+			// replay exactly what the client already saw as a prefill turn (#3353). Only
+			// text_delta is captured — thinking deltas are not prefill-replayable.
+			if d.Delta.Type == "text_delta" {
+				p.asstText.WriteString(d.Delta.Text)
+			}
 		}
 
 	case "content_block_stop":
@@ -265,6 +304,9 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		}
 		if oi, ok := p.passIdx[d.Index]; ok {
 			relayWithIndex(p.send, "content_block_stop", ev.Data, oi)
+			if p.openClientBlock == oi {
+				p.openClientBlock = -1 // block closed cleanly; nothing dangling to close on death
+			}
 		}
 
 	case "message_delta":
@@ -329,12 +371,22 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 
 	p := &anthropicPassthrough{
 		s: s, w: w, r: r, req: req, reqTrace: reqTrace, turn: sessionTurn, flusher: flusher,
-		passIdx: map[int]int{},
-		toolBuf: map[int]*sseToolAccum{},
+		passIdx:         map[int]int{},
+		toolBuf:         map[int]*sseToolAccum{},
+		openClientBlock: -1,
 	}
 	began := time.Now()
 
 	err := hp.StreamAnthropicRaw(r.Context(), req.Raw, upstreamKey, upstreamBeta, p.onEvent)
+	// #3353 warm-continue: a worker that dies mid-turn (client bytes already flowing) is
+	// recovered by replaying the already-delivered assistant text as a prefill turn on a
+	// fresh worker with the token budget decremented, so the caller sees ONE unbroken turn
+	// instead of a terminal error + cold session restart. Gated OFF by default; only the
+	// text-only pre-tool prefix is replayable (see canWarmContinue).
+	if err != nil && p.started && p.canWarmContinue(err) {
+		s.logf("gateway: warm-continue after mid-stream death (messages): %v", err)
+		err = p.warmContinue(hp, upstreamKey, upstreamBeta)
+	}
 	if err != nil {
 		switch {
 		case p.started:
