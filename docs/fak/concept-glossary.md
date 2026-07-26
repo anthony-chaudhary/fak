@@ -1959,3 +1959,17 @@ The demand-paged host fit guard: refuses a MemoryPlan whose host-scoped demands 
 The injectable core of RefusePagedHostPlanIfTooBig: takes the host (total, free, known) triple explicitly so the demand-paged refusal is testable without a live /proc/meminfo probe.
 
 **Distinct from:** Unexported test seam, not the entry point: RefusePagedHostPlanIfTooBig probes the live host via HostSystemMemoryInfo and delegates here, mirroring how refuseHostScopedPlanForHostMem backs the fraction-only guard in capacity.go.
+
+
+### GradeNotDebt
+
+The mode-debt scorer's grade for a dial that is correctly harness-held and model-unreachable: a safety dial the model cannot reach is not implicit-mode debt at all, so it is excluded from the lift worklist entirely rather than ranked at the bottom of it.
+
+**Distinct from:** Distinct from mode_debt, the headline metric this grade REMOVES a dial from. GradeNotDebt is a per-dial verdict meaning 'never rank this'; mode_debt is the fleet-level integer that ranked dials sum into. Also distinct from GradeClean, which means a dial IS debt-eligible and passed all four regime criteria -- GradeNotDebt means the criteria do not apply, so grading such a dial CLEAN would falsely claim it had been lifted.
+
+
+### NotDebt
+
+The Scorecard roll-up COUNT of dials that graded GradeNotDebt: how many surveyed dials were excluded from the lift worklist as correctly harness-held safety dials. Derived by Score so no consumer re-folds the grades.
+
+**Distinct from:** Distinct from GradeNotDebt, the per-dial grade it counts -- one is a verdict on a single dial, the other an integer over the whole census. Also distinct from the sibling Debt field: Debt is RANKED debt only (Hard+Soft), so NotDebt and Clean both contribute zero to it. Reading NotDebt as a debt figure inverts its meaning, since it counts precisely the dials that are NOT debt.

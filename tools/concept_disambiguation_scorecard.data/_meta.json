@@ -1077,6 +1077,11 @@
           "category": "incidental",
           "reason": "machine-readable debt key for the negation operator scorecard",
           "token": "negation_operator_debt"
+        },
+        {
+          "category": "incidental",
+          "reason": "A Go test function name cited in a doc comment as the place the HARD =\u003e un-lifted invariant is pinned. It names a test, not a concept in the scorer's vocabulary: its meaning is fully given by the invariant it checks, which is itself positioned under the grade rows. Positioning every test identifier would book coverage for the test suite rather than the domain.",
+          "token": "TestModeDebtGradeInvariants"
         }
       ],
       "id": "score-debt",
@@ -1085,6 +1090,7 @@
         "NegationOperatorDebtKey",
         "ScorecardAxis",
         "ScorecardAxisOracle",
+        "TestModeDebtGradeInvariants",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
         "negation_operator_debt",

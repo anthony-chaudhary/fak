@@ -16,8 +16,8 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **38** (clarity 0 + coverage 38) |
-| **Crystal-clear concepts (and climbing)** | **390** crystal of 2008 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2184 / 2222** (98.3% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **392** crystal of 2010 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2186 / 2224** (98.3% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
 
@@ -26,10 +26,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2008 concepts - score 98.9/100 (grade A) - disambiguation-debt 38
+concept-disambiguation chart - 2010 concepts - score 98.9/100 (grade A) - disambiguation-debt 38
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 390
+  * crystal       #######..................... 392
   o defined       ############################ 1618
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -51,7 +51,7 @@ clarity mix by family (each cell = one concept):
   policy-capability **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (120 concept(s); 22 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
   render-materialize ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (152 concept(s); 4 crystal)
-  score-debt       ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (68 concept(s); 4 crystal)
+  score-debt       ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (70 concept(s); 6 crystal)
   session-runtime  ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 23 crystal)
   support-maturity ************ooooooooooooooooo (29 concept(s); 12 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
@@ -77,11 +77,11 @@ coverage by family (positioned / discovered):
   layout           ############################ 13/13
   plan             ############################ 308/308
   pool             ############################ 36/36
-  score-debt       ############################ 83/83
+  score-debt       ############################ 85/85
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.3%  (2184/2222 confusable tokens positioned)
+namespace coverage  [###############################.] 98.3%  (2186/2224 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -390,6 +390,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | render-materialize | **RenderPlan** - Prompt-assembly layout: stable prefix of reused views plus volatile tail of raw faults |
 | * | crystal | symbol | render-materialize | **RenderItem** - One cell materialized into context by OpRender query effect |
 | * | crystal | symbol | render-materialize | **Rendered** - One span paged into fresh history through the trust gate |
+| * | crystal | symbol | score-debt | **GradeNotDebt** - The mode-debt scorer's grade for a dial that is correctly harness-held and model-unreachable: a safety dial the model cannot reach is not implicit-mode debt at all, so it is excluded from the lift worklist entirely rather than ranked at the bottom of it. |
+| * | crystal | symbol | score-debt | **NotDebt** - The Scorecard roll-up COUNT of dials that graded GradeNotDebt: how many surveyed dials were excluded from the lift worklist as correctly harness-held safety dials. Derived by Score so no consumer re-folds the grades. |
 | * | crystal | subsystem | score-debt | **scorecard** - One deterministic measurement of a surface that folds reality into a single *_debt integer plus an A-F grade (the family is documented in the scorecard skill). |
 | * | crystal | subsystem | score-debt | **scorecard control pane** - The fold that sums every scorecard's *_debt into one portfolio number with a pinned ratchet that reds only on a regression above baseline. |
 | * | crystal | metric | score-debt | **disambiguation-debt** - This scorecard's integer: clarity defects of positioned concepts plus coverage gaps (confusable tree tokens with no row). |
@@ -2244,7 +2246,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 2008 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 2010 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2274,7 +2276,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | layout | 13 | 13 | 0 |
 | plan | 308 | 308 | 0 |
 | pool | 36 | 36 | 0 |
-| score-debt | 83 | 83 | 0 |
+| score-debt | 85 | 85 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 
