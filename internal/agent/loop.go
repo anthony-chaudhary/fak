@@ -367,6 +367,10 @@ type armCompleteFunc func(ctx context.Context, messages []Message, tools []ToolD
 
 func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]traceEvent, complete armCompleteFunc, opts ...RunOption) (ArmMetrics, error) {
 	cfg := resolveRunConfig(opts)
+	// Mid-flight mailbox (#5158): seal the verb mailbox on EVERY return path once the arm
+	// finishes, so a finished run refuses further mid-flight verbs with the closed
+	// terminal-session token. Nil-safe: no mailbox wired => a no-op.
+	defer cfg.sealMidflightVerbs()
 	m := ArmMetrics{Arm: "baseline"}
 	if fak {
 		m.Arm = "fak"
@@ -468,6 +472,26 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				return m, ctx.Err()
 			}
 		}
+		// Mid-flight set-budget (#5158): write any staged budget through to the wired
+		// session table at THIS clean boundary — BEFORE the gate reads it — so the same
+		// boundary's gate adjudicates the fresh allotment (an exhausted one stops the arm
+		// here with its closed exhaustion reason). With no table wired the staged write
+		// drains as REFUSED. A no-op with no mailbox or nothing staged.
+		cfg.applyMidflightBudget(turn + 1)
+		// Mid-flight interrupt (#5158): a boundary-clean stop armed while the previous turn
+		// was in flight lands HERE — the in-flight turn already completed its admitted
+		// results — carrying the closed INTERRUPTED witness on StoppedBySession, never
+		// mid-tool and never a turn-cap inference. A no-op with no mailbox or nothing armed.
+		if reason, stopped := cfg.takeMidflightInterrupt(turn + 1); stopped {
+			if toolTerminalPayload != "" {
+				cfg.toolTerminalWake.release()
+			}
+			m.StoppedBySession = reason
+			if fak {
+				finalizeFak(k, &m)
+			}
+			return m, nil
+		}
 		// Session-control gate (no-op when no table is wired): read the session's live
 		// drive state at the turn boundary. A non-proceed verdict ends the arm here —
 		// budget-exhausted / drained / stopped / paused — with the reason recorded, so a
@@ -489,6 +513,10 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			sessionctl.RecordToolTerminalWakeNext(cfg.trace, toolTerminalPayload)
 		}
 		cfg.applyPace(perTurnCap)
+		// Typed loop-progress (#5148): the turn boundary is the first witnessed
+		// transition of this turn — emitted AFTER the session gate admitted it, so a
+		// turn that never ran is never announced. A no-op with no observer wired.
+		cfg.emitProgress(ProgressEvent{Kind: ProgressTurnStarted, Turn: turn + 1})
 
 		// Steer splice (#850): a running session drains any operator steer enqueued on
 		// the a2achan Session-locale bus and folds it into THIS turn's input. With no
@@ -564,6 +592,7 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 					continuation := "STOP_UNWITNESSED: missing declared witness: " + missing + ". Continue working until that witness exists."
 					sessionctl.RecordStopWitnessNext(cfg.trace, continuation)
 					messages = append(messages, Message{Role: RoleUser, Content: continuation})
+					cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 					continue
 				}
 			}
@@ -572,6 +601,7 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			// match) — a clean run leaks no provisional effect.
 			sp.resolve(ctx, nil, &m)
 			m.FinalAnswer = asst.Content
+			cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 			if fak {
 				finalizeFak(k, &m)
 			}
@@ -596,7 +626,26 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			rawArgs := tc.Function.Arguments
 			var content string
 			ev := traceEvent{Turn: turn + 1, Arm: m.Arm, Tool: tool, RawArgs: rawArgs}
+			// Dispatch is announced BEFORE the verdict is known, so a client watching the
+			// stream sees the call in flight rather than only its outcome (#5148).
+			cfg.emitProgress(ProgressEvent{Kind: ProgressToolStarted, Turn: turn + 1, CallID: tc.ID, Tool: tool})
 			switch {
+			case cfg.dropMidflightCall(tc.ID, turn+1):
+				// Mid-flight drop-pending-call (#5158): the operator named THIS queued call
+				// to be skipped BEFORE dispatch — exactly this call and nothing else. It
+				// never reaches the engine; the model sees a typed status=skipped receipt
+				// (#2414) carrying the closed CALL_DROPPED_BY_OPERATOR reason, never a
+				// feigned success, and can re-issue if it still needs the call.
+				content = ToolReceipt{
+					Status:      ToolResultSkipped,
+					Reason:      "CALL_DROPPED_BY_OPERATOR",
+					Disposition: "RETRYABLE",
+					Fix:         "the operator dropped this call mid-flight; re-issue it if it is still needed",
+					Detail:      "skipped before dispatch by a mid-flight drop-pending-call verb; never dispatched",
+				}.JSON()
+				ev.Verdict = "DROPPED"
+				ev.By = "operator"
+				ev.Note = "DROPPED by a mid-flight drop-pending-call verb (skipped before dispatch)"
 			case cfg.constraintDenied(tool, &content, &ev):
 				// Out-of-band tightened floor (#2756): a tool the operator forbade
 				// mid-session is denied BEFORE dispatch — never sent — with a typed
@@ -651,6 +700,15 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			default:
 				content, ev = execNaive(tool, rawArgs, &m, ev)
 			}
+			// The kernel's verdict for this call, drawn from the SAME closed vocabulary the
+			// rest of the kernel refuses with (verdictName + the deny's closed reason) — the
+			// event a client gates on (#5148). Emitted after the switch so an ESCALATE park
+			// that re-dispatched (parkEscalatedDeny) reports its FINAL verdict, not the
+			// provisional deny.
+			cfg.emitProgress(ProgressEvent{
+				Kind: ProgressCallAdjudicated, Turn: turn + 1, CallID: tc.ID, Tool: tool,
+				Verdict: ev.Verdict, Reason: ev.Reason,
+			})
 			if log != nil {
 				*log = append(*log, ev)
 			}
@@ -661,6 +719,12 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				m.TaskCompleted = true // the actual goal (a real booking) succeeded
 			}
 			messages = append(messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: content})
+			// The result has entered the transcript: report HOW it entered (clean /
+			// quarantined / tainted), derived from signals the loop already read (#5148).
+			cfg.emitProgress(ProgressEvent{
+				Kind: ProgressResultAdmitted, Turn: turn + 1, CallID: tc.ID, Tool: tool,
+				Taint: admittedTaint(ev, content),
+			})
 			// Capture this call's result as a prior output for the next speculation (only
 			// when speculating, so the historical loop allocates nothing extra).
 			if sp != nil {
@@ -671,6 +735,10 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				})
 			}
 		}
+		// Every tool call this turn proposed has been adjudicated and admitted: the turn
+		// is complete (#5148). An ABNORMAL end — terminate, session gate, error — returns
+		// above without this event; its reason rides the terminal ArmMetrics witness.
+		cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 		// Retire any armed write barrier at the turn boundary — it gates only this turn's
 		// writes, never a later turn's (#1319).
 		sp.disarm()

@@ -50,6 +50,15 @@ type runConfig struct {
 	contextBaselineOutput int
 	toolTerminalWake      *ToolTerminalWakeQueue
 	finalGate             func() (bool, string)
+	// observer is the typed loop-progress sink (#5148, WithProgressObserver in
+	// loop_observe.go). nil => every emitProgress is a no-op and the loop is
+	// byte-for-byte the historical loop.
+	observer ProgressObserver
+	// midflight is the owned per-run mid-flight verb mailbox (#5158, WithMidflightVerbs
+	// in loop_midflight.go). The loop consumes its queued interrupt / drop-pending-call /
+	// set-budget verbs at each CLEAN turn boundary. nil => no mailbox wired and every
+	// mid-flight consult is a no-op, so the loop is byte-for-byte the historical loop.
+	midflight *MidflightVerbs
 }
 
 // ToolTerminalWakeKind is the typed reason a background-tool terminal
