@@ -16,8 +16,8 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **39** (clarity 0 + coverage 39) |
-| **Crystal-clear concepts (and climbing)** | **393** crystal of 2011 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2187 / 2226** (98.2% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **395** crystal of 2013 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2189 / 2228** (98.2% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
 
@@ -26,10 +26,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2011 concepts - score 98.8/100 (grade A) - disambiguation-debt 39
+concept-disambiguation chart - 2013 concepts - score 98.8/100 (grade A) - disambiguation-debt 39
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 393
+  * crystal       #######..................... 395
   o defined       ############################ 1618
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -44,11 +44,11 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ********ooooooooooooooooooooooooooooooo (39 concept(s); 8 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
-  guard-gate       ******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (294 concept(s); 78 crystal)
+  guard-gate       *******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (295 concept(s); 79 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
   loop             **************************ooooooooooooooooooooooooooooooooo (59 concept(s); 26 crystal)
   plan             *********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (252 concept(s); 21 crystal)
-  policy-capability ***********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (121 concept(s); 23 crystal)
+  policy-capability ************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (122 concept(s); 24 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
   render-materialize ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (152 concept(s); 4 crystal)
   score-debt       ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (70 concept(s); 6 crystal)
@@ -60,10 +60,10 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   session-runtime  ###########################. 196/205
-  guard-gate       ###########################. 354/362
+  guard-gate       ###########################. 355/363
   cache            ############################ 256/260
   decision         ##########################.. 49/53
-  policy-capability ###########################. 141/144
+  policy-capability ###########################. 142/145
   render-materialize ############################ 171/174
   support-maturity ##########################.. 37/40
   context-ctx      ############################ 193/195
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.2%  (2187/2226 confusable tokens positioned)
+namespace coverage  [###############################.] 98.2%  (2189/2228 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -302,6 +302,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | guard-gate | **DefaultGatedSinks (default egress-sink policy)** - The reasonable default GatedSinks configuration: gates EGRESS (exfiltration) and DESTRUCTIVE (irreversible mutation) sinks on session taint, but NOT EXEC (preserves dev work). |
 | * | crystal | symbol | guard-gate | **ContractGate (contract validation gate)** - A named validation checkpoint in an official run contract (browseraction/terminalbench/toolsandbox) that gates promotion: candidate_task_ids, official_harness_pin, same_task_ids_required, etc. |
 | * | crystal | concept | guard-gate | **guardrail (safety boundary)** - A safety boundary or constraint that prevents an AI system from taking harmful actions; often implemented as policy checks or refusal reasons. |
+| * | crystal | symbol | guard-gate | **AmendGatedWiden** - The amendment class meaning a GATED OPERATOR CHANNEL (overlay, reload, operator escalation) may widen this policy surface, and the agent may never widen it on its own. One of four closed classes alongside FROZEN, RATCHET and SELF_AMENDABLE. |
 | * | crystal | symbol | guard-gate | **GatedAction** - GatedAction is the sessionctl payload of one call the adjudication gate refused with an ESCALATE disposition, parked on the out-of-band operator inbox (#2757): the tool name, the raw proposed args, the closed refusal reason, and the gate's preview — what an external operator reads to approve or deny the action. |
 | * | crystal | symbol | guard-gate | **ParkGatedAction** - ParkGatedAction is the sessionctl blocking park op of the out-of-band operator inbox (#2757): it publishes one GatedAction as an addressable pending action and blocks the calling loop until an operator verdict arrives, the park window elapses, or the context is cancelled, witnessing every outcome on the trace's park Next records at the consume point. |
 | * | crystal | symbol | guard-gate | **ResolveGatedAction** - ResolveGatedAction is the typed operator approve/deny op of the out-of-band inbox (#2757): it resolves the pending action addressed by id with a ParkVerdict (approve, optionally carrying modified args, or deny), waking the parked loop exactly once; malformed verdicts and unknown/already-resolved ids refuse with the closed PARK_MALFORMED / PARK_UNKNOWN_ACTION reasons. |
@@ -377,6 +378,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | policy-capability | **abi.Verdict** - The discriminated-union decision an adjudicator returns, keyed by kind (Allow, Deny, Defer, Transform, Quarantine, RequireWitness) with typed payloads. |
 | * | crystal | symbol | policy-capability | **reason code** - The closed, additive vocabulary of refusal reasons (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, ...) that every deny verdict cites, never free text. |
 | * | crystal | config | policy-capability | **posture (tool admission)** - The policy's default behavior after all provable refusal checks pass: PostureFailClosed (deny everything not allowed) or PostureAdmitAndLog (admit low-risk reads with forensic metadata). |
+| * | crystal | symbol | policy-capability | **PolicyKnob** - A registry ROW in PolicyKnobRegistry naming one amendable policy surface together with its amendment class (FROZEN / RATCHET / GATED_WIDEN / SELF_AMENDABLE) and permitted direction. It is metadata ABOUT a policy field, not a field itself, and carries no runtime value. |
 | * | crystal | symbol | policy-capability | **sessionQuarantineRetentionPolicy** - The cmd/fak accessor that reads FAK_SESSION_QUARANTINE_RETENTION and returns the bounded retention policy governing how many, how old and how large the quarantined copies of a corrupt session registry may grow before the recovery path reaps them; an unparseable value returns the conservative default plus an error the caller warns about rather than failing on. |
 | * | crystal | symbol | policy-capability | **DenialPolicy** - Store policy field selecting how the shared-task fold reports a policy-refused patch: deny outright or hold as quarantined. |
 | * | crystal | symbol | policy-capability | **ViewPolicy** - Reader-scope redaction policy for shared-task views: MaxScope plus IncludeQuarantined decide what View and EventsView reveal to a caller. |
@@ -2247,7 +2249,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 2011 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 2013 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2260,10 +2262,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | session-runtime | 196 | 205 | 9 |
-| guard-gate | 354 | 362 | 8 |
+| guard-gate | 355 | 363 | 8 |
 | cache | 256 | 260 | 4 |
 | decision | 49 | 53 | 4 |
-| policy-capability | 141 | 144 | 3 |
+| policy-capability | 142 | 145 | 3 |
 | render-materialize | 171 | 174 | 3 |
 | support-maturity | 37 | 40 | 3 |
 | context-ctx | 193 | 195 | 2 |

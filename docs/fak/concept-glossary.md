@@ -1980,3 +1980,17 @@ The Scorecard roll-up COUNT of dials that graded GradeNotDebt: how many surveyed
 The verdict-meta key the adjudicator's egress band stamps on a refusal to name WHICH egress stance produced it -- currently 'restrict', the strict-allowlist posture in which WebFetch flips from default-allowed to allowlist-only. It answers 'why was this host refused' for a reader of the decision journal, distinguishing a posture-driven refusal from a rule-driven one.
 
 **Distinct from:** Distinct from SecretPosture, the adjudicator's OTHER posture knob: SecretPosture governs what happens to credential-shaped spans in tool output (mask, quarantine, fail-closed) and is about DISCLOSURE, while egress_posture governs which destinations a tool call may reach and is about REACHABILITY. Both live on the same Policy and both spell their values as postures, so a reader scanning verdict meta can easily attribute one refusal to the other. Also distinct from the hardwired metadata floor, which produces its own refusal and stamps no egress_posture at all -- absence of this key is how a floor refusal is told apart from an operator-configured one.
+
+
+### PolicyKnob
+
+A registry ROW in PolicyKnobRegistry naming one amendable policy surface together with its amendment class (FROZEN / RATCHET / GATED_WIDEN / SELF_AMENDABLE) and permitted direction. It is metadata ABOUT a policy field, not a field itself, and carries no runtime value.
+
+**Distinct from:** egress_posture is an actual adjudicator.Policy knob whose value shapes a live decision; PolicyKnob is the registry entry that DESCRIBES such a knob's amendability. Reading a PolicyKnob tells you who may move a surface and which way — never what the surface is currently set to. The registry is exhaustive over exported Policy fields by reflection, so every knob has exactly one PolicyKnob row, but a PolicyKnob row also exists for non-field compiled-in floor elements that are not knobs at all.
+
+
+### AmendGatedWiden
+
+The amendment class meaning a GATED OPERATOR CHANNEL (overlay, reload, operator escalation) may widen this policy surface, and the agent may never widen it on its own. One of four closed classes alongside FROZEN, RATCHET and SELF_AMENDABLE.
+
+**Distinct from:** A PolicyKnob row carries an AmendGatedWiden value; the class is the vocabulary, the row is the assignment. Against its own siblings: RATCHET permits any authorized channel to tighten and nobody to widen, so it is about DIRECTION; GATED_WIDEN permits widening but restricts WHO, so it is about CHANNEL. A knob can therefore be widened under GATED_WIDEN in a way RATCHET forbids outright — the two are not points on one strictness scale, and reading GATED_WIDEN as 'looser RATCHET' is the specific error this row exists to prevent. SELF_AMENDABLE is the agent-writable frontier and is deliberately empty.

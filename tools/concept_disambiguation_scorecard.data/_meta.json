@@ -490,6 +490,11 @@
           "category": "incidental",
           "reason": "Refactor-extraction of the pre-existing HTTP fallback leg of fetchGuardPreCompactSignalsPreferred; it names an existing code path (source==\"http\") rather than introducing a new guard-gate concept.",
           "token": "fetchGuardPreCompactSignalsHTTP"
+        },
+        {
+          "category": "incidental",
+          "reason": "An English adverb inside a prose comment ('the knob exists to (gatedly) loosen the floor'), not a symbol or a term of art. Its meaning is entirely given by the AmendGatedWiden class the sentence describes; positioning it would book concept coverage for a figure of speech.",
+          "token": "gatedly"
         }
       ],
       "exclude": [
@@ -520,6 +525,7 @@
         "gate_test",
         "gate_verbtier",
         "gated",
+        "gatedly",
         "gateresult",
         "gates",
         "gatew",
