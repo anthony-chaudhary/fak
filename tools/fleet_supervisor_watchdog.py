@@ -14,7 +14,9 @@ second supervisor.
 
 Opt-in by design -- respawning the supervisor launches autonomous workers, so it
 stays OFF until you turn it on for the host that should run the fleet:
-  * The `job` repo must be present (FAK_JOB_DIR or ~/Documents/GitHub/job).
+  * The `job` repo must be present (FAK_JOB_DIR, else a `job` sibling of this repo,
+    else the legacy ~/Documents/GitHub/job).
+  * The `DISPATCH_DISABLED` kill-switch must be absent from that repo.
   * FAK_SUPERVISOR_ENABLE=1 must be set, else this only REPORTS and exits 0.
 
 Exit codes: 0 = alive / disabled / job repo absent (no-op) | 10 = respawned it.
@@ -36,7 +38,23 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-JOB_DIR = os.environ.get("FAK_JOB_DIR", os.path.expanduser("~/Documents/GitHub/job"))
+def _default_job_dir() -> str:
+    """First job checkout that actually exists, else the legacy path.
+
+    The old unconditional default (``~/Documents/GitHub/job``) does not exist on a
+    host that clones siblings under a work root -- e.g. ``C:\\work\\fak`` next to
+    ``C:\\work\\job`` -- so the watchdog reported "job repo absent" and kept nothing
+    alive, while the .ps1 port (which defaults to the sibling) happily respawned.
+    Probing the sibling first closes that split and keeps the legacy path working.
+    """
+    for cand in (os.path.join(os.path.dirname(FLEET_DIR), "job"),
+                 os.path.expanduser("~/Documents/GitHub/job")):
+        if os.path.isdir(cand):
+            return cand
+    return os.path.expanduser("~/Documents/GitHub/job")
+
+
+JOB_DIR = os.environ.get("FAK_JOB_DIR") or _default_job_dir()
 TARGET = int(os.environ.get("FAK_SUPERVISOR_TARGET", "4"))
 ENABLED = _env_flag("FAK_SUPERVISOR_ENABLE")
 LOG_DIR = os.environ.get("FAK_WATCHDOG_LOG_DIR", os.path.join(HERE, "_watchdog"))
@@ -155,6 +173,19 @@ def main() -> int:
     if not os.path.exists(run_loop):
         note(f"NOOP    job repo / supervisor absent ({run_loop}) -- nothing to keep alive")
         return 0
+
+    # Host-local dispatch kill-switch. run_supervise_loop.py itself no-ops on this
+    # sentinel, so respawning against it burns a process launch every tick and gets a
+    # supervisor that exits immediately -- the watchdog then sees "not alive" and does
+    # it again, forever. Witnessed 2026-07-26: 25 consecutive 5-minute RESPAWN ticks,
+    # every child dead inside a tick, and the churn masked because the respawn toast is
+    # rate-limited to one an hour. Honour the same sentinel the loop honours.
+    kill_switch = os.path.join(JOB_DIR, "DISPATCH_DISABLED")
+    if os.path.exists(kill_switch):
+        note(f"NOOP    dispatch kill-switch present ({kill_switch}) -- not respawning; "
+             "delete it to re-enable dispatch")
+        return 0
+
     if not ENABLED:
         note("NOOP    supervisor DOWN but FAK_SUPERVISOR_ENABLE not set -- reporting only")
         return 0

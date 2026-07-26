@@ -199,3 +199,37 @@ def test_main_bounds_unknown_verdict_probe(tmp_path, monkeypatch):
     assert wd.main() == 10
     assert seen[0][1]["timeout"] == wd.VERDICT_TIMEOUT_S
 
+
+def test_main_respects_dispatch_kill_switch(tmp_path, monkeypatch):
+    """The DISPATCH_DISABLED sentinel must stop the respawn, not just the supervisor.
+
+    run_supervise_loop.py already no-ops on it, so without this gate every tick spawns a
+    child that dies immediately and the next tick spawns another -- an unbounded respawn
+    loop that looks like a crashing supervisor.
+    """
+    job = tmp_path / "job"
+    scripts = job / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "run_supervise_loop.py").write_text("", encoding="utf-8")
+    (job / "DISPATCH_DISABLED").write_text("kill-switch", encoding="utf-8")
+    monkeypatch.setattr(wd, "JOB_DIR", str(job))
+    monkeypatch.setattr(wd, "LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setattr(wd, "ENABLED", True)
+    monkeypatch.setattr(wd, "supervisor_alive", lambda: [])
+    monkeypatch.setattr(wd, "toast", lambda *args: None)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("must not spawn while the kill-switch is present")
+
+    monkeypatch.setattr(wd.subprocess, "Popen", boom)
+    assert wd.main() == 0
+
+
+def test_default_job_dir_prefers_existing_sibling(tmp_path, monkeypatch):
+    """A `job` sibling of the repo root wins over the legacy path that does not exist."""
+    root = tmp_path / "work" / "fak"
+    (root / "tools").mkdir(parents=True)
+    (tmp_path / "work" / "job").mkdir(parents=True)
+    monkeypatch.setattr(wd, "FLEET_DIR", str(root))
+    assert wd._default_job_dir() == str(tmp_path / "work" / "job")
+

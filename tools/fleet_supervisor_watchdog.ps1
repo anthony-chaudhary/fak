@@ -11,7 +11,8 @@ re-launches the supervisor as a DETACHED process if (and only if) it is not
 already running.
 
 Opt-in by design (it launches autonomous workers): a respawn requires the job repo
-present AND FAK_SUPERVISOR_ENABLE=1, else it only REPORTS -- matching the .py port
+present, the DISPATCH_DISABLED kill-switch absent, AND FAK_SUPERVISOR_ENABLE=1,
+else it only REPORTS -- matching the .py port
 (fleet_supervisor_watchdog.py). register_supervisor_watchdog.ps1 kicks one run on
 install, so without this gate merely installing the task would spawn the supervisor.
 
@@ -63,6 +64,17 @@ if ($alive) {
 $runLoop = Join-Path $JobDir 'scripts\run_supervise_loop.py'
 if (-not (Test-Path $runLoop)) {
   Note "NOOP    job repo / supervisor absent ($runLoop) -- nothing to keep alive"
+  exit 0
+}
+# Host-local dispatch kill-switch (mirrors fleet_supervisor_watchdog.py). run_supervise_loop.py
+# no-ops on this sentinel, so respawning against it launches a process that exits inside the
+# tick -- and the next tick sees "not alive" and does it again. Witnessed 2026-07-26 on this
+# host: 25 consecutive RESPAWN ticks against a sentinel set 2026-06-21, every child dead
+# immediately, invisible in the fleet report because the respawn toast is rate-limited to one
+# an hour. Report it instead: the sentinel is an operator decision, not a fault to route around.
+$killSwitch = Join-Path $JobDir 'DISPATCH_DISABLED'
+if (Test-Path $killSwitch) {
+  Note "NOOP    dispatch kill-switch present ($killSwitch) -- not respawning; delete it to re-enable dispatch"
   exit 0
 }
 $supEnabled = "$env:FAK_SUPERVISOR_ENABLE".Trim().ToLower() -in @('1', 'true', 'yes', 'on')
