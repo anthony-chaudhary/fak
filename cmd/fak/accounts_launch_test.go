@@ -383,7 +383,12 @@ func TestAccountsLaunchBrokerAllowCarriesMetadata(t *testing.T) {
 	}
 }
 
-func TestRunAccountsLaunchFallsBackToFableWhenDefaultOpusUnavailable(t *testing.T) {
+// TestRunAccountsLaunchFallsBackWhenDefaultOpusUnavailable covers the UNKNOWN-MODEL wall: a CLI
+// build or a seat that does not know the default Opus 5 id refuses it at startup, and the launch
+// hops to the FIRST fallback rung — the previous Opus generation — so the degrade stays inside the
+// Opus class instead of dropping a tier. The capped-bucket wall (which walks on to Fable 5) is the
+// sibling test below.
+func TestRunAccountsLaunchFallsBackWhenDefaultOpusUnavailable(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)
 
@@ -392,7 +397,7 @@ func TestRunAccountsLaunchFallsBackToFableWhenDefaultOpusUnavailable(t *testing.
 	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
 		calls = append(calls, append([]string(nil), argv...))
 		if len(calls) == 1 {
-			return launchRunResult{Code: 1, Stderr: `error: model "claude-opus-4-8" is not available for this account`}
+			return launchRunResult{Code: 1, Stderr: `error: model "` + defaultLaunchModel + `" is not available for this account`}
 		}
 		return launchRunResult{Code: 0}
 	}
@@ -413,12 +418,12 @@ func TestRunAccountsLaunchFallsBackToFableWhenDefaultOpusUnavailable(t *testing.
 	if !strings.Contains(first, "--model "+defaultLaunchModel) {
 		t.Fatalf("primary launch did not use default Opus model: %q", first)
 	}
-	for _, want := range []string{"--model " + defaultLaunchFallbackModel, "--settings " + ultracodeSettingsArg} {
+	for _, want := range []string{"--model " + defaultLaunchFallbackFirst(), "--settings " + ultracodeSettingsArg} {
 		if !strings.Contains(second, want) {
 			t.Fatalf("fallback launch missing %q:\n%s", want, second)
 		}
 	}
-	for _, want := range []string{"falling back to", "unknown-model", defaultLaunchFallbackModel, "fallback command"} {
+	for _, want := range []string{"falling back to", "unknown-model", defaultLaunchFallbackFirst(), "fallback command"} {
 		if !strings.Contains(errb.String(), want) {
 			t.Fatalf("fallback stderr missing %q:\n%s", want, errb.String())
 		}
@@ -429,6 +434,11 @@ func TestRunAccountsLaunchFallsBackToFableWhenDefaultOpusUnavailable(t *testing.
 // limit is NOT an "unknown model" error, so the old unknown-model-only detector would have let the
 // walled Opus startup fail without ever trying the fallback. The broadened classifier recognizes
 // the cap and the chain falls forward to Fable 5.
+//
+// A weekly cap is ALLOCATION-BUCKET scoped, so it walls the whole Opus class: the default and the
+// previous-generation rung both refuse, and only Fable 5 — which bills against its own bucket —
+// starts. That walk-through is the point of ordering the chain the way it is, so the test drives
+// every rung rather than stopping at the first hop.
 func TestRunAccountsLaunchFallsBackWhenDefaultOpusHitsWeeklyLimit(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)
@@ -437,9 +447,9 @@ func TestRunAccountsLaunchFallsBackWhenDefaultOpusHitsWeeklyLimit(t *testing.T) 
 	orig := accountsLaunchRun
 	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
 		calls = append(calls, append([]string(nil), argv...))
-		if len(calls) == 1 {
+		if isOpusLaunchModel(modelArg(argv)) {
 			// No "model" / "fable" token at all — a bucket-scoped weekly cap, exactly what the
-			// old unknown-model gate misses.
+			// old unknown-model gate misses. Every Opus rung shares the capped bucket.
 			return launchRunResult{Code: 1, Stderr: "Claude usage limit reached — your weekly limit resets at 2026-07-10T00:00:00Z"}
 		}
 		return launchRunResult{Code: 0}
@@ -451,11 +461,12 @@ func TestRunAccountsLaunchFallsBackWhenDefaultOpusHitsWeeklyLimit(t *testing.T) 
 	if rc != 0 {
 		t.Fatalf("weekly-limit fallback rc=%d stderr=%s", rc, errb.String())
 	}
-	if len(calls) != 2 {
+	if len(calls) < 2 {
 		t.Fatalf("launch attempts = %d, want primary + fallback; calls=%#v", len(calls), calls)
 	}
-	if second := strings.Join(calls[1], " "); !strings.Contains(second, "--model "+defaultLaunchFallbackModel) {
-		t.Fatalf("weekly-limit fallback did not switch to Fable: %q", second)
+	last := strings.Join(calls[len(calls)-1], " ")
+	if !strings.Contains(last, "--model "+defaultLaunchFallbackNonOpus()) {
+		t.Fatalf("weekly-limit fallback did not walk the capped Opus bucket through to Fable: %q", last)
 	}
 	if !strings.Contains(errb.String(), "usage-limit") {
 		t.Fatalf("fallback plan should name the usage-limit kind:\n%s", errb.String())
@@ -507,6 +518,30 @@ func modelArg(argv []string) string {
 	return ""
 }
 
+// isOpusLaunchModel reports whether a launch --model value names an Opus-class rung. A weekly cap
+// is allocation-bucket scoped, so a test simulating one must wall EVERY Opus rung, not just the id
+// the chain happens to start on.
+func isOpusLaunchModel(model string) bool {
+	return strings.Contains(strings.ToLower(model), "opus")
+}
+
+// defaultLaunchFallbackFirst is the FIRST rung of the compiled-in fallback chain — the model a
+// refused default launch hops to. defaultLaunchFallbackModel is a multi-rung CHAIN (previous-Opus
+// for an unknown-model wall, then Fable 5 for a capped Opus bucket), so a test asserting on "the
+// fallback model" must name a rung rather than the whole constant.
+func defaultLaunchFallbackFirst() string { return splitModelChain(defaultLaunchFallbackModel)[0] }
+
+// defaultLaunchFallbackNonOpus is the first rung of the compiled-in chain that bills against a
+// DIFFERENT allocation bucket than Opus — the rung a capped-Opus walk has to reach to start.
+func defaultLaunchFallbackNonOpus() string {
+	for _, m := range splitModelChain(defaultLaunchFallbackModel) {
+		if !isOpusLaunchModel(m) {
+			return m
+		}
+	}
+	return ""
+}
+
 func TestRunAccountsLaunchDoesNotFallbackWhenModelExplicit(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)
@@ -541,10 +576,13 @@ func TestLaunchModelUnavailableClassifier(t *testing.T) {
 		want   launchModelUnavailKind
 	}{
 		// Unknown / invalid / unentitled model — must name the model dimension AND the tried id.
-		{`error: model "claude-opus-4-8" is not available for this account`, launchModelUnknown},
-		{`invalid model: claude-opus-4-8`, launchModelUnknown},
-		{`model_not_found: claude-opus-4-8`, launchModelUnknown},
-		{`your account does not have access to model claude-opus-4-8`, launchModelUnknown},
+		// The id is interpolated from defaultLaunchModel (the id these cases are classified
+		// AGAINST, below), so a fleet model bump moves the fixture with the default instead of
+		// silently reclassifying every unknown-model case as `available`.
+		{`error: model "` + defaultLaunchModel + `" is not available for this account`, launchModelUnknown},
+		{`invalid model: ` + defaultLaunchModel, launchModelUnknown},
+		{`model_not_found: ` + defaultLaunchModel, launchModelUnknown},
+		{`your account does not have access to model ` + defaultLaunchModel, launchModelUnknown},
 		// Usage / weekly / session caps — the class the old unknown-model-only detector MISSED.
 		// They are bucket-scoped and need not name the model id at all.
 		{`Claude usage limit reached — your weekly limit resets at 2026-07-10`, launchModelUsageLimit},

@@ -115,24 +115,37 @@ func ultracodePostureWord(posture string) string {
 	return "auto"
 }
 
-// defaultLaunchModel is the Opus 4.8 model id an account-switched Claude launch pins by
+// defaultLaunchModel is the Opus 5 model id an account-switched Claude launch pins by
 // default. The switcher passes it explicitly via --model so every seat a launch lands on
 // starts on the same model regardless of that seat's OWN saved default. `--model ""` opts
 // out and lets the seat's saved default stand. Like ultracode it is emitted for Claude only:
 // --model is a Claude-specific flag and the id names a Claude model, meaningless to other
-// agents. Pinned to Opus 4.8 as the fleet primary (was Fable 5); Fable remains the fallback.
-const defaultLaunchModel = "claude-opus-4-8"
+// agents. Pinned to Opus 5 as the fleet primary (was Opus 4.8, and Fable 5 before that);
+// the PREVIOUS Opus generation is now the first fallback rung, so "default to Opus 5" is
+// safe to ship fleet-wide — a CLI build or seat that does not yet know the id degrades
+// WITHIN the Opus class instead of dropping a whole tier on every launch.
+const defaultLaunchModel = "claude-opus-5"
 
 // defaultLaunchFallbackModel is the default fallback CHAIN (`--fallback-model`, comma-separated)
-// tried in order when the default Opus 4.8 launch is refused before a session starts because the
-// model is unavailable — unknown/invalid OR a usage/rate limit (e.g. an Opus weekly cap). It lands
-// on the Fable 5 alias — reached for its SEPARATE allocation bucket (a capped Opus window does not
-// cap Fable), NOT because Fable is cheaper: under the repo's canonical taxonomy Fable 5 is the
-// restricted, PRICIEST apex model (internal/modelroute/cost.go prices it ~2x the Opus/frontier
-// baseline; internal/fleetaccounts/apextier.go gates it explicit-only — #3927). ultracode is
-// preserved by reusing the same launchOpts. A caller can widen it, e.g. `--fallback-model
-// fable,claude-sonnet-5`.
-const defaultLaunchFallbackModel = "fable"
+// tried in order when the default Opus 5 launch is refused before a session starts because the
+// model is unavailable — unknown/invalid OR a usage/rate limit (e.g. an Opus weekly cap). The two
+// rungs answer the two DIFFERENT walls, in the order they are cheap to rule out:
+//
+//   - claude-opus-4-8 — the previous Opus generation, for the UNKNOWN-MODEL wall. A CLI build or a
+//     seat not yet entitled to Opus 5 refuses the id at startup, and the honest degrade there is
+//     the same-class model that is known-good, not a tier change. (It shares the Opus allocation
+//     bucket, so it does NOT answer a weekly cap — that is the next rung's job.)
+//   - claude-fable-5 — reached for its SEPARATE allocation bucket (a capped Opus window does not
+//     cap Fable), NOT because Fable is cheaper: under the repo's canonical taxonomy Fable 5 is the
+//     restricted, PRICIEST apex model (internal/modelroute/cost.go prices it ~2x the Opus/frontier
+//     baseline; internal/fleetaccounts/apextier.go gates it explicit-only — #3927).
+//
+// Both rungs are spelled with the VERSIONED id, never a bare alias like `fable`. This same chain
+// is what dispatchWorkerFallbackModel hands headless workers as `claude -p --fallback-model`, and
+// a bare alias 400-crashes a headless worker — the fleet crash-loop internal/dispatchtick's
+// WorkerModel* constants already warn about. ultracode is preserved by reusing the same
+// launchOpts. A caller can widen the chain, e.g. `--fallback-model claude-opus-4-8,claude-sonnet-5`.
+const defaultLaunchFallbackModel = "claude-opus-4-8,claude-fable-5"
 
 // launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
 // fak's capability floor — i.e. suppresses the agent's OWN per-call approval prompts, because
