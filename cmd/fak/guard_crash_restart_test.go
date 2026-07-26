@@ -137,6 +137,9 @@ func TestGuardCrashRestartGiveUpReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close before the test returns: the journal holds an open handle on audit.jsonl, and on
+	// Windows an open handle makes t.TempDir()'s RemoveAll cleanup fail the test.
+	defer func() { _ = j.Close() }()
 	guardRecordCrashRestartGiveUp(j, "claude", "trace-crash")
 	rows := j.Recent(1)
 	if len(rows) != 1 || rows[0].Kind != "CHILD_CRASH" || rows[0].Reason != guardCrashRestartExhaustedReason {

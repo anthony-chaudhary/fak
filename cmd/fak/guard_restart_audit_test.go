@@ -24,6 +24,9 @@ func TestGuardRestartAuditSurfacesCrashGiveUpReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close before the test returns: the journal holds an open handle on audit.jsonl, and on
+	// Windows an open handle makes t.TempDir()'s RemoveAll cleanup fail the test.
+	defer func() { _ = j.Close() }()
 	guardRecordCrashRestartGiveUp(j, "claude", "trace-crash")
 
 	var out bytes.Buffer
