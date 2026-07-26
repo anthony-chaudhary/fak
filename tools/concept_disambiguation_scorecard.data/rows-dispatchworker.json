@@ -1,0 +1,63 @@
+{
+  "rows": [
+    {
+      "id": "claudeguardturnsperepoch",
+      "canonical": "claudeGuardTurnsPerEpoch",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The turn-count multiplier in cmd/dispatchworker/guard.go that converts the per-turn model window ceiling into the CUMULATIVE --context-budget-tokens allowance a dispatch claude worker launches with: budget = max(hardCap - outputReserve, baseline) x claudeGuardTurnsPerEpoch. Set to 12 so the 3-equivalent-restart reaper (3 x 12 = 36 turns) stays behind the ~30-turn wall-clock runway, letting the graceful --max-duration drain win.",
+      "distinction": "A COUNT OF TURNS scaling a cumulative allowance - NOT a per-turn window size and NOT a compaction shed line. It replaced claudeGuardBirthHeadroomFactor, which applied a factor to a per-turn quantity and then clamped the result by the window ceiling, funding only two turns and killing 120/120 workers with BUDGET_CONTEXT_EXHAUSTED.",
+      "distinct_from": [
+        "x2-context-ctx-contextbudget",
+        "x2-context-ctx-compactionbudget"
+      ],
+      "aliases": [],
+      "grounding": "claudeGuardTurnsPerEpoch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "opencodecompactionoverlay",
+      "canonical": "opencodeCompactionOverlay",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The cmd/dispatchworker/guard.go builder that produces the OpenCode-native 96K shed-line configuration overlay for a worker command, or nil when the provider's real limits are unknown so the launch fails OPEN. Mirrors dispatch_worker.opencode_compaction_overlay on the python side.",
+      "distinction": "A CONFIG DOCUMENT FRAGMENT that tells a third-party harness when to compact - NOT fak's own CompactionBudget threshold and NOT the compaction act itself; it allocates nothing and rewrites no history.",
+      "distinct_from": [
+        "x2-context-ctx-compactionbudget",
+        "x2-context-ctx-contextbudget"
+      ],
+      "aliases": [],
+      "grounding": "opencodeCompactionOverlay",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "opencodeguardconfigcontent",
+      "canonical": "opencodeGuardConfigContent",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The cmd/dispatchworker/guard.go merge that folds the opencode compaction overlay into an existing OPENCODE_CONFIG_CONTENT document while preserving operator-supplied keys, returning the existing document unchanged when there is no overlay to apply.",
+      "distinction": "A MERGE over an operator-supplied env document - NOT the overlay it merges (opencodeCompactionOverlay) and NOT the guard policy or its floor. The Go launcher points opencode at guard via --base-url, so unlike the python half this does not also rewrite the provider baseURL.",
+      "distinct_from": [
+        "opencodecompactionoverlay",
+        "claudeguardturnsperepoch"
+      ],
+      "aliases": [],
+      "grounding": "opencodeGuardConfigContent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

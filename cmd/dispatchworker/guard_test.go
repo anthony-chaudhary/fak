@@ -87,19 +87,22 @@ func TestGuardAuditPathUniquePerCall(t *testing.T) {
 	}
 }
 
-// TestClaudeGuardContextBudgetDerivation locks the DERIVED budget (the
-// TODO(dynamic-budget) resolution): baseline × birth-headroom, clamped to the
-// ctxplan effective window ceiling. Mirror: tools/dispatch_worker.py
-// claude_guard_context_budget_tokens must yield the SAME integer; its parity
-// partner test_claude_guard_context_budget_derivation_matches_go (in
-// tools/dispatch_worker_test.py) pins the same 124000 golden — update both
-// in the same commit.
+// TestClaudeGuardContextBudgetDerivation locks the DERIVED budget: the per-TURN
+// resident term (the ctxplan effective window ceiling, floored by the measured
+// baseline) × claudeGuardTurnsPerEpoch. The seeded budget is a CUMULATIVE allowance
+// (internal/session/usage.go:99 debits each turn's whole resident window), so every
+// assertion here is in TURN units — the missing unit is what let the pre-fix
+// `min(baseline×2, ceiling)` pass its goldens while funding two turns per child.
+// Mirror: tools/dispatch_worker.py claude_guard_context_budget_tokens must yield the
+// SAME integer; its parity partner test_claude_guard_context_budget_derivation_matches_go
+// (in tools/dispatch_worker_test.py) pins the same 2016000 golden — update both in the
+// same commit.
 func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 	env := ctxplan.GenericTurnEnvelope()
 	ceiling := env.HardContextCap - env.OutputReserve
 	// Empty workspace measures nothing → the baseline floors to claudeGuardBaselineTokens,
-	// so this golden pins the hermetic shipped default (124000) independent of any
-	// on-disk orientation size.
+	// so this golden pins the hermetic shipped default independent of any on-disk
+	// orientation size.
 	got, err := strconv.Atoi(claudeGuardContextBudgetTokens("", "", nil))
 	if err != nil {
 		t.Fatalf("derived budget must be a wired integer: %v", err)
@@ -109,25 +112,49 @@ func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 	if got <= claudeGuardBaselineTokens {
 		t.Errorf("derived budget %d <= baseline %d: workers would be born over-budget (see #2972)", got, claudeGuardBaselineTokens)
 	}
-	// (b) Runaway backstop: at/under the effective window ceiling (HardContextCap −
-	// OutputReserve), so the cap always bites below the real model window.
-	if got > ceiling {
-		t.Errorf("derived budget %d > effective window ceiling %d (HardContextCap %d − OutputReserve %d)", got, ceiling, env.HardContextCap, env.OutputReserve)
+	// (b) TURN funding — the invariant the old goldens were missing. The worst-case
+	// per-turn debit is a full resident window (the ceiling, or the baseline when the
+	// baseline is larger than a small model's window), so budget/perTurn is the number
+	// of turns a child is guaranteed. It must be a whole epoch, not 2.
+	perTurn := max(ceiling, claudeGuardBaselineTokens)
+	if turns := got / perTurn; turns < claudeGuardTurnsPerEpoch {
+		t.Errorf("derived budget %d funds only %d full-window turns (perTurn %d), want >= %d: a worker that cannot run an epoch dies BUDGET_CONTEXT_EXHAUSTED mid-issue",
+			got, turns, perTurn, claudeGuardTurnsPerEpoch)
 	}
-	// (c) Golden lock for the shipped constants: min(62000×2, 200000−32000) = 124000.
-	// If this fails, someone changed the baseline, the headroom factor, or the
-	// ctxplan envelope — update tools/dispatch_worker.py IN THE SAME COMMIT.
-	if want := 124000; got != want {
+	// (c) The reaper must not outrun the work: cmd/fak/guard_child.go reaps after
+	// guardEquivalentRestartLimit = 3 identical BUDGET_CONTEXT_EXHAUSTED cycles, and
+	// claudeGuardMaxDuration() bounds the run at 1740s. At the witnessed ~57s/turn a
+	// worker has ~30 turns of wall clock, so 3 epochs must cover more than that or the
+	// restart reaper — not --max-duration — ends every run (the 120/120 CLAIM_NO_COMMIT
+	// failure mode).
+	const (
+		equivalentRestartLimit  = 3  // cmd/fak/guard_child.go guardEquivalentRestartLimit
+		witnessedSecondsPerTurn = 57 // resolve-5103: 6 turns over 5m42s
+	)
+	wallClockTurns := (defaultTimeoutS - claudeGuardMaxDurationMarginS) / witnessedSecondsPerTurn
+	if fundedTurns := (got / perTurn) * equivalentRestartLimit; fundedTurns <= wallClockTurns {
+		t.Errorf("budget funds %d turns across %d restart epochs but the wall clock allows ~%d: the equivalent-restart reaper fires before --max-duration",
+			fundedTurns, equivalentRestartLimit, wallClockTurns)
+	}
+	// (d) Golden lock for the shipped constants: max(200000−32000, 62000) × 12 = 2016000.
+	// If this fails, someone changed the baseline, the turn count, or the ctxplan
+	// envelope — update tools/dispatch_worker.py IN THE SAME COMMIT.
+	if want := 2016000; got != want {
 		t.Errorf("derived budget = %d, want %d; keep tools/dispatch_worker.py claude_guard_context_budget_tokens in sync", got, want)
 	}
-	// (d) Monotone in the baseline below the ceiling: a baseline bump RAISES the
-	// budget (the flat-constant staleness this derivation kills)...
-	if bumped := deriveClaudeGuardContextBudget(claudeGuardBaselineTokens+1000, env.HardContextCap, env.OutputReserve); bumped <= got {
-		t.Errorf("baseline bump must raise the derived budget: %d (baseline+1000) <= %d", bumped, got)
+	// (e) REGRESSION TRIPWIRE: the window ceiling is a per-TURN quantity and must never
+	// clamp the cumulative total again. Clamping is what pinned every child at ~2 turns
+	// (min(62000×k, 168000) = 168000 for all k >= 3, so no factor could ever help).
+	if got <= ceiling {
+		t.Errorf("derived budget %d <= per-turn window ceiling %d: the cumulative allowance has been clamped to a per-turn window again", got, ceiling)
 	}
-	// ...while a runaway baseline is still clamped to the window ceiling.
-	if clamped := deriveClaudeGuardContextBudget(ceiling, env.HardContextCap, env.OutputReserve); clamped != ceiling {
-		t.Errorf("over-window baseline must clamp to ceiling %d, got %d", ceiling, clamped)
+	// (f) Non-decreasing in the baseline, and strictly rising once the baseline outgrows
+	// the window ceiling (the flat-constant staleness this derivation kills).
+	if bumped := deriveClaudeGuardContextBudget(claudeGuardBaselineTokens+1000, env.HardContextCap, env.OutputReserve); bumped < got {
+		t.Errorf("baseline bump must not lower the derived budget: %d (baseline+1000) < %d", bumped, got)
+	}
+	if grown := deriveClaudeGuardContextBudget(ceiling+1000, env.HardContextCap, env.OutputReserve); grown <= got {
+		t.Errorf("a baseline past the window ceiling must raise the budget: %d <= %d", grown, got)
 	}
 	// The CLI surface: exact flags, exact order, derived value wired in.
 	want := []string{
@@ -168,11 +195,18 @@ func TestClaudeGuardCompactHistoryBudget(t *testing.T) {
 		t.Errorf("compact shed-line %d not above the 48K interactive default %d",
 			claudeGuardCompactHistoryBudget, gateway.DefaultCompactHistoryBudget)
 	}
-	// (d) At/under the drain ceiling (derived --context-budget-tokens), so the shed-line
-	// is a meaningful target below where the runaway backstop fires.
-	ceiling, _ := strconv.Atoi(claudeGuardContextBudgetTokens("", "", nil))
-	if claudeGuardCompactHistoryBudget > ceiling {
-		t.Errorf("compact shed-line %d > drain ceiling %d", claudeGuardCompactHistoryBudget, ceiling)
+	// (d) REACHABILITY, not "below the drain ceiling" — the two are on different scales
+	// (this shed-line is a PER-TURN instantaneous target; --context-budget-tokens is a
+	// CUMULATIVE allowance), so comparing them directly is a category error and was the
+	// assertion that let the composition ship broken. What must hold is that a worker
+	// SITTING AT the shed line still has a whole epoch of turns funded: otherwise the
+	// session dies of budget exhaustion long before compaction can fire, which is exactly
+	// what resolve-5103 witnessed (compact=none / `bailed: under_budget x6` on every turn
+	// while the cumulative budget drained in two).
+	drain, _ := strconv.Atoi(claudeGuardContextBudgetTokens("", "", nil))
+	if turns := drain / claudeGuardCompactHistoryBudget; turns < claudeGuardTurnsPerEpoch {
+		t.Errorf("drain budget %d funds only %d turns at the shed-line resident %d, want >= %d: compaction is unreachable before BUDGET_CONTEXT_EXHAUSTED",
+			drain, turns, claudeGuardCompactHistoryBudget, claudeGuardTurnsPerEpoch)
 	}
 }
 
@@ -210,15 +244,17 @@ func TestMeasureLaunchBaselineFloorsAndTracks(t *testing.T) {
 	if got := resolveClaudeGuardBaseline(measured); got != measured {
 		t.Errorf("supra-floor measurement must pass through, got %d want %d", got, measured)
 	}
-	// (e) The derived budget stays birth-safe and window-clamped on the measured path.
+	// (e) The derived budget stays birth-safe on the measured path AND still funds a
+	// whole epoch of turns at that measured resident — the turn-unit check, not the old
+	// window clamp (a cumulative allowance is never bounded by a per-turn window).
 	env := ctxplan.GenericTurnEnvelope()
 	ceiling := env.HardContextCap - env.OutputReserve
 	budget := deriveClaudeGuardContextBudget(resolveClaudeGuardBaseline(measured), env.HardContextCap, env.OutputReserve)
-	if budget <= measured && budget != ceiling {
-		t.Errorf("measured budget %d must exceed measured baseline %d (or clamp to ceiling %d)", budget, measured, ceiling)
+	if budget <= measured {
+		t.Errorf("measured budget %d must exceed measured baseline %d", budget, measured)
 	}
-	if budget > ceiling {
-		t.Errorf("measured budget %d must stay under the window ceiling %d", budget, ceiling)
+	if turns := budget / max(measured, ceiling); turns < claudeGuardTurnsPerEpoch {
+		t.Errorf("measured budget %d funds only %d turns at resident %d, want >= %d", budget, turns, max(measured, ceiling), claudeGuardTurnsPerEpoch)
 	}
 }
 
