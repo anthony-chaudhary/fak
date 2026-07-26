@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>2026-07-05T04:04:15</Date>
+    <Author>fak-fleet</Author>
+    <URI>\July4CacheValueAutospawn</URI>
+  </RegistrationInfo>
+  <Principals>
+    <Principal id="Author">
+      <UserId>%FLEET_TASK_USER_SID%</UserId>
+      <LogonType>InteractiveToken</LogonType>
+    </Principal>
+  </Principals>
+  <Settings>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <IdleSettings>
+      <Duration>PT10M</Duration>
+      <WaitTimeout>PT1H</WaitTimeout>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+  </Settings>
+  <Triggers>
+    <TimeTrigger>
+      <StartBoundary>2026-07-05T07:18:00</StartBoundary>
+      <Repetition>
+        <Interval>PT20M</Interval>
+        <Duration>PT5H</Duration>
+      </Repetition>
+    </TimeTrigger>
+  </Triggers>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\WINDOWS\System32\conhost.exe</Command>
+      <Arguments>--headless powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File %USERPROFILE%\fak-armed\july4_cachevalue_autospawn.ps1</Arguments>
+    </Exec>
+  </Actions>
+</Task>

@@ -45,8 +45,90 @@ schtasks /Delete /TN $TaskName /F
 func TestVerifyAcceptsBoundInstaller(t *testing.T) {
 	declared := map[string][]string{"tools/register_x.ps1": {"FleetX"}}
 	inv := []Coverage{{Task: "FleetX", Status: StatusInstaller, Installer: "tools/register_x.ps1"}}
-	if off := Verify(inv, declared); len(off) != 0 {
+	if off := Verify(inv, declared, nil); len(off) != 0 {
 		t.Fatalf("bound installer: want 0 offenses, got %v", off)
+	}
+}
+
+// TestVerifyAcceptsTrackedCapture is the XML tier's happy path: a row whose export
+// really is tracked, and which says what the export does not restore, holds up.
+func TestVerifyAcceptsTrackedCapture(t *testing.T) {
+	captured := map[string]bool{"tools/scheduled-tasks/FleetX.xml": true}
+	inv := []Coverage{{
+		Task:    "FleetX",
+		Status:  StatusXML,
+		Capture: "tools/scheduled-tasks/FleetX.xml",
+		Reason:  "launches an out-of-tree script; the XML restores the schedule, not the script",
+	}}
+	if off := Verify(inv, nil, captured); len(off) != 0 {
+		t.Fatalf("tracked capture: want 0 offenses, got %v", off)
+	}
+}
+
+// TestVerifyCatchesUntrackedCapture: a capture claim is a promise that a reimage can
+// read the file back. An export that was written but never committed cannot keep it,
+// and that is precisely the state a half-finished capture leaves behind.
+func TestVerifyCatchesUntrackedCapture(t *testing.T) {
+	inv := []Coverage{{
+		Task:    "FleetX",
+		Status:  StatusXML,
+		Capture: "tools/scheduled-tasks/FleetX.xml",
+		Reason:  "out-of-tree script",
+	}}
+	off := Verify(inv, nil, map[string]bool{})
+	if len(off) != 1 {
+		t.Fatalf("untracked capture: want 1 offense, got %v", off)
+	}
+	if off[0].Reason != ReasonMissingCapture {
+		t.Errorf("reason = %q, want %q", off[0].Reason, ReasonMissingCapture)
+	}
+
+	// A StatusXML row naming no capture at all is the same failure, caught before
+	// the tree is even consulted.
+	off = Verify([]Coverage{{Task: "FleetY", Status: StatusXML, Reason: "why"}}, nil, map[string]bool{})
+	if len(off) != 1 || off[0].Reason != ReasonMissingCapture {
+		t.Fatalf("captureless xml row: want 1 MISSING_TASK_CAPTURE offense, got %v", off)
+	}
+
+	// A capture named by a NON-xml row is held to the same standard: a drift row
+	// leaning on an export is making the identical reimage promise.
+	off = Verify([]Coverage{{
+		Task: "FleetZ", Status: StatusDrift, Capture: "tools/scheduled-tasks/FleetZ.xml", Reason: "interpolated name",
+	}}, nil, map[string]bool{})
+	if len(off) != 1 || off[0].Reason != ReasonMissingCapture {
+		t.Fatalf("drift row with untracked capture: want 1 MISSING_TASK_CAPTURE offense, got %v", off)
+	}
+}
+
+// TestVerifyRequiresResidualOnCapture: an XML capture versions the task, never the
+// script the task launches. A row that claims the XML tier without naming what a
+// restore would still be missing is overclaiming, and that is the whole distinction
+// between this tier and a real installer.
+func TestVerifyRequiresResidualOnCapture(t *testing.T) {
+	captured := map[string]bool{"tools/scheduled-tasks/FleetX.xml": true}
+	off := Verify([]Coverage{{
+		Task: "FleetX", Status: StatusXML, Capture: "tools/scheduled-tasks/FleetX.xml",
+	}}, nil, captured)
+	if len(off) != 1 || off[0].Reason != ReasonOrphanTask {
+		t.Fatalf("reasonless capture: want 1 ORPHAN_FLEET_TASK offense, got %v", off)
+	}
+}
+
+// TestUncoveredIsTheDoneCondition pins #3323's done condition as a predicate: a row
+// is uncovered only when it has NEITHER an installer NOR an export. Note the third
+// row — an honestly-reasoned orphan still fails, because Verify asks "is the claim
+// true?" while Uncovered asks "is it good enough?".
+func TestUncoveredIsTheDoneCondition(t *testing.T) {
+	got := Uncovered([]Coverage{
+		{Task: "ByInstaller", Status: StatusInstaller, Installer: "tools/register_x.ps1"},
+		{Task: "ByCapture", Status: StatusXML, Capture: "tools/scheduled-tasks/ByCapture.xml", Reason: "r"},
+		{Task: "Lost", Status: StatusOrphan, Reason: "honestly recorded, still lost on a reimage"},
+	})
+	if len(got) != 1 {
+		t.Fatalf("Uncovered: want 1 row, got %v", got)
+	}
+	if got[0].Task != "Lost" {
+		t.Errorf("Uncovered[0] = %q, want Lost", got[0].Task)
 	}
 }
 
@@ -57,7 +139,7 @@ func TestVerifyCatchesNameDrift(t *testing.T) {
 	declared := map[string][]string{"tools/register_x.ps1": {"FleetXRenamed"}}
 	inv := []Coverage{{Task: "FleetX", Status: StatusInstaller, Installer: "tools/register_x.ps1"}}
 
-	off := Verify(inv, declared)
+	off := Verify(inv, declared, nil)
 	if len(off) != 1 {
 		t.Fatalf("drifted installer: want 1 offense, got %v", off)
 	}
@@ -69,7 +151,7 @@ func TestVerifyCatchesNameDrift(t *testing.T) {
 	}
 
 	// A claim naming an installer that is gone entirely is the same class of lie.
-	off = Verify(inv, map[string][]string{})
+	off = Verify(inv, map[string][]string{}, nil)
 	if len(off) != 1 || off[0].Reason != ReasonInstallerNameDrift {
 		t.Fatalf("deleted installer: want 1 INSTALLER_NAME_DRIFT offense, got %v", off)
 	}
@@ -82,7 +164,7 @@ func TestVerifyRequiresReasonForGaps(t *testing.T) {
 	off := Verify([]Coverage{
 		{Task: "FleetOrphan", Status: StatusOrphan},
 		{Task: "FleetDrifted", Status: StatusDrift},
-	}, map[string][]string{})
+	}, map[string][]string{}, nil)
 	if len(off) != 2 {
 		t.Fatalf("reasonless gaps: want 2 offenses, got %v", off)
 	}
@@ -97,7 +179,7 @@ func TestVerifyRequiresReasonForGaps(t *testing.T) {
 	ok := Verify([]Coverage{
 		{Task: "FleetOrphan", Status: StatusOrphan, Reason: "script lives outside the repo"},
 		{Task: "FleetDrifted", Status: StatusDrift, Reason: "installer name is interpolated"},
-	}, map[string][]string{})
+	}, map[string][]string{}, nil)
 	if len(ok) != 0 {
 		t.Fatalf("explained gaps: want 0 offenses, got %v", ok)
 	}
@@ -106,7 +188,7 @@ func TestVerifyRequiresReasonForGaps(t *testing.T) {
 // TestVerifyRejectsUnknownStatus keeps the status vocabulary closed — a typo'd
 // status must not silently pass as coverage.
 func TestVerifyRejectsUnknownStatus(t *testing.T) {
-	off := Verify([]Coverage{{Task: "FleetX", Status: Status("probably-fine")}}, map[string][]string{})
+	off := Verify([]Coverage{{Task: "FleetX", Status: Status("probably-fine")}}, map[string][]string{}, nil)
 	if len(off) != 1 || off[0].Reason != ReasonOrphanTask {
 		t.Fatalf("unknown status: want 1 ORPHAN_FLEET_TASK offense, got %v", off)
 	}
@@ -128,6 +210,19 @@ func TestFleetTaskInventoryBindsToVersionedInstallers(t *testing.T) {
 	}
 	if len(offenses) > 0 {
 		t.Fatalf("%d fleet task(s) claim coverage that the tree does not back", len(offenses))
+	}
+}
+
+// TestFleetInventoryHasNoOrphans is #3323's done condition held against the real
+// record: every enabled fak-fleet task must have an installer or an exported task
+// XML, i.e. zero rows survive Uncovered. TestFleetTaskInventoryBindsToVersioned-
+// Installers cannot catch this — Verify only refuses claims that are UNTRUE, so an
+// honestly-reasoned orphan passes it while still being lost on a reimage. This is
+// the assertion that makes "zero orphans" a gate rather than a comment.
+func TestFleetInventoryHasNoOrphans(t *testing.T) {
+	for _, c := range Uncovered(Inventory()) {
+		t.Errorf("%s is rebuildable from neither an installer nor an exported task XML: %s (%s)",
+			c.Task, c.Reason, ReasonOrphanTask)
 	}
 }
 

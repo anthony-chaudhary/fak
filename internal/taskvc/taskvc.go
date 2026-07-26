@@ -56,6 +56,18 @@ const ReasonOrphanTask = "ORPHAN_FLEET_TASK"
 // installer creates a second task instead of updating the live one in place.
 const ReasonInstallerNameDrift = "INSTALLER_NAME_DRIFT"
 
+// ReasonMissingCapture is the closed-vocabulary refusal code for a row that claims
+// an exported task XML the tree does not actually track. An untracked capture is
+// the same lie as a deleted installer: the reimage it promises to survive would
+// find nothing there.
+const ReasonMissingCapture = "MISSING_TASK_CAPTURE"
+
+// CaptureDir is where the scrubbed task XML exports live, repo-relative. Written
+// by tools/capture_fleet_task_xml.ps1, which is also the only sanctioned way to
+// refresh one: it strips the host SID, COMPUTERNAME\user and home paths, and
+// refuses to write if any of them survive.
+const CaptureDir = "tools/scheduled-tasks"
+
 // Status is how one enabled fleet task is covered by version control.
 type Status string
 
@@ -64,20 +76,31 @@ const (
 	// task name. Re-running it updates the live task in place. This is the only
 	// status that means "rebuildable from the repo".
 	StatusInstaller Status = "installer"
+	// StatusXML: no installer, but a scrubbed export of the live task definition
+	// is versioned under CaptureDir. The schedule, principal shape and exact
+	// command line survive a reimage; whatever the command line POINTS AT does
+	// not, unless it is itself in the repo. Weaker than StatusInstaller, which is
+	// why Reason is still required — see Coverage.Reason.
+	StatusXML Status = "xml"
 	// StatusDrift: an installer for this loop exists but registers a DIFFERENT
 	// (or interpolated, hence unbindable) name, so a reinstall duplicates it.
 	StatusDrift Status = "drift"
-	// StatusOrphan: no installer in version control at all.
+	// StatusOrphan: no installer AND no exported XML — the loop is simply lost on
+	// a reimage. The inventory currently holds none; the gate exists to keep it
+	// that way.
 	StatusOrphan Status = "orphan"
 )
 
 // Coverage is one enabled fak-fleet Scheduled Task and its version-control claim.
-// Installer is set only for StatusInstaller rows; Reason is required for every
-// other status so the residual gap is always named, never silently tolerated.
+// Installer is set only for StatusInstaller rows; Capture names the exported task
+// XML for rows an installer does not cover; Reason is required for every status
+// except StatusInstaller, so the residual gap is always named, never silently
+// tolerated.
 type Coverage struct {
 	Task      string // live task name, e.g. "FleetStaleWorkGarden"
 	Status    Status
 	Installer string // repo-relative installer path, for StatusInstaller rows
+	Capture   string // repo-relative exported task XML under CaptureDir
 	Reason    string // why this task is not (or only partly) rebuildable
 }
 
@@ -132,20 +155,36 @@ func DeclaredTaskNames(src string) []string {
 // does not hold up, sorted for stable output.
 //
 // declared maps a repo-relative installer path to the task names it registers
-// (i.e. DeclaredTaskNames applied to each tracked installer).
+// (i.e. DeclaredTaskNames applied to each tracked installer). captured is the set
+// of exported task XML paths the tree actually tracks under CaptureDir.
 //
 //   - A StatusInstaller row must name an installer that EXISTS in declared and
 //     declares that exact task — otherwise the installer was deleted, renamed, or
 //     its -TaskName default drifted, and a reinstall would duplicate the loop.
-//   - A StatusDrift or StatusOrphan row must carry a Reason. Naming the gap is the
-//     point; an unexplained orphan is indistinguishable from an oversight.
+//   - A StatusXML row must name a Capture the tree really tracks. A capture claim
+//     is a reimage-survival promise; an untracked file cannot keep it.
+//   - Any row that names a Capture must have it tracked, whatever its status — a
+//     drift row leaning on a capture is making the same promise.
+//   - Every row except StatusInstaller must carry a Reason. Naming the gap is the
+//     point; an unexplained orphan is indistinguishable from an oversight, and an
+//     XML capture is NOT full coverage (it versions the task, never the script the
+//     task launches), so it has to say what it does not restore.
 //
 // Note the asymmetry: a drift/orphan row that turns out to be COVERED is not an
 // offense here. Verify refuses overclaiming (a coverage claim that is not true),
 // never underclaiming — so honestly recording a gap can never red the trunk.
-func Verify(inv []Coverage, declared map[string][]string) []Offense {
+func Verify(inv []Coverage, declared map[string][]string, captured map[string]bool) []Offense {
 	var offenses []Offense
 	for _, c := range inv {
+		// A named capture must exist in the tree regardless of status: the row is
+		// promising a reimage can read that file back.
+		if cap := strings.TrimSpace(c.Capture); cap != "" && !captured[cap] {
+			offenses = append(offenses, Offense{
+				Task:   c.Task,
+				Reason: ReasonMissingCapture,
+				Detail: fmt.Sprintf("claims exported task XML %s, which the tree does not track — refresh it with tools/capture_fleet_task_xml.ps1", cap),
+			})
+		}
 		switch c.Status {
 		case StatusInstaller:
 			names, ok := declared[c.Installer]
@@ -162,6 +201,21 @@ func Verify(inv []Coverage, declared map[string][]string) []Offense {
 					Task:   c.Task,
 					Reason: ReasonInstallerNameDrift,
 					Detail: fmt.Sprintf("installer %s no longer declares this task (declares: %s) — a reinstall would create a second loop", c.Installer, strings.Join(names, ", ")),
+				})
+			}
+		case StatusXML:
+			if strings.TrimSpace(c.Capture) == "" {
+				offenses = append(offenses, Offense{
+					Task:   c.Task,
+					Reason: ReasonMissingCapture,
+					Detail: fmt.Sprintf("status %q names no exported task XML; capture it with tools/capture_fleet_task_xml.ps1", c.Status),
+				})
+			}
+			if strings.TrimSpace(c.Reason) == "" {
+				offenses = append(offenses, Offense{
+					Task:   c.Task,
+					Reason: ReasonOrphanTask,
+					Detail: "an XML capture versions the task, not the script it launches; name what a restore would still be missing",
 				})
 			}
 		case StatusDrift, StatusOrphan:
@@ -193,16 +247,55 @@ func contains(hay []string, needle string) bool {
 	return false
 }
 
-// ScanTree parses every tracked fleet installer under tools/ in repoRoot and holds
-// the declared Inventory against them, returning one Offense per row that does not
-// hold up. Uses `git ls-files` (not a filesystem walk) so an untracked scratch
-// script in tools/ is correctly ignored — only files that would actually ship count.
+// Uncovered returns the rows that would be LOST on a reimage: no installer, and no
+// exported task XML either. This is the #3323 done condition as a predicate —
+// "every enabled fak-fleet task has an installer or exported XML in the repo" is
+// exactly len(Uncovered(Inventory())) == 0.
+//
+// It is deliberately separate from Verify. Verify asks "is this row's claim true?";
+// Uncovered asks "is the claim good enough?" — a row can be perfectly honest about
+// being an orphan and still fail the done condition.
+func Uncovered(inv []Coverage) []Coverage {
+	var out []Coverage
+	for _, c := range inv {
+		if c.Status == StatusInstaller || strings.TrimSpace(c.Capture) != "" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// ScanTree parses every tracked fleet installer under tools/ in repoRoot, collects
+// the tracked task-XML captures, and holds the declared Inventory against both,
+// returning one Offense per row that does not hold up. Uses `git ls-files` (not a
+// filesystem walk) so an untracked scratch script or a stray uncommitted export is
+// correctly ignored — only files that would actually ship count.
 func ScanTree(repoRoot string) ([]Offense, error) {
 	declared, err := DeclaredByInstaller(repoRoot)
 	if err != nil {
 		return nil, err
 	}
-	return Verify(Inventory(), declared), nil
+	captured, err := TrackedCaptures(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	return Verify(Inventory(), declared, captured), nil
+}
+
+// TrackedCaptures returns the set of repo-relative exported task XML paths tracked
+// under CaptureDir. An export sitting in the working tree but never committed does
+// NOT count: it would not survive the reimage the capture exists to survive.
+func TrackedCaptures(repoRoot string) (map[string]bool, error) {
+	paths, err := gitLsFiles(repoRoot, CaptureDir+"/*.xml")
+	if err != nil {
+		return nil, err
+	}
+	captured := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		captured[p] = true
+	}
+	return captured, nil
 }
 
 // DeclaredByInstaller reads the tracked fleet installer scripts under tools/ and
@@ -236,12 +329,19 @@ func readRepoFile(repoRoot, rel string) (string, error) {
 // naming conventions in the tree are covered: the register_*.ps1 majority and the
 // older install_*.ps1 spelling (install_self_update_schedule.ps1).
 func trackedInstallers(repoRoot string) ([]string, error) {
-	cmd := exec.Command("git", "ls-files", "tools/register_*.ps1", "tools/install_*.ps1")
+	return gitLsFiles(repoRoot, "tools/register_*.ps1", "tools/install_*.ps1")
+}
+
+// gitLsFiles lists the tracked paths under repoRoot matching the given pathspecs,
+// sorted. Shared by the installer scan and the capture scan so both agree on what
+// "in version control" means.
+func gitLsFiles(repoRoot string, pathspecs ...string) ([]string, error) {
+	cmd := exec.Command("git", append([]string{"ls-files"}, pathspecs...)...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git ls-files fleet installers in %s: %w", repoRoot, err)
+		return nil, fmt.Errorf("git ls-files %v in %s: %w", pathspecs, repoRoot, err)
 	}
 	var paths []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {

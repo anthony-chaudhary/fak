@@ -148,6 +148,11 @@
           "category": "incidental",
           "reason": "test helper clearing the private keychain probe memo between cases; implementation detail, not a cache concept",
           "token": "resetClaudeKeychainCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "A live Windows Scheduled Task name, recorded as a row of measured fleet data in the taskvc inventory -- not a term in the audit's vocabulary. Its meaning is entirely given by the task/capture pair it names, and the roster turns over whenever a fleet loop is added or retired, so positioning it would book concept coverage for the contents of a data table and go stale on the next fleet change. Matches the set-wide INCIDENTAL classification already applied to this inventory's task names and installer basenames in 24cc467aa.",
+          "token": "July4CacheValueAutospawn"
         }
       ],
       "id": "cache",
@@ -157,6 +162,7 @@
         "CacheValueGateDebtKey",
         "FAK_TOKEN_CACHE",
         "FAK_TOKEN_CACHE_MAX_BYTES",
+        "July4CacheValueAutospawn",
         "TokenCacheDir",
         "WindowCache",
         "applyinfocachemechclick",
