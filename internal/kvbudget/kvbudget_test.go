@@ -169,6 +169,88 @@ func TestMarkdownTable(t *testing.T) {
 	}
 }
 
+// TestAttnKindBranchSizesArbitraryModel pins the general branch over attention
+// architecture — the ktransformers kv_cache_calculator contribution (#5242): one
+// Shape sizes an MLA, an MLA+NSA-indexer, or an MHA header, so this calculator is
+// no longer GLM-5.2-specific.
+func TestAttnKindBranchSizesArbitraryModel(t *testing.T) {
+	// MHA / GQA (kv_cache_calculator.py:121@0c2912a): Layers × NumKVHeads ×
+	// (HeadDim + VHeadDim). A Llama-3-8B-shaped header.
+	mha := Shape{Kind: MHA, Layers: 32, NumKVHeads: 8, HeadDim: 128, VHeadDim: 128}
+	if got, want := mha.MHAElemsPerToken(), 32*8*(128+128); got != want {
+		t.Errorf("MHAElemsPerToken = %d, want %d", got, want)
+	}
+	if got, want := mha.KVElemsPerToken(), 65536; got != want {
+		t.Errorf("MHA KVElemsPerToken = %d, want %d", got, want)
+	}
+	if got, want := mha.KVBytesPerToken(F16), 131072.0; got != want {
+		t.Errorf("MHA KVBytesPerToken(F16) = %v, want %v", got, want)
+	}
+	// A rectangular head (v_head_dim != head_dim) is carried, not squared.
+	rect := Shape{Kind: MHA, Layers: 4, NumKVHeads: 2, HeadDim: 128, VHeadDim: 64}
+	if got, want := rect.KVElemsPerToken(), 4*2*(128+64); got != want {
+		t.Errorf("rectangular-head KVElemsPerToken = %d, want %d", got, want)
+	}
+	// MLA with no NSA/DSA indexer declared: latent + rope key only, no index term.
+	mla := Shape{Layers: 60, KVLoraRank: 512, QKRopeHeadDim: 64}
+	if got := mla.IndexElemsPerToken(); got != 0 {
+		t.Errorf("no-indexer IndexElemsPerToken = %d, want 0", got)
+	}
+	if got, want := mla.KVElemsPerToken(), 60*(512+64); got != want {
+		t.Errorf("MLA KVElemsPerToken = %d, want %d", got, want)
+	}
+	// The branch is exclusive: an MHA Shape never adds the MLA/index terms even
+	// when those fields carry values, and an MLA Shape never adds the per-head term.
+	mixed := Shape{Kind: MHA, Layers: 2, NumKVHeads: 1, HeadDim: 8, VHeadDim: 8,
+		KVLoraRank: 512, QKRopeHeadDim: 64, IndexLayers: 2, IndexHeadDim: 128}
+	if got, want := mixed.KVElemsPerToken(), 2*1*(8+8); got != want {
+		t.Errorf("MHA branch leaked an MLA term: KVElemsPerToken = %d, want %d", got, want)
+	}
+	if got := GLM52DSA.MHAElemsPerToken(); got != 0 {
+		t.Errorf("MLA Shape MHAElemsPerToken = %d, want 0", got)
+	}
+}
+
+// TestMLAZeroValueIsBackwardCompatible proves adding Kind moved no existing
+// number: AttnKind's zero value is MLA, so GLM52DSA — which sets no Kind — still
+// sizes through the MLA+DSA formula it always did.
+func TestMLAZeroValueIsBackwardCompatible(t *testing.T) {
+	if GLM52DSA.Kind != MLA {
+		t.Fatalf("GLM52DSA.Kind = %v, want MLA (the zero value)", GLM52DSA.Kind)
+	}
+	explicit := GLM52DSA
+	explicit.Kind = MLA
+	if got, want := explicit.KVElemsPerToken(), GLM52DSA.KVElemsPerToken(); got != want {
+		t.Errorf("explicit-MLA KVElemsPerToken = %d, want %d", got, want)
+	}
+	if got, want := GLM52DSA.KVElemsPerToken(),
+		GLM52DSA.MLAElemsPerToken()+GLM52DSA.IndexElemsPerToken(); got != want {
+		t.Errorf("MLA KVElemsPerToken = %d, want MLA+index %d", got, want)
+	}
+}
+
+// TestMHAShapeReachesTheBudgetMath proves the generalization reaches the whole
+// pipeline, not just the element count: an MHA Shape yields a real FitRow and a
+// real max-streams fit, which is what "size an arbitrary served model" means.
+func TestMHAShapeReachesTheBudgetMath(t *testing.T) {
+	mha := Shape{Kind: MHA, Layers: 32, NumKVHeads: 8, HeadDim: 128, VHeadDim: 128}
+	row := mha.FitRow(4096, F16)
+	// 4096 × 131072 B = 2^29 B = 0.5 GiB per stream, exactly.
+	if got, want := row.KVGiBPerStream, 0.5; got != want {
+		t.Errorf("MHA FitRow KVGiBPerStream = %v, want %v", got, want)
+	}
+	if got, want := row.MaxStreamsRaw, MaxStreams(FreeVRAMGiB, 0.5); got != want {
+		t.Errorf("MHA MaxStreamsRaw = %d, want %d", got, want)
+	}
+	if row.MaxStreamsRaw != 412 {
+		t.Errorf("MHA MaxStreamsRaw = %d, want 412 (206 ÷ 0.5)", row.MaxStreamsRaw)
+	}
+	// The MLA-only column is zero for an MHA shape — there is no latent to report.
+	if row.MLAGiBPerStream != 0 {
+		t.Errorf("MHA MLAGiBPerStream = %v, want 0", row.MLAGiBPerStream)
+	}
+}
+
 func containsLine(s, line string) bool {
 	for _, l := range splitLines(s) {
 		if l == line {
