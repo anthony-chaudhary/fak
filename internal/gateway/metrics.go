@@ -995,6 +995,13 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 	}
 	if trace := strings.TrimSpace(traceID); trace != "" {
 		ev["trace_id"] = trace
+		// Attribute the served turn to the tenant principal that owns the trace — the
+		// keyset-bound org/project (#5332) — so the access log is joinable to
+		// /v1/fak/events by trace_id. Emitted only for a NAMED owner; the single-tenant
+		// loopback ("" owner / unbound trace) leaves the line's shape unchanged.
+		if owner, ok := s.traceOwnerOf(trace); ok && owner != "" {
+			ev["principal"] = owner
+		}
 	}
 	b, err := json.Marshal(ev)
 	if err != nil {

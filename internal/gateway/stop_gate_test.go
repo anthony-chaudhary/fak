@@ -118,7 +118,7 @@ func TestStopGate_StreamDoesNotLeakRejectedFinal(t *testing.T) {
 	}, "trace-stream", func(delta string) error {
 		streamed.WriteString(delta)
 		return nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

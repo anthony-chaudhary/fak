@@ -9,6 +9,9 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -126,6 +129,51 @@ func TestSessionCeilingMetricsGauge(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("gauge output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestSessionCeilingReadinessField witnesses the OTHER half of the saturation signal
+// (#3425): the readout is a field on the readiness surface (/healthz), not only a
+// /metrics gauge — so an operator or autoscaler probing readiness sees headroom. Being
+// AT the ceiling must not flip ok:false: the deployment is healthy, it just sheds NEW
+// sessions while the in-flight loops run untouched.
+func TestSessionCeilingReadinessField(t *testing.T) {
+	s := &Server{listSessions: func(context.Context) []SessionState {
+		return []SessionState{{TraceID: "gw-1"}, {TraceID: "gw-2"}}
+	}}
+
+	probe := func(t *testing.T) map[string]any {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.handleHealth(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode /healthz: %v (body %q)", err, rec.Body.String())
+		}
+		return body
+	}
+
+	// Unarmed (no ceiling): the field is absent entirely — historical payload.
+	t.Setenv(envMaxSessions, "")
+	if _, ok := probe(t)["session_saturation"]; ok {
+		t.Fatal("unbounded deployment must not carry session_saturation on /healthz")
+	}
+
+	// Armed and exactly AT the ceiling: the field reports the readout, ok stays true.
+	t.Setenv(envMaxSessions, "2")
+	body := probe(t)
+	if body["ok"] != true {
+		t.Fatalf("saturation must not flip readiness to not-ok, got ok=%v", body["ok"])
+	}
+	sat, ok := body["session_saturation"].(map[string]any)
+	if !ok {
+		t.Fatalf("armed deployment must carry session_saturation on /healthz, got %v", body["session_saturation"])
+	}
+	if sat["ceiling"] != float64(2) || sat["live"] != float64(2) || sat["ratio"] != float64(1) {
+		t.Fatalf("session_saturation = %v, want ceiling=2 live=2 ratio=1", sat)
+	}
+	if sat["headroom"] != float64(0) || sat["bounded"] != true {
+		t.Fatalf("session_saturation = %v, want headroom=0 bounded=true", sat)
 	}
 }
 

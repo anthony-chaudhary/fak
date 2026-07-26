@@ -233,12 +233,34 @@ const (
 //     carry at least one stale read; 565 stale reads totaling ~3.4 MB (~854K estimated tokens,
 //     bytes/4 proxy) of pre-edit snapshot content the marker replaces. A sound lower-bound
 //     motivation, the same status as the oversized-elision prevalence artifact.
-//  3. NOT gated — unlike --defer-cold-tools (whose default-off is pinned to the #3537 A/B), stale
+//  3. NOT gated — unlike --defer-cold-tools (whose default-off was pinned to the #3537 A/B until
+//     those gates cleared and DefaultDeferColdTools flipped it on), stale
 //     elision's prior off-by-default was purely the initial conservative posture for a lossy-but-
 //     restorable transform; there is no pending validation gate blocking the flip.
 //
 // Pass --elide-stale-reads=false to opt out.
 const DefaultElideStaleReads = true
+
+// DefaultDeferColdTools arms the #3232 cold-tool deferral lever ON by default at both
+// front doors (fak guard / fak serve) — the #3537 payoff flip of epic #3229. The
+// mechanism (messages_tooldefer.go) marks every allowed-but-COLD custom tool
+// defer_loading:true and injects one tool_search_tool on the OUTBOUND Anthropic body, so
+// the provider loads only the hot core into context and faults a cold schema in on
+// demand. FAIL-SAFE ON FIRST REAL USE: every deferred def STAYS in tools[] byte-complete
+// (name/description/input_schema untouched — the transform only ADDS the defer_loading
+// key), so a deferred tool is discoverable via the injected search tool and its first
+// call still resolves — nothing goes silently missing; and a floor-denied tool stays
+// denied deferred or not (tooldefer_no_bypass_test.go). Deterministic + cache-safe
+// (byte-stable tools[] turn-over-turn) and fail-safe identity on any ambiguity.
+//
+// Blocker verdicts behind the flip (#3537 gate): #3530 flag wiring CLOSED, #3532
+// token-delta A/B CLOSED, #3533 held-accuracy CLOSED, #3534 poison/quarantine no-bypass
+// CLOSED; #3536 live-dogfood soak still open — the opt-outs below are its rollback lever.
+//
+// Opt out per-launch with --defer-cold-tools=false, or stand the live seam down with
+// FAK_ABLATE_DEFER_TOOLS=1 (the A/B ablation arm). This const is the FRONT-DOOR default;
+// the embedded Config zero value stays OFF, so an SDK embedder opts in explicitly.
+const DefaultDeferColdTools = true
 
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
@@ -387,6 +409,18 @@ type Config struct {
 	// publishes it in the guard-session index so a second process can read this
 	// session's status with no prior port (or key) knowledge.
 	ReadBearer string
+	// KeyPrincipals binds ADDITIONAL api keys to org/project ISOLATION principals
+	// (#5332). Each entry maps a raw api key (as the caller presents it in x-api-key or
+	// Authorization: Bearer) to the tenant principal it authenticates as; a matching
+	// inbound key both AUTHENTICATES the caller and ATTRIBUTES the session to that
+	// principal (access log + /v1/fak/events, joinable by X-Trace-Id). Additive to
+	// RequireKey — the single RequireKey bearer still authenticates the anonymous
+	// single-tenant caller, and an empty map leaves that path byte-for-byte unchanged.
+	// The raw keys are consumed at construction: New hashes each to a SHA-256 digest and
+	// drops the plaintext, so no raw key is retained in the Server or written anywhere —
+	// the operator sources them from the environment at the front door, never from a
+	// secret at rest.
+	KeyPrincipals map[string]string
 	// ExposeUpstreamErrorDetail, when true, lets the proxy fold a SCRUBBED, bounded
 	// snapshot of the upstream provider's own 400 error body into the client-facing
 	// message (see upstreamErrorStatus / plannerErrorStatus). It exists ONLY for the
@@ -675,9 +709,11 @@ type Config struct {
 	// This reaches the SYSTEMIC built-in slice (Read/Write/Edit/Bash/… — harness-owned, but
 	// just req.Tools to fak's gateway), not just fak's own MCP tools. Deterministic and
 	// cache-safe (byte-stable tools[] turn-over-turn), fail-safe identity on any ambiguity.
-	// Default false: this is the epic's highest-risk lever — the exact tool_search_tool wire
-	// type/beta and the A/B (token-delta × held-accuracy × poison) are the validation gates,
-	// and the fault-in leans on #3200's pin/quarantine. Ablate with FAK_ABLATE_DEFER_TOOLS=1.
+	// Zero value false (an SDK embedder opts in explicitly), but the FRONT DOORS (fak
+	// guard / fak serve) now default their --defer-cold-tools flag ON via
+	// DefaultDeferColdTools — the #3537 flip, its A/B (token-delta × held-accuracy ×
+	// poison) gates reported PASS. Opt out with --defer-cold-tools=false; ablate the live
+	// seam with FAK_ABLATE_DEFER_TOOLS=1. The fault-in leans on #3200's pin/quarantine.
 	DeferColdTools bool
 	// RouteManifest, when non-nil, makes the gateway classify each fak_syscall tool
 	// call into a modelroute.Subject and route it: for a single-model (PICK) plan the
@@ -1112,6 +1148,11 @@ type Server struct {
 	// readBearer is the read-scoped observability bearer (Config.ReadBearer): accepted
 	// ONLY on /healthz, /debug/vars, /metrics, never on a mutating route.
 	readBearer string
+	// keyset binds additional api keys to org/project isolation principals
+	// (Config.KeyPrincipals, #5332), matched in withAuth by a constant-time digest
+	// compare. nil => RequireKey-only auth, unchanged. Holds only key DIGESTS — the raw
+	// keys are hashed and dropped in New, never retained here.
+	keyset *keyset
 	// exposeUpstreamErrorDetail folds a scrubbed, bounded snapshot of the upstream's
 	// own 400 body into the client-facing message. TRUE only on the trusted local
 	// path (fak guard, loopback-bound); FALSE (the default) keeps the no-leak
@@ -1343,6 +1384,18 @@ type Server struct {
 	// maxCtxRestoreSessions generational reset as ctxRestore so it cannot grow unbounded.
 	traceOwnerMu sync.RWMutex
 	traceOwner   map[string]string
+
+	// tracePrincipal binds a session trace to the AUTHORITY principal its CURRENT turn
+	// is attributed to (human / self-model / peer-agent / timer / network-tool / unknown) —
+	// the #2412 inbound-principal floor. Stamped at the served-request boundary
+	// (handleAnthropicMessages) from the inbound principal-class label, last-writer-wins
+	// because authority is a PER-TURN fact (a session may relay a peer turn mid-stream),
+	// and read at the adjudication seam (adjudicateProposedServed) to type-check
+	// authority-consuming acts. Distinct from traceOwner (the tenant ISOLATION principal,
+	// a string identity for read-scope). Guarded by tracePrincipalMu; bounded by the same
+	// generational reset as traceOwner so it cannot grow unbounded.
+	tracePrincipalMu sync.RWMutex
+	tracePrincipal   map[string]Principal
 
 	// turnSafetyMu guards turnSafety, the per-trace stash of the LAST turn's adjudication
 	// SAFETY delta (calls blocked / repaired this turn, results quarantined this turn). The
@@ -1803,6 +1856,7 @@ func New(cfg Config) (*Server, error) {
 		model:                        model,
 		requireKey:                   cfg.RequireKey,
 		readBearer:                   cfg.ReadBearer,
+		keyset:                       newKeyset(cfg.KeyPrincipals),
 		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail,
 		upstreamBadRequestNotify:     cfg.UpstreamBadRequestNotify,
 		version:                      version,

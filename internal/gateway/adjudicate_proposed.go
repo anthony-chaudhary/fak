@@ -55,6 +55,16 @@ const ReasonLivelockFuse = "LIVELOCK_FUSE"
 // on len(kept)) collapses a fully-served turn to end_turn/stop correctly, and the
 // deny-all guard must exclude servedHits (a served turn is a SUCCESS, not a deny).
 func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.ToolCall, reqTrace string) (kept []agent.ToolCall, adjs []ToolAdjudication, dropped int, servedText string, servedHits int) {
+	// PRINCIPAL AUTHORITY FLOOR (#2412): before any adjudication (or vDSO fast-path
+	// probe), type-check the turn's authority-consuming acts against the inbound
+	// principal. A confirmation token is a consent-shaped act, honored only under the
+	// human principal; a peer-agent / timer / network-tool / unknown turn has it
+	// stripped here, so the underlying irreversible call falls back to its
+	// REQUIRE_WITNESS hold instead of being waved through by a relayed approval. The
+	// human principal (the common direct-wire default) is a no-op passthrough.
+	if p := s.tracePrincipalOf(reqTrace); !p.IsHuman() {
+		calls, _ = gateInboundAuthority(p, calls)
+	}
 	pass := make([]agent.ToolCall, 0, len(calls))
 	var served []string
 	for _, tc := range calls {

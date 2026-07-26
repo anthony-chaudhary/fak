@@ -115,6 +115,21 @@ func (s *Server) routeTable() []gatewayRoute {
 		// unless a host installs a provider via SetTasksSnapshotProvider and the
 		// operator enables it; the snapshot carries accounting only, no payload bytes.
 		{"/v1/fak/tasks", s.handleFakTasks},
+		// /v1/fak/sharedtask/ is the shared-task record co-editing subtree (#3885):
+		// GET /v1/fak/sharedtask/{task_id} is the scope-redacted record view, GET
+		// {task_id}/events the same-policy historical catch-up, POST {task_id}
+		// creates a record, POST {task_id}/patch is the adjudicated write through
+		// the internal/sharedtask fold (accept / conflict / deny / quarantine).
+		// Inert (404) unless the host installs a provider via SetSharedTaskProvider
+		// and the operator enables it (FAK_SHAREDTASK=1).
+		{"/v1/fak/sharedtask/", s.handleFakSharedTask},
+		// /v1/fak/agent/sessions is the agent-runtime spine (#3258, epic #3256): POST
+		// a goal and stream back ONE kernel-governed owned-loop session as NDJSON
+		// events — session.start, per-call adjudicated `call` rows, session.end with
+		// the ArmMetrics witness. The loop is agent.RunGovernedArm over the server's
+		// planner (offline mock / --gguf in-kernel / proxy), so every tool call
+		// crosses the in-kernel syscall boundary and the route runs offline in CI.
+		{"/v1/fak/agent/sessions", s.handleFakAgentSessions},
 		// /v1/fak/loops is the in-kernel background-loop runtime view: a JSON snapshot
 		// of every supervised loop and its live progress (the observability half of the
 		// loop control plane; complements the loopmgr ledger `fak loop status` reads).
@@ -327,12 +342,31 @@ func (l *noDelayTCPListener) Accept() (net.Conn, error) {
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	want := sha256.Sum256([]byte(s.requireKey))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.requireKey != "" && !authExempt(r) {
+		if (s.requireKey != "" || s.keyset != nil) && !authExempt(r) {
 			tok, ok := gatewayCredential(r)
 			got := sha256.Sum256([]byte(tok))
-			if !ok || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+			// The single RequireKey bearer authenticates the anonymous single-tenant
+			// caller; the keyset (#5332) authenticates a bound org/project principal.
+			// Both are the SAME constant-time SHA-256 compare — a request presenting ANY
+			// accepted key is authenticated. A keyset match additionally ATTRIBUTES the
+			// turn to its tenant principal, stamped onto the context below so principalFor
+			// / traceOwner / the access log / /v1/fak/events all name the same tenant. On
+			// the RequireKey-only path (keyset == nil) lookup is a nil no-op and this is
+			// byte-for-byte the prior behavior.
+			authed := ok && s.requireKey != "" && subtle.ConstantTimeCompare(got[:], want[:]) == 1
+			principal := ""
+			if ok {
+				if p, matched := s.keyset.lookup(tok); matched {
+					authed = true
+					principal = p
+				}
+			}
+			if !authed {
 				writeErr(w, http.StatusUnauthorized, "missing or invalid credentials")
 				return
+			}
+			if principal != "" {
+				r = r.WithContext(WithPrincipal(r.Context(), principal))
 			}
 		}
 		if s.startup.childStartupPending() && strings.HasPrefix(r.URL.Path, "/v1/") && !strings.HasPrefix(r.URL.Path, "/v1/fak/") {
@@ -1116,6 +1150,14 @@ func (s *Server) handleFakSyscall(w http.ResponseWriter, r *http.Request) {
 // (set by an auth proxy / tenant router in front of the gateway) takes precedence, else
 // the request body's principal field. Empty => single-tenant (every caller shares).
 func principalFor(r *http.Request, bodyPrincipal string) string {
+	// A keyset-authenticated caller's principal is bound at the front door (withAuth →
+	// WithPrincipal, #5332) and is AUTHORITATIVE: it outranks the X-Fak-Principal header
+	// and the body field so a caller cannot present one key and then claim another
+	// tenant via a spoofed header or body. On the no-keyset path the context carries no
+	// principal, so this falls through to the header/body exactly as before.
+	if p := strings.TrimSpace(principalFromContext(r.Context())); p != "" {
+		return p
+	}
 	if h := strings.TrimSpace(r.Header.Get("X-Fak-Principal")); h != "" {
 		return h
 	}
@@ -1209,6 +1251,13 @@ var activeJournal = journal.Active
 type EventsResponse struct {
 	Events []journal.Row `json:"events"`
 	Cursor uint64        `json:"cursor"`
+	// Principals maps a row's X-Trace-Id to the tenant ISOLATION principal that owns
+	// that trace (the keyset-bound org/project, #5332), letting a reader attribute each
+	// audit row to the tenant that produced it WITHOUT the hash-chained journal.Row
+	// schema carrying — or persisting — a principal field. Populated at read time from
+	// the live traceOwner map; omitted when no drained row has a named owner (the
+	// single-tenant loopback), so the single-key wire shape is unchanged.
+	Principals map[string]string `json:"principals,omitempty"`
 }
 
 // handleFakEvents drains the durable, hash-chained audit journal
@@ -1250,7 +1299,28 @@ func (s *Server) handleFakEvents(w http.ResponseWriter, r *http.Request) {
 			cursor = row.Seq
 		}
 	}
-	writeJSON(w, http.StatusOK, EventsResponse{Events: out, Cursor: cursor})
+	resp := EventsResponse{Events: out, Cursor: cursor}
+	// Attribute each drained row to the tenant principal that owns its trace, so a
+	// reader joins the audit journal to the org/project that produced it by X-Trace-Id.
+	// Read-time only: the on-disk hash-chained row schema is untouched. Only NAMED
+	// owners are emitted (an unbound / single-tenant "" owner is skipped), so the map is
+	// absent on the single-key loopback and present exactly for keyset-attributed rows.
+	principals := make(map[string]string, len(out))
+	for _, row := range out {
+		if row.TraceID == "" {
+			continue
+		}
+		if _, seen := principals[row.TraceID]; seen {
+			continue
+		}
+		if owner, ok := s.traceOwnerOf(row.TraceID); ok && owner != "" {
+			principals[row.TraceID] = owner
+		}
+	}
+	if len(principals) > 0 {
+		resp.Principals = principals
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleFakRevoke triggers a fleet-wide refutation of an external world-state witness.
@@ -1601,6 +1671,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"age_seconds":    int(age / time.Second),
 			"window_seconds": int(servedFailureWindow / time.Second),
 		}
+	}
+	// #3425: the deployment-boundary saturation readout rides the readiness surface too,
+	// not just /metrics — an operator or autoscaler probing /healthz sees live sessions
+	// against the configured ceiling (FAK_MAX_SESSIONS) and can scale out BEFORE the box
+	// starts shedding. Saturation does NOT flip ok:false: the deployment is healthy at
+	// the ceiling, it just backpressures NEW sessions (SESSION_CEILING_SATURATED) while
+	// the loops in flight run untouched. Absent entirely when no ceiling is configured.
+	if sat := s.sessionSaturationNow(r.Context()); sat.Bounded {
+		health["session_saturation"] = sat
 	}
 	writeJSON(w, http.StatusOK, health)
 }

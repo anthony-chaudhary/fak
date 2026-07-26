@@ -145,7 +145,30 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		return nil
 	}
 
-	m, err := s.runNativeArmStream(r.Context(), req, reqTrace, emitText)
+	// Typed loop-progress → structured native SSE (#5148). Each witnessed lifecycle
+	// transition of the OWNED loop becomes a custom SSE event named for its kind,
+	// interleaved with the text deltas above and tagged with this request's session
+	// trace + the originating call id. The observer runs on the same request goroutine
+	// as the text sink (the loop is synchronous within CompleteStream), so no
+	// cross-goroutine send race is introduced.
+	onProgress := func(ev agent.ProgressEvent) {
+		payload := map[string]any{
+			"type":    string(ev.Kind),
+			"session": reqTrace,
+			"turn":    ev.Turn,
+		}
+		for k, v := range map[string]string{
+			"call_id": ev.CallID, "tool": ev.Tool,
+			"verdict": ev.Verdict, "reason": ev.Reason, "taint": ev.Taint,
+		} {
+			if v != "" {
+				payload[k] = v
+			}
+		}
+		send(string(ev.Kind), payload)
+	}
+
+	m, err := s.runNativeArmStream(r.Context(), req, reqTrace, emitText, onProgress)
 	if err != nil {
 		s.logf("gateway: native stream loop error (trace %s): %v", reqTrace, err)
 		closeText()
@@ -188,20 +211,28 @@ func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesR
 	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, s.nativeRunOptions(ctx, reqTrace)...)
 }
 
-func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink) (agent.ArmMetrics, error) {
+// runNativeArmStream drives the owned loop for one STREAMED request. onProgress (may be
+// nil) receives the loop's typed lifecycle transitions (#5148) so the caller can render
+// them as structured SSE alongside the text deltas; a nil observer leaves the loop
+// byte-for-byte the historical one.
+func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink, onProgress agent.ProgressObserver) (agent.ArmMetrics, error) {
 	ensureAgentPolicyRung()
 	task := lastUserText(req.Messages)
+	opts := s.nativeRunOptions(ctx, reqTrace)
+	if onProgress != nil {
+		opts = append(opts, agent.WithProgressObserver(onProgress))
+	}
 	if s.stopGate != nil {
 		// A rejected final answer must never leak as an SSE delta. Buffer stop-gated
 		// turns through the non-streaming planner path and emit only the final answer
 		// whose declared witness passed.
-		m, err := agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, s.nativeRunOptions(ctx, reqTrace)...)
+		m, err := agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, opts...)
 		if err == nil && m.FinalAnswer != "" && sink != nil {
 			err = sink(m.FinalAnswer)
 		}
 		return m, err
 	}
-	return agent.RunArmStream(ctx, s.planner, task, true, s.nativeMaxTurns, sink, nil, s.nativeRunOptions(ctx, reqTrace)...)
+	return agent.RunArmStream(ctx, s.planner, task, true, s.nativeMaxTurns, sink, nil, opts...)
 }
 
 // ensureAgentPolicyRung guarantees the agent policy adjudicator is present in the
