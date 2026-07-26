@@ -653,6 +653,8 @@ func runLoopHealth(stdout, stderr io.Writer, argv []string) int {
 	registryPath := fs.String("registry", defaultLoopRegistry(), "loop registry JSON path")
 	asJSON := fs.Bool("json", false, "emit the loop-health report as JSON")
 	check := fs.Bool("check", false, "exit 3 when any loop is dark")
+	schedFrom := fs.String("sched-from", "", "corroborate DARK loops against a captured schedscan snapshot (JSON); enables the #4989 OS-scheduler rung off-Windows")
+	osTasks := fs.Bool("os-tasks", false, "corroborate DARK loops against a live Windows Task Scheduler query (#4989 OS-scheduler rung)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -676,7 +678,8 @@ func runLoopHealth(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak loop health: %v\n", err)
 		return 2
 	}
-	rep := loopmgr.FoldHealth(st, reg, now, loopmgr.HealthThresholds{})
+	osWitness := loopOSWitnesses(loopOSTaskRows(stderr, *schedFrom, *osTasks), loopOSTaskMap())
+	rep := loopmgr.FoldHealthWithOS(st, reg, now, loopmgr.HealthThresholds{}, osWitness)
 	attachLearningDocsDebt(&rep)
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, rep); err != nil {
@@ -1159,9 +1162,16 @@ func renderLoopHealth(w io.Writer, rep loopmgr.HealthReport, ledger, registry st
 		fmt.Fprintf(w, "no loops found (ledger %s registry %s)\n", ledger, registry)
 		return
 	}
-	fmt.Fprintf(w, "fak loop health: loops=%d live=%d stale=%d dark=%d unknown=%d registered=%d ledgered=%d\n\n",
+	fmt.Fprintf(w, "fak loop health: loops=%d live=%d stale=%d dark=%d unknown=%d registered=%d ledgered=%d",
 		rep.Rollup.Loops, rep.Rollup.Live, rep.Rollup.Stale, rep.Rollup.Dark,
 		rep.Rollup.Unknown, rep.Rollup.Registered, rep.Rollup.Ledgered)
+	// The #4989 OS-scheduler tally is a SUBSET of dark, printed only when it is
+	// non-zero: a bare "os-live-ledger-dark=0" would be noise, and the fail-closed
+	// tests read its absence as proof no loop was fabricated live.
+	if rep.Rollup.OSFiredNoLedgerRow > 0 {
+		fmt.Fprintf(w, " os-live-ledger-dark=%d", rep.Rollup.OSFiredNoLedgerRow)
+	}
+	fmt.Fprint(w, "\n\n")
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "LOOP\tSTATE\tLAST\tAGE\tCADENCE\tRUNS\tWITNESSED\tKEEP\tDEBT")
 	for _, row := range rep.Rows {
@@ -1182,6 +1192,11 @@ func renderLoopHealth(w io.Writer, rep loopmgr.HealthReport, ledger, registry st
 
 func loopHealthState(row loopmgr.HealthRow) string {
 	if row.Dark {
+		// #4989: a ledger-dark loop whose mapped OS task fired within cadence is alive
+		// at the OS layer, just not writing a ledger row — say so, don't call it dark-loop.
+		if row.OSFiredNoLedgerRow {
+			return "os-live-ledger-dark"
+		}
 		return "dark-loop"
 	}
 	return string(row.State)
