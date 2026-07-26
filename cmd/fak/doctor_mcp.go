@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 const doctorMCPSchema = "fak-doctor-mcp/1"
@@ -121,6 +123,7 @@ func diagnoseMCP(server, configPath, explicit string, explicitArgs []string, tim
 	} else {
 		add(doctorMCPStage{Name: "policy_readability", Status: "skip", Detail: "no --policy argument"})
 	}
+	add(sessionRegistryRecoveryStage())
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, resolved, args...)
@@ -211,6 +214,28 @@ func diagnoseMCP(server, configPath, explicit string, explicitArgs []string, tim
 	}
 	rep.OK = true
 	return rep
+}
+
+// sessionRegistryRecoveryStage surfaces corrupt-registry recovery counts and
+// the last recovery time for the production session registry (#4658). It is
+// strictly read-only (no locks, no file creation) and privacy-safe: the
+// ledger it reads records outcome/cause/size/time, never descriptor contents.
+func sessionRegistryRecoveryStage() doctorMCPStage {
+	registry := defaultSessionRegistryPath()
+	stats, ok, err := session.ReadRecoveryStats(registry)
+	if err != nil {
+		return doctorMCPStage{Name: "session_registry_recovery", Status: "skip", Detail: "recovery ledger unreadable: " + err.Error()}
+	}
+	if !ok {
+		return doctorMCPStage{Name: "session_registry_recovery", Status: "pass", Detail: "no corrupt-registry recoveries recorded"}
+	}
+	evidence, evidenceErr := session.QuarantineEvidenceCount(registry)
+	detail := fmt.Sprintf("recoveries_total=%d evidence_current=%d last=%s cause=%s",
+		stats.Total, evidence, stats.LastAt.UTC().Format(time.RFC3339), stats.LastCause)
+	if evidenceErr != nil {
+		detail = fmt.Sprintf("recoveries_total=%d last=%s cause=%s", stats.Total, stats.LastAt.UTC().Format(time.RFC3339), stats.LastCause)
+	}
+	return doctorMCPStage{Name: "session_registry_recovery", Status: "warn", Detail: detail}
 }
 
 func mcpStageFail(rep doctorMCPReport, name, cause string, err error, remediation string) doctorMCPReport {

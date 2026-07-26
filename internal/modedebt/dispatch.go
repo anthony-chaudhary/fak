@@ -52,6 +52,17 @@ type Dial struct {
 	Lifted bool   `json:"lifted"`
 	Regime string `json:"regime,omitempty"`
 	Detail string `json:"detail,omitempty"`
+
+	// The census half (#4415). The dispatcher selects on Grade+Lifted+Slug only, so
+	// every field below is additive and omitempty: an older scorecard that carries
+	// none of them still decodes and still dispatches identically. They exist so the
+	// `fak mode-debt` dump can show WHY a dial got its grade (Criteria), WHERE the
+	// dial lives (Surface/File/Line), and which reviewed safety hold excluded it.
+	Surface  string   `json:"surface,omitempty"`
+	File     string   `json:"file,omitempty"`
+	Line     int      `json:"line,omitempty"`
+	Criteria Criteria `json:"criteria"`
+	Excluded string   `json:"excluded,omitempty"`
 }
 
 // Scorecard is the stable JSON payload the scorer leaf emits and this dispatcher
@@ -59,6 +70,15 @@ type Dial struct {
 type Scorecard struct {
 	Schema string `json:"schema,omitempty"`
 	Dials  []Dial `json:"dials"`
+
+	// Roll-up counts derived by Score (#4415) so no consumer re-folds the grades.
+	// Debt is the headline DebtKey integer: RANKED debt only (Hard+Soft), so a CLEAN
+	// dial and a harness-held safety dial both contribute zero.
+	Clean   int `json:"clean"`
+	Hard    int `json:"hard"`
+	Soft    int `json:"soft"`
+	NotDebt int `json:"not_debt"`
+	Debt    int `json:"debt"`
 }
 
 // IsHard reports whether the dial is graded HARD (case-insensitive), i.e. a dial

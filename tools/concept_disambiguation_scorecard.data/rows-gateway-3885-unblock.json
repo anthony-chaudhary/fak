@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "handlefakagentsessions",
+      "canonical": "handleFakAgentSessions (gateway route)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Server.handleFakAgentSessions is the /v1/fak/agent/sessions HTTP handler (#3258, epic #3256): POST a goal and it runs ONE kernel-governed owned-loop agent session (agent.RunGovernedArm over the server's planner) and streams the session back as NDJSON events — session.start, per-call adjudicated call rows, session.end with the ArmMetrics witness.",
+      "distinction": "It is the HTTP front door that RUNS a governed agent session end to end and streams its events; unlike applySessionControl (a session-table mutator) or the session capacity/slot vocabulary, it owns no capacity accounting — every tool call it makes crosses the in-kernel syscall boundary.",
+      "distinct_from": [
+        "x-session-runtime-applysessioncontrol"
+      ],
+      "aliases": [],
+      "grounding": "handleFakAgentSessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

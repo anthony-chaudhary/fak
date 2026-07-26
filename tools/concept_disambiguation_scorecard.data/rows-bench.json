@@ -1,0 +1,85 @@
+{
+  "rows": [
+    {
+      "id": "insufficientaggregatehbm",
+      "canonical": "INSUFFICIENT_AGGREGATE_HBM",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The bench.AdmissionVerdict wire value a sanctioned node earns when its AGGREGATE device HBM across every rank is below the pinned artifact size: a physical-ceiling placement refusal that no reservation, scheduler change or peer eviction can lift. Only a smaller artifact (quantization) or more nodes close the ShortfallBytes it records, and admitNode derives it before any transfer begins.",
+      "distinction": "A PHYSICAL-ceiling refusal, so it is NOT INSUFFICIENT_FREE_HBM_NEEDS_RESERVATION (a free-rank shortfall that a reservation solves without evicting a peer) and NOT NO_GPU_DEVICE (no device at all). It refuses an ARTIFACT PLACEMENT, not a request or a commit, so it is not a repo or hook refusal reason like OPERATOR_GATE or sealed_by_trust_gate. It is the derived VERDICT, not the byte count it is derived from (AggregateHBMBytes, classified incidental).",
+      "distinct_from": [
+        "operatorgate",
+        "sealed-by-trust-gate",
+        "placement4801collectivewitnessmissing"
+      ],
+      "aliases": [],
+      "grounding": "INSUFFICIENT_AGGREGATE_HBM",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "runtimewitnessed",
+      "canonical": "RuntimeWitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "DeepSeekInventory.RuntimeWitnessed (JSON runtime_witnessed) is the honesty fence on the provisioning inventory: it stays false until a deterministic inference has actually RUN on a real placement of the pinned artifact, and a downstream consumer must refuse to headline throughput or saving while it is false. Everything else in the record is provenance plus a derived feasibility verdict - no number in it is fak-authored or measured.",
+      "distinction": "A one-bit fence over a whole artifact record asking has this model actually been RUN yet. NOT ProvenanceWitnessed (a four-level per-row evidence-strength label on a context-budget envelope), NOT ClaimWitnessed (a dispatch worker commit corroborated by the closure audit), and NOT CollectiveWitnessed (an NCCL collective smoke test on reserved ranks - hardware reachability, still short of an inference run). It is a claim BRAKE, not a verdict a gate switches on.",
+      "distinct_from": [
+        "witness-proof-provenancewitnessed",
+        "drive-witness-proof-claimwitnessed",
+        "placement4801collectivewitnessed"
+      ],
+      "aliases": [],
+      "grounding": "RuntimeWitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "witnessednodes",
+      "canonical": "WitnessedNodes",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "DeepSeekInventory.WitnessedNodes (JSON witnessed_nodes) is the scrubbed NodeCapacity population actually read back from sanctioned nodes over the private bridge - node-class label, rank counts and nominal per-rank HBM. It is the exact set every per-node AdmissionResult is derived over, and the set the NOT_SINGLE_NODE_ADMISSIBLE rollup is scoped to, so it bounds how far the refusal generalizes.",
+      "distinction": "The witnessed INPUT population, NOT the derived verdicts computed from it (Admission, AdmissionSummary, WitnessedPlacement) and NOT a runtime witness - nothing in this set came from loading weights or running inference (RuntimeWitnessed stays false). It enumerates witnessed NODES with their full capacity, unlike WitnessedFiles (artifacts a run touched) and unlike witnessedReservationEnvelope (the non-evicting reach of ONE candidate reservation).",
+      "distinct_from": [
+        "x-disambig-witnessedfiles",
+        "placement4801witnessedreservationenvelope",
+        "placement4801witnessedplacement"
+      ],
+      "aliases": [],
+      "grounding": "WitnessedNodes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "aggregatehbmbytes",
+      "canonical": "AggregateHBMBytes",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "A NodeCapacity accessor returning the node's total device memory across every rank (GPUCount x HBMBytesPerGPU) — the hard physical ceiling, reachable only by evicting peers.",
+      "distinction": "The MEASUREMENT, not the verdict: INSUFFICIENT_AGGREGATE_HBM is the AdmissionVerdict a node earns when this value falls below the pinned artifact size. Distinct from FreeHBMBytes, which counts only peer-free ranks and so is the ceiling reachable WITHOUT eviction (#4788 forbids eviction).",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "AggregateHBMBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

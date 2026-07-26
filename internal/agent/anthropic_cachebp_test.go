@@ -124,6 +124,57 @@ func TestUpgradeStableCacheTTL1hOnToolsBreakpoint(t *testing.T) {
 	}
 }
 
+// TestUpgradeStableCacheTTL1hUpgradesEveryHeadBreakpoint pins the #5363 ordering fix:
+// Claude Code 2.1.x marks BOTH the last tool and multiple system blocks, and Anthropic
+// rejects a 1h breakpoint that comes after a 5m one in tools→system→messages order (the
+// witnessed per-turn HTTP 400 "system.2.cache_control.ttl: a ttl='1h' cache_control block
+// must not come after a ttl='5m' cache_control block"). Every head breakpoint must be
+// upgraded together; the message-tail breakpoint stays 5m (it follows the 1h head, which
+// is the legal descending order).
+func TestUpgradeStableCacheTTL1hUpgradesEveryHeadBreakpoint(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"tools":[{"name":"a","input_schema":{"type":"object"}},{"name":"b","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],` +
+		`"system":[{"type":"text","text":"identity","cache_control":{"type":"ephemeral"}},` +
+		`{"type":"text","text":"project context","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":[{"type":"text","text":"recent","cache_control":{"type":"ephemeral"}}]}]}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1h(raw)
+	if oc.Reason != TTLUpgradeReasonNone || oc.Target != "system" {
+		t.Fatalf("outcome = %+v, want a full head upgrade labeled system", oc)
+	}
+	if n := bytes.Count(out, []byte(`"cache_control":{"type":"ephemeral","ttl":"1h"}`)); n != 3 {
+		t.Fatalf("want ALL 3 head breakpoints (1 tools + 2 system) on the 1h tier, got %d:\n%s", n, out)
+	}
+	if !bytes.Contains(out, []byte(`"text":"recent","cache_control":{"type":"ephemeral"}`)) {
+		t.Fatalf("message-tail breakpoint must stay 5m:\n%s", out)
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("upgraded body failed to re-decode: %v", err)
+	}
+
+	// Idempotence: a second pass over the fully-upgraded body is already_1h identity.
+	out2, oc2 := UpgradeAnthropicStableCacheTTL1h(out)
+	if oc2.Reason != TTLUpgradeReasonAlready1h || !bytes.Equal(out2, out) {
+		t.Fatalf("second pass = %+v, want already_1h identity", oc2)
+	}
+}
+
+// TestUpgradeStableCacheTTL1hRefusesMixedExplicitTTL: an explicit caller ttl on ANY head
+// breakpoint refuses the WHOLE upgrade — a partial edit around it could invert the
+// provider's required non-increasing TTL order.
+func TestUpgradeStableCacheTTL1hRefusesMixedExplicitTTL(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"tools":[{"name":"b","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral","ttl":"5m"}}],` +
+		`"system":[{"type":"text","text":"stable","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1h(raw)
+	if oc.Reason != TTLUpgradeReasonTTLAlreadySet {
+		t.Fatalf("outcome = %+v, want ttl_already_set refusal", oc)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Fatal("a mixed explicit-ttl head must be identity")
+	}
+}
+
 func TestUpgradeStableCacheTTL1hIgnoresMessageOnlyBreakpoint(t *testing.T) {
 	raw := []byte(`{"model":"m","max_tokens":1,` +
 		`"system":[{"type":"text","text":"stable but unmarked"}],` +

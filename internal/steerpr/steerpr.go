@@ -98,7 +98,22 @@ type Commit struct {
 // Unit is one operator-legible bundle of trunk commits: an Operator
 // Steerability PR. Its Band is the worst of its members'.
 type Unit struct {
-	Leaf     string         `json:"leaf"`
+	// Leaf is the unit's KEY: the (fak <leaf>) ship-stamp when GroupedBy is
+	// "leaf", or the wave key ("wave:<n>", see WaveKey) when GroupedBy is "wave".
+	// Every operator verb addresses a unit by this string, which is why the two
+	// bases share one field — and why the wave key carries a colon the ship-stamp
+	// grammar cannot produce, so the two key spaces can never collide.
+	Leaf string `json:"leaf"`
+	// GroupedBy names WHY this unit holds what it holds: "leaf" (one unit per
+	// ship-stamp — the default and the fallback) or "wave" (one unit per `fak
+	// issue cohort` wave). It is mandatory on every unit, never omitempty: two
+	// grouping bases coexisting silently would make the overlay LESS legible than
+	// one basis, which is the #5040 fail condition stated as a field tag.
+	GroupedBy string `json:"grouped_by"`
+	// Leaves are the distinct member ship-stamps folded into a WAVE unit, so an
+	// operator reading a wave unit can still see which lanes it spans. Empty on a
+	// leaf unit, where the answer is already Leaf.
+	Leaves   []string       `json:"leaves,omitempty"`
 	Title    string         `json:"title"`
 	Commits  []Commit       `json:"commits"`
 	Types    map[string]int `json:"types"`
@@ -268,44 +283,13 @@ func Issues(text string, exclude []string) []string {
 // Units are ordered biggest-first, then by leaf (the promotion-plan order);
 // the commits inside each unit read oldest-first, the way a PR body should.
 // Call SortWorstFirst for the operator view's attention order.
+//
+// This is the LEAF-grouped fold: every unit it returns reports grouped_by leaf.
+// It is `release prplan`'s fold and the overlay's fallback, and it is exactly
+// FoldUnitsByWave with no wave bindings — one loop, so the two bases can never
+// drift apart in anything but their key (see grouping.go, #5040).
 func FoldUnits(commits []Commit) (units []Unit, unstamped []Commit) {
-	byLeaf := map[string]*Unit{}
-	var order []string
-	for _, c := range commits {
-		c.Band = commitBand(c)
-		if c.Leaf == "" {
-			unstamped = append(unstamped, c)
-			continue
-		}
-		unit, ok := byLeaf[c.Leaf]
-		if !ok {
-			unit = &Unit{Leaf: c.Leaf, Types: map[string]int{}}
-			byLeaf[c.Leaf] = unit
-			order = append(order, c.Leaf)
-		}
-		unit.Commits = append(unit.Commits, c)
-		if c.Type != "" {
-			unit.Types[c.Type]++
-		}
-		unit.Resolves = MergeRefs(unit.Resolves, c.Resolves)
-		unit.Mentions = MergeRefs(unit.Mentions, c.Mentions)
-		unit.Files = MergeRefs(unit.Files, c.Files)
-	}
-	units = make([]Unit, 0, len(byLeaf))
-	for _, leaf := range order {
-		unit := byLeaf[leaf]
-		// git log yields newest-first; a PR body reads oldest-first.
-		for i, j := 0, len(unit.Commits)-1; i < j; i, j = i+1, j-1 {
-			unit.Commits[i], unit.Commits[j] = unit.Commits[j], unit.Commits[i]
-		}
-		// A body mention that some commit subject-binds is already a closure.
-		unit.Mentions = SubtractRefs(unit.Mentions, unit.Resolves)
-		unit.Band = FoldBand(unit.Commits)
-		unit.Title = UnitTitle(*unit)
-		units = append(units, *unit)
-	}
-	sortBiggestFirst(units)
-	return units, unstamped
+	return FoldUnitsByWave(commits, nil)
 }
 
 // sortBiggestFirst is the promotion-plan order: most commits first, then by
