@@ -151,6 +151,41 @@ DEFAULT_REALLOC_CEILING = 2
 DEFAULT_SEAT_ADAPTIVE = True
 DEFAULT_SEAT_CEILING = 20
 DEFAULT_SEAT_RAMP_DELTA = 2
+# Per-tick spawn FAN-OUT. The cap was never the binding constraint on steady-state
+# concurrency — ARRIVAL RATE was. `evaluate()` spawns AT MOST ONE worker per call, and
+# the armed FleetIssueDispatch task fires on a PT5M repeat, so with a ~5-min worker
+# lifetime the fleet converges to  lifetime / tick_interval ~= 1 live worker  no matter
+# how large --max-workers is (witnessed: cap=18, live=1, headroom=17). Raising the cap
+# cannot fix that; only spawning more than once per tick can.
+#
+# `evaluate_burst()` is that arm: it calls `evaluate()` up to `spawn_burst` times in one
+# tick, and each call re-runs the ENTIRE admission chain from scratch (registry-routed
+# account, dispatch_preflight host/seat/cap gate, weekly-cap + backend-health gates,
+# live-issue/live-lane de-dup, the contract + collision + multi-lane scans, and the
+# fenced lane lease). Nothing is hoisted across spawns: sub-tick N+1 sees the worker
+# sub-tick N just launched (its .pid sidecar makes it `live`, its log holds the lane,
+# its issue enters the cooldown/skip set) and re-decides at the NEW headroom, so the
+# fan-out fills capacity without ever bypassing a gate.
+#
+# THIS HOST LOCKS UP ON SPAWN BURSTS (#3153: soft-fault + process-spawn churn saturating
+# the kernel scheduler/MM locks — invisible to every CPU/RAM/disk meter). So the fan-out
+# is deliberately double-bounded and OFF by default:
+#   * DEFAULT_SPAWN_BURST = 1  -> byte-identical to the pre-fan-out tick until an
+#     operator opts in (--spawn-burst / FAK_DISPATCH_SPAWN_BURST).
+#   * SPAWN_BURST_HARD_CEILING clamps ANY flag/env value, so no configuration — not a
+#     typo'd env var, not a bad cron edit — can turn one tick into a spawn storm. This
+#     limit is SEPARATE from --max-workers: --max-workers bounds the total live
+#     population, the burst bounds NEW processes per tick (the churn axis that freezes
+#     the box).
+#   * a stagger between spawns spreads the process-creation transient instead of
+#     issuing it as one burst; each sub-tick's own preflight then re-reads host health
+#     before the next launch.
+DEFAULT_SPAWN_BURST = 1
+SPAWN_BURST_HARD_CEILING = 4
+SPAWN_BURST_ENV = "FAK_DISPATCH_SPAWN_BURST"
+DEFAULT_SPAWN_BURST_STAGGER_S = 15.0
+SPAWN_BURST_STAGGER_ENV = "FAK_DISPATCH_SPAWN_BURST_STAGGER_S"
+SPAWN_BURST_STAGGER_MAX_S = 120.0
 LOOP_ID_PREFIX = "issue-resolve-dispatch"
 DEFAULT_ISSUE_CONTRACT_MIN_SCORE = 100
 # Contract-ready pick: how many lane issues (oldest first) one tick may contract-
@@ -296,11 +331,17 @@ OPENCODE_PROMPT_NOTICE = "Resolve GitHub issue # from the attached dispatch prom
 OPENCODE_PROMPT_FILE_SUFFIX = ".prompt.txt"
 CLAUDE_PROMPT_FILE_SUFFIX = ".prompt.txt"
 
-# Operator directive: claude issue-resolution workers run Opus 4.8 at xhigh
+# Operator directive: claude issue-resolution workers run Opus 5 at xhigh
 # reasoning effort. Pinned here (not read from the per-account settings.json
 # `model`, which the switcher/backup tooling live-rotates) so the choice STICKS.
 # xhigh has no settings.json field — it is only settable via the `--effort` flag.
-CLAUDE_WORKER_MODEL = "claude-opus-4-8"
+# Kept in step with the Go launch default (cmd/fak's defaultLaunchModel and
+# internal/dispatchtick's WorkerModelOpus) so a worker spawned from this path and
+# one spawned from `fak dispatch` are the same model, not two silent regimes.
+# NOTE: unlike the Go path this launcher passes no --fallback-model, so a seat that
+# cannot start this model fails rather than degrading; add the chain here if that
+# becomes the observed wall.
+CLAUDE_WORKER_MODEL = "claude-opus-5"
 CLAUDE_WORKER_EFFORT = "xhigh"
 
 
@@ -4492,11 +4533,24 @@ def _dispatch_collision_evidence(root: Path, payload: dict[str, Any]) -> list[tu
     regex-scraped out of the summary prose. Additive: an unrecognized evidence
     kind is simply unread by existing consumers.
 
+    The WIP-vs-lease split above is what the ``refusal_class`` pair makes actually
+    computable (#4321). Lane/tree/paths alone do not carry it: a lane-lease refusal
+    and a working-tree co-tenancy refusal emit the SAME lane and tree, so a reader
+    had to infer the split from verdict-name prose -- and both mechanisms spell
+    themselves "collision" here (the lane-lease refusal's own reason text says
+    "refusing COLLISION_RISK"), which is exactly how ~369 working-tree refusals were
+    folded in with lease contention. Emitting the class as its own field makes the
+    two separable by data. Emitted only for a verdict refusal_class() classifies, so
+    a non-contention tick is unchanged.
+
     Deliberately silent on whether a LANE_LEASE_HELD blocker was live or
     stranded/dead -- that instrumentation is owned by #4324 and is not
     fabricated here.
     """
     out: list[tuple[str, str]] = []
+    contention = refusal_class(str(payload.get("verdict") or ""))
+    if contention:
+        out.append(("refusal_class", contention))
     lane = str(payload.get("lane") or "").strip()
     if not lane:
         return out
@@ -6200,6 +6254,186 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     return finish(payload)
 
 
+def resolve_spawn_burst(flag: int | None = None,
+                        env: Any | None = None) -> dict[str, Any]:
+    """Resolve one tick's spawn-burst limit — ``flag > env > default``, clamped.
+
+    Precedence: an explicit ``--spawn-burst`` wins; otherwise ``FAK_DISPATCH_SPAWN_BURST``
+    (the zero-touch way to arm the ALREADY-REGISTERED scheduled task without re-writing
+    its action); otherwise ``DEFAULT_SPAWN_BURST`` (1 = exactly today's behavior).
+
+    Every path is clamped to ``[1, SPAWN_BURST_HARD_CEILING]`` and NOTHING here raises:
+    a garbage env value falls back to the default rather than failing the tick, and no
+    value can exceed the ceiling. That is the whole point — the burst bound is the
+    fail-safe against the #3153 spawn-churn lockup, so it must not be defeatable by
+    configuration. Returns the audit block the tick payload carries under ``burst``."""
+    env = os.environ if env is None else env
+    source = "default"
+    requested: int = DEFAULT_SPAWN_BURST
+    env_invalid: str | None = None
+    raw_env = env.get(SPAWN_BURST_ENV)
+    if raw_env not in (None, ""):
+        try:
+            requested = int(str(raw_env).strip())
+            source = f"env:{SPAWN_BURST_ENV}"
+        except (TypeError, ValueError):
+            env_invalid = str(raw_env)
+    if flag is not None:
+        try:
+            requested = int(flag)
+            source = "flag:--spawn-burst"
+        except (TypeError, ValueError):
+            pass
+    limit = max(1, min(int(requested), SPAWN_BURST_HARD_CEILING))
+    out: dict[str, Any] = {
+        "limit": limit, "requested": int(requested), "source": source,
+        "hard_ceiling": SPAWN_BURST_HARD_CEILING,
+        "clamped": limit != int(requested),
+    }
+    if env_invalid is not None:
+        out["env_invalid"] = env_invalid
+    return out
+
+
+def resolve_spawn_burst_stagger(flag: float | None = None,
+                                env: Any | None = None) -> float:
+    """Seconds to wait BETWEEN spawns inside one burst — ``flag > env > default``.
+
+    Spreading N launches over N*stagger seconds is what turns a fan-out from a spawn
+    BURST (the #3153 lockup shape: many process trees created inside one scheduler
+    window) into a paced arrival. It also gives each sub-tick's own preflight a fresh
+    read of host load before the next admission. Clamped to
+    ``[0, SPAWN_BURST_STAGGER_MAX_S]`` so the pacing can never outlive the 5-minute
+    tick window; never raises."""
+    env = os.environ if env is None else env
+    value = DEFAULT_SPAWN_BURST_STAGGER_S
+    raw_env = env.get(SPAWN_BURST_STAGGER_ENV)
+    if raw_env not in (None, ""):
+        try:
+            value = float(str(raw_env).strip())
+        except (TypeError, ValueError):
+            value = DEFAULT_SPAWN_BURST_STAGGER_S
+    if flag is not None:
+        try:
+            value = float(flag)
+        except (TypeError, ValueError):
+            pass
+    if value != value or value < 0:  # NaN or negative
+        value = 0.0
+    return float(min(value, SPAWN_BURST_STAGGER_MAX_S))
+
+
+def evaluate_burst(root: Path, *, spawn_burst: int = DEFAULT_SPAWN_BURST,
+                   burst_stagger_s: float = DEFAULT_SPAWN_BURST_STAGGER_S,
+                   sleeper: Any | None = None,
+                   **kw: Any) -> dict[str, Any]:
+    """One TICK that may spawn up to ``spawn_burst`` workers, filling live headroom.
+
+    This is the arrival-rate fix. :func:`evaluate` spawns at most ONE worker per call,
+    so a PT5M tick against a ~5-min worker lifetime pins steady-state concurrency near
+    1 regardless of ``--max-workers``. This driver re-enters ``evaluate`` while the
+    previous sub-tick actually SPAWNED, up to the burst limit.
+
+    Independent admission, by construction: each iteration is a FULL ``evaluate`` call,
+    so every gate re-runs per spawn — preflight (host cap / seat pool / live<cap),
+    weekly-cap, backend health, seat-cool, live-issue and live-lane de-dup, the
+    contract / dirty-path / same-issue-WIP / multi-lane scans, and the fenced
+    ``refs/fak/locks/resolve-<lane>`` lease. No admission decision is hoisted over N
+    spawns. The de-dup is self-consistent because it reads the FILESYSTEM, not memory:
+    sub-tick N's worker leaves a ``.pid`` sidecar (so it counts as live and consumes
+    headroom), a spawn-header log (so its lane reads HELD), and a fresh log mtime (so
+    its issue is in the attempt cooldown) — all of which sub-tick N+1 re-reads. The
+    collision holds sub-tick N ledgered are likewise re-read, so the fan-out advances to
+    DISJOINT candidates instead of re-refusing the same blocked head.
+
+    Stops at the FIRST non-``spawned`` verdict (nothing to spawn, at cap, lane leased,
+    collision, contract hold, spawn failure). A refusal means the fleet is at a real
+    boundary; re-attempting it inside the same tick would only re-refuse.
+
+    DRY RUNS DO NOT FAN OUT: a ``--live=False`` sub-tick spawns nothing, so no headroom
+    is consumed and every sub-tick would re-pick the SAME issue and report it N times.
+    A dry run therefore evaluates exactly once and says so.
+
+    ``sleeper`` is the injectable stagger seam (tests pass a recorder; production uses
+    ``time.sleep``). Returns the FIRST sub-tick's payload — the canonical verdict for
+    this tick, and the one whose ``action`` :func:`tick_exit_code` grades — augmented
+    with a ``burst`` audit block. With the default limit of 1 the payload is
+    byte-identical to a plain ``evaluate``."""
+    limit = max(1, min(int(spawn_burst), SPAWN_BURST_HARD_CEILING))
+    live = bool(kw.get("live"))
+    stagger = max(0.0, float(burst_stagger_s))
+    if limit <= 1:
+        return evaluate(root, **kw)
+    if not live:
+        payload = evaluate(root, **kw)
+        payload["burst"] = {
+            "limit": limit, "attempts": 1, "spawned": 0, "stagger_s": stagger,
+            "skipped": ("dry_run — a dry-run sub-tick spawns nothing, so headroom "
+                        "never moves and every further sub-tick would re-pick the "
+                        "same issue; re-run with --live to fan out"),
+        }
+        return payload
+
+    payloads: list[dict[str, Any]] = []
+    spawned = 0
+    stopped_on = "burst_limit"
+    sub_kw = dict(kw)
+    for n in range(limit):
+        if n:
+            # The registry refresh is a per-TICK concern (route off current account
+            # evidence), not a per-spawn one: sub-tick 1 already re-derived it seconds
+            # ago. Skipping it on the follow-ons drops one subprocess per extra spawn —
+            # which is itself churn reduction on the axis that freezes this host.
+            sub_kw["refresh"] = False
+            _burst_stagger_sleep(stagger, sleeper)
+        payload = evaluate(root, **sub_kw)
+        payloads.append(payload)
+        if str(payload.get("action") or "") != "spawned":
+            stopped_on = str(payload.get("verdict") or payload.get("action") or "unknown")
+            break
+        spawned += 1
+
+    out = dict(payloads[0])
+    out["burst"] = {
+        "limit": limit,
+        "attempts": len(payloads),
+        "spawned": spawned,
+        "stagger_s": stagger,
+        "stopped_on": stopped_on,
+        "sub_ticks": [{
+            "n": i + 1,
+            "action": p.get("action"),
+            "verdict": p.get("verdict"),
+            "issue": p.get("target_issue"),
+            "lane": p.get("lane"),
+            "pid": (p.get("spawned") or {}).get("pid"),
+        } for i, p in enumerate(payloads)],
+    }
+    if spawned > 1:
+        extra = [f"#{r['issue']}" for r in out["burst"]["sub_ticks"][1:]
+                 if r.get("action") == "spawned" and r.get("issue")]
+        out["reason"] = (f"{out.get('reason')} (+{spawned - 1} more this tick: "
+                         f"{' '.join(extra)}; burst {spawned}/{limit})")
+    if len(payloads) > 1:
+        # Each sub-tick already wrote its own last-resolve-tick artifact via finish();
+        # re-record the AGGREGATE last so the on-disk tick record is the whole tick
+        # (a SPAWNED verdict plus its burst block), not the trailing refusal.
+        _record(root / RUNS_DIRNAME, out)
+    return out
+
+
+def _burst_stagger_sleep(seconds: float, sleeper: Any | None = None) -> float:
+    """Pace one inter-spawn gap. Injectable so tests never really sleep."""
+    if seconds <= 0:
+        return 0.0
+    if sleeper is None:
+        import time
+        time.sleep(seconds)
+    else:
+        sleeper(seconds)
+    return seconds
+
+
 def _record(runs_dir: Path, payload: dict[str, Any]) -> None:
     # Scope the tick record by backend so concurrent tasks (e.g. the opus
     # FleetIssueDispatch and the glm FleetIssueDispatchGlm) don't clobber each
@@ -6239,6 +6473,18 @@ def render(p: dict[str, Any]) -> str:
     if p.get("spawned"):
         s = p["spawned"]
         lines.append(f"  spawned pid={s.get('pid')} issue=#{s.get('issue')} log={s.get('log')}")
+    burst = p.get("burst") or {}
+    if burst.get("limit"):
+        if burst.get("skipped"):
+            lines.append(f"  burst     : limit {burst.get('limit')} — {burst['skipped']}")
+        else:
+            rows = " ".join(
+                f"#{r.get('issue')}:{r.get('verdict')}"
+                for r in (burst.get("sub_ticks") or []))
+            lines.append(f"  burst     : {burst.get('spawned')}/{burst.get('limit')} "
+                         f"spawned in {burst.get('attempts')} sub-tick(s), stopped on "
+                         f"{burst.get('stopped_on')} "
+                         f"(stagger {burst.get('stagger_s')}s) — {rows}")
     cs = p.get("contract_skipped") or []
     if cs:
         lanes = sorted({str(r.get("lane")) for r in cs if r.get("lane")})
@@ -6599,6 +6845,25 @@ def main(argv: list[str] | None = None) -> int:
                          f"(canary-safe ramp, #3246; default "
                          f"{DEFAULT_SEAT_RAMP_DELTA}; 0 disables the ramp bound so "
                          f"the cap jumps straight to the seat/host minimum)")
+    ap.add_argument("--spawn-burst", type=int, default=None,
+                    help=f"max workers ONE tick may spawn, filling live headroom "
+                         f"(default {DEFAULT_SPAWN_BURST} = one spawn per tick, exactly "
+                         f"the pre-fan-out behavior; hard-clamped to "
+                         f"{SPAWN_BURST_HARD_CEILING}). This is SEPARATE from "
+                         f"--max-workers: --max-workers bounds the total LIVE "
+                         f"population, this bounds NEW processes per tick — the churn "
+                         f"axis behind the host-lockup class (#3153). Every spawn in "
+                         f"the burst re-runs the full admission chain (preflight, seat, "
+                         f"collision scans, lane lease) independently. Also settable "
+                         f"fleet-wide via {SPAWN_BURST_ENV} (flag wins). Dry runs never "
+                         f"fan out.")
+    ap.add_argument("--spawn-burst-stagger-s", type=float, default=None,
+                    help=f"seconds between spawns inside one burst (default "
+                         f"{DEFAULT_SPAWN_BURST_STAGGER_S}; env "
+                         f"{SPAWN_BURST_STAGGER_ENV}; clamped to "
+                         f"{SPAWN_BURST_STAGGER_MAX_S}). Paces process creation so a "
+                         f"fan-out arrives as a ramp, not a burst, and each sub-tick's "
+                         f"preflight re-reads host load before the next launch.")
     ap.add_argument("--work-kind", default=None,
                     help="switcher work kind (engineering->t1, gardening->t2). Default "
                          "follows --backend: engineering for claude (t1 opus pool), "
@@ -6696,7 +6961,12 @@ def main(argv: list[str] | None = None) -> int:
     # The opencode/glm pool is tier 2 only; engineering routes to t1 and finds
     # nothing there. Derive the work-kind from the backend unless set explicitly.
     work_kind = args.work_kind or ("gardening" if args.backend == "opencode" else "engineering")
-    payload = evaluate(root, max_workers=args.max_workers, work_kind=work_kind,
+    burst = resolve_spawn_burst(args.spawn_burst)
+    payload = evaluate_burst(root,
+                       spawn_burst=burst["limit"],
+                       burst_stagger_s=resolve_spawn_burst_stagger(
+                           args.spawn_burst_stagger_s),
+                       max_workers=args.max_workers, work_kind=work_kind,
                        lane=args.lane, live=args.live, refresh=not args.no_refresh,
                        cooldown_min=args.cooldown_min, backend=args.backend,
                        exclude_lanes=exclude_lanes,
@@ -6716,6 +6986,11 @@ def main(argv: list[str] | None = None) -> int:
                        contract_hold_ttl_h=max(0, args.contract_hold_ttl_h),
                        repair_batch=max(0, args.repair_batch),
                        repair_cooldown_min=max(0, args.repair_cooldown_min))
+    # Surface HOW the burst limit was resolved (flag / env / default, and whether the
+    # hard ceiling clamped it) alongside what it did, so an operator reading one tick
+    # artifact can tell an armed fan-out from a defaulted one.
+    if isinstance(payload.get("burst"), dict):
+        payload["burst"].update({k: v for k, v in burst.items() if k != "limit"})
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return tick_exit_code(payload)
 

@@ -2381,14 +2381,14 @@ class BuildWorkerCommandTest(unittest.TestCase):
             ["claude", "-p", "--permission-mode", "bypassPermissions",
              "--effort", "xhigh"])
 
-    def test_worker_model_effort_pins_claude_to_opus48_xhigh(self) -> None:
-        # A cloud claude account is pinned to Opus 4.8 xhigh regardless of the
+    def test_worker_model_effort_pins_claude_to_opus_xhigh(self) -> None:
+        # A cloud claude account is pinned to Opus at xhigh regardless of the
         # (live-rotated) per-account settings.json model.
         mod = load()
         self.assertEqual(
             mod.worker_model_effort("claude", {"model": "claude-fable-5"}),
             (mod.CLAUDE_WORKER_MODEL, mod.CLAUDE_WORKER_EFFORT))
-        self.assertEqual(mod.CLAUDE_WORKER_MODEL, "claude-opus-4-8")
+        self.assertEqual(mod.CLAUDE_WORKER_MODEL, "claude-opus-5")
         self.assertEqual(mod.CLAUDE_WORKER_EFFORT, "xhigh")
 
     def test_worker_model_effort_keeps_local_claude_and_opencode(self) -> None:
@@ -5592,6 +5592,32 @@ class RefusalClassTest(unittest.TestCase):
             self.assertEqual(recs[4322]["refusal_class"],
                              mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
 
+    def test_loop_ledger_evidence_carries_the_split(self) -> None:
+        """#4321 -- the loops.jsonl evidence pairs make the WIP-vs-lease split
+        computable as a FIELD. Lane/tree alone cannot: both refusals emit the SAME
+        lane and tree, which is why the two were conflated in the first place."""
+        mod = load()
+
+        def ev(payload):
+            return dict(mod._dispatch_collision_evidence(ROOT, payload))
+
+        wip = ev({"verdict": "SAME_ISSUE_WIP", "lane": "tools"})
+        dirty = ev({"verdict": "DIRTY_PATH_COLLISION", "lane": "tools"})
+        lease = ev({"verdict": "LANE_LEASE_HELD", "lane": "tools"})
+
+        self.assertEqual(wip["refusal_class"], mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+        self.assertEqual(dirty["refusal_class"], mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+        self.assertEqual(lease["refusal_class"], mod.REFUSAL_CLASS_LANE_LEASE)
+        # Same lane on both sides -- the class is the ONLY separator here.
+        self.assertEqual(wip["lane"], lease["lane"])
+        self.assertNotEqual(wip["refusal_class"], lease["refusal_class"])
+        # A non-contention tick is unchanged (additive, no empty field invented).
+        self.assertNotIn("refusal_class",
+                         ev({"verdict": "WOULD_SPAWN", "lane": "tools"}))
+        # The class survives a refusal that never resolved a lane.
+        self.assertEqual(ev({"verdict": "SAME_ISSUE_WIP"})["refusal_class"],
+                         mod.REFUSAL_CLASS_WORKTREE_COTENANCY)
+
 
 class CandidatePriorityTest(unittest.TestCase):
     """candidate_priority maps priority/P* labels to the dispatchorder Candidate.priority
@@ -6365,6 +6391,375 @@ class UnresolvedAcceptanceGateTest(unittest.TestCase):
         mod = load()
         self.assertEqual(mod.unresolved_acceptance_gate("## Lane\ntools\n"), "")
         self.assertEqual(mod.unresolved_acceptance_gate(None), "")
+
+
+class SpawnBurstResolveTest(unittest.TestCase):
+    """The burst limit is the fail-safe against the #3153 spawn-churn lockup, so its
+    resolution must be total: flag > env > default, always clamped, never raising."""
+
+    def test_default_is_one_spawn_per_tick(self) -> None:
+        mod = load()
+        got = mod.resolve_spawn_burst(None, {})
+        self.assertEqual(got["limit"], 1)
+        self.assertEqual(got["source"], "default")
+        self.assertFalse(got["clamped"])
+
+    def test_env_arms_the_fan_out(self) -> None:
+        mod = load()
+        got = mod.resolve_spawn_burst(None, {mod.SPAWN_BURST_ENV: "3"})
+        self.assertEqual(got["limit"], 3)
+        self.assertEqual(got["source"], f"env:{mod.SPAWN_BURST_ENV}")
+
+    def test_flag_beats_env(self) -> None:
+        mod = load()
+        got = mod.resolve_spawn_burst(2, {mod.SPAWN_BURST_ENV: "4"})
+        self.assertEqual(got["limit"], 2)
+        self.assertEqual(got["source"], "flag:--spawn-burst")
+
+    def test_hard_ceiling_clamps_any_request(self) -> None:
+        # No configuration — not a flag, not an env var — may turn one tick into a
+        # spawn storm on this host. Both channels clamp.
+        mod = load()
+        for got in (mod.resolve_spawn_burst(99, {}),
+                    mod.resolve_spawn_burst(None, {mod.SPAWN_BURST_ENV: "99"})):
+            self.assertEqual(got["limit"], mod.SPAWN_BURST_HARD_CEILING)
+            self.assertEqual(got["requested"], 99)
+            self.assertTrue(got["clamped"])
+
+    def test_zero_and_negative_floor_at_one(self) -> None:
+        mod = load()
+        self.assertEqual(mod.resolve_spawn_burst(0, {})["limit"], 1)
+        self.assertEqual(mod.resolve_spawn_burst(-5, {})["limit"], 1)
+
+    def test_garbage_env_falls_back_to_the_default(self) -> None:
+        mod = load()
+        got = mod.resolve_spawn_burst(None, {mod.SPAWN_BURST_ENV: "lots"})
+        self.assertEqual(got["limit"], mod.DEFAULT_SPAWN_BURST)
+        self.assertEqual(got["source"], "default")
+        self.assertEqual(got["env_invalid"], "lots")
+
+    def test_stagger_resolution(self) -> None:
+        mod = load()
+        self.assertEqual(mod.resolve_spawn_burst_stagger(None, {}),
+                         mod.DEFAULT_SPAWN_BURST_STAGGER_S)
+        self.assertEqual(
+            mod.resolve_spawn_burst_stagger(None, {mod.SPAWN_BURST_STAGGER_ENV: "7"}), 7.0)
+        self.assertEqual(
+            mod.resolve_spawn_burst_stagger(2.5, {mod.SPAWN_BURST_STAGGER_ENV: "7"}), 2.5)
+        self.assertEqual(mod.resolve_spawn_burst_stagger(-3, {}), 0.0)
+        self.assertEqual(mod.resolve_spawn_burst_stagger(10_000, {}),
+                         mod.SPAWN_BURST_STAGGER_MAX_S)
+        self.assertEqual(
+            mod.resolve_spawn_burst_stagger(None, {mod.SPAWN_BURST_STAGGER_ENV: "x"}),
+            mod.DEFAULT_SPAWN_BURST_STAGGER_S)
+
+
+class EvaluateBurstDriverTest(unittest.TestCase):
+    """The fan-out driver itself, with evaluate() stubbed: how many sub-ticks run,
+    when the burst stops, and what the aggregate payload says."""
+
+    @staticmethod
+    def _spawned(issue: int, lane: str = "gateway", pid: int = 100):
+        return {"ok": True, "action": "spawned", "verdict": "SPAWNED",
+                "target_issue": issue, "lane": lane, "reason": f"spawned on #{issue}",
+                "spawned": {"pid": pid, "issue": issue}}
+
+    def _scripted(self, mod, payloads, calls):
+        def fake_evaluate(root, **kw):
+            calls.append(dict(kw))
+            return payloads[len(calls) - 1]
+        mod.evaluate = fake_evaluate
+
+    def test_default_limit_runs_one_subtick_and_stays_byte_identical(self) -> None:
+        mod = load()
+        calls: list[dict] = []
+        self._scripted(mod, [self._spawned(467)], calls)
+        p = mod.evaluate_burst(ROOT, live=True, max_workers=18)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("burst", p)  # opt-in: the default payload is unchanged
+
+    def test_fans_out_to_the_limit_when_every_subtick_spawns(self) -> None:
+        mod = load()
+        calls: list[dict] = []
+        self._scripted(mod, [self._spawned(467, "gateway", 101),
+                             self._spawned(520, "agent", 102),
+                             self._spawned(610, "docs", 103)], calls)
+        p = mod.evaluate_burst(ROOT, spawn_burst=3, burst_stagger_s=0,
+                               live=True, max_workers=18)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(p["burst"]["spawned"], 3)
+        self.assertEqual(p["burst"]["attempts"], 3)
+        self.assertEqual(p["burst"]["stopped_on"], "burst_limit")
+        self.assertEqual([r["issue"] for r in p["burst"]["sub_ticks"]], [467, 520, 610])
+        # The aggregate keeps the FIRST sub-tick's verdict (what tick_exit_code grades)
+        # and names the extra spawns in the reason.
+        self.assertEqual(p["verdict"], "SPAWNED")
+        self.assertEqual(p["target_issue"], 467)
+        self.assertIn("#520", p["reason"])
+        self.assertEqual(mod.tick_exit_code(p), 0)
+
+    def test_stops_at_the_first_non_spawn_verdict(self) -> None:
+        # A refusal means the fleet hit a real boundary; re-attempting it inside the
+        # same tick would only re-refuse.
+        mod = load()
+        calls: list[dict] = []
+        no_issue = {"ok": False, "action": "no_issue", "verdict": "NO_ISSUE",
+                    "reason": "nothing fresh"}
+        self._scripted(mod, [self._spawned(467), no_issue,
+                             self._spawned(999)], calls)
+        p = mod.evaluate_burst(ROOT, spawn_burst=3, burst_stagger_s=0,
+                               live=True, max_workers=18)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(p["burst"]["spawned"], 1)
+        self.assertEqual(p["burst"]["stopped_on"], "NO_ISSUE")
+        self.assertEqual(p["verdict"], "SPAWNED")
+
+    def test_hard_ceiling_bounds_the_driver_not_just_the_flag(self) -> None:
+        mod = load()
+        calls: list[dict] = []
+        self._scripted(mod, [self._spawned(n) for n in range(400, 420)], calls)
+        p = mod.evaluate_burst(ROOT, spawn_burst=99, burst_stagger_s=0,
+                               live=True, max_workers=18)
+        self.assertEqual(len(calls), mod.SPAWN_BURST_HARD_CEILING)
+        self.assertEqual(p["burst"]["limit"], mod.SPAWN_BURST_HARD_CEILING)
+
+    def test_dry_run_never_fans_out(self) -> None:
+        # A dry-run sub-tick spawns nothing, so headroom never moves and every
+        # further sub-tick would re-pick the SAME issue and double-report it.
+        mod = load()
+        calls: list[dict] = []
+        would = {"ok": True, "action": "would_spawn", "verdict": "WOULD_SPAWN",
+                 "target_issue": 467, "lane": "gateway", "reason": "safe to spawn 1"}
+        self._scripted(mod, [would, would, would], calls)
+        p = mod.evaluate_burst(ROOT, spawn_burst=3, live=False, max_workers=18)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(p["burst"]["attempts"], 1)
+        self.assertIn("dry_run", p["burst"]["skipped"])
+
+    def test_stagger_paces_every_extra_spawn(self) -> None:
+        # The lockup guard: N spawns arrive as a ramp, not as one process-creation
+        # burst. N spawns => N-1 gaps, and none before the first.
+        mod = load()
+        calls: list[dict] = []
+        slept: list[float] = []
+        self._scripted(mod, [self._spawned(1), self._spawned(2),
+                             self._spawned(3)], calls)
+        mod.evaluate_burst(ROOT, spawn_burst=3, burst_stagger_s=15.0,
+                           sleeper=slept.append, live=True, max_workers=18)
+        self.assertEqual(slept, [15.0, 15.0])
+
+    def test_no_stagger_before_a_burst_that_stops_immediately(self) -> None:
+        mod = load()
+        calls: list[dict] = []
+        slept: list[float] = []
+        self._scripted(mod, [{"ok": False, "action": "refused",
+                              "verdict": "REFUSE_AT_CAP", "reason": "at cap"}], calls)
+        mod.evaluate_burst(ROOT, spawn_burst=4, burst_stagger_s=15.0,
+                           sleeper=slept.append, live=True, max_workers=18)
+        self.assertEqual(slept, [])
+
+    def test_followon_subticks_skip_the_registry_refresh(self) -> None:
+        # The registry refresh is a per-TICK concern; re-running it per spawn is pure
+        # subprocess churn on exactly the axis that freezes this host.
+        mod = load()
+        calls: list[dict] = []
+        self._scripted(mod, [self._spawned(1), self._spawned(2)], calls)
+        mod.evaluate_burst(ROOT, spawn_burst=2, burst_stagger_s=0,
+                           live=True, max_workers=18, refresh=True)
+        self.assertTrue(calls[0]["refresh"])
+        self.assertFalse(calls[1]["refresh"])
+
+    def test_render_names_the_burst(self) -> None:
+        mod = load()
+        calls: list[dict] = []
+        self._scripted(mod, [self._spawned(467, "gateway", 101),
+                             self._spawned(520, "agent", 102)], calls)
+        p = mod.evaluate_burst(ROOT, spawn_burst=2, burst_stagger_s=0,
+                               live=True, max_workers=18)
+        rendered = mod.render(p)
+        self.assertIn("burst     : 2/2 spawned", rendered)
+        self.assertIn("#520:SPAWNED", rendered)
+
+
+class EvaluateBurstAdmissionTest(unittest.TestCase):
+    """End-to-end through the REAL evaluate(): every spawn in a burst is admitted
+    independently — no admission decision is hoisted over N spawns."""
+
+    def _live_patch(self, mod, *, lanes, preflight, spawn, lease_runner=None):
+        EvaluateTest._patch(self, mod, pre={}, pick={})
+        # `issue_lane_router` / `issue_worker_prompt` live in sys.modules and survive
+        # load(), so restore them or the stub leaks into every later test.
+        for shared, name in ((mod.issue_lane_router, "lane_taxonomy"),
+                             (mod.issue_worker_prompt, "build")):
+            prior = getattr(shared, name)
+            self.addCleanup(setattr, shared, name, prior)
+        # evaluate()'s low-yield probe shells `dos doctor` once per sub-tick (~2.5s).
+        # Nothing here depends on the real taxonomy.
+        mod.issue_lane_router.lane_taxonomy = lambda ws: ([], {}, set())
+        self.spawned_issues: set[int] = set()
+        self.spawned_lanes: set[str] = set()
+        self.collision_rows: list[dict] = []
+        mod.issue_dispatch.preflight = preflight
+        mod.issue_dispatch.worker_env = lambda d, lane, root: {}
+
+        def picker(root, lane, exclude=None, **_k):
+            ex = set(exclude or ())
+            eligible = [(name, list(nums)) for name, nums in lanes.items()
+                        if name not in ex]
+            if not eligible:
+                return {"lane": None, "numbers": [], "by_lane_count": {},
+                        "eligible_by_lane": []}
+            return {"lane": eligible[0][0], "numbers": eligible[0][1],
+                    "by_lane_count": {n: len(v) for n, v in eligible},
+                    "eligible_by_lane": [[n, v] for n, v in eligible]}
+
+        mod.lane_issue_numbers = picker
+        # The de-dup is filesystem-derived in production (.pid sidecar + spawn-header
+        # log); here the fake spawn feeds the same two readers, so sub-tick N+1 sees
+        # exactly what sub-tick N launched.
+        mod.live_resolution_issues = lambda runs_dir, **k: set(self.spawned_issues)
+        mod.live_resolution_lanes = lambda runs_dir, **k: set(self.spawned_lanes)
+        mod.record_collision_holds = lambda runs_dir, rows, **k: (
+            self.collision_rows.extend(rows))
+        mod.collision_held_issues = lambda runs_dir, **k: {
+            int(r["issue"]) for r in self.collision_rows if r.get("issue")}
+        mod.low_yield_soft_excludes = lambda root, runs_dir, **k: {
+            "exclude": set(), "lanes": [], "flagged": []}
+        mod.scan_multi_lane_scope = lambda root, text, lane: {
+            "multi_lane": False, "uncovered_lanes": [], "uncovered": []}
+        mod.same_issue_wip_collision = lambda runs_dir, issue, paths, **k: {
+            "collides": False}
+        mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}
+        mod.read_dead_backends = lambda runs_dir, **k: []
+        mod.recent_backend_stub_rate = lambda runs_dir, **k: None
+        mod.prune_dead_sidecars = lambda runs_dir, **k: {"pruned": []}
+        mod.witness_exited_workers = lambda runs_dir, root, **k: {
+            "live": True, "audited": [], "witnessed": [], "unwitnessed": [],
+            "no_commit": []}
+        mod.append_fleet_trend_row = lambda root, payload, **k: {"ok": True}
+        mod._git_capture = lambda root, args, **k: (0, "basesha0\n")
+        mod.spawn_issue_worker = spawn
+        return lease_runner
+
+    def _spawner(self, mod):
+        def spawn(command, env, cwd, runs_dir, issue, lane, backend, **k):
+            self.spawned_issues.add(int(issue))
+            self.spawned_lanes.add(str(lane))
+            return {"pid": 900 + len(self.spawned_issues), "issue": issue,
+                    "lane": lane, "backend": backend,
+                    "log": f"resolve-{issue}.log"}
+        return spawn
+
+    def test_each_spawn_reruns_the_full_admission_chain(self) -> None:
+        mod = load()
+        caps: list[int] = []
+
+        def preflight(root, **kw):
+            caps.append(int(kw.get("max_workers")))
+            return {"verdict": "SPAWN_OK", "reason": "ok", "cap": 18,
+                    "live": len(self.spawned_issues),
+                    "account": {"tag": "worker-a", "tier": 1, "model": "opus",
+                                "dir": "/acct/a"}}
+
+        self._live_patch(mod, lanes={"gateway": [467], "agent": [520]},
+                         preflight=preflight, spawn=self._spawner(mod))
+        leases: list[str] = []
+        mod.acquire_lane_lease = lambda root, lane, **k: (
+            leases.append(lane) or {"acquired": True, "refused": False,
+                                    "id": f"resolve-{lane}", "holder": "test"})
+        p = mod.evaluate_burst(ROOT, spawn_burst=2, burst_stagger_s=0,
+                               max_workers=18, work_kind="engineering",
+                               lane=None, live=True)
+        # Two spawns, on DIFFERENT issues and DIFFERENT lanes: sub-tick 2 saw
+        # sub-tick 1's worker as live and routed around it.
+        self.assertEqual(p["burst"]["spawned"], 2)
+        self.assertEqual(self.spawned_issues, {467, 520})
+        self.assertEqual(leases, ["gateway", "agent"])
+        # ...and the DoS gate was re-probed for each spawn, never hoisted.
+        self.assertGreaterEqual(len(caps), 2)
+
+    def test_burst_stops_when_the_preflight_hits_the_cap(self) -> None:
+        # The overall --max-workers cap still binds INSIDE a burst: the second
+        # sub-tick's preflight refuses and the fan-out ends there.
+        mod = load()
+
+        def preflight(root, **kw):
+            live = len(self.spawned_issues)
+            if live >= 1:
+                return {"verdict": "REFUSE_AT_CAP", "reason": f"live {live} >= cap 1",
+                        "cap": 1, "live": live,
+                        "account": {"tag": "worker-a", "tier": 1, "model": "opus",
+                                    "dir": "/acct/a"}}
+            return {"verdict": "SPAWN_OK", "reason": "ok", "cap": 1, "live": live,
+                    "account": {"tag": "worker-a", "tier": 1, "model": "opus",
+                                "dir": "/acct/a"}}
+
+        self._live_patch(mod, lanes={"gateway": [467], "agent": [520]},
+                         preflight=preflight, spawn=self._spawner(mod))
+        p = mod.evaluate_burst(ROOT, spawn_burst=4, burst_stagger_s=0,
+                               max_workers=1, work_kind="engineering",
+                               lane=None, live=True)
+        self.assertEqual(p["burst"]["spawned"], 1)
+        self.assertEqual(p["burst"]["stopped_on"], "REFUSE_AT_CAP")
+        self.assertEqual(self.spawned_issues, {467})
+
+    def test_burst_stops_when_a_peer_holds_the_next_lane_lease(self) -> None:
+        # Lane arbitration is re-decided per spawn: a peer taking the second lane's
+        # fenced lease refuses that sub-tick instead of racing a worker onto it.
+        mod = load()
+
+        def preflight(root, **kw):
+            return {"verdict": "SPAWN_OK", "reason": "ok", "cap": 18,
+                    "live": len(self.spawned_issues),
+                    "account": {"tag": "worker-a", "tier": 1, "model": "opus",
+                                "dir": "/acct/a"}}
+
+        self._live_patch(mod, lanes={"gateway": [467], "agent": [520]},
+                         preflight=preflight, spawn=self._spawner(mod))
+
+        def acquire(root, lane, **k):
+            if lane == "gateway":
+                return {"acquired": True, "refused": False, "id": "resolve-gateway",
+                        "holder": "test"}
+            return {"acquired": False, "refused": True, "id": f"resolve-{lane}",
+                    "reason": "LEASE_HELD"}
+
+        mod.acquire_lane_lease = acquire
+        p = mod.evaluate_burst(ROOT, spawn_burst=3, burst_stagger_s=0,
+                               max_workers=18, work_kind="engineering",
+                               lane=None, live=True)
+        self.assertEqual(p["burst"]["spawned"], 1)
+        self.assertEqual(p["burst"]["stopped_on"], "LANE_LEASE_HELD")
+        self.assertEqual(self.spawned_issues, {467})
+
+    def test_fanout_advances_past_a_dirty_path_collision(self) -> None:
+        # The ~2400-row collision-holds ledger is dominated by DIRTY_PATH_COLLISION,
+        # so a fan-out that re-picked the blocked head would just manufacture more
+        # holds. It does not: the in-tick scan steps past the colliding candidate,
+        # and the hold it ledgers keeps the NEXT sub-tick past it too.
+        mod = load()
+
+        def preflight(root, **kw):
+            return {"verdict": "SPAWN_OK", "reason": "ok", "cap": 18,
+                    "live": len(self.spawned_issues),
+                    "account": {"tag": "worker-a", "tier": 1, "model": "opus",
+                                "dir": "/acct/a"}}
+
+        self._live_patch(mod, lanes={"gateway": [467, 466], "agent": [520]},
+                         preflight=preflight, spawn=self._spawner(mod))
+        dirty = "cmd/fak/version_modules.go"
+        mod.dirty_repo_paths = lambda root: {"paths": [dirty], "unavailable": False}
+        mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
+            "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"title {n}",
+            "issue_record": {"body": (f"rework {dirty}" if n == 467 else "clean work")},
+        }
+        p = mod.evaluate_burst(ROOT, spawn_burst=2, burst_stagger_s=0,
+                               max_workers=18, work_kind="engineering",
+                               lane=None, live=True)
+        self.assertEqual(p["burst"]["spawned"], 2)
+        self.assertEqual(self.spawned_issues, {466, 520})
+        self.assertNotIn(467, self.spawned_issues)
+        self.assertEqual([r["issue"] for r in self.collision_rows], [467])
 
 
 if __name__ == "__main__":
