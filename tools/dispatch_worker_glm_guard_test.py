@@ -191,6 +191,34 @@ def test_empty_gateway_env_opts_out_of_forced_local_route() -> None:
             os.environ["FAK_GLM_GUARD_GATEWAY"] = saved
 
 
+# --- --codex-loop-gate is CODEX-ONLY -----------------------------------------
+# 5a2f88f244 (#2400) lost the newline before `if backend == "codex":`, appending it to
+# the comment on the line above. The flag's append then ran for every NON-CLAUDE
+# backend, so opencode workers were handed a codex-only guard flag. Python accepted it
+# silently -- the swallowed `if` left a syntactically valid file -- which is exactly why
+# it survived. These pin the flag to the one backend it belongs to.
+
+
+def _wrap(backend: str, cmd: list[str]) -> list[str]:
+    return dw.guard_wrap(cmd, fak_bin="fak", lane="t", backend=backend,
+                         workspace=ROOT, env={})
+
+
+def test_codex_loop_gate_flag_is_codex_only() -> None:
+    # Codex KEEPS it (the flag's actual purpose -- this must not regress the other way).
+    assert "--codex-loop-gate" in _wrap("codex", ["codex", "exec", "prompt"])
+    # Claude never had it.
+    assert "--codex-loop-gate" not in _wrap("claude", ["claude", "-p", "x"])
+
+
+def test_opencode_does_not_get_the_codex_loop_gate_flag() -> None:
+    # The regression itself: an opencode worker must not carry a codex-only flag.
+    raw = dw.build_command("glm", "opencode")
+    cmd, _ = dw.guarded_launch_command(raw, "glm", "opencode", ROOT,
+                                       env={"FLEET_DOGFOOD_GUARD": "1"})
+    assert "--codex-loop-gate" not in cmd, cmd
+
+
 def main() -> int:
     failures = 0
     for name, fn in sorted(globals().items()):

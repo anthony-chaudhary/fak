@@ -1023,7 +1023,11 @@ def guard_wrap(
                 e[OPENCODE_GUARD_UPSTREAM_KEY_ENV] = upstream_key
                 extra = ["--api-key-env", OPENCODE_GUARD_UPSTREAM_KEY_ENV, *extra]
             elif not base.startswith(("http://127.0.0.1:", "http://localhost:")):
-                return cmd  # remote OpenAI-wire upstreams need a key guard can hold    if backend == "codex":
+                return cmd  # remote OpenAI-wire upstreams need a key guard can hold
+    # Codex-only. This `if` was swallowed into the comment above by a lost newline in
+    # 5a2f88f244 (#2400), which left the append running for EVERY non-claude backend --
+    # so opencode workers were handed a codex-only flag. Keep it on its own line.
+    if backend == "codex":
         extra = [*extra, "--codex-loop-gate", "off"]
     return [fak_bin, "guard", "--provider", provider, *extra,
             "--audit", str(audit), "--", *cmd]
