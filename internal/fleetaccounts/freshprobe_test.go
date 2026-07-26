@@ -112,3 +112,99 @@ func TestProbeLedgerFreshMinEnvOverride(t *testing.T) {
 		t.Fatalf("ProbeLedgerFreshMin = %v, want 45", got)
 	}
 }
+
+func TestProbeLedgerEntitlementFreshMinDefaultAndEnvOverride(t *testing.T) {
+	if got := ProbeLedgerEntitlementFreshMin(); got != 1440 {
+		t.Fatalf("ProbeLedgerEntitlementFreshMin = %v, want 1440 (24h)", got)
+	}
+	t.Setenv("FLEET_PROBE_ENTITLEMENT_FRESH_MIN", "90")
+	if got := ProbeLedgerEntitlementFreshMin(); got != 90 {
+		t.Fatalf("ProbeLedgerEntitlementFreshMin = %v, want 90", got)
+	}
+}
+
+// An entitlement verdict outlives the 20-minute window a usage wall gets. This is the
+// live july2new-netra shape: an ACCESS probe ("Claude subscription access disabled")
+// recorded ~19h ago, well past ProbeLedgerFreshMin. Before the kind-aware window it
+// aged out to nil, the seat carried no block, and — because a 403 burns no quota — the
+// headroom-weighted allocator ranked the dead seat among the emptiest and routed
+// workers that died in ~0.5s.
+func TestFreshProbeFromLedgerEntitlementOutlivesUsageWindow(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		status string
+		kind   string
+	}{
+		{"ACCESS", "access"},
+		{"AUTH", "auth"},
+		{"CREDIT", "credit"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			rd := t.TempDir()
+			writeProbeLedger(t, rd, probeLine(t, ".claude-a", tc.status, now.Add(-19*time.Hour), ""))
+			got := FreshProbeFromLedger(".claude-a", rd, now, 0)
+			if got == nil {
+				t.Fatalf("19h-old %s = nil, want a blocked verdict (entitlement blocks do not heal by waiting)", tc.status)
+			}
+			if got.Available || got.BlockKind != tc.kind {
+				t.Fatalf("19h-old %s = %+v, want blocked with kind %q", tc.status, got, tc.kind)
+			}
+		})
+	}
+}
+
+// The widened window is entitlement-only: a usage wall genuinely expires when quota
+// resets, and a stale OK must still never mask a real current limit. Both keep aging
+// out at ProbeLedgerFreshMin.
+func TestFreshProbeFromLedgerUsageAndOKStillAgeOut(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	for _, status := range []string{"LIMIT", "OK"} {
+		t.Run(status, func(t *testing.T) {
+			rd := t.TempDir()
+			writeProbeLedger(t, rd, probeLine(t, ".claude-a", status, now.Add(-19*time.Hour), ""))
+			if got := FreshProbeFromLedger(".claude-a", rd, now, 0); got != nil {
+				t.Fatalf("19h-old %s = %+v, want nil (only entitlement verdicts get the long window)", status, got)
+			}
+		})
+	}
+}
+
+// Self-healing: honoring an old ACCESS never pins a seat that has recovered, because
+// only the newest row per account is read. A later OK IS the entry, so the block is
+// gone — no reset, no eviction, no operator step.
+func TestFreshProbeFromLedgerNewerOKClearsOlderAccessBlock(t *testing.T) {
+	rd := t.TempDir()
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	writeProbeLedger(t, rd,
+		probeLine(t, ".claude-a", "ACCESS", now.Add(-19*time.Hour), `"block_reason":"Claude subscription access disabled"`),
+		probeLine(t, ".claude-a", "OK", now.Add(-3*time.Minute), ""),
+	)
+	got := FreshProbeFromLedger(".claude-a", rd, now, 0)
+	if got == nil || !got.Available {
+		t.Fatalf("newer OK after ACCESS = %+v, want available", got)
+	}
+}
+
+// The long window is finite on purpose. A prober that stops running must not strand a
+// seat forever on its last bad verdict: past the window the fold returns nil and the
+// registry's own status decides, exactly as it did before this window existed. This is
+// the july17 trap — a transient org-disabled blip must not become permanent.
+func TestFreshProbeFromLedgerEntitlementExpiresPastLongWindow(t *testing.T) {
+	rd := t.TempDir()
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	writeProbeLedger(t, rd, probeLine(t, ".claude-a", "ACCESS", now.Add(-25*time.Hour), ""))
+	if got := FreshProbeFromLedger(".claude-a", rd, now, 0); got != nil {
+		t.Fatalf("25h-old ACCESS = %+v, want nil (a dead prober must not strand a seat)", got)
+	}
+}
+
+// An explicit window still means what it says: it is not silently widened for an
+// entitlement kind, so a caller that asks for 20 minutes gets 20 minutes.
+func TestFreshProbeFromLedgerExplicitWindowNotWidened(t *testing.T) {
+	rd := t.TempDir()
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	writeProbeLedger(t, rd, probeLine(t, ".claude-a", "ACCESS", now.Add(-25*time.Minute), ""))
+	if got := FreshProbeFromLedger(".claude-a", rd, now, 20); got != nil {
+		t.Fatalf("25min-old ACCESS with explicit window 20 = %+v, want nil", got)
+	}
+}
