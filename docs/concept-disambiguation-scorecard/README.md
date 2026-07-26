@@ -16,7 +16,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **39** (clarity 0 + coverage 39) |
-| **Crystal-clear concepts (and climbing)** | **375** crystal of 1992 positioned |
+| **Crystal-clear concepts (and climbing)** | **376** crystal of 1993 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2173 / 2212** (98.2% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
@@ -26,10 +26,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1992 concepts - score 98.8/100 (grade A) - disambiguation-debt 39
+concept-disambiguation chart - 1993 concepts - score 98.8/100 (grade A) - disambiguation-debt 39
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ######...................... 375
+  * crystal       #######..................... 376
   o defined       ############################ 1617
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -46,7 +46,7 @@ clarity mix by family (each cell = one concept):
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
   guard-gate       ******************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (293 concept(s); 78 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
-  loop             *************************ooooooooooooooooooooooooooooooooo (58 concept(s); 25 crystal)
+  loop             **************************ooooooooooooooooooooooooooooooooo (59 concept(s); 26 crystal)
   plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
   policy-capability *********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (119 concept(s); 21 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
@@ -312,6 +312,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | layout | **Layout (tensor)** - Tensor element physical arrangement: RowMajor, ColMajor, or other ordering |
 | * | crystal | symbol | layout | **Layout (ctxplan)** - Base/Current/Recent/Deep region profile for layout-aware planning |
 | * | crystal | symbol | layout | **MLA KV layout seam** - Attention cache variant seam interface: standardKVLayout vs mlaKVLayout |
+| * | crystal | symbol | loop | **agentGoalLoop (injected agent-loop seam for the goal endpoint)** - The function seam POST /v1/fak/agent/sessions calls to produce one governed agent-loop session, injected so the HTTP contract — envelope validation, NDJSON framing, and the session.start / call / session.end / error wire shape — can be proven as a standalone tested unit (#3258, epic #3256). |
 | * | crystal | symbol | loop | **loop_constraint.go (agent constraint seam)** - loop_constraint.go is the agent package's loop-side consumer of the out-of-band add-constraint op (#2756): applyConstraints drains the sessionctl constraint mailbox at the turn boundary and carries the tightened floor's standing directive as a system notice, and constraintDenied denies a floor-forbidden tool call before dispatch with a typed receipt carrying the closed CONSTRAINT_* reason. |
 | * | crystal | symbol | loop | **loop_park.go (agent park seam)** - loop_park.go is the agent package's loop-side consumer of the out-of-band operator approve/deny inbox (#2757): parkEscalatedDeny intercepts an ESCALATE-gated deny at the dispatch site when the session's inbox is open, parks it on the sessionctl pending-action queue, and honors the external verdict — approve re-proposes the call through the normal syscall boundary (byte-identical plus the gate's confirm echo, or operator-modified args freshly adjudicated), deny/timeout abort with a typed receipt carrying the closed PARK_* reason. |
 | * | crystal | symbol | loop | **loop_toolterminal_verbosity.go (agent background-completion wake verbosity seam)** - The verbosity axis of the background-process completion watcher: decides WHICH terminal tool-process transitions wake a new agent turn (off/error/result/all) and HOW MUCH of the folded toolproc verdict rides into that turn. |
@@ -2228,7 +2229,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1992 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1993 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
