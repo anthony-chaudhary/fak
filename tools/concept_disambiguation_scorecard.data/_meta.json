@@ -1476,6 +1476,16 @@
           "category": "incidental",
           "reason": "A local slice variable inside refusePagedHostPlanForHostMem holding the host-scoped subset of demands for the FitError payload. It names no concept: it exists for one statement's duration and its meaning is fully given by the field it fills (FitError.Demands).",
           "token": "hostPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "A row of measured data in the taskvc reboot-survival inventory, not a term in the audit's vocabulary. inventory.go is a census RECORD: each entry names one live Windows Scheduled Task and the installer basename that recreates it, as observed on this fleet on 2026-07-26. Its meaning is entirely given by the pair it forms, and the roster changes whenever a loop is added or retired. Positioning these would book concept coverage for the contents of a data table rather than for the audit's actual vocabulary (ORPHAN, INSTALLER_NAME_DRIFT, DeclaredTaskNames, Verify), and would go stale on the next fleet change without any concept having moved.",
+          "token": "FleetBenchPlanDoc"
+        },
+        {
+          "category": "incidental",
+          "reason": "A row of measured data in the taskvc reboot-survival inventory, not a term in the audit's vocabulary. inventory.go is a census RECORD: each entry names one live Windows Scheduled Task and the installer basename that recreates it, as observed on this fleet on 2026-07-26. Its meaning is entirely given by the pair it forms, and the roster changes whenever a loop is added or retired. Positioning these would book concept coverage for the contents of a data table rather than for the audit's actual vocabulary (ORPHAN, INSTALLER_NAME_DRIFT, DeclaredTaskNames, Verify), and would go stale on the next fleet change without any concept having moved.",
+          "token": "register_bench_plan_doc"
         }
       ],
       "exclude": [
@@ -1490,6 +1500,7 @@
         "BuildSweepPlan",
         "Candidates",
         "DecodeInterleavePlan",
+        "FleetBenchPlanDoc",
         "PlanDecodeInterleave",
         "PlanResolver",
         "SweepPlanGreedy",
@@ -1519,6 +1530,7 @@
         "planted",
         "planting",
         "plants",
+        "register_bench_plan_doc",
         "runAblatePlan"
       ],
       "min_files": 2,
@@ -1611,12 +1623,29 @@
           "category": "incidental",
           "reason": "internal loopfleet helper that loads per-loop registry cadences for the loopmgr health fold; an implementation detail, not a distinct loop concept needing disambiguation",
           "token": "loopmgrCadences"
+        },
+        {
+          "category": "incidental",
+          "reason": "A row of measured data in the taskvc reboot-survival inventory, not a term in the audit's vocabulary. inventory.go is a census RECORD: each entry names one live Windows Scheduled Task and the installer basename that recreates it, as observed on this fleet on 2026-07-26. Its meaning is entirely given by the pair it forms, and the roster changes whenever a loop is added or retired. Positioning these would book concept coverage for the contents of a data table rather than for the audit's actual vocabulary (ORPHAN, INSTALLER_NAME_DRIFT, DeclaredTaskNames, Verify), and would go stale on the next fleet change without any concept having moved.",
+          "token": "FakMetaSuperloopNight100"
+        },
+        {
+          "category": "incidental",
+          "reason": "A row of measured data in the taskvc reboot-survival inventory, not a term in the audit's vocabulary. inventory.go is a census RECORD: each entry names one live Windows Scheduled Task and the installer basename that recreates it, as observed on this fleet on 2026-07-26. Its meaning is entirely given by the pair it forms, and the roster changes whenever a loop is added or retired. Positioning these would book concept coverage for the contents of a data table rather than for the audit's actual vocabulary (ORPHAN, INSTALLER_NAME_DRIFT, DeclaredTaskNames, Verify), and would go stale on the next fleet change without any concept having moved.",
+          "token": "FleetScoutLoop"
+        },
+        {
+          "category": "incidental",
+          "reason": "A row of measured data in the taskvc reboot-survival inventory, not a term in the audit's vocabulary. inventory.go is a census RECORD: each entry names one live Windows Scheduled Task and the installer basename that recreates it, as observed on this fleet on 2026-07-26. Its meaning is entirely given by the pair it forms, and the roster changes whenever a loop is added or retired. Positioning these would book concept coverage for the contents of a data table rather than for the audit's actual vocabulary (ORPHAN, INSTALLER_NAME_DRIFT, DeclaredTaskNames, Verify), and would go stale on the next fleet change without any concept having moved.",
+          "token": "register_scout_loop"
         }
       ],
       "id": "loop",
       "ignore": [
         "BackgroundLoop",
         "ClassPollingLoop",
+        "FakMetaSuperloopNight100",
+        "FleetScoutLoop",
         "POLLING_LOOP",
         "appendlooprunevent",
         "buildtuiloopreport",
@@ -1644,6 +1673,7 @@
         "noloopledger",
         "q8prefillneedstokenloop",
         "recordloop",
+        "register_scout_loop",
         "runloop",
         "tuiloopreport"
       ],
