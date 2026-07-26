@@ -59,6 +59,21 @@ type WeeklyWindow struct {
 	TTLUpgrades       uint64   `json:"ttl_upgrades"`
 	TTLRefusals       uint64   `json:"ttl_refusals"`
 	RefusedUpgradePct *float64 `json:"refused_upgrade_pct,omitempty"` // 0..100; nil when the lever saw no heads
+
+	// Observed provider reuse (OBSERVED, provider-relayed cache_read — NOT a fak claim,
+	// and deliberately kept APART from the WITNESSED realized-reuse above so the two are
+	// never summed or conflated). The share of prompt tokens the provider served from ITS
+	// OWN prefix cache across every exit session — the honest "is prompt caching working
+	// end to end" signal even on a wire where fak's own managed levers are passive (e.g. a
+	// subscription-OAuth seat, whose 1h upgrade the provider rejects: see
+	// docs/cache-frontier/2026-07-18-subscription-oauth-400s-1h-ttl-upgrade-MEASURED.md).
+	// It is CONTEXT, not a scored cache-health family — a low WITNESSED score with a high
+	// observed reuse means "the provider cache is carrying the caching, fak's own levers are
+	// passive", which reads very differently from cold caching across the board.
+	ObsCacheReadTokens     uint64   `json:"obs_cache_read_tokens"`
+	ObsInputTokens         uint64   `json:"obs_input_tokens"`
+	ObsCacheCreationTokens uint64   `json:"obs_cache_creation_tokens"`
+	ObservedProviderReuse  *float64 `json:"observed_provider_reuse,omitempty"` // 0..1; nil when no observed prompt tokens
 }
 
 // WeeklyDigest is the weekly fleet cache-health digest (#3646) — the OPERATIONAL
@@ -111,6 +126,11 @@ func (w *WeeklyWindow) accumulateUsage(r gatewayusageledger.Row) {
 	for _, n := range c.CacheTTLUpgradeReasons {
 		w.TTLRefusals += n
 	}
+	// OBSERVED provider cache-read (relayed by the provider, never a fak claim): fold the
+	// per-session prompt-token split so finalize can derive the provider-reuse share.
+	w.ObsCacheReadTokens += c.CachedPromptTokens
+	w.ObsInputTokens += c.InputTokens
+	w.ObsCacheCreationTokens += c.CacheCreationTokens
 }
 
 // accumulateTrack1 folds one multi-turn Track-1 ledger row into the window's
@@ -140,6 +160,12 @@ func (w *WeeklyWindow) finalize() {
 	if heads := w.TTLUpgrades + w.TTLRefusals; heads > 0 {
 		pct := 100 * float64(w.TTLRefusals) / float64(heads)
 		w.RefusedUpgradePct = &pct
+	}
+	// OBSERVED provider reuse = provider cache_read / all prompt tokens processed (read +
+	// fresh input + cache_creation write). nil when the fleet moved no prompt tokens.
+	if obs := w.ObsCacheReadTokens + w.ObsInputTokens + w.ObsCacheCreationTokens; obs > 0 {
+		ratio := float64(w.ObsCacheReadTokens) / float64(obs)
+		w.ObservedProviderReuse = &ratio
 	}
 }
 

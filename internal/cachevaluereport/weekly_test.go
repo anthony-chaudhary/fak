@@ -12,6 +12,33 @@ import (
 // this-week (digestNow-7d, digestNow] and prior-week (digestNow-14d, digestNow-7d].
 var digestNow = time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 
+// TestObservedProviderReuseRatio pins the OBSERVED provider cache-read share: cache_read over
+// all prompt tokens processed (read + fresh input + cache_creation), folded from the usage
+// ledger and kept distinct from the WITNESSED realized-reuse. nil when no prompt tokens moved.
+func TestObservedProviderReuseRatio(t *testing.T) {
+	var w WeeklyWindow
+	// The measured subscription-seat shape: heavy cache_read, small fresh input + write.
+	w.accumulateUsage(gatewayusageledger.Row{Kind: "exit", Counters: gatewayusageledger.Counters{
+		CachedPromptTokens: 744, InputTokens: 200, CacheCreationTokens: 56,
+	}})
+	w.accumulateUsage(gatewayusageledger.Row{Kind: "exit", Counters: gatewayusageledger.Counters{}})
+	w.finalize()
+	if w.ObservedProviderReuse == nil {
+		t.Fatal("ObservedProviderReuse nil, want ~0.744")
+	}
+	if got := *w.ObservedProviderReuse; got < 0.743 || got > 0.745 {
+		t.Fatalf("ObservedProviderReuse = %.4f, want 0.744 (744/(744+200+56))", got)
+	}
+
+	// No prompt tokens at all -> nil (no evidence), never a manufactured 0.0.
+	var empty WeeklyWindow
+	empty.accumulateUsage(gatewayusageledger.Row{Kind: "exit", Counters: gatewayusageledger.Counters{}})
+	empty.finalize()
+	if empty.ObservedProviderReuse != nil {
+		t.Fatalf("ObservedProviderReuse = %v, want nil (no prompt tokens)", empty.ObservedProviderReuse)
+	}
+}
+
 func usageExitRow(age time.Duration, c gatewayusageledger.Counters) gatewayusageledger.Row {
 	return gatewayusageledger.Row{
 		Schema:     gatewayusageledger.Schema,
