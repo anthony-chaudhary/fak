@@ -312,6 +312,67 @@ func TestGuardSessionCardFinalizeWithoutTokenStaysDurable(t *testing.T) {
 	}
 }
 
+// TestGuardSessionCardFinalizeBoundsUndeliveredSpool witnesses the #5354 leak fence: on a box
+// with no Slack token the session cards can never drain, so finalize bounds the spool by
+// dropping UNDELIVERED cards older than guardOutboxMaxPendingAge — while keeping the fresh
+// outcome truth it just recorded. Without the fence the spool grows without limit (12k rows
+// on the live tree).
+func TestGuardSessionCardFinalizeBoundsUndeliveredSpool(t *testing.T) {
+	clearSlackEnv(t) // no ambient token — finalize bounds instead of draining
+	outboxTestDir(t)
+
+	ob, err := openOutbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An ancient undelivered status card (well past the 72h floor) plus the live root.
+	oldNonce, err := ob.Enqueue(slackoutbox.Row{
+		Channel:    "C1",
+		Text:       ":large_blue_circle: *guard session · STARTING* — ancient",
+		Source:     guardSessionThreadSource,
+		EnqueuedAt: time.Now().Add(-10 * 24 * time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ob.Enqueue(slackoutbox.Row{Channel: "C1", Text: "root", Nonce: "root-live"}); err != nil {
+		t.Fatal(err)
+	}
+
+	card := newGuardSessionCard("C1", "root-live", time.Now())
+	card.finalize("status: completed (exit=0) · turns=1")
+
+	snap, err := ob.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasRowNonce(snap, oldNonce) {
+		t.Fatal("finalize must drop an undelivered card older than the pending-age floor")
+	}
+	if !hasRowNonce(snap, "root-live") {
+		t.Fatal("the fresh root card must survive the bounding pass")
+	}
+	outcome := false
+	for _, r := range snap.Rows {
+		if r.ParentNonce == "root-live" && r.Source == guardSessionThreadSource+":outcome" {
+			outcome = true
+		}
+	}
+	if !outcome {
+		t.Fatal("the fresh outcome reply finalize just enqueued must survive the bounding pass")
+	}
+}
+
+// hasRowNonce reports whether the snapshot still carries a spool row with the given nonce.
+func hasRowNonce(snap *slackoutbox.Snapshot, nonce string) bool {
+	for _, r := range snap.Rows {
+		if r.Nonce == nonce {
+			return true
+		}
+	}
+	return false
+}
+
 func TestGuardSessionLiveAndFinalLines(t *testing.T) {
 	sum := gateway.AdjudicationSummary{Total: 7, InputTokens: 120, OutputTokens: 40, CachedPromptTokens: 90, Denied: 2}
 	live := guardSessionLiveLine("session-123", sum, 65*time.Second)
