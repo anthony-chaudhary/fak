@@ -148,7 +148,7 @@ not the current one.
 The ranking above was mechanical, so it is now a verb rather than a one-off:
 
 ```
-fak wip blocked [--landable] [--stale-days N] [--ledger <path>] [--json]
+fak wip blocked [--landable | --residue] [--stale-days N] [--ledger <path>] [--json]
 ```
 
 It re-derives exactly this table from the ledger the guard already writes — parsing the
@@ -176,6 +176,51 @@ Two properties are load-bearing, both learned the hard way while landing the WIP
 be read (a staged deletion, a vanished file) is treated as maximally FRESH, so work whose
 staleness cannot be established is never offered for landing.
 
+### Correction (2026-07-26): "land the WIP" is the right lever and the wrong instruction
+
+The sentence above — *the fix was to land the WIP* — is what this doc told the next
+implementer to do, and following it literally on the tree three days later would have
+destroyed work. A third property turned out to be load-bearing, and it is not visible from
+the path and mtime this ranking was originally built on:
+
+- **Dirty is not the same as carrying work.** Path plus mtime prove a path is dirty. They
+  say nothing about whether its bytes differ from what is already committed, and **three
+  shapes are dirty while holding no new work at all — each destructive to land**: a stale
+  INDEX entry (worktree already equals HEAD, staged at an older base a peer has since
+  landed over — committing REVERTS the peer), a phantom DELETE (staged deleted while a
+  byte-identical file sits on disk — committing deletes live code; git reports this as
+  *two* porcelain lines, `D  path` and `?? path`, so a deduplicated path set loses the
+  signal), and content already LANDED UPSTREAM.
+
+Both of the first two were live on this tree when it was measured. `internal/agent/loop.go`
+ranked with **8 blocked admissions** while its index held the pre-#5235 blob, so landing it
+would have reverted `66e132fbf`; `internal/gateway/role_alternation.go` and its test were
+staged deleted with byte-identical 14580/10650-byte files on disk, so landing them would
+have removed **632 lines the trunk still has**. Under the original path-and-mtime ranking
+all three read as ordinary landable WIP.
+
+`Rank` now takes a `Content` dimension the caller probes and returns a **`RESIDUE`** state
+that pre-empts every other verdict — age can neither promote nor excuse a stale index
+entry, since a fresh one is exactly as destructive to commit as an abandoned one. RESIDUE
+ranks directly below LAND because it is the *cheapest* lever on the board: those admissions
+come back by clearing the entry, with nothing committed and nothing reviewed.
+`ResidueBlocks` is reported separately from `BlocksRecovered` precisely so the two cannot be
+summed into a number that advertises a revert as throughput.
+
+The probe costs two whole-tree git reads regardless of dirty-set size
+(`git diff --name-only HEAD` and `... @{upstream}`) and **fails toward the OLD ranking**: a
+failed HEAD read leaves every path `ContentUnprobed`, reproducing the pre-`Content` verdict
+exactly. An emptied queue would *hide* real work, which is the worse failure — the same
+degrade-to-the-truth-you-have rule the ledger read already uses. Known gap, deliberate: an
+untracked file whose bytes already exist upstream still reads as work, because neither diff
+read covers untracked paths.
+
+Measured on this tree after the change: **164 dirty, 34 RESIDUE** (3 stale-index,
+2 phantom-delete, 29 landed-upstream) carrying **19 admissions recoverable without any
+commit**, and **0 rated landable**. Note what that last number means for the orphan-WIP
+lever this doc identified: it is not inexhaustible. Once the genuinely stale, genuinely
+divergent WIP has been landed, what remains looks identical to it and is not.
+
 ## Acceptance (from #4320)
 - The `LANE_LEASE_HELD` share of cmd-family collisions drops materially, measured before vs after over `.fak/loops.jsonl`. **Re-derive the before-number** (see Step 1 result — the 67 in the TL;DR is not reproducible on the current ledger).
 - No increase in cross-lane collisions, and no suppression of *correct* own-file DIRTY_PATH refusals.
@@ -184,4 +229,9 @@ staleness cannot be established is never offered for landing.
 - Do **not** add `cmd/fak/<prefix>_*.go` sub-lanes to `dos.toml` while keeping `cmd = ["cmd/**"]` — it reddens `dos lint` via `LANE_REGION_SHADOWED` (Blocker 1) and still routes to `cmd` (Blocker 3).
 - Do **not** claim Option C fixes the `DIRTY_PATH_COLLISION` events — that guard is pre-lease and text-only (`:3385`, runs `:5559` before the lease at `:5643`); a lease-geometry change cannot directly suppress it, and several of those events are correct refusals of real orphan-WIP collisions.
 - Do **not** relax the `DIRTY_PATH`/`MULTI_LANE_SCOPE` guards to make refusals disappear — verified independently that this only reclassifies (cross-lane citations are already caught by `MULTI_LANE_SCOPE`) or unsafely admits workers stacking onto orphan WIP.
+- Do **not** land a dirty path because it ranks stale and blocks admissions — check its
+  `content` first (`fak wip blocked --json`, or just read the `RESIDUE` rows). A stale index
+  entry, a phantom delete, and a landed-upstream copy all look exactly like abandoned WIP
+  under path-and-mtime, and committing any of them reverts a peer or deletes live code. See
+  the 2026-07-26 correction above.
 - Do **not** flip the `lane_tree()` fallback blind — it changes lease geometry for every undeclared scope-lane dispatch fleet-wide; land it behind the before/after measurement.
