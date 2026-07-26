@@ -169,6 +169,28 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"fak MCP context value allowed", "mcp__fak__fak_context_value", `{}`, abi.VerdictAllow},
 		{"fak MCP effectful memory run remains denied by default", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
 
+		// The self-service verbs witnessed as DEFAULT_DENY friction in real guarded
+		// sessions (the guard's own appeal channel among them) are admitted: pure
+		// reads or kernel-re-adjudicated executions, never a capability grant.
+		{"fak MCP appeal channel fak_admit allowed", "mcp__fak__fak_admit", `{"tool":"Read","intent":"appeal"}`, abi.VerdictAllow},
+		{"fak MCP dry-run fak_adjudicate allowed", "mcp__fak__fak_adjudicate", `{"tool":"Bash","arguments":{}}`, abi.VerdictAllow},
+		{"fak MCP kernel-mediated fak_syscall allowed (inner call re-adjudicates)", "mcp__fak__fak_syscall", `{"tool":"Read","arguments":{}}`, abi.VerdictAllow},
+		{"fak MCP memory drivers listing allowed (pure read)", "mcp__fak__fak_memory_drivers", `{}`, abi.VerdictAllow},
+		{"harness ReportFindings allowed (review output, no effect)", "ReportFindings", `{"findings":[]}`, abi.VerdictAllow},
+		{"harness DeferredToolPlaceholder allowed (schema plumbing)", "DeferredToolPlaceholder", `{}`, abi.VerdictAllow},
+
+		// A coarse operator overlay grant (mcp__atlassian__ prefix) must never admit
+		// irreversible external destruction: the name-deny outranks every allow layer.
+		{"confluence delete_page denied by name", "mcp__atlassian__confluence_delete_page", `{"page_id":"1"}`, abi.VerdictDeny},
+		{"confluence delete_attachment denied by name", "mcp__atlassian__confluence_delete_attachment", `{"attachment_id":"1"}`, abi.VerdictDeny},
+
+		// The sudo rule is structural (#sudo_local): a REMOTE escalation is the ssh
+		// command's argument, governed by the remote host — only local sudo is refused.
+		{"remote sudo over ssh allowed (structural sudo rule)", "Bash", `{"command":"ssh gpu-box 'sudo systemctl restart tritonserver'"}`, abi.VerdictAllow},
+		{"quoted sudo text allowed (structural sudo rule)", "Bash", `{"command":"echo 'sudo make install'"}`, abi.VerdictAllow},
+		{"local sudo still denied", "Bash", `{"command":"sudo rm f"}`, abi.VerdictDeny},
+		{"local doas launder denied (structural sudo rule)", "Bash", `{"command":"doas id"}`, abi.VerdictDeny},
+
 		// Admitting orchestration does NOT widen the danger floor: a still-unlisted tool fails
 		// closed, and a destructive Bash arg is still refused even though Bash is allowed.
 		{"unlisted tool still fails closed", "exfiltrate_to_prod", `{"target":"prod"}`, abi.VerdictDeny},
@@ -1329,6 +1351,45 @@ func TestGuardDefaultBaseURL(t *testing.T) {
 	}
 	if got := guardDefaultBaseURL("groq"); got != "" {
 		t.Errorf("unknown provider should have no default, got %q", got)
+	}
+}
+
+// The #3620 UPGRADE_NEVER_FIRED watchdog on the guard exit banner: an ACTIVE session whose
+// every 1h-TTL upgrade attempt was refused must surface the finding row with the per-reason
+// split, a session with even one fired upgrade must stay quiet, and a clean session must not
+// print the section at all — the banner half of the /debug/vars managed_cache.finding pair.
+func TestFormatAuditSummaryUpgradeNeverFired(t *testing.T) {
+	fired := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 6, Allowed: 6,
+		CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 2, "no_stable_breakpoint": 1},
+	})
+	for _, want := range []string{
+		"managed cache", "UPGRADE_NEVER_FIRED", "0 upgraded across 3 refused attempt(s)",
+		"refused: no_stable_breakpoint", "refused: volatile_head",
+		"managed_cache.finding",
+	} {
+		if !strings.Contains(fired, want) {
+			t.Errorf("never-fired banner missing %q:\n%s", want, fired)
+		}
+	}
+
+	// One fired upgrade clears the finding no matter how many refusals surround it.
+	cleared := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 6, Allowed: 6,
+		CacheTTLUpgraded:       1,
+		CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 5},
+	})
+	if strings.Contains(cleared, "UPGRADE_NEVER_FIRED") {
+		t.Errorf("banner raised the finding after an upgraded outcome:\n%s", cleared)
+	}
+
+	// Below the attempt floor a short all-refused session is not an alarm.
+	short := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 2, Allowed: 2,
+		CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 2},
+	})
+	if strings.Contains(short, "UPGRADE_NEVER_FIRED") {
+		t.Errorf("banner raised the finding below the attempt floor:\n%s", short)
 	}
 }
 

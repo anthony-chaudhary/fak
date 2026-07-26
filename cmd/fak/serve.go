@@ -126,6 +126,8 @@ type serveFlags struct {
 	tensorParallel               *int
 	budgetWebhook                *string
 	budgetWarnFraction           *float64
+	spendCap                     repeatedStringFlag
+	spendScopeTrace              *string
 	notifyNative                 *bool
 	notifyWebhook                *string
 	notifySlack                  *string
@@ -186,8 +188,10 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.metal = fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
 	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
 	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
-	sf.budgetWebhook = fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
+	sf.budgetWebhook = fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Also carries the --spend-cap breach event (kind:\"spend_breach\", #4859) when a scope crosses its token/USD budget. Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	sf.budgetWarnFraction = fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
+	fs.Var(&sf.spendCap, "spend-cap", "arm the control-plane SPEND CAP (#3273) on a budget scope: SCOPE[:ID]=SPEC, repeatable. SCOPE is tenant|team|agent|session; :ID caps one instance (omitted = the scope default for every id); SPEC is a bare token count, or comma-separated tokens=N,usd=N (micro-USD),action=pause|kill (default pause). A scope past its budget is hard-stopped BY THE KERNEL at the next turn (409 BUDGET_SPEND_EXCEEDED, before the model is consulted) and POSTs to --budget-webhook. e.g. --spend-cap session=200000 --spend-cap tenant:acme=tokens=5000000,action=kill. Empty (default) = no cap, request path unchanged.")
+	sf.spendScopeTrace = fs.String("spend-scope-trace", "", "how a request's trace id maps onto the --spend-cap scope ladder: a \"/\"-separated template naming what each trace segment carries, e.g. \"tenant/team/session\" reads the trace \"acme/core/s-17\" as tenant=acme team=core session=s-17. Empty (default) = session-only, the whole trace id is the session. A --spend-cap on a scope this template never populates fails startup rather than booting an uncapped server that looks capped.")
 	sf.notifyNative = fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
 	sf.notifyWebhook = fs.String("notify-webhook", "", "POST a JSON StopEvent to this URL on each served-session terminal/paused/budget boundary (#761), carrying the closed reason token; empty = off. Extends the #743 budget webhook to the full stop-reason vocabulary.")
 	sf.notifySlack = fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
@@ -399,6 +403,21 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	srv.SetModelLoadProfile(rt.loadProfile)
 	if rt.inKernelModel != nil && rt.inKernelTok != nil && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
 		srv.SetAdmissionController(gateway.NewAdmissionController(gateway.DefaultAdmissionPolicy()))
+	}
+	// Control-plane SPEND CAP (#4859, the CLI half of #3273): --spend-cap builds the
+	// governor, --spend-scope-trace the trace->ScopeKey resolver, and --budget-webhook is
+	// wired as the breach sink. No --spend-cap ⇒ a nil governor and no SetSpendGovernor
+	// call at all, so the served request path is byte-for-byte historical. A malformed or
+	// unenforceable cap fails startup loud (serve_spend.go) — a budget that silently does
+	// not bind is worse than a refused boot.
+	gov, scopeOf, err := buildSpendGovernor(sf.spendCap.Values(), *sf.spendScopeTrace, *sf.budgetWebhook)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		os.Exit(1)
+	}
+	if gov != nil {
+		srv.SetSpendGovernor(gov, scopeOf)
+		fmt.Printf("fak: spend cap armed on %d scope budget(s)\n", len(sf.spendCap.Values()))
 	}
 	rt.srv = srv
 }

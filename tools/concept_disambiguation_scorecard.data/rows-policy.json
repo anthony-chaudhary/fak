@@ -1,0 +1,41 @@
+{
+  "rows": [
+    {
+      "id": "policyknob",
+      "canonical": "PolicyKnob",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "A registry ROW in PolicyKnobRegistry naming one amendable policy surface together with its amendment class (FROZEN / RATCHET / GATED_WIDEN / SELF_AMENDABLE) and permitted direction. It is metadata ABOUT a policy field, not a field itself, and carries no runtime value.",
+      "distinction": "egress_posture is an actual adjudicator.Policy knob whose value shapes a live decision; PolicyKnob is the registry entry that DESCRIBES such a knob's amendability. Reading a PolicyKnob tells you who may move a surface and which way — never what the surface is currently set to. The registry is exhaustive over exported Policy fields by reflection, so every knob has exactly one PolicyKnob row, but a PolicyKnob row also exists for non-field compiled-in floor elements that are not knobs at all.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "PolicyKnob",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "amendgatedwiden",
+      "canonical": "AmendGatedWiden",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The amendment class meaning a GATED OPERATOR CHANNEL (overlay, reload, operator escalation) may widen this policy surface, and the agent may never widen it on its own. One of four closed classes alongside FROZEN, RATCHET and SELF_AMENDABLE.",
+      "distinction": "A PolicyKnob row carries an AmendGatedWiden value; the class is the vocabulary, the row is the assignment. Against its own siblings: RATCHET permits any authorized channel to tighten and nobody to widen, so it is about DIRECTION; GATED_WIDEN permits widening but restricts WHO, so it is about CHANNEL. A knob can therefore be widened under GATED_WIDEN in a way RATCHET forbids outright — the two are not points on one strictness scale, and reading GATED_WIDEN as 'looser RATCHET' is the specific error this row exists to prevent. SELF_AMENDABLE is the agent-writable frontier and is deliberately empty.",
+      "distinct_from": [
+        "policyknob"
+      ],
+      "aliases": [],
+      "grounding": "AmendGatedWiden",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

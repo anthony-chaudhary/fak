@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "loop-agent-goal-loop-seam",
+      "canonical": "agentGoalLoop (injected agent-loop seam for the goal endpoint)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The function seam POST /v1/fak/agent/sessions calls to produce one governed agent-loop session, injected so the HTTP contract — envelope validation, NDJSON framing, and the session.start / call / session.end / error wire shape — can be proven as a standalone tested unit (#3258, epic #3256).",
+      "distinction": "A SEAM, not a loop: it runs no planner and owns no kernel. The live governed loop is agent.RunArm behind the gateway assembly; agentGoalLoop is the injection point that loop plugs into, so a test can drive the endpoint without a planner. Sibling seams (loopconstraint, loopobserve, looppark) inject one FACET of a running loop, whereas this injects the whole loop into a handler that has not been wired onto the served mux.",
+      "distinct_from": [
+        "loopconstraint",
+        "loopobserve",
+        "looppark",
+        "loop-ring"
+      ],
+      "aliases": [],
+      "grounding": "agentGoalLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

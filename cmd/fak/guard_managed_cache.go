@@ -49,6 +49,10 @@ type guardManagedCacheInputs struct {
 	// oauthSource is non-empty exactly when the credential is a Pro/Max subscription
 	// OAuth token — the flat-rate posture AUTO stays passive on.
 	oauthSource string
+	// keychainAPIKey marks apiKey as Claude Code's saved key adopted from the macOS
+	// Keychain (#5363) rather than an --api-key-env value — same API-billing posture,
+	// honestly-labeled reason.
+	keychainAPIKey bool
 }
 
 // guardManagedCachePosture is the resolved decision plus the operator-facing reason,
@@ -109,6 +113,9 @@ func resolveGuardManagedCache(mode string, in guardManagedCacheInputs) (guardMan
 		default:
 			p.active = true
 			p.reason = "API-key billing (--api-key-env) — cache economics are operator dollars"
+			if in.keychainAPIKey {
+				p.reason = "API-key billing (Claude Code's saved key from the macOS Keychain) — cache economics are operator dollars"
+			}
 		}
 		return p, nil
 	default:

@@ -604,6 +604,13 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// in a post-hoc `fak traj score`. Empty (silent) unless trajectory recording
 		// is on, exactly like the sibling lines stay quiet when their signal is absent.
 		emit(guardContextHealthLine())
+		// The amendment posture (#5184): who could have moved which policy surface
+		// this session. Read from the compiled-in PolicyKnobRegistry, never from
+		// session state, so it is a property of the BINARY the operator is running
+		// rather than a self-report -- and the load-bearing row is that the
+		// agent-writable frontier is empty. Always printed: unlike the best-effort
+		// lines above it has no absent case to stay quiet about.
+		emit(formatAmendmentPosture())
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075) AND surface it.
 	// Persist both tracks, then — for a non-quiet (interactive) session — print the

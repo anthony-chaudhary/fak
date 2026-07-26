@@ -1,0 +1,79 @@
+{
+  "rows": [
+    {
+      "id": "pagecachefloor",
+      "canonical": "pagecachefloor",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The OS page-cache reserve in fak's host-memory budget: an absolute byte floor held back from MemAvailable so demand-paged (mmap/pread) weights keep a read-through tier.",
+      "distinction": "Not the prompt-cache concepts (cache-read/cache-control), which meter provider token reuse; this is host RAM the kernel spends caching file-backed weight pages, and it is an ABSOLUTE floor rather than the fraction BudgetAfterHeadroom applies.",
+      "distinct_from": [
+        "cache-read"
+      ],
+      "aliases": [],
+      "grounding": "pagecachefloor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "refusepagedhostplaniftoobig",
+      "canonical": "RefusePagedHostPlanIfTooBig",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The demand-paged host fit guard: refuses a MemoryPlan whose host-scoped demands exceed HostBudgetForPagedWeights, the tighter of the fractional headroom budget and MemAvailable minus the absolute page-cache floor.",
+      "distinction": "Unlike RefuseHostScopedPlanIfTooBigForHost, which checks the fraction-only budget, this also carves out the page-cache floor, so it refuses a plan that fits the headroom term but would squeeze the read-through tier the mapped weights fault through.",
+      "distinct_from": [
+        "plan-reqmemoryplan"
+      ],
+      "aliases": [],
+      "grounding": "RefusePagedHostPlanIfTooBig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "refusepagedhostplanforhostmem",
+      "canonical": "refusePagedHostPlanForHostMem",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The injectable core of RefusePagedHostPlanIfTooBig: takes the host (total, free, known) triple explicitly so the demand-paged refusal is testable without a live /proc/meminfo probe.",
+      "distinction": "Unexported test seam, not the entry point: RefusePagedHostPlanIfTooBig probes the live host via HostSystemMemoryInfo and delegates here, mirroring how refuseHostScopedPlanForHostMem backs the fraction-only guard in capacity.go.",
+      "distinct_from": [
+        "refusepagedhostplaniftoobig"
+      ],
+      "aliases": [],
+      "grounding": "refusePagedHostPlanForHostMem",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "refusehostscopedplanforhostmem",
+      "canonical": "refuseHostScopedPlanForHostMem",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The injectable core of RefuseHostScopedPlanIfTooBig (capacity.go): given a plan and an explicit host (total, free, known), it refuses when the plan's host-scoped demands exceed BudgetAfterHeadroom — the FRACTION-only host budget. Taking the host explicitly is what makes the refusal testable without a live /proc/meminfo.",
+      "distinction": "This is the FRACTION-only budget check; refusePagedHostPlanForHostMem is the demand-paged sibling that additionally subtracts an ABSOLUTE page-cache floor. They are not two spellings of one check: the fraction reserve scales with the box, while the paged floor is a property of the backing device's buffered-read cliff, so the two disagree on exactly the hosts where the choice matters. With floorBytes \u003c= 0 the paged form reproduces this one byte-for-byte.",
+      "distinct_from": [
+        "refusepagedhostplanforhostmem"
+      ],
+      "aliases": [],
+      "grounding": "refuseHostScopedPlanForHostMem",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
