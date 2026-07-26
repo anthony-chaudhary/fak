@@ -120,7 +120,7 @@ func cmdGuard(argv []string) {
 	taskHandoffRepo := fs.String("task-handoff-repo", "", "owner/repo for optional live handoff issue sync (passed to fak task handoff --live)")
 	taskHandoffLive := fs.Bool("task-handoff-live", false, "after a valid handoff with next_steps, the Stop hook runs fak task handoff --live before allowing the clean stop")
 	operatorDirected := fs.String("operator-directed", guardOperatorDirectedModeWarn, "Claude Code Stop hook that catches a HEADLESS turn ending by asking a human (\"do you want me to push?\", \"waiting for your approval\") — a question no one is there to answer, so the work stalls: off|shadow|warn|enforce. WARN by default (soak: prints the choicetriage remediation, allows the stop); enforce BLOCKS a resolvable ask and feeds the remediation back so the agent acts, while routing a HUMAN_RESIDUAL wall as a typed escalation. Auto-OFF for an attended interactive child the operator did not gate explicitly (a human can always ask); never blocks an interactive session.")
-	splitMode := fs.String("split", "auto", "the default-launch UI: open a 20% `fak info` pane BESIDE the 80% interactive agent pane so the live cache/token economy + the kernel floor's safety counters stay on screen (a bare `fak guard -- claude` hands the whole terminal to Claude, hiding fak). auto|on|off. AUTO (default): enable ONLY for an attended interactive launch inside a terminal multiplexer (tmux, or Windows Terminal via $WT_SESSION); no-op for headless/piped/CI/plain-terminal launches (zero behavior change there). on forces it (prints a recipe if no multiplexer is found); off disables. The pane polls THIS guard's own loopback gateway (auth-exempt on loopback); the bearer is never placed on a pane command line.")
+	splitMode := fs.String("split", "auto", "the default-launch UI: open a 20% `fak info` pane BESIDE the 80% interactive agent pane so the live cache/token economy + the kernel floor's safety counters stay on screen (a bare `fak guard -- claude` hands the whole terminal to Claude, hiding fak). auto|on|off. AUTO (default): enable ONLY for an attended interactive launch inside a splittable terminal context (tmux; Windows Terminal via $WT_SESSION; on macOS, iTerm2 gets an inline split and Apple Terminal — which has no split panes — a companion fak-info window, both via osascript); no-op for headless/piped/CI/plain-terminal launches (zero behavior change there). on forces it (prints a recipe if no host is found); off disables. The pane polls THIS guard's own loopback gateway (auth-exempt on loopback); the bearer is never placed on a pane command line.")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a \"bottom\" strip or a \"right\" column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: refresh interval for the fak-info pane")
 	splitDryRun := fs.Bool("split-dry-run", false, "preview the --split 80/20 plan (resolved multiplexer, geometry, and the exact `fak info` pane command) and EXIT, without bringing up the gateway, spawning a pane, or launching the agent. Use it to see what --split will do before handing the terminal to the agent.")
@@ -131,7 +131,7 @@ func cmdGuard(argv []string) {
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
 	elideStaleReads := fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default (gateway.DefaultElideStaleReads): replace a Read tool_result whose file was Edited/Written in a LATER in-session turn (a stale, superseded snapshot no longer reflecting disk) with a compact fak_context_restore marker, in the SAME cache-safe working-set band as --elide-result-bytes and stashing the pre-edit body behind a restore handle. The safer, restorable sibling of --elide-result-bytes: strictly more conservative predicate (superseded, not merely big), fail-safe identity on any ambiguity, protected cache prefix proven byte-identical. Size-independent; lossy but restorable. Pass =false to opt out. Anthropic passthrough only.")
 	vcacheAnchor := fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough, APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. Anthropic passthrough only.")
-	deferColdTools := fs.Bool("defer-cold-tools", false, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools). DEFAULT OFF: this is the epic's highest-risk lever — its A/B (token-delta x held-accuracy x poison-rate) and the deferred-tool fault-in (#3200 pin/quarantine) are the validation gates before the default flips (#3537). Also settable via FAK_DEFER_COLD_TOOLS=1; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1. Anthropic passthrough only.")
+	deferColdTools := fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools); every deferred def stays byte-complete in tools[], so a first real use still resolves — nothing goes silently missing. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B token-delta x held-accuracy x poison gates reported PASS, the #3200 pin/quarantine guards the fault-in). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
 	exposeProfile := fs.String("expose-profile", "", "in-kernel fak_* MCP tool-surface profile (#3607): \"\" (full registry, default) | \"headless\" — a curated allowlist for a single-issue dispatch worker (fak_index_work, fak_admit, fak_adjudicate, fak_memory_run, fak_tools_search), pruning the ~9.9k-token full-registry schema floor every worker otherwise pays each turn; the rest page in on demand through the still-exposed fak_tools_search. `fak dispatch` launches workers with =headless. The FAK_GUARD_EXPOSE_PROFILE env OVERRIDES this flag (the fleet opt-out: set it to `full`/`off` to restore the whole registry). Any value other than \"headless\" keeps the full registry.")
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: a fresh launch id derived from host, cwd, and wrapped argv; pass this flag for a stable resumable id)")
 	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist: high|medium|none|off. Off by default; use --session-pressure-days/--session-pressure-max to size the window.")
@@ -502,6 +502,10 @@ func cmdGuard(argv []string) {
 		apiKey               string
 		pinUpstream          bool
 		oauthSource          string
+		// keychainAPIKey marks apiKey as Claude Code's saved API key adopted from the
+		// macOS Keychain (#5363) — not an --api-key-env value — so the startup report's
+		// auth line and the managed-cache reason can name the real source.
+		keychainAPIKey bool
 		// credPath is the on-disk .credentials.json path fak is pinning upstream, populated
 		// only when pinUpstream is true. It is threaded through to the post-crash auth-recovery
 		// check (guardMaybeRecoverAuthCrash) so a wrapped-agent exit caused by an expired
@@ -540,6 +544,7 @@ func cmdGuard(argv []string) {
 		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
 		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
+		keychainAPIKey = us.keychainAPIKey
 		// resolveGuardUpstream armed the spend meter with the agent name (Opus
 		// default). Re-arm with the statically-known upstream model so a non-default
 		// tier prices at its own rate — e.g. a claude-fable-5 session bills 2x Opus
@@ -566,6 +571,9 @@ func cmdGuard(argv []string) {
 		}
 		if us.ambientKeyOverridden && !*quiet {
 			fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")
+		}
+		if us.keychainAPIKey && !*quiet {
+			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription login found; using Claude Code's saved API key from the macOS Keychain upstream (API billing — the same key the wrapped agent itself authenticates with, so the billed account is unchanged).")
 		}
 		// Pinned Claude subscription: the OAuth access token fak holds upstream is
 		// short-lived (the provider rotates it ~hourly, and Claude Code rewrites the
@@ -667,10 +675,11 @@ func cmdGuard(argv []string) {
 	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, guardManagedCacheInputs{
 		// ALONGSIDE mode still has a real provider wire on the proxy side, so only the
 		// PURE local branch (no upstream at all) turns the cache posture off.
-		localModel:  localModel && !localAlongside,
-		provider:    up,
-		apiKey:      apiKey,
-		oauthSource: oauthSource,
+		localModel:     localModel && !localAlongside,
+		provider:       up,
+		apiKey:         apiKey,
+		oauthSource:    oauthSource,
+		keychainAPIKey: keychainAPIKey,
 	})
 	if mcErr != nil {
 		fmt.Fprintln(os.Stderr, "fak guard:", mcErr)
@@ -1013,9 +1022,10 @@ func cmdGuard(argv []string) {
 		ToolFloorDenies: rt.Adjudicator.NeverAdmits,
 		// The 10x floor lever (--defer-cold-tools, #3232): defer the COLD tool tail
 		// (defer_loading:true) and inject a tool_search_tool on the outbound Anthropic body,
-		// so the provider loads only the hot core into context. DEFAULT OFF (the epic's
-		// highest-risk lever); gateway.New also ORs in FAK_DEFER_COLD_TOOLS. Deterministic,
-		// cache-safe, fail-safe identity on any ambiguity.
+		// so the provider loads only the hot core into context. DEFAULT ON
+		// (gateway.DefaultDeferColdTools, the #3537 flip); --defer-cold-tools=false opts out,
+		// FAK_ABLATE_DEFER_TOOLS=1 ablates the live seam, and gateway.New still ORs in
+		// FAK_DEFER_COLD_TOOLS. Deterministic, cache-safe, fail-safe identity on any ambiguity.
 		DeferColdTools: *deferColdTools,
 		// Curated headless tool surface (#3607): a dispatch worker launches with --expose-profile
 		// headless, so the in-kernel fak_* registry is pruned to the allowlist it actually uses
@@ -1385,6 +1395,7 @@ func cmdGuard(argv []string) {
 		pinUpstream:          pinUpstream,
 		apiKey:               apiKey,
 		apiKeyEnv:            *apiKeyEnv,
+		keychainAPIKey:       keychainAPIKey,
 		oauthSource:          oauthSource,
 		mcache:               mcache,
 		contextBudgetLimit:   contextBudgetLimit,

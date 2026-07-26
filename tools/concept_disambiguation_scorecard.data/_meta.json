@@ -118,6 +118,36 @@
           "category": "incidental",
           "reason": "reference to an existing pkg/scorecard type/const (defined there, out of this gate's cmd/internal scope); not introduced here",
           "token": "CacheValueGateDebtKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "private TTL bound on the keychain exec memo — a rate-limit over /usr/bin/security calls, not a member of the cache vocabulary (vCache/KV/provider prompt-cache)",
+          "token": "claudeKeychainCacheTTL"
+        },
+        {
+          "category": "incidental",
+          "reason": "private memo record for one keychain service probe result; implementation detail of the exec rate-limit, not a cache concept",
+          "token": "claudeKeychainCacheEntry"
+        },
+        {
+          "category": "incidental",
+          "reason": "mutex guarding the private keychain probe memo; implementation detail, not a cache concept",
+          "token": "claudeKeychainCacheMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "the private keychain probe memo map itself; implementation detail of the exec rate-limit, not a cache concept",
+          "token": "claudeKeychainCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "test-injectable clock for the private keychain probe memo; implementation detail, not a cache concept",
+          "token": "claudeKeychainCacheNow"
+        },
+        {
+          "category": "incidental",
+          "reason": "test helper clearing the private keychain probe memo between cases; implementation detail, not a cache concept",
+          "token": "resetClaudeKeychainCache"
         }
       ],
       "id": "cache",
@@ -167,6 +197,11 @@
         "cachevalue_test",
         "cachewritemult",
         "caching",
+        "claudeKeychainCache",
+        "claudeKeychainCacheEntry",
+        "claudeKeychainCacheMu",
+        "claudeKeychainCacheNow",
+        "claudeKeychainCacheTTL",
         "cmdCacheValueGateScore",
         "compactcachereads",
         "compactlastcacherd",
@@ -191,6 +226,7 @@
         "promptcachehittokens",
         "promptcachemisstokens",
         "pycache",
+        "resetClaudeKeychainCache",
         "runCacheValueGateScore",
         "tokencache",
         "uncached",
@@ -399,6 +435,61 @@
           "category": "incidental",
           "reason": "Prometheus KV-prefix reuse counter on the gateway /metrics surface; matches guard-gate only on the 'gate' substring of 'gateway'. It admits/refuses nothing — pure observability, incidental to the guard-gate concept family.",
           "token": "fak_gateway_kv_prefix_prompt_tokens_by_source_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported secretload.SecretSource impl — the macOS Keychain rung of guard's OAuth token ladder (#5363); a source in an existing ladder, not a new guard/gate concept",
+          "token": "guardOAuthKeychainSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "display label for the keychain rung in the loader's looked-in diagnostics; not a concept",
+          "token": "guardOAuthKeychainSourceName"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainSupported so cmd/fak tests stub platform support; not a concept",
+          "token": "guardKeychainSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainAccessToken for tests; not a concept",
+          "token": "guardKeychainAccessToken"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainCred for tests; not a concept",
+          "token": "guardKeychainCred"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainAPIKey for tests; not a concept",
+          "token": "guardKeychainAPIKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "GateFlipped is an incidental boolean wire field on the NegBenchArtifact OBSERVED witness (json gate_flipped, always false) recording that this scored negation-comprehension suite flips no CI gate; it is not a new canonical concept in the guard-gate family, just a per-artifact provenance flag mirroring the other bench witness harnesses",
+          "token": "GateFlipped"
+        },
+        {
+          "category": "incidental",
+          "reason": "test-injection indirection: a package-level var aliasing windowgate.ConfigureBackgroundCommand so the headless-vs-attended launch gate is unit-observable; carries no new guard-gate semantics beyond the existing windowless-background configuration it forwards to (#3597)",
+          "token": "guardHeadlessChildWindowMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire value of the GradedVerdictUnwitnessed verdict — a gated-abstain status string emitted when no delta is attributable; not a distinct gate concept.",
+          "token": "GATED_UNWITNESSED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Capacity arithmetic, not a gate: NodeCapacity.AggregateHBMBytes returns GPUCount times HBMBytesPerGPU (total device bytes across every rank) and AdmissionResult mirrors it as a recorded field. It admits, refuses and gates nothing - the closed-vocabulary verdict that READS it, INSUFFICIENT_AGGREGATE_HBM, is positioned separately in this family. It matches guard-gate only on the gate substring of aggregate, the morphology the family exclude stem aggregat already de-noises - same shape as the already-classified fak_gateway_kv_prefix_prompt_tokens_by_source_total (gateway).",
+          "token": "AggregateHBMBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Refactor-extraction of the pre-existing HTTP fallback leg of fetchGuardPreCompactSignalsPreferred; it names an existing code path (source==\"http\") rather than introducing a new guard-gate concept.",
+          "token": "fetchGuardPreCompactSignalsHTTP"
         }
       ],
       "exclude": [
@@ -413,14 +504,18 @@
       ],
       "id": "guard-gate",
       "ignore": [
+        "AggregateHBMBytes",
         "CacheValueGateDebtKey",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
+        "GATED_UNWITNESSED",
+        "GateFlipped",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
+        "fetchGuardPreCompactSignalsHTTP",
         "fleetbarecommitguard",
         "gate_test",
         "gate_verbtier",
@@ -438,6 +533,13 @@
         "guardHandoffBlockCeilingEnv",
         "guardHandoffBlockCounterPath",
         "guardHandoffBlockCounterRel",
+        "guardHeadlessChildWindowMode",
+        "guardKeychainAPIKey",
+        "guardKeychainAccessToken",
+        "guardKeychainCred",
+        "guardKeychainSupported",
+        "guardOAuthKeychainSource",
+        "guardOAuthKeychainSourceName",
         "guardOperatorQuestionEscalationSink",
         "guardOperatorQuestionEscalationSlackSource",
         "guardOperatorQuestionEscalationSlackText",
@@ -549,10 +651,31 @@
           "category": "incidental",
           "reason": "kernelSession is a local unexported plumbing accessor that returns the *Session a matKernel (sessionQ4KKernel/backendKernel) wraps; not a domain concept, just a type-switch helper for the routed-expert capability gate.",
           "token": "kernelSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "external iTerm2-set environment marker, read only to detect the terminal host for the guard --split overlay plan; not a fak session-runtime concept",
+          "token": "ITERM_SESSION_ID"
+        },
+        {
+          "category": "incidental",
+          "reason": "subcommand dispatch case, exactly parallel to runSessionAuditDeep/Budget/Feed; the concept is the codex report, not its runner",
+          "token": "runSessionAuditCodex"
+        },
+        {
+          "category": "incidental",
+          "reason": "doctor stage constructor, same shape as the sibling stages added inline; carries no distinction of its own",
+          "token": "sessionRegistryRecoveryStage"
+        },
+        {
+          "category": "incidental",
+          "reason": "the stage's wire Name string, mirroring sessionRegistryRecoveryStage; a report label, not a concept",
+          "token": "session_registry_recovery"
         }
       ],
       "id": "session-runtime",
       "ignore": [
+        "ITERM_SESSION_ID",
         "SessionAutonomous",
         "SessionClass",
         "SessionInteractive",
@@ -569,11 +692,14 @@
         "readSessionHandoffBlocks",
         "requireminimaxsession",
         "restartfreshsession",
+        "runSessionAuditCodex",
         "runtuisessions",
         "sanitizeSessionForPath",
         "scheduled",
         "schedulers",
         "scheduling",
+        "sessionRegistryRecoveryStage",
+        "session_registry_recovery",
         "sessionids",
         "sessions",
         "sessionsaudited",
@@ -709,11 +835,29 @@
           "category": "incidental",
           "reason": "unexported gateway adapter applying the existing subagentDoneVerdict fold-witness (the canonical witness-proof concept) to the scripted RPC syscall path (#2858); not a new witness family",
           "token": "witnessScriptedFold"
+        },
+        {
+          "category": "incidental",
+          "reason": "Verdict enum constant whose value GATED_UNWITNESSED names the abstain state when the fairness fence (WitnessSameTasks) did not hold; it applies the existing fairness-witness concept rather than introducing a new one.",
+          "token": "GradedVerdictUnwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Same verdict wire value under witness-proof: it reports the existing WitnessSameTasks fairness-fence outcome and introduces no new witness concept.",
+          "token": "GATED_UNWITNESSED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Struct bool field recording the existing WitnessSameTasks fairness-fence verdict (arms provably ran the same problems); applies that concept, does not add one.",
+          "token": "FairnessWitnessed"
         }
       ],
       "id": "witness-proof",
       "ignore": [
         "ClaimUnwitnessedCount",
+        "FairnessWitnessed",
+        "GATED_UNWITNESSED",
+        "GradedVerdictUnwitnessed",
         "HonestyClaimUnwitnessed",
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
@@ -811,6 +955,16 @@
           "category": "incidental",
           "reason": "Private helper trimming a numa_maps policy token to its head word; internal to decode_interleave.go.",
           "token": "normalizeDecodePolicyLabel"
+        },
+        {
+          "category": "incidental",
+          "reason": "The Go constant spelling of the already-positioned concept 'calladjudicated' (call_adjudicated, the loop-progress SSE event kind), registered there as an alias. It names no distinct concept: the const's value IS the wire token, so positioning it separately would duplicate the same row under two spellings.",
+          "token": "ProgressCallAdjudicated"
+        },
+        {
+          "category": "incidental",
+          "reason": "local error variable at the sessionQuarantineRetentionPolicy call site",
+          "token": "policyErr"
         }
       ],
       "exclude": [
@@ -818,6 +972,7 @@
       ],
       "id": "policy-capability",
       "ignore": [
+        "ProgressCallAdjudicated",
         "ReusePolicy",
         "adjudicate",
         "adjudicated",
@@ -829,6 +984,7 @@
         "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",
         "policies",
+        "policyErr",
         "policyblocks",
         "policylabel",
         "postures"
@@ -845,17 +1001,25 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "closed-vocabulary enum member; its Context is the audited change's outdated base state, not the context-window concept",
+          "token": "MechanismStaleContext"
+        }
+      ],
       "id": "context-ctx",
       "ignore": [
-        "contexts",
-        "recalling",
-        "recalled",
-        "context",
-        "ctx",
+        "MechanismStaleContext",
         "cctx",
         "compactions",
-        "recalls",
-        "ctxsleep"
+        "context",
+        "contexts",
+        "ctx",
+        "ctxsleep",
+        "recalled",
+        "recalling",
+        "recalls"
       ],
       "min_files": 3,
       "name": "Context-management family",
@@ -988,11 +1152,22 @@
           "category": "incidental",
           "reason": "strict project-work refusal reason for a completion handoff that names no achieved maturity (#4640); a reason token, not a maturity concept",
           "token": "MISSING_ACHIEVED_MATURITY"
+        },
+        {
+          "category": "incidental",
+          "reason": "platform-capability probe: reports whether the darwin exec seam for the macOS Keychain is wired in this build; not a support-maturity grid concept",
+          "token": "ClaudeKeychainSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "seam over accounts.ClaudeKeychainSupported (platform-capability probe for the darwin keychain exec); not a support-maturity grid concept",
+          "token": "guardKeychainSupported"
         }
       ],
       "id": "support-maturity",
       "ignore": [
         "BAD_ACHIEVED_MATURITY",
+        "ClaudeKeychainSupported",
         "DecodeInterleaveUnsupported",
         "DomainCoverage",
         "MISSING_ACHIEVED_MATURITY",
@@ -1008,6 +1183,7 @@
         "errInterleaveUnsupported",
         "errmmapunsupported",
         "errstreamingunsupported",
+        "guardKeychainSupported",
         "immaturity",
         "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",
@@ -1150,12 +1326,34 @@
           "category": "incidental",
           "reason": "private helper rendering commitDrainResult summary lines to the fak commit command stdout; restored verbatim alongside commit.go after dbe324f44 wrongly deleted the file while main.go:609 still dispatches runCommitCommand",
           "token": "renderCommitDrainResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "report formatter over the existing ClusterAuditFailures fold result, not a new materialization concept",
+          "token": "RenderAuditClusterReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Materializer that formats the Fidelity verdict struct into an operator-readable markdown card; a Render* function applying the existing render-materialize pattern, not a new concept.",
+          "token": "RenderFidelity"
+        },
+        {
+          "category": "incidental",
+          "reason": "renderer mirroring the live modules report layout; the concept is modver.Ghost, not the printer",
+          "token": "renderGhostReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private single-call-site text formatter for one verb (fak wip blocked); it materializes no new concept — the vocabulary it prints (LAND/WAIT/IDLE/ACTIVE) is owned and defined by internal/wipattr.BlockState, and this function only lays those rows out as a table.",
+          "token": "wipBlockedRender"
         }
       ],
       "id": "render-materialize",
       "ignore": [
         "AllowsRender",
         "DefaultRender",
+        "RenderAuditClusterReport",
+        "RenderFidelity",
         "RenderKind",
         "RenderReopen",
         "RenderStop",
@@ -1169,6 +1367,7 @@
         "priorwtrendercrash",
         "renderCommitDrainResult",
         "renderCommitVelocity",
+        "renderGhostReport",
         "renderValidate",
         "renderVelocityLeg",
         "rendered",
@@ -1176,7 +1375,8 @@
         "renders",
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
-        "tuioverviewsavingsrender"
+        "tuioverviewsavingsrender",
+        "wipBlockedRender"
       ],
       "min_files": 2,
       "name": "Render / materialize family",
@@ -1260,6 +1460,11 @@
           "category": "incidental",
           "reason": "local temporary variable naming paths in a candidate commit, not a planning abstraction",
           "token": "candidatePaths"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable in buildOwnedSystemBlockAt naming the after-breakpoint OVERLAY segment list (syspromptmmu.PlanOf(overlayBase) plus an optional steering segment); the 'plan' is internal/syspromptmmu's own Segment layering, not a new member of the Plan-TYPE disambiguation family (ctxplanner resident-view Plan vs memq explain Plan vs scored Candidate). An incidental local composition of an existing concept, not a distinct plan concept.",
+          "token": "overlayPlan"
         }
       ],
       "exclude": [
@@ -1287,6 +1492,7 @@
         "notplanned",
         "nplan",
         "orderLaneCandidatesAged",
+        "overlayPlan",
         "planErr",
         "planapproval",
         "planned",
@@ -1388,6 +1594,11 @@
           "category": "incidental",
           "reason": "legacy process command spelling recognized by the all-loop inventory; not a new loop concept",
           "token": "dispatch_loop"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal loopfleet helper that loads per-loop registry cadences for the loopmgr health fold; an implementation detail, not a distinct loop concept needing disambiguation",
+          "token": "loopmgrCadences"
         }
       ],
       "id": "loop",
@@ -1410,6 +1621,7 @@
         "loopid",
         "loopindexdebt",
         "looping",
+        "loopmgrCadences",
         "loops",
         "loops_inventory",
         "loops_inventory_test",
