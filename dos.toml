@@ -183,7 +183,6 @@ concurrent = [
   # loopdrive. The duplicate second occurrence is removed; loopdrive stays declared once above.
   "loopgate",
   "dispatchorder",
-  "devindex",
   "learningdebt",
   "opttarget",
   "guardcomplaint", # the agent APPEAL channel (`fak complain`): the subjective complement of guardroute; tree = internal/guardcomplaint/** only (its cmd/fak/complain.go shim stays in the `cmd` lane, keeping every leaf tree pairwise-disjoint per the header invariant)
@@ -194,7 +193,6 @@ concurrent = [
   "commitintent",
   "commitrollup",
   "commitlane",
-  "operatorbrief",
   "steerpr", # #5015: internal/steerpr leaf (the operator-steerability PR overlay); cmd/fak steer shims stay in the `cmd` lane to keep leaf trees pairwise-disjoint
   "safesync",
   "branchrole",
@@ -209,7 +207,6 @@ concurrent = [
   "versionskew", # internal/versionskew binary-vs-trunk ancestry witness; cmd/fak shim stays in the cmd lane
   "sessionaudit",
   "selfquery",
-  "harnessprofile",
   "livecodebench",
   "devexmeter",
   # reconciled 2026-07-01: internal/superloop is a real committed leaf (the operator-intent
@@ -219,13 +216,6 @@ concurrent = [
   # cmd/fak/superloop.go shim stays in the `cmd` lane, keeping every leaf tree
   # pairwise-disjoint per the header invariant.
   "superloop",
-  "toolproc",
-  "laneadmit",
-  "regionadmit",
-  "dispatchauto",
-  "toolprocgate",
-  "slackwire",
-  "slackoutbox",
   # reconciled 2026-07-02 (fak commit -preview advisory on the #2368/#2367 fixes):
   # internal/resume is a real committed leaf (the crash-resume decision kernel:
   # scan/outcome/next/watchdog + rehome/signals/stopped/sweep subpackages) that had
@@ -234,30 +224,92 @@ concurrent = [
   # cmd/fak resume_*.go shims stay in the `cmd` lane, keeping every leaf tree
   # pairwise-disjoint per the header invariant.
   "resume",
-  "trajctl",
-  "waiting",
   "tuiplugin",
   "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
-  "chatopsdetach",
-  "godfileceiling",
-  "microagent",
-  "l3kv",
-  "cvregress",
   "wiki", # #4278/#4280: internal/wiki leaf (witness-verified repo-wiki structure + citation resolver); cmd/fak/wiki.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
-  "zaitask",
-  "macfit",
-  "stallpage",
-  "guardcompile",
-  "operatorquestion",
-  "operatorresolve",
-  "planresolve",
-  "modelops",
-  "modelaccept",
-  "executionroute",
-  "market",
   "clonescan", # #5059: internal/clonescan leaf (the #4325/#4330 dup-cache tokenizer) declared so clonescan-scoped issues route to a runnable `go test ./internal/clonescan` gate, not the phantom ci/internal/ci lane; cmd/fak/dup.go + internal/hooks shims stay in their own lanes to keep leaf trees pairwise-disjoint.
   "egresslist", # #5130: internal/egresslist leaf (the bundled egress filter-list classifier, shipped by #4978) declared so the arbiter detects same-tree collisions instead of borrowing the `policy` lane; cmd/fak egresslist shims stay in the `cmd` lane to keep leaf trees pairwise-disjoint
   "egressrefresh", # #5130: internal/egressrefresh leaf (the #4978 upstream refresh engine, maintenance twin of egresslist) declared as its own lane so its tree stays pairwise-disjoint from egresslist
+  # reconciled 2026-07-25 (concurrency-ceiling audit): 352 real committed internal/ leaves had
+  # NO declared lane at all -- the same class as every reconciliation above, but at scale. It is
+  # not cosmetic: laneadmit.Decide falls back to the LANE's tree when a request carries none, and
+  # "an empty tree conservatively overlaps everything" (internal/laneadmit/laneadmit.go) -- so an
+  # UNDECLARED leaf resolves to an empty tree and collides with EVERY live lease. The fleet's real
+  # parallel width was therefore only the declared roster; work on any of the other leaves
+  # serialized the whole fleet behind one worker, and a `(fak <leaf>)` stamp on them bound to a
+  # phantom unit. Declaring each one restores the invariant this file's header already states --
+  # ONE LANE PER LEAF, "that is what lets the live fleet edit N leaves in parallel". Tree =
+  # internal/<leaf>/** only (added verbatim to [lanes.trees]), pairwise-disjoint by construction;
+  # every cmd/fak shim stays in the `cmd` lane so no two leaf trees overlap.
+  #
+  # Deliberately NOT mirrored into [lanes].autopick: autopick is the walk's PICK roster (a policy
+  # choice about which work to start), not the admission taxonomy this reconciliation repairs.
+  #
+  # The same pass removed 28 duplicate second occurrences already in this roster (the
+  # CONCURRENT_LANES_OVERLAP class the 2026-06-28 / 2026-06-29 notes above fixed for an earlier
+  # batch): each lane is declared EXACTLY ONCE, which is what keeps the arbiter's roster from
+  # being spawn-order-sensitive. Sorted alphabetically so a duplicate is visible on inspection.
+  # Regression gate: internal/architest TestEveryLeafDeclaresLane -- it fails the push that adds
+  # an internal/<leaf> without both a lane declaration and a [lanes.trees] entry.
+  "ablate", "accountobs", "accountprobe", "accounts", "affectedtests", "agentdemo",
+  "agenticbench", "agentreadinessscore", "agentsindex", "agenttest", "amdgpu", "antipattern",
+  "assumecheck", "astquery", "atif", "attemptbudget", "auditpane", "auditreason", "auditusage",
+  "balance", "benchauthority", "benchcatalog", "benchckpt", "benchcli", "benchids",
+  "benchlineagegate", "benchpost", "benchscore", "bgloop", "binstamp", "blastradius",
+  "blockerpost", "brittleness", "browseraction", "buildwitness", "cacheobs", "cacheprice",
+  "cachesweep", "cachevalue", "cachevalueledger", "cachevaluepost", "cachevaluereport",
+  "cachewitness", "cadencereport", "callavoid", "capindex", "capindexgw", "catchupscore",
+  "chatops", "chatrelay", "checkpointscore", "claimcheck", "closebatch", "closureaudit",
+  "closurerate", "cmdutil", "codegraph", "codesearch", "codexlifecycle", "codexmemory",
+  "commitissuelink", "commitsubject", "compactcohere", "completiondist", "computeadmit",
+  "conceptbench", "conceptcatalog", "conceptusage", "conflationscore", "conformance",
+  "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "deadlineadmit",
+  "deepseekbench", "deepseekv4kv", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
+  "deploymanifest", "dispatchaging", "dispatchaudit", "dispatchcache", "dispatchconservation",
+  "dispatchpost", "dispatchsweep", "dispatchtick", "docfreshrsi", "dogfoodissues",
+  "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy", "dormancysim", "dsparity",
+  "edittx", "egressfloor", "envconfiglint", "epicprogress", "epochbridge", "escalation",
+  "evebridge", "eveimport", "eveparity", "execrollup", "findingsink", "fleet", "fleetaccounts",
+  "fleetbottleneck", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory", "fleetmetrics",
+  "fleetmon", "fleetpane", "fleetreap", "fleetsim", "fleetspine", "fleettrend", "fleetverify",
+  "flock", "flowcredit", "focusscore", "frontierswe", "fusedturn", "gardenbundle",
+  "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "godsplitplan",
+  "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
+  "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
+  "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
+  "hostfault", "hostplacement", "hostresurrect", "hwgatelint", "ideascout", "idempotency",
+  "intlist", "issuecatalog", "issuecohort", "issuecontract", "issuecontractrepair", "issuecost",
+  "issuededup", "issuehygiene", "issuesmallness", "issuestriage", "jsonlledger", "kimik3page",
+  "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region", "launchlatency", "lifebridge",
+  "lifecycle", "linkstate", "loaddebounce", "logvault", "lookahead", "loopfleet", "loopmap",
+  "looporphan", "looprecover", "loopscore", "loopunblock", "macbench", "maputil", "mathx",
+  "mcpfootprint", "memgate", "memorycotravel", "memoryread", "memorystability", "memvaluescore",
+  "memview", "mergepreview", "milestoneburndown", "milestonedoc", "milestonepost",
+  "milestonereport", "modedebt", "modelladder", "modelscore", "modver", "mutationbudget",
+  "mutationefficacy", "negframe", "newmodel", "nodecompare", "nodeusagepost", "numfmt",
+  "operatortouches", "orphanscan", "patchcommit", "planaudit", "popularizationtickets",
+  "privatepath", "procguard", "projectcompletion", "projectreport", "promalert", "promptaudit",
+  "promptlint", "propagationscore", "pythongate", "qaprocessscore", "quality", "questionledger",
+  "qwen36nodereports", "qwen36parity", "randhex", "reachdelta", "readmevisualaudit",
+  "refactorverify", "refutil", "region", "rehydrate", "relay", "releasestale", "releasestatus",
+  "repoguard", "resumebackoff", "resumemetrics", "roofline", "safecommit", "savingsvector",
+  "scdiff", "scmbridge", "scorecardpane", "seatpark", "secretgate", "secretload", "selfinstall",
+  "sensecheck", "seoaeoscore", "servicelease", "serviceledger", "servicespec", "sessionctl",
+  "sessiondesc", "sessionjournal", "sessionledger", "sessionobs", "sessionread", "sessionreplay",
+  "sessionreset", "sessionsearch", "sessionsignals", "sessionsteer", "shadowgit", "sidecar",
+  "signals", "simhash", "skillenv", "skillvalue", "skipledger", "slackenv", "slackmeta",
+  "sotacoverage", "sotamatrix", "spendrollup", "stallscan", "stepbaton", "stepbatoncapture",
+  "stopfailure", "stripeload", "strmatch", "supervisoragent", "supportmaturity",
+  "supportmaturityscore", "swebenchsota", "sweepconfig", "syspromptmmu", "systemservice",
+  "taskdecision", "taskgraph", "taskidentity", "terminalbench", "terminalrisk", "testroute",
+  "timeoutphase", "tokencache", "toolcoverage", "toolrollup", "toolsandbox", "toolseq",
+  "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
+  "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
+  "uiquality", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
+  "vcacheqa", "vcachescore", "vcachesnapshot", "vcachestar", "verifierexposure", "vllmcompile",
+  "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
+  "workerenvelope", "workerworktree", "workflow", "workflowaudit", "workflowlint", "worklog",
+  "worktreewitness", "xenginekv", "xprobe",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -587,9 +639,365 @@ market = ["internal/market/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
 egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
+# reconciled 2026-07-25 (concurrency-ceiling audit): one tree per leaf lane declared in the
+# matching [lanes].concurrent block above. Every glob is the leaf's own prefix and nothing else,
+# so the set stays pairwise disjoint by construction (no `**/*`, no cross-leaf glob) and
+# `dos arbitrate` can PROVE two leaf workers disjoint instead of falling back to the
+# empty-tree "overlaps everything" rule that was serializing them.
+ablate = ["internal/ablate/**"]
+accountobs = ["internal/accountobs/**"]
+accountprobe = ["internal/accountprobe/**"]
+accounts = ["internal/accounts/**"]
+affectedtests = ["internal/affectedtests/**"]
+agentdemo = ["internal/agentdemo/**"]
+agenticbench = ["internal/agenticbench/**"]
+agentreadinessscore = ["internal/agentreadinessscore/**"]
+agentsindex = ["internal/agentsindex/**"]
+agenttest = ["internal/agenttest/**"]
+amdgpu = ["internal/amdgpu/**"]
+antipattern = ["internal/antipattern/**"]
+assumecheck = ["internal/assumecheck/**"]
+astquery = ["internal/astquery/**"]
+atif = ["internal/atif/**"]
+attemptbudget = ["internal/attemptbudget/**"]
+auditpane = ["internal/auditpane/**"]
+auditreason = ["internal/auditreason/**"]
+auditusage = ["internal/auditusage/**"]
+balance = ["internal/balance/**"]
+benchauthority = ["internal/benchauthority/**"]
+benchcatalog = ["internal/benchcatalog/**"]
+benchckpt = ["internal/benchckpt/**"]
+benchcli = ["internal/benchcli/**"]
+benchids = ["internal/benchids/**"]
+benchlineagegate = ["internal/benchlineagegate/**"]
+benchpost = ["internal/benchpost/**"]
+benchscore = ["internal/benchscore/**"]
+bgloop = ["internal/bgloop/**"]
+binstamp = ["internal/binstamp/**"]
+blastradius = ["internal/blastradius/**"]
+blockerpost = ["internal/blockerpost/**"]
+brittleness = ["internal/brittleness/**"]
+browseraction = ["internal/browseraction/**"]
+buildwitness = ["internal/buildwitness/**"]
+cacheobs = ["internal/cacheobs/**"]
+cacheprice = ["internal/cacheprice/**"]
+cachesweep = ["internal/cachesweep/**"]
+cachevalue = ["internal/cachevalue/**"]
+cachevalueledger = ["internal/cachevalueledger/**"]
+cachevaluepost = ["internal/cachevaluepost/**"]
+cachevaluereport = ["internal/cachevaluereport/**"]
+cachewitness = ["internal/cachewitness/**"]
+cadencereport = ["internal/cadencereport/**"]
+callavoid = ["internal/callavoid/**"]
+catchupscore = ["internal/catchupscore/**"]
+chatops = ["internal/chatops/**"]
+chatrelay = ["internal/chatrelay/**"]
+checkpointscore = ["internal/checkpointscore/**"]
+claimcheck = ["internal/claimcheck/**"]
+closebatch = ["internal/closebatch/**"]
+closureaudit = ["internal/closureaudit/**"]
+closurerate = ["internal/closurerate/**"]
+cmdutil = ["internal/cmdutil/**"]
+codegraph = ["internal/codegraph/**"]
+codesearch = ["internal/codesearch/**"]
+codexlifecycle = ["internal/codexlifecycle/**"]
+codexmemory = ["internal/codexmemory/**"]
+commitissuelink = ["internal/commitissuelink/**"]
+commitsubject = ["internal/commitsubject/**"]
+compactcohere = ["internal/compactcohere/**"]
+completiondist = ["internal/completiondist/**"]
+computeadmit = ["internal/computeadmit/**"]
+conceptbench = ["internal/conceptbench/**"]
+conceptcatalog = ["internal/conceptcatalog/**"]
+conceptusage = ["internal/conceptusage/**"]
+conflationscore = ["internal/conflationscore/**"]
+conformance = ["internal/conformance/**"]
+corelockaudit = ["internal/corelockaudit/**"]
+corelocks = ["internal/corelocks/**"]
+covmatrix = ["internal/covmatrix/**"]
+ctxknobs = ["internal/ctxknobs/**"]
+ctxplans = ["internal/ctxplans/**"]
+deadlineadmit = ["internal/deadlineadmit/**"]
+deepseekbench = ["internal/deepseekbench/**"]
+deepseekv4kv = ["internal/deepseekv4kv/**"]
+deepseekv4moe = ["internal/deepseekv4moe/**"]
+defaultvaluescore = ["internal/defaultvaluescore/**"]
+demo = ["internal/demo/**"]
+demoutil = ["internal/demoutil/**"]
+deploymanifest = ["internal/deploymanifest/**"]
+dispatchaging = ["internal/dispatchaging/**"]
+dispatchaudit = ["internal/dispatchaudit/**"]
+dispatchcache = ["internal/dispatchcache/**"]
+dispatchconservation = ["internal/dispatchconservation/**"]
+dispatchpost = ["internal/dispatchpost/**"]
+dispatchsweep = ["internal/dispatchsweep/**"]
+dispatchtick = ["internal/dispatchtick/**"]
+docfreshrsi = ["internal/docfreshrsi/**"]
+dogfoodissues = ["internal/dogfoodissues/**"]
+dogfoodscore = ["internal/dogfoodscore/**"]
+dojocal = ["internal/dojocal/**"]
+dojopost = ["internal/dojopost/**"]
+dormancy = ["internal/dormancy/**"]
+dormancysim = ["internal/dormancysim/**"]
+dsparity = ["internal/dsparity/**"]
+edittx = ["internal/edittx/**"]
+egressfloor = ["internal/egressfloor/**"]
+envconfiglint = ["internal/envconfiglint/**"]
+epicprogress = ["internal/epicprogress/**"]
+epochbridge = ["internal/epochbridge/**"]
+escalation = ["internal/escalation/**"]
+evebridge = ["internal/evebridge/**"]
+eveimport = ["internal/eveimport/**"]
+eveparity = ["internal/eveparity/**"]
+execrollup = ["internal/execrollup/**"]
+findingsink = ["internal/findingsink/**"]
+fleet = ["internal/fleet/**"]
+fleetaccounts = ["internal/fleetaccounts/**"]
+fleetbottleneck = ["internal/fleetbottleneck/**"]
+fleetcap = ["internal/fleetcap/**"]
+fleetcompare = ["internal/fleetcompare/**"]
+fleetfreeze = ["internal/fleetfreeze/**"]
+fleetmemory = ["internal/fleetmemory/**"]
+fleetmetrics = ["internal/fleetmetrics/**"]
+fleetmon = ["internal/fleetmon/**"]
+fleetpane = ["internal/fleetpane/**"]
+fleetreap = ["internal/fleetreap/**"]
+fleetsim = ["internal/fleetsim/**"]
+fleetspine = ["internal/fleetspine/**"]
+fleettrend = ["internal/fleettrend/**"]
+fleetverify = ["internal/fleetverify/**"]
+flock = ["internal/flock/**"]
+flowcredit = ["internal/flowcredit/**"]
+focusscore = ["internal/focusscore/**"]
+frontierswe = ["internal/frontierswe/**"]
+fusedturn = ["internal/fusedturn/**"]
+gardenbundle = ["internal/gardenbundle/**"]
+gatewayusageledger = ["internal/gatewayusageledger/**"]
+ghexec = ["internal/ghexec/**"]
+ghspam = ["internal/ghspam/**"]
+glm52prefillsweep = ["internal/glm52prefillsweep/**"]
+goalpark = ["internal/goalpark/**"]
+godsplitplan = ["internal/godsplitplan/**"]
+grafanapost = ["internal/grafanapost/**"]
+growthgate = ["internal/growthgate/**"]
+guard = ["internal/guard/**"]
+guardaccuracy = ["internal/guardaccuracy/**"]
+guardcorpus = ["internal/guardcorpus/**"]
+guardrotate = ["internal/guardrotate/**"]
+guardroute = ["internal/guardroute/**"]
+guardrsi = ["internal/guardrsi/**"]
+guardsessions = ["internal/guardsessions/**"]
+guardtrace = ["internal/guardtrace/**"]
+guardvars = ["internal/guardvars/**"]
+guideddecode = ["internal/guideddecode/**"]
+harnessres = ["internal/harnessres/**"]
+headlesslint = ["internal/headlesslint/**"]
+heavinessscore = ["internal/heavinessscore/**"]
+hooks = ["internal/hooks/**"]
+horizonrecovery = ["internal/horizonrecovery/**"]
+hostfault = ["internal/hostfault/**"]
+hostplacement = ["internal/hostplacement/**"]
+hostresurrect = ["internal/hostresurrect/**"]
+hwgatelint = ["internal/hwgatelint/**"]
+ideascout = ["internal/ideascout/**"]
+idempotency = ["internal/idempotency/**"]
+intlist = ["internal/intlist/**"]
+issuecatalog = ["internal/issuecatalog/**"]
+issuecohort = ["internal/issuecohort/**"]
+issuecontract = ["internal/issuecontract/**"]
+issuecontractrepair = ["internal/issuecontractrepair/**"]
+issuecost = ["internal/issuecost/**"]
+issuededup = ["internal/issuededup/**"]
+issuehygiene = ["internal/issuehygiene/**"]
+issuesmallness = ["internal/issuesmallness/**"]
+issuestriage = ["internal/issuestriage/**"]
+jsonlledger = ["internal/jsonlledger/**"]
+kimik3page = ["internal/kimik3page/**"]
+knobcensus = ["internal/knobcensus/**"]
+knownbad = ["internal/knownbad/**"]
+knownenv = ["internal/knownenv/**"]
+kvbudget = ["internal/kvbudget/**"]
+l3region = ["internal/l3region/**"]
+launchlatency = ["internal/launchlatency/**"]
+lifebridge = ["internal/lifebridge/**"]
+lifecycle = ["internal/lifecycle/**"]
+linkstate = ["internal/linkstate/**"]
+loaddebounce = ["internal/loaddebounce/**"]
+lookahead = ["internal/lookahead/**"]
+loopfleet = ["internal/loopfleet/**"]
+loopmap = ["internal/loopmap/**"]
+looporphan = ["internal/looporphan/**"]
+looprecover = ["internal/looprecover/**"]
+loopscore = ["internal/loopscore/**"]
+loopunblock = ["internal/loopunblock/**"]
+macbench = ["internal/macbench/**"]
+maputil = ["internal/maputil/**"]
+mathx = ["internal/mathx/**"]
+mcpfootprint = ["internal/mcpfootprint/**"]
+memgate = ["internal/memgate/**"]
+memorycotravel = ["internal/memorycotravel/**"]
+memoryread = ["internal/memoryread/**"]
+memorystability = ["internal/memorystability/**"]
+memvaluescore = ["internal/memvaluescore/**"]
+memview = ["internal/memview/**"]
+mergepreview = ["internal/mergepreview/**"]
+milestoneburndown = ["internal/milestoneburndown/**"]
+milestonedoc = ["internal/milestonedoc/**"]
+milestonepost = ["internal/milestonepost/**"]
+milestonereport = ["internal/milestonereport/**"]
+modedebt = ["internal/modedebt/**"]
+modelladder = ["internal/modelladder/**"]
+modelscore = ["internal/modelscore/**"]
+modver = ["internal/modver/**"]
+mutationbudget = ["internal/mutationbudget/**"]
+mutationefficacy = ["internal/mutationefficacy/**"]
+negframe = ["internal/negframe/**"]
+newmodel = ["internal/newmodel/**"]
+nodecompare = ["internal/nodecompare/**"]
+nodeusagepost = ["internal/nodeusagepost/**"]
+numfmt = ["internal/numfmt/**"]
+operatortouches = ["internal/operatortouches/**"]
+orphanscan = ["internal/orphanscan/**"]
+patchcommit = ["internal/patchcommit/**"]
+planaudit = ["internal/planaudit/**"]
+popularizationtickets = ["internal/popularizationtickets/**"]
+privatepath = ["internal/privatepath/**"]
+procguard = ["internal/procguard/**"]
+projectcompletion = ["internal/projectcompletion/**"]
+projectreport = ["internal/projectreport/**"]
+promalert = ["internal/promalert/**"]
+promptaudit = ["internal/promptaudit/**"]
+promptlint = ["internal/promptlint/**"]
+propagationscore = ["internal/propagationscore/**"]
+pythongate = ["internal/pythongate/**"]
+qaprocessscore = ["internal/qaprocessscore/**"]
+quality = ["internal/quality/**"]
+questionledger = ["internal/questionledger/**"]
+qwen36nodereports = ["internal/qwen36nodereports/**"]
+qwen36parity = ["internal/qwen36parity/**"]
+randhex = ["internal/randhex/**"]
+reachdelta = ["internal/reachdelta/**"]
+readmevisualaudit = ["internal/readmevisualaudit/**"]
+refactorverify = ["internal/refactorverify/**"]
+refutil = ["internal/refutil/**"]
+region = ["internal/region/**"]
+rehydrate = ["internal/rehydrate/**"]
+relay = ["internal/relay/**"]
+releasestale = ["internal/releasestale/**"]
+releasestatus = ["internal/releasestatus/**"]
+repoguard = ["internal/repoguard/**"]
+resumebackoff = ["internal/resumebackoff/**"]
+resumemetrics = ["internal/resumemetrics/**"]
+roofline = ["internal/roofline/**"]
+safecommit = ["internal/safecommit/**"]
+savingsvector = ["internal/savingsvector/**"]
+scdiff = ["internal/scdiff/**"]
+scmbridge = ["internal/scmbridge/**"]
+scorecardpane = ["internal/scorecardpane/**"]
+seatpark = ["internal/seatpark/**"]
+secretgate = ["internal/secretgate/**"]
+secretload = ["internal/secretload/**"]
+selfinstall = ["internal/selfinstall/**"]
+sensecheck = ["internal/sensecheck/**"]
+seoaeoscore = ["internal/seoaeoscore/**"]
+servicelease = ["internal/servicelease/**"]
+serviceledger = ["internal/serviceledger/**"]
+servicespec = ["internal/servicespec/**"]
+sessionctl = ["internal/sessionctl/**"]
+sessiondesc = ["internal/sessiondesc/**"]
+sessionjournal = ["internal/sessionjournal/**"]
+sessionledger = ["internal/sessionledger/**"]
+sessionobs = ["internal/sessionobs/**"]
+sessionread = ["internal/sessionread/**"]
+sessionreplay = ["internal/sessionreplay/**"]
+sessionreset = ["internal/sessionreset/**"]
+sessionsearch = ["internal/sessionsearch/**"]
+sessionsignals = ["internal/sessionsignals/**"]
+sessionsteer = ["internal/sessionsteer/**"]
+shadowgit = ["internal/shadowgit/**"]
+sidecar = ["internal/sidecar/**"]
+signals = ["internal/signals/**"]
+simhash = ["internal/simhash/**"]
+skillenv = ["internal/skillenv/**"]
+skillvalue = ["internal/skillvalue/**"]
+skipledger = ["internal/skipledger/**"]
+slackenv = ["internal/slackenv/**"]
+slackmeta = ["internal/slackmeta/**"]
+sotacoverage = ["internal/sotacoverage/**"]
+sotamatrix = ["internal/sotamatrix/**"]
+spendrollup = ["internal/spendrollup/**"]
+stallscan = ["internal/stallscan/**"]
+stepbaton = ["internal/stepbaton/**"]
+stepbatoncapture = ["internal/stepbatoncapture/**"]
+stopfailure = ["internal/stopfailure/**"]
+stripeload = ["internal/stripeload/**"]
+strmatch = ["internal/strmatch/**"]
+supervisoragent = ["internal/supervisoragent/**"]
+supportmaturity = ["internal/supportmaturity/**"]
+supportmaturityscore = ["internal/supportmaturityscore/**"]
+swebenchsota = ["internal/swebenchsota/**"]
+sweepconfig = ["internal/sweepconfig/**"]
+syspromptmmu = ["internal/syspromptmmu/**"]
+systemservice = ["internal/systemservice/**"]
+taskdecision = ["internal/taskdecision/**"]
+taskgraph = ["internal/taskgraph/**"]
+taskidentity = ["internal/taskidentity/**"]
+terminalbench = ["internal/terminalbench/**"]
+terminalrisk = ["internal/terminalrisk/**"]
+testroute = ["internal/testroute/**"]
+timeoutphase = ["internal/timeoutphase/**"]
+tokencache = ["internal/tokencache/**"]
+toolcoverage = ["internal/toolcoverage/**"]
+toolrollup = ["internal/toolrollup/**"]
+toolsandbox = ["internal/toolsandbox/**"]
+toolseq = ["internal/toolseq/**"]
+toolshape = ["internal/toolshape/**"]
+tooltrend = ["internal/tooltrend/**"]
+toon = ["internal/toon/**"]
+trajctlhook = ["internal/trajctlhook/**"]
+trajectory = ["internal/trajectory/**"]
+trajhook = ["internal/trajhook/**"]
+trajquery = ["internal/trajquery/**"]
+treedoctor = ["internal/treedoctor/**"]
+trendreport = ["internal/trendreport/**"]
+trigram = ["internal/trigram/**"]
+trunkbuildprobe = ["internal/trunkbuildprobe/**"]
+turnkind = ["internal/turnkind/**"]
+turntaxmeter = ["internal/turntaxmeter/**"]
+uiquality = ["internal/uiquality/**"]
+unwiredscore = ["internal/unwiredscore/**"]
+unwitnessedclaim = ["internal/unwitnessedclaim/**"]
+usagelog = ["internal/usagelog/**"]
+vcachecal = ["internal/vcachecal/**"]
+vcacheextract = ["internal/vcacheextract/**"]
+vcacheqa = ["internal/vcacheqa/**"]
+vcachescore = ["internal/vcachescore/**"]
+vcachesnapshot = ["internal/vcachesnapshot/**"]
+vcachestar = ["internal/vcachestar/**"]
+verifierexposure = ["internal/verifierexposure/**"]
+vllmcompile = ["internal/vllmcompile/**"]
+watchdoghealth = ["internal/watchdoghealth/**"]
+whatschanged = ["internal/whatschanged/**"]
+wipattr = ["internal/wipattr/**"]
+wipfence = ["internal/wipfence/**"]
+wiprecon = ["internal/wiprecon/**"]
+wipref = ["internal/wipref/**"]
+workerenvelope = ["internal/workerenvelope/**"]
+workerworktree = ["internal/workerworktree/**"]
+workflow = ["internal/workflow/**"]
+workflowaudit = ["internal/workflowaudit/**"]
+workflowlint = ["internal/workflowlint/**"]
+worklog = ["internal/worklog/**"]
+worktreewitness = ["internal/worktreewitness/**"]
+xenginekv = ["internal/xenginekv/**"]
+xprobe = ["internal/xprobe/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
-experiments = ["experiments/**"]
+# internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
+# name a `(fak experiments)` stamp on it can bind to -- so the ROOT experiments/ tree alone left
+# internal/experiments/ unclaimed (an empty tree, which overlaps everything). Both globs live on
+# the one lane; neither overlaps any other leaf's tree, so the set stays pairwise disjoint.
+experiments = ["experiments/**", "internal/experiments/**"]
 examples    = ["examples/**"]
 # Root docs/index files are part of the docs lane too. Without these exact
 # entries, `fak sweep` can only surface README/llms churn as no-lane residuals,
@@ -600,7 +1008,12 @@ visuals     = ["visuals/**"]
 claude      = [".claude/**"]
 ci          = [".github/**"]
 abi         = ["internal/abi/**"]
-release     = ["VERSION", "docs/releases/**"]
+# internal/release joins the release lane's tree rather than getting a concurrent lane of its
+# own: `release` is EXCLUSIVE (a release cut is the serial gate), and `(fak release)` is the only
+# stamp internal/release/ can carry. Left off, that leaf resolved to an empty tree -- which
+# collides with every live lease anyway, so claiming it here costs no parallelism and makes the
+# taxonomy honest. It stays exclusive; do not move `release` into [lanes].concurrent.
+release     = ["VERSION", "docs/releases/**", "internal/release/**"]
 dos         = ["dos.toml", ".gitignore"]
 global      = ["**/*"]
 
