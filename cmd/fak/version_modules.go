@@ -30,6 +30,7 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 	only := fs.String("only", "", "show only modules whose name has this prefix (e.g. internal/, cmd/fak, or tools/)")
 	sortKey := fs.String("sort", "name", "sort order for display: name|rev|date")
 	top := fs.Int("top", 0, "show only the first N modules after sorting (0 = all)")
+	ghosts := fs.Bool("ghosts", false, "list history-only (deleted) modules with their final rev + deletion commit, instead of the live report")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -41,6 +42,12 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 	if root == "" {
 		fmt.Fprintln(stderr, "fak version modules: could not resolve git repo root")
 		return 2
+	}
+	if *ghosts {
+		// The tombstone view is the complement of the live report — a distinct
+		// query with no ledger/score/display flags — so it short-circuits before
+		// the live Snapshot rather than filtering it.
+		return runVersionModulesGhosts(stdout, stderr, root, *asJSON)
 	}
 	rep, err := modver.Snapshot(context.Background(), root, modver.RealRunner)
 	if err != nil {
@@ -115,6 +122,41 @@ func stampModverLedger(stdout, stderr io.Writer, root, ledger string, rep modver
 	fmt.Fprintf(stdout, "fak version modules: stamped %d of %d modules -> %s\n",
 		len(rows), len(rep.Modules), path)
 	return 0
+}
+
+// runVersionModulesGhosts renders the tombstone report: history-only modules
+// that no longer exist at HEAD, each with the final rev it reached and the commit
+// that deleted it. It answers "what died and when" — the growth-shape fact the
+// live report excludes by design (#2477).
+func runVersionModulesGhosts(stdout, stderr io.Writer, root string, asJSON bool) int {
+	ghosts, err := modver.Ghosts(context.Background(), root, modver.RealRunner)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak version modules: %v\n", err)
+		return 1
+	}
+	if asJSON {
+		if err := writeIndentedJSON(stdout, ghosts); err != nil {
+			fmt.Fprintf(stderr, "fak version modules: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	renderGhostReport(stdout, ghosts)
+	return 0
+}
+
+// renderGhostReport prints the tombstone table — the final version each deleted
+// module reached, the date it died, and the module name — mirroring the live
+// report's layout so a ghost row reads the same as a live one, minus the score.
+func renderGhostReport(w io.Writer, ghosts []modver.Ghost) {
+	fmt.Fprintf(w, "fak version modules: %d ghost modules (history-only, absent at HEAD)\n", len(ghosts))
+	for _, g := range ghosts {
+		date := g.DeletedDate
+		if len(date) > 10 {
+			date = date[:10]
+		}
+		fmt.Fprintf(w, "  %-16s %s  %s\n", g.Version(), date, g.Name)
+	}
 }
 
 // renderModuleReport prints the human table for the full report.
