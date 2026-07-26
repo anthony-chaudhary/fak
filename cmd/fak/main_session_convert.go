@@ -39,6 +39,12 @@ func toGatewaySessionStateAt(s session.State, now time.Time) gateway.SessionStat
 			// the default `fak guard -- claude` wire form is unchanged and no horizon is derived.
 			ContextTokensCap:      s.Budget.ContextTokensCap,
 			ResidentContextTokens: s.Cost.LatestContextTokens(),
+			// The priced spend axis (#2762): carried on the read projection so the envelope
+			// route's returned/observed state is honest AND a partial `fak session budget`
+			// edit can PRESERVE a live spend ceiling (mergeBudget reads it back) instead of
+			// silently clearing it. 0 (omitempty) on a session with no spend budget.
+			SpendMicroCentsLeft: s.Budget.SpendMicroCentsLeft,
+			SpendMicroCentsCap:  s.Budget.SpendMicroCentsCap,
 		},
 		Priority:       s.Priority,
 		Pace:           gateway.SessionPace{MaxTokensPerTurn: s.Pace.MaxTokensPerTurn, MinTurnGapMs: s.Pace.MinTurnGapMs},
@@ -56,7 +62,17 @@ func toGatewaySessionStateAt(s session.State, now time.Time) gateway.SessionStat
 		ResetTransaction: toGatewayResetTransaction(s.ResetTransaction),
 		Assumptions:      toGatewaySessionAssumptions(s.Assumptions),
 		Time:             toGatewaySessionTime(s.Time, now),
-		Rev:              s.Rev,
+		// Throughput envelope read projection (#2762): the configured expected/min rates
+		// plus the measured sustained rate the floor is judged against — the field that
+		// makes a `throughput=`/`min_throughput=` ceiling legible in `fak session status`.
+		// An unconfigured axis yields the zero SessionThroughput (ObservedTokensPerSec is 0
+		// with nothing observed), which omitzero drops so the pre-#2762 wire shape is intact.
+		Throughput: gateway.SessionThroughput{
+			ExpectedTokensPerSec: s.Throughput.ExpectedTokensPerSec,
+			MinTokensPerSec:      s.Throughput.MinTokensPerSec,
+			ObservedTokensPerSec: s.Throughput.ObservedTokensPerSec(),
+		},
+		Rev: s.Rev,
 	}
 }
 
