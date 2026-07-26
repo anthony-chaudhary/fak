@@ -21,6 +21,10 @@ package agent
 // deferred there — this file is the builder that rung adopts, witnessed today.
 
 import (
+	"os"
+	"strconv"
+	"strings"
+
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
@@ -40,6 +44,12 @@ type SystemBlock struct {
 	// Refused carries the verdict for each authored item the gate rejected (a nil witness,
 	// empty content, ...), so a refusal is auditable, never a silent drop.
 	Refused []syspromptmmu.EditVerdict
+	// Steering is the terseness level (#5047) this block was built at: SteeringOff when the
+	// opt-in knob is unset or out of range (no steering block appended), else the applied
+	// 1..4 level. The steering block, when present, rides strictly AFTER the cache
+	// breakpoint alongside the queried overlay, so it never re-serializes the resident
+	// prefix (CacheStable still holds).
+	Steering int
 }
 
 // CacheStable is the one-bit verdict the owned loop checks before sending: the realized
@@ -61,6 +71,40 @@ func (b SystemBlock) CacheStable() bool {
 // ApplyEdit never mutates its input, so the resident plan can never be corrupted by an
 // authored overlay item.
 func BuildOwnedSystemBlock(items [][]byte, witness func(syspromptmmu.BaseEdit) bool) SystemBlock {
+	return buildOwnedSystemBlockAt(items, witness, steeringLevelFromEnv())
+}
+
+// steeringLevelFromEnv reads the opt-in FAK_STEERING_LEVEL knob (#5047). Unset, empty, or
+// unparseable ⇒ SteeringOff, so steering NEVER self-enables — the forward path only moves
+// when a level is deliberately configured. An out-of-range numeric value is returned as-is
+// and refused fail-safe downstream (SteeringSegment returns ok false), so it too collapses
+// to SteeringOff in the built block.
+func steeringLevelFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv(syspromptmmu.SteeringEnvVar))
+	if raw == "" {
+		return syspromptmmu.SteeringOff
+	}
+	level, err := strconv.Atoi(raw)
+	if err != nil {
+		return syspromptmmu.SteeringOff
+	}
+	return level
+}
+
+// buildOwnedSystemBlockAt is BuildOwnedSystemBlock with the steering level passed
+// EXPLICITLY (BuildOwnedSystemBlock reads it from the env knob). It builds the witness-gated
+// capability overlay exactly as before, then — when `level` selects a valid steering level
+// (1..4) — appends the sentinel-wrapped terseness block as the LAST overlay segment, strictly
+// after the cache breakpoint and after the queried capability cards. A SteeringOff or
+// out-of-range level appends nothing, so the returned Value is byte-identical to the
+// pre-#5047 forward path. The steering block is NOT counted in Overlays (it is fak's own
+// appended segment, not a witness-gated authored item); its presence is reported by Steering.
+//
+// Cache-stability is preserved by construction: the resident spine+policy plan and the
+// breakpoint that sits on its last block are untouched, so AuditRealizedPrefix over the
+// resident prefix still reads AuditOK and the resident prefix bytes are byte-identical to
+// the off build — only after-breakpoint tail bytes are added.
+func buildOwnedSystemBlockAt(items [][]byte, witness func(syspromptmmu.BaseEdit) bool, level int) SystemBlock {
 	residentPlan := syspromptmmu.BaseContextPlan() // spine + policy floor, fak-concepts first
 
 	var overlayBase []syspromptmmu.Segment // dynamically authored overlay layer, starts empty
@@ -75,12 +119,20 @@ func BuildOwnedSystemBlock(items [][]byte, witness func(syspromptmmu.BaseEdit) b
 		refused = append(refused, v)
 	}
 
-	value := syspromptmmu.BuildSystemValue(residentPlan, syspromptmmu.PlanOf(overlayBase))
+	overlayPlan := syspromptmmu.PlanOf(overlayBase)
+	steering := syspromptmmu.SteeringOff
+	if seg, ok := syspromptmmu.SteeringSegment(level); ok {
+		overlayPlan = append(overlayPlan, seg) // strictly after the queried cards, past the breakpoint
+		steering = level
+	}
+
+	value := syspromptmmu.BuildSystemValue(residentPlan, overlayPlan)
 	return SystemBlock{
 		Value:    value,
 		Audit:    syspromptmmu.AuditRealizedPrefix(systemRequestBody(value), residentPlan),
 		Overlays: len(overlayBase),
 		Refused:  refused,
+		Steering: steering,
 	}
 }
 
