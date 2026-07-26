@@ -1465,6 +1465,11 @@
           "category": "incidental",
           "reason": "Local variable in buildOwnedSystemBlockAt naming the after-breakpoint OVERLAY segment list (syspromptmmu.PlanOf(overlayBase) plus an optional steering segment); the 'plan' is internal/syspromptmmu's own Segment layering, not a new member of the Plan-TYPE disambiguation family (ctxplanner resident-view Plan vs memq explain Plan vs scored Candidate). An incidental local composition of an existing concept, not a distinct plan concept.",
           "token": "overlayPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "A local slice variable inside refusePagedHostPlanForHostMem holding the host-scoped subset of demands for the FitError payload. It names no concept: it exists for one statement's duration and its meaning is fully given by the field it fills (FitError.Demands).",
+          "token": "hostPlan"
         }
       ],
       "exclude": [
@@ -1489,6 +1494,7 @@
         "candidatemean",
         "candidates",
         "fitandplanserveggufexpertparallelpathondevice",
+        "hostPlan",
         "notplanned",
         "nplan",
         "orderLaneCandidatesAged",

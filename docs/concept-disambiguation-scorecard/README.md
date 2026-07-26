@@ -16,8 +16,8 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **38** (clarity 0 + coverage 38) |
-| **Crystal-clear concepts (and climbing)** | **386** crystal of 2004 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2180 / 2218** (98.3% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **390** crystal of 2008 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2184 / 2222** (98.3% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
 
@@ -26,10 +26,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2004 concepts - score 98.9/100 (grade A) - disambiguation-debt 38
+concept-disambiguation chart - 2008 concepts - score 98.9/100 (grade A) - disambiguation-debt 38
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 386
+  * crystal       #######..................... 390
   o defined       ############################ 1618
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -37,7 +37,7 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (66 concept(s); 4 crystal)
-  cache            ****************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (210 concept(s); 40 crystal)
+  cache            *****************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (211 concept(s); 41 crystal)
   context-ctx      *****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (181 concept(s); 29 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         *******************oooooooooooooooooo (37 concept(s); 19 crystal)
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   guard-gate       ******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (294 concept(s); 78 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
   loop             **************************ooooooooooooooooooooooooooooooooo (59 concept(s); 26 crystal)
-  plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
+  plan             *********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (252 concept(s); 21 crystal)
   policy-capability **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (120 concept(s); 22 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
   render-materialize ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (152 concept(s); 4 crystal)
@@ -61,7 +61,7 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   guard-gate       ###########################. 354/362
   session-runtime  ###########################. 196/204
-  cache            ############################ 255/259
+  cache            ############################ 256/260
   decision         ##########################.. 49/53
   policy-capability ###########################. 140/143
   render-materialize ############################ 171/174
@@ -75,13 +75,13 @@ coverage by family (positioned / discovered):
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   layout           ############################ 13/13
-  plan             ############################ 305/305
+  plan             ############################ 308/308
   pool             ############################ 36/36
   score-debt       ############################ 83/83
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.3%  (2180/2218 confusable tokens positioned)
+namespace coverage  [###############################.] 98.3%  (2184/2222 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -128,6 +128,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | cache | **KV transfer** - The migration DIRECTIVE emitted by hardware-aware placement: migrate / offload / restore / route a KV span between tiers. |
 | * | crystal | symbol | cache | **local_cache_hit** - A served prompt token reused from a KV prefix already resident on THIS box (an in-session prefix or a shared local KV store); one of the three cacheobs provenance-axis buckets (#3896, vLLM's by_source label). |
 | * | crystal | symbol | cache | **CacheGiB** - coalescebench config field: the resident expert-cache budget in GiB (the RAM tier sitting over SSD) that bounds how many routed (layer,expert) groups stay resident in the deterministic LRU the bench replays through. |
+| * | crystal | symbol | cache | **pagecachefloor** - The OS page-cache reserve in fak's host-memory budget: an absolute byte floor held back from MemAvailable so demand-paged (mmap/pread) weights keep a read-through tier. |
 | * | crystal | symbol | cache | **SimulateExpertCacheBatch** - Deterministic weight-free simulator replaying B agents advancing one decode step together; streams each distinct (layer,expert) group once per step and reports coalesced page-ins (DistinctStreamed) vs B un-coalesced streams (NaiveStreamed) and CoalesceRatio. |
 | * | crystal | symbol | cache | **ExpertCacheBatchAdmission** - Result struct pairing a byte-bounded ExpertCachePlan with a BatchCoalesceTrace: the admitted routed-group capacity plus the cross-agent coalescing evidence measured under exactly that capacity. |
 | * | crystal | symbol | cache | **AdmitExpertCacheBatchTrace** - Computes a byte-bounded routed-group capacity via PlanExpertCache then simulates the supplied B-agent batch steps under that exact capacity, failing closed when one step's distinct union exceeds the plan. |
@@ -339,6 +340,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | loop | **RosterSourceSuperloop (superloop-registry roster source tag)** - RosterSourceSuperloop is the roster source token marking that the super-loop registry claims an entry: either the entry IS a registered intent, or some intent hand-names the loop as a KindLoop member ref (which also sets Named). |
 | * | crystal | symbol | loop | **superloop_spinning (walk SPINNING finding)** - superloop_spinning is the superloop walk-verdict finding token emitted when at least one member loop is SPINNING: ticking on cadence (live/stale) while its ledger-verified progress high-water mark did not advance (#4956). It binds the closed relay reason RELAY_NO_PROGRESS and demands a revive/redirect, never an auto-replan. |
 | * | crystal | symbol | loop | **superloop_orphaned (walk ORPHANED finding)** - superloop_orphaned is the superloop walk-verdict finding token emitted when at least one member loop is ORPHANED: a tick emitted downstream follow-on work — a relay ArtifactIssue baton pointer or the issue an a2achan.WorkerStatus names — that nobody advanced or closed within its cadence window (#4957). It binds the closed relay reason RELAY_ORPHANED_FOLLOWON and demands chasing or redirecting the emitted output through the member's own front door, never an auto-refile. |
+| * | crystal | symbol | plan | **RefusePagedHostPlanIfTooBig** - The demand-paged host fit guard: refuses a MemoryPlan whose host-scoped demands exceed HostBudgetForPagedWeights, the tighter of the fractional headroom budget and MemAvailable minus the absolute page-cache floor. |
+| * | crystal | symbol | plan | **refusePagedHostPlanForHostMem** - The injectable core of RefusePagedHostPlanIfTooBig: takes the host (total, free, known) triple explicitly so the demand-paged refusal is testable without a live /proc/meminfo probe. |
+| * | crystal | symbol | plan | **refuseHostScopedPlanForHostMem** - The injectable core of RefuseHostScopedPlanIfTooBig (capacity.go): given a plan and an explicit host (total, free, known), it refuses when the plan's host-scoped demands exceed BudgetAfterHeadroom — the FRACTION-only host budget. Taking the host explicitly is what makes the refusal testable without a live /proc/meminfo. |
 | * | crystal | concept | plan | **replanning** - The property/act of re-deriving a plan for the same turn (ctxplan PlanView, supervisoragent action) - a deterministic re-admission that reuses the existing admit receipt, not a new authority. |
 | * | crystal | symbol | plan | **RolePlan** - Binds one execution Role to its own modelroute Subject (independent model constraints), an independent per-axis Budget, an escalation target, and a result fold. |
 | * | crystal | symbol | plan | **RolePlanSet** - The declared multi-role execution plan: an ordered list of RolePlans plus a top-level fold that composes the roles' results into the final answer. |
@@ -2240,7 +2244,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 2004 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 2008 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2254,7 +2258,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | guard-gate | 354 | 362 | 8 |
 | session-runtime | 196 | 204 | 8 |
-| cache | 255 | 259 | 4 |
+| cache | 256 | 260 | 4 |
 | decision | 49 | 53 | 4 |
 | policy-capability | 140 | 143 | 3 |
 | render-materialize | 171 | 174 | 3 |
@@ -2268,7 +2272,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | layout | 13 | 13 | 0 |
-| plan | 305 | 305 | 0 |
+| plan | 308 | 308 | 0 |
 | pool | 36 | 36 | 0 |
 | score-debt | 83 | 83 | 0 |
 | trajectory-control | 0 | 0 | 0 |

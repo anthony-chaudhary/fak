@@ -1931,3 +1931,31 @@ Renders the cross-model failure-clustering dogfood section from an already-folde
 The deterministic, surface-independent cross-surface session identity derived by hashing a normalized conversation id under a versioned scheme tag; it doubles as the sessionledger trace name, so continuity rides the ledger's durable hash chain.
 
 **Distinct from:** session-id (SessionID) names one session INSTANCE and is minted per session; SessionKey is DERIVED — a pure function of the conversation identity that yields the same value in any process and after any restart, which is what lets a conversation started on one surface resume on another against the same warm KV prefix. gateway.SessionPrefixKey answers the same question in-process over an in-memory map that evaporates on eviction; SessionKey resolves against the durable ledger instead.
+
+
+### refuseHostScopedPlanForHostMem
+
+The injectable core of RefuseHostScopedPlanIfTooBig (capacity.go): given a plan and an explicit host (total, free, known), it refuses when the plan's host-scoped demands exceed BudgetAfterHeadroom — the FRACTION-only host budget. Taking the host explicitly is what makes the refusal testable without a live /proc/meminfo.
+
+**Distinct from:** This is the FRACTION-only budget check; refusePagedHostPlanForHostMem is the demand-paged sibling that additionally subtracts an ABSOLUTE page-cache floor. They are not two spellings of one check: the fraction reserve scales with the box, while the paged floor is a property of the backing device's buffered-read cliff, so the two disagree on exactly the hosts where the choice matters. With floorBytes <= 0 the paged form reproduces this one byte-for-byte.
+
+
+### pagecachefloor
+
+The OS page-cache reserve in fak's host-memory budget: an absolute byte floor held back from MemAvailable so demand-paged (mmap/pread) weights keep a read-through tier.
+
+**Distinct from:** Not the prompt-cache concepts (cache-read/cache-control), which meter provider token reuse; this is host RAM the kernel spends caching file-backed weight pages, and it is an ABSOLUTE floor rather than the fraction BudgetAfterHeadroom applies.
+
+
+### RefusePagedHostPlanIfTooBig
+
+The demand-paged host fit guard: refuses a MemoryPlan whose host-scoped demands exceed HostBudgetForPagedWeights, the tighter of the fractional headroom budget and MemAvailable minus the absolute page-cache floor.
+
+**Distinct from:** Unlike RefuseHostScopedPlanIfTooBigForHost, which checks the fraction-only budget, this also carves out the page-cache floor, so it refuses a plan that fits the headroom term but would squeeze the read-through tier the mapped weights fault through.
+
+
+### refusePagedHostPlanForHostMem
+
+The injectable core of RefusePagedHostPlanIfTooBig: takes the host (total, free, known) triple explicitly so the demand-paged refusal is testable without a live /proc/meminfo probe.
+
+**Distinct from:** Unexported test seam, not the entry point: RefusePagedHostPlanIfTooBig probes the live host via HostSystemMemoryInfo and delegates here, mirroring how refuseHostScopedPlanForHostMem backs the fraction-only guard in capacity.go.
