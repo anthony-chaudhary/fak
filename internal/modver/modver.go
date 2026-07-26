@@ -34,11 +34,11 @@ import (
 const Schema = "fak-module-versions/1"
 
 // Module is one versioned unit: an internal/<leaf> package, a cmd/<dir> binary,
-// a .github/workflows/<file> CI workflow, a tools/<family> script, or an
-// examples/<file>.json policy manifest.
+// a .github/workflows/<file> CI workflow, a tools/<family> script, an
+// examples/<file>.json policy manifest, or a .claude/skills/<name> agent skill.
 type Module struct {
-	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml", "tools/account_probe", "examples/repo-guard-policy.json"
-	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow" | "tools" | "policy"
+	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml", "tools/account_probe", "examples/repo-guard-policy.json", ".claude/skills/commit-clean"
+	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow" | "tools" | "policy" | "skill"
 	Rev        int      `json:"rev"`    // distinct commits touching the module
 	LastCommit string   `json:"last_commit"`
 	LastDate   string   `json:"last_date"` // committer date (ISO) of the last touch
@@ -112,10 +112,10 @@ func RealRunner(ctx context.Context, dir string, args ...string) ([]byte, error)
 // the internal/ leaves and cmd/ binaries, the .github/workflows/ CI keyspace
 // (each workflow file is its own module), the tools/ script keyspace (each
 // top-level script family is a module), and the examples/ policy-manifest
-// keyspace (each top-level examples/<file>.json is a module — see moduleOf).
-// (docs/ and skills are follow-on key spaces — see the version-everything
-// backlog.)
-var trackedRoots = []string{"internal", "cmd", ".github/workflows", "tools", "examples"}
+// keyspace (each top-level examples/<file>.json is a module — see moduleOf), and
+// the .claude/skills/ agent-skill keyspace (each skill directory is a module).
+// (docs/ is a follow-on key space — see the version-everything backlog.)
+var trackedRoots = []string{"internal", "cmd", ".github/workflows", "tools", "examples", ".claude/skills"}
 
 // Snapshot computes the module-version report for the repo at dir: one
 // `git ls-files` to bound the LIVE module set, one `git log --name-only`
@@ -187,10 +187,19 @@ func liveModules(lsFilesOut []byte) map[string]bool {
 // (examples/<file>.json) is its own module, since a policy's unit of behavior is
 // the file; nested examples/<demo>/… paths are runnable demos and their
 // fixtures, not deployable capability-floor manifests, so they are excluded.
+// The .claude/skills/ agent-skill keyspace is directory-keyed like internal/ and
+// cmd/: each .claude/skills/<name>/… path is the module .claude/skills/<name>,
+// since a skill's unit of behavior is its whole directory — the SKILL.md steering
+// text plus any helper script it ships move together, and a skill is also the
+// repo's slash-command definition, so the same key space versions both. Other
+// .claude/ subtrees (settings, goal-prompts, the memory mirror) are not skill
+// definitions and belong to no module.
 // Files sitting directly under a directory root (no module directory) belong to
-// no module, as do nested paths under .github/workflows/ (GitHub Actions does
-// not run workflows in subdirectories) or under tools/ (registries, caches, and
-// fixtures — not the flat frozen-script inventory the de-Python ratchet tracks).
+// no module — including .claude/skills/README.md and .claude/skills/.gitignore,
+// which document and configure the keyspace rather than steer an agent — as do
+// nested paths under .github/workflows/ (GitHub Actions does not run workflows in
+// subdirectories) or under tools/ (registries, caches, and fixtures — not the
+// flat frozen-script inventory the de-Python ratchet tracks).
 func moduleOf(path string) (name, kind string, ok bool) {
 	path = strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
 	parts := strings.Split(path, "/")
@@ -222,6 +231,16 @@ func moduleOf(path string) (name, kind string, ok bool) {
 		// excluded, the same flat rule as tools/.
 		if len(parts) == 2 && strings.HasSuffix(parts[1], ".json") {
 			return path, "policy", true
+		}
+	case ".claude":
+		// Directory-keyed agent-skill keyspace: .claude/skills/<name>/… is one
+		// module, the same rule internal/<leaf> and cmd/<dir> use. len >= 4
+		// requires a file INSIDE a skill directory, so a file sitting directly
+		// under .claude/skills/ (len == 3: README.md, .gitignore) belongs to no
+		// module. Only the skills/ subtree is a keyspace — .claude/settings.json,
+		// .claude/goal-prompts/, and .claude/memory/ are not skill definitions.
+		if parts[1] == "skills" && len(parts) >= 4 {
+			return ".claude/skills/" + parts[2], "skill", true
 		}
 	}
 	return "", "", false

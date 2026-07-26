@@ -107,7 +107,15 @@ func TestAntiGamingCommitBandInputSetIsPinned(t *testing.T) {
 		// Partial (#5027) is membership completeness — N of M expected commits
 		// landed. It is RENDER-ONLY state and provably cannot reach the band; see
 		// TestAntiGamingPartialCannotImproveABand.
-		"Unit": {"Leaf", "Title", "Commits", "Types", "Resolves", "Mentions", "Files", "Band", "Curve", "Partial"},
+		//
+		// GroupedBy/Leaves (#5040) are the GROUPING basis — which commits share a
+		// unit — not a witness input. Regrouping changes the membership a band is
+		// folded over, so the proof owed here is different in kind from Partial's:
+		// not "the field is ignored" but "no partition of the same commits can
+		// clear one". FoldBand is worst-member over an unforgeable per-commit
+		// verdict, so an unwitnessed member reds whichever unit holds it; see
+		// TestAntiGamingWaveGroupingCannotLaunderAResidualUnit.
+		"Unit": {"Leaf", "GroupedBy", "Leaves", "Title", "Commits", "Types", "Resolves", "Mentions", "Files", "Band", "Curve", "Partial"},
 	}
 	got := map[string][]string{
 		"Commit": fieldNames(reflect.TypeOf(Commit{})),
@@ -180,6 +188,82 @@ func TestAntiGamingAckCannotLaunderAnUnwitnessedCommitToCleared(t *testing.T) {
 	pessimistic := Commit{SHA: "c", Verdict: VerdictWitnessed, Band: BandResidual}
 	if got := FoldBand([]Commit{pessimistic}); got != BandResidual {
 		t.Errorf("FoldBand(pessimistic) = %q, want %q: a worse-than-witnessed band is allowed to stand", got, BandResidual)
+	}
+}
+
+// TestAntiGamingWaveGroupingCannotLaunderAResidualUnit is the fence #5040 owes.
+//
+// Wave grouping (grouping.go) is a different KIND of input from an ack: it does
+// not write a band, it changes WHICH COMMITS SHARE A UNIT. That reopens the
+// laundering question from the membership side — if a unit's band were anything
+// but worst-member, burying one unwitnessed commit among nine witnessed ones
+// would clear it, and the wave binding is caller-supplied, i.e. operator-
+// reachable. So the proof owed is that no partition of the same commits can
+// improve a band.
+//
+// It also pins the honest LIMIT of that guarantee. Regrouping legitimately
+// merges units, so the unit-count headline (osp_residual) is basis-relative and
+// MAY fall — 3 residual leaf units folding into 1 residual wave unit is 3
+// decisions becoming 1, not debt disappearing. What may never happen is the
+// underlying debt moving: the set of residual COMMITS is invariant, and the
+// count can never reach zero while an unwitnessed commit is in the range. That
+// is the difference between regrouping and laundering, stated as a test.
+func TestAntiGamingWaveGroupingCannotLaunderAResidualUnit(t *testing.T) {
+	// One unwitnessed commit, buried among witnessed ones from other leaves —
+	// the most favourable possible regrouping for the forger.
+	commits := []Commit{
+		{SHA: "u1", Subject: "feat(a): unproven (#11) (fak a)", Leaf: "a", Type: "feat", Resolves: []string{"#11"}, Verdict: VerdictUnwitnessed},
+		{SHA: "w1", Subject: "feat(b): proven (#12) (fak b)", Leaf: "b", Type: "feat", Resolves: []string{"#12"}, Verdict: VerdictWitnessed},
+		{SHA: "w2", Subject: "feat(c): proven (#13) (fak c)", Leaf: "c", Type: "feat", Resolves: []string{"#13"}, Verdict: VerdictWitnessed},
+	}
+	// The forge: one wave claiming all three, so the unwitnessed member is a
+	// minority of a unit whose other members the machine cleared.
+	waveOf := WaveIndex([]WaveBinding{{Index: 0, Issues: []string{"#11", "#12", "#13"}}})
+
+	leafUnits, _ := FoldUnits(commits)
+	waveUnits, _ := FoldUnitsByWave(commits, waveOf)
+
+	if len(leafUnits) != 3 {
+		t.Fatalf("leaf fold = %d units, want 3 (fixture must start as separate leaf units)", len(leafUnits))
+	}
+	if len(waveUnits) != 1 {
+		t.Fatalf("wave fold = %d units, want 1 (fixture must actually regroup)", len(waveUnits))
+	}
+	if waveUnits[0].Band != BandResidual {
+		t.Errorf("wave unit band = %q, want %q: burying an unwitnessed commit among witnessed siblings must not clear it — the fold is worst-member under BOTH bases",
+			waveUnits[0].Band, BandResidual)
+	}
+	if got := Residual(waveUnits); got == 0 {
+		t.Error("Residual(wave fold) = 0 with an unwitnessed commit in range: regrouping may merge units, never empty the pile")
+	}
+
+	// The per-commit bands — the non-forgeable rung everything else is derived
+	// from — must be identical under both bases. Grouping is a VIEW; if it moved
+	// a commit's own band, the basis would be an oracle, which it is not.
+	bandsOf := func(units []Unit) map[string]Band {
+		out := map[string]Band{}
+		for _, u := range units {
+			for _, c := range u.Commits {
+				out[c.SHA] = c.Band
+			}
+		}
+		return out
+	}
+	leafBands, waveBands := bandsOf(leafUnits), bandsOf(waveUnits)
+	if !reflect.DeepEqual(leafBands, waveBands) {
+		t.Errorf("per-commit bands differ by grouping basis:\n leaf=%v\n wave=%v\nthe basis decides membership, never a witness rung", leafBands, waveBands)
+	}
+	if leafBands["u1"] != BandResidual {
+		t.Errorf("commit u1 band = %q, want %q", leafBands["u1"], BandResidual)
+	}
+
+	// And the basis is stated on every unit under both folds: an operator who
+	// cannot tell why a unit holds what it holds has been made worse off, which
+	// is the #5040 fail condition.
+	for _, u := range append(append([]Unit{}, leafUnits...), waveUnits...) {
+		if u.GroupedBy != GroupedByLeaf && u.GroupedBy != GroupedByWave {
+			t.Errorf("unit %q has grouped_by %q, want %q or %q", u.Leaf, u.GroupedBy, GroupedByLeaf, GroupedByWave)
+		}
 	}
 }
 
