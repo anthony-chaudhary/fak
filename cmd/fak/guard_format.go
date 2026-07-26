@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/callavoid"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
@@ -199,6 +200,28 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 			fmt.Sprintf("%d turn(s) — every proposed call returned as RETRYABLE feedback", sum.ToolFeedbackTurns)))
 		b.WriteString(guardNote("per-tool, model-fixable; the turn was NOT stopped — the model can fix the arguments or tool choice and retry"))
 		b.WriteString(guardNote("a tool-refusal count, not a session stop: a stop comes only from a declared stop policy"))
+	}
+	// Managed-cache upgrade watchdog (#3620): the startup banner can claim the 1h-TTL lever
+	// is ACTIVE while every actual upgrade attempt is refused (volatile_head /
+	// no_stable_breakpoint), so the session pays the 5m re-write the posture claimed to
+	// remove and nothing says so. Raise the finding from the WITNESSED outcome counters
+	// alone: refusal rows accrue only while the lever is on and only on a wire that has the
+	// lever, so a passive, short, or lever-less (openai-responses) session stays quiet, and
+	// a single fired upgrade clears it. The same finding rides /debug/vars
+	// managed_cache.finding, so the live pane and this exit artifact agree.
+	if sum.UpgradeNeverFired() {
+		b.WriteString(guardSection("managed cache"))
+		b.WriteString(guardRow("⚠ "+guardvars.FindingUpgradeNeverFired,
+			fmt.Sprintf("0 upgraded across %d refused attempt(s)", sum.TTLUpgradeAttempts())))
+		reasons := make([]string, 0, len(sum.CacheTTLUpgradeReasons))
+		for r := range sum.CacheTTLUpgradeReasons {
+			reasons = append(reasons, r)
+		}
+		sort.Strings(reasons)
+		for _, r := range reasons {
+			b.WriteString(guardRow("  refused: "+r, fmt.Sprintf("x%d", sum.CacheTTLUpgradeReasons[r])))
+		}
+		b.WriteString(guardNote("posture=ACTIVE but the 1h-TTL upgrade never fired: an idle gap >5m re-writes the prefix at full cost; every head was refused, so check the traffic carries a byte-stable system/tools head (also on /debug/vars managed_cache.finding)"))
 	}
 	if len(sum.ByReason) > 0 {
 		b.WriteString(guardSection("blocked by reason"))
