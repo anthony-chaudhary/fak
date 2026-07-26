@@ -264,28 +264,41 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertGreater(
             derived, mod.CLAUDE_GUARD_BASELINE_TOKENS,
             f"derived budget {derived} <= baseline: workers born over-budget")
-        # (b) Runaway backstop: at/under the effective window ceiling
-        # (window - output reserve).
-        self.assertLessEqual(
+        # (b) TURN funding -- the invariant the old goldens were missing. The seeded
+        # budget is a CUMULATIVE allowance debited one FULL resident window per turn,
+        # so the worst-case per-turn debit is the window ceiling and budget/per_turn is
+        # the number of turns a child is guaranteed. It must be a whole epoch, not 2.
+        per_turn = max(ceiling, mod.CLAUDE_GUARD_BASELINE_TOKENS)
+        self.assertGreaterEqual(
+            derived // per_turn, mod.CLAUDE_GUARD_TURNS_PER_EPOCH,
+            f"derived budget {derived} funds only {derived // per_turn} full-window "
+            f"turns (per_turn {per_turn}): a worker that cannot run an epoch dies "
+            "BUDGET_CONTEXT_EXHAUSTED mid-issue")
+        # (c) REGRESSION TRIPWIRE: the window ceiling is a PER-TURN quantity and must
+        # never clamp the cumulative total again. Clamping is what pinned every child
+        # at ~2 turns (min(62000*k, 168000) = 168000 for all k >= 3, so no headroom
+        # factor could ever help) and produced 120/120 CLAIM_NO_COMMIT witnesses.
+        self.assertGreater(
             derived, ceiling,
-            f"derived budget {derived} > effective window ceiling {ceiling}")
-        # (c) Golden lock: min(62000*2, 200000-32000) = 124000, and the argv
+            f"derived budget {derived} <= per-turn window ceiling {ceiling}: the "
+            "cumulative allowance has been clamped to a per-turn window again")
+        # (d) Golden lock: max(200000-32000, 62000) * 12 = 2016000, and the argv
         # string constant wired into CLAUDE_GUARD_BUDGET_ARGS carries it. If this
         # fails, a mirror constant diverged from Go (or Go moved) -- keep the two
         # goldens identical in the same commit.
         self.assertEqual(
-            derived, 124000,
+            derived, 2016000,
             "derived budget diverged from Go's TestClaudeGuardContextBudgetDerivation "
             "golden; re-sync the mirrored constants")
-        self.assertEqual(mod.CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS, "124000")
-        # (d) Monotone in the baseline below the ceiling: a baseline bump RAISES
-        # the budget (the flat-constant staleness the derivation kills). load()
-        # gives a fresh module per test, so patching its globals is hermetic.
+        self.assertEqual(mod.CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS, "2016000")
+        # (e) Non-decreasing in the baseline, and strictly rising once the baseline
+        # outgrows the window ceiling (the flat-constant staleness the derivation
+        # kills). load() gives a fresh module per test, so patching globals is
+        # hermetic.
         mod.CLAUDE_GUARD_BASELINE_TOKENS += 1000
+        self.assertGreaterEqual(mod.claude_guard_context_budget_tokens(), derived)
+        mod.CLAUDE_GUARD_BASELINE_TOKENS = ceiling + 1000
         self.assertGreater(mod.claude_guard_context_budget_tokens(), derived)
-        # ...while a runaway baseline is still clamped to the window ceiling.
-        mod.CLAUDE_GUARD_BASELINE_TOKENS = ceiling
-        self.assertEqual(mod.claude_guard_context_budget_tokens(), ceiling)
 
     def test_claude_guard_compact_history_budget(self) -> None:
         # Python half of the compact shed-line parity (#4253). Mirror of
@@ -304,9 +317,20 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertGreater(
             shed, mod.CLAUDE_GUARD_BASELINE_TOKENS,
             f"compact shed-line {shed} <= baseline: worker stays past-compact")
-        # (c) At/under the derived drain ceiling, so it is a meaningful target below
-        # where the runaway backstop fires.
-        self.assertLessEqual(shed, int(mod.claude_guard_context_budget_tokens()))
+        # (c) REACHABILITY, not "below the drain ceiling" -- the two are on different
+        # scales (this shed-line is a PER-TURN instantaneous target,
+        # --context-budget-tokens is a CUMULATIVE allowance), so comparing them
+        # directly is a category error and was the assertion that let the composition
+        # ship broken. What must hold is that a worker SITTING AT the shed line still
+        # has a whole epoch of turns funded; otherwise the session dies of budget
+        # exhaustion long before compaction can fire (witnessed as compact=none /
+        # "bailed: under_budget" on every turn while the cumulative budget drained).
+        drain = int(mod.claude_guard_context_budget_tokens())
+        self.assertGreaterEqual(
+            drain // shed, mod.CLAUDE_GUARD_TURNS_PER_EPOCH,
+            f"drain budget {drain} funds only {drain // shed} turns at the shed-line "
+            f"resident {shed}: compaction is unreachable before "
+            "BUDGET_CONTEXT_EXHAUSTED")
         # (d) It is actually WIRED into the claude guard argv (not just a constant).
         args = mod.claude_guard_budget_args()
         self.assertIn("--compact-history-budget", args)
@@ -438,6 +462,83 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertEqual(
             cfg["provider"]["zai-coding-plan"]["options"]["baseURL"],
             "http://127.0.0.1:8138/v1")
+
+    def test_opencode_compact_shed_line(self) -> None:
+        # Python half of the OpenCode-native compact shed-line parity (#4661).
+        # Mirror of cmd/dispatchworker TestOpencodeCompactShedLine; keep both in step.
+        mod = load()
+        shed = mod.OPENCODE_COMPACT_SHED_LINE_TOKENS
+
+        # (a) Golden lock: the same 96K headless target the claude/codex arms use.
+        self.assertEqual(
+            shed, 96000,
+            "opencode shed line diverged from Go's TestOpencodeCompactShedLine "
+            "and the 96K headless target (#4661)")
+        self.assertEqual(shed, mod.CLAUDE_GUARD_COMPACT_HISTORY_BUDGET)
+        self.assertEqual(shed, mod.CODEX_COMPACT_TOKEN_LIMIT)
+
+        overlay = mod.opencode_compaction_overlay(
+            ["opencode", "run", "-m", "zai-coding-plan/glm-5.2", "dispatch"])
+
+        # (b) The knob that actually moves OpenCode's trigger. OpenCode compacts at
+        # `limit.input - compaction.reserved` when limit.input is declared, so THIS
+        # is the invariant that makes the shed line real rather than decorative.
+        limit = overlay["provider"]["zai-coding-plan"]["models"]["glm-5.2"]["limit"]
+        self.assertEqual(limit["input"] - overlay["compaction"]["reserved"], shed,
+                         "derived opencode compaction trigger must land ON the shed line")
+        self.assertTrue(overlay["compaction"]["auto"])
+
+        # (c) The real window/output are carried verbatim: opencode's schema requires
+        # context+output beside input, and a wrong output would mis-cap generation.
+        self.assertEqual(limit["context"], 1000000)
+        self.assertEqual(limit["output"], 131072)
+        # It must LOWER the trigger, not postpone overflow: the un-overridden trigger
+        # for this model is context - output (no native limit.input), i.e. ~869K.
+        self.assertLess(shed, limit["context"] - limit["output"])
+
+        # (d) The dispatch argv passes no -m, so the account default must still be
+        # covered -- every model of the resolved provider carries the shed line.
+        default_argv = mod.build_command("recall", "opencode")
+        self.assertNotIn("-m", default_argv)
+        models = mod.opencode_compaction_overlay(default_argv)[
+            "provider"]["zai-coding-plan"]["models"]
+        self.assertIn("glm-5.2", models)
+        for name, spec in models.items():
+            self.assertEqual(spec["limit"]["input"], shed, f"{name} missed the shed line")
+
+        # (e) Fail OPEN on an unknown provider: a partial/absent limit block makes
+        # opencode refuse to start, which would kill the worker at launch.
+        self.assertEqual(
+            mod.opencode_compaction_overlay(
+                ["opencode", "run", "-m", "someone-else/mystery-1", "dispatch"]),
+            {})
+
+    def test_guard_wrap_opencode_injects_compact_shed_line(self) -> None:
+        # End-to-end through the real launcher seam: the shed line rides the SAME
+        # per-child OPENCODE_CONFIG_CONTENT env the base-URL repoint uses (#4661).
+        mod = load()
+        raw = ["opencode", "run", "-m", "zai-coding-plan/glm-5.2", "dispatch"]
+        env = {
+            "FLEET_DOGFOOD_GUARD_BASEURL": "https://api.example.test/v1",
+            "FLEET_DOGFOOD_GUARD_ADDR": "127.0.0.1:8137",
+            mod.OPENCODE_GUARD_UPSTREAM_KEY_ENV: "secret-test-key",
+            "OPENCODE_CONFIG_CONTENT": '{"autoupdate":false}',
+        }
+
+        mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="recall",
+                       backend="opencode", workspace=Path("."), env=env)
+
+        cfg = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+        # Pre-existing operator config and the base-URL repoint both survive the merge.
+        self.assertFalse(cfg["autoupdate"])
+        self.assertEqual(
+            cfg["provider"]["zai-coding-plan"]["options"]["baseURL"],
+            "http://127.0.0.1:8137/v1")
+        # ...and the shed line is present in the same document.
+        self.assertEqual(
+            cfg["provider"]["zai-coding-plan"]["models"]["glm-5.2"]["limit"]["input"],
+            mod.OPENCODE_COMPACT_SHED_LINE_TOKENS)
+        self.assertEqual(cfg["compaction"]["reserved"], 0)
 
     def test_opencode_upstream_key_reads_account_config(self) -> None:
         mod = load()

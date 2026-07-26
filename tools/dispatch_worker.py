@@ -297,26 +297,41 @@ CLAUDE_GUARD_PRECOMPACT_ARGS = ["--precompact-hook", "enforce"]
 # Pair the posture actuator with guard's hard budget restart path. The finite
 # restart limit prevents a bad issue prompt from creating an unbounded relaunch loop.
 #
-# This seeds guard's per-session ContextTokensLeft, which DebitUsage draws down by
-# each turn's FULL resident window (prompt+cache_read+cache_creation); at <=0 the
-# session drains BUDGET_CONTEXT_EXHAUSTED. The old 48k was picked to mirror
-# gateway.DefaultCompactHistoryBudget — but that is a compaction TARGET (what history
-# is squeezed toward), not a max resident window. The workers' ~62K irreducible
-# baseline prompt can't compact below itself, so a 48k drain ceiling meant every
-# worker was born over-budget → 2 restarts burned → 409 → exit 1 → CHILD_CRASH.
+# This seeds guard's per-session ContextTokensLeft, a CUMULATIVE allowance that
+# DebitUsage draws down by each turn's FULL resident window
+# (prompt+cache_read+cache_creation, so a cached prefix is re-charged every turn); at
+# <=0 the session drains BUDGET_CONTEXT_EXHAUSTED. It is NOT a per-turn ceiling:
+# turns funded per child ~= budget / mean resident per turn, and the resident never
+# drops below the launch baseline, so baseline x k funds AT MOST k turns.
+#
+# The old 48k was picked to mirror gateway.DefaultCompactHistoryBudget — but that is a
+# compaction TARGET (what history is squeezed toward), not a max resident window. The
+# workers' ~62K irreducible baseline prompt can't compact below itself, so a 48k drain
+# ceiling meant every worker was born over-budget → 2 restarts burned → 409 → exit 1 →
+# CHILD_CRASH.
 #
 # DONE(dynamic-budget): no longer a flat constant (a flat value silently falls below
-# the baseline the next time the baseline grows). The budget is DERIVED: baseline ×
-# birth-headroom, clamped to the model window's effective ceiling (window − output
-# reserve). Grows with the baseline (never a birth wall again), shrinks with the
-# window (always a runaway backstop under the real model window).
+# the baseline the next time the baseline grows). The budget is DERIVED as
+#     max(window - output reserve, baseline) * CLAUDE_GUARD_TURNS_PER_EPOCH
+# — the effective window ceiling bounds the PER-TURN resident (where it belongs), the
+# baseline floors it so a small-window model still funds its own launch prompt, and
+# the turn count scales the cumulative total.
+#
+# FIXED(turn-starvation): this replaced `baseline x 2` CLAMPED to the window ceiling.
+# Both halves applied a per-turn window quantity to a cumulative allowance, and the
+# clamp was the hard wall: min(62000*k, 168000) = 168000 for every k >= 3, so no
+# headroom factor could buy a third turn. Live witness
+# (.dispatch-runs/resolve-5103-20260726-022520.log): 6 turns at ctx 68.4k->83.2k,
+# context_tokens=124000 exhausted every second turn, restart_exhausted count=3
+# dominant_cause=BUDGET_CONTEXT_EXHAUSTED at 5m42s of a 29m runway -> exit 1 ->
+# CLAIM_NO_COMMIT on 120/120 worker witnesses.
 #
 # The window/reserve constants MIRROR the Go source of truth in
 # internal/ctxplan/envelope.go (GenericTurnEnvelope: HardContextCap 200000,
 # OutputReserve 32000; doctrine: docs/long-context-defaults.md — the advertised
-# window is a hard CAP, never a raw target); the baseline and headroom factor mirror
+# window is a hard CAP, never a raw target); the baseline and turn count mirror
 # cmd/dispatchworker/guard.go (claudeGuardBaselineTokens /
-# claudeGuardBirthHeadroomFactor). Python cannot import the Go package, so keep ALL
+# claudeGuardTurnsPerEpoch). Python cannot import the Go package, so keep ALL
 # FOUR constants and the arithmetic in sync with Go by hand — the derived integer
 # must be identical on both paths.
 CLAUDE_GUARD_MODEL_WINDOW_TOKENS = 200000   # ctxplan HardContextCap
@@ -329,11 +344,16 @@ CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS = 32000  # ctxplan OutputReserve
 # shipped value while an organically grown prompt raises it automatically. Mirrors
 # cmd/dispatchworker/guard.go:claudeGuardBaselineTokens.
 CLAUDE_GUARD_BASELINE_TOKENS = 62000
-# Budget = baseline × this factor, so a worker is born with a whole baseline of
-# headroom before the backstop fires. (History: the committed value this derivation
-# replaced was the crash-looping flat "48000"; a flat 131072 was only ever an
-# uncommitted working-tree interim, never shipped.)
-CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR = 2
+# How many FULL-WINDOW turns one child's cumulative context budget funds before
+# --restart-on-budget hands back and reseeds. Under the cumulative meter documented
+# above this is the only honest unit for the knob: the budget buys turns, not window.
+# Sized so a child outlives a third of the wall clock — the guard reaps after 3
+# identical BUDGET_CONTEXT_EXHAUSTED restart cycles (cmd/fak/guard_child.go
+# guardEquivalentRestartLimit), the wall clock is 1740s, and the witnessed dispatch
+# turn rate is ~57s/turn (~30 turns of runway), so 3 x 12 = 36 > 30 puts the graceful
+# --max-duration drain ahead of the reaper. MIRRORS
+# cmd/dispatchworker/guard.go:claudeGuardTurnsPerEpoch.
+CLAUDE_GUARD_TURNS_PER_EPOCH = 12
 # The COMPACT shed-line (--compact-history-budget) — DISTINCT from the drain ceiling
 # above. It is the resident-token target compaction squeezes OLD turns toward. Guard's
 # interactive default (gateway.DefaultCompactHistoryBudget) is 48000, which sits BELOW
@@ -344,7 +364,13 @@ CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR = 2
 # (gateway.HeadlessCompactHistoryBudget, otherwise reachable only via --expose-profile
 # headless) never applied. Pass it EXPLICITLY (explicit wins in
 # cmd/fak/guard.go:resolveGuardCompactBudget) so the shed-line sits above the ~62K
-# baseline and below the 124000 drain ceiling. MIRRORS gateway.HeadlessCompactHistoryBudget
+# baseline. It is NOT on the same scale as the drain ceiling: this is a PER-TURN
+# instantaneous target, --context-budget-tokens is a CUMULATIVE allowance. They only
+# look comparable because both print under the word "budget" — the per-turn stderr
+# nudge renders `ctx:<resident>/<this>` (internal/gateway/debug_stats.go
+# format_compaction_budget_nudge's Go original), so a worker can read
+# `ctx:83.2k/96.0k dist:12.8k-to-compact` on the very turn its cumulative session
+# budget dies. MIRRORS gateway.HeadlessCompactHistoryBudget
 # and cmd/dispatchworker/guard.go:claudeGuardCompactHistoryBudget by hand — keep the
 # integer identical across all three (Go golden TestClaudeGuardCompactHistoryBudget is
 # the drift tripwire). #4253.
@@ -429,22 +455,35 @@ def measured_claude_guard_baseline(
         measure_launch_baseline_tokens(constituents)), constituents
 
 
+def derive_claude_guard_context_budget(baseline_tokens: int) -> int:
+    """Pure arithmetic mirror of cmd/dispatchworker/guard.go
+    deriveClaudeGuardContextBudget on the generic envelope: the PER-TURN resident term
+    (window ceiling floored by the baseline) times the turn count. Kept as its own
+    function so the launch path and the launch-record observable share ONE expression —
+    the inline copy they used to each carry is exactly how the two drift."""
+    per_turn = CLAUDE_GUARD_MODEL_WINDOW_TOKENS - CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS
+    return max(per_turn, baseline_tokens) * CLAUDE_GUARD_TURNS_PER_EPOCH
+
+
 def claude_guard_context_budget_tokens(
     workspace=None, env: dict[str, str] | None = None,
 ) -> int:
-    """Derive the per-session context budget: MEASURED baseline (floored) x headroom,
-    window-clamped. An empty workspace measures nothing and falls to the floor, so the
-    hermetic default is min(62000*2, 200000-32000) = 124000. Mirrors
+    """Derive the per-session context budget: the PER-TURN resident term (the effective
+    window ceiling, floored by the MEASURED launch baseline) times the turn count. The
+    ceiling deliberately does NOT clamp the cumulative total — clamping a cumulative
+    allowance to a per-turn window is the dimensional error that starved every worker at
+    ~2 turns. An empty workspace measures nothing and falls to the floor, so the hermetic
+    default is max(200000-32000, 62000) * 12 = 2016000. Mirrors
     cmd/dispatchworker/guard.go:claudeGuardContextBudgetTokens.
     """
-    ceiling = CLAUDE_GUARD_MODEL_WINDOW_TOKENS - CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS
     baseline, _ = measured_claude_guard_baseline(workspace, env)
-    return min(baseline * CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR, ceiling)
+    return derive_claude_guard_context_budget(baseline)
 
 
 CLAUDE_GUARD_CONTEXT_BUDGET_TOKENS = str(claude_guard_context_budget_tokens())
-# The budget drains in ~2 turns per epoch, so a relaunch happens every ~2 min. The old
-# "2" killed a healthy worker after ~4-5 min (reset_limit limit=2 -> 409 -> CHILD_CRASH)
+# The budget funds CLAUDE_GUARD_TURNS_PER_EPOCH full-window turns per epoch, so a
+# relaunch happens every ~12+ turns rather than the ~2 the pre-fix derivation allowed.
+# The old "2" killed a healthy worker after ~4-5 min (reset_limit limit=2 -> 409 -> CHILD_CRASH)
 # at ~15% of its runway. 16 lets a healthy-but-slow worker reach its 30-min wall-clock
 # backstop (DEFAULT_TIMEOUT_S hard-kill + dispatcher reap) while a degenerate sub-2-min
 # reset storm still trips here. Mirrors cmd/dispatchworker/guard.go:claudeGuardRestartLimit.
@@ -463,6 +502,56 @@ CLAUDE_GUARD_MAX_DURATION = f"{DEFAULT_TIMEOUT_S - 60}s"
 # in-guard drain still precedes launch()'s hard-kill on the synchronous path.
 OPENCODE_GUARD_MAX_DURATION = f"{DEFAULT_TIMEOUT_S - 60}s"
 CODEX_COMPACT_TOKEN_LIMIT = 96000
+# The OpenCode-native early shed line (#4661, residual of #4253). OpenCode 1.17.9
+# exposes NO absolute "compact at N tokens" knob. Its auto-compactor fires when
+# resident crosses a threshold DERIVED from the model's declared window (verbatim
+# from the shipped 1.17.9 bundle, `function an(o)` / `function eh(o)`):
+#
+#     threshold = limit.input ? (limit.input - compaction.reserved)
+#                             : (limit.context - maxOutputTokens)
+#     compact when (tokens.total or input+output+cache.read+cache.write) >= threshold
+#
+# Two consequences the launcher MUST respect:
+#
+#  1. `compaction.reserved` is honored ONLY on the `limit.input` branch. The pinned
+#     dispatch provider's models declare {context, output} and NO `input`, so
+#     `reserved` is INERT for them and the real trigger sits at
+#     context - maxOutputTokens (glm-5.2: 1000000-131072 = 868928, ~9x past fak's
+#     96K headless target). Only 1079 of 5666 models in opencode's own models.json
+#     declare `limit.input` at all. Shipping `reserved` alone would be exactly the
+#     inert/misleading knob #4253's reopen refused.
+#  2. A model's `limit` IS overridable via config, so DECLARING `limit.input`
+#     equal to the shed line (with `reserved` pinned to 0, which is honored -- `0`
+#     is not nullish) moves the trigger to EXACTLY this value. OpenCode's schema
+#     requires all three of context/input/output together: a partial `limit` is
+#     refused at startup ("Missing key ... limit.context") and would kill the
+#     worker, hence the real context/output are carried verbatim below.
+#
+# This LOWERS the trigger (868928 -> 96000); it does not postpone overflow. Mirrors
+# cmd/dispatchworker/guard.go:opencodeCompactShedLineTokens -- keep the integer
+# identical across both launchers (the Go golden
+# TestOpencodeCompactShedLine is the drift tripwire).
+OPENCODE_COMPACT_SHED_LINE_TOKENS = 96000
+# The REAL (context, output) limits opencode resolves for the pinned provider's
+# catalog, transcribed from opencode's own models.json. They are carried verbatim
+# into the override because the schema requires them next to the `input` we
+# actually want to set -- a wrong `output` would mis-cap generation, and omitting
+# either makes opencode refuse to start. The dispatch argv passes NO `-m` (the
+# model comes from the account/agent default), so the shed line is declared for
+# EVERY model of the resolved provider: whichever one the account picks is covered.
+# A provider absent from this table gets NO override (fail OPEN -- native opencode
+# behavior, never an invalid config that kills the worker at launch). Mirrors
+# cmd/dispatchworker/guard.go:opencodeModelLimits.
+OPENCODE_MODEL_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
+    "zai-coding-plan": {
+        "glm-5.2": (1000000, 131072),
+        "glm-5.1": (200000, 131072),
+        "glm-5-turbo": (200000, 131072),
+        "glm-5v-turbo": (200000, 131072),
+        "glm-4.7": (204800, 131072),
+        "glm-4.5-air": (131072, 98304),
+    },
+}
 
 
 def claude_guard_budget_args(
@@ -481,8 +570,9 @@ def claude_guard_budget_args(
     ]
 
 
-# Floor-default budget argv (workspace-independent): the shipped 124000 wiring, kept
-# as a stable reference. The live path calls claude_guard_budget_args(workspace, env).
+# Floor-default budget argv (workspace-independent): the shipped floor-baseline wiring
+# (2016000 = 168000 x 12), kept as a stable reference. The live path calls
+# claude_guard_budget_args(workspace, env).
 CLAUDE_GUARD_BUDGET_ARGS = claude_guard_budget_args()
 
 
@@ -531,6 +621,45 @@ def _opencode_guard_addr(env: dict[str, str]) -> str:
     return f"{host}:{port}"
 
 
+def opencode_compaction_overlay(command: Sequence[str]) -> dict[str, Any]:
+    """The OpenCode-native 96K early shed line (#4661) as a config overlay.
+
+    OpenCode has no absolute compaction threshold, so the shed line is expressed the
+    only way its config can: declare ``limit.input`` = the shed line for the resolved
+    provider's models and pin ``compaction.reserved`` to 0, which lands OpenCode's
+    own trigger (``limit.input - reserved``) exactly on it. See
+    :data:`OPENCODE_COMPACT_SHED_LINE_TOKENS` for the derivation and why ``reserved``
+    alone is inert.
+
+    Returns ``{}`` (fail OPEN) when the provider's real limits are unknown -- emitting
+    a partial ``limit`` block would make opencode refuse to start.
+    """
+    provider = _opencode_model_provider(command)
+    catalog = OPENCODE_MODEL_LIMITS.get(provider)
+    if not catalog:
+        return {}
+    models: dict[str, Any] = {}
+    for model, (context, output) in catalog.items():
+        # A window already at/below the shed line needs no early trigger -- and
+        # declaring input >= context would be a lie about the model.
+        if context <= OPENCODE_COMPACT_SHED_LINE_TOKENS:
+            continue
+        models[model] = {"limit": {
+            "context": context,
+            "input": OPENCODE_COMPACT_SHED_LINE_TOKENS,
+            "output": output,
+        }}
+    if not models:
+        return {}
+    return {
+        # `auto` guards against a project config that disabled compaction outright;
+        # `reserved` 0 is honored (0 is not nullish) and is what makes the trigger
+        # land ON the shed line rather than a maxOutputTokens-sized distance below it.
+        "compaction": {"auto": True, "reserved": 0},
+        "provider": {provider: {"models": models}},
+    }
+
+
 def opencode_guard_config_content(command: Sequence[str], gateway_base_url: str,
                                   existing: str = "") -> str:
     """Inline OpenCode config that repoints the selected provider to fak guard.
@@ -538,6 +667,10 @@ def opencode_guard_config_content(command: Sequence[str], gateway_base_url: str,
     OpenCode's named providers do not necessarily honor ``OPENAI_BASE_URL``.
     ``OPENCODE_CONFIG_CONTENT`` is loaded after project config, so this keeps the
     override per-child and avoids writing credentials or transient ports to the repo.
+
+    It also carries the OpenCode-native 96K compaction shed line (#4661) -- the same
+    per-child seam, so no worker crosses fak's headless target waiting for OpenCode's
+    full-window auto-compaction.
     """
     provider = _opencode_model_provider(command)
     overlay = {
@@ -555,7 +688,9 @@ def opencode_guard_config_content(command: Sequence[str], gateway_base_url: str,
             base = json.loads(existing)
         except json.JSONDecodeError:
             base = {}
-    return json.dumps(_deep_merge_config(base, overlay), separators=(",", ":"))
+    merged = _deep_merge_config(base, overlay)
+    merged = _deep_merge_config(merged, opencode_compaction_overlay(command))
+    return json.dumps(merged, separators=(",", ":"))
 
 
 def _opencode_config_candidates(env: dict[str, str]) -> list[Path]:
@@ -1033,11 +1168,9 @@ def build_payload(
     # only), so fleet drift in the launch prompt is a visible number in the record.
     if backend == "claude":
         baseline, _ = measured_claude_guard_baseline(workspace)
-        envelope_ceiling = (CLAUDE_GUARD_MODEL_WINDOW_TOKENS
-                            - CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS)
         payload["guard_baseline_tokens"] = baseline
-        payload["guard_context_budget_tokens"] = min(
-            baseline * CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR, envelope_ceiling)
+        payload["guard_context_budget_tokens"] = derive_claude_guard_context_budget(
+            baseline)
     return payload
 
 
