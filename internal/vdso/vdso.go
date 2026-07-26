@@ -676,10 +676,52 @@ func init() {
 	Default.RegisterPure("calculate", calcSum)
 	Default.RegisterStatic("list_all_airports", []byte(`{"airports":["SFO","JFK","LAX","ORD","SEA","BOS","ATL","DFW"]}`))
 
-	abi.RegisterFastPath(1, tier{Default, 1}) // pure
-	abi.RegisterFastPath(3, tier{Default, 3}) // static + cache (Lookup handles all)
+	registerFastPaths()
 	abi.RegisterEmitter(Default)
 	abi.RegisterCapability("vdso.v1")
+}
+
+func registerFastPaths() {
+	abi.RegisterFastPath(1, tier{Default, 1}) // pure
+	abi.RegisterFastPath(3, tier{Default, 3}) // static + cache (Lookup handles all)
+}
+
+// EnsureRegistered re-registers the default vDSO's registry wiring if it is
+// missing. On every production path init() has already placed it and this is a
+// no-op; it earns its keep only in a test binary, where a sibling's
+// abi.ResetForTest() empties the registries and nothing restores them. A kernel
+// booted after such a reset consults an EMPTY fast-path list, so a duplicate
+// read-only call re-dispatches to the engine and VDSOHits stays 0 — a silent,
+// order-dependent failure in whichever test runs after the resetter, with no
+// signal pointing back at the reset.
+//
+// BOTH halves must be restored, and the emitter is the half that is easy to miss:
+// the fast path is only the READ side. The cache it reads is filled from the
+// result stream the vDSO observes as a registered abi.Emitter, so fast paths alone
+// leave a live-but-permanently-empty cache — every lookup misses and VDSOHits
+// still reads 0, which looks exactly like the bug not being fixed.
+//
+// Both restores are presence-checked, and checking rather than blindly
+// re-registering is load-bearing rather than tidy: the fast-path and emitter lists
+// are walked on EVERY Submit and every event, so re-appending on each call would
+// grow them without bound and double-count the vDSO's own emissions.
+func EnsureRegistered() {
+	registered := false
+	for _, fp := range abi.FastPaths() {
+		if fp == abi.FastPath(tier{Default, 1}) {
+			registered = true
+			break
+		}
+	}
+	if !registered {
+		registerFastPaths()
+	}
+	for _, e := range abi.Emitters() {
+		if e == abi.Emitter(Default) {
+			return
+		}
+	}
+	abi.RegisterEmitter(Default)
 }
 
 // tier wraps the VDSO so a single Lookup covers all three; registering twice at
