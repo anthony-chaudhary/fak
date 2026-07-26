@@ -15,25 +15,115 @@ func TestColdEligibleDecisionTable(t *testing.T) {
 		name      string
 		leaseLive bool
 		age       time.Duration
+		unlanded  int
 		want      bool
+		wantHeld  bool
 	}{
-		{"live lease past floor is KEPT", true, 2 * time.Hour, false},
-		{"live lease under floor is KEPT", true, time.Minute, false},
-		{"dead lease past floor is COLD", false, 2 * time.Hour, true},
-		{"dead lease under floor is KEPT", false, time.Minute, false},
-		{"dead lease exactly at floor is COLD", false, floor, true},
-		{"dead lease unknown age (0) is KEPT", false, 0, false},
+		{"live lease past floor is KEPT", true, 2 * time.Hour, 0, false, false},
+		{"live lease under floor is KEPT", true, time.Minute, 0, false, false},
+		{"dead lease past floor and CLEAN is COLD", false, 2 * time.Hour, 0, true, false},
+		{"dead lease under floor is KEPT", false, time.Minute, 0, false, false},
+		{"dead lease exactly at floor and clean is COLD", false, floor, 0, true, false},
+		{"dead lease unknown age (0) is KEPT", false, 0, 0, false, false},
+		// The third gate: coldness proves nobody is WATCHING, not that nothing is HELD.
+		{"dead lease past floor but 1 uncommitted entry is KEPT", false, 2 * time.Hour, 1, false, true},
+		{"dead lease past floor but many uncommitted entries is KEPT", false, 2 * time.Hour, 15, false, true},
+		{"unreadable working tree (-1) is KEPT", false, 2 * time.Hour, -1, false, true},
+		// A live or young worktree is kept for its OWN reason — being dirty as well
+		// must not relabel it as held-by-work, or the triage queue fills with
+		// worktrees whose real answer is "wait", not "decide".
+		{"live lease AND dirty is kept, not held-by-work", true, 2 * time.Hour, 9, false, false},
+		{"young AND dirty is kept, not held-by-work", false, time.Minute, 9, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, reason := coldEligible(c.leaseLive, c.age, floor)
+			got, held, reason := coldEligible(c.leaseLive, c.age, floor, c.unlanded)
 			if got != c.want {
-				t.Fatalf("coldEligible(live=%v, age=%s) = %v (%q), want %v", c.leaseLive, c.age, got, reason, c.want)
+				t.Fatalf("coldEligible(live=%v, age=%s, unlanded=%d) = %v (%q), want %v",
+					c.leaseLive, c.age, c.unlanded, got, reason, c.want)
 			}
-			if got && reason == "" {
-				t.Fatal("an eligible verdict must carry a why-eligible reason")
+			if held != c.wantHeld {
+				t.Fatalf("coldEligible(live=%v, age=%s, unlanded=%d) heldByWork = %v (%q), want %v",
+					c.leaseLive, c.age, c.unlanded, held, reason, c.wantHeld)
+			}
+			if reason == "" {
+				t.Fatal("every verdict must carry a reason for the ledger")
+			}
+			if got && held {
+				t.Fatalf("a reapable worktree cannot also be held by work: %q", reason)
 			}
 		})
+	}
+}
+
+// TestUnlandedCountFailsTowardCarryingWork pins the probe's fail-safe direction: a git
+// that cannot answer yields -1 ("assume work"), never 0 ("assume clean"). Reading a
+// broken worktree as clean is the one error mode that destroys an unrecoverable diff.
+func TestUnlandedCountFailsTowardCarryingWork(t *testing.T) {
+	broken := newFakeGit().reply("status", 128, "fatal: not a git repository")
+	if got := UnlandedCount("/wt/gone", broken.run); got != -1 {
+		t.Fatalf("UnlandedCount over a failing git = %d, want -1 (cannot tell => assume work)", got)
+	}
+	// Both tracked modifications and untracked files count: a worker that died before
+	// landing may hold its only new file as untracked.
+	dirty := newFakeGit().reply("status", 0, " M internal/journal/journal.go\n?? newfile.go\n")
+	if got := UnlandedCount("/wt/dirty", dirty.run); got != 2 {
+		t.Fatalf("UnlandedCount over 1 tracked + 1 untracked = %d, want 2", got)
+	}
+	clean := newFakeGit().reply("status", 0, "\n")
+	if got := UnlandedCount("/wt/clean", clean.run); got != 0 {
+		t.Fatalf("UnlandedCount over a clean tree = %d, want 0", got)
+	}
+}
+
+// TestColdReapListKeepsWorktreeHoldingUnlandedWork is the regression fence for the
+// measured hole: a worktree with a dead lease, well past the age floor, and carrying
+// uncommitted work read as textbook cold under the two-gate rule. Witnessed 2026-07-26:
+// 20/20 worktrees eligible, 17 of them holding uncommitted entries.
+func TestColdReapListKeepsWorktreeHoldingUnlandedWork(t *testing.T) {
+	parent := t.TempDir()
+	now := time.Now()
+	floor := 30 * time.Minute
+	old := coldTempWorktree(t, parent, "docs", "444", 253*time.Hour, now)
+
+	g := newFakeGit().
+		reply("worktree", 0, "worktree "+old+"\n").
+		reply("status", 0, " M cmd/fak/guard.go\n M internal/journal/journal.go\n")
+
+	plan := ColdReapList("/repo", g.run, now, floor, func(string) bool { return false })
+	if len(plan) != 1 {
+		t.Fatalf("want 1 enumerated worktree, got %d: %+v", len(plan), plan)
+	}
+	c := plan[0]
+	if c.Eligible {
+		t.Fatalf("a worktree holding unlanded work must NEVER be eligible: %+v", c)
+	}
+	if !c.HeldByWork {
+		t.Fatalf("it must be reported as held_by_work so an operator triages it: %+v", c)
+	}
+	if c.Unlanded != 2 {
+		t.Fatalf("unlanded count = %d, want 2: %+v", c.Unlanded, c)
+	}
+	if removes := g.callsWithPrefix("worktree", "remove"); len(removes) != 0 {
+		t.Fatalf("ColdReapList must delete nothing, saw removes: %v", removes)
+	}
+}
+
+// TestColdReapListSkipsStatusProbeForKeptWorktrees proves the probe is not paid for a
+// worktree the earlier gates already keep. The sweep runs over every worktree in the
+// namespace, so a per-worktree subprocess that cannot change the verdict is pure cost.
+func TestColdReapListSkipsStatusProbeForKeptWorktrees(t *testing.T) {
+	parent := t.TempDir()
+	now := time.Now()
+	live := coldTempWorktree(t, parent, "cmd", "555", 2*time.Hour, now)
+	young := coldTempWorktree(t, parent, "docs", "666", time.Minute, now)
+
+	g := newFakeGit().reply("worktree", 0, "worktree "+live+"\n\nworktree "+young+"\n")
+	// Only the "cmd" lane holds a live lease; "docs" is dead but under the floor.
+	ColdReapList("/repo", g.run, now, 30*time.Minute, func(p string) bool { return LaneOf(p) == "cmd" })
+
+	if probes := g.callsWithPrefix("status"); len(probes) != 0 {
+		t.Fatalf("no status probe should run for already-kept worktrees, saw: %v", probes)
 	}
 }
 

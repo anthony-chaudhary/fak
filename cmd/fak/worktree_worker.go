@@ -54,11 +54,14 @@ fak worktree <subcommand>
                    signed-off commit. Prints {ok, applied, committed, ...}.
       reap --worktree D
                    Force-remove ONE finished worker worktree. Prints {ok, removed, ...}.
-      reap --all-cold [--apply] [--age-floor-min N]
+      reap --all-cold [--apply] [--age-floor-min N] [--even-if-unlanded]
                    Bulk cold sweep: enumerate every worker worktree and reap only the
-                   COLD ones (their lane lease is dead AND they are past the age floor).
+                   COLD ones — lane lease dead, past the age floor, AND working tree
+                   clean. One still holding uncommitted work is KEPT and reported as
+                   held_by_work: land or abandon that diff to reclaim its disk.
                    DRY-RUN by default — reports the would-reap set and deletes nothing;
                    pass --apply (or FAK_WORKTREE_COLD_COLLECT=apply) to actually collect.
+                   --even-if-unlanded also collects the held ones, DESTROYING that work.
       list         List the live per-worker worktrees. Prints {count, paths}.
 `))
 }
@@ -183,16 +186,17 @@ func worktreeWorkerLand(argv []string) {
 func worktreeWorkerReap(argv []string) {
 	flags := flag.NewFlagSet("worktree worker reap", flag.ExitOnError)
 	worktree := flags.String("worktree", "", "the worker's worktree dir to force-remove (single-worktree mode)")
-	allCold := flags.Bool("all-cold", false, "bulk mode: enumerate ALL worker worktrees and reap only the COLD ones (dead lane lease AND past the age floor). DRY-RUN unless --apply")
+	allCold := flags.Bool("all-cold", false, "bulk mode: enumerate ALL worker worktrees and reap only the COLD ones (dead lane lease, past the age floor, and clean). DRY-RUN unless --apply")
 	apply := flags.Bool("apply", false, "with --all-cold, actually delete the cold worktrees (default: dry-run report only). Env "+worktreeColdApplyEnv+"=apply is equivalent")
 	ageFloorMin := flags.Int("age-floor-min", int(workerworktree.DefaultColdAgeFloor/time.Minute), "with --all-cold, the age grace floor in minutes — a dead-lease worktree younger than this is kept")
+	evenIfUnlanded := flags.Bool("even-if-unlanded", false, "with --all-cold, ALSO reap worktrees kept only because they still hold uncommitted work. DESTROYS that work — for reclaiming disk once the diffs are known to be abandoned")
 	root := flags.String("root", "", "repo root (default: discover from cwd)")
 	flags.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
 
 	if *allCold {
-		worktreeWorkerReapAllCold(repoRoot, *apply, time.Duration(*ageFloorMin)*time.Minute)
+		worktreeWorkerReapAllCold(repoRoot, *apply, time.Duration(*ageFloorMin)*time.Minute, *evenIfUnlanded)
 		return
 	}
 
@@ -235,27 +239,44 @@ type worktreeColdReapOut struct {
 	Reaped      int                    `json:"reaped"`
 	Bytes       int64                  `json:"bytes"`
 	ReapedBytes int64                  `json:"reaped_bytes"`
+	// HeldByWork counts the worktrees that cleared the lease and age gates and were
+	// kept only because they still carry uncommitted work, with their reclaimable
+	// bytes. Reported separately from the generic keep because it is a triage queue,
+	// not a wait: that disk comes back only once each diff is landed or abandoned.
+	HeldByWork      int   `json:"held_by_work"`
+	HeldByWorkBytes int64 `json:"held_by_work_bytes"`
 }
 
 // worktreeWorkerReapAllCold is the bulk cold sweep (#5351): enumerate every worker
-// worktree, decide which are COLD (dead lane lease AND past the age floor) via the
-// pure workerworktree.ColdReapList plan, and — only under an explicit apply opt-in —
+// worktree, decide which are COLD (dead lane lease, past the age floor, and clean) via
+// the pure workerworktree.ColdReapList plan, and — only under an explicit apply opt-in —
 // Reap each cold one with the SAME per-id workerworktree.Reap the single mode uses.
 // The default is a DRY-RUN that ledgers the would-reap set and deletes nothing.
-func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Duration) {
+func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Duration, evenIfUnlanded bool) {
 	if !apply && strings.EqualFold(strings.TrimSpace(os.Getenv(worktreeColdApplyEnv)), "apply") {
 		apply = true
 	}
-	out := worktreeColdReapReport(repoRoot, apply, ageFloor, time.Now())
+	out := worktreeColdReapReport(repoRoot, apply, ageFloor, time.Now(), evenIfUnlanded)
 	worktreeWorkerEmit(out)
 	// The human one-liner goes to stderr so stdout stays exactly one JSON object.
 	kept := len(out.Worktrees) - out.WouldReap
 	if apply {
-		fmt.Fprintf(os.Stderr, "reaped %d/%d cold worktrees (%s), %d live/young kept (apply)\n",
+		fmt.Fprintf(os.Stderr, "reaped %d/%d cold worktrees (%s), %d kept (apply)\n",
 			out.Reaped, out.WouldReap, humanBytes(out.ReapedBytes), kept)
 	} else {
-		fmt.Fprintf(os.Stderr, "would reap %d cold worktrees (%s), 0 deleted (dry-run; pass --apply to collect), %d live/young kept\n",
+		fmt.Fprintf(os.Stderr, "would reap %d cold worktrees (%s), 0 deleted (dry-run; pass --apply to collect), %d kept\n",
 			out.WouldReap, humanBytes(out.Bytes), kept)
+	}
+	// Unlanded work is called out on its own line: it is the one keep-reason the
+	// operator must ACT on, and folding it into the "kept" tally is what let 17
+	// worktrees of unlanded diffs read as ordinary reclaimable disk.
+	if out.HeldByWork > 0 {
+		verb := "held"
+		if evenIfUnlanded {
+			verb = "REAPED DESPITE"
+		}
+		fmt.Fprintf(os.Stderr, "%s %d worktree(s) by unlanded work (%s) — land or abandon each before reclaiming\n",
+			verb, out.HeldByWork, humanBytes(out.HeldByWorkBytes))
 	}
 }
 
@@ -264,7 +285,7 @@ func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Durati
 // worker worktrees, decides the cold set via workerworktree.ColdReapList under the
 // lease-liveness gate, and — only when apply is true — Reaps each cold one. It NEVER
 // deletes in dry-run: Reaped/ReapedBytes stay 0 and Bytes is the reclaimable total.
-func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration, now time.Time) worktreeColdReapOut {
+func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration, now time.Time, evenIfUnlanded bool) worktreeColdReapOut {
 	if ageFloor <= 0 {
 		ageFloor = workerworktree.DefaultColdAgeFloor
 	}
@@ -281,7 +302,15 @@ func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration,
 	}
 	for _, c := range plan {
 		item := worktreeColdReapItem{ColdWorktree: c, Bytes: worktreeDirBytes(c.Path)}
-		if c.Eligible {
+		// The override promotes ONLY the unlanded-work keeps. A live lease or a
+		// worktree under the age floor stays kept either way: those protect an
+		// in-flight land, which no disk-reclamation flag should be able to override.
+		reap := c.Eligible || (evenIfUnlanded && c.HeldByWork)
+		if c.HeldByWork {
+			out.HeldByWork++
+			out.HeldByWorkBytes += item.Bytes
+		}
+		if reap {
 			out.WouldReap++
 			out.Bytes += item.Bytes
 			if apply {

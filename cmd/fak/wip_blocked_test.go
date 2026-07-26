@@ -75,7 +75,10 @@ func TestWipBlockers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := wipBlockers(root, []string{"cmd/fak/stale.go", "cmd/fak/deleted.go"}, now)
+	// A nil content map is the unprobed caller: every path keeps the pre-Content
+	// verdict, which is what this test pins. The four content shapes are exercised in
+	// wip_blocked_residue_test.go.
+	got := wipBlockers(root, []string{"cmd/fak/stale.go", "cmd/fak/deleted.go"}, now, nil)
 	if len(got) != 2 {
 		t.Fatalf("blockers = %d, want 2 (totality: one per input path)", len(got))
 	}
