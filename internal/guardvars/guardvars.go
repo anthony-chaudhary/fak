@@ -74,7 +74,23 @@ type CacheAttributionVars struct {
 	FakDeferColdTurns     uint64   `json:"fak_defer_cold_turns,omitempty"`
 	FakDeferColdCount     uint64   `json:"fak_defer_cold_count,omitempty"`
 	FakDeferColdToolNames []string `json:"fak_defer_cold_tool_names,omitempty"`
+	// FakDeferFinding carries the #3621 live-watchdog verdict: FindingDeferEnabledButInert when
+	// the cold-tool-defer lever was ARMED across enough eligible turns and deferred nothing on
+	// any of them — the silent-identity failure mode the FakDeferCold* counters above cannot
+	// express on their own (they are a numerator; a flat zero reads the same whether the lever
+	// was off or on-and-inert). FakDeferStandDownTurns is that missing denominator: eligible
+	// turns on which the transform ran and stood down. Both empty/absent on a healthy defer
+	// session, on a lever-off session, and on a wire the transform never runs on, so the
+	// finding field's PRESENCE is itself the alarm.
+	FakDeferStandDownTurns uint64 `json:"fak_defer_stand_down_turns,omitempty"`
+	FakDeferFinding        string `json:"fak_defer_finding,omitempty"`
 }
+
+// FindingDeferEnabledButInert is the CacheAttributionVars.FakDeferFinding value for the #3621
+// watchdog: the cold-tool-defer lever armed, at least the eligible-turn floor accrued, zero cold
+// definitions ever deferred. The guard exit banner prints the same token so the live pane and the
+// exit artifact agree.
+const FindingDeferEnabledButInert = "DEFER_ENABLED_BUT_INERT"
 
 // WireOpenAIResponses is the resolved-upstream provider string for the OpenAI Responses
 // (codex) wire (gateway.Config.Provider / guardManagedCachePosture.provider). That wire has

@@ -223,6 +223,30 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 		}
 		b.WriteString(guardNote("posture=ACTIVE but the 1h-TTL upgrade never fired: an idle gap >5m re-writes the prefix at full cost; every head was refused, so check the traffic carries a byte-stable system/tools head (also on /debug/vars managed_cache.finding)"))
 	}
+	// Cold-tool-defer inert watchdog (#3621): the deferral section above prints only when the
+	// lever BIT, so an armed session that deferred nothing renders exactly like one where the
+	// lever was never turned on — both are silent. That is the silent-identity failure mode of
+	// the epic's highest-risk lever (a wrong dated tool_search_tool type 400s into identity; an
+	// already-deferred client body stands the transform down). Raise it from the WITNESSED
+	// stand-down denominator alone: those rows accrue only past the eligibility gate (lever on,
+	// Anthropic passthrough wire, ablation arm off), so a lever-off, non-Anthropic, ablated, or
+	// short session stays quiet, and a single deferred def clears it. The same finding rides
+	// /debug/vars cache_attribution.fak_defer_finding, so the live pane and this exit artifact
+	// agree.
+	if sum.DeferEnabledButInert() {
+		b.WriteString(guardSection("cold-tool deferral"))
+		b.WriteString(guardRow("⚠ "+guardvars.FindingDeferEnabledButInert,
+			fmt.Sprintf("0 cold def(s) deferred across %d eligible turn(s)", sum.DeferAttempts())))
+		reasons := make([]string, 0, len(sum.DeferStandDownReasons))
+		for r := range sum.DeferStandDownReasons {
+			reasons = append(reasons, r)
+		}
+		sort.Strings(reasons)
+		for _, r := range reasons {
+			b.WriteString(guardRow("  stood down: "+r, fmt.Sprintf("x%d", sum.DeferStandDownReasons[r])))
+		}
+		b.WriteString(guardNote("--defer-cold-tools is ARMED but never bit: you are paying the full eager tool slice the lever claimed to shed. 'no_cold_tools' means every advertised tool was hot (benign); 'already_deferred' means the client deferred first; anything else (decode_failed, splice_unproven, remarshal_failed) is fak standing down from a body it could not prove — check the dated tool_search_tool type is one the account has enabled (also on /debug/vars cache_attribution.fak_defer_finding)"))
+	}
 	if len(sum.ByReason) > 0 {
 		b.WriteString(guardSection("blocked by reason"))
 		reasons := make([]string, 0, len(sum.ByReason))

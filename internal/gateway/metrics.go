@@ -167,6 +167,15 @@ type gatewayMetrics struct {
 	// set so the deterministic per-turn defer of the same cold tail does not multiply-list a
 	// name; nil until the lever first fires.
 	deferColdNames map[string]struct{}
+	// deferStandDownTurns / deferStandDownReasons are the DENOMINATOR the #3621
+	// DEFER_ENABLED_BUT_INERT watchdog needs: turns on which the transform actually RAN — the
+	// lever on, the wire the Anthropic passthrough, the ablation arm off — and still stood down
+	// to byte-identity, keyed by the deferResult reason. Without them a zero-defer session is
+	// indistinguishable from a lever-off one, which is exactly the silent-identity blind spot.
+	// They accrue only PAST maybeDeferColdTools' eligibility gate, so a lever-off, non-Anthropic,
+	// or ablated session can never trip the finding. Nil map until the first stand-down.
+	deferStandDownTurns   uint64
+	deferStandDownReasons map[string]uint64
 
 	// toolRefMu guards the tool_reference SANITIZE accumulators (a correctness transform, not a
 	// cache saving): the client's INTERNAL `tool_reference` blocks — emitted inside a ToolSearch
@@ -705,6 +714,14 @@ type AdjudicationSummary struct {
 	// turns (#3647) — surfaced so the operator pane can name WHICH tools were made cold, not
 	// just how many. Sorted for a stable render; empty/absent when the lever never fired.
 	DeferColdToolNames []string `json:"defer_cold_tool_names,omitempty"`
+	// DeferStandDownTurns / DeferStandDownReasons are the missing DENOMINATOR of the DeferCold*
+	// numerator above (#3621): turns on which the lever was armed and the transform ran, yet it
+	// stood down to identity, plus the per-reason breakdown (no_cold_tools, already_deferred,
+	// decode_failed, …). They are what makes "the lever is off" distinguishable from "the lever
+	// is on and never bit" — the silent-identity failure mode the DEFER_ENABLED_BUT_INERT
+	// watchdog (defer_inert.go) keys on. Absent (omitempty) when nothing ever stood down.
+	DeferStandDownTurns   uint64            `json:"defer_stand_down_turns,omitempty"`
+	DeferStandDownReasons map[string]uint64 `json:"defer_stand_down_reasons,omitempty"`
 
 	// ToolRefTurns / ToolRefConverted witness the tool_reference SANITIZE correctness transform:
 	// the client's INTERNAL tool_reference blocks (emitted inside a ToolSearch tool_result) are not
@@ -792,6 +809,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.ToolPruneTurns, sum.ToolPruneCount = m.inboundToolPruneSnapshot()
 	sum.DeferColdTurns, sum.DeferColdCount = m.toolDeferSnapshot()
 	sum.DeferColdToolNames = m.toolDeferNamesSnapshot()
+	sum.DeferStandDownTurns, sum.DeferStandDownReasons = m.toolDeferStandDownSnapshot()
 	sum.ToolRefTurns, sum.ToolRefConverted = m.toolRefSanitizeSnapshot()
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	sum.ToolFeedbackTurns, _ = m.toolFeedbackSnapshot()

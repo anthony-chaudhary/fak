@@ -339,6 +339,50 @@ func (m *gatewayMetrics) observeToolDefer(cold int, fired bool, names ...string)
 	m.deferMu.Unlock()
 }
 
+// observeToolDeferStandDown records a defer-ELIGIBLE turn on which the transform ran and stood
+// down to byte-identity (#3621), keyed by the deferResult reason. This is the DENOMINATOR
+// observeToolDefer above deliberately never kept: it books only fired turns, so a session whose
+// every turn stands down looks identical to one where the lever was never armed at all — the
+// silent-identity blind spot (a wrong dated tool_search_tool type, an already-deferred client
+// body, an all-hot surface). Callers must invoke it only PAST maybeDeferColdTools' eligibility
+// gate (lever on, Anthropic passthrough wire, ablation arm off), which is what lets the
+// DEFER_ENABLED_BUT_INERT watchdog raise from these counters alone with no posture flag threaded
+// in. An empty reason books as "unknown" rather than an unnamed bucket.
+func (m *gatewayMetrics) observeToolDeferStandDown(reason string) {
+	if m == nil {
+		return
+	}
+	if reason == "" {
+		reason = "unknown"
+	}
+	m.deferMu.Lock()
+	m.deferStandDownTurns++
+	if m.deferStandDownReasons == nil {
+		m.deferStandDownReasons = map[string]uint64{}
+	}
+	m.deferStandDownReasons[reason]++
+	m.deferMu.Unlock()
+}
+
+// toolDeferStandDownSnapshot reads the stand-down denominator (#3621): eligible turns that stood
+// down, plus a COPY of the per-reason breakdown so a caller can never race the live map. reasons
+// is nil until something stands down, keeping the summary's JSON field absent on a clean session.
+func (m *gatewayMetrics) toolDeferStandDownSnapshot() (turns uint64, reasons map[string]uint64) {
+	if m == nil {
+		return 0, nil
+	}
+	m.deferMu.Lock()
+	defer m.deferMu.Unlock()
+	if len(m.deferStandDownReasons) == 0 {
+		return m.deferStandDownTurns, nil
+	}
+	out := make(map[string]uint64, len(m.deferStandDownReasons))
+	for r, n := range m.deferStandDownReasons {
+		out[r] = n
+	}
+	return m.deferStandDownTurns, out
+}
+
 // toolDeferSnapshot reads the deferral accumulators (turns, cold-def count).
 func (m *gatewayMetrics) toolDeferSnapshot() (turns, cold uint64) {
 	if m == nil {

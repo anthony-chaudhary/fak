@@ -1257,6 +1257,14 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	deferTurns, deferCold := m.toolDeferSnapshot()
 	writeCounter(b, "fak_gateway_tool_defer_cold_total", "WITNESSED (fak authored): cumulative cold tool DEFINITIONS marked defer_loading:true on the outbound Anthropic body across the session (the 10x floor lever, --defer-cold-tools #3232). Cache-safe by construction (deterministic, byte-stable tools[] turn-over-turn), so a counted deferral never bursts the upstream prompt cache. The provider-side context/token drop it drives is OBSERVED via input_tokens/cache_read, not claimed by this counter.", int64(deferCold))
 	writeCounter(b, "fak_gateway_tool_defer_turns_total", "WITNESSED (fak authored): turns on which fak deferred the cold tool tail (marked >=1 cold def defer_loading and injected a tool_search_tool). Zero when --defer-cold-tools is off (its default) or when every advertised tool was hot; nonzero means the lever fired that turn.", int64(deferTurns))
+	// The DENOMINATOR of the two counters above (#3621). Both of them are pure numerators, so a
+	// flat zero reads identically whether the lever was never armed or was armed and bit on
+	// nothing — the silent-identity failure mode. This counter accrues only PAST the eligibility
+	// gate (lever on, Anthropic passthrough wire, ablation arm off), so `_cold_total == 0 AND
+	// _standdown_turns_total >= 3` is the scrape-side form of the DEFER_ENABLED_BUT_INERT finding
+	// the guard banner and /debug/vars cache_attribution.fak_defer_finding raise.
+	standDownTurns, _ := m.toolDeferStandDownSnapshot()
+	writeCounter(b, "fak_gateway_tool_defer_standdown_turns_total", "WITNESSED (fak authored): turns on which the cold-tool-defer transform RAN — lever on, Anthropic passthrough wire, ablation arm off — and stood down to byte-identity anyway (no cold tools, a client body already deferred, or a splice fak could not prove). The denominator for fak_gateway_tool_defer_cold_total: a session with cold_total==0 and this counter climbing is the lever armed-but-inert (#3621), NOT a lever that was left off.", int64(standDownTurns))
 
 	// The tool_reference SANITIZE family (a CORRECTNESS transform, not a cache saving). WITNESSED:
 	// how many Claude-Code-internal tool_reference blocks fak rewrote into wire-valid text blocks so

@@ -96,6 +96,12 @@ func (s *Server) maybeDeferColdTools(req *agent.AnthropicMessagesRequest, trace 
 	})
 	s.metrics.observeToolDefer(res.ColdCount, res.Changed)
 	if !res.Changed {
+		// #3621: book the eligible-but-inert turn. Everything above this line is the
+		// eligibility gate (lever on, Anthropic passthrough, ablation off), so reaching here
+		// means the lever WAS armed and the transform still yielded identity — the one fact a
+		// zero-valued fak_gateway_tool_defer_cold_total can otherwise never distinguish from a
+		// lever that was simply never turned on. See defer_inert.go for the fold.
+		s.metrics.observeToolDeferStandDown(res.Reason)
 		return 0
 	}
 	req.Raw = res.Body

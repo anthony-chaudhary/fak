@@ -862,8 +862,16 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 	// into context), so it never lands in ms.HasAnyTokenActivity(). Fold it into the same gate
 	// so a defer-ON session with no token slice still renders the block rather than reading as
 	// a quiet cold session.
-	if !ms.HasAnyTokenActivity() && ms.FakVDSOAvoidedCalls == 0 && sum.DeferColdCount == 0 {
+	// #3621: an INERT defer session is by definition one with no defer shed to render, so the
+	// gate above would suppress the very block that has to carry the alarm. Fold the finding
+	// into the gate so an armed-but-never-bit session renders rather than reading as quiet.
+	inertDefer := sum.DeferEnabledButInert()
+	if !ms.HasAnyTokenActivity() && ms.FakVDSOAvoidedCalls == 0 && sum.DeferColdCount == 0 && !inertDefer {
 		return nil
+	}
+	finding := ""
+	if inertDefer {
+		finding = guardvars.FindingDeferEnabledButInert
 	}
 	return &debugCacheAttributionVars{
 		ProviderTokenEquiv:                        ms.ProviderTokenEquiv(),
@@ -878,6 +886,8 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 		FakDeferColdTurns:                         sum.DeferColdTurns,
 		FakDeferColdCount:                         sum.DeferColdCount,
 		FakDeferColdToolNames:                     sum.DeferColdToolNames,
+		FakDeferStandDownTurns:                    sum.DeferStandDownTurns,
+		FakDeferFinding:                           finding,
 	}
 }
 
