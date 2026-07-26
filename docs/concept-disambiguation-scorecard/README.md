@@ -15,21 +15,21 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **36** (clarity 0 + coverage 36) |
-| **Crystal-clear concepts (and climbing)** | **371** crystal of 1988 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2172 / 2208** (98.4% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **39** (clarity 0 + coverage 39) |
+| **Crystal-clear concepts (and climbing)** | **375** crystal of 1992 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2173 / 2212** (98.2% of the discovered confusable space) |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 99.0/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1988 concepts - score 99.0/100 (grade A) - disambiguation-debt 36
+concept-disambiguation chart - 1992 concepts - score 98.8/100 (grade A) - disambiguation-debt 39
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ######...................... 371
+  * crystal       ######...................... 375
   o defined       ############################ 1617
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -44,7 +44,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ********ooooooooooooooooooooooooooooooo (39 concept(s); 8 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
-  guard-gate       ****************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (291 concept(s); 76 crystal)
+  guard-gate       ******************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (293 concept(s); 78 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
   loop             *************************ooooooooooooooooooooooooooooooooo (58 concept(s); 25 crystal)
   plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
@@ -56,19 +56,19 @@ clarity mix by family (each cell = one concept):
   support-maturity ************ooooooooooooooooo (29 concept(s); 12 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 48 crystal)
+  witness-proof    **************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (127 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
   session-runtime  ###########################. 189/199
   guard-gate       ###########################. 354/361
+  cache            ############################ 255/259
   decision         ##########################.. 49/53
   policy-capability ###########################. 139/142
   render-materialize ############################ 171/174
   support-maturity ##########################.. 37/40
   context-ctx      ############################ 193/195
   loop             ###########################. 72/74
-  witness-proof    ############################ 135/137
-  cache            ############################ 254/255
+  witness-proof    ############################ 136/138
   evict            ###########################. 44/45
   gateway-engine   ############################ 166/167
   attention        ############################ 72/72
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.4%  (2172/2208 confusable tokens positioned)
+namespace coverage  [###############################.] 98.2%  (2173/2212 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -230,6 +230,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | gateway-engine | **model (in-kernel model)** - The in-kernel inference core: a pure-Go forward pass that runs chat token decode over a loaded GGUF checkpoint across several architectures and quant schemes. |
 | * | crystal | symbol | gateway-engine | **engines registry** - The runtime registry (abi.Registry.engines) that maps engine IDs to their EngineDriver implementations: the kernel's dispatch table of all registered inference backends. |
 | * | crystal | symbol | gateway-engine | **fak_gateway_kv_prefix_prompt_tokens_by_source_total** - The gateway's per-turn split of in-kernel prompt tokens by PROVENANCE source (local_compute / local_cache_hit / external_kv_transfer), orthogonal to the reuse-depth family; the three sum to the by-source prompt tokens. external_kv_transfer isolates the disaggregation dividend — tokens a remote / L3 KV tier served that a single box would otherwise have re-prefilled. |
+| * | crystal | symbol | guard-gate | **INSUFFICIENT_AGGREGATE_HBM** - The bench.AdmissionVerdict wire value a sanctioned node earns when its AGGREGATE device HBM across every rank is below the pinned artifact size: a physical-ceiling placement refusal that no reservation, scheduler change or peer eviction can lift. Only a smaller artifact (quantization) or more nodes close the ShortfallBytes it records, and admitNode derives it before any transfer begins. |
+| * | crystal | symbol | guard-gate | **AggregateHBMBytes** - A NodeCapacity accessor returning the node's total device memory across every rank (GPUCount x HBMBytesPerGPU) — the hard physical ceiling, reachable only by evicting peers. |
 | * | crystal | symbol | guard-gate | **guardSessionStart (fak guard-sessionstart hook)** - guard_sessionstart.go is the `fak guard-sessionstart` command: a Claude Code SessionStart hook whose stdout is injected into the FIRST turn. It emits guardSessionStartHint, the one-line affordance naming the fak substrate MCP verbs (fak_index_work, fak_admit/fak_adjudicate, fak_memory_run, fak_tools_search), and is toggled by FAK_GUARD_AFFORDANCE_MODE (on/off). |
 | * | crystal | config | guard-gate | **FAK_SECRETGATE** - The env opt-in (FAK_SECRETGATE) that arms internal/secretgate Admit; when off, Admit is a no-op and only the normgate secret check runs. |
 | * | crystal | config | guard-gate | **FLEET_CODEX_LOOP_GATE** - The env gate (FLEET_CODEX_LOOP_GATE) controlling whether the fleet dispatch tick admits the codex-loop step (dispatch_tick_codex_gate). |
@@ -423,6 +425,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | concept | vfs | **T3 scratchpad** - The agent's expire-by-default working scratchpad / tmpfs - files that exist for this task and are meant to be thrown away |
 | * | crystal | concept | vfs | **T4 durable memory** - Promoted, verified, forgettable cross-session memory - facts that earned durability through the write/promotion gate and survive the task |
 | * | crystal | concept | vfs | **T5 KV-cache substrate** - The physical KV-cache substrate: where a span's key/value tensors actually sit and how they are addressed and evicted |
+| * | crystal | symbol | witness-proof | **RuntimeWitnessed** - DeepSeekInventory.RuntimeWitnessed (JSON runtime_witnessed) is the honesty fence on the provisioning inventory: it stays false until a deterministic inference has actually RUN on a real placement of the pinned artifact, and a downstream consumer must refuse to headline throughput or saving while it is false. Everything else in the record is provenance plus a derived feasibility verdict - no number in it is fak-authored or measured. |
+| * | crystal | symbol | witness-proof | **WitnessedNodes** - DeepSeekInventory.WitnessedNodes (JSON witnessed_nodes) is the scrubbed NodeCapacity population actually read back from sanctioned nodes over the private bridge - node-class label, rank counts and nominal per-rank HBM. It is the exact set every per-node AdmissionResult is derived over, and the set the NOT_SINGLE_NODE_ADMISSIBLE rollup is scoped to, so it bounds how far the refusal generalizes. |
 | * | crystal | config | witness-proof | **DISPATCH_WITNESS_REQUIREMENT** - The env var (DISPATCH_WITNESS_REQUIREMENT) declaring what witness a dispatch worker must produce, forwarded into the guard Witness field. |
 | * | crystal | symbol | witness-proof | **WitnessedFiles** - The logvault accessor (v.WitnessedFiles) returning the set of files a run actually witnessed under a prefix (e.g. dispatch-runs), used by guard_audit. |
 | * | crystal | symbol | witness-proof | **witnessPath** - The filesystem path parameter (witnessPath) to a witness artifact read by graders (GradeWitness, AnalyzeNegatedQA). |
@@ -2224,7 +2228,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1988 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1992 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2238,14 +2242,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | session-runtime | 189 | 199 | 10 |
 | guard-gate | 354 | 361 | 7 |
+| cache | 255 | 259 | 4 |
 | decision | 49 | 53 | 4 |
 | policy-capability | 139 | 142 | 3 |
 | render-materialize | 171 | 174 | 3 |
 | support-maturity | 37 | 40 | 3 |
 | context-ctx | 193 | 195 | 2 |
 | loop | 72 | 74 | 2 |
-| witness-proof | 135 | 137 | 2 |
-| cache | 254 | 255 | 1 |
+| witness-proof | 136 | 138 | 2 |
 | evict | 44 | 45 | 1 |
 | gateway-engine | 166 | 167 | 1 |
 | attention | 72 | 72 | 0 |
