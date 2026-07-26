@@ -404,10 +404,28 @@ func (d *sessionDurability) publishBestEffort(ctx context.Context, id string, st
 		PCBState:  strings.ToUpper(st.Run.String()),
 		UpdatedAt: now.Unix(),
 		TTLSecs:   ttlSecs,
+		AgentUUID: claudeSessionUUID(),
 	})
 	if err != nil && d.warnf != nil {
 		d.warnf("fak: session side-ref publish failed for %s: %v", id, err)
 	}
+}
+
+// claudeSessionUUID resolves the STABLE Claude Code session UUID that a wip checkpoint
+// stamps, so the guard-session descriptor can carry it (SessionDescriptor.AgentUUID) and a
+// checkpoint's owning session becomes joinable to a live descriptor (#5343). The wip
+// checkpoint stamps firstNonEmpty(CLAUDE_CODE_SESSION_ID, FAK_SESSION_ID) (wip.go), so we
+// read CLAUDE_CODE_SESSION_ID FIRST — that guarantees the published UUID matches the stamp in
+// the common case. CLAUDE_SESSION_ID and FAK_SESSION_ID follow as fallbacks (FAK_SESSION_ID is
+// deliberately last: under `fak guard` a child sees it set to the volatile trace id, not the
+// UUID). Empty when no session env is set, which is a no-op for the join (the checkpoint
+// simply stays unresolved and is kept — the fail-toward-keeping posture).
+func claudeSessionUUID() string {
+	return firstNonEmpty(
+		os.Getenv("CLAUDE_CODE_SESSION_ID"),
+		os.Getenv("CLAUDE_SESSION_ID"),
+		os.Getenv("FAK_SESSION_ID"),
+	)
 }
 
 func sessionTableHas(tbl *session.Table, traceID string) bool {
