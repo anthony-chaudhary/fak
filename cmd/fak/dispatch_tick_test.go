@@ -964,6 +964,14 @@ func TestDispatchTickLiveBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 
 func TestDispatchTickLiveCodexLoopGateRefusesGuardlessSpawn(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
+	// Unwire the ambient dogfood upstream. `fak guard` for a NON-claude backend is only
+	// planned when a base URL names the upstream to proxy (dispatchtick.GuardedLaunchCommand
+	// refuses to misroute otherwise), and a guarded fak session exports
+	// FLEET_DOGFOOD_GUARD_BASEURL — inheriting it silently converts this fixture into the
+	// GUARDED shape and stops it proving anything about the dangerous one. The refusal below
+	// (no spawner call, typed CODEX_LOOP_GATE_REFUSED) is the load-bearing assertion: an
+	// unguarded Codex worker must not be launched into a no-progress thrash loop.
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "")
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	root := t.TempDir()
 	home := t.TempDir()
