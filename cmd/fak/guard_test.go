@@ -1354,6 +1354,45 @@ func TestGuardDefaultBaseURL(t *testing.T) {
 	}
 }
 
+// The #3620 UPGRADE_NEVER_FIRED watchdog on the guard exit banner: an ACTIVE session whose
+// every 1h-TTL upgrade attempt was refused must surface the finding row with the per-reason
+// split, a session with even one fired upgrade must stay quiet, and a clean session must not
+// print the section at all — the banner half of the /debug/vars managed_cache.finding pair.
+func TestFormatAuditSummaryUpgradeNeverFired(t *testing.T) {
+	fired := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 6, Allowed: 6,
+		CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 2, "no_stable_breakpoint": 1},
+	})
+	for _, want := range []string{
+		"managed cache", "UPGRADE_NEVER_FIRED", "0 upgraded across 3 refused attempt(s)",
+		"refused: no_stable_breakpoint", "refused: volatile_head",
+		"managed_cache.finding",
+	} {
+		if !strings.Contains(fired, want) {
+			t.Errorf("never-fired banner missing %q:\n%s", want, fired)
+		}
+	}
+
+	// One fired upgrade clears the finding no matter how many refusals surround it.
+	cleared := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 6, Allowed: 6,
+		CacheTTLUpgraded:       1,
+		CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 5},
+	})
+	if strings.Contains(cleared, "UPGRADE_NEVER_FIRED") {
+		t.Errorf("banner raised the finding after an upgraded outcome:\n%s", cleared)
+	}
+
+	// Below the attempt floor a short all-refused session is not an alarm.
+	short := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 2, Allowed: 2,
+		CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 2},
+	})
+	if strings.Contains(short, "UPGRADE_NEVER_FIRED") {
+		t.Errorf("banner raised the finding below the attempt floor:\n%s", short)
+	}
+}
+
 func TestFormatAuditSummary(t *testing.T) {
 	out := formatAuditSummary(gateway.AdjudicationSummary{
 		Total: 7, Allowed: 4, Denied: 2, Transformed: 1, Quarantined: 0,
