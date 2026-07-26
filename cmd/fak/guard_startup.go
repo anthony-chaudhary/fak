@@ -44,6 +44,7 @@ type guardStartupView struct {
 	pinUpstream          bool
 	apiKey               string
 	apiKeyEnv            string
+	keychainAPIKey       bool
 	oauthSource          string
 	mcache               guardManagedCachePosture
 	contextBudgetLimit   int
@@ -106,6 +107,8 @@ func renderGuardStartupReport(v guardStartupView) string {
 			switch {
 			case v.pinUpstream && v.up == "anthropic":
 				fmt.Fprintf(&startupReport, "fak guard: upstream auth — Claude Pro/Max subscription (provider-reported identity; OAuth token from %s, sent as a bearer token)\n", v.oauthSource)
+			case v.up == "anthropic" && v.apiKey != "" && v.keychainAPIKey:
+				fmt.Fprintln(&startupReport, "fak guard: upstream auth — API key (Claude Code's saved key from the macOS Keychain; provider-side API billing, not a fak claim)")
 			case v.up == "anthropic" && v.apiKey != "":
 				fmt.Fprintf(&startupReport, "fak guard: upstream auth — API key (from --api-key-env %s; provider-side API billing, not a fak claim)\n", v.apiKeyEnv)
 			case v.up == "anthropic":

@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "sessionfatigue",
+      "canonical": "session_fatigue",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence.",
+      "distinction": "sessionobs scores how well a session is OBSERVED — it grades the telemetry. session_fatigue grades the DECISIONS instead: it measures whether a confirm gate is still carrying a judgement or is being waved through, and it is strictly read-only. Naming a rubber-stamped gate is all it does; coarsening one is the regime mechanism (#2389/#2405) and the autonomy dial (#2759), not this token.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "session_fatigue",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "schema": "deepseek-v4-pro-inventory/1",
+  "model_id": "deepseek-ai/DeepSeek-V4-Pro",
+  "revision": "b5968e9190ef611bbf34a7229255be88a0e937c1",
+  "license": "MIT",
+  "gated": false,
+  "source": "huggingface",
+  "total_size_bytes": 864704792696,
+  "model_type": "deepseek_v4",
+  "layers": 61,
+  "routed_experts": 384,
+  "experts_per_token": 6,
+  "hidden_size": 7168,
+  "precision": "mixed: MoE expert parameters FP4, most other parameters FP8",
+  "total_params": "1.6T",
+  "activated_params": "49B",
+  "runtime": {
+    "torch_min": "2.10.0",
+    "transformers_min": "5.0.0",
+    "safetensors_min": "0.7.0",
+    "experts": 384,
+    "tensor_parallel": 8,
+    "multi_node": true,
+    "cpu_offload": false
+  },
+  "witnessed_nodes": [
+    {
+      "name": "node-a",
+      "gpu_model": "NVIDIA A100-SXM4-80GB",
+      "gpu_count": 8,
+      "free_gpu_count": 6,
+      "hbm_bytes_per_gpu": 85899345920,
+      "note": "two ranks carry an unrelated peer serve; #4788 forbids evicting it"
+    },
+    {
+      "name": "node-b",
+      "gpu_model": "NVIDIA A100-40GB",
+      "gpu_count": 8,
+      "free_gpu_count": 0,
+      "hbm_bytes_per_gpu": 42949672960,
+      "note": "every rank holds a peer allocation despite ~0% instantaneous utilization"
+    },
+    {
+      "name": "node-c",
+      "gpu_model": "NVIDIA A100-40GB",
+      "gpu_count": 8,
+      "free_gpu_count": 0,
+      "hbm_bytes_per_gpu": 42949672960,
+      "note": "every rank holds a peer allocation despite ~0% instantaneous utilization"
+    },
+    {
+      "name": "node-d",
+      "gpu_model": "",
+      "gpu_count": 0,
+      "free_gpu_count": 0,
+      "hbm_bytes_per_gpu": 0,
+      "note": "CPU/DC node; no GPU device"
+    }
+  ],
+  "admission": [
+    {
+      "node": "node-a",
+      "verdict": "INSUFFICIENT_AGGREGATE_HBM",
+      "admissible": false,
+      "weight_bytes": 864704792696,
+      "aggregate_hbm_bytes": 687194767360,
+      "free_hbm_bytes": 515396075520,
+      "shortfall_bytes": 177510025336,
+      "why": "aggregate HBM across every rank is below the artifact size; no reservation can lift this ceiling — it needs a smaller artifact or more nodes"
+    },
+    {
+      "node": "node-b",
+      "verdict": "INSUFFICIENT_AGGREGATE_HBM",
+      "admissible": false,
+      "weight_bytes": 864704792696,
+      "aggregate_hbm_bytes": 343597383680,
+      "free_hbm_bytes": 0,
+      "shortfall_bytes": 521107409016,
+      "why": "aggregate HBM across every rank is below the artifact size; no reservation can lift this ceiling — it needs a smaller artifact or more nodes"
+    },
+    {
+      "node": "node-c",
+      "verdict": "INSUFFICIENT_AGGREGATE_HBM",
+      "admissible": false,
+      "weight_bytes": 864704792696,
+      "aggregate_hbm_bytes": 343597383680,
+      "free_hbm_bytes": 0,
+      "shortfall_bytes": 521107409016,
+      "why": "aggregate HBM across every rank is below the artifact size; no reservation can lift this ceiling — it needs a smaller artifact or more nodes"
+    },
+    {
+      "node": "node-d",
+      "verdict": "NO_GPU_DEVICE",
+      "admissible": false,
+      "weight_bytes": 864704792696,
+      "aggregate_hbm_bytes": 0,
+      "free_hbm_bytes": 0,
+      "shortfall_bytes": 864704792696,
+      "why": "node exposes no GPU device; the artifact has no device memory to occupy"
+    }
+  ],
+  "admission_summary": "NOT_SINGLE_NODE_ADMISSIBLE",
+  "runtime_witnessed": false,
+  "provision_issue": 4788,
+  "placement_issue": 4801,
+  "consumer_issue": 4781,
+  "digest": "7c4653488b6de3cd8ca21967ed14abf9c118d9fcb63b5d8572c81ca3a3a06ff4"
+}

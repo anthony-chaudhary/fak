@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "egressposture",
+      "canonical": "egress_posture",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The verdict-meta key the adjudicator's egress band stamps on a refusal to name WHICH egress stance produced it -- currently 'restrict', the strict-allowlist posture in which WebFetch flips from default-allowed to allowlist-only. It answers 'why was this host refused' for a reader of the decision journal, distinguishing a posture-driven refusal from a rule-driven one.",
+      "distinction": "Distinct from SecretPosture, the adjudicator's OTHER posture knob: SecretPosture governs what happens to credential-shaped spans in tool output (mask, quarantine, fail-closed) and is about DISCLOSURE, while egress_posture governs which destinations a tool call may reach and is about REACHABILITY. Both live on the same Policy and both spell their values as postures, so a reader scanning verdict meta can easily attribute one refusal to the other. Also distinct from the hardwired metadata floor, which produces its own refusal and stamps no egress_posture at all -- absence of this key is how a floor refusal is told apart from an operator-configured one.",
+      "distinct_from": [
+        "x-policy-capability-secretposture"
+      ],
+      "aliases": [],
+      "grounding": "egress_posture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
