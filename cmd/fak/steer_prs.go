@@ -29,6 +29,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -388,6 +389,27 @@ func buildSteerPRsView(root, base, head string) (map[string]any, error) {
 	units, unstamped := steerpr.FoldUnits(commits)
 	steerpr.SortWorstFirst(units)
 
+	// The partial state rides beside the band as a third orthogonal axis (#5027):
+	// N of M expected commits landed, where M is the bound intent's DECLARED
+	// membership — its spine issue plus the fanout children carrying the
+	// `fanout-<leaf>-` marker. The band says whether to look; this says whether it
+	// is still cheap to act.
+	//
+	// The issue graph is gathered ONCE for the whole view (one bounded gh call,
+	// through the existing ghexec seam — never a second GitHub client) and every
+	// unit derives from that one set. Gathering is BEST-EFFORT in exactly the way
+	// verdict grading is: if gh is unavailable the set is empty, no spine is
+	// found, and every unit reports expected: unknown — never a fabricated
+	// denominator, and never silently M = N.
+	intentIssues := steerPRsIntentIssues(root)
+	steerpr.AttachPartials(units, func(u steerpr.Unit) (steerpr.Expectation, bool) {
+		if len(u.Resolves) == 0 {
+			// No closure-grade binding: there is no intent to count. Unknown.
+			return steerpr.Expectation{}, false
+		}
+		return steerpr.DeriveExpected(u.Leaf, u.Resolves[0], intentIssues)
+	})
+
 	// The acked state rides BESIDE the band as a separate field, never in it:
 	// only a ledger row whose SHA set exactly matches the unit's CURRENT member
 	// set still covers — a member that joined after the human looked drops the
@@ -424,11 +446,63 @@ func buildSteerPRsView(root, base, head string) (map[string]any, error) {
 		"unit_count":         len(units),
 		"unstamped_count":    len(unstamped),
 		"residual_count":     steerpr.Residual(units),
-		"units":              units,
-		"unstamped":          unstamped,
-		"acks":               acked,
-		"pauses":             paused,
+		// #5027: how much of the overlay is still forming (cheap to steer) versus
+		// how much carries no denominator at all. The unknown count is posted
+		// beside the forming count on purpose — an operator must be able to see how
+		// much of the view is NOT carrying a steering signal, rather than reading
+		// an unmeasured unit as a finished one.
+		"forming_count":          len(steerpr.PartialUnits(units)),
+		"unknown_expected_count": len(steerpr.UnknownExpectedUnits(units)),
+		"units":                  units,
+		"unstamped":              unstamped,
+		"acks":                   acked,
+		"pauses":                 paused,
 	}, nil
+}
+
+// steerPRsIntentGather is the bounded issue-graph scan the partial state derives
+// its denominator from (#5027). Overridable in tests so a test run never reaches
+// the network; the default shells the existing trusted gh seam.
+var steerPRsIntentGather = ghSteerIntentIssues
+
+// steerPRsIntentDedupeCap bounds the scan. An uncapped tracker walk is the
+// failure mode the fanout marker-key contract already caps at 300; the overlay
+// reads the same graph under the same bound.
+const steerPRsIntentDedupeCap = 300
+
+// steerPRsIntentIssues gathers the issue graph once per view build. Any failure
+// returns an empty set, which makes every unit's denominator UNKNOWN rather than
+// guessed — the same best-effort degradation the verdict grading uses, and for
+// the same reason: an honest "not derivable" beats a fabricated number.
+func steerPRsIntentIssues(root string) []steerpr.IntentIssue {
+	return steerPRsIntentGather(root)
+}
+
+// ghSteerIntentIssues runs the bounded `gh issue list --state all` scan through
+// internal/ghexec — deadlined, prompt-disabled, window-suppressed, and the SAME
+// seam the redirect affordance and the fanout dedupe use. Read-only: only the
+// `gh issue list` verb, so GitHub state never moves and git certainly never does.
+//
+// The scan is `--state all`, not `--state open`, deliberately. M is the intent's
+// DECLARED membership and must stay stable as children close; counting only open
+// children would shrink M every time work landed, so a unit would march toward
+// "3 of 3" and report complete while children were still outstanding.
+func ghSteerIntentIssues(root string) []steerpr.IntentIssue {
+	cmd, cancel := ghexec.CommandTimeout(nil, ghexec.DefaultTimeout,
+		"issue", "list", "--state", "all",
+		"--limit", strconv.Itoa(steerPRsIntentDedupeCap),
+		"--json", "number,body")
+	defer cancel()
+	cmd.Dir = root
+	buf, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var rows []steerpr.IntentIssue
+	if json.Unmarshal(buf, &rows) != nil {
+		return nil
+	}
+	return rows
 }
 
 // matchVerdict finds a commit's verdict by SHA prefix: `dos commit-audit` returns
@@ -503,6 +577,14 @@ func writeSteerPRs(view map[string]any, maxFiles int) string {
 		commitCount, len(units), residual,
 		releaseStatusShortSHA(releaseStatusString(view["base_sha"])), releaseStatusShortSHA(releaseStatusString(view["head_sha"])))
 	b.WriteString("Worst-attention-first: RESIDUAL owes you a look; CLEARED the kernel already witnessed.\n")
+	// #5027: the forming/unknown split, posted up front so an operator sees how
+	// much of the view is still cheap to redirect before reading any single unit.
+	forming := releaseStatusInt(view["forming_count"])
+	unknownExpected := releaseStatusInt(view["unknown_expected_count"])
+	if forming > 0 || unknownExpected > 0 {
+		fmt.Fprintf(&b, "%d unit(s) still FORMING (members outstanding — still cheap to steer); %d carry no derivable denominator (expected: unknown).\n",
+			forming, unknownExpected)
+	}
 	acked, _ := view["acks"].(map[string]steerpr.Ack)
 	pausedNow, _ := view["pauses"].(map[string]steerpr.Pause)
 	for _, unit := range units {
@@ -514,6 +596,13 @@ func writeSteerPRs(view map[string]any, maxFiles int) string {
 		// visible, or a paused intent is indistinguishable from a finished one.
 		if p, held := pausedNow[unit.Leaf]; held {
 			fmt.Fprintf(&b, "**PAUSED** by %s since %s — dispatch skips %s (BLOCKED_BY_HUMAN); release with `fak steer resume %s`.\n", p.By, p.At, p.Issue, unit.Leaf)
+		}
+		// The partial state renders on its own line beside the band (#5027): a
+		// forming unit ("3 of 12 landed") must not read like a finished one, and a
+		// unit with no derivable denominator says so rather than going quiet —
+		// silence reads as completeness to an operator scanning the overlay.
+		if line := unit.Partial.Annotate(); line != "" {
+			fmt.Fprintf(&b, "%s\n", line)
 		}
 		fmt.Fprintf(&b, "**Title:** `%s`\n", unit.Title)
 		if len(unit.Resolves) > 0 {
