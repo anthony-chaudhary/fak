@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **40** (clarity 0 + coverage 40) |
+| **Disambiguation-debt (drive to 0)** | **43** (clarity 0 + coverage 43) |
 | **Crystal-clear concepts (and climbing)** | **397** crystal of 2015 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2194 / 2234** (98.2% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2195 / 2238** (98.1% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
 
@@ -26,7 +26,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2015 concepts - score 98.8/100 (grade A) - disambiguation-debt 40
+concept-disambiguation chart - 2015 concepts - score 98.8/100 (grade A) - disambiguation-debt 43
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 397
@@ -63,25 +63,25 @@ coverage by family (positioned / discovered):
   guard-gate       ###########################. 355/363
   cache            ############################ 256/260
   decision         ##########################.. 49/53
+  loop             ###########################. 72/76
   policy-capability ###########################. 143/146
   render-materialize ############################ 172/175
   support-maturity ##########################.. 39/42
   context-ctx      ############################ 194/196
-  loop             ###########################. 72/74
+  gateway-engine   ############################ 166/168
   witness-proof    ############################ 136/138
   evict            ###########################. 44/45
-  gateway-engine   ############################ 166/167
   attention        ############################ 72/72
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   layout           ############################ 13/13
   plan             ############################ 308/308
   pool             ############################ 36/36
-  score-debt       ############################ 85/85
+  score-debt       ############################ 86/86
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.2%  (2194/2234 confusable tokens positioned)
+namespace coverage  [###############################.] 98.1%  (2195/2238 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -2267,21 +2267,21 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | guard-gate | 355 | 363 | 8 |
 | cache | 256 | 260 | 4 |
 | decision | 49 | 53 | 4 |
+| loop | 72 | 76 | 4 |
 | policy-capability | 143 | 146 | 3 |
 | render-materialize | 172 | 175 | 3 |
 | support-maturity | 39 | 42 | 3 |
 | context-ctx | 194 | 196 | 2 |
-| loop | 72 | 74 | 2 |
+| gateway-engine | 166 | 168 | 2 |
 | witness-proof | 136 | 138 | 2 |
 | evict | 44 | 45 | 1 |
-| gateway-engine | 166 | 167 | 1 |
 | attention | 72 | 72 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | layout | 13 | 13 | 0 |
 | plan | 308 | 308 | 0 |
 | pool | 36 | 36 | 0 |
-| score-debt | 85 | 85 | 0 |
+| score-debt | 86 | 86 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 
