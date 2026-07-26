@@ -628,6 +628,14 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	focusable := visual && term.IsTerminal(int(os.Stdin.Fd()))
 	if focusable {
 		if oldState, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
+			// MakeRaw just cleared OPOST/ONLCR on the tty DEVICE both fds share, so from here
+			// on a bare "\n" no longer implies a carriage return — every multi-row write
+			// (frames, notes, the exit line) would staircase across the pane (#5370). Re-add
+			// the mapping at the write site for BOTH streams; they are the same terminal.
+			// Reassigning the locals is enough: every later print in this function (including
+			// the closures below) writes through these variables.
+			stdout = newCRLFWriterTUI(stdout)
+			stderr = newCRLFWriterTUI(stderr)
 			// Register teardown BEFORE emitting any raw/1004/1000 byte so a panic also restores
 			// cleanly. LIFO order on return: disable mouse + focus reporting, restore the cooked
 			// stdin, then (the existing) trailing newline if a frame is parked. Registered after

@@ -1,0 +1,80 @@
+{
+  "rows": [
+    {
+      "id": "session-quarantine-retention-policy",
+      "canonical": "sessionQuarantineRetentionPolicy (corrupt-registry quarantine retention)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "How long, and how many, quarantined copies of a corrupt session registry are kept after RecoverCorruptRegistry moves the bad file aside — read from the sessionQuarantineRetentionEnv knob, falling back to the default policy when the knob is unparseable.",
+      "distinction": "Bounds the QUARANTINED EVIDENCE (the corrupt file set aside for diagnosis), not the LIVE descriptors: session.DefaultDescriptorTTL expires a healthy SessionDescriptor on the normal path, whereas this policy only governs wreckage already removed from service. Expiring one never expires the other.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessiondescriptor",
+        "x-issue1420-session-runtime-sessiondesc"
+      ],
+      "aliases": [],
+      "grounding": "sessionQuarantineRetentionPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sessionquarantineretentionpolicy",
+      "canonical": "sessionQuarantineRetentionPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The cmd/fak accessor that reads FAK_SESSION_QUARANTINE_RETENTION and returns the bounded retention policy governing how many, how old and how large the quarantined copies of a corrupt session registry may grow before the recovery path reaps them; an unparseable value returns the conservative default plus an error the caller warns about rather than failing on.",
+      "distinction": "DefaultAdmissionPolicy decides whether NEW work is let in; this decides how long WRECKAGE is kept after the fact. It is a housekeeping bound on already-quarantined evidence, never an admission or scheduling decision, and by design it can never refuse or delay a session — a malformed policy degrades to the default instead of failing startup.",
+      "distinct_from": [
+        "x2-policy-capability-defaultadmissionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "sessionQuarantineRetentionPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sessionquarantineretentionenv",
+      "canonical": "sessionQuarantineRetentionEnv",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The cmd/fak constant naming the environment variable that overrides the corrupt-registry quarantine retention policy. It is the NAME of the knob, not the knob's parsed value and not the policy itself.",
+      "distinction": "sessionQuarantineRetentionPolicy is the accessor that READS this knob and yields a parsed policy; this constant is only the string key it looks up. Renaming this constant changes which environment variable operators set; changing the policy changes what retention actually does.",
+      "distinct_from": [
+        "session-quarantine-retention-policy"
+      ],
+      "aliases": [],
+      "grounding": "sessionQuarantineRetentionEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "faksessionquarantineretention",
+      "canonical": "FAK_SESSION_QUARANTINE_RETENTION",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "The operator-facing environment variable bounding corrupt-registry quarantine evidence: 'off' disables cleanup entirely, 'count=N,age=DURATION,bytes=N' overrides individual dimensions with 0 meaning unbounded, and unset keeps session.DefaultQuarantineRetention. A malformed value warns and falls back to the default; it never prevents MCP startup.",
+      "distinction": "This is the WIRE NAME an operator exports, whereas sessionQuarantineRetentionEnv is the Go constant holding that name and sessionQuarantineRetentionPolicy is the parsed result. It bounds quarantined evidence only — it does not affect live session descriptor TTLs, and setting it 'off' retains wreckage rather than disabling recovery.",
+      "distinct_from": [
+        "sessionquarantineretentionenv"
+      ],
+      "aliases": [],
+      "grounding": "FAK_SESSION_QUARANTINE_RETENTION",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

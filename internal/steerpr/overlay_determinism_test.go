@@ -184,8 +184,13 @@ func TestOverlayFoldDeterminismPureFunctionOfRange(t *testing.T) {
 	// closed sets below. A new time-bearing field (generated_at, seen_at, ...)
 	// shows up here as a failing key, making the determinism decision explicit
 	// at the field's birth instead of as trend noise later.
+	// grouped_by / leaves (#5040) are pinned here deliberately: both are pure
+	// functions of the range plus the caller's wave bindings — no clock, no env —
+	// and grouped_by is unconditional precisely because a unit that does not say
+	// which basis it was grouped on is the failure that issue fences out.
 	unitKeys := map[string]bool{
-		"leaf": true, "title": true, "commits": true, "types": true,
+		"leaf": true, "grouped_by": true, "leaves": true,
+		"title": true, "commits": true, "types": true,
 		"resolves": true, "mentions": true, "files": true, "band": true, "curve": true,
 	}
 	commitKeys := map[string]bool{

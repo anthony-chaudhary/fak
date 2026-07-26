@@ -1875,3 +1875,101 @@ Server.handleFakAgentSessions is the /v1/fak/agent/sessions HTTP handler (#3258,
 The reap-or-keep verdict for a stale git .git/index.lock: a Reap flag plus a closed-vocabulary reason, decided purely from the commit-lane observer's evidence (lock presence, process-probe success, live-writer count, staleness past the grace window).
 
 **Distinct from:** It is the ACTUATOR's act-or-not verdict on reclaiming an orphaned .git/index.lock, NOT the commit-lane status Verdict (the observer's clear/busy/stale/blocked lane read) and NOT the witness Decision (a CONFIRMED/REFUTED/ABSTAIN evidence-grading verdict).
+
+
+### session_fatigue
+
+The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence.
+
+**Distinct from:** sessionobs scores how well a session is OBSERVED — it grades the telemetry. session_fatigue grades the DECISIONS instead: it measures whether a confirm gate is still carrying a judgement or is being waved through, and it is strictly read-only. Naming a rubber-stamped gate is all it does; coarsening one is the regime mechanism (#2389/#2405) and the autonomy dial (#2759), not this token.
+
+
+### sessionQuarantineRetentionPolicy
+
+The cmd/fak accessor that reads FAK_SESSION_QUARANTINE_RETENTION and returns the bounded retention policy governing how many, how old and how large the quarantined copies of a corrupt session registry may grow before the recovery path reaps them; an unparseable value returns the conservative default plus an error the caller warns about rather than failing on.
+
+**Distinct from:** DefaultAdmissionPolicy decides whether NEW work is let in; this decides how long WRECKAGE is kept after the fact. It is a housekeeping bound on already-quarantined evidence, never an admission or scheduling decision, and by design it can never refuse or delay a session — a malformed policy degrades to the default instead of failing startup.
+
+
+### sessionQuarantineRetentionEnv
+
+The cmd/fak constant naming the environment variable that overrides the corrupt-registry quarantine retention policy. It is the NAME of the knob, not the knob's parsed value and not the policy itself.
+
+**Distinct from:** sessionQuarantineRetentionPolicy is the accessor that READS this knob and yields a parsed policy; this constant is only the string key it looks up. Renaming this constant changes which environment variable operators set; changing the policy changes what retention actually does.
+
+
+### FAK_SESSION_QUARANTINE_RETENTION
+
+The operator-facing environment variable bounding corrupt-registry quarantine evidence: 'off' disables cleanup entirely, 'count=N,age=DURATION,bytes=N' overrides individual dimensions with 0 meaning unbounded, and unset keeps session.DefaultQuarantineRetention. A malformed value warns and falls back to the default; it never prevents MCP startup.
+
+**Distinct from:** This is the WIRE NAME an operator exports, whereas sessionQuarantineRetentionEnv is the Go constant holding that name and sessionQuarantineRetentionPolicy is the parsed result. It bounds quarantined evidence only — it does not affect live session descriptor TTLs, and setting it 'off' retains wreckage rather than disabling recovery.
+
+
+### claudeSessionUUID
+
+The cmd/fak resolver for the STABLE Claude Code session UUID (the transcript id) that a guard-session descriptor publishes as SessionDescriptor.AgentUUID, so a wip checkpoint's owning session becomes joinable to a live descriptor (#5343). Reads CLAUDE_CODE_SESSION_ID, then CLAUDE_SESSION_ID, then FAK_SESSION_ID; empty when none is set.
+
+**Distinct from:** FAK_SESSION_ID is a DIFFERENT identity, not a fallback spelling of this one: under fak guard a child sees it set to the VOLATILE trace id, which changes every run, so preferring it would publish a populated-looking field that joins to nothing. That is why it is read LAST here. resolveGuardSessionID resolves the guard's own session identity for gating; this resolves the transcript UUID for JOINING checkpoints to descriptors, and the two coincide only by accident.
+
+
+### MechanismStaleContext
+
+The closed-vocabulary MechanismClass label for an audit finding whose failure mechanism is acting on stale repository state - overwriting, clobbering, or reverting a peer's newer work, or building on an outdated base. It classifies HOW a change failed cross-model audit, never why.
+
+**Distinct from:** STALE_RECALL is a memory-recall verdict: a stored claim whose witness no longer verifies, refused at injection time before it reaches a prompt. MechanismStaleContext is a post-hoc audit finding label about the diff a model already produced, and despite the -Context suffix it names no Go context.Context and no context-window budget: it is one member of a fixed enum, carrying no lifetime, cancellation, or token accounting.
+
+
+### RenderAuditClusterReport
+
+Renders the cross-model failure-clustering dogfood section from an already-folded AuditClusterResult: a correlation-not-causation fence, then sufficient clusters split from insufficient or confounded ones, then route-policy proposals.
+
+**Distinct from:** RenderLedgerGapReport renders absence - the holes between expected and observed nightrun ledger rows. RenderAuditClusterReport renders present rows grouped by mechanism and author provenance, and is deliberately lossy in one direction: it emits only closed-vocabulary fields (mechanism class, counts, permille rates, typed flags) and never the auditor's free-text reason, so intent-attribution prose in a receipt cannot reach a rendered row.
+
+
+### SessionKey
+
+The deterministic, surface-independent cross-surface session identity derived by hashing a normalized conversation id under a versioned scheme tag; it doubles as the sessionledger trace name, so continuity rides the ledger's durable hash chain.
+
+**Distinct from:** session-id (SessionID) names one session INSTANCE and is minted per session; SessionKey is DERIVED — a pure function of the conversation identity that yields the same value in any process and after any restart, which is what lets a conversation started on one surface resume on another against the same warm KV prefix. gateway.SessionPrefixKey answers the same question in-process over an in-memory map that evaporates on eviction; SessionKey resolves against the durable ledger instead.
+
+
+### refuseHostScopedPlanForHostMem
+
+The injectable core of RefuseHostScopedPlanIfTooBig (capacity.go): given a plan and an explicit host (total, free, known), it refuses when the plan's host-scoped demands exceed BudgetAfterHeadroom — the FRACTION-only host budget. Taking the host explicitly is what makes the refusal testable without a live /proc/meminfo.
+
+**Distinct from:** This is the FRACTION-only budget check; refusePagedHostPlanForHostMem is the demand-paged sibling that additionally subtracts an ABSOLUTE page-cache floor. They are not two spellings of one check: the fraction reserve scales with the box, while the paged floor is a property of the backing device's buffered-read cliff, so the two disagree on exactly the hosts where the choice matters. With floorBytes <= 0 the paged form reproduces this one byte-for-byte.
+
+
+### pagecachefloor
+
+The OS page-cache reserve in fak's host-memory budget: an absolute byte floor held back from MemAvailable so demand-paged (mmap/pread) weights keep a read-through tier.
+
+**Distinct from:** Not the prompt-cache concepts (cache-read/cache-control), which meter provider token reuse; this is host RAM the kernel spends caching file-backed weight pages, and it is an ABSOLUTE floor rather than the fraction BudgetAfterHeadroom applies.
+
+
+### RefusePagedHostPlanIfTooBig
+
+The demand-paged host fit guard: refuses a MemoryPlan whose host-scoped demands exceed HostBudgetForPagedWeights, the tighter of the fractional headroom budget and MemAvailable minus the absolute page-cache floor.
+
+**Distinct from:** Unlike RefuseHostScopedPlanIfTooBigForHost, which checks the fraction-only budget, this also carves out the page-cache floor, so it refuses a plan that fits the headroom term but would squeeze the read-through tier the mapped weights fault through.
+
+
+### refusePagedHostPlanForHostMem
+
+The injectable core of RefusePagedHostPlanIfTooBig: takes the host (total, free, known) triple explicitly so the demand-paged refusal is testable without a live /proc/meminfo probe.
+
+**Distinct from:** Unexported test seam, not the entry point: RefusePagedHostPlanIfTooBig probes the live host via HostSystemMemoryInfo and delegates here, mirroring how refuseHostScopedPlanForHostMem backs the fraction-only guard in capacity.go.
+
+
+### GradeNotDebt
+
+The mode-debt scorer's grade for a dial that is correctly harness-held and model-unreachable: a safety dial the model cannot reach is not implicit-mode debt at all, so it is excluded from the lift worklist entirely rather than ranked at the bottom of it.
+
+**Distinct from:** Distinct from mode_debt, the headline metric this grade REMOVES a dial from. GradeNotDebt is a per-dial verdict meaning 'never rank this'; mode_debt is the fleet-level integer that ranked dials sum into. Also distinct from GradeClean, which means a dial IS debt-eligible and passed all four regime criteria -- GradeNotDebt means the criteria do not apply, so grading such a dial CLEAN would falsely claim it had been lifted.
+
+
+### NotDebt
+
+The Scorecard roll-up COUNT of dials that graded GradeNotDebt: how many surveyed dials were excluded from the lift worklist as correctly harness-held safety dials. Derived by Score so no consumer re-folds the grades.
+
+**Distinct from:** Distinct from GradeNotDebt, the per-dial grade it counts -- one is a verdict on a single dial, the other an integer over the whole census. Also distinct from the sibling Debt field: Debt is RANKED debt only (Hard+Soft), so NotDebt and Clean both contribute zero to it. Reading NotDebt as a debt figure inverts its meaning, since it counts precisely the dials that are NOT debt.
