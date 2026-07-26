@@ -22,9 +22,12 @@ package gateway
 //
 // The matching rule is deliberately PRECISE over fuzzy (issue #2926's stated concern: a
 // fuzzy name match yields false-positive refusals that block genuinely novel tools). It
-// is structural and directional: a proposal is refused only when its significant
-// capability tokens are ALREADY carried by a catalog tool whose name is at least as
-// general (proposal ⊆ catalog, or an exact capability-token match). A proposal that
+// is structural: a proposal is refused only when one side's significant capability
+// tokens are WHOLLY carried by the other's — either the catalog tool is at least as
+// general (proposal ⊆ catalog), or the proposal spells out a catalog capability in full
+// and adds words (catalog ⊆ proposal, the shape a free-text Capability phrase produces).
+// Containment either way means one name fully spans the other; a mere partial overlap
+// does not, and still admits. A proposal that
 // introduces a distinctive token no catalog tool carries is admitted — the gate never
 // blocks a novel capability, it only refuses one the catalog already reaches. A
 // proper-subset match must further rest on at least one DISTINCTIVE (non-generic) token,
@@ -113,9 +116,14 @@ func admitCoreToolAgainst(p ProposedCoreTool, catalog []catalogCapability) error
 	}
 
 	var sidesteps []string
+	shared := map[string]bool{}
 	for _, c := range catalog {
-		if catalogCovers(proposed, c.tokens) {
-			sidesteps = append(sidesteps, c.name)
+		if !catalogCovers(proposed, c.tokens) {
+			continue
+		}
+		sidesteps = append(sidesteps, c.name)
+		for t := range sharedTokens(proposed, c.tokens) {
+			shared[t] = true
 		}
 	}
 	if len(sidesteps) == 0 {
@@ -126,29 +134,67 @@ func admitCoreToolAgainst(p ProposedCoreTool, catalog []catalogCapability) error
 		Reason:    ReasonMCPCatalogCovers,
 		Proposed:  p.Name,
 		Sidesteps: sidesteps,
-		Shared:    tokenSlice(proposed),
+		Shared:    tokenSlice(shared),
 	}
 }
 
 // catalogCovers decides whether a catalog tool's capability tokens already reach the
 // proposed tool's. It fires when the two name the SAME capability (equal token sets) or
-// the catalog tool is strictly MORE general (proposed ⊊ catalog). A proper-subset match
-// must rest on at least one DISTINCTIVE (non-generic) shared token, so a bare shared verb
-// like "search"/"read" alone never triggers a refusal — that is the precision the issue
-// demands over a fuzzy name overlap.
+// when one side's tokens are wholly contained in the other's — in EITHER direction:
+//
+//   - proposed ⊊ catalog — the catalog tool is strictly more general, so it already
+//     reaches the narrower thing being proposed ("fak_index" under "fak_index_lane").
+//   - catalog ⊊ proposed — the proposal spells out a capability the catalog names
+//     exactly, plus extra words. This is the direction a free-text Capability phrase
+//     produces, and it is the whole reason that field exists: "fak_unlease" is opaque on
+//     its own, but the phrase "revoke a witness" contributes the token that shows
+//     fak_revoke already covers it. Checking only the first direction made the phrase
+//     actively counterproductive — every word it added pushed the proposal further from
+//     being a subset, so stating intent more fully made a redundant tool LOOK novel.
+//
+// Either way the match must rest on at least one DISTINCTIVE (non-generic) token from
+// the SHARED (smaller) set, so a bare shared verb like "search"/"read" never triggers a
+// refusal on its own — that is the precision the issue demands over a fuzzy name overlap.
+// The asymmetry is intentional: containment in either direction means one name fully
+// spans the other, which is a structural claim; a mere partial OVERLAP still admits,
+// because a token neither side accounts for is exactly what a novel capability looks like.
 func catalogCovers(proposed, catalog map[string]bool) bool {
-	if !subsetOf(proposed, catalog) {
-		return false
+	if subsetOf(proposed, catalog) {
+		if len(proposed) == len(catalog) {
+			return true // equal sets: the same capability by name
+		}
+		return hasDistinctive(proposed) // shared set is the proposal's
 	}
-	if len(proposed) == len(catalog) {
-		return true // equal sets: the same capability by name
+	if subsetOf(catalog, proposed) {
+		return hasDistinctive(catalog) // shared set is the catalog tool's
 	}
-	for t := range proposed { // proper subset: require a distinctive shared token
+	return false
+}
+
+// hasDistinctive reports whether a token set carries at least one non-generic token —
+// something naming a DOMAIN and not just an action.
+func hasDistinctive(tokens map[string]bool) bool {
+	for t := range tokens {
 		if !genericToken[t] {
 			return true
 		}
 	}
 	return false
+}
+
+// sharedTokens is the intersection of a proposal's capability signature with a matched
+// catalog tool's. The refusal reports the intersection rather than the whole proposal
+// because the two are no longer the same set once a match can run catalog ⊊ proposed: a
+// message listing every word of the proposer's phrase as "shared" would overstate what
+// the decision actually rests on.
+func sharedTokens(proposed, catalog map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for t := range proposed {
+		if catalog[t] {
+			out[t] = true
+		}
+	}
+	return out
 }
 
 // subsetOf reports whether every token in a is present in b.
