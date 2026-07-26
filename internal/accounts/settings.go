@@ -70,7 +70,7 @@ func (r Registry) DefaultsSettings() (map[string]any, bool) {
 }
 
 // ProjectedDefaultModel is the model the projection seeds into a seat that carries no model of
-// its own: Opus 4.8, matching cmd/fak's compiled-in defaultLaunchModel so a bare `claude
+// its own: Opus 5, matching cmd/fak's compiled-in defaultLaunchModel so a bare `claude
 // --resume`, a direct `claude` under a seat's CLAUDE_CONFIG_DIR, or a guard budget-restart
 // relaunch — none of which pass --model — inherits the SAME primary the account-switched launcher
 // pins. It MUST stay equal to that launch default; cmd/fak binds them with a guard test.
@@ -80,7 +80,7 @@ func (r Registry) DefaultsSettings() (map[string]any, bool) {
 // fable-5 on each sync/add, and only the launch path (which passes --model explicitly) honored
 // opus (#3091). The projection now overrides that pinned value with the launch default and treats
 // model as seat-owned. Fable 5 stays the launch fallback CHAIN and is not touched here.
-const ProjectedDefaultModel = "claude-opus-4-8"
+const ProjectedDefaultModel = "claude-opus-5"
 
 // seatSettingsDefaults specializes the registry defaults overlay for one seat's current settings,
 // applying the `model` carve-out (#3091). When the defaults pin a model:
