@@ -172,6 +172,7 @@ func wipUsage(w io.Writer) {
 // reported in code, not err; err is non-nil only when git could not be executed.
 // stdout is NOT trimmed — a patch's exact bytes (trailing newline) must survive.
 func gitWip(ctx context.Context, dir string, env []string, args ...string) (stdout, stderr string, code int, err error) {
+	gitWipSpawns.Add(1) // observability only (wip_spawns.go): the O(1)-spawns witness
 	cmd := exec.CommandContext(ctx, "git", args...)
 	configureDispatchHelperCommand(cmd)
 	if dir != "" {
@@ -198,6 +199,7 @@ func gitWip(ctx context.Context, dir string, env []string, args ...string) (stdo
 // `git apply --check -` to test whether a delta would apply cleanly without mutating
 // the tree. Same error contract as gitWip: a non-zero git exit is reported in code.
 func gitWipStdin(ctx context.Context, dir, stdin string, args ...string) (stdout, stderr string, code int, err error) {
+	gitWipSpawns.Add(1) // observability only (wip_spawns.go): the O(1)-spawns witness
 	cmd := exec.CommandContext(ctx, "git", args...)
 	configureDispatchHelperCommand(cmd)
 	if dir != "" {
