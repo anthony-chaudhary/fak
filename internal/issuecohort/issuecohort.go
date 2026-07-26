@@ -55,7 +55,14 @@ type Options struct {
 
 // WaveMember is one dispatchable leaf placed in a wave.
 type WaveMember struct {
-	Key           string   `json:"key"`
+	Key string `json:"key"`
+	// IssueNumber is the member's live GitHub issue number when the cohort was
+	// planned over EXISTING issues (`fak issue cohort --from-issues`), and 0 when
+	// it was planned over not-yet-filed candidates. It is carried, not derived:
+	// it is the review's own identity field, and it is what lets a downstream
+	// reader bind a landed commit's `#N` back to the wave the work was decided in
+	// (internal/steerpr's wave grouping, #5040) without inventing a second key.
+	IssueNumber   int      `json:"issue_number,omitempty"`
 	Title         string   `json:"title,omitempty"`
 	Lane          string   `json:"lane,omitempty"`
 	Paths         []string `json:"paths,omitempty"`
@@ -164,6 +171,7 @@ func Build(candidates []issuecontract.Candidate, opt Options) Plan {
 			leaves = append(leaves, leaf{
 				member: WaveMember{
 					Key:           strmatch.FirstTrimmed(review.Key, key),
+					IssueNumber:   review.IssueNumber,
 					Title:         strings.TrimSpace(c.Title),
 					Lane:          review.Lane,
 					Paths:         append([]string(nil), review.Paths...),

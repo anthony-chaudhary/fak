@@ -385,8 +385,24 @@ type credentialsDoc struct {
 // and reports whether it is usable right now: present, non-empty, and not past its expiry at now.
 // A missing/torn/expired credential returns ("", false) so the picker skips it — fak must never
 // fail over TO a dead token. Only the access token itself is returned; the refresh token and other
-// fields never leave this function.
+// fields never leave this function. A miss on disk falls back to the macOS Keychain (#5363) —
+// where darwin's live login actually lives — under the SAME strict contract (positive expiry,
+// strictly after now), so a Mac seat is failover-eligible without ever loosening the rule.
 func readLiveAccessToken(dir string, now time.Time) (string, bool) {
+	if tok, ok := readLiveFileAccessToken(dir, now); ok {
+		return tok, true
+	}
+	cred, ok := guardKeychainCred(dir)
+	if !ok || cred.AccessToken == "" || cred.ExpiresAt <= 0 {
+		return "", false
+	}
+	if !time.UnixMilli(cred.ExpiresAt).After(now) {
+		return "", false // already expired at now
+	}
+	return cred.AccessToken, true
+}
+
+func readLiveFileAccessToken(dir string, now time.Time) (string, bool) {
 	b, err := os.ReadFile(filepath.Join(dir, ".credentials.json"))
 	if err != nil {
 		return "", false

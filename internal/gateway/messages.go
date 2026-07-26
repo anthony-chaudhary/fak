@@ -129,11 +129,17 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
-	appendSessionLedger(reqTrace, "user_message", req.Raw)
+	appendSessionLedger(reqTrace, "user_message", turnLedgerSummary(req))
 	// C1 read-scope floor (#4192): the first turn a trace serves binds its owning principal, so a
 	// later fak_context_restore / fak_context_spans read-self op can be scoped to it. First-writer-
 	// wins; "" on the no-RequireKey loopback (single-tenant).
 	s.bindTraceOwner(reqTrace, principalFor(r, ""))
+	// AUTHORITY principal floor (#2412): stamp this turn's inbound authority label so the
+	// adjudication seam can type-check consent-shaped acts against it. Absent header => the
+	// direct interactive wire => human; a relay (webhook/A2A peer/scheduler) that stamped
+	// the class header cannot present as human. Per-turn (last-writer-wins), distinct from
+	// the tenant-isolation owner above.
+	s.bindTracePrincipal(reqTrace, classifyPrincipal(r.Header.Get(inboundPrincipalHeader)))
 	// Native-harness keystone (#1316/#1837): when `fak serve --native` is set, drive
 	// fak's OWN agent loop instead of the single-shot proxy turn below. The owned loop
 	// runs its own per-turn session gate (WithSessionGate over the same

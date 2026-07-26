@@ -36,6 +36,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/ghexec"
+	"github.com/anthony-chaudhary/fak/internal/issuecohort"
 	"github.com/anthony-chaudhary/fak/internal/steerpr"
 )
 
@@ -77,7 +78,7 @@ func runSteer(stdout, stderr io.Writer, argv []string) int {
 const steerUsage = `fak steer — the forming operator PRs on the trunk, and where a look lands
 
 Usage:
-  fak steer prs [--json] [--check] [--base REF] [--head REF] [--max-files N]
+  fak steer prs [--json] [--check] [--base REF] [--head REF] [--max-files N] [--cohort PLAN.json]
   fak steer ack <unit> [--by WHO] [--note TEXT] [--base REF] [--head REF]
   fak steer redirect <unit> -m "<steer note>" [--by WHO] [--base REF] [--head REF]
   fak steer pause <unit> [-m "<reason>"] [--by WHO] [--base REF] [--head REF]
@@ -87,6 +88,12 @@ prs folds the pending dev->release delta into PR-sized units per (fak <leaf>)
 stamp, bands each by where attention is owed (RESIDUAL/UNVERIFIABLE/CLEARED),
 and lists them worst-first. Read-only; --check reports RESIDUAL, it never gates
 a merge.
+
+--cohort takes a "fak issue cohort --json" plan and regroups the commits bound
+to a planned WAVE into one unit per wave — the fleet dispatches by wave, so the
+wave is the unit an operator can actually stop or redirect. Commits with no wave
+binding keep folding by leaf, and every unit states which basis it used
+(grouped_by: wave|leaf).
 
 ack records that a human reviewed a unit: an append-only, attributable ledger
 row bound to the unit's exact member SHA set. The unit then renders as
@@ -116,6 +123,7 @@ func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 	head := fs.String("head", "", "range head ref (default: <release_source> tip)")
 	check := fs.Bool("check", false, "exit 1 if any forming unit is RESIDUAL (reports; never blocks a merge)")
 	maxFiles := fs.Int("max-files", 20, "file paths listed per unit before folding to a count")
+	cohort := fs.String("cohort", "", "issue-cohort plan `file` (fak issue cohort --json): fold commits bound to a planned wave into one unit per wave")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -128,7 +136,17 @@ func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	view, err := buildSteerPRsView(steerRoot(), *base, *head)
+	// The wave bindings are read ONCE, here, and handed to the fold as data: an
+	// unreadable or wave-less plan is a hard error rather than a silent fall back
+	// to leaf grouping, because an operator who asked to watch waves must not be
+	// shown a leaf view that looks the same.
+	waves, err := steerPRsCohortWaves(*cohort)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak steer prs: %v\n", err)
+		return 2
+	}
+
+	view, err := buildSteerPRsViewWaves(steerRoot(), *base, *head, waves)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steer prs: %v\n", err)
 		return 1
@@ -363,6 +381,55 @@ func ghSteerRedirectFollowUp(r steerpr.Redirect) (string, error) {
 // resolution (branchrole + prPlanResolve) and git seam so the continuous view
 // and the promotion plan always fold the SAME range through the SAME parser.
 func buildSteerPRsView(root, base, head string) (map[string]any, error) {
+	return buildSteerPRsViewWaves(root, base, head, nil)
+}
+
+// steerPRsCohortWaves projects a `fak issue cohort --json` plan into the overlay's
+// wave bindings (#5040). It reads the EXISTING plan through the existing type —
+// no second planner, no new grouping key: the wave index and its members are the
+// cohort's own, and the join is the issue number a member already carries.
+//
+// An empty path means no wave grouping was asked for (the common case), so the
+// overlay folds by leaf. A named path that cannot be read, cannot be parsed, or
+// carries no issue-numbered wave member is an ERROR: those are the three ways an
+// operator could ask for the wave view and silently be handed the leaf view
+// instead, which is the confusion this issue exists to remove. A cohort planned
+// over not-yet-filed candidates is exactly that case — its members have no issue
+// numbers yet, so nothing could bind.
+func steerPRsCohortWaves(path string) ([]steerpr.WaveBinding, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read cohort plan: %w", err)
+	}
+	var plan issuecohort.Plan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return nil, fmt.Errorf("parse cohort plan %s: %w", path, err)
+	}
+	var bindings []steerpr.WaveBinding
+	for _, w := range plan.Waves {
+		binding := steerpr.WaveBinding{Index: w.Index}
+		for _, m := range w.Members {
+			if m.IssueNumber > 0 {
+				binding.Issues = append(binding.Issues, fmt.Sprintf("#%d", m.IssueNumber))
+			}
+		}
+		if len(binding.Issues) > 0 {
+			bindings = append(bindings, binding)
+		}
+	}
+	if len(bindings) == 0 {
+		return nil, fmt.Errorf("cohort plan %s carries no wave member with an issue number — plan the cohort over live issues (`fak issue cohort --from-issues`) so a landed commit's #N can bind to its wave", path)
+	}
+	return bindings, nil
+}
+
+// buildSteerPRsViewWaves is buildSteerPRsView with optional cohort wave
+// bindings: commits whose subject-bound issue belongs to a planned wave fold
+// into one unit per wave, the rest keep folding by leaf (#5040).
+func buildSteerPRsViewWaves(root, base, head string, waves []steerpr.WaveBinding) (map[string]any, error) {
 	roles, _ := branchrole.Load(root)
 	baseRef, baseSHA, err := prPlanResolve(root, base, []string{"origin/" + roles.ReleaseBranch, roles.ReleaseBranch})
 	if err != nil {
@@ -386,7 +453,12 @@ func buildSteerPRsView(root, base, head string) (map[string]any, error) {
 		}
 	}
 
-	units, unstamped := steerpr.FoldUnits(commits)
+	// The fleet dispatches by WAVE, not by leaf (#5040): when a commit's bound
+	// issue belongs to a planned cohort wave, the wave is the unit an operator can
+	// actually steer ("stop this wave"), so it is the unit of attention. Leaf
+	// grouping stays the fallback for everything else — the common case — and each
+	// unit states which basis it used.
+	units, unstamped := steerpr.FoldUnitsByWave(commits, steerpr.WaveIndex(waves))
 	steerpr.SortWorstFirst(units)
 
 	// The partial state rides beside the band as a third orthogonal axis (#5027):
@@ -453,10 +525,14 @@ func buildSteerPRsView(root, base, head string) (map[string]any, error) {
 		// an unmeasured unit as a finished one.
 		"forming_count":          len(steerpr.PartialUnits(units)),
 		"unknown_expected_count": len(steerpr.UnknownExpectedUnits(units)),
-		"units":                  units,
-		"unstamped":              unstamped,
-		"acks":                   acked,
-		"pauses":                 paused,
+		// #5040: how many units are grouped by cohort WAVE rather than by leaf,
+		// posted up front so an operator sees that two bases are in play before
+		// reading any single unit.
+		"wave_unit_count": len(steerpr.WaveUnits(units)),
+		"units":           units,
+		"unstamped":       unstamped,
+		"acks":            acked,
+		"pauses":          paused,
 	}, nil
 }
 
@@ -585,13 +661,24 @@ func writeSteerPRs(view map[string]any, maxFiles int) string {
 		fmt.Fprintf(&b, "%d unit(s) still FORMING (members outstanding — still cheap to steer); %d carry no derivable denominator (expected: unknown).\n",
 			forming, unknownExpected)
 	}
+	// #5040: two grouping bases coexist, so the split is stated before any unit is
+	// read. An operator who cannot tell why a unit holds what it holds has been
+	// made worse off by the regrouping, not better.
+	if waveUnits := releaseStatusInt(view["wave_unit_count"]); waveUnits > 0 {
+		fmt.Fprintf(&b, "%d unit(s) grouped by cohort WAVE (the fleet's dispatch unit — stop/redirect the wave); the rest by (fak <leaf>) stamp.\n", waveUnits)
+	}
 	acked, _ := view["acks"].(map[string]steerpr.Ack)
 	pausedNow, _ := view["pauses"].(map[string]steerpr.Pause)
 	for _, unit := range units {
 		// The acked state renders as a suffix beside the honest band — an acked
-		// residual reads "RESIDUAL (acked by X)", never CLEARED.
+		// residual reads "RESIDUAL (acked by X)", never CLEARED. The grouping basis
+		// rides in the header beside it: it is mandatory on every unit, so it is
+		// printed for leaf units too, not only for the novel wave ones.
 		a, ok := acked[unit.Leaf]
-		fmt.Fprintf(&b, "\n## [%s] %s — %d commit(s)\n\n", steerpr.BandLabel(unit.Band, a, ok), unit.Leaf, len(unit.Commits))
+		fmt.Fprintf(&b, "\n## [%s] %s — %d commit(s) · grouped_by: %s\n\n", steerpr.BandLabel(unit.Band, a, ok), unit.Leaf, len(unit.Commits), steerpr.GroupingBasis(unit))
+		if len(unit.Leaves) > 0 {
+			fmt.Fprintf(&b, "Wave spans %d lane(s): %s.\n", len(unit.Leaves), strings.Join(unit.Leaves, ", "))
+		}
 		// A live hold renders with paused-since (#5031): paused time must be
 		// visible, or a paused intent is indistinguishable from a finished one.
 		if p, held := pausedNow[unit.Leaf]; held {

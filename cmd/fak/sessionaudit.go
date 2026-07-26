@@ -34,6 +34,8 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 		return runSessionAuditBudget(stdout, stderr, argv[1:])
 	case "feed":
 		return runSessionAuditFeed(stdout, stderr, argv[1:])
+	case "codex":
+		return runSessionAuditCodex(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		sessionAuditUsage(stdout)
 		return 0
@@ -53,6 +55,8 @@ func sessionAuditUsage(w io.Writer) {
 	fmt.Fprintln(w, "       fak session-audit budget  [--json] [--target-tokens N] [--target-turns N] <session.jsonl>")
 	fmt.Fprintln(w, "       fak session-audit feed    [--since-days N] [--all] [--ledger docs/nightrun/session-audit.jsonl] [--json] [--dry-run]")
 	fmt.Fprintln(w, "            (fold the window into ONE scrubbed row and APPEND it to the durable ledger)")
+	fmt.Fprintln(w, "       fak session-audit codex   [--json] [--root DIR] [--cwd DIR|--here] [--fresh-mins N] [--top N] [--max N]")
+	fmt.Fprintln(w, "            (native Codex rollout store: typed critical-path + tool-outcome corpus report)")
 }
 
 type rootFlags []string
