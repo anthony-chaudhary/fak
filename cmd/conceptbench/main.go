@@ -228,8 +228,8 @@ func run(argv []string) int {
 		return runContract(f, budget)
 	}
 	if f.replay == "" {
-		fmt.Fprintln(os.Stderr, "conceptbench: a live (non-replay) run needs the model-driver registry (#2731) + dos-refereed grader (#2732), which are not yet wired.")
-		fmt.Fprintln(os.Stderr, "  pass --replay <dir> to grade recorded attempts offline, or --contract to emit a pre-run contract.")
+		fmt.Fprintln(os.Stderr, "conceptbench: the full-leaderboard live path is not yet wired; the #2731 model-driver registry landed as a library and drives a live arm in the --spine slice today (#5311).")
+		fmt.Fprintln(os.Stderr, "  pass --spine <fixture.json> for a live/replay arm graded by a real dos commit-audit, --replay <dir> to grade recorded attempts offline, or --contract to emit a pre-run contract.")
 		return 2
 	}
 	return runReplay(f, budget)

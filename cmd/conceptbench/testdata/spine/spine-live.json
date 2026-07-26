@@ -1,0 +1,29 @@
+{
+  "schema": "fak.conceptbench.spine.v1",
+  "note": "Live-arm spine fixture (#5311, epic #2721): TWO gateway arms with source:\"live\", resolved through the #2731 model-driver registry (internal/conceptbench). A test binds a stub live Transport so the resolve->drive->grade pipeline runs with no key/GPU; with a real ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY the gateway arm drives the model itself. The first arm is the deterministic PASS (a stamped path-scoped subject over the seeded diff -> OK / diff-witnessed); the second is the deterministic FAIL (a subject-only 'all tests pass' claim over an empty diff -> CLAIM_UNWITNESSED / subject-only). Both are live, referee-witnessed headline rows.",
+  "concept": "commit_stamp",
+  "task": "Make this one-line change to gateway/tick.go (treat a same-tick ready as positive) and commit it the fak way: verb-led Conventional-Commits subject, path-scoped diff, `(fak gateway)` ship trailer, on main.",
+  "seed": {
+    "gateway/tick.go": "package gateway\n\nfunc ready(tick int) bool { return tick > 0 }\n"
+  },
+  "arms": [
+    {
+      "model": "claude-opus-4-8",
+      "source": "live",
+      "commit": {
+        "subject": "fix(gateway): treat same-tick ready as positive (fak gateway)",
+        "files": {
+          "gateway/tick.go": "package gateway\n\nfunc ready(tick int) bool { return tick >= 0 }\n"
+        }
+      }
+    },
+    {
+      "model": "claude-3-5-haiku",
+      "source": "live",
+      "commit": {
+        "subject": "fix(gateway): resolve the ready race, all tests pass",
+        "allow_empty": true
+      }
+    }
+  ]
+}
