@@ -20,6 +20,7 @@ package main
 //	fak session priority <id> <N>           # re-set the scheduling rank (lower yields first)
 //	fak session audit [summary|actions|discover|audit|deep] ...  # offline transcript audit alias
 //	fak session compact-audit [--since D] [--json]  # offline Codex-rollout compaction health (#4763)
+//	fak session gate-fatigue [--json]      # offline per-gate approval-without-inspection rate (#4427)
 //	fak session reset-diff [--in FILE] [--json] [--md]  # offline before/after reset diff (#1575, see session_reset_diff.go)
 //
 // All write verbs accept --if-rev N: the optimistic-concurrency guard, so a stale
@@ -113,6 +114,12 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	// offline, streaming, no gateway — so it dispatches with the other offline verbs.
 	if verb == "compact-audit" {
 		return runSessionCompactAudit(stdout, stderr, args)
+	}
+	// gate-fatigue (#4427) folds the guard-stop ledger into a per-gate
+	// approval-without-inspection rate — offline, read-only, no gateway — so it
+	// dispatches with the other offline verbs.
+	if verb == "gate-fatigue" {
+		return runFatigue(stdout, stderr, args)
 	}
 	// subscribe (#2767) is the re-attach drain of one session's event stream; it
 	// carries its own cursor flag surface, so it dispatches ahead of the shared
@@ -849,6 +856,12 @@ func sessionUsage(w io.Writer) {
                                                offline compaction health from native Codex rollouts:
                                                did compaction fire, hold, and cut resident context?
                                                (append-only bytes / cumulative tokens are NOT the signal)
+  fak session gate-fatigue [--ledger PATH] [--trace ID] [--threshold F] [--min-fires N] [--json]
+                                               offline read-only confirm-fatigue detector: per-gate
+                                               approval-without-inspection rate over the guard-stop
+                                               stream, flagging RUBBER_STAMPED gates worth coarsening
+                                               into a regime instead of firing per call (it only
+                                               names them; it never changes a gate)
   fak session reset-diff [--in FILE] [--json] [--md]
                                                offline before/after diff for one reset
                                                (survived/summarized/expired/must-requery)

@@ -1875,3 +1875,10 @@ Server.handleFakAgentSessions is the /v1/fak/agent/sessions HTTP handler (#3258,
 The reap-or-keep verdict for a stale git .git/index.lock: a Reap flag plus a closed-vocabulary reason, decided purely from the commit-lane observer's evidence (lock presence, process-probe success, live-writer count, staleness past the grace window).
 
 **Distinct from:** It is the ACTUATOR's act-or-not verdict on reclaiming an orphaned .git/index.lock, NOT the commit-lane status Verdict (the observer's clear/busy/stale/blocked lane read) and NOT the witness Decision (a CONFIRMED/REFUTED/ABSTAIN evidence-grading verdict).
+
+
+### session_fatigue
+
+The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence.
+
+**Distinct from:** sessionobs scores how well a session is OBSERVED — it grades the telemetry. session_fatigue grades the DECISIONS instead: it measures whether a confirm gate is still carrying a judgement or is being waved through, and it is strictly read-only. Naming a rubber-stamped gate is all it does; coarsening one is the regime mechanism (#2389/#2405) and the autonomy dial (#2759), not this token.
