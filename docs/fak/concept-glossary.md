@@ -1910,3 +1910,24 @@ The operator-facing environment variable bounding corrupt-registry quarantine ev
 The cmd/fak resolver for the STABLE Claude Code session UUID (the transcript id) that a guard-session descriptor publishes as SessionDescriptor.AgentUUID, so a wip checkpoint's owning session becomes joinable to a live descriptor (#5343). Reads CLAUDE_CODE_SESSION_ID, then CLAUDE_SESSION_ID, then FAK_SESSION_ID; empty when none is set.
 
 **Distinct from:** FAK_SESSION_ID is a DIFFERENT identity, not a fallback spelling of this one: under fak guard a child sees it set to the VOLATILE trace id, which changes every run, so preferring it would publish a populated-looking field that joins to nothing. That is why it is read LAST here. resolveGuardSessionID resolves the guard's own session identity for gating; this resolves the transcript UUID for JOINING checkpoints to descriptors, and the two coincide only by accident.
+
+
+### MechanismStaleContext
+
+The closed-vocabulary MechanismClass label for an audit finding whose failure mechanism is acting on stale repository state - overwriting, clobbering, or reverting a peer's newer work, or building on an outdated base. It classifies HOW a change failed cross-model audit, never why.
+
+**Distinct from:** STALE_RECALL is a memory-recall verdict: a stored claim whose witness no longer verifies, refused at injection time before it reaches a prompt. MechanismStaleContext is a post-hoc audit finding label about the diff a model already produced, and despite the -Context suffix it names no Go context.Context and no context-window budget: it is one member of a fixed enum, carrying no lifetime, cancellation, or token accounting.
+
+
+### RenderAuditClusterReport
+
+Renders the cross-model failure-clustering dogfood section from an already-folded AuditClusterResult: a correlation-not-causation fence, then sufficient clusters split from insufficient or confounded ones, then route-policy proposals.
+
+**Distinct from:** RenderLedgerGapReport renders absence - the holes between expected and observed nightrun ledger rows. RenderAuditClusterReport renders present rows grouped by mechanism and author provenance, and is deliberately lossy in one direction: it emits only closed-vocabulary fields (mechanism class, counts, permille rates, typed flags) and never the auditor's free-text reason, so intent-attribution prose in a receipt cannot reach a rendered row.
+
+
+### SessionKey
+
+The deterministic, surface-independent cross-surface session identity derived by hashing a normalized conversation id under a versioned scheme tag; it doubles as the sessionledger trace name, so continuity rides the ledger's durable hash chain.
+
+**Distinct from:** session-id (SessionID) names one session INSTANCE and is minted per session; SessionKey is DERIVED — a pure function of the conversation identity that yields the same value in any process and after any restart, which is what lets a conversation started on one surface resume on another against the same warm KV prefix. gateway.SessionPrefixKey answers the same question in-process over an in-memory map that evaporates on eviction; SessionKey resolves against the durable ledger instead.

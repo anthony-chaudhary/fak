@@ -15,22 +15,22 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **40** (clarity 0 + coverage 40) |
-| **Crystal-clear concepts (and climbing)** | **382** crystal of 1999 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2178 / 2218** (98.2% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **38** (clarity 0 + coverage 38) |
+| **Crystal-clear concepts (and climbing)** | **386** crystal of 2004 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2180 / 2218** (98.3% of the discovered confusable space) |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1999 concepts - score 98.8/100 (grade A) - disambiguation-debt 40
+concept-disambiguation chart - 2004 concepts - score 98.9/100 (grade A) - disambiguation-debt 38
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 382
-  o defined       ############################ 1617
+  * crystal       #######..................... 386
+  o defined       ############################ 1618
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
@@ -38,29 +38,29 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (66 concept(s); 4 crystal)
   cache            ****************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (210 concept(s); 40 crystal)
-  context-ctx      ****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (180 concept(s); 28 crystal)
+  context-ctx      *****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (181 concept(s); 29 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         *******************oooooooooooooooooo (37 concept(s); 19 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ********ooooooooooooooooooooooooooooooo (39 concept(s); 8 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
-  guard-gate       ******************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (293 concept(s); 78 crystal)
+  guard-gate       ******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (294 concept(s); 78 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
   loop             **************************ooooooooooooooooooooooooooooooooo (59 concept(s); 26 crystal)
   plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
   policy-capability **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (120 concept(s); 22 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
-  render-materialize ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (151 concept(s); 3 crystal)
+  render-materialize ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (152 concept(s); 4 crystal)
   score-debt       ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (68 concept(s); 4 crystal)
-  session-runtime  *********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (170 concept(s); 21 crystal)
+  session-runtime  ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 23 crystal)
   support-maturity ************ooooooooooooooooo (29 concept(s); 12 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    **************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (127 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  ###########################. 194/204
   guard-gate       ###########################. 354/362
+  session-runtime  ###########################. 196/204
   cache            ############################ 255/259
   decision         ##########################.. 49/53
   policy-capability ###########################. 140/143
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.2%  (2178/2218 confusable tokens positioned)
+namespace coverage  [###############################.] 98.3%  (2180/2218 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -170,6 +170,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | context-ctx | **maxCtxRestoreCASEntries** - Cap constant bounding the durable media-restore CAS directory, oldest-modified-out on overflow (the disk analogue of the stash caps). |
 | * | crystal | symbol | context-ctx | **ctxRestoreCASDir** - Helper resolving the durable media-restore CAS directory from the environment at call time; empty string means durable persistence is off. |
 | * | crystal | concept | context-ctx | **managed context** - managed context is fak's gateway-owned context program - the SLO-reported alternative to client-managed context (internal/productscorecard ManagedContextSLOReport). |
+| * | crystal | symbol | context-ctx | **MechanismStaleContext** - The closed-vocabulary MechanismClass label for an audit finding whose failure mechanism is acting on stale repository state - overwriting, clobbering, or reverting a peer's newer work, or building on an outdated base. It classifies HOW a change failed cross-model audit, never why. |
 | * | crystal | symbol | context-ctx | **compaction_summary** - Regrowth attribution class for the compacted row's replacement_history: the summary transcript the Codex compactor injects into the fresh window after a fire (#4768), measured by row length only. |
 | * | crystal | symbol | context-ctx | **environment_context** - Upstream Codex marker (<environment_context>) that tags an injected environment header message in rollout transcripts; the #4768 regrowth scanner classifies rows containing it as reinjected instruction payload. |
 | * | crystal | symbol | cross-cluster | **core-image manifest** - internal/recall's Manifest: the persisted core image of a finished session - the page table, the frozen quarantine-clearance state, and a frozen world-version marker, with the bytes themselves living in a sibling cas.json swap device. |
@@ -381,6 +382,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | pool | **DISPATCH_POOL** - The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE. |
 | * | crystal | symbol | pool | **Pool (session)** - Bounded-LRU session state container with a fixed ceiling on concurrent sessions |
 | * | crystal | symbol | pool | **PoolProfile** - Pooling character of a residency tier describing host count, coherence model, and shareability |
+| * | crystal | symbol | render-materialize | **RenderAuditClusterReport** - Renders the cross-model failure-clustering dogfood section from an already-folded AuditClusterResult: a correlation-not-causation fence, then sufficient clusters split from insufficient or confounded ones, then route-policy proposals. |
 | * | crystal | symbol | render-materialize | **RenderPlan** - Prompt-assembly layout: stable prefix of reused views plus volatile tail of raw faults |
 | * | crystal | symbol | render-materialize | **RenderItem** - One cell materialized into context by OpRender query effect |
 | * | crystal | symbol | render-materialize | **Rendered** - One span paged into fresh history through the trust gate |
@@ -388,6 +390,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | score-debt | **scorecard control pane** - The fold that sums every scorecard's *_debt into one portfolio number with a pinned ratchet that reds only on a regression above baseline. |
 | * | crystal | metric | score-debt | **disambiguation-debt** - This scorecard's integer: clarity defects of positioned concepts plus coverage gaps (confusable tree tokens with no row). |
 | * | crystal | symbol | score-debt | **FleetDebt (fleet-product ranking key)** - FleetDebt is the superloop fleet-walk ranking key (#4958): the liveness x progress x follow-on PRODUCT minus one, so a clean live member folds to debt 0 and the ordinary worst-first sort (tier, then debt descending) ranks the fleet with no rival walker. A product, not a sum, because the axes compound — a stale loop that is also spinning pays cadence cost for zero verified output on two grains at once, and outranks either fault alone. |
+| * | crystal | symbol | session-runtime | **handleFakAgentSessions (gateway route)** - Server.handleFakAgentSessions is the /v1/fak/agent/sessions HTTP handler (#3258, epic #3256): POST a goal and it runs ONE kernel-governed owned-loop agent session (agent.RunGovernedArm over the server's planner) and streams the session back as NDJSON events — session.start, per-call adjudicated call rows, session.end with the ArmMetrics witness. |
 | * | crystal | symbol | session-runtime | **ForkSessionID** - The forked session id whose lookahead rollout produced a RolloutEvidence/Lesson (#5204): the twin session spun off to roll the trajectory forward under the fork-rollout runner. |
 | * | crystal | symbol | session-runtime | **claudeSessionUUID** - The cmd/fak resolver for the STABLE Claude Code session UUID (the transcript id) that a guard-session descriptor publishes as SessionDescriptor.AgentUUID, so a wip checkpoint's owning session becomes joinable to a live descriptor (#5343). Reads CLAUDE_CODE_SESSION_ID, then CLAUDE_SESSION_ID, then FAK_SESSION_ID; empty when none is set. |
 | * | crystal | symbol | session-runtime | **session_fatigue** - The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence. |
@@ -409,6 +412,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | session-runtime | **session.State** - Live, mutable per-session control record: run-state, budget, priority, pace, and revision (an optimistic-concurrency guard). |
 | * | crystal | subsystem | session-runtime | **sessionimage.Image** - Loaded, integrity-verified portable session archive: drive (session.json), recall manifest, ctxplan index, trajectory corpus, and image.json meta. |
 | * | crystal | symbol | session-runtime | **SessionPlanner** - Persistent per-session context planner: a long-lived lossless store plus candidate index that ingests each turn's new messages incrementally. |
+| * | crystal | symbol | session-runtime | **SessionKey** - The deterministic, surface-independent cross-surface session identity derived by hashing a normalized conversation id under a versioned scheme tag; it doubles as the sessionledger trace name, so continuity rides the ledger's durable hash chain. |
 | * | crystal | symbol | support-maturity | **errReplicaUnsupported** - The sentinel error (errReplicaUnsupported) the portable NUMA replica-store path returns when a caller asks for a NUMA-replicated allocation the platform cannot provide. |
 | * | crystal | metric | support-maturity | **FamilyCoverage** - The covmatrix/conceptcatalog measure (FamilyCoverage, JSON family_coverage) of how much of one model architecture's family is supported - a per-family fraction on the complete-model-support face. |
 | * | crystal | config | support-maturity | **Qwen35GDNParityCosineMin** - The acceptance floor constant (model.Qwen35GDNParityCosineMin) - the minimum cosine similarity the Qwen3.5 gated-delta-net path must hit against the reference to pass parity. |
@@ -1245,6 +1249,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | guard-gate | **guardPreCompactClaudeSettings (Claude hook settings)** - guardPreCompactClaudeSettings is the top-level Claude settings structure whose hook map is updated by guard precompact, stop-hook, and toolproc-hook installation. |
 | o | defined | symbol | guard-gate | **guardPreCompactHookCommand (precompact hook shell)** - guardPreCompactHookCommand builds the concrete command line fak writes into Claude hook settings for the precompact hook path. |
 | o | defined | symbol | guard-gate | **AppendGuarded (advisory-lock-guarded ledger append)** - internal/modver.AppendGuarded appends already-rendered fak-module-versions/1 JSONL to the module-versions ledger while holding an exclusive internal/flock advisory lock on <ledger>.lock, so two agents stamping the shared multi-session trunk cannot interleave a torn or duplicated row (#2473). |
+| o | defined | symbol | guard-gate | **guardOutboxMaxPendingAge (undelivered-outbox retention floor)** - cmd/fak/guard_slack.go guardOutboxMaxPendingAge: the generous age floor (72h) past which boundUndeliveredOutbox drops an UNDELIVERED guard-session Slack status card from the .dispatch-runs/slack-outbox spool on the no-token finalize path, bounding a spool that can never drain on a headless seat (#5354, census #5345 row 10). |
 | o | defined | symbol | layout | **PreviewLayout** - PreviewLayout (internal/ctxplan/preview.go) renders a Preview of spans under a Layout, forecast, budget, and cost model. |
 | o | defined | symbol | layout | **ProbeLayout** - Index.ProbeLayout (internal/ctxplan/layout.go) probes the per-area spans a Layout would produce for a forecast. |
 | o | defined | config | layout | **dateLayout (LiveCodeBench date format)** - internal/livecodebench's package-level const dateLayout = "2006-01-02", the Go time.Parse/Format reference layout string every LiveCodeBench contest_date, date-window bound, and normalized date field is parsed and re-rendered against. |
@@ -2235,7 +2240,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1999 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 2004 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2247,8 +2252,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 194 | 204 | 10 |
 | guard-gate | 354 | 362 | 8 |
+| session-runtime | 196 | 204 | 8 |
 | cache | 255 | 259 | 4 |
 | decision | 49 | 53 | 4 |
 | policy-capability | 140 | 143 | 3 |
