@@ -186,6 +186,24 @@ func excludedMatch(tag, account string, exclude []string, identityValues ...stri
 
 var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 
+// opusSegmentRE matches `opus` as a NAME SEGMENT of a normalized model id — bare, or
+// bounded by the punctuation ids use (`claude-opus-5`, `anthropic/claude-opus-4-8`).
+// The letter boundaries are what keep an unrelated substring (`octopus`) out.
+var opusSegmentRE = regexp.MustCompile(`(^|[^a-z])opus([^a-z]|$)`)
+
+// opusCompactRE matches the punctuation-stripped `opus<version>` spelling (`claudeopus5`,
+// `opus48`), the shape a separator-free id collapses to and the one the segment match above
+// cannot see. It is ANCHORED at the head (with the optional `claude` vendor prefix) and needs
+// a version digit, so a name that merely ends in the letters — `octopus-7b` — is not swept in.
+var opusCompactRE = regexp.MustCompile(`^(claude)?opus[0-9]`)
+
+// isOpusFamily reports whether a model name names the Claude Opus family in any generation
+// and any id shape. text is the lowercased, separator-normalized name and compact is its
+// punctuation-stripped form — the same pair modelTierFromName matches every other family on.
+func isOpusFamily(text, compact string) bool {
+	return opusSegmentRE.MatchString(text) || opusCompactRE.MatchString(compact)
+}
+
 // modelTierFromName is the small v1 model taxonomy. Tier 0 is the restricted apex
 // model (Fable 5 — see apextier.go); tier 1 is the max-quality frontier set; tier 2 is
 // the lightweight-work set (GLM-5.2 and Gemini 3.5 Flash); everything else is tier 3.
@@ -210,9 +228,15 @@ func modelTierFromName(model string) int {
 		strings.Contains(text, "gpt-5.5") || strings.Contains(compact, "gpt55") {
 		return 1
 	}
-	if strings.Contains(text, "opus-4.6") || strings.Contains(compact, "opus46") ||
-		text == "opus" || text == "claude-opus" {
-		return 1
+	// The Opus FAMILY is the Claude frontier class in every generation — opus-5 (the
+	// current fleet primary), opus-4.8, opus-4.6, and the bare aliases. Matching the
+	// family rather than enumerating dated ids is what stops a model bump from silently
+	// demoting the fleet primary: while only opus-4.6 was listed here, the shipped
+	// default `claude-opus-4-8` classified as tier 3 (TierOther), so the router treated
+	// the strongest seat as "everything else". Fable never reaches this line — IsApexModel
+	// already returned above — so widening to the family cannot leak into the apex tier.
+	if isOpusFamily(text, compact) {
+		return TierFrontier
 	}
 	if strings.Contains(text, "deepseek-v4-pro") || strings.Contains(compact, "deepseekv4pro") ||
 		strings.Contains(text, "kimi-k2.6") || strings.Contains(compact, "kimik26") {
