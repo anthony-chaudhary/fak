@@ -109,10 +109,34 @@ func runGuardPreCompactDecision(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	metricsURL := strings.TrimSpace(*metricsURLFlag)
+	// An explicitly-passed --metrics-url PINS the signal source to that gateway's
+	// /metrics. Without the pin the lifecycle-IPC preference (#3305) reads whatever
+	// FAK_GUARD_LIFECYCLE_SOCKET happens to be in the environment — and `fak guard`
+	// exports that var into everything it launches, so a nested `fak guard-precompact
+	// --metrics-url http://…` (an operator debugging a specific gateway, or a test
+	// standing up its own /metrics) silently reported the SUPERVISOR's posture and
+	// never dialled the URL it was handed. Naming a URL on the command line is an
+	// explicit choice of source, so it outranks the ambient env. The installed hook
+	// passes no flags (see writeGuardPreCompactSettings) and carries the metrics URL in
+	// FAK_GUARD_PRECOMPACT_METRICS_URL instead, so the guarded path still prefers IPC.
+	// fs.Visit walks only the flags actually present in argv, which is exactly the
+	// "named on the command line" vs "fell back to its env-derived default" distinction.
+	metricsURLPinned := false
+	if metricsURL != "" {
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "metrics-url" {
+				metricsURLPinned = true
+			}
+		})
+	}
 	if metricsURL == "" {
 		metricsURL = guardPreCompactMetricsURLFromBase(os.Getenv("ANTHROPIC_BASE_URL"))
 	}
-	signals, source, err := fetchGuardPreCompactSignalsPreferred(context.Background(), metricsURL, *timeout)
+	fetch := fetchGuardPreCompactSignalsPreferred
+	if metricsURLPinned {
+		fetch = fetchGuardPreCompactSignalsHTTP
+	}
+	signals, source, err := fetch(context.Background(), metricsURL, *timeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak guard PreCompact: allowing Claude auto-compaction; posture unavailable: %v\n", err)
 		return 0
@@ -159,6 +183,14 @@ func fetchGuardPreCompactSignalsPreferred(ctx context.Context, metricsURL string
 			relayPresent: snapshot.RelayWouldRotateSeen,
 		}, "ipc", nil
 	}
+	return fetchGuardPreCompactSignalsHTTP(ctx, metricsURL, timeout)
+}
+
+// fetchGuardPreCompactSignalsHTTP reads BOTH the compaction posture and the relay
+// would-rotate gauge out of ONE gateway /metrics scrape, ignoring the lifecycle-IPC
+// env entirely. It is the fallback leg of fetchGuardPreCompactSignalsPreferred and
+// also the pinned path when the caller named a --metrics-url explicitly.
+func fetchGuardPreCompactSignalsHTTP(ctx context.Context, metricsURL string, timeout time.Duration) (guardPreCompactSignals, string, error) {
 	if metricsURL == "" {
 		return guardPreCompactSignals{}, "http", errors.New("no metrics URL configured")
 	}

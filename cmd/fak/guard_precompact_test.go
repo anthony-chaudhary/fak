@@ -255,6 +255,53 @@ func TestRelayPrecompactShadowSurfacesArmedWithoutCompaction(t *testing.T) {
 	}
 }
 
+// TestRunGuardPreCompactExplicitMetricsURLOutranksAmbientIPC pins the signal-source
+// precedence. `fak guard` exports FAK_GUARD_LIFECYCLE_SOCKET/TOKEN into everything it
+// launches, so any nested `fak guard-precompact --metrics-url …` inherits a live
+// supervisor IPC. The #3305 IPC preference used to win even there, which read the
+// SUPERVISOR's posture (default "block", relay gauge unseen) and never dialled the URL
+// the caller named — turning an allow posture into exit 2 and swallowing the relay
+// shadow line. An explicitly-passed --metrics-url must pin the source to HTTP.
+func TestRunGuardPreCompactExplicitMetricsURLOutranksAmbientIPC(t *testing.T) {
+	_, ipc := newGuardLifecycleTestServer(t)
+	t.Setenv(guardLifecycleSocketEnv, ipc.path)
+	t.Setenv(guardLifecycleTokenEnv, ipc.token)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("fak_harness_coherence_posture 0\nfak_relay_would_rotate 1\n"))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardPreCompact(nil, &stderr, nil, []string{
+		"--mode", guardPreCompactModeShadow,
+		"--metrics-url", srv.URL + "/metrics",
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "signals=http") {
+		t.Fatalf("stderr = %q, want signals=http (explicit --metrics-url pins the source)", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "shadow would allow") {
+		t.Fatalf("stderr = %q, want the allow posture read from the named URL", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "relay would-rotate signal armed (reason=RELAY_ARMED)") {
+		t.Fatalf("stderr = %q, want the relay gauge from the named URL", stderr.String())
+	}
+
+	// Enforce mode must honour the same pin: an unreachable NAMED url fails open
+	// rather than silently succeeding against the ambient supervisor IPC.
+	var enforceErr strings.Builder
+	if code := runGuardPreCompact(nil, &enforceErr, nil, []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", "http://127.0.0.1:1/metrics",
+		"--timeout", "1ms",
+	}); code != 0 {
+		t.Fatalf("enforce exit = %d, want fail-open 0; stderr = %q", code, enforceErr.String())
+	}
+}
+
 // TestRelayPrecompactShadowParsesGauge covers the pure relay-gauge parser: a
 // present gauge reports its armed bit, a labeled series matches, and an absent
 // gauge reports not-present so the shadow seam stays silent.
