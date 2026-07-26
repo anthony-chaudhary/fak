@@ -1180,6 +1180,26 @@
           "category": "incidental",
           "reason": "seam over accounts.ClaudeKeychainSupported (platform-capability probe for the darwin keychain exec); not a support-maturity grid concept",
           "token": "guardKeychainSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported struct keying one coverage-profile block by file+span so repeated blocks merge; an implementation detail of CoverageScores with no operator-facing surface",
+          "token": "coverageBlock"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported line parser for one go-coverprofile row; a decoding step inside CoverageScores, not a concept an operator or caller names",
+          "token": "parseCoverageLine"
+        },
+        {
+          "category": "incidental",
+          "reason": "local flag variable holding the --coverage profile path inside runVersionModules; a CLI argument binding, not a concept",
+          "token": "coveragePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported cmd/fak glue that reads the profile, resolves the module path from go.mod and calls CoverageScores/CoverageEntries; the named concepts are those two, this is their call site",
+          "token": "joinCoverageScores"
         }
       ],
       "id": "support-maturity",
@@ -1194,6 +1214,8 @@
         "achievedMaturity",
         "correctnessclass",
         "correctnessdependson",
+        "coverageBlock",
+        "coveragePath",
         "coveragebaseline",
         "coveragediscipline",
         "defaultscoreparitytol",
@@ -1203,10 +1225,12 @@
         "errstreamingunsupported",
         "guardKeychainSupported",
         "immaturity",
+        "joinCoverageScores",
         "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",
         "paritybench",
         "parityreport",
+        "parseCoverageLine",
         "recurrentevictunsupportederror",
         "scoreparity",
         "sourcecoverage",

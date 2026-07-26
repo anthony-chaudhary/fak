@@ -1994,3 +1994,17 @@ A registry ROW in PolicyKnobRegistry naming one amendable policy surface togethe
 The amendment class meaning a GATED OPERATOR CHANNEL (overlay, reload, operator escalation) may widen this policy surface, and the agent may never widen it on its own. One of four closed classes alongside FROZEN, RATCHET and SELF_AMENDABLE.
 
 **Distinct from:** A PolicyKnob row carries an AmendGatedWiden value; the class is the vocabulary, the row is the assignment. Against its own siblings: RATCHET permits any authorized channel to tighten and nobody to widen, so it is about DIRECTION; GATED_WIDEN permits widening but restricts WHO, so it is about CHANNEL. A knob can therefore be widened under GATED_WIDEN in a way RATCHET forbids outright — the two are not points on one strictness scale, and reading GATED_WIDEN as 'looser RATCHET' is the specific error this row exists to prevent. SELF_AMENDABLE is the agent-writable frontier and is deliberately empty.
+
+
+### CoverageEntries
+
+The modver adapter that lifts a flat {module: statement-coverage-percent} map into the map[string]ScoreEntry that Report.JoinScores consumes, tagging each entry ProvenanceWitnessed because the percent is read off a real go-coverprofile artifact rather than modeled (#2467).
+
+**Distinct from:** The LIFT from percent to scored entry (provenance tagging), distinct from CoverageScores which computes the percents by folding a profile statement-weighted per module, and distinct from CoveragePct which is a scorecard's own coverage field rather than a module-version score.
+
+
+### CoverageScores
+
+The modver fold that decodes a go-coverprofile and returns the flat {module: percent} map, statement-WEIGHTED per module (covered statements over total statements across every file mapping to that module) rather than averaged per file, with repeated file+span blocks merged once and a malformed profile returned as an error instead of a partial fold (#2467).
+
+**Distinct from:** The COMPUTATION of per-module coverage percents from a profile, distinct from CoverageEntries which merely lifts those percents into scored entries for JoinScores, and distinct from the per-file scorecard adapter which takes an arithmetic mean because it has no statement counts to weight by.

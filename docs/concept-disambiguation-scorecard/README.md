@@ -15,21 +15,21 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **39** (clarity 0 + coverage 39) |
-| **Crystal-clear concepts (and climbing)** | **395** crystal of 2013 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2190 / 2229** (98.3% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **40** (clarity 0 + coverage 40) |
+| **Crystal-clear concepts (and climbing)** | **397** crystal of 2015 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2194 / 2234** (98.2% of the discovered confusable space) |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2013 concepts - score 98.9/100 (grade A) - disambiguation-debt 39
+concept-disambiguation chart - 2015 concepts - score 98.8/100 (grade A) - disambiguation-debt 40
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 395
+  * crystal       #######..................... 397
   o defined       ############################ 1618
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -53,20 +53,20 @@ clarity mix by family (each cell = one concept):
   render-materialize ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (152 concept(s); 4 crystal)
   score-debt       ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (70 concept(s); 6 crystal)
   session-runtime  ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 23 crystal)
-  support-maturity ************ooooooooooooooooo (29 concept(s); 12 crystal)
+  support-maturity **************ooooooooooooooooo (31 concept(s); 14 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    **************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (127 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  ###########################. 196/205
+  session-runtime  ###########################. 196/206
   guard-gate       ###########################. 355/363
   cache            ############################ 256/260
   decision         ##########################.. 49/53
   policy-capability ###########################. 143/146
-  render-materialize ############################ 171/174
-  support-maturity ##########################.. 37/40
-  context-ctx      ############################ 193/195
+  render-materialize ############################ 172/175
+  support-maturity ##########################.. 39/42
+  context-ctx      ############################ 194/196
   loop             ###########################. 72/74
   witness-proof    ############################ 136/138
   evict            ###########################. 44/45
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.3%  (2190/2229 confusable tokens positioned)
+namespace coverage  [###############################.] 98.2%  (2194/2234 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -426,6 +426,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | metric | support-maturity | **FamilyCoverage** - The covmatrix/conceptcatalog measure (FamilyCoverage, JSON family_coverage) of how much of one model architecture's family is supported - a per-family fraction on the complete-model-support face. |
 | * | crystal | config | support-maturity | **Qwen35GDNParityCosineMin** - The acceptance floor constant (model.Qwen35GDNParityCosineMin) - the minimum cosine similarity the Qwen3.5 gated-delta-net path must hit against the reference to pass parity. |
 | * | crystal | symbol | support-maturity | **TestVerbTierCoverageIsTotal** - The named coverage guarantee (TestVerbTierCoverageIsTotal) referenced by the verb-tier gate: it reds CI when any live dispatch verb resolves to no tier, asserting verb-tier coverage is total. |
+| * | crystal | symbol | support-maturity | **CoverageEntries** - The modver adapter that lifts a flat {module: statement-coverage-percent} map into the map[string]ScoreEntry that Report.JoinScores consumes, tagging each entry ProvenanceWitnessed because the percent is read off a real go-coverprofile artifact rather than modeled (#2467). |
+| * | crystal | symbol | support-maturity | **CoverageScores** - The modver fold that decodes a go-coverprofile and returns the flat {module: percent} map, statement-WEIGHTED per module (covered statements over total statements across every file mapping to that module) rather than averaged per file, with repeated file+span blocks merged once and a malformed profile returned as an error instead of a partial fold (#2467). |
 | * | crystal | symbol | support-maturity | **ReasonUnsupportedPatch** - Go constant naming the shared-task patch-result reason UNSUPPORTED_PATCH: the op and path combination falls outside the contract's closed patch grammar. |
 | * | crystal | symbol | support-maturity | **UNSUPPORTED_PATCH** - Wire reason token in shared-task patch-result JSON: the fold denied a patch whose op or path is outside the supported contract grammar. |
 | * | crystal | symbol | support-maturity | **resultForUnsupported** - Fold helper building the denied patch result carrying UNSUPPORTED_PATCH at the record's current revision. |
@@ -2249,7 +2251,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 2013 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 2015 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2261,14 +2263,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 196 | 205 | 9 |
+| session-runtime | 196 | 206 | 10 |
 | guard-gate | 355 | 363 | 8 |
 | cache | 256 | 260 | 4 |
 | decision | 49 | 53 | 4 |
 | policy-capability | 143 | 146 | 3 |
-| render-materialize | 171 | 174 | 3 |
-| support-maturity | 37 | 40 | 3 |
-| context-ctx | 193 | 195 | 2 |
+| render-materialize | 172 | 175 | 3 |
+| support-maturity | 39 | 42 | 3 |
+| context-ctx | 194 | 196 | 2 |
 | loop | 72 | 74 | 2 |
 | witness-proof | 136 | 138 | 2 |
 | evict | 44 | 45 | 1 |

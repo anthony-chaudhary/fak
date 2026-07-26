@@ -1,0 +1,41 @@
+{
+  "rows": [
+    {
+      "id": "modvercoverageentries",
+      "canonical": "CoverageEntries",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The modver adapter that lifts a flat {module: statement-coverage-percent} map into the map[string]ScoreEntry that Report.JoinScores consumes, tagging each entry ProvenanceWitnessed because the percent is read off a real go-coverprofile artifact rather than modeled (#2467).",
+      "distinction": "The LIFT from percent to scored entry (provenance tagging), distinct from CoverageScores which computes the percents by folding a profile statement-weighted per module, and distinct from CoveragePct which is a scorecard's own coverage field rather than a module-version score.",
+      "distinct_from": [
+        "x-goal25b-support-maturity-coveragepct"
+      ],
+      "aliases": [],
+      "grounding": "CoverageEntries",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "modvercoveragescores",
+      "canonical": "CoverageScores",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The modver fold that decodes a go-coverprofile and returns the flat {module: percent} map, statement-WEIGHTED per module (covered statements over total statements across every file mapping to that module) rather than averaged per file, with repeated file+span blocks merged once and a malformed profile returned as an error instead of a partial fold (#2467).",
+      "distinction": "The COMPUTATION of per-module coverage percents from a profile, distinct from CoverageEntries which merely lifts those percents into scored entries for JoinScores, and distinct from the per-file scorecard adapter which takes an arithmetic mean because it has no statement counts to weight by.",
+      "distinct_from": [
+        "modvercoverageentries"
+      ],
+      "aliases": [],
+      "grounding": "CoverageScores",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
