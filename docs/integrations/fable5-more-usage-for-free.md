@@ -29,7 +29,7 @@ which is which:
    "more Fable 5" from this lever is really "more of *whatever model you're
    running*."
 2. **It reaches Fable 5's separate allocation when Opus caps out (Fable-specific).**
-   When your default Opus 4.8 window hits a weekly / 5-hour / usage cap, guard's
+   When your default Opus window hits a weekly / 5-hour / usage cap, guard's
    launcher fails the session over to **Fable 5's separate allocation bucket**
    automatically — genuinely "more Fable 5 usage" you could not otherwise reach.
 
@@ -154,19 +154,28 @@ projection here; it's the thing running this document.
 
 This is the one lever that is *specifically* about getting **more Fable 5**.
 
-Every seat starts on Opus 4.8 (`defaultLaunchModel = "claude-opus-4-8"`,
-`cmd/fak/accounts_launch.go:65`). When that Opus start is refused **before the
+Every seat starts on Opus 5 (`defaultLaunchModel = "claude-opus-5"`,
+`cmd/fak/accounts_launch.go`). When that Opus start is refused **before the
 session begins** by a usage/weekly/5-hour cap — matched by
-`launchModelUsageLimitSignals` (`accounts_launch.go:511-522`) — guard's launcher
-retries on the cheaper **Fable 5** alias (`defaultLaunchFallbackModel = "fable"`,
-`:72`), which draws on a **separate allocation bucket**. The Opus 4.8 → Fable 5
-chain is built at `:416-457` and fires via `shouldRetryLaunchWithFallback`
-(`:471-481`):
+`launchModelUsageLimitSignals` — guard's launcher walks the fallback CHAIN
+(`defaultLaunchFallbackModel = "claude-opus-4-8,claude-fable-5"`), which fires via
+`shouldRetryLaunchWithFallback`. The two rungs answer two different walls:
+
+- **`claude-opus-4-8`** — the previous Opus generation. It covers the *unknown-model*
+  wall (a CLI build or seat that does not know the Opus 5 id), so that case degrades
+  inside the Opus class instead of dropping a tier.
+- **`claude-fable-5`** — the Fable rung, which draws on a **separate allocation
+  bucket**. A weekly cap is bucket-scoped and therefore walls *both* Opus rungs, so a
+  capped seat walks through to Fable — the lever this page is about.
+
+Both rungs use the **versioned** id. The bare `fable` alias 400-crashes a headless
+worker (the same chain feeds `claude -p --fallback-model` in the dispatch fleet), which
+is why the chain never spells a rung as an alias:
 
 ```bash
 # The launcher path (fak accounts launch / the dispatch fleet): capped Opus
 # automatically fails the seat over to Fable 5's separate bucket.
-fak accounts launch --fallback-model fable          # Opus weekly cap → Fable (accounts.go:143)
+fak accounts launch --fallback-model claude-fable-5   # Opus weekly cap → Fable, no alias
 ```
 
 There's also a cost-pressure gate that lets you *choose* Fable 5 to satisfy a
