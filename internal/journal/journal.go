@@ -310,7 +310,20 @@ func (j *Journal) Stats() (seq, dropped, writeErrors uint64) {
 // Path returns the file the journal appends to, or "" for an in-memory journal.
 // It lets a caller that enabled the journal report WHERE the durable trail lives
 // (the fak guard banner / exit summary) and what to run `fak audit verify` over.
+//
+// A NIL receiver reports "" instead of panicking. Across cmd/fak a nil *Journal is the ordinary
+// encoding of "journaling is off" — maybeRecordGuardSessionIndex (cmd/fak/guard_sessions.go)
+// tests `audit == nil` before reaching for the path for precisely that reason. A sibling call
+// site two lines later (the guardOwnsInteractiveTerminal row in cmd/fak/guard.go) omitted that
+// check, so every DEFAULT `fak guard` launch — the attended path, which enables no journal —
+// nil-dereferenced j.mu here and panicked. cmdGuard then exits 2, which reds the entire
+// guard / precompact / stop-hook test family at once from one missing nil test. Making this
+// accessor TOTAL retires that whole class: "no journal at all" and "journal with no file" now
+// answer the same "" the doc line above already promises for the in-memory case.
 func (j *Journal) Path() string {
+	if j == nil {
+		return ""
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return j.path
