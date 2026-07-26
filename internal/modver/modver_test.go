@@ -47,6 +47,18 @@ func TestModuleOf(t *testing.T) {
 		{"examples/README.md", "", "", false},                 // top-level non-JSON: excluded
 		{"examples/mcp/.mcp.json", "", "", false},             // nested demo fixture: excluded
 		{"examples/adjudication-demo/main.go", "", "", false}, // nested demo: excluded
+		// .claude/skills/ is a directory-keyed agent-skill keyspace.
+		{".claude/skills/commit-clean/SKILL.md", ".claude/skills/commit-clean", "skill", true},
+		{".claude/skills/skill-overlap/skill_overlap.py", ".claude/skills/skill-overlap", "skill", true}, // helper script folds into the skill
+		{".claude/skills/verify/refs/deep.md", ".claude/skills/verify", "skill", true},                   // deeper nesting still keys the skill dir
+		{".claude\\skills\\commit-clean\\SKILL.md", ".claude/skills/commit-clean", "skill", true},        // backslash-normalized
+		{".claude/skills/README.md", "", "", false},                                                      // directly under the skills root: no module
+		{".claude/skills/.gitignore", "", "", false},                                                     // directly under the skills root: no module
+		{".claude/settings.json", "", "", false},                                                         // not a skill definition
+		{".claude/goal-prompts/ask-hard-questions.md", "", "", false},                                    // prompts, not the skills keyspace
+		{".claude/memory/MEMORY.md", "", "", false},                                                      // memory mirror, not the skills keyspace
+		{"internal/ctxknobs/testdata/repo/.claude/skills/x/SKILL.md", // a fixture skill under internal/ stays its Go leaf
+			"internal/ctxknobs", "internal", true},
 		{"", "", "", false},
 	}
 	for _, c := range cases {
@@ -277,6 +289,84 @@ func TestPolicyKeyspace(t *testing.T) {
 	for _, r := range rows {
 		if r.Kind != "policy" || !strings.HasPrefix(r.Module, "examples/") {
 			t.Errorf("ledger row not a policy row: %+v", r)
+		}
+	}
+}
+
+// TestSkillKeyspace is the #2461 witness: a .claude/skills/<name>/ directory flows
+// through Snapshot as a directory-keyed "skill" module carrying a derived
+// r<rev>+g<sha> version, and is emittable as a ledger row (the "live stamp with
+// skill rows"). It pins the three exclusions that make the keyspace honest — a
+// helper script folds into its skill rather than becoming a module of its own, a
+// file sitting directly under .claude/skills/ is no module, and a non-skills
+// .claude/ subtree is outside the keyspace — plus the kind="skill" tag that makes
+// the skills-drift query one jq over the ledger.
+func TestSkillKeyspace(t *testing.T) {
+	// Only the newer commit touches commit-clean, so skill-overlap's last-touch
+	// stays behind it: the two skills have to be separable by date for the
+	// drift assertion below to mean anything.
+	const skillLog = "\x1e" + "sk222222\t2026-07-26T12:00:00Z\n" +
+		".claude/skills/commit-clean/SKILL.md\n" +
+		".claude/skills/README.md\n" + // directly under the skills root: excluded
+		".claude/settings.json\n" + // not a skill definition: excluded
+		"\x1e" + "sk111111\t2026-07-25T09:00:00Z\n" +
+		".claude/skills/commit-clean/SKILL.md\n" +
+		".claude/skills/skill-overlap/SKILL.md\n" +
+		".claude/skills/skill-overlap/skill_overlap.py\n" // helper folds into the skill: counts once
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "rev-parse":
+			return []byte("skhead01\n"), nil
+		case "ls-files":
+			return []byte(".claude/skills/commit-clean/SKILL.md\x00" +
+				".claude/skills/skill-overlap/SKILL.md\x00.claude/skills/skill-overlap/skill_overlap.py\x00" +
+				".claude/skills/README.md\x00.claude/settings.json\x00"), nil
+		case "log":
+			return []byte(skillLog), nil
+		}
+		t.Fatalf("unexpected git args: %v", args)
+		return nil, nil
+	}
+	rep, err := Snapshot(context.Background(), t.TempDir(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two skills survive: commit-clean and skill-overlap. The skills-root README
+	// and the non-skills .claude/settings.json are excluded from the keyspace.
+	if len(rep.Modules) != 2 {
+		t.Fatalf("got %d modules, want 2 (two skill directories): %+v", len(rep.Modules), rep.Modules)
+	}
+	clean := findModuleMV(t, rep, ".claude/skills/commit-clean")
+	if clean.Kind != "skill" || clean.Rev != 2 || clean.LastCommit != "sk222222" {
+		t.Fatalf("commit-clean skill = %+v, want kind=skill rev=2 last=sk222222 (both commits touch it)", clean)
+	}
+	if v := clean.Version(); v != "r2+gsk222222" {
+		t.Errorf("Version() = %q, want r2+gsk222222", v)
+	}
+	// The helper script must fold into its skill, not become a second module, and
+	// must not double-count the rev of the commit that touched both its files.
+	overlap := findModuleMV(t, rep, ".claude/skills/skill-overlap")
+	if overlap.Kind != "skill" || overlap.Rev != 1 {
+		t.Fatalf("skill-overlap = %+v, want kind=skill rev=1 (SKILL.md + helper are one module, one commit)", overlap)
+	}
+	// A skill untouched for longer must read as older: last-touch is a distinct
+	// field from the derived rev, and it is what makes skill drift visible.
+	if !(overlap.LastDate < clean.LastDate) {
+		t.Errorf("last-touch dates do not separate the skills: overlap %q vs commit-clean %q",
+			overlap.LastDate, clean.LastDate)
+	}
+	// The skills must be emittable as ledger rows (empty prior ledger), each
+	// tagged kind=skill so a skills-drift query is one jq over the ledger.
+	rows := DeltaRows(rep, nil, "2026-07-26T12:00:00Z")
+	if len(rows) != 2 {
+		t.Fatalf("ledger rows = %+v, want two skill rows", rows)
+	}
+	for _, r := range rows {
+		if r.Kind != "skill" || !strings.HasPrefix(r.Module, ".claude/skills/") {
+			t.Errorf("ledger row not a skill row: %+v", r)
+		}
+		if r.Version == "" || r.LastDate == "" {
+			t.Errorf("skill row missing the rev/last-touch a drift query reads: %+v", r)
 		}
 	}
 }

@@ -33,6 +33,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/egressfloor"
+	"github.com/anthony-chaudhary/fak/internal/egresslist"
 )
 
 // Policy is the decision table. A zero Policy is the fail-closed empty policy:
@@ -123,6 +124,40 @@ type Policy struct {
 	// with POLICY_BLOCK and a bounded host witness. Fetched bytes still flow
 	// through the result-admission chain as untrusted data.
 	ResearchEgressAllowHosts []string
+	// EgressBlockHosts are operator-declared hosts the egress LIST layer refuses, with
+	// subdomain coverage (a rule on "tracker.example" also refuses "cdn.tracker.example").
+	// Unlike EgressExtraDenyHosts — which tightens the hardwired floor and cites its class
+	// — these compose with EgressAllowHosts and EgressBlockLists under adblock precedence.
+	// Empty by default, so this is additive. See egresslist.go.
+	EgressBlockHosts []string
+	// EgressAllowHosts are EXCEPTIONS: hosts carved back open even when a block rule (an
+	// operator rule or a subscribed community list) would refuse them — adblock `@@`
+	// semantics, resolved per host. Under EgressRestrict they become the total allowlist
+	// rather than a set of exceptions. Empty by default.
+	EgressAllowHosts []string
+	// EgressBlockLists names bundled community block lists this policy subscribes to
+	// (egresslist.BundledListNames). Names are validated LOUDLY at policy load, so an
+	// unknown list is a load error, never a silently-empty subscription. Empty by default.
+	EgressBlockLists []string
+	// EgressRestrict inverts the egress posture from "reachable unless listed" to
+	// "unreachable unless listed": a destination no EgressAllowHosts rule names is refused
+	// POLICY_BLOCK even when no block rule matched it, and an empty allowlist under
+	// restrict closes egress entirely. False by default (the additive posture), and it only
+	// ever tightens.
+	EgressRestrict bool
+
+	// AutoRepairSidestep opts the reversibility rung into IN-FLIGHT REPAIR of a
+	// sanctioned compiled sidestep: when a held call's family offers a machine-
+	// applicable safe-subset substitution (today only a bare `git push` -> `fak sync
+	// push`), emit that as a TRANSFORM instead of the preview-confirm hold. Default
+	// false -- the hold is preserved, so every existing deployment is unchanged.
+	// Only the SAFE subset is ever substituted: reversibility.go attaches a
+	// RewriteCommand ONLY after its own safe-subset gate passes, so a --force /
+	// --delete / refspec push carries none and still holds. Turning this on
+	// therefore cannot launder a dangerous push into a weaker one -- the safe-subset
+	// test lives at the producer, not here. Operators set it with
+	// FAK_GUARD_AUTOREPAIR=sidestep (internal/policy, AutoRepairEnv).
+	AutoRepairSidestep bool
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -188,6 +223,9 @@ type ArgPredicate struct {
 type policyState struct {
 	policy    Policy
 	argByTool map[string][]ArgPredicate
+	// egressList is the policy's egress rules compiled once at install time (nil when
+	// the policy configures none, which Decides None for every host at zero cost).
+	egressList *egresslist.List
 }
 
 type Adjudicator struct {
@@ -207,7 +245,11 @@ func New(p Policy) *Adjudicator {
 	p.Profile = sanitizeProfile(p.Profile)                         // floor invariant: a profile may narrow only
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // floor invariant: only heuristic reasons soften
 	a := &Adjudicator{receiptRoot: receiptWorkspaceRoot()}
-	a.state.Store(&policyState{policy: p, argByTool: indexArgPredicates(p.ArgPredicates)})
+	a.state.Store(&policyState{
+		policy:     p,
+		argByTool:  indexArgPredicates(p.ArgPredicates),
+		egressList: compileEgressList(p),
+	})
 	return a
 }
 
@@ -218,7 +260,8 @@ func (a *Adjudicator) SetPolicy(p Policy) {
 	// Build the immutable predicate index before excluding readers. The lock then
 	// protects only the atomic policy+index pair swap, not O(predicate-count) work.
 	argByTool := indexArgPredicates(p.ArgPredicates)
-	a.state.Store(&policyState{policy: p, argByTool: argByTool})
+	egressList := compileEgressList(p)
+	a.state.Store(&policyState{policy: p, argByTool: argByTool, egressList: egressList})
 }
 
 // ResetRun clears the per-run synthesized-tool ledger (#543). The authored-script
@@ -459,6 +502,13 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 				Payload: abi.WitnessPayload{Claim: label + ": " + host},
 			}
 		}
+		// The operator-configurable band of the SAME rung, deliberately AFTER the
+		// hardwired check above: block/allow lists and the restrict posture (egresslist.go).
+		// Running second is what makes the floor un-openable — an allow rule naming the
+		// metadata host never gets asked, because Classify has already returned.
+		if v, ok := egressListVerdict(state.egressList, p, c.Tool, args); ok {
+			return v
+		}
 	}
 	if v, ok := researchEgressVerdict(c.Tool, args, p.ResearchEgressAllowHosts); ok {
 		return v
@@ -523,6 +573,36 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		}
 		env, ok := ReversibilityConfirmed(c.Tool, args)
 		if !ok {
+			// In-flight repair of a sanctioned compiled sidestep: when the operator opts
+			// in (FAK_GUARD_AUTOREPAIR=sidestep) and the matched family offered a machine-
+			// applicable substitution for THIS call, substitute the sanctioned verb instead
+			// of holding. env carries a RewriteCommand only when the producer's safe-subset
+			// gate passed (a bare `git push`, never a --force/--delete/refspec push), so the
+			// dangerous variants never reach here with one and still take the hold below.
+			if p.AutoRepairSidestep && env.RewriteCommand != "" {
+				// Preserve every non-confirmation arg (workdir, timeout, description, ...) and
+				// swap only the effect-bearing command, so the sanctioned verb still runs in
+				// the same working directory the operator targeted -- dropping workdir here
+				// would silently push a different repo.
+				na := argsWithoutConfirmation(args)
+				na["command"] = env.RewriteCommand
+				if ref, ok := putJSON(ctx, na); ok {
+					newTool := ""
+					if !strings.EqualFold(c.Tool, env.RewriteTool) {
+						newTool = env.RewriteTool // cross-tool sidestep (e.g. MCP git_push -> Bash)
+					}
+					return abi.Verdict{
+						Kind:    abi.VerdictTransform,
+						By:      "monitor/reversibility",
+						Payload: abi.TransformPayload{NewArgs: ref, NewTool: newTool},
+						Meta: map[string]string{
+							"reversibility_autorepair":   "sidestep",
+							"reversibility_class":        string(env.Class),
+							"reversibility_substitution": env.RewriteCommand,
+						},
+					}
+				}
+			}
 			return reversibilityGateVerdict(env)
 		}
 		confirmedWithToken = env.Class != ReversibilityReversible && hasConfirmationArg(args)
@@ -1118,6 +1198,29 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 							continue
 						}
 						return argDeny(pr, "shell_dialect "+cmdlet), true, notes
+					}
+				}
+				continue
+			}
+			// The PRIVILEGE-ESCALATION rule (`\bsudo\b`) is decided STRUCTURALLY, not
+			// by the raw regex, for the same reason as rm_rf/rce_pipe: the raw regex
+			// false-positives on sudo as quoted text (`echo 'sudo make install'`) and
+			// — the dominant false POLICY_BLOCK in real remote-GPU bring-up
+			// trajectories — on a REMOTE escalation carried as an ssh argument
+			// (`ssh gpu-box 'sudo systemctl restart …'`), where the local command
+			// word is ssh and the escalation is governed by the remote host's own
+			// controls, not this local floor. commandLocalEscalationWord tokenizes
+			// the command, unwraps sh -c / $() / ``, and matches sudo (or the doas
+			// launder the raw regex missed) only at a LOCAL resolved command-word
+			// position, so a genuine local escalation stays denied.
+			if isSudoArgRule(pr) {
+				if present {
+					if word, ok := commandLocalEscalationWord(val); ok {
+						if pr.Advisory {
+							note(pr, "sudo_local "+word)
+							continue
+						}
+						return argDeny(pr, "sudo_local "+word), true, notes
 					}
 				}
 				continue

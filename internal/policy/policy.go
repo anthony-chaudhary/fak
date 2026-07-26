@@ -29,6 +29,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/egresslist"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
 )
@@ -165,6 +166,18 @@ type Manifest struct {
 type EgressRule struct {
 	DenyHosts          []string `json:"deny_hosts,omitempty"`
 	ResearchAllowHosts []string `json:"research_allow_hosts,omitempty"`
+	// AllowHosts / BlockHosts / BlockLists are the adblock-style site allow/block layer
+	// (internal/egresslist): block_hosts refuse a host and every subdomain; block_lists
+	// subscribe to a bundled community filter list by name (an unknown name is a HARD
+	// load error naming the available lists — a dropped block list can never silently
+	// become an all-permissive no-op); allow_hosts are adblock '@@' exceptions that carve
+	// a host back open. restrict flips the WebFetch default posture from default-allowed
+	// to a strict allowlist. These map to adjudicator.Policy.Egress{Allow,Block}Hosts /
+	// EgressBlockLists / EgressRestrict.
+	AllowHosts []string `json:"allow_hosts,omitempty"`
+	BlockHosts []string `json:"block_hosts,omitempty"`
+	BlockLists []string `json:"block_lists,omitempty"`
+	Restrict   bool     `json:"restrict,omitempty"`
 }
 
 // AuthorizeRule releases a tainted flow into one exact sink tool/class. It is
@@ -374,6 +387,22 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if m.Egress != nil && len(m.Egress.ResearchAllowHosts) > 0 {
 		p.ResearchEgressAllowHosts = cloneSlice(m.Egress.ResearchAllowHosts)
 	}
+	if m.Egress != nil {
+		p.EgressAllowHosts = cloneSlice(m.Egress.AllowHosts)
+		p.EgressBlockHosts = cloneSlice(m.Egress.BlockHosts)
+		p.EgressRestrict = m.Egress.Restrict
+		// Every block_lists name must resolve to a bundled community list. An unknown
+		// name fails LOUD here, naming the bad list and the available ones — a dropped
+		// block list is a security regression, never a silent all-permissive no-op.
+		for i, name := range m.Egress.BlockLists {
+			if _, ok := egresslist.BundledList(name); !ok {
+				return Runtime{}, fmt.Errorf(
+					"egress.block_lists[%d]: unknown list %q; available: %s",
+					i, name, strings.Join(egresslist.BundledListNames(), ", "))
+			}
+		}
+		p.EgressBlockLists = cloneSlice(m.Egress.BlockLists)
+	}
 	if len(m.Allow) > 0 {
 		p.Allow = make(map[string]bool, len(m.Allow))
 		for _, t := range m.Allow {
@@ -451,6 +480,12 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	// Session-scoped, env-only (see AutoRepairEnv): applied after the manifest so a
+	// repo-shipped policy never carries one operator supervision preference to every
+	// other clone. A bad mode refuses the whole load rather than silently staying off.
+	if p.AutoRepairSidestep, err = autoRepairSidestepFromEnv(os.Getenv(AutoRepairEnv)); err != nil {
+		return Runtime{}, err
+	}
 	return Runtime{
 		Adjudicator:           p,
 		Sources:               sources,
@@ -521,10 +556,16 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 			m.Deny[t] = abi.ReasonName(c)
 		}
 	}
-	if len(p.EgressExtraDenyHosts) > 0 || len(p.ResearchEgressAllowHosts) > 0 {
+	if len(p.EgressExtraDenyHosts) > 0 || len(p.ResearchEgressAllowHosts) > 0 ||
+		len(p.EgressAllowHosts) > 0 || len(p.EgressBlockHosts) > 0 ||
+		len(p.EgressBlockLists) > 0 || p.EgressRestrict {
 		m.Egress = &EgressRule{
 			DenyHosts:          cloneSlice(p.EgressExtraDenyHosts),
 			ResearchAllowHosts: cloneSlice(p.ResearchEgressAllowHosts),
+			AllowHosts:         cloneSlice(p.EgressAllowHosts),
+			BlockHosts:         cloneSlice(p.EgressBlockHosts),
+			BlockLists:         cloneSlice(p.EgressBlockLists),
+			Restrict:           p.EgressRestrict,
 		}
 	}
 	if len(p.ArgPredicates) > 0 {
@@ -591,6 +632,14 @@ func Summary(p adjudicator.Policy) string {
 	}
 	fmt.Fprintf(&b, "egress deny hosts  : %s\n", joinOrNone(p.EgressExtraDenyHosts))
 	fmt.Fprintf(&b, "research egress    : %s\n", joinOrNone(p.ResearchEgressAllowHosts))
+	fmt.Fprintf(&b, "egress allow hosts : %s\n", joinOrNone(p.EgressAllowHosts))
+	fmt.Fprintf(&b, "egress block hosts : %s\n", joinOrNone(p.EgressBlockHosts))
+	fmt.Fprintf(&b, "egress block lists : %s\n", joinOrNone(p.EgressBlockLists))
+	egressPosture := "default-allowed"
+	if p.EgressRestrict {
+		egressPosture = "restrict (strict WebFetch allowlist)"
+	}
+	fmt.Fprintf(&b, "egress posture     : %s\n", egressPosture)
 	fmt.Fprintf(&b, "self-modify globs  : %s\n", joinOrNone(p.SelfModifyGlobs))
 	fmt.Fprintf(&b, "redact arg fields  : %s\n", joinOrNone(p.RedactFields))
 	fmt.Fprintf(&b, "arg rules          : %d rule(s)\n", len(p.ArgPredicates))

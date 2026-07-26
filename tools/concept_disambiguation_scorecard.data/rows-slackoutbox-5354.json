@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "c5354-guard-outbox-max-pending-age",
+      "canonical": "guardOutboxMaxPendingAge (undelivered-outbox retention floor)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_slack.go guardOutboxMaxPendingAge: the generous age floor (72h) past which boundUndeliveredOutbox drops an UNDELIVERED guard-session Slack status card from the .dispatch-runs/slack-outbox spool on the no-token finalize path, bounding a spool that can never drain on a headless seat (#5354, census #5345 row 10).",
+      "distinction": "The retention AGE FLOOR for UNDELIVERED outbox rows on the leak-fence path - NOT slackoutbox RetainPosted/RetainDead (the windows that govern already-DELIVERED rows) and NOT resolveGuardSessionsToken (the missing token whose absence is the leak's cause, not its bound).",
+      "distinct_from": [
+        "cov5305-resolve-guard-compact-budget",
+        "cov5305-guard-park-poll"
+      ],
+      "aliases": [],
+      "grounding": "guardOutboxMaxPendingAge",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -185,11 +185,18 @@ runnable as printed. The registered set:
   **measurable** members are the four outward-facing scorecards whose numbers get
   posted — **product**, **release-readiness**, **steerability**, **milestone** — each
   a real control-pane card key walked by no other intent, so the once-only fold still
-  counts each once. The feeds that carry no scorecard (blockers, cachevalue, capacity,
-  node-usage, backlog) are a delivery-liveness question — *are the channels actually
-  receiving the posts?* — surfaced as a `fak slack beat` descend pointer that is shown
-  for entry but never weighed, so an unread pulse can't red a clean walk. Answers "is
-  every scoreboard number healthy, and are the feeds delivering?".
+  counts each once. Alongside them rides one **`KindLoop`** member — the
+  operator-steerability overlay's maintenance loop (`steerpr-overlay`, whose ticks
+  append `docs/nightrun/steerpr-overlay.jsonl`), entered with `fak steer prs`. It
+  carries **liveness, not a card**, so it adds no scorecard ref and double-counts
+  nothing at the root; an overlay that stops recomputing the residual pile now surfaces
+  here instead of going unnoticed, and a host with no foldable overlay ledger reads
+  **UNMEASURED** rather than a clean 0. The feeds that carry no scorecard (blockers,
+  cachevalue, capacity, node-usage, backlog) are a delivery-liveness question — *are the
+  channels actually receiving the posts?* — surfaced as a `fak slack beat` descend
+  pointer that is shown for entry but never weighed, so an unread pulse can't red a
+  clean walk. Answers "is every scoreboard number healthy, are the steering numbers
+  still being recomputed, and are the feeds delivering?".
 - **`run-the-night`** — the overnight productivity meta-loop. It walks the three
   dimensions that must move together or a night wastes itself: **issue-drain**
   (descends `drain-issues`), **account-limit utilization**, and **lab/node resource

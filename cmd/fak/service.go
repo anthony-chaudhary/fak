@@ -54,6 +54,9 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	if args[0] == "events" {
 		return runServiceEvents(stdout, stderr, args[1:])
 	}
+	if args[0] == "bridge" {
+		return runServiceBridge(stdout, stderr, args[1:])
+	}
 	// The bare `status` verb keeps its platform-manager meaning; the observed-
 	// event ledger rollup (#4753) answers when the operator names a ledger,
 	// either explicitly (--ledger-dir) or via FAK_SERVICE_LEDGER_DIR.
@@ -261,6 +264,8 @@ func serviceUsage(w io.Writer) {
 	fmt.Fprintln(w, "       fak service events [--json] [--ledger-dir D] [--service S]")
 	fmt.Fprintln(w, "       fak service events --ingest windows-xml|journald-json|launchd-ndjson --file F --node N --service S [--workload W] [--unit U] [--json]")
 	fmt.Fprintln(w, "       fak service status --ledger-dir D [--json]    (observed-event rollup; also picked when FAK_SERVICE_LEDGER_DIR is set)")
+	fmt.Fprintln(w, "       fak service bridge --spec F --role machine|watchdog|broker [--sha256 HEX] [--principal U] [--observed F | --live [--unit S]] [--ledger-dir D] [--json]")
+	fmt.Fprintln(w, "       fak service bridge --judge terminal-kill|termservice-reset|host-reboot|scm-process-kill --ledger-dir D [--service S] [--json]")
 }
 
 // hasServiceLedgerFlag reports whether the operator explicitly named the
