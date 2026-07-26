@@ -8,10 +8,16 @@ package gateway
 import (
 	"net/http/httptest"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 func newReadBearerServer(t *testing.T) *Server {
 	t.Helper()
+	// "test" is not a package-init engine — it exists only because some other helper
+	// registered it. Register it here so these cases stand on their own rather than on
+	// whichever test happened to run first.
+	abi.RegisterEngine("test", echoEngine{})
 	srv, err := New(Config{EngineID: "test", Model: "m", RequireKey: "sekret", ReadBearer: "read-tok"})
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +71,7 @@ func TestReadBearerDoesNotGrantMutatingEndpoints(t *testing.T) {
 }
 
 func TestReadBearerEmptyConfigAuthorizesNothing(t *testing.T) {
+	abi.RegisterEngine("test", echoEngine{})
 	srv, err := New(Config{EngineID: "test", Model: "m", RequireKey: "sekret"})
 	if err != nil {
 		t.Fatal(err)

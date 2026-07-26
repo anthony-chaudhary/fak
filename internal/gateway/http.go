@@ -341,6 +341,7 @@ func (l *noDelayTCPListener) Accept() (net.Conn, error) {
 // security kernel.
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	want := sha256.Sum256([]byte(s.requireKey))
+	wantRead := sha256.Sum256([]byte(s.readBearer))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (s.requireKey != "" || s.keyset != nil) && !authExempt(r) {
 			tok, ok := gatewayCredential(r)
@@ -360,6 +361,17 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 					authed = true
 					principal = p
 				}
+			}
+			// The read-scoped bearer (Config.ReadBearer) is consulted only AFTER the
+			// full-strength credential has already failed, and only on the read-only
+			// observability paths. That ordering is what keeps it strictly widening: it
+			// can admit a caller the main key would have rejected, but it can never
+			// reject one the main key accepted, and it is never reachable from a
+			// mutating route. Guarding on a non-empty readBearer is load-bearing, not
+			// belt-and-braces — without it an UNSET read bearer would hash to the same
+			// digest as an empty presented bearer and silently authorize `Bearer `.
+			if !authed && s.readBearer != "" && ok && readScopedPath(r) {
+				authed = subtle.ConstantTimeCompare(got[:], wantRead[:]) == 1
 			}
 			if !authed {
 				writeErr(w, http.StatusUnauthorized, "missing or invalid credentials")
@@ -393,9 +405,21 @@ func authExempt(r *http.Request) bool {
 	if r.URL.Path == "/healthz" {
 		return true
 	}
+	if readScopedPath(r) {
+		return requestFromLoopback(r)
+	}
+	return false
+}
+
+// readScopedPath reports whether the path is one of the read-only observability
+// surfaces — the set the loopback exemption opens, and the same set the read-scoped
+// bearer may unlock off-loopback. Both callers share this one predicate so the two
+// grants can never drift into disagreeing about what "read-only" means: adding a
+// surface here widens both at once, which is the intent.
+func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
 	case "/metrics", "/debug/vars":
-		return requestFromLoopback(r)
+		return true
 	}
 	return false
 }
