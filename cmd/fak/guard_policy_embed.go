@@ -53,6 +53,25 @@ const guardResourceSampleInterval = 2 * time.Second
 // orchestration plumbing. The genuine-danger classes (destructive Bash args, self-modify globs)
 // are still untouched, so widening the orchestration surface never widens the danger floor.
 //
+// The allow-list also admits fak's OWN self-service MCP verbs (fak_adjudicate/fak_admit/
+// fak_syscall/fak_read/fak_changes/fak_memory_drivers/fak_memory_explain/fak_trajquery) —
+// real guarded sessions were DEFAULT_DENYing the guard's own appeal channel (fak_admit),
+// which is self-defeating: these are pure reads or kernel-re-adjudicated executions, so
+// admitting the NAME grants nothing the floor doesn't re-check downstream. fak_memory_run
+// stays OUT: with apply=true it is an effectful memory write (the pinned deny in
+// guard_test.go); an operator overlay is the sanctioned place to grant it.
+// Likewise the harness's ReportFindings (code-review output) and DeferredToolPlaceholder
+// (deferred-schema plumbing), both witnessed as DEFAULT_DENY friction in session journals.
+// The Confluence DELETE verbs are explicitly denied so a coarse operator overlay grant
+// (`fak guard allow --prefix mcp__atlassian__`) never admits irreversible external
+// destruction — a name-deny outranks every allow layer.
+//
+// The `\bsudo\b` arg-rule is decided STRUCTURALLY (internal/adjudicator/sudo_local.go,
+// same recogniser pattern as rm_rf/rce_pipe): only a LOCAL escalation at a resolved
+// command-word position is refused. `ssh gpu-box 'sudo systemctl …'` — the dominant
+// false POLICY_BLOCK in real remote-GPU bring-up trajectories — is allowed, because the
+// floor governs this host, and the remote host's own controls govern that one.
+//
 //go:embed guard-default-policy.json
 var guardDefaultPolicyJSON []byte
 

@@ -142,7 +142,29 @@ func (s guardOAuthCredentialsSource) readOnce(now func() time.Time) (tok string,
 // file is missing/unparseable/carries no token (nothing to judge); a token with expiresAt<=0
 // (no expiry recorded) is treated as always-fresh, matching Claude Code's own convention of
 // omitting expiresAt for a token that does not rotate.
+//
+// When the FILE has no answer, the macOS Keychain gets the same question (#5363): on darwin
+// the live login (and every refresh a `claude` run performs) lands in the Keychain, not the
+// file — without this fallback the headless StaleCred rung fails closed and the park poll
+// can never witness the rotation it is waiting for on a keychain-only Mac.
 func credExpiresAt(path string) (expiresAt time.Time, ok bool) {
+	if exp, ok := credFileExpiresAt(path); ok {
+		return exp, true
+	}
+	if filepath.Base(path) != ".credentials.json" {
+		return time.Time{}, false
+	}
+	cred, ok := guardKeychainCred(filepath.Dir(path))
+	if !ok || cred.AccessToken == "" {
+		return time.Time{}, false
+	}
+	if cred.ExpiresAt <= 0 {
+		return time.Time{}, true // no expiry recorded: treat as never-expiring
+	}
+	return time.UnixMilli(cred.ExpiresAt), true
+}
+
+func credFileExpiresAt(path string) (expiresAt time.Time, ok bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return time.Time{}, false
@@ -163,6 +185,46 @@ func credExpiresAt(path string) (expiresAt time.Time, ok bool) {
 		return time.Time{}, true // no expiry recorded: treat as never-expiring
 	}
 	return time.UnixMilli(doc.ClaudeAIOauth.ExpiresAt), true
+}
+
+// guardOAuthKeychainSource is the macOS login-Keychain rung of the token ladder (#5363):
+// on darwin Claude Code stores the ACTIVE login credential in the Keychain and writes no
+// .credentials.json, so this source plays the same "the credential Claude Code is using
+// right now" role the credentials file plays elsewhere. It sits AFTER the file (only one
+// of the two exists on a healthy box, and a present-and-live file should keep winning
+// everywhere else) and BEFORE the long-lived .oauth-token setup-token fallback. The
+// expiry drop rule matches guardOAuthCredentialsSource: a recorded-and-past expiry
+// misses rather than sending a known-bad bearer. Lookup delegates to internal/accounts
+// through the guardKeychainAccessToken seam so tests can stub the keychain without a
+// darwin host.
+type guardOAuthKeychainSource struct {
+	key string
+	dir string
+	now func() time.Time
+}
+
+const guardOAuthKeychainSourceName = `macOS Keychain "Claude Code-credentials"`
+
+// Seams over internal/accounts' keychain reader so cmd/fak tests can exercise the
+// keychain rung (and its precedence) on any GOOS without a real Keychain.
+var (
+	guardKeychainSupported   = accounts.ClaudeKeychainSupported
+	guardKeychainAccessToken = accounts.ClaudeKeychainAccessToken
+	guardKeychainCred        = accounts.ClaudeKeychainCred
+	guardKeychainAPIKey      = accounts.ClaudeKeychainAPIKey
+)
+
+func (s guardOAuthKeychainSource) Name() string { return guardOAuthKeychainSourceName }
+
+func (s guardOAuthKeychainSource) Lookup(key string) (string, bool) {
+	if key != s.key {
+		return "", false
+	}
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	return guardKeychainAccessToken(s.dir, now())
 }
 
 type guardOAuthFileSource struct {
@@ -201,6 +263,17 @@ func guardAnthropicOAuthLoader(tokenEnv, cfgDir string, now func() time.Time, wa
 		now:  now,
 		warn: warn,
 	})
+
+	// The macOS Keychain rung is appended only where a keychain exists, so the
+	// error's "looked in:" list stays honest per platform (#5363).
+	if guardKeychainSupported() {
+		tried = append(tried, guardOAuthKeychainSourceName)
+		sources = append(sources, guardOAuthKeychainSource{
+			key: guardAnthropicOAuthSecretKey,
+			dir: cfgDir,
+			now: now,
+		})
+	}
 
 	setupPath := filepath.Join(cfgDir, ".oauth-token")
 	tried = append(tried, setupPath)
