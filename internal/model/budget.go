@@ -174,6 +174,18 @@ func Q4KDecodeWorkers() int {
 
 func q4kDecodeWorkers() int { return Q4KDecodeWorkers() }
 
+// KQuantDecodeWorkers reports the worker count for resident Q5_K/Q6_K batch-1 decode GEMVs
+// (kQuantMatRowsInto). #4974: a q4_k_m artifact is a MIXTURE — the Q4_K majority and the
+// Q5_K/Q6_K minority (ffn_down / lm_head, plus mixed-quant routed experts) are streamed by two
+// different kernels on the SAME decode step — so the witnessed regime is a property of the
+// artifact, not of one kernel: both take the one measured knee. Deliberately delegates to
+// Q4KDecodeWorkers rather than declaring a second divisor, because the DA33 sweep witnessed ONE
+// knee for the whole model (64 workers on a 256-thread / 8-NUMA host) and a k-quant-specific
+// divisor would be an unwitnessed guess. Same derivation, same FAK_WORKERS/FAK_BUDGET override.
+func KQuantDecodeWorkers() int { return Q4KDecodeWorkers() }
+
+func kQuantDecodeWorkers() int { return KQuantDecodeWorkers() }
+
 // Q4KDecodeWorkerBudget reports how Q4KDecodeWorkers was derived (for a bench JSON line).
 func Q4KDecodeWorkerBudget() string {
 	_, source := q4kDecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)

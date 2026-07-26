@@ -9,17 +9,21 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 // overrideable via FAK_NUMA_INTERLEAVE), and compute.ApplyDecodeInterleave mbinds each resident
 // weight region to MPOL_INTERLEAVE across the online NUMA nodes (linux/amd64 only, no-op elsewhere).
 //
-// The regions are the resident raw Q4_K super-block slabs — q4kw (the FFN gate/up/down, v/o_proj
-// and, when tied-raw, lm_head) plus a separately pinned q4khead — which hold 0.5625 B/param and are
-// the bytes the decode GEMV streams every step. Restriping THEM across nodes is what turns the
-// default first-touch node-0 placement into the witnessed interleave regime.
+// The regions are the resident raw super-block slabs the decode GEMV streams every step — the
+// bytes whose placement the witnessed regime is about. A q4_k_m artifact is a MIXTURE, so that is
+// two stores, not one: q4kw (the Q4_K majority — FFN gate/up/down, v/o_proj and, when tied-raw,
+// lm_head) plus a separately pinned q4khead, AND kqw (the Q5_K/Q6_K minority a q4_k_m mix leaves
+// on ffn_down / lm_head, plus mixed-quant routed experts), which kQuantMatRows streams through the
+// same q4kDecodeWorkers pool. Restriping THEM across nodes is what turns the default first-touch
+// node-0 placement into the witnessed interleave regime; a store left out silently keeps its
+// loader-node pages while the label still reports "applied".
 
-// residentDecodeRegions collects the resident raw Q4_K weight slabs that the decode GEMV streams,
+// residentDecodeRegions collects the resident raw weight slabs that the CPU decode GEMV streams,
 // deduplicated by backing-array base pointer so a head held in both q4kw and q4khead (or an aliased
 // slab) is placed exactly once. Empty/nil slabs are skipped by ApplyDecodeInterleave.
 func (m *Model) residentDecodeRegions() [][]byte {
-	regions := make([][]byte, 0, len(m.q4kw)+1)
-	seen := make(map[*byte]bool, len(m.q4kw)+1)
+	regions := make([][]byte, 0, len(m.q4kw)+len(m.kqw)+1)
+	seen := make(map[*byte]bool, len(m.q4kw)+len(m.kqw)+1)
 	add := func(raw []byte) {
 		if len(raw) == 0 {
 			return
@@ -38,6 +42,11 @@ func (m *Model) residentDecodeRegions() [][]byte {
 	}
 	if m.q4khead != nil { // a raw lm_head that q4kHeadName()/the q4kw map may not surface
 		add(m.q4khead.raw)
+	}
+	for _, qt := range m.kqw { // the q4_k_m Q5_K/Q6_K minority, streamed by kQuantMatRows
+		if qt != nil {
+			add(qt.raw)
+		}
 	}
 	return regions
 }
