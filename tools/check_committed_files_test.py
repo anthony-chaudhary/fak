@@ -147,6 +147,63 @@ def test_nonpositive_max_bytes_matches_default() -> None:
         f"base rc={base.returncode} zeroed rc={zeroed.returncode}\n{zeroed.stdout}\n{zeroed.stderr}")
 
 
+# --- BY-MACHINE private-by-default (STAGED-ONLY) ----------------------------
+
+def test_bymachine_raw_drop_refused_by_helper() -> None:
+    # A raw per-machine run drop is caught by the staged-only helper (root-hoisted form).
+    assert cc._is_private_bymachine_addition(
+        "experiments/benchmark/runs/by-machine/node-macos-a/20260718-x/score.json")
+    # ...and the fak/-nested superrepo form.
+    assert cc._is_private_bymachine_addition(
+        "fak/experiments/benchmark/runs/by-machine/node-macos-a/20260718-x/score.json")
+
+
+def test_bymachine_dgx_addition_also_caught() -> None:
+    # A dgx* machine drop under by-machine/ is the historically-leaky class — caught too,
+    # in BOTH layouts (the ignore rule that replaced the dgx-only glob was too narrow).
+    # The machine names here are SYNTHETIC on purpose: this is a public tree, and a fixture
+    # naming a real fleet node would itself be the leak the gate exists to stop (PUBLIC_LEAK
+    # refuses the bare dgxN alias). What the rule matches is the by-machine/ prefix, not the
+    # machine name, so a made-up name exercises it exactly as well as a real one.
+    assert cc._is_private_bymachine_addition(
+        "experiments/benchmark/runs/by-machine/dgx-a100-01/20260718-run/witness.json")
+    assert cc._is_private_bymachine_addition(
+        "fak/experiments/benchmark/runs/by-machine/dgx-a100-02/20260718-run/manifest.json")
+
+
+def test_bymachine_helper_does_not_overfire() -> None:
+    # A normal source path is NOT a by-machine drop (helper returns False).
+    assert not cc._is_private_bymachine_addition("internal/foo/bar.go")
+    # The tracked aggregate catalog lives OUTSIDE by-machine/ and stays committable.
+    assert not cc._is_private_bymachine_addition("experiments/benchmark/catalog.json")
+    # A sibling runs/ dir that is NOT by-machine/ is untouched.
+    assert not cc._is_private_bymachine_addition("experiments/benchmark/runs/summary.md")
+
+
+def test_bymachine_not_in_classify_so_tree_mode_unaffected() -> None:
+    # CRITICAL: the by-machine rule is STAGED-ONLY. _classify (which runs in BOTH
+    # --audit-staged and --audit-tree) must return None for a by-machine path, so the ~50
+    # grandfathered evidence artifacts already tracked under by-machine/ keep --audit-tree
+    # green. If someone folded the rule into _classify/PRIVATE_ONLY, this goes red.
+    p = "experiments/benchmark/runs/by-machine/node-macos-a/20260622-q4k/score.json"
+    assert cc._classify(p, ROOT, MAX) is None
+    assert not any(rx.search(p) for rx, _ in cc.PRIVATE_ONLY)
+    # And the fak/-nested form is likewise invisible to the tree-mode classifier.
+    assert cc._classify("fak/" + p, ROOT, MAX) is None
+
+
+def test_gitignore_keeps_both_bymachine_rules() -> None:
+    # The private-by-default DEFAULT is the whole-tree .gitignore rule (62bed967e). The
+    # commit-time helper is a backstop, NOT a replacement: if the ignore lines were silently
+    # removed, raw drops would flow back in via a plain `git add`. Pin BOTH whole-tree rules
+    # (root-hoisted + fak/-nested) so the default cannot be dropped without a red test.
+    gitignore = (Path(ROOT) / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "experiments/benchmark/runs/by-machine/" in gitignore, \
+        "root-hoisted by-machine ignore rule missing from .gitignore"
+    assert "fak/experiments/benchmark/runs/by-machine/" in gitignore, \
+        "fak/-nested by-machine ignore rule missing from .gitignore"
+
+
 # --- live regression guard: the real tree is clean --------------------------
 
 def test_tracked_tree_has_no_private_only_path() -> None:
