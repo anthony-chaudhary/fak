@@ -68,6 +68,7 @@ const (
 // matcher, and the dollar figures stay single-sourced in Pricing so the two
 // can never drift.
 var canonicalModelTier = map[string]string{
+	"claude-opus-5":             "opus",
 	"claude-opus-4-8":           "opus",
 	"claude-sonnet-4-6":         "sonnet",
 	"claude-sonnet-5":           "sonnet",

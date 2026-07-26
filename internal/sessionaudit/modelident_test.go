@@ -14,6 +14,7 @@ import (
 // identity so the cost artifact can show raw and canonical side by side.
 func TestResolveModelIDCanonicalFleetIDs(t *testing.T) {
 	for _, id := range []string{
+		"claude-opus-5",
 		"claude-opus-4-8",
 		"claude-sonnet-4-6",
 		"claude-sonnet-5",
@@ -97,7 +98,12 @@ func TestResolveModelIDDoesNotOvermatch(t *testing.T) {
 // cards keep pricing exactly as before.
 func TestStrictModelCostUSDFailsClosed(t *testing.T) {
 	const mtok = 1_000_000
-	// Canonical fleet ids price from their pinned rows.
+	// Canonical fleet ids price from their pinned rows. claude-opus-5 is the SHIPPED
+	// launch default, so it must price here rather than fail closed: an unregistered
+	// default would report every guarded session as an UNKNOWN cost hold.
+	if got, err := StrictModelCostUSD("claude-opus-5", 0, 0, 0, mtok); err != nil || got != 75.0 {
+		t.Fatalf("strict opus-5 output MTok = (%.2f, %v), want (75, nil)", got, err)
+	}
 	if got, err := StrictModelCostUSD("claude-opus-4-8", 0, 0, 0, mtok); err != nil || got != 75.0 {
 		t.Fatalf("strict opus output MTok = (%.2f, %v), want (75, nil)", got, err)
 	}
