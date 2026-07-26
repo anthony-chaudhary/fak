@@ -84,6 +84,10 @@ func cacheHealthFactsFromWindow(w cachevaluereport.WeeklyWindow) scorecard.Cache
 		ReuseRatio:          w.ReuseRatio,
 		ShedEffectiveness:   scorecard.ShedEffectivenessHealth(w.CompactionFired, w.CompactionBailed),
 		UpgradeFiredRate:    scorecard.UpgradeFiredHealth(w.TTLUpgrades, w.TTLRefusals),
+		// ObservedProviderReuse is CONTEXT (provider-relayed cache_read share), not a scored
+		// family — it lets a low WITNESSED score read honestly when the provider's own cache is
+		// carrying the reuse (e.g. a subscription seat whose managed levers are passive).
+		ObservedProviderReuse: w.ObservedProviderReuse,
 		// WitnessedObservedAgreement stays nil: the gross/net shares live on the D1/D2/D3
 		// cache-VALUE surface, not this weekly digest. The fold supports it when supplied.
 	}
