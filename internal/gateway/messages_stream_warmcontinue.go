@@ -38,6 +38,7 @@ const warmContinueMaxAttempts = 3
 var (
 	errWarmContinueBuild     = errors.New("gateway: warm-continue could not build the continuation request")
 	errWarmContinueExhausted = errors.New("gateway: warm-continue exhausted its attempts")
+	errWarmContinueStoodDown = errors.New("gateway: warm-continue stood down — the turn is no longer replayable")
 )
 
 // warmContinueEnabled reports whether the #3353 warm-continue path is armed. OFF by default;
@@ -52,15 +53,47 @@ func warmContinueEnabled() bool {
 }
 
 // canWarmContinue reports whether this mid-stream death is safely resumable by replaying the
-// delivered text as a prefill turn. It requires the gate armed, some relayed assistant text to
-// replay, a migratable (non-status) error, and a turn that is text-only so far: no held
-// tool_use block (which would re-emit on replay) and no thinking block (not prefill-replayable).
+// delivered text as a prefill turn: the gate armed, a migratable (non-status) error, and a turn
+// whose shape is still replayable.
 func (p *anthropicPassthrough) canWarmContinue(err error) bool {
-	return warmContinueEnabled() &&
-		warmContinuableErr(err) &&
-		strings.TrimSpace(p.asstText.String()) != "" &&
+	return warmContinueEnabled() && warmContinuableErr(err) && p.warmContinueShapeOK()
+}
+
+// warmContinueShapeOK reports whether the turn AS IT STANDS NOW is replayable as an assistant
+// prefill: some relayed text to replay, no held tool_use block (which would re-emit on replay)
+// and no thinking, checked BOTH ways — no thinking block relayed, and extended thinking not
+// enabled on the request in the first place.
+//
+// This is deliberately re-read before EVERY attempt, not just the first (warmContinue's loop),
+// because a continuation can change the answer: a resumed stream that itself dies after opening
+// a tool_use block leaves that call sitting in toolOrder, and replaying past it would let a
+// re-emitted call join the still-held one so flushHeldTools emits the SAME tool_use twice — the
+// client would execute the side effect TWICE. Standing down to the terminal-error path costs the
+// turn; a duplicated tool call costs whatever the tool did.
+func (p *anthropicPassthrough) warmContinueShapeOK() bool {
+	return strings.TrimSpace(p.asstText.String()) != "" &&
 		len(p.toolOrder) == 0 &&
-		!p.sawThinking
+		!p.sawThinking &&
+		!requestEnablesThinking(p.req.Raw)
+}
+
+// requestEnablesThinking reports whether the INBOUND body turns extended thinking on.
+// Anthropic refuses an assistant prefill outright on such a request, so the replay would buy a
+// guaranteed 400 — which warmContinuableErr then (correctly) declines to retry, leaving the
+// client with the same terminal error one wasted upstream call later. This is the structural
+// half of the thinking guard: p.sawThinking can only react once a thinking block has already
+// been relayed, and a thinking-enabled turn whose first block happens to be text would slip
+// past it.
+func requestEnablesThinking(raw []byte) bool {
+	var m struct {
+		Thinking struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+	}
+	if json.Unmarshal(raw, &m) != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(m.Thinking.Type), "enabled")
 }
 
 // warmContinuableErr reports whether err is a MIGRATABLE mid-stream failure — a transport
@@ -83,6 +116,12 @@ func warmContinuableErr(err error) bool {
 func (p *anthropicPassthrough) warmContinue(hp *agent.HTTPPlanner, upstreamKey, upstreamBeta string) error {
 	p.continuing = true // suppress the continuation's own message_start echo/notes
 	for attempt := 0; attempt < warmContinueMaxAttempts; attempt++ {
+		// Re-check the shape every time round: the previous attempt may have opened a tool_use
+		// or thinking block before it died, which makes a further replay unsafe (see
+		// warmContinueShapeOK). Standing down hands the caller back to the terminal-error path.
+		if !p.warmContinueShapeOK() {
+			return errWarmContinueStoodDown
+		}
 		prefix := p.asstText.String()
 		body, ok := warmContinueBody(p.req.Raw, prefix, estimateAnthropicTokens(prefix))
 		if !ok {
@@ -113,13 +152,13 @@ func (p *anthropicPassthrough) closeOpenClientBlock() {
 	p.openClientBlock = -1
 }
 
-// warmContinueBody builds the continuation request from the original inbound body: it appends
-// the delivered assistant text as a trailing assistant PREFILL message (the model continues it
-// without re-emitting it) and decrements max_tokens by the delivered estimate (saturating at 1,
-// mirroring dynamo's max_tokens.saturating_sub). The body is re-marshalled — the dead worker's
-// cache prefix is already lost, and the continuation goes to a fresh worker, so byte-identity of
-// the cached prefix is not a goal here. Returns ok=false if the body is not a JSON object with a
-// messages array.
+// warmContinueBody builds the continuation request from the original inbound body: it lands
+// the delivered assistant text as the trailing assistant PREFILL message (the model continues
+// it without re-emitting it) and decrements max_tokens by the delivered estimate (saturating at
+// 1, mirroring dynamo's max_tokens.saturating_sub). The body is re-marshalled — the dead
+// worker's cache prefix is already lost, and the continuation goes to a fresh worker, so
+// byte-identity of the cached prefix is not a goal here. Returns ok=false if the body is not a
+// JSON object with a messages array, or if the delivered prefix is not a legal prefill.
 func warmContinueBody(raw []byte, prefix string, delivered int) ([]byte, bool) {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(raw, &m) != nil {
@@ -133,11 +172,10 @@ func warmContinueBody(raw []byte, prefix string, delivered int) ([]byte, bool) {
 	if json.Unmarshal(msgsRaw, &msgs) != nil {
 		return nil, false
 	}
-	am, err := json.Marshal(map[string]any{"role": "assistant", "content": prefix})
-	if err != nil {
+	msgs, ok = warmContinuePrefill(msgs, prefix)
+	if !ok {
 		return nil, false
 	}
-	msgs = append(msgs, json.RawMessage(am))
 	nb, err := json.Marshal(msgs)
 	if err != nil {
 		return nil, false
@@ -158,6 +196,103 @@ func warmContinueBody(raw []byte, prefix string, delivered int) ([]byte, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+// warmContinuePrefill lands the delivered text as the message array's trailing assistant turn.
+// Anthropic holds a final assistant (prefill) turn to two hard rules, and a mid-stream death
+// walks into both of them constantly:
+//
+//   - its content may NOT end in whitespace ("final assistant content cannot end with trailing
+//     whitespace") — yet a stream cut mid-markdown or mid-code ends on a newline more often
+//     than not, so the naive replay of exactly-what-was-delivered is a coin-flip 400;
+//   - it may not FOLLOW another assistant turn — and a caller is free to send its own prefill
+//     as the last inbound message, which is precisely the turn the model was continuing when
+//     the worker died, so appending a second assistant message stacks two same-role turns.
+//
+// So the text is right-trimmed for the wire and MERGED onto an existing trailing assistant turn
+// instead of stacked after it. The trim is a deliberate small asymmetry: the client already saw
+// the trailing newline, and the model may re-emit it, so the resumed text can gain a duplicate
+// space — cosmetic, and strictly better than the turn dying outright. Returns ok=false when
+// nothing survives the trim (an all-whitespace prefix is not a resumable prefill) or the
+// trailing assistant turn has a content shape we will not extend without guessing.
+func warmContinuePrefill(msgs []json.RawMessage, prefix string) ([]json.RawMessage, bool) {
+	prefix = strings.TrimRight(prefix, " \t\r\n\v\f")
+	if prefix == "" {
+		return nil, false
+	}
+	if n := len(msgs); n > 0 {
+		var probe struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(msgs[n-1], &probe) == nil && probe.Role == "assistant" {
+			merged, ok := growAssistantText(probe.Content, prefix)
+			if !ok {
+				return nil, false
+			}
+			var last map[string]json.RawMessage
+			if json.Unmarshal(msgs[n-1], &last) != nil {
+				return nil, false
+			}
+			last["content"] = merged
+			nb, err := json.Marshal(last)
+			if err != nil {
+				return nil, false
+			}
+			out := make([]json.RawMessage, n)
+			copy(out, msgs)
+			out[n-1] = nb
+			return out, true
+		}
+	}
+	am, err := json.Marshal(map[string]any{"role": "assistant", "content": prefix})
+	if err != nil {
+		return nil, false
+	}
+	return append(msgs, json.RawMessage(am)), true
+}
+
+// growAssistantText concatenates text onto an assistant message's content, preserving whichever
+// wire shape it arrived in: a bare string grows in place, a block array grows its LAST text
+// block, and an array ending in a non-text block gains a fresh text block. Returns ok=false for
+// a content value that is neither a string nor an array.
+func growAssistantText(content json.RawMessage, text string) (json.RawMessage, bool) {
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		nb, err := json.Marshal(s + text)
+		return nb, err == nil
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(content, &blocks) != nil {
+		return nil, false
+	}
+	if n := len(blocks); n > 0 {
+		var last map[string]json.RawMessage
+		if json.Unmarshal(blocks[n-1], &last) == nil {
+			var typ, prior string
+			_ = json.Unmarshal(last["type"], &typ)
+			if typ == "text" && json.Unmarshal(last["text"], &prior) == nil {
+				tb, err := json.Marshal(prior + text)
+				if err != nil {
+					return nil, false
+				}
+				last["text"] = tb
+				nb, err := json.Marshal(last)
+				if err != nil {
+					return nil, false
+				}
+				blocks[n-1] = nb
+				out, err := json.Marshal(blocks)
+				return out, err == nil
+			}
+		}
+	}
+	tb, err := json.Marshal(map[string]any{"type": "text", "text": text})
+	if err != nil {
+		return nil, false
+	}
+	out, err := json.Marshal(append(blocks, json.RawMessage(tb)))
+	return out, err == nil
 }
 
 // estimateAnthropicTokens approximates how much of the token budget the delivered text already
