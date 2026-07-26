@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -96,6 +99,12 @@ func TestHumanBlockedSkippedFiltersByReason(t *testing.T) {
 // "would post to <channel>" line and posts nothing, resolving the channel from the env var.
 func TestRunDispatchSkippedDryRun(t *testing.T) {
 	t.Setenv("FAK_SKIPPED_CHANNEL", "C0TEST")
+	// Unwire the ambient stops ledger: a guarded fak session exports
+	// FAK_GUARD_STOPS_LEDGER=<repo>/.fak/guard-stops.jsonl, and an inherited override would
+	// fold the LIVE repo's guard escalations into this fixture's card (a real HUMAN_RESIDUAL
+	// row there made this assert 2 instead of 1). With the override clear the reader derives
+	// the ledger from --workspace, which is the empty temp dir below.
+	t.Setenv(guardStopsLedgerEnv, "")
 	old := dispatchRouteIssues
 	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
 		return dispatchtick.RouterPayload{SkippedHumanBlocked: []dispatchtick.SkippedIssue{
@@ -122,6 +131,39 @@ func TestRunDispatchSkippedDryRun(t *testing.T) {
 	}
 	if !strings.Contains(s, "(dry-run: 1 human-blocked issue(s); would post to C0TEST)") {
 		t.Fatalf("dry-run footer wrong: %q", s)
+	}
+}
+
+// TestRunDispatchSkippedFoldsWorkspaceGuardLedger pins the other half of that scoping: with no
+// FAK_GUARD_STOPS_LEDGER override the card folds the guard escalations of the workspace it was
+// pointed AT (<workspace>/.fak/guard-stops.jsonl) — the same root the router and the pause
+// ledger are read from — instead of the ambient checkout's ledger.
+func TestRunDispatchSkippedFoldsWorkspaceGuardLedger(t *testing.T) {
+	t.Setenv("FAK_SKIPPED_CHANNEL", "C0TEST")
+	t.Setenv(guardStopsLedgerEnv, "")
+	old := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = old })
+
+	root := t.TempDir()
+	ledger := filepath.Join(root, filepath.FromSlash(guardStopsLedgerDefaultRel))
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	row := fmt.Sprintf(`{"schema":%q,"session":"ws-escalated","disposition":%q}`+"\n",
+		guardStopRecordSchema, string(stopDispOperatorDirectedEscalate))
+	if err := os.WriteFile(ledger, []byte(row), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := runDispatchSkipped(&out, &errb, []string{"--workspace", root, "--dry-run"}); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb.String())
+	}
+	if s := out.String(); !strings.Contains(s, "guard session ws-escalated") {
+		t.Fatalf("card missed the workspace-local guard escalation: %q", s)
 	}
 }
 

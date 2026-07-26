@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -78,7 +79,19 @@ func runDispatchSkipped(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak dispatch skipped: %v\n", err)
 		return 1
 	}
-	blocked := mergeHumanBlockedSkipped(humanBlockedSkipped(router), humanBlockedGuardEscalations(guardStopsLedgerResolved()))
+	// Fold the guard escalations of the workspace this run was pointed AT. Every other ledger
+	// read here is derived from root (the router above, the known-bad hold below,
+	// steerpr.PauseLedgerPath in the route hold), so the stops ledger must be too: the generic
+	// reader path (guardStopsLedgerResolved) falls back to repoRoot() — whatever checkout the
+	// process happens to sit in — which both misreports a foreign --workspace and silently
+	// inherits the ambient repo's live ledger, the one a guarded fak session wires into
+	// FAK_GUARD_STOPS_LEDGER. An explicit env override still wins, so an operator who wires a
+	// ledger path deliberately keeps reading exactly that file.
+	ledger := strings.TrimSpace(os.Getenv(guardStopsLedgerEnv))
+	if ledger == "" {
+		ledger = filepath.Join(root, filepath.FromSlash(guardStopsLedgerDefaultRel))
+	}
+	blocked := mergeHumanBlockedSkipped(humanBlockedSkipped(router), humanBlockedGuardEscalations(ledger))
 	card := renderSkippedHumanBlockedCard(blocked, *repoURL)
 	// A live known-bad hold (#2716) is a DISTINCT row class from the human-blocked set:
 	// dynamic, ledger-driven, and cleared by releasing the signature (not by a human
