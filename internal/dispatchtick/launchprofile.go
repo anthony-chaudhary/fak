@@ -32,7 +32,7 @@ import (
 // the bare "fable" alias, which 400-crashes a headless worker (a fleet crash-loop we
 // have paid for before). Always the versioned id.
 const (
-	WorkerModelOpus  = "claude-opus-4-8"
+	WorkerModelOpus  = "claude-opus-5"
 	WorkerModelFable = "claude-fable-5"
 
 	// EffortXHigh is the strongest reasoning-effort knob short of ultracode. It is
