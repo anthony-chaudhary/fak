@@ -129,7 +129,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
-	appendSessionLedger(reqTrace, "user_message", req.Raw)
+	appendSessionLedger(reqTrace, "user_message", turnLedgerSummary(req))
 	// C1 read-scope floor (#4192): the first turn a trace serves binds its owning principal, so a
 	// later fak_context_restore / fak_context_spans read-self op can be scoped to it. First-writer-
 	// wins; "" on the no-RequireKey loopback (single-tenant).

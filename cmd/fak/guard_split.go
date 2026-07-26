@@ -17,11 +17,13 @@ import (
 // screen the whole session.
 //
 // The constraint that shapes the design: `fak guard` holds the gateway IN THIS PROCESS (an
-// OS-picked loopback port, torn down when the agent exits). So the split must be INLINE — open
-// the overlay pane in the CURRENT terminal window and run the agent inline in this pane —
-// never a fresh window, which would orphan the gateway this process owns. The overlay polls
-// this guard's own loopback gateway (auth-exempt on loopback), so the bearer is never placed
-// on a pane command line.
+// OS-picked loopback port, torn down when the agent exits). So the AGENT must launch INLINE in
+// the current pane — never a fresh window, which would orphan the gateway this process owns.
+// The overlay pane prefers the current window too (tmux / Windows Terminal / iTerm2 split it);
+// Apple Terminal is the one host with NO split panes, so there the overlay opens as a
+// companion Terminal WINDOW — still only a poller of this guard's loopback gateway, so nothing
+// is orphaned. The overlay polls this guard's own loopback gateway (auth-exempt on loopback),
+// so the bearer is never placed on a pane command line.
 //
 // Like the rest of cmd/fak this is a PURE plan builder (buildGuardSplitPlan, zero side
 // effects) plus a thin runner (openGuardInfoPane) that execs the resolved multiplexer argv.
@@ -34,11 +36,12 @@ var (
 	guardSplitLookPath = exec.LookPath
 )
 
-// guardSplitPlan is the resolved inline-split plan. Spawn is the multiplexer argv that opens
-// the 20% overlay pane in the CURRENT window; Overlay is the fak-info command that pane runs
-// (recorded for the dry-run/json surfaces). Host names the resolved multiplexer ("tmux" |
-// "wt" | "none"). There is no Agent/Claude field: the agent always launches inline in the
-// current pane AFTER this plan opens the overlay, so guard keeps its in-process gateway.
+// guardSplitPlan is the resolved inline-split plan. Spawn is the host argv that opens
+// the overlay surface; Overlay is the fak-info command that surface runs (recorded for
+// the dry-run/json surfaces). Host names the resolved split host ("tmux" | "wt" |
+// "iterm2" | "terminal-app" | "none"). There is no Agent/Claude field: the agent always
+// launches inline in the current pane AFTER this plan opens the overlay, so guard keeps
+// its in-process gateway.
 type guardSplitPlan struct {
 	Host     string   `json:"host"`
 	Where    string   `json:"where"`
@@ -48,12 +51,12 @@ type guardSplitPlan struct {
 	Fallback string   `json:"fallback,omitempty"`
 }
 
-// buildGuardSplitPlan resolves the multiplexer and assembles the argv that opens the 20%
-// overlay pane in the current window. It is pure: goos/getenv/lookPath are injected, and
-// overlayArgs are the child argv AFTER the fak executable (selfExe is prepended here).
-// Detection order: inside tmux ($TMUX) -> inside Windows Terminal ($WT_SESSION + `wt`) ->
-// none. Both supported hosts split the CURRENT window so the overlay lands beside the inline
-// agent pane.
+// buildGuardSplitPlan resolves the split host and assembles the argv that opens the
+// overlay surface. It is pure: goos/getenv/lookPath are injected, and overlayArgs are
+// the child argv AFTER the fak executable (selfExe is prepended here). Detection order:
+// inside tmux ($TMUX) -> inside Windows Terminal ($WT_SESSION + `wt`) -> a macOS
+// terminal app scriptable via osascript (iTerm2 splits the current window; Apple
+// Terminal has no split panes, so it gets a companion window) -> none.
 func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(string) (string, error), selfExe, where string, overlayArgs []string) (guardSplitPlan, error) {
 	where = strings.TrimSpace(strings.ToLower(where))
 	if where == "" {
@@ -112,11 +115,84 @@ func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(
 		}
 	}
 
-	// 3. No usable multiplexer context: render an actionable fallback (open a pane yourself and
+	// 3. macOS terminal apps, scripted via osascript (always present on macOS). A stock Mac
+	// ships neither tmux nor Windows Terminal, so before this rung an attended `fak guard
+	// -- claude` in Terminal.app/iTerm2 silently skipped the split and fak stayed invisible
+	// for the whole session — the one attended platform with NO fak surface at all.
+	if app := macSplitTerminalApp(goos, getenv); app != "" {
+		if _, err := lookPath("osascript"); err == nil {
+			if app == "iterm2" {
+				// iTerm2 is a true inline split of the CURRENT window. Its AppleScript verbs
+				// name the DIVIDER: "split horizontally" draws a horizontal divider (new pane
+				// BELOW — the bottom strip), "split vertically" a vertical one (new pane to the
+				// RIGHT — the right column). The API has no pane-size parameter, so the split
+				// is even, not 80/20 — the geometry label says so rather than claiming 20%.
+				// The new session is created without being selected, so keyboard focus stays
+				// in the current (agent) pane.
+				verb, geometry := "split horizontally", "agent (top) / fak info (bottom pane — iTerm2 even split)"
+				if where == "right" {
+					verb, geometry = "split vertically", "agent (left) / fak info (right pane — iTerm2 even split)"
+				}
+				plan.Host = "iterm2"
+				plan.Geometry = geometry
+				plan.Spawn = []string{"osascript", "-e", fmt.Sprintf(
+					`tell application "iTerm2" to tell current session of current window to %s with same profile command "%s"`,
+					verb, appleScriptQuote(shellJoin(overlayCmd)))}
+				return plan, nil
+			}
+			// Apple Terminal has no split panes, so the overlay opens as a companion WINDOW
+			// (`do script` runs the overlay in a fresh window; --split-where has nothing to
+			// place). That never orphans the gateway — the agent still launches inline in
+			// THIS window; the companion only polls the loopback gateway URL. `do script`
+			// focuses the new window, so the script re-fronts the agent window (index 1)
+			// to keep the cursor where the operator types. The trailing `; exit` lets the
+			// window close itself when the overlay ends (with the default close-on-clean-
+			// exit profile) instead of lingering as a dead shell.
+			plan.Host = "terminal-app"
+			plan.Geometry = "agent (this window) / fak info (companion Terminal window)"
+			plan.Spawn = []string{"osascript",
+				"-e", `tell application "Terminal"`,
+				"-e", `set agentWindow to front window`,
+				"-e", `do script "` + appleScriptQuote(shellJoin(overlayCmd)+"; exit") + `"`,
+				"-e", `set index of agentWindow to 1`,
+				"-e", `end tell`,
+			}
+			return plan, nil
+		}
+	}
+
+	// 4. No usable multiplexer context: render an actionable fallback (open a pane yourself and
 	// run the overlay in it).
 	plan.Host = "none"
 	plan.Fallback = guardSplitFallbackRecipe(overlayCmd)
 	return plan, nil
+}
+
+// macSplitTerminalApp resolves which scriptable macOS terminal app this session is
+// attended in: "iterm2" (true inline split panes), "terminal-app" (Apple Terminal —
+// no split panes, companion window instead), or "" (neither, or not macOS). iTerm2
+// is recognized by either of its two markers ($ITERM_SESSION_ID survives shells that
+// rewrite $TERM_PROGRAM); Apple Terminal only by $TERM_PROGRAM. Every other
+// TERM_PROGRAM (vscode, ...) stays "" — an unknown host must keep today's silent
+// no-op, not gain a surprise osascript spawn.
+func macSplitTerminalApp(goos string, getenv func(string) string) string {
+	if goos != "darwin" {
+		return ""
+	}
+	if strings.TrimSpace(getenv("ITERM_SESSION_ID")) != "" || strings.TrimSpace(getenv("TERM_PROGRAM")) == "iTerm.app" {
+		return "iterm2"
+	}
+	if strings.TrimSpace(getenv("TERM_PROGRAM")) == "Apple_Terminal" {
+		return "terminal-app"
+	}
+	return ""
+}
+
+// appleScriptQuote escapes s for embedding inside a double-quoted AppleScript string
+// literal. AppleScript strings have exactly two escapes: backslash and double-quote.
+func appleScriptQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return strings.ReplaceAll(s, `"`, `\"`)
 }
 
 func guardSplitGeometryLabel(where string) string {
@@ -130,8 +206,8 @@ func guardSplitGeometryLabel(where string) string {
 // second pane and the exact overlay command to run in it.
 func guardSplitFallbackRecipe(overlayCmd []string) string {
 	var b strings.Builder
-	b.WriteString("fak guard --split: no terminal multiplexer context found (looked for $TMUX and, on Windows, $WT_SESSION + `wt`).\n")
-	b.WriteString("open a second pane yourself (tmux split, or Windows Terminal Alt+Shift+- / Alt+Shift+plus) and run the 20% fak-info overlay there:\n")
+	b.WriteString("fak guard --split: no splittable terminal context found (looked for $TMUX; on Windows, $WT_SESSION + `wt`; on macOS, $TERM_PROGRAM naming iTerm2 or Apple Terminal).\n")
+	b.WriteString("open a second pane/window yourself (tmux split, Windows Terminal Alt+Shift+- / Alt+Shift+plus, or a second terminal window) and run the fak-info overlay there:\n")
 	fmt.Fprintf(&b, "  %s\n", strings.Join(overlayCmd, " "))
 	return b.String()
 }
@@ -148,18 +224,29 @@ func renderGuardSplitPlan(p guardSplitPlan) string {
 		return b.String()
 	}
 	fmt.Fprintf(&b, "spawn: %s\n", strings.Join(p.Spawn, " "))
-	b.WriteString("  agent pane (80%): current pane (inline launch after the overlay pane opens)\n")
-	fmt.Fprintf(&b, "  fak info pane (20%%): %s\n", strings.Join(p.Overlay, " "))
+	// The pane labels stay honest per host: only tmux/wt can actually promise 80/20
+	// (iTerm2's AppleScript split is even; Apple Terminal gets a companion window).
+	agentLabel, infoLabel := "agent pane (80%): current pane", "fak info pane (20%)"
+	switch p.Host {
+	case "iterm2":
+		agentLabel, infoLabel = "agent pane: current pane", "fak info pane (even split)"
+	case "terminal-app":
+		agentLabel, infoLabel = "agent: this window", "fak info (companion window)"
+	}
+	fmt.Fprintf(&b, "  %s (inline launch after the overlay opens)\n", agentLabel)
+	fmt.Fprintf(&b, "  %s: %s\n", infoLabel, strings.Join(p.Overlay, " "))
 	return b.String()
 }
 
 // guardSplitEnabled resolves the --split tri-state (auto|on|off) into a decision. AUTO (the
 // default) enables the inline fak-info pane ONLY for an attended interactive launch inside a
-// known terminal multiplexer (tmux or Windows Terminal), and never recursively (the spawned
-// pane and the agent inherit FAK_GUARD_SPLIT=1). on forces it (the runner prints the fallback
-// recipe when no multiplexer is found); off disables it. Every non-interactive / headless /
-// CI / plain-terminal launch falls through to a no-op, so the default is invisible and
-// harmless exactly where a split cannot help — there is zero behavior change for those paths.
+// known splittable terminal context (tmux, Windows Terminal, or — via the guardSplitGOOS
+// seam — a scriptable macOS terminal app: iTerm2 / Apple Terminal), and never recursively
+// (the spawned pane and the agent inherit FAK_GUARD_SPLIT=1). on forces it (the runner
+// prints the fallback recipe when no host is found); off disables it. Every
+// non-interactive / headless / CI / plain-terminal launch falls through to a no-op, so the
+// default is invisible and harmless exactly where a split cannot help — there is zero
+// behavior change for those paths.
 func guardSplitEnabled(mode string, getenv func(string) string, stdinInteractive, childInteractive bool) (bool, error) {
 	normalized := strings.TrimSpace(strings.ToLower(mode))
 	// The nesting guard applies to EVERY enabling mode, not just auto: the spawned overlay
@@ -181,7 +268,8 @@ func guardSplitEnabled(mode string, getenv func(string) string, stdinInteractive
 		if !stdinInteractive || !childInteractive {
 			return false, nil // headless / piped / -p run: nothing to sit beside.
 		}
-		inMux := strings.TrimSpace(getenv("TMUX")) != "" || strings.TrimSpace(getenv("WT_SESSION")) != ""
+		inMux := strings.TrimSpace(getenv("TMUX")) != "" || strings.TrimSpace(getenv("WT_SESSION")) != "" ||
+			macSplitTerminalApp(guardSplitGOOS, getenv) != ""
 		return inMux, nil
 	case "on", "true", "1", "yes":
 		return true, nil

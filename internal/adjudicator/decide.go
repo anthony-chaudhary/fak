@@ -1122,6 +1122,29 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 				}
 				continue
 			}
+			// The PRIVILEGE-ESCALATION rule (`\bsudo\b`) is decided STRUCTURALLY, not
+			// by the raw regex, for the same reason as rm_rf/rce_pipe: the raw regex
+			// false-positives on sudo as quoted text (`echo 'sudo make install'`) and
+			// — the dominant false POLICY_BLOCK in real remote-GPU bring-up
+			// trajectories — on a REMOTE escalation carried as an ssh argument
+			// (`ssh gpu-box 'sudo systemctl restart …'`), where the local command
+			// word is ssh and the escalation is governed by the remote host's own
+			// controls, not this local floor. commandLocalEscalationWord tokenizes
+			// the command, unwraps sh -c / $() / ``, and matches sudo (or the doas
+			// launder the raw regex missed) only at a LOCAL resolved command-word
+			// position, so a genuine local escalation stays denied.
+			if isSudoArgRule(pr) {
+				if present {
+					if word, ok := commandLocalEscalationWord(val); ok {
+						if pr.Advisory {
+							note(pr, "sudo_local "+word)
+							continue
+						}
+						return argDeny(pr, "sudo_local "+word), true, notes
+					}
+				}
+				continue
+			}
 			// Every OTHER deny_regex rule matches the CANONICAL form (#2407): the raw
 			// arg string alone let a backslash, dot-segment, env-alias, or quote-style
 			// spelling of the same value slip a rule written against its canonical
