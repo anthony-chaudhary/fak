@@ -98,11 +98,26 @@ func configureServeSessionDurability(tbl *session.Table, path string, stderr io.
 		if !session.IsCorruptDescriptorFile(err) {
 			return err
 		}
-		quarantined, quarantineErr := quarantineCorruptSessionRegistry(path)
-		if quarantineErr != nil {
-			return fmt.Errorf("%w; quarantine corrupt registry: %v", err, quarantineErr)
+		policy, policyErr := sessionQuarantineRetentionPolicy()
+		if policyErr != nil {
+			warnf("fak: invalid %s; using the default quarantine retention policy: %v", sessionQuarantineRetentionEnv, policyErr)
 		}
-		warnf("fak: corrupt session registry quarantined at %s; starting with an empty registry: %v", quarantined, err)
+		rec, recErr := session.RecoverCorruptRegistry(path, err, policy, time.Now())
+		if recErr != nil {
+			return fmt.Errorf("%w; quarantine corrupt registry: %v", err, recErr)
+		}
+		if rec.AlreadyRecovered {
+			warnf("fak: corrupt session registry already quarantined by a concurrent recoverer; retrying restore")
+		} else {
+			warnf("fak: corrupt session registry quarantined at %s; starting with an empty registry (cause=%s bytes=%d recoveries_total=%d): %v",
+				rec.Event.QuarantinePath, rec.Event.Cause, rec.Event.Bytes, rec.Stats.Total, err)
+		}
+		if rec.LedgerErr != nil {
+			warnf("fak: session recovery ledger update failed (recovery unaffected): %v", rec.LedgerErr)
+		}
+		if rec.ReapErr != nil {
+			warnf("fak: quarantine retention cleanup failed (recovery unaffected): %v", rec.ReapErr)
+		}
 		if err := mirror.restore(tbl); err != nil {
 			return err
 		}
@@ -111,25 +126,17 @@ func configureServeSessionDurability(tbl *session.Table, path string, stderr io.
 	return nil
 }
 
-func quarantineCorruptSessionRegistry(path string) (string, error) {
-	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
-	base := path + ".corrupt-" + stamp
-	for attempt := 0; attempt < 100; attempt++ {
-		dst := base
-		if attempt > 0 {
-			dst = fmt.Sprintf("%s-%d", base, attempt)
-		}
-		if _, err := os.Stat(dst); err == nil {
-			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-		if err := os.Rename(path, dst); err != nil {
-			return "", err
-		}
-		return dst, nil
-	}
-	return "", errors.New("could not allocate corrupt session registry quarantine path")
+// sessionQuarantineRetentionEnv overrides the bounded retention policy for
+// corrupt-registry quarantine evidence (#4658): "off" disables cleanup
+// entirely, "count=N,age=DURATION,bytes=N" overrides individual dimensions
+// (0 makes a dimension unbounded), and unset keeps the conservative default
+// (session.DefaultQuarantineRetention). A malformed value falls back to the
+// default with a stderr warning — retention problems never prevent MCP
+// startup.
+const sessionQuarantineRetentionEnv = "FAK_SESSION_QUARANTINE_RETENTION"
+
+func sessionQuarantineRetentionPolicy() (session.QuarantineRetention, error) {
+	return session.ParseQuarantineRetention(os.Getenv(sessionQuarantineRetentionEnv))
 }
 
 func defaultSessionRegistryPath() string {

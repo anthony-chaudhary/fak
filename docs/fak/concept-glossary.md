@@ -1882,3 +1882,24 @@ The reap-or-keep verdict for a stale git .git/index.lock: a Reap flag plus a clo
 The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence.
 
 **Distinct from:** sessionobs scores how well a session is OBSERVED — it grades the telemetry. session_fatigue grades the DECISIONS instead: it measures whether a confirm gate is still carrying a judgement or is being waved through, and it is strictly read-only. Naming a rubber-stamped gate is all it does; coarsening one is the regime mechanism (#2389/#2405) and the autonomy dial (#2759), not this token.
+
+
+### sessionQuarantineRetentionPolicy
+
+The cmd/fak accessor that reads FAK_SESSION_QUARANTINE_RETENTION and returns the bounded retention policy governing how many, how old and how large the quarantined copies of a corrupt session registry may grow before the recovery path reaps them; an unparseable value returns the conservative default plus an error the caller warns about rather than failing on.
+
+**Distinct from:** DefaultAdmissionPolicy decides whether NEW work is let in; this decides how long WRECKAGE is kept after the fact. It is a housekeeping bound on already-quarantined evidence, never an admission or scheduling decision, and by design it can never refuse or delay a session — a malformed policy degrades to the default instead of failing startup.
+
+
+### sessionQuarantineRetentionEnv
+
+The cmd/fak constant naming the environment variable that overrides the corrupt-registry quarantine retention policy. It is the NAME of the knob, not the knob's parsed value and not the policy itself.
+
+**Distinct from:** sessionQuarantineRetentionPolicy is the accessor that READS this knob and yields a parsed policy; this constant is only the string key it looks up. Renaming this constant changes which environment variable operators set; changing the policy changes what retention actually does.
+
+
+### FAK_SESSION_QUARANTINE_RETENTION
+
+The operator-facing environment variable bounding corrupt-registry quarantine evidence: 'off' disables cleanup entirely, 'count=N,age=DURATION,bytes=N' overrides individual dimensions with 0 meaning unbounded, and unset keeps session.DefaultQuarantineRetention. A malformed value warns and falls back to the default; it never prevents MCP startup.
+
+**Distinct from:** This is the WIRE NAME an operator exports, whereas sessionQuarantineRetentionEnv is the Go constant holding that name and sessionQuarantineRetentionPolicy is the parsed result. It bounds quarantined evidence only — it does not affect live session descriptor TTLs, and setting it 'off' retains wreckage rather than disabling recovery.

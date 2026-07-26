@@ -16,8 +16,8 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **40** (clarity 0 + coverage 40) |
-| **Crystal-clear concepts (and climbing)** | **377** crystal of 1994 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2174 / 2214** (98.2% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **381** crystal of 1998 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2177 / 2217** (98.2% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
 
@@ -26,10 +26,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1994 concepts - score 98.8/100 (grade A) - disambiguation-debt 40
+concept-disambiguation chart - 1998 concepts - score 98.8/100 (grade A) - disambiguation-debt 40
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 377
+  * crystal       #######..................... 381
   o defined       ############################ 1617
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -48,22 +48,22 @@ clarity mix by family (each cell = one concept):
   layout           ****oooooooo       (12 concept(s); 4 crystal)
   loop             **************************ooooooooooooooooooooooooooooooooo (59 concept(s); 26 crystal)
   plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
-  policy-capability *********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (119 concept(s); 21 crystal)
+  policy-capability **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (120 concept(s); 22 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
   render-materialize ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (151 concept(s); 3 crystal)
   score-debt       ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (68 concept(s); 4 crystal)
-  session-runtime  *****************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (166 concept(s); 17 crystal)
+  session-runtime  ********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (169 concept(s); 20 crystal)
   support-maturity ************ooooooooooooooooo (29 concept(s); 12 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    **************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (127 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  ###########################. 190/200
+  session-runtime  ###########################. 193/203
   guard-gate       ###########################. 354/362
   cache            ############################ 255/259
   decision         ##########################.. 49/53
-  policy-capability ###########################. 139/142
+  policy-capability ###########################. 140/143
   render-materialize ############################ 171/174
   support-maturity ##########################.. 37/40
   context-ctx      ############################ 193/195
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.2%  (2174/2214 confusable tokens positioned)
+namespace coverage  [###############################.] 98.2%  (2177/2217 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -371,6 +371,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | policy-capability | **abi.Verdict** - The discriminated-union decision an adjudicator returns, keyed by kind (Allow, Deny, Defer, Transform, Quarantine, RequireWitness) with typed payloads. |
 | * | crystal | symbol | policy-capability | **reason code** - The closed, additive vocabulary of refusal reasons (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, ...) that every deny verdict cites, never free text. |
 | * | crystal | config | policy-capability | **posture (tool admission)** - The policy's default behavior after all provable refusal checks pass: PostureFailClosed (deny everything not allowed) or PostureAdmitAndLog (admit low-risk reads with forensic metadata). |
+| * | crystal | symbol | policy-capability | **sessionQuarantineRetentionPolicy** - The cmd/fak accessor that reads FAK_SESSION_QUARANTINE_RETENTION and returns the bounded retention policy governing how many, how old and how large the quarantined copies of a corrupt session registry may grow before the recovery path reaps them; an unparseable value returns the conservative default plus an error the caller warns about rather than failing on. |
 | * | crystal | symbol | policy-capability | **DenialPolicy** - Store policy field selecting how the shared-task fold reports a policy-refused patch: deny outright or hold as quarantined. |
 | * | crystal | symbol | policy-capability | **ViewPolicy** - Reader-scope redaction policy for shared-task views: MaxScope plus IncludeQuarantined decide what View and EventsView reveal to a caller. |
 | * | crystal | symbol | policy-capability | **normalizeViewPolicy** - Fold helper defaulting an empty ViewPolicy scope before redaction so an unset reader scope never widens visibility. |
@@ -389,6 +390,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | score-debt | **FleetDebt (fleet-product ranking key)** - FleetDebt is the superloop fleet-walk ranking key (#4958): the liveness x progress x follow-on PRODUCT minus one, so a clean live member folds to debt 0 and the ordinary worst-first sort (tier, then debt descending) ranks the fleet with no rival walker. A product, not a sum, because the axes compound — a stale loop that is also spinning pays cadence cost for zero verified output on two grains at once, and outranks either fault alone. |
 | * | crystal | symbol | session-runtime | **ForkSessionID** - The forked session id whose lookahead rollout produced a RolloutEvidence/Lesson (#5204): the twin session spun off to roll the trajectory forward under the fork-rollout runner. |
 | * | crystal | symbol | session-runtime | **session_fatigue** - The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence. |
+| * | crystal | symbol | session-runtime | **sessionQuarantineRetentionPolicy (corrupt-registry quarantine retention)** - How long, and how many, quarantined copies of a corrupt session registry are kept after RecoverCorruptRegistry moves the bad file aside — read from the sessionQuarantineRetentionEnv knob, falling back to the default policy when the knob is unparseable. |
+| * | crystal | symbol | session-runtime | **sessionQuarantineRetentionEnv** - The cmd/fak constant naming the environment variable that overrides the corrupt-registry quarantine retention policy. It is the NAME of the knob, not the knob's parsed value and not the policy itself. |
+| * | crystal | config | session-runtime | **FAK_SESSION_QUARANTINE_RETENTION** - The operator-facing environment variable bounding corrupt-registry quarantine evidence: 'off' disables cleanup entirely, 'count=N,age=DURATION,bytes=N' overrides individual dimensions with 0 meaning unbounded, and unset keeps session.DefaultQuarantineRetention. A malformed value warns and falls back to the default; it never prevents MCP startup. |
 | * | crystal | symbol | session-runtime | **SessionFleet** - gateway.SessionFleet aggregates the cross-MACHINE SessionFleetMachine rows that the live `fak guard` provider exposes through `/debug/vars` for `fak info`. |
 | * | crystal | subsystem | session-runtime | **sessionjournal (package)** - internal/sessionjournal is the crash-survivable session-event journal: a boot-epoch fold of open/beat/close events over guard_sessions.jsonl that classifies each session LIVE/CRASHED/STALE/CLOSED for resume targeting. |
 | * | crystal | subsystem | session-runtime | **sessionread (package)** - internal/sessionread is the closed read/query/observe-op vocabulary spine (#4176/#4191): each shipped session READ seam carries its own capability/disclosure/evidence/refusal contract, the outbound twin of sessionctl. |
@@ -2230,7 +2234,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1994 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1998 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2242,11 +2246,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 190 | 200 | 10 |
+| session-runtime | 193 | 203 | 10 |
 | guard-gate | 354 | 362 | 8 |
 | cache | 255 | 259 | 4 |
 | decision | 49 | 53 | 4 |
-| policy-capability | 139 | 142 | 3 |
+| policy-capability | 140 | 143 | 3 |
 | render-materialize | 171 | 174 | 3 |
 | support-maturity | 37 | 40 | 3 |
 | context-ctx | 193 | 195 | 2 |
