@@ -596,6 +596,39 @@ func (c runConfig) debitTurn(usage Usage) {
 	}
 }
 
+// debitToolCall spends ONE unit of the session's tool-call runaway budget (#5235, the
+// #2887 floor) for a call about to be DISPATCHED, and returns the closed stop reason
+// when the ceiling is crossed ("" = proceed). It is debitTurn's per-CALL twin: where the
+// turn axis debits once per model round-trip and is only read at a turn boundary, this
+// axis is debited per dispatched tool call, so a single turn that emits a long tool-call
+// loop is cut MID-TURN at the ceiling instead of running the whole batch out. Exhaustion
+// drives the session to Draining/Stopped inside session.Table.DebitToolCall, yielding the
+// closed ReasonBudgetToolCalls witness the caller stamps on StoppedBySession.
+//
+// A nil table is a no-op returning "" (the historical loop is byte-for-byte unchanged),
+// and an unconfigured axis is permissive by the 0=off convention, so wiring a session
+// without a calls= envelope never cuts a run. The function-shaped SessionGate carries no
+// tool-call axis yet, so a gateway-served run debits nothing here (#5235 out of scope).
+//
+// It cuts ONLY for its own axis. Table.DebitToolCall shares its run-state head with
+// Decide, so a session already Draining/Stopped/Paused answers !Proceed carrying THAT
+// reason rather than a budget one — and honoring it here would silently re-adjudicate
+// run-state at a point the loop deliberately does not. That would break the #2758
+// drain/terminate contract in the drain direction: a drain must let the in-flight turn
+// dispatch every call the model already announced and take the stop at the NEXT
+// BOUNDARY, while only a terminate cuts dispatch mid-turn (already handled by the
+// stopTerminated safe point above the call site). So a non-budget reason is passed over
+// as "proceed" and left to the gate that owns it.
+func (c runConfig) debitToolCall() string {
+	if c.table == nil {
+		return ""
+	}
+	if v := c.table.DebitToolCall(c.trace); !v.Proceed && v.Reason == session.ReasonBudgetToolCalls {
+		return v.Reason
+	}
+	return ""
+}
+
 // sampleOptsFor turns a per-turn output-token cap into the variadic SampleOpt slice
 // for p.Complete. A non-positive cap returns NO options, so the planner call is
 // byte-identical to the pre-seam p.Complete(ctx, messages, tools) — the historical

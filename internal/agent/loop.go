@@ -621,6 +621,21 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			if stopTerminated() {
 				return m, nil
 			}
+			// Tool-call runaway budget (#5235, the #2887 floor): spend one unit of the
+			// session's per-CALL allotment BEFORE this call is dispatched or counted. The
+			// boundary gate above cannot hold this line — it only runs between turns, so a
+			// single turn emitting a long tool-call loop would run the whole batch out.
+			// Exhaustion ends the arm HERE, mid-turn, with the closed
+			// BUDGET_TOOLCALLS_EXHAUSTED witness on StoppedBySession and no final answer —
+			// the remaining calls are never dispatched, exactly like a terminate. A no-op
+			// with no table wired or no ceiling configured.
+			if reason := cfg.debitToolCall(); reason != "" {
+				m.StoppedBySession = reason
+				if fak {
+					finalizeFak(k, &m)
+				}
+				return m, nil
+			}
 			m.ToolCalls++
 			tool := tc.Function.Name
 			rawArgs := tc.Function.Arguments
