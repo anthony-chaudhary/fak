@@ -668,9 +668,24 @@ var registry = []Super{
 		// or counted). The intent is SATISFIED when every posted scorecard is at floor; the
 		// descend pointer keeps the feed-liveness check in view without letting an unread
 		// surface red a clean walk.
+		//
+		// The operator-steerability overlay (#5039) joins as a KindLoop member rather than a
+		// sixth intent: its number IS outward-facing steering, so tend-scoreboards is its
+		// home, and a new intent walking the same debt would fragment the fold. What is
+		// registered here is the overlay's LIVENESS — the maintenance loop (#5023) whose tick
+		// re-folds the pending dev->release delta and appends docs/nightrun/steerpr-overlay.jsonl,
+		// read through the same cross-ledger loop-health fold every other KindLoop member uses.
+		// It carries NO scorecard ref, so the once-only invariant is untouched (this addition
+		// double-counts nothing at the root); the osp_residual CARD and its scorecard member
+		// are #5022's deliverable, deliberately kept out of this registration. Its Enter is the
+		// concrete verb that retires the debt the loop measures — `fak steer prs`, a read-only
+		// fold that exits 0 — so the worklist's action column is runnable exactly as printed.
+		// A host with no overlay ledger, or a ledger loopfleet cannot fold, reads UNMEASURED
+		// (the shell's KindLoop miss path), never a clean zero: an overlay that stopped
+		// ticking for a week must surface, which is the whole reason to register it.
 		Name:   "tend-scoreboards",
 		Title:  "tend the scoreboard/reporting surfaces",
-		About:  "walk the outward-facing report scorecards fak posts to Slack (product, release, steerability, milestone), surface the feed-delivery liveness, then enter the worst-first report in debt",
+		About:  "walk the outward-facing report scorecards fak posts to Slack (product, release, steerability, milestone) plus the steerability-overlay maintenance loop's liveness, surface the feed-delivery liveness, then enter the worst-first report in debt",
 		Floor:  0,
 		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 15, TokenCeiling: 100000, MaxWorkers: 1},
 		Members: []Member{
@@ -678,6 +693,7 @@ var registry = []Super{
 			{Kind: KindScorecard, Ref: "release", Why: "release-readiness debt: the release-cadence feed reports an unready release", Enter: "python tools/release_readiness_scorecard.py --json"},
 			{Kind: KindScorecard, Ref: "steer", Why: "steerability debt: the steering-guard feed reports the fleet is hard to steer", Enter: "/steerability-score"},
 			{Kind: KindScorecard, Ref: "milestone", Why: "milestone debt: the milestone feed reports the roadmap climb has stalled", Enter: "/milestone-score"},
+			{Kind: KindLoop, Ref: "steerpr-overlay", Why: "operator-steerability overlay liveness (#5039): the maintenance loop (#5023) that re-folds the pending dev->release delta as commits land — dark or unread means the residual pile an operator steers by stopped being recomputed, and an unwitnessed claim can sit unseen for a week", Enter: "fak steer prs"},
 			{Kind: KindSurface, Ref: "fak slack beat", Why: "reporting-feed delivery liveness: are the scoreboard channels actually receiving the posts the feeds send (blockers, cachevalue, capacity, node-usage, backlog have no scorecard, only a delivery pulse)?"},
 		},
 	},
