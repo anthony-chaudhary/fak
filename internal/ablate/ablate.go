@@ -215,6 +215,11 @@ type AblationRun struct {
 	FakTokenDelta          float64                  `json:"fak_token_delta"`
 	Correctness            GateResult               `json:"correctness"`
 	ChildAOwnServeEstimate *float64                 `json:"child_a_own_serve_dollars,omitempty"`
+	// ModelStrength is the #4412 strength-axis card: the arm's marginal delta at each
+	// swept model tier plus the LOAD_BEARING / REDUNDANT / HOBBLING verdict folded from
+	// that trajectory. A POINTER with omitempty on purpose — without `--models` the axis
+	// never runs and the field vanishes, so the legacy single-tier JSON is unchanged.
+	ModelStrength *ModelStrength `json:"model_strength,omitempty"`
 }
 
 // PrefixIntegrity is the per-arm cache-burst witness for wire-side cache levers. The
@@ -283,6 +288,13 @@ type Report struct {
 	Caveats      []string           `json:"caveats,omitempty"`
 	Runs         []AblationRun      `json:"runs"`
 	Dropped      []DroppedArm       `json:"dropped_arms,omitempty"`
+	// Verdicts is the FLAT per-feature strength grade list the #4412 axis publishes
+	// alongside runs[]. It duplicates each run's ModelStrength verdict on purpose: the
+	// already-shipped `fak harness-debt-dispatch` (#4414) reads exactly this shape off a
+	// top-level "verdicts" key, so emitting it here lets the producer feed the consumer
+	// directly instead of making that leaf learn the nested runs[] layout. Empty (and
+	// omitted) whenever the strength axis did not run.
+	Verdicts []StrengthVerdict `json:"verdicts,omitempty"`
 }
 
 // ArmByID returns the arm with the given id, or nil.
