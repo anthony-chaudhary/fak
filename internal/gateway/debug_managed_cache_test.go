@@ -1,6 +1,10 @@
 package gateway
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
+)
 
 // The /debug/vars managed_cache block is the posture sibling of the #1849 cache_attribution
 // owner split (#2190): it must make the managed-cache 1h TTL-upgrade lever legible LIVE, and
@@ -63,6 +67,46 @@ func TestManagedCacheVars(t *testing.T) {
 	t.Run("passive cold session stays quiet", func(t *testing.T) {
 		if got := managedCacheVars(false, "", AdjudicationSummary{}); got != nil {
 			t.Fatalf("passive cold session should emit no block, got %+v", got)
+		}
+	})
+
+	// The #3620 watchdog on the live surface: an ACTIVE session whose attempts are all
+	// refused past the floor carries the UPGRADE_NEVER_FIRED finding in managed_cache.finding;
+	// a fired upgrade, a below-floor session, or a lever-less wire leaves the field empty.
+	t.Run("active all-refused past the floor raises UPGRADE_NEVER_FIRED", func(t *testing.T) {
+		got := managedCacheVars(true, "", AdjudicationSummary{
+			CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 2, "no_stable_breakpoint": 1},
+		})
+		if got == nil || got.Finding != guardvars.FindingUpgradeNeverFired {
+			t.Fatalf("Finding = %+v, want %q", got, guardvars.FindingUpgradeNeverFired)
+		}
+	})
+
+	t.Run("a fired upgrade keeps the finding clear", func(t *testing.T) {
+		got := managedCacheVars(true, "", AdjudicationSummary{
+			CacheTTLUpgraded:       1,
+			CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 5},
+		})
+		if got == nil || got.Finding != "" {
+			t.Fatalf("Finding = %+v, want empty after an upgraded outcome", got)
+		}
+	})
+
+	t.Run("below the attempt floor stays finding-free", func(t *testing.T) {
+		got := managedCacheVars(true, "", AdjudicationSummary{
+			CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 2},
+		})
+		if got == nil || got.Finding != "" {
+			t.Fatalf("Finding = %+v, want empty below the floor", got)
+		}
+	})
+
+	t.Run("responses wire never carries the finding", func(t *testing.T) {
+		got := managedCacheVars(true, "openai-responses", AdjudicationSummary{
+			CacheTTLUpgradeReasons: map[string]uint64{"volatile_head": 9},
+		})
+		if got == nil || got.Finding != "" {
+			t.Fatalf("Finding = %+v, want empty on a wire without the 1h-TTL lever", got)
 		}
 	})
 

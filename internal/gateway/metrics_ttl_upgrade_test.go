@@ -95,6 +95,48 @@ func TestCacheTTLUpgradePlacedAndUpgradedCountsAsAuthored(t *testing.T) {
 	}
 }
 
+// The #3620 UPGRADE_NEVER_FIRED live watchdog over synthetic outcome counters: an ACTIVE
+// session whose every upgrade attempt is refused must raise the finding once the attempt
+// floor accrues, and a single fired upgrade must clear it — the running upgraded-vs-refused
+// ratio the cache-verify loop keys on.
+func TestUpgradeNeverFiredWatchdog(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+
+	// Below the floor: a short session's first refused turns are not an alarm.
+	m.observeCacheTTLUpgrade("volatile_head")
+	m.observeCacheTTLUpgrade("no_stable_breakpoint")
+	if sum := m.adjudicationSummary(); sum.UpgradeNeverFired() {
+		t.Fatalf("watchdog fired below the attempt floor: attempts=%d", sum.TTLUpgradeAttempts())
+	}
+
+	// At the floor with zero upgrades: the finding fires.
+	m.observeCacheTTLUpgrade("volatile_head")
+	sum := m.adjudicationSummary()
+	if got := sum.TTLUpgradeAttempts(); got != 3 {
+		t.Fatalf("TTLUpgradeAttempts = %d, want 3", got)
+	}
+	if !sum.UpgradeNeverFired() {
+		t.Fatalf("watchdog silent at %d refused attempts with 0 upgrades", sum.TTLUpgradeAttempts())
+	}
+
+	// One fired upgrade clears it, however many refusals surround it.
+	m.observeCacheTTLUpgrade("")
+	m.observeCacheTTLUpgrade("volatile_head")
+	sum = m.adjudicationSummary()
+	if sum.UpgradeNeverFired() {
+		t.Fatalf("watchdog still raised after an upgraded outcome: upgraded=%d attempts=%d",
+			sum.CacheTTLUpgraded, sum.TTLUpgradeAttempts())
+	}
+}
+
+// A cold process (lever off or nothing eligible ever attempted) has no outcomes at all and
+// must never raise the finding — zero attempts is "unproven", not "never fired".
+func TestUpgradeNeverFiredQuietWhenCold(t *testing.T) {
+	if sum := newGatewayMetrics(time.Now()).adjudicationSummary(); sum.UpgradeNeverFired() {
+		t.Fatal("watchdog fired on a cold session with no upgrade outcomes")
+	}
+}
+
 // A lever-off session (nothing observed) folds to a zero count and an ABSENT reason map,
 // so the ledger row's omitempty keeps the JSON key out and OFF stays distinguishable from
 // ON-but-ineligible.
