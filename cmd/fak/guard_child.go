@@ -63,6 +63,13 @@ type guardUpstream struct {
 	// fails loud before spawning a headless child that would block on a login it can never
 	// complete. Distinct from passthroughFallback, which still has a path (the child's own key).
 	noTokenAnywhere bool
+	// keychainAPIKey is set when the auto-OAuth path found no subscription anywhere but
+	// adopted Claude Code's SAVED API KEY from the macOS Keychain as the upstream credential
+	// (#5363) — the credential a Mac on API billing actually authenticates with. Billing is
+	// unchanged by the adoption (the wrapped agent itself bills this same key); holding it in
+	// guard means the managed-cache auto posture can see API billing and go ACTIVE. cmdGuard
+	// surfaces a one-line note for discoverability, mirroring ambientKeyOverridden.
+	keychainAPIKey bool
 	// Claude config-home login posture for the CLAUDE_CONFIG_DIR guard will hand to the
 	// child. This is credential-safe observability only; token routing still follows the
 	// explicit source precedence in resolveAnthropicOAuthToken.
@@ -140,6 +147,7 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 	passthroughFallback := false
 	ambientKeyOverridden := false
 	noTokenAnywhere := false
+	keychainAPIKey := false
 	claudeConfigDir := ""
 	loginStatus := accounts.LoginStatus("")
 	canServe := false
@@ -180,7 +188,20 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 			oauthSource = "subscription login (token rotating; resolved per request)"
 		default:
 			// Auto attempt found no token AND no subscription login is present at all. There is
-			// nothing to pin and nothing for the per-request refresh to recover. Two sub-cases:
+			// nothing to pin and nothing for the per-request refresh to recover. Before falling
+			// back, ask the macOS Keychain for Claude Code's SAVED API KEY (#5363): a Mac whose
+			// Claude Code runs on API billing has no subscription to find — its real credential
+			// is that key, so guard adopts it upstream. Billing is identical either way (the
+			// wrapped agent itself authenticates with this same key), and holding it means the
+			// managed-cache auto posture sees API billing instead of "billing unknown". This
+			// stays subordinate to the subscription default: any OAuth token above wins, and the
+			// ambient-ANTHROPIC_API_KEY-must-not-override-a-subscription rule is untouched.
+			if key, ok := guardKeychainAPIKey(claudeConfigDir); ok {
+				apiKey = key
+				keychainAPIKey = true
+				break
+			}
+			// Two remaining sub-cases:
 			//   - the child carries its own ANTHROPIC_API_KEY → legitimate API-billing
 			//     passthrough (its key flows upstream); keep spawning.
 			//   - the child has no key either → a headless spawn would block on a /login the
@@ -200,7 +221,7 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 		provider: up, autodetected: autodetected, baseURL: resolvedBase,
 		apiKey: apiKey, pinUpstream: pinUpstream, oauthSource: oauthSource,
 		passthroughFallback: passthroughFallback, ambientKeyOverridden: ambientKeyOverridden,
-		noTokenAnywhere: noTokenAnywhere,
+		noTokenAnywhere: noTokenAnywhere, keychainAPIKey: keychainAPIKey,
 		claudeConfigDir: claudeConfigDir, loginStatus: loginStatus, canServe: canServe,
 		remoteServe: remote,
 	}

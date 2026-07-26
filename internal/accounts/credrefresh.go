@@ -95,7 +95,26 @@ func TriggerRefresh(ctx context.Context, cfgDir string, spawn RefreshSpawn, now 
 // ok is false when the file is missing, unparseable (a torn read mid-rewrite), carries no token,
 // or records no positive expiry — the raw freshness fact, not the send-safe verdict. It mirrors
 // cmd/fak/guard_support.go's credExpiresAt; it lives here so this leaf stays free of a cmd import.
+//
+// When the file has no answer it falls back to the macOS Keychain (#5363) under the SAME
+// positive-expiry contract: on darwin the `claude -p` spawn TriggerRefresh fires rotates the
+// KEYCHAIN item, not a file, so without this fallback the before/after comparison above never
+// observes the refresh it just caused.
 func credExpiry(path string) (time.Time, bool) {
+	if exp, ok := credFileExpiry(path); ok {
+		return exp, true
+	}
+	if filepath.Base(path) != ".credentials.json" {
+		return time.Time{}, false
+	}
+	cred, ok := ClaudeKeychainCred(filepath.Dir(path))
+	if !ok || cred.AccessToken == "" || cred.ExpiresAt <= 0 {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(cred.ExpiresAt), true
+}
+
+func credFileExpiry(path string) (time.Time, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return time.Time{}, false
