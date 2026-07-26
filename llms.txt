@@ -23,6 +23,7 @@
 - Configuration: [`docs/fak/server-config.md`](docs/fak/server-config.md)
 - API: [`docs/fak/api-reference.md`](docs/fak/api-reference.md)
 - Deployment: [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md)
+- Deploying the gateway on a **rented GPU box** (CoreWeave, Lambda, RunPod, Crusoe, Vast.ai, Nebius) — in-kernel on the GPU, or proxy in front of a co-located vLLM/SGLang; every provider row is `not yet` end-to-end witnessed: [`docs/fak/neo-cloud-deploy.md`](docs/fak/neo-cloud-deploy.md). Distinct from **fronting a hosted model API** ([`docs/supported/clouds.md`](docs/supported/clouds.md)) and from the neo-cloud **backend binding layer** ([`docs/vendor/neo-cloud-reference-architecture.md`](docs/vendor/neo-cloud-reference-architecture.md)).
 - Release readiness, guarded cut/publish, verification, and rollback: [`fak release`](cmd/fak/release.go) and [`.claude/skills/release/SKILL.md`](.claude/skills/release/SKILL.md)
 - Client and agent integrations: [`docs/integrations/`](docs/integrations/)
 - Scoped benchmark results, tuned baselines, artifacts, and reproduce routes: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md)
