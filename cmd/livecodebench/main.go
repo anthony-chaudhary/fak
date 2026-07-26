@@ -76,6 +76,13 @@ func run(argv []string) int {
 	if len(argv) > 0 && argv[0] == "ab" {
 		return runAB(argv[1:])
 	}
+	// ab-graded is the graded companion to ab. The match above is exact, so "ab"
+	// does not shadow it; without this case the subcommand fell through to the
+	// smoke-report FlagSet and died on "unexpected positional arguments", which
+	// made runABGraded unreachable code.
+	if len(argv) > 0 && argv[0] == "ab-graded" {
+		return runABGraded(argv[1:])
+	}
 
 	fs := flag.NewFlagSet("livecodebench", flag.ContinueOnError)
 	fixture := fs.String("fixture", "internal/livecodebench/testdata/fixture.json", "path to committed LiveCodeBench smoke fixture")
