@@ -247,7 +247,9 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Study: ktransformers/kt-kernel @0c2912a — compute/kernel/operator-tooling pass (deeper #3900 follow-on)](docs/notes/CONCEPT-STUDY-KTRANSFORMERS-2026-07-18.md) -- auto-indexed dated note.
 - [Concept study: the Reddit "token-saving tools for Claude Code" cluster (rtk/distill/ctg/9router/Headroom) — witnessed borrows](docs/notes/CONCEPT-STUDY-REDDIT-TOKEN-TOOLS-2026-07-16.md) -- auto-indexed dated note.
 - [The supervisor seat: when the monitor loop is an agent, not a tick or a human](docs/notes/CONCEPT-SUPERVISOR-AGENT-SEAT-2026-07-13.md) -- auto-indexed dated note.
+- [Org-policy plane: prior art + threat model (epic #5315, R1 #5316)](docs/notes/RESEARCH-org-policy-plane-prior-art-2026-07-20.md) -- auto-indexed dated note.
 - [Org-policy signing, freshness, and key-distribution model (epic #5315, W2 #5320)](docs/notes/RESEARCH-org-policy-signing-model-2026-07-20.md) -- auto-indexed dated note.
+- [Org-policy precedence lattice (epic #5315, R3 #5318)](docs/notes/RESEARCH-org-policy-precedence-2026-07-20.md) -- auto-indexed dated note.
 - [Managed-cache family — own-sessions audit from the durable gateway-usage ledgers](docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md) -- auto-indexed dated note.
 - [Study: vLLM @b6ff8a2f — witnessed inference/serving borrows (#5261-#5262)](docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md) -- auto-indexed dated note.
 - [Study: SGLang @b8ec5449 — RadixAttention serving engine (#5286-#5288)](docs/notes/CONCEPT-STUDY-SGLANG-2026-07-18.md) -- auto-indexed dated note.
