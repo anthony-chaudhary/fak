@@ -39,7 +39,34 @@ Result chain: turn-1 window (~62K) > budget (48000) → `BUDGET_CONTEXT_EXHAUSTE
 turn 1 → guard's 2 restarts burned → raw 409 → child exit 1 → `CHILD_CRASH`. Fleet
 ship rate collapsed to **2–9%**.
 
-## The shipped fix (`8a0fcffbb`)
+> **SUPERSEDED (turn-starvation).** The derivation recorded in the next section —
+> `min(baseline × 2, HardContextCap − OutputReserve)` = 124000 — was itself defective and
+> has been replaced. It cured the *birth* wall but created a *turn* wall: the seeded
+> budget is a CUMULATIVE allowance (`internal/session/usage.go:99` debits each turn's
+> ENTIRE resident window), so `baseline × k` funds at most `k` turns, and clamping that
+> cumulative total to the per-turn window ceiling made the clamp binding for every
+> `k ≥ 3` (`min(62000×k, 168000) = 168000`), pinning every child at ~2 turns no matter
+> what the factor was. Live witness
+> `.dispatch-runs/resolve-5103-20260726-022520.log`: 6 turns at ctx 68.4k→83.2k,
+> `context_tokens=124000`, `restart_exhausted count=3
+> dominant_cause=BUDGET_CONTEXT_EXHAUSTED` at 5m42s of a 29m runway → 409 → exit 1,
+> reproduced on 120/120 worker witnesses as `CLAIM_NO_COMMIT`. The shipped derivation is
+> now `max(HardContextCap − OutputReserve, baseline) × claudeGuardTurnsPerEpoch`
+> (= `max(168000, 62000) × 12` = **2016000**): the window ceiling bounds the PER-TURN
+> resident, where it is dimensionally correct, and the turn count scales the cumulative
+> total. The goldens below (124000, `budget <= ceiling`, strict monotone-in-baseline)
+> are superseded by turn-unit assertions in the same two tests.
+>
+> Corollary recorded here because it cost real debugging time: the per-turn stderr nudge
+> renders `ctx:<resident>/<compact-history-budget>` (`internal/gateway/debug_stats.go`
+> `formatCompactionBudgetNudge`) — the denominator is the 96000 COMPACT shed-line, never
+> the session budget. A worker therefore reads `ctx:83.2k/96.0k dist:12.8k-to-compact`
+> ("compaction is close") on the very turn its unrelated cumulative budget kills it, and
+> the compaction fold correctly logs `bailed: under_budget` because it compares the
+> per-turn *suffix after the cache anchor* (`internal/agent/anthropic_compact.go:372`)
+> against 96000. The two "budgets" were never on the same scale.
+
+## The shipped fix (`8a0fcffbb`) — superseded, see above
 
 Replace the flat constant with a launch-time **derivation** so no single flat value
 can silently fall below the baseline the next time the baseline grows:
