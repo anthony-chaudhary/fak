@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,30 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
+// dispatchTickFixtureCores / dispatchTickFixtureRAMMB / dispatchTickFixtureThreads are the
+// host-resource fixture every tick test runs against (both probe seams in the helper below
+// return them). Cap terms derived from the host are therefore a property of the FIXTURE, and
+// a test may assert them by derivation instead of by a literal that only holds on a
+// 64-core box.
+const (
+	dispatchTickFixtureCores   = 64
+	dispatchTickFixtureRAMMB   = 128000
+	dispatchTickFixtureThreads = 1000
+)
+
 func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (map[string]any, error)) {
 	t.Helper()
+	// Pin the per-worker host budgets to their built-in defaults. The resource PROBE is
+	// stubbed below, but the budgets the cap fold divides those resources BY are read from
+	// the environment, and a live dogfood session exports a hand-calibrated set (e.g.
+	// FAK_HOST_CORES_PER_WORKER=1, which doubles the fixture's host_cap from 32 to 64).
+	// Pinning the defaults keeps every tick test's host_cap a function of the fixture alone,
+	// so a local run agrees with CI instead of with the operator's shell. A test that wants a
+	// different calibration overrides these after calling the helper.
+	t.Setenv("FAK_HOST_CORES_PER_WORKER", strconv.Itoa(dispatchtick.HostCoresPerWorker))
+	t.Setenv("FAK_HOST_RAM_MB_PER_WORKER", strconv.Itoa(dispatchtick.HostRAMMBPerWorker))
+	t.Setenv("FAK_HOST_THREADS_PER_CORE", strconv.Itoa(dispatchtick.HostThreadsPerCore))
+	t.Setenv("FAK_HOST_THREADS_PER_WORKER", strconv.Itoa(dispatchtick.HostThreadsPerWorker))
 	old := dispatchRunJSON
 	oldExternal := dispatchRunExternalJSON
 	oldResources := dispatchProbeHostResources
@@ -36,12 +59,13 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 		}
 		return nil, fmt.Errorf("unexpected external helper %q %v", name, args)
 	}
-	dispatchProbeHostResources = func() dispatchtick.HostResources {
-		return dispatchtick.HostResources{Cores: dispatchtick.IntPtr(64), FreeRAMMB: dispatchtick.IntPtr(128000), TotalThreads: dispatchtick.IntPtr(1000)}
+	hostFixture := dispatchtick.HostResources{
+		Cores:        dispatchtick.IntPtr(dispatchTickFixtureCores),
+		FreeRAMMB:    dispatchtick.IntPtr(dispatchTickFixtureRAMMB),
+		TotalThreads: dispatchtick.IntPtr(dispatchTickFixtureThreads),
 	}
-	dispatchBuildHostResources = func(dispatchtick.ProcGuardInput) dispatchtick.HostResources {
-		return dispatchtick.HostResources{Cores: dispatchtick.IntPtr(64), FreeRAMMB: dispatchtick.IntPtr(128000), TotalThreads: dispatchtick.IntPtr(1000)}
-	}
+	dispatchProbeHostResources = func() dispatchtick.HostResources { return hostFixture }
+	dispatchBuildHostResources = func(dispatchtick.ProcGuardInput) dispatchtick.HostResources { return hostFixture }
 	dispatchProbeWorkerCount = func(root, product string) int { return 0 }
 	dispatchProbeProcesses = func() dispatchtick.ProcGuardInput {
 		return dispatchtick.ProcGuardInput{
@@ -757,10 +781,17 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 		t.Fatalf("startup cap = %#v, want cap=3 live=0", capFact)
 	}
 	terms := mapAt(capFact, "cap_terms")
+	// host_cap is a property of the stubbed host FIXTURE, not of the box running the test:
+	// cores bind (64 cores / 2 cores-per-worker = 32, well under the fixture's RAM and thread
+	// components), so derive it the way the fold does. A literal 32 would false-fail on any
+	// differently-sized machine and would silently rot if the built-in budget moved --
+	// the same reason configured_cap is compared against DefaultMaxWorkers rather than 20.
+	wantHostCap := dispatchTickFixtureCores / dispatchtick.HostCoresPerWorker
 	if dispatchMapInt(terms, "configured_cap") != dispatchtick.DefaultMaxWorkers || dispatchMapInt(terms, "lease_cap") != 3 ||
-		dispatchMapInt(terms, "host_cap") != 32 || dispatchMapInt(terms, "seat_cap") < 3 ||
+		dispatchMapInt(terms, "host_cap") != wantHostCap || dispatchMapInt(terms, "seat_cap") < 3 ||
 		dispatchMapInt(terms, "effective_cap") != 3 || dispatchMapString(terms, "limiting") != "lease" {
-		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=32 seat>=3 effective=3 limiting=lease", terms, dispatchtick.DefaultMaxWorkers)
+		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=%d seat>=3 effective=3 limiting=lease",
+			terms, dispatchtick.DefaultMaxWorkers, wantHostCap)
 	}
 	preflight := mapAt(got, "preflight")
 	if dispatchMapString(mapAt(preflight, "cap_terms"), "limiting") != "lease" {
