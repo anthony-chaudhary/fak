@@ -160,6 +160,76 @@ type debugMemoryVars struct {
 	NextGCBytes     uint64 `json:"next_gc_bytes"`
 	LastGCUnixNano  uint64 `json:"last_gc_unix_nano"`
 	NumGC           uint32 `json:"num_gc"`
+
+	// The three below are DERIVED, and they are the ones that catch an allocation
+	// blowup. Raw MemStats were already published here and still did not surface
+	// the session-ledger O(n^2): Alloc looks unremarkable between collections and
+	// heap_objects stays LOW precisely when the problem is a few enormous buffers.
+	//
+	// AllocBytesPerSec is the cumulative allocation RATE since boot. A healthy
+	// proxy turn allocates a few MB; the ledger bug ran at ~484 MB/s sustained
+	// (1.19 TB in 41 min on one guard). Rate is the tell that a per-turn cost has
+	// gone superlinear.
+	AllocBytesPerSec uint64 `json:"alloc_bytes_per_sec"`
+	// PeakHeapSysBytes is the high-water mark of heap memory taken from the OS.
+	// Sawtooth RSS means an instantaneous sample almost never catches the peak,
+	// which is exactly the number that decides whether this process is why the
+	// machine is swapping.
+	PeakHeapSysBytes uint64 `json:"peak_heap_sys_bytes"`
+	// PeakAllocBytes is the high-water mark of live heap.
+	PeakAllocBytes uint64 `json:"peak_alloc_bytes"`
+}
+
+// newDebugMemoryVars renders one MemStats sample plus the derived rate/peak fields.
+func newDebugMemoryVars(mem *runtime.MemStats) debugMemoryVars {
+	perSec, peakSys, peakAlloc := procMemory.observe(mem)
+	return debugMemoryVars{
+		AllocBytes:       mem.Alloc,
+		TotalAllocBytes:  mem.TotalAlloc,
+		SysBytes:         mem.Sys,
+		HeapAllocBytes:   mem.HeapAlloc,
+		HeapSysBytes:     mem.HeapSys,
+		HeapObjects:      mem.HeapObjects,
+		StackInuseBytes:  mem.StackInuse,
+		NextGCBytes:      mem.NextGC,
+		LastGCUnixNano:   mem.LastGC,
+		NumGC:            mem.NumGC,
+		AllocBytesPerSec: perSec,
+		PeakHeapSysBytes: peakSys,
+		PeakAllocBytes:   peakAlloc,
+	}
+}
+
+// memoryWatermarks tracks the high-water marks MemStats itself does not keep.
+// Sampled on each /debug/vars read (the info pane polls every 2s), which is
+// frequent enough to catch a sawtooth's crest and costs nothing when nobody looks.
+type memoryWatermarks struct {
+	bootUnixNano int64
+	peakHeapSys  atomic.Uint64
+	peakAlloc    atomic.Uint64
+}
+
+var procMemory = memoryWatermarks{bootUnixNano: time.Now().UnixNano()}
+
+// observe folds one MemStats sample into the watermarks and returns the derived
+// fields. Monotonic maxima via CAS: concurrent readers race benignly.
+func (m *memoryWatermarks) observe(ms *runtime.MemStats) (perSec, peakSys, peakAlloc uint64) {
+	for {
+		old := m.peakHeapSys.Load()
+		if ms.HeapSys <= old || m.peakHeapSys.CompareAndSwap(old, ms.HeapSys) {
+			break
+		}
+	}
+	for {
+		old := m.peakAlloc.Load()
+		if ms.Alloc <= old || m.peakAlloc.CompareAndSwap(old, ms.Alloc) {
+			break
+		}
+	}
+	if elapsed := time.Now().UnixNano() - m.bootUnixNano; elapsed > 0 {
+		perSec = uint64(float64(ms.TotalAlloc) / (float64(elapsed) / 1e9))
+	}
+	return perSec, m.peakHeapSys.Load(), m.peakAlloc.Load()
 }
 
 type debugKernelVars struct {
@@ -441,18 +511,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 			NumCPU:       runtime.NumCPU(),
 			GOMAXPROCS:   runtime.GOMAXPROCS(0),
 			NumGoroutine: runtime.NumGoroutine(),
-			Memory: debugMemoryVars{
-				AllocBytes:      mem.Alloc,
-				TotalAllocBytes: mem.TotalAlloc,
-				SysBytes:        mem.Sys,
-				HeapAllocBytes:  mem.HeapAlloc,
-				HeapSysBytes:    mem.HeapSys,
-				HeapObjects:     mem.HeapObjects,
-				StackInuseBytes: mem.StackInuse,
-				NextGCBytes:     mem.NextGC,
-				LastGCUnixNano:  mem.LastGC,
-				NumGC:           mem.NumGC,
-			},
+			Memory:       newDebugMemoryVars(&mem),
 		},
 		Kernel: debugKernelVars{
 			Submits:      c.Submits,
