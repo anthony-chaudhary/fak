@@ -80,8 +80,104 @@ Add longest-glob precedence to `dispatchorder.treeOverlap`, `devindex.parseLanes
 2. **Red witness (shipped with this doc):** `tools/issue_lane_router_test.py::PhantomTreeRegionFidelityTest` asserts the lease-region-fidelity invariant — an issue whose only work site is `cmd/fak/<scope>_*.go` must acquire a lease *region* that covers that file. It fails today (region is the phantom `internal/<scope>/**`) and passes when Option C lands (`@unittest.expectedFailure`; remove the marker then). It witnesses the *lease-geometry* defect only — not the DIRTY_PATH guard.
 3. Decide the fallback glob granularity, then implement Option C behind the before/after measurement from step 1.
 
+## Step 1 result — measured decomposition (2026-07-26)
+
+Step 1 above is now **done**, and the answer changes the priority order. Method: one
+single pass over `.fak/loops.jsonl` (5859 records; reason-bearing window
+**2026-07-16 12:24 → 2026-07-26 05:36**), counting the `reason` field and, for
+`DIRTY_PATH_COLLISION`, parsing the dirty path out of `summary` and the lane/tree/contract
+paths out of `evidence_refs`.
+
+| reason | events | share |
+|---|---|---|
+| `DIRTY_PATH_COLLISION` | 146 | **84.9%** |
+| `MULTI_LANE_SCOPE` | 13 | 7.6% |
+| `NO_LANE` | 5 | 2.9% |
+| `ISSUE_CONTRACT_HOLD` | 4 | 2.3% |
+| **`LANE_LEASE_HELD`** | **3** | **1.7%** |
+| `SAME_ISSUE_WIP` | 1 | 0.6% |
+
+The last-24h slice holds the same shape (37 / 5 / 1 / 1, zero `LANE_LEASE_HELD`).
+
+**These counts do not match the 67 / 22 cited in the TL;DR**, and not by growth — the
+lease figure moved *down* while the dirty figure moved *up*, so the two passes are reading
+different corpora (a rotated ledger, or a cmd-family-only filter) rather than the same one
+at different times. Whoever implements Option C should re-derive its own before-number from
+the ledger it will be measured against; do not inherit 67.
+
+**What this means for Option C:** nothing about its correctness — the lease-region-fidelity
+defect is real and independently witnessed by `PhantomTreeRegionFidelityTest`. But its
+addressable share of *current* dispatch blocking is **3 events**, so it cannot be justified
+as a throughput fix on this ledger. It is a correctness fix; rank it as one.
+
+### Where the blocking actually is: stale orphan WIP, and the guard is right
+
+Ranking the 146 dirty refusals by the dirty path named:
+
+```
+87 blocks  cmd/fak/version_modules.go      (7.3 days stale)
+11 blocks  internal/gateway/http.go        (3.6 days stale)
+10 blocks  cmd/fak/guard.go                (fresh — peer mid-edit)
+ 6 blocks  internal/gateway/native_serve.go (6.6 days)
+ 5 blocks  cmd/fak/serve.go                (6.9 days)
+ …26 distinct paths total
+```
+
+Splitting those by mtime: **125 of 146 (86%) name a path that has been dirty ≥2 days**
+(abandoned orphan WIP, landable), and only **19** name a genuinely fresh peer edit
+(a correct, transient refusal). 14 stale files carry the whole 125.
+
+The single largest cluster is decisive about the mechanism. All **87**
+`cmd/fak/version_modules.go` refusals were lane `docs`, lease tree
+`docs/**,README.md,INDEX.md,llms.txt,…`, refused because the issue contract's `paths`
+list named one cmd/fak file — and 85 of the 87 named *only* that file. The blocked issues
+include **#2477 itself**, whose implementation *is* that dirty file: the work was refused
+admission because its own half-finished diff was sitting in the tree.
+
+This **reinforces the third Do-NOT below rather than weakening it.** The guard was not
+misfiring; it was correctly protecting 8 days of abandoned work from being overwritten. The
+fix was not to intersect the dirty set against the lane tree (that would admit a docs-lane
+worker whose tree forbids the cmd/fak file it needs to edit — admitting a worker that
+cannot work), and not to relax the guard. The fix was to **land the WIP**, which cleared
+87 refusals' worth of blocking in one commit.
+
+**Consequence for #4320's framing:** on this ledger, dispatch concurrency is gated by
+orphan-WIP hygiene, not lease geometry. Lease geometry is the next constraint after that,
+not the current one.
+
+The ranking above was mechanical, so it is now a verb rather than a one-off:
+
+```
+fak wip blocked [--landable] [--stale-days N] [--ledger <path>] [--json]
+```
+
+It re-derives exactly this table from the ledger the guard already writes — parsing the
+dirty paths out of the `DIRTY_PATH_COLLISION` / `SAME_ISSUE_WIP` summaries
+(`wipattr.ParseBlockedPaths`), joining them against `git status`, and folding the result
+through `wipattr.Rank`. Rows come back `LAND` (blocking, and the whole change set is
+idle — the lever), `WAIT` (blocking, but the set is live: the refusal is *correct*),
+`IDLE`, or `ACTIVE`; `--landable` prints just the queue and exits 3 when it is non-empty,
+so a sweep or hook can branch on "there is a lever here" without parsing output.
+
+Two properties are load-bearing, both learned the hard way while landing the WIP above:
+
+- **Staleness is a property of the change SET, not the file.** `internal/adjudicator/
+  reversibility.go` read 5.1 days idle and its package tested green, but the `Policy`
+  field its untracked test referenced lived in a peer's `decide.go`, edited 30 minutes
+  earlier. Landing the "stale" half alone would have put a test referencing a
+  non-existent symbol on the trunk. `Rank` therefore classifies on the set's freshest
+  member and names the sibling responsible, so a per-file mtime can never recommend
+  committing half a change set. (`TestRankChangeSetPinsStaleFileLive` pins this.)
+- **The cost figure is a lower bound.** The guard lists at most 8 dirty paths per refusal
+  and elides the rest as `(+N more)`, so `blocks` under-counts wide refusals. That bias is
+  the safe direction — it can only under-rank a lever, never invent one.
+
+`--landable` is deliberately conservative in the same direction: a path whose mtime cannot
+be read (a staged deletion, a vanished file) is treated as maximally FRESH, so work whose
+staleness cannot be established is never offered for landing.
+
 ## Acceptance (from #4320)
-- The `LANE_LEASE_HELD` share of cmd-family collisions drops materially, measured before vs after over `.fak/loops.jsonl`.
+- The `LANE_LEASE_HELD` share of cmd-family collisions drops materially, measured before vs after over `.fak/loops.jsonl`. **Re-derive the before-number** (see Step 1 result — the 67 in the TL;DR is not reproducible on the current ledger).
 - No increase in cross-lane collisions, and no suppression of *correct* own-file DIRTY_PATH refusals.
 
 ## Do NOT
