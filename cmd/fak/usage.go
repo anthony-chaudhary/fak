@@ -314,6 +314,11 @@ const usageCoreText = `usage:
                  cross-check the real kernel admit verdict (would the context-MMU
                  quarantine it?), then RECOMMEND what to do about each finding. Exit 1
                  on any finding. The fak analogue of 'dos doctor')
+  fak doctor serve [--model-bytes N] [--headroom 0.15] [--json]
+                (the SERVE-READINESS pre-flight: a green/yellow/red table of the CPU
+                 SIMD decode tier (AVX-512/AMX>AVX2>scalar, NEON on arm64), whether the
+                 target model fits free VRAM/RAM with headroom, and the NUMA layout -
+                 each row with a remediation hint. Exit 1 on any Unready row)
   fak check-tool-failure [--list | TOKEN | --message TEXT] [--json]
                 (closed NON-GUARD tool-failure vocabulary: hangs, timeouts, shell
                  mismatches, hang/shell-mismatch exit-143 cases, and partial applies.
@@ -504,7 +509,7 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                  witnessed off-box even if the local anchor is tampered)
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL [--replica-base-url URL ...] --model M --api-key-env VAR]
-                [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--require-key-env VAR] [--vdso=true]
+                [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--plan-json] [--require-key-env VAR] [--vdso=true]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget]]
                 [--invalidation global|namespace|resource]
                 [--engine-cache-engine sglang|vllm --engine-cache-base-url URL --engine-cache-admin-key-env VAR]

@@ -98,6 +98,7 @@ type serveFlags struct {
 	cudaGraph                    *bool
 	policyPath                   *string
 	policyCheck                  *bool
+	sizingJSON                   *bool
 	expose                       repeatedStringFlag
 	vdso                         *bool
 	invalidation                 *string
@@ -159,6 +160,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.cudaGraph = fs.Bool("cuda-graph", false, "with --backend cuda: capture each decode token's whole op stream into a CUDA graph and replay it as ONE launch instead of N kernel launches (#483), the per-token launch-overhead lever for large single-stream decode (e.g. Qwen3.6-27B on an A100). OFF by default (a measured no-win on a tiny 0.5B/L4 where launch overhead is already small); witness tok/s before/after on YOUR node before relying on it. Equivalent to FAK_CUDA_GRAPH=1; inert on a non-cuda build or CPU backend.")
 	sf.policyPath = fs.String("policy", "", "capability-floor manifest to load (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	sf.policyCheck = fs.Bool("policy-check", false, "validate --policy and exit without binding a listener")
+	sf.sizingJSON = fs.Bool("plan-json", false, "with --gguf: print the versioned header-derived memory sizing artifact (classed demands, disk/ram/vram tier rollup, per-pool usable bytes after headroom, warnings incl. would-be fit refusals) as JSON on stdout and exit BEFORE any load — nothing is allocated, no listener binds (#4361). The numbers are the same ones the selected serve arm's fit check admits against; a demand set a live boot would refuse still emits, with the refusal in warnings[].")
 	fs.Var(&sf.expose, "expose", "ALLOWLIST of MCP tool-name glob patterns to advertise AND allow — everything else is neither listed by tools/list nor callable (an attempt answers \"unknown tool\", so hiding a tool never leaks that it exists). Patterns are path.Match globs over the bare tool name; one value may be comma-separated (--expose 'fak_index_*,fak_capabilities') and the flag may repeat. Empty (default) exposes the full surface. A malformed glob or a pattern matching NO known tool fails startup loud (a typo must not silently shrink the surface). Cuts prompt-prefix token cost by advertising only the tools a given harness uses; for the leanest surface expose just the discovery tools (--expose 'fak_tools_search,fak_capabilities') and let the agent page the rest in on demand.")
 	sf.vdso = fs.Bool("vdso", true, "enable the vDSO dedup fast path")
 	sf.invalidation = fs.String("invalidation", "global", "vDSO tier-2 invalidation granularity for the live fleet: global|namespace|resource")
@@ -175,7 +177,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.elideResultBytes = fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
 	sf.elideStaleReads = fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default (gateway.DefaultElideStaleReads): replace a Read tool_result whose file was Edited/Written in a LATER in-session turn (a stale, superseded snapshot no longer reflecting disk) with a compact fak_context_restore marker, in the SAME cache-safe working-set band as --elide-result-bytes and stashing the pre-edit body behind a restore handle. The safer, restorable sibling of --elide-result-bytes: strictly more conservative predicate (superseded, not merely big), fail-safe identity on any ambiguity, protected cache prefix proven byte-identical. Size-independent; lossy but restorable. Pass =false to opt out. No effect on non-passthrough wires.")
 	sf.vcacheAnchor = fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough (an upstream --base-url anthropic), APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. No effect on non-passthrough wires.")
-	sf.deferColdTools = fs.Bool("defer-cold-tools", false, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core into context and faults a cold schema in on demand. Deterministic + cache-safe (byte-stable tools[] turn-over-turn) and fail-safe identity on any ambiguity. DEFAULT OFF (the epic's highest-risk lever; its A/B and the #3200 fault-in are the validation gates before #3537 flips it on). Also settable via FAK_DEFER_COLD_TOOLS=1; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1. Anthropic passthrough only.")
+	sf.deferColdTools = fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core into context and faults a cold schema in on demand. Deterministic + cache-safe (byte-stable tools[] turn-over-turn) and fail-safe identity on any ambiguity; every deferred def stays byte-complete in tools[], so a first real use still resolves. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B and #3200 fault-in gates reported PASS). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
 	sf.sessionID = fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
 	sf.sessionStatePath = fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
 	sf.contextBudgetTokens = fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
@@ -212,6 +214,14 @@ func cmdServe(argv []string) {
 	// --policy-check: validate the manifest and exit, binding no listener.
 	if *sf.policyCheck {
 		runServePolicyCheck(*sf.policyPath)
+		return
+	}
+
+	// --plan-json (#4361): emit the versioned header-derived memory sizing artifact
+	// and exit before load — the colibri-inspired pre-load inspection dry-run,
+	// mirroring the --policy-check early-exit. Nothing allocates, no listener binds.
+	if *sf.sizingJSON {
+		runServeSizingJSON(sf)
 		return
 	}
 
