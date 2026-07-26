@@ -169,6 +169,26 @@ func TestScaffoldGeneratedTaxonomyBuildsAndTestsGreen(t *testing.T) {
 	}
 	defer cleanup()
 
+	// Stale-artifact sweep. The deferred cleanup above only runs on a normal return: a KILLED run
+	// (CI timeout, operator ^C, harness kill) skips it and leaves zzscaffbuildgolden_*.go on disk.
+	// The staging loop below then refuses over the orphan, so one killed run used to red this test
+	// FOREVER on that tree — and in a shared multi-session checkout that reds internal/compute for
+	// every other session until somebody hand-diagnoses and removes the files. `zzscaffbuildgolden`
+	// is this test's RESERVED disposable name (the zz-prefix exists precisely so no real backend
+	// takes it), so a file bearing it is by construction our own leftover: sweep it. The refusal
+	// intent is preserved where it earns its keep — the sweep is scoped to exactly the three
+	// reserved names, and an orphan we cannot remove still fails loudly rather than silently.
+	for _, rel := range []string{name + "_arch.go", name + "_arch_test.go", name + "_backend.go"} {
+		full := filepath.Join(wd, rel)
+		if _, statErr := os.Stat(full); statErr != nil {
+			continue // nothing there — the normal path
+		}
+		if rmErr := os.Remove(full); rmErr != nil {
+			t.Fatalf("stale scaffold artifact %s left by a killed earlier run could not be removed: %v", full, rmErr)
+		}
+		t.Logf("removed stale scaffold artifact %s left by a killed earlier run", full)
+	}
+
 	for _, f := range files {
 		if f.RelPath != name+"_arch.go" && f.RelPath != name+"_arch_test.go" && f.RelPath != name+"_backend.go" {
 			continue // NOTES.md is not Go source; skip staging it
