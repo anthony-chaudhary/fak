@@ -69,6 +69,14 @@ type SpecWiring struct {
 	// the linear greedy rule (AcceptGreedy). It is set by BridgeRolesTree; BridgeRoles
 	// leaves it false (the linear chain, which AcceptTree reduces to exactly).
 	Tree bool
+	// VocabBridged, when true, reports that the drafter and verifier do NOT share a
+	// tokenizer, so every proposed token crosses a VocabMap on the way to the target.
+	// It is set by BridgeRolesVocab; BridgeRoles leaves it false, because a same-vocab
+	// pairing needs no bridge. This is an HONESTY bit, not a switch: a bridged pairing
+	// costs a translation per token and can only propose tokens inside the shared
+	// vocabulary, so a caller comparing two wirings must be able to see which one it
+	// has rather than infer it from the ids.
+	VocabBridged bool
 }
 
 // BridgeRoles maps a role-declared drafter/verifier pair onto the polymodel
