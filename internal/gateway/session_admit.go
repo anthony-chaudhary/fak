@@ -25,6 +25,9 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -417,6 +420,38 @@ func appendSessionLedger(trace, kind string, content []byte) {
 		content = []byte("{}")
 	}
 	_, _ = l.Append(trace, kind, content)
+}
+
+// turnLedgerSummary is what the ledger records for a served turn: the SHAPE of the
+// request, never the request. Persisting req.Raw here meant a full conversation
+// context (~200 KB and rising) landed in the ledger every turn; the ledger is a
+// provenance chain, and a byte count plus a digest witnesses the same turn for a
+// fixed ~200 bytes. sessionledger.Elide would clamp an oversized blob anyway --
+// summarizing at the source keeps what we DO store useful instead of a bare hash.
+func turnLedgerSummary(req *agent.AnthropicMessagesRequest) []byte {
+	if req == nil {
+		return nil
+	}
+	sum := sha256.Sum256(req.Raw)
+	b, err := json.Marshal(struct {
+		Model    string `json:"model,omitempty"`
+		Messages int    `json:"messages"`
+		Tools    int    `json:"tools,omitempty"`
+		Stream   bool   `json:"stream,omitempty"`
+		RawBytes int    `json:"raw_bytes"`
+		RawSHA   string `json:"raw_sha256"`
+	}{
+		Model:    req.Model,
+		Messages: len(req.Messages),
+		Tools:    len(req.Tools),
+		Stream:   req.Stream,
+		RawBytes: len(req.Raw),
+		RawSHA:   hex.EncodeToString(sum[:]),
+	})
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 func (t servedSessionTurn) complete() { appendSessionLedger(t.traceID, "turn_complete", nil) }

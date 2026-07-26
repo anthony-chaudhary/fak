@@ -96,6 +96,116 @@ func TestBuildGuardSplitPlanWindowsNoWTSessionFallsThrough(t *testing.T) {
 	}
 }
 
+// TestBuildGuardSplitPlanITerm2Bottom pins the macOS iTerm2 rung: a true inline split of
+// the current window via osascript. "split horizontally" names the DIVIDER in iTerm2's
+// AppleScript dictionary, so it is the bottom-strip orientation.
+func TestBuildGuardSplitPlanITerm2Bottom(t *testing.T) {
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"TERM_PROGRAM": "iTerm.app", "ITERM_SESSION_ID": "w0t0p0"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "iterm2" {
+		t.Fatalf("host = %q, want iterm2", plan.Host)
+	}
+	if plan.Spawn[0] != "osascript" {
+		t.Fatalf("spawn[0] = %q, want osascript", plan.Spawn[0])
+	}
+	script := strings.Join(plan.Spawn, " ")
+	for _, want := range []string{"split horizontally", "with same profile command", "fak info --gateway-url http://127.0.0.1:5000"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("spawn missing %q:\n%s", want, script)
+		}
+	}
+	// The AppleScript API has no pane-size parameter — the geometry label must not claim 20%.
+	if !strings.Contains(plan.Geometry, "even") {
+		t.Fatalf("iTerm2 geometry should admit the even split, got %q", plan.Geometry)
+	}
+}
+
+func TestBuildGuardSplitPlanITerm2RightIsVerticalSplit(t *testing.T) {
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"TERM_PROGRAM": "iTerm.app"}), lookPathOK, "fak", "right", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if script := strings.Join(plan.Spawn, " "); !strings.Contains(script, "split vertically") {
+		t.Fatalf("right column should use iTerm2 `split vertically`, got:\n%s", script)
+	}
+}
+
+// TestBuildGuardSplitPlanAppleTerminalCompanionWindow pins the Apple Terminal rung: no
+// split panes exist there, so the overlay opens as a companion window (`do script`) and
+// the script re-fronts the agent window so the cursor stays where the operator types.
+func TestBuildGuardSplitPlanAppleTerminalCompanionWindow(t *testing.T) {
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"TERM_PROGRAM": "Apple_Terminal"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "terminal-app" {
+		t.Fatalf("host = %q, want terminal-app", plan.Host)
+	}
+	if plan.Spawn[0] != "osascript" {
+		t.Fatalf("spawn[0] = %q, want osascript", plan.Spawn[0])
+	}
+	script := strings.Join(plan.Spawn, " ")
+	for _, want := range []string{
+		`do script "fak info --gateway-url http://127.0.0.1:5000`,
+		"; exit", // the companion window closes itself when the overlay ends
+		"set agentWindow to front window",
+		"set index of agentWindow to 1", // focus returns to the agent window
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("spawn missing %q:\n%s", want, script)
+		}
+	}
+	if !strings.Contains(plan.Geometry, "companion Terminal window") {
+		t.Fatalf("geometry should name the companion window, got %q", plan.Geometry)
+	}
+}
+
+// TestBuildGuardSplitPlanMacTerminalNeedsDarwin proves the mac rungs are gated on GOOS,
+// not just env: the same TERM_PROGRAM on another OS must keep today's silent fallthrough.
+func TestBuildGuardSplitPlanMacTerminalNeedsDarwin(t *testing.T) {
+	plan, err := buildGuardSplitPlan("linux", envFunc(map[string]string{"TERM_PROGRAM": "Apple_Terminal"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "none" {
+		t.Fatalf("host = %q, want none", plan.Host)
+	}
+}
+
+// TestBuildGuardSplitPlanTmuxWinsInsideMacTerminal: tmux running inside Terminal.app sets
+// both markers; the tmux rung must win — it is the better host (real 20% pane, -d focus).
+func TestBuildGuardSplitPlanTmuxWinsInsideMacTerminal(t *testing.T) {
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"TMUX": "x", "TERM_PROGRAM": "Apple_Terminal"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "tmux" {
+		t.Fatalf("host = %q, want tmux", plan.Host)
+	}
+}
+
+// TestBuildGuardSplitPlanUnknownMacTerminalStaysSilent: an unrecognized TERM_PROGRAM
+// (vscode, ...) must not gain a surprise osascript spawn.
+func TestBuildGuardSplitPlanUnknownMacTerminalStaysSilent(t *testing.T) {
+	plan, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"TERM_PROGRAM": "vscode"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Host != "none" {
+		t.Fatalf("host = %q, want none", plan.Host)
+	}
+}
+
+// TestAppleScriptQuote pins the two AppleScript string escapes (backslash first, then
+// double-quote) so an overlay path containing either cannot break out of the script.
+func TestAppleScriptQuote(t *testing.T) {
+	if got := appleScriptQuote(`a\b"c`); got != `a\\b\"c` {
+		t.Fatalf("appleScriptQuote = %q, want %q", got, `a\\b\"c`)
+	}
+}
+
 func TestBuildGuardSplitPlanNoMultiplexerFallback(t *testing.T) {
 	plan, err := buildGuardSplitPlan("linux", envFunc(nil), lookPathFail, "fak", "bottom", guardOverlayArgs())
 	if err != nil {
@@ -193,6 +303,46 @@ func TestGuardSplitEnabled(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestGuardSplitEnabledMacTerminals pins the macOS auto-enable rung through the
+// guardSplitGOOS seam: iTerm2 / Apple Terminal enable an attended launch on darwin,
+// an unknown TERM_PROGRAM stays a no-op, nesting still never re-splits, and the same
+// env on another GOOS must not enable.
+func TestGuardSplitEnabledMacTerminals(t *testing.T) {
+	saved := guardSplitGOOS
+	t.Cleanup(func() { guardSplitGOOS = saved })
+
+	guardSplitGOOS = "darwin"
+	cases := []struct {
+		name string
+		env  map[string]string
+		want bool
+	}{
+		{"Apple Terminal enables", map[string]string{"TERM_PROGRAM": "Apple_Terminal"}, true},
+		{"iTerm2 via TERM_PROGRAM enables", map[string]string{"TERM_PROGRAM": "iTerm.app"}, true},
+		{"iTerm2 via session id enables", map[string]string{"ITERM_SESSION_ID": "w0t0p0"}, true},
+		{"unknown TERM_PROGRAM no-ops", map[string]string{"TERM_PROGRAM": "vscode"}, false},
+		{"nested never re-splits", map[string]string{"TERM_PROGRAM": "Apple_Terminal", "FAK_GUARD_SPLIT": "1"}, false},
+	}
+	for _, tc := range cases {
+		got, err := guardSplitEnabled("auto", envFunc(tc.env), true, true)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+
+	guardSplitGOOS = "linux"
+	got, err := guardSplitEnabled("auto", envFunc(map[string]string{"TERM_PROGRAM": "Apple_Terminal"}), true, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got {
+		t.Fatal("Apple_Terminal env on linux must not enable the split")
 	}
 }
 
