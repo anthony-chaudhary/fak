@@ -15,36 +15,36 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **22** (clarity 0 + coverage 22) |
-| **Crystal-clear concepts (and climbing)** | **365** crystal of 1982 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2157 / 2179** (99.0% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **36** (clarity 0 + coverage 36) |
+| **Crystal-clear concepts (and climbing)** | **371** crystal of 1988 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2172 / 2208** (98.4% of the discovered confusable space) |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 99.4/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 99.0/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1982 concepts - score 99.4/100 (grade A) - disambiguation-debt 22
+concept-disambiguation chart - 1988 concepts - score 99.0/100 (grade A) - disambiguation-debt 36
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ######...................... 365
+  * crystal       ######...................... 371
   o defined       ############################ 1617
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (65 concept(s); 3 crystal)
-  cache            **************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (208 concept(s); 38 crystal)
-  context-ctx      ***************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (179 concept(s); 27 crystal)
+  attention        ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (66 concept(s); 4 crystal)
+  cache            ****************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (210 concept(s); 40 crystal)
+  context-ctx      ****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (180 concept(s); 28 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         *******************oooooooooooooooooo (37 concept(s); 19 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ********ooooooooooooooooooooooooooooooo (39 concept(s); 8 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
-  guard-gate       **************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (289 concept(s); 74 crystal)
+  guard-gate       ****************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (291 concept(s); 76 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
   loop             *************************ooooooooooooooooooooooooooooooooo (58 concept(s); 25 crystal)
   plan             ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 18 crystal)
@@ -59,29 +59,29 @@ clarity mix by family (each cell = one concept):
   witness-proof    ************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 48 crystal)
 
 coverage by family (positioned / discovered):
+  session-runtime  ###########################. 189/199
+  guard-gate       ###########################. 354/361
   decision         ##########################.. 49/53
-  guard-gate       ############################ 347/350
-  policy-capability ###########################. 137/140
+  policy-capability ###########################. 139/142
+  render-materialize ############################ 171/174
   support-maturity ##########################.. 37/40
-  loop             ###########################. 71/73
-  render-materialize ############################ 171/173
-  session-runtime  ############################ 186/188
+  context-ctx      ############################ 193/195
+  loop             ###########################. 72/74
   witness-proof    ############################ 135/137
   cache            ############################ 254/255
   evict            ###########################. 44/45
+  gateway-engine   ############################ 166/167
   attention        ############################ 72/72
-  context-ctx      ############################ 193/193
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  gateway-engine   ############################ 166/166
   layout           ############################ 13/13
-  plan             ############################ 301/301
+  plan             ############################ 305/305
   pool             ############################ 36/36
   score-debt       ############################ 83/83
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 99.0%  (2157/2179 confusable tokens positioned)
+namespace coverage  [###############################.] 98.4%  (2172/2208 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -103,6 +103,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | attention | **attn_gate** - The Qwen3.5-hybrid attention output-gate flag (attnGate in the qwen35/GGUF config) - whether the attention block multiplies its output by a learned per-head gate. |
 | * | crystal | symbol | attention | **attn_q_norm** - The per-head query-normalization weight tensor (blk.N.attn_q_norm.weight, canonicalized to self_attn.q_norm.weight) that applies QK-norm to the attention query projection in Qwen3.5-class GGUFs. |
 | * | crystal | config | attention | **full_attention_interval** - The Qwen3.5 hybrid-attention layer period (cfg.FullAttentionInterval, GGUF full_attention_interval): every Nth layer runs full (global) attention while the rest run the local/linear path. |
+| * | crystal | symbol | attention | **AttnKind** - The attention-architecture tag on a kvbudget.Shape (MLA is the zero value, MHA the other member) that selects which per-token KV-cache element formula sizes the cache: the compressed MLA latent plus decoupled rope key, plus a DSA indexer key when the shape declares index layers, or the full per-head K+V of standard multi-head / grouped-query attention. |
 | * | crystal | symbol | cache | **PromptCacheKey** - The OpenAI Responses-wire cross-shard cache-routing hint (prompt_cache_key): a stable key derived from the cacheable HEAD that pins requests sharing a prefix onto one upstream automatic-prefix-cache node (#5186). |
 | * | crystal | symbol | cache | **SilentCacheInvalidation** - The post-fire reconciliation signal (#2791): a compaction that FIRED - which by construction proves the protected prefix was spliced byte-identically, since verifySplicedBody turns any byte-inequality into a prefix_mismatch identity return - yet whose provider reported zero cache_read and nonzero cache_creation, evidencing the provider re-created the very prefix fak preserved (a TTL expiry or capacity eviction fak cannot prevent). |
 | * | crystal | cli-verb | cache | **cachesweep (stale-cache reaping verb)** - internal/cachesweep (the package) and `fak cachesweep` (the verb) reap stale or orphaned cache artifacts the dispatcher and session layers leave behind, bounded by a lane-aware scan so a sweep never touches a live session's working set. |
@@ -134,6 +135,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | cache | **CacheTTL1h** - CacheTTL1h (internal/gateway/cache_pricing.go) is the extended 1-hour ephemeral provider prompt-cache TTL tier, priced above the 5-minute default. |
 | * | crystal | symbol | cache | **UpgradeAnthropicStableCacheTTL1h** - UpgradeAnthropicStableCacheTTL1h (internal/agent/anthropic_cachebp.go) rewrites an Anthropic request body to upgrade stable cache_control breakpoints to the 1h TTL tier, returning a typed upgrade outcome. |
 | * | crystal | metric | cache | **fak_gateway_cache_ttl_upgrade_total** - fak_gateway_cache_ttl_upgrade_total is the /metrics counter witnessing managed-cache TTL upgrades by outcome label. |
+| * | crystal | symbol | cache | **KVCacheShape** - The model.Config method that reads a loaded model header and returns the kvbudget.Shape sizing that model's KV cache: MLA geometry (layers, KVLoraRank, QKRopeHeadDim) when the header declares a compressed latent, plus the DSA/NSA indexer key over an upper bound of NumLayers when it declares an indexer, and otherwise MHA/GQA geometry (NumKVHeads, HeadDim, VHeadDim). It replaces kvbudget's hardcoded GLM52DSA estimate with the served model's own declared widths (#5242). |
+| * | crystal | doc-term | cache | **kv_cache_calculator (ktransformers KV sizing reference)** - ktransformers' external KV-sizing utility python/cli/utils/kv_cache_calculator.py, studied in docs/notes/CONCEPT-STUDY-KTRANSFORMERS-2026-07-18.md, whose MLA / NSA-indexer / MHA branch over a loaded ModelConfig is the named prior art fak ports into AttnKind and Config.KVCacheShape (#5242). It appears in this repo only as a pinned citation coordinate in doc comments (kv_cache_calculator.py:LINES@0c2912a). |
 | * | crystal | concept | cache | **managed cache** - managed cache (the FAMILY) is the set of features by which fak shapes the provider prompt cache on the client's behalf: the provider 5m prompt cache riding the client's own cache_control breakpoints, tool-prune, star-anchor breakpoint placement (--vcache-anchor), compaction shed (--compact-history-budget), defer-cold-tools, in-kernel KV-prefix reuse (when fak runs the model itself), the 1h-TTL upgrade, and volatile-head redaction, among others. On our own OAuth Claude Code seats the family is EFFECTIVE BY DEFAULT - carried by the 5m prompt cache (median cache-read share ~78-85% on substantial sessions) and tool-prune (~96-99% of sessions) - so caching IS working even though the --managed-cache posture resolves passive; the other members are inert-by-design or provider-blocked there. Audit: docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md. |
 | * | crystal | symbol | cache | **guardManagedCachePosture** - guardManagedCachePosture (cmd/fak/guard_managed_cache.go) is the resolved managed-cache decision for one guard session - mode, active, and the operator-facing reason - rendered once in the startup banner so the session's cache posture is explicit instead of inferred from flag defaults. |
 | * | crystal | config | cache | **Config.CacheTTL1H** - Config.CacheTTL1H (internal/gateway/gateway.go) is the gateway LEVER an active managed-cache posture arms: when true, each outbound Anthropic request's existing stable-head cache_control breakpoint is upgraded to the 1-hour tier (maybeUpgradeAnthropicCacheTTL1H -> agent.UpgradeAnthropicStableCacheTTL1h), so an idle gap past 5 minutes re-enters on a 0.1x cache read instead of re-writing the prefix. |
@@ -152,6 +155,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | concept | context-ctx | **fak_context** - The fak-managed conversation-context lifecycle (the fak_context_ events - session_fak_context_events, context_lifecycle_events) surfaced by vcache/cachevalue status. |
 | * | crystal | subsystem | context-ctx | **fak_context_planner** - The failure-domain/component (fak_context_planner) that plans the fak conversation-context window - the vcache CausePlanning path deciding what context to keep or compact for the next turn. |
 | * | crystal | symbol | context-ctx | **context_compacted** - The transcript event marker (event_msg/context_compacted) the codex lifecycle emits when a session's context was compacted - the paired real compaction marker used by compactaudit. |
+| * | crystal | symbol | context-ctx | **opencodeCompactionOverlay** - The cmd/dispatchworker/guard.go builder that produces the OpenCode-native 96K shed-line configuration overlay for a worker command, or nil when the provider's real limits are unknown so the launch fails OPEN. Mirrors dispatch_worker.opencode_compaction_overlay on the python side. |
 | * | crystal | symbol | context-ctx | **ContextRestoreEpisodes** - The pure fold in internal/dojo that turns the context-span ledger's drop/restore counts into the dojo's one scored episode for the context-restore/restore_recall KPI cell. |
 | * | crystal | symbol | context-ctx | **loadContextSpanLedger** - The cmd/fak adapter that reduces the durable gateway-usage ledger's compaction-dropped turns into the ContextSpanLedger counts the pure restore-recall fold consumes. |
 | * | crystal | symbol | context-ctx | **dojo_lever_context_restore** - The cmd/fak registration file for the context-restore dojo lever - the RegisterLever seam entry that binds the restore-recall KPI cell into fak dojo run and the --live fold. |
@@ -235,6 +239,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | guard-gate | **gate_weight** - The MoE router gate weight (gateWeights[i]) for a routed expert - the softmax weight AttributeRoute folds one token's expert picks by, and a Qwen3.5 HAL layer weight. |
 | * | crystal | config | guard-gate | **guardLifecycleSocketEnv** - The constant (guardLifecycleSocketEnv = FAK_GUARD_LIFECYCLE_SOCKET) naming the env var that carries the guard lifecycle IPC socket path used by precompact/stophook. |
 | * | crystal | config | guard-gate | **guardLifecycleTokenEnv** - The constant (guardLifecycleTokenEnv = FAK_GUARD_LIFECYCLE_TOKEN) naming the env var that carries the guard lifecycle IPC auth token used by precompact/stophook. |
+| * | crystal | symbol | guard-gate | **claudeGuardTurnsPerEpoch** - The turn-count multiplier in cmd/dispatchworker/guard.go that converts the per-turn model window ceiling into the CUMULATIVE --context-budget-tokens allowance a dispatch claude worker launches with: budget = max(hardCap - outputReserve, baseline) x claudeGuardTurnsPerEpoch. Set to 12 so the 3-equivalent-restart reaper (3 x 12 = 36 turns) stays behind the ~30-turn wall-clock runway, letting the graceful --max-duration drain win. |
+| * | crystal | symbol | guard-gate | **opencodeGuardConfigContent** - The cmd/dispatchworker/guard.go merge that folds the opencode compaction overlay into an existing OPENCODE_CONFIG_CONTENT document while preserving operator-supplied keys, returning the existing document unchanged when there is no overlay to apply. |
 | * | crystal | symbol | guard-gate | **gateVerbTierTree (whole-tree verb-tier gate)** - Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653). |
 | * | crystal | subsystem | guard-gate | **guard_mcp (guard MCP self-query install)** - The cmd/fak/guard_mcp.go module: it wires fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_context_*) into the guarded child by injecting an MCP server registration into the child's launch config, mirroring the install shape of guard_precompact.go / guard_codex.go. |
 | * | crystal | subsystem | guard-gate | **guard_codex (guard Codex-provider wiring)** - The cmd/fak/guard_codex.go module: the first-class `fak guard -- codex` wiring, fak's OpenAI-Codex provider install path (credential resolve plus config rewrite) that lets the guard front a Codex child the same way it fronts an Anthropic one. |
@@ -2218,7 +2224,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1982 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1988 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2230,23 +2236,23 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| session-runtime | 189 | 199 | 10 |
+| guard-gate | 354 | 361 | 7 |
 | decision | 49 | 53 | 4 |
-| guard-gate | 347 | 350 | 3 |
-| policy-capability | 137 | 140 | 3 |
+| policy-capability | 139 | 142 | 3 |
+| render-materialize | 171 | 174 | 3 |
 | support-maturity | 37 | 40 | 3 |
-| loop | 71 | 73 | 2 |
-| render-materialize | 171 | 173 | 2 |
-| session-runtime | 186 | 188 | 2 |
+| context-ctx | 193 | 195 | 2 |
+| loop | 72 | 74 | 2 |
 | witness-proof | 135 | 137 | 2 |
 | cache | 254 | 255 | 1 |
 | evict | 44 | 45 | 1 |
+| gateway-engine | 166 | 167 | 1 |
 | attention | 72 | 72 | 0 |
-| context-ctx | 193 | 193 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| gateway-engine | 166 | 166 | 0 |
 | layout | 13 | 13 | 0 |
-| plan | 301 | 301 | 0 |
+| plan | 305 | 305 | 0 |
 | pool | 36 | 36 | 0 |
 | score-debt | 83 | 83 | 0 |
 | trajectory-control | 0 | 0 | 0 |
