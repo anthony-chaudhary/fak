@@ -93,6 +93,10 @@ no silent cap:
 - **Watch** it on `/metrics`: `fak_gateway_session_saturation` (live governed sessions ÷
   ceiling, in `[0,1+]`), alongside `fak_gateway_session_ceiling` and
   `fak_gateway_sessions_live`. Alert/scale out as it approaches `1.0`.
+- **Or probe** it on the readiness surface: `/healthz` carries the same readout as a
+  `session_saturation` object (`ceiling`, `live`, `ratio`, `headroom`, `bounded`).
+  Saturation does **not** flip `ok` to `false` — a box at its ceiling is healthy, it is
+  shedding new load by design.
 - **Backpressure** past the ceiling: a **new** session's admission is refused with
   HTTP `503` + `Retry-After` and the closed reason `SESSION_CEILING_SATURATED`
   (`dos check-reason SESSION_CEILING_SATURATED`). Sessions **already in flight are never
