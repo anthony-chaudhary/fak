@@ -188,7 +188,23 @@ func kQuantMatRows(qt *kQuantTensor, x []float32) []float32 {
 	return y
 }
 
+// kQuantMatRowsInto is the batch-1 k-quant decode GEMV entry point. #4974: it takes the SAME
+// bounded decode worker budget as the Q4_K decode GEMV (q4kMatRowsInto → q4kDecodeWorkers). A
+// q4_k_m artifact is a MIXTURE: the Q4_K majority streams through q4kMatRowsInto, but the
+// Q5_K/Q6_K minority a q4_k_m mix leaves on ffn_down / lm_head (plus mixed-quant routed experts)
+// streams through THIS kernel on every decode step. Leaving it at the global numWorkers ran part
+// of each token in the uncapped all-workers regime the witnessed cap exists to dodge, so the
+// ordinary path only half-selected the witnessed regime. Bit-identical either way — the [lo,hi)
+// split is worker-count independent (parForRangeWorkers), pinned by
+// TestKQuantMatRowsIntoWorkersIsBitIdenticalAcrossBudgets.
 func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
+	kQuantMatRowsIntoWorkers(qt, x, y, kQuantDecodeWorkers())
+}
+
+// kQuantMatRowsIntoWorkers is kQuantMatRowsInto with an explicit worker budget, so the batched
+// PREFILL fallback in kQuantMatRowsIntoBatch keeps the full numWorkers width while batch-1 decode
+// takes the capped decode budget. Prefill is not the memory-bound batch-1 shape the cap targets.
+func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
 	y = y[:qt.out]
 	if qt.w3MLP {
 		// The W3 path is deliberately decode-only: a pre-quantized IQ3_XXS dense-MLP
@@ -212,10 +228,10 @@ func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
 		if qt.kind == kindQ6K {
 			ranger = q6kMatRowsRangeInt8
 		}
-		parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { ranger(qt, qv, y, lo, hi) })
+		parForRangeWorkers(qt.out, qt.out*qt.in, workers, func(lo, hi int) { ranger(qt, qv, y, lo, hi) })
 		return
 	}
-	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { kQuantMatRowsRange(qt, x, y, lo, hi) })
+	parForRangeWorkers(qt.out, qt.out*qt.in, workers, func(lo, hi int) { kQuantMatRowsRange(qt, x, y, lo, hi) })
 }
 
 // kQuantMatRowsRange computes y[lo:hi] with the SAME fixed-order four-accumulator dot and
@@ -264,7 +280,9 @@ func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
 	if kQuantSDOTEnabled(qt.kind) {
 		in, out := qt.in, qt.out
 		for t := 0; t < P; t++ {
-			kQuantMatRowsInto(qt, X[t*in:(t+1)*in], Y[t*out:(t+1)*out])
+			// PREFILL keeps the full numWorkers width: the #4974 decode cap targets the
+			// memory-bound batch-1 decode shape, not a P-token prefill wall.
+			kQuantMatRowsIntoWorkers(qt, X[t*in:(t+1)*in], Y[t*out:(t+1)*out], numWorkers)
 		}
 		return
 	}
