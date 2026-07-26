@@ -1,0 +1,64 @@
+{
+  "rows": [
+    {
+      "id": "attn-kind",
+      "canonical": "AttnKind",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The attention-architecture tag on a kvbudget.Shape (MLA is the zero value, MHA the other member) that selects which per-token KV-cache element formula sizes the cache: the compressed MLA latent plus decoupled rope key, plus a DSA indexer key when the shape declares index layers, or the full per-head K+V of standard multi-head / grouped-query attention.",
+      "distinction": "A KV-SIZING selector that counts cached elements and computes nothing - NOT Attention (the softmax token-mixer kernel that actually runs) and NOT FullAttentionInterval (a per-layer cadence inside one model); AttnKind is a whole-model tag that picks a byte-count formula, not a kernel and not a layer type.",
+      "distinct_from": [
+        "x-attention-attention",
+        "x-attention-fullattention"
+      ],
+      "aliases": [],
+      "grounding": "AttnKind",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kv-cache-shape",
+      "canonical": "KVCacheShape",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The model.Config method that reads a loaded model header and returns the kvbudget.Shape sizing that model's KV cache: MLA geometry (layers, KVLoraRank, QKRopeHeadDim) when the header declares a compressed latent, plus the DSA/NSA indexer key over an upper bound of NumLayers when it declares an indexer, and otherwise MHA/GQA geometry (NumKVHeads, HeadDim, VHeadDim). It replaces kvbudget's hardcoded GLM52DSA estimate with the served model's own declared widths (#5242).",
+      "distinction": "Header-derived SIZING geometry that allocates nothing and is read in no decode path - NOT the KV cache (the tensors whose footprint it predicts), NOT KVLayout (the runtime interface that reconstructs per-head K/V from cached bytes), and NOT MLAConfig (the projection weights themselves).",
+      "distinct_from": [
+        "kv-cache",
+        "kvlayout",
+        "mla-config"
+      ],
+      "aliases": [],
+      "grounding": "KVCacheShape",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kv-cache-calculator",
+      "canonical": "kv_cache_calculator (ktransformers KV sizing reference)",
+      "family": "cache",
+      "kind": "doc-term",
+      "definition": "ktransformers' external KV-sizing utility python/cli/utils/kv_cache_calculator.py, studied in docs/notes/CONCEPT-STUDY-KTRANSFORMERS-2026-07-18.md, whose MLA / NSA-indexer / MHA branch over a loaded ModelConfig is the named prior art fak ports into AttnKind and Config.KVCacheShape (#5242). It appears in this repo only as a pinned citation coordinate in doc comments (kv_cache_calculator.py:LINES@0c2912a).",
+      "distinction": "An EXTERNAL prior-art reference with no implementation in this repo - NOT KVCacheShape (fak's own header-to-Shape branch that ports it) and NOT the KV cache (fak's own tensor storage); nothing here is named kv_cache_calculator, and the token is a source citation, not a fak surface.",
+      "distinct_from": [
+        "kv-cache-shape",
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "kv_cache_calculator",
+      "grounding_kind": "doc",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

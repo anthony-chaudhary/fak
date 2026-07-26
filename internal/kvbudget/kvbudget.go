@@ -51,10 +51,36 @@ import (
 // measured in (matching the triage doc's `÷ 1024³`).
 const GiB = 1 << 30
 
-// Shape is the GLM-5.2 MLA+DSA KV-cache geometry: the per-token, per-layer
-// element counts, independent of KV precision (precision is a Quant, below).
-// The fields mirror model.Config in internal/model/config.go.
+// AttnKind selects which attention architecture's KV-cache element formula a
+// Shape sizes — the general branch ktransformers' kv_cache_calculator makes over
+// the loaded model header (kv_cache_calculator.py:86-121@0c2912a). The zero
+// value is MLA (GLM52DSA and the triage-doc reproduction leave Kind unset), so
+// an existing MLA-only Shape keeps its meaning bit-for-bit.
+type AttnKind int
+
+const (
+	// MLA (DeepSeek-V2/V3, GLM-5.2) caches a compressed KV latent (KVLoraRank)
+	// plus one decoupled rope key (QKRopeHeadDim) per layer, and — when the
+	// header declares a DeepSeek-NSA / GLM-DSA lightning indexer — an extra
+	// IndexHeadDim key over IndexLayers.
+	MLA AttnKind = iota
+	// MHA (Llama, Qwen, and every standard multi-head / grouped-query model)
+	// caches a full per-head K and V: NumKVHeads × (HeadDim + VHeadDim) per
+	// layer.
+	MHA
+)
+
+// Shape is a KV-cache geometry: the per-token, per-layer element counts an
+// attention architecture caches, independent of KV precision (precision is a
+// Quant, below). Kind selects the element formula — MLA (+ optional NSA/DSA
+// indexer) or MHA — so one Shape sizes an arbitrary served model, not just
+// GLM-5.2. The fields mirror model.Config in internal/model/config.go, and
+// model.Config.KVCacheShape populates a Shape straight from a loaded header
+// instead of the GLM52DSA estimate (#5242).
 type Shape struct {
+	// Kind selects the per-token element formula (MLA vs MHA). Its zero value is
+	// MLA, so a Shape that sets only the MLA fields (e.g. GLM52DSA) is unchanged.
+	Kind AttnKind
 	// Layers is the number of decoder layers that cache an MLA latent + rope
 	// key per token (model.Config.NumLayers).
 	Layers int
@@ -72,6 +98,13 @@ type Shape struct {
 	// IndexHeadDim is the DSA indexer key width per token per index layer
 	// (model.Config.IndexHeadDim).
 	IndexHeadDim int
+	// NumKVHeads, HeadDim, and VHeadDim are the MHA (Kind==MHA) geometry: the
+	// number of key/value heads and their key and value widths
+	// (model.Config.{NumKVHeads, HeadDim, VHeadDim}). A square-head model leaves
+	// VHeadDim==HeadDim. All zero for an MLA Shape.
+	NumKVHeads int
+	HeadDim    int
+	VHeadDim   int
 }
 
 // GLM52DSA is the DeepSeek-lineage ESTIMATE the triage doc §3.2 pins as the
@@ -112,9 +145,25 @@ func (s Shape) MLAElemsPerToken() int { return s.Layers * (s.KVLoraRank + s.QKRo
 // bound (some layers share the indexer).
 func (s Shape) IndexElemsPerToken() int { return s.IndexLayers * s.IndexHeadDim }
 
-// KVElemsPerToken is the total KV elements cached per token: MLA latent + rope
-// key + DSA indexer key.
-func (s Shape) KVElemsPerToken() int { return s.MLAElemsPerToken() + s.IndexElemsPerToken() }
+// MHAElemsPerToken is the full per-head K+V cached per token for standard
+// multi-head / grouped-query attention, summed over layers:
+// Layers × NumKVHeads × (HeadDim + VHeadDim) — ktransformers' MHA branch
+// (kv_cache_calculator.py:121@0c2912a). Zero for an MLA Shape.
+func (s Shape) MHAElemsPerToken() int {
+	return s.Layers * s.NumKVHeads * (s.HeadDim + s.VHeadDim)
+}
+
+// KVElemsPerToken is the total KV elements cached per token, branched on the
+// Shape's attention arch: for MHA the per-head K+V sum; for MLA the compressed
+// latent + rope key + DSA indexer key. This is the general branch over
+// attention arch — the same math sizes an MLA or an MHA header (#5242). An
+// MLA Shape (Kind unset) reduces to the prior MLA+DSA formula exactly.
+func (s Shape) KVElemsPerToken() int {
+	if s.Kind == MHA {
+		return s.MHAElemsPerToken()
+	}
+	return s.MLAElemsPerToken() + s.IndexElemsPerToken()
+}
 
 // MLABytesPerToken is the MLA-only KV footprint per token at the given quant
 // (the "MLA only" column of the doc's table).
