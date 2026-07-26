@@ -16,8 +16,8 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **40** (clarity 0 + coverage 40) |
-| **Crystal-clear concepts (and climbing)** | **381** crystal of 1998 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2177 / 2217** (98.2% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **382** crystal of 1999 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2178 / 2218** (98.2% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
 
@@ -26,10 +26,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1998 concepts - score 98.8/100 (grade A) - disambiguation-debt 40
+concept-disambiguation chart - 1999 concepts - score 98.8/100 (grade A) - disambiguation-debt 40
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 381
+  * crystal       #######..................... 382
   o defined       ############################ 1617
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -52,14 +52,14 @@ clarity mix by family (each cell = one concept):
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
   render-materialize ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (151 concept(s); 3 crystal)
   score-debt       ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (68 concept(s); 4 crystal)
-  session-runtime  ********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (169 concept(s); 20 crystal)
+  session-runtime  *********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (170 concept(s); 21 crystal)
   support-maturity ************ooooooooooooooooo (29 concept(s); 12 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    **************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (127 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  ###########################. 193/203
+  session-runtime  ###########################. 194/204
   guard-gate       ###########################. 354/362
   cache            ############################ 255/259
   decision         ##########################.. 49/53
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.2%  (2177/2217 confusable tokens positioned)
+namespace coverage  [###############################.] 98.2%  (2178/2218 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -389,6 +389,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | metric | score-debt | **disambiguation-debt** - This scorecard's integer: clarity defects of positioned concepts plus coverage gaps (confusable tree tokens with no row). |
 | * | crystal | symbol | score-debt | **FleetDebt (fleet-product ranking key)** - FleetDebt is the superloop fleet-walk ranking key (#4958): the liveness x progress x follow-on PRODUCT minus one, so a clean live member folds to debt 0 and the ordinary worst-first sort (tier, then debt descending) ranks the fleet with no rival walker. A product, not a sum, because the axes compound — a stale loop that is also spinning pays cadence cost for zero verified output on two grains at once, and outranks either fault alone. |
 | * | crystal | symbol | session-runtime | **ForkSessionID** - The forked session id whose lookahead rollout produced a RolloutEvidence/Lesson (#5204): the twin session spun off to roll the trajectory forward under the fork-rollout runner. |
+| * | crystal | symbol | session-runtime | **claudeSessionUUID** - The cmd/fak resolver for the STABLE Claude Code session UUID (the transcript id) that a guard-session descriptor publishes as SessionDescriptor.AgentUUID, so a wip checkpoint's owning session becomes joinable to a live descriptor (#5343). Reads CLAUDE_CODE_SESSION_ID, then CLAUDE_SESSION_ID, then FAK_SESSION_ID; empty when none is set. |
 | * | crystal | symbol | session-runtime | **session_fatigue** - The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence. |
 | * | crystal | symbol | session-runtime | **sessionQuarantineRetentionPolicy (corrupt-registry quarantine retention)** - How long, and how many, quarantined copies of a corrupt session registry are kept after RecoverCorruptRegistry moves the bad file aside — read from the sessionQuarantineRetentionEnv knob, falling back to the default policy when the knob is unparseable. |
 | * | crystal | symbol | session-runtime | **sessionQuarantineRetentionEnv** - The cmd/fak constant naming the environment variable that overrides the corrupt-registry quarantine retention policy. It is the NAME of the knob, not the knob's parsed value and not the policy itself. |
@@ -2234,7 +2235,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1998 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1999 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2246,7 +2247,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 193 | 203 | 10 |
+| session-runtime | 194 | 204 | 10 |
 | guard-gate | 354 | 362 | 8 |
 | cache | 255 | 259 | 4 |
 | decision | 49 | 53 | 4 |
