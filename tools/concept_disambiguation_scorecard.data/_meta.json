@@ -971,6 +971,11 @@
           "category": "incidental",
           "reason": "local error variable at the sessionQuarantineRetentionPolicy call site",
           "token": "policyErr"
+        },
+        {
+          "category": "incidental",
+          "reason": "A pure string-builder renderer in the guard exit-summary grammar, named by the format\u003cSection\u003e convention its dozen siblings share. It introduces no vocabulary: its meaning is wholly given by the concepts it prints, PolicyKnob and AmendGatedWiden, both positioned. Positioning the renderer would book concept coverage for a formatting helper and would need re-deciding for every sibling section.",
+          "token": "formatAmendmentPosture"
         }
       ],
       "exclude": [
@@ -986,6 +991,7 @@
         "adjudication",
         "adjudicators",
         "capabilities",
+        "formatAmendmentPosture",
         "guardWindowsArgvPreflight",
         "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",

@@ -17,16 +17,16 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **39** (clarity 0 + coverage 39) |
 | **Crystal-clear concepts (and climbing)** | **395** crystal of 2013 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2189 / 2228** (98.2% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2190 / 2229** (98.3% of the discovered confusable space) |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2013 concepts - score 98.8/100 (grade A) - disambiguation-debt 39
+concept-disambiguation chart - 2013 concepts - score 98.9/100 (grade A) - disambiguation-debt 39
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 395
@@ -63,7 +63,7 @@ coverage by family (positioned / discovered):
   guard-gate       ###########################. 355/363
   cache            ############################ 256/260
   decision         ##########################.. 49/53
-  policy-capability ###########################. 142/145
+  policy-capability ###########################. 143/146
   render-materialize ############################ 171/174
   support-maturity ##########################.. 37/40
   context-ctx      ############################ 193/195
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.2%  (2189/2228 confusable tokens positioned)
+namespace coverage  [###############################.] 98.3%  (2190/2229 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -2265,7 +2265,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | guard-gate | 355 | 363 | 8 |
 | cache | 256 | 260 | 4 |
 | decision | 49 | 53 | 4 |
-| policy-capability | 142 | 145 | 3 |
+| policy-capability | 143 | 146 | 3 |
 | render-materialize | 171 | 174 | 3 |
 | support-maturity | 37 | 40 | 3 |
 | context-ctx | 193 | 195 | 2 |
