@@ -346,12 +346,16 @@ func attentionLines(snap fleet.Snapshot) []string {
 	var lines []string
 	total := 0
 	for _, it := range snap.Attention {
-		if it.Level != "ok" {
+		// Skip the fold's conflated "N box(es) down or unreachable" visibility crit, for the
+		// same reason firstCritTitle does: down is named honestly from ByState (state lines +
+		// the capacity "down N" token), and unknown/silent is not an outage — parroting that
+		// title here mislabels silent boxes as down (a phantom-down lie on a zero-down fleet).
+		if it.Level != "ok" && !isVisibilityCrit(it) {
 			total++
 		}
 	}
 	for _, it := range snap.Attention {
-		if it.Level == "ok" {
+		if it.Level == "ok" || isVisibilityCrit(it) {
 			continue
 		}
 		if len(lines) == 3 {
