@@ -44,6 +44,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 import account_probe                  # noqa: E402
+import dispatch_worker as dw          # noqa: E402
 import issue_resolve_dispatch as ird  # noqa: E402
 import issue_worker_prompt            # noqa: E402
 
@@ -52,6 +53,49 @@ RUNS = REPO / ".dispatch-runs"
 # key. opencode_worker_env pins XDG_CONFIG_HOME from this so the worker loads it.
 OPENCODE_DIR = str(Path(os.path.expanduser("~")) / ".config" / "opencode")
 GLM_MODEL = "zai-coding-plan/glm-4.5-air"
+
+# --- Local guard gateway on :18080 (issue #4771) ------------------------------
+# The glm/opencode docs worker MUST front ``fak guard`` -> a LOCAL pure-fak gateway
+# (default ``127.0.0.1:18080``), never talk to the upstream provider directly -- that
+# local hop is the dogfood-the-kernel property every guarded lane relies on. But the
+# seat's opencode.json ``options.baseURL`` (the public provider) OUT-RANKS the legacy
+# global guard base in ``opencode_guard_base_url``, so the route to :18080 was lost:
+# the pre-spawn reachability probe hit the keyed provider bare, 401'd, and the docs
+# fleet refused EVERY launch (GATEWAY_DOWN in the incident, AUTH once the provider
+# answered). Pin the PROVIDER-SCOPED guard base -- the highest-precedence override in
+# ``opencode_guard_base_url`` -- so BOTH the probe and the spawned worker route through
+# the supervised local gateway again.
+GLM_PROVIDER = GLM_MODEL.split("/", 1)[0]  # "zai-coding-plan"
+GLM_GUARD_BASEURL_ENV = f"{dw.OPENCODE_GUARD_BASE_URL_ENV}_{dw._env_key_suffix(GLM_PROVIDER)}"
+DEFAULT_GLM_GUARD_GATEWAY = "http://127.0.0.1:18080/v1"
+
+
+def glm_guard_gateway() -> str:
+    """The local pure-fak guard-gateway base URL the glm worker fronts (#4771).
+
+    ``FAK_GLM_GUARD_GATEWAY`` overrides the default endpoint; an EMPTY value opts out
+    of the forced local route entirely (fall back to the seat's own resolution)."""
+    v = os.environ.get("FAK_GLM_GUARD_GATEWAY")
+    return DEFAULT_GLM_GUARD_GATEWAY if v is None else v.strip()
+
+
+def apply_glm_guard_gateway(env: dict) -> str:
+    """Pin the provider-scoped guard base so the glm seat routes through the local
+    :18080 gateway for BOTH the reachability probe and the spawned worker (#4771).
+
+    Highest precedence in ``opencode_guard_base_url`` (over opencode.json's provider
+    baseURL), so the probe/worker hit the supervised local gateway:
+      * gateway up   -> probe ``/models`` 200 -> OK -> spawn or a *real* capacity refusal
+      * gateway down -> probe GATEWAY_DOWN -> truthful skip, no wasted spawn
+    An operator value already present in ``env`` WINS (never overridden). Returns the
+    effective guard base (``''`` = not pinned, e.g. FAK_GLM_GUARD_GATEWAY exported empty)."""
+    existing = (env.get(GLM_GUARD_BASEURL_ENV) or "").strip()
+    if existing:
+        return existing
+    gw = glm_guard_gateway()
+    if gw:
+        env[GLM_GUARD_BASEURL_ENV] = gw
+    return gw
 
 
 def _alive(pid: int) -> bool:
@@ -143,6 +187,11 @@ def main(argv=None) -> int:
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
+
+    # Restore the :18080 local guard-gateway route (#4771) BEFORE the reachability probe
+    # and any spawn: pin the provider-scoped guard base in the process env so both the
+    # preflight and the (os.environ-inheriting) worker front the supervised local gateway.
+    apply_glm_guard_gateway(os.environ)
 
     # Reap timed-out glm workers BEFORE counting capacity. The detached docs-lane spawn path
     # does not sit inside the main dispatcher's reap loop, so a runaway (e.g. one that outran
