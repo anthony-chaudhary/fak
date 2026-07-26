@@ -112,7 +112,7 @@ func (s *Server) handleFakAgentSessions(w http.ResponseWriter, r *http.Request) 
 	emit(AgentSessionEvent{Event: "session.start", TraceID: reqTrace, Goal: req.Goal, MaxTurns: maxTurns})
 
 	began := time.Now()
-	ensureAgentPolicyRung()
+	ensureGovernedRungs()
 	m, calls, err := agent.RunGovernedArm(r.Context(), s.planner, req.Goal, maxTurns, s.nativeRunOptions(r.Context(), reqTrace)...)
 	if err != nil {
 		// The stream is already open (200 written), so the failure is reported as the

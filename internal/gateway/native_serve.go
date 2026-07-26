@@ -28,6 +28,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/grammar"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
 // nativeMaxTurnsOr resolves the configured native loop turn cap, defaulting a
@@ -206,7 +208,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 // is the sole tool path. It returns the per-turn ArmMetrics — the witness that the loop,
 // not an external harness, drove the turn.
 func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string) (agent.ArmMetrics, error) {
-	ensureAgentPolicyRung()
+	ensureGovernedRungs()
 	task := lastUserText(req.Messages)
 	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, s.nativeRunOptions(ctx, reqTrace)...)
 }
@@ -216,7 +218,7 @@ func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesR
 // them as structured SSE alongside the text deltas; a nil observer leaves the loop
 // byte-for-byte the historical one.
 func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink, onProgress agent.ProgressObserver) (agent.ArmMetrics, error) {
-	ensureAgentPolicyRung()
+	ensureGovernedRungs()
 	task := lastUserText(req.Messages)
 	opts := s.nativeRunOptions(ctx, reqTrace)
 	if onProgress != nil {
@@ -254,6 +256,34 @@ func ensureAgentPolicyRung() {
 		}
 	}
 	abi.RegisterAdjudicator(100, adjudicator.Default)
+}
+
+// ensureGovernedRungs restores the whole driver set the owned loop is measured
+// against, not just the policy rung. The same reset that strips the rank-100
+// monitor also strips grammar's rank-5 rung and vDSO's fast paths — and those two
+// fail QUIETLY where a missing monitor fails loudly: with grammar gone an
+// alias-shaped call is no longer repaired in-syscall (it just errors and burns a
+// turn, Repairs stays 0), and with the fast paths gone a duplicate read-only call
+// re-dispatches to the engine (VDSOHits stays 0). The loop still produces an
+// answer, so nothing looks broken; only the kernel's own counters — the numbers a
+// served session reports as its witness — silently read zero. Healing all three
+// together keeps "the endpoint ran under the real kernel" true of the metrics and
+// not merely of the verdicts.
+func ensureGovernedRungs() {
+	ensureAgentPolicyRung()
+	ensureGrammarRung()
+	vdso.EnsureRegistered()
+}
+
+// ensureGrammarRung restores grammar's rank-5 rung at its canonical rank, mirroring
+// grammar's package init. Presence-checked so repeat calls stay idempotent.
+func ensureGrammarRung() {
+	for _, a := range abi.Adjudicators() {
+		if a == abi.Adjudicator(grammar.Default) {
+			return
+		}
+	}
+	abi.RegisterAdjudicator(5, grammar.Default)
 }
 
 func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) []agent.RunOption {

@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 )
 
 // agent_sessions_test.go — the spine endpoint's offline witness (#3258): a POSTed
@@ -16,6 +19,13 @@ import (
 
 func newAgentSessionsTestServer(t *testing.T) *Server {
 	t.Helper()
+	// Register the engine this test needs instead of inheriting it. internal/engine's
+	// init() registers "mock" globally, but ~27 helpers in this package call
+	// abi.ResetForTest() and restore only "test" — so whether "mock" survives to here
+	// depends purely on in-package test ORDER, and merely adding a test file whose name
+	// sorts earlier silently breaks these three. Registering explicitly is the
+	// convention the rest of the package already follows and makes the dependency real.
+	abi.RegisterEngine("mock", engine.MockEngine)
 	srv, err := New(Config{EngineID: "mock", Model: "mock", VDSO: true})
 	if err != nil {
 		t.Fatalf("New: %v", err)
