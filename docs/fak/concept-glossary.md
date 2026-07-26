@@ -1973,3 +1973,10 @@ The mode-debt scorer's grade for a dial that is correctly harness-held and model
 The Scorecard roll-up COUNT of dials that graded GradeNotDebt: how many surveyed dials were excluded from the lift worklist as correctly harness-held safety dials. Derived by Score so no consumer re-folds the grades.
 
 **Distinct from:** Distinct from GradeNotDebt, the per-dial grade it counts -- one is a verdict on a single dial, the other an integer over the whole census. Also distinct from the sibling Debt field: Debt is RANKED debt only (Hard+Soft), so NotDebt and Clean both contribute zero to it. Reading NotDebt as a debt figure inverts its meaning, since it counts precisely the dials that are NOT debt.
+
+
+### egress_posture
+
+The verdict-meta key the adjudicator's egress band stamps on a refusal to name WHICH egress stance produced it -- currently 'restrict', the strict-allowlist posture in which WebFetch flips from default-allowed to allowlist-only. It answers 'why was this host refused' for a reader of the decision journal, distinguishing a posture-driven refusal from a rule-driven one.
+
+**Distinct from:** Distinct from SecretPosture, the adjudicator's OTHER posture knob: SecretPosture governs what happens to credential-shaped spans in tool output (mask, quarantine, fail-closed) and is about DISCLOSURE, while egress_posture governs which destinations a tool call may reach and is about REACHABILITY. Both live on the same Policy and both spell their values as postures, so a reader scanning verdict meta can easily attribute one refusal to the other. Also distinct from the hardwired metadata floor, which produces its own refusal and stamps no egress_posture at all -- absence of this key is how a floor refusal is told apart from an operator-configured one.

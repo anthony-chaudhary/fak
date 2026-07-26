@@ -16,8 +16,8 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **38** (clarity 0 + coverage 38) |
-| **Crystal-clear concepts (and climbing)** | **392** crystal of 2010 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2186 / 2224** (98.3% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **393** crystal of 2011 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2187 / 2225** (98.3% of the discovered confusable space) |
 | As of |  (fak ) |
 | Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
 
@@ -26,10 +26,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2010 concepts - score 98.9/100 (grade A) - disambiguation-debt 38
+concept-disambiguation chart - 2011 concepts - score 98.9/100 (grade A) - disambiguation-debt 38
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 392
+  * crystal       #######..................... 393
   o defined       ############################ 1618
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -48,7 +48,7 @@ clarity mix by family (each cell = one concept):
   layout           ****oooooooo       (12 concept(s); 4 crystal)
   loop             **************************ooooooooooooooooooooooooooooooooo (59 concept(s); 26 crystal)
   plan             *********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (252 concept(s); 21 crystal)
-  policy-capability **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (120 concept(s); 22 crystal)
+  policy-capability ***********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (121 concept(s); 23 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
   render-materialize ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (152 concept(s); 4 crystal)
   score-debt       ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (70 concept(s); 6 crystal)
@@ -63,7 +63,7 @@ coverage by family (positioned / discovered):
   session-runtime  ###########################. 196/204
   cache            ############################ 256/260
   decision         ##########################.. 49/53
-  policy-capability ###########################. 140/143
+  policy-capability ###########################. 141/144
   render-materialize ############################ 171/174
   support-maturity ##########################.. 37/40
   context-ctx      ############################ 193/195
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.3%  (2186/2224 confusable tokens positioned)
+namespace coverage  [###############################.] 98.3%  (2187/2225 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -361,6 +361,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | plan | **Plan (planner)** - Planner's chosen resident view: selected set, elided set, and accounting |
 | * | crystal | symbol | plan | **Plan (memq)** - Static pre-execution Explain output: pipeline steps, effects, and mutations |
 | * | crystal | symbol | plan | **Candidate** - Scored span the planner may keep resident with cost, benefit, and density metrics |
+| * | crystal | symbol | policy-capability | **egress_posture** - The verdict-meta key the adjudicator's egress band stamps on a refusal to name WHICH egress stance produced it -- currently 'restrict', the strict-allowlist posture in which WebFetch flips from default-allowed to allowlist-only. It answers 'why was this host refused' for a reader of the decision journal, distinguishing a posture-driven refusal from a rule-driven one. |
 | * | crystal | symbol | policy-capability | **cmdPolicy** - The argv handler for the fak policy subcommand (func cmdPolicy in cmd/fak) - the CLI entry that inspects and prints the effective admission policy. |
 | * | crystal | symbol | policy-capability | **FirePolicy** - The rsiloop decision rule (rsiloop.FirePolicy) that decides whether an RSI tuning step fires at a given horizon margin (BaselineFirePolicy fires at MinHorizonMargin 0). |
 | * | crystal | config | policy-capability | **FLEET_POLICY_DIR** - The env var (FLEET_POLICY_DIR) naming a DIRECTORY of fleet dispatch-policy files loaded at tick preflight. |
@@ -2246,7 +2247,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 2010 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 2011 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2262,7 +2263,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | session-runtime | 196 | 204 | 8 |
 | cache | 256 | 260 | 4 |
 | decision | 49 | 53 | 4 |
-| policy-capability | 140 | 143 | 3 |
+| policy-capability | 141 | 144 | 3 |
 | render-materialize | 171 | 174 | 3 |
 | support-maturity | 37 | 40 | 3 |
 | context-ctx | 193 | 195 | 2 |
