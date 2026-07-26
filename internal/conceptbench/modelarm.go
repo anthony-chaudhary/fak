@@ -156,7 +156,7 @@ func NewRegistry() *Registry {
 		transports: map[ArmKind]Transport{},
 		replay:     map[ArmKind]bool{},
 	}
-	for _, m := range []string{"claude-opus-4-8", "fable", "claude-fable-5", "claude-sonnet-5", "claude-3-5-haiku"} {
+	for _, m := range []string{"claude-opus-5", "claude-opus-4-8", "fable", "claude-fable-5", "claude-sonnet-5", "claude-3-5-haiku"} {
 		r.register(m, ArmGateway, "internal/gateway")
 	}
 	for _, m := range []string{"qwen3.6", "smollm2", "glm-5.2"} {
