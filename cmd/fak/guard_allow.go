@@ -103,7 +103,7 @@ func guardAllowWritePath(user bool) (string, error) {
 }
 
 func guardAllowOverlayLayerPaths() []string {
-	layers := guardAllowOverlayPaths()
+	layers := guardAllowLayersWithSessionScope(guardAllowOverlayPaths())
 	out := make([]string, 0, len(layers))
 	for _, layer := range layers {
 		out = append(out, layer.Path)
@@ -113,7 +113,7 @@ func guardAllowOverlayLayerPaths() []string {
 
 func loadGuardAllowOverlayLayers() (guardAllowOverlay, []guardAllowOverlayLayer, error) {
 	merged := guardAllowOverlay{Version: guardAllowOverlayVersion}
-	layers := guardAllowOverlayPaths()
+	layers := guardAllowLayersWithSessionScope(guardAllowOverlayPaths())
 	for _, layer := range layers {
 		ov, err := loadGuardAllowOverlay(layer.Path)
 		if err != nil {
