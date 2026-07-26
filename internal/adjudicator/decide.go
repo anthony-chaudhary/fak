@@ -145,6 +145,19 @@ type Policy struct {
 	// restrict closes egress entirely. False by default (the additive posture), and it only
 	// ever tightens.
 	EgressRestrict bool
+
+	// AutoRepairSidestep opts the reversibility rung into IN-FLIGHT REPAIR of a
+	// sanctioned compiled sidestep: when a held call's family offers a machine-
+	// applicable safe-subset substitution (today only a bare `git push` -> `fak sync
+	// push`), emit that as a TRANSFORM instead of the preview-confirm hold. Default
+	// false -- the hold is preserved, so every existing deployment is unchanged.
+	// Only the SAFE subset is ever substituted: reversibility.go attaches a
+	// RewriteCommand ONLY after its own safe-subset gate passes, so a --force /
+	// --delete / refspec push carries none and still holds. Turning this on
+	// therefore cannot launder a dangerous push into a weaker one -- the safe-subset
+	// test lives at the producer, not here. Operators set it with
+	// FAK_GUARD_AUTOREPAIR=sidestep (internal/policy, AutoRepairEnv).
+	AutoRepairSidestep bool
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -560,6 +573,36 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		}
 		env, ok := ReversibilityConfirmed(c.Tool, args)
 		if !ok {
+			// In-flight repair of a sanctioned compiled sidestep: when the operator opts
+			// in (FAK_GUARD_AUTOREPAIR=sidestep) and the matched family offered a machine-
+			// applicable substitution for THIS call, substitute the sanctioned verb instead
+			// of holding. env carries a RewriteCommand only when the producer's safe-subset
+			// gate passed (a bare `git push`, never a --force/--delete/refspec push), so the
+			// dangerous variants never reach here with one and still take the hold below.
+			if p.AutoRepairSidestep && env.RewriteCommand != "" {
+				// Preserve every non-confirmation arg (workdir, timeout, description, ...) and
+				// swap only the effect-bearing command, so the sanctioned verb still runs in
+				// the same working directory the operator targeted -- dropping workdir here
+				// would silently push a different repo.
+				na := argsWithoutConfirmation(args)
+				na["command"] = env.RewriteCommand
+				if ref, ok := putJSON(ctx, na); ok {
+					newTool := ""
+					if !strings.EqualFold(c.Tool, env.RewriteTool) {
+						newTool = env.RewriteTool // cross-tool sidestep (e.g. MCP git_push -> Bash)
+					}
+					return abi.Verdict{
+						Kind:    abi.VerdictTransform,
+						By:      "monitor/reversibility",
+						Payload: abi.TransformPayload{NewArgs: ref, NewTool: newTool},
+						Meta: map[string]string{
+							"reversibility_autorepair":   "sidestep",
+							"reversibility_class":        string(env.Class),
+							"reversibility_substitution": env.RewriteCommand,
+						},
+					}
+				}
+			}
 			return reversibilityGateVerdict(env)
 		}
 		confirmedWithToken = env.Class != ReversibilityReversible && hasConfirmationArg(args)

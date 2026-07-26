@@ -32,7 +32,29 @@ type ReversibilityEnvelope struct {
 	Preview      string             `json:"preview"`
 	ConfirmToken string             `json:"confirm_token,omitempty"`
 	DryRunHint   string             `json:"dry_run_hint,omitempty"`
+	// RewriteCommand / RewriteTool name the sanctioned sidestep this call could be
+	// auto-substituted with, and the tool it would run under. They are populated ONLY
+	// for the SAFE-subset push (a bare `git push` / `git push <remote>` with no branch)
+	// and are empty for every other call — including every dangerous push.
+	//
+	// This is the CLASSIFIER half only. No rung reads these fields yet: the opt-in
+	// actuation half (a Policy.AutoRepairSidestep knob that turns the reversibility
+	// HOLD into an in-flight TRANSFORM) is NOT YET landed. The invariant this half
+	// establishes ahead of it is the one that makes the eventual gate safe to write as
+	// a bare `env.RewriteCommand != ""`: the safe-subset test lives HERE, so a rung
+	// that trusts a non-empty RewriteCommand can never be handed a force/delete/
+	// refspec/named-branch push.
+	RewriteCommand string `json:"rewrite_command,omitempty"`
+	RewriteTool    string `json:"rewrite_tool,omitempty"`
 }
+
+// gitPushSidestepCommand is the sanctioned safe-push verb offered in place of a bare
+// `git push`: a non-force, current-branch push the kernel admits because its command
+// head is `fak`, not `git push`. It is pinned to the SAME string the git-push
+// reversibility family's redirect hint advertises (familyRemedyCommands["git-push"][0])
+// — TestSidestepRewriteMatchesRemedyTable binds the two so the machine-readable
+// rewrite target and the human-facing advisory hint can never drift apart.
+const gitPushSidestepCommand = "fak sync push"
 
 var previewSecretRE = regexp.MustCompile(`(?i)(password|token|secret|api[_-]?key|authorization)(=|:)[^\s]+`)
 
@@ -47,7 +69,65 @@ func ClassifyReversibility(tool string, args map[string]any) ReversibilityEnvelo
 	if class != ReversibilityReversible {
 		env.ConfirmToken = ReversibilityConfirmToken(class, tool, args)
 	}
+	// Populate the safe-subset sidestep target. Only a bare `git push` /
+	// `git push <remote>` with no branch and no dangerous flag carries a rewrite; a
+	// force/delete/tags/all/mirror/refspec/-u/named-branch/sibling push does not, so a
+	// future `env.RewriteCommand != ""` gate can never see a dangerous push.
+	if cmd := commandText(args); cmd != "" && safeBareGitPush(cmd) {
+		env.RewriteCommand = gitPushSidestepCommand
+		env.RewriteTool = tool
+	}
 	return env
+}
+
+// safeBareGitPush reports whether cmd is the SAFE push subset a sidestep may substitute:
+// a single command (no sibling riding along a `&&`/`;`/`|`) whose head is `git push`
+// with, at most, a bare remote name and NO branch, NO refspec, and NO flag. Every
+// departure — a force/delete/tags/all/mirror/prune flag, an upstream `-u`, a
+// `local:remote` refspec, a named target branch (`git push origin main`), or a second
+// segment — differs from `fak sync push` (non-force, current-branch, fast-forward-only),
+// so laundering it into that verb would silently change intent; those return false and
+// stay on the preview-confirm hold.
+//
+// It parses the RAW command (dashes intact, unlike commandSegments' family-matcher
+// normalization) so a flag is visible, strips the same leading env assignments and
+// wrapper heads, and splits on commandSegmentRE. That split is deliberately NOT the
+// quote-aware one commandSegments uses: a sequencing byte inside a quoted payload
+// manufactures an extra segment here and pushes the call OUT of the safe subset. For a
+// family matcher that would be a false positive; for a safe-subset admission it is the
+// conservative direction — the call keeps its preview-confirm hold.
+func safeBareGitPush(cmd string) bool {
+	var nonEmpty []string
+	for _, raw := range commandSegmentRE.Split(cmd, -1) {
+		if strings.TrimSpace(raw) != "" {
+			nonEmpty = append(nonEmpty, raw)
+		}
+	}
+	if len(nonEmpty) != 1 { // a sibling command disqualifies the whole line
+		return false
+	}
+	fields := strings.Fields(nonEmpty[0])
+	for len(fields) > 0 &&
+		(envAssignmentRE.MatchString(fields[0]) || commandWrapperHeads[strings.ToLower(fields[0])]) {
+		fields = fields[1:]
+	}
+	if len(fields) < 2 || strings.ToLower(fields[0]) != "git" || strings.ToLower(fields[1]) != "push" {
+		return false
+	}
+	positional := 0
+	for _, tok := range fields[2:] {
+		if strings.HasPrefix(tok, "-") {
+			return false // any flag (force, -u, --tags, --all, --delete, --mirror, --prune, …)
+		}
+		if strings.Contains(tok, ":") {
+			return false // an explicit refspec (local:remote)
+		}
+		positional++
+		if positional > 1 {
+			return false // a second positional names a specific branch, not the current one
+		}
+	}
+	return true
 }
 
 // ReversibilityConfirmed returns the call's preview envelope and whether it may

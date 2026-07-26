@@ -480,6 +480,12 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	// Session-scoped, env-only (see AutoRepairEnv): applied after the manifest so a
+	// repo-shipped policy never carries one operator supervision preference to every
+	// other clone. A bad mode refuses the whole load rather than silently staying off.
+	if p.AutoRepairSidestep, err = autoRepairSidestepFromEnv(os.Getenv(AutoRepairEnv)); err != nil {
+		return Runtime{}, err
+	}
 	return Runtime{
 		Adjudicator:           p,
 		Sources:               sources,

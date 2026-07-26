@@ -15,18 +15,18 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **38** (clarity 0 + coverage 38) |
+| **Disambiguation-debt (drive to 0)** | **39** (clarity 0 + coverage 39) |
 | **Crystal-clear concepts (and climbing)** | **393** crystal of 2011 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2187 / 2225** (98.3% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2187 / 2226** (98.2% of the discovered confusable space) |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.8/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2011 concepts - score 98.9/100 (grade A) - disambiguation-debt 38
+concept-disambiguation chart - 2011 concepts - score 98.8/100 (grade A) - disambiguation-debt 39
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 393
@@ -59,8 +59,8 @@ clarity mix by family (each cell = one concept):
   witness-proof    **************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (127 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
+  session-runtime  ###########################. 196/205
   guard-gate       ###########################. 354/362
-  session-runtime  ###########################. 196/204
   cache            ############################ 256/260
   decision         ##########################.. 49/53
   policy-capability ###########################. 141/144
@@ -81,7 +81,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.3%  (2187/2225 confusable tokens positioned)
+namespace coverage  [###############################.] 98.2%  (2187/2226 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -2259,8 +2259,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| session-runtime | 196 | 205 | 9 |
 | guard-gate | 354 | 362 | 8 |
-| session-runtime | 196 | 204 | 8 |
 | cache | 256 | 260 | 4 |
 | decision | 49 | 53 | 4 |
 | policy-capability | 141 | 144 | 3 |
