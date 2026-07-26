@@ -66,9 +66,20 @@ func TestMain(m *testing.M) {
 // classified correctly — so a pipe-stdin test would pass on both the broken and fixed code and
 // witness nothing. Driving stdin from DevNull makes this test fail on the broken check and pass
 // on term.IsTerminal, which is what makes it a real witness for the Windows bug.
+// The deadline is deliberately GENEROUS rather than tight. The bug it witnesses is an
+// INFINITE block — a guard that waits forever on a stdin it wrongly believes is a terminal —
+// so any finite deadline catches it just as surely, and a long one costs nothing on the happy
+// path (this launch takes ~1.2s on an idle box). A short deadline, by contrast, stops measuring
+// the guard and starts measuring MACHINE LOAD: at 20s this test false-failed with "guard default
+// launch timed out" during a full-package run on a shared multi-session checkout (34s observed
+// wall clock for the same launch that needs 1.2s alone), sending a real green result back as a
+// hang. Sizing the bound to the failure mode instead of to the expected duration keeps the
+// witness intact and takes the load-flake away.
+const guardE2EHangDeadline = 120 * time.Second
+
 func runGuardE2E(t *testing.T, args string, env map[string]string) (exitCode int, out string, timedOut bool) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), guardE2EHangDeadline)
 	defer cancel()
 
 	devNull, err := os.Open(os.DevNull)
