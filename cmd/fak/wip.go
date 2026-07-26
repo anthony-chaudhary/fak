@@ -65,6 +65,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipReap(stdout, stderr, argv[1:])
 	case "attribute", "attr":
 		return runWipAttribute(stdout, stderr, argv[1:])
+	case "blocked":
+		return runWipBlocked(stdout, stderr, argv[1:])
 	case "reconcile":
 		return runWipReconcile(stdout, stderr, argv[1:])
 	case "sweep-guard", "sweepguard":
@@ -131,6 +133,15 @@ func wipUsage(w io.Writer) {
       Attribute every dirty working-tree hunk to the session that checkpointed it
       (OWNED), to several (SHARED), or to none (ORPHAN — unattributed, at-risk WIP).
       With --orphans, print only the ORPHAN hunks (exit 3 if any exist).
+
+  fak wip blocked [-C <repo>] [--ledger <path>] [--stale-days N] [--landable] [--json]
+      Rank the dirty working tree by the dispatch admissions each path has REFUSED
+      (parsed from the loop ledger's DIRTY_PATH_COLLISION / SAME_ISSUE_WIP rows), so
+      the orphan actually throttling the fleet sorts first. Verdicts: LAND (blocking
+      and its whole change set is idle — the lever), WAIT (blocking but the set is
+      live; the refusal is correct), IDLE, ACTIVE. Staleness is judged on the change
+      SET, never one file's mtime, so the stale half of a live set is never offered.
+      With --landable, print only the LAND rows (exit 3 if any exist).
 
   fak wip reconcile [-C <repo>] [--json] [--file-ticket] [--dry-run]
       For every checkpoint whose owning session no longer holds a live lease
