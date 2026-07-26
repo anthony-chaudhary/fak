@@ -59,6 +59,8 @@ func runSteer(stdout, stderr io.Writer, argv []string) int {
 			return runSteerPRs(stdout, stderr, argv[1:])
 		case "ack":
 			return runSteerAck(stdout, stderr, argv[1:])
+		case "comment":
+			return runSteerComment(stdout, stderr, argv[1:])
 		case "redirect":
 			return runSteerRedirect(stdout, stderr, argv[1:])
 		case "pause":
@@ -79,6 +81,7 @@ const steerUsage = `fak steer — the forming operator PRs on the trunk, and whe
 Usage:
   fak steer prs [--json] [--check] [--base REF] [--head REF] [--max-files N]
   fak steer ack <unit> [--by WHO] [--note TEXT] [--base REF] [--head REF]
+  fak steer comment <unit> -m "<note>" [--by WHO] [--base REF] [--head REF]
   fak steer redirect <unit> -m "<steer note>" [--by WHO] [--base REF] [--head REF]
   fak steer pause <unit> [-m "<reason>"] [--by WHO] [--base REF] [--head REF]
   fak steer resume <unit> [--by WHO]
@@ -93,6 +96,13 @@ row bound to the unit's exact member SHA set. The unit then renders as
 "RESIDUAL (acked by WHO)" — never CLEARED: an ack is a human's look, not a
 witness, and it moves neither the machine band nor the residual count. A new
 member commit invalidates the ack (it was a review of a different SHA set).
+
+comment is the weakest steering rung — annotate. It posts a note to the unit's
+closure-grade bound issue through the trusted gh seam, prefixed with the unit's
+identity (leaf + the exact member SHA set and band that were read), then records
+the annotation on the overlay ledger so the brief can see the unit got operator
+attention. A unit that binds no issue is refused rather than posted somewhere
+plausible: a mention is not a binding. It changes no band and no ack state.
 
 redirect re-aims a unit's INTENT without touching what landed: it files (or
 reopens) a steer follow-up through the trusted gh seam carrying the note, the
