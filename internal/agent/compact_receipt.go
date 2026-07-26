@@ -59,6 +59,15 @@ type CompactReceipt struct {
 	// provider read it actually unlocked without joining a second ledger.
 	ObservedCacheReadTokens     uint64 `json:"observed_cache_read_tokens,omitempty"`
 	ObservedCacheCreationTokens uint64 `json:"observed_cache_creation_tokens,omitempty"`
+	// JoinKey is the event-join coordinate (#2788) a fire shares with the provider usage record
+	// for the turn it affected — the (turn sequence, monotonic ts) pair that makes the receipt's
+	// WITNESSED shed correlatable 1:1 with the SAME turn's OBSERVED provider cache_read /
+	// cache_creation AFTER the fact, across two independently collected streams. It is stamped by a
+	// caller that holds the turn coordinate (the gateway, via WithJoinKey) and left ZERO (unstamped)
+	// by a byte-level caller with no turn context — an unstamped key is the honest state of a
+	// byte-level receipt, never a failed join. Like the OBSERVED fields it is metadata for the
+	// join, never WITNESSED by fak, so it cannot perturb the ReconcileShed invariant.
+	JoinKey CompactJoinKey `json:"join_key,omitempty"`
 }
 
 // NewCompactReceipt builds the per-fire audit receipt from the CompactOutcome one compaction attempt
