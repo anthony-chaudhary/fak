@@ -46,6 +46,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"regexp"
+	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
@@ -354,6 +355,16 @@ func UpgradeAnthropicStableCacheTTL1h(raw []byte) ([]byte, TTLUpgradeOutcome) {
 }
 
 // upgradeAnthropicStableCacheTTL1hOnce is one un-retried upgrade pass — the original edit.
+//
+// The upgrade is ALL-OR-NOTHING over the head arrays. Anthropic accepts only non-increasing
+// TTLs in prefix-processing order (tools → system → messages), so upgrading one stable-head
+// breakpoint while an earlier one stays on the default 5m tier is a per-turn HTTP 400
+// ("a ttl='1h' cache_control block must not come after a ttl='5m' cache_control block") —
+// witnessed live with Claude Code 2.1.x, which marks BOTH the last tool and system blocks
+// (#5363). So EVERY tools/system breakpoint is upgraded together; message-tail breakpoints
+// stay 5m, which is legal because they FOLLOW the 1h head (descending order). Any refusal —
+// a volatile head, an explicit caller ttl on any head breakpoint, a splice ambiguity —
+// refuses the WHOLE body (identity), never a partial edit that would 400 upstream.
 func upgradeAnthropicStableCacheTTL1hOnce(raw []byte) ([]byte, TTLUpgradeOutcome) {
 	if len(raw) == 0 {
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNonJSON}
@@ -362,41 +373,93 @@ func upgradeAnthropicStableCacheTTL1hOnce(raw []byte) ([]byte, TTLUpgradeOutcome
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNonJSON}
 	}
-	if out, oc, ok := upgradeStableCacheTTLInArray(raw, "system", headValueIsVolatile(obj["tools"])); ok {
-		return out, oc
-	}
-	if out, oc, ok := upgradeStableCacheTTLInArray(raw, "tools", false); ok {
-		return out, oc
-	}
-	return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNoStableBreakpoint}
-}
 
-func upgradeStableCacheTTLInArray(raw []byte, target string, inheritedVolatile bool) ([]byte, TTLUpgradeOutcome, bool) {
-	// Anchor the head array by its KEY (target is "system"/"tools"), never bytes.Index on the value
-	// bytes: a head array byte-identical to a message content array would otherwise upgrade the ttl
-	// inside the wrong occurrence (#3773).
-	elems, spans, ok := decodeTopLevelArray(raw, target)
-	if !ok || len(elems) == 0 {
-		return raw, TTLUpgradeOutcome{}, false
+	// One eligible splice target: the absolute span of an existing cache_control object.
+	type ttlSplice struct {
+		abs int    // absolute offset of the cache_control object value in raw
+		cc  []byte // the cache_control object bytes
 	}
-	for i := len(elems) - 1; i >= 0; i-- {
-		el := elems[i]
-		if !rawHasCacheControl(el) {
+	var splices []ttlSplice
+	marked := 0         // head breakpoints seen (any ttl state)
+	already1h := 0      // head breakpoints already on the 1h tier
+	primaryTarget := "" // the deepest marked head array — "system" outranks "tools", matching the historical Target label
+
+	toolsVolatile := headValueIsVolatile(obj["tools"])
+	for _, head := range []struct {
+		key               string
+		inheritedVolatile bool
+	}{
+		// system is scanned first so primaryTarget keeps the historical "deepest anchor
+		// wins" label; splice ORDER is by absolute offset below, so scan order is
+		// label-only. A volatile tools[] value sits ahead of every system block in the
+		// provider's prefix order, so system inherits tools volatility.
+		{"system", toolsVolatile},
+		{"tools", false},
+	} {
+		// Anchor the head array by its KEY, never bytes.Index on the value bytes: a head
+		// array byte-identical to a message content array would otherwise upgrade the ttl
+		// inside the wrong occurrence (#3773).
+		elems, spans, ok := decodeTopLevelArray(raw, head.key)
+		if !ok || len(elems) == 0 {
 			continue
 		}
-		if inheritedVolatile || anyHeadElementVolatile(elems[:i+1]) {
-			return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonVolatileHead, Target: target}, true
+		for i := len(elems) - 1; i >= 0; i-- {
+			el := elems[i]
+			if !rawHasCacheControl(el) {
+				continue
+			}
+			marked++
+			if primaryTarget == "" {
+				primaryTarget = head.key
+			}
+			if head.inheritedVolatile || anyHeadElementVolatile(elems[:i+1]) {
+				return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonVolatileHead, Target: head.key}
+			}
+			ccStart, ccEnd, ok := objectValueSpan(el, "cache_control")
+			if !ok {
+				return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: head.key}
+			}
+			cc := el[ccStart:ccEnd]
+			var parsed struct {
+				Type string `json:"type"`
+				TTL  string `json:"ttl"`
+			}
+			if json.Unmarshal(cc, &parsed) != nil || parsed.Type != "ephemeral" {
+				return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: head.key}
+			}
+			switch parsed.TTL {
+			case "1h":
+				already1h++
+			case "":
+				splices = append(splices, ttlSplice{abs: spans[i].start + ccStart, cc: cc})
+			default:
+				// The caller chose a ttl on a head breakpoint; a mixed-tier edit around it
+				// could invert the required ordering. Respect the whole layout.
+				return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonTTLAlreadySet, Target: head.key}
+			}
 		}
-		out, reason := spliceCacheControlTTL1h(raw, el, spans[i].start)
-		if reason != TTLUpgradeReasonNone {
-			return raw, TTLUpgradeOutcome{Reason: reason, Target: target}, true
-		}
-		if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
-			return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonRedecodeFail, Target: target}, true
-		}
-		return out, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNone, Target: target}, true
 	}
-	return raw, TTLUpgradeOutcome{}, false
+
+	if marked == 0 {
+		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNoStableBreakpoint}
+	}
+	if len(splices) == 0 {
+		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonAlready1h, Target: primaryTarget}
+	}
+	// Apply back-to-front so earlier absolute offsets stay valid as later bytes grow.
+	sort.Slice(splices, func(i, j int) bool { return splices[i].abs > splices[j].abs })
+	out := raw
+	for _, sp := range splices {
+		next, ok := spliceTTL1hIntoObject(out, sp.abs, sp.cc)
+		if !ok {
+			return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: primaryTarget}
+		}
+		out = next
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonRedecodeFail, Target: primaryTarget}
+	}
+	return out, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNone, Target: primaryTarget}
 }
 
 func anyHeadElementVolatile(elems []json.RawMessage) bool {
@@ -406,33 +469,6 @@ func anyHeadElementVolatile(elems []json.RawMessage) bool {
 		}
 	}
 	return false
-}
-
-func spliceCacheControlTTL1h(raw, el []byte, elemAbs int) ([]byte, string) {
-	ccStart, ccEnd, ok := objectValueSpan(el, "cache_control")
-	if !ok {
-		return nil, TTLUpgradeReasonSpliceFailed
-	}
-	cc := el[ccStart:ccEnd]
-	var parsed struct {
-		Type string `json:"type"`
-		TTL  string `json:"ttl"`
-	}
-	if json.Unmarshal(cc, &parsed) != nil || parsed.Type != "ephemeral" {
-		return nil, TTLUpgradeReasonSpliceFailed
-	}
-	switch parsed.TTL {
-	case "1h":
-		return raw, TTLUpgradeReasonAlready1h
-	case "":
-	default:
-		return raw, TTLUpgradeReasonTTLAlreadySet
-	}
-	out, ok := spliceTTL1hIntoObject(raw, elemAbs+ccStart, cc)
-	if !ok {
-		return nil, TTLUpgradeReasonSpliceFailed
-	}
-	return out, TTLUpgradeReasonNone
 }
 
 func spliceTTL1hIntoObject(raw []byte, objAbs int, obj []byte) ([]byte, bool) {

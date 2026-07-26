@@ -120,7 +120,7 @@ func cmdGuard(argv []string) {
 	taskHandoffRepo := fs.String("task-handoff-repo", "", "owner/repo for optional live handoff issue sync (passed to fak task handoff --live)")
 	taskHandoffLive := fs.Bool("task-handoff-live", false, "after a valid handoff with next_steps, the Stop hook runs fak task handoff --live before allowing the clean stop")
 	operatorDirected := fs.String("operator-directed", guardOperatorDirectedModeWarn, "Claude Code Stop hook that catches a HEADLESS turn ending by asking a human (\"do you want me to push?\", \"waiting for your approval\") — a question no one is there to answer, so the work stalls: off|shadow|warn|enforce. WARN by default (soak: prints the choicetriage remediation, allows the stop); enforce BLOCKS a resolvable ask and feeds the remediation back so the agent acts, while routing a HUMAN_RESIDUAL wall as a typed escalation. Auto-OFF for an attended interactive child the operator did not gate explicitly (a human can always ask); never blocks an interactive session.")
-	splitMode := fs.String("split", "auto", "the default-launch UI: open a 20% `fak info` pane BESIDE the 80% interactive agent pane so the live cache/token economy + the kernel floor's safety counters stay on screen (a bare `fak guard -- claude` hands the whole terminal to Claude, hiding fak). auto|on|off. AUTO (default): enable ONLY for an attended interactive launch inside a terminal multiplexer (tmux, or Windows Terminal via $WT_SESSION); no-op for headless/piped/CI/plain-terminal launches (zero behavior change there). on forces it (prints a recipe if no multiplexer is found); off disables. The pane polls THIS guard's own loopback gateway (auth-exempt on loopback); the bearer is never placed on a pane command line.")
+	splitMode := fs.String("split", "auto", "the default-launch UI: open a 20% `fak info` pane BESIDE the 80% interactive agent pane so the live cache/token economy + the kernel floor's safety counters stay on screen (a bare `fak guard -- claude` hands the whole terminal to Claude, hiding fak). auto|on|off. AUTO (default): enable ONLY for an attended interactive launch inside a splittable terminal context (tmux; Windows Terminal via $WT_SESSION; on macOS, iTerm2 gets an inline split and Apple Terminal — which has no split panes — a companion fak-info window, both via osascript); no-op for headless/piped/CI/plain-terminal launches (zero behavior change there). on forces it (prints a recipe if no host is found); off disables. The pane polls THIS guard's own loopback gateway (auth-exempt on loopback); the bearer is never placed on a pane command line.")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a \"bottom\" strip or a \"right\" column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: refresh interval for the fak-info pane")
 	splitDryRun := fs.Bool("split-dry-run", false, "preview the --split 80/20 plan (resolved multiplexer, geometry, and the exact `fak info` pane command) and EXIT, without bringing up the gateway, spawning a pane, or launching the agent. Use it to see what --split will do before handing the terminal to the agent.")
@@ -502,6 +502,10 @@ func cmdGuard(argv []string) {
 		apiKey               string
 		pinUpstream          bool
 		oauthSource          string
+		// keychainAPIKey marks apiKey as Claude Code's saved API key adopted from the
+		// macOS Keychain (#5363) — not an --api-key-env value — so the startup report's
+		// auth line and the managed-cache reason can name the real source.
+		keychainAPIKey bool
 		// credPath is the on-disk .credentials.json path fak is pinning upstream, populated
 		// only when pinUpstream is true. It is threaded through to the post-crash auth-recovery
 		// check (guardMaybeRecoverAuthCrash) so a wrapped-agent exit caused by an expired
@@ -540,6 +544,7 @@ func cmdGuard(argv []string) {
 		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
 		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
+		keychainAPIKey = us.keychainAPIKey
 		// resolveGuardUpstream armed the spend meter with the agent name (Opus
 		// default). Re-arm with the statically-known upstream model so a non-default
 		// tier prices at its own rate — e.g. a claude-fable-5 session bills 2x Opus
@@ -566,6 +571,9 @@ func cmdGuard(argv []string) {
 		}
 		if us.ambientKeyOverridden && !*quiet {
 			fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")
+		}
+		if us.keychainAPIKey && !*quiet {
+			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription login found; using Claude Code's saved API key from the macOS Keychain upstream (API billing — the same key the wrapped agent itself authenticates with, so the billed account is unchanged).")
 		}
 		// Pinned Claude subscription: the OAuth access token fak holds upstream is
 		// short-lived (the provider rotates it ~hourly, and Claude Code rewrites the
@@ -667,10 +675,11 @@ func cmdGuard(argv []string) {
 	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, guardManagedCacheInputs{
 		// ALONGSIDE mode still has a real provider wire on the proxy side, so only the
 		// PURE local branch (no upstream at all) turns the cache posture off.
-		localModel:  localModel && !localAlongside,
-		provider:    up,
-		apiKey:      apiKey,
-		oauthSource: oauthSource,
+		localModel:     localModel && !localAlongside,
+		provider:       up,
+		apiKey:         apiKey,
+		oauthSource:    oauthSource,
+		keychainAPIKey: keychainAPIKey,
 	})
 	if mcErr != nil {
 		fmt.Fprintln(os.Stderr, "fak guard:", mcErr)
@@ -1385,6 +1394,7 @@ func cmdGuard(argv []string) {
 		pinUpstream:          pinUpstream,
 		apiKey:               apiKey,
 		apiKeyEnv:            *apiKeyEnv,
+		keychainAPIKey:       keychainAPIKey,
 		oauthSource:          oauthSource,
 		mcache:               mcache,
 		contextBudgetLimit:   contextBudgetLimit,

@@ -942,11 +942,23 @@ func DeriveIdentity(dir string) Identity {
 
 // hasClaudeCredentials reports whether a config home has a credential Claude can
 // actually use. A placeholder .credentials.json with a claudeAiOauth object but no
-// access/refresh token is not a login; that was the july4-netra drift where fak said
+// access/refresh token is not a login; that was the July-4 drift where fak said
 // "ready" while Claude and the job switcher correctly saw a missing session/login.
 // Legacy/minimal fixtures that only prove the file exists still read as credentials
 // when they do not carry a claudeAiOauth object.
+//
+// When the disk says no, the macOS login Keychain gets the last word (#5363): Claude
+// Code on darwin stores the live credential there and writes NO .credentials.json, so
+// without this fallback every healthy Mac seat read as needs_login. Non-darwin builds
+// have no keychain seam and keep the disk-only answer byte-for-byte.
 func hasClaudeCredentials(dir string) bool {
+	if hasClaudeFileCredentials(dir) {
+		return true
+	}
+	return ClaudeKeychainHasCreds(dir)
+}
+
+func hasClaudeFileCredentials(dir string) bool {
 	if tok, err := os.ReadFile(filepath.Join(dir, ".oauth-token")); err == nil {
 		trimmed := string(bytes.TrimSpace(tok))
 		if strings.HasPrefix(trimmed, "sk-ant-oat") {
