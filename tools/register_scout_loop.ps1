@@ -76,9 +76,11 @@ if (-not (Test-Path $launcher)) { throw "launch_goal_detached.ps1 not found at $
 $fuel = Join-Path $Workspace $PointerFile
 if (-not (Test-Path $fuel)) { throw "scout-loop fuel not found at $fuel" }
 
-$psHost = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
-if (-not $psHost) { $psHost = (Get-Command powershell -ErrorAction SilentlyContinue).Source }
-if (-not $psHost) { throw "no PowerShell host (pwsh/powershell) found on PATH" }
+# NOT `(Get-Command pwsh).Source`: on a Store install that returns a version-stamped
+# path under WindowsApps\Microsoft.PowerShell_<VERSION>_x64__..., and a task frozen to it
+# dies with exit 1 on every fire once PowerShell updates. Resolve-FakLoopPowerShellHost
+# prefers the upgrade-stable paths instead.
+$psHost = Resolve-FakLoopPowerShellHost
 
 # Child = <psHost> -NoProfile -ExecutionPolicy Bypass -File launch_goal_detached.ps1
 #         -PointerFile <fuel> -Workspace <ws> -WorkKind <tier> [-PlanOnly]
