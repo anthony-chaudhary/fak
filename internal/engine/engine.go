@@ -368,6 +368,11 @@ func remoteRoute(route string) bool {
 // MIRROR: internal/modelroute.IsRemoteRoute keeps a tier-1 copy of this same
 // on-box family list (it cannot import this layer); the two MUST stay in sync so a
 // `fak route` residency label never disagrees with the floor that enforces it.
+// TestTierOneRouteMirrorAgreesWithTheFloor runs BOTH classifiers over one corpus,
+// so a family added here and forgotten there is a test failure, not a fail-OPEN.
+// NOTE the "fleet" family (an ORG-OPERATED server, modelroute.ZoneFleet) is
+// deliberately ABSENT from this list: org-owned hardware is self-hosted but still
+// off-box, so it stays remote to this floor.
 func localRoute(route string) bool {
 	for _, local := range []string{"inkernel", "mock", "cassette", "local", "on-device", "ondevice", "kernel"} {
 		if route == local ||

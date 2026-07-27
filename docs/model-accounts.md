@@ -190,7 +190,58 @@ from carrying a non-loopback base URL, which would otherwise emit a `local:` rou
 while the bytes egress off-box. A cross-package test
 (`internal/engine/account_residency_test.go`) pins that the floor and the switcher
 agree for every provider kind, so a future kind that the floor could not classify is a
-build-time failure, not a silent fail-open.
+build-time failure, not a silent fail-open. The same file pins the tier-1 mirror
+(`modelroute.IsRemoteRoute`) against the enforcing floor over one corpus, because
+`internal/modelroute` sits below `internal/engine` and must keep its own copy of the
+on-box family list. See *Placement zones* below for the third rung the binary
+local/remote split does not name.
+
+## Placement zones: your box, your company's boxes, someone else's
+
+Locality is not binary. A company that self-hosts runs models in **three** places, and
+an account declares which by its `kind`:
+
+| Zone | `kind` | Where the weights sit | Self-hosted? | On-box? |
+| --- | --- | --- | --- | --- |
+| `device` | `local` | the engineer's own machine (loopback only) | yes | **yes** |
+| `fleet` | `fleet` | a machine the **organization** operates | yes | no |
+| `vendor` | `openai` / `anthropic` / `gemini` / `xai` / `deepseek` / `openai-responses` | a third-party lab's API | no | no |
+
+The middle rung is the one that carries the token volume in a self-hosting shop — a
+GLM- or Kimi-class open model on company GPUs, shared by every engineer. Before
+`kind: fleet` existed it could not be written down: as `local` it was refused (a local
+account must carry a loopback base URL), and as `openai` it was admitted but became
+indistinguishable from `api.openai.com` in every downstream record, so the org got no
+credit for hardware it owns.
+
+```json
+{
+  "id": "corp-glm",
+  "kind": "fleet",
+  "base_url": "http://glm.infer.corp.internal:8000/v1",
+  "label": "GLM-5.2 vLLM server the company operates"
+}
+```
+
+A `fleet` account needs an explicit, non-loopback `http(s)` endpoint (there is no public
+default for a host only your org can name, and a loopback address is `device` by
+definition — the zones must stay disjoint). Unlike a vendor account it does **not**
+require a `cred_env`: an org-operated server on a private network commonly has no API
+key. Supply one when the endpoint authenticates.
+
+**Self-hosted is not the same as on-box, deliberately.** `ZoneFleet.SelfHosted()` is
+true — its tokens count toward "we ran this on our own silicon" — but
+`ZoneFleet.OnBox()` is false, so the residency floor still treats a `fleet:…` route as
+remote and still denies a tenant-scoped payload routed there. Naming the zone changes
+what fak can *attribute*, not what it *permits*. Letting an org-operated host carry a
+sensitive payload is an enforcement change that needs an operator-declared trust
+boundary (authenticated transport, a named host allowlist), and it is tracked
+separately — it does not arrive as a side effect of declaring a zone.
+
+The zones are ordered as an escalation ladder — `device` (0) → `fleet` (1) →
+`vendor` (2) — so "prefer the cheapest rung that can do the work" is a comparison on a
+declared value rather than a string switch. An unrecognized zone ranks *above* vendor
+and is neither self-hosted nor on-box: unattributable never reads as free or as safe.
 
 ## A note on codex and Anthropic subscriptions
 
@@ -254,3 +305,16 @@ account-resolved route is the next refinement of what that field carries.)
 per-account rate-limit, capacity, health, or failover signal. It is not the fleet's
 load-aware switcher — it is the portable, reviewable account map that a switcher would
 consult.
+
+**Placement zones — shipped and deferred, precisely.** *Shipped:* the vocabulary. A
+company-operated server is expressible (`kind: fleet`), its account validates on its own
+terms, its route string round-trips to `ZoneFleet`, and `PlacementZone.SelfHosted()`
+gives every downstream consumer one predicate to attribute a token by. Witnessed by
+`TestZonesPartitionTheKnownKinds`, `TestEngineRouteCarriesTheZoneBackOut`,
+`TestShippedExampleRosterCarriesAllThreeZones`, and — at the enforcing floor —
+`TestFleetZoneStaysRemoteAtTheFloor` plus `TestTierOneRouteMirrorAgreesWithTheFloor`.
+*Deferred, and deliberately so:* nothing yet **chooses** a zone automatically, no usage
+record yet **carries** the zone, and the residency floor does not yet treat a fleet host
+as inside a trust boundary. Zone-aware placement, the self-hosted token-fraction metric,
+and the escalation ladder are separate, individually reviewable changes on top of this
+vocabulary — not implied by it.

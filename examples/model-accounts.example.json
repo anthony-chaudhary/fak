@@ -8,6 +8,19 @@
       "label": "on-box ollama / vLLM (OpenAI-compatible) — no key, residency-exempt"
     },
     {
+      "id": "corp-glm",
+      "kind": "fleet",
+      "base_url": "http://glm.infer.corp.internal:8000/v1",
+      "label": "zone=fleet — a GLM-5.2 vLLM server the COMPANY operates. Self-hosted (its tokens count as saved) but still OFF-BOX, so the residency floor treats it as remote until an operator declares a trust boundary. No cred_env needed on a private network; add one if the endpoint authenticates."
+    },
+    {
+      "id": "corp-kimi",
+      "kind": "fleet",
+      "base_url": "http://kimi.infer.corp.internal:8000/v1",
+      "cred_env": "CORP_INFER_TOKEN",
+      "label": "zone=fleet — a Kimi-K3 server on company GPUs, behind a shared bearer token named (never pasted) here"
+    },
+    {
       "id": "openai-personal",
       "kind": "openai",
       "cred_env": "OPENAI_API_KEY",
@@ -85,6 +98,9 @@
   "default": "openai-personal",
   "bindings": [
     { "model": "small", "account": "local", "upstream_model": "llama3.2" },
+    { "model": "zone-device", "account": "local", "upstream_model": "qwen/qwen3.6-4b" },
+    { "model": "zone-fleet", "account": "corp-glm", "upstream_model": "glm-5.2" },
+    { "model": "zone-fleet-agentic", "account": "corp-kimi", "upstream_model": "kimi-k3" },
     { "model": "medium", "account": "openai-personal", "upstream_model": "gpt-5.5" },
     { "model": "large", "account": "claude-sub", "upstream_model": "claude-opus-4-6" },
     { "model": "guard-a", "account": "openai-work", "upstream_model": "gpt-5.5" },

@@ -27,6 +27,7 @@ func TestEngineRouteAgreesWithResidencyFloor(t *testing.T) {
 		modelroute.KindXAI,
 		modelroute.KindDeepSeek,
 		modelroute.KindLocal,
+		modelroute.KindFleet,
 	}
 	for _, k := range kinds {
 		tg := modelroute.Target{Kind: k, Account: "acct", UpstreamModel: "the-model"}
@@ -55,5 +56,50 @@ func TestLocalRoutePrefixWinsOverDeceptiveName(t *testing.T) {
 	rroute := remote.EngineRoute() // "openai:local/gpt-5.5"
 	if !remoteRoute(rroute) {
 		t.Fatalf("a remote account named 'local' must still route remote (kind leads): %q", rroute)
+	}
+}
+
+// TestTierOneRouteMirrorAgreesWithTheFloor pins the DUPLICATION that
+// internal/modelroute.IsRemoteRoute necessarily is. modelroute sits at architest
+// tier 1 (stdlib-only) and cannot import this package, so it keeps its own copy of
+// the on-box engine-family list — the copy the comment on localRoute names as the
+// MIRROR. A family added on one side and forgotten on the other would let a
+// tier-1 caller label a route on-box while THIS floor denies it (or worse, the
+// reverse), so both classifiers run over one corpus here and must agree
+// byte-for-byte on every shape the floor accepts.
+func TestTierOneRouteMirrorAgreesWithTheFloor(t *testing.T) {
+	routes := []string{
+		"", "inkernel", "mock", "cassette", "kernel",
+		"local", "local:box/llama3.2", "local-gpu", "local/llama",
+		"on-device:0", "ondevice-1", "on-device/gpu",
+		"fleet:gpu07/glm-5.2", "fleet-a/kimi", "fleet",
+		"openai:acct/gpt-5.5", "anthropic:work/claude-opus-5", "gemini:g/pro",
+		"xai:x/grok", "deepseek:d/v4", "openai-responses:acct/o",
+		"notlocal:acct/m", "fleetwood:acct/mac", "localish", "something-unknown",
+		"  local:box/m  ", "LOCAL:BOX/M", "FLEET:gpu07/x",
+	}
+	for _, r := range routes {
+		if got, want := modelroute.IsRemoteRoute(r), remoteRoute(r); got != want {
+			t.Fatalf("route %q: modelroute.IsRemoteRoute=%v but engine.remoteRoute=%v — "+
+				"the tier-1 mirror and the enforcing floor disagree (fail-OPEN risk)", r, got, want)
+		}
+	}
+}
+
+// TestFleetZoneStaysRemoteAtTheFloor is the executable statement of the
+// placement-zone slice's fail-closed boundary, asserted at the floor that
+// actually enforces it. A ZoneFleet route is SELF-HOSTED (the org owns the
+// silicon, so a usage ledger may count its tokens as saved) yet still OFF-BOX, so
+// this floor must keep denying a tenant-scoped payload routed there. Widening
+// that is an operator-declared trust-boundary change; it must never arrive as a
+// side effect of naming the zone.
+func TestFleetZoneStaysRemoteAtTheFloor(t *testing.T) {
+	tg := modelroute.Target{Kind: modelroute.KindFleet, Account: "gpu07", UpstreamModel: "glm-5.2"}
+	route := tg.EngineRoute()
+	if !remoteRoute(route) {
+		t.Fatalf("a fleet route %q must read REMOTE at the residency floor — org-owned hardware is still off-box", route)
+	}
+	if zone := modelroute.ZoneOfRoute(route); !zone.SelfHosted() {
+		t.Fatalf("a fleet route %q must still be attributable as self-hosted (zone %q)", route, zone)
 	}
 }

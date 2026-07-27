@@ -143,12 +143,23 @@ const (
 	// residency-EXEMPT (the bytes never leave the box), which is why Validate forbids
 	// it from carrying a non-loopback base URL.
 	KindLocal ProviderKind = "local"
+	// KindFleet is an OpenAI-compatible server the ORGANIZATION operates — off-box
+	// but inside the org's own trust boundary (a GLM/Kimi-class open model on
+	// company GPUs). It is the middle rung of the placement ladder, and the one
+	// the token economics rest on: see PlacementZone in zone.go.
+	//
+	// It is REMOTE to the residency floor exactly as a vendor kind is. Declaring
+	// hardware org-owned does not by itself make a sensitive payload safe to send
+	// off the box; the zone makes the deployment EXPRESSIBLE and ATTRIBUTABLE
+	// (Target.Zone().SelfHosted()), and any widening of the floor is a separate,
+	// operator-declared enforcement change.
+	KindFleet ProviderKind = "fleet"
 )
 
 // knownKind reports whether k is one of the closed ProviderKind set.
 func knownKind(k ProviderKind) bool {
 	switch k {
-	case KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindDeepSeek, KindLocal:
+	case KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindDeepSeek, KindLocal, KindFleet:
 		return true
 	}
 	return false
@@ -161,8 +172,9 @@ func remoteKind(k ProviderKind) bool { return k != KindLocal }
 // KindBaseURL is the public default base URL for a REMOTE provider kind, used when an
 // Account omits base_url. It matches the defaults `fak guard`/`fak serve` use
 // (Anthropic WITHOUT a /v1 suffix — its adapter appends the Messages path; a parity
-// test pins this against cmd/fak's guardDefaultBaseURL). KindLocal has no public
-// default (returns ""), so a local account MUST set an explicit loopback base_url.
+// test pins this against cmd/fak's guardDefaultBaseURL). KindLocal and KindFleet have
+// no public default (returns ""), so a local account MUST set an explicit loopback
+// base_url and a fleet account an explicit org-reachable one.
 func KindBaseURL(k ProviderKind) string {
 	switch k {
 	case KindOpenAI, KindOpenAIResponses:
@@ -268,8 +280,11 @@ func (t Target) Remote() bool { return !t.Local() }
 // "local:" (which internal/engine's residency PDP reads as on-box, residency-exempt,
 // via a first-checked early-return) and a remote target "<kind>:" where <kind> is one
 // of the floor-recognized keywords (openai / openai-responses⊃openai / anthropic /
-// gemini / xai / deepseek) — so the floor's local/remote decision is the account's DECLARED kind,
-// never a guess from whether the model name contains "openai". The account/upstream
+// gemini / xai / deepseek / fleet) — so the floor's local/remote decision is the account's DECLARED kind,
+// never a guess from whether the model name contains "openai". A KindFleet target
+// therefore leads with "fleet:", which the floor reads as REMOTE (org-owned is still
+// off-box) while ZoneOfRoute reads it as ZoneFleet — one string, two honest answers:
+// the floor gets locality, the usage ledger gets self-hosted attribution. The account/upstream
 // follow for legibility; upstream model ids may contain provider namespace slashes
 // (for example qwen/qwen3.6-27b), so consumers that parse this shape must split only
 // on the first slash after the account id. The
@@ -463,7 +478,14 @@ func (r Roster) Validate() error {
 			return fmt.Errorf("modelroute: account %q cred_env %q is not an env-var name "+
 				"(it must NAME the variable holding the key, e.g. OPENAI_API_KEY — never the secret itself)", a.ID, a.CredEnv)
 		}
-		if remoteKind(a.Kind) {
+		if a.Kind == KindFleet {
+			// An ORG-OPERATED server: off-box like a vendor account, but reached on
+			// the org's own network, so it carries its own invariants (an explicit
+			// non-loopback endpoint) and NOT the vendor credential requirement.
+			if err := validateFleetAccount(a); err != nil {
+				return err
+			}
+		} else if remoteKind(a.Kind) {
 			if a.CredEnv == "" {
 				return fmt.Errorf("modelroute: remote account %q needs a cred_env (the env var NAME holding its key/token)", a.ID)
 			}
