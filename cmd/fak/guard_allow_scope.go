@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +19,8 @@ import (
 //	repo        0   <repo>/.fak/guard/allow.json                    checked-out tree; broadest
 //	user        1   ~/.fak/guard/allow.json                         operator-local, host-wide
 //	env         1   $FAK_GUARD_ALLOW_OVERLAY (explicit path)        operator-controlled override
-//	session     2   <repo>/.fak/guard/sessions/<id>.allow.json      THIS guard session only
+//	session     2   <repo>/.fak/guard/sessions/<id>.allow.json      THIS guard session only —
+//	                                                                meant to be dropped at session end
 //
 // PRECEDENCE RULE: a HIGHER rank is the NARROWER, more-ephemeral scope, and it layers
 // ON TOP of every lower rank — session over user/env over repo. Layers are applied in
@@ -40,6 +43,28 @@ import (
 // the other layers); the session path is fed into protectGuardPolicyConfig with the
 // rest of the layer paths, so a wrapped agent can no more widen its own session scope
 // than the repo or user ones.
+//
+// EPHEMERALITY is what the session scope is FOR: `fak guard allow --session <tool>`
+// records a widening into the session file, every read path unions that layer last, and
+// dropping the file at session end leaves no permanent hole in the floor. Two halves,
+// and only the first is wired today:
+//
+//   - WIRED — the WRITE and READ halves. cmdGuardAllow routes --session to
+//     guardAllowSessionOverlayPath via guardAllowWritePathForScope, and every reader
+//     (guardAllowOverlayLayerPaths, guardAllowWinningScope, the --list rendering) unions
+//     the session layer through guardAllowLayersWithSessionScope.
+//   - NOT WIRED — the automatic DROP. armGuardAllowSessionScopeTeardown and
+//     dropGuardAllowSessionScope below are the mechanism, and nothing in the guard boot
+//     or teardown path calls either one yet: no production call site exists outside this
+//     file's tests. So a session-scoped widening PERSISTS across launches today unless
+//     the operator removes the file, and the file name is the only thing scoping it. Said
+//     outright because an ephemerality the code does not perform is exactly the kind of
+//     claim this repo treats as unwitnessed. The arming rung — setGuardAllowSessionScopeID
+//     + arm at cmd/fak/guard.go's resolveGuardSessionID, `defer dropGuardAllowSessionScope()`
+//     beside the interactive-session-registry defer — is filed rather than half-done here.
+//
+// When the drop IS armed, only the session file is ever removed — repo/user/env are
+// durable operator decisions.
 
 // guardAllowScopeSession names the session-scope layer. The repo/user/env layer names
 // in guardAllowOverlayPaths double as their scope names.
@@ -120,6 +145,65 @@ func guardAllowScopeRank(scope string) int {
 	default:
 		return -1
 	}
+}
+
+// guardAllowScopeDurabilityNote is the one-clause durability legend for a scope. Every
+// operator-facing listing carries it so the question the scope table answers — does a
+// widening recorded HERE survive the next launch? — never has to be inferred from a path.
+// The session line says what is TRUE TODAY rather than what the scope is for: the drop is
+// unarmed (see the header), so a session widening does in fact survive, and a legend that
+// promised otherwise would be the listing telling the operator a comfortable lie.
+func guardAllowScopeDurabilityNote(scope string) string {
+	switch scope {
+	case guardAllowScopeSession:
+		return " (ephemeral by design — but the drop at session end is NOT ARMED yet, so this one persists)"
+	case "user":
+		return " (durable — host-wide, every repo)"
+	case "env":
+		return " (durable — $" + guardAllowOverlayEnv + " override)"
+	case "repo":
+		return " (durable — this checkout)"
+	}
+	return ""
+}
+
+// guardAllowSessionScopeTeardownPath is the session-scope overlay path CAPTURED AT
+// ARM TIME. Teardown must remove the file this session actually read, not whatever the
+// id resolves to at exit: the guard finalizes guardTraceID (resolveGuardSessionID)
+// AFTER the capability floor loads, so re-resolving at teardown could name a different
+// file and silently leak the widening into the next launch. Empty = nothing armed —
+// which is the state on EVERY launch today, since no boot caller arms it yet — and an
+// unarmed dropGuardAllowSessionScope is a no-op.
+var guardAllowSessionScopeTeardownPath string
+
+// armGuardAllowSessionScopeTeardown records the session-scope layer path this launch
+// resolved and arms the drop; it returns the armed path so a caller can report it.
+// NO PRODUCTION CALLER YET — this is the mechanism half of the ephemerality contract
+// (see the header). Its intended call site is right after resolveGuardSessionID hands
+// the guard its final guardTraceID.
+func armGuardAllowSessionScopeTeardown() string {
+	guardAllowSessionScopeTeardownPath = guardAllowSessionOverlayPath()
+	return guardAllowSessionScopeTeardownPath
+}
+
+// dropGuardAllowSessionScope deletes the ARMED session-scope overlay. It is the half of
+// the scope contract that would make a session widening EPHEMERAL — honored for this
+// session, absent on the next launch — and it is deliberately narrow: it removes ONLY
+// the armed session file, never the repo/user/env layers, which are durable operator
+// decisions. A missing file is the common case (no session-scoped widening was ever
+// added) and is not an error. Disarms itself, so a double teardown cannot delete a path
+// a later launch has since armed. NO PRODUCTION CALLER YET: nothing in the guard's
+// teardown path defers this, so the drop does not happen on a real session end.
+func dropGuardAllowSessionScope() error {
+	path := strings.TrimSpace(guardAllowSessionScopeTeardownPath)
+	guardAllowSessionScopeTeardownPath = ""
+	if path == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("guard allow session scope: drop %s: %w", path, err)
+	}
+	return nil
 }
 
 // guardAllowWinningScope reports which scope OWNS an entry when it appears in more

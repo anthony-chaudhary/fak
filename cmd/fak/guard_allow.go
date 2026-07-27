@@ -91,15 +91,30 @@ func guardAllowOverlayPath() string {
 	return filepath.Join(findRepoRoot("."), ".fak", "guard", "allow.json")
 }
 
+// guardAllowWritePathForScope resolves the WRITE target for a named scope from the
+// guard_allow_scope.go precedence table: "session" is this session's overlay (the
+// narrowest layer, and the one MEANT to be dropped at teardown — that drop is mechanism
+// only today, see guard_allow_scope.go), "user" the host-wide per-user file, anything
+// else the default repo-local target (or the env override when one is set).
+func guardAllowWritePathForScope(scope string) (string, error) {
+	switch scope {
+	case guardAllowScopeSession:
+		return guardAllowSessionOverlayPath(), nil
+	case "user":
+		p := guardAllowUserOverlayPath()
+		if p == "" {
+			return "", errors.New("user home directory is unavailable")
+		}
+		return p, nil
+	}
+	return guardAllowOverlayPath(), nil
+}
+
 func guardAllowWritePath(user bool) (string, error) {
-	if !user {
-		return guardAllowOverlayPath(), nil
+	if user {
+		return guardAllowWritePathForScope("user")
 	}
-	p := guardAllowUserOverlayPath()
-	if p == "" {
-		return "", errors.New("user home directory is unavailable")
-	}
-	return p, nil
+	return guardAllowWritePathForScope("repo")
 }
 
 func guardAllowOverlayLayerPaths() []string {
@@ -299,6 +314,7 @@ func cmdGuardAllow(argv []string) {
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, guardAllowUsage()) }
 	list := fs.Bool("list", false, "print effective allow layers with per-layer provenance, then exit")
 	user := fs.Bool("user", false, "write the per-user home overlay instead of the repo-local overlay")
+	session := fs.Bool("session", false, "write the SESSION-scope overlay: the narrowest layer, applied last, so it is the last word over the repo/user/env layers. NOT YET EPHEMERAL — the drop at session end is unarmed and no launch supplies a session id, so this writes the shared sessions/current.allow.json and the widening PERSISTS until you remove that file")
 	remove := fs.Bool("remove", false, "remove the named tool(s)/prefix(es) from the overlay instead of adding")
 	prefix := fs.Bool("prefix", false, "treat the positional args as allow_prefix entries (a tool-name PREFIX) rather than exact names")
 	fromJournal := fs.Bool("from-journal", false, "list the tools a guarded session BLOCKED (DEFAULT_DENY) from an audit journal, each with the exact command to allow it")
@@ -308,7 +324,22 @@ func cmdGuardAllow(argv []string) {
 	addAll := fs.Bool("add-all", false, "with an import source, add EVERY mappable entry found to the overlay in one step")
 	_ = fs.Parse(argv)
 
-	path, err := guardAllowWritePath(*user)
+	// The write SCOPE (guard_allow_scope.go): --session is the narrowest layer (applied
+	// last, so it is the last word), --user the host-wide one, and the default stays
+	// repo-local. Naming both is a contradiction, not a precedence question, so refuse it
+	// rather than silently picking one and writing the widening somewhere the operator did
+	// not mean.
+	writeScope := "repo"
+	switch {
+	case *session && *user:
+		fmt.Fprintln(os.Stderr, "fak guard allow: --session and --user name different scopes; pick one")
+		os.Exit(2)
+	case *session:
+		writeScope = guardAllowScopeSession
+	case *user:
+		writeScope = "user"
+	}
+	path, err := guardAllowWritePathForScope(writeScope)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak guard allow:", err)
 		os.Exit(1)
@@ -327,13 +358,17 @@ func cmdGuardAllow(argv []string) {
 	case *fromMCPConfig:
 		os.Exit(runGuardAllowFromMCPConfig(os.Stdout, os.Stderr, path, &ov, fs.Args(), *addAll))
 	case *list:
-		for _, layer := range guardAllowOverlayPaths() {
+		// List every layer the READ path actually unions — session scope included, in
+		// ascending precedence order — and name each layer's scope rank, so an operator
+		// can tell which scope a widening lives in instead of inferring it from a path.
+		for _, layer := range guardAllowLayersWithSessionScope(guardAllowOverlayPaths()) {
 			layerOverlay, layerErr := loadGuardAllowOverlay(layer.Path)
 			if layerErr != nil {
 				fmt.Fprintln(os.Stderr, "fak guard allow:", layerErr)
 				os.Exit(1)
 			}
-			fmt.Fprintf(os.Stdout, "[%s layer]\n", layer.Name)
+			fmt.Fprintf(os.Stdout, "[%s layer] scope=%s precedence=%d%s\n",
+				layer.Name, layer.Name, guardAllowScopeRank(layer.Name), guardAllowScopeDurabilityNote(layer.Name))
 			printGuardAllowOverlay(os.Stdout, layer.Path, layerOverlay)
 		}
 	default:
@@ -514,8 +549,9 @@ func guardAllowUsage() string {
 		"  fak guard allow <tool>...              add exact tool name(s) to the always-allow overlay",
 		"  fak guard allow --prefix <prefix>...   add an allow_prefix (a tool-name PREFIX family) instead",
 		"  fak guard allow --remove <name>...     remove entr(ies) from the overlay",
-		"  fak guard allow --list                 print effective user/repo layers and provenance",
+		"  fak guard allow --list                 print every effective layer with its scope, precedence and provenance",
 		"  fak guard allow --user <tool>...       write the per-user home layer instead of repo-local",
+		"  fak guard allow --session <tool>...    write the session-scope layer (narrowest, applied last; its drop-at-exit is NOT armed yet, so the entry persists)",
 		"  fak guard allow --from-journal         list what a guarded session BLOCKED + the command to allow each",
 		"  fak guard allow --from-journal --add-all   add every blocked tool in one step",
 		"  fak guard allow --from-claude-settings [path]   import permissions.allow from .claude/settings.json (name-level only)",
