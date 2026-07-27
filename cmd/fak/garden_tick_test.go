@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
@@ -64,8 +65,9 @@ func TestGardenTickRegisterAcceptsTildeDir(t *testing.T) {
 	}
 }
 
-// TestWitnessGardenTickRecordsRunEnd proves every tick appends a witnessed run-end to
-// the loop ledger, so a witnessed run end (the tick + its findings) lives in the ledger.
+// TestWitnessGardenTickRecordsRunEnd proves every tick appends the claim+verdict PAIR
+// to the loop ledger under ONE run id: an EventEnd carrying the tick's own claim, and
+// an EventWitness carrying the verdict the folded member envelopes prove.
 func TestWitnessGardenTickRecordsRunEnd(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	plan := gardenbundle.PlanTick([]gardenbundle.MemberResult{
@@ -78,15 +80,18 @@ func TestWitnessGardenTickRecordsRunEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPrefix: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("want 1 ledger event, got %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("want 2 ledger events (end + witness), got %d", len(events))
 	}
 	ev := events[0]
 	if ev.LoopID != gardenTickLoopID {
 		t.Fatalf("LoopID = %q, want %q", ev.LoopID, gardenTickLoopID)
 	}
-	if ev.Kind != loopmgr.EventEnd || ev.Status != loopmgr.StatusWitnessedDone {
-		t.Fatalf("kind/status = %s/%s, want end/witnessed_done", ev.Kind, ev.Status)
+	// The END channel carries the tick's own CLAIM. It must not wear the witness
+	// vocabulary: loopmgr only counts EventWitness toward Witnessed, so a verdict
+	// filed here reads as an unwitnessed run in `fak loop health`.
+	if ev.Kind != loopmgr.EventEnd || ev.Status != loopmgr.StatusClaimedDone {
+		t.Fatalf("kind/status = %s/%s, want end/claimed_done", ev.Kind, ev.Status)
 	}
 	if ev.Metrics["reaped_leases"] != 2 {
 		t.Fatalf("reaped_leases metric = %d, want 2", ev.Metrics["reaped_leases"])
@@ -96,5 +101,69 @@ func TestWitnessGardenTickRecordsRunEnd(t *testing.T) {
 	}
 	if ev.Metrics["folded_sentinel_lines"] != 4 {
 		t.Fatalf("folded_sentinel_lines metric = %d, want 4", ev.Metrics["folded_sentinel_lines"])
+	}
+
+	w := events[1]
+	if w.Kind != loopmgr.EventWitness || w.Status != loopmgr.StatusWitnessedDone {
+		t.Fatalf("witness kind/status = %s/%s, want witness/witnessed_done", w.Kind, w.Status)
+	}
+	// Same run id on both, or the ledger reads as two half-runs instead of one
+	// claimed-and-witnessed run.
+	if w.RunID != ev.RunID || w.RunID == "" {
+		t.Fatalf("witness RunID = %q, want the end event's %q", w.RunID, ev.RunID)
+	}
+	if len(w.EvidenceRefs) == 0 {
+		t.Fatal("witness carries no evidence ref for the folded member envelopes")
+	}
+}
+
+// TestWitnessGardenTickWithholdsTheVerdictWhenAMemberErrored proves an unreadable
+// member downgrades the verdict to witness_unavailable: the tick cannot prove it swept
+// everything when a member produced no usable payload. The END claim is unaffected —
+// the tick did run — so the run still counts, it just is not proven done.
+func TestWitnessGardenTickWithholdsTheVerdictWhenAMemberErrored(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	plan := gardenbundle.PlanTick([]gardenbundle.MemberResult{
+		{Key: "stale_leases", Label: "stale leases", State: "action"},
+		{Key: "scorecard", Label: "scorecard control pane", State: "errored"},
+	}, false)
+
+	witnessGardenTick(ledger, plan, 0, 0, 0, 0, 0, 0, 0)
+
+	events, _, err := loopmgr.LoadPrefix(ledger)
+	if err != nil {
+		t.Fatalf("LoadPrefix: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("want 2 ledger events (end + witness), got %d", len(events))
+	}
+	if events[0].Kind != loopmgr.EventEnd || events[0].Status != loopmgr.StatusClaimedDone {
+		t.Fatalf("kind/status = %s/%s, want end/claimed_done", events[0].Kind, events[0].Status)
+	}
+	w := events[1]
+	if w.Kind != loopmgr.EventWitness || w.Status != loopmgr.StatusWitnessUnavailable {
+		t.Fatalf("witness kind/status = %s/%s, want witness/witness_unavailable", w.Kind, w.Status)
+	}
+	if w.Reason != "GARDEN_TICK_MEMBER_ERRORED" {
+		t.Fatalf("witness reason = %q, want GARDEN_TICK_MEMBER_ERRORED", w.Reason)
+	}
+	if !strings.Contains(w.Summary, "1 member(s) errored") {
+		t.Fatalf("witness summary = %q, want the errored-member count", w.Summary)
+	}
+}
+
+// TestGardenTickUnmeasuredCountsOnlyErroredMembers pins the boundary the verdict turns
+// on: a red or action member is a MEASURED finding the tick surfaced, so it must not
+// withhold the verdict; only an unreadable ("errored") member does.
+func TestGardenTickUnmeasuredCountsOnlyErroredMembers(t *testing.T) {
+	plan := gardenbundle.PlanTick([]gardenbundle.MemberResult{
+		{Key: "a", State: "ok"},
+		{Key: "b", State: "action"},
+		{Key: "c", State: "red"},
+		{Key: "d", State: "errored"},
+		{Key: "e", State: "errored"},
+	}, false)
+	if got := gardenTickUnmeasured(plan); got != 2 {
+		t.Fatalf("gardenTickUnmeasured = %d, want 2 (only the errored members)", got)
 	}
 }

@@ -253,6 +253,52 @@ func appendGrowthgateReapLedger(path string, decisions []growthReapDecision) err
 	return errors.Join(errs...)
 }
 
+// appendGrowthCensusHeartbeat appends ONE per-tick census row when the reapable set
+// came back EMPTY (#5349 step 5, the soak rung). Without it the reap ledger is
+// silent on a zero-reapable tick, so an operator reading the soak window cannot
+// distinguish "the collect ran and correctly found nothing eligible" from "the
+// collect never ran at all" — the exact ambiguity that hid the dead tick trigger
+// (#5355), where a missing act-pass looked identical to a clean one. The apply flip
+// is gated on that window showing a CORRECT reap set, and an absence of rows can
+// witness neither correctness nor liveness, so the would-reap trail alone cannot
+// carry the evidence. This carries its own schema so reap-decision.v1 stays pure
+// (one row per FILE decision); this is one row per TICK. Best-effort and
+// append-only, the same contract as the decision ledger above.
+func appendGrowthCensusHeartbeat(path string, roots []string, scanned, protected int, verdict string) error {
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	b, err := json.Marshal(map[string]any{
+		"schema": "fak.growthgate.census-clean.v1",
+		"ts":     time.Now().UTC().Format(time.RFC3339Nano),
+		"action": "census-clean",
+		// reapable is pinned to 0 by construction — this row is written ONLY when the
+		// partition came back empty — so a soak consumer can filter on it without
+		// having to re-derive the partition it never saw.
+		"reapable": 0,
+		// verdict/scanned/protected are what make the clean tick auditable rather than
+		// merely present: a census that scanned 0 files is a broken scope, not a clean
+		// tree, and a protected>0 tick names over-budget files the classifier
+		// deliberately spared (HOT or non-disposable) rather than missed.
+		"verdict":   verdict,
+		"scanned":   scanned,
+		"protected": protected,
+		"roots":     roots,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(b, '\n'))
+	return err
+}
+
 // growthSkipDirs are pruned wholesale — heavy and never a growth-ledger home.
 var growthSkipDirs = map[string]bool{
 	".git": true, "node_modules": true, "vendor": true, ".venv": true, "venv": true,

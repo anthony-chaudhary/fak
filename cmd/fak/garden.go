@@ -305,15 +305,20 @@ func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir
 	return reaped, sessions, surfaced, lockFiles, collected, intents, folded
 }
 
-// witnessGardenTick records the tick's run-end in the loop ledger, so a witnessed
-// run end (the tick + its findings) lives in the ledger and `fak loop health` shows
-// the loop alive. A ledger append failure is non-fatal: the remediation already
-// happened; losing the witness line shouldn't fail the tick.
+// witnessGardenTick records the tick's run in the loop ledger as the claim+verdict
+// PAIR the rest of the fleet emits (`fak loop drive`, `fak dispatch progress`): an
+// EventEnd carrying the tick's own claim, then an EventWitness carrying the verdict
+// the folded member envelopes prove — so `fak loop health` shows the loop alive AND
+// witnessed. Putting the verdict on the END channel instead (as this did until
+// #5341) is counted by loopmgr as an UNWITNESSED run, because only EventWitness
+// increments Witnessed: health then reported this loop 0-of-N witnessed with
+// witness_collapse=true while its own last_state read "witnessed_done" — the exact
+// opposite of what this function exists to do. A ledger append failure is non-fatal:
+// the remediation already happened; losing a ledger line shouldn't fail the tick.
 func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, sessions, surfaced, lockFiles, collected, intents, folded int) {
 	if ledgerPath == "" {
 		return
 	}
-	status := loopmgr.StatusWitnessedDone
 	summary := fmt.Sprintf("garden tick clean: %d member(s), nothing to act on", len(plan.Decisions))
 	if plan.DryRun {
 		summary = fmt.Sprintf("garden tick dry-run: would reap %d, surface %d (no side effect)", plan.ToReap, plan.ToSurface)
@@ -330,15 +335,56 @@ func witnessGardenTick(ledgerPath string, plan gardenbundle.TickPlan, reaped, se
 		"surfaced_runs":         int64(surfaced),
 		"advisory":              int64(plan.Advisory),
 	}
+	runID := firstNonEmpty(os.Getenv("FAK_LOOP_RUN_ID"), fmt.Sprintf("garden-tick-%d", time.Now().UnixNano()))
 	_, _ = loopmgr.Append(ledgerPath, loopmgr.Event{
 		LoopID:  gardenTickLoopID,
-		RunID:   firstNonEmpty(os.Getenv("FAK_LOOP_RUN_ID"), fmt.Sprintf("garden-tick-%d", time.Now().UnixNano())),
+		RunID:   runID,
 		Kind:    loopmgr.EventEnd,
-		Status:  status,
+		Status:  loopmgr.StatusClaimedDone,
 		Source:  "fak garden tick",
 		Summary: summary,
 		Metrics: metrics,
 	})
+
+	// The verdict channel. The folded member envelopes ARE the witness: each one is a
+	// machine-checked payload, not the tick's own narration. A member that ERRORED
+	// produced no usable payload, so the tick cannot prove it swept everything — that
+	// is witness_unavailable, not a done verdict. A red/action member is the opposite:
+	// a MEASURED finding the tick surfaced honestly, so it still witnesses done.
+	status, reason := loopmgr.StatusWitnessedDone, "GARDEN_TICK_FOLDED"
+	witnessSummary := summary
+	if unmeasured := gardenTickUnmeasured(plan); unmeasured > 0 {
+		status, reason = loopmgr.StatusWitnessUnavailable, "GARDEN_TICK_MEMBER_ERRORED"
+		witnessSummary = fmt.Sprintf("%s; %d member(s) errored — sweep completeness unproven", summary, unmeasured)
+	}
+	_, _ = loopmgr.Append(ledgerPath, loopmgr.Event{
+		LoopID:  gardenTickLoopID,
+		RunID:   runID,
+		Kind:    loopmgr.EventWitness,
+		Status:  status,
+		Reason:  reason,
+		Source:  "fak garden tick",
+		Summary: witnessSummary,
+		Metrics: metrics,
+		EvidenceRefs: []loopmgr.EvidenceRef{{
+			Kind:    "control_pane",
+			Ref:     "fak garden tick",
+			Summary: fmt.Sprintf("%d member envelope(s) folded", len(plan.Decisions)),
+		}},
+	})
+}
+
+// gardenTickUnmeasured counts the members whose envelope produced no usable payload
+// ("errored"). They are the reason a tick cannot claim a done verdict: the sweep may
+// have missed exactly the condition an unreadable member would have surfaced.
+func gardenTickUnmeasured(plan gardenbundle.TickPlan) int {
+	n := 0
+	for _, d := range plan.Decisions {
+		if d.State == "errored" {
+			n++
+		}
+	}
+	return n
 }
 
 // registerGardenTickLoop installs the durable garden-tick loop in the loop registry
@@ -493,6 +539,10 @@ func growthReapLedgerPath() string {
 // ledger-only, so the first landing records what it WOULD reap over a soak window
 // without deleting anything. Returns the count of files actually reaped (0 in the
 // ledger-only default).
+//
+// It writes to the ledger on EVERY tick, not only a reaping one: when the reapable
+// set is empty it appends one census-clean heartbeat instead, so the soak window
+// distinguishes a clean collect from a dead one (see appendGrowthCensusHeartbeat).
 func collectGrowthLogs(stderr io.Writer, roots []string, apply bool, ledgerPath string) (reaped int) {
 	now := time.Now()
 	var arts []growthgate.Artifact
@@ -504,7 +554,7 @@ func collectGrowthLogs(stderr io.Writer, roots []string, apply bool, ledgerPath 
 		arts = append(arts, gathered...)
 	}
 	rep := growthgate.Classify(arts, growthgate.DefaultBudget())
-	toReap, _ := growthgate.ReapPlan(rep)
+	toReap, protected := growthgate.ReapPlan(rep)
 
 	rows := make([]growthReapDecision, 0, len(toReap))
 	for _, f := range toReap {
@@ -520,10 +570,21 @@ func collectGrowthLogs(stderr io.Writer, roots []string, apply bool, ledgerPath 
 		}
 		rows = append(rows, row)
 	}
-	if ledgerPath != "" && len(rows) > 0 {
+	if ledgerPath == "" {
+		return reaped
+	}
+	if len(rows) > 0 {
 		if err := appendGrowthgateReapLedger(ledgerPath, rows); err != nil {
 			fmt.Fprintf(stderr, "fak garden tick: growth ledger %s: %v\n", ledgerPath, err)
 		}
+		return reaped
+	}
+	// Nothing reapable — still witness the tick (#5349 step 5). A zero-reapable tick
+	// used to write NOTHING, which made the soak window unfalsifiable: an empty
+	// ledger read the same whether the collect was clean or dead. The apply flip is
+	// gated on that window, so the clean case has to leave a row too.
+	if err := appendGrowthCensusHeartbeat(ledgerPath, roots, rep.Scanned, len(protected), string(rep.Verdict)); err != nil {
+		fmt.Fprintf(stderr, "fak garden tick: growth census heartbeat %s: %v\n", ledgerPath, err)
 	}
 	return reaped
 }

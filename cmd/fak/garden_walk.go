@@ -186,10 +186,14 @@ func loadGardenWalkIssues(input, repo, state string, limit int) ([]gardenbundle.
 	return items, "issue", nil
 }
 
-// witnessGardenWalk appends the walk's run-end to the loop ledger, so a witnessed
-// run end (the walk + its counts) lives in the ledger and `fak loop health` shows
-// the loop alive. A ledger append failure is non-fatal: the proposal already
-// printed; losing the witness line shouldn't fail the walk.
+// witnessGardenWalk appends the walk's run to the loop ledger as the claim+verdict
+// PAIR the rest of the fleet emits (`fak loop drive`, `fak dispatch progress`): an
+// EventEnd carrying the walk's own claim, then an EventWitness carrying the verdict
+// its walked counts prove — so `fak loop health` shows the loop alive AND witnessed.
+// Putting the verdict on the END channel instead (as this did until #5341) is counted
+// by loopmgr as an UNWITNESSED run, because only EventWitness increments Witnessed. A
+// ledger append failure is non-fatal: the proposal already printed; losing a ledger
+// line shouldn't fail the walk.
 func witnessGardenWalk(ledgerPath string, plan gardenbundle.WalkPlan) {
 	if ledgerPath == "" {
 		return
@@ -204,14 +208,30 @@ func witnessGardenWalk(ledgerPath string, plan gardenbundle.WalkPlan) {
 		"deferred":  int64(plan.Deferred),
 		"skipped":   int64(plan.Active + plan.Fresh + plan.Healthy),
 	}
+	runID := firstNonEmpty(os.Getenv("FAK_LOOP_RUN_ID"), fmt.Sprintf("garden-walk-%d", time.Now().UnixNano()))
 	_, _ = loopmgr.Append(ledgerPath, loopmgr.Event{
 		LoopID:  gardenWalkLoopID,
-		RunID:   firstNonEmpty(os.Getenv("FAK_LOOP_RUN_ID"), fmt.Sprintf("garden-walk-%d", time.Now().UnixNano())),
+		RunID:   runID,
 		Kind:    loopmgr.EventEnd,
-		Status:  loopmgr.StatusWitnessedDone,
+		Status:  loopmgr.StatusClaimedDone,
 		Source:  "fak garden walk",
 		Summary: summary,
 		Metrics: metrics,
+	})
+	_, _ = loopmgr.Append(ledgerPath, loopmgr.Event{
+		LoopID:  gardenWalkLoopID,
+		RunID:   runID,
+		Kind:    loopmgr.EventWitness,
+		Status:  loopmgr.StatusWitnessedDone,
+		Reason:  "GARDEN_WALK_COUNTED",
+		Source:  "fak garden walk",
+		Summary: summary,
+		Metrics: metrics,
+		EvidenceRefs: []loopmgr.EvidenceRef{{
+			Kind:    "walk_counts",
+			Ref:     "fak garden walk",
+			Summary: fmt.Sprintf("%d %s walked, %d need attention", plan.Total, plan.Source, plan.Attention),
+		}},
 	})
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
@@ -158,8 +159,8 @@ func TestRunGardenWalkBudgetDefers(t *testing.T) {
 	}
 }
 
-// TestRunGardenWalkWitnessesRun proves every walk appends a witnessed run-end to the
-// loop ledger so `fak loop health` sees the loop living.
+// TestRunGardenWalkWitnessesRun proves every walk appends its claim+verdict PAIR to the
+// loop ledger end to end, so `fak loop health` sees the loop living AND witnessed.
 func TestRunGardenWalkWitnessesRun(t *testing.T) {
 	fixture := writeWalkFixture(t)
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
@@ -174,18 +175,26 @@ func TestRunGardenWalkWitnessesRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPrefix: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("want 1 ledger event, got %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("want 2 ledger events (end + witness), got %d", len(events))
 	}
 	ev := events[0]
 	if ev.LoopID != gardenWalkLoopID {
 		t.Fatalf("LoopID = %q, want %q", ev.LoopID, gardenWalkLoopID)
+	}
+	if ev.Kind != loopmgr.EventEnd || ev.Status != loopmgr.StatusClaimedDone {
+		t.Fatalf("end kind/status = %s/%s, want end/claimed_done", ev.Kind, ev.Status)
 	}
 	if ev.Metrics["walked"] != 5 {
 		t.Fatalf("walked metric = %d, want 5", ev.Metrics["walked"])
 	}
 	if ev.Metrics["attention"] != 3 {
 		t.Fatalf("attention metric = %d, want 3", ev.Metrics["attention"])
+	}
+	// The verdict rides the WITNESS channel: only EventWitness increments loopmgr's
+	// Witnessed, so a verdict filed on the end event above reads as an unwitnessed run.
+	if w := events[1]; w.Kind != loopmgr.EventWitness || w.Status != loopmgr.StatusWitnessedDone {
+		t.Fatalf("witness kind/status = %s/%s, want witness/witnessed_done", w.Kind, w.Status)
 	}
 }
 
@@ -275,5 +284,46 @@ func TestRegisterGardenWalkLoopArmsDurableUnit(t *testing.T) {
 	job2, _ := reg2.Get(gardenWalkLoopID)
 	if job2.CreatedUnixNano != created {
 		t.Fatalf("re-register changed CreatedUnixNano %d -> %d", created, job2.CreatedUnixNano)
+	}
+}
+
+// TestWitnessGardenWalkRecordsTheClaimVerdictPair proves the walk appends BOTH ledger
+// channels under one run id: an EventEnd carrying its own claim, and an EventWitness
+// carrying the verdict its counts prove. Filing the verdict on the END channel instead
+// is counted by loopmgr as an unwitnessed run — only EventWitness increments Witnessed
+// — which is what made `fak loop health` read the garden loops 0-of-N witnessed.
+func TestWitnessGardenWalkRecordsTheClaimVerdictPair(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+
+	witnessGardenWalk(ledger, gardenbundle.WalkPlan{
+		Source: "issue", Total: 7, Attention: 3, Acted: 2, Review: 1, Deferred: 1, Healthy: 3,
+	})
+
+	events, _, err := loopmgr.LoadPrefix(ledger)
+	if err != nil {
+		t.Fatalf("LoadPrefix: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("want 2 ledger events (end + witness), got %d", len(events))
+	}
+	end, w := events[0], events[1]
+	if end.LoopID != gardenWalkLoopID || w.LoopID != gardenWalkLoopID {
+		t.Fatalf("LoopIDs = %q/%q, want %q", end.LoopID, w.LoopID, gardenWalkLoopID)
+	}
+	if end.Kind != loopmgr.EventEnd || end.Status != loopmgr.StatusClaimedDone {
+		t.Fatalf("end kind/status = %s/%s, want end/claimed_done", end.Kind, end.Status)
+	}
+	if w.Kind != loopmgr.EventWitness || w.Status != loopmgr.StatusWitnessedDone {
+		t.Fatalf("witness kind/status = %s/%s, want witness/witnessed_done", w.Kind, w.Status)
+	}
+	// One run id across the pair, or the ledger reads as two half-runs.
+	if w.RunID != end.RunID || w.RunID == "" {
+		t.Fatalf("witness RunID = %q, want the end event's %q", w.RunID, end.RunID)
+	}
+	if len(w.EvidenceRefs) == 0 {
+		t.Fatal("witness carries no evidence ref for the walked counts")
+	}
+	if end.Metrics["walked"] != 7 || w.Metrics["attention"] != 3 {
+		t.Fatalf("metrics walked=%d attention=%d, want 7/3", end.Metrics["walked"], w.Metrics["attention"])
 	}
 }
