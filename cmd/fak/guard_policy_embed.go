@@ -58,8 +58,14 @@ const guardResourceSampleInterval = 2 * time.Second
 // real guarded sessions were DEFAULT_DENYing the guard's own appeal channel (fak_admit),
 // which is self-defeating: these are pure reads or kernel-re-adjudicated executions, so
 // admitting the NAME grants nothing the floor doesn't re-check downstream. fak_memory_run
-// stays OUT: with apply=true it is an effectful memory write (the pinned deny in
-// guard_test.go); an operator overlay is the sanctioned place to grant it.
+// is admitted the same way, but ARG-GATED rather than name-gated: the effectful write
+// (apply=true) keeps its pinned deny, while the read-only default (apply absent/false) is
+// allowed. Withholding the whole NAME over-blocked, because apply=false is the form the
+// kernel's own capability catalog hands the agent — `fak capabilities` emits every
+// memory-driver card as a ready fak_memory_run (apply=false), and guard-sessionstart's
+// first-turn affordance names the verb outright — so the floor was denying, and then
+// PRUNING the definition of, a tool it had just told the agent to call. An operator
+// overlay remains the sanctioned place to grant the effectful apply=true form.
 // Likewise the harness's ReportFindings (code-review output) and DeferredToolPlaceholder
 // (deferred-schema plumbing), both witnessed as DEFAULT_DENY friction in session journals.
 // The Confluence DELETE verbs are explicitly denied so a coarse operator overlay grant

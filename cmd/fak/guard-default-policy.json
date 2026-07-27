@@ -99,6 +99,7 @@
     "mcp__fak__fak_changes",
     "mcp__fak__fak_memory_drivers",
     "mcp__fak__fak_memory_explain",
+    "mcp__fak__fak_memory_run",
     "mcp__fak__fak_trajquery",
     "mcp__fak__fak_tools_search",
     "mcp__fak__fak_index_lane",
@@ -266,7 +267,10 @@
     { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK",
       "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell — printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)" },
     { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK",
-      "fix": "produce the destroy plan for review instead: terraform plan -destroy — that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only" }
+      "fix": "produce the destroy plan for review instead: terraform plan -destroy — that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only" },
+
+    { "tool": "mcp__fak__fak_memory_run", "arg": "apply", "deny_regex": "^(?i:true)$", "reason": "POLICY_BLOCK",
+      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL — the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent" }
   ],
 
   "egress": {

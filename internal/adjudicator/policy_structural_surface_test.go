@@ -24,6 +24,21 @@ var shippedUndecidedRules = []struct{ marker, why string }{
 	{"Clear-Content", "split out of the disk rule, which claimed a file truncation was a 'disk/volume operation' and sent the caller to an operator with nothing to approve. Still denied — an in-place truncation has no preview and no undo — but its remedy now names the in-tree routes that were always admitted. A containment decider (empty a file under the working tree or a scratchpad root, deny outside) is the obvious next step and needs a new dispatch call site"},
 	{`os\.system`, "the execute_code surface, which is not a shell command line"},
 	{`:\(\)`, "fork bomb; prose describes the shape well enough that the remedy needs no literal, which is why its fix text now omits one"},
+	{`(?i:true)`, "the effectful-apply flag on fak_memory_run. Unlike every other entry here this one is not a decider waiting to be written: the arg is a BOOLEAN, so the anchored regex has exactly two possible inputs and no room to quote anything. The raw regex is the whole truth by construction, and the mention hazard the other entries carry does not exist for it (see freeTextArg)"},
+}
+
+// freeTextArg reports whether an arg's VALUE can carry a quoted MENTION of the
+// pattern its rule matches — a shell command line or a code body, where `grep
+// 'mkfs'` and a real mkfs are the same bytes to a raw regex. The hazard is a
+// property of the VALUE's shape, not of the rule: a scalar flag (apply=true) has
+// exactly two possible values and nowhere to quote a mention, so a rule over one
+// cannot confuse a use with a mention — and its remedy must not claim it can.
+func freeTextArg(arg string) bool {
+	switch strings.ToLower(arg) {
+	case "command", "code":
+		return true
+	}
+	return false
 }
 
 // TestEveryShippedStructuralRuleIsRecognised makes the surface-parity defect class
@@ -285,7 +300,7 @@ func TestUndecidedRuleRemediesAreNotSelfRefuting(t *testing.T) {
 					r.Tool, r.Arg, r.DenyRegex, bad, r.Fix)
 			}
 		}
-		if !strings.Contains(fix, "mention") {
+		if freeTextArg(r.Arg) && !strings.Contains(fix, "mention") {
 			t.Errorf("tool %q arg %q: deny_regex %q has NO structural decider, so it refuses every quoted MENTION of the pattern — a grep, a commit message, a here-doc — but its remedy never says so. The caller is left to infer it from a refusal that claims they performed the operation:\n  fix: %s",
 				r.Tool, r.Arg, r.DenyRegex, r.Fix)
 		}

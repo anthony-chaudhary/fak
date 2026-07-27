@@ -168,6 +168,14 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"fak MCP capabilities allowed", "mcp__fak__fak_capabilities", `{"intent":"inspect guard loop"}`, abi.VerdictAllow},
 		{"fak MCP context value allowed", "mcp__fak__fak_context_value", `{}`, abi.VerdictAllow},
 		{"fak MCP effectful memory run remains denied by default", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
+		// ...but the READ-ONLY form is the one the kernel's own capability catalog hands
+		// the agent (`fak capabilities` emits every memory-driver card as a ready
+		// fak_memory_run with apply=false) and the one guard-sessionstart's first-turn
+		// affordance names. Withholding the whole NAME denied that too — and pruned the
+		// tool DEFINITION as never-admitted, so the agent could not even see the verb the
+		// same binary had just told it to call. The deny is arg-gated on apply now.
+		{"fak MCP read-only memory run allowed (apply=false is a proposal)", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":false}`, abi.VerdictAllow},
+		{"fak MCP memory run allowed with apply omitted (defaults to false)", "mcp__fak__fak_memory_run", `{"driver":"recall"}`, abi.VerdictAllow},
 
 		// The self-service verbs witnessed as DEFAULT_DENY friction in real guarded
 		// sessions (the guard's own appeal channel among them) are admitted: pure
@@ -230,6 +238,38 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 				t.Errorf("%s: got verdict %v, want %v", tc.name, verdictName(got), verdictName(tc.want))
 			}
 		})
+	}
+}
+
+// The arg-gated half has a SECOND, less obvious consequence, and this pins it.
+//
+// NeverAdmits is the pure "can this NAME ever be Allowed, for any argument" question
+// the inbound tool-def compactor asks before it may drop a tool DEFINITION from the
+// advertised tools[] (internal/gateway maybeCompactInboundTools). A name withheld
+// from the allow list answers "never" — so fak_memory_run was not merely denied when
+// called, it was PRUNED before the model could see it, 1219 times across the audited
+// guard corpus, under an ADVISORY verdict that no refusal counter ever showed. The
+// same binary's guard-sessionstart hook named the verb to the agent in its first turn
+// and its capability catalog emitted ready apply=false calls for it, so the floor was
+// advertising a tool it had already made unreachable.
+//
+// An ARG rule cannot do that: arg predicates only restrict an otherwise-allow, so an
+// arg-gated name stays reachable and its definition stays advertised. Pinning both
+// directions keeps a future "just drop it from the allow list again" from silently
+// re-pruning the definition.
+func TestGuardDefaultPolicyKeepsArgGatedVerbsAdvertised(t *testing.T) {
+	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
+	if err != nil {
+		t.Fatalf("embedded guard floor is not a valid manifest: %v", err)
+	}
+	floor := rt.Adjudicator
+	if floor.NeverAdmits("mcp__fak__fak_memory_run") {
+		t.Errorf("the shipped floor marks mcp__fak__fak_memory_run as never-admitted, so the gateway prunes its tool DEFINITION — but apply=false is admitted and the same binary advertises the verb in guard-sessionstart and `fak capabilities`")
+	}
+	// The control: a name the floor genuinely never admits is still droppable, so
+	// this test cannot pass by disabling pruning wholesale.
+	if !floor.NeverAdmits("mcp__fak__fak_definitely_not_a_real_tool") {
+		t.Errorf("an unknown name must stay never-admitted (droppable); NeverAdmits reported reachable, which would disable tool-def pruning entirely")
 	}
 }
 
