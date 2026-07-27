@@ -40,8 +40,9 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 		asJSON      = fs.Bool("json", false, "emit the Report as JSON")
 		file        = fs.String("file", "", `read the text to scan from this path ("-" = stdin)`)
 		leftovers   = fs.Bool("leftovers", false, "run the RUN-LEVEL end-of-run fold: refuse a final summary that narrates deferred work while zero gh issues were filed")
+		closing     = fs.Bool("closing", false, "run the RUN-LEVEL closing-shape fold: refuse a final summary whose last block is a trailing prose wall instead of scannable bullets")
 		issuesFiled = fs.Int("issues-filed", 0, "with --leftovers: how many gh issues the run filed (or resolved) during its lifetime (the doctrine cross-check)")
-		override    = fs.Bool("override", false, `with --leftovers: the operator escape for "genuinely nothing left" — forces clean even when leftovers are narrated`)
+		override    = fs.Bool("override", false, `with --leftovers/--closing: the operator escape ("genuinely nothing left" / "this prose closer is deliberate") — forces clean`)
 	)
 	fs.Usage = func() { fmt.Fprint(stderr, headlessLintUsage) }
 	if !parseFlags(fs, argv) {
@@ -64,6 +65,11 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 
 	if *leftovers {
 		return runHeadlessLeftovers(stdout, stderr, text, *issuesFiled, *override, *asJSON)
+	}
+	// The closing-shape dual of --leftovers (headless_closing.go): same final summary,
+	// the other run-level question — does it CLOSE in a shape the operator can scan?
+	if *closing {
+		return runHeadlessClosing(stdout, stderr, text, *override, *asJSON)
 	}
 
 	rep := headlesslint.Scan(text)
@@ -200,6 +206,15 @@ usage:
   fak headless-lint "…text…" [--json]
   … | fak headless-lint [--json]
   fak headless-lint --leftovers [--issues-filed N] [--override] "…final summary…"
+  fak headless-lint --closing [--override] [--json] "…final summary…"
+
+run-level closing-shape fold (--closing):
+  Enforces the AGENTS.md rule "Close operator-facing turns with scannable bullets,
+  verdict first; make the last line a bullet carrying the next checkable step."
+  Refuses (exit 1, CLOSING_PROSE_WALL) a final summary whose LAST block is a trailing
+  prose wall — a long paragraph with no leading bullet, burying the verdict and the
+  next step. A bulleted final block or a short single-line closer is clean; --override
+  is the escape when the prose closer is deliberate.
 
 run-level end-of-run fold (--leftovers):
   Enforces the AGENTS.md rule "End of run: file the leftovers, don't narrate them."
