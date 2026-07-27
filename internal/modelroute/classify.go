@@ -122,7 +122,24 @@ func parseWorkClass(raw string) (WorkClass, bool) {
 // on a vendor reports ReasonClassUndeclared next to escalated-past-cheaper-zone, which
 // tells them the fix is a label, not more hardware.
 func (r Roster) PlaceSubject(s Subject, candidates []Candidate) (Placement, Classification, error) {
+	return r.PlaceSubjectWithServing(s, candidates, ServingReport{})
+}
+
+// PlaceSubjectWithServing is PlaceSubject against a liveness snapshot (serving.go).
+//
+// It completes the pair discipline the rest of the placement API already keeps: Place
+// delegates to PlaceWithServing with an empty report, PlaceSpawn delegates to
+// PlaceSpawnWithServing with an empty one, and the subject-shaped entry point — the one
+// a dispatch seam and `fak route --place` actually call — was the only composed call
+// with no way to be handed a report at all. A caller holding one had to decompose this
+// function by hand into ClassOf plus PlaceWithServing, which duplicates the composition
+// and lets the two answers drift on the day classification grows a second input.
+//
+// Delegating with an EMPTY report rather than branching on one keeps the property the
+// serving design rests on true here too: a fleet with no prober takes the identical code
+// path to the identical placement, structurally, not by default.
+func (r Roster) PlaceSubjectWithServing(s Subject, candidates []Candidate, serving ServingReport) (Placement, Classification, error) {
 	cls := ClassOf(s)
-	p, err := r.Place(cls.Class, candidates)
+	p, err := r.PlaceWithServing(cls.Class, candidates, serving)
 	return p, cls, err
 }

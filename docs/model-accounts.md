@@ -412,7 +412,7 @@ SPAWN PLACEMENT  (--spawn-type explore)
   work class   routine  [declared by the roster's spawn_classes]
   parent       zone=vendor  model=deepseek-flash
   placed       zone=device  model=zone-device
-  self-hosted  yes      escalated  no
+  self-hosted  yes      escalated  no       failed-over  no
   relation     spawn-descended-from-parent-zone spawn-inherit-unmeasured
   descent      yes      self-hosted descent  yes
 ```
@@ -504,6 +504,127 @@ nobody can state afterwards.
 `StubTierScorer` still grades nothing, so today the file is something you produce — from
 DOS's git witness, a judge score, or your own harness. That producer is the one piece
 standing between this ladder and traffic that moves by itself.
+
+### Placing against what is actually answering
+
+A grade says what a model *can* do. It says nothing about whether the box is powered on.
+`--serving FILE` hands the ladder a liveness snapshot — what your own probes just saw —
+and the ladder walks past candidates it reports are not serving:
+
+```json
+{
+  "schema": "fak.modelroute.serving.v1",
+  "as_of_unix": 1785312000,
+  "max_age_seconds": 120,
+  "covers": ["device", "fleet"],
+  "models": {
+    "zone-device":        {"state": "up",   "observed_unix": 1785311950},
+    "zone-fleet":         {"state": "down", "observed_unix": 1785311950},
+    "zone-fleet-agentic": {"state": "up",   "observed_unix": 1785311950}
+  }
+}
+```
+
+```console
+$ fak route --accounts examples/model-accounts.example.json --place \
+      --labels work_class=normal-impl --serving serving.json \
+      --capability zone-device=t2,zone-fleet=t1,zone-fleet-agentic=t1,large=t0
+```
+```
+  placed       zone=fleet  model=zone-fleet-agentic
+  self-hosted  yes      escalated  yes      failed-over  yes
+  ladder
+    device  -                        zone-capability-unmeasured x2 zone-under-tier
+    fleet   zone-fleet-agentic       zone-serving-down placed-in-zone escalated-past-cheaper-zone
+    vendor  -                        zone-not-reached
+
+SERVING SNAPSHOT  (--serving serving.json)
+  as of        1785312000      max age  120s
+  covers       device fleet
+  observations 3, of which 3 name a model this roster binds
+  SILENT       small tiny-classifier
+               the snapshot claims to speak for these candidates' rungs and then says
+               nothing about them, so they are passed over as unknown rather than
+               assumed well. That is a gap in the probe, not an outage.
+```
+
+**One dead GPU host is not a dead rung.** A fleet is several machines, and abandoning the
+rung because one box rebooted sends every token to a third-party lab to route around a
+neighbour that was idle — so the failover above stayed on the company's own hardware.
+
+| Verdict | What it means | Placed? |
+| --- | --- | --- |
+| `zone-serving-down` | observed unable to serve | passed over |
+| `zone-serving-unknown` | no verdict, on a rung the snapshot *claims* to cover | passed over |
+| `zone-serving-stale` | a verdict that cannot be shown fresh | passed over |
+| `zone-serving-degraded` | serving under strain | **recorded, and placed anyway** |
+
+Degraded is deliberately not actionable: a loaded host still takes work, and shedding at
+the first sign of queueing inverts self-hosting exactly in the busy hour it is meant for.
+
+Three rules decide the rest, and each is fail-closed in a different direction:
+
+- **Silence only means something where you said it would.** `covers` is the operator
+  declaring which rungs the probe actually watches; a candidate the snapshot is silent
+  about *inside* that coverage is unknown, not healthy, because a crashed prober must not
+  read as a fleet in perfect health. Outside coverage, silence gates nothing.
+- **An observation is always honored**, coverage or not. Coverage governs what silence
+  means, never what a verdict means — a report that says a host is down is not overruled
+  by a `covers` list that forgot to mention its rung.
+- **Freshness is fail-closed, and so is every way of not having it**: no observation
+  stamp, no `as_of_unix`, past `max_age_seconds`, or stamped *after* the report all read
+  as stale. A snapshot with a bound and no clock to measure against therefore gates
+  everything it covers, which is correct and reads exactly like a total outage — so the
+  summary says `STALE-ALL` and names the missing field rather than leaving you to guess.
+
+**`failed-over` is carried apart from `escalated`** because they want opposite fixes.
+Escalated says a cheaper rung could not do this work — a capability fact, stable until
+someone changes the roster. Failed-over says a rung that *could* have was routed around
+because something was not answering — an operations fact that may already be untrue. A
+bill read without that second bit shows vendor spend attributed to work that "needed" a
+vendor, and sends an operator hunting a capability problem that does not exist while the
+dead host stays dead. Both are printed for every placement, including the ones that stayed
+cheap: a failover *within* a rung cost nothing and still means something is down.
+
+The snapshot and the roster are validated apart and meet only here, so the report also
+names what neither half can see alone:
+
+```
+  observations 2, of which 0 name a model this roster binds
+  UNBOUND      glm-5.2 kimi-k3
+               these observations gate NOTHING: the ladder only ever asks about
+               models the roster binds, so a probe filed under an id nothing binds
+               is honored nowhere and this run is identical to one with no snapshot.
+               Check the ids against the roster's bindings, not its upstream names.
+               Each of these is the UPSTREAM name of a candidate: the probe filed its
+               result under the name it dialled, and the ladder asks by routed id.
+                 glm-5.2  ->  zone-fleet
+                 kimi-k3  ->  zone-fleet-agentic
+```
+
+That is the fail-open the flag would otherwise ship: a clean-validating report, an
+operator who believes they gated a dead host, and a placement identical to one with no
+snapshot at all. The same typo *inside* declared coverage fails the other way instead —
+the real candidate is now silent on a rung the report speaks for, so it is passed over as
+unknown and a healthy host looks dead. One id appearing in `UNBOUND` and its routed name
+in `SILENT` is the signature of exactly this mistake. Where an upstream name resolves to
+**two** candidates, both are named: two accounts serving the same weights is how a rung
+scales, and one observation cannot speak for both pools — which is why the snapshot is
+keyed by routed id in the first place.
+
+Two smaller refusals hold the same line. An unknown field is rejected rather than ignored,
+because `max_age_sec` otherwise parses, validates, looks right, and silently switches
+fail-closed freshness *off*. And a named file that cannot be read is an error, never an
+empty report: dropping the flag means "no liveness signal", while a missing file means
+your probe did not run, and placing work as though every host were healthy is precisely
+the failure the gate exists to prevent. In `--json` the `serving` key is **absent** unless
+a snapshot was supplied, so it can never be misread as a probe that saw nothing.
+
+**What is not shipped:** nothing produces this file either. It is deliberately not a probe
+of fak's own — placement is asserted to be pure (same roster, same candidates, same
+report, same answer), and a CLI that dialled endpoints would be reading a clock and a
+network inside a decision that reads neither. The snapshot is your monitoring's output,
+in fak's vocabulary.
 
 ## A note on codex and Anthropic subscriptions
 

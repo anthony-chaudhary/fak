@@ -78,6 +78,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	since := fs.String("since", "", "evidence window for --outcomes: 30d or a Go duration like 720h; an undated turn cannot be shown to be inside it and is excluded")
 	gradeFloor := fs.String("grade-floor", "", "evidentiary bar for --outcomes: attempts=N,rate=0..1[,witness] (default attempts=20,rate=0.8)")
 	spawnType := fs.String("spawn-type", "", "with --place: also place a sub-agent this turn spawns, of this agent TYPE; its work class comes from the roster's spawn_classes declaration (an undeclared type is refused, never assumed routine)")
+	serving := fs.String("serving", "", "with --place: a JSON liveness snapshot of what is currently ANSWERING, keyed by bound model id; the ladder walks past candidates it reports down, unknown inside declared coverage, or unshowably stale")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
 	capacityReason := fs.String("capacity-reason", "", "capacity block reason token")
 	capacityFrom := fs.String("capacity-from", "", "currently blocked target")
@@ -216,7 +217,8 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	if *place {
 		return runRoutePlace(stdout, stderr, roster, subj, placeOptions{
 			CapSpec: *capability, EvidencePath: *evidence, OutcomesPath: *outcomes,
-			Since: *since, FloorSpec: *gradeFloor, SpawnType: *spawnType, JSON: *asJSON,
+			Since: *since, FloorSpec: *gradeFloor, SpawnType: *spawnType,
+			ServingPath: *serving, JSON: *asJSON,
 		})
 	}
 	// A --spawn-type without --place would be silently dropped, and a placement flag
@@ -224,6 +226,13 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	// routing answer and believes they saw a spawn placed.
 	if strings.TrimSpace(*spawnType) != "" {
 		fmt.Fprintln(stderr, "fak route: --spawn-type needs --place — placing a sub-agent is a rung question, and `fak route` alone answers which model, not which rung")
+		return 2
+	}
+	// Same rule, and it bites harder here: an operator who hands over a liveness
+	// snapshot and gets a routing answer with no --place has been told nothing about
+	// whether their dead host was gated, while everything on screen looks fine.
+	if strings.TrimSpace(*serving) != "" {
+		fmt.Fprintln(stderr, "fak route: --serving needs --place — a liveness snapshot gates the placement ladder, and `fak route` alone answers which model, not which rung")
 		return 2
 	}
 

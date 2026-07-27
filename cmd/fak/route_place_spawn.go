@@ -55,12 +55,18 @@ type spawnPlacementReport struct {
 // obey it — a sub-agent spawned from a vendor turn must still be able to land on the
 // engineer's laptop — and this oracle deliberately does not add a second opinion about
 // that on top.
-func spawnPlacementFor(r modelroute.Roster, parent modelroute.Placement, spawnType string, candidates []modelroute.Candidate) (spawnPlacementReport, error) {
+//
+// The liveness snapshot is the parent walk's, verbatim (route_place_serving.go). A
+// delegated turn placed against a different view of what is answering would be reporting
+// a rung the fleet cannot serve it on — and the child is precisely the traffic this epic
+// wants on the company's own hardware, so it is also the traffic a dead GPU host hits
+// first.
+func spawnPlacementFor(r modelroute.Roster, parent modelroute.Placement, spawnType string, candidates []modelroute.Candidate, serving modelroute.ServingReport) (spawnPlacementReport, error) {
 	class, declared := r.SpawnClassFor(spawnType)
 	if !declared {
 		return spawnPlacementReport{}, undeclaredSpawnTypeError(r, spawnType)
 	}
-	sp, err := r.PlaceSpawn(parent, class, candidates)
+	sp, err := r.PlaceSpawnWithServing(parent, class, candidates, serving)
 	if err != nil {
 		return spawnPlacementReport{}, err
 	}
@@ -118,7 +124,7 @@ func printSpawnPlacement(w io.Writer, rep spawnPlacementReport) {
 	fmt.Fprintf(w, "  parent       %s\n", parent)
 	fmt.Fprintf(w, "  placed       zone=%s  model=%s\n", p.Zone, p.Model)
 	fmt.Fprintf(w, "  target       kind=%s account=%s upstream=%s\n", p.Target.Kind, p.Target.Account, p.Target.UpstreamModel)
-	fmt.Fprintf(w, "  self-hosted  %-3s      escalated  %s\n", yesNo(p.SelfHosted()), yesNo(p.Escalated))
+	fmt.Fprintln(w, placementDispositionLine(p))
 	fmt.Fprintf(w, "  tier floor   required=%s optimal=%s  chosen-capability=%s\n",
 		p.Choice.RequiredTier, p.Choice.OptimalTier, capabilityCell(p))
 	fmt.Fprintf(w, "  relation     %s\n", strings.Join(sp.Reasons, " "))

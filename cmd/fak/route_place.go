@@ -99,6 +99,10 @@ type placementReport struct {
 	// pointer, so an absent key means "not asked" rather than "a spawn that placed
 	// nowhere" (route_place_spawn.go).
 	Spawn *spawnPlacementReport `json:"spawn,omitempty"`
+	// Serving is present only when --serving supplied a liveness snapshot. A pointer
+	// for the same reason: an absent key means no snapshot was given, which must not
+	// read as a snapshot that observed nothing (route_place_serving.go).
+	Serving *servingSummary `json:"serving,omitempty"`
 }
 
 // placeOptions are the two ways a caller may say what a model can do, plus the render
@@ -111,6 +115,7 @@ type placeOptions struct {
 	Since        string // --since: the evidence window ("30d", "720h")
 	FloorSpec    string // --grade-floor: the operator's evidentiary bar
 	SpawnType    string // --spawn-type: also place a sub-agent of this DECLARED type
+	ServingPath  string // --serving: an operator's liveness snapshot of what is answering
 	JSON         bool
 }
 
@@ -130,6 +135,17 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 	if err != nil {
 		fmt.Fprintln(stderr, "fak route:", err)
 		return 2
+	}
+	// The liveness snapshot is loaded BEFORE anything is placed or printed, so a
+	// malformed one refuses outright rather than half-reporting a ladder walk the
+	// operator would reasonably read as gated.
+	var serving modelroute.ServingReport
+	servingPath := strings.TrimSpace(opts.ServingPath)
+	if servingPath != "" {
+		if serving, err = loadServingReport(servingPath); err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 2
+		}
 	}
 	// One model, two sources of truth about what it can do, is a configuration error.
 	// Preferring either one silently would leave the operator reading a grade whose
@@ -153,23 +169,33 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 		candidates, grades, ignored = gradedPool(candidates, evidence, floor)
 	}
 
-	p, cls, err := roster.PlaceSubject(subj, candidates)
+	p, cls, err := roster.PlaceSubjectWithServing(subj, candidates, serving)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak route:", err)
 		return 1
 	}
 
-	// The delegated question, asked against the SAME pool the parent walked: a child
-	// that could only descend because the oracle handed it different candidates would
+	// The delegated question, asked against the SAME pool the parent walked AND the
+	// same snapshot: a child that could only descend because the oracle handed it
+	// different candidates — or a rung the parent's own walk was told is dead — would
 	// be reporting a rung the fleet cannot actually serve it on.
 	var spawn *spawnPlacementReport
 	if strings.TrimSpace(opts.SpawnType) != "" {
-		rep, err := spawnPlacementFor(*roster, p, opts.SpawnType, candidates)
+		rep, err := spawnPlacementFor(*roster, p, opts.SpawnType, candidates, serving)
 		if err != nil {
 			fmt.Fprintln(stderr, "fak route:", err)
 			return 1
 		}
 		spawn = &rep
+	}
+
+	// The join between the snapshot and the pool the ladder actually walked — the only
+	// place a probe filed under a model nothing binds can be noticed (see
+	// route_place_serving.go).
+	var servingRep *servingSummary
+	if servingPath != "" {
+		s := summarizeServing(servingPath, serving, candidates, *roster)
+		servingRep = &s
 	}
 
 	measured := 0
@@ -182,6 +208,7 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 		b, _ := json.MarshalIndent(placementReport{
 			Classification: cls, Placement: p, Candidates: candidates, MeasuredCount: measured,
 			Grades: grades, IgnoredModels: ignored, Journal: journal, Spawn: spawn,
+			Serving: servingRep,
 		}, "", "  ")
 		fmt.Fprintln(stdout, string(b))
 		return 0
@@ -189,6 +216,9 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 	printPlacement(stdout, p, cls, candidates, measured)
 	if spawn != nil {
 		printSpawnPlacement(stdout, *spawn)
+	}
+	if servingRep != nil {
+		printServingSnapshot(stdout, *servingRep)
 	}
 	if grades != nil {
 		printGrades(stdout, grades, floor, ignored)
@@ -213,7 +243,7 @@ func printPlacement(w io.Writer, p modelroute.Placement, cls modelroute.Classifi
 	fmt.Fprintf(w, "  work class   %s  [%s]  %s\n", class, declaredNote, strings.Join(cls.Reasons, " "))
 	fmt.Fprintf(w, "  placed       zone=%s  model=%s\n", p.Zone, p.Model)
 	fmt.Fprintf(w, "  target       kind=%s account=%s upstream=%s\n", p.Target.Kind, p.Target.Account, p.Target.UpstreamModel)
-	fmt.Fprintf(w, "  self-hosted  %-3s      escalated  %s\n", yesNo(p.SelfHosted()), yesNo(p.Escalated))
+	fmt.Fprintln(w, placementDispositionLine(p))
 	fmt.Fprintf(w, "  tier floor   required=%s optimal=%s  chosen-capability=%s\n",
 		p.Choice.RequiredTier, p.Choice.OptimalTier, capabilityCell(p))
 	fmt.Fprintln(w, "  ladder")
@@ -235,6 +265,23 @@ func printPlacement(w io.Writer, p modelroute.Placement, cls modelroute.Classifi
 		fmt.Fprintln(w, "  note         nothing declared what this work IS, so it took the strictest floor. The")
 		fmt.Fprintln(w, "               fix is a --labels work_class=… declaration, not more hardware.")
 	}
+}
+
+// placementDispositionLine renders the three facts about HOW a placement came out, on one
+// line and never fewer than three.
+//
+// failed-over is carried by Placement separately from escalated because they answer
+// different questions and want opposite fixes: escalated says a cheaper rung could not do
+// this work (a capability fact, stable until the roster changes), while failed-over says a
+// rung that COULD have done it was routed around because something was not answering (an
+// operations fact that may already be untrue). Printing only escalated attributes vendor
+// spend to work that "needed" a vendor, and sends an operator hunting a capability problem
+// that does not exist while the dead host stays dead. It is worth printing even when the
+// placement stayed cheap: a failover WITHIN a rung kept the money on the fleet and still
+// means something is down.
+func placementDispositionLine(p modelroute.Placement) string {
+	return fmt.Sprintf("  self-hosted  %-3s      escalated  %-3s      failed-over  %s",
+		yesNo(p.SelfHosted()), yesNo(p.Escalated), yesNo(p.FailedOver))
 }
 
 // capabilityCell renders the winning candidate's capability, and refuses to dress the
