@@ -1272,11 +1272,18 @@ type Server struct {
 	// offline MockPlanner. Settable in-package for tests.
 	planner agent.Planner
 	// servedSide is the deployment-constant serving locality selectChatPlanner
-	// resolved (vendor for a proxy, local for the in-kernel model, unknown for the
-	// mock and for a dual planner, whose side is per-request). servedLocality reads
-	// it. The zero value is the honest unknown, so a test that sets planner directly
-	// leaves its turns UNCLASSIFIED rather than silently attributed.
+	// resolved for the deployments that do NOT proxy: self-hosted for the in-kernel
+	// model, unknown for the mock. servedLocality reads it. The zero value is the
+	// honest unknown, so a test that sets planner directly leaves its turns
+	// UNCLASSIFIED rather than silently attributed.
 	servedSide servingLocality
+	// upstream is what the configured base URL(s) establish about who owns the other
+	// end of the proxy — and, by being nil, whether this deployment proxies at all.
+	// The two facts ride in one field so the invalid state (a non-proxying server
+	// that nonetheless has an upstream side) cannot be built. A proxying deployment
+	// whose upstream cannot be placed carries a non-nil localityUnknown: it proxies,
+	// and we decline to say to whom. See upstreamAttribution.
+	upstream *servingLocality
 	// inKernelModelButChatIsMock tracks when kernel has real weights loaded (for
 	// fak_syscalls) but chat falls back to mock due to missing tokenizer (#1115).
 	// Set at New when InKernelModel != nil && Tokenizer == nil. The /healthz
@@ -1801,7 +1808,7 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	planner, servedSide, inKernelModelButChatIsMock, err := selectChatPlanner(cfg, model, proxyURLs, logf, startup)
+	planner, servedSide, upstreamSide, inKernelModelButChatIsMock, err := selectChatPlanner(cfg, model, proxyURLs, logf, startup)
 	if err != nil {
 		return nil, err
 	}
@@ -1861,6 +1868,7 @@ func New(cfg Config) (*Server, error) {
 		engineID:                     engineID,
 		model:                        model,
 		servedSide:                   servedSide,
+		upstream:                     upstreamSide,
 		requireKey:                   cfg.RequireKey,
 		readBearer:                   cfg.ReadBearer,
 		keyset:                       newKeyset(cfg.KeyPrincipals),
@@ -1962,7 +1970,7 @@ func New(cfg Config) (*Server, error) {
 // planner, a proxy planner, the in-kernel chat planner, or the deterministic mock —
 // records the planner-init startup phase, and reports whether real weights are loaded
 // for syscalls but chat still falls back to the mock (missing tokenizer, #1115).
-func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(string, ...any), startup *startupProfile) (agent.Planner, servingLocality, bool, error) {
+func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(string, ...any), startup *startupProfile) (agent.Planner, servingLocality, *servingLocality, bool, error) {
 	var planner agent.Planner
 	var err error
 	t := time.Now()
@@ -1985,12 +1993,12 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 		// were dead; now the combination is the alongside deployment.
 		proxy, perr := newProxyPlanner(cfg, model, proxyURLs)
 		if perr != nil {
-			return nil, localityUnknown, false, perr
+			return nil, localityUnknown, nil, false, perr
 		}
 		localID := localModelIDOr(cfg.LocalModelID)
 		planner, err = NewDualPlanner(proxy, newInKernelChatPlanner(cfg, localID, logf), localID)
 		if err != nil {
-			return nil, localityUnknown, false, err
+			return nil, localityUnknown, nil, false, err
 		}
 		logf("gateway: dual planner — model id %q (and \"local\") decodes in-kernel; every other model id proxies upstream", localID)
 		// Deliberately left unknown: dual is the one mode with no deployment-constant
@@ -1999,10 +2007,16 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 	case len(proxyURLs) != 0:
 		planner, err = newProxyPlanner(cfg, model, proxyURLs)
 		if err != nil {
-			return nil, localityUnknown, false, err
+			return nil, localityUnknown, nil, false, err
 		}
-		// Every turn leaves the box for a third-party API.
-		side = localityVendor
+		// Deliberately left unknown, for the same reason dual is: a proxying
+		// deployment has no deployment-CONSTANT side. `--base-url` is how both
+		// self-hosting rungs are reached in the common case — an on-box server and a
+		// company-operated one — so reading the flag itself as "a third-party API"
+		// told an operator who bought nothing that they bought everything. What the
+		// upstream URL does establish is resolved by upstreamAttribution and rides on
+		// Server.upstream, where a per-model roster binding can still override it;
+		// servedLocality composes the two.
 	case cfg.InKernelModel != nil && cfg.Tokenizer != nil:
 		// Serve the model fused into the kernel as the chat backend on BOTH
 		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
@@ -2031,7 +2045,7 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 		// no hardware ever served.
 	}
 	startup.phase("planner-init", time.Since(t))
-	return planner, side, inKernelModelButChatIsMock, nil
+	return planner, side, upstreamAttribution(proxyURLs), inKernelModelButChatIsMock, nil
 }
 
 // ablateUncachedTrimBytes composes Config.ElideResultBytes with the FAK_ABLATE_UNCACHED_TRIM

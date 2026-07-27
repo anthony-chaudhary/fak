@@ -1,6 +1,12 @@
 package gateway
 
-import "github.com/anthony-chaudhary/fak/internal/agent"
+import (
+	"net/url"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
+)
 
 // Which side served a turn, and why the gateway has to say so.
 //
@@ -40,17 +46,17 @@ const (
 
 // servedLocality resolves which side served a turn that named reqModel.
 //
-// Under a dual planner the side is a property of the REQUEST, so the answer comes
-// from the planner's own routing predicate rather than from a copy of its rules —
-// there is exactly one definition of "this id decodes in-kernel", and asking it is
-// what keeps the metric honest if the local id set changes. An empty model id routes
-// to the proxy there (the documented default side), so an omitted model field is
-// reported as vendor, matching what actually served it.
+// Under a dual planner the side is a property of the REQUEST, so the local leg's
+// answer comes from the planner's own routing predicate rather than from a copy of
+// its rules — there is exactly one definition of "this id decodes in-kernel", and
+// asking it is what keeps the metric honest if the local id set changes.
 //
-// Every other deployment has a constant side that selectChatPlanner already
-// resolved. A planner wired in directly (tests, or a host that bypassed the
-// selector) leaves servedSide at its zero value and reports unknown, which is the
-// direction that under-claims self-hosting rather than over-claiming it.
+// Everything the gateway PROXIED goes through proxiedLocality, whether the proxy is
+// this deployment's only backend or the dual planner's upstream leg. The remaining
+// deployments — the in-kernel-only server, the offline mock, a planner a test wired
+// in directly — have a constant side that selectChatPlanner already resolved, and an
+// unset one stays unknown, the direction that under-claims self-hosting rather than
+// over-claiming it.
 func (s *Server) servedLocality(reqModel string) servingLocality {
 	if s == nil {
 		return localityUnknown
@@ -61,7 +67,7 @@ func (s *Server) servedLocality(reqModel string) servingLocality {
 		}
 		return s.proxiedLocality(reqModel)
 	}
-	if s.servedSide == localityVendor {
+	if s.upstream != nil {
 		return s.proxiedLocality(reqModel)
 	}
 	return s.servedSide
@@ -77,21 +83,162 @@ func (s *Server) servedLocality(reqModel string) servingLocality {
 // invisible in the one number built to measure it, and the error runs in the
 // direction of erasing exactly the deployment the effort exists to produce.
 //
-// The roster is the only place an operator DECLARES that a host is theirs, so it is
-// the only thing asked. BoundZone answers solely for a model the roster explicitly
-// binds — never the default account's zone for an unbound id, and never a dangling
-// binding's — so the credit requires a real declaration and a typo cannot earn it.
-// With no roster wired, or a model it does not bind, the answer stays vendor: this
-// can only move a turn OFF the vendor side on the strength of something an operator
-// wrote down, never onto the self-hosted side by inference.
+// Two sources answer, in this order, and neither is a guess:
+//
+//   - THE ROSTER, per model id. It is where an operator DECLARES that a host is
+//     theirs, and BoundZone answers solely for an id the roster explicitly binds —
+//     never the default account's zone for an unbound id, never a dangling
+//     binding's. A per-model declaration beats a per-deployment reading of the
+//     upstream because a roster deployment routes ids to DIFFERENT accounts, so the
+//     binding is what actually decided where this turn went.
+//   - THE UPSTREAM the deployment was pointed at, for an id no binding covers.
+//     upstreamAttribution resolves it, and abstains rather than assuming.
+//
+// Absent both, the turn is UNCLASSIFIED. It is not booked as vendor: nothing
+// established that it was bought, and a confident vendor attribution nobody earned
+// renders downstream as "0% self-hosted" over full coverage — an unearned zero
+// wearing a measurement's clothes, which is the exact failure this whole path
+// exists to make impossible.
 func (s *Server) proxiedLocality(reqModel string) servingLocality {
-	if s == nil || s.roster == nil {
-		return localityVendor
+	if s == nil {
+		return localityUnknown
 	}
-	if z, ok := s.roster.BoundZone(reqModel); ok && z.SelfHosted() {
+	if s.roster != nil {
+		if z, ok := s.roster.BoundZone(reqModel); ok {
+			if z.SelfHosted() {
+				return localitySelfHosted
+			}
+			return localityVendor
+		}
+	}
+	if s.upstream != nil {
+		return *s.upstream
+	}
+	return localityUnknown
+}
+
+// upstreamAttribution reads the base URLs a proxying deployment was pointed at and
+// says what, if anything, they establish about who owns the other end. It returns
+// nil for a deployment that does not proxy at all — the absence that tells
+// servedLocality there is no upstream to ask about, as distinct from an upstream it
+// could not place.
+//
+// This exists because `--base-url` is how BOTH self-hosting rungs are reached in the
+// common case: an on-box server (`--base-url http://127.0.0.1:11434/v1`, the way
+// almost everyone runs ollama or vLLM behind a laptop) and a company-operated one.
+// Treating the flag as proof of a third-party API told an operator who bought
+// nothing that they bought everything.
+//
+// Only two readings are drawn, and the asymmetry between them is deliberate:
+//
+//   - A LOOPBACK host is this machine. That is definitional rather than inferred,
+//     and it is the same rule modelroute already ENFORCES elsewhere — a fleet
+//     account is refused a loopback base_url precisely because a loopback address
+//     is ZoneDevice by definition. (An operator who tunnels a vendor onto 127.0.0.1
+//     has hidden the topology from every tool on the box, this one included.)
+//   - A host matching a KNOWN VENDOR endpoint is bought. That table is
+//     modelroute's own, so it tracks the provider set rather than duplicating it,
+//     and a vendor it does not list reads UNKNOWN — under-claiming, which is the
+//     safe direction, never a self-hosted credit.
+//
+// Anything else abstains. A private hostname is NOT read as org-owned: only the
+// roster may say that, because only an operator knows it. And the reading must be
+// UNANIMOUS across a replica pool — a pool mixing our hardware with a vendor's has
+// no single honest answer, and per-turn we cannot tell which replica served.
+//
+// Like the rest of this file it is ATTRIBUTION ONLY. It is not a residency
+// predicate, it must never be consulted about where a payload may go, and the
+// loopback reading in particular must not be mistaken for the floor's own on-box
+// test, which lives in internal/engine and keys on the account-resolved route.
+func upstreamAttribution(proxyURLs []string) *servingLocality {
+	if len(proxyURLs) == 0 {
+		return nil
+	}
+	agreed := localityUnknown
+	for i, raw := range proxyURLs {
+		one := attributeUpstreamURL(raw)
+		if i == 0 {
+			agreed = one
+			continue
+		}
+		if one != agreed {
+			agreed = localityUnknown
+			break
+		}
+	}
+	return &agreed
+}
+
+// attributeUpstreamURL is the single-URL reading upstreamAttribution folds.
+func attributeUpstreamURL(raw string) servingLocality {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return localityUnknown
+	}
+	if upstreamIsThisMachine(raw) {
 		return localitySelfHosted
 	}
-	return localityVendor
+	u, err := url.Parse(raw)
+	if err != nil {
+		return localityUnknown
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return localityUnknown
+	}
+	if vendorUpstreamHosts()[host] {
+		return localityVendor
+	}
+	return localityUnknown
+}
+
+// upstreamIsThisMachine reports whether raw names the box fak is running on. It
+// mirrors the rule modelroute applies to a local account rather than importing it:
+// the predicate there is unexported, and keeping this copy inside the gateway stops
+// an attribution helper from widening a package the residency floor mirrors.
+func upstreamIsThisMachine(raw string) bool {
+	low := strings.ToLower(raw)
+	if strings.HasPrefix(low, "unix:") || strings.Contains(low, ".sock") {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	switch host {
+	case "localhost", "127.0.0.1", "0.0.0.0", "::1":
+		return true
+	}
+	return strings.HasPrefix(host, "127.")
+}
+
+// vendorUpstreamHosts is the set of hostnames that are third-party inference APIs by
+// definition, derived from modelroute's own per-kind default endpoints so the two
+// cannot drift into disagreement. A provider missing from it reads unknown, never
+// self-hosted, so the incompleteness costs coverage and never buys a false credit.
+func vendorUpstreamHosts() map[string]bool {
+	hosts := map[string]bool{}
+	add := func(raw string) {
+		if u, err := url.Parse(raw); err == nil {
+			if h := strings.ToLower(u.Hostname()); h != "" {
+				hosts[h] = true
+			}
+		}
+	}
+	for _, k := range []modelroute.ProviderKind{
+		modelroute.KindOpenAI,
+		modelroute.KindOpenAIResponses,
+		modelroute.KindAnthropic,
+		modelroute.KindGemini,
+		modelroute.KindXAI,
+		modelroute.KindDeepSeek,
+	} {
+		add(modelroute.KindBaseURL(k))
+	}
+	add(modelroute.DeepSeekAnthropicBaseURL)
+	add(modelroute.GroqOpenAIBaseURL)
+	return hosts
 }
 
 // servedLocalityOf resolves the side for a turn described by its per-request sampling

@@ -15,7 +15,10 @@ func dualServer(t *testing.T, localID string) *Server {
 	if err != nil {
 		t.Fatalf("NewDualPlanner: %v", err)
 	}
-	return &Server{planner: dp}
+	// Mirror the shape New builds: a dual deployment is always pointed at an upstream,
+	// and the classifier has to know WHICH one before it can call the proxied leg
+	// bought. This one is a vendor API, so those turns genuinely were.
+	return &Server{planner: dp, upstream: upstreamAttribution([]string{"https://api.anthropic.com"})}
 }
 
 // Under a dual planner the side is a property of the REQUEST, and the classifier must
@@ -56,7 +59,8 @@ func TestServedLocalityUsesTheDeploymentSideWhenNotDual(t *testing.T) {
 		srv  *Server
 		want servingLocality
 	}{
-		{"proxy-only serves vendor tokens", &Server{planner: agent.NewMockPlanner("x"), servedSide: localityVendor}, localityVendor},
+		{"proxy-only pointed at a vendor API serves bought tokens",
+			&Server{planner: agent.NewMockPlanner("x"), upstream: upstreamAttribution([]string{"https://api.openai.com/v1"})}, localityVendor},
 		{"in-kernel-only serves our own", &Server{planner: agent.NewMockPlanner("x"), servedSide: localitySelfHosted}, localitySelfHosted},
 		// The zero value. A planner wired in directly (a test, or a host that
 		// bypassed the selector) must not be attributed to either side.
