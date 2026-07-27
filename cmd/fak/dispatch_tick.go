@@ -551,6 +551,11 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	// it. Seam off adds no payload key, so a default tick is byte-identical. The result is
 	// adopted only on the no-skip branch, so a named refusal cannot move a worker's model no
 	// matter what a future edit to the resolver returns alongside its reason.
+	//
+	// Turning the seam on is not sufficient: the operator must ALSO declare which roster
+	// accounts these seats can dial (FLEET_DISPATCH_RUNG_ACCOUNTS), because a model id is the
+	// whole launch instruction and a rung this backend cannot reach is a walled slot rather
+	// than a cheaper one. Undeclared places nothing, and says so.
 	if pinned, rungSkip := applyRungPlacement(root, labels, modelPolicy); rungSkip != "" {
 		payload["rung_pin_skipped"] = rungSkip
 	} else {

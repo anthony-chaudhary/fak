@@ -18,13 +18,22 @@ var routineTierLabels = []string{"tier/T2-optimal", "tier/T2-required"}
 
 // rungRoot is a workspace with the seam on and no ambient configuration: no roster, no
 // journal, default window. Each test adds exactly the inputs it is about.
+//
+// The reach declaration names all three of placementEvidenceRoster's accounts, so tests
+// about EVIDENCE are not silently also testing launchability. The "*" spelling and the
+// narrowed and undeclared cases each get their own test rather than riding in here.
 func rungRoot(t *testing.T) string {
 	t.Helper()
 	t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "on")
 	t.Setenv("FLEET_DISPATCH_ACCOUNTS", "")
 	t.Setenv(dispatchRungWindowEnv, "")
+	t.Setenv(dispatchRungAccountsEnv, "laptop,cluster,frontier")
 	return t.TempDir()
 }
+
+// reachAll is the whole-roster assertion, for the pure resolver tests that are not about
+// which accounts are dialable.
+var reachAll = rungReach{All: true}
 
 func withRungRoster(t *testing.T, root string) {
 	t.Helper()
@@ -336,7 +345,7 @@ func TestAnUngradedRosterResolvesToTheTopRungAndIsRefused(t *testing.T) {
 	}
 	rung, skip := resolveRungPlacement(roster, modelroute.ClassRoutine, map[string][]modelroute.ClassEvidence{
 		"qwen3.6-4b": {{Class: modelroute.ClassRoutine, Attempts: 3, Successes: 3, Verify: modelroute.VerifyWitness}},
-	})
+	}, reachAll)
 	if skip != rungSkipUnmeasured {
 		t.Errorf("skip = %q, want %q", skip, rungSkipUnmeasured)
 	}
@@ -345,7 +354,7 @@ func TestAnUngradedRosterResolvesToTheTopRungAndIsRefused(t *testing.T) {
 	}
 
 	// A roster that binds no models cannot place at all, and says that instead.
-	if _, skip := resolveRungPlacement(modelroute.Roster{}, modelroute.ClassRoutine, nil); skip != rungSkipRosterEmpty {
+	if _, skip := resolveRungPlacement(modelroute.Roster{}, modelroute.ClassRoutine, nil, reachAll); skip != rungSkipRosterEmpty {
 		t.Errorf("empty roster skip = %q, want %q", skip, rungSkipRosterEmpty)
 	}
 }
@@ -371,6 +380,197 @@ func TestAnAutomaticRungPinIsGatedLikeTheTierTable(t *testing.T) {
 	}
 }
 
+// A placement is not a launch. Turning the ladder on says "start placing"; it does not say
+// which endpoints this fleet's seats can actually dial, and WorkerLaunch carries only a model
+// id — no base URL, no credential. So an operator who has declared nothing gets no placement,
+// and the refusal names itself. A default of "everything is reachable" would read as a
+// boundary while enforcing nothing, which is worse than having none.
+func TestTheLadderDialsNothingUntilAnOperatorNamesWhatItCanReach(t *testing.T) {
+	for _, undeclared := range []string{"", "   ", ",", " , ,"} {
+		root := rungRoot(t)
+		withRungRoster(t, root)
+		withRungJournal(t, root, rungTurns("qwen3.6-4b", 24, time.Minute, modelroute.VerifyWitness))
+		t.Setenv(dispatchRungAccountsEnv, undeclared)
+
+		before := seatDefaultFor("qwen3.6-4b", "opus-5")
+		after, skip := applyRungPlacement(root, routineTierLabels, before)
+		if skip != rungSkipNoReachDecl {
+			t.Errorf("%q: skip = %q, want %q", undeclared, skip, rungSkipNoReachDecl)
+		}
+		if !reflect.DeepEqual(after, before) {
+			t.Errorf("%q: an undeclared reach still placed %+v", undeclared, after)
+		}
+	}
+
+	// Unset is the case an operator reaches by doing nothing, and it is the one that must
+	// not place. t.Setenv registers the restore, so unsetting here is safe.
+	root := rungRoot(t)
+	withRungRoster(t, root)
+	withRungJournal(t, root, rungTurns("qwen3.6-4b", 24, time.Minute, modelroute.VerifyWitness))
+	os.Unsetenv(dispatchRungAccountsEnv)
+	if _, skip := applyRungPlacement(root, routineTierLabels, seatDefaultFor("qwen3.6-4b", "opus-5")); skip != rungSkipNoReachDecl {
+		t.Errorf("an unset declaration: skip = %q, want %q", skip, rungSkipNoReachDecl)
+	}
+
+	// And it is reported ahead of the missing roster and the missing journal. With several
+	// things absent at once, "you have not said what this fleet can dial" is the one the
+	// operator has to answer anyway — the other two are files a running fleet produces.
+	bare := rungRoot(t)
+	os.Unsetenv(dispatchRungAccountsEnv)
+	if _, skip := applyRungPlacement(bare, routineTierLabels, seatDefaultFor("qwen3.6-4b", "opus-5")); skip != rungSkipNoReachDecl {
+		t.Errorf("with nothing configured at all: skip = %q, want %q", skip, rungSkipNoReachDecl)
+	}
+}
+
+// Narrowing what the fleet can dial costs it the unreachable RUNGS, not the ladder. With the
+// device endpoint undeclared and both models graded, the work lands on the fleet rung — still
+// self-hosted, which is the epic's actual objective — rather than falling back to the seat's
+// vendor default because the cheapest rung happened to be unreachable.
+func TestANarrowedReachFallsToTheNextDialableRungNotTheSeatDefault(t *testing.T) {
+	root := rungRoot(t)
+	withRungRoster(t, root)
+	withRungJournal(t, root, append(
+		rungTurns("qwen3.6-4b", 24, time.Minute, modelroute.VerifyWitness),
+		rungTurns("glm-5.2", 24, time.Minute, modelroute.VerifyWitness)...))
+	t.Setenv(dispatchRungAccountsEnv, "cluster")
+
+	after, skip := applyRungPlacement(root, routineTierLabels, seatDefaultFor("qwen3.6-4b", "opus-5"))
+	if skip != "" {
+		t.Fatalf("a reachable graded rung was refused: %s", skip)
+	}
+	if after.Model != "glm-5.2" {
+		t.Errorf("model = %q, want the fleet-rung model — the device rung was not declared dialable", after.Model)
+	}
+	if after.Source != modelSourceRung {
+		t.Errorf("source = %q, want %q", after.Source, modelSourceRung)
+	}
+}
+
+// The invariant that makes filtering the pool safe at all: narrowing the reachable set must
+// never make a WEAKER model win. Place fixes its top rung from the static zone ladder rather
+// than from the pool, so an unmeasured candidate stays barred by rule 2 even when every rung
+// above it has been filtered away, and rule 1's tier floor is a property of the work.
+func TestNarrowingReachNeverPromotesAWeakerModel(t *testing.T) {
+	roster, err := modelroute.ParseRoster([]byte(placementEvidenceRoster))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Graded for ROUTINE work only, which is what a real corpus of small local turns looks
+	// like. Nothing here says either model can hold a security release.
+	evidence := map[string][]modelroute.ClassEvidence{
+		"qwen3.6-4b": {{Class: modelroute.ClassRoutine, Attempts: 40, Successes: 40, Verify: modelroute.VerifyWitness}},
+		"glm-5.2":    {{Class: modelroute.ClassRoutine, Attempts: 40, Successes: 40, Verify: modelroute.VerifyWitness}},
+	}
+	onBox := rungReach{Accounts: map[string]bool{"laptop": true, "cluster": true}}
+
+	// The vendor rung is filtered away, so nothing is left that can hold the class. The
+	// answer is a refusal, never "the best rung still standing".
+	rung, skip := resolveRungPlacement(roster, modelroute.ClassSecurityRelease, evidence, onBox)
+	if rung != nil {
+		t.Fatalf("filtering the vendor rung away placed security work on %s (%s)", rung.Model, rung.Zone)
+	}
+	if skip == "" {
+		t.Fatal("a refusal reported no reason")
+	}
+
+	// And the same narrowing does not disturb the class those models ARE graded for.
+	routine, skip := resolveRungPlacement(roster, modelroute.ClassRoutine, evidence, onBox)
+	if skip != "" || routine == nil || routine.Model != "qwen3.6-4b" {
+		t.Errorf("routine placement under the same narrowing: skip=%q rung=%+v", skip, routine)
+	}
+}
+
+// The gate applies to all three rungs by the same rule. The vendor rung is the tempting one
+// to exempt — "the frontier API is always reachable" — and exempting it would quietly make an
+// undeclared reach mean "send it to the vendor", which is the exact spend this epic exists to
+// avoid and the one failure that costs money rather than a retry.
+func TestTheVendorRungIsNotExemptFromTheReachGate(t *testing.T) {
+	roster, err := modelroute.ParseRoster([]byte(placementEvidenceRoster))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// opus-5 is graded for the hardest class there is, so nothing but the declaration stands
+	// between this work and the vendor rung.
+	evidence := map[string][]modelroute.ClassEvidence{
+		"opus-5": {{Class: modelroute.ClassSecurityRelease, Attempts: 40, Successes: 40, Verify: modelroute.VerifyWitness}},
+	}
+	onBox := rungReach{Accounts: map[string]bool{"laptop": true, "cluster": true}}
+
+	if rung, skip := resolveRungPlacement(roster, modelroute.ClassSecurityRelease, evidence, onBox); rung != nil {
+		t.Errorf("an undeclared vendor account was placed on anyway: %s (%s), skip=%q", rung.Model, rung.Zone, skip)
+	}
+	// Declared, it places — the gate is about what was declared, not about which rung it is.
+	withVendor := rungReach{Accounts: map[string]bool{"laptop": true, "cluster": true, "frontier": true}}
+	rung, skip := resolveRungPlacement(roster, modelroute.ClassSecurityRelease, evidence, withVendor)
+	if skip != "" || rung == nil || rung.Model != "opus-5" {
+		t.Errorf("a declared vendor account did not place: skip=%q rung=%+v", skip, rung)
+	}
+}
+
+// A declaration that selects nothing is a typo, and it must not look like an idle ladder. An
+// operator who wrote "lapotp" has a one-character fix; one reading "no graded evidence yet"
+// goes looking for turns that are already on disk.
+func TestADeclarationThatSelectsNothingNamesItselfRatherThanLookingIdle(t *testing.T) {
+	root := rungRoot(t)
+	withRungRoster(t, root)
+	withRungJournal(t, root, rungTurns("qwen3.6-4b", 24, time.Minute, modelroute.VerifyWitness))
+
+	for _, decl := range []string{"lapotp", "LAPTOP", "laptop2,cluster-2"} {
+		t.Setenv(dispatchRungAccountsEnv, decl)
+		before := seatDefaultFor("qwen3.6-4b", "opus-5")
+		after, skip := applyRungPlacement(root, routineTierLabels, before)
+		if skip != rungSkipUnreachable {
+			t.Errorf("%q: skip = %q, want %q", decl, skip, rungSkipUnreachable)
+		}
+		if !reflect.DeepEqual(after, before) {
+			t.Errorf("%q: moved the worker to %+v", decl, after)
+		}
+	}
+}
+
+// The whole-roster case is available and must be SPELLED. That keeps it an assertion the
+// operator made rather than one the code assumed on their behalf.
+func TestTheWholeRosterAssertionIsSpelledNotInferred(t *testing.T) {
+	root := rungRoot(t)
+	withRungRoster(t, root)
+	withRungJournal(t, root, rungTurns("qwen3.6-4b", 24, time.Minute, modelroute.VerifyWitness))
+
+	t.Setenv(dispatchRungAccountsEnv, "*")
+	after, skip := applyRungPlacement(root, routineTierLabels, seatDefaultFor("qwen3.6-4b", "opus-5"))
+	if skip != "" || after.Model != "qwen3.6-4b" {
+		t.Errorf("the spelled whole-roster assertion did not place: model=%q skip=%q", after.Model, skip)
+	}
+
+	reach, ok := dispatchRungReach()
+	if !ok || !reach.All {
+		t.Errorf(`"*" parsed to %+v (ok=%v), want the whole-roster assertion`, reach, ok)
+	}
+	// A model the roster does not bind is still not reachable-by-wildcard, because it never
+	// enters the candidate pool at all — "*" widens the ACCOUNTS, not the roster.
+	if got := reach.filter(modelroute.Roster{}, nil); len(got) != 0 {
+		t.Errorf(`"*" invented %d candidates from an empty roster`, len(got))
+	}
+}
+
+// A dangling binding is a broken roster, and Place is already fail-loud about it. The reach
+// filter must not swallow one: converting a misconfiguration into "nothing was reachable"
+// hands the operator the wrong cure.
+func TestABrokenRosterStaysFailLoudThroughTheReachFilter(t *testing.T) {
+	roster := modelroute.Roster{
+		Accounts: []modelroute.Account{{ID: "laptop", Kind: modelroute.KindLocal, BaseURL: "http://127.0.0.1:11434/v1"}},
+		Bindings: []modelroute.Binding{{Model: "ghost", Account: "nowhere"}},
+		Default:  "laptop",
+	}
+	rung, skip := resolveRungPlacement(roster, modelroute.ClassRoutine, nil,
+		rungReach{Accounts: map[string]bool{"laptop": true}})
+	if rung != nil {
+		t.Fatalf("a dangling binding placed %+v", rung)
+	}
+	if skip != rungSkipRefused {
+		t.Errorf("skip = %q, want %q — the misconfiguration was reported as an empty reach", skip, rungSkipRefused)
+	}
+}
+
 // The reason vocabulary is closed and its members are distinct: two paths sharing a string
 // would make an operator's diagnosis ambiguous exactly when they need it.
 func TestTheSkipVocabularyIsClosedAndDistinct(t *testing.T) {
@@ -379,6 +579,7 @@ func TestTheSkipVocabularyIsClosedAndDistinct(t *testing.T) {
 		rungSkipOutranked, rungSkipNoWorkClass, rungSkipBadWindow, rungSkipNoRoster,
 		rungSkipRosterEmpty, rungSkipNoJournal, rungSkipJournalBig, rungSkipJournalBad,
 		rungSkipNoEvidence, rungSkipRefused, rungSkipUnmeasured, rungSkipNotApplied,
+		rungSkipNoReachDecl, rungSkipUnreachable,
 	} {
 		if r == "" {
 			t.Error("the empty reason is reserved for a pin that happened")
