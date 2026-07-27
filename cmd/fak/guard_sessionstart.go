@@ -88,7 +88,15 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 	// with the affordance. sessionsteer stays stdlib-only (tier 1) — the reframe lives here, at the
 	// emit boundary, not inside the pure decision core. Idempotent, so a source string already in
 	// positive voice is returned unchanged.
-	additionalContext = negframe.ReframeFakOnly(negframe.Fak(additionalContext))
+	// The pass is DEFAULT-ON and now runs behind the #3568 ablation lever, so #3546's control
+	// arm is one env toggle (FAK_ABLATE=negframe_reframe) rather than hand-swapped strings.
+	// The same call returns this turn's telemetry, recorded best-effort to the negframe
+	// journal the exit summary folds into its one-line arm/residual/fallback report.
+	reframed, negframeRow := guardNegframeReframe(negframe.Fak(additionalContext))
+	additionalContext = reframed
+	// Begin (not append): SessionStart is the session boundary, so the per-turn stream the exit
+	// summary folds starts fresh here rather than accumulating this workspace's whole history.
+	guardNegframeBegin(guardNegframeJournalRel, negframeRow)
 	// Claude Code injects a SessionStart hook's hookSpecificOutput.additionalContext into the
 	// first turn's context. Emit the envelope; a marshal failure is a silent no-op (fail open).
 	envelope := map[string]any{

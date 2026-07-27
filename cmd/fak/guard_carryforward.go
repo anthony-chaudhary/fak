@@ -380,7 +380,17 @@ func guardRecoveryPrompt(items []guardRefusalCarry) string {
 		return ""
 	}
 	fragments = append(fragments, negframe.Fak(". Keep fak guard wrapped after the blocker is cleared."))
-	return negframe.ReframeFakOnly(fragments...)
+	// #3568 lever (#5365): the resume-recovery prompt is the SECOND injected-directive emit
+	// site, so it routes through the same gated seam as the SessionStart affordance rather than
+	// calling ReframeFakOnly unconditionally. With FAK_ABLATE=negframe_reframe this ships
+	// #3546's control arm the RAW negative-framed prose instead of quietly reframing on both.
+	//
+	// The telemetry row is dropped HERE by design: this composes in the `fak guard` parent
+	// before the child is spawned, and the child's SessionStart BEGINS the per-session journal
+	// by truncating it (guardNegframeBegin). A row appended at this point would be discarded a
+	// moment later, so this site honours the arm without seeding a row the boundary eats.
+	prompt, _ := guardNegframeReframe(fragments...)
+	return prompt
 }
 
 var guardReasonHeaderRE = regexp.MustCompile(`^\[reasons\.([A-Z0-9_]+)\]`)

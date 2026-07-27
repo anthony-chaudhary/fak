@@ -410,3 +410,88 @@ func TestGuardSessionStartHintPositiveFirst(t *testing.T) {
 		t.Fatalf("positive source is not reframe-idempotent:\n got %q\nwant %q", got, guardSessionStartHint)
 	}
 }
+
+// TestGuardSessionStartWritesNegframeJournal is #5365's witness for the halves #3568 deferred.
+// Before this, the read side (guardNegframeSummaryLine) was structurally silent because NOTHING
+// wrote guardNegframeJournalRel, and the emit called negframe.ReframeFakOnly unconditionally so
+// #3546's control arm shipped reframed prose anyway. Both are asserted end-to-end here, through
+// the real hook actuator rather than the helper in isolation:
+//
+//   - a SessionStart emit leaves a foldable row, so the exit summary has something to report;
+//   - the row names the arm the FAK_ABLATE_NEGFRAME_REFRAME lever actually selected;
+//   - on the control arm the injected prose is byte-identical to the raw fragment.
+func TestGuardSessionStartWritesNegframeJournal(t *testing.T) {
+	// guardNegframeJournalRel is workspace-relative, so each emit runs inside a scratch tree —
+	// that also keeps the assertion off this repo's real .fak/ journal.
+	emit := func(t *testing.T, argv ...string) (ctx, summary string) {
+		t.Helper()
+		t.Chdir(t.TempDir())
+		var out, errb bytes.Buffer
+		if code := runGuardSessionStart(&out, &errb, append([]string{"--mode", "on"}, argv...)); code != 0 {
+			t.Fatalf("exit = %d, want 0 (SessionStart must never wedge a start)", code)
+		}
+		var env struct {
+			HookSpecificOutput struct {
+				AdditionalContext string `json:"additionalContext"`
+			} `json:"hookSpecificOutput"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+			t.Fatalf("not valid JSON: %v\n%s", err, out.String())
+		}
+		return env.HookSpecificOutput.AdditionalContext, guardNegframeSummaryLine(guardNegframeJournalRel)
+	}
+
+	t.Run("treatment arm leaves a foldable row", func(t *testing.T) {
+		t.Setenv("FAK_ABLATE", "")
+		t.Setenv(guardNegframeEnvVar, "1")
+		ctx, summary := emit(t, "--managed")
+		if summary == "" {
+			t.Fatal("SessionStart wrote no journal row — the exit-summary fold is still silent (#5365 item 2)")
+		}
+		if !strings.Contains(summary, "reframe on") {
+			t.Fatalf("row did not record the treatment arm:\n%s", summary)
+		}
+		if !strings.Contains(ctx, "fak_index_work") {
+			t.Fatalf("routing through the lever dropped the affordance:\n%s", ctx)
+		}
+	})
+
+	// The control arm is the whole point of #3546: with the lever off, the bytes fak injects are
+	// the RAW fragment, not a quietly-reframed one, and the row says so.
+	t.Run("control arm records the ablated arm and ships raw bytes", func(t *testing.T) {
+		t.Setenv("FAK_ABLATE", "")
+		t.Setenv(guardNegframeEnvVar, "0")
+		ctx, summary := emit(t)
+		if summary == "" {
+			t.Fatal("control arm wrote no journal row")
+		}
+		if !strings.Contains(summary, "reframe OFF") {
+			t.Fatalf("row did not record the ablated arm:\n%s", summary)
+		}
+		if ctx != guardSessionStartHint {
+			t.Fatalf("control arm rewrote the injected prose:\n got %q\nwant %q", ctx, guardSessionStartHint)
+		}
+	})
+
+	// Begin, not append: a second SessionStart is a new session boundary, so the fold reports
+	// THIS session rather than accumulating the workspace's whole history.
+	t.Run("each session start resets the fold", func(t *testing.T) {
+		t.Setenv("FAK_ABLATE", "")
+		t.Setenv(guardNegframeEnvVar, "1")
+		dir := t.TempDir()
+		t.Chdir(dir)
+		var out, errb bytes.Buffer
+		for range 3 {
+			if code := runGuardSessionStart(&out, &errb, []string{"--mode", "on"}); code != 0 {
+				t.Fatalf("exit = %d, want 0", code)
+			}
+		}
+		raw, err := os.ReadFile(guardNegframeJournalRel)
+		if err != nil {
+			t.Fatalf("read journal: %v", err)
+		}
+		if n := len(strings.Split(strings.TrimSpace(string(raw)), "\n")); n != 1 {
+			t.Fatalf("three session starts left %d rows, want 1 (the boundary must truncate):\n%s", n, raw)
+		}
+	})
+}
