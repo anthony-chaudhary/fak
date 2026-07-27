@@ -232,6 +232,14 @@ internal/compute/spirv/
 .gobuild-tmp/
 fak/.gocache/
 fak/.gotmp/
+# The two `fak/`-prefixed patterns above only match a nested `fak/` directory, so
+# they never fire in this checkout — the module root IS fak, and the runners write
+# `.gotmp/` at the repo root. Left in place for parent-dir layouts; these anchored
+# twins are what actually catch it here. `.gotmp/` accumulates commit-message
+# drafts, `fak commit` logs and mutation-testing spikes (`.gotmp/mut/*.go`); Go
+# tooling already skips dot-dirs, so it is scratch, never source.
+/.gotmp/
+/.gocache/
 /coverage
 
 # Scratch test-runner logs dropped into fak/ by WSL/PowerShell test runs
