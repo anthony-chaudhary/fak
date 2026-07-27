@@ -561,6 +561,23 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	} else {
 		modelPolicy = pinned
 	}
+	// The ladder's other direction (#5416 track D): when the target's last finished attempt RAN
+	// the work on its rung and failed its own tests, re-dispatch it one rung up instead of
+	// re-running the same underpowered attempt. Only an underpowered outcome earns a rung — a
+	// guard refusal never does, and a transport wall is Layer-2's business below — and the climb
+	// is bounded by an operator-declared ceiling and a per-item budget counted from a durable
+	// ledger. It runs immediately after the placement above because it raises THAT decision (and
+	// an unpinned seat default), and before the capacity reroute and the shape gate because a
+	// live wall and a shape mismatch still overrule a rung that was bought.
+	//
+	// Nothing here is speculative: the debit is on disk before the pin exists, so an escalated
+	// launch always has a recorded purchase behind it. Seam off adds no payload key.
+	if raised, esc, escSkip := applyRungEscalation(root, opts.Live, target, labels, witnessRecords, modelPolicy); escSkip != "" {
+		payload["rung_escalation_skipped"] = escSkip
+	} else if esc != nil {
+		payload["rung_escalation"] = esc.Map()
+		modelPolicy = raised
+	}
 	if opts.CapacityReason != "" {
 		reroute := modelroute.RerouteCapacity(opts.CapacityFrom, modelroute.CapacitySignal{Blocked: true, Reason: opts.CapacityReason, RequiredModelB: opts.RequiredModelB, RequiredContext: opts.RequiredContext}, opts.CapacityTargets)
 		payload["capacity_reroute"] = reroute

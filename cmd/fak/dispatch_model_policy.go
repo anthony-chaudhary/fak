@@ -44,15 +44,21 @@ func applyModelDowngrade(backend string, target int, records []dispatchtick.Witn
 // witnessed failure (a context-balloon/restart-limit starvation is not a model-switchable
 // wall like usage_cap / model_unknown / rate_limit).
 //
-// Only the AUTOMATIC pins are gated — modelSourceTier, modelSourceWorkClass and
-// modelSourceRung. An explicit --worker-model pin, a lane_models pin, and the benchmark gate
-// are deliberate operator intent and always win, matching the resolver's stated precedence
-// doctrine; the gate exists to protect the worker from a TABLE's choice, not to override a
-// human's. The placement ladder (#5416 track E) belongs on the gated side for the same
-// reason the tier table does, and more so: it picks a rung from a corpus of past outcomes,
+// Only the AUTOMATIC pins are gated — modelSourceTier, modelSourceWorkClass, modelSourceRung
+// and modelSourceEscalated. An explicit --worker-model pin, a lane_models pin, and the
+// benchmark gate are deliberate operator intent and always win, matching the resolver's stated
+// precedence doctrine; the gate exists to protect the worker from a TABLE's choice, not to
+// override a human's. The placement ladder (#5416 track E) belongs on the gated side for the
+// same reason the tier table does, and more so: it picks a rung from a corpus of past outcomes,
 // which says a model CAN do this class of work and says nothing about whether it can hold
 // this issue's work SHAPE. Those are different questions, and this is the one that asks the
 // second.
+//
+// An ESCALATED pin (track D) is gated for that same reason and is the case where it matters
+// most: the item has already failed once, so dropping the rung it just paid for into a shape
+// that model cannot hold spends the budget on a second starvation. The debit is NOT refunded
+// when this fires — the ledger records what was authorised, and a refund path is a way to
+// drain a budget in a loop.
 //
 // fired is false for every other source, an unpinned seat default, a surgical shape, and an
 // unknown shape (an untagged or contradictorily-tagged issue) — so a default fleet tick is
@@ -65,7 +71,7 @@ func applyModelDowngrade(backend string, target int, records []dispatchtick.Witn
 // the refused one dropped, so a later downgrade never re-offers the model that cannot hold it.
 func applyPlacementGate(p workerModelPolicy, shape dispatchtick.WorkShape) (workerModelPolicy, bool) {
 	switch p.Source {
-	case modelSourceTier, modelSourceWorkClass, modelSourceRung:
+	case modelSourceTier, modelSourceWorkClass, modelSourceRung, modelSourceEscalated:
 	default:
 		return p, false
 	}
