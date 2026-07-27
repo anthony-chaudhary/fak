@@ -20,21 +20,79 @@ package agent
 // ever SHORTENS an OLD tool message and never drops one entirely (head+tail survive), so it
 // is fail-safe by construction.
 
-// ElideMessages shrinks the Content of oversized OLD tool-role messages (outside the recent
-// working-set window) to a bounded head+tail form, returning a copy with the shrunk messages
-// (the input slice is never mutated). threshold is the byte size above which a tool message's
-// Content is shrunk; <= 0 or an empty slice is identity. The recent elideRecentKeepMsgs
-// messages are always left intact. Outcome.Elided/ShedBytes are meaningful only on a fire
-// (Reason == ElideReasonNone); otherwise the input is returned unchanged.
+// dedupMessagesCrossTurn folds a contiguous LINE run in a later tool-role message that already
+// appeared verbatim in a STRICTLY-EARLIER one down to a one-line in-band pointer, reusing the
+// proven pure core dedupBlockLines (anthropic_elide_crossturn.go). It is the decoded-wire twin of
+// collectCrossTurnDedupEdits: same matcher, same keep-earliest pointer, string rewrite instead of
+// a byte-splice.
+//
+// This is a dedup LEVEL orthogonal to head+tail, and the reason it exists is that head+tail is
+// structurally blind to duplication (#5254): its whole eligibility test is len(Content) > threshold,
+// and repetition is a property of the SET, not of one member. The measured duplicated
+// tool_result/shell_command rows average ~7.85 KB — comfortably UNDER the 16 KB default threshold —
+// so a size gate skips every one of them no matter how many times they recur. Dedup therefore
+// triggers on crossTurnMinDupLines / crossTurnMinDupBytes only; size independence is the point.
+//
+// EVERY tool message is indexed as a possible source, including ones inside the protected recent
+// window, so a fold can always name the earliest occurrence; only messages strictly before
+// lastEligible are actually rewritten. Copy-on-write and fail-safe: a fold is kept only when it is
+// genuinely shorter, and the folded bytes stay reachable in-band at their earliest occurrence.
+func dedupMessagesCrossTurn(messages []Message, lastEligible int) (out []Message, folded, shed int) {
+	var idx []int // message index of each indexed block, in wire order
+	var blocks [][]string
+	for i, m := range messages {
+		if m.Role != "tool" || m.Content == "" {
+			continue
+		}
+		idx = append(idx, i)
+		blocks = append(blocks, splitLinesKeepNL(m.Content))
+	}
+	if len(blocks) < 2 {
+		return messages, 0, 0 // nothing to match against
+	}
+	// The pointer names the source's MESSAGE index as its turn, matching the Anthropic path.
+	rendered, changed := dedupBlockLines(blocks, append([]int(nil), idx...))
+	for k, mi := range idx {
+		if !changed[k] || mi >= lastEligible {
+			continue // unfolded, or inside the protected recent working set
+		}
+		if len(rendered[k]) >= len(messages[mi].Content) {
+			continue // no genuine savings — leave it
+		}
+		if out == nil {
+			out = append([]Message(nil), messages...)
+		}
+		shed += len(messages[mi].Content) - len(rendered[k])
+		out[mi].Content = rendered[k]
+		folded++
+	}
+	if out == nil {
+		return messages, 0, 0
+	}
+	return out, folded, shed
+}
+
+// ElideMessages shrinks the Content of OLD tool-role messages (outside the recent working-set
+// window), returning a copy with the shrunk messages (the input slice is never mutated). It runs
+// two orthogonal levels: cross-turn verbatim-span dedup (size-independent) and then bounded
+// head+tail elision of anything still over threshold. threshold is the byte size above which a
+// tool message's Content is head+tail shrunk, and arms the pass as a whole; <= 0 or an empty slice
+// is identity. The recent elideRecentKeepMsgs messages are always left intact. Outcome.Elided/
+// ShedBytes are meaningful only on a fire (Reason == ElideReasonNone); otherwise the input is
+// returned unchanged.
 func ElideMessages(messages []Message, threshold int) ([]Message, ElideOutcome) {
 	if threshold <= 0 || len(messages) == 0 {
 		return messages, ElideOutcome{Reason: ElideReasonOff}
 	}
 	lastEligible := len(messages) - elideRecentKeepMsgs // exclusive: protect the recent window
-	var out []Message                                   // copy-on-write — allocated only on the first shrink
+	// Dedup FIRST, on the ORIGINAL bodies: sources stay verbatim, so a block's rewrite depends only
+	// on strictly-earlier blocks' original content (prefix monotonicity). head+tail then mops up
+	// whatever is still oversized after folding.
+	work, folded, foldShed := dedupMessagesCrossTurn(messages, lastEligible)
+	var out []Message // copy-on-write over work — allocated only on the first head+tail shrink
 	elided, shed := 0, 0
 	for i := 0; i < lastEligible; i++ {
-		m := messages[i]
+		m := work[i]
 		if m.Role != "tool" || len(m.Content) <= threshold {
 			continue
 		}
@@ -43,14 +101,17 @@ func ElideMessages(messages []Message, threshold int) ([]Message, ElideOutcome) 
 			continue // no genuine savings — leave it
 		}
 		if out == nil {
-			out = append([]Message(nil), messages...)
+			out = append([]Message(nil), work...)
 		}
 		shed += len(m.Content) - len(shrunk)
 		out[i].Content = shrunk
 		elided++
 	}
 	if out == nil {
+		out = work // no head+tail fire; work is the deduped copy (or messages itself)
+	}
+	if elided == 0 && folded == 0 {
 		return messages, ElideOutcome{Reason: ElideReasonUnderThreshold}
 	}
-	return out, ElideOutcome{Reason: ElideReasonNone, Elided: elided, ShedBytes: shed}
+	return out, ElideOutcome{Reason: ElideReasonNone, Elided: elided + folded, ShedBytes: shed + foldShed}
 }
