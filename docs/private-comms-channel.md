@@ -67,6 +67,42 @@ Run the client's `selftest` verb before committing to a long command. It uses th
 timeout instead of the short fail-fast probe budget, so it is the cheapest way to learn
 which class you are in.
 
+## Prove a readback is restored
+
+The class table tells you which fix to apply. It does not tell you the fix worked, and a
+class that clears itself between two probes is exactly the failure mode above. Before
+declaring a session usable again — and before a hardware-gated task depends on it — take a
+fresh round-trip witness in this order.
+
+1. `dgxbridge doctor` — network-free. It resolves a token and a control channel and stops
+   there. An unauthorized or public-only checkout reports `NOT READY` with both checks
+   missing; that is the boundary working as designed, not a bridge fault, and no later step
+   can run from that host.
+2. `dgxbridge doctor -probe` — adds the live round-trip against the resolved session. The
+   `readback` sub-check is the gate: green means a command's output actually came back, not
+   merely that the session answered a control verb.
+3. A trivial captured command through the normal run path — echo a fixed token, or any
+   single cheap read-only command — and confirm that token appears in the returned output.
+   Predictable output is the whole point: it separates "the bridge returned something" from
+   "the bridge returned *this command's* result".
+
+Step 3 is the witness worth recording. Steps 1 and 2 can both pass against a session whose
+shell is healthy but whose transport is slow, and `hub_timeout` is not durable, so a single
+green probe is weaker evidence than one captured round-trip of known content. Re-run step 3
+rather than trusting an earlier green when the answer is close to a decision bar.
+
+Steps 2 and 3 need live credentials. A host without them cannot reach any session — `doctor`
+reports `NOT READY` with both checks missing and stops there — so the round-trip witness is
+unavailable from that host, but the class logic is still checkable. The bridge package's own
+tests are network-free and pin which condition maps to which class, so building the client
+from the private snapshot into a scratch Go module and running that package's tests confirms
+that a slow transport reports a hub class and never a wedged-shell one. Use that when a
+client change needs checking and no session is reachable from your host; it settles which
+class a condition maps to, and never whether a given session is healthy right now.
+
+Keep a captured transcript in the private repository whenever it names a host, node, or
+channel; a public note carries the outcome in generic terms only.
+
 ## Public readback
 
 When lab capacity is being considered for dev-worker dispatch, follow the scrub and schema
