@@ -259,6 +259,16 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		if b, err := os.ReadFile(stem + dispatchtick.ModelSidecarSuffix); err == nil {
 			rec.Model = strings.TrimSpace(string(b))
 		}
+		// #5416 track E: scrape the rung that actually served the slot from its .zone
+		// sidecar, THROUGH the allowlist — a truncated or hand-edited file leaves Zone
+		// empty, which the fold counts as unattributed rather than as running on this box.
+		// Absent for every slot spawned before the opt-in seam, and that absence is the
+		// honest answer: nothing recorded where those ran.
+		if b, err := os.ReadFile(stem + dispatchtick.ZoneSidecarSuffix); err == nil {
+			if z, ok := dispatchtick.ZoneFromSidecar(string(b)); ok {
+				rec.Zone = string(z)
+			}
+		}
 		records = append(records, rec)
 		row := rec.Map()
 		if len(reverted) > 0 {

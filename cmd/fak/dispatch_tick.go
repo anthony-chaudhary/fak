@@ -606,6 +606,14 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	if modelPolicy.Source == modelSourceTier && tierBucket != "" {
 		payload["worker_tier"] = string(tierBucket)
 	}
+	// #5416 tracks E+F: resolve the two facts a later witness sweep cannot reconstruct —
+	// what class of work an operator DECLARED this issue to be, and which placement rung
+	// serves the model this slot is about to run. Both are point-in-time (labels get
+	// re-tagged, rosters get re-bound), so they are resolved here, beside the decision they
+	// describe. Opt-in: an unconfigured tick adds no payload keys at all.
+	if dispatchPlacementEvidenceEnabled() {
+		recordDispatchPlacementEvidence(root, labels, launch.Model, payload)
+	}
 	launchPreview, guardedPreview = guardedDispatchCommand(root, pick.Lane, opts.Backend, preview)
 	payload["command"] = dispatchtick.LaunchCommandShape(preview, root, account)
 	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchPreview, root, account)
@@ -670,6 +678,16 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		tWitness := time.Now()
 		witnessedSlots, witnessRecords = witnessExitedWorkers(root, runsDir, true)
 		heldNoCommit = dispatchtick.HeldNoCommitIssues(witnessRecords)
+		// #5416 tracks E+F: fold this sweep's finished slots into durable capability
+		// evidence. This is the caller the producer and the journal were missing — without
+		// it every pure piece was correct and nothing on a live fleet ever wrote a row.
+		// Opt-in, live-only, and fail-open: the accounting lands in the payload either way,
+		// so an operator sees how much of the sweep became evidence and how much could not.
+		if dispatchPlacementEvidenceEnabled() {
+			if ev := appendDispatchTurnOutcomes(runsDir, witnessRecords); len(ev) > 0 {
+				witnessedSlots["turn_evidence"] = ev
+			}
+		}
 		dispatchStampMs(timings, "witness", tWitness)
 	}
 
@@ -1051,6 +1069,11 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	// it back into WitnessRecord.Model (and Layer-2 downgrade can read what the slot ran on).
 	// Written only when the model was un-blanked — a seat-default worker leaves no sidecar.
 	writeDispatchModelSidecar(spawned.Log, launch.Model)
+	// #5416 tracks E+F: persist the work class and placement rung resolved at prepare time
+	// beside the log, so the witness sweep reads what was true AT LAUNCH rather than
+	// re-deriving a present-tense answer about a finished slot. No-op when either could not
+	// be named, and when the seam is off nothing was resolved and nothing is written.
+	writeDispatchPlacementSidecars(spawned.Log, payload)
 	if reason, failed := dispatchEarlyExitFailureReason(opts.Backend, spawned.PID, target, spawned.EarlyExit); failed {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"
