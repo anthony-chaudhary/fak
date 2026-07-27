@@ -1,0 +1,71 @@
+{
+  "schema": "fak-quality-case/1",
+  "id": "corpora-replay",
+  "version": 1,
+  "prompt": "Answer every question in the replay corpus shard.",
+  "params": {
+    "temperature": 0,
+    "max_tokens": 64
+  },
+  "reference": {
+    "runner": "reference",
+    "tokens": [
+      "shard",
+      "ok"
+    ],
+    "text": "shard ok"
+  },
+  "oracles": [
+    "exact-match"
+  ],
+  "metadata": {
+    "model": {
+      "name": "fixture-model",
+      "revision": "sha256:model-v1"
+    },
+    "tokenizer": {
+      "name": "fixture-tokenizer",
+      "revision": "sha256:tokenizer-v1"
+    },
+    "engine": {
+      "name": "fak",
+      "backend": "cpu",
+      "flags": {
+        "dtype": "f32",
+        "threads": "1"
+      }
+    },
+    "code": {
+      "name": "github.com/anthony-chaudhary/fak",
+      "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3"
+    },
+    "oracle": {
+      "kind": "recorded-answer-key",
+      "revision": "sha256:oracle-corpora-v1"
+    },
+    "tolerance": {
+      "metric": "exact-answer",
+      "revision": "policy:corpora-v1"
+    },
+    "baseline": {
+      "id": "corpora-replay-shard-0",
+      "revision": "sha256:baseline-corpora-v1"
+    },
+    "tier": {
+      "name": "nightly"
+    },
+    "cost": {
+      "runtime_seconds": 1500,
+      "timeout_seconds": 3000,
+      "cpu": 8,
+      "memory_mib": 16384
+    },
+    "owner": "corpora-team",
+    "family": "corpora"
+  },
+  "tags": [
+    "corpora",
+    "cpu",
+    "nightly"
+  ]
+}

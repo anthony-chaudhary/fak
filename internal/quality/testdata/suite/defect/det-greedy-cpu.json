@@ -1,0 +1,71 @@
+{
+  "schema": "fak-quality-case/1",
+  "id": "det-greedy-cpu",
+  "version": 1,
+  "prompt": "Return the canonical answer.",
+  "params": {
+    "temperature": 0,
+    "max_tokens": 2
+  },
+  "reference": {
+    "runner": "reference",
+    "tokens": [
+      "canonical",
+      "answer"
+    ],
+    "text": "canonical answer"
+  },
+  "oracles": [
+    "greedy-token-diff"
+  ],
+  "metadata": {
+    "model": {
+      "name": "fixture-model",
+      "revision": "sha256:model-v1"
+    },
+    "tokenizer": {
+      "name": "fixture-tokenizer",
+      "revision": "sha256:tokenizer-v1"
+    },
+    "engine": {
+      "name": "fak",
+      "backend": "cpu",
+      "flags": {
+        "dtype": "f32",
+        "threads": "1"
+      }
+    },
+    "code": {
+      "name": "github.com/anthony-chaudhary/fak",
+      "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3"
+    },
+    "oracle": {
+      "kind": "exact-greedy-trace",
+      "revision": "sha256:oracle-greedy-v1"
+    },
+    "tolerance": {
+      "metric": "exact-token",
+      "revision": "policy:exact-v1"
+    },
+    "baseline": {
+      "id": "det-greedy-cpu-reference",
+      "revision": "sha256:baseline-greedy-v1"
+    },
+    "tier": {
+      "name": "pr"
+    },
+    "cost": {
+      "runtime_seconds": 2,
+      "timeout_seconds": 30,
+      "cpu": 1,
+      "memory_mib": 256
+    },
+    "owner": "quality-team",
+    "family": "deterministic"
+  },
+  "tags": [
+    "greedy",
+    "cpu",
+    "pr"
+  ]
+}

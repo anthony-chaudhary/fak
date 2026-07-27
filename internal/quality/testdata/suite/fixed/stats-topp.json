@@ -1,0 +1,73 @@
+{
+  "schema": "fak-quality-case/1",
+  "id": "stats-topp",
+  "version": 1,
+  "prompt": "Sample one color from the fixture palette.",
+  "params": {
+    "temperature": 0.8,
+    "top_p": 0.95,
+    "max_tokens": 4,
+    "seed": 20260726
+  },
+  "reference": {
+    "runner": "reference",
+    "tokens": [
+      "blue"
+    ],
+    "text": "blue"
+  },
+  "oracles": [
+    "distribution-tv"
+  ],
+  "metadata": {
+    "model": {
+      "name": "fixture-model",
+      "revision": "sha256:model-v1"
+    },
+    "tokenizer": {
+      "name": "fixture-tokenizer",
+      "revision": "sha256:tokenizer-v1"
+    },
+    "engine": {
+      "name": "fak",
+      "backend": "cpu",
+      "flags": {
+        "dtype": "f32",
+        "threads": "1"
+      }
+    },
+    "code": {
+      "name": "github.com/anthony-chaudhary/fak",
+      "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3"
+    },
+    "oracle": {
+      "kind": "sampled-distribution",
+      "revision": "sha256:oracle-tv-v1"
+    },
+    "tolerance": {
+      "metric": "total-variation",
+      "absolute": 0.02,
+      "revision": "policy:tv-v1"
+    },
+    "baseline": {
+      "id": "stats-topp-distribution",
+      "revision": "sha256:baseline-tv-v1"
+    },
+    "tier": {
+      "name": "nightly"
+    },
+    "cost": {
+      "runtime_seconds": 600,
+      "timeout_seconds": 1800,
+      "cpu": 8,
+      "memory_mib": 8192
+    },
+    "owner": "sampling-team",
+    "family": "statistics"
+  },
+  "tags": [
+    "sampling",
+    "cpu",
+    "nightly"
+  ]
+}

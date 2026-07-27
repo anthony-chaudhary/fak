@@ -1,0 +1,80 @@
+{
+  "schema": "fak-quality-case/1",
+  "id": "review-rubric",
+  "version": 1,
+  "prompt": "Write the release quality report for the run.",
+  "params": {
+    "temperature": 0,
+    "max_tokens": 256
+  },
+  "reference": {
+    "runner": "reference",
+    "tokens": [
+      "report"
+    ],
+    "text": "The run shipped with one unresolved divergence."
+  },
+  "oracles": [
+    "grounding-rubric"
+  ],
+  "rubric": {
+    "required": [
+      "divergence"
+    ],
+    "forbidden": [
+      "no issues found"
+    ],
+    "min_score": 0.9
+  },
+  "metadata": {
+    "model": {
+      "name": "fixture-model",
+      "revision": "sha256:model-v1"
+    },
+    "tokenizer": {
+      "name": "fixture-tokenizer",
+      "revision": "sha256:tokenizer-v1"
+    },
+    "engine": {
+      "name": "fak",
+      "backend": "cpu",
+      "flags": {
+        "dtype": "f32",
+        "threads": "1"
+      }
+    },
+    "code": {
+      "name": "github.com/anthony-chaudhary/fak",
+      "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3"
+    },
+    "oracle": {
+      "kind": "rubric-judge",
+      "revision": "sha256:oracle-rubric-v1"
+    },
+    "tolerance": {
+      "metric": "rubric-score",
+      "absolute": 0.1,
+      "revision": "policy:rubric-v1"
+    },
+    "baseline": {
+      "id": "review-rubric-golden-report",
+      "revision": "sha256:baseline-rubric-v1"
+    },
+    "tier": {
+      "name": "release"
+    },
+    "cost": {
+      "runtime_seconds": 300,
+      "timeout_seconds": 3600,
+      "cpu": 4,
+      "memory_mib": 2048
+    },
+    "owner": "reports-team",
+    "family": "review"
+  },
+  "tags": [
+    "review",
+    "cpu",
+    "release"
+  ]
+}

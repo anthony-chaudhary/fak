@@ -1,0 +1,73 @@
+{
+  "schema": "fak-quality-case/1",
+  "id": "gpu-parity-f16",
+  "version": 1,
+  "prompt": "Decode the parity probe under f16 on the accelerator backend.",
+  "params": {
+    "temperature": 0,
+    "max_tokens": 8
+  },
+  "reference": {
+    "runner": "reference",
+    "tokens": [
+      "parity",
+      "ok"
+    ],
+    "text": "parity ok"
+  },
+  "oracles": [
+    "device-matrix-parity"
+  ],
+  "metadata": {
+    "model": {
+      "name": "fixture-model",
+      "revision": "sha256:model-v1"
+    },
+    "tokenizer": {
+      "name": "fixture-tokenizer",
+      "revision": "sha256:tokenizer-v1"
+    },
+    "engine": {
+      "name": "fak",
+      "backend": "cuda",
+      "flags": {
+        "dtype": "f16",
+        "tp": "1"
+      }
+    },
+    "code": {
+      "name": "github.com/anthony-chaudhary/fak",
+      "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3"
+    },
+    "oracle": {
+      "kind": "device-differential",
+      "revision": "sha256:oracle-device-v1"
+    },
+    "tolerance": {
+      "metric": "max-abs-logit-delta",
+      "absolute": 0.005,
+      "revision": "policy:f16-v1"
+    },
+    "baseline": {
+      "id": "gpu-parity-f16-cpu-reference",
+      "revision": "sha256:baseline-device-v1"
+    },
+    "tier": {
+      "name": "release"
+    },
+    "cost": {
+      "runtime_seconds": 1200,
+      "timeout_seconds": 7200,
+      "cpu": 16,
+      "memory_mib": 65536,
+      "accelerators": 8
+    },
+    "owner": "kernels-team",
+    "family": "gpu_parity"
+  },
+  "tags": [
+    "gpu",
+    "parity",
+    "release"
+  ]
+}
