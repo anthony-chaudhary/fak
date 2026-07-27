@@ -74,6 +74,34 @@ type Counters struct {
 	KVPrefixPromptTokens uint64 `json:"kv_prefix_prompt_tokens"`
 	KVPrefixReusedTokens uint64 `json:"kv_prefix_reused_tokens"`
 
+	// WHO ACTUALLY SERVED THE TURN — the self-hosted split of the volume already
+	// totalled in InputTokens/OutputTokens above. fak could not previously answer
+	// "what fraction of our tokens did we serve ourselves?" about its own serving
+	// path: the side was decided per request (a model id that resolves in-kernel
+	// decodes locally, everything else proxies upstream) and then thrown away one
+	// line later, so the durable row recorded the volume and lost the attribution.
+	//
+	// The two groups are DISJOINT SUBSETS of the unsplit totals, accumulated in the
+	// same observation, so SelfHostedOutputTokens+VendorOutputTokens <= OutputTokens
+	// always — the remainder is the volume whose side could not be resolved, and it
+	// is what makes the classified fraction a real coverage number rather than an
+	// assumption. FoldSelfHostedShare is the reader.
+	//
+	// EVERY FIELD IS `omitempty`, WHICH IS THE WHOLE POINT. A row written before
+	// this split existed omits all six, and an absent field must read NOT
+	// INSTRUMENTED — never "zero self-hosted". Those are opposite claims about a
+	// fleet: the first says nobody measured, the second says everyone paid a vendor.
+	// A row that DID measure and served nothing locally still carries VendorTurns>0,
+	// so the earned zero is distinguishable from the unmeasured one by presence, not
+	// by value. Keeping them omitempty also leaves pre-split rows byte-identical and
+	// their RowKey unchanged (the key hashes this struct's JSON).
+	SelfHostedTurns        uint64 `json:"self_hosted_turns,omitempty"`
+	SelfHostedInputTokens  uint64 `json:"self_hosted_input_tokens,omitempty"`
+	SelfHostedOutputTokens uint64 `json:"self_hosted_output_tokens,omitempty"`
+	VendorTurns            uint64 `json:"vendor_turns,omitempty"`
+	VendorInputTokens      uint64 `json:"vendor_input_tokens,omitempty"`
+	VendorOutputTokens     uint64 `json:"vendor_output_tokens,omitempty"`
+
 	// Compaction — WITNESSED attempt counters + OBSERVED post-fire cache read.
 	CompactionFired           uint64 `json:"compaction_fired"`
 	CompactionBailed          uint64 `json:"compaction_bailed"`
