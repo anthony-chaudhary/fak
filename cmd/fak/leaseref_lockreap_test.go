@@ -231,10 +231,12 @@ func TestGardenTickFoldsSentinelDecisionsNote(t *testing.T) {
 	// Tighten the keep bound so five seeded refusals exceed it and the fold has work.
 	t.Setenv("FAK_GARDEN_SENTINEL_KEEP", "2")
 
-	// Seed the empty-tree sentinel note with five pre-commit refusals (commitSHA=="").
+	// Seed the empty-tree sentinel note with pre-commit refusals (commitSHA==""). The
+	// assertions below relate to THIS seeded count, not to a frozen literal.
+	const seededRefusals = 5
 	rec := witness.NewRecorderForDir(dir)
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := 0; i < seededRefusals; i++ {
 		if err := rec.AppendDecision(ctx, "", witness.Decision{Op: "commit", Verdict: witness.VerdictRefuse, ReasonClass: "OFF_TRUNK"}); err != nil {
 			t.Fatalf("seed refusal %d: %v", i, err)
 		}
@@ -245,8 +247,8 @@ func TestGardenTickFoldsSentinelDecisionsNote(t *testing.T) {
 	if _, _, _, _, _, _, dryFolded := performGardenTick(&dso, &dse, gardenbundle.TickPlan{}, dir, dir, true, false); dryFolded != 0 {
 		t.Fatalf("dry-run folded = %d, want 0 (no side effect under dry-run)", dryFolded)
 	}
-	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != 5 {
-		t.Fatalf("dry-run must not touch the sentinel note, got %d lines, want 5", len(pre))
+	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != seededRefusals {
+		t.Fatalf("dry-run must not touch the sentinel note, got %d lines, want %d", len(pre), seededRefusals)
 	}
 
 	// An acting tick folds the note to the last 2 lines: 3 dropped.

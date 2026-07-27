@@ -299,7 +299,7 @@ func TestCacheBreakDetectorPrefixDigestIsAttributableAndContentFree(t *testing.T
 	// Pure lowercase hex of fixed width is what makes the retained state
 	// structurally incapable of carrying prompt text into a log or journal.
 	for _, part := range []string{a.System, a.Tools, a.History, a.Combined} {
-		if len(part) != 16 {
+		if len(part) != 16 { //boundarylint:ignore CHANGE_DETECTOR_TEST 16 is the fixed hex width of DigestTurnPrefix's hex.EncodeToString(sum[:8]) — a deliberate fixed-width invariant (like sha256 hex being 64), not a growable enumeration total
 			t.Fatalf("digest %q is not the expected 16-hex-char content-free form", part)
 		}
 		if strings.Trim(part, "0123456789abcdef") != "" {

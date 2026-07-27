@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,13 @@ func TestDeepSeekInventoryProvenancePinned(t *testing.T) {
 	if got, want := inv.Revision, "b5968e9190ef611bbf34a7229255be88a0e937c1"; got != want {
 		t.Errorf("revision = %q, want %q (an immutable commit, never a moving tag)", got, want)
 	}
-	if len(inv.Revision) != 40 {
+	// What separates an immutable commit from a moving tag is the SHAPE of the id:
+	// pure lowercase hex at git's object-id width. The hex check is the discriminating
+	// half (a 40-character branch name would pass a bare length test).
+	if strings.Trim(inv.Revision, "0123456789abcdef") != "" {
+		t.Errorf("revision %q is not lowercase hex; a tag or branch name is not immutable", inv.Revision)
+	}
+	if len(inv.Revision) != 40 { //boundarylint:ignore CHANGE_DETECTOR_TEST 40 is git's fixed SHA-1 object-id hex width (the same kind of algorithm invariant as sha256 hex being 64), not a growable enumeration total
 		t.Errorf("revision %q is not a full 40-hex immutable commit", inv.Revision)
 	}
 	if got, want := inv.TotalSizeBytes, int64(864704792696); got != want {

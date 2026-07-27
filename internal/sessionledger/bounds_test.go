@@ -1,6 +1,8 @@
 package sessionledger
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -71,8 +73,15 @@ func TestOversizedContentIsElidedNotStored(t *testing.T) {
 	if err := json.Unmarshal(e.Content, &stub); err != nil {
 		t.Fatalf("stub is not JSON: %v", err)
 	}
-	if !stub.Elided || stub.Bytes != len(big) || len(stub.SHA256) != 64 {
+	if !stub.Elided || stub.Bytes != len(big) {
 		t.Fatalf("stub lost provenance: %+v", stub)
+	}
+	// The digest is provenance only if it is the sha256 OF the bytes that were
+	// dropped. Asserting that relation — rather than freezing the hex width — is
+	// what catches a stub carrying a stale, truncated, or wrong digest.
+	sum := sha256.Sum256(big)
+	if want := hex.EncodeToString(sum[:]); stub.SHA256 != want {
+		t.Fatalf("stub sha256 = %q, want %q (the digest of the elided content)", stub.SHA256, want)
 	}
 	// The elided entry must still verify as a chain member.
 	chain, err := l.Chain("t")

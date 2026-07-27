@@ -20,13 +20,21 @@ func topo(nodes, coresPerNode int) []NUMANodeTopology {
 }
 
 func TestScheduleDecodeNUMA_EvenDistribution(t *testing.T) {
-	// da33 shape: 8 nodes, 32 cores/node, 64 decode workers ⇒ 8 workers per node.
-	s := ScheduleDecodeNUMA(topo(8, 32), 64)
+	// da33 shape: 8 nodes, 32 cores/node, 64 decode workers ⇒ 8 workers per node. The
+	// shape drives both the call and the assertions, so the invariant asserted is
+	// "one placement per requested worker", not the number 64.
+	const (
+		nodes        = 8
+		coresPerNode = 32
+		workers      = 64
+		perNode      = workers / nodes
+	)
+	s := ScheduleDecodeNUMA(topo(nodes, coresPerNode), workers)
 	if !s.Eligible || s.Reason != DecodeNUMAScheduleEligible {
 		t.Fatalf("want eligible, got reason=%q", s.Reason)
 	}
-	if len(s.Placements) != 64 {
-		t.Fatalf("want 64 placements, got %d", len(s.Placements))
+	if len(s.Placements) != workers {
+		t.Fatalf("want %d placements, got %d", workers, len(s.Placements))
 	}
 	if s.Oversubscribed {
 		t.Fatalf("64 workers over 8×32 cores must not oversubscribe")
@@ -40,12 +48,12 @@ func TestScheduleDecodeNUMA_EvenDistribution(t *testing.T) {
 		if p.Worker != i {
 			t.Fatalf("placement %d has worker %d, want ascending", i, p.Worker)
 		}
-		wantNode := i / 8
+		wantNode := i / perNode
 		if p.NodeID != wantNode {
 			t.Fatalf("worker %d homed on node %d, want %d (block-wise)", i, p.NodeID, wantNode)
 		}
-		if p.CPUs[0] != wantNode*32 || len(p.CPUs) != 32 {
-			t.Fatalf("worker %d cpus = %v, want node %d's 32-core block", i, p.CPUs, wantNode)
+		if p.CPUs[0] != wantNode*coresPerNode || len(p.CPUs) != coresPerNode {
+			t.Fatalf("worker %d cpus = %v, want node %d's %d-core block", i, p.CPUs, wantNode, coresPerNode)
 		}
 	}
 }
@@ -70,16 +78,18 @@ func TestScheduleDecodeNUMA_Remainder(t *testing.T) {
 
 func TestScheduleDecodeNUMA_Oversubscribed(t *testing.T) {
 	// 20 workers over 4 nodes of 2 cores ⇒ 5 workers/node > 2 cores ⇒ oversubscribed,
-	// but the placement still covers all 20 workers (kernel time-slices within the node).
-	s := ScheduleDecodeNUMA(topo(4, 2), 20)
+	// but the placement still covers EVERY requested worker (the kernel time-slices
+	// within the node) — that coverage relation is the invariant, not the count 20.
+	const workers = 20
+	s := ScheduleDecodeNUMA(topo(4, 2), workers)
 	if !s.Eligible {
 		t.Fatalf("want eligible, got %q", s.Reason)
 	}
 	if !s.Oversubscribed {
 		t.Fatalf("5 workers over 2 cores/node must flag oversubscribed")
 	}
-	if len(s.Placements) != 20 {
-		t.Fatalf("want 20 placements even when oversubscribed, got %d", len(s.Placements))
+	if len(s.Placements) != workers {
+		t.Fatalf("want %d placements even when oversubscribed, got %d", workers, len(s.Placements))
 	}
 }
 

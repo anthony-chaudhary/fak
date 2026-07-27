@@ -227,8 +227,12 @@ func TestCuratorTakeoverIsNotPersistedIntoInteractiveHistory(t *testing.T) {
 
 	// The background errand builds its request from the standing history plus its
 	// own prompt — that part is legitimate, the harness turn rides this request.
-	sent := append(PersistableTurns(standing), review.Message)
-	if len(sent) != 5 || sent[4].Content != review.Message.Content {
+	// The invariant is "the whole persistable standing history plus exactly the one
+	// harness turn, riding last" — relate the length to that history rather than
+	// freezing today's total, which would only churn when the fixture grows.
+	persisted := PersistableTurns(standing)
+	sent := append(persisted, review.Message)
+	if len(sent) != len(persisted)+1 || sent[len(persisted)].Content != review.Message.Content {
 		t.Fatalf("harness turn must ride its own request: %+v", sent)
 	}
 

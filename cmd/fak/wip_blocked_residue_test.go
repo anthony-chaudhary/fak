@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,9 +35,20 @@ A  cmd/fak/agent_goal_endpoint.go
 func TestParseWipStatusEntriesKeepsPhantomDeleteTwin(t *testing.T) {
 	entries := parseWipStatusEntries(livePorcelain)
 
-	// 8 status lines survive; the ignored (!!) one is dropped.
-	if len(entries) != 8 {
-		t.Fatalf("entries = %d, want 8: %+v", len(entries), entries)
+	// Every status line survives except the ignored (!!) ones, and the deduplicated
+	// view keeps one row per DISTINCT path. Both expectations are derived from the
+	// fixture, so growing livePorcelain re-derives them instead of rotting a frozen
+	// total into a change detector.
+	wantEntries, distinct := 0, map[string]bool{}
+	for _, ln := range strings.Split(strings.TrimSpace(livePorcelain), "\n") {
+		if strings.HasPrefix(ln, "!!") {
+			continue
+		}
+		wantEntries++
+		distinct[strings.TrimSpace(ln[2:])] = true
+	}
+	if len(entries) != wantEntries {
+		t.Fatalf("entries = %d, want %d (every non-ignored status line): %+v", len(entries), wantEntries, entries)
 	}
 	var stagedDelete, untracked int
 	for _, e := range entries {
@@ -56,11 +68,14 @@ func TestParseWipStatusEntriesKeepsPhantomDeleteTwin(t *testing.T) {
 			stagedDelete, untracked)
 	}
 
-	// The deduplicated view still gives the ranking one row per path: 8 entries over 6
-	// distinct paths, because the two phantom-delete twins each collapse.
+	// The deduplicated view still gives the ranking one row per path — fewer rows than
+	// entries, because the two phantom-delete twins each collapse.
 	paths := parseWipStatusPaths(livePorcelain)
-	if len(paths) != 6 {
-		t.Fatalf("deduplicated paths = %d, want 6: %v", len(paths), paths)
+	if len(paths) != len(distinct) {
+		t.Fatalf("deduplicated paths = %d, want %d distinct: %v", len(paths), len(distinct), paths)
+	}
+	if len(paths) >= len(entries) {
+		t.Fatalf("dedup collapsed nothing: %d paths from %d entries, want the twins folded", len(paths), len(entries))
 	}
 	seen := map[string]bool{}
 	for _, p := range paths {

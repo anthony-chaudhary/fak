@@ -366,22 +366,24 @@ func TestCompactSentinelNoteBoundsSentinelNote(t *testing.T) {
 	if err := rec.AppendDecision(ctx, head, Decision{Op: "commit", Verdict: VerdictAllow, Lane: "witness"}); err != nil {
 		t.Fatalf("append commit-anchored: %v", err)
 	}
-	// Five pre-commit refusals all pile onto the single empty-tree sentinel note.
-	for i := 0; i < 5; i++ {
+	// The pre-commit refusals all pile onto the single empty-tree sentinel note. The
+	// assertions below relate to THIS seeded count, not to a frozen literal.
+	const seededRefusals = 5
+	for i := 0; i < seededRefusals; i++ {
 		if err := rec.AppendDecision(ctx, "", Decision{Op: "commit", Verdict: VerdictRefuse, ReasonClass: "OFF_TRUNK"}); err != nil {
 			t.Fatalf("append pre-commit refusal %d: %v", i, err)
 		}
 	}
-	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != 5 {
-		t.Fatalf("sentinel should hold 5 refusals before the fold, got %d", len(pre))
+	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != seededRefusals {
+		t.Fatalf("sentinel should hold %d refusals before the fold, got %d", seededRefusals, len(pre))
 	}
 
 	// maxLines <= 0 is a fail-safe no-op: it must NOT truncate the record.
 	if dropped, err := rec.CompactSentinelNote(ctx, 0); err != nil || dropped != 0 {
 		t.Fatalf("compact(0) = (%d,%v), want (0,nil) fail-safe", dropped, err)
 	}
-	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != 5 {
-		t.Fatalf("compact(0) must keep all 5, got %d", len(pre))
+	if pre, _ := rec.ReadDecisions(ctx, ""); len(pre) != seededRefusals {
+		t.Fatalf("compact(0) must keep all %d, got %d", seededRefusals, len(pre))
 	}
 
 	// Fold to the last 2 refusals: 3 dropped.

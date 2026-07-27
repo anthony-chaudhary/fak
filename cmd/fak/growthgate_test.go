@@ -70,11 +70,14 @@ func TestGatherGrowthArtifacts(t *testing.T) {
 		}
 	}
 	// The three append-only suffixes PLUS the two .dispatch-runs/ sidecars admitted
-	// by path regardless of suffix — but NOT the top-level .txt/.json repo files.
-	if len(arts) != 5 {
-		t.Fatalf("gathered %d artifacts, want 5: %v", len(arts), got)
+	// by path regardless of suffix — but NOT the top-level .txt/.json repo files. The
+	// invariant is "exactly the admitted set and nothing else", so size the assertion
+	// off that set rather than freezing today's total.
+	admitted := []string{"a.jsonl", "b.log", "c.err", "run.witness", "trace.json"}
+	if len(arts) != len(admitted) {
+		t.Fatalf("gathered %d artifacts, want the %d admitted: %v", len(arts), len(admitted), got)
 	}
-	for _, want := range []string{"a.jsonl", "b.log", "c.err", "run.witness", "trace.json"} {
+	for _, want := range admitted {
 		if !got[want] {
 			t.Errorf("gatherer missed %s", want)
 		}
