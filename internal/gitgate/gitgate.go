@@ -592,8 +592,22 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 	sub := args[i]
 	rest := args[i+1:]
 
-	if sub == "rebase" {
-		return neverAmendSharedLaw + " rebase refused: merge the trunk in place instead.", true
+	// A rebase that ADVANCES history stays categorically refused on the shared
+	// trunk. The rebase STATE-CONTROL forms are not that act and no longer ride the
+	// same refusal: `--abort` restores the pre-rebase HEAD and working tree (it is
+	// the UNDO), `--quit` drops the rebase state without moving history further, and
+	// `--show-current-patch` only reads. Refusing those made the law self-refuting —
+	// a checkout that is ALREADY mid-rebase (started by a human, by another tool, or
+	// by a `pull.rebase=true` config, none of which this argv-only rung can see) then
+	// had no sanctioned exit, so the tree stayed parked in a conflicted detached-HEAD
+	// state that fails every peer's commit in the shared checkout. That is the very
+	// outcome the law exists to prevent, reached by refusing the repair — the
+	// self-refuting-remedy loop this file already warns about for --autostash
+	// (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md). `--continue` and `--skip`
+	// keep applying commits, so they keep advancing the rewrite and stay refused;
+	// because `--abort` is always available as the safe exit, nothing is trapped.
+	if sub == "rebase" && !rebaseStateControlOnly(rest) {
+		return neverAmendSharedLaw + " rebase refused: merge the trunk in place instead. If a rebase is ALREADY in progress, `git rebase --abort` (restore the pre-rebase HEAD and working tree) is allowed and is the sanctioned exit.", true
 	}
 
 	// The refspec spellings of force-push and remote-delete (see the law consts):
@@ -726,6 +740,30 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 // appears (everything after it is a pathspec) or, for `push`, when a bare
 // (non-flag) operand follows, which git treats as a pathspec. `save` takes only
 // a message, never a pathspec, so `git stash save ...` is always whole-tree.
+// rebaseStateControlOnly reports whether a `git rebase` argv carries ONLY
+// non-advancing rebase state control: `--abort` (restore the pre-rebase HEAD and
+// working tree), `--quit` (drop the rebase state in place), or
+// `--show-current-patch` (read the stopped-at commit). It is deliberately
+// whole-argv and allow-listed, not a "contains --abort" scan: it requires at least
+// one such flag AND admits nothing else on the line, so a revision operand, a
+// `--continue`/`--skip`, or any other flag drops straight back to the categorical
+// refusal. That is what keeps the exemption unlaunderable — there is no argv of the
+// form `git rebase --abort <anything>` that rides it into a real rebase.
+func rebaseStateControlOnly(rest []string) bool {
+	found := false
+	for _, t := range rest {
+		switch {
+		case t == "--abort", t == "--quit":
+			found = true
+		case t == "--show-current-patch", strings.HasPrefix(t, "--show-current-patch="):
+			found = true
+		default:
+			return false
+		}
+	}
+	return found
+}
+
 func isUnscopedStashCreate(rest []string) bool {
 	// Skip leading valueless flags to find the stash subcommand word (e.g.
 	// `git stash -k` / `git stash --keep-index` is still a bare create).
