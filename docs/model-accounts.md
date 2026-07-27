@@ -323,6 +323,101 @@ never down, which is what makes accepting complexity as an input safe at all.
 `Roster.PlaceSubject(subject, candidates)` composes the two and returns the placement
 *and* the classification, so both halves of the decision are visible together.
 
+### Seeing the ladder before it moves traffic: `fak route --place`
+
+```console
+$ fak route --accounts accounts.json --place --labels work_class=routine
+```
+
+The oracle walks the ladder for one subject against your real roster and prints the rung
+it chose, every rung it passed over, and the closed reason token for each. It exists
+*before* anything on the dispatch path calls `Place`, deliberately: a placement policy
+nobody can inspect is a policy nobody can be held to, and an operator has to be able to
+see what the ladder would do with **their** roster before fak starts moving traffic on
+the strength of it. Add `--json` for the same answer as a report.
+
+The candidate pool is every model the roster **binds**, not just the one routing picked —
+the question is which rung can serve this class of work at all. Compatibility-only and
+deprecated-alias bindings are excluded, since admitting a legacy spelling would let the
+same hardware appear twice on a rung.
+
+### Saying what a model can do
+
+Because unmeasured capability may not descend the ladder, a fresh roster places
+*everything* on the vendor rung — correctly, and uselessly. There are three ways to give
+the ladder something to descend on, in increasing order of what they cost to produce:
+
+| Flag | What it is | What it costs to be wrong |
+| --- | --- | --- |
+| `--capability qwen3.6-4b=t2,glm-5.2=t1` | an operator **asserting** a grade | attributable to a person, but does not scale past a handful of models |
+| `--evidence FILE` | a summary of observed outcomes, graded here | someone assembled the counts; you are trusting their arithmetic |
+| `--outcomes FILE` | the append-only turn journal, **counted here** | nothing is trusted but the record itself |
+
+All three feed one grader (`modelroute.GradeCapability`), and its bar is yours:
+
+```console
+$ fak route --accounts accounts.json --place --labels work_class=routine \
+    --outcomes turns.jsonl --since 30d --grade-floor attempts=50,rate=0.9,witness
+```
+
+The default bar is 20 independently verified attempts at 80%. There is deliberately **no
+knob that makes self-report count** — a model's own claim of 500/500 successes buys
+nothing, and the refused attempts are reported *as refused* rather than as absent. An
+operator who wants to assert a capability can already do so, attributably, with
+`--capability`. A model claimed by both an assertion and a measurement is a named
+refusal: they cannot both be the grade.
+
+A grade is the **floor** of the work observed, never its optimal tier, and a model that
+fails the bar is `UNMEASURED` **with a reason** rather than graded at the worst tier. The
+three reasons call for opposite responses and are never collapsed into one:
+
+| Reason | The fix |
+| --- | --- |
+| `no-trusted-evidence` | run the turns under a witness or a judge — the volume is there, the provenance is not |
+| `insufficient-samples` | run more turns, or lower `attempts=` if you meant to |
+| `below-success-floor` | this model cannot do this work; that is the answer |
+
+### Grading from the turn journal
+
+`--outcomes` reads the record itself — one JSON object per line, appended as turns
+happen (`modelroute.TurnOutcome`):
+
+```jsonl
+{"id":"t-4471","model":"qwen3.6-4b","class":"routine","zone":"device","success":true,"verify":"witness","at":"2026-07-24T11:02:00Z"}
+```
+
+The fold is written to **lose** evidence rather than invent it, because each alternative
+inflates a claim, and it reports every loss:
+
+```
+  journal      turns.jsonl: 1463 line(s), 1332 counted, 4 model(s) with evidence
+  not counted  1 unparseable line(s), 30 replayed id(s), 60 older than 30d, 40 undated
+```
+
+- A repeated `id` is counted **once**. Replaying a file is the cheapest possible way to
+  manufacture a grade: the same 20 successes appended three times must not read as 60.
+- An **undated** row cannot be shown to be inside a window, so `--since` excludes it — and
+  counts it apart from a stale one, because one needs a wider window and the other needs a
+  producer that stamps its rows. Ask for no window and a missing date costs nothing.
+- **Provenance is never merged.** 100 self-reported turns and 20 witnessed ones about the
+  same model stay two rows; merging them would force a pick of provenance, and any pick
+  is a lie. The grade keeps the weakest provenance behind whatever it merged.
+- A **torn line** is skipped and counted, never fatal. A fleet appending to this file will
+  eventually die mid-write, and discarding thousands of verified turns over one partial
+  row would make the honest path the fragile one.
+- Rows with no `id` are kept — a missing id is not proof of a duplicate — but reported as
+  a corpus that **cannot be checked for replay**, since that is a fact about how much the
+  number is worth.
+
+`--evidence` and `--outcomes` are mutually exclusive: a run that took some of its answer
+from a journal and some from a hand-written summary produces a grade whose provenance
+nobody can state afterwards.
+
+**What is not shipped:** nothing yet *writes* this journal. `internal/ablate`'s
+`StubTierScorer` still grades nothing, so today the file is something you produce — from
+DOS's git witness, a judge score, or your own harness. That producer is the one piece
+standing between this ladder and traffic that moves by itself.
+
 ## A note on codex and Anthropic subscriptions
 
 Codex's native wire is the OpenAI Responses API, so bind it to `kind: openai-responses`,
