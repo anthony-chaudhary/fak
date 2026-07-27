@@ -44,10 +44,15 @@ func applyModelDowngrade(backend string, target int, records []dispatchtick.Witn
 // witnessed failure (a context-balloon/restart-limit starvation is not a model-switchable
 // wall like usage_cap / model_unknown / rate_limit).
 //
-// Only the AUTOMATIC pins are gated — modelSourceTier and modelSourceWorkClass. An explicit
-// --worker-model pin, a lane_models pin, and the benchmark gate are deliberate operator
-// intent and always win, matching the resolver's stated precedence doctrine; the gate exists
-// to protect the worker from a TABLE's choice, not to override a human's.
+// Only the AUTOMATIC pins are gated — modelSourceTier, modelSourceWorkClass and
+// modelSourceRung. An explicit --worker-model pin, a lane_models pin, and the benchmark gate
+// are deliberate operator intent and always win, matching the resolver's stated precedence
+// doctrine; the gate exists to protect the worker from a TABLE's choice, not to override a
+// human's. The placement ladder (#5416 track E) belongs on the gated side for the same
+// reason the tier table does, and more so: it picks a rung from a corpus of past outcomes,
+// which says a model CAN do this class of work and says nothing about whether it can hold
+// this issue's work SHAPE. Those are different questions, and this is the one that asks the
+// second.
 //
 // fired is false for every other source, an unpinned seat default, a surgical shape, and an
 // unknown shape (an untagged or contradictorily-tagged issue) — so a default fleet tick is
@@ -59,7 +64,9 @@ func applyModelDowngrade(backend string, target int, records []dispatchtick.Witn
 // placement becomes opus+ultracode, not a bare opus. The chain drops the safe model AND keeps
 // the refused one dropped, so a later downgrade never re-offers the model that cannot hold it.
 func applyPlacementGate(p workerModelPolicy, shape dispatchtick.WorkShape) (workerModelPolicy, bool) {
-	if p.Source != modelSourceTier && p.Source != modelSourceWorkClass {
+	switch p.Source {
+	case modelSourceTier, modelSourceWorkClass, modelSourceRung:
+	default:
 		return p, false
 	}
 	v := dispatchtick.AssessPlacement(shape, p.Model)

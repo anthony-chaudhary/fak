@@ -543,6 +543,19 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	// default fleet tick is byte-identical to before this seam.
 	tierProfile, tierBucket := dispatchTierLaunchProfile(opts.Backend, labels, opts.WorkKind)
 	modelPolicy := resolveWorkerModelPolicy(opts.Backend, pick.Lane, opts.WorkerModel, account, dispatchTickPolicy(root), opts.PinWorkerModel, tierProfile, opts.WorkClassModel)
+	// Opt-in automatic placement ladder (FLEET_DISPATCH_RUNG_PLACEMENT, #5416 track E): grade
+	// the roster's bound models from the turn journal and start this worker on the cheapest
+	// rung the evidence supports, instead of the seat's vendor default. Lowest precedence of
+	// all — it can only fill a seat default — and it runs BEFORE the capacity reroute and the
+	// preventive placement gate below, so a live wall and a shape mismatch both still overrule
+	// it. Seam off adds no payload key, so a default tick is byte-identical. The result is
+	// adopted only on the no-skip branch, so a named refusal cannot move a worker's model no
+	// matter what a future edit to the resolver returns alongside its reason.
+	if pinned, rungSkip := applyRungPlacement(root, labels, modelPolicy); rungSkip != "" {
+		payload["rung_pin_skipped"] = rungSkip
+	} else {
+		modelPolicy = pinned
+	}
 	if opts.CapacityReason != "" {
 		reroute := modelroute.RerouteCapacity(opts.CapacityFrom, modelroute.CapacitySignal{Blocked: true, Reason: opts.CapacityReason, RequiredModelB: opts.RequiredModelB, RequiredContext: opts.RequiredContext}, opts.CapacityTargets)
 		payload["capacity_reroute"] = reroute
