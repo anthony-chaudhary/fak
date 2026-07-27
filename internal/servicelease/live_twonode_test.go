@@ -511,6 +511,20 @@ func (h *liveHarness) firstOwnedAtMSSince(node string, mark int) int64 {
 	return 0
 }
 
+// sampledOwner reports the ownership the sampler most recently OBSERVED on the
+// claim channel ("" if none). It lags ownerNow by up to one liveSampleTick plus
+// the owner's claim-file write: ownerNow reads the table's grant, this reads
+// what the on-disk claims actually prove. A fault that must be witnessed in the
+// timeline has to bind here, not on the table.
+func (h *liveHarness) sampledOwner() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if n := len(h.timeline); n > 0 {
+		return h.timeline[n-1].owner
+	}
+	return ""
+}
+
 func orNone(s string) string {
 	if s == "" {
 		return "-"
@@ -649,11 +663,39 @@ func TestLiveTwoNodeFencedOwnership(t *testing.T) {
 	if lost == "beta" {
 		survivor = "alpha"
 	}
+	// The post-reboot grant is a TABLE fact the instant Acquire is served, but
+	// the ownership timeline only records an owner once that node has published
+	// its claim file and the sampler has accepted it. The reassignment above is
+	// therefore observable to the control plane up to a sample tick before it
+	// is observable on the claim channel, and the fault below is applied within
+	// microseconds of observing it. Killing the fresh owner inside that window
+	// destroys the process BEFORE it ever writes a claim, so the timeline never
+	// records it at all and the run ends with one distinct owner — the
+	// cross-node handoff check then fails on the fault's timing, not on the
+	// fencing logic. That is the ci-fast flake "only map[alpha:true] ever
+	// owned" (~2 of 11 runs, interleaved with green runs on both older and
+	// newer tips; reproduced locally at 1 of 10). Wait for the claim channel to
+	// catch up first, so the fault lands on an owner the run has actually
+	// witnessed owning.
+	h.waitFor("the sampler to witness "+lost+" holding an accepted claim", func() bool {
+		return h.sampledOwner() == lost
+	})
 	held, _ := h.leaseNow()
 	mark := h.mark()
 	h.kill(lost)
 	h.waitOwner(survivor, "the surviving node to take over after lease expiry")
-	if at := h.firstOwnedAtMSSince(survivor, mark); at != 0 && at < held.ExpiresMS {
+	// Same seam on the takeover side: waitOwner binds on the TABLE, so it
+	// returns the instant the takeover Acquire is served, up to a sample tick
+	// before the timeline records it. Bind on the claim channel too, or both
+	// timeline-derived checks race that tick — the premature-reassignment check
+	// just below silently no-ops on an unsighted survivor (measured: the
+	// survivor was still unsighted here on 4 of 10 local runs), and the
+	// cross-node-handoff check at the end of the run reads a timeline that has
+	// not caught up.
+	h.waitFor("the sampler to witness "+survivor+" holding an accepted claim", func() bool {
+		return h.firstOwnedAtMSSince(survivor, mark) != 0
+	})
+	if at := h.firstOwnedAtMSSince(survivor, mark); at < held.ExpiresMS {
 		t.Fatalf("%s became valid owner at %d, before the held lease expired at %d: premature reassignment",
 			survivor, at, held.ExpiresMS)
 	}
