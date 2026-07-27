@@ -216,11 +216,16 @@ func summarizeAdmission(results []AdmissionResult) AdmissionVerdict {
 // aggregate arithmetic the read-backs quote); a rank's usable HBM is slightly lower, so
 // a refusal derived from the nominal figure is the CONSERVATIVE direction — the real
 // shortfall is larger, never smaller.
+//
+// GPUModel carries the device CLASS and its nominal capacity only. The board-interconnect
+// SKU suffix that tools/scrub_hardware_names.py treats as an unconditional lab tell is
+// dropped: it identifies the operator's private box without changing any number derived
+// below, and TestDeepSeekInventoryScrubbed keeps it out mechanically.
 func witnessedNodes() []NodeCapacity {
 	return []NodeCapacity{
 		{
 			Name:           "node-a",
-			GPUModel:       "NVIDIA A100-SXM4-80GB",
+			GPUModel:       "NVIDIA A100-80GB",
 			GPUCount:       8,
 			FreeGPUCount:   6,
 			HBMBytesPerGPU: 80 * bytesPerGiB,
@@ -266,7 +271,11 @@ func DeepSeekV4ProInventory() DeepSeekInventory {
 		License:        "MIT",
 		Gated:          false,
 		Source:         "huggingface",
-		TotalSizeBytes: 864704792696,
+		// The one pinned artifact size for the whole package: the placement seam
+		// (#4801) already exports it as ArtifactBytes and measures its reservation bars
+		// against it. Re-typing the literal here would let the two sibling records drift
+		// onto different artifacts while both still claim to describe this revision.
+		TotalSizeBytes: ArtifactBytes,
 
 		ModelType:       "deepseek_v4",
 		Layers:          61,

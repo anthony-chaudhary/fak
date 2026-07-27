@@ -26,7 +26,7 @@
   "witnessed_nodes": [
     {
       "name": "node-a",
-      "gpu_model": "NVIDIA A100-SXM4-80GB",
+      "gpu_model": "NVIDIA A100-80GB",
       "gpu_count": 8,
       "free_gpu_count": 6,
       "hbm_bytes_per_gpu": 85899345920,
@@ -104,5 +104,5 @@
   "provision_issue": 4788,
   "placement_issue": 4801,
   "consumer_issue": 4781,
-  "digest": "7c4653488b6de3cd8ca21967ed14abf9c118d9fcb63b5d8572c81ca3a3a06ff4"
+  "digest": "5cf9f1a65440a403a01ee456b6a9afc3a87ff9b43e6d6d68725096a8ab4f2e9d"
 }

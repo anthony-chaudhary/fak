@@ -289,6 +289,10 @@ func TestDeepSeekInventoryScrubbed(t *testing.T) {
 		"/mnt/", "/projects/", "/home/", "c:\\",
 		"auth_token", "access_token", "api_token", "bearer ",
 		"password", "secret", "api_key", "apikey", "private_key",
+		// The unconditional hardware tells tools/scrub_hardware_names.py names: these
+		// strings are only ever the operator's private lab box, and they carry no
+		// capacity information the HBM fields do not already state.
+		"sxm4", "dgx", "da33",
 	} {
 		if bytes.Contains(blob, []byte(needle)) {
 			t.Errorf("inventory leaks %q; the public artifact carries node-class labels only", needle)
@@ -321,5 +325,74 @@ func TestDeepSeekInventoryGolden(t *testing.T) {
 	if !bytes.Equal(bytes.TrimRight(want, "\n"), bytes.TrimRight(got, "\n")) {
 		t.Errorf("inventory drifted from golden %s — a provisioning fact changed; re-run with "+
 			"UPDATE_GOLDEN=1 ONLY if intended:\n got: %s\nwant: %s", golden, got, want)
+	}
+}
+
+// TestDeepSeekInventoryGoldenIsConsumable reads the recorded artifact BACK off disk and
+// treats it the way #4781 must: parse it, verify its digest, then RE-DERIVE every
+// admission verdict from the capacities the file itself records. The golden test above
+// only proves the code still emits these bytes; this one proves the bytes are a
+// self-standing, arithmetically coherent record — a consumer reaching the same refusal
+// from the file alone. It is the check that would catch a hand-edited verdict, a node
+// whose recorded aggregate does not match its own rank count, or a digest left stale
+// after a manual tweak.
+func TestDeepSeekInventoryGoldenIsConsumable(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "deepseek_v4_pro_inventory.json"))
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	var inv DeepSeekInventory
+	if err := json.Unmarshal(raw, &inv); err != nil {
+		t.Fatalf("the recorded artifact does not parse as the schema it claims: %v", err)
+	}
+
+	if got, want := inv.Schema, DeepSeekInventorySchema; got != want {
+		t.Errorf("recorded schema = %q, want %q", got, want)
+	}
+	if !inv.VerifyDigest() {
+		t.Error("the on-disk artifact fails its own digest; a consumer cannot trust it after transport")
+	}
+	if got, want := inv.TotalSizeBytes, ArtifactBytes; got != want {
+		t.Errorf("recorded artifact = %d bytes but the placement seam reserves for %d; the two "+
+			"sibling records would be describing different artifacts", got, want)
+	}
+	if len(inv.WitnessedNodes) == 0 || len(inv.Admission) != len(inv.WitnessedNodes) {
+		t.Fatalf("recorded %d witnessed nodes and %d verdicts; every node must carry exactly one",
+			len(inv.WitnessedNodes), len(inv.Admission))
+	}
+
+	for i, n := range inv.WitnessedNodes {
+		got := inv.Admission[i]
+		if got.Node != n.Name {
+			t.Errorf("verdict %d is for %q but node %d is %q; the two lists are misaligned",
+				i, got.Node, i, n.Name)
+			continue
+		}
+		if n.FreeGPUCount > n.GPUCount {
+			t.Errorf("node %s records %d free of %d ranks, which is not physically possible",
+				n.Name, n.FreeGPUCount, n.GPUCount)
+		}
+		if want := int64(n.GPUCount) * n.HBMBytesPerGPU; got.AggregateHBMBytes != want {
+			t.Errorf("node %s: recorded aggregate HBM %d, but %d ranks x %d bytes = %d",
+				n.Name, got.AggregateHBMBytes, n.GPUCount, n.HBMBytesPerGPU, want)
+		}
+		if want := int64(n.FreeGPUCount) * n.HBMBytesPerGPU; got.FreeHBMBytes != want {
+			t.Errorf("node %s: recorded free HBM %d, but %d free ranks x %d bytes = %d",
+				n.Name, got.FreeHBMBytes, n.FreeGPUCount, n.HBMBytesPerGPU, want)
+		}
+		// The load-bearing check: the recorded verdict must be what the shared derivation
+		// produces from the recorded capacity, not prose typed in beside it.
+		if want := admitNode(n, inv.TotalSizeBytes); got != want {
+			t.Errorf("node %s: recorded verdict does not re-derive from its own capacity\n got: %+v\nwant: %+v",
+				n.Name, got, want)
+		}
+	}
+
+	if got, want := inv.AdmissionSummary, summarizeAdmission(inv.Admission); got != want {
+		t.Errorf("recorded summary = %s, but the recorded per-node verdicts roll up to %s", got, want)
+	}
+	if inv.RuntimeWitnessed {
+		t.Error("the recorded artifact claims runtime_witnessed = true; no inference has run and " +
+			"placement is still refused, so the file would be asserting a witness it does not carry")
 	}
 }
