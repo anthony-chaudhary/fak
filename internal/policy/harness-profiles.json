@@ -22,7 +22,8 @@
       "arg": "command",
       "rules": [
         { "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b" },
-        { "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk|Clear-Content)\\b" },
+        { "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b" },
+        { "deny_regex": "(?i)\\bClear-Content\\b" },
         { "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b" },
         { "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b" },
         { "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b" }
