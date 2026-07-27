@@ -92,24 +92,61 @@ type placementReport struct {
 	Placement      modelroute.Placement      `json:"placement"`
 	Candidates     []modelroute.Candidate    `json:"candidates"`
 	MeasuredCount  int                       `json:"measured_candidates"`
+	Grades         []modelroute.Grade        `json:"grades,omitempty"`
+	IgnoredModels  []string                  `json:"ignored_evidence_models,omitempty"`
+}
+
+// placeOptions are the two ways a caller may say what a model can do, plus the render
+// choice. They are one struct so that adding a third source of capability later is a
+// change to this type rather than to every call site's argument order.
+type placeOptions struct {
+	CapSpec      string // --capability: an operator ASSERTING a grade
+	EvidencePath string // --evidence: outcomes the grader turns into one
+	JSON         bool
 }
 
 // runRoutePlace walks the zone ladder for one subject against one roster and reports it.
 // Exit codes match the rest of `fak route`: 0 ok, 1 a placement/roster failure, 2 usage.
-func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj modelroute.Subject, capSpec string, asJSON bool) int {
+func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj modelroute.Subject, opts placeOptions) int {
 	if roster == nil {
 		fmt.Fprintln(stderr, "fak route: --place needs --accounts FILE — a rung is a property of the roster (which accounts you have and what kind each is), not of the routing manifest")
 		return 2
 	}
-	declared, err := capabilityDeclarations(capSpec)
+	declared, err := capabilityDeclarations(opts.CapSpec)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak route:", err)
 		return 2
+	}
+	var (
+		evidence map[string][]modelroute.ClassEvidence
+		floor    modelroute.GradeFloor
+	)
+	if opts.EvidencePath != "" {
+		if evidence, floor, err = loadPlacementEvidence(opts.EvidencePath); err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 2
+		}
+		// One model, two sources of truth about what it can do, is a configuration error.
+		// Preferring either one silently would leave the operator reading a grade whose
+		// origin they cannot tell — so name the models and refuse.
+		if clash := conflictingDeclarations(declared, evidence); len(clash) > 0 {
+			fmt.Fprintf(stderr, "fak route: --capability and --evidence both claim a capability for %s; "+
+				"a measurement and an assertion cannot both be the grade — drop it from one of them\n",
+				strings.Join(clash, ", "))
+			return 2
+		}
 	}
 	candidates := placementCandidates(*roster, declared)
 	if len(candidates) == 0 {
 		fmt.Fprintln(stderr, "fak route: --place: the roster binds no models, so there is nothing to place; add a binding or use --accounts-check to inspect it")
 		return 1
+	}
+	var (
+		grades  []modelroute.Grade
+		ignored []string
+	)
+	if evidence != nil {
+		candidates, grades, ignored = gradedPool(candidates, evidence, floor)
 	}
 
 	p, cls, err := roster.PlaceSubject(subj, candidates)
@@ -124,14 +161,18 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 			measured++
 		}
 	}
-	if asJSON {
+	if opts.JSON {
 		b, _ := json.MarshalIndent(placementReport{
 			Classification: cls, Placement: p, Candidates: candidates, MeasuredCount: measured,
+			Grades: grades, IgnoredModels: ignored,
 		}, "", "  ")
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
 	printPlacement(stdout, p, cls, candidates, measured)
+	if grades != nil {
+		printGrades(stdout, grades, floor, ignored)
+	}
 	return 0
 }
 
@@ -163,8 +204,9 @@ func printPlacement(w io.Writer, p modelroute.Placement, cls modelroute.Classifi
 	fmt.Fprintf(w, "  candidates   %d bound model(s), %d with a MEASURED capability\n", len(candidates), measured)
 	if measured == 0 {
 		fmt.Fprintln(w, "  note         no candidate carries a measured capability, so no cheap rung was eligible:")
-		fmt.Fprintln(w, "               an asserted grade may not win a device or fleet rung. Declare what you have")
-		fmt.Fprintln(w, "               measured with --capability model=t0|t1|t2 to let the ladder descend.")
+		fmt.Fprintln(w, "               an asserted grade may not win a device or fleet rung. Give the ladder a")
+		fmt.Fprintln(w, "               measurement to descend on: --capability model=t0|t1|t2, or --evidence FILE")
+		fmt.Fprintln(w, "               to grade from observed outcomes (see the per-model reasons below).")
 	}
 	if !cls.Declared {
 		fmt.Fprintln(w, "  note         nothing declared what this work IS, so it took the strictest floor. The")

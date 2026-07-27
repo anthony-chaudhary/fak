@@ -40,8 +40,14 @@ func routePlaceRoster() modelroute.Roster {
 // routePlaceRun invokes the oracle and returns (exit, stdout, stderr).
 func routePlaceRun(t *testing.T, roster *modelroute.Roster, labels map[string]string, capSpec string, asJSON bool) (int, string, string) {
 	t.Helper()
+	return routePlaceRunOpts(t, roster, labels, placeOptions{CapSpec: capSpec, JSON: asJSON})
+}
+
+// routePlaceRunOpts is the same, for the cases that exercise more than --capability.
+func routePlaceRunOpts(t *testing.T, roster *modelroute.Roster, labels map[string]string, opts placeOptions) (int, string, string) {
+	t.Helper()
 	var out, errBuf bytes.Buffer
-	code := runRoutePlace(&out, &errBuf, roster, modelroute.Subject{Labels: labels}, capSpec, asJSON)
+	code := runRoutePlace(&out, &errBuf, roster, modelroute.Subject{Labels: labels}, opts)
 	return code, out.String(), errBuf.String()
 }
 

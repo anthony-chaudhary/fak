@@ -73,6 +73,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	accountsCover := fs.String("accounts-cover", "", "cross-check an account roster against the routing manifest's routed ids and report coverage (exit 1 if any id is unbound)")
 	place := fs.Bool("place", false, "walk the zone ladder (device -> fleet -> vendor) for this subject and report which rung serves it; needs --accounts")
 	capability := fs.String("capability", "", "declare MEASURED per-model capability tiers for --place: model=t0|t1|t2[,...] (undeclared = unmeasured, which may not descend the ladder)")
+	evidence := fs.String("evidence", "", "grade per-model capability for --place from a JSON file of OBSERVED outcomes {floor,evidence} instead of asserting it; self-reported outcomes are refused")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
 	capacityReason := fs.String("capacity-reason", "", "capacity block reason token")
 	capacityFrom := fs.String("capacity-from", "", "currently blocked target")
@@ -209,7 +210,9 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 
 	// --place asks the orthogonal question: not which model, but which RUNG runs it.
 	if *place {
-		return runRoutePlace(stdout, stderr, roster, subj, *capability, *asJSON)
+		return runRoutePlace(stdout, stderr, roster, subj, placeOptions{
+			CapSpec: *capability, EvidencePath: *evidence, JSON: *asJSON,
+		})
 	}
 
 	if *asJSON {
