@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Keep this checkout at one-worktree-on-master, safely (worktree_doctor.py). Retains: fak-v0.1.</Description>
+    <URI>\FleetWorktreeDoctor</URI>
+  </RegistrationInfo>
+  <Principals>
+    <Principal id="Author">
+      <UserId>%FLEET_TASK_USER_SID%</UserId>
+      <LogonType>S4U</LogonType>
+    </Principal>
+  </Principals>
+  <Settings>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT15M</ExecutionTimeLimit>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <IdleSettings>
+      <Duration>PT10M</Duration>
+      <WaitTimeout>PT1H</WaitTimeout>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+  </Settings>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-06-19T03:30:00-07:00</StartBoundary>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "===== $((Get-Date -Format o)) =====" | Out-File -FilePath '%LOCALAPPDATA%\Fleet\watchdog\worktree_doctor.log' -Append -Encoding UTF8; &amp; 'C:\Program Files\Python313\python.exe' -X utf8 "C:\work\fleet\tools\worktree_doctor.py" --repo "C:\work\fleet" --fetch --prune --prune-branches --allow-branch fak-v0.1 2&gt;&amp;1 | Out-File -FilePath '%LOCALAPPDATA%\Fleet\watchdog\worktree_doctor.log' -Append -Encoding UTF8"</Arguments>
+      <WorkingDirectory>C:\work\fleet</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

@@ -64,12 +64,19 @@ const (
 // costs ownership, and the heartbeat timeout is short enough that a 1s silence
 // is unambiguously a partition.
 const (
-	liveTTLMS         int64 = 3000
+	// The lease TTL has to comfortably outlast a REAL process restart, because the
+	// property under test is "a local restart under the same incarnation does not move
+	// ownership" -- not "a restart beats N milliseconds". A tight TTL couples the
+	// assertion to process-spawn latency, so a cold re-exec (first spawn of a freshly
+	// built binary, or any loaded box) expires the lease mid-restart and the control
+	// plane correctly reassigns -- a green control plane failing a red test. Observed
+	// on Windows: a cold child took ~3.5s to renew, overrunning a 3000ms TTL.
+	liveTTLMS         int64 = 12000
 	liveHBTimeoutMS   int64 = 500
 	liveTickMS              = 120
 	liveReconcileTick       = 40 * time.Millisecond
 	liveSampleTick          = 25 * time.Millisecond
-	liveWaitTimeout         = 30 * time.Second
+	liveWaitTimeout         = 90 * time.Second
 	liveChildDeadline       = 3 * time.Minute
 )
 

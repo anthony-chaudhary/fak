@@ -27,6 +27,7 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 	stamp := fs.Bool("stamp", false, "append changed-module rows to the ledger")
 	ledger := fs.String("ledger", defaultModverLedger, "ledger path (repo-relative unless absolute)")
 	scoresPath := fs.String("scores", "", `flat {"module": number} JSON file to join as scores`)
+	coveragePath := fs.String("coverage", "", "go coverage profile (go test -coverprofile) to fold into per-module statement coverage and join as scores")
 	only := fs.String("only", "", "show only modules whose name has this prefix (e.g. internal/, cmd/fak, or tools/)")
 	sortKey := fs.String("sort", "name", "sort order for display: name|rev|date")
 	top := fs.Int("top", 0, "show only the first N modules after sorting (0 = all)")
@@ -36,6 +37,12 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "fak version modules: unexpected args: %v\n", fs.Args())
+		return 2
+	}
+	if *scoresPath != "" && *coveragePath != "" {
+		// Both write the same score column; silently letting one win would make
+		// the joined number's origin unreadable in the ledger.
+		fmt.Fprintln(stderr, "fak version modules: --scores and --coverage both set the module score; pass one")
 		return 2
 	}
 	root := resolveRoot(pathutil.ExpandTilde(*dir))
@@ -68,6 +75,11 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 		matched := rep.JoinScores(scores)
 		fmt.Fprintf(stderr, "fak version modules: joined %d/%d scores\n", matched, len(scores))
 	}
+	if *coveragePath != "" {
+		if code := joinCoverageScores(stderr, root, *coveragePath, &rep); code != 0 {
+			return code
+		}
+	}
 	if *stamp {
 		// --stamp always operates on the full report: the --only/--sort/--top
 		// flags are a display view only, and stamping a filtered subset would
@@ -87,6 +99,36 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	renderModuleReportN(stdout, view, len(rep.Modules))
+	return 0
+}
+
+// joinCoverageScores folds a go coverage profile into per-module statement
+// coverage and joins it as the report's score (#2467). Joining HERE — inside the
+// same run, before --stamp reads the report — is what lets one command,
+// `fak version modules --coverage coverage.out --stamp`, land a ledger stamp
+// with coverage joined; the --scores path needs a separately produced file.
+//
+// The profile names files by import path, so the fold needs this repo's module
+// path from go.mod to recover repo-relative paths. The joined score is labeled
+// witnessed: it is measured off a real run's artifact, not modeled.
+func joinCoverageScores(stderr io.Writer, root, profile string, rep *modver.Report) int {
+	b, err := os.ReadFile(pathutil.ExpandTilde(profile))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak version modules: %v\n", err)
+		return 2
+	}
+	modulePath, err := readModulePath(filepath.Join(root, "go.mod"))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak version modules: read module path: %v\n", err)
+		return 1
+	}
+	coverage, err := modver.CoverageScores(b, modulePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak version modules: %v\n", err)
+		return 2
+	}
+	matched := rep.JoinScores(modver.CoverageEntries(coverage))
+	fmt.Fprintf(stderr, "fak version modules: joined %d/%d coverage scores\n", matched, len(coverage))
 	return 0
 }
 

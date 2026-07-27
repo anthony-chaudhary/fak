@@ -23,6 +23,8 @@ import (
 //	fak cachevalue feed --dry-run                        # render the exact card; do not post
 //	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl --savings-ledger .fak/nightrun/cache-savings.jsonl
 //	fak cachevalue weekly --dry-run                      # weekly fleet cache-HEALTH digest (posture adoption + reuse trend + shed + refused upgrades, #3646)
+//	fak cachevalue census                                # LIVE fleet managed-cache posture census: %ACTIVE and %upgrade-fired among ACTIVE (#3650)
+//	fak cachevalue census --json                         # the same census fold as JSON, for a periodic poster
 //	fak cachevalue post --report-json report.json        # post a pre-rolled report (- for stdin)
 //	fak cachevalue report --since 2026-06-22             # the two-track P&L (WITNESSED + OBSERVED $) + NET (#1304)
 //	fak cachevalue metrics                               # the same two-track fold + ablation arms as a Prometheus exposition (Grafana surface)
@@ -51,7 +53,7 @@ import (
 
 //fak:ctxplan verb=cachevalue enters="nothing live — an offline fold over the durable cache-value, cache-savings, and gateway-usage JSONL ledgers on disk" pages="nothing into a model window — it renders a cache-effectiveness P&L card and posts it to the #scoreboard Slack channel (or prints it under --dry-run)" warms="nothing — it REPORTS on whether the kernel prompt-cache method is paying off; it warms no prompt cache or KV itself"
 func cmdCachevalue(argv []string) {
-	dispatchSubcommands("cachevalue", "report | shapes | compaction | status | review | post | feed | weekly | metrics", argv,
+	dispatchSubcommands("cachevalue", "report | shapes | compaction | status | review | post | feed | weekly | census | metrics", argv,
 		subcommand{"report", runCachevalueReport},
 		subcommand{"shapes", runCachevalueShapes},
 		subcommand{"compaction", runCachevalueCompaction},
@@ -60,6 +62,7 @@ func cmdCachevalue(argv []string) {
 		subcommand{"post", runCachevaluePost},
 		subcommand{"feed", runCachevalueFeed},
 		subcommand{"weekly", runCachevalueWeekly},
+		subcommand{"census", runCachevalueCensus},
 		subcommand{"metrics", runCachevalueMetrics},
 	)
 }
