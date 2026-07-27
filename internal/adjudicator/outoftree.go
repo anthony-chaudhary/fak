@@ -97,7 +97,12 @@ func outOfTreeWriteEscapes(cmd, ws string, scratch []string, rawMatches bool) (e
 	}
 	targets := outOfTreeWriteTargets(cmd)
 	if len(targets) == 0 {
-		return true // raw matched but no destination identified — keep the deny
+		// No destination identified. That is the fail-closed case in general — a
+		// shape the extractor does not understand must keep the deny — but it is
+		// also what a quoted MENTION of a traversal looks like, and the rules fire
+		// on any command that merely names one. Admit only where the absence is
+		// PROVEN; see ootMentionOnly.
+		return !ootMentionOnly(cmd)
 	}
 	for _, t := range targets {
 		ct, ok := canonicalizeArgValue(t)
