@@ -58,8 +58,15 @@ const (
 )
 
 // ZoneResolver maps a pinned model id to the rung its account serves from. ok is false when
-// the roster does not bind the id. cmd/fak supplies `roster.Resolve(m)` + `Target.Zone()`;
-// keeping it a func is what lets this tier-1 leaf attribute a rung without holding a Roster.
+// the roster does not bind the id. Keeping it a func is what lets this tier-1 leaf attribute
+// a rung without holding a Roster.
+//
+// Supply `modelroute.Roster.BoundZone` — its shape is exactly this one. Do NOT build a
+// resolver from `Roster.Resolve` + `Target.Zone()`: Resolve is a DISPATCH primitive and falls
+// back to the roster's default account for an id nobody bound, so as an attributor it answers
+// the default's rung for every typo and every unregistered pin. On the fleet-default rosters
+// this path is aimed at, that reports vendor spend as self-hosted — the one direction the
+// headline share must never be wrong in.
 type ZoneResolver func(model string) (modelroute.PlacementZone, bool)
 
 // AttributeZone names the rung a pinned model was served from, or says why it cannot.
