@@ -26,21 +26,41 @@ var rmDeleteWrappers = map[string]bool{
 	"ionice": true,
 }
 
-// isRmRfArgRule reports whether pr is the shipped recursive/forced-delete
-// deny_regex on a Bash command arg. Like isRCEPipeArgRule it is Bash-scoped
-// (EqualFold ⇒ the lowercase `bash` harness alias matches too); the identical
-// shell_command / functions.shell_command / PowerShell mirrors keep the raw
-// regex path.
+// isRmRfArgRule reports whether pr is one of the two shipped recursive/forced-delete
+// deny_regexes on a shell command arg, on a surface that ships it.
+//
+// The POSIX spelling used to be recognised on the Bash tool ALONE, even though
+// cmd/fak/guard-default-policy.json ships the byte-identical regex on the
+// shell_command and functions.shell_command mirrors too. Those mirrors therefore
+// kept the raw-regex path and lost BOTH carve-outs the structural decision grants:
+// a recursive delete confined to a declared scratchpad root, and the force-only
+// single-literal-target delete that #4983 degraded to the reversibility confirm
+// gate. The same command got two different verdicts depending only on which tool
+// NAME the harness happened to use — `rm -f notes.txt` was preview-confirmed on
+// Bash and a terminal POLICY_BLOCK on shell_command. A capability floor whose
+// strictness tracks a harness's tool naming is not a floor, it is a coin flip, and
+// the strict side was refusing routine work.
+//
+// Recognising both spellings on the generic surfaces closes that. It is safe in the
+// same way the rest of this file is: the structural decision is consulted only after
+// the raw regex has already matched and can only ever DOWNGRADE that match, and the
+// POSIX walk resolves nothing it cannot read — a Windows-spelled path on a
+// PowerShell-backed shell_command host loses its separators to POSIX lexing, fails
+// to prove containment, and keeps the deny.
 func isRmRfArgRule(pr *ArgPredicate) bool {
 	if pr == nil || pr.Re == nil || (pr.Arg != "command" && pr.Arg != "cmd") {
 		return false
 	}
-	if strings.EqualFold(pr.Tool, "Bash") {
-		return pr.Re.String() == defaultRmRfDenyRegex
-	}
+	re := pr.Re.String()
 	switch strings.ToLower(pr.Tool) {
-	case "powershell", "shell_command", "functions.shell_command":
-		return pr.Re.String() == defaultPSDeleteDenyRegex
+	case "bash":
+		return re == defaultRmRfDenyRegex
+	case "powershell":
+		return re == defaultPSDeleteDenyRegex
+	case "shell_command", "functions.shell_command":
+		// This surface is POSIX on one host and PowerShell on another, so the
+		// shipped policy gives it BOTH rules; recognise both.
+		return re == defaultRmRfDenyRegex || re == defaultPSDeleteDenyRegex
 	default:
 		return false
 	}
@@ -89,7 +109,14 @@ func commandHasUnsafeRecursiveForcedDelete(cmd, ws string, scratch []string) boo
 				}
 			case strings.ToLower("Remove" + "-Item"):
 				args := seg.argv[i+1:]
-				if argvHasPowerShellRecursiveOrForce(args) && !psDeleteTargetsInScratch(args, ws, scratch) {
+				// psDeleteTargetsInScratch sees POSIX-lexed args, where a Windows
+				// path has already lost every backslash — so on the only host this
+				// cmdlet runs on it can never prove containment. Re-prove it under
+				// PowerShell lexing before refusing. Purely additive: a second way
+				// to PROVE the delete is confined, never a new way to deny.
+				if argvHasPowerShellRecursiveOrForce(args) &&
+					!psDeleteTargetsInScratch(args, ws, scratch) &&
+					!psRemoveItemAllTargetsInScratch(src, ws, scratch) {
 					return true
 				}
 			}

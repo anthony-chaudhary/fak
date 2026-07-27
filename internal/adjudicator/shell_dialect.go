@@ -54,9 +54,12 @@ var powerShellCmdlets = map[string]string{
 }
 
 // isShellDialectArgRule reports whether pr is the shipped cross-shell-dialect
-// deny_regex on a Bash command arg. Bash-scoped like isRmRfArgRule / isRCEPipeArgRule
-// (EqualFold ⇒ the lowercase `bash` harness alias matches too); a differently-spelled
-// or non-Bash rule keeps the raw-regex path.
+// deny_regex on a Bash command arg. Bash-scoped like isRCEPipeArgRule (EqualFold ⇒
+// the lowercase `bash` harness alias matches too); a differently-spelled or non-Bash
+// rule keeps the raw-regex path. Unlike isRmRfArgRule — which now recognises the
+// delete rule on every surface the shipped policy gives it — this rule is Bash-scoped
+// by MEANING, not by oversight: it fires on a PowerShell cmdlet submitted to a POSIX
+// shell, which is only a dialect mismatch when the receiving shell is POSIX.
 func isShellDialectArgRule(pr *ArgPredicate) bool {
 	if pr == nil || pr.Re == nil || !strings.EqualFold(pr.Tool, "Bash") {
 		return false
