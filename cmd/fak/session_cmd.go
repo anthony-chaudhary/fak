@@ -7,6 +7,10 @@ package main
 //
 //	fak session ls                          # every live session (the snapshot)
 //	fak session status <id>                 # one session's drive state
+//
+// Without an explicit --addr/$FAK_ADDR there is no prior gateway-port knowledge, so `ls`
+// and `status` answer from the cross-process guard-session INDEX instead (#3461,
+// session_query.go): --reg-dir names the registry dir holding guard_sessions.jsonl.
 //	fak session stop   <id> [--reason R]    # request a clean stop (drain at the next boundary)
 //	fak session terminate <id> [--reason R] # forceful stop (#2758): cancel in-flight work at the next safe point
 //	fak session pause  <id>                 # hold at the next boundary
@@ -171,6 +175,11 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	registryPath := fs.String("registry", "", "ls --durable/--fleet: session registry path (default $FAK_SESSION_REGISTRY or the user config dir)")
 	remote := fs.String("remote", "origin", "ls --fleet: git remote to fetch the fleet session refs from")
 	staleWindow := fs.Duration("stale", defaultSessionStaleWindow, "ls --durable/--fleet: liveness window — a RUNNING session with no heartbeat within it reads STALLED")
+	// #3461: the cross-process guard-session INDEX (internal/guardsessions) — a registry
+	// DIRECTORY holding guard_sessions.jsonl, the same spelling and default resolution as
+	// `fak guard sessions --reg-dir`. Distinct from --registry above, which names the
+	// durable C1 session registry FILE that --durable/--fleet read.
+	regDir := fs.String("reg-dir", "", "ls/status without --addr/$FAK_ADDR: registry dir holding guard_sessions.jsonl (default: $FLEET_REG_DIR, else the host Fleet registry, else <repo>/tools/_registry)")
 	if rc, ok := parseFlagsOrHelp(fs, flagArgs); !ok {
 		return rc
 	}
@@ -187,8 +196,8 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	switch verb {
 	case "ls":
 		// #1203: --durable / --fleet read the durable C1 registry (and fold in the C2
-		// fleet session refs) offline, deterministically — no gateway required. The bare
-		// `fak session ls` stays the backward-compatible live gateway snapshot.
+		// fleet session refs) offline, deterministically — no gateway required. They win
+		// over the #3461 index path below, which is the no-flag default.
 		if *durable || *fleet {
 			return runSessionInventory(stdout, stderr, sessionInventoryOpts{
 				asJSON:       *asJSON,
@@ -198,8 +207,24 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 				staleWindow:  *staleWindow,
 			})
 		}
+		// #3461: with NO explicit gateway address there is no prior port knowledge, so the
+		// guard-session index answers instead of one assumed default gateway — every
+		// recorded session, pid-liveness checked, with its own published gateway URL. An
+		// explicit --addr/$FAK_ADDR keeps the legacy single-gateway snapshot byte-for-byte.
+		if !sessionAddrExplicit(fs) {
+			return runSessionIndexLS(stdout, stderr, resolveSweepRegDir(*regDir), *asJSON)
+		}
 		return c.renderList(stdout, stderr, *asJSON)
 	case "status":
+		// #3461: with no explicit address, resolve the query against the guard-session
+		// index first and read the matched session's OWN published gateway (read-scoped
+		// bearer). An unmatched query is not claimed (handled=false) and falls through to
+		// the legacy single-gateway drive-state read below.
+		if !sessionAddrExplicit(fs) {
+			if code, handled := sessionIndexResolveStatus(stdout, stderr, resolveSweepRegDir(*regDir), pos[0], *asJSON); handled {
+				return code
+			}
+		}
 		rc := c.renderState(stdout, stderr, *asJSON, func() (gateway.SessionState, error) {
 			return c.observe(pos[0])
 		})
@@ -830,10 +855,14 @@ func defaultSessionAddr() string {
 func sessionUsage(w io.Writer) {
 	fmt.Fprint(w, `fak session — read and control a served session's live DRIVE state
 
-  fak session ls                              every live session (the live gateway snapshot)
+  fak session ls                              every recorded guard session from the local index
+                                               (pid-liveness checked, each with its own gateway URL);
+                                               with --addr/$FAK_ADDR, the live gateway snapshot
   fak session ls --durable [--registry PATH]  the durable C1 registry (survives restart/eviction)
   fak session ls --fleet   [--remote R]       every node's sessions (C1 + C2 refs after a git fetch)
-  fak session status   <id>                   one session's drive state
+  fak session status   <id>                   one session's drive state; without --addr/$FAK_ADDR a
+                                               handle/trace prefix resolves against the guard-session
+                                               index and reads that session's own /debug/vars
   fak session stop     <id> [--reason R]      request a clean stop (drain at the next boundary)
   fak session terminate <id> [--reason R]     forceful stop: cancel in-flight work at the next
                                                safe point (no new tool calls; no drain cleanup)
@@ -882,5 +911,6 @@ flags: --addr (default $FAK_ADDR or http://127.0.0.1:8080)  --key ($FAK_KEY)
        --if-rev N (optimistic-concurrency guard)  --json
        envelope: --inspect-only
        ls: --durable  --fleet  --registry PATH  --remote R (default origin)
+       ls/status (no --addr): --reg-dir PATH (guard-session index dir, $FLEET_REG_DIR)
 `)
 }
