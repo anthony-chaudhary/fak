@@ -100,6 +100,15 @@ that a slow transport reports a hub class and never a wedged-shell one. Use that
 client change needs checking and no session is reachable from your host; it settles which
 class a condition maps to, and never whether a given session is healthy right now.
 
+Run that check from a scratch Go module built on the private snapshot. The public tree
+carries no bridge package at all, so the package path only resolves once the private client
+is staged into such a module; there is no in-repo lane gate to run instead. The whole package
+passes there in a few seconds, so run it whole — narrowing to the classification test by name
+is for when you want only the class cases, not a workaround for a broken sibling. The one
+check that shells out to the host's `bash` skips itself when that shell is absent rather than
+failing, so a host whose shell does not match the box's shows up as a skip. A `FAIL` in this
+package is therefore a real regression, not host noise; do not discount one as environmental.
+
 Keep a captured transcript in the private repository whenever it names a host, node, or
 channel; a public note carries the outcome in generic terms only.
 
