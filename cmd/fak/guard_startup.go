@@ -248,10 +248,17 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	}
 	// The adjudicator runs in this parent process. Declare the narrow Claude
 	// scratch tree here so structural write/delete gates can prove containment;
-	// never widen this default to the whole OS temp directory.
-	if strings.TrimSpace(os.Getenv("FAK_GUARD_SCRATCHPAD_ROOTS")) == "" {
-		_ = os.Setenv("FAK_GUARD_SCRATCHPAD_ROOTS", filepath.Join(os.TempDir(), "claude"))
+	// never widen this default to the whole OS temp directory. Whatever is
+	// declared — this default or an operator's override — is then expanded to
+	// carry BOTH host spellings of each root, because those gates prove
+	// containment by string comparison and Git Bash spells the drive-letter
+	// directory `/c/…` (see guardScratchpadRootsValue: an alias renames a root,
+	// it never adds one, so the default stays exactly this narrow).
+	declaredScratch := strings.TrimSpace(os.Getenv("FAK_GUARD_SCRATCHPAD_ROOTS"))
+	if declaredScratch == "" {
+		declaredScratch = filepath.Join(os.TempDir(), "claude")
 	}
+	_ = os.Setenv("FAK_GUARD_SCRATCHPAD_ROOTS", guardScratchpadRootsValue(declaredScratch))
 	policyDigest = guardEffectivePolicyDigest(policyBytes, allowOverlay, denyOverlay)
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, policyPath)...)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
