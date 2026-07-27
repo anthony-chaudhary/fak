@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,6 +149,73 @@ func TestGrowthApplyEnabledDefaultsOff(t *testing.T) {
 	t.Setenv("FAK_GARDEN_GROWTH_COLLECT", "apply")
 	if !growthApplyEnabled(false) {
 		t.Fatalf("FAK_GARDEN_GROWTH_COLLECT=apply must enable apply")
+	}
+}
+
+// TestCollectGrowthLogsHeartbeatsWhenNothingReapable proves the soak rung (#5349
+// step 5): a tick whose reapable set is EMPTY still leaves exactly one auditable
+// census row. Before this, a zero-reapable tick wrote nothing at all, so an empty
+// soak window could not be told apart from a collect that never ran — the failure
+// mode that hid the dead tick trigger (#5355). The row must carry the census facts
+// that make the clean verdict checkable (scanned > 0 proves the scope was real, and
+// the protected count names the over-budget file the classifier deliberately
+// spared) and must NOT claim a reap.
+func TestCollectGrowthLogsHeartbeatsWhenNothingReapable(t *testing.T) {
+	root := t.TempDir()
+	// One over-budget disposable file, but HOT => protected, so reapable is empty
+	// while the census still has something real to report.
+	hot := filepath.Join(root, "b", "metrics", "observations.jsonl")
+	writeSizedGrowthFile(t, hot, overBudget, 0)
+	ledger := filepath.Join(t.TempDir(), "growth-reap.jsonl")
+
+	var stderr bytes.Buffer
+	if reaped := collectGrowthLogs(&stderr, []string{root}, false, ledger); reaped != 0 {
+		t.Fatalf("nothing is reapable here, reaped=%d", reaped)
+	}
+
+	data, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatalf("a zero-reapable tick must still witness itself in the soak ledger: %v", err)
+	}
+	var row map[string]any
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("want exactly one census row per clean tick, got %d: %s", len(lines), data)
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
+		t.Fatalf("census row must be valid JSON: %v (%s)", err, lines[0])
+	}
+	if row["schema"] != "fak.growthgate.census-clean.v1" {
+		t.Fatalf("census row needs its own schema, got %v", row["schema"])
+	}
+	if row["reapable"] != float64(0) {
+		t.Fatalf("a census-clean row must pin reapable=0, got %v", row["reapable"])
+	}
+	// scanned > 0 is the liveness half: a heartbeat over an empty scope would be a
+	// broken census reporting itself clean.
+	if s, ok := row["scanned"].(float64); !ok || s <= 0 {
+		t.Fatalf("census row must report a real scanned count, got %v", row["scanned"])
+	}
+	if p, ok := row["protected"].(float64); !ok || p != 1 {
+		t.Fatalf("the HOT over-budget file must be counted protected, got %v", row["protected"])
+	}
+	if strings.Contains(string(data), "would-reap") || strings.Contains(string(data), `"action":"reaped"`) {
+		t.Fatalf("a clean tick must never claim a reap: %s", data)
+	}
+}
+
+// TestCollectGrowthLogsNoLedgerPathWritesNothing proves the heartbeat did not turn
+// an unconfigured ledger into a write: with no ledger path the collect stays silent.
+func TestCollectGrowthLogsNoLedgerPathWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	writeSizedGrowthFile(t, filepath.Join(root, "a", "metrics", "observations.jsonl"), overBudget, time.Hour)
+
+	var stderr bytes.Buffer
+	if reaped := collectGrowthLogs(&stderr, []string{root}, false, ""); reaped != 0 {
+		t.Fatalf("apply-off must delete nothing, reaped=%d", reaped)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("an empty ledger path is not an error, got stderr: %s", stderr.String())
 	}
 }
 
