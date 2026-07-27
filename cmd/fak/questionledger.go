@@ -1,11 +1,12 @@
 package main
 
 import (
+	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/ghexec"
 	"github.com/anthony-chaudhary/fak/internal/questionledger"
 )
 
@@ -17,10 +18,12 @@ func cmdQuestionLedger(argv []string) {
 	os.Exit(questionledger.Run(os.Stdout, os.Stderr, argv, now, runQuestionLedgerGH))
 }
 
-// runQuestionLedgerGH is the gh seam used by `ensure-label --apply`.
+// runQuestionLedgerGH is the gh seam used by `ensure-label --apply`. The call
+// is a GitHub network round-trip, so it carries a deadline at this call site:
+// ghexec kills a wedged `gh` instead of hanging the invocation forever.
 func runQuestionLedgerGH(args []string) (string, string, error) {
-	cmd := exec.Command("gh", args...)
-	configureDispatchHelperCommand(cmd)
+	cmd, cancel := ghexec.CommandTimeout(context.Background(), ghexec.DefaultTimeout, args...)
+	defer cancel()
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
