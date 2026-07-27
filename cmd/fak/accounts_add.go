@@ -764,6 +764,11 @@ func syncViewsUnlessNoSync(stdout, stderr io.Writer, registryPath, dosView, jobV
 func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	if p.name == "" {
 		fmt.Fprintln(stderr, "usage: fak accounts remove --name <name> [--rehome-to <seat>] [--reason <text>] [--archive]")
+		// Name the account-scoped form here too: a bare `remove` is exactly where an operator who
+		// means "retire this account" lands, and offering only --name is what let a duplicate seat
+		// keep the account live after its canonical seat was tombstoned (#4669).
+		fmt.Fprintln(stderr, "   or: fak accounts remove --by-account <email|uuid|seat> [--rehome-to <seat>] [--reason <text>] [--archive]")
+		fmt.Fprintln(stderr, "       --name retires ONE seat; --by-account retires the WHOLE account (every active seat resolving to it)")
 		return 2
 	}
 	reg, ok := loadRegistryOrErr(stderr, p.registryPath)

@@ -129,6 +129,29 @@ func TestRemoveByAccountRefusesRehomeIntoRetired(t *testing.T) {
 	}
 }
 
+// TestRemoveUsageNamesByAccount pins the discoverability half of #4669: a bare `remove` (no
+// --name, no --by-account) is exactly where an operator who means "retire this account" lands, so
+// the usage MUST name the account-scoped form and say what distinguishes it. Offering only --name
+// there is what let july6-netra keep july11@… live after its canonical seat was tombstoned.
+func TestRemoveUsageNamesByAccount(t *testing.T) {
+	home, regPath := bucketRegistry(t)
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"remove", "--registry", regPath, "--home", home})
+	if rc == 0 {
+		t.Fatalf("a bare `remove` names no seat and must not succeed; rc=0")
+	}
+	usage := errb.String()
+	if !strings.Contains(usage, "--by-account") {
+		t.Fatalf("remove usage must name the account-scoped form:\n%s", usage)
+	}
+	// The usage has to state the seat-vs-account distinction, not merely list the flag — the
+	// papercut was an operator reading `--name` as "retire the account".
+	if !strings.Contains(usage, "ONE seat") || !strings.Contains(usage, "WHOLE account") {
+		t.Fatalf("remove usage must contrast one-seat vs whole-account retirement:\n%s", usage)
+	}
+}
+
 // TestRemoveNameNotesOtherLiveSeat pins the second acceptance path: a single-seat
 // `remove --name` prints a `note:` naming the OTHER live seat still resolving to the same
 // account, so the operator isn't relying on catching the `dup ->` line by eye.

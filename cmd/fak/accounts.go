@@ -33,8 +33,11 @@ import (
 //	fak accounts add <name> [--reserved] [--chrome-profile P] [--no-login --token -]
 //	                                   enroll a NEW account end-to-end: isolated-dir login (never
 //	                                   ~/.claude), identity probe, twin-check, registry + views
-//	fak accounts remove --name <n> [--archive]  tombstone an account in the registry + regenerate views;
+//	fak accounts remove --name <n> [--archive]  tombstone ONE seat in the registry + regenerate views;
 //	                                   --archive ALSO renames the dir to .DELETED-<date> + repoints the registry, in one go
+//	                                   --by-account <email|uuid|seat> retires the WHOLE account instead: EVERY
+//	                                   active seat resolving to that bucket, under one --rehome-to + --reason,
+//	                                   so a duplicate seat can't leave the account live (#4669)
 //	fak accounts restore --name <n>    reverse `remove --archive`: rename .DELETED dir back,
 //	                                   clear tombstone fields, repair rehome refs, resync views
 //	fak accounts set-role <role> --name <n> point a role (active|anchor) at <n> + regenerate views
