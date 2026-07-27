@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -87,6 +88,14 @@ func adaptivityOf(s string) agentdojo.Adaptivity {
 }
 
 func main() {
+	// --trace is this command's CONFIG surface for the per-attack progress line. It was an
+	// AGENTDOJOPROBE_TRACE environment read, which the internal/envconfiglint ratchet
+	// (CONFIG_NOT_ENV, #2863) refuses: the environment carries secrets, a behavioral switch
+	// belongs on the command's own surface. A flag is also the honest shape here — the trace
+	// is a per-INVOCATION debugging choice, not a property of the host the probe runs on.
+	trace := flag.Bool("trace", false, "write one progress line per attack to stderr while scoring")
+	flag.Parse()
+
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "agentdojoprobe: read stdin:", err)
@@ -119,7 +128,7 @@ func main() {
 			SinkArgs:   s.SinkArgs,
 		}
 
-		if os.Getenv("AGENTDOJOPROBE_TRACE") != "" {
+		if *trace {
 			fmt.Fprintf(os.Stderr, "scoring[%d] %s (sink=%s)\n", i, name, a.SinkTool)
 		}
 		sinkCall := &abi.ToolCall{Tool: a.SinkTool, Args: abi.Ref{
