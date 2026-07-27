@@ -36,6 +36,14 @@ const (
 	ReasonNoZoneCanServe    = "no-zone-can-serve"           // the ladder ran out
 	ReasonTopRungUnmeasured = "top-rung-unmeasured-allowed" // the vendor fallback, taken on an asserted capability
 	ReasonZoneNotReached    = "zone-not-reached"            // a cheaper rung took the work first
+
+	// Serving-liveness tokens (track H). Only the first three PASS OVER a
+	// candidate; degraded is recorded on a candidate that is placed anyway. See
+	// serving.go for what each one is claiming.
+	ReasonZoneServingDown     = "zone-serving-down"     // observed unable to serve
+	ReasonZoneServingUnknown  = "zone-serving-unknown"  // no verdict, inside declared coverage
+	ReasonZoneServingStale    = "zone-serving-stale"    // a verdict that cannot be shown fresh
+	ReasonZoneServingDegraded = "zone-serving-degraded" // serving under strain; took the work regardless
 )
 
 // Candidate is one placeable option: a routed model id that the roster binds, plus
@@ -70,6 +78,22 @@ type Placement struct {
 	Choice    TierChoice    `json:"choice"`
 	Escalated bool          `json:"escalated"` // a cheaper rung had a candidate and lost
 	Ladder    []ZoneVerdict `json:"ladder"`    // every rung, in ladder order
+
+	// FailedOver reports whether any candidate at or below the placed rung was
+	// passed over on a SERVING observation (down, unknown-inside-coverage, or
+	// unshowably-stale) rather than on tier or capability.
+	//
+	// It is carried separately from Escalated because the two answer different
+	// operator questions and want different fixes. Escalated says a cheaper rung
+	// could not do this work — a capability or policy fact, stable until somebody
+	// changes the roster. FailedOver says a rung that COULD have done the work was
+	// routed around because something was not answering — an operations fact that
+	// may already be untrue. Reading a bill without this bit, an operator sees
+	// vendor spend attributed to work that "needed" a vendor, and goes looking for
+	// a capability problem that does not exist while the dead host stays dead. It
+	// is true for a failover WITHIN a rung too: the placement stayed cheap, but
+	// something was still down, and that is worth knowing before it spreads.
+	FailedOver bool `json:"failed_over,omitempty"`
 
 	// Measured reports whether the winning candidate's capability was MEASURED or
 	// merely the unmeasured default.
@@ -117,6 +141,31 @@ func (p Placement) SelfHosted() bool { return p.Zone.SelfHosted() }
 // typo in a placement config should surface as a misconfiguration, not as traffic
 // quietly continuing to go to a vendor.
 func (r Roster) Place(class WorkClass, candidates []Candidate) (Placement, error) {
+	return r.PlaceWithServing(class, candidates, ServingReport{})
+}
+
+// PlaceWithServing is Place with a liveness snapshot: the same ladder walk, with
+// candidates additionally passed over when the operator's own probes say they are
+// not answering (serving.go).
+//
+// Place delegates here with an EMPTY report, which is the point: a deployment
+// with no prober takes the identical code path and reaches the identical
+// placement, because an empty snapshot's verdict is silence everywhere. "Adding
+// health does not change placement until someone measures health" is a property
+// of the definition rather than of a default somebody could quietly flip.
+//
+// The serving check runs LAST, after the measured and tier gates, and the order
+// is load-bearing. A candidate can fail both — a small local model that is under
+// tier for release work AND on a box that is down — and only the first reason
+// gets recorded. Tier is a permanent fact about the work and the model; liveness
+// is a fact about this minute. Reporting the transient one would make the same
+// misconfiguration diagnose differently depending on when the operator looked,
+// and would send them to reboot a host that was never going to be allowed to take
+// that work anyway. The reason that does not change with the weather wins.
+func (r Roster) PlaceWithServing(class WorkClass, candidates []Candidate, serving ServingReport) (Placement, error) {
+	if err := serving.Validate(); err != nil {
+		return Placement{}, err
+	}
 	if len(candidates) == 0 {
 		return Placement{}, fmt.Errorf("modelroute: placement for class %q has no candidates", class)
 	}
@@ -152,7 +201,10 @@ func (r Roster) Place(class WorkClass, candidates []Candidate) (Placement, error
 		// without placing, so a rung that rejects its first candidate and admits its
 		// second is not mislabeled as an escalation.
 		cheaperRungLost bool
-		placed          *Placement
+		// servingSkipped records that some candidate at or below the eventual
+		// placement was passed over on a liveness observation. See Placement.FailedOver.
+		servingSkipped bool
+		placed         *Placement
 	)
 
 	for _, zone := range ladder {
@@ -176,7 +228,19 @@ func (r Roster) Place(class WorkClass, candidates []Candidate) (Placement, error
 				zoneReasons = append(zoneReasons, ReasonZoneUnderTier)
 				continue
 			}
+			// Last gate: what the operator's probes say is actually answering.
+			skip, servingReason := serving.verdict(zone, cand.cand.Model)
+			if skip {
+				zoneReasons = append(zoneReasons, servingReason)
+				servingSkipped = true
+				continue
+			}
 			chosen, choice = &here[i], c
+			// Non-empty here means DEGRADED: recorded on the rung that took the
+			// work, not a reason it was passed over.
+			if servingReason != "" {
+				zoneReasons = append(zoneReasons, servingReason)
+			}
 			if !cand.cand.Measured {
 				zoneReasons = append(zoneReasons, ReasonTopRungUnmeasured)
 			}
@@ -193,12 +257,13 @@ func (r Roster) Place(class WorkClass, candidates []Candidate) (Placement, error
 		}
 		verdicts = append(verdicts, ZoneVerdict{Zone: zone, Model: chosen.cand.Model, Reasons: zoneReasons})
 		placed = &Placement{
-			Model:     chosen.cand.Model,
-			Target:    chosen.target,
-			Zone:      zone,
-			Choice:    choice,
-			Escalated: cheaperRungLost,
-			Measured:  chosen.cand.Measured,
+			Model:      chosen.cand.Model,
+			Target:     chosen.target,
+			Zone:       zone,
+			Choice:     choice,
+			Escalated:  cheaperRungLost,
+			FailedOver: servingSkipped,
+			Measured:   chosen.cand.Measured,
 		}
 		break
 	}
