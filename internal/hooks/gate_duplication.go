@@ -204,12 +204,12 @@ func trackedGoByDir(d *StagedDiff, want map[string]bool, maxNeighborhood int) (m
 // reused verbatim, so no disk is touched there. A disk miss is a skip (fail-open, never a false
 // DUPLICATION), matching FileBytes' own missing-file contract.
 func (d *StagedDiff) neighborBytes(rel string) (string, bool) {
-	if e, ok := d.fileCache[rel]; ok {
+	if e, ok := d.cachedFile(rel); ok {
 		return string(e.data), e.exists
 	}
 	b, err := os.ReadFile(filepath.Join(d.Root, filepath.FromSlash(rel)))
 	exists := err == nil
-	d.fileCache[rel] = fileEntry{data: b, exists: exists}
+	d.storeFile(rel, fileEntry{data: b, exists: exists})
 	return string(b), exists
 }
 

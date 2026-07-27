@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -167,6 +168,13 @@ type StagedDiff struct {
 	IndexPaths        []string               // all candidate-index paths (for cross-file semantic gates)
 	Treeish           string                 // ":" for index, or a committed tip for CI range checks
 
+	// cacheMu guards fileCache. The pre-commit CLI bounds each gate with a wall-clock budget and
+	// ABANDONS a gate that overruns it (#5335) — it cannot cancel one, since Gate.Check takes no
+	// context. The abandoned Check keeps running against this same StagedDiff while the loop
+	// hands it to the next gate, so two gates can reach fileCache at once. Unsynchronized, that
+	// is a concurrent map write: a Go RUNTIME FATAL, unrecoverable, killing the hook — the
+	// timeout path would crash the very commit the bound exists to let through.
+	cacheMu   sync.Mutex
 	fileCache map[string]fileEntry // rel path -> cached read
 }
 
@@ -178,8 +186,62 @@ type fileEntry struct {
 // ReadStagedDiff runs the one family of `git diff --cached` reads the gates need and folds the
 // result into a StagedDiff. A git failure on the core diff returns ErrCouldNotRun so every
 // gate fails open (the Python gates each returned exit 2 in that case).
+//
+// It carries no deadline: the ~5 git reads it spawns all take the index, so on a contended
+// shared tree they can block indefinitely. Callers on the commit hot path must use
+// ReadStagedDiffWithin instead — see #5335.
 func ReadStagedDiff(root string) (*StagedDiff, error) {
 	return readStagedDiffWith(context.Background(), realRunner, root)
+}
+
+// ReadStagedDiffWithin is ReadStagedDiff bounded by ctx: if the staged-diff reads do not finish
+// before ctx expires, it returns ErrCouldNotRun instead of blocking. This is the #5335 fix for
+// the hook's PROLOGUE — the reads run `git diff --cached` / `ls-files`, which contend on the
+// index, so a peer holding `.git/index.lock` used to wedge every commit in the clone here,
+// upstream of (and so uncovered by) the per-gate budget in the pre-commit CLI.
+//
+// The returned StagedDiff deliberately does NOT retain ctx. Its lazy reads (FileBytes) run under
+// a fresh background context, because an EXPIRED ctx would make `git show` fail, and FileBytes
+// reports a failed read as "does not resolve" rather than an error — which a gate like
+// BROKEN_LINK turns into a finding. Letting the bound reach the lazy reads could therefore
+// manufacture a FALSE BLOCK, inverting the fail-open invariant this bound exists to protect. A
+// bound may only ever skip work, never add a refusal.
+func ReadStagedDiffWithin(ctx context.Context, root string) (*StagedDiff, error) {
+	return readStagedDiffWithin(ctx, realRunner, root)
+}
+
+func readStagedDiffWithin(ctx context.Context, run Runner, root string) (*StagedDiff, error) {
+	type outcome struct {
+		d   *StagedDiff
+		err error
+	}
+	// The read runs in a goroutine we are willing to ABANDON, so the bound holds even if the
+	// runner ignores ctx entirely — realRunner honors it via exec.CommandContext, but a bound
+	// that depends on the thing it is bounding is not a bound. Buffered so an abandoned read
+	// still sends and exits rather than leaking. Same shape as the CLI's per-gate budget.
+	done := make(chan outcome, 1)
+	go func() {
+		d, err := readStagedDiffWith(ctx, run, root)
+		done <- outcome{d, err}
+	}()
+
+	select {
+	case o := <-done:
+		if o.err != nil {
+			return nil, o.err
+		}
+		if ctx.Err() != nil {
+			// The reads RACED the deadline. readStagedDiffWith drops a failed sub-read
+			// silently (IndexPaths simply stays empty), so a diff assembled across the
+			// expiry may be truncated — and a truncated view is what INDEX_SYNC would read
+			// as a real violation. Refuse the partial view instead of gating on it.
+			return nil, ErrCouldNotRun
+		}
+		o.d.ctx = context.Background() // unbind the deadline before any gate reads through it
+		return o.d, nil
+	case <-ctx.Done():
+		return nil, ErrCouldNotRun
+	}
 }
 
 func readStagedDiffWith(ctx context.Context, run Runner, root string) (*StagedDiff, error) {
@@ -304,7 +366,7 @@ func (d *StagedDiff) sortedFiles() []string {
 // FileBytes reads a repo-relative file once and caches it. Missing file => (nil, false), never
 // an error — the gates treat an absent target as "does not resolve", matching os.path.exists.
 func (d *StagedDiff) FileBytes(rel string) ([]byte, bool) {
-	if e, ok := d.fileCache[rel]; ok {
+	if e, ok := d.cachedFile(rel); ok {
 		return e.data, e.exists
 	}
 	var b []byte
@@ -320,8 +382,32 @@ func (d *StagedDiff) FileBytes(rel string) ([]byte, bool) {
 		exists = err == nil
 	}
 	e := fileEntry{data: b, exists: exists}
-	d.fileCache[rel] = e
+	d.storeFile(rel, e)
 	return e.data, e.exists
+}
+
+// cachedFile / storeFile are the ONLY fileCache accessors, so every read a gate makes is
+// serialized against an abandoned gate still running against the same StagedDiff (see cacheMu).
+//
+// Neither holds cacheMu across the actual file read. A read can be a `git show` that is blocked
+// on the very index contention this bound exists for, and holding the lock across it would make
+// one wedged gate block every other gate on the mutex — converting a bounded, skippable stall
+// into a serialized one. Losing a race just means two gates read the same file twice, which is
+// idempotent and cheap; last write wins and both observe identical bytes.
+func (d *StagedDiff) cachedFile(rel string) (fileEntry, bool) {
+	d.cacheMu.Lock()
+	defer d.cacheMu.Unlock()
+	e, ok := d.fileCache[rel]
+	return e, ok
+}
+
+func (d *StagedDiff) storeFile(rel string, e fileEntry) {
+	d.cacheMu.Lock()
+	defer d.cacheMu.Unlock()
+	if d.fileCache == nil {
+		return // a hand-built diff with no cache: nothing to warm, and never a nil-map panic
+	}
+	d.fileCache[rel] = e
 }
 
 // Exists reports whether a repo-relative path exists on disk (file or dir), mirroring
