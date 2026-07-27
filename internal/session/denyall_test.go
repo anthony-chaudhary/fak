@@ -129,6 +129,75 @@ func TestDenyAllBreakerDangerousDenialFailsClosed(t *testing.T) {
 	}
 }
 
+// TestDenyAllBreakerPosixPolicyBlockDiagnosticNamesTheSpelling covers the surfaces
+// that carry `rm -rf`. Bash used to fall through to the generic branch, so the one
+// surface where the scratchpad route is hardest to reach was the one told the least
+// about it — it named no delete alternative and no scratchpad root at all.
+//
+// It also pins the SPELLING, which is the difference between a remedy and a loop:
+// the carve-out resolves on a forward-slash path and not on a Windows-spelled one,
+// because the POSIX tokenizer reads `\` as an escape (pinned from the deciding side
+// by adjudicator's TestScratchCarveOutSpellingAsymmetry). An agent that re-targets
+// into its scratchpad using backslashes is refused a second time, and a remedy that
+// silently fails on the retry is indistinguishable from no remedy.
+func TestDenyAllBreakerPosixPolicyBlockDiagnosticNamesTheSpelling(t *testing.T) {
+	for _, tool := range []string{"Bash", "shell_command", "functions.shell_command"} {
+		t.Run(tool, func(t *testing.T) {
+			var b DenyAllBreaker
+			obs := DenyAllObservation{
+				Tool:        tool,
+				Reason:      "POLICY_BLOCK",
+				Progress:    false,
+				Disposition: DenyAllEffectful,
+			}
+			var stop DenyAllVerdict
+			for i := 0; i < DenyAllDefaultThreshold; i++ {
+				stop = b.Observe(obs)
+			}
+			if !stop.Stopped {
+				t.Fatalf("repeated %s POLICY_BLOCK must hit the bounded stop", tool)
+			}
+			d := stop.Diagnostic
+			for _, want := range []string{
+				"strictly INSIDE a declared scratchpad root",
+				"not the root itself",
+				"outside such a root recursive/forced deletes stay operator-only",
+				// The spelling, without which the advertised retry fails silently.
+				"FORWARD slashes",
+				`C:\scratch\sess\build`,
+				"C:scratchsessbuild",
+			} {
+				if !strings.Contains(d, want) {
+					t.Errorf("%s POLICY_BLOCK diagnostic missing %q\n got:\n%s", tool, want, d)
+				}
+			}
+			// The generic branch is what Bash used to get: no delete route at all.
+			if !strings.Contains(d, "rm <file>") {
+				t.Errorf("%s POLICY_BLOCK diagnostic names no exact-delete alternative:\n%s", tool, d)
+			}
+		})
+	}
+}
+
+// The PowerShell surface has no escaping trap, so it must NOT carry the POSIX
+// spelling note — advice that does not apply is noise an agent has to rule out.
+func TestDenyAllBreakerPowerShellDiagnosticOmitsPosixSpelling(t *testing.T) {
+	var b DenyAllBreaker
+	obs := DenyAllObservation{
+		Tool:        "PowerShell",
+		Reason:      "POLICY_BLOCK",
+		Progress:    false,
+		Disposition: DenyAllEffectful,
+	}
+	var stop DenyAllVerdict
+	for i := 0; i < DenyAllDefaultThreshold; i++ {
+		stop = b.Observe(obs)
+	}
+	if strings.Contains(stop.Diagnostic, "FORWARD slashes") {
+		t.Errorf("PowerShell diagnostic carries a POSIX-only spelling note:\n%s", stop.Diagnostic)
+	}
+}
+
 // TestDenyAllBreakerPowerShellPolicyBlockDiagnosticIsActionable replays the
 // Windows destructive-command churn shape: PowerShell repeatedly proposes the
 // same Remove-Item -Recurse/-Force style call, the policy floor refuses it with a

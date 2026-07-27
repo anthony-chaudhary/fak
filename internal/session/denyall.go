@@ -278,13 +278,50 @@ func denyAllDiagnostic(tool, reason string, dispo DenyAllDisposition, consecutiv
 // the genuinely fatal case. The two conditions that keep the deny — the scratch root
 // itself, and a glob or unexpanded variable — are named too, since a remedy that
 // silently fails the second time is the same defect one turn later.
+//
+// That last sentence is why this also names the SPELLING. The carve-out resolves on a
+// forward-slash path and not on a Windows-spelled one, because the POSIX tokenizer
+// reads `\` as an escape: `rm -rf C:\scratch\sess\build` arrives as the single token
+// `C:scratchsessbuild`, which is under no root, so it is refused. That refusal is
+// CORRECT — Git Bash really would aim the delete at a different path, and admitting
+// the intended path while the shell runs another one is the one thing this decider
+// must never do — but it is indistinguishable, from the agent's side, from the route
+// not existing: it re-targeted into the scratchpad exactly as instructed and was
+// refused again. Naming the spelling is what closes that loop, and it is text only.
+// The PowerShell surface has no such trap (its operands keep their backslashes), so
+// only the POSIX-capable surfaces carry the note.
 func denyAllEffectfulRecovery(tool, reason string) string {
+	const (
+		lead = ": follow the sanctioned alternative from the refusal text/policy and do NOT re-propose the refused call unchanged."
+
+		// The scratch carve-out, stated with the two conditions that keep the deny.
+		scratchRoute = " A recursive/forced delete is ALREADY admitted when every target is a literal path strictly INSIDE a declared scratchpad root (not the root itself, and no glob or unexpanded variable) — re-target it there and retry rather than asking the operator; outside such a root recursive/forced deletes stay operator-only."
+
+		// Spelling is load-bearing on the POSIX surfaces and silently is not on the
+		// PowerShell one, so the route above is only reachable if the retry is spelled
+		// the way the receiving shell reads it.
+		posixSpelling = " Spell that path with FORWARD slashes (C:/scratch/sess/build): at a POSIX shell a backslash is an ESCAPE, so C:\\scratch\\sess\\build reaches the floor as C:scratchsessbuild, resolves under no root at all, and is refused a second time — which reads as the route not existing rather than as a spelling error."
+	)
 	switch reason {
 	case "POLICY_BLOCK":
-		if tool == "PowerShell" || tool == "shell_command" || tool == "functions.shell_command" {
-			return "the floor is CORRECT to deny \"" + tool + "\": follow the sanctioned alternative from the refusal text/policy and do NOT re-propose the refused call unchanged. For a PowerShell Remove-Item -Recurse/-Force block, remove exact files with Remove-Item <file> or move them aside. A recursive/forced delete is ALREADY admitted when every target is a literal path strictly INSIDE a declared scratchpad root (not the root itself, and no glob or unexpanded variable) — re-target it there and retry rather than asking the operator; outside such a root recursive/forced deletes stay operator-only."
+		switch tool {
+		case "PowerShell":
+			return "the floor is CORRECT to deny \"" + tool + "\"" + lead +
+				" For a PowerShell Remove-Item -Recurse/-Force block, remove exact files with Remove-Item <file> or move them aside." + scratchRoute
+		case "Bash", "bash":
+			// Bash used to fall through to the generic text, which names no delete
+			// route at all — so the surface that carries `rm -rf`, and the only one
+			// where the spelling trap bites, was the one told the least.
+			return "the floor is CORRECT to deny \"" + tool + "\"" + lead +
+				" For an rm -r/-f block, remove exact files with rm <file> or move them aside." + scratchRoute + posixSpelling
+		case "shell_command", "functions.shell_command":
+			// This surface is POSIX on one host and PowerShell on another, so it
+			// carries both spellings for the same reason isRmRfArgRule recognises
+			// both rules on it.
+			return "the floor is CORRECT to deny \"" + tool + "\"" + lead +
+				" For a recursive/forced delete block, remove exact files with rm <file> / Remove-Item <file>, or move them aside." + scratchRoute + posixSpelling
 		}
-		return "the floor is CORRECT to deny \"" + tool + "\": follow the sanctioned alternative from the refusal text/policy and do NOT re-propose the refused call unchanged. Do NOT loosen the policy unless the same dangerous-command argument rules remain in force."
+		return "the floor is CORRECT to deny \"" + tool + "\"" + lead + " Do NOT loosen the policy unless the same dangerous-command argument rules remain in force."
 	default:
 		return "the floor is CORRECT to deny \"" + tool + "\": do NOT allow-list it without mirroring the dangerous-command argument rules " +
 			"the named shell aliases carry (rm -rf / sudo / curl|sh). If the tool is genuinely unavailable, answer in text only."
