@@ -262,11 +262,27 @@ func denyAllDiagnostic(tool, reason string, dispo DenyAllDisposition, consecutiv
 		"A genuinely dangerous repeated denial stays fail-closed: the breaker only stops AUTO-CONTINUATION; it never auto-allows a refused tool."
 }
 
+// denyAllEffectfulRecovery is the last line an agent reads before auto-continuation
+// ends, so a route it fails to name is, from the agent's side, a route that does not
+// exist. This copy of the delete guidance used to close with a flat "recursive/forced
+// deletes stay operator-only", which the shipped floor contradicts: a recursive delete
+// whose targets all resolve strictly under a declared scratchpad root is ADMITTED
+// (adjudicator's psRemoveItemAllTargetsInScratch exists precisely to make that
+// carve-out reachable on Windows). An agent cleaning its own per-session scratch was
+// therefore told to escalate to an operator for work the floor already allows — and
+// escalating is the one move that cannot resolve it, because there is nothing for the
+// operator to approve.
+//
+// Naming the route is not a loosening: the breaker still never auto-allows anything,
+// and the operator-only claim is preserved for a target OUTSIDE such a root, which is
+// the genuinely fatal case. The two conditions that keep the deny — the scratch root
+// itself, and a glob or unexpanded variable — are named too, since a remedy that
+// silently fails the second time is the same defect one turn later.
 func denyAllEffectfulRecovery(tool, reason string) string {
 	switch reason {
 	case "POLICY_BLOCK":
 		if tool == "PowerShell" || tool == "shell_command" || tool == "functions.shell_command" {
-			return "the floor is CORRECT to deny \"" + tool + "\": follow the sanctioned alternative from the refusal text/policy and do NOT re-propose the refused call unchanged. For a PowerShell Remove-Item -Recurse/-Force block, remove exact files with Remove-Item <file> or move them aside; recursive/forced deletes stay operator-only."
+			return "the floor is CORRECT to deny \"" + tool + "\": follow the sanctioned alternative from the refusal text/policy and do NOT re-propose the refused call unchanged. For a PowerShell Remove-Item -Recurse/-Force block, remove exact files with Remove-Item <file> or move them aside. A recursive/forced delete is ALREADY admitted when every target is a literal path strictly INSIDE a declared scratchpad root (not the root itself, and no glob or unexpanded variable) — re-target it there and retry rather than asking the operator; outside such a root recursive/forced deletes stay operator-only."
 		}
 		return "the floor is CORRECT to deny \"" + tool + "\": follow the sanctioned alternative from the refusal text/policy and do NOT re-propose the refused call unchanged. Do NOT loosen the policy unless the same dangerous-command argument rules remain in force."
 	default:

@@ -158,11 +158,23 @@ func TestDenyAllBreakerPowerShellPolicyBlockDiagnosticIsActionable(t *testing.T)
 		"sanctioned alternative",
 		"do NOT re-propose",
 		"Remove-Item <file>",
-		"recursive/forced deletes stay operator-only",
+		// The operator-only claim survives, but only where it is TRUE: outside a
+		// declared scratchpad root.
+		"outside such a root recursive/forced deletes stay operator-only",
+		// ...and the route the floor actually grants must be named, or the last
+		// line the agent reads before giving up denies a remedy that exists.
+		"strictly INSIDE a declared scratchpad root",
+		"not the root itself",
 	} {
 		if !strings.Contains(d, want) {
 			t.Errorf("PowerShell POLICY_BLOCK diagnostic missing %q\n got:\n%s", want, d)
 		}
+	}
+	// The breaker must never read as a blanket ban on the carve-out the adjudicator
+	// grants. This is the exact sentence that shipped, and it is the reason an agent
+	// cleaning its own scratch escalated to an operator who had nothing to approve.
+	if strings.Contains(d, "aside; recursive/forced deletes stay operator-only") {
+		t.Errorf("diagnostic still denies the scratchpad route the floor admits:\n%s", d)
 	}
 	if strings.Contains(d, "DEFAULT_DENY = not on the capability floor") {
 		t.Fatalf("POLICY_BLOCK diagnostic must not carry DEFAULT_DENY semantics:\n%s", d)
