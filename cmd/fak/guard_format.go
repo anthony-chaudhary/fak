@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guardvars"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
 // This file holds the `fak guard` exit-summary FORMATTERS — the pure
@@ -246,6 +247,29 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 			b.WriteString(guardRow("  stood down: "+r, fmt.Sprintf("x%d", sum.DeferStandDownReasons[r])))
 		}
 		b.WriteString(guardNote("--defer-cold-tools is ARMED but never bit: you are paying the full eager tool slice the lever claimed to shed. 'no_cold_tools' means every advertised tool was hot (benign); 'already_deferred' means the client deferred first; anything else (decode_failed, splice_unproven, remarshal_failed) is fak standing down from a body it could not prove — check the dated tool_search_tool type is one the account has enabled (also on /debug/vars cache_attribution.fak_defer_finding)"))
+	}
+	// Volatile-head anchor-refusal watchdog (#3622): the offensive breakpoint placer splices a
+	// cache_control anchor onto a stable system[]/tools[] head, and the placement counters record
+	// every attempt — but a CUMULATIVE tally is a value nobody watches. When a session's head turns
+	// volatile mid-conversation (every cacheable head span now carries a per-request token) the
+	// anchor stops EARNING caching, the "placed" bucket simply stops rising, and the surface is
+	// indistinguishable from a session that went quiet. Raise it on the CROSSING COUNT, not the end
+	// state: a session that turned volatile and later recovered still spent turns paying uncached,
+	// and an exit artifact reporting only the final instant would hide exactly that degradation.
+	// The false-positive guard lives in the pure fold: `already_set` — the Claude-Code shape, where
+	// the client authored its own cache_control and the turn IS cached — is DEFERRED, never refused,
+	// so a healthy client-owned session can never trip this.
+	if sum.AnchorRefusedRising() {
+		b.WriteString(guardSection("cache anchor"))
+		b.WriteString(guardRow("⚠ "+metrics.AnchorFindingRefusedRising,
+			fmt.Sprintf("%d/%d recent placement(s) refused (%.0f%% >= %.0f%%), %d crossing(s)",
+				sum.AnchorPlacement.WindowRefused, sum.AnchorPlacement.WindowDecisive,
+				sum.AnchorPlacement.RefusedFraction*100,
+				sum.AnchorPlacement.Thresholds.Threshold*100, sum.AnchorPlacement.Findings)))
+		for _, t := range sum.AnchorRefusalOutcomes() {
+			b.WriteString(guardRow("  refused: "+t.Outcome, fmt.Sprintf("x%d", t.Turns)))
+		}
+		b.WriteString(guardNote("the star-anchor stopped earning caching: fak wanted to splice a cache breakpoint and could not, so those turns paid full uncached prefix. 'volatile_head' means every cacheable head span carried a per-request token (a timestamp/nonce/session-id injected into system[] or tools[]) — pin it out of the head; 'no_stable_head' means there was no system[]/tools[] block to anchor on at all. 'already_set' is NOT counted here: that is the client owning its own cache, which is healthy"))
 	}
 	if len(sum.ByReason) > 0 {
 		b.WriteString(guardSection("blocked by reason"))
