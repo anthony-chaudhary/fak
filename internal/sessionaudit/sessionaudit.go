@@ -470,6 +470,7 @@ func Analyze(path string) Session {
 	defer f.Close()
 
 	seen := map[string]bool{}
+	seenTool := map[string]bool{}
 	lens := newBehaviorLens()
 	clens := newConfusionLens()
 	sc := bufio.NewScanner(f)
@@ -496,7 +497,7 @@ func Analyze(path string) Session {
 		lens.observeRecord(r)
 		switch r.Type {
 		case "assistant":
-			analyzeAssistant(&s, r, seen, lens, clens)
+			analyzeAssistant(&s, r, seen, seenTool, lens, clens)
 		case "user":
 			analyzeUser(&s, r, lens)
 		}
@@ -947,11 +948,23 @@ type contentBlock struct {
 	Text      json.RawMessage `json:"text"`
 }
 
-func analyzeAssistant(s *Session, r transcriptRecord, seen map[string]bool, lens *behaviorLens, clens *confusionLens) {
+func analyzeAssistant(s *Session, r transcriptRecord, seen, seenTool map[string]bool, lens *behaviorLens, clens *confusionLens) {
 	msg := r.Message
+	var blocks []contentBlock
+	if len(msg.Content) > 0 {
+		_ = json.Unmarshal(msg.Content, &blocks)
+	}
 	if msg.ID != nil {
 		if seen[*msg.ID] {
 			s.DupAssistantLines++
+			// The turn and its tokens stop here — a split record repeats the message id AND
+			// its usage, so counting them again would inflate every token figure in the
+			// report. Its TOOL CALLS are not repeats, though: this harness writes one
+			// assistant response as several records and the tool calls live on the later
+			// ones. Returning outright dropped 16,289 of 18,776 tool_use blocks (86.8%) in a
+			// 712-transcript census — the tool-mix table, the read-only ratio and the
+			// behavior lens were all reading about an eighth of what happened.
+			noteToolUses(s, blocks, seenTool, lens, true)
 			return
 		}
 		seen[*msg.ID] = true
@@ -988,21 +1001,9 @@ func analyzeAssistant(s *Session, r transcriptRecord, seen map[string]bool, lens
 	pt.CacheRead += u.CacheReadInputTokens
 	pt.CacheCreate += u.CacheCreationInputTokens
 	s.PerTrack[track] = pt
-	var blocks []contentBlock
-	if len(msg.Content) > 0 {
-		_ = json.Unmarshal(msg.Content, &blocks)
-	}
+	noteToolUses(s, blocks, seenTool, lens, false)
 	for _, b := range blocks {
 		switch b.Type {
-		case "tool_use":
-			s.NToolUse++
-			name := b.Name
-			if name == "" {
-				name = "?"
-			}
-			s.Tools[name]++
-			s.ToolInputChars += txtLen(b.Input)
-			lens.noteToolUse(b.ID, name, b.Input, canonicalArgs(b.Input))
 		case "thinking":
 			s.NThinking++
 		case "text":
@@ -1012,6 +1013,50 @@ func analyzeAssistant(s *Session, r transcriptRecord, seen map[string]bool, lens
 	}
 	if r.InterruptedMessageID != "" || msg.StopReason == "interrupted" {
 		s.Interrupted++
+	}
+}
+
+// noteToolUses counts the tool calls carried by one assistant record.
+//
+// onSplitRecord says the record's turn was already counted under this message id, and it
+// changes what the record is allowed to claim. Calls are matched on the API's block id
+// rather than on position, because split records are not strictly disjoint — 41 of 18,790
+// blocks in the census really did appear twice, and one call must not be counted for each
+// record that carries it.
+//
+// On a split record a block with NO id is skipped rather than guessed at: nothing
+// distinguishes it from a repeat of a block already counted, and inventing tool calls is
+// the worse error. The census found no id-less blocks at all, so this costs nothing real,
+// and it keeps a genuinely repeated record from inflating the tool mix.
+//
+// Text and thinking blocks are deliberately NOT rescued the same way, which is a stated
+// remaining gap rather than an oversight: they carry no id, so there is nothing to match a
+// repeat on, and the confusion lens reads prose — handing it a streamed prefix twice would
+// inflate the marker counts it reports. NText and NThinking therefore still undercount a
+// split response.
+func noteToolUses(s *Session, blocks []contentBlock, seenTool map[string]bool, lens *behaviorLens, onSplitRecord bool) {
+	for _, b := range blocks {
+		if b.Type != "tool_use" {
+			continue
+		}
+		switch {
+		case b.ID == "":
+			if onSplitRecord {
+				continue
+			}
+		case seenTool[b.ID]:
+			continue
+		default:
+			seenTool[b.ID] = true
+		}
+		s.NToolUse++
+		name := b.Name
+		if name == "" {
+			name = "?"
+		}
+		s.Tools[name]++
+		s.ToolInputChars += txtLen(b.Input)
+		lens.noteToolUse(b.ID, name, b.Input, canonicalArgs(b.Input))
 	}
 }
 
