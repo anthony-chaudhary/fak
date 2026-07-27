@@ -102,12 +102,21 @@ class a condition maps to, and never whether a given session is healthy right no
 
 Run that check from a scratch Go module built on the private snapshot. The public tree
 carries no bridge package at all, so the package path only resolves once the private client
-is staged into such a module; there is no in-repo lane gate to run instead. The whole package
-passes there in a few seconds, so run it whole — narrowing to the classification test by name
-is for when you want only the class cases, not a workaround for a broken sibling. The one
-check that shells out to the host's `bash` skips itself when that shell is absent rather than
-failing, so a host whose shell does not match the box's shows up as a skip. A `FAIL` in this
-package is therefore a real regression, not host noise; do not discount one as environmental.
+is staged into such a module; there is no in-repo lane gate to run instead. The check that
+settles the class table above is the readback classification test; run it by name for a fast,
+unambiguous answer, then run the package whole to catch the rest.
+
+One caveat when you run it whole. The bg-artifact prune check shells out to the host's
+`bash`, and its guard only asks whether a `bash` resolves on `PATH` — not whether that shell
+can work in the test directory. On a native Windows host the WSL launcher at
+`System32\bash.exe` resolves, then cannot change into a Windows temp path: it reports
+`chdir(...) failed` on stderr and starts at the filesystem root instead. The prune command it
+runs discards stderr and ends in `; true`, so the shell still exits `0`, every fixture
+survives, and the check fails as though the reap logic had regressed. The signature is
+narrow — that one check failing, with every expected-reaped artifact reported as surviving,
+while the classification test passes. Until the guard probes whether the shell can work in
+the test directory rather than merely exist, read a lone prune failure on a Windows host as
+host noise. Any other failure, and the classification test above all, is a real regression.
 
 Keep a captured transcript in the private repository whenever it names a host, node, or
 channel; a public note carries the outcome in generic terms only.
