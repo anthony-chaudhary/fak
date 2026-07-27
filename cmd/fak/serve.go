@@ -479,6 +479,23 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 		KVPrefixPromptTokens: adj.KVPrefixPromptTokens,
 		KVPrefixReusedTokens: adj.KVPrefixReusedTokens,
 
+		// WHO ACTUALLY SERVED THE VOLUME above — the self-hosted split, carried
+		// from the routing decision the planner makes per request. The two groups
+		// are disjoint subsets of InputTokens/OutputTokens; what falls in neither
+		// is the volume whose side this build could not resolve.
+		//
+		// Six omitempty fields on both ends, and that is load-bearing: a gateway
+		// that classified nothing leaves all six at zero here, they never reach
+		// the wire, and an absent field keeps reading NOT INSTRUMENTED. Filling
+		// any of them with a derived or defaulted value would convert "nobody
+		// measured" into "everyone paid a vendor" — or worse, the reverse.
+		SelfHostedTurns:        adj.SelfHostedTurns,
+		SelfHostedInputTokens:  adj.SelfHostedInputTokens,
+		SelfHostedOutputTokens: adj.SelfHostedOutputTokens,
+		VendorTurns:            adj.VendorTurns,
+		VendorInputTokens:      adj.VendorInputTokens,
+		VendorOutputTokens:     adj.VendorOutputTokens,
+
 		CompactionFired:           adj.CompactionFired,
 		CompactionBailed:          adj.CompactionBailed,
 		CompactionOff:             adj.CompactionOff,
