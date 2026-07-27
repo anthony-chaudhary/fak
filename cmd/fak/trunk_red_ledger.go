@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
 // trunk_red_ledger.go — turn a PRE-EXISTING trunk red from a per-clone stderr
@@ -427,14 +428,24 @@ func trunkRedGitResolver(root string) func(baseSha string) bool {
 	}
 }
 
-// trunkRedBaseMergedPast reports whether base is a STRICT ancestor of origin/main.
-// Any git failure (unresolvable base, no origin/main, command error) is NOT-resolved.
+// trunkRedTrunkRef names the remote trunk ref this file compares bases against. The
+// branch is never hard-coded: it comes from the same branch-role contract every other
+// verb reads (safecommit.ExpectedTrunk over dos.toml's [branch_roles], falling back to
+// safecommit.DefaultTrunk when the config cannot be read), remote-qualified as
+// "origin/<trunk>" the way sweep.go's origin probe does it.
+func trunkRedTrunkRef(root string) string {
+	return "origin/" + safecommit.ExpectedTrunk(root, "")
+}
+
+// trunkRedBaseMergedPast reports whether base is a STRICT ancestor of the remote trunk
+// tip. Any git failure (unresolvable base, no remote trunk ref, command error) is
+// NOT-resolved.
 func trunkRedBaseMergedPast(root, base string) bool {
 	baseOut, err := gitOut(root, "rev-parse", "--verify", base+"^{commit}")
 	if err != nil {
 		return false
 	}
-	tipOut, err := gitOut(root, "rev-parse", "--verify", "origin/main^{commit}")
+	tipOut, err := gitOut(root, "rev-parse", "--verify", trunkRedTrunkRef(root)+"^{commit}")
 	if err != nil {
 		return false
 	}
@@ -453,7 +464,7 @@ func renderTrunkRed(sum trunkRedSummary) string {
 	var b strings.Builder
 	if sum.Total == 0 {
 		if sum.ResolvedRows > 0 {
-			fmt.Fprintf(&b, "fak trunk-red: no LIVE shared breaks — %d resolved class(es) across %d witness row(s) folded out (base already merged past on origin/main).\n", sum.ResolvedClasses, sum.ResolvedRows)
+			fmt.Fprintf(&b, "fak trunk-red: no LIVE shared breaks — %d resolved class(es) across %d witness row(s) folded out (base already merged past on the remote trunk).\n", sum.ResolvedClasses, sum.ResolvedRows)
 			fmt.Fprintf(&b, "  ledger: %s", sum.Ledger)
 			return strings.TrimRight(b.String(), "\n")
 		}
@@ -490,7 +501,7 @@ func renderTrunkRed(sum trunkRedSummary) string {
 		}
 	}
 	if sum.ResolvedRows > 0 {
-		fmt.Fprintf(&b, "  (+ %d resolved class(es) across %d row(s) folded out: base already merged past on origin/main)\n", sum.ResolvedClasses, sum.ResolvedRows)
+		fmt.Fprintf(&b, "  (+ %d resolved class(es) across %d row(s) folded out: base already merged past on the remote trunk)\n", sum.ResolvedClasses, sum.ResolvedRows)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
