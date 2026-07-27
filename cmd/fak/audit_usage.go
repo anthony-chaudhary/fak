@@ -282,6 +282,9 @@ func renderAuditUsage(rep auditusage.Report) string {
 	add("dispatch (%s): workers=%d findings=%d\n", rep.Dispatch.Basis, rep.Dispatch.Workers, rep.Dispatch.Findings)
 	add("cache (%s):    sessions=%d\n", rep.Cache.Basis, rep.Cache.Sessions)
 	add("gateway (%s):  sessions=%d\n", rep.Gateway.Basis, rep.Gateway.Sessions)
+	if line := selfHostedLine(rep.Gateway.SelfHosted); line != "" {
+		add("  self-hosted:  %s\n", line)
+	}
 	add("usage (%s):    total=%d errors=%d\n", rep.Usage.Basis, rep.Usage.Total, rep.Usage.Errors)
 	chainNote := ""
 	if rep.Vault.ChainBroken {
