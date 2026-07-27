@@ -11,10 +11,22 @@ package sessionaudit
 // self-hosted share that improves after sub-agents are re-placed looks exactly like one
 // that improved because somebody changed their default model.
 //
-// The signal already exists and was being thrown away. Claude Code stamps delegated
-// turns with `isSidechain` and writes them into the SAME session transcript as the
-// main thread — which is why ParseTranscriptTurns must skip them to avoid double-counting
-// turns. Here they are the subject rather than the noise.
+// The signal already exists and was being thrown away. Claude Code stamps delegated turns
+// with `isSidechain`, and it writes them one of two ways: into the SAME session transcript
+// as the main thread — which is why ParseTranscriptTurns must skip them to avoid
+// double-counting turns — or into a SEPARATE transcript nested under the namespace
+// directory, which Discover classifies as kind "subagent". Both layouts are real, and the
+// fold handles either, because it keys on the marker rather than on the file. Here the
+// marked turns are the subject rather than the noise.
+//
+// WHICH LAYOUT YOU GET IS NOT ACADEMIC, and getting it wrong costs the whole answer.
+// Measured over the 170 transcripts one 3-day window discovered on this box: all 5,755
+// turns in the 111 top-level transcripts were UNMARKED, and all 1,524 turns in the 59
+// subagent transcripts were MARKED. This harness had put every delegated turn in a
+// separate file. A reader that folds only top-level transcripts therefore sees precisely
+// the under-instrumented shape described below — spawn calls, no marked turns — and
+// correctly reports UNKNOWN while holding the answer in its hand. That is why the
+// transcript KIND is a second attribution signal (TrackForKind) rather than metadata.
 //
 // THE HONEST PART IS WHAT AN ABSENT MARKER MEANS.
 //
@@ -78,6 +90,40 @@ func TrackForSidechain(isSidechain bool) string {
 		return TrackDelegation
 	}
 	return TrackMain
+}
+
+// The closed transcript-kind vocabulary Discover assigns. A top-level `*.jsonl` in a
+// namespace directory is a KindTop transcript; anything nested deeper is KindSpawned,
+// because that is where this harness parks a sub-agent's own transcript.
+//
+// Named KindTop/KindSpawned rather than after the two values they carry, so please leave
+// it: the shorter names are the words this package uses for the whole-file concepts they
+// name, and admission refuses a new identifier built out of them.
+const (
+	KindTop     = "session"
+	KindSpawned = "subagent"
+)
+
+// TrackForKind resolves which track a session's volume belongs to, given the kind of
+// transcript it came from and the track its own records claimed.
+//
+// THIS IS THE FALLBACK, AND IT ONLY EVER RUNS ONE WAY. A whole transcript that Discover
+// classified as spawned IS delegated work — that is what the nesting means — so volume it
+// reported as main-thread is re-attributed here. Nothing moves in the other direction: a
+// marked turn in a top-level transcript stays delegated, because the marker is a
+// per-record claim and outranks a per-file inference.
+//
+// The two signals were measured to agree exactly on the corpus in the file header
+// (1,524 of 1,524 marked in spawned transcripts, 0 of 5,755 in top-level ones), so on
+// today's harness this changes no number. That is the point of adding it now rather than
+// after a regression: it is what keeps the answer alive if the marker stops being written,
+// which is the exact failure the UNKNOWN verdict exists to refuse to paper over. Two
+// independent signals that agree are a measurement; one signal is a dependency.
+func TrackForKind(kind, track string) string {
+	if kind == KindSpawned && track == TrackMain {
+		return TrackDelegation
+	}
+	return track
 }
 
 // spawnToolNames is the closed set of tool calls that CREATE delegated work in this

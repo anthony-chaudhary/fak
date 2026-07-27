@@ -422,7 +422,7 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 			}
 			for _, p := range files {
 				top[p] = true
-				if rec, ok := statTranscript(root, ns, p, "session", cutoff); ok {
+				if rec, ok := statTranscript(root, ns, p, KindTop, cutoff); ok {
 					out = append(out, rec)
 				}
 			}
@@ -433,7 +433,7 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 				if err != nil || d.IsDir() || filepath.Ext(path) != ".jsonl" || top[path] {
 					return nil
 				}
-				if rec, ok := statTranscript(root, ns, path, "subagent", cutoff); ok {
+				if rec, ok := statTranscript(root, ns, path, KindSpawned, cutoff); ok {
 					out = append(out, rec)
 				}
 				return nil
@@ -552,8 +552,14 @@ func AggregateSessions(sessions []Session) Aggregate {
 		// Rolled up from the SESSION rather than derived from PerModel the way PerBucket
 		// and PerTier are: delegation is a property of the turn, not of the model that
 		// served it, and the same model id routinely serves both tracks.
+		//
+		// Through TrackForKind, so a transcript the harness parked in its own file
+		// lands on the delegated track even if its records carry no marker. On today's
+		// harness the two signals agree exactly and this moves nothing; it is what keeps
+		// the fraction answerable if the marker stops being written.
 		for track, c := range s.PerTrack {
-			agg.PerTrack[track] = addModelCounts(agg.PerTrack[track], c)
+			t := TrackForKind(s.Kind, track)
+			agg.PerTrack[t] = addModelCounts(agg.PerTrack[t], c)
 		}
 		calls = append(calls, float64(s.NToolUse))
 		outs = append(outs, float64(s.Tokens.Output))
@@ -716,7 +722,7 @@ func BuildCompactReportFromDiscovery(opts DiscoverOptions, includeSubagents bool
 	}
 	included := make([]Session, 0, len(sessions))
 	for _, s := range sessions {
-		if !includeSubagents && s.Kind == "subagent" {
+		if !includeSubagents && s.Kind == KindSpawned {
 			continue
 		}
 		included = append(included, s)
@@ -732,7 +738,7 @@ func BuildCompactReportFromDiscovery(opts DiscoverOptions, includeSubagents bool
 		}
 		var subRecs []Transcript
 		for _, rec := range allRecs {
-			if rec.Kind == "subagent" {
+			if rec.Kind == KindSpawned {
 				subRecs = append(subRecs, rec)
 			}
 		}

@@ -122,7 +122,11 @@ func scopeLine(sessions []Session, nsPrefix string, sinceDays *float64, includeS
 	}
 	kinds := "top-level session transcripts"
 	if includeSubagents {
-		kinds += " (subagents reported separately below)"
+		// Says FOLDED IN, not "reported separately below", because that is what this flag
+		// now does — and the distinction decides whether the delegation share can be
+		// computed at all. This harness parks delegated turns in their own transcripts, so
+		// a scope that leaves them out has no delegated volume to divide by.
+		kinds += " (sub-agent / workflow transcripts folded in)"
 	}
 	cap := ""
 	if maxSessions > 0 {
