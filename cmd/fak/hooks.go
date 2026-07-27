@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -140,6 +141,57 @@ func resolveCheckBudget() time.Duration {
 	return defaultCheckBudget
 }
 
+// defaultTotalBudget bounds the WHOLE pre-commit hook's wall clock, prologue included. The
+// per-gate budget alone does not bound the hook: PreCommitGates() returns 17 gates, so a
+// per-gate-only cap admits a ~17-minute worst case. That matters because #5335's failure is a
+// FEEDBACK LOOP, not just a stall — a committer that outruns its ~120s tool timeout is SIGTERM'd
+// mid-index-write and leaves a fresh stale `.git/index.lock`, which wedges the next committer.
+// Bounding the hook under that timeout is what breaks the loop. 90s sits below the 120s cap and
+// far above a healthy run (~0.3s for all gates), so it engages only when something is genuinely
+// wedged. Override with FAK_PRECOMMIT_TOTAL_BUDGET_MS; a non-positive override is ignored,
+// because disabling the bound reintroduces the wedge.
+const defaultTotalBudget = 90 * time.Second
+
+// resolveTotalBudget returns the FAK_PRECOMMIT_TOTAL_BUDGET_MS override (when it parses to a
+// positive millisecond count) or defaultTotalBudget.
+func resolveTotalBudget() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("FAK_PRECOMMIT_TOTAL_BUDGET_MS")); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return defaultTotalBudget
+}
+
+// gateBudgetFor returns the budget for the NEXT gate under the hook's shared wall clock: the
+// per-gate budget clamped to whatever remains of the total. ok=false means the total is spent
+// and the remaining gates must be skipped (fail-open) rather than each getting a fresh per-gate
+// budget — the clamp is what stops N slow gates from summing past the total.
+func gateBudgetFor(perGate, remaining time.Duration) (budget time.Duration, ok bool) {
+	if remaining <= 0 {
+		return 0, false
+	}
+	if remaining < perGate {
+		return remaining, true
+	}
+	return perGate, true
+}
+
+// exitBoundedFailOpen is the exit code for "a wall-clock bound cut this hook short — allow the
+// commit and do NOT fall through to the Python gates" (#5335).
+//
+// It is distinct from exit 2 on purpose. Exit 2 means could-not-run and tells the shell wrapper
+// to run the Python checkers instead, which is right when `fak` is simply absent or the repo is
+// unreadable. But when the bound fired, git itself is wedged — and every Python checker shells
+// out to the same git, unbounded. Falling through would rebuild the exact wedge the bound just
+// escaped, and would double the hook's wall clock while doing it. So this code says: the gates
+// did not run, and re-running them by another route is not available. The issue's own DoD asks
+// for exactly this ("exit 2 -> skip the Python fallthrough or the whole gate").
+//
+// Allowing the commit is the fail-open direction the hook already takes for every other
+// could-not-run: a gate that cannot reach its evidence is skipped, never converted into a block.
+const exitBoundedFailOpen = 3
+
 // checkWithinBudget runs one gate's Check under a wall-clock budget. Returning within budget it
 // yields the gate's own (findings, error) verbatim. On budget expiry it returns
 // (nil, errCheckBudgetExceeded) and ABANDONS the still-running Check: the goroutine sends its
@@ -175,13 +227,41 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
-	r := resolveRoot(*root)
+	// The whole hook — prologue AND gates — runs inside one wall clock (#5335), so a wedged
+	// git can never hold a commit past the tool timeout that manufactures the next stale lock.
+	// The clock starts HERE, before the first git spawn: resolveRoot shells out too, so a
+	// deadline taken after it would leave the hook's very first subprocess unbounded.
+	totalBudget := resolveTotalBudget()
+	hookDeadline := time.Now().Add(totalBudget)
+
+	rootCtx, cancelRoot := context.WithDeadline(context.Background(), hookDeadline)
+	r := resolveRootWithin(rootCtx, *root)
+	cancelRoot()
 	if r == "" {
+		if time.Now().After(hookDeadline) {
+			if !*asJSON {
+				fmt.Fprintf(stderr, "pre-commit: repo-root probe exceeded the %s hook budget; gates skipped (fail-open, #5335)\n", totalBudget)
+			}
+			return exitBoundedFailOpen
+		}
 		return 2 // not in a repo => could-not-run => fall through to python
 	}
 
-	d, err := hooks.ReadStagedDiff(r)
+	// Bound the PROLOGUE. ReadStagedDiff spawns ~5 index-taking git reads and used to run with
+	// no deadline at all, upstream of the per-gate budget below — which is exactly where #5335
+	// observed the hook blocking at near-zero CPU while a peer held `.git/index.lock`.
+	readCtx, cancelRead := context.WithDeadline(context.Background(), hookDeadline)
+	d, err := hooks.ReadStagedDiffWithin(readCtx, r)
+	cancelRead()
 	if err != nil {
+		if time.Now().After(hookDeadline) {
+			// Git is wedged, not missing. Handing off to the (unbounded) Python gates would
+			// rebuild the wedge, so stop here and let the commit through.
+			if !*asJSON {
+				fmt.Fprintf(stderr, "pre-commit: staged-diff read exceeded the %s hook budget; gates skipped (fail-open, #5335)\n", totalBudget)
+			}
+			return exitBoundedFailOpen
+		}
 		// could-not-run: never block. The shell wrapper treats exit 2 as "fall back to python".
 		return 2
 	}
@@ -194,13 +274,22 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		if mode == "off" || escaped {
 			continue
 		}
-		findings, gerr := checkWithinBudget(g, d, budget)
+		// Charge every gate against the shared wall clock, so N slow gates cannot sum past the
+		// total the way N per-gate budgets could.
+		gateBudget, ok := gateBudgetFor(budget, time.Until(hookDeadline))
+		if !ok {
+			if !*asJSON {
+				fmt.Fprintf(stderr, "pre-commit: %s hook budget spent; remaining gates from %s skipped (fail-open, #5335)\n", totalBudget, g.Name)
+			}
+			break
+		}
+		findings, gerr := checkWithinBudget(g, d, gateBudget)
 		if gerr != nil {
 			// A single gate that could-not-run — or ran past its wall-clock budget (#5335) — is
 			// skipped (fail-open); the other gates still run. A budget cut-off is reported so a
 			// wedged or deliberately-slow gate is visible, never a silent bypass of a real check.
 			if errors.Is(gerr, errCheckBudgetExceeded) && !*asJSON {
-				fmt.Fprintf(stderr, "pre-commit: gate %s exceeded its %s budget; skipped (fail-open, #5335)\n", g.Name, budget)
+				fmt.Fprintf(stderr, "pre-commit: gate %s exceeded its %s budget; skipped (fail-open, #5335)\n", g.Name, gateBudget)
 			}
 			continue
 		}
@@ -393,10 +482,18 @@ func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding) {
 
 // resolveRoot returns the explicit --root, else the git toplevel from cwd, else "".
 func resolveRoot(explicit string) string {
+	return resolveRootWithin(context.Background(), explicit)
+}
+
+// resolveRootWithin is resolveRoot bounded by ctx. The `git rev-parse` it spawns is the FIRST
+// subprocess the pre-commit hook runs, so leaving it unbounded would put a git call ahead of the
+// hook's own wall clock (#5335). An expired ctx yields "" — the same not-in-a-repo answer a
+// failed probe already gives — so the bound can only ever skip work, never add a refusal.
+func resolveRootWithin(ctx context.Context, explicit string) string {
 	if strings.TrimSpace(explicit) != "" {
 		return explicit
 	}
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
