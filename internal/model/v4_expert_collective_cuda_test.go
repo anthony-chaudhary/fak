@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -31,16 +32,33 @@ var errV4CollectiveCapacityRefused = errors.New("CAPACITY_REFUSED")
 // would be a false multi-GPU witness — exactly what #971 exists to prevent. So the single-GPU
 // case is reported as a typed CAPACITY_REFUSED rather than downgraded to a 1-rank green.
 func admitV4DeviceCollective(world int) (compute.Backend, error) {
+	return admitV4DeviceCollectiveVia(world, compute.Lookup)
+}
+
+// admitV4DeviceCollectiveVia is admitV4DeviceCollective over an INJECTABLE backend lookup, so
+// the refusal classification below is witnessable on an ordinary CPU host. Without the seam the
+// build-tag rungs are only reachable on hardware we cannot get to, which is precisely how they
+// stayed mis-typed.
+func admitV4DeviceCollectiveVia(world int, lookup func(string) (compute.Backend, bool)) (compute.Backend, error) {
 	if world < 2 {
 		return nil, fmt.Errorf("device collective rung needs world >= 2, got %d", world)
 	}
-	be, ok := compute.Lookup("cuda")
+	// WHY BOTH MISSES BELOW ARE TYPED CAPACITY REFUSALS, AND WHY THEY NAME BUILD TAGS.
+	// Neither miss means "the collective path is broken" — it means "this BINARY cannot express
+	// the rung", which is the same class as "this box has < 2 GPUs" and must stay errors.Is-able
+	// as CAPACITY_REFUSED. The messages name the missing build tag rather than the host because
+	// the admission is gated by THREE different compile gates, not by hardware:
+	// internal/compute/cuda.go is //go:build cuda (a default untagged build registers no cuda
+	// backend on ANY node, GPU or not), and InitCollective is defined ONLY in
+	// cuda_collective.go, //go:build cuda && nccl (so -tags cuda alone still has no seam).
+	// An "on this host" message sends the operator hunting the node; the fix is the build.
+	be, ok := lookup("cuda")
 	if !ok {
-		return nil, fmt.Errorf("%w: exact cuda backend not registered on this host", errV4CollectiveCapacityRefused)
+		return nil, fmt.Errorf("%w: no cuda backend registered — internal/compute/cuda.go is //go:build cuda, so an untagged build registers none on ANY node, GPU or not; rebuild with -tags cuda,nccl", errV4CollectiveCapacityRefused)
 	}
 	init, ok := be.(compute.CollectiveInitializer)
 	if !ok {
-		return nil, fmt.Errorf("backend %q lacks the CollectiveInitializer seam", be.Name())
+		return nil, fmt.Errorf("%w: backend %q lacks the CollectiveInitializer seam — InitCollective exists only in internal/compute/cuda_collective.go (//go:build cuda && nccl), so a -tags cuda build WITHOUT nccl cannot express this rung; rebuild with -tags cuda,nccl", errV4CollectiveCapacityRefused, be.Name())
 	}
 	if err := init.InitCollective(world); err != nil {
 		return nil, fmt.Errorf("%w: world=%d NCCL admission refused: %v", errV4CollectiveCapacityRefused, world, err)
@@ -49,6 +67,59 @@ func admitV4DeviceCollective(world int) (compute.Backend, error) {
 		return nil, fmt.Errorf("%w: backend %q did not advertise Caps().Collective after world=%d admission", errV4CollectiveCapacityRefused, be.Name(), world)
 	}
 	return be, nil
+}
+
+// seamlessCUDABackend is a stand-in for a `-tags cuda`-WITHOUT-`nccl` build: the cuda backend
+// is registered, but no InitCollective is compiled in, so it does not satisfy
+// compute.CollectiveInitializer. Only Name() is reachable on the path under test, so the
+// embedded nil Backend is never called.
+type seamlessCUDABackend struct{ compute.Backend }
+
+func (seamlessCUDABackend) Name() string { return "cuda" }
+
+// TestV4DeviceCollectiveAdmissionTypesBuildTagMisses pins the two BUILD-GATE misses as typed
+// CAPACITY_REFUSALS that name the missing tag. This is the CPU-host-runnable half of #5106: the
+// device witness needs >= 2 GPUs, but the acceptance command's failure MODES do not, and they
+// were the trap — a `-tags cuda` build without `nccl` used to hard-t.Fatal with an untyped
+// "lacks the CollectiveInitializer seam", and an untagged build blamed "this host". Both read as
+// a broken collective or bad hardware when the real fix is the build command. Getting this wrong
+// costs a scarce multi-GPU window, so it is pinned here where it can actually be run.
+func TestV4DeviceCollectiveAdmissionTypesBuildTagMisses(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		lookup func(string) (compute.Backend, bool)
+		want   string
+	}{
+		{
+			name:   "untagged build registers no cuda backend",
+			lookup: func(string) (compute.Backend, bool) { return nil, false },
+			want:   "-tags cuda,nccl",
+		},
+		{
+			name:   "tags cuda without nccl has no CollectiveInitializer",
+			lookup: func(string) (compute.Backend, bool) { return seamlessCUDABackend{}, true },
+			want:   "-tags cuda,nccl",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := admitV4DeviceCollectiveVia(2, tc.lookup)
+			if err == nil {
+				t.Fatal("admission succeeded without a real device collective")
+			}
+			// The load-bearing assertion: errors.Is must hold, or the acceptance harness cannot
+			// tell "this binary/box cannot express the rung" from "the collective path broke".
+			if !errors.Is(err, errV4CollectiveCapacityRefused) {
+				t.Fatalf("error is not a typed CAPACITY_REFUSED: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("refusal does not name the build fix %q: %v", tc.want, err)
+			}
+			// It must NOT blame the node: the miss is a compile gate, reproducible on an 8-GPU box.
+			if strings.Contains(err.Error(), "on this host") {
+				t.Fatalf("refusal blames the host for a build-tag miss: %v", err)
+			}
+		})
+	}
 }
 
 // TestV4CollectiveExpertTransportCUDAMultiRank is the sanctioned-hardware acceptance rung for
