@@ -58,12 +58,12 @@ type gatewayMetrics struct {
 	// how much volume went unclassified. Never derive one group by subtracting the
 	// other from the total — that would silently book every unclassified turn as
 	// self-hosted, which is the one direction of error that flatters us.
-	inferLocalTurns         uint64
-	inferLocalPromptTokens  uint64
-	inferLocalComplTokens   uint64
-	inferVendorTurns        uint64
-	inferVendorPromptTokens uint64
-	inferVendorComplTokens  uint64
+	inferSelfHostedTurns        uint64
+	inferSelfHostedPromptTokens uint64
+	inferSelfHostedComplTokens  uint64
+	inferVendorTurns            uint64
+	inferVendorPromptTokens     uint64
+	inferVendorComplTokens      uint64
 	// inferCacheCreationTokens is the cumulative provider cache_creation_input_tokens —
 	// the WRITE axis the read-only ProviderCacheSavingsUSD never retained. With it and
 	// the read total, the session can report NET realized vcache economics (read saving
@@ -831,9 +831,9 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.CachedTurns = m.inferCachedHits
 	sum.InputTokens = m.inferPromptTokens
 	sum.OutputTokens = m.inferComplTokens
-	sum.SelfHostedTurns = m.inferLocalTurns
-	sum.SelfHostedInputTokens = m.inferLocalPromptTokens
-	sum.SelfHostedOutputTokens = m.inferLocalComplTokens
+	sum.SelfHostedTurns = m.inferSelfHostedTurns
+	sum.SelfHostedInputTokens = m.inferSelfHostedPromptTokens
+	sum.SelfHostedOutputTokens = m.inferSelfHostedComplTokens
 	sum.VendorTurns = m.inferVendorTurns
 	sum.VendorInputTokens = m.inferVendorPromptTokens
 	sum.VendorOutputTokens = m.inferVendorComplTokens

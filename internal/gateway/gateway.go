@@ -2010,7 +2010,7 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 		// into a Planner. Falls through to MockPlanner if the host didn't preload.
 		planner = newInKernelChatPlanner(cfg, model, logf)
 		// Every turn decodes on this box against weights we host.
-		side = localityLocal
+		side = localitySelfHosted
 	default:
 		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
 		// chat surface silently fell back to the deterministic offline mock. Warn

@@ -28,9 +28,9 @@ func TestServedLocalityFollowsTheDualPlannerRouting(t *testing.T) {
 		model string
 		want  servingLocality
 	}{
-		{"the local id decodes in-kernel", "qwen-local", localityLocal},
-		{"the reserved alias too", "local", localityLocal},
-		{"case and padding do not change the side", "  QWEN-LOCAL ", localityLocal},
+		{"the local id decodes in-kernel", "qwen-local", localitySelfHosted},
+		{"the reserved alias too", "local", localitySelfHosted},
+		{"case and padding do not change the side", "  QWEN-LOCAL ", localitySelfHosted},
 		{"any other id proxies upstream", "claude-opus-5", localityVendor},
 		// An omitted model routes to the proxy (the planner's documented default
 		// side), so it is vendor — not unknown, and certainly not local.
@@ -41,7 +41,7 @@ func TestServedLocalityFollowsTheDualPlannerRouting(t *testing.T) {
 				t.Errorf("servedLocality(%q) = %v, want %v", tc.model, got, tc.want)
 			}
 			// The classifier and the planner must never disagree about the same id.
-			if routesLocal := s.planner.(*DualPlanner).RoutesLocal(tc.model); routesLocal != (tc.want == localityLocal) {
+			if routesLocal := s.planner.(*DualPlanner).RoutesLocal(tc.model); routesLocal != (tc.want == localitySelfHosted) {
 				t.Errorf("RoutesLocal(%q) = %v but locality says %v", tc.model, routesLocal, tc.want)
 			}
 		})
@@ -57,7 +57,7 @@ func TestServedLocalityUsesTheDeploymentSideWhenNotDual(t *testing.T) {
 		want servingLocality
 	}{
 		{"proxy-only serves vendor tokens", &Server{planner: agent.NewMockPlanner("x"), servedSide: localityVendor}, localityVendor},
-		{"in-kernel-only serves our own", &Server{planner: agent.NewMockPlanner("x"), servedSide: localityLocal}, localityLocal},
+		{"in-kernel-only serves our own", &Server{planner: agent.NewMockPlanner("x"), servedSide: localitySelfHosted}, localitySelfHosted},
 		// The zero value. A planner wired in directly (a test, or a host that
 		// bypassed the selector) must not be attributed to either side.
 		{"an unwired side stays unclassified", &Server{planner: agent.NewMockPlanner("x")}, localityUnknown},
@@ -76,14 +76,14 @@ func TestServedLocalityUsesTheDeploymentSideWhenNotDual(t *testing.T) {
 // served it.
 func TestServedLocalityOfOptsMatchesTheRoutedSide(t *testing.T) {
 	s := dualServer(t, "qwen-local")
-	if got := s.servedLocalityOf([]agent.SampleOpt{agent.WithModel("qwen-local")}); got != localityLocal {
+	if got := s.servedLocalityOf([]agent.SampleOpt{agent.WithModel("qwen-local")}); got != localitySelfHosted {
 		t.Errorf("opts naming the local id = %v, want local", got)
 	}
 	if got := s.servedLocalityOf([]agent.SampleOpt{agent.WithModel("claude-opus-5")}); got != localityVendor {
 		t.Errorf("opts naming an upstream id = %v, want vendor", got)
 	}
 	// A nil opt in the slice must not panic the accounting path.
-	if got := s.servedLocalityOf([]agent.SampleOpt{nil, agent.WithModel("qwen-local"), nil}); got != localityLocal {
+	if got := s.servedLocalityOf([]agent.SampleOpt{nil, agent.WithModel("qwen-local"), nil}); got != localitySelfHosted {
 		t.Errorf("opts with nil entries = %v, want local", got)
 	}
 	if got := s.servedLocalityOf(nil); got != localityVendor {
@@ -97,8 +97,8 @@ func TestServedLocalityOfOptsMatchesTheRoutedSide(t *testing.T) {
 // into whichever side happens to be convenient.
 func TestObserveInferenceServedSplitsWithoutDisturbingTheTotals(t *testing.T) {
 	m := newGatewayMetrics(time.Now())
-	m.observeInferenceServed(localityLocal, 100, 10, 0, 0, "stop", time.Second)
-	m.observeInferenceServed(localityLocal, 200, 20, 0, 0, "stop", time.Second)
+	m.observeInferenceServed(localitySelfHosted, 100, 10, 0, 0, "stop", time.Second)
+	m.observeInferenceServed(localitySelfHosted, 200, 20, 0, 0, "stop", time.Second)
 	m.observeInferenceServed(localityVendor, 300, 30, 0, 0, "stop", time.Second)
 	// Unclassified: a path not yet taught to classify, or a mock.
 	m.observeInferenceServed(localityUnknown, 400, 40, 0, 0, "stop", time.Second)
@@ -164,7 +164,7 @@ func TestAnUnclassifiedSummaryKeepsTheSplitOffTheWire(t *testing.T) {
 // A negative token count from an upstream must not let a subset exceed its total.
 func TestAttributeServedTurnClampsNegatives(t *testing.T) {
 	m := newGatewayMetrics(time.Now())
-	m.observeInferenceServed(localityLocal, -5, -7, 0, 0, "stop", time.Second)
+	m.observeInferenceServed(localitySelfHosted, -5, -7, 0, 0, "stop", time.Second)
 	s := m.adjudicationSummary()
 	if s.SelfHostedTurns != 1 {
 		t.Errorf("SelfHostedTurns = %d, want 1 (the turn still happened)", s.SelfHostedTurns)

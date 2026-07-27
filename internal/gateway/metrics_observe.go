@@ -734,10 +734,10 @@ func (m *gatewayMetrics) attributeServedTurn(loc servingLocality, promptTok, com
 	}
 	m.inferenceMu.Lock()
 	switch loc {
-	case localityLocal:
-		m.inferLocalTurns++
-		m.inferLocalPromptTokens += uint64(promptTok)
-		m.inferLocalComplTokens += uint64(complTok)
+	case localitySelfHosted:
+		m.inferSelfHostedTurns++
+		m.inferSelfHostedPromptTokens += uint64(promptTok)
+		m.inferSelfHostedComplTokens += uint64(complTok)
 	case localityVendor:
 		m.inferVendorTurns++
 		m.inferVendorPromptTokens += uint64(promptTok)
