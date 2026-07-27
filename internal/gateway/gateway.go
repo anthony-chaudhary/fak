@@ -1271,6 +1271,12 @@ type Server struct {
 	// live HTTPPlanner/ReplicaRouter when BaseURL/ReplicaBaseURLs are set, else the
 	// offline MockPlanner. Settable in-package for tests.
 	planner agent.Planner
+	// servedSide is the deployment-constant serving locality selectChatPlanner
+	// resolved (vendor for a proxy, local for the in-kernel model, unknown for the
+	// mock and for a dual planner, whose side is per-request). servedLocality reads
+	// it. The zero value is the honest unknown, so a test that sets planner directly
+	// leaves its turns UNCLASSIFIED rather than silently attributed.
+	servedSide servingLocality
 	// inKernelModelButChatIsMock tracks when kernel has real weights loaded (for
 	// fak_syscalls) but chat falls back to mock due to missing tokenizer (#1115).
 	// Set at New when InKernelModel != nil && Tokenizer == nil. The /healthz
@@ -1795,7 +1801,7 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	planner, inKernelModelButChatIsMock, err := selectChatPlanner(cfg, model, proxyURLs, logf, startup)
+	planner, servedSide, inKernelModelButChatIsMock, err := selectChatPlanner(cfg, model, proxyURLs, logf, startup)
 	if err != nil {
 		return nil, err
 	}
@@ -1854,6 +1860,7 @@ func New(cfg Config) (*Server, error) {
 		k:                            k,
 		engineID:                     engineID,
 		model:                        model,
+		servedSide:                   servedSide,
 		requireKey:                   cfg.RequireKey,
 		readBearer:                   cfg.ReadBearer,
 		keyset:                       newKeyset(cfg.KeyPrincipals),
@@ -1955,11 +1962,18 @@ func New(cfg Config) (*Server, error) {
 // planner, a proxy planner, the in-kernel chat planner, or the deterministic mock —
 // records the planner-init startup phase, and reports whether real weights are loaded
 // for syscalls but chat still falls back to the mock (missing tokenizer, #1115).
-func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(string, ...any), startup *startupProfile) (agent.Planner, bool, error) {
+func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(string, ...any), startup *startupProfile) (agent.Planner, servingLocality, bool, error) {
 	var planner agent.Planner
 	var err error
 	t := time.Now()
 	inKernelModelButChatIsMock := false
+	// Which SIDE serves a turn under this deployment — the attribution the usage
+	// ledger's self-hosted split needs and could not previously get. It is resolved
+	// here, and only here, because this switch is the one place the four modes are
+	// exhaustive by construction: a fifth branch added later must state its own side
+	// or inherit the honest unknown, whereas a type-switch somewhere downstream would
+	// quietly read a new planner as unclassified and shrink coverage without saying so.
+	side := localityUnknown
 	switch {
 	case len(proxyURLs) != 0 && cfg.InKernelModel != nil && cfg.Tokenizer != nil:
 		// DUAL (small local model ALONGSIDE the API upstream, dual_planner.go): a live
@@ -1971,25 +1985,32 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 		// were dead; now the combination is the alongside deployment.
 		proxy, perr := newProxyPlanner(cfg, model, proxyURLs)
 		if perr != nil {
-			return nil, false, perr
+			return nil, localityUnknown, false, perr
 		}
 		localID := localModelIDOr(cfg.LocalModelID)
 		planner, err = NewDualPlanner(proxy, newInKernelChatPlanner(cfg, localID, logf), localID)
 		if err != nil {
-			return nil, false, err
+			return nil, localityUnknown, false, err
 		}
 		logf("gateway: dual planner — model id %q (and \"local\") decodes in-kernel; every other model id proxies upstream", localID)
+		// Deliberately left unknown: dual is the one mode with no deployment-constant
+		// side, because the side is a property of each REQUEST's model id. servedLocality
+		// asks the planner itself (RoutesLocal) rather than guessing from a default here.
 	case len(proxyURLs) != 0:
 		planner, err = newProxyPlanner(cfg, model, proxyURLs)
 		if err != nil {
-			return nil, false, err
+			return nil, localityUnknown, false, err
 		}
+		// Every turn leaves the box for a third-party API.
+		side = localityVendor
 	case cfg.InKernelModel != nil && cfg.Tokenizer != nil:
 		// Serve the model fused into the kernel as the chat backend on BOTH
 		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
 		// real ChatML chat via internal/tokenizer, the cmd/fakchat recipe factored
 		// into a Planner. Falls through to MockPlanner if the host didn't preload.
 		planner = newInKernelChatPlanner(cfg, model, logf)
+		// Every turn decodes on this box against weights we host.
+		side = localityLocal
 	default:
 		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
 		// chat surface silently fell back to the deterministic offline mock. Warn
@@ -2005,9 +2026,12 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
 		}
 		planner = agent.NewMockPlanner(model)
+		// Scripted text is not inference, from here or from a vendor. It stays
+		// UNCLASSIFIED so a mock run can never pad the self-hosted share with turns
+		// no hardware ever served.
 	}
 	startup.phase("planner-init", time.Since(t))
-	return planner, inKernelModelButChatIsMock, nil
+	return planner, side, inKernelModelButChatIsMock, nil
 }
 
 // ablateUncachedTrimBytes composes Config.ElideResultBytes with the FAK_ABLATE_UNCACHED_TRIM
@@ -2737,7 +2761,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 		}
 		return nil, err
 	}
-	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, dur)
+	s.metrics.observeInferenceServed(s.servedLocalityOf(opts), comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, dur)
 	s.observePlannerRequestMemory()
 	// The served turn has mutated the KV cache; relieve HBM pressure by demoting a hot span to
 	// the colder tier instead of dropping it (#1073, the live serve-path call site for the

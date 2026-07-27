@@ -151,7 +151,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return s.streamPlannerUpstreamError(w, err, started, reqTrace, began, sendLocked, closeText)
 	}
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
-	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began)
+	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began, req.Model)
 
 	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
 		if !started {

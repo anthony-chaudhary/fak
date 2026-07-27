@@ -698,6 +698,54 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok, cacheC
 	m.observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
 }
 
+// observeInferenceServed is observeInference plus WHO SERVED THE TURN — the
+// self-hosted attribution the durable usage row needs. loc is what servedLocality
+// resolved; localityUnknown counts the turn in the unsplit totals and in neither
+// side, which is what makes the classified fraction a measurement rather than an
+// assumption.
+//
+// It is a separate entry point rather than an extra parameter on observeInference so
+// that every existing caller — including any the fleet adds while this is landing —
+// keeps reporting an honest unknown instead of being silently defaulted into one
+// side by a zero argument.
+func (m *gatewayMetrics) observeInferenceServed(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur time.Duration) {
+	m.observeInferenceServedTimed(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
+}
+
+// observeInferenceServedTimed is observeInferenceTimed with the serving side.
+func (m *gatewayMetrics) observeInferenceServedTimed(loc servingLocality, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	m.observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
+	m.attributeServedTurn(loc, promptTok, complTok)
+}
+
+// attributeServedTurn books one served turn's volume against the side that
+// generated it. Clamps negatives out the same way the unsplit accumulators do, so a
+// provider that reports a nonsense count cannot make a group exceed the total it is
+// a subset of.
+func (m *gatewayMetrics) attributeServedTurn(loc servingLocality, promptTok, complTok int) {
+	if m == nil || loc == localityUnknown {
+		return
+	}
+	if promptTok < 0 {
+		promptTok = 0
+	}
+	if complTok < 0 {
+		complTok = 0
+	}
+	m.inferenceMu.Lock()
+	switch loc {
+	case localityLocal:
+		m.inferLocalTurns++
+		m.inferLocalPromptTokens += uint64(promptTok)
+		m.inferLocalComplTokens += uint64(complTok)
+	case localityVendor:
+		m.inferVendorTurns++
+		m.inferVendorPromptTokens += uint64(promptTok)
+		m.inferVendorComplTokens += uint64(complTok)
+	}
+	m.inferenceMu.Unlock()
+}
+
 // observeInferenceTimed is observeInference with an explicit time-to-first-token
 // split. ttft is the wall-clock from the planner call starting to the FIRST content
 // delta arriving (the prefill phase: prompt ingest + first token); dur is the whole

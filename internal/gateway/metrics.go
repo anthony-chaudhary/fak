@@ -51,6 +51,19 @@ type gatewayMetrics struct {
 	inferComplTokens  uint64
 	inferCachedTokens uint64
 	inferCachedHits   uint64 // served turns whose prompt got a provider cache READ (>0 cached tokens)
+	// The self-hosted split of the SAME volume the unsplit totals above accumulate,
+	// attributed by servedLocality at the observation (epic #5416). Both groups are
+	// strict subsets: a turn whose side could not be resolved lands in neither, so
+	// local+vendor <= the unsplit total and the shortfall is the honest measure of
+	// how much volume went unclassified. Never derive one group by subtracting the
+	// other from the total — that would silently book every unclassified turn as
+	// self-hosted, which is the one direction of error that flatters us.
+	inferLocalTurns         uint64
+	inferLocalPromptTokens  uint64
+	inferLocalComplTokens   uint64
+	inferVendorTurns        uint64
+	inferVendorPromptTokens uint64
+	inferVendorComplTokens  uint64
 	// inferCacheCreationTokens is the cumulative provider cache_creation_input_tokens —
 	// the WRITE axis the read-only ProviderCacheSavingsUSD never retained. With it and
 	// the read total, the session can report NET realized vcache economics (read saving
@@ -636,6 +649,21 @@ type AdjudicationSummary struct {
 	InputTokens         uint64 `json:"input_tokens"`
 	OutputTokens        uint64 `json:"output_tokens"`
 	CacheCreationTokens uint64 `json:"cache_creation_tokens"`
+	// SelfHosted*/Vendor* split InputTokens and OutputTokens by WHO SERVED the turn
+	// (epic #5416): tokens generated in-kernel on hardware we host, versus tokens
+	// bought from a third-party API. Both are strict subsets of the unsplit totals —
+	// a turn whose side servedLocality could not resolve is counted in the totals and
+	// in neither group — so the shortfall between them is the unclassified volume,
+	// and a reader can tell a measured self-hosted zero (Vendor turns present, no
+	// local ones) from an unmeasured one (no classified turn at all). All omitempty:
+	// a summary from a build or deployment that classified nothing must not serialize
+	// six zeros that read as "we self-host nothing".
+	SelfHostedTurns        uint64 `json:"self_hosted_turns,omitempty"`
+	SelfHostedInputTokens  uint64 `json:"self_hosted_input_tokens,omitempty"`
+	SelfHostedOutputTokens uint64 `json:"self_hosted_output_tokens,omitempty"`
+	VendorTurns            uint64 `json:"vendor_turns,omitempty"`
+	VendorInputTokens      uint64 `json:"vendor_input_tokens,omitempty"`
+	VendorOutputTokens     uint64 `json:"vendor_output_tokens,omitempty"`
 	// CacheCreationTokensUpgraded is the subset of CacheCreationTokens attributed to the
 	// managed-cache 1h TTL tier (GATEWAY_ATTRIBUTED — fak's own per-turn upgrade witness,
 	// since the provider wire never splits 5m vs 1h creation tokens; see
@@ -803,6 +831,12 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.CachedTurns = m.inferCachedHits
 	sum.InputTokens = m.inferPromptTokens
 	sum.OutputTokens = m.inferComplTokens
+	sum.SelfHostedTurns = m.inferLocalTurns
+	sum.SelfHostedInputTokens = m.inferLocalPromptTokens
+	sum.SelfHostedOutputTokens = m.inferLocalComplTokens
+	sum.VendorTurns = m.inferVendorTurns
+	sum.VendorInputTokens = m.inferVendorPromptTokens
+	sum.VendorOutputTokens = m.inferVendorComplTokens
 	sum.CacheCreationTokens = m.inferCacheCreationTokens
 	sum.CacheCreationTokensUpgraded = m.inferCacheCreationTokensUpgraded
 	// Observed per-turn E2E latency distribution (same lock observeInferenceTimed holds

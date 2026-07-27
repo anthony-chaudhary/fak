@@ -101,6 +101,15 @@ type anthropicPassthrough struct {
 	openClientBlock int
 }
 
+// reqModel is the model id the client asked for on this relayed turn, or "" when the
+// request is unavailable — the routing input servedLocality classifies from.
+func (p *anthropicPassthrough) reqModel() string {
+	if p == nil || p.req == nil {
+		return ""
+	}
+	return p.req.Model
+}
+
 // markFirstToken stamps the time-to-first-token boundary on the first content delta of
 // the turn. Idempotent: only the first delta sets it, so later deltas do not move it.
 func (p *anthropicPassthrough) markFirstToken(now time.Time) {
@@ -451,7 +460,11 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		if !p.firstTokenAt.IsZero() {
 			ttft = p.firstTokenAt.Sub(began)
 		}
-		s.metrics.observeInferenceTimed(p.promptTok, p.complTok, p.cacheRead, p.cacheCreate, p.finishReason, dur, ttft)
+		// The requested model id, which is what the planner routes on — so this relay's
+		// turns are attributed by the same rule as every other path, rather than being
+		// assumed vendor because the byte-preserving relay happens to talk to a vendor
+		// today.
+		s.metrics.observeInferenceServedTimed(s.servedLocality(p.reqModel()), p.promptTok, p.complTok, p.cacheRead, p.cacheCreate, p.finishReason, dur, ttft)
 		if compacted {
 			s.metrics.recordCompactionCacheRead(p.cacheRead) // OBSERVED provider cache_read on a compacted streamed turn
 			s.observeResetHealth(reqTrace, p.promptTok, p.cacheRead, p.cacheCreate)
