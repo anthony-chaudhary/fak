@@ -399,7 +399,8 @@
       "definition": "MaxContext is the swebench.Geometry method giving the largest context length a workload geometry reaches, computed as Prefix + Turns*(Decode+Result).",
       "distinction": "Not the model's fixed context-window limit (context-window); it is a measured per-workload peak context length.",
       "distinct_from": [
-        "context-window"
+        "context-window",
+        "x-disambig-fakcontext"
       ],
       "aliases": [],
       "grounding": "maxcontext",

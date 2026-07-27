@@ -135,7 +135,7 @@
       "kind": "symbol",
       "definition": "The cache for Gated-DeltaNet linear-attention layers: accumulated recurrent state and a short-conv window per layer, not per-token K/V.",
       "distinction": "Recurrent STATE for linear attention - NOT the KV cache (per-token softmax K/V) and NOT the attention accumulator (witness masses).",
-      "distinct_from": ["kv-cache", "attention-accumulator"],
+      "distinct_from": ["kv-cache", "attention-accumulator", "x-cache-newlinearattncache"],
       "aliases": [],
       "grounding": "linearattncache",
       "grounding_kind": "symbol",

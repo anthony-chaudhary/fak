@@ -26,6 +26,12 @@ func fixture(t *testing.T) (Catalog, string) {
 	if err := os.WriteFile(filepath.Join(data, "_meta.json"), append(meta, '\n'), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// The rows have to exist as bytes, not only in memory: positioning a concept
+	// writes the reverse half of its boundary into the twin's OWN row file.
+	rows, _ := json.MarshalIndent(map[string]any{"rows": c.Rows}, "", "  ")
+	if err := os.WriteFile(filepath.Join(data, c.Rows[0].Source), append(rows, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
 	return c, root
 }
 func TestPlanPositionAtomicDryRunAndApply(t *testing.T) {
@@ -35,7 +41,7 @@ func TestPlanPositionAtomicDryRunAndApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.BeforeFamilyCount != 2 || p.AfterFamilyCount != 3 || len(p.Files) != 2 {
+	if p.BeforeFamilyCount != 2 || p.AfterFamilyCount != 3 || len(p.Files) != 3 {
 		t.Fatalf("bad plan: %+v", p)
 	}
 	if _, err = os.Stat(filepath.Join(c.Dir, "rows-cache-authored.json")); !os.IsNotExist(err) {
@@ -97,12 +103,8 @@ func TestProductionCorpusExcludesTestsAndBuildTags(t *testing.T) {
 }
 
 func TestAppendRowPreservesExistingBytes(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "rows-cache.json")
 	before := []byte("{\n  \"note\": \"keep spacing\",\n  \"rows\": [\n    {\"id\":\"old\", \"canonical\": \"Old\"}\n  ]\n}\n")
-	if err := os.WriteFile(p, before, 0600); err != nil {
-		t.Fatal(err)
-	}
-	out, err := appendRowFile(p, Row{ID: "new", Canonical: "New"})
+	out, err := appendRow(before, Row{ID: "new", Canonical: "New"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +200,14 @@ func TestAuthoringModesCloseOneGapWithCriticalCleanAndFreshDocs(t *testing.T) {
 		if out, err := scorecardRun(t, root, "--gaps"); err == nil || !strings.Contains(strings.ToLower(out), "cachegap") {
 			t.Fatalf("want one pre-authoring gap, err=%v out=%s", err, out)
 		}
-		req := PositionRequest{ID: "cache-gap", Canonical: "Cache Gap", Family: "cache", Definition: "the fixture gap cache", Distinction: "a third cache rather than cache a", Kind: "symbol", Grounding: "CacheGap", GroundingKind: "symbol", Glossary: "docs/glossary.md", DistinctFrom: []string{"cache-a"}}
+		req := PositionRequest{ID: "cache-gap", Canonical: "Cache Gap", Family: "cache", Definition: "the fixture gap cache", Distinction: "a third cache rather than cache a or cache b", Kind: "symbol", Grounding: "CacheGap", GroundingKind: "symbol", Glossary: "docs/glossary.md", DistinctFrom: []string{"cache-b"}}
+		// "Cache Gap" is two edits from "Cache A", so a reader cannot keep the two
+		// names apart. Naming a DIFFERENT sibling does not pay that debt: the plan is
+		// refused, and the refusal names the twin that is still undrawn.
+		if _, err := PlanPosition(c, req); err == nil || !strings.Contains(err.Error(), "cache-a") {
+			t.Fatalf("want a refusal naming the unseparated twin, got %v", err)
+		}
+		req.DistinctFrom = []string{"cache-a", "cache-b"}
 		plan, err := PlanPosition(c, req)
 		if err != nil {
 			t.Fatal(err)
@@ -216,17 +225,39 @@ func TestAuthoringModesCloseOneGapWithCriticalCleanAndFreshDocs(t *testing.T) {
 		if out, err := scorecardRun(t, root, "--gaps"); err != nil || strings.Contains(strings.ToLower(out), "cachegap") {
 			t.Fatalf("position did not take gap to zero: %v %s", err, out)
 		}
-		want, err := os.ReadFile(filepath.Join(root, "docs", "concept-disambiguation-scorecard", "README.md"))
+		// Separation is mutual: the twins' own rows gained the reverse reference, in
+		// their own file, without the rest of that file being reformatted.
+		twins, err := os.ReadFile(filepath.Join(c.Dir, "rows-cache.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
+		if n := bytes.Count(twins, []byte(`"cache-gap"`)); n != 2 {
+			t.Fatalf("want a back-reference in each twin row, got %d in:\n%s", n, twins)
+		}
+		reloaded, err := Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ds := Validate(reloaded); len(ds) > 0 {
+			t.Fatalf("back-referenced catalog no longer validates: %v", ds)
+		}
+		if out, err := scorecardRun(t, root, "--pairs"); err != nil || !strings.Contains(out, "0 undrawn") {
+			t.Fatalf("position left a confusable pair undrawn: %v %s", err, out)
+		}
+		// Every generated artifact - scorecard AND name index - lands with the plan.
 		regen := filepath.Join(root, "regen")
 		if out, err := scorecardRun(t, root, "--markdown-dir", regen); err != nil {
 			t.Fatalf("regen: %v %s", err, out)
 		}
-		got, _ := os.ReadFile(filepath.Join(regen, "README.md"))
-		if !bytes.Equal(want, got) {
-			t.Fatal("generated README is stale")
+		for _, name := range []string{"README.md", "INDEX.md"} {
+			want, readErr := os.ReadFile(filepath.Join(root, "docs", "concept-disambiguation-scorecard", name))
+			if readErr != nil {
+				t.Fatalf("%s: %v", name, readErr)
+			}
+			got, _ := os.ReadFile(filepath.Join(regen, name))
+			if !bytes.Equal(want, got) {
+				t.Fatalf("generated %s is stale", name)
+			}
 		}
 	})
 	t.Run("classify", func(t *testing.T) {

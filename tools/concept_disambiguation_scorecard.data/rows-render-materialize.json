@@ -39,7 +39,7 @@
       "kind": "symbol",
       "definition": "One span paged into fresh history through the trust gate",
       "distinction": "Span paged through trust gate - NOT RenderItem (memq effect)",
-      "distinct_from": ["renderitem-memq", "renderplan-context"],
+      "distinct_from": ["renderitem-memq", "renderplan-context", "x-ci-coverage-render-materialize-renderers", "x-render-materialize-render", "x2-render-materialize-renderer"],
       "aliases": [],
       "grounding": "Rendered",
       "grounding_kind": "symbol",

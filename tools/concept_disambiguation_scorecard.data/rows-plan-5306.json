@@ -9,7 +9,7 @@
       "distinction": "A retry TIME BUDGET for the agent planner - NOT a memory/fit plan and NOT the harness-selection plan; it caps how long retries may run, not what gets planned.",
       "distinct_from": [
         "cov5306-harness-candidates",
-        "plan"
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "FAK_PLANNER_RETRY_BUDGET",
@@ -28,7 +28,7 @@
       "distinction": "The CANDIDATE SET of harnesses to choose among - NOT the single selected Harness and NOT a memory/fit plan; it is the input options, not a decision.",
       "distinct_from": [
         "cov5306-speculation-candidate",
-        "plan"
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "HarnessCandidates",
@@ -46,8 +46,8 @@
       "definition": "internal/agent/inkernel_decode.go inKernelPlannerPrefixReuseSupported: reports whether the in-kernel planner can reuse a prefix KV for the given model and backend, gating whether a decode takes the prefix-reuse path.",
       "distinction": "A CAPABILITY predicate (can this model/backend reuse a prefix?) - NOT prefixCacheIdentityFromContext (which names WHICH prefix) and NOT a batch/memory plan; it returns a bool, not a plan.",
       "distinct_from": [
-        "plan",
-        "cov5306-serve-gguf-memory-plan"
+        "cov5306-serve-gguf-memory-plan",
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "inKernelPlannerPrefixReuseSupported",
@@ -103,8 +103,8 @@
       "definition": "internal/model/madvise_other.go + mmap_other.go: 'plan9' names the Plan 9 operating system in the GOOS build-tag lists of the platforms that fall back to the portable (no-mmap / no-madvise) paths.",
       "distinction": "The Plan 9 OPERATING-SYSTEM build target - NOT any fak 'plan' concept; it is a GOOS name that only collides in spelling with the plan family.",
       "distinct_from": [
-        "plan",
-        "cov5306-plant"
+        "cov5306-plant",
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "plan9",
@@ -123,7 +123,7 @@
       "distinction": "Plans a RE-CLASSIFY of an existing concept - NOT PlanPosition (which plans ADDING a new positioned row) and NOT a memory/fit plan.",
       "distinct_from": [
         "cov5306-plan-position",
-        "plan"
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "PlanClassify",
@@ -142,7 +142,7 @@
       "distinction": "Plans ADDING a new positioned concept row - NOT PlanClassify (which plans re-grading an existing one) and NOT a memory/fit plan.",
       "distinct_from": [
         "cov5306-plan-classify",
-        "plan"
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "PlanPosition",
@@ -160,8 +160,8 @@
       "definition": "cmd/fak/codex_mcp_install.go + internal/quality/regression_bisect.go: 'plant' occurs only as an English VERB in comments ('plant artifacts under a directory', 'plant a revision'), never as a fak concept.",
       "distinction": "An English VERB that collides in spelling with the plan family - NOT a fak 'plan' (a computed layout/decision); it names an action in prose, not a concept.",
       "distinct_from": [
-        "plan",
-        "cov5306-plan9"
+        "cov5306-plan9",
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "plant",
@@ -275,7 +275,7 @@
       "distinction": "Resolves an OPERATOR-QUESTION into a plan verdict - NOT a memory/fit plan and NOT the PR-plan resolvers; it plans a guard's answer to a human-facing question.",
       "distinct_from": [
         "cov5306-pr-plan-resolve",
-        "plan"
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "resolveGuardOperatorQuestionPlan",
@@ -332,7 +332,7 @@
       "distinction": "A proposed SPECULATION action for look-ahead rollout - NOT HarnessCandidates (candidate harnesses to run) and NOT a memory/fit plan; it is a branch to speculate, not a resource layout.",
       "distinct_from": [
         "cov5306-harness-candidates",
-        "plan"
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "SpeculationCandidate",

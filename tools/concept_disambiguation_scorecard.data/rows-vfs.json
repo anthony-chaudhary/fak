@@ -87,7 +87,7 @@
       "kind": "concept",
       "definition": "The physical KV-cache substrate: where a span's key/value tensors actually sit and how they are addressed and evicted",
       "distinction": "Where a span physically lives and its address - NOT T4 (governance of what earns durability)",
-      "distinct_from": ["vfs-t4-durable-memory"],
+      "distinct_from": ["vfs-t4-durable-memory", "kv-mmu"],
       "aliases": ["tier-5", "KV substrate", "KV-cache substrate"],
       "grounding": "kvmmu",
       "grounding_kind": "path",

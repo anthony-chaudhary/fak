@@ -114,7 +114,8 @@
    "definition": "internal/closureaudit.OpenWitnessed (\"OPEN_WITNESSED\") is the closure-audit BUCKET assigned to an issue that is still open on GitHub but already carries a Resolving-kind witnessed commit - the bucket the close arm drives to CLOSED.",
    "distinction": "The per-issue BUCKET LABEL an audit assigns, not WitnessedOpen's numeric loop-economics COUNT of how many such issues exist in a report window.",
    "distinct_from": [
-    "witness-proof-witnessedopen"
+     "witness-proof-witnessedopen",
+     "covg-witness-proof-spendwitnessed"
    ],
    "aliases": [
     "OpenWitnessed",
@@ -177,7 +178,8 @@
    "definition": "internal/memvaluescore scores a KPI row keyed \"recall_value_witnessed\" (Group \"value\") as a binary pass/fail on whether the recall-events ledger has any witnessed rows at all - rows `fak memory recall` appends only when a real recall witnesses an event.",
    "distinction": "One specific memvaluescore KPI row key testing ledger non-emptiness, not the TallyFromCountersWitnessed realized-deny fold or the generic WitnessOutcome verdict.",
    "distinct_from": [
-    "x2-witness-proof-tallyfromcounterswitnessed"
+     "x2-witness-proof-tallyfromcounterswitnessed",
+     "x-context-ctx-recallvaluewitnessed"
    ],
    "aliases": [
     "recall_value_witnessed",
@@ -321,7 +323,8 @@
    "definition": "internal/dispatchtick.WitnessSidecarSuffix (\".witness\") is the on-disk file-name suffix marking a dispatch-tick worker slot as audited-once, since a landed commit's diff (and so its verdict) is immutable and a slot must be graded exactly one time.",
    "distinction": "A file-naming CONVENTION/idempotency marker, not CommitWitnessed's boolean grading function in the same package.",
    "distinct_from": [
-    "witness-proof-commitwitnessed"
+     "witness-proof-commitwitnessed",
+     "world-state-witness"
    ],
    "aliases": [
     "WitnessSidecarSuffix",

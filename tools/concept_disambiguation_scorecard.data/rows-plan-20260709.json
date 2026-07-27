@@ -91,7 +91,8 @@
    "definition": "CandidateScore is the SkillFixtureTask field holding one held task's outcome score measured WITH the proposed skill applied.",
    "distinction": "It is a single raw per-task measurement, not candidateMetric (the corpus-wide mean it feeds) or BaselineScore (the without-skill sibling field on the same struct).",
    "distinct_from": [
-    "plan-candidatemetric"
+     "plan-candidatemetric",
+     "x-goal25b-plan-scorecandidate"
    ],
    "aliases": [
     "CandidateScore"
@@ -663,8 +664,9 @@
    "definition": "sessionPlannerMu is the gateway Server mutex serializing all reads and writes of the sessionPlanners map (mint, lookup, generational-reset eviction) across concurrent turns.",
    "distinction": "It is the MUTEX guarding the map, not sessionPlanners (the map itself) or maxSessionPlanners (the capacity constant that triggers eviction under this lock).",
    "distinct_from": [
-    "x-plan-sessionplanners",
-    "plan-maxsessionplanners"
+     "x-plan-sessionplanners",
+     "plan-maxsessionplanners",
+     "session-planner"
    ],
    "aliases": [
     "sessionPlannerMu"

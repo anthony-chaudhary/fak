@@ -9,7 +9,8 @@
       "distinction": "It is the progress-evidence timestamp for watchdog recovery, not the resume launch timestamp ResumedAt and not a generic witness verdict.",
       "distinct_from": [
         "x-goal25-witness-proof-witnessclaim",
-        "x-witness-proof-witnessrecord"
+        "x-witness-proof-witnessrecord",
+        "covg-witness-proof-progresswitnessed"
       ],
       "aliases": [],
       "grounding": "progresswitnessedat",

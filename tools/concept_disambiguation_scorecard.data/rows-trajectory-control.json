@@ -52,7 +52,8 @@
       "definition": "The evidence-strength ladder every ScoreRow carries: W3 deterministic evidence (witnessed commit, green suite), W2 transcript-derived heuristic, W1 structured judge verdict, W0 self-report (recorded, never load-bearing); the read-time audit (witnessStrength) demotes a dangling W3 row to W0",
       "distinction": "Grades a SCORE's evidence - NOT the witness/evidence family's world-state witness (refutes a cache entry) or measurement witness (proves an RSI gain), and NOT dispatchtick's WitnessOK (a resolution-corroboration constant)",
       "distinct_from": [
-        "trajctl-scorerow"
+        "trajctl-scorerow",
+        "x-witness-proof-witnessfunc"
       ],
       "aliases": [
         "witness rung",

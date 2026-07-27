@@ -103,7 +103,7 @@
       "kind": "symbol",
       "definition": "metrics.SpendWitnessed: a provenance value that marks a spend figure as WITNESSED (derived from real session evidence) rather than estimated or projected.",
       "distinction": "A provenance TAG on a spend metric (witnessed basis vs estimated basis), distinct from GateSpendLabeled - the gate that refuses unlabeled spend categories. A provenance VALUE describes where a number came from; the gate DECIDES whether the rollup is admissible.",
-      "distinct_from": ["covg-guard-gate-gatespendlabeled", "witness-proof-provenancewitnessed", "witness-outcome"],
+      "distinct_from": ["covg-guard-gate-gatespendlabeled", "witness-proof-provenancewitnessed", "witness-outcome", "witness-proof-openwitnessed"],
       "aliases": ["spend witnessed provenance", "SpendWitnessed basis"],
       "grounding": "SpendWitnessed",
       "grounding_kind": "symbol",

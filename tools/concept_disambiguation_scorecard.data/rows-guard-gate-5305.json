@@ -302,7 +302,8 @@
       "distinction": "The PARK-and-wait-for-login loop - NOT guardClassifyAuthCrash (which decides IF a crash was auth-correlated) and NOT guardRunHeadlessRehydrate (the proactive pre-expiry rehydrate).",
       "distinct_from": [
         "cov5305-guard-classify-auth-crash",
-        "cov5305-guard-run-headless-rehydrate"
+        "cov5305-guard-run-headless-rehydrate",
+        "x-goal-guard-gate-guard-cap-park"
       ],
       "aliases": [],
       "grounding": "guardParkForRelogin",
@@ -321,7 +322,8 @@
       "distinction": "The PARK subsystem (hold-and-wait for login) - NOT guardParkPoll (its poll-interval knob) and NOT the auto-refresh path that avoids parking by rotating early.",
       "distinct_from": [
         "cov5305-guard-park-poll",
-        "cov5305-guard-park-for-relogin"
+        "cov5305-guard-park-for-relogin",
+        "guard-gate-guardvars"
       ],
       "aliases": [],
       "grounding": "guardPark",

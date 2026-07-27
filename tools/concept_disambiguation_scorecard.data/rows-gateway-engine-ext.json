@@ -46,7 +46,9 @@
       "distinction": "It is the Q8_0 compute variant; unlike sessionQ8Kernel it allocates a fresh operand per prep (safe for nested MoE callers), and it is not the f32 (f32Kernel) variant nor the coordinator kernel.",
       "distinct_from": [
         "matKernel (compute)",
-        "kernel"
+        "kernel",
+        "x-gateway-engine-inkernel",
+        "x-gateway-engine-q4kernel"
       ],
       "aliases": [],
       "grounding": "q8kernel",
@@ -65,7 +67,9 @@
       "distinction": "It is the int4 compute variant of the model forward, distinct from q8Kernel (Q8_0) and the resident Q4_K kernel, and is not the coordinator kernel.",
       "distinct_from": [
         "matKernel (compute)",
-        "kernel"
+        "kernel",
+        "x-gateway-engine-inkernel",
+        "x-gateway-engine-q8kernel"
       ],
       "aliases": [],
       "grounding": "q4kernel",
@@ -219,7 +223,9 @@
       "distinct_from": [
         "modelengine",
         "engine",
-        "kernel"
+        "kernel",
+        "x-gateway-engine-q4kernel",
+        "x-gateway-engine-q8kernel"
       ],
       "aliases": [],
       "grounding": "inkernel",
@@ -395,7 +401,8 @@
       "distinction": "It NAMES which registered engine driver to dispatch to, distinct from EngineModel (the model the chosen engine runs) and from EngineRoute (the locality-leading route string).",
       "distinct_from": [
         "engine",
-        "engines"
+        "engines",
+        "x2-gateway-engine-engineids"
       ],
       "aliases": [],
       "grounding": "engineid",
@@ -452,7 +459,9 @@
       "distinction": "It is the per-target ROUTE string (locality + upstream), distinct from EngineID (the registry key) and never carries credential material.",
       "distinct_from": [
         "modelroute",
-        "EngineID (registry)"
+        "EngineID (registry)",
+        "cov5307-engine-route",
+        "x2-gateway-engine-routeengine"
       ],
       "aliases": [],
       "grounding": "engineroute",
@@ -719,7 +728,8 @@
       "distinction": "It is a contract FIELD carrying a gateway URL for the browser-action recipe, not the gateway subsystem itself.",
       "distinct_from": [
         "gateway",
-        "GatewayURL (field)"
+        "GatewayURL (field)",
+        "x-gateway-engine-fakgatewayup"
       ],
       "aliases": [],
       "grounding": "fakgateway",
@@ -755,7 +765,8 @@
       "definition": "The Prometheus gauge that is 1 when the fak gateway process is scrapeable.",
       "distinction": "It reports process liveness only, distinct from fak_gateway_time_to_ready_seconds which measures boot-to-ready latency.",
       "distinct_from": [
-        "gatewayMetrics (registry)"
+        "gatewayMetrics (registry)",
+        "x-gateway-engine-fakgateway"
       ],
       "aliases": [],
       "grounding": "fakgatewayup",

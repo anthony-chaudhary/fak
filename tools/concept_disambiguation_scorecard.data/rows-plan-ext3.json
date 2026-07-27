@@ -191,7 +191,8 @@
       "definition": "internal/dispatchtick's DispatchLaneCandidate is the normalized input to unattended whole-lane scoring: lane, priority, step budget, count, and core flag, scored by DispatchLaneScorer functions.",
       "distinction": "It is a DISPATCH LANE scoring candidate, NOT a ctxplan resident-view Candidate span nor a clonescan CandidateKeys block.",
       "distinct_from": [
-        "Candidate"
+        "Candidate",
+        "x3-plan-dispatchwavecandidate"
       ],
       "aliases": [],
       "grounding": "dispatchlanecandidate",

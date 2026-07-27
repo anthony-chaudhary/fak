@@ -76,8 +76,12 @@ func runConcept(stdout, stderr io.Writer, args []string) int {
 		cmd.Stderr = stderr
 		cmd.Env = os.Environ()
 		if e := cmd.Run(); e != nil {
-			if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(conceptcatalog.GeneratedReadme))); statErr != nil {
-				return 1
+			// Exit 1 is an honest ACTION snapshot, not a generator failure - but only
+			// if EVERY tracked artifact was actually written.
+			for _, tracked := range []string{conceptcatalog.GeneratedReadme, conceptcatalog.GeneratedIndex} {
+				if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(tracked))); statErr != nil {
+					return 1
+				}
 			}
 		}
 		return 0

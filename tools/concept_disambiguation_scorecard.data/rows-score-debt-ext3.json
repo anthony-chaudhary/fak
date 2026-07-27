@@ -336,7 +336,8 @@
       "distinction": "One LANE selected for a wave's RunTargets - NOT a LaneCandidate (an issue inside a lane) and NOT the dispatchPlan that scores the whole dispatch surface.",
       "distinct_from": [
         "LaneCandidate (dispatchtick)",
-        "dispatchPlan"
+        "dispatchPlan",
+        "x3-plan-dispatchlanecandidate"
       ],
       "aliases": [
         "dispatchwavecandidate"

@@ -9,7 +9,8 @@
       "distinction": "It only OBSERVES and calibrates cache-warmth belief; it is not vcachewarm, the M3 layer that actually issues warming requests.",
       "distinct_from": [
         "vcache",
-        "vcachewarm (M3 warming)"
+        "vcachewarm (M3 warming)",
+        "x-goal25-cache-vcacheqa"
       ],
       "aliases": [],
       "grounding": "vcachecal",
@@ -47,7 +48,8 @@
       "distinction": "It decides how to actively warm an anchor, unlike vcachestar which only decides which first natural request becomes the anchor.",
       "distinct_from": [
         "vcache",
-        "vcachestar (M2 star anchors)"
+        "vcachestar (M2 star anchors)",
+        "x-goal25-cache-vcachewarmth"
       ],
       "aliases": [],
       "grounding": "vcachewarm",
@@ -123,7 +125,9 @@
       "distinction": "It is the positive lifecycle event, not NOT_CACHED which is the miss reason recorded when no tier entry answered.",
       "distinct_from": [
         "cache-read",
-        "NOT_CACHED (miss reason)"
+        "NOT_CACHED (miss reason)",
+        "coalescebench-cachegib",
+        "x-goal25-cache-cachebit"
       ],
       "aliases": [],
       "grounding": "cachehit",
@@ -180,7 +184,8 @@
       "distinction": "It is the cross-provider-normalized hit count, not CachedTokens which is the un-normalized per-provider raw field it reads from.",
       "distinct_from": [
         "cache-read",
-        "CachedTokens (provider field)"
+        "CachedTokens (provider field)",
+        "x-goal25-cache-uncachedprompttokens"
       ],
       "aliases": [],
       "grounding": "cachedprompttokens",
@@ -314,7 +319,8 @@
       "distinction": "It holds recurrent linear-attention state, not the per-position key/value tensors of the dense cache that NewKVCache allocates.",
       "distinct_from": [
         "kv-cache",
-        "NewKVCache (dense allocator)"
+        "NewKVCache (dense allocator)",
+        "linear-attn-cache"
       ],
       "aliases": [],
       "grounding": "newlinearattncache",

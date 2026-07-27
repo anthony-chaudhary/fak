@@ -33,7 +33,8 @@
       "distinction": "Not the ctxplan context planner that materializes a turn's history view (ctxplan); BaseContextPlan only projects the fixed system-prompt spine into prompt segments.",
       "distinct_from": [
         "ctxplan (context planner)",
-        "contextq (materializer)"
+        "contextq (materializer)",
+        "x2-plan-planof"
       ],
       "aliases": [],
       "grounding": "basecontextplan",
@@ -52,7 +53,8 @@
       "distinction": "Not the ctxplan turn-history planner (ctxplan); this sizes the KV/scratch memory budget at serve time and emits a MemoryPlan, not a model-visible context view.",
       "distinct_from": [
         "ctxplan (context planner)",
-        "context window"
+        "context window",
+        "x2-plan-autosizecontextplan"
       ],
       "aliases": [
         "contextsizeconfig"
@@ -224,7 +226,8 @@
       "distinction": "Not the runtime remaining count (ContextTokensLeft (session budget)); ContextBudget is the configured budget surfaced in the console report shape.",
       "distinct_from": [
         "ContextTokensLeft (session budget)",
-        "context window"
+        "context window",
+        "x-goal25b-context-ctx-contextnudge"
       ],
       "aliases": [],
       "grounding": "contextbudget",
@@ -356,7 +359,9 @@
       "distinction": "Not a model-context renderer (RenderPlan, Rendered); this renderer projects a scorecard corpus into Jekyll markdown for publishing.",
       "distinct_from": [
         "RenderPlan",
-        "render (verb)"
+        "render (verb)",
+        "rendered-ctxplan",
+        "x-ci-coverage-render-materialize-renderers"
       ],
       "aliases": [],
       "grounding": "renderer",
@@ -397,7 +402,8 @@
       "distinction": "Not the ChatML prompt renderers (renderChatMLTools) that build a model prompt; RenderText emits a human-readable demo walkthrough.",
       "distinct_from": [
         "RenderTrace (agent)",
-        "Rendered"
+        "Rendered",
+        "x-ci-coverage-render-materialize-renderbest"
       ],
       "aliases": [],
       "grounding": "rendertext",
@@ -452,7 +458,8 @@
       "definition": "The renderSmoke* family writes the shared markdown sections of a SWE-bench smoke contract (renderSmokeArmsTable the Arm/Harness/Model table, renderSmokeGatesTable the Gate/OK/Detail table, renderSmokeEvidenceLink the compare-evidence-link block, renderRequiredBeforeClaim the required-before-any-result-claim bullet list).",
       "distinction": "Not the post-run measured RenderMarkdown report; these render the pre-run smoke CONTRACT sections (the credentialed promise) before any number exists.",
       "distinct_from": [
-        "RenderMarkdown (bench report)"
+        "RenderMarkdown (bench report)",
+        "x2-guard-gate-smokegate"
       ],
       "aliases": [
         "rendersmokegatestable",
@@ -531,7 +538,11 @@
       "definition": "milestonereport.RenderDist renders the M0..M7 maturity-rung distribution as a compact one-liner (\"M0:2 M1:0 ...\") in ladder order, exported so the Slack milestone card renders the same ladder line.",
       "distinction": "Not the bench RenderMarkdown reports; RenderDist emits the milestone-distribution one-liner over the support-maturity rungs.",
       "distinct_from": [
-        "RenderMarkdown (bench report)"
+        "RenderMarkdown (bench report)",
+        "render-materialize-render-lint",
+        "x-ci-coverage-render-materialize-renderbest",
+        "x-ci-coverage-render-materialize-renderlist",
+        "x-goal25b-render-materialize-renderdigest"
       ],
       "aliases": [],
       "grounding": "renderdist",

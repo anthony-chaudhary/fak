@@ -197,7 +197,10 @@
       "distinction": "It mutates the running monitor's policy in memory, not a manifest on disk \u2014 unlike Manifest.ToPolicy, which compiles a manifest into a Policy value.",
       "distinct_from": [
         "policy-manifest",
-        "adjudicator"
+        "adjudicator",
+        "policy-capability-mempolicy",
+        "policy-capability-t-policy",
+        "x-policy-capability-defaultresetpolicy"
       ],
       "aliases": [],
       "grounding": "setpolicy",
@@ -466,7 +469,8 @@
       "definition": "gateway.ResetPolicy holds the context-reset decision thresholds (min turns, healthy/stale read ratios, cooldown) that ResetScore folds to recommend a fresh-context reset over another compaction cut; DefaultResetPolicy supplies the conservative defaults.",
       "distinction": "It decides session CONTEXT reset-vs-cut from cache health, not tool admission \u2014 unlike DefaultPolicy, the adjudicator floor.",
       "distinct_from": [
-        "DefaultPolicy (adjudicator)"
+        "DefaultPolicy (adjudicator)",
+        "x-policy-capability-setpolicy"
       ],
       "aliases": [],
       "grounding": "defaultresetpolicy",
@@ -485,7 +489,8 @@
       "distinction": "It is a throughput/batching control policy, not a security decision policy \u2014 unlike DefaultPolicy, the adjudicator tool floor.",
       "distinct_from": [
         "DefaultPolicy (adjudicator)",
-        "ResetPolicy (gateway)"
+        "ResetPolicy (gateway)",
+        "x2-policy-capability-fetchpolicy"
       ],
       "aliases": [],
       "grounding": "batchpolicy",

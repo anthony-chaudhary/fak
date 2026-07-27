@@ -71,7 +71,7 @@
       "kind": "concept",
       "definition": "The managed-cache restart plan (internal/resume) is the OTHER sense of the phrase: Plan prices restarting a dormant rate-limit-crashed session (RESUME_FULL vs CUT, with RESET always priced) against the projected provider-cache posture, and Diagnose detects which transcripts need one - turning a blind cold re-prefill into a restart with the cache managed.",
       "distinction": "A RESTART-time pricing verdict for a DORMANT session's cache - NOT the live-session managed-cache posture (fak guard --managed-cache) and NOT the ctxplanner/memq Plan types (see the plan family).",
-      "distinct_from": ["managed-cache", "prompt-cache", "plan-planner", "plan-memq"],
+      "distinct_from": ["managed-cache", "prompt-cache", "plan-planner", "plan-memq", "x-goal25b-plan-resumeplan"],
       "aliases": ["managed restart", "resume Plan"],
       "grounding": "StrategyResumeFull",
       "grounding_kind": "symbol",

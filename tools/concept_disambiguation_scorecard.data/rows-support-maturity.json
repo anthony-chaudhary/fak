@@ -55,7 +55,7 @@
       "kind": "concept",
       "definition": "Parity is a same-workload comparison against a named peer, baseline, or oracle, reporting match, lead, or trailing behavior under the stated conditions.",
       "distinction": "Parity is comparative; it may witness correctness when the peer is the oracle, but it is not raw support, not coverage breadth, and not the broader maturity state.",
-      "distinct_from": ["support", "coverage", "correctness", "maturity"],
+      "distinct_from": ["support", "coverage", "correctness", "maturity", "x-support-maturity-dsparity"],
       "aliases": [],
       "grounding": "parity",
       "grounding_kind": "doc",

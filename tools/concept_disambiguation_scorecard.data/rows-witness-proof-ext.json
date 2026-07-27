@@ -296,7 +296,8 @@
       "distinction": "It is the per-tool OVERRIDE that customizes witness extraction, distinct from the fallback defaultWitnessOf and from taskmgr's identically-named WitnessFunc that adapts a func to the Witness interface.",
       "distinct_from": [
         "defaultWitnessOf (vdso extractor)",
-        "world-state-witness"
+        "world-state-witness",
+        "trajctl-witness-rung"
       ],
       "aliases": [],
       "grounding": "witnessfunc",
@@ -332,7 +333,8 @@
       "definition": "loopmgr.StatusWitnessRefused is the loop run-status 'witness_refused' (and its WitnessRefused counter) meaning a witness RAN and the evidence contradicted the run's claimed completion.",
       "distinction": "It is the loop-manager's run-level refusal status, the operational dual of the abi.WitnessRefuted outcome enum the in-process gate uses.",
       "distinct_from": [
-        "WitnessRefuted (witness outcome)"
+        "WitnessRefuted (witness outcome)",
+        "x2-witness-proof-witnessstatus"
       ],
       "aliases": [],
       "grounding": "witnessrefused",

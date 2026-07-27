@@ -180,7 +180,8 @@
       "distinction": "It is an OS-level NUMA MEMORY-BINDING policy, not a tool-admission or capability policy - unlike Policy (loaded), the adjudicator's tool decision table - and its 'policy' is the kernel memory placement rule, not an authorization rule.",
       "distinct_from": [
         "policy-loaded",
-        "policy-capability-policy-bytes"
+        "policy-capability-policy-bytes",
+        "x-policy-capability-setpolicy"
       ],
       "aliases": [],
       "grounding": "mempolicy",
@@ -316,9 +317,7 @@
       "definition": "egressfloor.DeliveryPolicy is the deny-by-default capability floor that maps each delivery platform to allowed destinations and adjudicates an outbound Delivery into a witnessed DeliveryRecord.",
       "distinction": "An outbound DELIVERY DESTINATION allowlist and adjudicator, not a model-routing policy, a worker model policy, or the gateway manifest parser that constructs it.",
       "distinct_from": [
-        "policy-manifest",
-        "capability-grant",
-        "policy-decision"
+        "policy-manifest"
       ],
       "aliases": [],
       "grounding": "DeliveryPolicy",

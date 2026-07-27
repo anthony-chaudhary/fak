@@ -224,7 +224,8 @@
       "definition": "contextevents is the concrete context-ctx identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring context-ctx concepts.",
       "distinction": "contextevents is a specific tree identifier in the context-ctx namespace, not the broader sibling concept referenced by x2-context-ctx-commandcontext.",
       "distinct_from": [
-        "x2-context-ctx-commandcontext"
+        "x2-context-ctx-commandcontext",
+        "x-issue1420-context-ctx-contextevent"
       ],
       "aliases": [],
       "grounding": "contextevents",
@@ -566,7 +567,8 @@
       "definition": "gocandidates is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
       "distinction": "gocandidates is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
       "distinct_from": [
-        "x-plan-httpplanner"
+        "x-plan-httpplanner",
+        "x-ci-coverage-plan-pycandidates"
       ],
       "aliases": [],
       "grounding": "gocandidates",
@@ -746,7 +748,8 @@
       "definition": "kernelkv is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts.",
       "distinction": "kernelkv is a specific tree identifier in the gateway-engine namespace, not the broader sibling concept referenced by x2-gateway-engine-enginecallsavoided.",
       "distinct_from": [
-        "x2-gateway-engine-enginecallsavoided"
+        "x2-gateway-engine-enginecallsavoided",
+        "kernel"
       ],
       "aliases": [],
       "grounding": "kernelkv",
@@ -1052,7 +1055,8 @@
       "definition": "pycandidates is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
       "distinction": "pycandidates is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
       "distinct_from": [
-        "x-plan-httpplanner"
+        "x-plan-httpplanner",
+        "x-ci-coverage-plan-gocandidates"
       ],
       "aliases": [],
       "grounding": "pycandidates",

@@ -23,7 +23,7 @@
       "kind": "concept",
       "definition": "The IO-aware fused attention kernel technique (Dao et al.) that computes exact softmax attention via tiling and online softmax without materializing the full N-by-N score matrix, referenced as the SOTA ladder rung fak's own fused online-softmax kernel targets.",
       "distinction": "It is the KERNEL TECHNIQUE concept (IO-aware tiling + online softmax), NOT the fak capability bit (FusedAttn) that advertises a backend can lower to it and NOT the vLLM paged-KV scheme (PagedAttention).",
-      "distinct_from": ["x-attention-fusedattn", "x-attention-pagedattention"],
+      "distinct_from": ["x-attention-fusedattn", "x-attention-pagedattention", "x-goal25b-attention-kflashattention"],
       "aliases": ["FlashAttention"],
       "grounding": "flashattention",
       "grounding_kind": "doc",

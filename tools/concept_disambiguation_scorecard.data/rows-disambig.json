@@ -66,7 +66,8 @@
       "definition": "The Qwen3.5 hybrid-attention layer period (cfg.FullAttentionInterval, GGUF full_attention_interval): every Nth layer runs full (global) attention while the rest run the local/linear path.",
       "distinction": "The CADENCE of full-attention layers in a hybrid stack - NOT the attention kind itself (flashAttention) and NOT the sliding-window size; it is how often full attention recurs.",
       "distinct_from": [
-        "x-attention-flashattention"
+        "x-attention-flashattention",
+        "x-attention-fullattention"
       ],
       "aliases": [],
       "grounding": "FullAttentionInterval",
@@ -161,7 +162,8 @@
       "definition": "The fak-managed conversation-context lifecycle (the fak_context_ events - session_fak_context_events, context_lifecycle_events) surfaced by vcache/cachevalue status.",
       "distinction": "The fak-side CONTEXT lifecycle object/event stream - NOT the Go command context (commandContext) and NOT a single context budget; it is fak's model of the running conversation window.",
       "distinct_from": [
-        "x2-context-ctx-commandcontext"
+        "x2-context-ctx-commandcontext",
+        "x-context-ctx-maxcontext"
       ],
       "aliases": [],
       "grounding": "fak_context",
@@ -313,7 +315,8 @@
       "definition": "The filesystem path parameter (witnessPath) to a witness artifact read by graders (GradeWitness, AnalyzeNegatedQA).",
       "distinction": "The PATH to one witness file on disk - NOT the enumerated WitnessedFiles set and NOT the witness content; it is where a grader reads the witness from.",
       "distinct_from": [
-        "x2-witness-proof-witnessresult"
+        "x2-witness-proof-witnessresult",
+        "x-goal25-witness-proof-pathwitness"
       ],
       "aliases": [],
       "grounding": "witnessPath",

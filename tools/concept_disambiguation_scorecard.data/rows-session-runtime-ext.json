@@ -26,7 +26,8 @@
       "definition": "DurabilitySession is the ctxplan/ctxmmu durability-tier constant (\"session\") that marks a stored context span as true only for the current session's lifetime.",
       "distinction": "Not the runtime `session` object: it is a retention-class label on a span, ranking above DurabilityTurn and below DurabilityBounded/DurabilityDurable.",
       "distinct_from": [
-        "session"
+        "session",
+        "x-goal25-session-runtime-sessiondurability"
       ],
       "aliases": [],
       "grounding": "durabilitysession",
@@ -216,7 +217,8 @@
       "distinction": "Not controlSession (DRIVE-state verbs): steerSession injects free-text guidance over the agent bus, subject to the a2achan default-deny floor, not a run/budget/pace mutation.",
       "distinct_from": [
         "session-control-request",
-        "controlSession (write hook)"
+        "controlSession (write hook)",
+        "x-session-runtime-supersession"
       ],
       "aliases": [],
       "grounding": "steersession",
@@ -505,7 +507,8 @@
       "distinction": "Not the slot itself: OnSlotFreed is the registration seam for reacting to a freed slot, holding exactly one observer.",
       "distinct_from": [
         "slot",
-        "scheduler"
+        "scheduler",
+        "x2-session-runtime-slotfreed"
       ],
       "aliases": [],
       "grounding": "onslotfreed",
@@ -656,7 +659,8 @@
       "distinction": "Not controlSession (the injected host hook it calls): handleFakSession is the route layer that parses the request and maps refusals to 409/400/422.",
       "distinct_from": [
         "session-control-request",
-        "controlSession (write hook)"
+        "controlSession (write hook)",
+        "x-session-runtime-handlefaksession"
       ],
       "aliases": [],
       "grounding": "faksession",

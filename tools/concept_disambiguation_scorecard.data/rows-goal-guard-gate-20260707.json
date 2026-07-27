@@ -75,7 +75,8 @@
       "definition": "guardParkBudget() resolves the shared guard-park ceiling from FAK_GUARD_PARK_BUDGET (a Go duration, default 24h, clamped to [0,24h]; 0 restores the immediate fail-loud refusal) bounding how long ANY guard park may block - chiefly the STALE_CRED re-login park guardParkForRelogin, which waits for an expired credential to be refreshed at credPath before resuming, and which the separate spend-cap park reuses as its clamp.",
       "distinction": "guardParkBudget is only the duration CEILING knob and guardParkForRelogin is the park that BLOCKS waiting for a fresh credential; guard_child is the supervisor that spawns the child and folds its outcome into the guard report, invoking the park from its recovery path. The budget is not itself a parker.",
       "distinct_from": [
-        "x-goal25b-guard-gate-guardchild"
+        "x-goal25b-guard-gate-guardchild",
+        "cov5305-guard-park-for-relogin"
       ],
       "aliases": [
         "fakguardparkbudget",
@@ -152,7 +153,8 @@
       "definition": "The operator-authored allow-list overlay behind `fak guard allow`: guardAllowOverlayPath resolves the file (env override, else the repo default), loadGuardAllowOverlay reads and validates it, and guardApplyAllowOverlay unions its allow / allow_prefix entries into the runtime capability floor at launch so a tool the base floor never enumerated stops hitting DEFAULT_DENY.",
       "distinction": "The allow-overlay only WIDENS the allow-list - the danger arg-rules (rm -rf, sudo, RCE pipe) and any explicit deny are untouched - and it is authored out-of-band by the operator so a wrapped agent cannot grant itself a capability. repo-guard is a different surface: a PreToolUse hook whose rungs (out-of-tree write, interactive hang, foreground sleep) no allow-overlay widens.",
       "distinct_from": [
-        "repo-guard"
+        "repo-guard",
+        "cov5300-guard-allow-overlay"
       ],
       "aliases": [
         "guardallowoverlaypath",
@@ -407,7 +409,8 @@
       "definition": "ActionGated is one of the three ProviderActionState values (\"gated\") in internal/vcacheobserve: it marks a provider-cache action-plan row (heartbeat_pin, explicit_cache) that cannot be spent yet because it still lacks the required warm-transport or byte-identical-prefix witness, so apply refuses it as RefusedGated.",
       "distinction": "ActionGated is a provider-cache action STATE in internal/vcacheobserve, blocked on a missing transport witness; the session ActionGate (internal/sessionaudit CompactActionGate / the --session-action-gate threshold) is an unrelated compact-action severity gate in a different package. They share the substring 'action gate' and have no producer/consumer relationship.",
       "distinct_from": [
-        "x-issue1420-guard-gate-actiongate"
+        "x-issue1420-guard-gate-actiongate",
+        "gatedaction"
       ],
       "aliases": [],
       "grounding": "actiongated",
@@ -551,7 +554,8 @@
       "definition": "The whole-tree audit gates run in one process by `fak hygiene` (HygieneGates() in internal/hooks/tree.go): the family of `--audit-tree` checks - DOC_PLACEMENT, BROKEN_LINK, SECRET_SHAPE, INDEX_SYNC, GOD_FILE_GROWTH, BARE_DEV_SPELLING and others - that `make hygiene` / `make ci` enforce over `git ls-files` as a pre-push backstop.",
       "distinction": "Hygiene gates are the whole-tree (`--audit-tree`) audit twins run unconditionally over the tracked tree; the git-hook gate sibling is the staged (`--audit-staged`) commit-boundary variant fired at git pre-commit/commit-msg. They SHARE several checks (BROKEN_LINK, SECRET_SHAPE, GOD_FILE_GROWTH appear in both) - the boundary is scope and timing, not which checks.",
       "distinct_from": [
-        "git-hook-gate"
+        "git-hook-gate",
+        "guard-gate-hygienegate"
       ],
       "aliases": [],
       "grounding": "hygienegates",

@@ -7,7 +7,7 @@
       "kind": "symbol",
       "definition": "Bounded-LRU session state container with a fixed ceiling on concurrent sessions",
       "distinction": "Session container - NOT PoolProfile (tier pooling character)",
-      "distinct_from": ["poolprofile-cachemeta"],
+      "distinct_from": ["poolprofile-cachemeta", "x-pool-newpool"],
       "aliases": [],
       "grounding": "Pool",
       "grounding_kind": "symbol",

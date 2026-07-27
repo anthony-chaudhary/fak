@@ -426,7 +426,8 @@
       "distinction": "It is the scan computation, NOT the linear-attention layer concept/predicate (linearattn) nor its state cache (linear-attn-cache).",
       "distinct_from": [
         "linear attention (Gated-DeltaNet)",
-        "linear-attn-cache"
+        "linear-attn-cache",
+        "x-attention-linearattnstep"
       ],
       "aliases": [],
       "grounding": "linearattnseq",
@@ -444,7 +445,8 @@
       "definition": "cfg.FullAttentionInterval \u2014 the hybrid Qwen3.5 schedule where every Nth decoder layer uses full (global) attention (LayerTypes 'full_attention') while the rest slide.",
       "distinction": "It marks the global-attention layers in the cadence, NOT a sliding-window layer.",
       "distinct_from": [
-        "attended"
+        "attended",
+        "x-disambig-fullattentioninterval"
       ],
       "aliases": [],
       "grounding": "fullattention",

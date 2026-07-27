@@ -416,7 +416,8 @@
       "definition": "ActionGate is the session-summary option or report field carrying the compact-action gate threshold used when rendering recent session actions.",
       "distinction": "It is the threshold setting/value, not the ApplyCompactActionGate function that evaluates it.",
       "distinct_from": [
-        "x-issue1420-guard-gate-applycompactactiongate"
+        "x-issue1420-guard-gate-applycompactactiongate",
+        "x-goal-guard-gate-action-gated"
       ],
       "aliases": [],
       "grounding": "actiongate",
@@ -450,7 +451,8 @@
       "definition": "guardPreCompactClaudeCommand is the JSON row shape for one Claude hook command written by the guard precompact/toolproc hook installers.",
       "distinction": "It is the command leaf inside the Claude hook settings, not the matcher that owns its hooks nor the settings document.",
       "distinct_from": [
-        "x-goal25b-guard-gate-guardprecompact"
+        "x-goal25b-guard-gate-guardprecompact",
+        "x-goal25b-guard-gate-guardprecompactisclaudecommand"
       ],
       "aliases": [],
       "grounding": "guardprecompactclaudecommand",
@@ -518,7 +520,12 @@
       "definition": "SessionEnd is the Claude/toolproc hook event that marks the owning agent session ending, letting toolprocgate classify descendants as orphans.",
       "distinction": "It is the session-lifecycle boundary event, not a per-turn Stop event and not session reset.",
       "distinct_from": [
-        "session-reset"
+        "session-reset",
+        "session-id",
+        "x-goal25b-session-runtime-sessionspend",
+        "x-issue1420-session-runtime-evsessionend",
+        "x-session-runtime-sessionfeed",
+        "x-session-runtime-sessionread"
       ],
       "aliases": [],
       "grounding": "sessionend",
@@ -773,7 +780,8 @@
       "definition": "WitnessOK is the dispatchtick constant value diff-witnessed that marks a claimed resolution as corroborated by the required witness rung.",
       "distinction": "It is the accepted witness constant, not the list of commands that produced evidence.",
       "distinct_from": [
-        "witness-outcome"
+        "witness-outcome",
+        "x2-witness-proof-witnessfor"
       ],
       "aliases": [],
       "grounding": "witnessok",

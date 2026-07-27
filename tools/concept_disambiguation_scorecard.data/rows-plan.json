@@ -39,7 +39,7 @@
       "kind": "symbol",
       "definition": "Scored span the planner may keep resident with cost, benefit, and density metrics",
       "distinction": "Scored span input to planner - NOT Plan (planner's output)",
-      "distinct_from": ["plan-planner"],
+      "distinct_from": ["plan-planner", "covg-plan-ncandidate"],
       "aliases": [],
       "grounding": "Candidate",
       "grounding_kind": "symbol",

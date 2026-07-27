@@ -123,7 +123,8 @@
       "distinction": "These are PROVIDER-CACHE governor decisions, not the kernel tool-call Decision trace and not the witness adjudication Decision.",
       "distinct_from": [
         "Decision (kernel)",
-        "Decision (witness)"
+        "Decision (witness)",
+        "x2-cache-vcachepolicyactions"
       ],
       "aliases": [
         "decisionheartbeatpin",

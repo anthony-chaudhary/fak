@@ -8,7 +8,8 @@
       "definition": "The deterministic, surface-independent cross-surface session identity derived by hashing a normalized conversation id under a versioned scheme tag; it doubles as the sessionledger trace name, so continuity rides the ledger's durable hash chain.",
       "distinction": "session-id (SessionID) names one session INSTANCE and is minted per session; SessionKey is DERIVED — a pure function of the conversation identity that yields the same value in any process and after any restart, which is what lets a conversation started on one surface resume on another against the same warm KV prefix. gateway.SessionPrefixKey answers the same question in-process over an in-memory map that evaporates on eviction; SessionKey resolves against the durable ledger instead.",
       "distinct_from": [
-        "session-id"
+        "session-id",
+        "x-session-runtime-sessionref"
       ],
       "aliases": [],
       "grounding": "SessionKey",

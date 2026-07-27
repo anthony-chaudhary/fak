@@ -68,7 +68,9 @@
       "distinction": "It is a speculative-decoding rollback COUNT for tokens that were never accepted into the real transcript, NOT a memory-pressure or policy eviction of genuinely attended spans (EvictColdest/EvictNode); the rolled-back positions were provisional.",
       "distinct_from": [
         "EvictColdest (kvmmu)",
-        "evict-kvcache"
+        "evict-kvcache",
+        "evict-evictor",
+        "x-evict-evicted"
       ],
       "aliases": [],
       "grounding": "evictkv",
@@ -127,7 +129,9 @@
       "distinct_from": [
         "Evictions (radixkv LRU counter)",
         "EvictNode (radixkv policy)",
-        "evict-kvcache"
+        "evict-kvcache",
+        "evict-evictor",
+        "x-evict-evictkv"
       ],
       "aliases": [],
       "grounding": "evicted",

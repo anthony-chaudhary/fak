@@ -22,7 +22,7 @@
       "kind": "concept",
       "definition": "SessionRows (internal/sidecar/sidecar.go) is the []SessionRow slice on the sidecar Inputs bundle carrying the collected fleet-session census rows into foldSessions, which folds them with the Sessions PlaneInput status into the rendered Sessions plane.",
       "distinction": "The plural input slice of collected session census rows - NOT SessionRow (the singular row element type it holds) and NOT Sessions (the PlaneInput measurement-status for the same plane) and NOT tuiSessionRow (the terminal-overview render struct).",
-      "distinct_from": ["x-issue1420-render-materialize-renderslack"],
+      "distinct_from": ["x-issue1420-render-materialize-renderslack", "x-session-runtime-sessionrow", "x2-session-runtime-sessionobs"],
       "aliases": [],
       "grounding": "SessionRows",
       "grounding_kind": "symbol",

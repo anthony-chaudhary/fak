@@ -535,7 +535,7 @@
       "kind": "metric",
       "definition": "recall_value_witnessed is the internal/memvaluescore KPI key (Group \"value\") measuring whether a memory-store recall actually got used, witnessed rather than merely claimed.",
       "distinction": "A memory-STORE health KPI - a different sense of 'value' than CtxValueReport (the gateway's live session context-window report); not to be confused with any managed-context counter in this family despite the shared word.",
-      "distinct_from": ["recall", "x-context-ctx-ctxvaluereport"],
+      "distinct_from": ["recall", "x-context-ctx-ctxvaluereport", "witness-proof-recallvaluewitnessed"],
       "aliases": [],
       "grounding": "recallvaluewitnessed",
       "grounding_kind": "metric",

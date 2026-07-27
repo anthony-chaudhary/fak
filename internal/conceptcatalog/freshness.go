@@ -18,9 +18,22 @@ import (
 )
 
 const (
-	GeneratedReadme   = "docs/concept-disambiguation-scorecard/README.md"
+	GeneratedReadme = "docs/concept-disambiguation-scorecard/README.md"
+	// GeneratedIndex is the reverse lookup: every NAME a reader can meet in the tree
+	// mapped back to the concept it denotes, plus the twins that name is mistakable
+	// for. It is generated from the same catalog as the scorecard and must age with
+	// it - a fresh scorecard beside a stale index would answer "what is this concept"
+	// correctly while answering "which concept is this name" from a retired catalog.
+	GeneratedIndex    = "docs/concept-disambiguation-scorecard/INDEX.md"
 	RegenerateCommand = "python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard"
 )
+
+// generatedArtifacts pairs each tracked artifact with its filename under the
+// generator's --markdown-dir output.
+var generatedArtifacts = []struct{ Tracked, Name string }{
+	{GeneratedReadme, "README.md"},
+	{GeneratedIndex, "INDEX.md"},
+}
 
 // FreshnessResult describes deterministic generated-artifact freshness.
 type FreshnessResult struct {
@@ -45,6 +58,7 @@ func RelevantPath(path string) bool {
 	return p == "tools/concept_disambiguation_scorecard.py" ||
 		p == "docs/fak/concept-glossary.md" ||
 		p == GeneratedReadme ||
+		p == GeneratedIndex ||
 		strings.HasPrefix(p, "tools/concept_disambiguation_scorecard.data/")
 }
 
@@ -60,14 +74,16 @@ func CheckFresh(root string) (FreshnessResult, error) {
 		return FreshnessResult{}, err
 	}
 	result := FreshnessResult{Fresh: true, Regenerate: RegenerateCommand}
-	expected, err := os.ReadFile(filepath.Join(generated, "README.md"))
-	if err != nil {
-		return result, fmt.Errorf("read generated README: %w", err)
-	}
-	actual, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(GeneratedReadme)))
-	if err != nil || !generatedBytesEqual(actual, expected) {
-		result.Fresh = false
-		result.StalePaths = append(result.StalePaths, GeneratedReadme)
+	for _, art := range generatedArtifacts {
+		expected, err := os.ReadFile(filepath.Join(generated, art.Name))
+		if err != nil {
+			return result, fmt.Errorf("read generated %s: %w", art.Name, err)
+		}
+		actual, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(art.Tracked)))
+		if err != nil || !generatedBytesEqual(actual, expected) {
+			result.Fresh = false
+			result.StalePaths = append(result.StalePaths, art.Tracked)
+		}
 	}
 	sort.Strings(result.StalePaths)
 	return result, nil
@@ -164,10 +180,13 @@ func generate(root, out string) error {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	// The scorecard intentionally exits 1 when its current verdict is ACTION;
-	// generation itself succeeded if the artifact exists.
+	// generation itself succeeded if EVERY artifact exists. Checking all of them
+	// keeps a crash that stops after the first one from reading as a clean run.
 	if err != nil {
-		if _, statErr := os.Stat(filepath.Join(out, "README.md")); statErr != nil {
-			return fmt.Errorf("generate scorecard: %w: %s", err, strings.TrimSpace(stderr.String()))
+		for _, art := range generatedArtifacts {
+			if _, statErr := os.Stat(filepath.Join(out, art.Name)); statErr != nil {
+				return fmt.Errorf("generate scorecard: %w: %s", err, strings.TrimSpace(stderr.String()))
+			}
 		}
 	}
 	return nil

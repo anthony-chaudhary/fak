@@ -66,7 +66,9 @@
       "distinction": "A shared-task VIEW-SCOPE cap - NOT SourcePolicy (a resume governor) and NOT PolicyKnobRegistry; it limits visibility, not resumption or amendment.",
       "distinct_from": [
         "cov5307-source-policy",
-        "cov5307-policy-knob-registry"
+        "cov5307-policy-knob-registry",
+        "sharedtask-viewpolicy",
+        "x2-policy-capability-tierpolicy"
       ],
       "aliases": [],
       "grounding": "ViewPolicy",
@@ -237,7 +239,8 @@
       "distinction": "The FALLBACK loop-id source (after FAK_GOAL_LOOP) - NOT FAK_GOAL_LOOP (the primary) and NOT FAK_LOOP_REGISTRY (the registry location).",
       "distinct_from": [
         "cov5307-fak-goal-loop",
-        "cov5307-fak-loop-registry"
+        "cov5307-fak-loop-registry",
+        "loopmgr"
       ],
       "aliases": [],
       "grounding": "FAK_LOOP_ID",
@@ -313,7 +316,9 @@
       "distinction": "The ENGINE-ROUTE string of a target - NOT DecisionRecord (the recorded routing decision) and NOT HarnessCandidates; it names the engine, not the decision or the options.",
       "distinct_from": [
         "cov5307-decision-record",
-        "decision"
+        "decision-kernel",
+        "x-gateway-engine-engineroute",
+        "x2-gateway-engine-routeengine"
       ],
       "aliases": [],
       "grounding": "EngineRoute",
@@ -332,7 +337,8 @@
       "distinction": "The RECORDED routing decision (for telemetry) - NOT EngineRoute (the chosen engine string inside it) and NOT the live Decision being made; it is the observability artifact.",
       "distinct_from": [
         "cov5307-engine-route",
-        "decision"
+        "decision-kernel",
+        "x2-decision-decisionjournal"
       ],
       "aliases": [],
       "grounding": "DecisionRecord",
@@ -350,8 +356,8 @@
       "definition": "internal/agent/inkernel_planner.go (inKernelRadixEvictionPolicyFromEnv): the radixkv.EvictionPolicy selecting how the in-kernel radix KV cache evicts prefixes under pressure.",
       "distinction": "The radix-KV EVICTION policy (how prefixes are dropped) - NOT a guard/admission policy and NOT SourcePolicy; it governs cache reclamation, not tool or source admission.",
       "distinct_from": [
-        "evict",
-        "cov5307-source-policy"
+        "cov5307-source-policy",
+        "evict-kvcache"
       ],
       "aliases": [],
       "grounding": "EvictionPolicy",

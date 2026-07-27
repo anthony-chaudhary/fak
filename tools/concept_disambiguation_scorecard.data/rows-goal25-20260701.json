@@ -44,7 +44,8 @@
       "definition": "testPlan (cmd/fak/test.go) is the parsed invocation plan of a `fak test` run - what the runner will execute for a given GOOS and argument list.",
       "distinction": "A CLI test-run plan, not the planner Plan that lays out context spans.",
       "distinct_from": [
-        "plan-planner"
+        "plan-planner",
+        "x-goal25-plan-plantest"
       ],
       "aliases": [],
       "grounding": "testPlan",
@@ -211,7 +212,8 @@
       "distinction": "A dry-run probe of what a plan WOULD do; PlanQuery/Plan produce the committed layout.",
       "distinct_from": [
         "x-goal25-plan-planquery",
-        "plan-planner"
+        "plan-planner",
+        "executionroute-roleplan"
       ],
       "aliases": [],
       "grounding": "ProbePlan",
@@ -630,7 +632,8 @@
       "distinct_from": [
         "kv-cache",
         "vcache",
-        "config-cachettl1h"
+        "config-cachettl1h",
+        "c4681-cachettl5m"
       ],
       "aliases": [],
       "grounding": "CacheTTL1h",
@@ -741,7 +744,8 @@
       "definition": "Usage.UncachedPromptTokens (internal/agent/chat.go) returns the prompt tokens of one turn not served by provider cache.",
       "distinction": "The per-turn agent.Usage accessor; UncachedInputTokens is the ratelimit-side partition field.",
       "distinct_from": [
-        "x-goal25-cache-uncachedinputtokens"
+        "x-goal25-cache-uncachedinputtokens",
+        "x-cache-cachedprompttokens"
       ],
       "aliases": [],
       "grounding": "UncachedPromptTokens",
@@ -759,7 +763,8 @@
       "definition": "CachedTurns (internal/gateway/metrics.go) counts turns whose client cache_control prefix passed through the kernel hop unchanged.",
       "distinction": "A TURN counter about prefix preservation, not a token count like CachedInputTokens.",
       "distinct_from": [
-        "x-goal25-cache-cachedinputtokens"
+        "x-goal25-cache-cachedinputtokens",
+        "x2-cache-vcacheobservewindow"
       ],
       "aliases": [],
       "grounding": "CachedTurns",
@@ -777,7 +782,9 @@
       "definition": "Record.CacheBit (internal/cachewitness/cachewitness.go) is the single honest bit: did this run's provider usage show any cache read at all.",
       "distinction": "A one-bit witness verdict, not a savings amount or a hit-rate metric.",
       "distinct_from": [
-        "vcache"
+        "vcache",
+        "coalescebench-cachegib",
+        "x-cache-cachehit"
       ],
       "aliases": [],
       "grounding": "CacheBit",
@@ -832,7 +839,8 @@
       "definition": "Package vcacheqa (internal/vcacheqa) is the shared QA harness and witness contract every vCache gate runs through, folding gate results into a GateReport.",
       "distinction": "The QA HARNESS for vCache gates, not the vCache accounting layer it tests.",
       "distinct_from": [
-        "vcache"
+        "vcache",
+        "x-cache-vcachecal"
       ],
       "aliases": [],
       "grounding": "vcacheqa",
@@ -851,7 +859,8 @@
       "distinction": "The DEMOTION journal for warmth claims, not the vCache governor's decision journal.",
       "distinct_from": [
         "vcache",
-        "x-goal25-cache-vcachegovernor"
+        "x-goal25-cache-vcachegovernor",
+        "x-cache-vcachewarm"
       ],
       "aliases": [],
       "grounding": "vcacheWarmth",
@@ -1054,7 +1063,8 @@
       "definition": "guardIsCodex (cmd/fak/guard_codex.go) detects whether the guarded child command is a Codex CLI invocation, selecting the Codex install shape.",
       "distinction": "A child-command classifier inside fak guard, not a gate decision.",
       "distinct_from": [
-        "guard-kernel"
+        "guard-kernel",
+        "covg-guard-gate-guardcodex"
       ],
       "aliases": [],
       "grounding": "guardIsCodex",
@@ -1126,7 +1136,8 @@
       "definition": "PathWitness (internal/taskmgr/evidence.go) witnesses a claim by checking that the claimed filesystem path actually exists.",
       "distinction": "An EXISTENCE witness over paths; ShapeWitness additionally checks the artifact's shape.",
       "distinct_from": [
-        "x-goal25-witness-proof-shapewitness"
+        "x-goal25-witness-proof-shapewitness",
+        "x-disambig-witnesspath"
       ],
       "aliases": [],
       "grounding": "PathWitness",
@@ -1252,7 +1263,8 @@
       "definition": "MissingWitness (internal/devexmeter) lists the friction classes whose meter window lacked a witness, keeping the meter honest about gaps.",
       "distinction": "An honesty list of UNWITNESSED classes, not a witness or a claim.",
       "distinct_from": [
-        "claim"
+        "claim",
+        "witness-proof-missingwitnesses"
       ],
       "aliases": [],
       "grounding": "MissingWitness",
@@ -1360,7 +1372,8 @@
       "definition": "isSessionRef (internal/leaseref/session.go) tests whether a leaseref string names a session record rather than another lease kind.",
       "distinction": "A ref-kind test, not a session record or liveness verdict.",
       "distinct_from": [
-        "x-goal25-session-runtime-sessiondescriptor"
+        "x-goal25-session-runtime-sessiondescriptor",
+        "x-session-runtime-sessionref"
       ],
       "aliases": [],
       "grounding": "isSessionRef",
@@ -1378,7 +1391,8 @@
       "definition": "sessionDurability (cmd/fak/session_durable.go) keeps a serve session's descriptor re-published on a TTL so peers keep seeing it as live.",
       "distinction": "The re-publisher that keeps a descriptor fresh, not the descriptor record.",
       "distinct_from": [
-        "x-goal25-session-runtime-sessiondescriptor"
+        "x-goal25-session-runtime-sessiondescriptor",
+        "x-session-runtime-durabilitysession"
       ],
       "aliases": [],
       "grounding": "sessionDurability",
@@ -1561,7 +1575,8 @@
       "definition": "Package taskdecision (internal/taskdecision) renders a session's decision log for reset handoffs.",
       "distinction": "The decision-log RENDERER, not a decision verdict type.",
       "distinct_from": [
-        "decision-kernel"
+        "decision-kernel",
+        "x-decision-walkdecision"
       ],
       "aliases": [],
       "grounding": "taskdecision",

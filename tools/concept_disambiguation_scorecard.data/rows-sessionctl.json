@@ -8,7 +8,8 @@
       "definition": "GatedAction is the sessionctl payload of one call the adjudication gate refused with an ESCALATE disposition, parked on the out-of-band operator inbox (#2757): the tool name, the raw proposed args, the closed refusal reason, and the gate's preview — what an external operator reads to approve or deny the action.",
       "distinction": "The parked PAYLOAD an operator judges, not a gate itself: unlike toolprocgate (which gates background tool process transitions) GatedAction carries an already-refused reversibility/ESCALATE call awaiting an external verdict; the call was never dispatched.",
       "distinct_from": [
-        "x-issue1420-guard-gate-toolprocgate"
+        "x-issue1420-guard-gate-toolprocgate",
+        "x-goal-guard-gate-action-gated"
       ],
       "aliases": [],
       "grounding": "GatedAction",

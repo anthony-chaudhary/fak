@@ -358,6 +358,243 @@ def test_render_rollup_and_doc_section() -> None:
     assert "Concept roll-up" in files["README.md"]
 
 
+# --- separation: is each concept disambiguated FROM THE OTHERS? -------------
+
+def test_bare_name_strips_the_catalog_gloss() -> None:
+    # The gloss is the catalog explaining itself; the tree only ever says `Decision`.
+    assert cd.bare_name("Decision (kernel)") == "Decision"
+    assert cd.bare_name("Decision") == "Decision"
+    assert cd.bare_name("fak_gateway_cache_ttl_upgrade_total") == "fak_gateway_cache_ttl_upgrade_total"
+    assert cd.bare_name("Plan (memq) (nested)") == "Plan (memq)"   # only the trailing gloss
+
+
+def test_split_words_handles_camel_snake_and_acronyms() -> None:
+    assert cd.split_words("SessionRef") == ["session", "ref"]
+    assert cd.split_words("ffn_gate") == ["ffn", "gate"]
+    assert cd.split_words("KVLayout") == ["kv", "layout"]          # acronym run stays whole
+    assert cd.split_words("q4Kernel") == ["q4", "kernel"]
+    assert cd.split_words("") == []
+
+
+def test_edit_distance_within_bands_at_the_cap() -> None:
+    assert cd.edit_distance_within("sessionref", "sessionrow", 2) == 2
+    assert cd.edit_distance_within("kernel", "kernel", 2) == 0
+    # Over the cap the banded walk short-circuits to cap+1 rather than the true distance.
+    assert cd.edit_distance_within("alpha", "omegaomega", 2) == 3
+
+
+def test_shared_affix_takes_the_longer_run() -> None:
+    assert cd.shared_affix("sessionref", "sessionrow") == 8        # head run
+    assert cd.shared_affix("kvlayout", "layout") == 6              # tail run
+    assert cd.shared_affix("alpha", "omega") == 1                  # 'a' tail only
+
+
+def _pair_rows() -> list[dict]:
+    """Two of every confusable kind, plus a control pair that must NOT be flagged."""
+    return [
+        # homonym: identical once the gloss is stripped.
+        row(id="d1", canonical="Decision (kernel)", grounding="alpha", distinct_from=[]),
+        row(id="d2", canonical="Decision (scheduler)", grounding="beta", distinct_from=[]),
+        # permuted: same words, different order.
+        row(id="p1", canonical="witnessPath", grounding="alpha", distinct_from=[]),
+        row(id="p2", canonical="PathWitness", grounding="beta", distinct_from=[]),
+        # near: 2 edits apart sharing an 8-character head.
+        row(id="n1", canonical="SessionRef", grounding="alpha", distinct_from=[]),
+        row(id="n2", canonical="SessionRow", grounding="beta", distinct_from=[]),
+        # control: same trailing word, but only a 4-character shared run - a bare family
+        # root is not evidence that a reader confuses them.
+        row(id="c1", canonical="AlphaGate", grounding="alpha", distinct_from=[]),
+        row(id="c2", canonical="OmegaGate", grounding="beta", distinct_from=[]),
+    ]
+
+
+def test_confusable_pairs_finds_all_three_kinds_and_spares_the_control() -> None:
+    pairs = cd.confusable_pairs(_pair_rows())
+    got = {(p["a"], p["b"]): p["kind"] for p in pairs}
+    assert got.get(("d1", "d2")) == "homonym"
+    assert got.get(("p1", "p2")) == "permuted"
+    assert got.get(("n1", "n2")) == "near"
+    assert ("c1", "c2") not in got, got            # shared affix below the floor
+    # Discovered from the names themselves: no row DECLARED any of these.
+    assert all(not r["distinct_from"] for r in _pair_rows())
+    # Deterministic ordering, strongest kind first.
+    assert [p["kind"] for p in pairs] == sorted(
+        (p["kind"] for p in pairs), key=lambda k: cd.PAIR_KINDS.index(k))
+
+
+def test_confusable_pairs_takes_the_strongest_kind_when_several_apply() -> None:
+    # `Cache Key` / `Key Cache` are BOTH permuted and (normalized) near; homonym-first
+    # ranking means the strongest applicable kind labels the pair.
+    rows = [row(id="a", canonical="Cache Key", grounding="alpha", distinct_from=[]),
+            row(id="b", canonical="Key Cache", grounding="beta", distinct_from=[])]
+    pairs = cd.confusable_pairs(rows)
+    assert len(pairs) == 1 and pairs[0]["kind"] == "permuted"
+
+
+def test_separation_edges_resolve_by_id_canonical_and_index() -> None:
+    rows = [row(id="r1", canonical="Alpha", aliases=["alpha-thing"], distinct_from=["Beta"]),
+            sibling(id="r2", canonical="Beta", distinct_from=["alpha-thing"])]
+    index = cd.build_index(rows)
+    edges, unresolved = cd.separation_edges(rows, index)
+    # r1 resolved by canonical name; r2 resolved through the index, by ALIAS.
+    assert ("r1", "r2") in edges and ("r2", "r1") in edges
+    assert unresolved == []
+
+
+def test_separation_edges_report_dangling_and_ambiguous_references() -> None:
+    rows = [row(id="r1", canonical="Alpha", distinct_from=["ghost"]),
+            sibling(id="r2", canonical="Beta", distinct_from=["Decision"]),
+            row(id="d1", canonical="Decision (kernel)", grounding="alpha", distinct_from=[]),
+            row(id="d2", canonical="Decision (scheduler)", grounding="beta", distinct_from=[])]
+    _, unresolved = cd.separation_edges(rows, cd.build_index(rows))
+    assert any("dangling boundary" in u and "ghost" in u for u in unresolved)
+    # A reference that names TWO concepts is its own defect: it does not say which.
+    assert any("names 2 concepts at once" in u for u in unresolved)
+    assert cd.kpi_reference_resolves(unresolved)["defects"]
+    assert cd.kpi_reference_resolves([])["defects"] == []
+
+
+def test_separation_report_grades_mutual_one_sided_and_undrawn() -> None:
+    rows = _pair_rows()
+    rows[0]["distinct_from"] = ["d2"]           # homonym drawn one way only
+    rows[2]["distinct_from"] = ["p2"]
+    rows[3]["distinct_from"] = ["p1"]           # permuted drawn both ways
+    sep = cd.separation_report(rows, cd.separation_edges(rows, cd.build_index(rows))[0],
+                               cd.confusable_pairs(rows))
+    state = {(p["a"], p["b"]): p["state"] for p in sep["pairs"]}
+    assert state[("d1", "d2")] == "one_sided"
+    assert state[("p1", "p2")] == "mutual"
+    assert state[("n1", "n2")] == "undrawn"
+    assert sep["counts"] == {"mutual": 1, "one_sided": 1, "undrawn": 1}
+    # Being clean per-row cannot clear these: only the boundary itself does.
+    assert cd.kpi_pair_separated(sep)["defects"]        # the undrawn pair
+    assert cd.kpi_pair_mutual(sep)["defects"]           # the one-sided pair
+
+
+def test_entangled_rung_catches_the_receiving_end_of_a_one_sided_line() -> None:
+    rows = _pair_rows()
+    rows[0]["distinct_from"] = ["d2"]           # d1 warns about d2; d2 says nothing back
+    edges = cd.separation_edges(rows, cd.build_index(rows))[0]
+    sep = cd.separation_report(rows, edges, cd.confusable_pairs(rows))
+    ent = cd.entangled_rows(sep, edges)
+    assert "d1" not in ent                      # it drew its own boundary
+    assert "d2" in ent                          # a reader arriving HERE is still unwarned
+    assert "n1" in ent and "n2" in ent          # neither side of the undrawn pair
+    # The verdict ladder puts `entangled` between drifting and defined, and the row
+    # cannot clear it by re-labelling itself - only by drawing the boundary.
+    t = tree()
+    v, why = cd.expected_verdict(row(), colliding=False, exists=t["exists"],
+                                 sizes={"cache": 2}, entangled="names no boundary against d1")
+    assert v == "entangled" and "d1" in why
+    assert (cd.VERDICT_RANK["defined"] < cd.VERDICT_RANK["drifting"]
+            < cd.VERDICT_RANK["entangled"] < cd.VERDICT_RANK["colliding"])
+
+
+# --- indexing: can a reader who meets a NAME find the concept? --------------
+
+def test_build_index_covers_canonical_alias_and_grounding_surfaces() -> None:
+    rows = [row(id="r1", canonical="Alpha (the first)", aliases=["A1"], grounding="alpha")]
+    ix = cd.build_index(rows)
+    keys = {e["key"] for e in ix["entries"]}
+    assert {"alpha", "a1"} <= keys              # bare canonical + alias + grounding
+    assert ix["by_key"]["alpha"] == ["r1"]
+    assert ix["ambiguous_keys"] == 0
+
+
+def test_index_finds_the_lookup_ambiguity_canonical_names_hide() -> None:
+    # Both canonicals are unique, yet one row claims the OTHER's name as an alias:
+    # the name is genuinely ambiguous and `canonical_unique` cannot see it.
+    rows = [row(id="r1", canonical="Alpha", grounding="alpha"),
+            sibling(id="r2", canonical="Beta", aliases=["Alpha"], grounding="beta")]
+    assert cd.kpi_canonical_unique(rows)["defects"] == []
+    ix = cd.build_index(rows)
+    assert ix["ambiguous_keys"] == 1
+    assert sorted(ix["ambiguous"][0]["targets"]) == ["r1", "r2"]
+
+
+def test_index_pairs_leave_spelling_pairs_to_the_separation_checks() -> None:
+    # `Decision (kernel)` / `Decision (scheduler)` share a lookup key AND are homonyms;
+    # counting one missing boundary as two defects would inflate the debt.
+    rows = _pair_rows()
+    ix = cd.build_index(rows)
+    spelling = cd.confusable_pairs(rows)
+    assert ("d1", "d2") in {(p["a"], p["b"]) for p in spelling}
+    assert ("d1", "d2") not in {(p["a"], p["b"]) for p in cd.index_pairs(ix, spelling)}
+
+
+def test_kpi_index_resolves_tolerates_ambiguity_that_is_separated() -> None:
+    # Two concepts really are both called `Alpha` in the tree; the catalog does not get
+    # to rename a Go type. The defect is not the shared name - it is the reader landing
+    # on both with nothing to tell them apart.
+    def rows_with(df1, df2):
+        return [row(id="r1", canonical="One", grounding="alpha", distinct_from=df1),
+                sibling(id="r2", canonical="Two", aliases=["One"], grounding="beta",
+                        distinct_from=df2)]
+    rows = rows_with([], [])
+    ix = cd.build_index(rows)
+    ipairs = cd.index_pairs(ix, cd.confusable_pairs(rows))
+    edges = cd.separation_edges(rows, ix)[0]
+    assert cd.kpi_index_resolves(ipairs, rows, edges, ix)["defects"]
+    # ...and one-sided is still a fog for the reader arriving from the other side.
+    rows = rows_with(["r2"], [])
+    ix = cd.build_index(rows)
+    edges = cd.separation_edges(rows, ix)[0]
+    assert cd.kpi_index_resolves(cd.index_pairs(ix, cd.confusable_pairs(rows)),
+                                 rows, edges, ix)["defects"]
+    # Drawn BOTH ways, the index can honestly answer "both, and here is the difference".
+    rows = rows_with(["r2"], ["r1"])
+    ix = cd.build_index(rows)
+    edges = cd.separation_edges(rows, ix)[0]
+    assert cd.kpi_index_resolves(cd.index_pairs(ix, cd.confusable_pairs(rows)),
+                                 rows, edges, ix)["defects"] == []
+
+
+def test_render_pairs_index_and_the_generated_name_index() -> None:
+    rows = _pair_rows()
+    p = cd.build_payload(workspace=".", data=_data(rows), tree=tree())
+    sp, ix = p["corpus"]["separation"], p["corpus"]["index"]
+    assert sp["confusable_pairs"] == 3 and sp["undrawn"] == 3
+    # All EIGHT rows are entangled, not six: the control pair's spellings stay far
+    # apart, but both rows ground on the same tree token, so LOOKUP makes them twins
+    # even where spelling does not.
+    assert sp["entangled_concepts"] == 8
+    assert ix["ambiguous_keys"] == 3 and ix["unresolved_shared_names"] > 0
+
+    pairs_txt = cd.render_pairs(p)
+    assert "pairwise separation" in pairs_txt
+    assert "homonym" in pairs_txt and "permuted" in pairs_txt and "near" in pairs_txt
+    idx_txt = cd.render_index(p, limit=2)
+    assert "name index" in idx_txt and "more name(s)" in idx_txt
+
+    files = cd.render_doc_folder(p, stamp="2026-07-26")
+    assert set(files) == {"README.md", "INDEX.md"}
+    assert "Separation - is each concept disambiguated FROM THE OTHERS?" in files["README.md"]
+    assert "not to be confused with" in files["INDEX.md"].lower()
+    assert "Decision (kernel)" in files["INDEX.md"]
+    # The index POINTS at the scorecard rather than copying it.
+    assert "README.md" in files["INDEX.md"]
+
+
+def test_lookup_answers_one_name_the_way_a_reader_meets_it() -> None:
+    """A reader does not read the index; they arrive holding ONE spelling."""
+    p = cd.build_payload(workspace=".", data=_data(_pair_rows()), tree=tree())
+    rows = cd._index_rows(p)
+    # The spelling a reader met is normalized the same way the index was built, so
+    # 'Session Ref', 'session_ref' and 'sessionRef' are the same question.
+    for spelling in ["SessionRef", "session_ref", "session ref"]:
+        hits, exact = cd.index_lookup(rows, spelling)
+        assert exact and len(hits) == 1 and hits[0]["key"] == "sessionref", spelling
+    # A near miss answers with the nearest keys rather than a bare "no".
+    hits, exact = cd.index_lookup(rows, "session")
+    assert not exact and {h["key"] for h in hits} >= {"sessionref", "sessionrow"}
+    assert cd.index_lookup(rows, "nothing-like-this-at-all") == ([], False)
+    # The rendered answer carries the contrast set, not just the definition.
+    out = cd.render_index(p, lookup="SessionRef")
+    assert "'SessionRef' -> 1 lookup name(s)" in out
+    assert "not to be confused with" in out
+    assert "no lookup name matches" in cd.render_index(p, lookup="nothing-like-this-at-all")
+
+
 # --- the load-bearing live smoke: the committed catalog is clean + substantially mapped ---
 
 def test_live_real_data_is_clean_and_in_band() -> None:
@@ -394,6 +631,21 @@ def test_live_real_data_is_clean_and_in_band() -> None:
     # A credible foundation: a real spread of crystal + defined concepts is positioned.
     assert c["standing"]["crystal"] >= 20, "real crystal-clear concepts (the cache family is the exemplar)"
     assert c["standing"]["defined"] >= 5, "honest defined-but-not-yet-anchored concepts"
+    # SEPARATION on real data: discovery is still finding confusable twins, and every one
+    # of them is drawn from BOTH sides, so a reader arriving from either name is warned.
+    sp = c["separation"]
+    assert sp["confusable_pairs"] >= 50, "pair discovery should find a real twin population"
+    assert sp["undrawn"] == 0, f"{sp['undrawn']} confusable pair(s) unseparated - see --pairs"
+    assert sp["one_sided"] == 0, f"{sp['one_sided']} pair(s) drawn one way only - see --pairs"
+    assert sp["mutual"] == sp["confusable_pairs"]
+    assert sp["dangling_references"] == 0, "every distinct_from must name exactly one concept"
+    assert c["standing"]["entangled"] == 0
+    # INDEXING on real data: names really are shared (Decision is four Go types), and
+    # every shared name lands on concepts that separate from each other.
+    ix = c["index"]
+    assert ix["keys"] > c["rows"], "the lookup surface is wider than the concept list"
+    assert ix["ambiguous_keys"] > 0, "shared names are a fact of the tree, not a bug"
+    assert ix["unresolved_shared_names"] == 0, "a shared name must land on a CHOICE - see --index"
     # Every crystal concept's distinction is anchored in a doc that exists.
     for r in c["leaderboard"]:
         if r["verdict"] == "crystal":

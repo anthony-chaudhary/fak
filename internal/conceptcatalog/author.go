@@ -83,7 +83,50 @@ func PlanPosition(c Catalog, req PositionRequest) (Plan, error) {
 		return Plan{}, fmt.Errorf("row-file must match rows-*.json")
 	}
 	path := filepath.Join(c.Dir, rowFile)
-	content, err := appendRowFile(path, row)
+
+	// Draw the OTHER half of every declared boundary. A one-way distinct_from tells
+	// the reader who arrives at the new concept how it differs and leaves the reader
+	// who arrives at its twin holding both meanings, so the twin's own row gets the
+	// back-reference here rather than as a follow-up nobody files.
+	edited := map[string][]byte{}
+	for _, ref := range req.DistinctFrom {
+		twin, ok := rowByID(c, ref)
+		if !ok {
+			return Plan{}, fmt.Errorf("distinct_from %q is not an existing row ID", ref)
+		}
+		src := filepath.FromSlash(twin.Source)
+		if _, statErr := os.Stat(src); statErr != nil {
+			// A catalog loaded through a relative root records a relative source.
+			src = filepath.Join(c.Dir, filepath.Base(src))
+		}
+		b, ok := edited[src]
+		if !ok {
+			var readErr error
+			if b, readErr = os.ReadFile(src); readErr != nil {
+				return Plan{}, readErr
+			}
+		}
+		nb, changed, err := addBackReference(b, twin.ID, req.ID)
+		if err != nil {
+			return Plan{}, fmt.Errorf("back-reference %s -> %s: %w", twin.ID, req.ID, err)
+		}
+		if changed {
+			edited[src] = nb
+		}
+	}
+
+	// The new row can land in a file a back-reference just rewrote; append to those
+	// bytes, not to the stale ones on disk.
+	existing, ok := edited[path]
+	if !ok {
+		b, readErr := os.ReadFile(path)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return Plan{}, readErr
+		}
+		existing = b
+	}
+	delete(edited, path)
+	content, err := appendRow(existing, row)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -101,14 +144,47 @@ func PlanPosition(c Catalog, req PositionRequest) (Plan, error) {
 	}
 	gb = append(gb, []byte(heading)...)
 	files := []string{filepath.ToSlash(path), filepath.ToSlash(glossaryPath)}
+	changes := []Change{{Path: path, BeforeCount: before, AfterCount: before + 1, Content: content}, {Path: glossaryPath, Content: gb}}
+	for src, b := range edited {
+		files = append(files, filepath.ToSlash(src))
+		changes = append(changes, Change{Path: src, Content: b})
+	}
 	sort.Strings(files)
-	plan := Plan{Mode: "position", Family: req.Family, BeforeFamilyCount: before, AfterFamilyCount: before + 1, Files: files, Changes: []Change{{Path: path, BeforeCount: before, AfterCount: before + 1, Content: content}, {Path: glossaryPath, Content: gb}}}
-	return AddGeneratedArtifacts(c, plan)
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
+	plan := Plan{Mode: "position", Family: req.Family, BeforeFamilyCount: before, AfterFamilyCount: before + 1, Files: files, Changes: changes}
+	plan, snap, err := generateShadow(c, plan)
+	if err != nil {
+		return Plan{}, err
+	}
+	// The scorecard discovers confusable pairs from the names themselves, so a new
+	// name can collide with a concept the author never thought of. Refuse the landing
+	// with the list rather than admitting a name that reads as an existing one.
+	if miss := snap.unseparatedFor(req.ID); len(miss) > 0 {
+		var b strings.Builder
+		fmt.Fprintf(&b, "%q is mistakable for %d concept(s) it does not separate from:", req.Canonical, len(miss))
+		for _, p := range miss {
+			other, _ := p.Other(req.ID)
+			fmt.Fprintf(&b, "\n  %s - %s", other, p.Why)
+		}
+		b.WriteString("\n\nadd each to distinct_from (the other half of every boundary is written for you)")
+		return Plan{}, errors.New(b.String())
+	}
+	return plan, nil
 }
 
-func appendRowFile(path string, row Row) ([]byte, error) {
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+func rowByID(c Catalog, id string) (Row, bool) {
+	for _, r := range c.Rows {
+		if norm(r.ID) == norm(id) {
+			return r, true
+		}
+	}
+	return Row{}, false
+}
+
+// appendRow adds one row to a data file's bytes, or writes a fresh file when the
+// existing bytes are empty.
+func appendRow(b []byte, row Row) ([]byte, error) {
+	if len(b) == 0 {
 		x := struct {
 			Rows []Row `json:"rows"`
 		}{Rows: []Row{row}}
@@ -118,24 +194,21 @@ func appendRowFile(path string, row Row) ([]byte, error) {
 		}
 		return append(out, '\n'), nil
 	}
-	if err != nil {
-		return nil, err
-	}
 	var check struct {
 		Rows []Row `json:"rows"`
 	}
-	if err = json.Unmarshal(b, &check); err != nil {
+	if err := json.Unmarshal(b, &check); err != nil {
 		return nil, err
 	}
 	// Preserve every existing byte. Insert one indented object immediately before
 	// the rows array's closing bracket instead of marshal-rewriting the file.
 	closeObj := bytes.LastIndex(b, []byte("}"))
 	if closeObj < 0 {
-		return nil, fmt.Errorf("%s: missing object close", path)
+		return nil, errors.New("data file: missing object close")
 	}
 	closeRows := bytes.LastIndex(b[:closeObj], []byte("]"))
 	if closeRows < 0 {
-		return nil, fmt.Errorf("%s: missing rows close", path)
+		return nil, errors.New("data file: missing rows close")
 	}
 	rb, e := json.MarshalIndent(row, "    ", "  ")
 	if e != nil {
@@ -159,22 +232,31 @@ func appendRowFile(path string, row Row) ([]byte, error) {
 // AddGeneratedArtifacts runs the canonical generator against a shadow data
 // directory containing the planned mutations. It never alters the workspace.
 func AddGeneratedArtifacts(c Catalog, plan Plan) (Plan, error) {
+	p, _, err := generateShadow(c, plan)
+	return p, err
+}
+
+// generateShadow also returns the snapshot the planned catalog grades to, so a
+// caller can refuse a mutation on what the generator SAW rather than on a second,
+// drifting copy of the same rule.
+func generateShadow(c Catalog, plan Plan) (Plan, shadowSnapshot, error) {
+	var snap shadowSnapshot
 	root := filepath.Dir(filepath.Dir(c.Dir))
 	if _, err := os.Stat(filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")); os.IsNotExist(err) {
-		return plan, nil
+		return plan, snap, nil
 	}
 	script := filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")
 	if _, err := os.Stat(script); err != nil {
-		return Plan{}, fmt.Errorf("canonical generator: %w", err)
+		return Plan{}, snap, fmt.Errorf("canonical generator: %w", err)
 	}
 	shadow, err := os.MkdirTemp("", "fak-concept-data-*")
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, snap, err
 	}
 	defer os.RemoveAll(shadow)
 	entries, err := os.ReadDir(c.Dir)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, snap, err
 	}
 	proposed := map[string][]byte{}
 	for _, ch := range plan.Changes {
@@ -188,7 +270,7 @@ func AddGeneratedArtifacts(c Catalog, plan Plan) (Plan, error) {
 		src := filepath.Join(c.Dir, e.Name())
 		b, er := os.ReadFile(src)
 		if er != nil {
-			return Plan{}, er
+			return Plan{}, snap, er
 		}
 		clean := filepath.Clean(src)
 		if v, ok := proposed[clean]; ok {
@@ -196,7 +278,7 @@ func AddGeneratedArtifacts(c Catalog, plan Plan) (Plan, error) {
 		}
 		written[clean] = true
 		if er = os.WriteFile(filepath.Join(shadow, e.Name()), b, 0600); er != nil {
-			return Plan{}, er
+			return Plan{}, snap, er
 		}
 	}
 	// A position commonly creates rows-<family>-authored.json. Materialize
@@ -206,32 +288,42 @@ func AddGeneratedArtifacts(c Catalog, plan Plan) (Plan, error) {
 			continue
 		}
 		if writeErr := os.WriteFile(filepath.Join(shadow, filepath.Base(src)), b, 0600); writeErr != nil {
-			return Plan{}, writeErr
+			return Plan{}, snap, writeErr
 		}
 	}
 	outDir := filepath.Join(shadow, "generated")
-	cmd := exec.Command("python", script, "--workspace", root, "--data", shadow, "--markdown-dir", outDir)
+	cmd := exec.Command("python", script, "--workspace", root, "--data", shadow, "--markdown-dir", outDir, "--json")
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
-	b, er := cmd.CombinedOutput()
+	// Keep stderr off stdout: stdout is the snapshot JSON this plan is judged on.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	b, er := cmd.Output()
 	if er != nil {
 		// The scorecard exits 1 for an honestly generated ACTION snapshot (for
 		// example, unrelated families still carry coverage debt). Exit 2 and
 		// missing output are generator failures; exit 1 is valid content.
 		var exitErr *exec.ExitError
 		if !errors.As(er, &exitErr) || exitErr.ExitCode() != 1 {
-			return Plan{}, fmt.Errorf("canonical generation failed: %v: %s", er, strings.TrimSpace(string(b)))
+			return Plan{}, snap, fmt.Errorf("canonical generation failed: %v: %s", er, strings.TrimSpace(stderr.String()))
 		}
 	}
-	readme, err := os.ReadFile(filepath.Join(outDir, "README.md"))
-	if err != nil {
-		return Plan{}, err
+	if err = json.Unmarshal(b, &snap); err != nil {
+		return Plan{}, snap, fmt.Errorf("decode planned snapshot: %w", err)
 	}
-	dst := filepath.Join(root, "docs", "concept-disambiguation-scorecard", "README.md")
-	plan.Changes = append(plan.Changes, Change{Path: dst, Content: readme})
-	plan.Files = append(plan.Files, filepath.ToSlash(dst))
+	// Every generated artifact ages with the catalog: a fresh scorecard beside a
+	// stale name index would answer one of the two questions from a retired catalog.
+	for _, art := range generatedArtifacts {
+		content, readErr := os.ReadFile(filepath.Join(outDir, art.Name))
+		if readErr != nil {
+			return Plan{}, snap, readErr
+		}
+		dst := filepath.Join(root, filepath.FromSlash(art.Tracked))
+		plan.Changes = append(plan.Changes, Change{Path: dst, Content: content})
+		plan.Files = append(plan.Files, filepath.ToSlash(dst))
+	}
 	sort.Strings(plan.Files)
-	return plan, nil
+	return plan, snap, nil
 }
 
 var categories = map[string]bool{"incidental": true, "false-positive": true, "test-only": true, "build-tag-only": true}

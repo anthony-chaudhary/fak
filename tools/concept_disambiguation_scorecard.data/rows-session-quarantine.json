@@ -9,7 +9,8 @@
       "distinction": "Bounds the QUARANTINED EVIDENCE (the corrupt file set aside for diagnosis), not the LIVE descriptors: session.DefaultDescriptorTTL expires a healthy SessionDescriptor on the normal path, whereas this policy only governs wreckage already removed from service. Expiring one never expires the other.",
       "distinct_from": [
         "x-goal25-session-runtime-sessiondescriptor",
-        "x-issue1420-session-runtime-sessiondesc"
+        "x-issue1420-session-runtime-sessiondesc",
+        "sessionquarantineretentionpolicy"
       ],
       "aliases": [],
       "grounding": "sessionQuarantineRetentionPolicy",
@@ -28,7 +29,8 @@
       "definition": "The cmd/fak accessor that reads FAK_SESSION_QUARANTINE_RETENTION and returns the bounded retention policy governing how many, how old and how large the quarantined copies of a corrupt session registry may grow before the recovery path reaps them; an unparseable value returns the conservative default plus an error the caller warns about rather than failing on.",
       "distinction": "DefaultAdmissionPolicy decides whether NEW work is let in; this decides how long WRECKAGE is kept after the fact. It is a housekeeping bound on already-quarantined evidence, never an admission or scheduling decision, and by design it can never refuse or delay a session — a malformed policy degrades to the default instead of failing startup.",
       "distinct_from": [
-        "x2-policy-capability-defaultadmissionpolicy"
+        "x2-policy-capability-defaultadmissionpolicy",
+        "session-quarantine-retention-policy"
       ],
       "aliases": [],
       "grounding": "sessionQuarantineRetentionPolicy",

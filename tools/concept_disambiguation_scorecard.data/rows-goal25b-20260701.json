@@ -194,7 +194,8 @@
       "distinction": "The ideascout candidate GRADER, not the reader or the candidate type.",
       "distinct_from": [
         "x-goal25b-plan-readcandidates",
-        "candidate-planner"
+        "candidate-planner",
+        "plan-candidatescore"
       ],
       "aliases": [],
       "grounding": "ScoreCandidate",
@@ -285,7 +286,9 @@
       "definition": "resume_plan is the tools/_registry/resume_plan.json artifact: the AUTO_RESUME rows the resume watchdog consumes.",
       "distinction": "A fleet-registry ARTIFACT of resume rows; WatchdogPlanRow is one row of it as parsed.",
       "distinct_from": [
-        "x-goal25b-plan-watchdogplanrow"
+        "x-goal25b-plan-watchdogplanrow",
+        "managed-cache-restart-plan",
+        "plan-planresume"
       ],
       "aliases": [],
       "grounding": "resume_plan",
@@ -760,7 +763,8 @@
       "definition": "guardPreCompactIsClaudeCommand (cmd/fak/guard_precompact.go) detects whether the guarded command is a Claude CLI invocation, so the PreCompact hook install applies.",
       "distinction": "The Claude-detection twin of guardIsCodex, scoped to the PreCompact install.",
       "distinct_from": [
-        "x-goal25-guard-gate-guardiscodex"
+        "x-goal25-guard-gate-guardiscodex",
+        "x-issue1420-guard-gate-guardprecompactclaudecommand"
       ],
       "aliases": [],
       "grounding": "guardPreCompactIsClaudeCommand",
@@ -1085,7 +1089,8 @@
       "definition": "Table.ContextNudge (internal/session/ctxspike.go) returns the context-spike nudge string the turn loop splices into a run when a spike is detected.",
       "distinction": "A spike-triggered NUDGE message, not a compaction or budget mechanism.",
       "distinct_from": [
-        "context-mmu"
+        "context-mmu",
+        "x2-context-ctx-contextbudget"
       ],
       "aliases": [],
       "grounding": "ContextNudge",
@@ -1521,7 +1526,8 @@
       "distinction": "The DOLLAR meter over a session, not its token or time budget.",
       "distinct_from": [
         "x-goal25-session-runtime-sessionlimit",
-        "session"
+        "session",
+        "x-issue1420-session-runtime-sessionend"
       ],
       "aliases": [],
       "grounding": "session_spend",
@@ -1539,7 +1545,10 @@
       "definition": "SessionTime (internal/gateway/gateway.go) is the per-session clock snapshot exposed in gateway session state, with an IsZero test.",
       "distinction": "A CLOCK snapshot on session state, not the session lease or budget.",
       "distinct_from": [
-        "session"
+        "session",
+        "cov5303-session-live",
+        "x-session-runtime-sessionfile",
+        "x2-session-runtime-sessiontype"
       ],
       "aliases": [],
       "grounding": "SessionTime",
@@ -1702,7 +1711,8 @@
       "definition": "VLLMEngine (internal/engine/vllm.go) is the vLLM-backed engine adapter, declaring its capability set.",
       "distinction": "One concrete engine ADAPTER; engine is the general abstraction.",
       "distinct_from": [
-        "engine"
+        "engine",
+        "x-goal25b-gateway-engine-vllmengineid"
       ],
       "aliases": [],
       "grounding": "VLLMEngine",
@@ -1756,7 +1766,8 @@
       "definition": "renderable is the doc adjective for context that can be rendered into prompt text - ctxplan prices a span by tokenizing its renderable text.",
       "distinction": "An ADJECTIVE about render-capable context, not a render function.",
       "distinct_from": [
-        "renderplan-context"
+        "renderplan-context",
+        "x-ci-coverage-render-materialize-rendertable"
       ],
       "aliases": [],
       "grounding": "renderable",
@@ -1810,7 +1821,8 @@
       "definition": "RenderDigest (internal/memoryread) renders the agent-memory digest `fak memory-read` prints, bounded by max bytes.",
       "distinction": "The MEMORY digest renderer, not a context or plan renderer.",
       "distinct_from": [
-        "renderplan-context"
+        "renderplan-context",
+        "x2-render-materialize-renderdist"
       ],
       "aliases": [],
       "grounding": "RenderDigest",
@@ -1864,7 +1876,10 @@
       "definition": "RenderLine (internal/fleettrend) renders the one-line fleet trend readout from trend rows.",
       "distinction": "A one-line TREND renderer, not a context renderer.",
       "distinct_from": [
-        "renderplan-context"
+        "renderplan-context",
+        "render-materialize-render-lint",
+        "render-materialize-render-live",
+        "x-ci-coverage-render-materialize-renderlist"
       ],
       "aliases": [],
       "grounding": "RenderLine",
@@ -1972,7 +1987,8 @@
       "definition": "defaultLoopPolicy (cmd/fak/loop.go) returns the default policy name a `fak loop` run uses when none is given.",
       "distinction": "The loop-run policy DEFAULT, not the policy manifest.",
       "distinct_from": [
-        "policy-manifest"
+        "policy-manifest",
+        "default-loop-policy"
       ],
       "aliases": [],
       "grounding": "defaultLoopPolicy",
@@ -2318,7 +2334,8 @@
       "definition": "CanEvict (internal/model/kvcache.go, internal/kvmmu) reports whether the KV cache is in a state where eviction may proceed.",
       "distinction": "The eviction PRECONDITION check, not the eviction action.",
       "distinct_from": [
-        "evict-kvcache"
+        "evict-kvcache",
+        "x2-evict-capevict"
       ],
       "aliases": [],
       "grounding": "CanEvict",
@@ -2355,7 +2372,8 @@
       "definition": "k_flash_attention (internal/compute/cuda.go) is the CUDA flash-attention decode kernel - tiled over the KV window with a running max/sum so no full score buffer materializes.",
       "distinction": "The CUDA decode KERNEL for attention, not an attention observer or metric.",
       "distinct_from": [
-        "attn-observer"
+        "attn-observer",
+        "x-attention-flashattention"
       ],
       "aliases": [],
       "grounding": "k_flash_attention",

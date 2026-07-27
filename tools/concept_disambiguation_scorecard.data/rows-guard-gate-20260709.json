@@ -409,8 +409,9 @@
    "definition": "The cmd/fak/guard_mcp.go struct recording what installGuardMCPRegistration did (Applied/ConfigPath/URL/Reason) when wiring fak's MCP surface into a Claude Code child, used by the startup banner and tests.",
    "distinction": "It is the RESULT RECORD of the MCP registration install, not guardPreCompactInstall, the analogous record for the PreCompact hook install, and not guardStopHookInstall, the analogous record for the Stop hook install.",
    "distinct_from": [
-    "guard-gate-guardprecompactinstall",
-    "guard-gate-guardstophookinstall"
+     "guard-gate-guardprecompactinstall",
+     "guard-gate-guardstophookinstall",
+     "covg-guard-gate-guardmcp"
    ],
    "aliases": [
     "guardMCPInstall"
@@ -600,7 +601,8 @@
    "definition": "The internal/guardvars package holding the canonical wire shapes (e.g. SessionVars) shared field-for-field by the /debug/vars gateway producer and the `fak info` cmd/fak consumer, so a new field cannot silently drop between the two.",
    "distinction": "It is the SHARED TYPE-DEFINITION leaf preventing producer/consumer field drift, not guardInfoVars, the cmd/fak info-pane consumer alias of these types, and not the gateway debug producer itself.",
    "distinct_from": [
-    "x-goal25b-guard-gate-guardinfovars"
+     "x-goal25b-guard-gate-guardinfovars",
+     "cov5305-guard-park"
    ],
    "aliases": [
     "guardvars"
@@ -662,8 +664,9 @@
    "definition": "The internal/frontierswe/run.go struct (Runnable/DockerPresent/IntegrityOK/Reason/RemoteCommand) reporting whether the real C7 SWE-bench environment could be stood up on this host, and the exact remote command to run it where it cannot.",
    "distinction": "It is a SWE-bench harness HOST-CAPABILITY report, unrelated to a tool-call adjudication gate; distinct from PreflightGate, the rehearsal host-capability gate for a different harness, and from the generic decision-point gate concept.",
    "distinct_from": [
-    "x-goal-guard-gate-preflight-gate",
-    "gate"
+     "x-goal-guard-gate-preflight-gate",
+     "gate",
+     "ffn-gate"
    ],
    "aliases": [
     "RunGate"

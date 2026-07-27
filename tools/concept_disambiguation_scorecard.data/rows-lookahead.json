@@ -8,7 +8,8 @@
       "definition": "The forked session id whose lookahead rollout produced a RolloutEvidence/Lesson (#5204): the twin session spun off to roll the trajectory forward under the fork-rollout runner.",
       "distinction": "Identifies the throwaway FORK session a lookahead rollout ran in (evidence provenance), distinct from the live drive session it was forked from.",
       "distinct_from": [
-        "x2-session-runtime-sessionobs"
+        "x2-session-runtime-sessionobs",
+        "x-session-runtime-faksessionid"
       ],
       "aliases": [],
       "grounding": "ForkSessionID",

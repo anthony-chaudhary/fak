@@ -24,5 +24,12 @@ func checkConceptFreshness(d *StagedDiff) ([]Finding, error) {
 	if res.Fresh {
 		return nil, nil
 	}
-	return []Finding{{Gate: "CONCEPT_FRESHNESS", File: "docs/concept-disambiguation-scorecard/README.md", Detail: fmt.Sprintf("generated concept artifacts are stale: %v; run `%s` and stage the result", res.StalePaths, res.Regenerate)}}, nil
+	// Name the artifact that actually drifted: the scorecard and the reverse name
+	// index age independently, and pointing at the README when the INDEX is the stale
+	// one sends the reader to a file that is already correct.
+	file := conceptcatalog.GeneratedReadme
+	if len(res.StalePaths) > 0 {
+		file = res.StalePaths[0]
+	}
+	return []Finding{{Gate: "CONCEPT_FRESHNESS", File: file, Detail: fmt.Sprintf("generated concept artifacts are stale: %v; run `%s` and stage the result", res.StalePaths, res.Regenerate)}}, nil
 }

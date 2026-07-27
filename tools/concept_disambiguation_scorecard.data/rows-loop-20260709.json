@@ -71,7 +71,7 @@
       "kind": "concept",
       "definition": "The crashloop fence is loopmgr.RestartPolicy: a pure decision core that caps consecutive restart attempts for a supervised loop process, computes a doubling backoff delay with deterministic jitter, and gives up with a typed reason (WATCHDOG_RESTART_EXHAUSTED) instead of letting a failing process restart forever.",
       "distinction": "Not doomloop (internal/doomloop), which classifies a WORKER's effort-vs-verified-progress ratio across sample windows; RestartPolicy instead fences how many times a supervised PROCESS may be restarted after it exits, with no notion of progress or effort.",
-      "distinct_from": ["loop-doomloop"],
+      "distinct_from": ["loop-doomloop", "policy-capability-restart-policy"],
       "aliases": ["crashloop", "crash-loop", "RestartPolicy"],
       "grounding": "RestartPolicy",
       "grounding_kind": "symbol",

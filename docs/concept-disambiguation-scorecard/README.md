@@ -15,23 +15,26 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **44** (clarity 0 + coverage 44) |
-| **Crystal-clear concepts (and climbing)** | **397** crystal of 2015 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2195 / 2239** (98.0% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **58** (clarity 0 + coverage 58) |
+| **Crystal-clear concepts (and climbing)** | **401** crystal of 2019 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2196 / 2254** (97.4% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 189 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **60** of 2683 indexed names |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 98.7/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.3/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2015 concepts - score 98.7/100 (grade A) - disambiguation-debt 44
+concept-disambiguation chart - 2019 concepts - score 98.3/100 (grade A) - disambiguation-debt 58
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 397
+  * crystal       #######..................... 401
   o defined       ############################ 1618
   ~ drifting      ............................ 0
+  = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
@@ -44,11 +47,11 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ********ooooooooooooooooooooooooooooooo (39 concept(s); 8 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (128 concept(s); 13 crystal)
-  guard-gate       *******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (295 concept(s); 79 crystal)
+  guard-gate       ********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (296 concept(s); 80 crystal)
   layout           ****oooooooo       (12 concept(s); 4 crystal)
-  loop             **************************ooooooooooooooooooooooooooooooooo (59 concept(s); 26 crystal)
+  loop             ****************************ooooooooooooooooooooooooooooooooo (61 concept(s); 28 crystal)
   plan             *********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (252 concept(s); 21 crystal)
-  policy-capability ************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (122 concept(s); 24 crystal)
+  policy-capability *************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (123 concept(s); 25 crystal)
   pool             ***ooooooooooooooooooooooooooooo (32 concept(s); 3 crystal)
   render-materialize ****oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (152 concept(s); 4 crystal)
   score-debt       ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (70 concept(s); 6 crystal)
@@ -59,31 +62,39 @@ clarity mix by family (each cell = one concept):
   witness-proof    **************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (127 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  ###########################. 196/206
-  guard-gate       ###########################. 355/363
-  cache            ###########################. 256/261
+  guard-gate       ###########################. 355/369
+  session-runtime  ##########################.. 196/209
+  cache            ###########################. 256/262
+  loop             ##########################.. 72/77
+  render-materialize ###########################. 172/177
   decision         ##########################.. 49/53
-  loop             ###########################. 72/76
+  support-maturity #########################... 39/43
+  gateway-engine   ############################ 166/169
   policy-capability ###########################. 143/146
-  render-materialize ############################ 172/175
-  support-maturity ##########################.. 39/42
   context-ctx      ############################ 194/196
-  gateway-engine   ############################ 166/168
   witness-proof    ############################ 136/138
   evict            ###########################. 44/45
+  layout           ##########################.. 13/14
+  plan             ############################ 309/310
   attention        ############################ 72/72
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  layout           ############################ 13/13
-  plan             ############################ 308/308
   pool             ############################ 36/36
   score-debt       ############################ 86/86
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.0%  (2195/2239 confusable tokens positioned)
+namespace coverage  [###############################.] 97.4%  (2196/2254 confusable tokens positioned)
 
-legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
+pairwise separation (of the name-pairs a reader cannot keep apart):
+  mutual       ############################ 189
+  one-sided    ............................ 0
+  undrawn      ............................ 0
+  pairs separated   [################################] 189/189
+
+name index: 2683 lookup name(s) -> 2019 concept(s), 60 ambiguous
+
+legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
 
 ## The clarity ladder
@@ -93,8 +104,33 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * crystal | grounded + defined + a line drawn against siblings + that line anchored in a doc that exists |
 | o defined | grounded + defined + a distinction line, but the line is not written in a discoverable doc |
 | ~ drifting | grounded + defined, but no line drawn against its siblings (you know what it is, not what it is NOT) |
+| = entangled | defined and draws SOME line, but not against the twin its own NAME is confusable with - per-row clean, pairwise still fog |
 | x colliding | shares a canonical name with another concept - a true ambiguity, fixable only by a rename |
 | . undocumented | appears in the tree, but the catalog gives no definition |
+
+## Separation - is each concept disambiguated FROM THE OTHERS?
+
+Per-concept clarity is not the same question as pairwise separation. A concept in a 250-member family satisfies `disambiguated` by naming **any one** sibling - while the twin its name is genuinely mistakable for goes undrawn. So the scorecard discovers, from the catalog's own names, the pairs a reader cannot keep apart - **permuted** (`witnessPath` / `PathWitness`: the same words in a different order) and **near** (`SessionRef` / `SessionRow`: a couple of edits apart) - and asks whether the line is drawn between *those two specifically*. Boundaries are directed, so for a confusable pair the line must be drawn from **both** sides: `A.distinct_from = [B]` does nothing for a reader who arrived at B. A concept that does not separate from its own twin is `entangled` - clean per row, still fog pairwise.
+
+| Separation metric | Value |
+|---|---|
+| Confusable name-pairs discovered | 189 |
+| **Separated from each other (drive to all)** | **189 / 189** (189 mutual, 0 one-sided) |
+| **Undrawn twin-pairs (drive to 0)** | **0** |
+| Entangled concepts (own twin undrawn) | 0 |
+| Boundaries drawn (mutual / total) | 1276 / 3699 |
+| Dangling `distinct_from` references (drive to 0) | 0 |
+
+## Indexing - can a reader who meets a NAME find the concept?
+
+The catalog is organised by concept; a reader arrives with a **spelling**. [`INDEX.md`](INDEX.md) turns it around: every surface a name can arrive as - the canonical, every alias, the raw grounding token - is a lookup key pointing at the concept it denotes, carrying that concept's contrast set so *which one is this?* and *how is it not the other one?* are answered together. A key that lands on two concepts is an **index** defect the canonical names cannot show: both canonicals may be unique while one row quietly claims the other's name as an alias.
+
+| Index metric | Value |
+|---|---|
+| Lookup names indexed | 2683 over 2019 concepts |
+| Lookup names landing on several concepts | 60 |
+| **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
+| Concepts carrying a contrast set | 2019 |
 
 ## The concepts (best verdict first)
 
@@ -245,6 +281,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | guard-gate | **guardLifecycleTokenEnv** - The constant (guardLifecycleTokenEnv = FAK_GUARD_LIFECYCLE_TOKEN) naming the env var that carries the guard lifecycle IPC auth token used by precompact/stophook. |
 | * | crystal | symbol | guard-gate | **claudeGuardTurnsPerEpoch** - The turn-count multiplier in cmd/dispatchworker/guard.go that converts the per-turn model window ceiling into the CUMULATIVE --context-budget-tokens allowance a dispatch claude worker launches with: budget = max(hardCap - outputReserve, baseline) x claudeGuardTurnsPerEpoch. Set to 12 so the 3-equivalent-restart reaper (3 x 12 = 36 turns) stays behind the ~30-turn wall-clock runway, letting the graceful --max-duration drain win. |
 | * | crystal | symbol | guard-gate | **opencodeGuardConfigContent** - The cmd/dispatchworker/guard.go merge that folds the opencode compaction overlay into an existing OPENCODE_CONFIG_CONTENT document while preserving operator-supplied keys, returning the existing document unchanged when there is no overlay to apply. |
+| * | crystal | symbol | guard-gate | **guard_self_tighten** - The admission gate for a SELF-authored (agent-proposed) policy overlay: admitSelfTightenOverlay classifies the delta from the installed effective floor to the proposed one through policy.DiffAmendment and admits only a no-op or tighten-only verdict, so an agent's own authority may ratchet the capability floor tighter but never wider (#5181, epic #5170 Track F). |
 | * | crystal | symbol | guard-gate | **gateVerbTierTree (whole-tree verb-tier gate)** - Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653). |
 | * | crystal | subsystem | guard-gate | **guard_mcp (guard MCP self-query install)** - The cmd/fak/guard_mcp.go module: it wires fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_context_*) into the guarded child by injecting an MCP server registration into the child's launch config, mirroring the install shape of guard_precompact.go / guard_codex.go. |
 | * | crystal | subsystem | guard-gate | **guard_codex (guard Codex-provider wiring)** - The cmd/fak/guard_codex.go module: the first-class `fak guard -- codex` wiring, fak's OpenAI-Codex provider install path (credential resolve plus config rewrite) that lets the guard front a Codex child the same way it fronts an Anthropic one. |
@@ -318,6 +355,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | loop | **agentGoalLoop (injected agent-loop seam for the goal endpoint)** - The function seam POST /v1/fak/agent/sessions calls to produce one governed agent-loop session, injected so the HTTP contract — envelope validation, NDJSON framing, and the session.start / call / session.end / error wire shape — can be proven as a standalone tested unit (#3258, epic #3256). |
 | * | crystal | symbol | loop | **loop_constraint.go (agent constraint seam)** - loop_constraint.go is the agent package's loop-side consumer of the out-of-band add-constraint op (#2756): applyConstraints drains the sessionctl constraint mailbox at the turn boundary and carries the tightened floor's standing directive as a system notice, and constraintDenied denies a floor-forbidden tool call before dispatch with a typed receipt carrying the closed CONSTRAINT_* reason. |
 | * | crystal | symbol | loop | **loop_park.go (agent park seam)** - loop_park.go is the agent package's loop-side consumer of the out-of-band operator approve/deny inbox (#2757): parkEscalatedDeny intercepts an ESCALATE-gated deny at the dispatch site when the session's inbox is open, parks it on the sessionctl pending-action queue, and honors the external verdict — approve re-proposes the call through the normal syscall boundary (byte-identical plus the gate's confirm echo, or operator-modified args freshly adjudicated), deny/timeout abort with a typed receipt carrying the closed PARK_* reason. |
+| * | crystal | symbol | loop | **loop_observe.go (agent progress-observer seam)** - loop_observe.go is the agent package's OUTBOUND loop-state seam (#5148): WithProgressObserver installs a typed, nil-safe ProgressObserver that runArm emits closed-set ProgressEvent lifecycle transitions through (turn_started, tool_started, call_adjudicated, result_admitted, turn_done), which the native gateway stream renders as structured SSE. Unset, every emit is a no-op and the loop is byte-for-byte the historical loop. |
+| * | crystal | symbol | loop | **loop_midflight** - loop_midflight.go is the agent package's owned per-run MID-FLIGHT verb mailbox and tamper-evident hash-chained journal (#5158, the write half of #2403 / epic #2388): a transport enqueues interrupt / drop-pending-call / set-budget verbs that the owned loop consumes at its next CLEAN turn boundary (never mid-tool, never mid-adjudication) to stop the arm, skip one named queued call, or write a fresh budget through to the session table; nil-safe, so with no verb issued the loop is byte-for-byte the historical loop. |
 | * | crystal | symbol | loop | **loop_toolterminal_verbosity.go (agent background-completion wake verbosity seam)** - The verbosity axis of the background-process completion watcher: decides WHICH terminal tool-process transitions wake a new agent turn (off/error/result/all) and HOW MUCH of the folded toolproc verdict rides into that turn. |
 | * | crystal | metric | loop | **loop_count** - The dispatch codex-loop iteration counter (LoopCount, JSON loop_count) reported per session tick - how many times the codex loop has re-entered for one session. |
 | * | crystal | concept | loop | **loop (the ring)** - The generic engineering abstraction: sense -> decide -> act -> witness, at any altitude (tool-call / turn / session / fleet / RSI / intent). |
@@ -363,6 +402,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | plan | **Plan (memq)** - Static pre-execution Explain output: pipeline steps, effects, and mutations |
 | * | crystal | symbol | plan | **Candidate** - Scored span the planner may keep resident with cost, benefit, and density metrics |
 | * | crystal | symbol | policy-capability | **egress_posture** - The verdict-meta key the adjudicator's egress band stamps on a refusal to name WHICH egress stance produced it -- currently 'restrict', the strict-allowlist posture in which WebFetch flips from default-allowed to allowlist-only. It answers 'why was this host refused' for a reader of the decision journal, distinguishing a posture-driven refusal from a rule-driven one. |
+| * | crystal | symbol | policy-capability | **call_adjudicated (loop-progress SSE event)** - call_adjudicated (Go const ProgressCallAdjudicated) is the loop-progress event KIND that publishes one tool call's already-decided kernel verdict on the native owned-loop SSE stream (#5148): it carries Turn, CallID, Tool, Verdict (ALLOW/DENY/TRANSFORM/QUARANTINE) and, on a deny, the closed refusal reason a client gates on. |
 | * | crystal | symbol | policy-capability | **cmdPolicy** - The argv handler for the fak policy subcommand (func cmdPolicy in cmd/fak) - the CLI entry that inspects and prints the effective admission policy. |
 | * | crystal | symbol | policy-capability | **FirePolicy** - The rsiloop decision rule (rsiloop.FirePolicy) that decides whether an RSI tuning step fires at a given horizon margin (BaselineFirePolicy fires at MinHorizonMargin 0). |
 | * | crystal | config | policy-capability | **FLEET_POLICY_DIR** - The env var (FLEET_POLICY_DIR) naming a DIRECTORY of fleet dispatch-policy files loaded at tick preflight. |
@@ -2251,35 +2291,40 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 2015 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2423/3699 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2019 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
+| separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
+| separation | `pair_separated` | 100 | 0 | all 189 confusable name-pair(s) are separated |
+| separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
+| indexed | `index_resolves` | 100 | 0 | every one of 2683 lookup name(s) resolves - 60 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 196 | 206 | 10 |
-| guard-gate | 355 | 363 | 8 |
-| cache | 256 | 261 | 5 |
+| guard-gate | 355 | 369 | 14 |
+| session-runtime | 196 | 209 | 13 |
+| cache | 256 | 262 | 6 |
+| loop | 72 | 77 | 5 |
+| render-materialize | 172 | 177 | 5 |
 | decision | 49 | 53 | 4 |
-| loop | 72 | 76 | 4 |
+| support-maturity | 39 | 43 | 4 |
+| gateway-engine | 166 | 169 | 3 |
 | policy-capability | 143 | 146 | 3 |
-| render-materialize | 172 | 175 | 3 |
-| support-maturity | 39 | 42 | 3 |
 | context-ctx | 194 | 196 | 2 |
-| gateway-engine | 166 | 168 | 2 |
 | witness-proof | 136 | 138 | 2 |
 | evict | 44 | 45 | 1 |
+| layout | 13 | 14 | 1 |
+| plan | 309 | 310 | 1 |
 | attention | 72 | 72 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| layout | 13 | 13 | 0 |
-| plan | 308 | 308 | 0 |
 | pool | 36 | 36 | 0 |
 | score-debt | 86 | 86 | 0 |
 | trajectory-control | 0 | 0 | 0 |

@@ -23,16 +23,40 @@ clarity axes a confused reader actually feels:
   DISAMBIGUATED - for a concept that shares a family with siblings, an explicit
                   ``distinct_from`` names the siblings + a one-line ``distinction``
                   draws the boundary (what it is NOT). This is the crystal-clarity test.
+  SEPARATED     - the boundary is drawn against the concept it is genuinely mistakable
+                  for, from BOTH sides. Per-row clarity is not pairwise separation: in a
+                  250-member family, naming ANY sibling satisfies DISAMBIGUATED while the
+                  twin whose SPELLING collides goes undrawn. See "separation" below.
   ANCHORED      - the distinction is written down somewhere DISCOVERABLE (a glossary
                   anchor that exists), so a newcomer can find it - not tribal knowledge.
+  INDEXED       - a reader who meets any SPELLING of the name (canonical / alias /
+                  grounding token) lands on exactly one concept. See "indexing" below.
 
 The clarity **verdict** ladder folds those into one honest label per concept:
 
   crystal       grounded + defined + distinction + distinct_from resolves + anchor exists
   defined       grounded + defined + distinction, but the line is not written in a doc
   drifting      grounded + defined, but NO line drawn against its siblings
+  entangled     defined and draws SOME line, but not against the twin its own NAME is
+                confusable with - per-row clean, pairwise still fog
   colliding     shares a canonical name with another concept (a true ambiguity)
   undocumented  appears in the tree, but the catalog gives no definition
+
+SEPARATION - disambiguating concepts FROM EACH OTHER. The catalog's own names are swept
+for the pairs a reader cannot keep apart: ``permuted`` (identical word multiset in a
+different order - ``witnessPath`` / ``PathWitness``) and ``near`` (canonical names within
+a couple of edits - ``SessionRef`` / ``SessionRow``, ``q4Kernel`` / ``q8Kernel``). For
+each such pair the line must be drawn between THOSE TWO - and drawn MUTUALLY, because a
+boundary is directed: ``A.distinct_from = [B]`` says nothing to a reader who arrived at
+B, which is exactly as likely when the names are twins. The pair list is DISCOVERED, not
+declared, so it grows by itself the moment a peer lands a near-twin name.
+
+INDEXING - the reverse map. The catalog is organised by concept; a reader arrives with a
+spelling. ``build_index`` turns every surface (canonical / alias / grounding) into a
+lookup key carrying the concept it denotes plus its contrast set, and refuses a key that
+lands on two concepts which do not separate from each other - an ambiguity the canonical
+names cannot show, because both canonicals can be unique while one row quietly claims the
+other's name as an ALIAS. Rendered to the generated ``INDEX.md``.
 
 Every check CROSS-CHECKS the row against the real tree: the grounding token must
 appear in the production corpus, the glossary anchor must exist on disk, a
@@ -80,12 +104,16 @@ Run from the repo ROOT::
     python tools/concept_disambiguation_scorecard.py --critical      # worst-first clarity backlog
     python tools/concept_disambiguation_scorecard.py --rollup        # hierarchy roll-up (abstraction heads, weakest-link)
     python tools/concept_disambiguation_scorecard.py --gaps          # coverage backlog (unpositioned tree tokens)
+    python tools/concept_disambiguation_scorecard.py --pairs         # pairwise separation backlog (confusable name-pairs)
+    python tools/concept_disambiguation_scorecard.py --index         # name -> concept lookup index
+    python tools/concept_disambiguation_scorecard.py --lookup "KV cache"  # resolve ONE name a reader met
     python tools/concept_disambiguation_scorecard.py --compare base.json   # prove the debt dropped
     python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard
 """
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import re
 import sys
@@ -116,36 +144,51 @@ KINDS = {
 GROUNDING_KINDS = {"symbol", "path", "claims", "doc", "metric", "verb"}
 
 # The clarity verdict ladder, best -> worst. The rank doubles as the "distance from
-# crystal clarity" used to order the worst-first backlog.
-VERDICTS = ["crystal", "defined", "drifting", "colliding", "undocumented"]
+# crystal clarity" used to order the worst-first backlog. `entangled` sits between
+# `drifting` and `colliding`: the concept HAS a definition and draws a line at some
+# sibling, but the twin its NAME is actually mistakable for is not the one it
+# separates from - a per-row-clean concept the namespace still cannot keep apart.
+VERDICTS = ["crystal", "defined", "drifting", "entangled", "colliding", "undocumented"]
 VERDICT_RANK = {v: i for i, v in enumerate(VERDICTS)}
 
-GROUPS = ("well-formed", "distinctness", "grounded", "honesty")
+GROUPS = ("well-formed", "distinctness", "separation", "indexed", "grounded", "honesty")
 KPI_GROUP: dict[str, str] = {
     "well_formed": "well-formed",
     "canonical_unique": "distinctness",
     "defined": "distinctness",
     "disambiguated": "distinctness",
+    "reference_resolves": "separation",
+    "pair_separated": "separation",
+    "pair_mutual": "separation",
     "grounded": "grounded",
     "anchored": "grounded",
+    "index_resolves": "indexed",
     "clarity_consistent": "honesty",
 }
 KPI_WEIGHTS: dict[str, float] = {
-    "well_formed": 0.10,
-    "canonical_unique": 0.20,
-    "defined": 0.14,
-    "disambiguated": 0.24,
-    "grounded": 0.14,
-    "anchored": 0.08,
-    "clarity_consistent": 0.10,
+    "well_formed": 0.08,
+    "canonical_unique": 0.14,
+    "defined": 0.10,
+    "disambiguated": 0.15,
+    "reference_resolves": 0.07,
+    "pair_separated": 0.12,
+    "pair_mutual": 0.05,
+    "grounded": 0.10,
+    "anchored": 0.05,
+    "index_resolves": 0.07,
+    "clarity_consistent": 0.07,
 }
 KPI_PENALTY: dict[str, int] = {
     "well_formed": 12,
     "canonical_unique": 25,
     "defined": 16,
     "disambiguated": 20,
+    "reference_resolves": 14,
+    "pair_separated": 20,
+    "pair_mutual": 10,
     "grounded": 16,
     "anchored": 12,
+    "index_resolves": 18,
     "clarity_consistent": 18,
 }
 # The composite blends the clarity of the rows that EXIST with how much of the
@@ -255,6 +298,381 @@ def cluster_sizes(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# SEPARATION - disambiguating concepts FROM EACH OTHER (not just annotating each
+# one on its own).
+#
+# `kpi_disambiguated` asks a PER-ROW question: does this concept say what it is
+# NOT, naming at least one sibling? In a family of 250 members that bar is met by
+# naming ANY sibling - including a distant one - while the twin a reader actually
+# confuses it with goes undrawn. Clarity per row does not imply the namespace is
+# separated pairwise.
+#
+# So this layer works on PAIRS. It discovers, from the catalog itself, the pairs
+# whose NAMES a reader cannot keep apart, and then asks whether the catalog draws
+# the line between THOSE two specifically:
+#
+#   permuted  identical word multiset, different order - `witnessPath` /
+#             `PathWitness` are the same two words and denote different things.
+#   near      normalized canonical names within a couple of edits - `SessionRef` /
+#             `SessionRow`, `CacheGiB` / `CacheBit`, `q4Kernel` / `q8Kernel`.
+#
+# A boundary is DIRECTED: `A.distinct_from = [B]` helps a reader who arrived at A
+# and does nothing for one who arrived at B. For a confusable pair the line must
+# therefore be MUTUAL - drawn from both sides - or half the readers stay lost.
+# ---------------------------------------------------------------------------
+
+# camelCase / ALLCAPS / snake / dotted -> word pieces. `KVCacheShape` splits to
+# ('kv','cache','shape') so a permutation of the same pieces is detectable.
+_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+")
+_NONWORD_RE = re.compile(r"[^A-Za-z0-9]+")
+# Names carry a trailing gloss in parens (`q4Kernel (compute)`); the gloss is prose
+# for the reader, not part of the name, so it is stripped before comparison.
+_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
+MAX_PAIR_EDITS = 2      # names this close are one typo apart - a reader will confuse them.
+MIN_PAIR_LEN = 6        # below this, an edit or two is a whole different word.
+# A couple of edits alone is too loose on short names: `ffngate` and `rungate` are two
+# substitutions apart yet share only the family root every member shares. What makes a
+# pair genuinely mistakable is a long common HEAD or TAIL - `cachettl5m`/`cachettl1h`,
+# `kernel`/`kernelkv`, `sessionref`/`sessionrow` - so a near pair must also share this
+# many leading or trailing characters. Without it the sweep would flag most of a family.
+MIN_SHARED_AFFIX = 5
+
+
+def bare_name(name: Any) -> str:
+    """A canonical name with its trailing parenthetical gloss removed."""
+    if not isinstance(name, str):
+        return ""
+    return _PAREN_RE.sub("", name).strip()
+
+
+def split_words(name: Any) -> list[str]:
+    """Lowercase word pieces of a name, across camelCase / snake / dotted / spaced."""
+    out: list[str] = []
+    for chunk in _NONWORD_RE.split(bare_name(name)):
+        out.extend(w.lower() for w in _WORD_RE.findall(chunk))
+    return out
+
+
+def edit_distance_within(a: str, b: str, cap: int) -> int:
+    """Levenshtein(a, b) when it is <= cap, else cap + 1.
+
+    Length-gated and row-pruned so the all-pairs sweep over a few thousand names
+    stays cheap: any row whose best cell already exceeds `cap` can only grow."""
+    if abs(len(a) - len(b)) > cap:
+        return cap + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        if min(cur) > cap:
+            return cap + 1
+        prev = cur
+    return prev[-1]
+
+
+def separation_edges(rows: list[dict[str, Any]],
+                     index: dict[str, Any] | None = None
+                     ) -> tuple[set[tuple[str, str]], list[str]]:
+    """The DIRECTED graph of boundaries the catalog actually draws.
+
+    An edge (a, b) means row `a` names `b` in its `distinct_from`. A reference is
+    resolved the way a READER would resolve it - through the name index, not only
+    through the exact catalog id. The ladder is: catalog id, then exact canonical,
+    then the index (which also keys bare canonical names, aliases and grounding
+    tokens). This is the indexing half paying for the separation half: an author who
+    writes the name a concept is actually known by gets a real boundary, not a dangle.
+
+    Returns (edges, unresolved). `unresolved` describes the two ways a reference can
+    fail to name one concept:
+      dangling   - it points at nothing, sending a reader to compare against a
+                   concept that is not in the catalog, which is worse than silence;
+      ambiguous  - it points at several concepts at once, so which boundary is being
+                   drawn is exactly the question the reference was supposed to answer.
+    """
+    ids = {r.get("id") for r in rows if _nonempty(r.get("id"))}
+    by_canon = {norm_token(r.get("canonical", "")): r.get("id") for r in rows
+                if _nonempty(r.get("canonical"))}
+    by_key = (index or {}).get("by_key") or {}
+    edges: set[tuple[str, str]] = set()
+    unresolved: list[str] = []
+    for i, r in enumerate(rows):
+        rid = r.get("id") if _nonempty(r.get("id")) else f"row[{i}]"
+        for ref in r.get("distinct_from") or []:
+            if not _nonempty(ref):
+                continue
+            target = ref if ref in ids else by_canon.get(norm_token(ref))
+            if target is None:
+                landing = [t for t in by_key.get(norm_token(bare_name(ref)), []) if t != rid]
+                if len(landing) == 1:
+                    target = landing[0]
+                elif len(landing) > 1:
+                    unresolved.append(
+                        f"{rid}: distinct_from {ref!r} names {len(landing)} concepts at once "
+                        f"({', '.join(landing[:4])}{'...' if len(landing) > 4 else ''}) - "
+                        f"an ambiguous boundary; use the catalog id of the one you mean")
+                    continue
+            if target is None:
+                unresolved.append(f"{rid}: distinct_from {ref!r} resolves to no catalog id, "
+                                  f"canonical name or index key - a dangling boundary")
+            elif target != rid:
+                edges.add((rid, target))
+    return edges, unresolved
+
+
+def shared_affix(a: str, b: str) -> int:
+    """The longer of the two names' common leading / trailing run, in characters."""
+    head = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        head += 1
+    tail = 0
+    for x, y in zip(reversed(a), reversed(b)):
+        if x != y:
+            break
+        tail += 1
+    return max(head, tail)
+
+
+PAIR_KINDS = ("homonym", "permuted", "near")   # most confusable first
+_PAIR_RANK = {k: i for i, k in enumerate(PAIR_KINDS)}
+
+
+def confusable_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The pairs of DISTINCT concepts whose names a reader cannot tell apart.
+
+    Discovered from the catalog's own names - not declared - so the pair list grows
+    by itself the moment a peer lands a near-twin name, and it cannot be shrunk by
+    editing the data (dropping a row does not make the tree token go away; it makes
+    coverage fall instead).
+
+      homonym   the bare names are THE SAME once the catalog's parenthetical gloss is
+                stripped - `Decision (kernel)` and `Decision (scheduler)` are both just
+                `Decision` in the tree. Legitimate across Go packages, and precisely
+                why the reader who meets the bare word needs to be handed both.
+      permuted  same word multiset, different spelling (`witnessPath`/`PathWitness`)
+      near      within MAX_PAIR_EDITS edits AND sharing a long head/tail
+                (`SessionRef`/`SessionRow`, `kernel`/`kernelkv`, `CacheTTL5m`/`CacheTTL1h`)
+
+    The strongest kind wins when a pair qualifies as several. Returns a deterministic
+    list sorted by (kind, a, b)."""
+    named = [r for r in rows if _nonempty(r.get("id")) and _nonempty(r.get("canonical"))]
+    found: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def _add(a: str, b: str, kind: str, why: str) -> None:
+        key = (a, b) if a < b else (b, a)
+        cur = found.get(key)
+        if cur is None or _PAIR_RANK[kind] < _PAIR_RANK[cur["kind"]]:
+            found[key] = {"a": key[0], "b": key[1], "kind": kind, "why": why}
+
+    # homonym: bucket by the BARE normalized name. The gloss in `Decision (kernel)` is
+    # the catalog explaining itself to a reader; the tree only ever says `Decision`.
+    by_bare: dict[str, list[str]] = {}
+    for r in named:
+        tok = norm_token(bare_name(r.get("canonical")))
+        if tok:
+            by_bare.setdefault(tok, []).append(r["id"])
+    for tok, ids in by_bare.items():
+        if len(ids) < 2:
+            continue
+        for i, a in enumerate(sorted(ids)):
+            for b in sorted(ids)[i + 1:]:
+                _add(a, b, "homonym", f"both are plainly named {tok!r} once the gloss is stripped")
+
+    # permuted: bucket by the sorted word multiset; anything sharing a bucket is a
+    # rearrangement of the same words.
+    by_words: dict[tuple[str, ...], list[str]] = {}
+    for r in named:
+        ws = split_words(r.get("canonical"))
+        if len(ws) >= 2:
+            by_words.setdefault(tuple(sorted(ws)), []).append(r["id"])
+    for ws, ids in by_words.items():
+        if len(ids) < 2:
+            continue
+        for i, a in enumerate(sorted(ids)):
+            for b in sorted(ids)[i + 1:]:
+                _add(a, b, "permuted", f"same words in a different order: {' '.join(ws)}")
+
+    # near: bucket normalized names by length; a pair within `cap` edits cannot differ
+    # in length by more than `cap`, so only neighbouring buckets need comparing.
+    by_len: dict[int, list[tuple[str, str]]] = {}
+    for r in named:
+        tok = norm_token(bare_name(r.get("canonical")))
+        if len(tok) >= MIN_PAIR_LEN:
+            by_len.setdefault(len(tok), []).append((r["id"], tok))
+    for length in sorted(by_len):
+        left = by_len[length]
+        right = [x for d in range(1, MAX_PAIR_EDITS + 1) for x in by_len.get(length + d, [])]
+        for i, (ida, ta) in enumerate(left):
+            for idb, tb in left[i + 1:] + right:
+                if ida == idb or ta == tb:
+                    continue
+                affix = shared_affix(ta, tb)
+                if affix < MIN_SHARED_AFFIX:
+                    continue
+                d = edit_distance_within(ta, tb, MAX_PAIR_EDITS)
+                if d <= MAX_PAIR_EDITS:
+                    _add(ida, idb, "near",
+                         f"{d} edit(s) apart sharing {affix} characters: {ta} / {tb}")
+    return sorted(found.values(), key=lambda p: (_PAIR_RANK[p["kind"]], p["a"], p["b"]))
+
+
+def separation_report(rows: list[dict[str, Any]], edges: set[tuple[str, str]],
+                      pairs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Grade every discovered confusable pair against the drawn boundaries.
+
+      mutual    both rows name each other - a reader arriving from EITHER side is told
+      one_sided exactly one direction is drawn - half the readers still collide
+      undrawn   neither names the other - the twin names sit in the catalog unseparated
+
+    Also folds the whole-graph mutuality view (all boundaries, not just confusable
+    pairs), which is advisory: a general one-sided edge is a nudge, an unseparated
+    TWIN is debt."""
+    byid = {r.get("id"): r for r in rows if _nonempty(r.get("id"))}
+    graded: list[dict[str, Any]] = []
+    counts = {"mutual": 0, "one_sided": 0, "undrawn": 0}
+    for p in pairs:
+        a, b = p["a"], p["b"]
+        ab, ba = (a, b) in edges, (b, a) in edges
+        state = "mutual" if (ab and ba) else ("one_sided" if (ab or ba) else "undrawn")
+        counts[state] += 1
+        graded.append({**p, "state": state, "a_to_b": ab, "b_to_a": ba,
+                       "a_canonical": (byid.get(a) or {}).get("canonical"),
+                       "b_canonical": (byid.get(b) or {}).get("canonical"),
+                       "a_family": (byid.get(a) or {}).get("family"),
+                       "b_family": (byid.get(b) or {}).get("family")})
+    one_way = sorted(f"{a} -> {b}" for (a, b) in edges if (b, a) not in edges)
+    return {
+        "pairs": graded, "counts": counts, "discovered": len(graded),
+        "separated": counts["mutual"] + counts["one_sided"],
+        "edges": len(edges),
+        "mutual_edges": sum(1 for (a, b) in edges if (b, a) in edges),
+        "one_way_edges": one_way,
+    }
+
+
+# ---------------------------------------------------------------------------
+# INDEXING - can a reader who meets a NAME find the concept it denotes?
+#
+# The catalog is organised by concept; a reader meets a SPELLING. The index turns
+# it around: every surface a name can arrive as - the canonical, every alias, the
+# grounding token - becomes a lookup key pointing at the concept(s) it denotes,
+# carrying that concept's contrast set so the answer to "which one is this?" and
+# "how is it not the other one?" arrive together.
+#
+# A key that lands on TWO concepts is an index defect, not a catalog defect: the
+# canonical names may be perfectly distinct while one row quietly claims the other's
+# name as an alias, so the lookup is ambiguous even though `canonical_unique` is
+# clean. That is only acceptable when the two concepts separate from each other -
+# then the index can honestly answer "both, and here is the difference".
+# ---------------------------------------------------------------------------
+
+def build_index(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """The NAME -> CONCEPT lookup index over every surface (canonical / alias /
+    grounding). Deterministic: entries sorted by key, targets sorted by id."""
+    entries: dict[str, dict[str, Any]] = {}
+    for i, r in enumerate(rows):
+        rid = r.get("id") if _nonempty(r.get("id")) else f"row[{i}]"
+        surfaces: list[tuple[str, str]] = []
+        for name in [r.get("canonical")] + list(r.get("aliases") or []) + [r.get("grounding")]:
+            if not _nonempty(name):
+                continue
+            source = ("canonical" if name == r.get("canonical")
+                      else ("grounding" if name == r.get("grounding") else "alias"))
+            surfaces.append((name.strip(), source))
+        for name, source in surfaces:
+            key = norm_token(bare_name(name)) or norm_token(name)
+            if not key:
+                continue
+            e = entries.setdefault(key, {"key": key, "spellings": set(), "targets": {}})
+            e["spellings"].add(name)
+            e["targets"].setdefault(rid, set()).add(source)
+    out: list[dict[str, Any]] = []
+    for key in sorted(entries):
+        e = entries[key]
+        out.append({
+            "key": key,
+            "spellings": sorted(e["spellings"]),
+            "targets": sorted(e["targets"]),
+            "via": {rid: sorted(src) for rid, src in sorted(e["targets"].items())},
+            "ambiguous": len(e["targets"]) > 1,
+        })
+    ambiguous = [e for e in out if e["ambiguous"]]
+    return {"entries": out, "keys": len(out), "ambiguous": ambiguous,
+            "ambiguous_keys": len(ambiguous),
+            "by_key": {e["key"]: list(e["targets"]) for e in out}}
+
+
+def index_pairs(index: dict[str, Any],
+                already: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pairs discovered by LOOKUP rather than by spelling: two concepts answer to the
+    same name, so a reader who meets that name lands on both.
+
+    An ambiguous lookup key is not a defect by itself - `Decision` is genuinely the
+    name of four different Go types, and the catalog does not get to rename them. It
+    is a defect when the concepts it lands on are not separated FROM EACH OTHER,
+    because then the index hands the reader a fog instead of a choice. Pairs already
+    discovered by spelling are left to the spelling checks so one missing boundary is
+    never counted as two defects."""
+    seen = {(p["a"], p["b"]) for p in already} | {(p["b"], p["a"]) for p in already}
+    out: list[dict[str, Any]] = []
+    emitted: set[tuple[str, str]] = set()
+    for e in index.get("ambiguous") or []:
+        targets = list(e["targets"])
+        for a, b in itertools.combinations(targets, 2):
+            if (a, b) in seen or (a, b) in emitted:
+                continue
+            emitted.add((a, b))
+            emitted.add((b, a))
+            via = sorted(set(e["via"].get(a, [])) | set(e["via"].get(b, [])))
+            out.append({"a": a, "b": b, "kind": "shared-name",
+                        "why": (f"both answer to the lookup name {e['key']!r} "
+                                f"(via {'/'.join(via)}; {len(targets)} concepts share it)")})
+    return sorted(out, key=lambda p: (p["a"], p["b"]))
+
+
+def unseparated_pairs(sep: dict[str, Any], ipairs: list[dict[str, Any]],
+                      edges: set[tuple[str, str]]) -> list[dict[str, Any]]:
+    """Every pair a reader can confuse whose boundary is not yet drawn BOTH ways,
+    from either discovery route (spelling and lookup), in one machine-readable list.
+
+    This is the "what would I have to write" view, and it is what the authoring path
+    consumes: `fak concept position` refuses to land a name that collides with an
+    existing one until the new row and its twin each say what the other is not. The
+    rule lives here, once, so the authoring gate and the scorecard can never drift
+    apart into two different definitions of confusable."""
+    out: list[dict[str, Any]] = []
+    for p in sep.get("pairs") or []:
+        if p.get("state") != "mutual":
+            out.append({"a": p["a"], "b": p["b"], "kind": p.get("kind", ""),
+                        "why": p.get("why", ""), "state": p.get("state", ""),
+                        "a_to_b": bool(p.get("a_to_b")), "b_to_a": bool(p.get("b_to_a"))})
+    for p in ipairs:
+        ab, ba = (p["a"], p["b"]) in edges, (p["b"], p["a"]) in edges
+        if ab and ba:
+            continue
+        out.append({"a": p["a"], "b": p["b"], "kind": p["kind"], "why": p["why"],
+                    "state": "one_sided" if (ab or ba) else "undrawn",
+                    "a_to_b": ab, "b_to_a": ba})
+    return sorted(out, key=lambda p: (p["a"], p["b"]))
+
+
+def index_contrast(rows: list[dict[str, Any]], edges: set[tuple[str, str]],
+                   pairs: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Per concept, the CONTRAST set the index shows a reader: every concept it
+    declares a boundary against, plus every confusable twin discovered by name. The
+    union is what "not to be confused with" must list for the index to be useful."""
+    out: dict[str, set[str]] = {}
+    for a, b in edges:
+        out.setdefault(a, set()).add(b)
+    for p in pairs:
+        out.setdefault(p["a"], set()).add(p["b"])
+        out.setdefault(p["b"], set()).add(p["a"])
+    return {k: sorted(v) for k, v in out.items()}
+
+
+# ---------------------------------------------------------------------------
 # Per-KPI pure checks. Each returns
 #   {kpi, group, score (0-100 int), detail, defects: [str], soft: [str]}
 # defects = HARD units of disambiguation-debt; soft = score-only judgment nudges.
@@ -360,6 +778,97 @@ def kpi_disambiguated(rows: list[dict[str, Any]], sizes: dict[str, int]) -> dict
                 bad_detail=f"{len(defects)} undisambiguated confusable concept(s)")
 
 
+def kpi_reference_resolves(unresolved: list[str]) -> dict[str, Any]:
+    """EVERY `distinct_from` reference must resolve to a real catalog entry.
+
+    `kpi_disambiguated` only needs ONE reference to resolve, so a row listing two
+    siblings passes while the second silently dangles. A dangling boundary is worse
+    than a missing one: it sends the reader to compare against a concept that is not
+    there, and it makes the separation graph under-count the lines actually drawn."""
+    return _kpi("reference_resolves", list(unresolved),
+                "every distinct_from reference resolves to a real concept",
+                bad_detail=f"{len(unresolved)} dangling distinct_from reference(s)")
+
+
+def kpi_pair_separated(sep: dict[str, Any]) -> dict[str, Any]:
+    """THE pairwise test: for every pair of concepts whose NAMES are confusable,
+    the catalog must draw the line between THOSE TWO - in at least one direction.
+
+    This is what per-row disambiguation cannot see. A row in a 250-member family
+    satisfies `disambiguated` by naming any one sibling; this asks whether the
+    sibling it is genuinely mistakable for is the one it separates from."""
+    defects = [
+        f"{p['a']}: confusable with {p['b']} ({p['why']}) but neither names the other - "
+        f"add {p['b']} to {p['a']}'s distinct_from (and back)"
+        for p in sep["pairs"] if p["state"] == "undrawn"
+    ]
+    return _kpi("pair_separated", defects,
+                f"all {sep['discovered']} confusable name-pair(s) are separated",
+                bad_detail=f"{len(defects)} confusable pair(s) with no line drawn")
+
+
+def kpi_pair_mutual(sep: dict[str, Any]) -> dict[str, Any]:
+    """A boundary is DIRECTED, and for a confusable pair it must be drawn from BOTH
+    sides. `A.distinct_from = [B]` only helps a reader who arrived at A; one who
+    arrived at B - just as likely, since the names are twins - is told nothing. Only
+    confusable pairs are held to this bar; general one-way edges stay advisory."""
+    defects = []
+    for p in sep["pairs"]:
+        if p["state"] != "one_sided":
+            continue
+        src, dst = (p["a"], p["b"]) if p["a_to_b"] else (p["b"], p["a"])
+        defects.append(f"{dst}: {src} separates from it, but it does not separate back "
+                       f"({p['why']}) - a reader arriving at {dst} is not warned")
+    return _kpi("pair_mutual", defects,
+                "every confusable pair draws its line from both sides",
+                bad_detail=f"{len(defects)} one-sided boundary on a confusable pair")
+
+
+def kpi_index_resolves(ipairs: list[dict[str, Any]], rows: list[dict[str, Any]],
+                       edges: set[tuple[str, str]], index: dict[str, Any]) -> dict[str, Any]:
+    """A lookup name that lands on several concepts must land on a CHOICE.
+
+    Distinct from `canonical_unique`, which only guards canonical names: this guards
+    the whole lookup surface, so it also catches one row claiming another row's name
+    as an ALIAS, or two rows grounded on the same tree token. Those names are then
+    genuinely ambiguous even though both canonicals are unique.
+
+    Ambiguity is not by itself a defect - `Decision` really is the name of four
+    different Go types and the catalog does not get to rename them. It is a defect
+    when the concepts sharing the name do not separate from each other, because then
+    the index answers the reader's question with a fog instead of "both, and here is
+    the difference". Pairs already discovered by spelling belong to the separation
+    checks; this KPI owns only the ones that lookup alone reveals."""
+    byid = {r.get("id"): r for r in rows if _nonempty(r.get("id"))}
+    defects: list[str] = []
+    for p in ipairs:
+        if (p["a"], p["b"]) in edges and (p["b"], p["a"]) in edges:
+            continue
+        a, b = p["a"], p["b"]
+        defects.append(f"{a}: shares a lookup name with {b} "
+                       f"({(byid.get(a) or {}).get('canonical')} vs "
+                       f"{(byid.get(b) or {}).get('canonical')}) - {p['why']} - but they do "
+                       f"not separate from each other; add {b} to {a}'s distinct_from (and back)")
+    return _kpi("index_resolves", defects,
+                f"every one of {index['keys']} lookup name(s) resolves - "
+                f"{index['ambiguous_keys']} land on several concepts, all separated",
+                bad_detail=f"{len(defects)} unresolvable shared lookup name(s)")
+
+
+def kpi_mutuality_soft(sep: dict[str, Any]) -> dict[str, Any]:
+    """SOFT: across the WHOLE boundary graph (not only the confusable pairs), how many
+    lines are drawn from one side only. Advisory by construction - demanding mutuality
+    of every one of thousands of edges would be noise, and the pairs where it actually
+    bites are already hard debt in `kpi_pair_mutual`. Reported so the trend is visible."""
+    one_way = sep["one_way_edges"]
+    score = _clamp(100 - min(20, len(one_way) // 50))
+    detail = ("every boundary is drawn from both sides" if not one_way else
+              f"{len(one_way)}/{sep['edges']} boundaries drawn one-way only")
+    return {"kpi": "mutuality_soft", "group": "separation",
+            "score": score, "value": round(score / 100, 3),
+            "detail": detail, "defects": [], "soft": one_way[:12]}
+
+
 def kpi_grounded(rows: list[dict[str, Any]], in_tree: Callable[[str], bool]) -> dict[str, Any]:
     """The grounding token must REALLY appear in the production corpus. A name nobody
     uses cannot be disambiguated - it is either stale (rename the concept away) or
@@ -395,13 +904,32 @@ def kpi_anchored(rows: list[dict[str, Any]], exists: Callable[[str], bool]) -> d
                 bad_detail=f"{len(defects)} missing/dangling anchor(s)")
 
 
+def entangled_rows(sep: dict[str, Any], edges: set[tuple[str, str]],
+                   extra_pairs: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    """Concepts that do not separate from a twin their own NAME is mistakable for.
+
+    A row is entangled when it takes part in a confusable pair and does not itself
+    name the other side. That covers both the pair nobody drew and the receiving end
+    of a one-sided line - in both cases a reader who arrives HERE is not warned. The
+    only stable fix is to draw the boundary, which is exactly the intended incentive:
+    the verdict cannot be cleared by re-labelling the row."""
+    out: dict[str, str] = {}
+    for p in list(sep["pairs"]) + list(extra_pairs or []):
+        for me, other in ((p["a"], p["b"]), (p["b"], p["a"])):
+            if (me, other) not in edges and me not in out:
+                out[me] = f"names no boundary against its twin {other} ({p['why']})"
+    return out
+
+
 def expected_verdict(row: dict[str, Any], *, colliding: bool, exists: Callable[[str], bool],
-                     sizes: dict[str, int]) -> tuple[str, str]:
+                     sizes: dict[str, int], entangled: str = "") -> tuple[str, str]:
     """The clarity verdict the evidence implies, worst-first. Grounding is graded
     separately (kpi_grounded) so it is not double-charged here.
 
       undocumented  no definition at all
       colliding     shares a canonical name with another concept
+      entangled     defined and draws SOME line, but not against the twin its own name
+                    is confusable with - per-row clean, pairwise still fog
       drifting      defined, but no boundary drawn (only when a sibling exists)
       defined       boundary drawn, but not written in a doc (no/missing anchor)
       crystal       defined + boundary drawn + anchored on disk
@@ -413,6 +941,8 @@ def expected_verdict(row: dict[str, Any], *, colliding: bool, exists: Callable[[
     has_sibling = sizes.get(row.get("family"), 0) >= 2
     if has_sibling and not _nonempty(row.get("distinction")):
         return "drifting", "defined but draws no line against its siblings"
+    if entangled:
+        return "entangled", entangled
     anchor = row.get("glossary_anchor", "")
     if not _nonempty(anchor) or not exists(anchor):
         return "defined", "boundary drawn but not written in a discoverable doc"
@@ -420,15 +950,18 @@ def expected_verdict(row: dict[str, Any], *, colliding: bool, exists: Callable[[
 
 
 def kpi_clarity_consistent(rows: list[dict[str, Any]], colliding_ids: set[str],
-                           exists: Callable[[str], bool], sizes: dict[str, int]) -> dict[str, Any]:
+                           exists: Callable[[str], bool], sizes: dict[str, int],
+                           entangled: dict[str, str] | None = None) -> dict[str, Any]:
     """The stated verdict must match what the evidence implies. Calling a drifting
-    concept 'crystal', or a colliding one 'defined', is the overclaim this catches -
-    the same self-report refusal the rest of the repo runs."""
+    concept 'crystal', a colliding one 'defined', or an ENTANGLED one either, is the
+    overclaim this catches - the same self-report refusal the rest of the repo runs."""
+    entangled = entangled or {}
     defects: list[str] = []
     for i, r in enumerate(rows):
         rid = r.get("id", i)
         declared = r.get("verdict")
-        exp, why = expected_verdict(r, colliding=(rid in colliding_ids), exists=exists, sizes=sizes)
+        exp, why = expected_verdict(r, colliding=(rid in colliding_ids), exists=exists,
+                                    sizes=sizes, entangled=entangled.get(rid, ""))
         if declared != exp:
             defects.append(f"{rid}: claims '{declared}' but evidence implies '{exp}' - {why}")
     return _kpi("clarity_consistent", defects, "every verdict matches its evidence",
@@ -742,11 +1275,14 @@ def per_row_debt(rows: list[dict[str, Any]], kpis: list[dict[str, Any]]) -> dict
 
 
 def leaderboard(rows: list[dict[str, Any]], colliding_ids: set[str],
-                exists: Callable[[str], bool], sizes: dict[str, int]) -> list[dict[str, Any]]:
+                exists: Callable[[str], bool], sizes: dict[str, int],
+                entangled: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    entangled = entangled or {}
     out: list[dict[str, Any]] = []
     for r in rows:
         exp, _ = expected_verdict(r, colliding=(r.get("id") in colliding_ids),
-                                  exists=exists, sizes=sizes)
+                                  exists=exists, sizes=sizes,
+                                  entangled=entangled.get(r.get("id"), ""))
         out.append({
             "id": r.get("id"), "canonical": r.get("canonical"), "family": r.get("family"),
             "kind": r.get("kind"), "verdict": r.get("verdict"), "expected_verdict": exp,
@@ -770,17 +1306,25 @@ def critical_backlog(rows: list[dict[str, Any]], row_debt: dict[str, int]) -> li
 
 def run_kpis(rows: list[dict[str, Any]], families: set[str], colliding_ids: set[str],
              sizes: dict[str, int], in_tree: Callable[[str], bool],
-             exists: Callable[[str], bool], doc_verbs: set[str]) -> list[dict[str, Any]]:
+             exists: Callable[[str], bool], doc_verbs: set[str], *,
+             sep: dict[str, Any], unresolved: list[str], index: dict[str, Any],
+             ipairs: list[dict[str, Any]], edges: set[tuple[str, str]],
+             entangled: dict[str, str]) -> list[dict[str, Any]]:
     return [
         kpi_well_formed(rows, families),
         kpi_canonical_unique(rows),
         kpi_defined(rows),
         kpi_disambiguated(rows, sizes),
+        kpi_reference_resolves(unresolved),
+        kpi_pair_separated(sep),
+        kpi_pair_mutual(sep),
         kpi_grounded(rows, in_tree),
         kpi_anchored(rows, exists),
-        kpi_clarity_consistent(rows, colliding_ids, exists, sizes),
+        kpi_index_resolves(ipairs, rows, edges, index),
+        kpi_clarity_consistent(rows, colliding_ids, exists, sizes, entangled),
         kpi_kind_grounding_soft(rows, doc_verbs),
         kpi_hierarchy_soft(rows),
+        kpi_mutuality_soft(sep),
     ]
 
 
@@ -806,7 +1350,20 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
     colliding_ids = set(find_collisions(rows))
     sizes = cluster_sizes(rows)
 
-    kpis = run_kpis(rows, families, colliding_ids, sizes, in_tree, exists, doc_verbs)
+    # Separation + index: the pairwise / lookup layers. Both are DERIVED from the
+    # catalog's own names, so neither can be satisfied by adding prose to a row.
+    index = build_index(rows)
+    edges, unresolved = separation_edges(rows, index)
+    pairs = confusable_pairs(rows)
+    ipairs = index_pairs(index, pairs)
+    sep = separation_report(rows, edges, pairs)
+    contrast = index_contrast(rows, edges, pairs + ipairs)
+    entangled = entangled_rows(sep, edges, ipairs)
+    unseparated = unseparated_pairs(sep, ipairs, edges)
+
+    kpis = run_kpis(rows, families, colliding_ids, sizes, in_tree, exists, doc_verbs,
+                    sep=sep, unresolved=unresolved, index=index, ipairs=ipairs,
+                    edges=edges, entangled=entangled)
     by_name = {k["kpi"]: k for k in kpis}
     clarity_score = round(sum(KPI_WEIGHTS[n] * by_name[n]["score"]
                               for n in KPI_WEIGHTS if n in by_name), 1)
@@ -832,7 +1389,7 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
 
     row_debt = per_row_debt(rows, kpis)
     pos = standing(rows)
-    lb = leaderboard(rows, colliding_ids, exists, sizes)
+    lb = leaderboard(rows, colliding_ids, exists, sizes, entangled)
     crit = critical_backlog(rows, row_debt)
     rollup = roll_up(rows, row_debt)
     n_crystal = pos.get("crystal", 0)
@@ -861,11 +1418,35 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
         "leaderboard": lb,
         "critical": crit,
         "rollup": rollup,
+        "separation": {
+            "confusable_pairs": sep["discovered"],
+            "separated": sep["separated"],
+            "mutual": sep["counts"]["mutual"],
+            "one_sided": sep["counts"]["one_sided"],
+            "undrawn": sep["counts"]["undrawn"],
+            "entangled_concepts": len(entangled),
+            "boundaries": sep["edges"],
+            "mutual_boundaries": sep["mutual_edges"],
+            "one_way_boundaries": len(sep["one_way_edges"]),
+            "dangling_references": len(unresolved),
+            "pairs": sep["pairs"],
+            "unseparated": unseparated,
+        },
+        "index": {
+            "keys": index["keys"],
+            "ambiguous_keys": index["ambiguous_keys"],
+            "shared_name_pairs": len(ipairs),
+            "unresolved_shared_names": sum(
+                1 for x in ipairs
+                if (x["a"], x["b"]) not in edges or (x["b"], x["a"]) not in edges),
+            "ambiguous": index["ambiguous"],
+            "contrast_concepts": len(contrast),
+        },
     }
 
     standing_line = (f"{pos['crystal']} crystal / {pos['defined']} defined / "
-                     f"{pos['drifting']} drifting / {pos['colliding']} colliding / "
-                     f"{pos['undocumented']} undocumented")
+                     f"{pos['drifting']} drifting / {pos['entangled']} entangled / "
+                     f"{pos['colliding']} colliding / {pos['undocumented']} undocumented")
     cov_line = (f"coverage {cov['coverage_pct']}% ({cov['covered']}/{cov['discovered']} "
                 f"confusable tree tokens positioned)")
     if disambiguation_debt == 0:
@@ -897,6 +1478,10 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
         "reason": reason, "next_action": next_action, "workspace": workspace,
         "corpus": corpus_out, "kpis": kpis,
         "_data": {"rows": rows, "families": fam_defs},
+        # The full lookup index rides OUTSIDE `corpus` so the control-pane payload stays
+        # lean: `corpus.index` keeps the counts + the ambiguous entries, which is all a
+        # dashboard needs, while the renderers get every entry from here.
+        "_index": index,
     }
 
 
@@ -1066,7 +1651,8 @@ def collect(workspace: Path, *, data_path: Path | None = None) -> dict[str, Any]
 # Renderers - terminal, chart, critical backlog, coverage gaps, compare, doc folder.
 # ---------------------------------------------------------------------------
 
-_MARK = {"crystal": "*", "defined": "o", "drifting": "~", "colliding": "x", "undocumented": "."}
+_MARK = {"crystal": "*", "defined": "o", "drifting": "~", "entangled": "=",
+         "colliding": "x", "undocumented": "."}
 
 
 def _bar(n: int, scale: int, width: int = 28, *, fill: str = "#", empty: str = ".") -> str:
@@ -1083,6 +1669,8 @@ def render(payload: dict[str, Any]) -> str:
     c = payload.get("corpus") or {}
     cov = c.get("coverage") or {}
     pos = c.get("standing") or {}
+    sp = c.get("separation") or {}
+    ix = c.get("index") or {}
     lines = [
         f"concept-disambiguation: {payload.get('verdict')} ({payload.get('finding')})",
         f"  {payload.get('reason')}",
@@ -1096,8 +1684,15 @@ def render(payload: dict[str, Any]) -> str:
          f"({cov.get('covered', 0)}/{cov.get('discovered', 0)} confusable tree tokens positioned) "
          f"- {c.get('rows', 0)} concepts scored - {c.get('crystal_concepts', 0)} crystal"),
         (f"standing: {pos.get('crystal', 0)} crystal - {pos.get('defined', 0)} defined - "
-         f"{pos.get('drifting', 0)} drifting - {pos.get('colliding', 0)} colliding - "
-         f"{pos.get('undocumented', 0)} undocumented"),
+         f"{pos.get('drifting', 0)} drifting - {pos.get('entangled', 0)} entangled - "
+         f"{pos.get('colliding', 0)} colliding - {pos.get('undocumented', 0)} undocumented"),
+        (f"separation: {sp.get('confusable_pairs', 0)} confusable name-pair(s) - "
+         f"{sp.get('mutual', 0)} mutual, {sp.get('one_sided', 0)} one-sided, "
+         f"{sp.get('undrawn', 0)} undrawn - {sp.get('boundaries', 0)} boundaries drawn "
+         f"({sp.get('one_way_boundaries', 0)} one-way); see --pairs"),
+        (f"index: {ix.get('keys', 0)} lookup name(s) -> {c.get('rows', 0)} concept(s) - "
+         f"{ix.get('ambiguous_keys', 0)} shared by several, "
+         f"{ix.get('unresolved_shared_names', 0)} of those unseparated; see --index"),
         ("debt by group: " + "  ".join(
             f"{g}:{(c.get('debt_by_group') or {}).get(g, 0)}" for g in GROUPS)),
         (f"roll-up: {(c.get('rollup') or {}).get('roots', 0)} top-level abstraction(s) over "
@@ -1183,6 +1778,144 @@ def render_gaps(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_pairs(payload: dict[str, Any]) -> str:
+    """The pairwise separation backlog: every pair of concepts whose NAMES a reader
+    cannot keep apart, worst-first (undrawn, then one-sided, then mutual)."""
+    c = payload.get("corpus") or {}
+    sp = c.get("separation") or {}
+    order = {"undrawn": 0, "one_sided": 1, "mutual": 2}
+    mark = {"undrawn": "x", "one_sided": ">", "mutual": "="}
+    lines = [
+        (f"concept-disambiguation pairwise separation: {sp.get('confusable_pairs', 0)} "
+         f"confusable name-pair(s) discovered - {sp.get('undrawn', 0)} undrawn, "
+         f"{sp.get('one_sided', 0)} one-sided, {sp.get('mutual', 0)} mutual"),
+        "",
+        "A pair is CONFUSABLE when its two names collide by spelling alone, in one of three",
+        "ways: homonym (identical once the parenthetical gloss is stripped), permuted (the",
+        "same words in a different order), or near (within "
+        f"{MAX_PAIR_EDITS} edits AND sharing a head or",
+        f"tail run of {MIN_SHARED_AFFIX}+ characters, so a bare family root is not enough).",
+        "Pairs are DISCOVERED from the names themselves, never declared, so landing a",
+        "near-twin name raises the bar automatically. Being clean per-row does not separate",
+        "a pair: a concept in a large family satisfies `disambiguated` by naming ANY sibling,",
+        "while the twin it is genuinely mistakable for goes undrawn.",
+        "",
+        "  x undrawn    neither names the other - the twins sit in the catalog unseparated",
+        "  > one-sided  drawn from one side only - a reader arriving at the other is unwarned",
+        "  = mutual     both name each other - a reader arriving from EITHER side is told",
+        "",
+    ]
+    pairs = sorted(sp.get("pairs") or [],
+                   key=lambda p: (order.get(p["state"], 9), p["kind"], p["a"], p["b"]))
+    if not pairs:
+        lines.append("  (no confusable name-pairs discovered - every canonical name is far")
+        lines.append("   from every other; the namespace separates itself by spelling alone)")
+        return "\n".join(lines)
+    for p in pairs:
+        arrow = ("<->" if p["state"] == "mutual"
+                 else ("-->" if p.get("a_to_b") else ("<--" if p.get("b_to_a") else "   ")))
+        lines.append(f"  {mark.get(p['state'], ' ')} [{p['kind']:<8}] {p.get('a_canonical')!r} "
+                     f"{arrow} {p.get('b_canonical')!r}")
+        lines.append(f"      {p['why']}   ({p['a']} / {p['b']})")
+    lines.append("")
+    lines.append(f"whole-graph mutuality: {sp.get('mutual_boundaries', 0)}/"
+                 f"{sp.get('boundaries', 0)} boundaries are drawn from both sides "
+                 f"({sp.get('one_way_boundaries', 0)} one-way; advisory outside confusable pairs)")
+    lines.append(f"dangling references: {sp.get('dangling_references', 0)}")
+    return "\n".join(lines)
+
+
+def _index_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Join the raw index entries with each target's catalog facts + contrast set, so
+    one lookup answers BOTH 'which concept is this?' and 'how is it not the other one?'."""
+    c = payload.get("corpus") or {}
+    byid = {r.get("id"): r for r in c.get("leaderboard") or []}
+    contrast: dict[str, list[str]] = {}
+    for p in (c.get("separation") or {}).get("pairs") or []:
+        contrast.setdefault(p["a"], []).append(p["b"])
+        contrast.setdefault(p["b"], []).append(p["a"])
+    out: list[dict[str, Any]] = []
+    for e in (payload.get("_index") or {}).get("entries") or []:
+        targets = []
+        for tid in e["targets"]:
+            r = byid.get(tid) or {}
+            # The other concepts this very key lands on are twins by LOOKUP, whether or
+            # not their spellings are close - so the entry warns even before the
+            # boundary is drawn.
+            twins = sorted(set(contrast.get(tid) or []) | (set(e["targets"]) - {tid}))
+            not_confused = sorted(set((r.get("distinct_from") or []) + twins))
+            targets.append({"id": tid, "canonical": r.get("canonical"),
+                            "family": r.get("family"), "kind": r.get("kind"),
+                            "verdict": r.get("verdict"), "definition": r.get("definition"),
+                            "anchor": r.get("glossary_anchor", ""),
+                            "not_to_be_confused_with": not_confused,
+                            "via": e["via"].get(tid, [])})
+        out.append({**e, "targets_full": targets})
+    return out
+
+
+def index_lookup(rows: list[dict[str, Any]], name: str) -> tuple[list[dict[str, Any]], bool]:
+    """Resolve one spelling against the index the way a reader arrives at it: the same
+    normalization the index was built with, so `KV cache`, `kv_cache` and `kvCache` are
+    one question. Falls back to substring matches, flagged as such, rather than
+    answering "no" to a name the catalog nearly holds."""
+    key = norm_token(bare_name(name)) or norm_token(name)
+    if not key:
+        return [], False
+    exact = [e for e in rows if e["key"] == key]
+    if exact:
+        return exact, True
+    return [e for e in rows if key in e["key"] or e["key"] in key], False
+
+
+def render_index(payload: dict[str, Any], *, limit: int = 0, lookup: str = "") -> str:
+    """The NAME -> CONCEPT lookup index. A reader who meets any spelling - the canonical
+    name, an alias, or the raw grounding token - finds the one concept it denotes and
+    the concepts it must not be confused with."""
+    c = payload.get("corpus") or {}
+    ix = c.get("index") or {}
+    rows = _index_rows(payload)
+    if lookup:
+        hits, exact = index_lookup(rows, lookup)
+        if not hits:
+            return (f"no lookup name matches {lookup!r} among {ix.get('keys', 0)} name(s) "
+                    f"over {c.get('rows', 0)} concept(s).\n"
+                    "The name is unpositioned: `--gaps` lists the tree tokens still waiting "
+                    "for a concept, and `fak concept position` lands one.")
+        rows = hits
+        lines = [
+            (f"{lookup!r} -> {len(rows)} lookup name(s)"
+             + ("" if exact else " (no exact match; nearest keys)")),
+            "",
+        ]
+    else:
+        lines = [
+            (f"concept-disambiguation name index: {ix.get('keys', 0)} lookup name(s) over "
+             f"{c.get('rows', 0)} concept(s) - {ix.get('ambiguous_keys', 0)} ambiguous"),
+            "",
+            "Every surface a name can arrive as (canonical / alias / grounding token) resolves",
+            "to the concept it denotes plus that concept's contrast set. '!' marks a name that",
+            "lands on more than one concept - a LOOKUP ambiguity the canonical names do not show.",
+            "",
+        ]
+    shown = rows[:limit] if limit else rows
+    for e in shown:
+        flag = "!" if e["ambiguous"] else " "
+        lines.append(f"{flag} {e['spellings'][0]}"
+                     + (f"   (also: {', '.join(e['spellings'][1:])})" if len(e["spellings"]) > 1 else ""))
+        for t in e["targets_full"]:
+            lines.append(f"    -> {t['canonical']}  [{t['family']} / {t['kind']} / "
+                         f"{t['verdict']}]  via {'+'.join(t['via'])}")
+            if t.get("definition"):
+                lines.append(f"       {t['definition']}")
+            if t["not_to_be_confused_with"]:
+                lines.append(f"       not to be confused with: "
+                             f"{', '.join(t['not_to_be_confused_with'])}")
+    if limit and len(rows) > limit:
+        lines.append(f"  ... and {len(rows) - limit} more name(s) (omit --limit for all)")
+    return "\n".join(lines)
+
+
 def render_compare(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     b = baseline.get("corpus") or {}
     cur = current.get("corpus") or {}
@@ -1195,6 +1928,12 @@ def render_compare(baseline: dict[str, Any], current: dict[str, Any]) -> str:
         f"  coverage:   {b.get('coverage_debt', 0)} -> {cur.get('coverage_debt', 0)}",
         f"score:        {bo}/100 -> {co}/100   (+{round(co - bo, 1)})",
         f"crystal:      {b.get('crystal_concepts', 0)} -> {cur.get('crystal_concepts', 0)} crystal concepts",
+        (f"pairs undrawn: {(b.get('separation') or {}).get('undrawn', 0)} -> "
+         f"{(cur.get('separation') or {}).get('undrawn', 0)}   "
+         f"(mutual {(b.get('separation') or {}).get('mutual', 0)} -> "
+         f"{(cur.get('separation') or {}).get('mutual', 0)})"),
+        (f"ambiguous names: {(b.get('index') or {}).get('ambiguous_keys', 0)} -> "
+         f"{(cur.get('index') or {}).get('ambiguous_keys', 0)}"),
     ]
     for gp in GROUPS:
         gb = (b.get("debt_by_group") or {}).get(gp, 0)
@@ -1246,6 +1985,19 @@ def render_chart(payload: dict[str, Any]) -> str:
     pct = cov.get("coverage_pct", 0.0)
     lines.append(f"namespace coverage  [{_bar(int(round(pct)), 100, width=32)}] {pct}%  "
                  f"({cov.get('covered', 0)}/{cov.get('discovered', 0)} confusable tokens positioned)")
+    lines.append("")
+    sp = c.get("separation") or {}
+    npair = sp.get("confusable_pairs", 0)
+    lines.append("pairwise separation (of the name-pairs a reader cannot keep apart):")
+    for state, label in (("mutual", "mutual"), ("one_sided", "one-sided"), ("undrawn", "undrawn")):
+        n = sp.get(state, 0)
+        lines.append(f"  {label:<12} {_bar(n, max(1, npair))} {n}")
+    lines.append(f"  pairs separated   [{_bar(sp.get('separated', 0), max(1, npair), width=32)}] "
+                 f"{sp.get('separated', 0)}/{npair}")
+    ix = c.get("index") or {}
+    lines.append("")
+    lines.append(f"name index: {ix.get('keys', 0)} lookup name(s) -> {c.get('rows', 0)} concept(s), "
+                 f"{ix.get('ambiguous_keys', 0)} ambiguous")
     lines.append("")
     lines.append("legend: " + "   ".join(f"{_MARK[v]} {v}" for v in VERDICTS))
     return "\n".join(lines)
@@ -1351,6 +2103,12 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
     out.append(f"| **Confusable tokens positioned (covered / discovered)** | "
                f"**{cov.get('covered', 0)} / {cov.get('discovered', 0)}** "
                f"({cov.get('coverage_pct', 0)}% of the discovered confusable space) |")
+    out.append(f"| **Undrawn twin-pairs (drive to 0)** | "
+               f"**{(c.get('separation') or {}).get('undrawn', 0)}** of "
+               f"{(c.get('separation') or {}).get('confusable_pairs', 0)} confusable name-pairs |")
+    out.append(f"| **Ambiguous lookup names (drive to 0)** | "
+               f"**{(c.get('index') or {}).get('ambiguous_keys', 0)}** of "
+               f"{(c.get('index') or {}).get('keys', 0)} indexed names |")
     out.append(f"| As of | {c.get('as_of', '?')} (fak {c.get('fak_version', '?')}) |")
     out.append(f"| Legacy bounded score (saturates; not the driver) | {c.get('score', 0)}/100 "
                f"(grade {c.get('grade', '?')}) |")
@@ -1375,8 +2133,56 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
     out.append("| * crystal | grounded + defined + a line drawn against siblings + that line anchored in a doc that exists |")
     out.append("| o defined | grounded + defined + a distinction line, but the line is not written in a discoverable doc |")
     out.append("| ~ drifting | grounded + defined, but no line drawn against its siblings (you know what it is, not what it is NOT) |")
+    out.append("| = entangled | defined and draws SOME line, but not against the twin its own NAME is confusable with - per-row clean, pairwise still fog |")
     out.append("| x colliding | shares a canonical name with another concept - a true ambiguity, fixable only by a rename |")
     out.append("| . undocumented | appears in the tree, but the catalog gives no definition |")
+    out.append("")
+    sp = c.get("separation") or {}
+    ix = c.get("index") or {}
+    out.append("## Separation - is each concept disambiguated FROM THE OTHERS?")
+    out.append("")
+    out.append("Per-concept clarity is not the same question as pairwise separation. A concept "
+               "in a 250-member family satisfies `disambiguated` by naming **any one** sibling - "
+               "while the twin its name is genuinely mistakable for goes undrawn. So the "
+               "scorecard discovers, from the catalog's own names, the pairs a reader cannot "
+               "keep apart - **permuted** (`witnessPath` / `PathWitness`: the same words in a "
+               "different order) and **near** (`SessionRef` / `SessionRow`: a couple of edits "
+               "apart) - and asks whether the line is drawn between *those two specifically*. "
+               "Boundaries are directed, so for a confusable pair the line must be drawn from "
+               "**both** sides: `A.distinct_from = [B]` does nothing for a reader who arrived "
+               "at B. A concept that does not separate from its own twin is `entangled` - "
+               "clean per row, still fog pairwise.")
+    out.append("")
+    out.append("| Separation metric | Value |")
+    out.append("|---|---|")
+    out.append(f"| Confusable name-pairs discovered | {sp.get('confusable_pairs', 0)} |")
+    out.append(f"| **Separated from each other (drive to all)** | **{sp.get('separated', 0)} / "
+               f"{sp.get('confusable_pairs', 0)}** ({sp.get('mutual', 0)} mutual, "
+               f"{sp.get('one_sided', 0)} one-sided) |")
+    out.append(f"| **Undrawn twin-pairs (drive to 0)** | **{sp.get('undrawn', 0)}** |")
+    out.append(f"| Entangled concepts (own twin undrawn) | {sp.get('entangled_concepts', 0)} |")
+    out.append(f"| Boundaries drawn (mutual / total) | {sp.get('mutual_boundaries', 0)} / "
+               f"{sp.get('boundaries', 0)} |")
+    out.append(f"| Dangling `distinct_from` references (drive to 0) | "
+               f"{sp.get('dangling_references', 0)} |")
+    out.append("")
+    out.append("## Indexing - can a reader who meets a NAME find the concept?")
+    out.append("")
+    out.append("The catalog is organised by concept; a reader arrives with a **spelling**. "
+               "[`INDEX.md`](INDEX.md) turns it around: every surface a name can arrive as - the "
+               "canonical, every alias, the raw grounding token - is a lookup key pointing at the "
+               "concept it denotes, carrying that concept's contrast set so *which one is this?* "
+               "and *how is it not the other one?* are answered together. A key that lands on two "
+               "concepts is an **index** defect the canonical names cannot show: both canonicals "
+               "may be unique while one row quietly claims the other's name as an alias.")
+    out.append("")
+    out.append("| Index metric | Value |")
+    out.append("|---|---|")
+    out.append(f"| Lookup names indexed | {ix.get('keys', 0)} over {c.get('rows', 0)} concepts |")
+    out.append(f"| Lookup names landing on several concepts | {ix.get('ambiguous_keys', 0)} |")
+    out.append(f"| **Shared names whose concepts stay unseparated (drive to 0)** | "
+               f"**{ix.get('unresolved_shared_names', 0)}** |")
+    out.append(f"| Concepts carrying a contrast set | {ix.get('contrast_concepts', 0)} |")
     out.append("")
     out.append("## The concepts (best verdict first)")
     out.append("")
@@ -1434,8 +2240,83 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
     return "\n".join(out)
 
 
+def _md_cell(s: Any) -> str:
+    """Make a value safe inside a Markdown table cell."""
+    return str(s if s is not None else "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def render_doc_name_index(payload: dict[str, Any], *, stamp: str | None = None) -> str:
+    """The generated A-Z name index: every lookup surface -> the concept it denotes and
+    the concepts it must not be confused with.
+
+    An index POINTS; it does not copy. The definitions live in README.md, so each entry
+    stays one line and the whole lookup surface fits in one scannable artifact."""
+    c = payload.get("corpus") or {}
+    ix = c.get("index") or {}
+    rows = _index_rows(payload)
+    out = _front_matter(
+        "fak concept name index - every spelling, the concept it denotes, and its contrast set",
+        "A-Z lookup over every surface a fak concept name can arrive as (canonical, alias, "
+        "grounding token), pointing at the one concept it denotes plus the concepts it must "
+        "not be confused with. Generated - do not hand-edit.")
+    out.append("# fak concept name index - which concept is this name, and what is it NOT?")
+    out.append("")
+    if stamp:
+        out.append(f"<!-- concept-disambiguation-scorecard: {stamp} - process: "
+                   f"tools/concept_disambiguation_scorecard.py - data: {DATA_DIR_REL}/ -->")
+        out.append("")
+    out.append("The [scorecard](README.md) is organised by concept. A reader arrives with a "
+               "**spelling** - something they read in code, a metric name, a flag - and needs "
+               "the reverse map. This is it: every surface a name can arrive as (the canonical "
+               "name, every alias, the raw grounding token) resolves to the concept it denotes "
+               "and to that concept's **contrast set**, so *which one is this?* and *how is it "
+               "not the other one?* are answered in the same line.")
+    out.append("")
+    out.append("> Generated by `python tools/concept_disambiguation_scorecard.py "
+               "--markdown-dir docs/concept-disambiguation-scorecard`. Do not hand-edit: edit "
+               f"`{DATA_DIR_REL}/` and regenerate.")
+    out.append("")
+    out.append(f"**{ix.get('keys', 0)}** lookup names over **{c.get('rows', 0)}** concepts; "
+               f"**{ix.get('ambiguous_keys', 0)}** land on more than one concept (marked **!** - "
+               "tolerated only when the two concepts separate from each other in both "
+               "directions, so the index can honestly answer *both, and here is the difference*).")
+    out.append("")
+    out.append("The **not to be confused with** column is the union of the boundaries the concept "
+               "declares (`distinct_from`) and the twins the scorecard discovered by name - the "
+               "pairs whose spellings a reader cannot keep apart.")
+    out.append("")
+
+    def _bucket(key: str) -> str:
+        ch = key[:1]
+        if not ch:
+            return "#"
+        return ch.upper() if ch.isalpha() else "0-9"
+
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for e in rows:
+        buckets.setdefault(_bucket(e["key"]), []).append(e)
+    for b in sorted(buckets):
+        out.append(f"## {b}")
+        out.append("")
+        out.append("| | Name (and other spellings) | Concept | Family / kind | Not to be confused with |")
+        out.append("|---|---|---|---|---|")
+        for e in buckets[b]:
+            flag = "**!**" if e["ambiguous"] else ""
+            spellings = _md_cell(e["spellings"][0])
+            if len(e["spellings"]) > 1:
+                spellings += " <br><small>" + _md_cell(", ".join(e["spellings"][1:])) + "</small>"
+            for t in e["targets_full"]:
+                nc = t["not_to_be_confused_with"]
+                out.append(f"| {flag} | `{spellings}` | **{_md_cell(t['canonical'])}** "
+                           f"| {_md_cell(t['family'])} / {_md_cell(t['kind'])} "
+                           f"| {_md_cell(', '.join(nc)) if nc else '-'} |")
+        out.append("")
+    return "\n".join(out)
+
+
 def render_doc_folder(payload: dict[str, Any], *, stamp: str | None = None) -> dict[str, str]:
-    return {"README.md": render_doc_index(payload, stamp=stamp)}
+    return {"README.md": render_doc_index(payload, stamp=stamp),
+            "INDEX.md": render_doc_name_index(payload, stamp=stamp)}
 
 
 # ---------------------------------------------------------------------------
@@ -1450,6 +2331,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--critical", action="store_true", help="the worst-first clarity backlog")
     ap.add_argument("--rollup", action="store_true", help="the hierarchy roll-up (namespace at its abstraction heads)")
     ap.add_argument("--gaps", action="store_true", help="the coverage backlog (unpositioned tree tokens)")
+    ap.add_argument("--pairs", action="store_true", help="the pairwise separation backlog (confusable name-pairs)")
+    ap.add_argument("--index", action="store_true", help="the name -> concept lookup index")
+    ap.add_argument("--lookup", default="", help="resolve ONE name through the index (implies --index)")
+    ap.add_argument("--limit", type=int, default=0, help="cap the --index listing (0 = all)")
     ap.add_argument("--compare", default="", help="baseline JSON to prove disambiguation-debt dropped")
     ap.add_argument("--markdown-dir", default="", help=f"regenerate the doc folder (e.g. {GENERATED_DOC_DIR})")
     ap.add_argument("--data", default="", help=f"data directory (default: {DATA_DIR_REL})")
@@ -1492,6 +2377,10 @@ def main(argv: list[str] | None = None) -> int:
         print(render_rollup(payload))
     elif args.gaps:
         print(render_gaps(payload))
+    elif args.pairs:
+        print(render_pairs(payload))
+    elif args.index or args.lookup:
+        print(render_index(payload, limit=args.limit, lookup=args.lookup))
     elif not args.markdown_dir:
         print(render(payload))
 

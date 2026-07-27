@@ -122,7 +122,11 @@
       "definition": "Stable identifier field of one open decision row on a shared task record; append id-newness and state resolution are both keyed by it.",
       "distinction": "A record field naming one decision instance on the co-editing surface, not a journal entry or a routing decision.",
       "distinct_from": [
-        "x2-decision-decisionjournal"
+        "x2-decision-decisionjournal",
+        "decision-kernel",
+        "decision-scheduler",
+        "decision-task",
+        "decision-witness"
       ],
       "aliases": [],
       "grounding": "DecisionID",
@@ -312,7 +316,9 @@
       "definition": "Reader-scope redaction policy for shared-task views: MaxScope plus IncludeQuarantined decide what View and EventsView reveal to a caller.",
       "distinction": "Read-side redaction policy; DenialPolicy shapes write-side verdicts on the same surface.",
       "distinct_from": [
-        "sharedtask-denialpolicy"
+        "sharedtask-denialpolicy",
+        "cov5307-view-policy",
+        "x2-policy-capability-tierpolicy"
       ],
       "aliases": [],
       "grounding": "ViewPolicy",

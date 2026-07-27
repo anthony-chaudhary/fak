@@ -128,7 +128,9 @@
       "definition": "internal/gateway's sessionPlanners is the Server's bounded map holding one persistent agent.SessionPlanner per session trace id, minted lazily by sessionPlannerFor.",
       "distinction": "It is the gateway-side per-trace CACHE of planners, NOT the agent.SessionPlanner type or its PlanTurn method.",
       "distinct_from": [
-        "SessionPlanner.PlanTurn (ctxplan)"
+        "SessionPlanner.PlanTurn (ctxplan)",
+        "plan-sessionplannermu",
+        "session-planner"
       ],
       "aliases": [
         "sessionplannerfor"
@@ -149,7 +151,9 @@
       "distinction": "It is the agent-side on/off seam into the ctxplan engine, NOT the gateway-side hook maybePlanMessages that drives it.",
       "distinct_from": [
         "maybePlanMessages (gateway)",
-        "SessionPlanner.PlanTurn (ctxplan)"
+        "SessionPlanner.PlanTurn (ctxplan)",
+        "ctxviewplanner",
+        "plan-featurectxplanseam"
       ],
       "aliases": [
         "fakctxplanseam"
@@ -1009,8 +1013,9 @@
       "definition": "The dispatch price and live telemetry CandidateCount field is the number of candidates admitted to the price calculation after routing, held-lane, cooldown, and scope filters.",
       "distinction": "It counts PRICED dispatch candidates, NOT safe concurrency, not issue totals, and not binary doctor candidates.",
       "distinct_from": [
-        "SafeConcurrency (dispatch price)",
-        "DefaultBinaryDoctorCandidates (appversion)"
+        "DefaultBinaryDoctorCandidates (appversion)",
+        "x3-plan-setpointplan",
+        "x2-plan-candidatebound"
       ],
       "aliases": [
         "candidatecount"
@@ -1031,7 +1036,7 @@
       "distinction": "It is a DRY launch target schedule, NOT the live execution plan that binds account seats and dispatch tick commands.",
       "distinct_from": [
         "ExecutionPlan (dispatch wave)",
-        "dispatchPriceWave"
+        "x-plan-dispatchlaunchplanfromwaves"
       ],
       "aliases": [
         "launchplan"
@@ -1052,7 +1057,8 @@
       "distinction": "It is the EXECUTABLE worker plan, NOT the dry LaunchPlan emitted by dispatch price.",
       "distinct_from": [
         "LaunchPlan (dispatch price)",
-        "dispatch tick"
+        "x-plan-orderlanecandidates",
+        "x-plan-executionplanid"
       ],
       "aliases": [
         "executionplan"
@@ -1095,7 +1101,8 @@
       "distinction": "It identifies the EXECUTION plan, NOT the dry dispatch price PlanID.",
       "distinct_from": [
         "plan-id (dispatch plan digest)",
-        "LaunchPlan (dispatch price)"
+        "LaunchPlan (dispatch price)",
+        "x-plan-executionplan"
       ],
       "aliases": [
         "executionplanid",
@@ -1180,7 +1187,8 @@
       "definition": "In fak's refusal/routing vocabulary (cmd/fak/commit.go, internal/gateway/routing.go) to 'replan' is the recovery action when a commit or route is BLOCKED \u2014 discard the attempt and compute a fresh plan rather than retrying it verbatim.",
       "distinction": "It is a recovery DISPOSITION an agent takes, NOT a function that builds a plan (BuildPlan).",
       "distinct_from": [
-        "BuildPlan (action planner)"
+        "BuildPlan (action planner)",
+        "executionroute-roleplan"
       ],
       "aliases": [],
       "grounding": "replan",

@@ -126,7 +126,9 @@
    "definition": "compute.KVEvictPolicy is the enum (KVEvictLRU / KVEvictCostAware) selecting which victim-ranking policy ReplayKVCache and the offline KV-replay tooling simulate when replaying recorded KV events against a token budget.",
    "distinction": "It is the OFFLINE replay/simulation eviction policy compute scores admission decisions against, not radixkv's live EvictionPolicy the running server actually enforces - unlike PolicyEvictions (radixkv), the counter for the live tree's policy-driven drops.",
    "distinct_from": [
-    "PolicyEvictions (radixkv)"
+     "PolicyEvictions (radixkv)",
+     "evict-kvevictcostaware",
+     "evict-kvevictlru"
    ],
    "aliases": [
     "KVEvictLRU",
@@ -260,8 +262,9 @@
    "definition": "loopmgr.RestartPolicy is the pure crashloop fence (MaxAttempts, BaseDelay, MaxDelay, ResetAfter) whose Decide/BackoffDelay methods govern a supervised loop's automatic restart/backoff scheduling, reused by cmd/fak's watchdog as watchdogRestartPolicy.",
    "distinction": "It governs PROCESS-SUPERVISION backoff after a crash, not tool-call authorization - unlike Policy (loaded) and DefaultPolicy (adjudicator), which decide whether a tool call is allowed.",
    "distinct_from": [
-    "policy-loaded",
-    "DefaultPolicy (adjudicator)"
+     "policy-loaded",
+     "DefaultPolicy (adjudicator)",
+     "loop-crashloop"
    ],
    "aliases": [
     "watchdogRestartPolicy"
@@ -319,8 +322,9 @@
    "definition": "cmd/fak's tPolicy is a time.Now() checkpoint captured immediately before a guard/serve entrypoint (guard_setup.go, guard_startup.go, serve.go) loads and parses its admission policy, later subtracted (time.Since(tPolicy)) to report the policy-load stage duration.",
    "distinction": "It is a WALL-CLOCK TIMING checkpoint local variable, not a policy value or struct field - unlike policyBytes, the bytes it times the read of, and radixkv's t.policy field (the tree's live eviction policy), an unrelated receiver-scoped field that happens to normalize to the same token.",
    "distinct_from": [
-    "policy-capability-policy-bytes",
-    "policy-loaded"
+     "policy-capability-policy-bytes",
+     "policy-loaded",
+     "x-policy-capability-setpolicy"
    ],
    "aliases": [],
    "grounding": "tPolicy",

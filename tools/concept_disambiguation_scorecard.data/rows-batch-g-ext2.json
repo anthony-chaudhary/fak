@@ -79,7 +79,8 @@
       "distinction": "It is a NAMED demo tool that retrieves a (poisoned) policy document, NOT a policy manifest of authorization rules nor any compiled adjudication policy.",
       "distinct_from": [
         "policy manifest",
-        "Policy (loaded)"
+        "Policy (loaded)",
+        "x-policy-capability-batchpolicy"
       ],
       "aliases": [
         "readrefundpolicy"
@@ -100,7 +101,9 @@
       "distinction": "It is a CONTEXT-RESIDENCY tier label that pins policy spans in the prompt, NOT the loaded adjudication policy itself nor a manifest of rules.",
       "distinct_from": [
         "Policy (loaded)",
-        "policy manifest"
+        "policy manifest",
+        "cov5307-view-policy",
+        "sharedtask-viewpolicy"
       ],
       "aliases": [],
       "grounding": "tierpolicy",
@@ -214,7 +217,8 @@
       "distinction": "These are the single *_debt INTEGER outputs of individual scorecards, NOT this scorecard's own disambiguation-debt and NOT the control pane that sums every scorecard's debt into one portfolio number.",
       "distinct_from": [
         "disambiguation-debt",
-        "scorecard control pane"
+        "scorecard control pane",
+        "x2-session-runtime-sessionobsdebt"
       ],
       "aliases": [
         "conflationdebt",
@@ -371,7 +375,8 @@
       "distinction": "It is a JOURNAL audit-record kind for an eviction event, NOT the KV-span eviction routine itself (EvictColdest) nor the LRU eviction counter (Evictions).",
       "distinct_from": [
         "Evictions (radixkv LRU counter)",
-        "EvictColdest (kvmmu)"
+        "EvictColdest (kvmmu)",
+        "x-goal25b-evict-canevict"
       ],
       "aliases": [],
       "grounding": "capevict",
@@ -409,7 +414,8 @@
       "distinction": "It is the explicit ordinal LADDER type quantizing readiness into rungs, distinct from the prose concept of maturity and from raw support, which only says a path exists without a rung.",
       "distinct_from": [
         "maturity",
-        "support"
+        "support",
+        "cov5307-support-maturity"
       ],
       "aliases": [
         "fromsupport",
@@ -475,7 +481,8 @@
       "distinction": "It is the MODEL-ROUTING decision log and its per-decision record/recorder, NOT the witness journal of adjudication Decisions (decisions ref).",
       "distinct_from": [
         "decisions ref (witness journal)",
-        "Decision (kernel)"
+        "Decision (kernel)",
+        "cov5307-decision-record"
       ],
       "aliases": [
         "decisionrecord",
@@ -497,7 +504,9 @@
       "distinction": "It is a guard ROUTING/operational verdict (where a finding goes, or which model backs guard), NOT the kernel's per-tool-call admit/refuse Decision.",
       "distinct_from": [
         "Decision (kernel)",
-        "Decision (scheduler)"
+        "Decision (scheduler)",
+        "executionroute-roledecision",
+        "x2-guard-gate-launchcfg"
       ],
       "aliases": [
         "guardlocalmodeldecision"

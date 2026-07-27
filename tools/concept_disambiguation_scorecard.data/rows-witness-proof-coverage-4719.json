@@ -215,7 +215,7 @@
       "kind": "symbol",
       "definition": "WitnessDir is the on-disk directory constant where witness artifacts are stored, declared independently in multiple packages: mlpscore.WitnessDir (docs/mlp/witnesses) for MLP witness manifests, qwen36parity.WitnessDir (experiments/agent-live) for Mac parity witnesses, and benchloop fleet dispatch's witnessDir for bench-fleet witness JSON.",
       "distinction": "A FILESYSTEM PATH convention for storing witness artifacts on disk, not a world-state witness (a cache-coherence binding) and not the WitnessResolver (an engine that corroborates claims). Where witnesses are STORED vs what they BIND vs what RESOLVES them.",
-      "distinct_from": ["world-state-witness", "witness-resolver", "covg-witness-proof-witnessref"],
+      "distinct_from": ["world-state-witness", "witness-resolver", "covg-witness-proof-witnessref", "x2-witness-proof-witnessfor"],
       "aliases": ["WitnessDir", "witnessDir", "witness directory"],
       "grounding": "witnessdir",
       "grounding_kind": "symbol",

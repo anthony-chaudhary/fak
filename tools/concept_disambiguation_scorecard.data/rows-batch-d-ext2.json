@@ -33,7 +33,8 @@
       "distinction": "It is the CHAT-endpoint wiring that exposes the in-kernel model over HTTP, distinct from the InKernelPlanner that performs the actual in-process decode.",
       "distinct_from": [
         "InKernelPlanner",
-        "model (in-kernel model)"
+        "model (in-kernel model)",
+        "x2-plan-newinkernelplanner"
       ],
       "aliases": [
         "inkernelq4k",
@@ -145,7 +146,9 @@
       "distinction": "It is the per-call SELECTION of which engine to dispatch to, distinct from EngineID which is the static registry key it returns and from the engine itself.",
       "distinct_from": [
         "EngineID (registry)",
-        "engine"
+        "engine",
+        "cov5307-engine-route",
+        "x-gateway-engine-engineroute"
       ],
       "aliases": [],
       "grounding": "routeengine",

@@ -9,7 +9,9 @@
       "distinction": "One role's routing-plus-budget contract; unlike RolePlanSet it is a single member of the set, and unlike modelroute.Plan it carries the role, its budget, and its escalation target rather than only the chosen model policy.",
       "distinct_from": [
         "x-cov-plan-planstep",
-        "drive-plan-planmeta"
+        "drive-plan-planmeta",
+        "x-goal25-plan-probeplan",
+        "x-plan-replan"
       ],
       "aliases": [],
       "grounding": "RolePlan",

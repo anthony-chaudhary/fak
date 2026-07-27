@@ -56,5 +56,67 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "loopobserve",
+      "canonical": "loop_observe.go (agent progress-observer seam)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "loop_observe.go is the agent package's OUTBOUND loop-state seam (#5148): WithProgressObserver installs a typed, nil-safe ProgressObserver that runArm emits closed-set ProgressEvent lifecycle transitions through (turn_started, tool_started, call_adjudicated, result_admitted, turn_done), which the native gateway stream renders as structured SSE. Unset, every emit is a no-op and the loop is byte-for-byte the historical loop.",
+      "distinction": "Not loop_constraint.go / loop_park.go, which are INBOUND seams that drain operator ops at the turn boundary and CHANGE what the loop does (the floor it enforces, the park it takes): loop_observe.go is purely OUTBOUND and read-only — it publishes witnessed transitions the loop already made and can never gate, deny, or alter a turn.",
+      "distinct_from": [
+        "loopconstraint",
+        "looppark"
+      ],
+      "aliases": [],
+      "grounding": "loop_observe",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "calladjudicated",
+      "canonical": "call_adjudicated (loop-progress SSE event)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "call_adjudicated (Go const ProgressCallAdjudicated) is the loop-progress event KIND that publishes one tool call's already-decided kernel verdict on the native owned-loop SSE stream (#5148): it carries Turn, CallID, Tool, Verdict (ALLOW/DENY/TRANSFORM/QUARANTINE) and, on a deny, the closed refusal reason a client gates on.",
+      "distinction": "Not 'adjudicating' (the decision act itself, performed by the kernel's adjudicator rungs): call_adjudicated is the after-the-fact OBSERVATION of that act, emitted on the stream once the verdict is final. It decides nothing and can change no verdict; suppressing it would leave the adjudication outcome identical.",
+      "distinct_from": [
+        "x2-policy-capability-adjudicating"
+      ],
+      "aliases": [
+        "ProgressCallAdjudicated"
+      ],
+      "grounding": "call_adjudicated",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "loopmidflight",
+      "canonical": "loop_midflight",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "loop_midflight.go is the agent package's owned per-run MID-FLIGHT verb mailbox and tamper-evident hash-chained journal (#5158, the write half of #2403 / epic #2388): a transport enqueues interrupt / drop-pending-call / set-budget verbs that the owned loop consumes at its next CLEAN turn boundary (never mid-tool, never mid-adjudication) to stop the arm, skip one named queued call, or write a fresh budget through to the session table; nil-safe, so with no verb issued the loop is byte-for-byte the historical loop.",
+      "distinction": "Not loop_observe.go, the OUTBOUND read-only half of the same owned-turn program that only PUBLISHES witnessed lifecycle transitions and can alter no turn: loop_midflight is INBOUND and MUTATING, stopping or steering the live arm at the boundary and sealing at return. And not loop_constraint.go / loop_park.go, which drain sessionctl OPERATOR ops (floor tightening / escalated-deny parking): loop_midflight is the per-run SESSION-verb mailbox (interrupt/drop/set-budget) whose journal is hash-chained tamper-evidence.",
+      "distinct_from": [
+        "loopobserve",
+        "loopconstraint",
+        "looppark"
+      ],
+      "aliases": [],
+      "grounding": "loop_midflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

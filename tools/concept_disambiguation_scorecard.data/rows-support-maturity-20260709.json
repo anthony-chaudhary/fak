@@ -9,7 +9,8 @@
       "distinction": "It is a DEEPSEEK-KERNEL determinism/parity SPECIFICATION package (schema + offline synthetic check), not the fak-vs-raw eval-routing parity witness (eveparity) nor a model-quality parity grader (qwen36parity).",
       "distinct_from": [
         "x-support-maturity-eveparity",
-        "qwen36parity"
+        "qwen36parity",
+        "parity"
       ],
       "aliases": [
         "dsparity",

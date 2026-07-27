@@ -18,5 +18,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "guardselftighten",
+      "canonical": "guard_self_tighten",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The admission gate for a SELF-authored (agent-proposed) policy overlay: admitSelfTightenOverlay classifies the delta from the installed effective floor to the proposed one through policy.DiffAmendment and admits only a no-op or tighten-only verdict, so an agent's own authority may ratchet the capability floor tighter but never wider (#5181, epic #5170 Track F).",
+      "distinction": "Decides ADMISSION of an agent-authored proposal; the guard allow-overlay (guardApplyAllowOverlay) instead APPLIES an operator-authored widening to the running floor. Different author (agent vs operator), different act (refuse-or-admit vs apply), opposite direction (tighten-only vs widen). Also distinct from the launch-wide --core-lock-all posture, which clamps every channel for the whole session rather than judging one overlay.",
+      "distinct_from": [
+        "x-goal-guard-gate-guard-allow-overlay"
+      ],
+      "aliases": [],
+      "grounding": "admitSelfTightenOverlay",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

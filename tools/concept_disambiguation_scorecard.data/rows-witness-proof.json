@@ -7,7 +7,7 @@
       "kind": "symbol",
       "definition": "An external reference (commit hash, blob digest, etag, lease epoch) a cache entry is admitted under, so the entry can be refuted when that external state changes.",
       "distinction": "An external FACT a cache binds its lifetime to - NOT the RSI measurement witness (a proof an improvement was real) and NOT a Claim (a self-report).",
-      "distinct_from": ["claim", "revocation"],
+      "distinct_from": ["claim", "revocation", "witness-proof-witnesssidecarsuffix"],
       "aliases": ["external witness"],
       "grounding": "witness",
       "grounding_kind": "symbol",

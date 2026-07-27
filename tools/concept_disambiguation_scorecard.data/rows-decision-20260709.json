@@ -75,7 +75,8 @@
       "distinction": "It is the CALIBRATION record joining a dispatched tier choice to its later witnessed outcome, not the session decision-log renderer package (taskdecision) nor the super loop's worklist pick (DriveDecision).",
       "distinct_from": [
         "taskdecision",
-        "x-decision-drivedecision"
+        "x-decision-drivedecision",
+        "x-decision-steerdecision"
       ],
       "aliases": [
         "TierDecision",

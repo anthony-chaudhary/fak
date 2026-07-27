@@ -8,7 +8,8 @@
    "definition": "rendercompare is the concrete render-materialize identifier in benchruns: it renders a before/after comparison block for bench runs.",
    "distinction": "rendercompare renders a before/after comparison block for bench runs; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "render-materialize-render-compact"
    ],
    "aliases": [],
    "grounding": "rendercompare",
@@ -26,7 +27,12 @@
    "definition": "renderlist is the concrete render-materialize identifier in benchruns: it renders the flat list view of bench runs.",
    "distinction": "renderlist renders the flat list view of bench runs; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "render-materialize-render-lint",
+     "render-materialize-render-live",
+     "x-ci-coverage-render-materialize-renderbest",
+     "x-goal25b-render-materialize-renderline",
+     "x2-render-materialize-renderdist"
    ],
    "aliases": [],
    "grounding": "renderlist",
@@ -44,7 +50,8 @@
    "definition": "renderers is the concrete render-materialize identifier in render registry: it the collection of pluggable render functions, not any single one.",
    "distinction": "renderers the collection of pluggable render functions, not any single one; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "rendered-ctxplan"
    ],
    "aliases": [],
    "grounding": "renderers",
@@ -80,7 +87,8 @@
    "definition": "rendertable is the concrete render-materialize identifier in codex-mcp-health: it renders the tabular health view.",
    "distinction": "rendertable renders the tabular health view; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "x-goal25b-render-materialize-renderable"
    ],
    "aliases": [],
    "grounding": "rendertable",
@@ -98,7 +106,10 @@
    "definition": "renderbest is the concrete render-materialize identifier in benchruns: it renders only the best/winning bench run.",
    "distinction": "renderbest renders only the best/winning bench run; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "x-ci-coverage-render-materialize-renderlist",
+     "x2-render-materialize-renderdist",
+     "x2-render-materialize-rendertext"
    ],
    "aliases": [],
    "grounding": "renderbest",
@@ -170,7 +181,8 @@
    "definition": "rendergaps is the concrete render-materialize identifier in productscorecard: it renders the coverage-gap backlog section.",
    "distinction": "rendergaps renders the coverage-gap backlog section; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "render-materialize-render-gate"
    ],
    "aliases": [],
    "grounding": "rendergaps",
@@ -296,7 +308,8 @@
    "definition": "renderseats is the concrete render-materialize identifier in fleetaccounts: it renders the account-seat roster.",
    "distinction": "renderseats renders the account-seat roster; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "x-ci-coverage-render-materialize-renderstatus"
    ],
    "aliases": [],
    "grounding": "renderseats",
@@ -314,7 +327,8 @@
    "definition": "rendershow is the concrete render-materialize identifier in benchruns: it renders the single-run detail (show) view.",
    "distinction": "rendershow renders the single-run detail (show) view; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "render-materialize-render-row"
    ],
    "aliases": [],
    "grounding": "rendershow",
@@ -332,7 +346,8 @@
    "definition": "renderstatus is the concrete render-materialize identifier in benchloop: it renders the bench-loop status line.",
    "distinction": "renderstatus renders the bench-loop status line; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
-    "x2-render-materialize-renderer"
+     "x2-render-materialize-renderer",
+     "x-ci-coverage-render-materialize-renderseats"
    ],
    "aliases": [],
    "grounding": "renderstatus",

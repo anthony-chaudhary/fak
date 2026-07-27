@@ -8,7 +8,8 @@
       "definition": "The cmd/fak resolver for the STABLE Claude Code session UUID (the transcript id) that a guard-session descriptor publishes as SessionDescriptor.AgentUUID, so a wip checkpoint's owning session becomes joinable to a live descriptor (#5343). Reads CLAUDE_CODE_SESSION_ID, then CLAUDE_SESSION_ID, then FAK_SESSION_ID; empty when none is set.",
       "distinction": "FAK_SESSION_ID is a DIFFERENT identity, not a fallback spelling of this one: under fak guard a child sees it set to the VOLATILE trace id, which changes every run, so preferring it would publish a populated-looking field that joins to nothing. That is why it is read LAST here. resolveGuardSessionID resolves the guard's own session identity for gating; this resolves the transcript UUID for JOINING checkpoints to descriptors, and the two coincide only by accident.",
       "distinct_from": [
-        "cov5305-resolve-guard-session-id"
+        "cov5305-resolve-guard-session-id",
+        "x-session-runtime-claudesessionid"
       ],
       "aliases": [],
       "grounding": "claudeSessionUUID",

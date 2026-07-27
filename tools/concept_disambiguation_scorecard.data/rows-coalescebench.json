@@ -8,7 +8,9 @@
       "definition": "coalescebench config field: the resident expert-cache budget in GiB (the RAM tier sitting over SSD) that bounds how many routed (layer,expert) groups stay resident in the deterministic LRU the bench replays through.",
       "distinction": "A bench INPUT KNOB naming the cache SIZE budget (GiB -\u003e whole resident groups via capacityGroups), not a cache mechanism or trace: distinct from enginecache (an engine-level KV/weight cache) and from the SimulateExpertCacheBatch simulator it feeds.",
       "distinct_from": [
-        "enginecache"
+        "enginecache",
+        "x-cache-cachehit",
+        "x-goal25-cache-cachebit"
       ],
       "aliases": [],
       "grounding": "CacheGiB",

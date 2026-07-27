@@ -8,7 +8,8 @@
       "definition": "idxPlan is the local ctxplan.Plan produced by index.PlanCells in cmd/ctxplandemo and cmd/ctxplanbench, the O(1) resident view scored over only an index-bounded candidate set rather than the full transcript.",
       "distinction": "It is one concrete materialized resident view returned by PlanCells, NOT the PlanCells selection primitive itself nor the agent.Planner client that drives a model.",
       "distinct_from": [
-        "PlanCells (ctxplan)"
+        "PlanCells (ctxplan)",
+        "ctxplan"
       ],
       "aliases": [
         "rehydrateplannedview"
@@ -49,7 +50,8 @@
       "definition": "syspromptmmu.PlanOf folds a base Segment list into the []cachemeta.PromptSegment system-prompt plan that BuildSystemValue realizes, and BaseContextPlan seeds the resident spine-plus-policy floor of that plan.",
       "distinction": "It plans the cacheable SYSTEM-PROMPT prefix segments, NOT the per-turn history resident view (ctxplan PlanCells) nor a routed model roster.",
       "distinct_from": [
-        "PlanCells (ctxplan)"
+        "PlanCells (ctxplan)",
+        "x2-context-ctx-basecontextplan"
       ],
       "aliases": [
         "basecontextplan",
@@ -70,7 +72,8 @@
       "definition": "compute.AutoSizeContextPlan takes a ContextSizeConfig and a MemoryPlan weight set plus available bytes and returns the auto-sized context token budget and the fitted MemoryPlan for a serve.",
       "distinction": "It SIZES a compute MemoryPlan against host headroom, NOT a ctxplan resident view of conversation history nor a routed model plan.",
       "distinct_from": [
-        "MemoryPlan (compute)"
+        "MemoryPlan (compute)",
+        "x2-context-ctx-autosizecontextplan"
       ],
       "aliases": [],
       "grounding": "autosizecontextplan",
@@ -162,7 +165,8 @@
       "definition": "agent.NewInKernelPlanner builds the in-kernel agent.Planner that decodes a local GGUF model in-process (used by run_model.go and the gateway's --gguf in-kernel generation path).",
       "distinction": "It constructs the LOCAL in-process generation planner, NOT the outbound network HTTPPlanner nor an offline test planner.",
       "distinct_from": [
-        "HTTPPlanner (agent client)"
+        "HTTPPlanner (agent client)",
+        "x2-gateway-engine-inkernelchat"
       ],
       "aliases": [
         "buildrunplanner"
@@ -416,7 +420,8 @@
       "definition": "internal/ctxplan's CandidateBound is the index-bounded candidate-set size c the Planned regime priced each turn, defaulting to DefaultMaxCandidates and feeding IndexBoundedPlannerCompute.",
       "distinction": "It bounds how many Candidate spans the planner scores per turn, NOT the Candidate input itself nor the MaxCandidates probe knob.",
       "distinct_from": [
-        "MaxCandidates (ctxplan probe)"
+        "MaxCandidates (ctxplan probe)",
+        "x-plan-candidatecount"
       ],
       "aliases": [],
       "grounding": "candidatebound",

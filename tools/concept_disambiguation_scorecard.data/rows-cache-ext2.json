@@ -56,7 +56,8 @@
       "distinction": "It is the read-only OBSERVED provider-cache telemetry window the gateway records and snapshots, not the cachevalue P&L roll-up that scores ledgered reuse nor the in-kernel KV cache that authors fak's own reuse.",
       "distinct_from": [
         "Provider cache",
-        "vCache"
+        "vCache",
+        "x-goal25-cache-cachedturns"
       ],
       "aliases": [
         "vcacheturnssnapshot",
@@ -84,7 +85,8 @@
       "distinct_from": [
         "Provider cache",
         "cache_read",
-        "CacheReadMultiplier (price coeff)"
+        "CacheReadMultiplier (price coeff)",
+        "c4681-prefixcache"
       ],
       "aliases": [
         "providercachenetsavings",
@@ -223,7 +225,8 @@
       "distinction": "It is the provenance-labeled evidence fold over /metrics that keeps WITNESSED and OBSERVED cache numbers in separate fields, not the cachevalue ledger that persists ledgered observations nor the provider cache it observes.",
       "distinct_from": [
         "vCache",
-        "Provider cache"
+        "Provider cache",
+        "x2-witness-proof-cachewitness"
       ],
       "aliases": [],
       "grounding": "cachewitness",
@@ -242,7 +245,8 @@
       "distinction": "It is the refuse-to-compact reason protecting a provider cache_control breakpoint span, not the provider cache itself nor the in-kernel KV span an evictor would reclaim.",
       "distinct_from": [
         "cache_control",
-        "Provider cache"
+        "Provider cache",
+        "x4-cache-compactreasoncachedspan"
       ],
       "aliases": [],
       "grounding": "cachedspan",
@@ -394,7 +398,8 @@
       "distinction": "They are provider-cache POLICY ACTIONS in the vCache governor, not a generic cache miss and not the provider cache_control marker itself.",
       "distinct_from": [
         "Provider cache",
-        "cache_control"
+        "cache_control",
+        "x-decision-vcachegovernoractions"
       ],
       "aliases": [
         "explicitcache",

@@ -28,7 +28,8 @@
       "distinction": "It intervenes on a LIVE objective's score curve (the controller's own actuator decision), NOT the kernel's tool-call verdict explanation (decision-kernel, which records a past call's adjudication) nor the witness adjudication verdict (decision-witness, which confirms/refutes git evidence after the fact).",
       "distinct_from": [
         "decision-kernel",
-        "decision-witness"
+        "decision-witness",
+        "x-decision-tierdecision"
       ],
       "aliases": [],
       "grounding": "steerdecision",
@@ -47,7 +48,8 @@
       "distinction": "It triages one issue's HANDLING disposition in a garden walk, NOT the super loop's per-invocation worklist selection (DriveDecision, which picks the worst-first member to enter) nor the dispatcher's tier-calibration record (TierDecision, which joins a past dispatch tier to its witnessed outcome).",
       "distinct_from": [
         "x-decision-drivedecision",
-        "x-decision-tierdecision"
+        "x-decision-tierdecision",
+        "x-goal25-decision-taskdecision"
       ],
       "aliases": [],
       "grounding": "walkdecision",

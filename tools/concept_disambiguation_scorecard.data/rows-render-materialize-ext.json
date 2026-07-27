@@ -9,7 +9,8 @@
       "distinction": "Not the per-id Store.Materialize page-in of a single span's bytes, and not the model.materialize*Tensors manifest rewrite; it is the whole-history context-View builder.",
       "distinct_from": [
         "rendered-ctxplan",
-        "renderplan-context"
+        "renderplan-context",
+        "x-render-materialize-materializer"
       ],
       "aliases": [],
       "grounding": "materialize",
@@ -128,7 +129,8 @@
       "distinction": "Not renderTurnDebugStats (a debug telemetry line about a served turn); RenderTurn produces the actual turn message list handed to the model.",
       "distinct_from": [
         "renderplan-context",
-        "rendered-ctxplan"
+        "rendered-ctxplan",
+        "x-render-materialize-rendertuiloops"
       ],
       "aliases": [],
       "grounding": "renderturn",
@@ -185,7 +187,8 @@
       "distinction": "Not OpScan (which (re)loads/enumerates cells) \u2014 OpRender is the terminal page-in step that produces RenderItem cells and never mutates the store.",
       "distinct_from": [
         "renderitem-memq",
-        "RenderedBytes (memq stat)"
+        "RenderedBytes (memq stat)",
+        "x-render-materialize-render"
       ],
       "aliases": [],
       "grounding": "oprender",
@@ -335,7 +338,9 @@
       "definition": "The renderTUI* family formats one fak console dashboard pane (loops/agent/garden/guard/issues/overview/sessions) from its typed report struct into a fixed-width terminal text view.",
       "distinction": "Not the bench RenderMarkdown/contract renderers (which emit Markdown docs); these emit width-bounded terminal panes for the live `fak` console.",
       "distinct_from": [
-        "RenderMarkdown (bench report)"
+        "RenderMarkdown (bench report)",
+        "render-materialize-render-toc",
+        "x-render-materialize-renderturn"
       ],
       "aliases": [
         "rendertuiagent",
@@ -420,7 +425,9 @@
       "distinction": "Not materialize (which pages real bytes/spans/tensors into a live store or context); render only formats an already-decided value into text.",
       "distinct_from": [
         "renderplan-context",
-        "rendered-ctxplan"
+        "rendered-ctxplan",
+        "x-render-materialize-oprender",
+        "x2-render-materialize-renderer"
       ],
       "aliases": [],
       "grounding": "render",
