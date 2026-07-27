@@ -82,26 +82,26 @@ func TestModelFacingSyntheticProducersHaveNextWitnesses(t *testing.T) {
 			Authorities: []callAuthority{{File: "internal/agent/loop.go", Call: "RecordToolTerminalWakeNext"}},
 		},
 		{
-			Producer:    syntheticProducer{File: "internal/agent/loop.go", Role: "RoleUser", Payload: "steer"},
+			Producer:    syntheticProducer{File: "internal/agent/loop_directives.go", Role: "RoleUser", Payload: "steer"},
 			Authorities: []callAuthority{{File: "internal/agent/loop_session.go", Call: "RecordSteerNext"}},
 		},
 		{
-			Producer: syntheticProducer{File: "internal/agent/loop.go", Role: "RoleSystem", Payload: "objective"},
+			Producer: syntheticProducer{File: "internal/agent/loop_directives.go", Role: "RoleSystem", Payload: "objective"},
 			Authorities: []callAuthority{
 				{File: "internal/agent/loop_redirect.go", Call: "ApplyPendingRedirect"},
 				{File: "internal/sessionctl/redirect.go", Call: "WitnessMove"},
 			},
 		},
 		{
-			Producer: syntheticProducer{File: "internal/agent/loop.go", Role: "RoleSystem", Payload: "floor"},
+			Producer: syntheticProducer{File: "internal/agent/loop_directives.go", Role: "RoleSystem", Payload: "floor"},
 			Authorities: []callAuthority{
 				{File: "internal/agent/loop_constraint.go", Call: "ApplyPendingConstraints"},
 				{File: "internal/sessionctl/constraint.go", Call: "WitnessMove"},
 			},
 		},
 		{
-			Producer:    syntheticProducer{File: "internal/agent/loop.go", Role: "RoleUser", Payload: "nudge"},
-			Authorities: []callAuthority{{File: "internal/agent/loop.go", Call: "RecordContextAdvisoryNext"}},
+			Producer:    syntheticProducer{File: "internal/agent/loop_directives.go", Role: "RoleUser", Payload: "nudge"},
+			Authorities: []callAuthority{{File: "internal/agent/loop_directives.go", Call: "RecordContextAdvisoryNext"}},
 		},
 		{
 			Producer:    syntheticProducer{File: "internal/agent/loop.go", Role: "RoleUser", Payload: "continuation"},
