@@ -237,3 +237,89 @@ func TestNativeStreamStructuredEvents(t *testing.T) {
 		t.Fatalf("message_stop did not carry fak.native_arm; frames=%+v", frames)
 	}
 }
+
+// TestNativeStreamUnwiredLoopIsUnchanged is the OTHER half of #5148's done-when: the
+// observer is a pure additive RunOption, so with none wired the owned loop is
+// byte-for-byte the historical loop. The golden test above witnesses the WIRED path (the
+// HTTP handler always passes a non-nil observer, so it can never reach the unwired arm of
+// runNativeArmStream's `if onProgress != nil`); this drives the same deterministic 3-turn
+// run through runNativeArmStream twice — once unwired, once observed — and pins that
+// observation changes NOTHING the loop produces: same streamed text, same ArmMetrics
+// (compared as marshalled bytes, the literal reading of "byte-for-byte"). Watching the
+// loop must not perturb it.
+func TestNativeStreamUnwiredLoopIsUnchanged(t *testing.T) {
+	// Same bootstrap as the golden test: RunArm(fak=true) builds its own kernel, and
+	// runNativeArmStream's ensureGovernedRungs() self-heals a sibling's abi.ResetForTest.
+	agent.Configure()
+	abi.RegisterRegionBackend(inlineBackend{})
+
+	// One fresh planner per run — the turn script is a stateful counter, so a shared
+	// planner would make the second run start mid-script and the compare meaningless.
+	run := func(obs agent.ProgressObserver) (agent.ArmMetrics, string) {
+		t.Helper()
+		srv := &Server{planner: &progressStreamingPlanner{}, nativeMaxTurns: 8}
+		var text strings.Builder
+		m, err := srv.runNativeArmStream(context.Background(), &agent.AnthropicMessagesRequest{
+			Messages: []agent.Message{{Role: agent.RoleUser, Content: "Clean up my account then book a flight."}},
+		}, "native-unwired-trace", func(delta string) error {
+			text.WriteString(delta)
+			return nil
+		}, obs)
+		if err != nil {
+			t.Fatalf("runNativeArmStream: %v", err)
+		}
+		return m, text.String()
+	}
+
+	bareArm, bareText := run(nil)
+
+	var seen []agent.ProgressEvent
+	obsArm, obsText := run(func(ev agent.ProgressEvent) { seen = append(seen, ev) })
+
+	// Non-vacuity FIRST: if the observed run never actually emitted, the equality below
+	// would compare two identical unwired runs and prove nothing. Pin that the observed
+	// run really did see the full lifecycle — both kernel verdicts included.
+	if len(seen) != 12 {
+		t.Fatalf("observed run emitted %d lifecycle events, want the 12-event 3-turn sequence: %+v", len(seen), seen)
+	}
+	verdicts := map[string]int{}
+	for _, ev := range seen {
+		if ev.Kind == agent.ProgressCallAdjudicated {
+			verdicts[ev.Verdict]++
+		}
+	}
+	if verdicts["DENY"] != 1 || verdicts["ALLOW"] != 1 {
+		t.Fatalf("observed verdicts = %v, want one DENY (delete_account) and one ALLOW (book_flight)", verdicts)
+	}
+
+	// ...and that the unwired run actually DROVE the loop. Without this the byte compare
+	// below could pass on two zero-value ArmMetrics.
+	if bareArm.Turns != 3 || bareArm.Denies != 1 || bareArm.FinalAnswer != "All done." {
+		t.Fatalf("unwired run did not drive the 3-turn script: turns=%d denies=%d final=%q",
+			bareArm.Turns, bareArm.Denies, bareArm.FinalAnswer)
+	}
+
+	// Second vacuity guard: the unwired run must have actually DRIVEN the loop. An
+	// all-zero ArmMetrics on both sides would satisfy the byte compare below while
+	// witnessing nothing, so pin the real outcome of the 3-turn script — the denied call,
+	// the executed one, and the final answer.
+	if bareArm.Turns != 3 || bareArm.ToolCalls != 2 || bareArm.Denies != 1 || bareArm.EngineCalls != 1 || bareArm.FinalAnswer != "All done." {
+		t.Fatalf("unwired run did not drive the full script: %+v", bareArm)
+	}
+
+	// The loop's own output is identical wired vs unwired.
+	if bareText != obsText {
+		t.Fatalf("streamed text differs with an observer wired: unwired=%q observed=%q", bareText, obsText)
+	}
+	bareJSON, err := json.Marshal(bareArm)
+	if err != nil {
+		t.Fatalf("marshal unwired ArmMetrics: %v", err)
+	}
+	obsJSON, err := json.Marshal(obsArm)
+	if err != nil {
+		t.Fatalf("marshal observed ArmMetrics: %v", err)
+	}
+	if !bytes.Equal(bareJSON, obsJSON) {
+		t.Fatalf("ArmMetrics differ with an observer wired — the observer perturbed the loop\nunwired : %s\nobserved: %s", bareJSON, obsJSON)
+	}
+}
