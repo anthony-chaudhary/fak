@@ -88,6 +88,15 @@ type Config struct {
 	MaxRetries int
 	// Verifier independently checks completion. Nil preserves baseline behavior.
 	Verifier Verifier
+	// Warm wires the two-watermark hibernation warm band (#5072, follow-on
+	// #4035) into the Step loop: an agent that also implements Restorable is
+	// enrolled on spawn (its fresh context frozen to disk, no goroutine held),
+	// takes a resident slot around each Step, and hands it back at every step
+	// boundary — warm into the reserve while residency is above low-water, cold
+	// to the store otherwise — so N enrolled agents share R resident slots.
+	// Nil (the default) is the byte-identical off posture: no enrollment, no
+	// residency, no store, and the loop below is exactly the pre-band loop.
+	Warm *WarmBand
 }
 
 // Defaults for Config zero values.
@@ -113,6 +122,11 @@ type job struct {
 	m      Microagent
 	ctx    context.Context
 	cancel context.CancelFunc
+	// banded is set once, at enrollment, when the warm band is on AND this agent
+	// implements Restorable. It is read only by the driving worker goroutine, so it
+	// needs no lock. When false every band call below is a no-op and the loop is
+	// byte-identically the pre-band loop.
+	banded bool
 }
 
 // Host drives K concurrent Microagent.Step calls as goroutines, all sharing one
@@ -125,6 +139,7 @@ type Host struct {
 	audit      AuditSink
 	maxRetries int
 	verifier   Verifier
+	warm       *WarmBand
 
 	queue chan *job
 
@@ -168,6 +183,7 @@ func NewHost(gw Gateway, cfg Config) (*Host, error) {
 		audit:      audit,
 		maxRetries: max(0, cfg.MaxRetries),
 		verifier:   cfg.Verifier,
+		warm:       cfg.Warm,
 		queue:      make(chan *job, queue),
 		live:       map[string]*job{},
 	}
@@ -318,13 +334,26 @@ func (h *Host) worker() {
 // cancel, re-checking the agent's context at every step boundary.
 func (h *Host) run(j *job) {
 	steps, retries := 0, 0
-	feedback, canRetry := j.m.(RetryFeedback)
+	if err := h.enroll(j); err != nil {
+		h.retire(j, steps, false, err)
+		return
+	}
 	for {
 		if j.ctx.Err() != nil {
 			h.retire(j, steps, false, j.ctx.Err())
 			return
 		}
-		done, err := j.m.Step(j.ctx, h.gw)
+		m, err := h.acquire(j)
+		if err != nil {
+			h.retire(j, steps, false, err)
+			return
+		}
+		// Re-read per step rather than once before the loop: a banded agent's live
+		// value is rebuilt by every cold Wake (into a fresh Blank vessel), so the
+		// retry seam must be taken off the value actually being stepped. For an
+		// unbanded agent m is always j.m, so this is the same value every time.
+		feedback, canRetry := m.(RetryFeedback)
+		done, err := m.Step(j.ctx, h.gw)
 		steps++
 		switch {
 		case err != nil && j.ctx.Err() != nil:
@@ -379,13 +408,74 @@ func (h *Host) run(j *job) {
 			h.retire(j, steps, false, verification)
 			return
 		}
+		// Clean step boundary: Step returned, not done, no error. Hand the resident
+		// slot back and let the #4035 WarmPark fold decide where this context goes —
+		// warm into the reserve while residency is above low-water (its next Acquire
+		// pops it back at ZERO Thaw), cold to the store otherwise. A RETRY does not
+		// reach here on purpose: it keeps its slot, so the next Acquire returns the
+		// same held value with no second admit and no round-trip.
+		if err := h.yield(j); err != nil {
+			h.retire(j, steps, false, err)
+			return
+		}
 	}
+}
+
+// enroll registers j with the warm band, but only when the band is ON and the agent
+// implements Restorable — the band must be able to rebuild the agent into a fresh
+// vessel after it drops its last reference, which is the whole point of hibernating
+// the context. An agent that is not Restorable (or any agent at all when Config.Warm
+// is nil) stays unbanded and is stepped exactly the pre-band way.
+//
+// Enrollment freezes the agent's turn-0 context to disk, so it costs one file and no
+// goroutine: N enrolled agents go on to share R resident slots.
+func (h *Host) enroll(j *job) error {
+	if h.warm == nil {
+		return nil
+	}
+	r, ok := j.m.(Restorable)
+	if !ok {
+		return nil
+	}
+	if err := h.warm.Enroll(j.id, r); err != nil {
+		return err
+	}
+	j.banded = true
+	return nil
+}
+
+// acquire resolves the agent to step for this unit of work. Unbanded, that is just
+// j.m. Banded, it takes a resident slot (blocking until one frees, or until the
+// agent's context ends) and returns the LIVE agent the band resolved: the same value
+// if this id is mid-retry, a warm reserve hit at 0 Thaw, else a cold Wake — the
+// status-quo cold start a warm miss falls through to.
+func (h *Host) acquire(j *job) (Microagent, error) {
+	if !j.banded {
+		return j.m, nil
+	}
+	return h.warm.Acquire(j.ctx, j.id)
+}
+
+// yield hands j's resident slot back at a clean step boundary. It is a no-op for an
+// unbanded agent.
+func (h *Host) yield(j *job) error {
+	if !j.banded {
+		return nil
+	}
+	return h.warm.Yield(j.id)
 }
 
 // retire records one agent's terminal outcome exactly once: session entry →
 // Stopped with a reason, one audit event, one Reap result.
 func (h *Host) retire(j *job, steps int, done bool, err error) {
 	j.cancel()
+	// Every terminal path funnels through here, so this one call covers done, error
+	// and cancel alike: it releases any resident slot still held, drops the live
+	// value, and Takes any warm residue back out so the reserve never carries a
+	// finished agent. Retire is idempotent, so a double retire is harmless.
+	if j.banded {
+		h.warm.Retire(j.id)
+	}
 	reason, kind := "done", EventDone
 	switch {
 	case err != nil && j.ctx.Err() != nil && errors.Is(err, j.ctx.Err()):
