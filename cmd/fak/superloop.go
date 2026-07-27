@@ -33,6 +33,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/loopfleet"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/relay"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
 	"github.com/anthony-chaudhary/fak/internal/superloop"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
@@ -54,6 +55,8 @@ func runSuperloop(stdout, stderr io.Writer, argv []string) int {
 		return runSuperloopWalk(stdout, stderr, argv[1:])
 	case "roster":
 		return runRoster(stdout, stderr, argv[1:])
+	case "fleet":
+		return runSuperloopFleet(stdout, stderr, argv[1:])
 	case "drive":
 		return runSuperloopDrive(stdout, stderr, argv[1:])
 	case "modelfit":
@@ -155,8 +158,12 @@ func runSuperloopWalk(stdout, stderr io.Writer, argv []string) int {
 		root = abs
 	}
 
+	// The declared issue-target headline gates the WALK exactly as it gates the
+	// drive (#4958): a walk of an intent with a declared target folds its LIVE
+	// progress count in (surface-only until a dispatch ledger exists), so `walk`
+	// can never read satisfied over an unmet headline the drive would refuse.
 	statuses := collectSuperloopStatuses(root, s)
-	rep := superloop.Walk(s, statuses)
+	rep := superloop.Walk(s, statuses, issueProgressWalkOpts(root, s)...)
 
 	if *asJSON {
 		// Emit the machine-readable report, but the exit code must still reflect the
@@ -270,7 +277,8 @@ func (c *superloopCollector) collect(s superloop.Super, onPath map[string]bool) 
 			if found {
 				st.Measured = true
 				st.Dark = lh.Dark
-				st.Debt = loopDebt(lh)
+				st.Progress, st.ProgressReason = c.memberProgress(m, lh)
+				st.Debt = loopDebt(lh, st.Progress)
 				st.Detail = fmt.Sprintf("state %s, %d run(s), keep %s", lh.State, lh.Runs, keepRateStr(lh.KeepRate))
 				break
 			}
@@ -325,8 +333,12 @@ func (c *superloopCollector) descend(m superloop.Member, onPath map[string]bool)
 		st.Detail = fmt.Sprintf("cycle: %q is already on this descent path", sub.Name)
 		return st
 	}
+	// The sub-intent's declared headline gates its sub-walk here too (#4958), so a
+	// progress shortfall folds into SubwalkStatus debt at the PARENT's altitude —
+	// the root walk ranks a big headline miss ahead of trivial member debt, not
+	// only the drive path.
 	onPath[sub.Name] = true
-	rep := superloop.Walk(sub, c.collect(sub, onPath))
+	rep := superloop.Walk(sub, c.collect(sub, onPath), issueProgressWalkOpts(c.root, sub)...)
 	delete(onPath, sub.Name)
 	return superloop.SubwalkStatus(m, rep)
 }
@@ -417,20 +429,75 @@ func (c *superloopCollector) loopFleet(m superloop.Member) []superloop.MemberSta
 	for ledger, reason := range c.skippedLedger {
 		gaps = append(gaps, superloop.RosterGap{Ledger: ledger, Reason: reason})
 	}
-	return superloop.LoopFleetStatuses(m, folded, gaps)
+	sts := superloop.LoopFleetStatuses(m, folded, gaps)
+	// Fold the per-loop PROGRESS verdict (#4956) onto each enumerated fleet loop
+	// through the same ledger-verified read the hand-named KindLoop members use,
+	// then RE-apply the meta-walk's worst-first key (#4958): debt becomes the
+	// PRODUCT of the three loop dimensions (liveness × progress × follow-on, minus
+	// one — superloop.FleetDebt), so a stale loop that is ALSO spinning compounds
+	// (debt 3) instead of merely summing, and a clean live leaf stays 0. The
+	// follow-on verdict (#4957) rides the same fold as its witness lands; until
+	// then the axis reads "" and multiplies by 1 — surfaced, never fabricated.
+	for i := range sts {
+		lh, ok := c.loopByKind[sts[i].Member.Ref]
+		if !ok || !sts[i].Measured {
+			continue
+		}
+		sts[i].Progress, sts[i].ProgressReason = c.memberProgress(sts[i].Member, lh)
+		sts[i].Debt = superloop.FleetDebt(string(lh.State), lh.Dark, sts[i].Progress, sts[i].FollowOn)
+	}
+	return sts
 }
 
-// loopDebt maps a loop-health row to a debt integer for the worst-first fold: a dark
-// loop carries its urgency in the Dark flag (debt 0), a stale loop is one unit of
-// debt (slipping past its cadence), a live loop is clean.
-func loopDebt(lh loopfleet.LoopHealth) int {
-	if lh.Dark {
-		return 0 // urgency is carried by Dark; tier() ranks it ahead of debt anyway
+// memberProgress reads one loop member's ledger-verified progress (#4956) and folds
+// it into the closed progress verdict. The read is relay.ReadVerifiedProgress over
+// the file-backed ledger reader — the intent ledger's own re-verifiable rows, NEVER
+// the ledger row's self-reported keep counters — and the fold is
+// superloop.ClassifyProgress, which lets only a throughput (issue-drain) member trip
+// SPINNING and parks a proven-idle watch member benign. Fail-closed at every edge: a
+// non-ticking loop reads no progress axis at all (its urgency is the liveness
+// verdict), and a loop with no bound intent-ledger anchor (progressLedgerRef "")
+// reads ProgressUnknown, which the fold surfaces as unmeasured — shown, never debt,
+// never a fabricated zero (the nightIssueProgress posture).
+//
+// The Baseline stays the zero value: the relay high-water starts at 0 (a first
+// verified step counts as progress), so the live SPINNING bar is "ticking with NO
+// verified step recorded at all"; a persisted per-window high-water cursor is the
+// #4958 tend-wiring follow-on.
+func (c *superloopCollector) memberProgress(m superloop.Member, lh loopfleet.LoopHealth) (superloop.MemberProgress, string) {
+	ticking := lh.State == loopmgr.HealthLive || lh.State == loopmgr.HealthStale
+	if !ticking {
+		return "", ""
 	}
-	if lh.State == loopmgr.HealthStale {
-		return 1
+	reader := relay.NewFileLedgerReader(relay.OSFileLedger(c.root))
+	now := relay.ReadVerifiedProgress(relay.ProgressCursor{LedgerRef: progressLedgerRef(c.root, lh.Kind)}, reader)
+	return superloop.ClassifyProgress(m, true, superloop.ProgressRead{Now: now})
+}
+
+// progressLedgerRef maps a fleet loop's stable identity to the repo-relative
+// intent-ledger ref its verified progress is read from. NO live binding exists yet:
+// every loop returns "" (no anchor), which relay.ReadVerifiedProgress fails closed
+// to ProgressUnknown and the walk surfaces as an unmeasured, surface-only progress
+// verdict — never a fabricated zero, never a slanderous SPINNING. A var so tests
+// bind a hermetic ledger and drive the SPINNING path end to end; the production
+// binding (a per-loop persisted cursor) rides the #4958 tend wiring.
+var progressLedgerRef = func(root, kind string) string { return "" }
+
+// loopDebt maps a loop-health row PLUS its progress verdict (#4956) to a debt
+// integer for the worst-first fold: a dark loop carries its urgency in the Dark flag
+// (debt 0), a stale loop is one unit of debt (slipping past its cadence), and a
+// SPINNING loop adds the progress term — one more unit for ticking with zero
+// advanced verified progress — so a live-but-producing-nothing loop can no longer
+// read clean.
+func loopDebt(lh loopfleet.LoopHealth, prog superloop.MemberProgress) int {
+	debt := 0
+	if !lh.Dark && lh.State == loopmgr.HealthStale {
+		debt = 1
 	}
-	return 0
+	if prog == superloop.ProgressSpinning {
+		debt++
+	}
+	return debt
 }
 
 func keepRateStr(r float64) string {
@@ -483,12 +550,27 @@ func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 	fmt.Fprintf(w, "superloop walk: %s — %s (%s)\n", rep.Name, rep.Verdict, rep.Finding)
 	fmt.Fprintf(w, "  aggregate debt %d (floor %d)  members %d  walked %d  unmeasured %d  dark %d\n",
 		rep.TotalDebt, rep.Floor, rep.Members, rep.Walked, rep.Unmeasured, rep.Dark)
+	if rep.Spinning > 0 {
+		// #4956: a member can be live on cadence and still produce nothing verified.
+		fmt.Fprintf(w, "  spinning %d — ticking on cadence with zero advanced verified progress (%s)\n",
+			rep.Spinning, relay.ReasonNoProgress)
+	}
+	if rep.Orphaned > 0 {
+		// #4957: a member can produce fine while its emitted work sits unowned.
+		fmt.Fprintf(w, "  orphaned %d — emitting follow-on work nobody advances (%s)\n",
+			rep.Orphaned, relay.ReasonOrphanedFollowon)
+	}
 	if rep.IssueTarget > 0 {
 		// The intent declares a headline issue target (run-the-night's ~200 overnight).
-		// It is surfaced, not folded into satisfaction — binding it to a live count of
-		// issues progressed is the named follow-on, so the operator sees the DECLARED
-		// number without the walk claiming a progress it did not witness.
-		fmt.Fprintf(w, "  issue target: %d (declared operator headline; live progress-vs-target is the named follow-on)\n", rep.IssueTarget)
+		// When the dispatch ledger made live progress measurable, the walk folds it in
+		// and shows the gate's live numbers (#4958); otherwise the declared number is
+		// surfaced without the walk claiming a progress it did not witness.
+		if rep.IssueProgressMeasured {
+			fmt.Fprintf(w, "  issue target: %d — progressed %d, shortfall %d (a live gate, not a decoration)\n",
+				rep.IssueTarget, rep.IssueProgressed, rep.IssueShortfall)
+		} else {
+			fmt.Fprintf(w, "  issue target: %d (declared operator headline; no dispatch ledger measurable here — surfaced, not folded)\n", rep.IssueTarget)
+		}
 	}
 	fmt.Fprintf(w, "  %s\n\n", rep.Reason)
 
@@ -504,6 +586,12 @@ func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 			debt := fmt.Sprintf("%d", it.Debt)
 			if it.Dark {
 				debt = "DARK"
+			} else if it.Progress == superloop.ProgressSpinning {
+				// live on cadence, zero advanced verified progress (#4956)
+				debt = fmt.Sprintf("SPIN %d", it.Debt)
+			} else if it.FollowOn == superloop.FollowonOrphaned {
+				// emitting follow-on work nobody advances (#4957)
+				debt = fmt.Sprintf("ORPH %d", it.Debt)
 			} else if it.Container {
 				// only an UNREAD pointer renders "→"; a descended sub-super-loop
 				// carries its real folded debt.
@@ -585,6 +673,11 @@ func superloopUsage(w io.Writer) {
                                       super loops — what the operator supervises,
                                       each counted exactly once; an unfoldable
                                       ledger surfaces as a KNOWN gap, never dropped
+  fak superloop fleet <status|next|walk|run>  the generic fleet meta-walker (#4958):
+                                      every ledgered loop worst-first on the PRODUCT
+                                      liveness × progress × follow-on (dark/stale ×
+                                      SPINNING × ORPHANED); run drives the worst
+                                      member through the same admission gate as drive
   fak superloop drive <name> [--lane L]  walk, then ENTER the one worst-first member
                                       through the same admission gate any spawn passes
                                       (COLLISION_RISK on lease overlap), and re-fold

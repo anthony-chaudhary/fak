@@ -1269,6 +1269,10 @@ func debitSession(ctx context.Context, traceID string, usage gateway.SessionUsag
 		OutputTokens:   usage.CompletionTokens,
 		ContextTokens:  usage.ContextTokens,
 		CostMicroCents: servedTurnSpendMicroCents(usage),
+		// The turn's real duration feeds the throughput axis's sustained-rate observation
+		// (#2762); dropping it here left an operator-set `min_throughput` floor inert on the
+		// served path (ObservedNanos never accumulated, so BelowFloor never tripped).
+		DurationNanos: usage.DurationNanos,
 	})
 	persistServeSessionRevision(ctx, traceID, st)
 	return toGatewaySessionState(st)
@@ -1415,10 +1419,16 @@ func applySessionControl(tbl *session.Table, traceID, verb string, req gateway.S
 		if req.Budget == nil {
 			return session.State{}, false, errors.New("budget is required")
 		}
+		// Spend rides the budget wire (#2762): the CLI projects `spend=$25` onto the
+		// priced axis, and a partial `budget` write reads-then-preserves it — so the
+		// two spend fields must be carried here, else the envelope's spend ceiling (or
+		// a live one on a plain --turns edit) is silently cleared.
 		b := session.Budget{
-			TurnsLeft:         req.Budget.TurnsLeft,
-			TokensLeft:        req.Budget.TokensLeft,
-			ContextTokensLeft: req.Budget.ContextTokensLeft,
+			TurnsLeft:           req.Budget.TurnsLeft,
+			TokensLeft:          req.Budget.TokensLeft,
+			ContextTokensLeft:   req.Budget.ContextTokensLeft,
+			SpendMicroCentsLeft: req.Budget.SpendMicroCentsLeft,
+			SpendMicroCentsCap:  req.Budget.SpendMicroCentsCap,
 		}
 		if req.IfRev > 0 {
 			return casApply(tbl, traceID, req.IfRev, func(s *session.State) { s.Budget = b })
@@ -1445,8 +1455,45 @@ func applySessionControl(tbl *session.Table, traceID, verb string, req gateway.S
 		}
 		st, ok := tbl.SetPriority(traceID, pri)
 		return st, ok, nil
+	case "wall":
+		// Wall-clock ceiling (#2762): set the envelope and arm the clock at now, mirroring
+		// SetWallClockLimit. now is read at the process boundary like toGatewaySessionState;
+		// Start is a no-op on an already-ticking clock, so a mid-run reset moves the ceiling
+		// without rewinding elapsed time. A <=0 limit clears the envelope (WithLimit's rule).
+		if req.Wall == nil {
+			return session.State{}, false, errors.New("wall is required")
+		}
+		limit := time.Duration(req.Wall.LimitNanos)
+		now := time.Now()
+		if req.IfRev > 0 {
+			return casApply(tbl, traceID, req.IfRev, func(s *session.State) {
+				s.Time = s.Time.WithLimit(limit).Start(now)
+			})
+		}
+		st, ok := tbl.SetWallClockLimit(traceID, limit, now)
+		return st, ok, nil
+	case "throughput":
+		// Throughput envelope (#2762): the soft expected pace-shaping rate plus the enforced
+		// minimum sustained-rate floor. The accumulated observation window is preserved (only
+		// the rates are re-stated), matching SetThroughputBudget — re-arming must not forget
+		// what has already been measured under a live floor.
+		if req.Throughput == nil {
+			return session.State{}, false, errors.New("throughput is required")
+		}
+		tp := session.ThroughputBudget{
+			ExpectedTokensPerSec: req.Throughput.ExpectedTokensPerSec,
+			MinTokensPerSec:      req.Throughput.MinTokensPerSec,
+		}
+		if req.IfRev > 0 {
+			return casApply(tbl, traceID, req.IfRev, func(s *session.State) {
+				s.Throughput.ExpectedTokensPerSec = tp.ExpectedTokensPerSec
+				s.Throughput.MinTokensPerSec = tp.MinTokensPerSec
+			})
+		}
+		st, ok := tbl.SetThroughputBudget(traceID, tp)
+		return st, ok, nil
 	}
-	return session.State{}, false, fmt.Errorf("unknown verb %q (want run|budget|pace|priority)", verb)
+	return session.State{}, false, fmt.Errorf("unknown verb %q (want run|budget|pace|priority|wall|throughput)", verb)
 }
 
 // casApply reads the current drive record, mutates it in place, and CompareAndSets
