@@ -71,6 +71,8 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	accountsCheck := fs.String("accounts-check", "", "validate an account roster and print the account + binding surface")
 	accountsStatus := fs.String("accounts-status", "", "validate an account roster and print credential readiness (env presence only; no network, no secret values)")
 	accountsCover := fs.String("accounts-cover", "", "cross-check an account roster against the routing manifest's routed ids and report coverage (exit 1 if any id is unbound)")
+	place := fs.Bool("place", false, "walk the zone ladder (device -> fleet -> vendor) for this subject and report which rung serves it; needs --accounts")
+	capability := fs.String("capability", "", "declare MEASURED per-model capability tiers for --place: model=t0|t1|t2[,...] (undeclared = unmeasured, which may not descend the ladder)")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
 	capacityReason := fs.String("capacity-reason", "", "capacity block reason token")
 	capacityFrom := fs.String("capacity-from", "", "currently blocked target")
@@ -188,6 +190,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	// concrete provider/account/upstream that serves it. This is the COMPOSITION:
 	// the route picks the abstract model ids, the roster says whose account runs them.
 	var bound *modelroute.ResolvedPlan
+	var roster *modelroute.Roster
 	if *accounts != "" {
 		r, err := modelroute.LoadRoster(*accounts)
 		if err != nil {
@@ -195,12 +198,18 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		fmt.Fprintf(stderr, "fak: loaded account roster from %s\n", *accounts)
+		roster = &r
 		resolved, err := r.ResolveDecision(d)
 		if err != nil {
 			fmt.Fprintln(stderr, "fak route:", err)
 			return 1
 		}
 		bound = &resolved
+	}
+
+	// --place asks the orthogonal question: not which model, but which RUNG runs it.
+	if *place {
+		return runRoutePlace(stdout, stderr, roster, subj, *capability, *asJSON)
 	}
 
 	if *asJSON {
