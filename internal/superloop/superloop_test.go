@@ -968,7 +968,8 @@ func TestRunTheNightWalksThreeDimensions(t *testing.T) {
 
 // TestTendScoreboardsWalksReportingSurfaces pins the reporting-family intent's shape: the
 // four outward-facing report scorecards fak posts to Slack (product, release, steerability,
-// milestone) as MEASURABLE members, plus the Slack-beat feed-delivery surface as a
+// milestone) as MEASURABLE members, the operator-steerability overlay's maintenance loop
+// (#5039) as the one liveness member, plus the Slack-beat feed-delivery surface as a
 // descend pointer. It also pins the once-only guarantee (none of the four scorecards is
 // walked by another intent, so the root fold counts each once) and that tend descends it.
 func TestTendScoreboardsWalksReportingSurfaces(t *testing.T) {
@@ -978,7 +979,7 @@ func TestTendScoreboardsWalksReportingSurfaces(t *testing.T) {
 	}
 	wantCards := map[string]bool{"product": true, "release": true, "steer": true, "milestone": true}
 	gotCards := map[string]Member{}
-	var surfaces int
+	var surfaces, loops int
 	for _, m := range sb.Members {
 		switch m.Kind {
 		case KindScorecard:
@@ -986,13 +987,18 @@ func TestTendScoreboardsWalksReportingSurfaces(t *testing.T) {
 				t.Errorf("report scorecard %q has no Enter hint — its worklist action must be runnable", m.Ref)
 			}
 			gotCards[m.Ref] = m
+		case KindLoop:
+			loops++
+			if m.Ref != steerprOverlayLoopRef {
+				t.Errorf("tend-scoreboards loop member = %q, want the steerability-overlay maintenance loop %q", m.Ref, steerprOverlayLoopRef)
+			}
 		case KindSurface:
 			surfaces++
 			if m.Ref != "fak slack beat" {
 				t.Errorf("tend-scoreboards surface member = %q, want the slack-beat delivery-liveness surface", m.Ref)
 			}
 		default:
-			t.Errorf("tend-scoreboards member %q has unexpected kind %q (want scorecard or surface)", m.Ref, m.Kind)
+			t.Errorf("tend-scoreboards member %q has unexpected kind %q (want scorecard, loop or surface)", m.Ref, m.Kind)
 		}
 	}
 	for ref := range wantCards {
@@ -1002,6 +1008,9 @@ func TestTendScoreboardsWalksReportingSurfaces(t *testing.T) {
 	}
 	if surfaces != 1 {
 		t.Errorf("tend-scoreboards must carry exactly one feed-delivery surface pointer, got %d", surfaces)
+	}
+	if loops != 1 {
+		t.Errorf("tend-scoreboards must carry exactly one liveness loop member (the overlay), got %d", loops)
 	}
 
 	// The four report scorecards must not be walked by any OTHER intent — else the root
@@ -1024,6 +1033,7 @@ func TestTendScoreboardsWalksReportingSurfaces(t *testing.T) {
 		{Member: gotCards["product"], Measured: true, Debt: 0},
 		{Member: gotCards["release"], Measured: true, Debt: 0},
 		{Member: gotCards["steer"], Measured: true, Debt: 0},
+		{Member: steerprOverlayMember(t, sb), Measured: true, Debt: 0},
 		{Member: Member{Kind: KindSurface, Ref: "fak slack beat"}, Container: true},
 	})
 	if rep.TotalDebt != 7 {
