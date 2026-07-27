@@ -323,6 +323,63 @@ never down, which is what makes accepting complexity as an input safe at all.
 `Roster.PlaceSubject(subject, candidates)` composes the two and returns the placement
 *and* the classification, so both halves of the decision are visible together.
 
+### Declaring what a sub-agent type does
+
+Sub-agents are where the cheap rungs would pay for themselves — a fleet spawns far more
+delegated work than top-level turns — and `Roster.PlaceSpawn(parent, class, candidates)`
+already answers "which rung should this child run on". It refuses an **empty** work class
+on purpose: an unclassified spawn is a missing classification, not a routine one, and
+letting delegation reach a laptop without stating what the work *is* would be exactly the
+shape a floor bypass takes.
+
+That refusal is what left the call unreachable. A spawn arrives as an admitted tool call
+carrying an agent **type** and a prompt. The prompt is prose, and reading a class out of
+prose is the guess `ClassOf` refuses everywhere else. The type is structured — but it is
+not a work class: only an operator knows whether the agent type *their* fleet calls
+`explore` does bounded lookup or ships code.
+
+So it is declared, in the roster the operator already owns:
+
+```jsonc
+"spawn_classes": [
+  { "type": "explore",        "class": "routine" },
+  { "type": "code-reviewer",  "class": "normal-impl" },
+  { "type": "release-cutter", "class": "security-release-destructive" }
+]
+```
+
+`Roster.SpawnClassFor(type)` resolves one, returning `(class, declared bool)`. The rules
+are the ones the rest of this leaf runs on:
+
+| Input | Resolves to | Why |
+| --- | --- | --- |
+| a declared type (case- and space-insensitive) | that class, **declared** | the operator said so |
+| a type nobody declared, or no `spawn_classes` block at all | *(empty)*, **undeclared** | `PlaceSpawn` then refuses — the spawn keeps whatever placement it has today |
+| a declared type whose class token this package does not know | *(empty)*, **undeclared** | same rule as a misspelled `work_class` label: a typo is not permission to use a laptop |
+
+The match is **exact**, never a prefix and never a glob — `explore` must not answer for
+`explore-and-delete`. A malformed entry is refused at load rather than skipped: an empty
+type, an empty or unknown class (the error names the four options), a duplicate type, or a
+type carrying a route delimiter. A silently-dropped entry is the worst outcome available,
+because it looks correct from the operator's side while behaving like an undeclared one,
+and nothing points at the typo.
+
+**Shipped:** the declaration, its validation, and the resolver — plus the block in
+`examples/model-accounts.example.json`, which the test suite parses and resolves.
+**Not shipped:** nothing on the spawn path calls `SpawnClassFor` yet. The gateway does
+observe spawns (`internal/gateway/adjudicate_proposed.go` stamps every admitted tool call
+and already recognises the spawn-shaped ones — that is where `spawn_count` comes from),
+and that is the seam a placement call would bind to, but binding it changes where
+delegated traffic runs and is a separate, individually reviewable change under
+[epic #5416](https://github.com/anthony-chaudhary/fak/issues/5416). Declaring
+`spawn_classes` today moves no traffic.
+
+One neighbouring field is *not* this signal, and it has already been mistaken for it: a
+session's `ParentTrace`/`Generation` is **continuation** lineage — the same agent after a
+budget-reset re-continuation — written only by `session.Table.Recontinue`. It never marks
+a row as somebody's child. `SpawnCount` is the sub-agent axis, and it is parent-side: it
+counts children a trace spawned, never whose child a trace is.
+
 ### Seeing the ladder before it moves traffic: `fak route --place`
 
 ```console

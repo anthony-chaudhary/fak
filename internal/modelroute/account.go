@@ -219,6 +219,16 @@ type Account struct {
 	RequestsPerDay    int          `json:"requests_per_day,omitempty"`
 	TokensPerMinute   int          `json:"tokens_per_minute,omitempty"`
 	TokensPerDay      int          `json:"tokens_per_day,omitempty"`
+	// Principals is the OPTIONAL closed set of tenant ISOLATION principals — the
+	// org/project identity a gateway keyset binds an inbound api key to (#5332) —
+	// admitted to dispatch through this account. EMPTY means UNRESTRICTED: every
+	// principal may reach the account, which is byte-for-byte the behavior of every
+	// roster written before this field existed. A NON-EMPTY list is a fail-CLOSED
+	// allowlist enforced at the routing boundary (before Submit), so one tenant can
+	// never dispatch through another tenant's credential — the residency arm of the
+	// keyset. It scopes WHICH accounts a tenant may reach; it is NOT an authority
+	// grant and says nothing about whether a turn may consume user consent.
+	Principals []string `json:"principals,omitempty"`
 }
 
 // Binding maps ONE routed model id (a Plan member's Model, or a Plan's Scout) to the
@@ -245,6 +255,11 @@ type Roster struct {
 	Accounts []Account `json:"accounts"`
 	Bindings []Binding `json:"bindings,omitempty"`
 	Default  string    `json:"default,omitempty"`
+	// SpawnClasses declares which work class each of the fleet's sub-agent TYPES does
+	// (epic #5416, track E). Optional and omitempty: a roster without it is unchanged,
+	// and an undeclared type stays undeclared rather than defaulting to a class. See
+	// spawnclass.go for why the declaration lives here rather than being inferred.
+	SpawnClasses []SpawnClass `json:"spawn_classes,omitempty"`
 }
 
 // Target is the resolved dispatch destination for one routed model id: which account
@@ -264,6 +279,38 @@ type Target struct {
 	RequestsPerDay    int          `json:"requests_per_day,omitempty"`
 	TokensPerMinute   int          `json:"tokens_per_minute,omitempty"`
 	TokensPerDay      int          `json:"tokens_per_day,omitempty"`
+	// Principals carries the resolving Account's tenant-isolation allowlist through to
+	// the dispatch boundary so Admits can adjudicate it there (#5332). Empty =>
+	// unrestricted, exactly as on the Account.
+	Principals []string `json:"principals,omitempty"`
+}
+
+// Admits reports whether the given tenant ISOLATION principal may dispatch through
+// this target's account (#5332, the residency arm of the gateway keyset). An account
+// naming NO principals is unrestricted and admits everyone — the pre-#5332 roster is
+// unchanged. An account naming ANY is a fail-CLOSED allowlist:
+//
+//   - only an exact, whitespace-trimmed member is admitted. The compare is never a
+//     prefix or a glob, so "acme" never admits "acme-evil";
+//   - the EMPTY principal — what a caller presents when no keyset key bound it to a
+//     tenant, including the single --require-key-env bearer — is NEVER admitted to a
+//     restricted account. An unattributable caller cannot inherit a tenant's credential;
+//   - a list of only blank entries admits NOBODY rather than degrading to unrestricted,
+//     so a typo'd roster fails closed instead of opening the account to everyone.
+func (t Target) Admits(principal string) bool {
+	if len(t.Principals) == 0 {
+		return true
+	}
+	want := strings.TrimSpace(principal)
+	if want == "" {
+		return false
+	}
+	for _, p := range t.Principals {
+		if strings.TrimSpace(p) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Local reports whether this target dispatches to an on-box server. It is DERIVED
@@ -369,6 +416,7 @@ func (r Roster) Resolve(modelID string) (Target, error) {
 		RequestsPerDay:    a.RequestsPerDay,
 		TokensPerMinute:   a.TokensPerMinute,
 		TokensPerDay:      a.TokensPerDay,
+		Principals:        a.Principals,
 	}, nil
 }
 
@@ -526,6 +574,9 @@ func (r Roster) Validate() error {
 	}
 	if r.Default != "" && !seen[r.Default] {
 		return fmt.Errorf("modelroute: default account %q is not a defined account", r.Default)
+	}
+	if err := validateSpawnClasses(r.SpawnClasses); err != nil {
+		return err
 	}
 	return nil
 }
