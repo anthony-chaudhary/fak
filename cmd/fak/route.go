@@ -77,6 +77,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	outcomes := fs.String("outcomes", "", "grade per-model capability for --place from an append-only turn journal (one JSON TurnOutcome per line), counting the turns here rather than trusting a summary")
 	since := fs.String("since", "", "evidence window for --outcomes: 30d or a Go duration like 720h; an undated turn cannot be shown to be inside it and is excluded")
 	gradeFloor := fs.String("grade-floor", "", "evidentiary bar for --outcomes: attempts=N,rate=0..1[,witness] (default attempts=20,rate=0.8)")
+	spawnType := fs.String("spawn-type", "", "with --place: also place a sub-agent this turn spawns, of this agent TYPE; its work class comes from the roster's spawn_classes declaration (an undeclared type is refused, never assumed routine)")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
 	capacityReason := fs.String("capacity-reason", "", "capacity block reason token")
 	capacityFrom := fs.String("capacity-from", "", "currently blocked target")
@@ -215,8 +216,15 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	if *place {
 		return runRoutePlace(stdout, stderr, roster, subj, placeOptions{
 			CapSpec: *capability, EvidencePath: *evidence, OutcomesPath: *outcomes,
-			Since: *since, FloorSpec: *gradeFloor, JSON: *asJSON,
+			Since: *since, FloorSpec: *gradeFloor, SpawnType: *spawnType, JSON: *asJSON,
 		})
+	}
+	// A --spawn-type without --place would be silently dropped, and a placement flag
+	// that quietly does nothing is worse than one that is refused: the operator reads a
+	// routing answer and believes they saw a spawn placed.
+	if strings.TrimSpace(*spawnType) != "" {
+		fmt.Fprintln(stderr, "fak route: --spawn-type needs --place — placing a sub-agent is a rung question, and `fak route` alone answers which model, not which rung")
+		return 2
 	}
 
 	if *asJSON {

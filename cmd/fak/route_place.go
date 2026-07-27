@@ -95,6 +95,10 @@ type placementReport struct {
 	Grades         []modelroute.Grade        `json:"grades,omitempty"`
 	IgnoredModels  []string                  `json:"ignored_evidence_models,omitempty"`
 	Journal        *journalSummary           `json:"journal,omitempty"`
+	// Spawn is present only when --spawn-type asked the delegated question. A
+	// pointer, so an absent key means "not asked" rather than "a spawn that placed
+	// nowhere" (route_place_spawn.go).
+	Spawn *spawnPlacementReport `json:"spawn,omitempty"`
 }
 
 // placeOptions are the two ways a caller may say what a model can do, plus the render
@@ -106,6 +110,7 @@ type placeOptions struct {
 	OutcomesPath string // --outcomes: the raw turn journal, counted here
 	Since        string // --since: the evidence window ("30d", "720h")
 	FloorSpec    string // --grade-floor: the operator's evidentiary bar
+	SpawnType    string // --spawn-type: also place a sub-agent of this DECLARED type
 	JSON         bool
 }
 
@@ -154,6 +159,19 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 		return 1
 	}
 
+	// The delegated question, asked against the SAME pool the parent walked: a child
+	// that could only descend because the oracle handed it different candidates would
+	// be reporting a rung the fleet cannot actually serve it on.
+	var spawn *spawnPlacementReport
+	if strings.TrimSpace(opts.SpawnType) != "" {
+		rep, err := spawnPlacementFor(*roster, p, opts.SpawnType, candidates)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 1
+		}
+		spawn = &rep
+	}
+
 	measured := 0
 	for _, c := range candidates {
 		if c.Measured {
@@ -163,12 +181,15 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 	if opts.JSON {
 		b, _ := json.MarshalIndent(placementReport{
 			Classification: cls, Placement: p, Candidates: candidates, MeasuredCount: measured,
-			Grades: grades, IgnoredModels: ignored, Journal: journal,
+			Grades: grades, IgnoredModels: ignored, Journal: journal, Spawn: spawn,
 		}, "", "  ")
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
 	printPlacement(stdout, p, cls, candidates, measured)
+	if spawn != nil {
+		printSpawnPlacement(stdout, *spawn)
+	}
 	if grades != nil {
 		printGrades(stdout, grades, floor, ignored)
 	}

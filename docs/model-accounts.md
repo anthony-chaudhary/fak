@@ -398,6 +398,36 @@ the question is which rung can serve this class of work at all. Compatibility-on
 deprecated-alias bindings are excluded, since admitting a legacy spelling would let the
 same hardware appear twice on a rung.
 
+Add `--spawn-type TYPE` to ask the *delegated* question in the same breath: where would a
+sub-agent of that type run, given that this turn ran where the block above says. Against
+the shipped example roster:
+
+```console
+$ fak route --accounts examples/model-accounts.example.json --place \
+      --labels work_class=ultra-hard --spawn-type explore \
+      --capability zone-device=t2,zone-fleet=t1,large=t0
+```
+```
+SPAWN PLACEMENT  (--spawn-type explore)
+  work class   routine  [declared by the roster's spawn_classes]
+  parent       zone=vendor  model=deepseek-flash
+  placed       zone=device  model=zone-device
+  self-hosted  yes      escalated  no
+  relation     spawn-descended-from-parent-zone spawn-inherit-unmeasured
+  descent      yes      self-hosted descent  yes
+```
+
+The child's class comes from the `spawn_classes` declaration above — never from the
+parent, the prompt, or the spelling of the type — so an **undeclared** type is refused
+with the roster's own list of declared ones rather than assumed routine. The parent's rung
+is *recorded, not obeyed*: a sub-agent spawned from a frontier turn still lands on the
+laptop, which is the whole point, and `self-hosted descent` is the event
+[epic #5416](https://github.com/anthony-chaudhary/fak/issues/5416) counts. The report also
+answers the counterfactual — what *inheriting* the parent's model would have done — and
+says `UNKNOWN` when the parent was never graded, because "the status quo was fine here"
+is a claim that needs a measurement behind it. `--json` carries the same answer under a
+`spawn` key that is **absent** when the question was not asked.
+
 ### Saying what a model can do
 
 Because unmeasured capability may not descend the ladder, a fresh roster places
