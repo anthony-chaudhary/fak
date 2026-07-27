@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	conceptbench "github.com/anthony-chaudhary/fak/internal/conceptbench"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 )
@@ -233,7 +234,32 @@ func runSpine(f flags, budget budgetInfo) int {
 		HonestyGate:        gate,
 		Rows:               rows,
 	}
-	return writeArtifact(f.out, rep)
+	return emitSpineReport(f.out, rep)
+}
+
+// emitSpineReport writes the spine's fak.conceptbench.v1 artifact through
+// benchcli's lineage stamper, so the four lineage axes (version / utc / git_commit /
+// machine) ride on the report the spine produces — the contract
+// internal/benchlineagegate enforces at this emit site. --out takes
+// benchcli.WriteReport (which additionally pins the artifact's own path into the
+// lineage envelope); with no --out the stamped bytes are produced by
+// benchcli.MarshalReport and printed, matching writeArtifact's stdout form.
+func emitSpineReport(out string, rep spineReport) int {
+	if out != "" {
+		if err := benchcli.WriteReport(out, rep); err != nil {
+			fmt.Fprintln(os.Stderr, "conceptbench:", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, "wrote", out)
+		return 0
+	}
+	blob, err := benchcli.MarshalReport(rep)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "conceptbench:", err)
+		return 1
+	}
+	fmt.Println(string(blob))
+	return 0
 }
 
 // spineHonesty lifts the spine rows into report.go's ReportRow shape and returns
