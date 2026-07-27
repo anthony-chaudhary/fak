@@ -243,6 +243,54 @@ The zones are ordered as an escalation ladder — `device` (0) → `fleet` (1) �
 declared value rather than a string switch. An unrecognized zone ranks *above* vendor
 and is neither self-hosted nor on-box: unattributable never reads as free or as safe.
 
+### Walking the ladder: `Roster.Place`
+
+`Roster.Place(class, candidates)` is what actually walks it. Given a `WorkClass` and the
+models you have bound — each with the work tier you have evidence it can serve — it
+returns the cheapest rung that can take the job, plus the full ladder walk that produced
+the answer:
+
+```go
+p, err := roster.Place(modelroute.ClassRoutine, []modelroute.Candidate{
+    {Model: "tiny",     Capability: modelroute.TierT2, Measured: true},
+    {Model: "corp-mid", Capability: modelroute.TierT1, Measured: true},
+    {Model: "frontier", Capability: modelroute.TierT0, Measured: true},
+})
+// p.Zone == ZoneDevice, p.SelfHosted() == true, p.Escalated == false
+```
+
+Two rules stop it from being wishful thinking:
+
+**The floor belongs to the work, not to the model.** Admission runs through
+`TierPolicy.Admit`, so a cheap rung cannot take work above its tier however available it
+is. Security/release/destructive work has a floor that never drops to routine, so it
+skips a measured local model and lands on the fleet — `p.Escalated` is true and the
+device rung reports `zone-under-tier`. An unrecognized class stays at the strictest floor
+rather than inferring a cheap one.
+
+**Unmeasured capability may not descend the ladder.** `Candidate.Measured` records
+whether `Capability` is a measurement or an assertion, and an assertion is skipped on
+every rung below the vendor. This matters right now: `internal/ablate`'s `StubTierScorer`
+measures nothing, so a placer that trusted asserted grades would route everything to the
+cheapest rung on a number nobody computed, and would look like it was working. Until
+capability measurement lands, an operator opts a rung in by marking a candidate
+`Measured` — a claim they can be held to. `TestUnmeasuredCapabilityCannotDescendTheLadder`
+pins both halves: an all-asserted ladder places on the vendor, and the same work moves to
+the device the moment the cheap rung is measured.
+
+Every rung is reported, including the ones passed over, in a closed reason vocabulary
+(`placed-in-zone`, `zone-under-tier`, `zone-capability-unmeasured`, `zone-no-candidate`,
+`zone-not-reached`, `escalated-past-cheaper-zone`) — because "why is this *still* going to
+a vendor?" is the question an operator actually asks. A candidate the roster cannot
+resolve is a loud error, never a silent skip: a typo in a placement config must surface as
+a misconfiguration rather than as traffic quietly continuing to bill a vendor.
+
+The trap this code is written around is that `WorkTier` numbers are **inverted** — T0 is
+the most demanding but the lowest number. Every comparison goes through
+`WorkTier.MeetsRequirement`, never a raw `<` or `>=`. Substituting the natural-looking
+`capability >= required` fails four tests at once, and the way it fails is the point: a
+4B laptop model takes both the ultra-hard and the security/destructive work.
+
 ## A note on codex and Anthropic subscriptions
 
 Codex's native wire is the OpenAI Responses API, so bind it to `kind: openai-responses`,
@@ -313,9 +361,10 @@ gives every downstream consumer one predicate to attribute a token by. Witnessed
 `TestZonesPartitionTheKnownKinds`, `TestEngineRouteCarriesTheZoneBackOut`,
 `TestShippedExampleRosterCarriesAllThreeZones`, and — at the enforcing floor —
 `TestFleetZoneStaysRemoteAtTheFloor` plus `TestTierOneRouteMirrorAgreesWithTheFloor`.
-*Deferred, and deliberately so:* nothing yet **chooses** a zone automatically, the serving
-path does not yet **record** the zone it used, and the residency floor does not yet treat
-a fleet host as inside a trust boundary. Zone-aware placement, the self-hosted
+*Also shipped:* `Roster.Place` **chooses** a zone (see *Walking the ladder* above).
+*Deferred, and deliberately so:* nothing yet calls it on the live dispatch path, the
+serving path does not yet **record** the zone it used, and the residency floor does not
+yet treat a fleet host as inside a trust boundary. Zone-aware placement, the self-hosted
 token-fraction metric, and the escalation ladder are separate, individually reviewable
 changes on top of this vocabulary — not implied by it. They are tracked as
 [epic #5416](https://github.com/anthony-chaudhary/fak/issues/5416).
