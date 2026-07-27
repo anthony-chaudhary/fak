@@ -70,6 +70,19 @@ type Placement struct {
 	Choice    TierChoice    `json:"choice"`
 	Escalated bool          `json:"escalated"` // a cheaper rung had a candidate and lost
 	Ladder    []ZoneVerdict `json:"ladder"`    // every rung, in ladder order
+
+	// Measured reports whether the winning candidate's capability was MEASURED or
+	// merely the unmeasured default.
+	//
+	// It is carried explicitly because Choice cannot be read honestly without it. An
+	// unmeasured candidate enters Admit at the zero-value tier — the most demanding one
+	// — so the top rung's fallback is admitted with Choice.Capability == TierT0 and,
+	// against a routine floor, Choice.OverTier == true. Both are artifacts of the
+	// default, not findings: reporting "over-tier waste" about a model nobody graded
+	// asserts a capability fak does not have. A surface rendering Choice MUST consult
+	// this first. Recovering it by scanning Ladder for ReasonTopRungUnmeasured would
+	// work today and break the moment the reason vocabulary grows.
+	Measured bool `json:"measured"`
 }
 
 // SelfHosted reports whether the placement landed on hardware the engineer or their
@@ -185,6 +198,7 @@ func (r Roster) Place(class WorkClass, candidates []Candidate) (Placement, error
 			Zone:      zone,
 			Choice:    choice,
 			Escalated: cheaperRungLost,
+			Measured:  chosen.cand.Measured,
 		}
 		break
 	}

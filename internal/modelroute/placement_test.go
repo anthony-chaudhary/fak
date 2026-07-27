@@ -315,3 +315,37 @@ func hasReason(reasons []string, want string) bool {
 	}
 	return false
 }
+
+// TestAnUnmeasuredWinnerSaysSoOnThePlacement pins the honesty fix that a rendering
+// surface depends on. An unmeasured candidate enters Admit at the zero-value tier — the
+// MOST demanding one — so the top rung's fallback comes back with Capability T0 and, for
+// routine work, OverTier true. Read without Measured, that says "we placed a T0-grade
+// model and it is over-tier waste" about a model nobody has ever graded.
+func TestAnUnmeasuredWinnerSaysSoOnThePlacement(t *testing.T) {
+	r := threeZoneRoster()
+	p, err := r.Place(ClassRoutine, []Candidate{{Model: "frontier"}}) // no measurement anywhere
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Measured {
+		t.Fatalf("placement of an ungraded candidate claims a measurement: %+v", p)
+	}
+	// The trap this field exists to defuse: Choice alone reads as a graded, over-tier pick.
+	if p.Choice.Capability != TierT0 || !p.Choice.OverTier {
+		t.Fatalf("expected the unmeasured default to look graded-and-over-tier in Choice (%+v) — "+
+			"if that changed, Placement.Measured's doc comment needs updating too", p.Choice)
+	}
+	if !hasReason(p.Ladder[len(p.Ladder)-1].Reasons, ReasonTopRungUnmeasured) {
+		t.Fatalf("top rung did not record %q: %+v", ReasonTopRungUnmeasured, p.Ladder)
+	}
+
+	// A genuinely measured winner reports the opposite, so the flag tracks the candidate
+	// rather than the zone it happened to land in.
+	got, err := r.Place(ClassRoutine, measured())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Measured {
+		t.Fatalf("placement of a measured candidate denies the measurement: %+v", got)
+	}
+}
