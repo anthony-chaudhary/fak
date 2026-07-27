@@ -2,6 +2,7 @@ package dispatchtick
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -228,5 +229,118 @@ func TestSelfModifyHoldForPickCatchesMisroutedTrustCriticalIssue(t *testing.T) {
 	// An UNGUARDED worker is never held, even when the issue text targets trust-critical trees.
 	if held, _ := SelfModifyHoldForPick(false, []string{"tools/**"}, "edit internal/adjudicator/decide.go"); held {
 		t.Fatalf("SelfModifyHoldForPick held an unguarded worker")
+	}
+}
+
+// misrouteTaxonomy mirrors the live dos.toml shape the routing-time hold has to survive:
+// the trust-critical trees that DO have their own concurrent lane (policy), the one whose
+// lane is EXCLUSIVE and therefore absent from the concurrent set (abi -> internal/abi/**),
+// and the shippable lanes a mis-route lands on.
+var misrouteTaxonomy = LaneTaxonomy{
+	Concurrent: []string{"tools", "docs", "policy", "gateway"},
+	Trees: map[string][]string{
+		"tools":   {"tools/**", "scripts/**"},
+		"docs":    {"docs/**"},
+		"policy":  {"internal/policy/**"},
+		"gateway": {"internal/gateway/**"},
+	},
+}
+
+func TestRouteIssueHoldsTrustCriticalTextMisroutedToShippableLane(t *testing.T) {
+	// The root-cause case (#3122): internal/abi's lane is exclusive, so the path rung
+	// yields NO concurrent lane and the `dispatch` scope alias drops the issue on the
+	// shippable `tools` lane -- where a guarded worker can never ship it. Held at routing
+	// time so it never reaches the front of tools' priority order.
+	got := RouteIssue(Issue{
+		Number: 2514,
+		Title:  "fix(dispatch): tighten the tick's refusal",
+		Body:   "the real work is in `internal/abi/kernel.go`",
+	}, misrouteTaxonomy, RouteOptions{})
+	if got.Lane != "" {
+		t.Fatalf("RouteIssue(internal/abi text, dispatch->tools alias).Lane = %q, want \"\" (held)", got.Lane)
+	}
+	if !strings.HasPrefix(got.Signal, TrustCriticalMisrouteSignalPrefix) {
+		t.Fatalf("held route Signal = %q, want the %q prefix", got.Signal, TrustCriticalMisrouteSignalPrefix)
+	}
+	if !strings.Contains(got.Signal, "internal/abi/kernel.go") || !strings.Contains(got.Signal, "tools") {
+		t.Fatalf("held route Signal = %q, want it to name both the trust-critical tree and the lane it was held from", got.Signal)
+	}
+	if !strings.Contains(got.UnroutedReason, "internal/abi/kernel.go") {
+		t.Fatalf("held route UnroutedReason = %q, want the trust-critical tree named", got.UnroutedReason)
+	}
+
+	// A CORRECTLY-routed trust-critical issue keeps its lane: the lane tree already
+	// reveals the hazard, so the pick-time lane-tree arm holds it with a better witness
+	// and the lane attribution operators read stays intact.
+	correct := RouteIssue(Issue{
+		Number: 2515,
+		Title:  "fix(policy): reload the manifest",
+		Body:   "in `internal/policy/loader.go`",
+	}, misrouteTaxonomy, RouteOptions{})
+	if correct.Lane != "policy" {
+		t.Fatalf("RouteIssue(correctly-routed policy issue).Lane = %q, want policy (never held at routing time)", correct.Lane)
+	}
+
+	// A merely-SELF-SOURCE issue is NOT held: the guard floor permits shipping
+	// internal/gateway, so holding it would starve the dispatch surface.
+	shippable := RouteIssue(Issue{
+		Number: 2516,
+		Title:  "fix(gateway): drop the stale keyset",
+		Body:   "in `internal/gateway/keyset.go`",
+	}, misrouteTaxonomy, RouteOptions{})
+	if shippable.Lane != "gateway" {
+		t.Fatalf("RouteIssue(guard-shippable gateway issue).Lane = %q, want gateway (never held)", shippable.Lane)
+	}
+
+	// An ordinary shippable issue with no trust-critical reference routes untouched.
+	plain := RouteIssue(Issue{
+		Number: 2517,
+		Title:  "docs(docs): refresh the front door",
+		Body:   "update `docs/README.md`",
+	}, misrouteTaxonomy, RouteOptions{})
+	if plain.Lane != "docs" {
+		t.Fatalf("RouteIssue(plain docs issue).Lane = %q, want docs", plain.Lane)
+	}
+}
+
+func TestRouteIssuesKeepsTrustCriticalMisrouteOffTheShippableLaneFront(t *testing.T) {
+	// The acceptance criterion stated in payload terms: the mis-routed issue must not
+	// appear in ANY shippable lane's priority order in `fak dispatch route --json`, and
+	// must be legible to an operator as its own hold class rather than a generic miss.
+	// Both fixtures use the CONTRACT-COMPLETE body builder: RouteIssues drops any issue
+	// failing the shared issue contract into the skipped set BEFORE routing, so a thin
+	// body would make every assertion below pass vacuously. Distinct scopes + disjoint
+	// path hints also keep the duplicate-risk skip from firing for the same reason.
+	payload := RouteIssues(RouterInput{
+		Workspace: "ws",
+		Taxonomy:  misrouteTaxonomy,
+		Issues: []Issue{
+			{Number: 2514, Title: "fix(dispatch): tighten the tick's refusal",
+				Body: scopedDispatchIssueBody("2", "fak/internal/abi/kernel.go")},
+			{Number: 2600, Title: "chore(ops): drop the stale run dir",
+				Body: scopedDispatchIssueBody("3", "tools/dispatch_status.py")},
+		},
+	})
+	if got := len(payload.Issues); got != 2 {
+		t.Fatalf("routed %d issue(s), want 2 -- both fixtures must survive the contract/duplicate filters or the assertions below are vacuous", got)
+	}
+	for lane, group := range payload.Lanes {
+		for _, num := range group.Issues {
+			if num == 2514 {
+				t.Fatalf("mis-routed trust-critical issue #2514 is still in lane %q's priority order %v", lane, group.Issues)
+			}
+		}
+	}
+	if got := payload.Lanes["tools"].Issues; len(got) != 1 || got[0] != 2600 {
+		t.Fatalf("tools lane issues = %v, want only the genuinely-shippable #2600", got)
+	}
+	var bucket string
+	for _, row := range payload.UnroutableBacklog {
+		if row.Number == 2514 {
+			bucket = row.Bucket
+		}
+	}
+	if bucket != "trust_critical" {
+		t.Fatalf("unroutable bucket for #2514 = %q, want trust_critical (an operator-legible hold, not a generic no_lane miss)", bucket)
 	}
 }

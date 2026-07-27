@@ -360,6 +360,12 @@ func routeUnroutableBucket(route IssueRoute) string {
 		if strings.HasPrefix(route.Signal, "exclusive-scope:") || strings.Contains(route.UnroutedReason, "exclusive-lane") {
 			return "exclusive_lane"
 		}
+		// A trust-critical mis-route (#3122) DID route -- it was held on purpose. Give it
+		// its own bucket so the operator sees the hold, not the generic "no lane signal"
+		// advice to add a scope/label/path hint, which would be wrong here.
+		if strings.HasPrefix(route.Signal, TrustCriticalMisrouteSignalPrefix) {
+			return "trust_critical"
+		}
 		return "no_lane"
 	}
 	if route.SignalConflict && strings.HasPrefix(route.Signal, "path-ambiguous:") {
@@ -383,6 +389,8 @@ func unroutableBacklogAction(bucket string) string {
 		return "add a lane-bearing title scope, label, or concrete path hint"
 	case "exclusive_lane":
 		return "operator must pick a non-exclusive lane or launch the exclusive work manually"
+	case "trust_critical":
+		return "re-route to the lane owning the named trust-critical tree, or run it UNGUARDED (the worktree-isolated escape); a guarded worker can investigate this but never ship it"
 	case "missing_scope":
 		return "add worker-ready scope, done condition, witness, likely files, and work-unit metadata"
 	case "ambiguous_path":
@@ -398,10 +406,12 @@ func unroutableBacklogRank(bucket string) int {
 		return 0
 	case "exclusive_lane":
 		return 1
-	case "missing_scope":
+	case "trust_critical":
 		return 2
-	case "ambiguous_path":
+	case "missing_scope":
 		return 3
+	case "ambiguous_path":
+		return 4
 	default:
 		return 9
 	}

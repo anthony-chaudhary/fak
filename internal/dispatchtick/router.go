@@ -399,7 +399,70 @@ type RouteOptions struct {
 	KeywordAlias map[string]string
 }
 
-// RouteIssue picks the dos.toml lane an issue belongs to via a confidence ladder,
+// RouteIssue picks the dos.toml lane an issue belongs to, then applies the
+// routing-time trust-critical mis-route hold (#3122). The ladder itself is
+// routeIssueByLadder; this wrapper is the single seam every caller already goes
+// through, so a mis-route is held ONCE, where the lane is first decided, rather
+// than re-discovered by each downstream consumer.
+func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRoute {
+	return holdTrustCriticalMisroute(routeIssueByLadder(issue, taxonomy, opts), issue, taxonomy)
+}
+
+// holdTrustCriticalMisroute is the ROUTING-time arm of the self-modify hold (#3122):
+// an issue whose TEXT targets fak's trust-critical witness machinery, but which the
+// ladder aimed at a lane that is NOT that machinery, is held here instead of being
+// handed to a guarded worker that can never ship it.
+//
+// It is the ROOT-CAUSE twin of the pick-time SelfModifyHoldForPick, which stays in
+// place as defense-in-depth (#3122's acceptance says not to remove it). Without this
+// rung the mis-routed issue sits at a SHIPPABLE lane's front: the picker re-reads its
+// text and re-refuses it every tick, forever, while `fak dispatch route --json`
+// reports it as routed-and-ready. Holding at routing time makes the picker a cheap
+// fast-path and makes the mis-route visible to an operator.
+//
+// The live mis-routes this catches are the ones the lane tree HIDES: an issue naming
+// internal/abi/** (whose lane is exclusive, so the path rung yields no concurrent
+// lane) falling through to a tools/docs scope alias, and a multi-path issue whose
+// ambiguity tie-break prefers the shippable lane over the trust-critical one.
+//
+// Two deliberate non-holds keep the rung from over-firing:
+//
+//   - A lane whose OWN tree is trust-critical (a correctly-routed policy / kernel /
+//     architest issue) is left routed: the lane tree already reveals the hazard, so
+//     the pick-time lane-tree arm holds it with the better witness and the lane
+//     attribution operators rely on survives.
+//   - An already-unrouted row (an exclusive-scope hold or a plain no-signal miss) is
+//     returned untouched, so this rung never overwrites a stronger verdict.
+//
+// This mirrors tools/issue_lane_router.py's _hold_trust_critical_misroute, so the two
+// routers hold the same issues for the same reason.
+func holdTrustCriticalMisroute(routed IssueRoute, issue Issue, taxonomy LaneTaxonomy) IssueRoute {
+	if routed.Lane == "" {
+		return routed
+	}
+	if correctlyRouted, _ := SelfModifyHold(true, taxonomy.Trees[routed.Lane]); correctlyRouted {
+		return routed
+	}
+	targets, tree := IssueTextTargetsTrustCritical(issue.Title + "\n" + issue.Body)
+	if !targets {
+		return routed
+	}
+	return route(issue, "", "none",
+		TrustCriticalMisrouteSignalPrefix+tree+" (held from "+routed.Lane+")",
+		false, routed.Paths,
+		fmt.Sprintf("issue text targets '%s' (fak's own witness machinery, which a guarded "+
+			"worker may never ship) but the routing ladder chose the shippable lane '%s'; "+
+			"held before spawn", tree, routed.Lane))
+}
+
+// TrustCriticalMisrouteSignalPrefix marks a route held by holdTrustCriticalMisroute.
+// The payload builder keys the operator-facing unroutable bucket off this prefix, so
+// the hold is reported as its own class rather than folded into the generic
+// "no lane signal" bucket, whose next-action ("add a scope/label/path hint") would be
+// actively wrong advice for an issue that routed fine and was held on purpose.
+const TrustCriticalMisrouteSignalPrefix = "trust-critical-text:"
+
+// routeIssueByLadder picks the dos.toml lane an issue belongs to via a confidence ladder,
 // strongest signal first: repo paths named in the body (path-confirmed) > a
 // Conventional-Commit title scope that is or aliases a lane (exact-scope / alias) >
 // an aliasable label > an explicit keyword > the "## Lane" section a `fak task
@@ -409,7 +472,7 @@ type RouteOptions struct {
 // after every independently re-derived signal has failed, so a mislabeled Lane never
 // overrides a real scope/path (the cross-check #1854 asked for) yet a plain-English
 // handoff step with a correct Lane no longer routes UNROUTED.
-func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRoute {
+func routeIssueByLadder(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRoute {
 	scopeAlias := opts.ScopeAlias
 	if scopeAlias == nil {
 		scopeAlias = ScopeAlias
