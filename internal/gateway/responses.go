@@ -289,13 +289,18 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	began := time.Now()
-	comp, err := s.completeServed(ctx, sessionTurn, messages, tools,
+	// Hoisted so the #5212 denial-recovery sample re-samples under the SAME sampling
+	// contract as the first call — a recovery that quietly changed model or budget
+	// would not be the same turn continuing.
+	sampleOpts := []agent.SampleOpt{
 		agent.WithModel(req.Model),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxOutputTokens)),
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
-	)
+	}
+
+	began := time.Now()
+	comp, err := s.completeServed(ctx, sessionTurn, messages, tools, sampleOpts...)
 	if err != nil {
 		s.logf("gateway: upstream model error: %v", err)
 		s.writeUpstreamErr(w, err)
@@ -315,6 +320,57 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
+
+	// #5212: a turn whose every proposed call was refused would otherwise reach Codex as
+	// a `completed` response carrying ONLY the guard's remediation prose — which Codex
+	// reads as the model authoring a final answer, and answers with `task_complete` while
+	// the requested work sits untouched. Hand the refusals back to the MODEL as structured
+	// tool results and re-sample ONCE, so the turn gets a second actuation opportunity
+	// before the client ever sees a response. refusedFirst holds the original refusals
+	// (empty when no recovery ran), which stay on the wire extension and in the evidence:
+	// they happened, whatever the recovery went on to do.
+	//
+	var refusedFirst []ToolAdjudication
+	if turnIsDenialOnly(kept, dropped, asst.Content, bodyRefused, servedText) {
+		if rc, ok := s.recoverDeniedResponsesTurn(ctx, sessionTurn, messages, comp.Message, adjs, tools, sampleOpts...); ok {
+			refusedFirst = adjs
+			firstUsage := comp.Usage
+			comp = rc
+			comp.Usage = foldRecoveryUsage(firstUsage, rc.Usage)
+			asst = comp.Message
+			asst.Role = agent.RoleAssistant
+			kept, adjs, dropped, servedText, servedHits, bodyRefused = s.adjudicateProposedTurn(ctx, asst, reqTrace)
+		}
+	}
+	// blocked: the recovery ran and STILL produced neither an allowed actuation nor a
+	// model-authored answer. That is a blocked turn, and it is rendered as one below
+	// rather than dressed up as a completion.
+	blocked := len(refusedFirst) > 0 && turnIsDenialOnly(kept, dropped, asst.Content, bodyRefused, servedText)
+	turnAdjs := turnAdjudications(refusedFirst, adjs)
+
+	// #5212: fold this turn's adjudication SHAPE into the same turn-control signal the
+	// Anthropic wire already records (messages.go). The Responses wire recorded NOTHING
+	// here before, so a Codex session stopping on the same refusal turn after turn was
+	// indistinguishable from a run of clean completions — which is why the body's operator
+	// had to notice the false `task_complete` by hand. Recorded exactly ONCE per HTTP turn,
+	// on the turn's FINAL shape, so a recovered turn resets the streak rather than counting
+	// the refusal it successfully routed around.
+	//
+	// A blocked turn is forced to deny-all even when its refusals were individually tagged
+	// RETRYABLE: "retryable" describes a call the model may fix, and by this point the model
+	// has already BEEN handed the refusal and re-sampled without producing an allowed call.
+	// The retry happened and failed, so what remains is a terminal stop, and counting it as
+	// mere feedback would hide precisely the denial→terminal transition this issue is about.
+	signal := adjudicationOutcomeForTurn(adjs, len(kept), servedHits)
+	if blocked {
+		signal = adjudicationOutcomeDenyAll
+	}
+	denyFP := ""
+	if signal == adjudicationOutcomeDenyAll {
+		denyFP = denyAllFingerprint(turnAdjs)
+	}
+	s.metrics.recordAdjudicationOutcome(signal, denyFP)
+
 	asst.ToolCalls = kept
 	// #3567 output-side shadow: classify the MODEL's own outbound prose (sampled,
 	// observe-only) before fak blanks/appends anything -- mirror of the chat path.
@@ -348,8 +404,13 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		// client an actionable in-band message instead of an empty turn (mirrors chat).
 		finish = "stop"
 		if asst.Content == "" {
-			asst.Content = denySummary(adjs)
+			asst.Content = denySummary(turnAdjs)
 		}
+	}
+	// #5212: lead the note with the typed blocked state, so neither the model nor a
+	// status consumer can read the guard's remediation prose as a finished answer.
+	if blocked {
+		asst.Content = blockedByGuardNote(turnAdjs) + "\n" + asst.Content
 	}
 
 	respModel := comp.Model
@@ -370,9 +431,15 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	if comp.FinishReason == "length" {
 		resp.IncompleteDetails = &responsesIncomplete{Reason: "max_output_tokens"}
+	} else if blocked {
+		// #5212: the kernel interrupted this turn and recovery could not continue it.
+		// `incomplete` + a fak-namespaced reason is the typed BLOCKED state — the wire
+		// distinction between "the model is done" and "the guard stopped this turn".
+		resp.Status = "incomplete"
+		resp.IncompleteDetails = &responsesIncomplete{Reason: deniedGuardIncompleteReason}
 	}
-	if len(adjs) > 0 || len(resultAdmissions) > 0 {
-		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions}
+	if len(turnAdjs) > 0 || len(resultAdmissions) > 0 {
+		resp.Fak = &FakExt{Adjudications: turnAdjs, ResultAdmissions: resultAdmissions}
 	}
 	if req.Stream {
 		s.writeResponsesStream(w, resp)

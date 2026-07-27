@@ -149,6 +149,13 @@ func TestResponsesProxyAllowsBenignAndDropsDenied(t *testing.T) {
 // refused, the assistant message carries the deny summary as output_text (so even a
 // fak-unaware Responses client gets something actionable) and there are no
 // function_call items.
+//
+// #5212 kept both of those properties and added the one they were missing: the turn is
+// no longer reported as a normal completion. This planner re-proposes the SAME refused
+// call on the recovery sample, so it lands on the unrecoverable path — actionable text,
+// zero actuations, and now an explicit blocked state instead of `completed`. The status
+// arm is asserted here deliberately: without it this test passes either way, and the
+// false completion it would miss is exactly the defect #5212 reports.
 func TestResponsesAllDeniedSynthesizesText(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = stubPlanner{comp: &agent.Completion{
@@ -173,6 +180,12 @@ func TestResponsesAllDeniedSynthesizesText(t *testing.T) {
 	}
 	if !strings.Contains(messageText(resp.Output), "Allowed next step for each refused tool call") {
 		t.Errorf("output_text = %q, want the deny summary", messageText(resp.Output))
+	}
+	if resp.Status != "incomplete" {
+		t.Errorf("status = %q, want incomplete — a guard-refused turn is not a completed answer (#5212)", resp.Status)
+	}
+	if resp.IncompleteDetails == nil || resp.IncompleteDetails.Reason != deniedGuardIncompleteReason {
+		t.Errorf("incomplete_details = %+v, want reason %q", resp.IncompleteDetails, deniedGuardIncompleteReason)
 	}
 }
 
