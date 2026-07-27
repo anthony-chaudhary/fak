@@ -148,6 +148,19 @@ type Row struct {
 	// mirrored class (Reason) — rides the frozen decision fields above, and this
 	// carries the full correlated record (provenance + tier/cost + attempt log) on top.
 	Quality *QualityQuarantineRow `json:"quality,omitempty"`
+
+	// Relay-provenance field (for RELAY_MSG: the cross-platform relayed-message
+	// witness, #2851). Relaying a message is transport, not a kernel decision, so
+	// RelayChain.Append writes it directly through the chain, like a restart. NOT
+	// part of the hash-chain pre-image (chainHash lists the chained fields
+	// explicitly, so appending it here leaves every existing journal verifying
+	// byte-for-byte); the chained forensic identity of a relayed message — Kind,
+	// the platform (Tool), the session key (TraceID), the adjudication verdict
+	// (Verdict) and its refusal class (Reason), the direction (By), and the body
+	// digest (ArgsDigest) — rides the frozen decision fields above, and this
+	// carries the full correlated record (user id, turn id, per-session
+	// predecessor link) layered on top.
+	Relay *RelayProvenance `json:"relay,omitempty"`
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
