@@ -111,14 +111,18 @@ type Prompt struct {
 }
 
 type Session struct {
-	Path              string                 `json:"path"`
-	Session           string                 `json:"session"`
-	Kind              string                 `json:"kind,omitempty"`
-	Error             string                 `json:"error,omitempty"`
-	NRecords          int64                  `json:"n_records"`
-	RecordTypes       map[string]int64       `json:"rec_types"`
-	Models            map[string]int64       `json:"models"`
-	PerModel          map[string]ModelCounts `json:"per_model"`
+	Path        string                 `json:"path"`
+	Session     string                 `json:"session"`
+	Kind        string                 `json:"kind,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	NRecords    int64                  `json:"n_records"`
+	RecordTypes map[string]int64       `json:"rec_types"`
+	Models      map[string]int64       `json:"models"`
+	PerModel    map[string]ModelCounts `json:"per_model"`
+	// PerTrack splits the same volume by WHO ASKED — the operator's own session versus
+	// delegated sub-agent and background work (epic #5416 track E). Keys are the closed
+	// vocabulary in delegated.go.
+	PerTrack          map[string]ModelCounts `json:"per_track"`
 	AssistantTurns    int64                  `json:"assistant_turns"`
 	DupAssistantLines int64                  `json:"dup_assistant_lines"`
 	NPrompts          int64                  `json:"n_prompts"`
@@ -157,6 +161,9 @@ type Aggregate struct {
 	PerModel              map[string]ModelCounts `json:"per_model"`
 	PerBucket             map[string]ModelCounts `json:"per_bucket"`
 	PerTier               map[string]ModelCounts `json:"per_tier"`
+	// PerTrack is the corpus-wide delegation rollup — the input to
+	// FoldDelegationShare (epic #5416 track E).
+	PerTrack map[string]ModelCounts `json:"per_track"`
 	// ModelIdentities maps every billed raw model id in PerModel to its typed
 	// canonical identity, so the cost artifact carries the RAW and CANONICAL
 	// spellings side by side with resolution provenance (#4635). Non-billed
@@ -452,6 +459,7 @@ func Analyze(path string) Session {
 		RecordTypes: map[string]int64{},
 		Models:      map[string]int64{},
 		PerModel:    map[string]ModelCounts{},
+		PerTrack:    map[string]ModelCounts{},
 		Tools:       map[string]int64{},
 	}
 	f, err := os.Open(path)
@@ -513,6 +521,7 @@ func AggregateSessions(sessions []Session) Aggregate {
 		PerModel:              map[string]ModelCounts{},
 		PerBucket:             map[string]ModelCounts{},
 		PerTier:               map[string]ModelCounts{},
+		PerTrack:              map[string]ModelCounts{},
 	}
 	nsModels := map[string]map[string]int64{}
 	var calls, outs, ios, cacheHits, rofs []float64
@@ -538,6 +547,12 @@ func AggregateSessions(sessions []Session) Aggregate {
 		for model, c := range s.PerModel {
 			nsModels[ns][model] += c.Output
 			agg.PerModel[model] = addModelCounts(agg.PerModel[model], c)
+		}
+		// Rolled up from the SESSION rather than derived from PerModel the way PerBucket
+		// and PerTier are: delegation is a property of the turn, not of the model that
+		// served it, and the same model id routinely serves both tracks.
+		for track, c := range s.PerTrack {
+			agg.PerTrack[track] = addModelCounts(agg.PerTrack[track], c)
 		}
 		calls = append(calls, float64(s.NToolUse))
 		outs = append(outs, float64(s.Tokens.Output))
@@ -886,10 +901,14 @@ func ModelTier(model string) string {
 }
 
 type transcriptRecord struct {
-	Type                 string        `json:"type"`
-	Timestamp            string        `json:"timestamp"`
-	IsMeta               bool          `json:"isMeta"`
-	IsCompactSummary     bool          `json:"isCompactSummary"`
+	Type             string `json:"type"`
+	Timestamp        string `json:"timestamp"`
+	IsMeta           bool   `json:"isMeta"`
+	IsCompactSummary bool   `json:"isCompactSummary"`
+	// IsSidechain marks a turn generated for a spawned sub-agent or a background
+	// workflow. Absent on an uninstrumented transcript, which decodes to false — see
+	// delegated.go for why that absence is cross-examined rather than trusted.
+	IsSidechain          bool          `json:"isSidechain"`
 	LastPrompt           string        `json:"lastPrompt"`
 	InterruptedMessageID string        `json:"interruptedMessageId"`
 	Message              transcriptMsg `json:"message"`
@@ -959,6 +978,16 @@ func analyzeAssistant(s *Session, r transcriptRecord, seen map[string]bool, lens
 	pm.CacheRead += u.CacheReadInputTokens
 	pm.CacheCreate += u.CacheCreationInputTokens
 	s.PerModel[model] = pm
+	// Same turn, counted a second way: by who asked for it. Placed after the dedup guard
+	// above so a split assistant record cannot double-count a delegated turn.
+	track := TrackForSidechain(r.IsSidechain)
+	pt := s.PerTrack[track]
+	pt.Turns++
+	pt.Input += u.InputTokens
+	pt.Output += u.OutputTokens
+	pt.CacheRead += u.CacheReadInputTokens
+	pt.CacheCreate += u.CacheCreationInputTokens
+	s.PerTrack[track] = pt
 	var blocks []contentBlock
 	if len(msg.Content) > 0 {
 		_ = json.Unmarshal(msg.Content, &blocks)

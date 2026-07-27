@@ -49,6 +49,7 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	fmt.Fprintln(&b)
 	renderModelMix(&b, agg)
 	renderSelfHostedShare(&b, agg)
+	writeDelegationShare(&b, agg)
 	renderBuckets(&b, agg)
 	renderModels(&b, agg)
 	renderNamespaces(&b, agg)
@@ -213,6 +214,50 @@ func renderSelfHostedShare(b *strings.Builder, agg Aggregate) {
 	}
 	if len(s.UnattributableBuckets) > 0 {
 		fmt.Fprintf(b, "- **Missing the placement signal:** %s\n", strings.Join(s.UnattributableBuckets, "; "))
+	}
+	fmt.Fprintln(b)
+}
+
+// writeDelegationShare prints how much of the corpus's generated volume was produced for
+// delegated work — epic #5416 track E's lever, sized rather than asserted.
+//
+// It sits directly under the self-hosted share because the two are read together: the
+// self-hosted share says how much volume already runs on our own hardware, and this says
+// how much of the remainder is the kind that could be moved without an engineer noticing.
+//
+// An uninstrumented corpus reports UNKNOWN, never 0%. A zero here would be the strongest
+// possible argument against track E, and it must not be available for free to a transcript
+// that simply never wrote the marker.
+//
+// Named write* rather than render* deliberately, so please leave it: a new render-family
+// identifier is refused on admission, and renaming out of the family is the sanctioned
+// escape.
+func writeDelegationShare(b *strings.Builder, agg Aggregate) {
+	d := FoldDelegationShare(agg.PerTrack, agg.ToolMix)
+	fmt.Fprintln(b, "## Delegation share (how much volume is sub-agent and background work)")
+	fmt.Fprintln(b)
+	fmt.Fprintln(b, "| Track | Turns | Output tok | Cache-read tok |")
+	fmt.Fprintln(b, "|---|---:|---:|---:|")
+	for _, row := range []struct {
+		label string
+		c     ModelCounts
+	}{
+		{"delegated (sub-agent + background)", d.Delegation},
+		{"main thread (the operator's own session)", d.Main},
+		{"untracked (no delegation signal)", d.Untracked},
+	} {
+		fmt.Fprintf(b, "| %s | %s | %s | %s |\n", row.label, fmtInt(row.c.Turns), fmtInt(row.c.Output), fmtInt(row.c.CacheRead))
+	}
+	fmt.Fprintln(b)
+	switch {
+	case d.UnderInstrumented:
+		fmt.Fprintf(b, "**Delegation share = UNKNOWN** - this corpus made %s spawn-tool call(s) but not one turn carries the `isSidechain` marker, so delegated volume was generated and not recorded. That is an instrumentation gap, NOT a 0%%.\n",
+			fmtInt(d.SpawnCalls))
+	case d.OutputShare == nil:
+		fmt.Fprintln(b, "**Delegation share = UNKNOWN** - no generated output in this corpus carries a delegation track.")
+	default:
+		fmt.Fprintf(b, "**Delegation share of tracked output = %s**  _(over %s of generated output; %s spawn-tool call(s) observed)_\n",
+			fmtPct(d.OutputShare), fmtPct(d.Coverage), fmtInt(d.SpawnCalls))
 	}
 	fmt.Fprintln(b)
 }
