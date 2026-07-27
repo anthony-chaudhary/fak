@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/growthgate"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // DefaultDispatchSidecarFloor is the grace age below which a .dispatch-runs/ sidecar
@@ -139,6 +140,7 @@ func runDispatchReap(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir) // a leading ~ is never expanded by Go; do it so --dir ~/repo/.dispatch-runs works
 
 	applyDelete := *apply || strings.EqualFold(strings.TrimSpace(os.Getenv(dispatchReapApplyEnv)), "apply")
 	floor := time.Duration(*floorHours * float64(time.Hour))
