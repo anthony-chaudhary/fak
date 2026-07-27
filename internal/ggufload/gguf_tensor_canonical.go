@@ -111,10 +111,22 @@ func normalizeQwen35LinearTensor(name string, src []float32, cfg model.Config) (
 		// coefficient (-exp(A_log)); fak's canonical tensor and forward expect
 		// the pre-transform A_log. Undo the export transform here so every
 		// runtime path computes exp(-exp(A_log)*softplus(dt)) exactly once.
+		//
+		// The domain guard runs through model.CheckSourceDomain (#4746) so the
+		// refusal carries all four facts the provenance contract names — tensor
+		// NAME, transform ID, element INDEX, expected DOMAIN — as a typed
+		// *model.SourceDomainError. Its Evidence() is the publish-safe form a
+		// provenance artifact records, withholding the offending weight value
+		// that Error() shows the operator. model.IsNegativeDecay is also
+		// STRICTER than the hand-rolled predicate it replaces: -Inf is finite-
+		// negative-looking to a `decay >= 0 || NaN` test but log(-(-Inf)) is
+		// +Inf, so it used to canonicalize into an infinite A_log instead of
+		// being refused at the domain it violates.
+		if err := model.CheckSourceDomain(name, TransformInvertNegExpDecay,
+			model.NegativeDecayDomain, out, model.IsNegativeDecay); err != nil {
+			return nil, true, err
+		}
 		for i, decay := range out {
-			if decay >= 0 || math.IsNaN(float64(decay)) {
-				return nil, true, fmt.Errorf("gguf: tensor %s decay[%d]=%g, want finite negative -exp(A_log)", name, i, decay)
-			}
 			out[i] = float32(math.Log(float64(-decay)))
 		}
 		return out, true, nil

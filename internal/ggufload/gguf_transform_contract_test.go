@@ -321,8 +321,12 @@ func TestQwen35SSMADecayContractInvertsAndValidates(t *testing.T) {
 	// non-negative here while the source domain is strictly negative.
 	if _, err := normalizeCanonicalTensorData("model.layers.0.linear_attn.A_log", []float32{0, 0.25, 0.5, 0.75}, cfg); err == nil {
 		t.Fatalf("canonical-domain fixture (raw A_log values) was accepted; want finite-negative source validation to refuse it")
-	} else if !strings.Contains(err.Error(), "finite negative") {
-		t.Fatalf("canonical-domain fixture refused with %q, want the finite-negative source-domain error", err)
+	} else if !strings.Contains(err.Error(), model.NegativeDecayDomain) {
+		// Assert the SHARED domain constant rather than a paraphrase of it:
+		// the refusal, the contract, and the provenance artifact are supposed to
+		// quote one string (#4746), and a substring match on hand-written prose
+		// would keep passing while they silently drifted into three.
+		t.Fatalf("canonical-domain fixture refused with %q, want the %q source-domain error", err, model.NegativeDecayDomain)
 	}
 	// Non-finite sources are refused too.
 	if _, err := normalizeCanonicalTensorData("model.layers.0.linear_attn.A_log", []float32{float32(math.NaN()), -1, -1, -1}, cfg); err == nil {
