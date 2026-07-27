@@ -41,6 +41,13 @@ func TestShellDialectStructuralNoFalsePositive(t *testing.T) {
 		// The cmdlet name is QUOTED text handed to echo — a single token, never a command.
 		`echo 'Get-Content is a PowerShell cmdlet'`,
 		`echo "to list files use Get-ChildItem"`,
+		// Documenting the guard is routine work, and it is the shape most likely to
+		// name a guarded pattern. A `-m` argument is not a command word no matter
+		// what it quotes, so writing down WHY a rule exists must never trip it.
+		`git commit -m "docs(guard): explain why Get-ChildItem is refused"`,
+		`git commit -m "fix(adjudicator): admit inert Copy-Item mentions (fak adjudicator)"`,
+		`git log --grep "Remove-Item"`,
+		`git grep -n Set-Content -- '*.go'`,
 		// A real POSIX pipeline whose stage words are all real binaries.
 		`find . -name '*.go' | xargs wc -l`,
 	}

@@ -8,6 +8,24 @@ import (
 	"testing"
 )
 
+// shippedUndecidedRules inventories the shipped deny_regex rules that have NO
+// structural decider today, keyed by a distinguishing substring. They are listed
+// rather than merely skipped so that adding a rule to the policy forces a conscious
+// choice — write a decider, or record here why the raw regex is the whole truth for
+// it. Each entry is a standing candidate for the same treatment the decided
+// families already got.
+//
+// The list is package-level because two tests need the same answer to "does this
+// rule tell a use from a MENTION": the parity test above, and the remedy test that
+// holds these rules to a stricter standard for exactly that reason.
+var shippedUndecidedRules = []struct{ marker, why string }{
+	{"mkfs", "disk-formatting verbs; a quoted mention is still refused"},
+	{"Format-Volume", "PowerShell disk verbs: they destroy a filesystem outright, so the raw regex IS the whole truth and operator-only is the right posture"},
+	{"Clear-Content", "split out of the disk rule, which claimed a file truncation was a 'disk/volume operation' and sent the caller to an operator with nothing to approve. Still denied — an in-place truncation has no preview and no undo — but its remedy now names the in-tree routes that were always admitted. A containment decider (empty a file under the working tree or a scratchpad root, deny outside) is the obvious next step and needs a new dispatch call site"},
+	{`os\.system`, "the execute_code surface, which is not a shell command line"},
+	{`:\(\)`, "fork bomb; prose describes the shape well enough that the remedy needs no literal, which is why its fix text now omits one"},
+}
+
 // TestEveryShippedStructuralRuleIsRecognised makes the surface-parity defect class
 // impossible to reintroduce silently.
 //
@@ -53,19 +71,7 @@ func TestEveryShippedStructuralRuleIsRecognised(t *testing.T) {
 		{"out_of_tree_write", isOutOfTreeWriteArgRule, []string{ootDashORegex, ootOutputRegex, ootRedirectRegex, ootCopyVerbRegex}},
 	}
 
-	// undecided inventories the shipped deny_regex rules that have NO structural
-	// decider today, keyed by a distinguishing substring. They are listed rather
-	// than merely skipped so that adding a rule to the policy forces a conscious
-	// choice — write a decider, or record here why the raw regex is the whole
-	// truth for it. Each entry is a standing candidate for the same treatment the
-	// families above already got.
-	undecided := []struct{ marker, why string }{
-		{"mkfs", "disk-formatting verbs; a quoted mention is still refused"},
-		{"Format-Volume", "PowerShell disk verbs: they destroy a filesystem outright, so the raw regex IS the whole truth and operator-only is the right posture"},
-		{"Clear-Content", "split out of the disk rule, which claimed a file truncation was a 'disk/volume operation' and sent the caller to an operator with nothing to approve. Still denied — an in-place truncation has no preview and no undo — but its remedy now names the in-tree routes that were always admitted. A containment decider (empty a file under the working tree or a scratchpad root, deny outside) is the obvious next step and needs a new dispatch call site"},
-		{`os\.system`, "the execute_code surface, which is not a shell command line"},
-		{`:\(\)`, "fork bomb; prose describes the shape well enough that the remedy needs no literal, which is why its fix text now omits one"},
-	}
+	undecided := shippedUndecidedRules
 
 	shipped := map[string]map[string]bool{}
 	for _, fam := range families {
@@ -187,15 +193,107 @@ func TestEveryShippedDenyRuleNamesARemedy(t *testing.T) {
 		// Tolerated, but recorded: the decider is what makes it safe, so if one is
 		// ever narrowed the note below is where to look first.
 		//
-		// One of these is NOT actually safe today and is left open deliberately
-		// rather than papered over: the shell-dialect rule's decider does not grant
-		// mention-immunity, so a cmdlet name quoted inside an argument (a regex
-		// literal, a grep pattern) still trips it — observed while writing this test.
-		// Fixing that means teaching that decider to skip quoted words, which is a
-		// separate change from this one.
+		// An earlier revision of this note recorded the shell-dialect rule as the one
+		// entry here that was NOT safe — the claim being that its decider refused a
+		// cmdlet name quoted inside an argument (a regex literal, a grep pattern).
+		// That claim was wrong, and it was already contradicted by a test one file
+		// over: commandLeadsWithPowerShellCmdlet resolves the command WORD of each
+		// segment and matches a cmdlet only in that position, so a quoted mention
+		// never reaches it. TestShellDialectStructuralNoFalsePositive has pinned that
+		// since the decider shipped; its corpus now also carries the commit-message
+		// and git-grep shapes, which are how a mention usually arrives in practice.
 		t.Logf("tolerated: tool %q fix text matches its own deny_regex, but the rule is decided structurally so a quoted mention is admitted (%q)", r.Tool, r.DenyRegex)
 	}
 	if seen == 0 {
 		t.Fatal("no deny_regex arg rules found in the shipped policy — the manifest shape changed and this test is now vacuous")
+	}
+}
+
+// TestUndecidedRuleRemediesAreNotSelfRefuting holds the raw-regex rules to the one
+// standard their decided siblings get for free.
+//
+// A decided rule can afford a remedy that names its own subject: the decider
+// resolves real command words, so `grep -rn "sudo" docs/` is admitted and quoting
+// the refusal costs nothing. A rule with NO decider has no such slack — the match
+// IS the verdict, so every route its remedy names must survive the rule itself.
+//
+// Two shipped remedies did not. The disk/device and disk/volume rules both ended
+// "print the exact command and what it is for, and ask the operator" — and printing
+// it is a shell command line containing the pattern, so the rule refuses that too.
+// The caller is sent in a circle, and because a POLICY_BLOCK under `fak guard --
+// claude` reads upstream as an agent-chosen end_turn, they do not get a second look
+// to notice. Worse, the refusal misdescribes what happened: a `grep` for the string
+// is reported as an attempted "disk/device operation", so an agent that never went
+// near a device is told it tried to destroy one.
+//
+// So this asserts both halves of an honest raw-regex remedy:
+//
+//	NEGATIVE — it must not route the caller through printing or echoing the
+//	command, because the same rule refuses that.
+//	POSITIVE — it must SAY that it cannot tell a use from a mention, because that
+//	is the fact the caller needs in order to pick a route that works.
+//
+// Neither half asks the rule to be more permissive. mkfs, dd, Format-Volume,
+// Clear-Disk, Initialize-Disk and Clear-Content stay denied on every surface they
+// ship on; only the remedy stops lying about the way out.
+func TestUndecidedRuleRemediesAreNotSelfRefuting(t *testing.T) {
+	b, err := os.ReadFile("../../cmd/fak/guard-default-policy.json")
+	if err != nil {
+		t.Fatalf("read shipped policy: %v", err)
+	}
+	var manifest struct {
+		ArgRules []struct {
+			Tool      string `json:"tool"`
+			Arg       string `json:"arg"`
+			DenyRegex string `json:"deny_regex"`
+			Fix       string `json:"fix"`
+		} `json:"arg_rules"`
+	}
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatalf("parse shipped policy: %v", err)
+	}
+
+	// Imperative forms only: these are remedies that TELL the caller to print the
+	// command. A remedy that instead DISCLOSES the limitation ("echoing the command
+	// is refused for that same reason") is the cure, not the defect, and reads as
+	// "echoing the", which none of these match.
+	selfRefuting := []string{
+		"print the exact command",
+		"print the command",
+		"echo the command",
+	}
+
+	hits := map[string]int{}
+	for _, r := range manifest.ArgRules {
+		if r.DenyRegex == "" {
+			continue
+		}
+		var why string
+		for _, u := range shippedUndecidedRules {
+			if strings.Contains(r.DenyRegex, u.marker) {
+				why, hits[u.marker] = u.why, hits[u.marker]+1
+				break
+			}
+		}
+		if why == "" {
+			continue // decided elsewhere, or unknown — the parity test owns that case
+		}
+		fix := strings.ToLower(r.Fix)
+		for _, bad := range selfRefuting {
+			if strings.Contains(fix, bad) {
+				t.Errorf("tool %q arg %q: deny_regex %q has NO structural decider, yet its remedy routes the caller through %q — a shell command line that prints this pattern trips this very rule, so the only route it names is one it refuses:\n  fix: %s",
+					r.Tool, r.Arg, r.DenyRegex, bad, r.Fix)
+			}
+		}
+		if !strings.Contains(fix, "mention") {
+			t.Errorf("tool %q arg %q: deny_regex %q has NO structural decider, so it refuses every quoted MENTION of the pattern — a grep, a commit message, a here-doc — but its remedy never says so. The caller is left to infer it from a refusal that claims they performed the operation:\n  fix: %s",
+				r.Tool, r.Arg, r.DenyRegex, r.Fix)
+		}
+	}
+
+	for _, u := range shippedUndecidedRules {
+		if hits[u.marker] == 0 {
+			t.Errorf("undecided marker %q matches no shipped rule — either it gained a decider (move it to the families list in TestEveryShippedStructuralRuleIsRecognised) or it was dropped from the policy; either way this test is silently covering nothing.\n  recorded rationale: %s", u.marker, u.why)
+		}
 	}
 }
