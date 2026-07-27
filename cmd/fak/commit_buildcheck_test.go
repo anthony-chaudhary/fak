@@ -205,6 +205,40 @@ func TestCommitBuildCheckGate_preexistingHeadRedFailsOpen(t *testing.T) {
 			t.Fatalf("advisory missing %q; got %q", want, stderr.String())
 		}
 	}
+	// The fleet witness this advisory emits must land in the repo being GATED — the
+	// throwaway one seeded above — never in the developer's real checkout. This test
+	// once filed its synthetic `buildcheck.test/p undefined: neverDefined` break into
+	// the real ledger on every run, where the temp repo's base sha resolves against
+	// nothing and the row can never fold out: `fak trunk-red` grew to 28 fleet-wide
+	// "shared breaks" that were all THIS fixture, burying the one real break.
+	if _, err := os.Stat(filepath.Join(repo, ".fak", "trunk-red.jsonl")); err != nil {
+		t.Fatalf("witness should have landed in the gated repo's ledger: %v", err)
+	}
+	if outside := trunkRedLedgerDefault(); outside != "" && !strings.HasPrefix(outside, repo) {
+		before := trunkRedLedgerLineCount(outside)
+		stderr.Reset()
+		if ok, _, _ := commitBuildCheckGate(&stderr, repo, []string{"p/extra.go"}); !ok {
+			t.Fatalf("second pre-existing-red pass must still fail open")
+		}
+		if after := trunkRedLedgerLineCount(outside); after != before {
+			t.Fatalf("gating %s polluted this repo's ledger %s: %d -> %d row(s)", repo, outside, before, after)
+		}
+	}
+}
+
+// trunkRedLedgerLineCount counts rows in a trunk-red ledger; a missing ledger is 0.
+func trunkRedLedgerLineCount(path string) int {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // TestFormatPreexistingRedAdvisory pins the pure advisory formatter without git/go: it must keep the

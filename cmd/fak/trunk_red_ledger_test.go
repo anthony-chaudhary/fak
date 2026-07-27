@@ -32,6 +32,47 @@ func isolateTrunkRedEnv(t *testing.T) string {
 	return ledger
 }
 
+// TestTrunkRedWitnessFilesInTheGatedRepo pins the write-side scoping: a gate run
+// against ANOTHER checkout records that checkout's break in ITS ledger, never in
+// the repo the process happens to sit in. Before this, the build-check gate's own
+// tests — which drive it against a throwaway repo — filed their synthetic
+// `buildcheck.test/p undefined: neverDefined` break into the developer's real
+// ledger, where the temp repo's base sha resolves against nothing and the row can
+// never fold out. `fak trunk-red` reported 28 fleet-wide "shared breaks" that were
+// all that one fixture, burying the single real break it exists to surface.
+func TestTrunkRedWitnessFilesInTheGatedRepo(t *testing.T) {
+	pinTrunkRedClock(t)
+	// No env override: the gated root alone must decide the destination.
+	t.Setenv(trunkRedLedgerEnv, "")
+	t.Setenv(trunkRedModeEnv, "")
+	t.Setenv("FAK_SESSION_ID", "")
+	t.Setenv("CLAUDE_SESSION_ID", "")
+
+	gated := t.TempDir()
+	var stderr bytes.Buffer
+	w := emitTrunkRedWitness(&stderr, gated, "commit", "base1", []string{"buildcheck.test/p"}, "neverDefined")
+	if !w.Witnessed {
+		t.Fatalf("expected a witness in the gated repo; stderr=%q", stderr.String())
+	}
+	want := filepath.Join(gated, ".fak", "trunk-red.jsonl")
+	if w.Ledger != want {
+		t.Fatalf("witness filed at %q, want the GATED repo's ledger %q", w.Ledger, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("gated repo's ledger not written: %v", err)
+	}
+	// The repo the process is in must be untouched.
+	if here := trunkRedLedgerDefault(); here != "" && here == w.Ledger {
+		t.Fatalf("witness landed in the process's own repo ledger %q", here)
+	}
+
+	// A blank gated root is unrecordable, not a silent fallback to the cwd's repo.
+	w2 := emitTrunkRedWitness(&stderr, "", "commit", "base1", []string{"pkg/a"}, "Foo")
+	if w2.Witnessed {
+		t.Fatalf("a witness with no gated root must not record; landed at %q", w2.Ledger)
+	}
+}
+
 func TestTrunkRedClassIsOrderIndependentAndBaseScoped(t *testing.T) {
 	a := trunkRedClass("abc123", []string{"pkg/b", "pkg/a"})
 	b := trunkRedClass("abc123", []string{"pkg/a", "pkg/b"})
@@ -53,7 +94,7 @@ func TestEmitTrunkRedWitnessFailOpen(t *testing.T) {
 		ledger := isolateTrunkRedEnv(t)
 		t.Setenv(trunkRedModeEnv, "off")
 		var stderr bytes.Buffer
-		w := emitTrunkRedWitness(&stderr, "commit", "base1", []string{"pkg/a"}, "Foo")
+		w := emitTrunkRedWitness(&stderr, "", "commit", "base1", []string{"pkg/a"}, "Foo")
 		if w.Witnessed {
 			t.Fatalf("mode=off must not witness")
 		}
@@ -65,7 +106,7 @@ func TestEmitTrunkRedWitnessFailOpen(t *testing.T) {
 	t.Run("no packages is a no-op", func(t *testing.T) {
 		isolateTrunkRedEnv(t)
 		var stderr bytes.Buffer
-		w := emitTrunkRedWitness(&stderr, "commit", "base1", nil, "")
+		w := emitTrunkRedWitness(&stderr, "", "commit", "base1", nil, "")
 		if w.Witnessed {
 			t.Fatalf("a witness with no nameable break must not record")
 		}
@@ -75,7 +116,7 @@ func TestEmitTrunkRedWitnessFailOpen(t *testing.T) {
 		ledger := isolateTrunkRedEnv(t)
 		t.Setenv("FAK_SESSION_ID", "sess-1")
 		var stderr bytes.Buffer
-		w := emitTrunkRedWitness(&stderr, "commit", "base1", []string{"pkg/a", "pkg/b"}, "Foo")
+		w := emitTrunkRedWitness(&stderr, "", "commit", "base1", []string{"pkg/a", "pkg/b"}, "Foo")
 		if !w.Witnessed {
 			t.Fatalf("expected a witness; stderr=%q", stderr.String())
 		}
@@ -105,21 +146,21 @@ func TestEmitTrunkRedWitnessConvergesAcrossSessions(t *testing.T) {
 
 	// Same clone (same session) re-hits the same break: occurrences climb, sessions stay 1.
 	t.Setenv("FAK_SESSION_ID", "sess-1")
-	_ = emitTrunkRedWitness(&stderr, "commit", "base1", []string{"pkg/a"}, "Foo")
-	w2 := emitTrunkRedWitness(&stderr, "pre-push", "base1", []string{"pkg/a"}, "Foo")
+	_ = emitTrunkRedWitness(&stderr, "", "commit", "base1", []string{"pkg/a"}, "Foo")
+	w2 := emitTrunkRedWitness(&stderr, "", "pre-push", "base1", []string{"pkg/a"}, "Foo")
 	if w2.Occurrences != 2 || w2.Sessions != 1 {
 		t.Fatalf("same session re-hit: want occ=2 sess=1; got occ=%d sess=%d", w2.Occurrences, w2.Sessions)
 	}
 
 	// A different clone hits the SAME class: sessions climbs — the convergence signal.
 	t.Setenv("FAK_SESSION_ID", "sess-2")
-	w3 := emitTrunkRedWitness(&stderr, "commit", "base1", []string{"pkg/a"}, "Foo")
+	w3 := emitTrunkRedWitness(&stderr, "", "commit", "base1", []string{"pkg/a"}, "Foo")
 	if w3.Occurrences != 3 || w3.Sessions != 2 {
 		t.Fatalf("second clone same break: want occ=3 sess=2; got occ=%d sess=%d", w3.Occurrences, w3.Sessions)
 	}
 
 	// A genuinely different break (different package) is its own class.
-	w4 := emitTrunkRedWitness(&stderr, "commit", "base1", []string{"pkg/other"}, "Bar")
+	w4 := emitTrunkRedWitness(&stderr, "", "commit", "base1", []string{"pkg/other"}, "Bar")
 	if w4.Occurrences != 1 {
 		t.Fatalf("distinct break must be its own class; got occ=%d", w4.Occurrences)
 	}
@@ -149,11 +190,11 @@ func TestSummarizeTrunkRedFoldsAndOrders(t *testing.T) {
 
 	// Class X: two clones stuck (2 sessions). Class Y: one clone.
 	t.Setenv("FAK_SESSION_ID", "sess-1")
-	_ = emitTrunkRedWitness(&stderr, "commit", "baseX", []string{"pkg/x"}, "Xsym")
+	_ = emitTrunkRedWitness(&stderr, "", "commit", "baseX", []string{"pkg/x"}, "Xsym")
 	t.Setenv("FAK_SESSION_ID", "sess-2")
-	_ = emitTrunkRedWitness(&stderr, "pre-push", "baseX", []string{"pkg/x"}, "Xsym")
+	_ = emitTrunkRedWitness(&stderr, "", "pre-push", "baseX", []string{"pkg/x"}, "Xsym")
 	t.Setenv("FAK_SESSION_ID", "sess-3")
-	_ = emitTrunkRedWitness(&stderr, "commit", "baseY", []string{"pkg/y"}, "Ysym")
+	_ = emitTrunkRedWitness(&stderr, "", "commit", "baseY", []string{"pkg/y"}, "Ysym")
 
 	content, err := os.ReadFile(os.Getenv(trunkRedLedgerEnv))
 	if err != nil {
@@ -336,7 +377,7 @@ func TestRunTrunkRedReaderPaths(t *testing.T) {
 		ledger := isolateTrunkRedEnv(t)
 		var stderr bytes.Buffer
 		t.Setenv("FAK_SESSION_ID", "sess-1")
-		_ = emitTrunkRedWitness(&stderr, "commit", "baseX", []string{"pkg/x"}, "Xsym")
+		_ = emitTrunkRedWitness(&stderr, "", "commit", "baseX", []string{"pkg/x"}, "Xsym")
 
 		var stdout, rerr bytes.Buffer
 		if code := runTrunkRed(&stdout, &rerr, []string{"--ledger", ledger}); code != 0 {
@@ -354,7 +395,7 @@ func TestRunTrunkRedReaderPaths(t *testing.T) {
 		pinTrunkRedClock(t)
 		ledger := isolateTrunkRedEnv(t)
 		var stderr bytes.Buffer
-		_ = emitTrunkRedWitness(&stderr, "commit", "baseX", []string{"pkg/x"}, "Xsym")
+		_ = emitTrunkRedWitness(&stderr, "", "commit", "baseX", []string{"pkg/x"}, "Xsym")
 
 		var stdout, rerr bytes.Buffer
 		if code := runTrunkRed(&stdout, &rerr, []string{"--ledger", ledger, "--json"}); code != 0 {

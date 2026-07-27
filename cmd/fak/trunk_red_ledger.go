@@ -94,27 +94,38 @@ const (
 	trunkRedLedgerDefaultRel = ".fak/trunk-red.jsonl"
 )
 
-// trunkRedLedgerDefault is the absolute default path: <repo root>/.fak/trunk-red.jsonl.
-// Empty when the root is unresolvable (so the witness silently no-ops rather than
-// scattering ledgers under a random cwd).
-func trunkRedLedgerDefault() string {
-	root := repoRoot()
+// trunkRedLedgerDefaultFor is the absolute default path for a NAMED repo root:
+// <root>/.fak/trunk-red.jsonl. Empty when the root is blank (so the witness
+// silently no-ops rather than scattering ledgers under a random cwd).
+func trunkRedLedgerDefaultFor(root string) string {
 	if strings.TrimSpace(root) == "" {
 		return ""
 	}
 	return filepath.Join(root, filepath.FromSlash(trunkRedLedgerDefaultRel))
 }
 
-// trunkRedLedgerForWrite is the path the gates write to: an explicit env override wins,
-// else the repo-root default. "" (mode=off, or no resolvable root) disables recording.
-func trunkRedLedgerForWrite() string {
+// trunkRedLedgerDefault is the reader's default: the repo the PROCESS is in.
+func trunkRedLedgerDefault() string { return trunkRedLedgerDefaultFor(repoRoot()) }
+
+// trunkRedLedgerForWrite is the path the gates write to for the repo they are
+// GATING: an explicit env override wins, else that repo's default. "" (mode=off,
+// or no resolvable root) disables recording.
+//
+// The gated root is passed in rather than read from the process cwd on purpose. A
+// gate run against another checkout — the build-check gate's own tests drive it
+// against a throwaway repo — would otherwise file its synthetic break in THIS
+// repo's ledger, where the base sha resolves against nothing and the row can never
+// fold out. That is how `fak trunk-red` came to report 28 fleet-wide "shared
+// breaks" that were all one test fixture, drowning the real break it exists to
+// surface.
+func trunkRedLedgerForWrite(root string) string {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv(trunkRedModeEnv)), "off") {
 		return ""
 	}
 	if p := strings.TrimSpace(os.Getenv(trunkRedLedgerEnv)); p != "" {
 		return p
 	}
-	return trunkRedLedgerDefault()
+	return trunkRedLedgerDefaultFor(root)
 }
 
 // trunkRedLedgerForRead is the path `fak trunk-red` reads: the env override, else the
@@ -153,13 +164,15 @@ type trunkRedWitness struct {
 // witness with no named break would not converge on anything. An append error is
 // advisory (stderr) only and never changes the gate's already-made admit decision.
 // On success it folds the ledger to return this class's occurrence and session counts,
-// so the caller can print an honest convergence line.
-func emitTrunkRedWitness(stderr io.Writer, gate, baseSha string, pkgs []string, firstBreak string) trunkRedWitness {
+// so the caller can print an honest convergence line. root is the repo being GATED
+// — the row lands in that repo's ledger, never in whatever checkout the process
+// happens to be sitting in.
+func emitTrunkRedWitness(stderr io.Writer, root, gate, baseSha string, pkgs []string, firstBreak string) trunkRedWitness {
 	w := trunkRedWitness{Class: trunkRedClass(baseSha, pkgs)}
 	if len(pkgs) == 0 {
 		return w // nothing nameable to converge on
 	}
-	ledger := trunkRedLedgerForWrite()
+	ledger := trunkRedLedgerForWrite(root)
 	if ledger == "" {
 		return w // recording disabled or no resolvable root
 	}
@@ -390,14 +403,14 @@ func summarizeTrunkRed(content string, resolved func(baseSha string) bool) trunk
 }
 
 // trunkRedGitResolver returns the production resolve predicate for summarizeTrunkRed:
-// a base sha is PROVABLY resolved only when it is a STRICT ancestor of origin/main
-// (`git merge-base --is-ancestor` exits 0 and the base is not the origin/main tip
+// a base sha is PROVABLY resolved only when it is a STRICT ancestor of the remote
+// trunk tip (`git merge-base --is-ancestor` exits 0 and the base is not that tip
 // itself) — the trunk has moved PAST the commit the red was proven at, so the break
 // was very likely fixed upstream. EVERY uncertainty — no repo root, an unresolvable
-// sha, origin/main missing (fresh clone, no remote), any git error — reports NOT
-// resolved, keeping the row surfaced: a hidden live break is far worse than a stale
-// one. Results are memoized per base so a large ledger shells git once per distinct
-// base.
+// sha, a missing remote trunk ref (fresh clone, no remote), any git error — reports
+// NOT resolved, keeping the row surfaced: a hidden live break is far worse than a
+// stale one. Results are memoized per base so a large ledger shells git once per
+// distinct base.
 func trunkRedGitResolver(root string) func(baseSha string) bool {
 	cache := map[string]bool{}
 	return func(baseSha string) bool {

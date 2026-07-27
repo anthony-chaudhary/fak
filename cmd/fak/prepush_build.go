@@ -269,7 +269,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	// shows the whole fleet stuck on ONE break instead of each clone re-discovering it. To
 	// stderr so --json stdout stays pure; fail-open, never changes the push decision.
 	if res.Verdict == "TRUNK_ALREADY_RED" {
-		w := emitTrunkRedWitness(stderr, "pre-push", res.BaseSha, res.PreExistingRed, extractUndefinedSymbol(res.Detail))
+		w := emitTrunkRedWitness(stderr, r, "pre-push", res.BaseSha, res.PreExistingRed, extractUndefinedSymbol(res.Detail))
 		fmt.Fprint(stderr, trunkRedWitnessNote(w))
 	}
 	if *report != "" {

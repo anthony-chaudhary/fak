@@ -138,7 +138,7 @@ func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (ok boo
 			// Best-effort fleet witness: fold this per-clone shrug onto a shared class so the
 			// fleet converges on ONE break instead of each clone re-discovering it. Fail-open —
 			// the commit is already admitted; recording never changes that.
-			w := emitTrunkRedWitness(stderr, "commit", headSHA, failingPackagesFromBuild(headDetail), extractUndefinedSymbol(headDetail))
+			w := emitTrunkRedWitness(stderr, root, "commit", headSHA, failingPackagesFromBuild(headDetail), extractUndefinedSymbol(headDetail))
 			fmt.Fprint(stderr, trunkRedWitnessNote(w))
 			return true, "", ""
 		}
