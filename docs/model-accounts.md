@@ -313,8 +313,33 @@ gives every downstream consumer one predicate to attribute a token by. Witnessed
 `TestZonesPartitionTheKnownKinds`, `TestEngineRouteCarriesTheZoneBackOut`,
 `TestShippedExampleRosterCarriesAllThreeZones`, and — at the enforcing floor —
 `TestFleetZoneStaysRemoteAtTheFloor` plus `TestTierOneRouteMirrorAgreesWithTheFloor`.
-*Deferred, and deliberately so:* nothing yet **chooses** a zone automatically, no usage
-record yet **carries** the zone, and the residency floor does not yet treat a fleet host
-as inside a trust boundary. Zone-aware placement, the self-hosted token-fraction metric,
-and the escalation ladder are separate, individually reviewable changes on top of this
-vocabulary — not implied by it.
+*Deferred, and deliberately so:* nothing yet **chooses** a zone automatically, the serving
+path does not yet **record** the zone it used, and the residency floor does not yet treat
+a fleet host as inside a trust boundary. Zone-aware placement, the self-hosted
+token-fraction metric, and the escalation ladder are separate, individually reviewable
+changes on top of this vocabulary — not implied by it. They are tracked as
+[epic #5416](https://github.com/anthony-chaudhary/fak/issues/5416).
+
+### The first consumer: honest stratum attribution
+
+`internal/sessionaudit` classifies audited turns into billing buckets. It used to answer
+"was this self-hosted?" from the **model id**, which cannot support the claim: Qwen,
+Llama, Mistral, DeepSeek, GLM and Kimi all publish open weights, so each is servable
+either from hardware you operate or from a vendor's API. That produced two contradictions
+in one file — `deepseek*` was bucketed self-hosted while priced from the published
+DeepSeek *API* rate card, and the roster above binds `qwen/qwen3.6-27b` to **Groq**, a
+vendor, while the classifier called those tokens self-hosted.
+
+A model id now buys only a model-family answer (`open-weights (placement unknown)`), and
+placement comes from a real signal:
+
+| Call | Answers |
+| --- | --- |
+| `ProviderBucket(model)` | whose *model* it is — never where it ran |
+| `BucketForPlacement(model, zone)` | the bucket, given a `PlacementZone` string |
+| `BucketIsSelfHosted(bucket)` | `(selfHosted, known bool)` — two values on purpose |
+
+`BucketIsSelfHosted` returns a second `known` bool so unattributable volume cannot be
+folded into either side of a self-hosted fraction. `TestPricedModelsAreNeverBucketedSelfHosted`
+makes the underlying rule executable and total over the rate card: a model billed per token
+by a third party ran on their hardware, so it can never also be bucketed as self-hosted.

@@ -189,10 +189,10 @@ func renderBuckets(b *strings.Builder, agg Aggregate) {
 		bcost := modelCostByKey(agg, bucket, ProviderBucket)
 		costCell := "- (no card)"
 		priced := ""
-		if bucket == "Anthropic (Claude)" {
+		if bucket == BucketAnthropic {
 			costCell = "$" + fmtFloat(bcost, 2)
 			priced = "yes"
-		} else if bucket == "non-billed (harness)" {
+		} else if bucket == BucketNonBilled {
 			costCell = "$0.00"
 		}
 		fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s |\n", bucket, fmtInt(c.Turns), fmtInt(c.Output), fmtInt(c.CacheRead), costCell, priced)

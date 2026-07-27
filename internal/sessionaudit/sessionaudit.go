@@ -728,19 +728,54 @@ func BuildCompactReportFromDiscovery(opts DiscoverOptions, includeSubagents bool
 	return BuildCompactReport(included, agg, opts.NamespacePrefix, opts.SinceDays, includeSubagents, max, totalDiscovered, excluded, generated), nil
 }
 
+// The closed bucket vocabulary. These are report keys (Aggregate.PerBucket) and
+// were previously scattered string literals; naming them keeps the classifier, the
+// renderer, and the self-hosted predicate from drifting apart.
+//
+// BucketOpenWeights replaced a bucket formerly named "local / self-hosted". That
+// name was a CLAIM ABOUT PLACEMENT derived from a model id, and a model id cannot
+// support it: Qwen, Llama, Mistral, DeepSeek, GLM and Kimi all publish open weights,
+// so each can be served either from hardware you operate or from a vendor's API, at
+// wildly different cost and residency. fak's own shipped roster
+// (examples/model-accounts.example.json) binds "qwen/qwen3.6-27b" to a Groq VENDOR
+// account, and this package prices "deepseek" from the published DeepSeek API rate
+// card — both were being reported as self-hosted. The bucket now names what the id
+// actually tells you (an open-weights family) and defers the placement question to
+// BucketForPlacement, which requires a real placement signal. See epic #5416.
+const (
+	BucketNonBilled     = "non-billed (harness)"
+	BucketAnthropic     = "Anthropic (Claude)"
+	BucketGoogle        = "Google (Gemini)"
+	BucketOpenAI        = "OpenAI"
+	BucketOpenWeights   = "open-weights (placement unknown)"
+	BucketDevice        = "self-hosted (device)"
+	BucketFleet         = "self-hosted (fleet)"
+	BucketVendorOpen    = "vendor API (open-weights model)"
+	BucketUnknownPrices = "UNKNOWN (unpriced bucket)"
+)
+
+// ProviderBucket classifies a model id by the only thing an id can support: WHOSE
+// MODEL it is. It deliberately makes no claim about where the tokens were served —
+// for that, a caller with a real placement signal uses BucketForPlacement, and any
+// consumer asking "was this self-hosted?" goes through BucketIsSelfHosted, whose
+// second return value distinguishes "no" from "not knowable from this".
 func ProviderBucket(model string) string {
 	if nonBilled(model) {
-		return "non-billed (harness)"
+		return BucketNonBilled
 	}
 	m := strings.ToLower(model)
 	for _, b := range []struct {
 		name string
 		subs []string
 	}{
-		{"Anthropic (Claude)", []string{"claude", "opus", "sonnet", "haiku", "fable"}},
-		{"Google (Gemini)", []string{"gemini", "gemma"}},
-		{"OpenAI", []string{"gpt", "o1-", "o3-", "o4-", "davinci"}},
-		{"local / self-hosted", []string{"qwen", "llama", "mistral", "mixtral", "phi-", "deepseek"}},
+		{BucketAnthropic, []string{"claude", "opus", "sonnet", "haiku", "fable"}},
+		{BucketGoogle, []string{"gemini", "gemma"}},
+		{BucketOpenAI, []string{"gpt", "o1-", "o3-", "o4-", "davinci"}},
+		// Open-weights families. "glm" and "kimi" are listed because this package
+		// PRICES them (see Pricing) — without an entry here a priced model landed in
+		// the bucket literally named "unpriced", which
+		// TestPricedModelsNeverLandInTheUnpricedBucket now forbids.
+		{BucketOpenWeights, []string{"qwen", "llama", "mistral", "mixtral", "phi-", "deepseek", "glm", "kimi"}},
 	} {
 		for _, sub := range b.subs {
 			if strings.Contains(m, sub) {
@@ -748,7 +783,56 @@ func ProviderBucket(model string) string {
 			}
 		}
 	}
-	return "UNKNOWN (unpriced bucket)"
+	return BucketUnknownPrices
+}
+
+// BucketForPlacement answers the question ProviderBucket cannot: given the zone the
+// tokens were ACTUALLY served in, it returns a bucket that may claim placement. The
+// zone is the string form of a modelroute.PlacementZone ("device", "fleet",
+// "vendor"); it is taken as a plain string rather than the typed value because this
+// package is an import-free leaf (architest pureRoot).
+//
+// An empty or unrecognized zone falls back to ProviderBucket — i.e. to no placement
+// claim at all. That fallback is the whole point: a caller that cannot supply a
+// placement gets an honest "unknown", never a guess.
+func BucketForPlacement(model, zone string) string {
+	if nonBilled(model) {
+		return BucketNonBilled
+	}
+	switch strings.ToLower(strings.TrimSpace(zone)) {
+	case "device":
+		return BucketDevice
+	case "fleet":
+		return BucketFleet
+	case "vendor":
+		if b := ProviderBucket(model); b != BucketOpenWeights && b != BucketUnknownPrices {
+			return b // a vendor's own model keeps its vendor bucket
+		}
+		// An open-weights model bought from a vendor API — the case that was
+		// previously misfiled as self-hosted.
+		return BucketVendorOpen
+	}
+	return ProviderBucket(model)
+}
+
+// BucketIsSelfHosted reports whether a bucket names tokens served on hardware the
+// engineer or their organization operates (selfHosted), and whether the bucket makes
+// that claim at all (known).
+//
+// It returns TWO values on purpose. Epic #5416's headline number is "what fraction of
+// our tokens were self-hosted?", and a single bool would fold "we know these went to a
+// vendor" together with "we could not tell", letting unattributable volume silently
+// inflate or deflate the fraction. A caller must decide explicitly what to do with the
+// unknown remainder; it must never be scored as a saving.
+func BucketIsSelfHosted(bucket string) (selfHosted, known bool) {
+	switch bucket {
+	case BucketDevice, BucketFleet:
+		return true, true
+	case BucketAnthropic, BucketGoogle, BucketOpenAI, BucketVendorOpen, BucketNonBilled:
+		return false, true
+	}
+	// BucketOpenWeights and BucketUnknownPrices: the id named a model, not a place.
+	return false, false
 }
 
 func PriceFor(model string) (Rates, bool) {

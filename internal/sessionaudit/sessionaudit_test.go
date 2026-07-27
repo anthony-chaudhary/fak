@@ -533,7 +533,7 @@ func TestProviderBucketAndCostBehavior(t *testing.T) {
 		"claude-opus-4-8":   "Anthropic (Claude)",
 		"gemini-2.5-pro":    "Google (Gemini)",
 		"gpt-5":             "OpenAI",
-		"qwen2.5:14b":       "local / self-hosted",
+		"qwen2.5:14b":       BucketOpenWeights,
 		"<synthetic>":       "non-billed (harness)",
 		"some-future-model": "UNKNOWN (unpriced bucket)",
 	}
