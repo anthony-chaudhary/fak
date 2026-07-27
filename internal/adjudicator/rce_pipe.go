@@ -153,7 +153,11 @@ func rceShellSources(cmd string) []string {
 			walk(inner, depth+1)
 		}
 	}
-	walk(cmd, 0)
+	// Strip provably-inert here-doc bodies first: file CONTENT reaching this
+	// tokenizer is read as command lines, because a body's newlines are segment
+	// boundaries and its first words land at command-word position. Narrow and
+	// subtractive — see stripInertHeredocBodies.
+	walk(stripInertHeredocBodies(cmd), 0)
 	return out
 }
 
