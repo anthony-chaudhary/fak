@@ -6,6 +6,12 @@ const (
 	legacyRCEPipeDenyRegex  = `\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b`
 	defaultRCEPipeDenyRegex = `(?i)\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(bash|sh|python(?:[0-9.]+)?|perl|ruby|node|php|lua)\b`
 
+	// defaultPSRCEPipeDenyRegex is the PowerShell mirror of the same rule. It
+	// shipped with NO structural decider at all, so every inert MENTION of the
+	// pattern was a terminal POLICY_BLOCK on all three surfaces that carry it —
+	// including the one an agent reaches for to read the policy that refused it.
+	defaultPSRCEPipeDenyRegex = `(?i)\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\b[^|]*\|[^|]*\b(iex|Invoke-Expression)\b`
+
 	maxRCEShellSourceDepth = 8
 	maxRCEShellSources     = 256
 )
@@ -28,14 +34,12 @@ func isRCEPipeArgRule(pr *ArgPredicate) bool {
 	if pr == nil || pr.Re == nil || (pr.Arg != "command" && pr.Arg != "cmd") {
 		return false
 	}
-	switch strings.ToLower(pr.Tool) {
-	case "bash", "shell_command", "functions.shell_command":
-	default:
-		return false
-	}
+	tool := strings.ToLower(pr.Tool)
 	switch pr.Re.String() {
 	case legacyRCEPipeDenyRegex, defaultRCEPipeDenyRegex:
-		return true
+		return tool == "bash" || tool == "shell_command" || tool == "functions.shell_command"
+	case defaultPSRCEPipeDenyRegex:
+		return tool == "powershell" || tool == "shell_command" || tool == "functions.shell_command"
 	default:
 		return false
 	}
@@ -170,6 +174,17 @@ func rceShellSegments(cmd string) []rceShellSegment {
 		if len(cur) > 0 {
 			segs = append(segs, rceShellSegment{argv: cur, sep: sep})
 			cur = nil
+			return
+		}
+		// No words since the last boundary, so this separator really belongs to
+		// the segment that just closed. Dropping it loses the pipe in every
+		// grouped spelling — `(curl u) | sh` closes [curl u] at the paren and
+		// `{ curl u; } | sh` closes it at the brace, after which the `|` finds an
+		// empty segment and vanishes. Both then read as "no pipe at a command
+		// boundary" and were ADMITTED, which is the same hole the brace fix
+		// closed one level up.
+		if sep == '|' && len(segs) > 0 {
+			segs[len(segs)-1].sep = '|'
 		}
 	}
 
@@ -374,6 +389,14 @@ func rceDownloaderCommand(argv []string) bool {
 	switch rceProgramBasename(argv[i]) {
 	case "curl", "wget":
 		return true
+	// PowerShell's downloaders, for the mirror rule this decider also serves.
+	// The two dialects already overlap at the head word — `curl` and `wget` are
+	// themselves PowerShell ALIASES of Invoke-WebRequest — so the set is shared
+	// rather than threaded through a dialect parameter. A cross-dialect head is
+	// inert on the other host, and the decider is only ever consulted for a
+	// command one of the two regexes has ALREADY matched.
+	case "invoke-webrequest", "iwr", "invoke-restmethod", "irm":
+		return true
 	default:
 		return false
 	}
@@ -385,6 +408,12 @@ func rceInterpreterCommand(argv []string) bool {
 		return false
 	}
 	base := rceProgramBasename(argv[i])
+	// PowerShell's execution sink. Unlike the POSIX interpreters below, iex takes
+	// the piped bytes as a STATEMENT with no flag that could make them data, so
+	// there is no rcePythonFixedProgramConsumesData-style exemption to consider.
+	if base == "iex" || base == "invoke-expression" {
+		return true
+	}
 	if hasNumericSuffix(base, "python") && rcePythonFixedProgramConsumesData(argv[i+1:]) {
 		return false
 	}

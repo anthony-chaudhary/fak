@@ -45,7 +45,7 @@ func TestEveryShippedStructuralRuleIsRecognised(t *testing.T) {
 		spellings []string
 	}{
 		{"rm_rf", isRmRfArgRule, []string{defaultRmRfDenyRegex, defaultPSDeleteDenyRegex}},
-		{"rce_pipe", isRCEPipeArgRule, []string{legacyRCEPipeDenyRegex, defaultRCEPipeDenyRegex}},
+		{"rce_pipe", isRCEPipeArgRule, []string{legacyRCEPipeDenyRegex, defaultRCEPipeDenyRegex, defaultPSRCEPipeDenyRegex}},
 		{"sudo", isSudoArgRule, []string{defaultSudoDenyRegex}},
 		{"runas", isRunAsArgRule, []string{defaultRunAsDenyRegex}},
 		{"terraform_destroy", isTerraformDestroyArgRule, []string{terraformDestroyDenyRegex, terraformDestroyDenyRegexCI}},
@@ -62,7 +62,6 @@ func TestEveryShippedStructuralRuleIsRecognised(t *testing.T) {
 	undecided := []struct{ marker, why string }{
 		{"mkfs", "disk-formatting verbs; a quoted mention is still refused"},
 		{"Format-Volume", "PowerShell disk verbs; Clear-Content is a FILE verb mis-filed here"},
-		{"Invoke-Expression", "the PowerShell download-pipe mirror; psSegments would serve it"},
 		{`os\.system`, "the execute_code surface, which is not a shell command line"},
 		{`:\(\)`, "fork bomb; the spelling is narrow enough that a mention is unlikely"},
 	}
