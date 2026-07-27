@@ -155,6 +155,43 @@ type GatewayRollup struct {
 	Basis    string                    `json:"basis"`
 	Sessions int                       `json:"sessions"`
 	Trend    *gatewayusageledger.Trend `json:"trend,omitempty"`
+	// SelfHosted answers "what fraction of the tokens we served did we generate
+	// ourselves?" — nil only when the window held no gateway rows at all, since
+	// with nothing folded there is no question to decline.
+	SelfHosted *SelfHostedRollup `json:"self_hosted,omitempty"`
+}
+
+// SelfHostedRollup is the who-served-it slice of the gateway rollup: the report's
+// snake_case view of gatewayusageledger.SelfHostedShare, with that type's two
+// derived numbers materialized as fields so a JSON consumer sees them at all
+// (they are methods there, and methods do not serialize).
+//
+// It reports a share and the coverage that share was computed over, TOGETHER and
+// never separately. "68% self-hosted" over 2% of the volume is a sample someone
+// will quote as a fleet number, and the pairing is the only thing standing between
+// this rollup and that headline.
+type SelfHostedRollup struct {
+	// OutputShare is self-hosted output over CLASSIFIED output, in [0,1]. Nil when
+	// Reason explains why the corpus did not earn an answer — a nil share and a 0.0
+	// share are different findings, and the difference is "nobody measured" versus
+	// "we bought every token".
+	OutputShare *float64 `json:"output_share,omitempty"`
+	// Reason is set exactly when OutputShare is nil.
+	Reason string `json:"reason,omitempty"`
+	// ClassifiedOutputFraction is how much of the folded output volume had a
+	// resolvable side, in [0,1]. This is the qualifier on OutputShare.
+	ClassifiedOutputFraction float64 `json:"classified_output_fraction"`
+
+	SelfHostedTurns        uint64 `json:"self_hosted_turns"`
+	SelfHostedInputTokens  uint64 `json:"self_hosted_input_tokens"`
+	SelfHostedOutputTokens uint64 `json:"self_hosted_output_tokens"`
+	VendorTurns            uint64 `json:"vendor_turns"`
+	VendorInputTokens      uint64 `json:"vendor_input_tokens"`
+	VendorOutputTokens     uint64 `json:"vendor_output_tokens"`
+	// OutputTokens is the unsplit total over the same rows — the denominator that
+	// makes ClassifiedOutputFraction auditable rather than asserted.
+	OutputTokens uint64 `json:"output_tokens"`
+	Rows         int    `json:"rows"`
 }
 
 // UsageRollup summarizes usage.jsonl (CLI invocations). OBSERVED: a self-report
@@ -499,6 +536,28 @@ func foldGateway(rows []gatewayusageledger.Row, since time.Time) GatewayRollup {
 	}
 	if trend, ok := gatewayusageledger.FoldTrend(filtered); ok {
 		g.Trend = &trend
+	}
+	// The who-served-it fold runs over the SAME filtered rows, carryforward rows
+	// included — see FoldSelfHostedShare, which sums them deliberately where
+	// FoldTrend skips them. An empty window gets no rollup at all: declining to
+	// answer is a statement about instrumentation, and there is nothing to say it
+	// about when no session was folded.
+	if len(filtered) > 0 {
+		sh := gatewayusageledger.FoldSelfHostedShare(filtered)
+		g.SelfHosted = &SelfHostedRollup{
+			OutputShare:              sh.OutputShare,
+			Reason:                   string(sh.Reason),
+			ClassifiedOutputFraction: sh.ClassifiedOutputFraction(),
+
+			SelfHostedTurns:        sh.SelfHostedTurns,
+			SelfHostedInputTokens:  sh.SelfHostedInputTokens,
+			SelfHostedOutputTokens: sh.SelfHostedOutputTokens,
+			VendorTurns:            sh.VendorTurns,
+			VendorInputTokens:      sh.VendorInputTokens,
+			VendorOutputTokens:     sh.VendorOutputTokens,
+			OutputTokens:           sh.OutputTokens,
+			Rows:                   sh.Rows,
+		}
 	}
 	return g
 }
