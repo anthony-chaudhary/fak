@@ -16,14 +16,25 @@ package ggufload
 // canonical tensor is in domain Y, and the loader must apply named transform T
 // between them, with these validity ranges" — pins the meaning of the bytes.
 //
-// This file declares those contracts for the Qwen3.5/Qwen3.6 (qwen35 hybrid)
-// family, whose GGUF exports carry the largest set of non-identity mappings in
-// the loader (gguf_tensor_canonical.go). Each contract records the external and
-// canonical names, the source and destination semantic domains, a NAMED
-// transform identifier, provenance for why the transform exists, and whether it
-// is lossless/invertible. The transform identifier is derivable from the tensor
-// NAME alone (TransformIDForGGUFTensor), so a shape-first manifest can expose it
-// without reading any weight payload.
+// This file declares those contracts for EVERY non-identity mapping
+// normalizeCanonicalTensorData performs (gguf_tensor_canonical.go), keyed by
+// architecture because the same external name carries different semantics per
+// family:
+//
+//   - the Qwen3.5/Qwen3.6 (qwen35 hybrid) family, which carries the largest set
+//     of non-identity mappings — the SSM/GDN value-head deinterleaves, the
+//     NormGain1p residual-gain shift, and the ssm_a decay inversion;
+//   - the llama-family NORM-rope architectures, whose q/k projections are
+//     rotary-unpermuted (LlamaRotaryTransformContracts);
+//   - the NEOX-layout architectures (qwen3, gemma3, phi3, …), whose mappings are
+//     all identity and therefore declare no contract at all.
+//
+// Each contract records the external and canonical names, the source and
+// destination semantic domains, a NAMED transform identifier, provenance for why
+// the transform exists, and whether it is lossless/invertible. The transform
+// identifier is derivable from the tensor NAME plus the header architecture
+// (TransformIDForGGUFTensor), so a shape-first manifest can expose it without
+// reading any weight payload.
 //
 // The paired test (gguf_transform_contract_test.go) behaviorally probes every
 // tensor a qwen35 GGUF carries through the live loader path
@@ -239,10 +250,71 @@ func Qwen35TransformContracts() []TensorTransformContract {
 	}
 }
 
+// LlamaRotaryTransformContracts returns the semantic transform contracts for
+// the non-qwen35 half of the loader audit (#4744 "then audit other non-identity
+// loader mappings"). Outside the qwen35 hybrid path, normalizeCanonicalTensorData
+// has exactly two non-identity branches — the q/k rotary unpermute — and it
+// applies them to every architecture NOT on the ggufArchStoresHFRotaryLayout
+// NEOX allow-list. Those are the mappings declared here.
+//
+// The same external name carries a DIFFERENT transform per family, which is
+// precisely why the registry is arch-keyed: "attn_q.weight" is
+// stacked-q-rotary-unpermute under qwen35, rotary-unpermute under the
+// llama-family NORM-rope arches, and identity under the NEOX arches (qwen3,
+// gemma3, phi3, …), which declare no contract at all.
+func LlamaRotaryTransformContracts() []TensorTransformContract {
+	const provenance = "convert_hf_to_gguf.py permutes llama-family (NORM-rope) q/k rows " +
+		"into the GGML interleaved rotary-pair layout on export; fak's forward applies the HF " +
+		"rotate_half convention (forward.go), so the loader unpermutes back via " +
+		"unpermuteRotaryTensor (gguf_tensor_canonical.go). NEOX-layout arches are exported " +
+		"unpermuted and are excluded by ggufArchStoresHFRotaryLayout — for them this mapping " +
+		"is identity and carries no contract"
+	rotary := func(external, canonical, rows string) TensorTransformContract {
+		return TensorTransformContract{
+			External: external, Canonical: canonical,
+			Transform:       TransformRotaryUnpermute,
+			SourceDomain:    rows + " rows in GGML interleaved rotary-pair order (row j*2+p)",
+			CanonicalDomain: rows + " rows in HF rotate_half order (row p*half+j)",
+			Provenance:      provenance,
+			// A pure row permutation: every value survives bit-exactly and the
+			// permutation is its own well-defined inverse.
+			Lossless: true, Invertible: true,
+		}
+	}
+	return []TensorTransformContract{
+		rotary("attn_q.weight", "self_attn.q_proj.weight", "query"),
+		rotary("attn_k.weight", "self_attn.k_proj.weight", "key"),
+	}
+}
+
+// TensorTransformContractsForArch returns the semantic transform contracts that
+// apply to a GGUF of architecture arch. arch is the header's
+// general.architecture value (canonicalized), so this stays payload-free.
+//
+// A nil result means the loader maps every tensor of that architecture
+// identically — the NEOX-layout arches, whose q/k weights are consumed exactly
+// as stored.
+func TensorTransformContractsForArch(arch string) []TensorTransformContract {
+	switch canonicalGGUFArch(arch) {
+	case "qwen35", "qwen35moe":
+		return Qwen35TransformContracts()
+	}
+	if ggufArchStoresHFRotaryLayout(canonicalGGUFArch(arch)) {
+		return nil
+	}
+	return LlamaRotaryTransformContracts()
+}
+
 // Qwen35TransformContractForExternal returns the contract for an external
 // tensor suffix (or model-global name), if one is declared.
 func Qwen35TransformContractForExternal(external string) (TensorTransformContract, bool) {
-	for _, c := range Qwen35TransformContracts() {
+	return TransformContractForExternalArch(external, "qwen35")
+}
+
+// TransformContractForExternalArch returns the contract declared for an
+// external tensor suffix (or model-global name) under architecture arch.
+func TransformContractForExternalArch(external, arch string) (TensorTransformContract, bool) {
+	for _, c := range TensorTransformContractsForArch(arch) {
 		if c.External == external {
 			return c, true
 		}
@@ -250,24 +322,67 @@ func Qwen35TransformContractForExternal(external string) (TensorTransformContrac
 	return TensorTransformContract{}, false
 }
 
-// TransformIDForGGUFTensor maps a raw GGUF tensor name to its declared
-// semantic transform identifier. It consults only the NAME — never a weight
-// payload — so the shape-first manifest (#3251) can expose the transform id
-// for a tensor from the header alone. ok=false means the mapping is identity
-// (or unknown): no semantic transform is declared for it.
-func TransformIDForGGUFTensor(name string) (string, bool) {
-	external := name
-	if strings.HasPrefix(name, "blk.") {
-		rest := strings.TrimPrefix(name, "blk.")
-		if dot := strings.IndexByte(rest, '.'); dot > 0 {
-			if _, err := strconv.Atoi(rest[:dot]); err == nil {
-				external = rest[dot+1:]
-			}
-		}
+// ExternalTensorSuffix strips a "blk.<layer>." prefix from a raw GGUF tensor
+// name, leaving the per-layer suffix a contract is keyed on. Model-global
+// tensors (e.g. "output_norm.weight") are returned unchanged.
+func ExternalTensorSuffix(name string) string {
+	if !strings.HasPrefix(name, "blk.") {
+		return name
 	}
-	c, ok := Qwen35TransformContractForExternal(external)
+	rest := strings.TrimPrefix(name, "blk.")
+	dot := strings.IndexByte(rest, '.')
+	if dot <= 0 {
+		return name
+	}
+	if _, err := strconv.Atoi(rest[:dot]); err != nil {
+		return name
+	}
+	return rest[dot+1:]
+}
+
+// TransformIDForGGUFTensor maps a raw GGUF tensor name to its declared semantic
+// transform identifier under architecture arch. It consults only the NAME and
+// the header architecture — never a weight payload — so the shape-first
+// manifest (#3251) can expose the transform id for a tensor from the GGUF
+// header alone. ok=false means the mapping is identity (or unknown): no
+// semantic transform is declared for it.
+func TransformIDForGGUFTensor(name, arch string) (string, bool) {
+	c, ok := TransformContractForExternalArch(ExternalTensorSuffix(name), arch)
 	if !ok {
 		return "", false
 	}
 	return c.Transform, true
+}
+
+// TensorTransformID reports the declared semantic transform identifier for one
+// tensor of a PARSED GGUF HEADER. It is the accessor a shape-first manifest
+// (#3251) calls: it reads general.architecture out of the already-decoded
+// metadata and the tensor's name, and touches no part of the tensor data blob —
+// Read/Open stop at the header, so a caller holding only a *File has, by
+// construction, read no weights. ok=false means the mapping is identity (or the
+// tensor is unknown to the canonicalizer): no semantic transform is declared.
+func (f *File) TensorTransformID(name string) (string, bool) {
+	arch, _ := f.String("general.architecture")
+	return TransformIDForGGUFTensor(name, arch)
+}
+
+// TensorTransformIDs returns the declared transform identifier of every tensor
+// in the header that carries one, keyed by the raw GGUF tensor name. Identity
+// mappings are omitted, so an empty map means this checkpoint's architecture is
+// consumed exactly as stored. Like TensorTransformID it is header-only: the
+// shape-first manifest can publish "which tensors does this loader reinterpret,
+// and under what named transform" for a multi-hundred-GB checkpoint at the cost
+// of a header parse.
+func (f *File) TensorTransformIDs() map[string]string {
+	arch, _ := f.String("general.architecture")
+	if len(TensorTransformContractsForArch(arch)) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, t := range f.Tensors {
+		if id, ok := TransformIDForGGUFTensor(t.Name, arch); ok {
+			out[t.Name] = id
+		}
+	}
+	return out
 }

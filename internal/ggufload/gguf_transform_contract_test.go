@@ -17,6 +17,7 @@ package ggufload
 //     reading weight payloads (#3251 seam).
 
 import (
+	"bytes"
 	"math"
 	"strings"
 	"testing"
@@ -109,15 +110,71 @@ func transformProbeInput(external string, n int) []float32 {
 	return src
 }
 
-// TestQwen35NonIdentityMappingsDeclareTransformContracts is the contract lint:
-// a mapping the loader transforms without a declared semantic contract fails,
-// and so does a stale contract for a mapping the loader no longer transforms.
-func TestQwen35NonIdentityMappingsDeclareTransformContracts(t *testing.T) {
-	cfg := transformContractProbeConfig()
-	probes := qwen35TransformProbes()
+// llamaRotaryProbeConfig is a minimal llama-family (NORM-rope) config: not a
+// qwen35 hybrid (no linear_attention layer types) and not on the NEOX
+// allow-list, so the loader applies the q/k rotary unpermute.
+func llamaRotaryProbeConfig() model.Config {
+	return model.Config{
+		ModelType:  "llama",
+		HiddenSize: 8,
+		NumHeads:   2,
+		NumKVHeads: 1,
+		HeadDim:    4,
+	}
+}
+
+// llamaRotaryProbes enumerates the per-layer tensors a llama-family GGUF
+// carries through normalizeCanonicalTensorData, with the element counts implied
+// by llamaRotaryProbeConfig.
+func llamaRotaryProbes() map[string]int {
+	const (
+		h     = 8 // HiddenSize
+		heads = 2 // NumHeads
+		hd    = 4 // HeadDim
+		kv    = 1 // NumKVHeads
+	)
+	return map[string]int{
+		"output_norm.weight":       h,
+		"blk.0.attn_norm.weight":   h,
+		"blk.0.ffn_norm.weight":    h,
+		"blk.0.attn_q.weight":      heads * hd * h,
+		"blk.0.attn_k.weight":      kv * hd * h,
+		"blk.0.attn_v.weight":      kv * hd * h,
+		"blk.0.attn_output.weight": h * heads * hd,
+		"blk.0.ffn_gate.weight":    h * h,
+		"blk.0.ffn_up.weight":      h * h,
+		"blk.0.ffn_down.weight":    h * h,
+	}
+}
+
+// TestNonIdentityMappingsDeclareTransformContracts is the contract lint, run
+// over every architecture family the loader transforms: a mapping the loader
+// transforms without a declared semantic contract fails, and so does a stale
+// contract for a mapping the loader no longer transforms. A NEW transform-
+// bearing family must be added here, or its mappings fail the lint unchecked.
+func TestNonIdentityMappingsDeclareTransformContracts(t *testing.T) {
+	for _, fam := range []struct {
+		arch   string
+		cfg    model.Config
+		probes map[string]int
+	}{
+		{"qwen35", transformContractProbeConfig(), qwen35TransformProbes()},
+		{"llama", llamaRotaryProbeConfig(), llamaRotaryProbes()},
+	} {
+		t.Run(fam.arch, func(t *testing.T) {
+			assertContractsCoverLoader(t, fam.arch, fam.cfg, fam.probes)
+		})
+	}
+}
+
+// assertContractsCoverLoader probes every tensor of one architecture family
+// through the LIVE loader path and cross-checks it against the declared
+// registry in both directions.
+func assertContractsCoverLoader(t *testing.T, arch string, cfg model.Config, probes map[string]int) {
+	t.Helper()
 	for name, n := range probes {
 		external := transformProbeExternal(name)
-		canonical, ok := CanonicalTensorNameArch(name, "qwen35")
+		canonical, ok := CanonicalTensorNameArch(name, arch)
 		if !ok {
 			t.Fatalf("probe %s: no canonical mapping", name)
 		}
@@ -136,9 +193,9 @@ func TestQwen35NonIdentityMappingsDeclareTransformContracts(t *testing.T) {
 				}
 			}
 		}
-		contract, has := Qwen35TransformContractForExternal(external)
+		contract, has := TransformContractForExternalArch(external, arch)
 		if changed && !has {
-			t.Errorf("mapping %s -> %s transforms data but lacks a semantic transform contract (#4744): declare it in Qwen35TransformContracts", name, canonical)
+			t.Errorf("arch %s: mapping %s -> %s transforms data but lacks a semantic transform contract (#4744): declare it in the registry TensorTransformContractsForArch(%q) returns", arch, name, canonical, arch)
 			continue
 		}
 		if !changed && has {
@@ -169,9 +226,36 @@ func TestQwen35NonIdentityMappingsDeclareTransformContracts(t *testing.T) {
 	for name := range probes {
 		probed[transformProbeExternal(name)] = true
 	}
-	for _, c := range Qwen35TransformContracts() {
+	for _, c := range TensorTransformContractsForArch(arch) {
 		if !probed[c.External] {
-			t.Errorf("contract %s -> %s declares an external tensor with no behavioral probe; add it to qwen35TransformProbes", c.External, c.Canonical)
+			t.Errorf("arch %s: contract %s -> %s declares an external tensor with no behavioral probe; add it to the family's probe map", arch, c.External, c.Canonical)
+		}
+	}
+}
+
+// TestNEOXLayoutArchesDeclareNoTransformContracts pins the third branch of the
+// arch-keyed registry: architectures exported already in the HF rotate_half
+// layout are consumed as stored, so declaring a transform for them would be a
+// stale contract. This is the case that makes the registry arch-keyed rather
+// than name-keyed — "attn_q.weight" is transform-bearing under llama and
+// qwen35, and identity here.
+func TestNEOXLayoutArchesDeclareNoTransformContracts(t *testing.T) {
+	cfg := llamaRotaryProbeConfig()
+	for _, arch := range []string{"qwen3", "qwen2", "gemma3", "phi3", "gptoss"} {
+		if got := TensorTransformContractsForArch(arch); len(got) != 0 {
+			t.Errorf("arch %s stores the HF rotary layout but declares %d transform contracts", arch, len(got))
+		}
+		cfg.ModelType = arch
+		n := cfg.NumHeads * cfg.HeadDim * cfg.HiddenSize
+		src := transformProbeInput("attn_q.weight", n)
+		out, err := normalizeCanonicalTensorData("model.layers.0.self_attn.q_proj.weight", append([]float32(nil), src...), cfg)
+		if err != nil {
+			t.Fatalf("arch %s: normalize q_proj: %v", arch, err)
+		}
+		for i := range out {
+			if out[i] != src[i] {
+				t.Fatalf("arch %s: loader transformed q_proj at [%d] (%g -> %g) but declares no contract", arch, i, src[i], out[i])
+			}
 		}
 	}
 }
@@ -304,18 +388,121 @@ func TestQwen35ValueTransformWitnessesKillIdentityMutation(t *testing.T) {
 // TestTransformIDExposedWithoutReadingPayloads proves the #3251 seam: the
 // transform identifier is derived from the tensor NAME alone.
 func TestTransformIDExposedWithoutReadingPayloads(t *testing.T) {
-	id, ok := TransformIDForGGUFTensor("blk.17.ssm_a")
+	id, ok := TransformIDForGGUFTensor("blk.17.ssm_a", "qwen35")
 	if !ok || !strings.Contains(id, TransformInvertNegExpDecay) {
 		t.Fatalf("blk.17.ssm_a transform id = %q, %v; want the declared %s contract from the name alone", id, ok, TransformInvertNegExpDecay)
 	}
-	if id, ok := TransformIDForGGUFTensor("output_norm.weight"); !ok || id != TransformGainMinusOne {
+	if id, ok := TransformIDForGGUFTensor("output_norm.weight", "qwen35"); !ok || id != TransformGainMinusOne {
 		t.Fatalf("output_norm.weight transform id = %q, %v; want %q", id, ok, TransformGainMinusOne)
 	}
 	// Identity mappings expose no transform id.
-	if id, ok := TransformIDForGGUFTensor("blk.3.ffn_gate.weight"); ok {
+	if id, ok := TransformIDForGGUFTensor("blk.3.ffn_gate.weight", "qwen35"); ok {
 		t.Fatalf("blk.3.ffn_gate.weight is an identity mapping but exposes transform id %q", id)
 	}
-	if id, ok := TransformIDForGGUFTensor("blk.3.ssm_norm.weight"); ok {
+	if id, ok := TransformIDForGGUFTensor("blk.3.ssm_norm.weight", "qwen35"); ok {
 		t.Fatalf("blk.3.ssm_norm.weight is shape-validated identity but exposes transform id %q", id)
+	}
+
+	// The SAME tensor name resolves to a different transform per architecture,
+	// so the manifest must read general.architecture from the header alongside
+	// the name — still no weight payload.
+	perArch := map[string]string{
+		"qwen35": TransformStackedQRotaryUnpermute,
+		"qwen36": TransformStackedQRotaryUnpermute, // canonicalized onto qwen35
+		"llama":  TransformRotaryUnpermute,
+	}
+	for arch, want := range perArch {
+		if id, ok := TransformIDForGGUFTensor("blk.0.attn_q.weight", arch); !ok || id != want {
+			t.Errorf("arch %s: blk.0.attn_q.weight transform id = %q, %v; want %q", arch, id, ok, want)
+		}
+	}
+	if id, ok := TransformIDForGGUFTensor("blk.0.attn_q.weight", "qwen3"); ok {
+		t.Errorf("arch qwen3 stores the HF rotary layout; blk.0.attn_q.weight must expose no transform id, got %q", id)
+	}
+	if id, ok := TransformIDForGGUFTensor("blk.0.attn_k.weight", "llama"); !ok || id != TransformRotaryUnpermute {
+		t.Errorf("arch llama: blk.0.attn_k.weight transform id = %q, %v; want %q", id, ok, TransformRotaryUnpermute)
+	}
+}
+
+// writeTransformManifestGGUF builds a GGUF containing a header and a tensor
+// directory and NOTHING ELSE — the file ends where the tensor data blob would
+// begin. Any code path that reached for a weight payload would read past EOF.
+func writeTransformManifestGGUF(arch string) []byte {
+	var b bytes.Buffer
+	writeMinimalHeader(&b, 4, 2)
+	writeKVString(&b, "general.architecture", arch)
+	writeKVUint32(&b, "general.alignment", 32)
+	writeTensorInfoForTest(&b, "token_embd.weight", []uint64{8, 4}, TensorF32, 0)
+	writeTensorInfoForTest(&b, "blk.0.attn_q.weight", []uint64{8, 8}, TensorF32, 64)
+	writeTensorInfoForTest(&b, "blk.0.attn_k.weight", []uint64{8, 4}, TensorF32, 128)
+	writeTensorInfoForTest(&b, "blk.0.ffn_gate.weight", []uint64{8, 8}, TensorF32, 192)
+	return b.Bytes()
+}
+
+// TestTransformManifestFromHeaderOnlyGGUF is the payload-free witness for the
+// #3251 manifest seam, made non-forgeable: the fixture GGUF carries no tensor
+// data blob at all, so resolving a transform identifier from it PROVES no weight
+// was consulted — a manifest that needed a payload could not answer here.
+//
+// It also pins the property that makes the seam worth having: the identical
+// tensor directory resolves to different transforms under different
+// architectures, which is exactly the semantic distinction shape and dtype
+// cannot carry (both files below are byte-identical apart from the arch string).
+func TestTransformManifestFromHeaderOnlyGGUF(t *testing.T) {
+	for _, tc := range []struct {
+		arch string
+		want map[string]string
+	}{
+		{"qwen35", map[string]string{
+			"blk.0.attn_q.weight": TransformStackedQRotaryUnpermute,
+			"blk.0.attn_k.weight": TransformRotaryUnpermute,
+		}},
+		{"llama", map[string]string{
+			"blk.0.attn_q.weight": TransformRotaryUnpermute,
+			"blk.0.attn_k.weight": TransformRotaryUnpermute,
+		}},
+		// A NEOX-layout arch is consumed exactly as stored: no transform at all.
+		{"qwen3", map[string]string{}},
+	} {
+		t.Run(tc.arch, func(t *testing.T) {
+			raw := writeTransformManifestGGUF(tc.arch)
+			f, err := Read(bytes.NewReader(raw))
+			if err != nil {
+				t.Fatalf("Read header-only gguf: %v", err)
+			}
+			// The fixture really is payload-free: the header parse consumed the
+			// whole file, so the tensor blob is not present to be read.
+			if f.TensorDataOffset < int64(len(raw)) {
+				t.Fatalf("fixture is not payload-free: data offset %d < file size %d", f.TensorDataOffset, len(raw))
+			}
+
+			got := f.TensorTransformIDs()
+			if len(got) != len(tc.want) {
+				t.Fatalf("arch %s: transform manifest = %v, want %v", tc.arch, got, tc.want)
+			}
+			for name, want := range tc.want {
+				if got[name] != want {
+					t.Errorf("arch %s: %s transform = %q, want %q", tc.arch, name, got[name], want)
+				}
+			}
+			// Identity tensors must never appear in the manifest.
+			for _, name := range []string{"token_embd.weight", "blk.0.ffn_gate.weight"} {
+				if id, ok := f.TensorTransformID(name); ok {
+					t.Errorf("arch %s: identity tensor %s exposed transform %q", tc.arch, name, id)
+				}
+			}
+
+			// The weight-free metadata export carries the same identifiers, so a
+			// manifest consumer reads them without a bespoke call.
+			exp := f.ExportMetadata()
+			if len(exp.Tensors) != 4 {
+				t.Fatalf("arch %s: export tensor count = %d, want 4", tc.arch, len(exp.Tensors))
+			}
+			for _, te := range exp.Tensors {
+				if want := tc.want[te.Name]; te.Transform != want {
+					t.Errorf("arch %s: export %s transform = %q, want %q", tc.arch, te.Name, te.Transform, want)
+				}
+			}
+		})
 	}
 }

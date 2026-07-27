@@ -59,11 +59,20 @@ type MetaKV struct {
 // block type, dimensions, and in-data offset. (The absolute FileOffset is derived
 // at load time and intentionally omitted — the export describes the checkpoint as
 // authored, not where it landed in a particular reader's address space.)
+//
+// Transform is the one derived field: the semantic transform identifier fak's
+// loader will apply to reach its canonical tensor (#4744), empty when the mapping
+// is identity. It is resolved from the tensor NAME plus the header's
+// general.architecture — never from a weight payload — so it rides along on this
+// header-only export for free. The name/type/dims/offset above still describe the
+// checkpoint exactly as authored; Transform describes what this reader will do
+// with it, which is precisely the half that shape and dtype cannot express.
 type TensorExport struct {
-	Name   string   `json:"name"`
-	Type   string   `json:"type"`
-	Dims   []uint64 `json:"dims"`
-	Offset uint64   `json:"offset"`
+	Name      string   `json:"name"`
+	Type      string   `json:"type"`
+	Dims      []uint64 `json:"dims"`
+	Offset    uint64   `json:"offset"`
+	Transform string   `json:"transform,omitempty"`
 }
 
 // Metadata is a complete, machine-readable snapshot of a parsed GGUF header: its
@@ -86,6 +95,11 @@ type Metadata struct {
 // Unlike the human-oriented ggufprobe dump (which summarizes a 248k-token vocab so
 // it does not flood a terminal), this is the faithful export: it preserves every
 // element of every array so the result round-trips the on-disk metadata.
+//
+// Every field is read straight off the header except TensorExport.Transform, which
+// is derived (name + architecture -> declared semantic transform, #4744) and
+// therefore additive: it annotates the authored bytes rather than restating them,
+// and stays empty for an identity mapping.
 func (f *File) ExportMetadata() Metadata {
 	keys := make([]string, 0, len(f.Metadata))
 	for k := range f.Metadata {
@@ -103,13 +117,17 @@ func (f *File) ExportMetadata() Metadata {
 		kvs = append(kvs, kv)
 	}
 
+	// Header-only: transformIDs resolves from the decoded metadata + tensor
+	// names, so the export stays weight-free.
+	transformIDs := f.TensorTransformIDs()
 	tensors := make([]TensorExport, 0, len(f.Tensors))
 	for _, t := range f.Tensors {
 		tensors = append(tensors, TensorExport{
-			Name:   t.Name,
-			Type:   t.Type.String(),
-			Dims:   t.Dims,
-			Offset: t.Offset,
+			Name:      t.Name,
+			Type:      t.Type.String(),
+			Dims:      t.Dims,
+			Offset:    t.Offset,
+			Transform: transformIDs[t.Name],
 		})
 	}
 
