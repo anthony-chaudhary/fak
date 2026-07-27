@@ -4591,12 +4591,24 @@ def append_loop_event(root: Path, ledger: Path, event: dict[str, Any],
         "--principal", str(event.get("principal") or event.get("backend") or "dispatcher"),
     ]
     for flag, key in (("--run", "run_id"), ("--status", "status"),
-                      ("--verified-state", "verified_state"),
                       ("--reason", "reason"), ("--summary", "summary")):
         if event.get(key):
             cmd += [flag, str(event[key])]
     cmd += _loop_metric_args(event.get("metrics") or {})
-    cmd += _loop_evidence_args(event.get("evidence") or [])
+    # `verified_state` rides the EVIDENCE channel, never a flag of its own. loopmgr.Event
+    # has no VerifiedState field and `fak loop append` defines no --verified-state, so
+    # passing one made the flag parser exit 2 ("flag provided but not defined") BEFORE
+    # anything was appended. Only the witness event carries verified_state, so
+    # fire/admit/end landed and every witness row was dropped — and because this wrapper
+    # is deliberately fail-open the usage error went into the tick payload, where no
+    # reader looks. `fak loop health` consequently read issue-resolve-progress at
+    # 0-of-546 witnessed with witness_collapse=true for the whole life of the ledger.
+    # The Go twin (cmd/fak/dispatch_progress.go) already encodes it the canonical way,
+    # as an EvidenceRef{Kind: "verified_state"}; match it.
+    evidence = list(event.get("evidence") or [])
+    if event.get("verified_state"):
+        evidence.append(("verified_state", str(event["verified_state"])))
+    cmd += _loop_evidence_args(evidence)
     try:
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=60,

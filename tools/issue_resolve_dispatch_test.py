@@ -12,6 +12,7 @@ import importlib.util
 import atexit
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -6760,6 +6761,85 @@ class EvaluateBurstAdmissionTest(unittest.TestCase):
         self.assertEqual(self.spawned_issues, {466, 520})
         self.assertNotIn(467, self.spawned_issues)
         self.assertEqual([r["issue"] for r in self.collision_rows], [467])
+
+
+class AppendLoopEventArgvTest(unittest.TestCase):
+    """The argv `append_loop_event` hands to `fak loop append`.
+
+    This wrapper had no coverage at all — every caller's test stubs `append=`, so the
+    only place the argv is actually built was never exercised. It shipped a
+    `--verified-state` flag the Go verb does not define, which made the flag parser exit
+    2 before appending. Only the WITNESS event carries verified_state, so fire/admit/end
+    landed and every witness row was silently dropped (the wrapper is fail-open), and
+    `fak loop health` read the loop 0-of-N witnessed with witness_collapse=true.
+    """
+
+    def _argv(self, event: dict[str, object]) -> list[str]:
+        mod = load()
+        seen: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            seen.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with mock.patch.object(mod.subprocess, "run", fake_run):
+            out = mod.append_loop_event(ROOT, Path("loops.jsonl"), event)
+        self.assertTrue(out["ok"])
+        self.assertEqual(len(seen), 1)
+        return seen[0]
+
+    def _loop_append_flags(self) -> set[str]:
+        """The flag names `fak loop append` really defines, read from its flag set.
+
+        Parsed from the Go source rather than shelled out so the test stays hermetic
+        (this file runs nothing live). This is what pins the Python argv to Go reality:
+        a flag Python invents but Go never declares is a silent exit-2, not an error a
+        fail-open caller can see.
+        """
+        src = (ROOT / "cmd" / "fak" / "loop.go").read_text(encoding="utf-8")
+        start = src.index("func runLoopAppend(")
+        end = src.index("\nfunc ", start + 1)
+        body = src[start:end]
+        return set(re.findall(r'fs\.(?:String|Bool|Int|Int64|Var)\(\s*(?:&\w+,\s*)?"([a-z-]+)"', body))
+
+    def test_verified_state_rides_evidence_not_an_undefined_flag(self) -> None:
+        argv = self._argv({
+            "loop_id": "issue-resolve-progress", "run_id": "RID-1", "kind": "witness",
+            "status": "witnessed_done", "verified_state": "verified_done",
+            "reason": "OK", "summary": "open_count=479",
+            "evidence": [("progress_log", "runs/progress.jsonl")],
+        })
+        self.assertNotIn("--verified-state", argv)
+        self.assertIn("--evidence", argv)
+        self.assertIn("verified_state=verified_done", argv)
+        # The pre-existing evidence is preserved, not replaced.
+        self.assertIn("progress_log=runs/progress.jsonl", argv)
+        # And the row is still a witness carrying its status.
+        self.assertEqual(argv[argv.index("--kind") + 1], "witness")
+        self.assertEqual(argv[argv.index("--status") + 1], "witnessed_done")
+
+    def test_every_flag_is_one_fak_loop_append_defines(self) -> None:
+        defined = self._loop_append_flags()
+        self.assertIn("evidence", defined)      # the parse found a real flag set
+        self.assertNotIn("verified-state", defined)
+        for event in (
+            {"loop_id": "l", "run_id": "R", "kind": "witness", "status": "witnessed_done",
+             "verified_state": "verified_unavailable", "reason": "AUDIT_UNAVAILABLE",
+             "summary": "s", "metrics": {"open_now": 479}, "evidence": [("progress_log", "p")]},
+            {"loop_id": "l", "run_id": "R", "kind": "end", "status": "claimed_done",
+             "reason": "OK", "summary": "s"},
+        ):
+            argv = self._argv(event)
+            for tok in argv:
+                if tok.startswith("--"):
+                    self.assertIn(tok[2:], defined,
+                                  f"{tok} is not a flag `fak loop append` defines; "
+                                  f"it would exit 2 and drop the row (argv={argv})")
+
+    def test_no_verified_state_appends_no_evidence_ref(self) -> None:
+        argv = self._argv({"loop_id": "l", "run_id": "R", "kind": "end",
+                           "status": "claimed_done", "reason": "OK", "summary": "s"})
+        self.assertNotIn("--evidence", argv)
 
 
 if __name__ == "__main__":
