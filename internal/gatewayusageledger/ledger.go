@@ -81,6 +81,16 @@ type Counters struct {
 	CompactionDroppedTurns    uint64 `json:"compaction_dropped_turns"`
 	CompactionShedTokens      uint64 `json:"compaction_shed_tokens"`
 	CompactionCacheReadTokens uint64 `json:"compaction_cache_read_tokens"`
+	// CompactionInducedCreationTokens is the suffix-burst base (#2785): provider
+	// cache_creation the fires INDUCED by shifting bytes after the drop point, which
+	// invalidates the downstream recent-breakpoint suffix and forces a one-time cold
+	// re-write. It is the debit side of the compaction net (CompactionEconomics). No
+	// caller populates it yet — the per-fire attribution is #2785 — so it is 0 on
+	// today's rows and `omitempty` keeps those rows byte-identical to the pre-field
+	// schema (and their RowKey unchanged, since the key hashes this struct's JSON).
+	// A 0 here is UNWITNESSED, not measured-zero; CompactionEconomics.NetIsUpperBound
+	// is what carries that distinction to a reader.
+	CompactionInducedCreationTokens uint64 `json:"compaction_induced_creation_tokens,omitempty"`
 	// Per-reason breakdown of CompactionBailed (the closed agent.CompactReason*
 	// vocabulary) plus the anchor-starved subset of under_budget — the per-session
 	// WHY behind a zero fak shed slice (#1407/#1408). Durable here so a fleet reader
@@ -172,7 +182,17 @@ type Row struct {
 	UptimeSecs  float64     `json:"uptime_seconds,omitempty"`
 	Provenance  *Provenance `json:"provenance,omitempty"`
 	Counters    Counters    `json:"counters"`
-	GeneratedAt string      `json:"generated_at"`
+	// CompactionEconomics is the compaction-economics TRAILER (#2792): the per-session
+	// net-of-both WHY — fires, shed, observed cache_read, induced creation, and the
+	// signed net they imply — so the economics survive process exit where operators
+	// already look, instead of having to be re-joined from the per-fire ledger and the
+	// provider rows by hand. It is a PURE projection of Counters (CompactionEconomicsOf),
+	// stamped by NewRow, so it adds no observation the row did not already carry and a
+	// distrustful reader can recompute it from the same line. Pointer + omitempty: a
+	// session that never compacted carries no trailer and stays byte-identical to the
+	// pre-trailer schema.
+	CompactionEconomics *CompactionEconomics `json:"compaction_economics,omitempty"`
+	GeneratedAt         string               `json:"generated_at"`
 	// Carryforward is set only on Kind==KindCarryforward rows written by Cut —
 	// the fold witness for the pre-cut rows this row's Counters sum. Pointer +
 	// omitempty keeps every real session row byte-identical to the pre-cut schema.
@@ -205,7 +225,13 @@ func NewRow(kind, sessionType, context, sessionID string, uptime time.Duration, 
 		UptimeSecs:  uptime.Seconds(),
 		Provenance:  prov,
 		Counters:    c,
-		GeneratedAt: now.UTC().Format(time.RFC3339),
+		// Stamped for EVERY writer (guard teardown, serve stdio/http exit, the periodic
+		// snapshot) because it is derived from c alone — there is no way for a caller to
+		// forget it, and no second source that could disagree with the counters beside it.
+		// Cut's synthetic carryforward rows deliberately do NOT get one: they are era-sums,
+		// not sessions, and a per-session WHY summed across sessions is not a WHY.
+		CompactionEconomics: CompactionEconomicsOf(c),
+		GeneratedAt:         now.UTC().Format(time.RFC3339),
 	}
 }
 
