@@ -102,9 +102,15 @@ class a condition maps to, and never whether a given session is healthy right no
 
 Run that check from a scratch Go module built on the private snapshot. The public tree
 carries no bridge package at all, so the package path only resolves once the private client
-is staged into such a module; there is no in-repo lane gate to run instead. The check that
-settles the class table above is the readback classification test; run it by name for a fast,
-unambiguous answer, then run the package whole to catch the rest.
+is staged into such a module; there is no in-repo lane gate to run instead. The checks that
+settle the class table above are the readback classification tests, and it is worth knowing
+their names: `TestClassifyReadbackSeparatesFailureClasses` pins each condition to its class,
+while `TestPreflightReportsSlowHubNotAWedgedSession`,
+`TestPreflightReportsWedgedSessionWhenTailRepliesArrive`, `TestPreflightClassSplitsHubFromSession`,
+and `TestHubSideHintsDoNotSayRestart` pin the two properties an operator acts on — that a slow
+transport never reports a wedged shell, and that a hub-side class never tells anyone to restart
+a session. Selecting them with `-run` covering those three prefixes is the fast, unambiguous
+answer; run the package whole afterwards to catch the rest.
 
 One caveat when you run it whole. The bg-artifact prune check shells out to the host's
 `bash`, and its guard only asks whether a `bash` resolves on `PATH` — not whether that shell
