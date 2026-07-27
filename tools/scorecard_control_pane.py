@@ -90,6 +90,9 @@ import json
 import os
 import shlex
 import subprocess
+import tempfile
+import time
+from concurrent import futures
 from dispatch_worker import install_no_window_subprocess_defaults
 import sys
 from pathlib import Path
@@ -795,15 +798,74 @@ def baseline_doc(payload: dict[str, Any]) -> dict[str, Any]:
 
 # --- live runner -----------------------------------------------------------
 
-def run_scorecard(root: Path, card: dict[str, str] | str, *, python: str, timeout: int) -> tuple[dict[str, Any] | None, str]:
+# Card fan-out width. Capped well below a big host's core count because each job
+# is a whole scorecard subprocess (several shell their own `go`/`git`), and this
+# pane runs on shared developer boxes where saturating every core is antisocial.
+JOBS_CAP = 8
+
+# Ceiling for the one-time cmd/fak build below. A cold compile measured ~62s on a
+# Windows developer host; 300s leaves room on a slower/colder machine without ever
+# letting a wedged toolchain hang the pane.
+GO_BUILD_TIMEOUT = 300
+
+# The prefix the Go-backed cards shell. Rewritten to the prebuilt binary when one
+# is available -- see build_fak_binary.
+GO_RUN_PREFIX = ("go", "run", "./cmd/fak")
+
+
+def default_jobs() -> int:
+    """Default card concurrency: bounded by JOBS_CAP, never below 1."""
+    return max(1, min(JOBS_CAP, os.cpu_count() or 4))
+
+
+def build_fak_binary(root: Path, out_dir: str, *, timeout: int = GO_BUILD_TIMEOUT) -> str:
+    """Build ``./cmd/fak`` ONCE into out_dir; return its path, or "" if it will not build.
+
+    Seventeen registered cards shell ``go run ./cmd/fak …``, and every ``go run`` is
+    its own build: run serially that re-links cmd/fak seventeen times, and fanned out
+    it would COMPILE it seventeen times over. Building once up front and pointing the
+    cards at the artifact makes the fan-out cheap.
+
+    Returning "" is a first-class outcome, not an error to report: on a working tree
+    that does not compile the cards fall back to their own ``go run``, fail there, and
+    the operator gets the REAL build error in each card's own error text -- which is
+    exactly what build_break_hint() triages into "your tree does not compile" rather
+    than "the card is broken". Swallowing the build failure here would strand that
+    diagnosis.
+    """
+    out = str(Path(out_dir) / ("fak.exe" if os.name == "nt" else "fak"))
+    try:
+        proc = subprocess.run(
+            ["go", "build", "-o", out, "./cmd/fak"],
+            cwd=str(root), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out if proc.returncode == 0 and Path(out).exists() else ""
+
+
+def card_argv(root: Path, card: dict[str, str] | str, *, python: str,
+              fak_bin: str = "") -> tuple[list[str], str]:
+    """Resolve one card to (argv, error); a non-empty error means it cannot be run."""
     if isinstance(card, dict) and card.get("cmd"):
         argv = shlex.split(card["cmd"])
-    else:
-        script = card["script"] if isinstance(card, dict) else card
-        script_path = root / "tools" / script
-        if not script_path.exists():
-            return None, f"missing scorecard: tools/{script}"
-        argv = [python, str(script_path), "--json", *shlex.split(card.get("args", "") if isinstance(card, dict) else "")]
+        if fak_bin and tuple(argv[:3]) == GO_RUN_PREFIX:
+            argv = [fak_bin, *argv[3:]]
+        return argv, ""
+    script = card["script"] if isinstance(card, dict) else card
+    script_path = root / "tools" / script
+    if not script_path.exists():
+        return [], f"missing scorecard: tools/{script}"
+    args = shlex.split(card.get("args", "") if isinstance(card, dict) else "")
+    return [python, str(script_path), "--json", *args], ""
+
+
+def run_scorecard(root: Path, card: dict[str, str] | str, *, python: str, timeout: int,
+                  fak_bin: str = "") -> tuple[dict[str, Any] | None, str]:
+    argv, resolve_error = card_argv(root, card, python=python, fak_bin=fak_bin)
+    if resolve_error:
+        return None, resolve_error
     try:
         proc = subprocess.run(
             argv,
@@ -821,14 +883,46 @@ def run_scorecard(root: Path, card: dict[str, str] | str, *, python: str, timeou
         return None, f"non-JSON output (exit {proc.returncode}): {tail[0][:160]}"
 
 
-def collect(root: Path, *, python: str = "", timeout: int = 120) -> list[dict[str, Any]]:
+def collect(root: Path, *, python: str = "", timeout: int = 120,
+            jobs: int = 0) -> list[dict[str, Any]]:
+    """Run every registered card and fold each into a metric dict.
+
+    The cards run CONCURRENTLY, bounded by ``jobs`` (``jobs=1`` restores the strict
+    sequential pass). Sequentially this fold is the SUM of ~40 independent
+    subprocesses -- measured at over 500s on a developer host, against the 240s
+    budget its own scheduled runner (the gating ``scorecard control pane`` member of
+    ``fak garden``) allows it. That made the gate structurally unpassable: it could
+    only ever report ``timed out after 240s``, and a hard gate that can never be
+    green measures nothing. Threads are the right shape because a card spends its
+    whole life blocked in ``subprocess.run`` on a child, and every card is run with
+    ``--json``, a read-only path -- so no two cards race on the tree.
+
+    Concurrency does not change the fold: results are indexed back in SCORECARDS
+    order, and each card keeps its own timeout budget.
+    """
     python = python or sys.executable
-    metrics: list[dict[str, Any]] = []
-    for card in SCORECARDS:
-        card_timeout = int(card.get("timeout", timeout)) if isinstance(card, dict) else timeout
-        payload, error = run_scorecard(root, card, python=python, timeout=card_timeout)
-        metrics.append(metric_from_payload(card, payload, error))
-    return metrics
+    jobs = jobs if jobs > 0 else default_jobs()
+
+    with tempfile.TemporaryDirectory(prefix="fak-control-pane-build-") as build_dir:
+        fak_bin = build_fak_binary(root, build_dir, timeout=max(timeout, GO_BUILD_TIMEOUT))
+
+        def measure(card: dict[str, str]) -> dict[str, Any]:
+            card_timeout = int(card.get("timeout", timeout)) if isinstance(card, dict) else timeout
+            started = time.monotonic()
+            payload, error = run_scorecard(root, card, python=python,
+                                           timeout=card_timeout, fak_bin=fak_bin)
+            metric = metric_from_payload(card, payload, error)
+            # The pane could not previously name its own slow card: a timeout said
+            # only that the WHOLE fold ran out of budget. Carry each card's wall
+            # clock so the next regression is attributable.
+            metric["secs"] = round(time.monotonic() - started, 1)
+            return metric
+
+        if jobs == 1:
+            return [measure(card) for card in SCORECARDS]
+        with futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+            pending = [pool.submit(measure, card) for card in SCORECARDS]
+            return [f.result() for f in pending]
 
 
 def load_baseline(path: Path) -> dict[str, Any] | None:
@@ -958,6 +1052,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="CI ratchet gate: exit non-zero only if debt regressed above baseline (#506)")
     ap.add_argument("--baseline", default="", help=f"baseline JSON path (default: {BASELINE_REL})")
     ap.add_argument("--timeout", type=int, default=120, help="per-scorecard timeout seconds")
+    ap.add_argument("--jobs", type=int, default=0,
+                    help=f"cards to run concurrently (default: min({JOBS_CAP}, cpus); 1 = sequential)")
     args = ap.parse_args(argv)
 
     try:
@@ -968,7 +1064,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     baseline_path = Path(args.baseline).resolve() if args.baseline else (root / BASELINE_REL)
 
-    metrics = collect(root, timeout=args.timeout)
+    metrics = collect(root, timeout=args.timeout, jobs=args.jobs)
     baseline = load_baseline(baseline_path)
     payload = fold(metrics, baseline, workspace=str(root), commit=head_commit(root))
 

@@ -13,7 +13,10 @@ or `python -m pytest tools/scorecard_control_pane_test.py -q`.
 from __future__ import annotations
 
 import os
+import shlex
 import sys
+import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -734,11 +737,11 @@ def test_main_check_wires_gate_exit_code() -> None:
     orig_collect, orig_load = scp.collect, scp.load_baseline
     try:
         # regressed: current seo=4 above a baseline of seo=1 -> non-zero exit.
-        scp.collect = lambda root, timeout=120: full_metrics(seo=4)
+        scp.collect = lambda root, timeout=120, **_: full_metrics(seo=4)
         scp.load_baseline = lambda p: baseline_from(seo=1)
         assert scp.main(["--check"]) == 1
         # improved: current debt below baseline -> green even though nonzero before.
-        scp.collect = lambda root, timeout=120: full_metrics(seo=0)
+        scp.collect = lambda root, timeout=120, **_: full_metrics(seo=0)
         scp.load_baseline = lambda p: baseline_from(seo=5)
         assert scp.main(["--check"]) == 0
         # unpinned: no baseline -> the distinct exit 2.
@@ -760,7 +763,7 @@ def test_main_check_json_ok_reflects_ratchet_not_raw_fold() -> None:
     try:
         # improved with residual debt: raw fold is ok:false (debt>0) but the
         # ratchet HELD -> the emitted payload must be ok:true / verdict OK.
-        scp.collect = lambda root, timeout=120: full_metrics(seo=0)
+        scp.collect = lambda root, timeout=120, **_: full_metrics(seo=0)
         scp.load_baseline = lambda p: baseline_from(seo=5)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -771,7 +774,7 @@ def test_main_check_json_ok_reflects_ratchet_not_raw_fold() -> None:
         assert out["gate_exit"] == 0 and "RATCHET OK" in out["gate_message"]
 
         # regressed: ratchet trips -> ok:false / verdict ACTION, exit 1.
-        scp.collect = lambda root, timeout=120: full_metrics(seo=4)
+        scp.collect = lambda root, timeout=120, **_: full_metrics(seo=4)
         scp.load_baseline = lambda p: baseline_from(seo=1)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -854,6 +857,130 @@ def test_check_gate_build_break_hint_in_message() -> None:
     out = scp.fold(metrics, base, workspace=".", commit="now01")
     code, msg = scp.check_gate(out)
     assert code == 1 and "unmeasured" in msg and "go build ./..." in msg
+
+
+# --- card fan-out: the fold must fit its own scheduled budget ---------------
+#
+# The pane's scheduled runner is the GATING `scorecard control pane` member of
+# `fak garden`, which allows a member 240s. Run one card at a time the real
+# portfolio sums to >500s on a developer host, so the gate could only ever report
+# `timed out after 240s` — a hard gate that can never be green measures nothing.
+# These pin the three properties that make the fan-out safe to rely on: it
+# actually overlaps, it does not reorder the fold, and `--jobs 1` still means
+# strictly sequential.
+
+class _patched:
+    """Swap module attributes for the duration of a with-block."""
+
+    def __init__(self, **attrs: object) -> None:
+        self._attrs = attrs
+        self._saved: dict[str, object] = {}
+
+    def __enter__(self) -> "_patched":
+        for key, value in self._attrs.items():
+            self._saved[key] = getattr(scp, key)
+            setattr(scp, key, value)
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        for key, value in self._saved.items():
+            setattr(scp, key, value)
+        return False
+
+
+def _concurrency_probe(delay: float = 0.0):
+    """A run_scorecard stub returning a valid payload while recording peak overlap."""
+    state = {"live": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def stub(root, card, *, python, timeout, fak_bin=""):  # noqa: ANN001, ANN202
+        with lock:
+            state["live"] += 1
+            state["peak"] = max(state["peak"], state["live"])
+        if delay:
+            time.sleep(delay)
+        with lock:
+            state["live"] -= 1
+        return corpus_card(card["debt"], 0, grade="A"), ""
+
+    return stub, state
+
+
+def _collect_with(stub, *, jobs: int) -> list[dict]:
+    # build_fak_binary is stubbed out: these tests pin the fan-out, not the toolchain.
+    with _patched(run_scorecard=stub, build_fak_binary=lambda *a, **k: ""):
+        return scp.collect(scp.repo_root(), python="py", timeout=1, jobs=jobs)
+
+
+def test_collect_fans_cards_out_concurrently() -> None:
+    stub, state = _concurrency_probe(delay=0.05)
+    metrics = _collect_with(stub, jobs=8)
+    assert len(metrics) == len(scp.SCORECARDS)
+    assert state["peak"] > 1, f"cards ran one-at-a-time (peak concurrency {state['peak']})"
+
+
+def test_collect_keeps_scorecards_order_under_fan_out() -> None:
+    # Order is load-bearing: the pinned baseline is keyed per metric and render()
+    # walks the list positionally, so a fan-out that returned completion order
+    # would silently re-attribute debt.
+    stub, _ = _concurrency_probe(delay=0.01)
+    metrics = _collect_with(stub, jobs=8)
+    assert [m["key"] for m in metrics] == [c["key"] for c in scp.SCORECARDS]
+
+
+def test_collect_jobs_one_stays_sequential() -> None:
+    stub, state = _concurrency_probe(delay=0.005)
+    metrics = _collect_with(stub, jobs=1)
+    assert len(metrics) == len(scp.SCORECARDS)
+    assert state["peak"] == 1, f"--jobs 1 must not overlap; peak was {state['peak']}"
+
+
+def test_collect_records_per_card_seconds() -> None:
+    # A timing-out pane could not previously name WHICH card was slow; every
+    # metric now carries its own wall clock so the next regression is attributable.
+    stub, _ = _concurrency_probe()
+    metrics = _collect_with(stub, jobs=4)
+    assert all(isinstance(m.get("secs"), float) for m in metrics), \
+        [m["key"] for m in metrics if not isinstance(m.get("secs"), float)]
+
+
+def test_default_jobs_is_bounded() -> None:
+    assert 1 <= scp.default_jobs() <= scp.JOBS_CAP
+
+
+def test_card_argv_rewrites_go_run_to_the_prebuilt_binary() -> None:
+    card = next(c for c in scp.SCORECARDS if c["key"] in scp.GO_BACKED_KEYS)
+    argv, err = scp.card_argv(scp.repo_root(), card, python="py", fak_bin="/tmp/fak")
+    assert err == ""
+    assert argv[0] == "/tmp/fak", argv
+    # Only the `go run ./cmd/fak` prefix is replaced — the card's own subcommand
+    # and flags must survive verbatim or it would measure something else.
+    assert argv[1:] == shlex.split(card["cmd"])[3:], argv
+
+
+def test_card_argv_falls_back_to_go_run_without_a_binary() -> None:
+    # A working tree that does not compile yields no prebuilt binary. The cards
+    # must then shell `go run` exactly as before, so the REAL build error still
+    # reaches the operator through each card's error text — which is what
+    # build_break_hint() triages into "your tree does not compile" instead of
+    # "the card is broken".
+    card = next(c for c in scp.SCORECARDS if c["key"] in scp.GO_BACKED_KEYS)
+    argv, err = scp.card_argv(scp.repo_root(), card, python="py", fak_bin="")
+    assert err == "" and argv[:3] == list(scp.GO_RUN_PREFIX), argv
+
+
+def test_card_argv_leaves_python_cards_alone() -> None:
+    card = next(c for c in scp.SCORECARDS if c.get("script"))
+    argv, err = scp.card_argv(scp.repo_root(), card, python="py", fak_bin="/tmp/fak")
+    assert err == "" and argv[0] == "py" and "--json" in argv, argv
+
+
+def test_card_argv_reports_a_missing_script() -> None:
+    argv, err = scp.card_argv(
+        scp.repo_root(),
+        {"key": "x", "debt": "x_debt", "label": "x", "script": "no_such_scorecard.py"},
+        python="py")
+    assert argv == [] and "missing scorecard" in err, (argv, err)
 
 
 # --- tolerant live smoke ----------------------------------------------------
