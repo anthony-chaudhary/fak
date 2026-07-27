@@ -170,7 +170,7 @@ func printGrades(w io.Writer, grades []modelroute.Grade, floor modelroute.GradeF
 		fmt.Fprintf(w, "    %-24s %s\n", g.Model, gradeCell(g))
 	}
 	if silent > 0 {
-		fmt.Fprintf(w, "    %-24s %d model(s) the evidence file says nothing about; they stay top-rung only\n", "(no evidence)", silent)
+		fmt.Fprintf(w, "    %-24s %d model(s) the evidence says nothing about; they stay top-rung only\n", "(no evidence)", silent)
 	}
 	if len(ignored) > 0 {
 		fmt.Fprintf(w, "  note         evidence for %d model(s) the roster does not bind, so it graded nothing: %s\n",

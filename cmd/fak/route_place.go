@@ -94,6 +94,7 @@ type placementReport struct {
 	MeasuredCount  int                       `json:"measured_candidates"`
 	Grades         []modelroute.Grade        `json:"grades,omitempty"`
 	IgnoredModels  []string                  `json:"ignored_evidence_models,omitempty"`
+	Journal        *journalSummary           `json:"journal,omitempty"`
 }
 
 // placeOptions are the two ways a caller may say what a model can do, plus the render
@@ -101,7 +102,10 @@ type placementReport struct {
 // change to this type rather than to every call site's argument order.
 type placeOptions struct {
 	CapSpec      string // --capability: an operator ASSERTING a grade
-	EvidencePath string // --evidence: outcomes the grader turns into one
+	EvidencePath string // --evidence: a summary of outcomes the grader turns into one
+	OutcomesPath string // --outcomes: the raw turn journal, counted here
+	Since        string // --since: the evidence window ("30d", "720h")
+	FloorSpec    string // --grade-floor: the operator's evidentiary bar
 	JSON         bool
 }
 
@@ -117,24 +121,19 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 		fmt.Fprintln(stderr, "fak route:", err)
 		return 2
 	}
-	var (
-		evidence map[string][]modelroute.ClassEvidence
-		floor    modelroute.GradeFloor
-	)
-	if opts.EvidencePath != "" {
-		if evidence, floor, err = loadPlacementEvidence(opts.EvidencePath); err != nil {
-			fmt.Fprintln(stderr, "fak route:", err)
-			return 2
-		}
-		// One model, two sources of truth about what it can do, is a configuration error.
-		// Preferring either one silently would leave the operator reading a grade whose
-		// origin they cannot tell — so name the models and refuse.
-		if clash := conflictingDeclarations(declared, evidence); len(clash) > 0 {
-			fmt.Fprintf(stderr, "fak route: --capability and --evidence both claim a capability for %s; "+
-				"a measurement and an assertion cannot both be the grade — drop it from one of them\n",
-				strings.Join(clash, ", "))
-			return 2
-		}
+	evidence, floor, journal, err := placementGradeInputs(opts)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak route:", err)
+		return 2
+	}
+	// One model, two sources of truth about what it can do, is a configuration error.
+	// Preferring either one silently would leave the operator reading a grade whose
+	// origin they cannot tell — so name the models and refuse.
+	if clash := conflictingDeclarations(declared, evidence); len(clash) > 0 {
+		fmt.Fprintf(stderr, "fak route: --capability and the graded evidence both claim a capability for %s; "+
+			"a measurement and an assertion cannot both be the grade — drop it from one of them\n",
+			strings.Join(clash, ", "))
+		return 2
 	}
 	candidates := placementCandidates(*roster, declared)
 	if len(candidates) == 0 {
@@ -164,7 +163,7 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 	if opts.JSON {
 		b, _ := json.MarshalIndent(placementReport{
 			Classification: cls, Placement: p, Candidates: candidates, MeasuredCount: measured,
-			Grades: grades, IgnoredModels: ignored,
+			Grades: grades, IgnoredModels: ignored, Journal: journal,
 		}, "", "  ")
 		fmt.Fprintln(stdout, string(b))
 		return 0
@@ -172,6 +171,9 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 	printPlacement(stdout, p, cls, candidates, measured)
 	if grades != nil {
 		printGrades(stdout, grades, floor, ignored)
+	}
+	if journal != nil {
+		printJournalSummary(stdout, *journal)
 	}
 	return 0
 }

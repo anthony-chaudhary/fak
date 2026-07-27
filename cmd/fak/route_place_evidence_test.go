@@ -252,7 +252,7 @@ func TestModelsTheFileNeverMentionsAreCountedNotListed(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %q", code, errOut)
 	}
-	if !strings.Contains(out, "2 model(s) the evidence file says nothing about") {
+	if !strings.Contains(out, "2 model(s) the evidence says nothing about") {
 		t.Errorf("silent models were not accounted for:\n%s", out)
 	}
 	if strings.Contains(out, "rung-vendor  ") {
