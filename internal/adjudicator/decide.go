@@ -1225,6 +1225,77 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 				}
 				continue
 			}
+			// The WINDOWS privilege-elevation rule (`Start-Process … -Verb RunAs`) is
+			// decided STRUCTURALLY for the same reason as its POSIX twin above — and
+			// closing the asymmetry sudo_local.go itself named, where the POSIX
+			// escalation word got a command-word decision while this one kept the raw
+			// regex (#2343). The raw regex false-positives on the phrase as quoted
+			// text, which on THIS repo is routine work: grepping the policy that ships
+			// the rule (`Select-String -Pattern 'Start-Process -Verb RunAs' …`) and
+			// committing a doc about it were both POLICY_BLOCKs. Worse, the refusal's
+			// own fix text says to PRINT the command for the operator, and printing it
+			// tripped the same rule — the self-refuting-remedy class already closed for
+			// -WhatIf and `git clean -n`. commandInvokesRunAsElevation tokenizes with
+			// PowerShell's lexical rules (backtick escapes, backslash is a path byte),
+			// resolves each statement's command word, and requires Start-Process AT
+			// that position carrying -Verb RunAs in the same argv — unwrapping nested
+			// host payloads so a real elevation stays denied. Gated on the raw match
+			// and purely SUBTRACTIVE, so it never introduces a new deny; every
+			// ambiguity (unterminated quote, -EncodedCommand) keeps the deny.
+			if isRunAsArgRule(pr) {
+				if present {
+					canon, ok := canonicalizeArgValue(val)
+					if !ok {
+						return argMalformed(pr), true, notes
+					}
+					if pr.Re != nil && pr.Re.MatchString(canon) {
+						if commandInvokesRunAsElevation(val) || commandInvokesRunAsElevation(canon) {
+							if pr.Advisory {
+								note(pr, "runas_elevation")
+								continue
+							}
+							return argDeny(pr, "runas_elevation"), true, notes
+						}
+						// quoted mention only: the raw regex was a false positive
+					}
+				}
+				continue
+			}
+			// The TERRAFORM DESTROY rule is decided STRUCTURALLY by SUBCOMMAND, because
+			// the raw regex is `terraform` … `destroy` on one line and so refuses the
+			// recovery it itself advertises: its own fix text says "produce the destroy
+			// plan for review instead: terraform plan -destroy", and `-destroy` matches
+			// `\bdestroy\b`, so the advertised escape is blocked by the rule advertising
+			// it. That is the self-refuting-remedy class already closed for -WhatIf,
+			// `git clean -n` and `git rebase --abort`. It also refused quoted mentions
+			// (documenting or grepping the policy file that ships the rule, which lives
+			// in this checkout) and read-only subcommands (`terraform show  # inspect
+			// before a destroy`). commandAppliesTerraformDestroy resolves `terraform` at a
+			// command-word position under BOTH POSIX and PowerShell lexing and denies
+			// only a real teardown — `destroy`, or `apply -destroy`, which is its exact
+			// equivalent — while admitting `plan -destroy` and every read-only
+			// subcommand. Gated on the raw match and purely SUBTRACTIVE, so it never
+			// introduces a new deny; every ambiguity keeps the deny.
+			if isTerraformDestroyArgRule(pr) {
+				if present {
+					canon, ok := canonicalizeArgValue(val)
+					if !ok {
+						return argMalformed(pr), true, notes
+					}
+					if pr.Re != nil && pr.Re.MatchString(canon) {
+						if commandAppliesTerraformDestroy(val) || commandAppliesTerraformDestroy(canon) {
+							if pr.Advisory {
+								note(pr, "terraform_destroy")
+								continue
+							}
+							return argDeny(pr, "terraform_destroy"), true, notes
+						}
+						// plan/read-only subcommand or a quoted mention: the raw regex
+						// was a false positive
+					}
+				}
+				continue
+			}
 			// Every OTHER deny_regex rule matches the CANONICAL form (#2407): the raw
 			// arg string alone let a backslash, dot-segment, env-alias, or quote-style
 			// spelling of the same value slip a rule written against its canonical
