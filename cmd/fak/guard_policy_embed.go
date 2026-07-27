@@ -72,6 +72,22 @@ const guardResourceSampleInterval = 2 * time.Second
 // (`fak guard allow --prefix mcp__atlassian__`) never admits irreversible external
 // destruction — a name-deny outranks every allow layer.
 //
+// The cross-shell-dialect rule (a PowerShell cmdlet submitted to the POSIX Bash tool)
+// ships ADVISORY — `arg_rules[].advisory`, the rule-granular dual of advisory_reasons,
+// which is the sanctioned lever here because SHELL_DIALECT is deliberately NOT in
+// AdvisoryEligible and must never be blanket-softened. The call is admitted with the
+// would-deny recorded on the verdict instead of refused. It is a dialect LINT, not a
+// danger class: by the rule's own fix text the entire consequence of admitting one is
+// `command not found` (exit 127), so enforcing it prevented nothing the shell does not
+// prevent a millisecond later, while costing a turn boundary each time. It was the
+// largest single refusal class in the guard-audit corpus (116 of 259 refusals of
+// genuinely attempted calls), and every one was a READ-ONLY cmdlet; internal/kernel
+// already classes the reason RETRYABLE/model-fixable. Admitting grants no capability —
+// the decider matches a cmdlet only at a resolved command-word position, the one place
+// a POSIX shell cannot run it. The genuine-danger classes are untouched, and the
+// destructive PowerShell rules (recursive/forced delete, the disk verbs, the truncation
+// cmdlet) keep their hard denies on the PowerShell / shell_command surfaces.
+//
 // The `\bsudo\b` arg-rule is decided STRUCTURALLY (internal/adjudicator/sudo_local.go,
 // same recogniser pattern as rm_rf/rce_pipe): only a LOCAL escalation at a resolved
 // command-word position is refused. `ssh gpu-box 'sudo systemctl …'` — the dominant

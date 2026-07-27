@@ -44,6 +44,36 @@ func TestWitnesslessBlockLowersQuality(t *testing.T) {
 	}
 }
 
+// TestAdvisoryIsNotAnUnknownVerdict pins the vocabulary fix. An ADVISORY row is a
+// rule on logged trial (arg_rules[].advisory) or a tool-definition prune: the call was
+// ADMITTED and the would-deny was recorded alongside it. That is the most fully
+// explained row the journal carries, so counting it as an unknown-verdict honesty hole
+// inverted the metric — and because ADVISORY is the dominant verdict in real journals,
+// the miscount was big enough to pin WorstBucket on a defect that does not exist.
+//
+// The nonsense verdict is kept in the same fixture so this asserts a VOCABULARY fix,
+// not a blanket "stop counting unknowns": ZALGO must still score as one.
+func TestAdvisoryIsNotAnUnknownVerdict(t *testing.T) {
+	p := writeJournal(t, []map[string]any{
+		{"verdict": "ALLOW", "kind": "DECIDE", "tool": "Read"},
+		{"verdict": "ADVISORY", "kind": "DECIDE", "tool": "Bash", "reason": "SHELL_DIALECT"},
+		{"verdict": "ADVISORY", "kind": "TOOL_DEFINITION_PRUNED", "tool": "Bash", "reason": "DEFAULT_DENY"},
+		{"verdict": "ZALGO", "kind": "ZALGO"},
+	})
+	fold := FoldRows([]string{p})
+	if fold.UnknownVerdict != 1 {
+		t.Errorf("UnknownVerdict = %d, want 1 (only ZALGO) — an admitted-and-recorded advisory is not an honesty hole", fold.UnknownVerdict)
+	}
+	if fold.ByVerdict["ADVISORY"] != 2 {
+		t.Errorf("ByVerdict[ADVISORY] = %d, want 2 — advisories must still be COUNTED, just not as unknowns", fold.ByVerdict["ADVISORY"])
+	}
+	// An advisory carries no DENY, so it must not be charged as a blank-reason or
+	// witnessless block either.
+	if fold.BlankReasonOnDeny != 0 || fold.WitnesslessBlock != 0 {
+		t.Errorf("fold = %+v, want no block-quality charges from advisory rows", fold)
+	}
+}
+
 func TestUnexplainedBlockLowersQuality(t *testing.T) {
 	p := writeJournal(t, []map[string]any{
 		{"verdict": "ALLOW", "kind": "DECIDE"},

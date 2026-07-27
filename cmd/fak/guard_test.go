@@ -325,14 +325,37 @@ func TestGuardDefaultPolicyHermesReasons(t *testing.T) {
 	}
 }
 
-// TestGuardDefaultPolicyDeniesPowerShellCmdletsInBash is the #3941 end-to-end drift
-// guard: the REAL embedded floor must DENY a PowerShell cmdlet submitted to the POSIX
-// Bash tool with reason SHELL_DIALECT (it fails `command not found`, exit 127), while
-// still ALLOWING the POSIX equivalents. This exercises the shipped JSON → recognizer →
-// structural path, so a divergence between guard-default-policy.json's deny_regex and
-// defaultShellDialectDenyRegex (which would silently drop back to the false-positive
-// raw-regex path) fails here.
-func TestGuardDefaultPolicyDeniesPowerShellCmdletsInBash(t *testing.T) {
+// TestGuardDefaultPolicyNotesPowerShellCmdletsInBash is the #3941 end-to-end drift
+// guard, now asserting the ADVISORY posture the rule shipped with after the refusal
+// census: a PowerShell cmdlet submitted to the POSIX Bash tool is ADMITTED with a
+// would-deny note (`Bash.command shell_dialect <Cmdlet>`) rather than refused.
+//
+// Why this rule and not the others. The floor's deny classes are the ones where the
+// call itself is the harm — destructive removal, privilege escalation, disk wipe,
+// fork bomb, RCE pipe. A cmdlet on a Bash line is in none of them: by the rule's own
+// fix text the entire consequence of admitting it is `command not found` (exit 127),
+// so the refusal prevents nothing the shell does not prevent a millisecond later. It
+// was a usability LINT living in the danger floor, and it was the single largest
+// refusal class in the guard-audit corpus — 116 of 259 refusals of genuinely
+// attempted calls (45%), every one of them triggered by a READ-ONLY cmdlet
+// (Select-String 45, Select-Object 27, Get-Content 25, Get-ChildItem 12,
+// Measure-Object 4, Get-Item/Test-Path/Invoke-WebRequest 1 each). internal/kernel
+// already classes SHELL_DIALECT RETRYABLE ("model-fixable — re-route the tool"), so
+// enforcing it was also inconsistent with the kernel's own reading of it.
+//
+// Admitting it grants NO capability. The rule is decided structurally, and
+// commandLeadsWithPowerShellCmdlet matches a cmdlet only at a resolved command-word
+// position — the one position where a POSIX shell cannot execute it. The shapes that
+// would really run a cmdlet do not reach this rule at all: rceShellProgram unwraps
+// only sh/bash/dash/zsh/ksh, so `powershell -c "…"` on the Bash tool is a quoted
+// argument that this decider never matched, before or after this change.
+//
+// Both drift directions are still pinned. The advisory case must carry the note,
+// which proves the shipped JSON → recognizer → structural path ran end to end; and
+// the benign case `grep Select-Object src` must stay a clean Allow, which is what
+// fails loudly if guard-default-policy.json's deny_regex ever diverges from
+// defaultShellDialectDenyRegex and drops back to the false-positive raw-regex path.
+func TestGuardDefaultPolicyNotesPowerShellCmdletsInBash(t *testing.T) {
 	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
 	if err != nil {
 		t.Fatalf("embedded guard floor is not a valid manifest: %v", err)
@@ -354,22 +377,42 @@ func TestGuardDefaultPolicyDeniesPowerShellCmdletsInBash(t *testing.T) {
 		return adj.Adjudicate(context.Background(), &abi.ToolCall{Tool: "Bash", Args: ref})
 	}
 
-	for _, cmd := range []string{
-		`Get-ChildItem | Select-Object -First 5`,
-		`Where-Object { $_ -gt 5 }`,
-		`cat access.log | Measure-Object -Line`,
+	for _, tc := range []struct{ cmd, cmdlet string }{
+		{`Get-ChildItem | Select-Object -First 5`, "Get-ChildItem"},
+		{`Where-Object { $_ -gt 5 }`, "Where-Object"},
+		{`cat access.log | Measure-Object -Line`, "Measure-Object"},
+		// The dominant corpus shape: a legitimate POSIX command whose LATER
+		// pipeline stage leads with a cmdlet. 104 of the 116 were this.
+		{`git log --oneline | Select-String fix`, "Select-String"},
 	} {
-		v := decide(cmd)
-		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonShellDialect {
-			t.Errorf("cmdlet %q: shipped floor gave %v/%s, want Deny/SHELL_DIALECT",
-				cmd, verdictName(v.Kind), abi.ReasonName(v.Reason))
+		v := decide(tc.cmd)
+		if v.Kind != abi.VerdictAllow {
+			t.Errorf("cmdlet %q: shipped floor gave %v/%s, want Allow (advisory)",
+				tc.cmd, verdictName(v.Kind), abi.ReasonName(v.Reason))
+			continue
+		}
+		// The would-deny must survive as forensics, or advisory would be a silent
+		// widening rather than a recorded one.
+		want := "Bash.command shell_dialect " + tc.cmdlet
+		if got := v.Meta["advisory_violations"]; !strings.Contains(got, want) {
+			t.Errorf("cmdlet %q: advisory_violations = %q, want it to contain %q — the structural decider did not run, so the rule fell back to the raw regex",
+				tc.cmd, got, want)
 		}
 	}
-	// The POSIX equivalents the refusal points at must NOT be caught.
+	// The POSIX equivalents the hint points at must stay clean Allows carrying NO
+	// note. `grep Select-Object src` is the drift canary: it mentions a cmdlet as an
+	// ARGUMENT, so only the structural decider can tell it apart from a use — a
+	// raw-regex fallback would note (and before this change, deny) it.
 	for _, cmd := range []string{`ls -la`, `head -5 file | wc -l`, `grep Select-Object src`} {
-		if v := decide(cmd); v.Kind != abi.VerdictAllow {
+		v := decide(cmd)
+		if v.Kind != abi.VerdictAllow {
 			t.Errorf("benign %q: shipped floor gave %v/%s, want Allow",
 				cmd, verdictName(v.Kind), abi.ReasonName(v.Reason))
+			continue
+		}
+		if got := v.Meta["advisory_violations"]; got != "" {
+			t.Errorf("benign %q: got advisory note %q, want none — a cmdlet named as an argument is not a dialect error, and noting it means the raw-regex path is deciding",
+				cmd, got)
 		}
 	}
 }

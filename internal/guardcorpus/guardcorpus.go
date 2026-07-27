@@ -46,12 +46,14 @@ const (
 // ADVISORY is a real, non-blocking verdict emitted by guard monitors — e.g. the
 // tool-definition-pruner (kind TOOL_DEFINITION_PRUNED, by "tool-definition-pruner")
 // and the SHELL_DIALECT monitor. Folding this host's real journals showed it is
-// the DOMINANT verdict (~39 rows/session across 510 sessions). guardrsi.KnownVerdicts
-// OMITS it (internal/guardrsi/guardrsi.go:25), so the guard-RSI verdict-quality
-// metric miscounts every advisory as an unknown-verdict honesty hole — a false
-// signal that pins its worst bucket on "unknown_verdict". This fold does not
-// inherit that bug; the finding is filed as a fan-out item (A-advisory) in
-// docs/GUARD-SESSION-DATASET-PLAN.md.
+// the DOMINANT verdict (~39 rows/session across 510 sessions).
+//
+// guardrsi.KnownVerdicts used to OMIT it, so the guard-RSI verdict-quality metric
+// miscounted every advisory as an unknown-verdict honesty hole and pinned its worst
+// bucket on "unknown_verdict" — a lever aimed at a defect that did not exist. That
+// fold now carries ADVISORY too (TestAdvisoryIsNotAnUnknownVerdict pins it), so the
+// two vocabularies agree; the note is kept because the divergence is what the
+// A-advisory fan-out item in docs/GUARD-SESSION-DATASET-PLAN.md was filed about.
 var knownVerdicts = map[string]bool{
 	"ALLOW": true, "DENY": true, "TRANSFORM": true, "QUARANTINE": true,
 	"WITNESS": true, "DEFER": true, "INDETERMINATE": true, "ADVISORY": true,
