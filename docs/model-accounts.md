@@ -291,6 +291,38 @@ the most demanding but the lowest number. Every comparison goes through
 `capability >= required` fails four tests at once, and the way it fails is the point: a
 4B laptop model takes both the ultra-hard and the security/destructive work.
 
+### Declaring what the work is
+
+`Place` needs a `WorkClass`; routing produces a `Subject`. `ClassOf(Subject)` is the
+joint, and it is where an automatic placer is most tempted to cheat — it would be easy to
+look at a tool name, decide "grep is harmless", and route it to a laptop. fak does not do
+that. Judging what a call can destroy is `internal/adjudicator`'s reversibility question,
+it sits a tier above this leaf, and it is deliberately not re-guessed from a name here.
+
+So a work class is **declared, or it is conservative**. Declare it as a subject label:
+
+```jsonc
+{ "match": { "aspect": "tool_call", "labels": { "work_class": "routine" } },
+  "plan":  { "model": "tiny" } }
+```
+
+| Input | Classified as | Why |
+| --- | --- | --- |
+| `labels.work_class` naming a known class | that class, **declared** | the operator said so |
+| `aspect: "scout"`, nothing declared | `routine`, **declared** | a scout *is* the cheap classify-first probe — the aspect names the work |
+| anything else | *(empty)*, **undeclared** | `PolicyFor` already puts the empty class at the strictest floor |
+| `labels.work_class` misspelled | *(empty)*, **undeclared** | a typo in `routine` must not read as permission to use a laptop |
+
+Undeclared work therefore lands exactly where it landed before this feature existed — on
+a vendor — and reports `class-undeclared-conservative` so an operator can see the fix is
+a label rather than more hardware. There is no second conservatism mechanism layered on
+top; one gate in one place is why the behaviour stays predictable. `Complexity` can then
+ratchet a floor **up** (a high-complexity `routine` subject becomes `normal-impl`) and
+never down, which is what makes accepting complexity as an input safe at all.
+
+`Roster.PlaceSubject(subject, candidates)` composes the two and returns the placement
+*and* the classification, so both halves of the decision are visible together.
+
 ## A note on codex and Anthropic subscriptions
 
 Codex's native wire is the OpenAI Responses API, so bind it to `kind: openai-responses`,
