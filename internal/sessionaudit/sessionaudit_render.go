@@ -48,6 +48,7 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	}
 	fmt.Fprintln(&b)
 	renderModelMix(&b, agg)
+	renderSelfHostedShare(&b, agg)
 	renderBuckets(&b, agg)
 	renderModels(&b, agg)
 	renderNamespaces(&b, agg)
@@ -175,6 +176,43 @@ func renderModelMix(b *strings.Builder, agg Aggregate) {
 		c := agg.PerTier[tier]
 		tierCost := modelCostByKey(agg, tier, ModelTier)
 		fmt.Fprintf(b, "| %s | %s | %s | $%s | %s |\n", tier, fmtInt(c.Output), fmtPct(ratio(c.Output, totalOutput)), fmtFloat(tierCost, 2), fmtPct(floatRatio(tierCost, totalCost)))
+	}
+	fmt.Fprintln(b)
+}
+
+// renderSelfHostedShare prints epic #5416's headline number: the fraction of generated
+// tokens served on hardware we operate, ALWAYS next to the coverage that qualifies it.
+//
+// The two never appear apart. "62% self-hosted" over 4% coverage is a misleading
+// headline, and on today's corpus the honest reading is usually "we cannot tell yet" —
+// which is a finding, not a gap to paper over with a zero.
+func renderSelfHostedShare(b *strings.Builder, agg Aggregate) {
+	s := FoldSelfHostedShare(agg.PerBucket)
+	fmt.Fprintln(b, "## Self-hosted share (where the tokens were actually served)")
+	fmt.Fprintln(b)
+	fmt.Fprintln(b, "| Placement | Turns | Output tok | Cache-read tok |")
+	fmt.Fprintln(b, "|---|---:|---:|---:|")
+	for _, row := range []struct {
+		label string
+		c     ModelCounts
+	}{
+		{"self-hosted (device + fleet)", s.SelfHosted},
+		{"vendor API", s.Vendor},
+		{"unattributable (no placement signal)", s.Unattributable},
+		{"non-billed (harness, not inference)", s.NonBilled},
+	} {
+		fmt.Fprintf(b, "| %s | %s | %s | %s |\n", row.label, fmtInt(row.c.Turns), fmtInt(row.c.Output), fmtInt(row.c.CacheRead))
+	}
+	fmt.Fprintln(b)
+	if s.OutputShare == nil {
+		fmt.Fprintf(b, "**Self-hosted share = UNKNOWN** - no turn in this corpus carries a placement signal, so %s output tok of real inference cannot be attributed either way. That is the wiring gap, not a 0%%.\n",
+			fmtInt(s.Unattributable.Output))
+	} else {
+		fmt.Fprintf(b, "**Self-hosted share of attributed output = %s**  _(over %s of inference output; the rest carries no placement signal)_\n",
+			fmtPct(s.OutputShare), fmtPct(s.Coverage))
+	}
+	if len(s.UnattributableBuckets) > 0 {
+		fmt.Fprintf(b, "- **Missing the placement signal:** %s\n", strings.Join(s.UnattributableBuckets, "; "))
 	}
 	fmt.Fprintln(b)
 }
