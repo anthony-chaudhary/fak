@@ -34,6 +34,27 @@ import (
 //
 // then paste the result between the braces below. Because the recipe reads the live
 // findings, the regenerated list is always a subset of this one.
+//
+// # When the ratchet reds on a NEW tell (do NOT add it below)
+//
+// TestTestSuitePolicy fails in THIS package, but the file it names almost never lives
+// here — a NEW tell is introduced under cmd/… or internal/<other>/…, whose author runs
+// their own lane's suite and so never sees this gate. The red is therefore inherited by
+// every clone until someone triages it, and the tempting clear — pasting the named file
+// into the list below — is the one move the ratchet forbids: it is shrink-only, and
+// grandfathering a NEW tell retires the signal instead of paying it. Pay it at the
+// source file instead, in one of exactly two ways:
+//
+//   - assert the relation the frozen value stands for, so the assertion still holds
+//     after a legitimate change to the count — #5312 converted a frozen `len(sel) != 5`
+//     into `const k = 5; len(sel) != k`, whose invariant is "sampleTopK returns exactly
+//     k distinct experts";
+//   - or, when the width is a genuine algorithm invariant rather than a growable total,
+//     mark it in place with a trailing //boundarylint:ignore CHANGE_DETECTOR_TEST and
+//     the reason it cannot drift — #5312 suppressed an 8-hex scrubbed-hash width, the
+//     same class as sha256 hex being 64.
+//
+// Either way the fix lands in the source file's own lane, not this one.
 var changeDetectorBaseline = []string{
 	"cmd/batchbench/batchbench_test.go",
 	"cmd/ctxplandemo/main_test.go",
