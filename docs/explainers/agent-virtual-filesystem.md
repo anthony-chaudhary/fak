@@ -112,8 +112,18 @@ The **T0-vs-T1 proof** for that claim is a reproducible witness:
 [`examples/vm-fs-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/vm-fs-guard/)
 runs `fak` inside a container/microVM standing in for a T0 sandbox and captures fak
 adjudicating FS syscalls on a disk *it did not provision* — an out-of-scope write refused
-(`T1 · SELF_MODIFY`), a poisoned read quarantined (`T2 · TRUST_VIOLATION`), and the exit
-ledger of FS decisions, while the sandbox's own disk stays readable and writable. It is
+(`T1 · SELF_MODIFY`), an **out-of-view read refused** (`T1 · DEFAULT_DENY`) with a
+read-only subtree's write refused beside it (`T1 · POLICY_BLOCK`), a poisoned read
+quarantined (`T2 · TRUST_VIOLATION`), and the exit ledger of FS decisions, while the
+sandbox's own disk stays readable and writable. The read-side refusals are enforced through
+the wired `arg_rules` path view rather than the `mount_view` vocabulary this tier names —
+the capability is live, its declarative spelling is still #5310 (the example says so).
+Crucially the T0 half is **witnessed, not asserted**: the run reads the box off the
+*guest's own kernel* (`systemd-detect-virt`, `/proc`, `findmnt`), names the
+hypervisor-attached device backing the rootfs, and fails if any fak-backed mount, device,
+or FUSE server exists — so "fak did not provide this disk" is evidence the script can
+red-line on, not a sentence it prints. A run that cannot find a T0 declines to claim the
+VM half rather than printing it anyway (`FAK_REQUIRE_T0=1` makes that an `exit 1`). It is
 the filesystem twin of the network-egress witness
 ([`examples/remote-vm-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/remote-vm-guard/)):
 together they show one capability floor riding into any T0, over two syscall families.
@@ -152,8 +162,12 @@ Shipped pieces that already live in these tiers — with the gaps named, not hid
   not just per-op deny rules) is **half-landed** —
   [#2577](https://github.com/anthony-chaudhary/fak/issues/2577) shipped the `mount_view`
   manifest namespace and the deny-by-default kernel `policy.MountViewRefusal`, but nothing
-  on the request path calls it, so a declared view is inert and `fak preflight` still
-  ALLOWs an out-of-view `Read`. Wiring it into the call-side adjudicator is
+  on the request path calls it, so a view declared in *that* namespace is inert and
+  `fak preflight` still ALLOWs the out-of-view `Read` it should have hidden. The
+  *capability* is not missing — the wired `arg_rules` path view refuses an out-of-view
+  `Read` with `DEFAULT_DENY` today (witnessed below) — what is missing is the single
+  declarative block that applies it to every FS tool at once instead of one rule per tool.
+  Wiring it into the call-side adjudicator is
   [#5310](https://github.com/anthony-chaudhary/fak/issues/5310); adjacent work is
   [#2358](https://github.com/anthony-chaudhary/fak/issues/2358). The shipped T1/T2 floor
   running *inside a sandbox fak did not provision* is witnessed end-to-end in

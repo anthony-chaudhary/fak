@@ -1,17 +1,46 @@
 # Captured output
 
-Every verdict below is a live decision of the same kernel a guarded session runs
+The T1/T2 verdicts are live decisions of the same kernel a guarded session runs
 (`fak preflight` folds the call-side chain; `fak demo` folds the result-side admitter),
-so the run is bit-identical on any box.
+so **those rows are identical on any box**. The **T0 block is not** — it is read off the
+guest's own kernel at run time, so it reports whatever box you actually ran on. That is
+the point: an *asserted* T0 would prove nothing about the claim this example exists to
+back.
+
+**Transcript fidelity.** `run.sh` folds stderr into stdout (`exec 2>&1`), so a plain
+`./run.sh > capture.txt` reproduces the ordering below exactly — before that, the narration
+and the verdict rows rode different streams and interleaved differently on every run, which
+would have made this file un-reproducible by construction. The only edits applied here are
+mechanical and lossless: ANSI colour escapes stripped, and the `✓ · —` glyphs folded to
+`PASS - -` so the block renders in any terminal, pager, and diff. No line is reordered,
+added, reworded, or omitted.
+
+## Inside a VM (the VM-vs-boundary capture)
+
+Captured inside a hypervisor guest (WSL2, a Hyper-V lightweight utility VM standing in
+for E2B/Fly/Cloudflare), run under `FAK_REQUIRE_T0=1` so an unwitnessed T0 would have
+been a hard failure rather than a silent downgrade:
 
 ```text
-$ examples/vm-fs-guard/run.sh
+$ FAK_BIN=$HOME/vm-fs-guard/fak FAK_REQUIRE_T0=1 ./run.sh
+[vm-fs-guard] T0 - the box that PROVIDES the disk (the sandbox's job, never fak's):
+  PASS T0 witnessed from inside the guest             -> vm - hypervisor guest - wsl - Linux 6.6.114.1-microsoft-standard-WSL2
+      rootfs   /dev/sdd ext4   /
+      workdir  /dev/sdd ext4   /
+  PASS fak provides no filesystem here                -> no fak mount, device, or FUSE server
+
 [vm-fs-guard] T1 - REFUSED: a write into a region the sandbox's disk holds but the agent must not touch
 [vm-fs-guard]      (SELF_MODIFY, by shape; fak did not provide this disk - it gates the path on it):
   PASS Edit  .git/config (repo internals)             -> DENY  SELF_MODIFY
   PASS Write ~/.ssh/id_rsa (a private key)            -> DENY  SELF_MODIFY
   PASS Write /workspace/.env (a secrets file)         -> DENY  SELF_MODIFY
   PASS Write internal/adjudicator/decide.go (kernel)  -> DENY  SELF_MODIFY
+
+[vm-fs-guard] T1 - REFUSED (read side): a Read whose target lies OUTSIDE the agent's declared view,
+[vm-fs-guard]      and a write into a subtree mounted read-only. The sandbox's disk holds both files;
+[vm-fs-guard]      fak never lets the call reach them (deny-by-default over the path space):
+  PASS Read  /srv/secrets/prod.pem (out of view)      -> DENY  DEFAULT_DENY
+  PASS Write /workspace/vendor/lib.go (ro subtree)    -> DENY  POLICY_BLOCK
 
 [vm-fs-guard] ALLOWED - ordinary reads/writes of the sandbox's OWN disk (the floor gates path+trust, not the disk):
   PASS Read  /workspace/src/main.go (in scope)        -> ALLOW
@@ -26,14 +55,74 @@ $ examples/vm-fs-guard/run.sh
   T1  DENY        SELF_MODIFY    Write ~/.ssh/id_rsa (a private key)
   T1  DENY        SELF_MODIFY    Write /workspace/.env (a secrets file)
   T1  DENY        SELF_MODIFY    Write internal/adjudicator/decide.go (kernel)
+  T1  DENY        DEFAULT_DENY   Read  /srv/secrets/prod.pem (out of view)
+  T1  DENY        POLICY_BLOCK   Write /workspace/vendor/lib.go (ro subtree)
   --  ALLOW       (permitted)    Read  /workspace/src/main.go (in scope)
   --  ALLOW       (permitted)    Write /workspace/notes.md (in scope)
   T2  QUARANTINE  TRUST_VIOLATION poisoned read held out of context
 
-[vm-fs-guard] all witnesses passed - fak adjudicated FS syscalls INSIDE a sandbox it did not provision:
-[vm-fs-guard]   a write into guarded machinery refused (T1/SELF_MODIFY), a poisoned read quarantined
-[vm-fs-guard]   (T2/TRUST_VIOLATION), while the sandbox's own disk stayed readable/writable.
+[vm-fs-guard] all witnesses passed - fak adjudicated FS syscalls INSIDE a vm it did not provision:
+[vm-fs-guard]   the disk came from the vm (fak holds no mount there); the DECISIONS came from fak -
+[vm-fs-guard]   a write into guarded machinery refused (T1/SELF_MODIFY), an out-of-view read refused
+[vm-fs-guard]   (T1/DEFAULT_DENY), a poisoned read quarantined (T2/TRUST_VIOLATION), while the
+[vm-fs-guard]   sandbox's own disk stayed readable/writable.
 [vm-fs-guard] wrap a live agent the same way: fak guard -- claude   (the FS floor rides into the VM).
+EXIT=0
+```
+
+All three of the issue's captures are live CLI decisions in that transcript: **(a)** the
+out-of-view `Read` refused (`DENY DEFAULT_DENY`, plus the read-only-subtree write refused
+`POLICY_BLOCK`), **(b)** the poisoned read quarantined (`QUARANTINE TRUST_VIOLATION`), and
+**(c)** the exit ledger of FS decisions - nine rows, each one a verdict the adjudicator
+computed on this run, inside a guest fak did not provision.
+
+**What makes this the VM-vs-boundary witness, and not merely a policy test.** Three facts
+in the T0 block are read off the guest, not asserted by the script:
+
+- the kernel identifies itself as a **hypervisor guest** (`systemd-detect-virt` -> `wsl`);
+- the root filesystem is **`/dev/sdd ext4`** — a block device the *hypervisor* attached.
+  fak did not provision, snapshot, or format it, and could not have;
+- **no fak mount, device, or FUSE server exists on the box** — the script scans every
+  mount for one and fails the run if it finds one.
+
+So the disk is unambiguously the sandbox's, while every verdict below it is fak's. That
+is the epic's claim — *fak is the virtual filesystem, not the virtual machine* — as
+evidence rather than as prose.
+
+## On a bare host (no sandbox)
+
+Run the same script outside a container/VM and the T1/T2 rungs still pass, but the run
+**declines to claim the VM half** instead of printing the sandbox sentence anyway:
+
+```text
+$ FAK_BIN=<a Windows-built fak.exe> ./run.sh
+[vm-fs-guard] T0 - the box that PROVIDES the disk (the sandbox's job, never fak's):
+  ! T0 NOT witnessed                               -> host (no container or VM detected)
+[vm-fs-guard]      the T1/T2 verdicts below are real, but this run is NOT the VM-vs-boundary
+[vm-fs-guard]      witness - it proves the boundary, not that the boundary rode into a VM.
+[vm-fs-guard]      capture the VM half by running this script INSIDE a sandbox, e.g.:
+[vm-fs-guard]        docker run --rm -v "$PWD:/w" -w /w golang:1.23 examples/vm-fs-guard/run.sh
+...
+[vm-fs-guard] all T1/T2 witnesses passed - but T0 was NOT witnessed on this run (host, no sandbox):
+EXIT=0
+```
+
+That run is worth more than the fence it demonstrates. It was captured on a **different
+OS** (a Windows host, outside any guest) using a **separately built `fak.exe`** — and its
+nine T1/T2 ledger rows came out byte-identical to the WSL2 capture above. So "those rows
+are identical on any box" is not an assertion in this file either: two operating systems
+and two independently built binaries agree, which is what you would expect of a decision
+that is a pure function of (policy, call) and nothing else.
+
+`FAK_REQUIRE_T0=1` turns the downgrade into a hard failure, which is the form CI and any
+promotion check should run — it is what stops a bare-host run from being filed as the
+VM-vs-boundary witness:
+
+```text
+$ FAK_BIN=<a Windows-built fak.exe> FAK_REQUIRE_T0=1 ./run.sh
+...
+[vm-fs-guard] FAK_REQUIRE_T0=1 and no T0 was witnessed
+EXIT=1
 ```
 
 The disclosure on a refusal is bounded to the single offending glob — `fak preflight

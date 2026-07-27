@@ -23,8 +23,20 @@ examples/vm-fs-guard/run.sh
 Needs only Go (to build `fak`) — **no model, key, GPU, server, or network**. Every
 verdict is a live decision of the **same kernel** a guarded session runs: `fak preflight`
 folds the call-side adjudicator chain for one filesystem tool call, and `fak demo` folds
-the result-side admitter (`Kernel.AdmitResult`) over a poisoned read. The result is
+the result-side admitter (`Kernel.AdmitResult`) over a poisoned read. Those verdicts are
 bit-identical on every run, and the full script normally completes in a few seconds after Go compilation. Captured output: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+
+**Run it inside a sandbox to capture the VM half.** The T0 rung is *witnessed, never
+asserted*: the script reads the box off the guest's own kernel (`/proc`, `findmnt`,
+`systemd-detect-virt`) and only claims "inside a VM it did not provision" when it
+actually found one. On a bare host it still proves T1/T2 and says plainly that the VM
+half is **not** captured — an asserted T0 would be exactly the conflation this example
+exists to refute.
+
+```bash
+docker run --rm -v "$PWD:/w" -w /w golang:1.23 examples/vm-fs-guard/run.sh
+FAK_REQUIRE_T0=1 examples/vm-fs-guard/run.sh   # unwitnessed T0 -> exit 1 (CI/promotion)
+```
 
 **On a dirty shared trunk, skip the build** — point the witness at a prebuilt binary:
 
@@ -41,12 +53,14 @@ checkout rather than only in a clean clone.
 
 ## What it proves
 
-The disk belongs to the sandbox; the *decisions* belong to fak. Three FS-syscall classes,
-one boundary:
+The disk belongs to the sandbox; the *decisions* belong to fak. One boundary rung that
+establishes *whose disk it is*, then three FS-syscall classes decided on top of it:
 
 | # | The filesystem syscall | Verdict | Why |
 |---|---|---|---|
+| **T0** | *(not a syscall — the substrate)* the guest kernel's own report of the box, plus every mount on it | **witnessed** | the run reads `systemd-detect-virt` / `/proc` / `findmnt` to confirm it is inside a guest, names the device backing the rootfs (the *hypervisor's*, e.g. `/dev/sdd ext4`), and **fails if any fak-backed mount, device, or FUSE server exists** — the "fak did not provide this disk" half, as evidence |
 | **T1** | `Edit .git/config`, `Write ~/.ssh/id_rsa`, `Write /workspace/.env`, `Write internal/adjudicator/decide.go` | **DENY · SELF_MODIFY** | a write into a region the sandbox's disk holds but the agent must never touch — repo internals, a private key, a secrets file, fak's own kernel source — refused *by shape*, naming only the one offending glob |
+| **T1 (read side)** | `Read /srv/secrets/prod.pem` (outside the view), `Write /workspace/vendor/lib.go` (a read-only subtree) | **DENY · DEFAULT_DENY** / **DENY · POLICY_BLOCK** | the issue's capture (a): the sandbox's disk *holds* both files and fak never lets the call reach them — deny-by-default over the path space, the shape a mount namespace has. Declared as `arg_rules` in [`vm-fs-floor.json`](vm-fs-floor.json); see [Honest boundary](#honest-boundary) for why not the `mount_view` spelling |
 | **allow** | `Read /workspace/src/main.go`, `Write /workspace/notes.md` | **ALLOW** | ordinary reads/writes of the sandbox's own disk — the floor gates the **path and the trust**, not the disk |
 | **T2** | a poisoned fetch/read *result* carrying a prompt injection | **QUARANTINE · TRUST_VIOLATION** | an untrusted read held out of the agent's context by the result-side admitter, so the injection never lands |
 
@@ -65,6 +79,11 @@ widens:
   [`vm-fs-floor.json`](vm-fs-floor.json)), citing `SELF_MODIFY` with a bounded witness
   naming only the matched glob. `fak preflight --policy … --tool … --args …` folds this
   exact chain for one call.
+- **T1 (call-side, read half)** — the arg-rule path view refuses a call whose *target path*
+  falls outside the agent's declared view. `allow_glob` makes the view deny-by-default (a
+  path matching nothing earns `DEFAULT_DENY` — nothing affirmatively permitted it), and a
+  `deny_regex` marks a subtree read-only (a write into it earns `POLICY_BLOCK`). Both are
+  evaluated by the adjudicator on every call, ahead of any affirmative allow.
 - **T2 (result-side)** — the context-MMU's result-admission floor recognizes a
   prompt-injected tool result and returns `QUARANTINE`/`TRUST_VIOLATION`, holding the
   bytes out of context. `fak demo` folds the real `Kernel.AdmitResult` chain over it.
@@ -86,29 +105,42 @@ fak guard -- claude          # every FS tool call crosses the floor; the disk st
 
 ## Honest boundary
 
-This witness captures the **shipped** filesystem floor: the call-side `SELF_MODIFY` *write*
-refusal and the result-side read *quarantine*, both live kernel decisions. It is
-deliberately **not** the full T1 story yet:
+This witness captures the **shipped** filesystem floor: the T0 substrate read off the
+guest kernel, the call-side `SELF_MODIFY` *write* refusal, and the result-side read
+*quarantine* — the latter two live kernel decisions. It is deliberately **not** the full
+T1 story yet:
 
-- The issue's ideal (a) is an *out-of-view Read refused by the **mount view***. **This is
-  still not witnessed here, and the reason changed.**
-  [#2577](https://github.com/anthony-chaudhary/fak/issues/2577) closed having landed the
-  mount-view *kernel* — the `mount_view` manifest namespace plus `policy.MountViewRefusal`,
-  a correct and unit-tested deny-by-default reference monitor over paths — but **not its
-  enforcement wiring**. Nothing on the request path calls it, so a declared view is inert
-  and no CLI verb can refuse an out-of-view read. Witnessed against a manifest whose view
-  covers `src` only:
+- The issue's capture (a) — *an out-of-view `Read` refused* — **is witnessed above**, and
+  it is a live adjudicator verdict, not a scripted string. What deserves naming precisely
+  is **which monitor refuses it**. Two different spellings of the same idea exist in the
+  manifest, and only one of them reaches the request path:
 
-  ```text
-  $ fak preflight --policy mv.json --tool Read --args '{"file_path":"secrets/id_rsa"}'
-  verdict=ALLOW reason=NONE by=monitor      # out of view, yet ALLOWed
-  ```
+  - **`arg_rules` (wired, and what this witness uses).** An `allow_glob` over `Read`'s
+    `file_path` is deny-by-default over a path space: a target matching no rule earns
+    `DENY DEFAULT_DENY`, and a `deny_regex` marks a read-only subtree whose write earns
+    `DENY POLICY_BLOCK`. The adjudicator evaluates these on every call, so the *capability*
+    — hide a tree from the agent while the sandbox keeps providing it — ships today.
+  - **`mount_view` (parses, never runs).**
+    [#2577](https://github.com/anthony-chaudhary/fak/issues/2577) closed having landed the
+    mount-view *kernel* — the `mount_view` namespace plus `policy.MountViewRefusal`, a
+    correct and unit-tested deny-by-default reference monitor over paths — but **not its
+    enforcement wiring**. Nothing on the request path calls it, so a view declared in
+    *that* vocabulary is inert. Witnessed against a manifest whose view covers `src` only:
 
-  Corroborating: `fak policy --check` prints all 17 floor dimensions and the mount view is
-  in none of them. Wiring it is
-  [#5310](https://github.com/anthony-chaudhary/fak/issues/5310). Until that lands, the
-  shipped floor refuses out-of-scope **writes** (SELF_MODIFY), which is what this witness
-  shows — a write-side T1 refusal standing in for a read-side one.
+    ```text
+    $ fak preflight --policy mv.json --tool Read --args '{"file_path":"secrets/id_rsa"}'
+    verdict=ALLOW reason=NONE by=monitor      # out of view, yet ALLOWed
+    ```
+
+    Corroborating: `fak policy --check` prints all 17 floor dimensions and the mount view
+    is in none of them. Wiring it is
+    [#5310](https://github.com/anthony-chaudhary/fak/issues/5310).
+
+  So the gap #5310 closes is one of **expressiveness, not capability**: an operator who
+  wants a path view must spell it as `arg_rules` (per-tool, one rule per shape) rather than
+  as one declarative `mount_view` block that applies to every FS tool at once. This witness
+  deliberately shows the wired form, and says so, rather than declaring an inert field and
+  letting the reader assume it did the refusing.
 - The single **unified read syscall** spanning local tree query *and* remote-document
   retrieval under one trust gate ([#2578](https://github.com/anthony-chaudhary/fak/issues/2578))
   **has landed** and is witnessed directly: the *same* result-admit floor quarantines a
@@ -118,22 +150,43 @@ deliberately **not** the full T1 story yet:
   This `fak demo` run shows the T2 quarantine through the result-admitter; the seam test
   proves it is backend-agnostic (local *and* remote, one floor, one cache).
 
-**Promotion evidence** (what moves this from `gen/next` toward `now`): #5310 wiring
-`MountViewRefusal` into the call-side adjudicator turns witness (a) into a real read-side
-out-of-view `Read → DENY DEFAULT_DENY` that `run.sh` can assert next to the existing
-write-side rung — at which point all three of the issue's captures (out-of-view read,
-quarantine, ledger) are live CLI decisions rather than two-of-three. #2578 has already
-promoted: the T2 half is witnessed over local *and* remote reads.
+**Promotion evidence** (what moves this from `gen/next` toward `now`): all three of the
+issue's captures are now live CLI decisions taken inside a guest fak did not provision —
+the out-of-view `Read → DENY DEFAULT_DENY`, the poisoned read `→ QUARANTINE
+TRUST_VIOLATION`, and the nine-row exit ledger ([`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md)),
+captured under `FAK_REQUIRE_T0=1` so an unwitnessed substrate would have failed the run
+instead of silently downgrading it. Three halves promoted to get here: #2578 (the T2 read
+seam, witnessed over local *and* remote reads); **T0 itself** — the run reads the substrate
+off the guest kernel rather than asserting it, and found a hypervisor guest with its rootfs
+on a hypervisor-attached block device and no fak mount present; and the **read-side T1
+rung**, which moved from "blocked" to "witnessed" once the refusal was routed through the
+monitor that is actually wired. What remains is #5310 wiring `MountViewRefusal`, which
+promotes the *declaration* (one `mount_view` block covering every FS tool) rather than the
+enforcement — at which point these rungs can be re-spelled in the tier's own vocabulary and
+this README's two-spellings caveat retires.
 **Demotion/retirement evidence**: if the epic retires the "fak is the VFS, not the VM"
 claim (e.g. fak grows a T0 provider), this witness — which exists to back exactly that
-claim — is retired with it.
-**Invalidating assumptions**: (1) this stands in a container/microVM as a T0 substitute for
-the real E2B/Fly/Cloudflare platforms; if the boundary behaves differently on a real guest
-kernel (gVisor/Firecracker syscall interception) than in this substitute, the witness must
-be re-run there before the strategic claim rests on it. (2) A *closed* tier issue does not
-mean an *enforced* tier — #2577 closed on the kernel half alone, and the gap was invisible
-until the manifest was driven through `fak preflight`. Read a tier's claim against a live
-verdict, not against its issue state.
+claim — is retired with it. Concretely: the T0 rung fails the run the moment a fak-backed
+mount appears on the box, so *this example red-lines itself* if fak ever becomes the FS
+provider. That is the demotion trigger, wired rather than promised.
+**Invalidating assumptions**: (1) the captured T0 is a hypervisor guest (WSL2) standing in
+for the real E2B/Fly/Cloudflare platforms; if the boundary behaves differently under a
+guest kernel that *intercepts syscalls* (gVisor, Firecracker + seccomp) than under this
+substitute, the witness must be re-run there before the strategic claim rests on it — the
+detector proves *a* VM, not *that* VM. (2) The T0 rung witnesses the substrate, not the
+enforcement path: it shows fak owns no mount, which is necessary but not sufficient for
+"fak adjudicates every FS syscall" — an agent bypassing the tool interface (a raw `open()`
+from spawned code) is outside what `fak preflight` decides, and this example does not claim
+otherwise. (3) A *closed* tier issue does not mean an *enforced* tier — #2577 closed on the
+kernel half alone, and the gap was invisible until the manifest was driven through
+`fak preflight`. Read a tier's claim against a live verdict, not against its issue state.
+(4) The read-side rung witnesses a path view spelled as `arg_rules`, which is **per-tool**:
+the two rules here cover `Read` and `Write`, so a *third* FS tool reaching the same path
+(`Edit`, `Glob`, `Grep`, a future `Stat`) is outside the view this manifest declares and
+would need its own rule. A single `mount_view` block would cover them all at once — so
+where the capability is equivalent today, the *completeness* of a hand-spelled view is an
+operator's responsibility until #5310 lands. Treat this rung as proof the enforcement path
+works, not as a template for a production view.
 
 ## Where this fits
 

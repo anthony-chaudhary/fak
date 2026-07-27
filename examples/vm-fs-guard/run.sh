@@ -31,14 +31,30 @@
 # call-side chain; `fak demo` folds the result-side admitter), so the result is identical
 # on every run.
 #
-# Honest fence: the shipped T1 floor refuses out-of-scope *writes* (SELF_MODIFY) into
-# regions the sandbox's disk holds. The read-side *mount view* that hides a whole tree from
-# the agent is NOT witnessed below: #2577 landed its kernel (policy.MountViewRefusal + the
-# `mount_view` manifest field) but not its enforcement wiring, so a declared view is inert
-# on the request path — `fak preflight` ALLOWs an out-of-view Read today (#5310 wires it).
+# Honest fence — WHICH monitor refuses the read. The read-side refusal below is real and
+# wired: an out-of-view Read earns DENY DEFAULT_DENY from the arg-rule path view (the
+# `arg_rules` block of vm-fs-floor.json), which the adjudicator evaluates on every call.
+# What is NOT wired is the *other* spelling of the same idea: #2577 landed the `mount_view`
+# manifest namespace + policy.MountViewRefusal (a correct, unit-tested deny-by-default
+# monitor) but not its enforcement wiring, so a view declared in THAT vocabulary is inert
+# on the request path — #5310 wires it. So: the capability ships and is witnessed here; the
+# declarative `mount_view` syntax for it does not yet reach the request path.
 # The unified read syscall spanning local + remote (#2578) HAS landed and is witnessed by
 # internal/vdso/t2_read_seam_witness_test.go. See README.md § Honest boundary.
+#
+# T0 is WITNESSED, never asserted (#2581). The claim this example exists to back is
+# "fak decides, the sandbox provides" — so the run reads the T0 off the guest's own kernel
+# before it claims to be inside one. On a bare host it still proves T1/T2, but it says
+# plainly that the VM half is NOT captured instead of printing the VM sentence anyway.
+#   FAK_REQUIRE_T0=1 ./run.sh     # make an unwitnessed T0 a hard failure (CI/promotion)
+#
+# One stream, on purpose. The narration (log()) and the per-rung verdict rows used to go to
+# stderr and stdout respectively, so a terminal interleaved them nondeterministically and a
+# `./run.sh > capture.txt` silently dropped every header. A witness whose captured ordering
+# cannot be reproduced is not a witness, so fold stderr into stdout once, here: both fds now
+# share one file description and the transcript below is byte-ordered on any box.
 set -euo pipefail
+exec 2>&1
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 FAK_DIR="$(cd "$HERE/../.." && pwd)"           # examples/vm-fs-guard -> fak/
@@ -88,6 +104,84 @@ t1_allow(){
     FAILS=$((FAILS + 1))
   fi
 }
+# t1_view() asserts a PATH-VIEW refusal — the READ side of T1, and the rung that makes
+# "fak is the virtual filesystem" literal: the sandbox's disk still holds the file, and
+# fak simply never lets the call reach it. Deny-by-default over a path space, exactly the
+# shape a mount namespace has: outside the declared view -> DEFAULT_DENY (nothing
+# affirmatively permitted it), inside a read-only subtree with a write shape ->
+# POLICY_BLOCK (a rule denied it). $4 is the reason code the refusal must cite, so a rung
+# that starts refusing for a DIFFERENT reason fails loudly instead of passing quietly.
+t1_view(){
+  local desc="$1" tool="$2" args="$3" want="$4"
+  local out; out="$(preflight --tool "$tool" --args "$args")"
+  if printf '%s' "$out" | grep -q 'verdict=DENY' && printf '%s' "$out" | grep -q "reason=$want"; then
+    printf '  \033[32m✓\033[0m %-46s -> DENY  %s\n' "$desc" "$want"
+    LEDGER="${LEDGER}  T1  DENY        $(printf '%-15s' "$want")${desc}\n"
+  else
+    printf '  \033[31m✗\033[0m %-46s -> %s (wanted DENY %s)\n' "$desc" "$out" "$want"
+    FAILS=$((FAILS + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------------------
+# 0) T0 — the box that PROVIDES the disk, which is emphatically NOT fak.
+#
+# This is the rung the rest of the witness rests on: every verdict below is only
+# interesting because fak computed it while riding INSIDE a T0 someone else provisioned.
+# So READ the T0 off the guest's own kernel (/proc, findmnt, systemd-detect-virt) rather
+# than asserting it in prose — an asserted T0 is exactly the conflation this example
+# exists to refute ("fak provides the disk" vs "fak gates the disk").
+T0_KIND="host"; T0_WHAT="no container or VM detected"
+t0_detect(){
+  local virt=""
+  # a container leaves a marker file or a cgroup path; a VM leaves a hypervisor signature.
+  if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+    T0_KIND="container"; T0_WHAT="OCI container (runtime marker present)"
+  elif [ -r /proc/1/cgroup ] && grep -qEi 'docker|containerd|lxc|kubepods|podman' /proc/1/cgroup 2>/dev/null; then
+    T0_KIND="container"; T0_WHAT="OCI container (pid-1 cgroup)"
+  fi
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    virt="$(systemd-detect-virt 2>/dev/null || true)"
+    case "$virt" in
+      ""|none) : ;;
+      *) [ "$T0_KIND" = host ] && { T0_KIND="vm"; T0_WHAT="hypervisor guest · $virt"; } ;;
+    esac
+  fi
+  if [ "$T0_KIND" = host ] && [ -r /proc/version ] && grep -qi 'microsoft\|hypervisor' /proc/version 2>/dev/null; then
+    T0_KIND="vm"; T0_WHAT="hypervisor guest (kernel signature)"
+  fi
+  [ "$T0_KIND" != host ] && [ -r /proc/version ] && T0_WHAT="$T0_WHAT · $(uname -s) $(uname -r)"
+  return 0
+}
+# mount_of() names WHO backs a path — the source device/share and its fstype. That source
+# is the sandbox's; fak appears in none of them, which is the "not the FS provider" half.
+mount_of(){ findmnt -no SOURCE,FSTYPE,TARGET -T "$1" 2>/dev/null || true; }
+
+t0_detect
+echo
+log "T0 — the box that PROVIDES the disk (the sandbox's job, never fak's):"
+if [ "$T0_KIND" != host ]; then
+  printf '  \033[32m✓\033[0m %-46s -> %s\n' "T0 witnessed from inside the guest" "${T0_KIND} · ${T0_WHAT}"
+  ROOTFS="$(mount_of /)"; WORKFS="$(mount_of "$HERE")"
+  [ -n "$ROOTFS" ] && printf '      rootfs   %s\n' "$ROOTFS"
+  [ -n "$WORKFS" ] && printf '      workdir  %s\n' "$WORKFS"
+  # fak ships no filesystem: no mount, no device, no FUSE server anywhere on this box.
+  if command -v findmnt >/dev/null 2>&1 && findmnt -rno SOURCE,FSTYPE,TARGET 2>/dev/null | grep -qiE '(^|[^a-z])fak([^a-z]|$)|fuse\.fak'; then
+    printf '  \033[31m✗\033[0m %-46s -> a fak-backed mount exists (fak would BE the FS)\n' "fak provides no filesystem here"
+    FAILS=$((FAILS + 1))
+  else
+    printf '  \033[32m✓\033[0m %-46s -> no fak mount, device, or FUSE server\n' "fak provides no filesystem here"
+  fi
+else
+  printf '  \033[33m!\033[0m %-46s -> host (%s)\n' "T0 NOT witnessed" "$T0_WHAT"
+  log "     the T1/T2 verdicts below are real, but this run is NOT the VM-vs-boundary"
+  log "     witness — it proves the boundary, not that the boundary rode into a VM."
+  log "     capture the VM half by running this script INSIDE a sandbox, e.g.:"
+  log "       docker run --rm -v \"\$PWD:/w\" -w /w golang:1.23 examples/vm-fs-guard/run.sh"
+  if [ "${FAK_REQUIRE_T0:-0}" = 1 ]; then
+    log "FAK_REQUIRE_T0=1 and no T0 was witnessed"; exit 1
+  fi
+fi
 
 echo
 log "T1 — REFUSED: a write into a region the sandbox's disk holds but the agent must not touch"
@@ -96,6 +190,12 @@ t1_deny  "Edit  .git/config (repo internals)"          Edit  '{"file_path":".git
 t1_deny  "Write ~/.ssh/id_rsa (a private key)"         Write '{"file_path":"/home/agent/.ssh/id_rsa","content":"x"}'
 t1_deny  "Write /workspace/.env (a secrets file)"      Write '{"file_path":"/workspace/.env","content":"x"}'
 t1_deny  "Write internal/adjudicator/decide.go (kernel)" Write '{"file_path":"internal/adjudicator/decide.go","content":"x"}'
+echo
+log "T1 — REFUSED (read side): a Read whose target lies OUTSIDE the agent's declared view,"
+log "     and a write into a subtree mounted read-only. The sandbox's disk holds both files;"
+log "     fak never lets the call reach them (deny-by-default over the path space):"
+t1_view  "Read  /srv/secrets/prod.pem (out of view)"   Read  '{"file_path":"/srv/secrets/prod.pem"}' DEFAULT_DENY
+t1_view  "Write /workspace/vendor/lib.go (ro subtree)" Write '{"file_path":"/workspace/vendor/lib.go","content":"x"}' POLICY_BLOCK
 echo
 log "ALLOWED — ordinary reads/writes of the sandbox's OWN disk (the floor gates path+trust, not the disk):"
 t1_allow "Read  /workspace/src/main.go (in scope)"     Read  '{"file_path":"/workspace/src/main.go"}'
@@ -126,7 +226,19 @@ echo
 if [ "$FAILS" -ne 0 ]; then
   log "$FAILS witness(es) FAILED"; exit 1
 fi
-log "all witnesses passed — fak adjudicated FS syscalls INSIDE a sandbox it did not provision:"
-log "  a write into guarded machinery refused (T1/SELF_MODIFY), a poisoned read quarantined"
-log "  (T2/TRUST_VIOLATION), while the sandbox's own disk stayed readable/writable."
+# The closing claim is scoped to what THIS run actually witnessed. Only a run that read a
+# real T0 off the guest may say "inside a sandbox"; a host run says what it proved instead.
+if [ "$T0_KIND" != host ]; then
+  log "all witnesses passed — fak adjudicated FS syscalls INSIDE a ${T0_KIND} it did not provision:"
+  log "  the disk came from the ${T0_KIND} (fak holds no mount there); the DECISIONS came from fak —"
+  log "  a write into guarded machinery refused (T1/SELF_MODIFY), an out-of-view read refused"
+  log "  (T1/DEFAULT_DENY), a poisoned read quarantined (T2/TRUST_VIOLATION), while the"
+  log "  sandbox's own disk stayed readable/writable."
+else
+  log "all T1/T2 witnesses passed — but T0 was NOT witnessed on this run (host, no sandbox):"
+  log "  a write into guarded machinery refused (T1/SELF_MODIFY), an out-of-view read refused"
+  log "  (T1/DEFAULT_DENY), a poisoned read quarantined (T2/TRUST_VIOLATION), while the disk"
+  log "  stayed readable/writable. Re-run inside a"
+  log "  sandbox for the VM-vs-boundary half — see the docker line above."
+fi
 log "wrap a live agent the same way: fak guard -- claude   (the FS floor rides into the VM)."

@@ -10,5 +10,21 @@
     "internal/adjudicator/",
     "internal/kernel/"
   ],
-  "redact_fields": ["password", "secret", "api_key", "token", "authorization"]
+  "redact_fields": ["password", "secret", "api_key", "token", "authorization"],
+  "arg_rules": [
+    {
+      "tool": "Read",
+      "arg": "file_path",
+      "allow_glob": "/workspace/**",
+      "reason": "DEFAULT_DENY",
+      "fix": "read a path inside the mounted workspace, or ask the operator to widen the view"
+    },
+    {
+      "tool": "Write",
+      "arg": "file_path",
+      "deny_regex": "^/workspace/vendor/",
+      "reason": "POLICY_BLOCK",
+      "fix": "vendor/ is mounted read-only; write your change under /workspace/src instead"
+    }
+  ]
 }
