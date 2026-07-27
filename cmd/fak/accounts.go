@@ -85,8 +85,8 @@ type accountsCmd struct {
 	addReserved, addNoLogin, addNoSync, addAdopt               *bool
 	addForce, addProbeIdentity, addNoProbeIdentity, probeIdent *bool
 
-	rmRehome, rmReason, rehomeAddr, rehomeKey *string
-	rmArchive                                 *bool
+	rmRehome, rmReason, rehomeAddr, rehomeKey, rmByAccount *string
+	rmArchive                                              *bool
 
 	roleFlag, launchCommand, launchModel, launchFallbackModel, launchManagedCache, launchUltracode, afterSeat, cooldownClear *string
 	launchGuard, launchSkipPerms, rotateFlag, noHeadroom                                                                     *bool
@@ -141,13 +141,14 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	rehomeAddr := fs.String("addr", defaultSessionAddr(), "(rehome) gateway base URL of the LIVE fak guard session (from the guard banner, or $FAK_ADDR)")
 	rehomeKey := fs.String("key", defaultGatewayBearerToken(), "(rehome) bearer credential (only if the gateway sets --require-key)")
 	rmArchive := fs.Bool("archive", false, "(remove) ALSO rename the config dir to <dir>.DELETED-<date> and repoint the registry (name+dir+rehome refs) in one command; refuses the live CLAUDE_CONFIG_DIR seat")
+	rmByAccount := fs.String("by-account", "", "(remove) retire the WHOLE account: tombstone EVERY active seat that resolves to this account bucket (an email, account UUID, raw bucket key, or seat name), with one --rehome-to + --reason. Refuses if --rehome-to resolves back into the account being retired (#4669)")
 	roleFlag := fs.String("role", "", "(set-role) the role to point at --name (active|anchor); may also be given as the first positional")
 	launchGuard := fs.Bool("guard", true, "(launch) wrap the agent in `fak guard` so the kernel adjudicates every tool call and the prompt-cache/compaction (vCache) layer is on; --guard=false launches the agent directly")
 	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
 	launchUltracode := fs.String("ultracode", "auto", "(launch) ultracode posture auto|on|off (default auto): run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) via --settings '{\"ultracode\":true}'. auto turns it on only for rigor-class work, so a bare/unclassified launch stays off (ultracode is the slowest posture and is pure overhead on grind work); on forces it, off disables it. true/false are accepted as on/off aliases. Claude-only; ignored for other agents")
-	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Opus 4.8 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
-	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Opus 4.8 startup is unavailable — an unknown/invalid model OR a usage/rate limit (e.g. an Opus weekly cap -> Fable); empty disables. Default: Fable 5 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
+	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Opus 5 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
+	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Opus 5 startup is unavailable — an unknown/invalid model (-> the previous Opus generation) OR a usage/rate limit such as an Opus weekly cap (-> Fable 5, a separate allocation bucket); empty disables. Default: "+defaultLaunchFallbackModel+". Ignored when --model is explicit")
 	launchManagedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "(launch) managed-cache posture for the guard session: auto|on|off (default: $"+fleetManagedCacheEnv+", else on — best-effort managed cache everywhere). on forces the stable-prefix 1h-TTL cache upgrade regardless of billing; explicit auto restores guard's billing-gated default (PASSIVE on a subscription-OAuth seat unless $"+fleetGuardAPIKeyEnvEnv+" makes it ACTIVE); off is the express opt-out for a seat where on self-blocks")
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
@@ -217,6 +218,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 		rmReason:            rmReason,
 		rehomeAddr:          rehomeAddr,
 		rehomeKey:           rehomeKey,
+		rmByAccount:         rmByAccount,
 		rmArchive:           rmArchive,
 		roleFlag:            roleFlag,
 		launchCommand:       launchCommand,
@@ -262,6 +264,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addAPIKeyEnv := c.addAPIKeyEnv
 	addProbeIdentity, addNoProbeIdentity, probeIdent := c.addProbeIdentity, c.addNoProbeIdentity, c.probeIdent
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmArchive := c.rmRehome, c.rmReason, c.rehomeAddr, c.rehomeKey, c.rmArchive
+	rmByAccount := c.rmByAccount
 	roleFlag, launchGuard, launchSkipPerms, launchCommand := c.roleFlag, c.launchGuard, c.launchSkipPerms, c.launchCommand
 	launchUltracode, launchModel, launchFallbackModel, launchManagedCache := c.launchUltracode, c.launchModel, c.launchFallbackModel, c.launchManagedCache
 	rotateFlag, afterSeat, noHeadroom, cooldownClear := c.rotateFlag, c.afterSeat, c.noHeadroom, c.cooldownClear
@@ -407,6 +410,23 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		// single-source inverse of `add`. The account becomes status=tombstoned with a rehome
 		// target + audit fields, drops out of the dos view's active rows, and moves to the job
 		// view's tombstoned_accounts block, all from one registry edit.
+		//
+		// --by-account (#4669) retires the WHOLE account rather than one seat: it tombstones
+		// every active seat resolving to the named account bucket in one audited pass, so a
+		// duplicate seat identity_mismatched onto the account can't leave it live after the
+		// canonical seat is removed.
+		if *rmByAccount != "" {
+			return runAccountsRemoveByAccount(stdout, stderr, removeParams{
+				byAccount:    *rmByAccount,
+				rehomeTo:     *rmRehome,
+				reason:       *rmReason,
+				archive:      *rmArchive,
+				registryPath: *registryPath,
+				dosView:      *dosView,
+				jobView:      *jobView,
+				noSync:       *addNoSync,
+			})
+		}
 		return runAccountsRemove(stdout, stderr, removeParams{
 			name:         *addName,
 			rehomeTo:     *rmRehome,

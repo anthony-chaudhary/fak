@@ -713,7 +713,11 @@ func rosterAccountName(name, suffix string) string {
 
 // removeParams carries the resolved flags for `fak accounts remove`.
 type removeParams struct {
-	name         string
+	name string
+	// byAccount, when set, selects the account-scoped retirement (#4669): retire EVERY active
+	// seat resolving to this account bucket (an email, account UUID, raw bucket key, or seat
+	// name) instead of the single --name seat.
+	byAccount    string
 	rehomeTo     string
 	reason       string
 	archive      bool
@@ -820,52 +824,17 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	if reason == "" {
 		reason = "removed via `fak accounts remove`"
 	}
-	reg.Homes[idx].Status = accounts.StatusTombstoned
-	reg.Homes[idx].RehomeTo = rehome
-	reg.Homes[idx].TombstonedAt = time.Now().UTC().Format(time.RFC3339)
-	reg.Homes[idx].TombstoneReason = reason
-	disabled := false
-	reg.Homes[idx].Enabled = &disabled
-	movedRoles := moveRolesOffHome(&reg, p.name, liveRehome.Name)
+	// Peers on the SAME account bucket as this seat, computed BEFORE the tombstone over a
+	// Refreshed COPY (so disk-derived identities drive the grouping without persisting them).
+	// After this removal these seats still resolve to the account, so a note points the operator
+	// at the account-scoped retirement instead of relying on catching the `dup ->` line by eye
+	// (#4669) — the exact july6-netra papercut the issue reports.
+	peers := reconcileRefreshed(reg)[p.name].Peers
 
-	// --archive collapses the whole retirement into one command: rename the config dir to the
-	// house tombstone form (<dir>.DELETED-<date>) and repoint the registry entry (name + dir,
-	// plus any rehome target that named the old seat) to match — the manual dir-rename +
-	// hand-edit-registry + re-sync dance, done for you. It refuses the live CLAUDE_CONFIG_DIR,
-	// since you cannot move the dir the current session runs from.
-	if p.archive {
-		date := time.Now().UTC().Format("2006-01-02")
-		oldName, oldDir := reg.Homes[idx].Name, reg.Homes[idx].Dir
-		if oldDir != "" {
-			if live := os.Getenv("CLAUDE_CONFIG_DIR"); live != "" && sameDir(live, oldDir) {
-				fmt.Fprintf(stderr, "fak accounts: refusing to archive %q — it is the live CLAUDE_CONFIG_DIR; archive it from another session\n", p.name)
-				return 1
-			}
-			newDir := oldDir + ".DELETED-" + date
-			if _, err := os.Stat(newDir); err == nil {
-				fmt.Fprintf(stderr, "fak accounts: archive target already exists: %s\n", newDir)
-				return 1
-			}
-			if _, err := os.Stat(oldDir); err == nil {
-				if err := os.Rename(oldDir, newDir); err != nil {
-					fmt.Fprintf(stderr, "fak accounts: archive rename %s -> %s: %v\n", oldDir, newDir, err)
-					return 1
-				}
-				fmt.Fprintf(stdout, "archived dir: %s -> %s\n", oldDir, newDir)
-			} else {
-				fmt.Fprintf(stdout, "archive: dir %s absent — repointing the registry only\n", oldDir)
-			}
-			reg.Homes[idx].Dir = newDir
-		}
-		// Rename the registry handle and repoint any rehome target that named the old seat, so
-		// no tombstone is left pointing at a name that no longer exists.
-		newName := oldName + ".DELETED-" + date
-		reg.Homes[idx].Name = newName
-		for i := range reg.Homes {
-			if reg.Homes[i].RehomeTo == oldName {
-				reg.Homes[i].RehomeTo = newName
-			}
-		}
+	date := time.Now().UTC().Format("2006-01-02")
+	movedRoles, code := applyTombstone(stdout, stderr, &reg, idx, rehome, liveRehome.Name, reason, p.archive, date)
+	if code != 0 {
+		return code
 	}
 
 	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
@@ -875,6 +844,9 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	for _, role := range movedRoles {
 		fmt.Fprintf(stdout, "registry: role %s -> %s (was %s)\n", role, liveRehome.Name, p.name)
 	}
+	if len(peers) > 0 {
+		fmt.Fprintf(stdout, "note: also reachable via %s — pass --by-account to retire the whole account\n", strings.Join(peers, ", "))
+	}
 	if code := syncViewsUnlessNoSync(stdout, stderr, p.registryPath, p.dosView, p.jobView, p.noSync); code != 0 {
 		return code
 	}
@@ -882,6 +854,263 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		fmt.Fprintf(stdout, "removed + archived account %q (now %q; dir renamed, tombstoned in registry + views)\n", p.name, reg.Homes[idx].Name)
 	} else {
 		fmt.Fprintf(stdout, "removed account %q (config dir left in place; tombstoned in registry + views)\n", p.name)
+	}
+	return 0
+}
+
+// applyTombstone performs the registry-side retirement of the ACTIVE seat at reg.Homes[idx]:
+// it sets status=tombstoned + rehome + audit fields, disables the seat, and moves any roles it
+// held onto liveRehomeName (which the caller has already resolved to an active seat). With
+// archive it ALSO renames the seat's config dir to <dir>.DELETED-<date> and repoints the
+// registry handle (name + dir) plus any rehome ref that named the old handle — the manual
+// dir-rename + hand-edit-registry dance, done for you. It refuses the live CLAUDE_CONFIG_DIR,
+// since you cannot move the dir the current session runs from.
+//
+// It mutates reg only; the caller saves + syncs + prints the summary. It returns the roles it
+// moved (for the summary) and a nonzero code (with a printed error) on an archive filesystem
+// refusal/failure. rehome is the handle recorded on the seat (may itself rehome forward);
+// liveRehomeName is its resolved live seat, used for the role move. date is passed in so an
+// account-scoped retirement stamps every seat with ONE archive date.
+func applyTombstone(stdout, stderr io.Writer, reg *accounts.Registry, idx int, rehome, liveRehomeName, reason string, archive bool, date string) (movedRoles []string, code int) {
+	fromName := reg.Homes[idx].Name
+	reg.Homes[idx].Status = accounts.StatusTombstoned
+	reg.Homes[idx].RehomeTo = rehome
+	reg.Homes[idx].TombstonedAt = time.Now().UTC().Format(time.RFC3339)
+	reg.Homes[idx].TombstoneReason = reason
+	disabled := false
+	reg.Homes[idx].Enabled = &disabled
+	movedRoles = moveRolesOffHome(reg, fromName, liveRehomeName)
+
+	if archive {
+		oldName, oldDir := reg.Homes[idx].Name, reg.Homes[idx].Dir
+		if oldDir != "" {
+			if live := os.Getenv("CLAUDE_CONFIG_DIR"); live != "" && sameDir(live, oldDir) {
+				fmt.Fprintf(stderr, "fak accounts: refusing to archive %q — it is the live CLAUDE_CONFIG_DIR; archive it from another session\n", fromName)
+				return movedRoles, 1
+			}
+			newDir := oldDir + ".DELETED-" + date
+			if _, err := os.Stat(newDir); err == nil {
+				fmt.Fprintf(stderr, "fak accounts: archive target already exists: %s\n", newDir)
+				return movedRoles, 1
+			}
+			if _, err := os.Stat(oldDir); err == nil {
+				if err := os.Rename(oldDir, newDir); err != nil {
+					fmt.Fprintf(stderr, "fak accounts: archive rename %s -> %s: %v\n", oldDir, newDir, err)
+					return movedRoles, 1
+				}
+				fmt.Fprintf(stdout, "archived dir: %s -> %s\n", oldDir, newDir)
+			} else {
+				fmt.Fprintf(stdout, "archive: dir %s absent — repointing the registry only\n", oldDir)
+			}
+			reg.Homes[idx].Dir = newDir
+		}
+		newName := oldName + ".DELETED-" + date
+		reg.Homes[idx].Name = newName
+		for i := range reg.Homes {
+			if reg.Homes[i].RehomeTo == oldName {
+				reg.Homes[i].RehomeTo = newName
+			}
+		}
+	}
+	return movedRoles, 0
+}
+
+// reconcileRefreshed returns the reconcile verdicts computed over a Refreshed CLONE of reg, so
+// disk-derived identities drive the account grouping WITHOUT mutating (or later persisting) the
+// caller's registry.
+func reconcileRefreshed(reg accounts.Registry) map[string]accounts.SeatIdentity {
+	return reconcileRefreshedRegistry(reg).Reconcile()
+}
+
+// resolveAccountBucket maps a --by-account selector to the account-bucket key Reconcile groups
+// on, plus the ACTIVE seats resolving to it. The selector may be an account email, an account
+// UUID, the raw bucket key (uuid:… / tok:… / apikey:…), or a seat NAME — whichever handle an
+// operator has to hand. reg must already be Refreshed (identities derived). It refuses
+// ambiguity: a selector that names seats on more than one distinct bucket returns ok=false with
+// the matched buckets, so the caller can list them rather than guess which account to retire.
+func resolveAccountBucket(reg accounts.Registry, selector string) (bucket string, seats []accounts.Home, buckets []string) {
+	sel := strings.TrimSpace(selector)
+	matched := map[string]bool{}
+	for _, h := range reg.Homes {
+		if !h.Active() {
+			continue
+		}
+		key := h.Identity.AccountKey()
+		if key == "" {
+			continue // no derivable identity — nothing to bucket on
+		}
+		if h.Name == sel ||
+			(h.Identity.Email != "" && strings.EqualFold(h.Identity.Email, sel)) ||
+			(h.Identity.AccountUUID != "" && h.Identity.AccountUUID == sel) ||
+			key == sel {
+			matched[key] = true
+		}
+	}
+	for k := range matched {
+		buckets = append(buckets, k)
+	}
+	sort.Strings(buckets)
+	if len(buckets) != 1 {
+		return "", nil, buckets
+	}
+	bucket = buckets[0]
+	for _, h := range reg.Homes {
+		if h.Active() && h.Identity.AccountKey() == bucket {
+			seats = append(seats, h)
+		}
+	}
+	sort.Slice(seats, func(i, j int) bool { return seats[i].Name < seats[j].Name })
+	return bucket, seats, buckets
+}
+
+// runAccountsRemoveByAccount retires a WHOLE account (#4669): it tombstones EVERY active seat
+// resolving to the selected account bucket in one audited pass, with a single rehome target and
+// reason, so a duplicate seat that was identity_mismatched onto the account (the `dup ->` line
+// in `list`) cannot leave the account live after its canonical seat is removed. It prints the
+// full set of seats it will touch BEFORE acting, and refuses (structured, non-zero) when the
+// rehome target itself resolves back into the account being retired — otherwise the account
+// would never actually retire.
+func runAccountsRemoveByAccount(stdout, stderr io.Writer, p removeParams) int {
+	reg, ok := loadRegistryOrErr(stderr, p.registryPath)
+	if !ok {
+		return 1
+	}
+	// Resolve over a Refreshed copy so disk-derived identities drive the bucketing; the SAVED
+	// registry stays the loaded one (only tombstone fields change), matching the --name path.
+	refreshed := reconcileRefreshedRegistry(reg)
+	bucket, seats, buckets := resolveAccountBucket(refreshed, p.byAccount)
+	switch {
+	case len(buckets) == 0:
+		fmt.Fprintf(stderr, "fak accounts: no active seat resolves to account %q (want an email, account UUID, bucket key, or seat name)\n", p.byAccount)
+		return 1
+	case len(buckets) > 1:
+		fmt.Fprintf(stderr, "fak accounts: %q is ambiguous — it names %d accounts (%s); retire one at a time with --name, or pass a UUID/email that selects exactly one\n",
+			p.byAccount, len(buckets), strings.Join(buckets, ", "))
+		return 1
+	}
+
+	// Resolve the rehome target: the flag, else the registry's anchor seat.
+	rehome := p.rehomeTo
+	if rehome == "" {
+		if def, ok := reg.Default(); ok {
+			rehome = def.Name
+		}
+	}
+	if rehome == "" {
+		fmt.Fprintln(stderr, "fak accounts: no --rehome-to and no default seat to fall forward to; pass --rehome-to <seat>")
+		return 1
+	}
+	liveRehome, _, err := reg.Resolve(rehome)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: invalid rehome target %q: %v\n", rehome, err)
+		return 1
+	}
+	// Refuse rehoming INTO the account being retired: the live target must not itself resolve to
+	// the bucket we are tombstoning, else the account never actually retires — the exact bug this
+	// command fixes. Key on the refreshed identity so a name-lie duplicate target is caught too.
+	if liveKey := accountKeyForName(refreshed, liveRehome.Name); liveKey == bucket {
+		fmt.Fprintf(stderr, "fak accounts: REFUSED (rehome-into-retired): rehome target %q resolves to the account being retired (%s); pick a live seat on a DIFFERENT account\n", rehome, bucket)
+		return 1
+	}
+
+	reason := p.reason
+	if reason == "" {
+		reason = "removed via `fak accounts remove --by-account`"
+	}
+
+	// Print the full set BEFORE acting, so the operator sees every seat one command will touch.
+	names := make([]string, len(seats))
+	for i, s := range seats {
+		names[i] = s.Name
+	}
+	fmt.Fprintf(stdout, "retiring account %s — %d seat(s): %s\n", bucket, len(seats), strings.Join(names, ", "))
+	fmt.Fprintf(stdout, "  rehome -> %s; reason: %s\n", rehome, reason)
+
+	date := time.Now().UTC().Format("2006-01-02")
+	// Pre-flight the archive so a multi-seat retirement is all-or-nothing at the first rename:
+	// refuse up front if any seat is the live CLAUDE_CONFIG_DIR or its .DELETED target exists,
+	// rather than renaming some dirs and then bailing with the registry unsaved.
+	if p.archive {
+		if code := preflightArchive(stderr, seats, date); code != 0 {
+			return code
+		}
+	}
+
+	for _, s := range seats {
+		idx := homeIndex(reg, s.Name)
+		if idx < 0 {
+			continue // resolved from the refreshed clone; the name is always present in reg
+		}
+		movedRoles, code := applyTombstone(stdout, stderr, &reg, idx, rehome, liveRehome.Name, reason, p.archive, date)
+		if code != 0 {
+			return code
+		}
+		fmt.Fprintf(stdout, "registry: tombstoned %s -> rehome %s\n", s.Name, rehome)
+		for _, role := range movedRoles {
+			fmt.Fprintf(stdout, "registry: role %s -> %s (was %s)\n", role, liveRehome.Name, s.Name)
+		}
+	}
+
+	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
+		return 1
+	}
+	if code := syncViewsUnlessNoSync(stdout, stderr, p.registryPath, p.dosView, p.jobView, p.noSync); code != 0 {
+		return code
+	}
+	fmt.Fprintf(stdout, "removed account %s — %d seat(s) tombstoned; rehome -> %s (config dirs left in place unless --archive)\n", bucket, len(seats), rehome)
+	return 0
+}
+
+// reconcileRefreshedRegistry returns a Refreshed CLONE of reg (identities derived from disk)
+// without mutating the caller's registry — the same slice-clone guard reconcileRefreshed uses,
+// but returning the registry itself so a caller can resolve buckets over it.
+func reconcileRefreshedRegistry(reg accounts.Registry) accounts.Registry {
+	homes := make([]accounts.Home, len(reg.Homes))
+	copy(homes, reg.Homes)
+	cp := reg
+	cp.Homes = homes
+	return cp.Refresh()
+}
+
+// accountKeyForName returns the account-bucket key of the named seat in reg (already Refreshed),
+// or "" when the name is absent or has no derivable identity.
+func accountKeyForName(reg accounts.Registry, name string) string {
+	for _, h := range reg.Homes {
+		if h.Name == name {
+			return h.Identity.AccountKey()
+		}
+	}
+	return ""
+}
+
+// homeIndex returns the index of the seat named name in reg.Homes, or -1 when absent.
+func homeIndex(reg accounts.Registry, name string) int {
+	for i := range reg.Homes {
+		if reg.Homes[i].Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// preflightArchive refuses an account-scoped `--archive` retirement up front when any seat can't
+// be archived (it is the live CLAUDE_CONFIG_DIR, or its <dir>.DELETED-<date> target already
+// exists), so the multi-seat rename is all-or-nothing rather than renaming some dirs and then
+// bailing with the registry unsaved. It mutates nothing.
+func preflightArchive(stderr io.Writer, seats []accounts.Home, date string) int {
+	live := os.Getenv("CLAUDE_CONFIG_DIR")
+	for _, s := range seats {
+		if s.Dir == "" {
+			continue
+		}
+		if live != "" && sameDir(live, s.Dir) {
+			fmt.Fprintf(stderr, "fak accounts: refusing to archive %q — it is the live CLAUDE_CONFIG_DIR; archive it from another session\n", s.Name)
+			return 1
+		}
+		if _, err := os.Stat(s.Dir + ".DELETED-" + date); err == nil {
+			fmt.Fprintf(stderr, "fak accounts: archive target already exists: %s\n", s.Dir+".DELETED-"+date)
+			return 1
+		}
 	}
 	return 0
 }
