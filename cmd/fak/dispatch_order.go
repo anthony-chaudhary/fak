@@ -102,13 +102,15 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchAttemptBudget(stdout, stderr, argv[1:])
 	case "timeout-ledger":
 		return runDispatchTimeoutLedger(stdout, stderr, argv[1:])
+	case "rung-ledger":
+		return runDispatchRungLedger(stdout, stderr, argv[1:])
 	case "reap":
 		return runDispatchReap(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, timeout-ledger, or reap)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, timeout-ledger, rung-ledger, or reap)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -313,6 +315,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch skip-ledger [--in FILE] [--workspace DIR] [--cooldown-min N] [--now UNIX] [--json]
   fak dispatch attempt-budget [--in FILE] [--budget N] [--now UNIX] [--json]
   fak dispatch timeout-ledger [--in FILE] [--workspace DIR] [--now UNIX] [--json]
+  fak dispatch rung-ledger [--workspace DIR] [--item KEY] [--json]
   fak dispatch reap  [--dir .dispatch-runs] [--floor-hours N] [--apply] [--ledger FILE] [--top N] [--json]
 
 auto is the self-sizing front door to the multi-account wave: it folds the live ceilings (the
@@ -398,6 +401,17 @@ evidence was observed), then persists one JSONL row per attempt to
 .dispatch-runs/timeout-ledger.jsonl under --workspace, so WHERE timeouts happen is auditable
 instead of every timeout looking like the same opaque event. It never inspects a live process
 or spawns a worker -- the only side effect is the local append.
+rung-ledger is the read side of the placement ladder's automatic spend: it renders
+.dispatch-runs/escalations.jsonl (which work item bought which rung, when, and on whose
+verdict) next to the authority currently declared for it -- the ladder switch, the ceiling,
+the per-item budget and the account reach. The spend column is the number the ENFORCER uses,
+so it adds the unattributable debits (torn rows, and rows naming no item) to every item, and
+an item can therefore read as exhausted with fewer rows of its own than the budget; the torn
+and unowned counts are printed apart so the two cures stay distinguishable. Nothing is
+defaulted: an undeclared budget prints "(undeclared)", never a number. It is strictly
+read-only -- rotating an oversized ledger is an operator act -- and it renders a ledger past
+the actuator's read cap anyway, saying that the actuator is refusing it, since that is exactly
+when someone needs to see the contents. --item narrows the listing, not the arithmetic.
 tier-status is the offline model-tier account readout: given issue rows (each with its
 tier/T<N>-required|optimal labels and an account pool), it folds them through the pure tier
 chooser and prints which seat each issue would route to, the over-tier waste and under-tier
