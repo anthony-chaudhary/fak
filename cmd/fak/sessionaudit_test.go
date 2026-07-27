@@ -435,3 +435,47 @@ func writeSessionAuditJSONL(t *testing.T, path string, records []map[string]any)
 	}
 	return path
 }
+
+// THE LIVE DEFECT THIS PINS. `--include-subagents` is documented as including subagent /
+// workflow transcripts, and it used to discover and analyze them and then aggregate the
+// top-level sessions anyway. On this harness that loses the entire delegated track: every
+// delegated turn is written into a spawned transcript, so the report answered UNKNOWN over
+// a corpus it had already read (measured: 1,524 of 1,524 marked turns lived in spawned
+// transcripts, 0 of 5,755 top-level turns were marked).
+func TestSessionAuditIncludeSubagentsCountsDelegatedVolume(t *testing.T) {
+	root := t.TempDir()
+	writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "session-a.jsonl"), []map[string]any{
+		sessionAuditAssistant("top", 900, "Agent"), // a spawn call: work WAS delegated
+	})
+	writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "session-a", "subagents", "worker.jsonl"), []map[string]any{
+		sessionAuditAssistant("sub", 100, ""), // the delegated work itself, and unmarked
+	})
+
+	// Default scope: the spawned transcript is genuinely out of scope, so the share is
+	// UNKNOWN — not a 0% this corpus never earned.
+	var stdout, stderr bytes.Buffer
+	if rc := runSessionAudit(&stdout, &stderr, []string{"audit", "--root", root, "--all"}); rc != 0 {
+		t.Fatalf("audit rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Delegation share = UNKNOWN") {
+		t.Fatalf("a scope that excludes the delegated transcripts must not name a share:\n%s", stdout.String())
+	}
+
+	// With the flag, the same corpus becomes answerable.
+	stdout.Reset()
+	stderr.Reset()
+	if rc := runSessionAudit(&stdout, &stderr, []string{"audit", "--root", root, "--all", "--include-subagents"}); rc != 0 {
+		t.Fatalf("audit rc=%d stderr=%s", rc, stderr.String())
+	}
+	got := stdout.String()
+	if strings.Contains(got, "Delegation share = UNKNOWN") {
+		t.Fatalf("--include-subagents analyzed the delegated transcript, so it must count it:\n%s", got)
+	}
+	if !strings.Contains(got, "Delegation share of tracked output = 10.0%") {
+		t.Fatalf("want a 10%% delegated share (100 of 1,000 output tok):\n%s", got)
+	}
+	// And the breakout must not invite anyone to add the same tokens on twice.
+	if !strings.Contains(got, "already counted in the totals above") {
+		t.Fatalf("the subagent breakout must say it is already counted:\n%s", got)
+	}
+}

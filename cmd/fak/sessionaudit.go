@@ -177,13 +177,26 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	var top, subs []sessionaudit.Session
 	for _, s := range sessions {
-		if s.Kind == "subagent" {
+		if s.Kind == sessionaudit.KindSpawned {
 			subs = append(subs, s)
 		} else {
 			top = append(top, s)
 		}
 	}
-	agg := sessionaudit.AggregateSessions(top)
+	// WHAT THE AGGREGATE FOLDS. `--include-subagents` is documented as "include
+	// subagent/workflow transcripts", and it used to discover them, analyze them, and then
+	// aggregate `top` anyway — so the flag widened the file list without counting anything.
+	//
+	// On this harness that is not a rounding difference. Every delegated turn is written to
+	// a spawned transcript (measured: 1,524 of 1,524 marked turns lived there, 0 of 5,755
+	// top-level turns were marked), so an aggregate built from `top` alone has no delegated
+	// volume at all. The delegation share then correctly reports UNKNOWN — over a corpus
+	// this command had already analyzed and was holding in `payload.Sessions`.
+	folded := top
+	if *includeSubagents {
+		folded = sessions
+	}
+	agg := sessionaudit.AggregateSessions(folded)
 	var excluded *sessionaudit.Summary
 	if !*includeSubagents {
 		allOpts := opts
@@ -206,7 +219,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	reportSince := opts.SinceDays
 	reportNS := opts.NamespacePrefix
-	md := sessionaudit.ReportMarkdown(top, agg, reportNS, reportSince, *includeSubagents, *max, totalDiscovered, excluded, time.Now())
+	md := sessionaudit.ReportMarkdown(folded, agg, reportNS, reportSince, *includeSubagents, *max, totalDiscovered, excluded, time.Now())
 	payload := sessionaudit.AuditPayload{
 		Aggregate:         agg,
 		ExcludedSubagents: excluded,
@@ -216,8 +229,16 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 		sum := sessionaudit.SummarizeAnalyses(subs)
 		payload.SubagentSummary = &sum
 		payload.SubagentTranscript = len(subs)
-		md += fmt.Sprintf("\n## Subagent / workflow spend (SEPARATE transcripts, usually uncounted)\n\n- **%d subagent transcripts**\n- Output tokens: %d  .  Cache-read: %d  .  Cache-creation: %d  .  Fresh input: %d\n- Est. cost: $%.2f  _(assumed pricing)_\n",
-			len(subs), sum.Tokens.Output, sum.Tokens.CacheRead, sum.Tokens.CacheCreate, sum.Tokens.Input, sum.CostUSD)
+		// Says plainly whether this volume is inside the totals above or outside them. The
+		// old heading said "usually uncounted", which was true of the default scope and
+		// false the moment the flag folded them in — and a reader who adds a counted
+		// breakdown back onto the totals double-counts the delegated half of the corpus.
+		counted := "NOT counted in the totals above"
+		if *includeSubagents {
+			counted = "already counted in the totals above; broken out here, do not add it back on"
+		}
+		md += fmt.Sprintf("\n## Subagent / workflow spend (SEPARATE transcripts, %s)\n\n- **%d subagent transcripts**\n- Output tokens: %d  .  Cache-read: %d  .  Cache-creation: %d  .  Fresh input: %d\n- Est. cost: $%.2f  _(assumed pricing)_\n",
+			counted, len(subs), sum.Tokens.Output, sum.Tokens.CacheRead, sum.Tokens.CacheCreate, sum.Tokens.Input, sum.CostUSD)
 	}
 	if *mdOut != "" {
 		if err := os.WriteFile(*mdOut, []byte(md), 0o666); err != nil {
