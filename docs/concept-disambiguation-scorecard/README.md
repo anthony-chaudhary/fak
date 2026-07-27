@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **58** (clarity 0 + coverage 58) |
+| **Disambiguation-debt (drive to 0)** | **61** (clarity 0 + coverage 61) |
 | **Crystal-clear concepts (and climbing)** | **401** crystal of 2019 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2196 / 2254** (97.4% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2196 / 2257** (97.3% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 189 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **60** of 2683 indexed names |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 98.3/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.2/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2019 concepts - score 98.3/100 (grade A) - disambiguation-debt 58
+concept-disambiguation chart - 2019 concepts - score 98.2/100 (grade A) - disambiguation-debt 61
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 401
@@ -68,23 +68,23 @@ coverage by family (positioned / discovered):
   loop             ##########################.. 72/77
   render-materialize ###########################. 172/177
   decision         ##########################.. 49/53
+  policy-capability ###########################. 143/147
   support-maturity #########################... 39/43
   gateway-engine   ############################ 166/169
-  policy-capability ###########################. 143/146
   context-ctx      ############################ 194/196
+  plan             ############################ 309/311
   witness-proof    ############################ 136/138
   evict            ###########################. 44/45
   layout           ##########################.. 13/14
-  plan             ############################ 309/310
+  pool             ###########################. 36/37
   attention        ############################ 72/72
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  pool             ############################ 36/36
   score-debt       ############################ 86/86
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.4%  (2196/2254 confusable tokens positioned)
+namespace coverage  [###############################.] 97.3%  (2196/2257 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 189
@@ -2314,18 +2314,18 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | loop | 72 | 77 | 5 |
 | render-materialize | 172 | 177 | 5 |
 | decision | 49 | 53 | 4 |
+| policy-capability | 143 | 147 | 4 |
 | support-maturity | 39 | 43 | 4 |
 | gateway-engine | 166 | 169 | 3 |
-| policy-capability | 143 | 146 | 3 |
 | context-ctx | 194 | 196 | 2 |
+| plan | 309 | 311 | 2 |
 | witness-proof | 136 | 138 | 2 |
 | evict | 44 | 45 | 1 |
 | layout | 13 | 14 | 1 |
-| plan | 309 | 310 | 1 |
+| pool | 36 | 37 | 1 |
 | attention | 72 | 72 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| pool | 36 | 36 | 0 |
 | score-debt | 86 | 86 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |

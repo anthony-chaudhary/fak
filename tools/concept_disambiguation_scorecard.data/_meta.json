@@ -868,6 +868,26 @@
           "category": "incidental",
           "reason": "Struct bool field recording the existing WitnessSameTasks fairness-fence verdict (arms provably ran the same problems); applies that concept, does not add one.",
           "token": "FairnessWitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "options bag of three caller-supplied resolver funcs (work class, timestamp, zone) for the #5428 capability-evidence producer — a parameter carrier for one sweep, not a new witness-proof concept; the proof vocabulary it reads (CLAIM_WITNESSED / CLAIM_TEST_GREEN|RED|UNRUN) is the existing governed one",
+          "token": "WitnessEvidenceOptions"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-sweep counter bag naming the records that did NOT become evidence (unattributed / unclassified / undated / unidentified) so a silent zero has an actionable cause — accounting over the existing witness records, not a new witness-proof concept",
+          "token": "WitnessEvidenceStats"
+        },
+        {
+          "category": "incidental",
+          "reason": "bridge function only: it consumes the existing governed witness verdicts and emits the existing modelroute.TurnOutcome evidence type, defining no proof notion of its own. Same posture as VerdictUnwitnessed — a view over the existing oracle rather than a second one; its concept weight lives in modelroute's already-positioned evidence vocabulary",
+          "token": "TurnOutcomesFromWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported implementation helper picking the slot's own log path (else its commit sha) as a replay-stable evidence id — a keying detail of the producer, not an operator-facing witness-proof concept",
+          "token": "witnessOutcomeID"
         }
       ],
       "id": "witness-proof",
@@ -879,7 +899,10 @@
         "HonestyClaimUnwitnessed",
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
+        "TurnOutcomesFromWitness",
         "VerdictUnwitnessed",
+        "WitnessEvidenceOptions",
+        "WitnessEvidenceStats",
         "WitnessMove",
         "dispatchWitnessArchiveStranded",
         "dispatchWitnessDirtyFile",
@@ -902,6 +925,7 @@
         "revocations",
         "want_witness",
         "withdefaultoriginwitnesses",
+        "witnessOutcomeID",
         "witnessScriptedFold",
         "witnessStrandedArchiveSuffix",
         "witnessable",
