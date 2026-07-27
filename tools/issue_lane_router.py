@@ -114,6 +114,100 @@ EXCLUSIVE_UNBLOCK_ACTION = (
     "scope; do not spawn an issue worker for the blocked lane"
 )
 
+# ---------------------------------------------------------------------------
+# Trust-critical pre-route (#3122)
+# ---------------------------------------------------------------------------
+#
+# Mirrored from `internal/dispatchtick/selfmodify.go` (TrustCriticalTreePrefixes /
+# TrustCriticalFileGlobs / trustCriticalTextRE). These are the witness-machinery
+# trees a GUARDED worker must never SHIP an edit to — letting an autonomous loop
+# rewrite its own referee is the RSI hazard #1397 protects against.
+#
+# The Go side already holds this at PICK time (`SelfModifyHoldForPick`), which stays
+# in place as defense-in-depth. What was missing is the ROUTING-time arm: a
+# trust-critical issue whose scope/label/keyword aliases to a SAFE lane (a
+# `fix(dispatch):` title lands on `tools`) sits at that shippable lane's front
+# forever, because its lane tree never reveals the hazard — so the picker re-fetches
+# and re-refuses it every single tick, invisibly to `dispatch route --json`.
+#
+# NOTE the deliberate NARROWNESS, and do not widen it to the broad "self-source"
+# (`cmd/**`, `internal/**`) set the #3122 body's wording suggests: the live guard
+# floor permits shipping internal/gateway, internal/agent, cmd/fak, ... , so holding
+# the whole Go module here would hold issues the picker dispatches happily and starve
+# the dispatch surface. The router must hold exactly what the picker holds, only
+# earlier. `selfmodify.go`'s `IsSelfSourceTree` is the OTHER, broader predicate (build
+# isolation) — it is not this one.
+TRUST_CRITICAL_TREE_PREFIXES = (
+    "internal/abi/",
+    "internal/kernel/",
+    "internal/adjudicator/",
+    "internal/policy/",
+    "internal/registrations/",
+    "internal/architest/",
+    "internal/shipgate/",
+)
+TRUST_CRITICAL_FILE_GLOBS = ("dos.toml", ".dos/", "policy.json", "VERSION")
+
+# The text arm of the same predicate: a trust-critical path/glob named anywhere in an
+# issue's title or body, with an optional `./` or `fak/` doc-link prefix. The leading
+# boundary (start of text, or a non-path char — a newline qualifies) keeps it from
+# matching inside a longer word. `re.ASCII` pins `\w` to Go's `[0-9A-Za-z_]` so the
+# Python port and `trustCriticalTextRE` agree character-for-character.
+_TRUST_CRITICAL_TEXT_RE = re.compile(
+    r"(?:^|[^\w./-])((?:\./|fak/)?internal/"
+    r"(?:abi|kernel|adjudicator|policy|registrations|architest|shipgate)[\w*./-]*)",
+    re.ASCII)
+
+TRUST_CRITICAL_UNBLOCK_ACTION = (
+    "operator: re-route to the lane that owns the named trust-critical tree, or run it "
+    "UNGUARDED (the worktree-isolated escape); a guarded worker on a shippable lane can "
+    "investigate this but can never ship it"
+)
+
+
+def _normalize_tree(glob: str) -> str:
+    """Canonicalize one lane-tree glob for prefix matching — the port of
+    selfmodify.go's normalizeTree. A leading `./` or `fak/` module prefix is
+    stripped and backslashes are normalized, so a Windows-authored or doc-link
+    glob matches the same as a POSIX repo-relative one."""
+    g = glob.strip().replace("\\", "/")
+    for prefix in ("./", "fak/"):
+        if g.startswith(prefix):
+            g = g[len(prefix):]
+    return g
+
+
+def is_trust_critical_tree(glob: str) -> bool:
+    """Whether one lane-tree glob is rooted in the trust-critical witness machinery
+    (the port of selfmodify.go's IsTrustCriticalTree). This is the ship-HOLD
+    predicate, a strict subset of the broad self-source set."""
+    g = _normalize_tree(glob)
+    if not g:
+        return False
+    if any(g.startswith(p) for p in TRUST_CRITICAL_TREE_PREFIXES):
+        return True
+    return any(g == f or g.startswith(f) for f in TRUST_CRITICAL_FILE_GLOBS)
+
+
+def lane_is_trust_critical(lane: str | None, trees: dict[str, list[str]]) -> bool:
+    """Whether a LANE's own declared tree is trust-critical — i.e. the issue is
+    routed CORRECTLY and the pick-time lane-tree arm (`SelfModifyHold`) already sees
+    the hazard. Such a lane is deliberately left alone by the routing-time rung: the
+    mis-route arm exists only for the case the lane tree HIDES."""
+    if lane is None:
+        return False
+    return any(is_trust_critical_tree(g) for g in trees.get(lane, []))
+
+
+def issue_text_targets_trust_critical(text: str) -> str | None:
+    """The first trust-critical tree an issue's text (title + body) names, or None —
+    the port of selfmodify.go's IssueTextTargetsTrustCritical. A reference to a
+    merely-self-source tree (`internal/gateway`, `cmd/fak`) is deliberately NOT
+    matched: the guard permits shipping those, so holding them would starve the
+    dispatch surface."""
+    m = _TRUST_CRITICAL_TEXT_RE.search(text or "")
+    return m.group(1) if m else None
+
 # Scope token -> lane, when the scope is not itself a lane name. Conservative and
 # derived from real issue scopes vs the real lane roster. Override via --config.
 SCOPE_ALIAS: dict[str, str] = {
@@ -595,7 +689,72 @@ def route_issue(
     keyword_alias: dict[str, str] | None = None,
     exclusive: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Route one issue to a lane via the confidence ladder. Pure + deterministic.
+    """Route one issue to a lane via the confidence ladder, then apply the
+    trust-critical mis-route hold. Pure + deterministic.
+
+    The ladder itself is :func:`_route_by_ladder`; this wrapper adds the
+    routing-time pre-route rung (#3122). Callers keep the same signature and the
+    same payload shape — a held issue uses the existing :func:`_blocked_route`
+    fields, so no consumer sees a new required key."""
+    routed = _route_by_ladder(
+        issue, concurrent, trees, scope_alias=scope_alias, label_alias=label_alias,
+        keyword_alias=keyword_alias, exclusive=exclusive)
+    return _hold_trust_critical_misroute(routed, issue, trees)
+
+
+def _hold_trust_critical_misroute(
+    routed: dict[str, Any], issue: dict[str, Any], trees: dict[str, list[str]],
+) -> dict[str, Any]:
+    """The routing-time arm of the self-modify hold (#3122): an issue whose TEXT
+    targets fak's trust-critical witness machinery, but which the ladder aimed at a
+    lane that is NOT that machinery, is held here instead of being handed to a
+    guarded worker that can never ship it.
+
+    This is the ROOT-CAUSE twin of the pick-time `dispatchtick.SelfModifyHoldForPick`
+    (which stays in place as defense-in-depth, per #3122's acceptance). Without it the
+    mis-routed issue sits at a shippable lane's FRONT: the picker re-fetches its text
+    and re-refuses it every tick, forever, while `dispatch route --json` reports it as
+    routed-and-ready. Holding at routing time makes the picker a cheap fast-path and
+    makes the mis-route visible to operators.
+
+    Two deliberate non-holds keep the rung from over-firing:
+
+    * A lane whose OWN tree is trust-critical (a correctly-routed `adjudicator` /
+      `policy` / ... issue) is left routed. The lane tree already reveals the hazard,
+      so the pick-time lane-tree arm holds it with the better witness, and the lane
+      attribution operators rely on survives.
+    * An already-held row (lane is None — exclusive-lane hold or plain unrouted) is
+      returned untouched, so this rung never overwrites a stronger verdict.
+    """
+    lane = routed.get("lane")
+    if lane is None or lane_is_trust_critical(str(lane), trees):
+        return routed
+    text = str(issue.get("title") or "") + "\n" + str(issue.get("body") or "")
+    tree = issue_text_targets_trust_critical(text)
+    if tree is None:
+        return routed
+    return _blocked_route(
+        issue, str(lane), f"trust-critical-text:{tree} (held from {lane})",
+        "trust-critical",
+        reason=(
+            f"lane-policy:trust-critical issue text targets '{tree}' (fak's own witness "
+            f"machinery, which a guarded worker may never ship) but the routing ladder "
+            f"chose the shippable lane '{lane}'; held before spawn"),
+        unblock_action=TRUST_CRITICAL_UNBLOCK_ACTION)
+
+
+def _route_by_ladder(
+    issue: dict[str, Any],
+    concurrent: list[str],
+    trees: dict[str, list[str]],
+    *,
+    scope_alias: dict[str, str] | None = None,
+    label_alias: dict[str, str] | None = None,
+    keyword_alias: dict[str, str] | None = None,
+    exclusive: set[str] | None = None,
+) -> dict[str, Any]:
+    """The confidence ladder proper (path-grep -> exact-scope -> alias -> label ->
+    keyword). Pure + deterministic.
 
     ``exclusive`` is the exclusive-lane set to refuse auto-routing onto; callers
     pass the value derived from `dos doctor` (`lane_taxonomy`'s third element).
@@ -772,17 +931,25 @@ def _route(issue, lane, confidence, signal, conflict, *, unrouted_reason=None,
     }
 
 
-def _blocked_route(issue, lane: str, signal: str, policy: str) -> dict[str, Any]:
+def _blocked_route(issue, lane: str, signal: str, policy: str, *,
+                   reason: str | None = None,
+                   unblock_action: str | None = None) -> dict[str, Any]:
+    # `reason`/`unblock_action` are optional overrides for a non-exclusive hold
+    # policy (the trust-critical pre-route, #3122). Omitted, they keep the original
+    # exclusive-lane wording verbatim, so the field SHAPE is unchanged for every
+    # existing consumer.
     lane = str(lane)
     out = _route(
         issue, None, "none", signal, False,
         unrouted_reason=(
+            reason if reason is not None else
             f"lane-policy:{policy} lane '{lane}' is human-owned/operator-gated; "
             f"held before spawn"),
         class_lane=lane)
     out["blocked_lane"] = lane
     out["blocked_policy"] = policy
-    out["unblock_action"] = EXCLUSIVE_UNBLOCK_ACTION
+    out["unblock_action"] = (
+        unblock_action if unblock_action is not None else EXCLUSIVE_UNBLOCK_ACTION)
     return out
 
 

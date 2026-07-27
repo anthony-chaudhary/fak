@@ -240,6 +240,127 @@ class RoutingRungTest(unittest.TestCase):
         self.assertIsNone(r["lane"])
         self.assertEqual(r["blocked_lane"], "abi")
 
+    # -- trust-critical pre-route rung (#3122) ------------------------------
+    # The HELD direction and the NOT-held direction are both asserted here on
+    # purpose: over-holding (routing-time holds of merely-self-source work the
+    # guard ships happily) is the specific regression this rung risks, so a run
+    # that only exercises the hold does not witness the rung.
+
+    def test_trust_critical_text_misrouted_to_safe_lane_is_held(self):
+        # `dispatch` aliases to the shippable `tools` lane, but the real work is
+        # in the adjudicator — the referee a guarded worker may never ship. The
+        # lane tree (tools/**) never reveals that, so the router must.
+        r = route(issue(30, "fix(dispatch): tighten the pre-route verdict",
+                        body="the decision lives in internal/adjudicator/decide.go"))
+        self.assertIsNone(r["lane"])
+        self.assertEqual(r["blocked_lane"], "tools")
+        self.assertEqual(r["blocked_policy"], "trust-critical")
+        self.assertIn("internal/adjudicator/decide.go", r["signal"])
+        self.assertIn("internal/adjudicator/decide.go", r["unrouted_reason"])
+        self.assertIn("held before spawn", r["unrouted_reason"])
+        self.assertIn("can never ship it", r["unblock_action"])
+
+    def test_merely_self_source_text_still_routes(self):
+        # internal/gateway is self-source but NOT trust-critical: the guard ships
+        # it, so holding it here would starve the dispatch surface.
+        r = route(issue(31, "fix(dispatch): tighten the tick",
+                        body="the decision lives in internal/gateway/router.go"))
+        self.assertEqual(r["lane"], "tools")
+        self.assertEqual(r["confidence"], "alias")
+        self.assertIsNone(r["unrouted_reason"])
+        self.assertNotIn("blocked_policy", r)
+
+    def test_trust_critical_prefix_does_not_match_inside_a_longer_token(self):
+        # `myinternal/policy` / `x/internal/policy` are not fak's own policy tree.
+        for body in ("see myinternal/policyfile.go", "vendored at x/internal/policy/x.go"):
+            with self.subTest(body=body):
+                r = route(issue(32, "fix(dispatch): unrelated", body=body))
+                self.assertEqual(r["lane"], "tools")
+
+    def test_trust_critical_hold_does_not_override_an_exclusive_hold(self):
+        # An already-held row keeps the stronger exclusive verdict + its witness.
+        r = route(issue(33, "abi: hoist the surface",
+                        body="also touches internal/kernel/kernel.go"))
+        self.assertIsNone(r["lane"])
+        self.assertEqual(r["blocked_lane"], "abi")
+        self.assertEqual(r["blocked_policy"], "exclusive")
+
+
+class TrustCriticalPreRouteTest(unittest.TestCase):
+    """#3122: the routing-time arm of the self-modify hold.
+
+    Its own taxonomy, because the module-level fixture declares no lane whose tree
+    IS trust-critical (other than the exclusive `abi`), and the correctly-routed
+    non-hold is the case that keeps this rung from stealing lane attribution from
+    the pick-time lane-tree arm (`dispatchtick.SelfModifyHold`).
+    """
+
+    LANES = ["tools", "docs", "gateway", "adjudicator", "policy"]
+    TREES = {
+        "tools": ["tools/**"],
+        "docs": ["docs/**"],
+        "gateway": ["internal/gateway/**"],
+        "adjudicator": ["internal/adjudicator/**"],
+        "policy": ["internal/policy/**"],
+    }
+
+    def route(self, iss: dict) -> dict:
+        return m.route_issue(iss, self.LANES, self.TREES)
+
+    def test_correctly_routed_trust_critical_lane_is_not_held_here(self):
+        # Routed to the lane that OWNS the tree: the lane tree already reveals the
+        # hazard, so the pick-time arm holds it with the better witness and the
+        # router leaves the lane attribution intact.
+        r = self.route(issue(40, "fix(adjudicator): reversibility verdict",
+                             body="internal/adjudicator/reversibility.go"))
+        self.assertEqual(r["lane"], "adjudicator")
+        self.assertIsNone(r["unrouted_reason"])
+
+    def test_predicate_matches_every_declared_trust_critical_tree(self):
+        for prefix in m.TRUST_CRITICAL_TREE_PREFIXES:
+            with self.subTest(prefix=prefix):
+                self.assertTrue(m.is_trust_critical_tree(prefix + "x.go"))
+                self.assertEqual(
+                    m.issue_text_targets_trust_critical(f"work in {prefix}x.go"),
+                    prefix + "x.go")
+
+    def test_predicate_normalizes_doclink_and_windows_globs(self):
+        for glob in ("fak/internal/kernel/**", "./internal/kernel/**",
+                     "internal\\kernel\\kernel.go"):
+            with self.subTest(glob=glob):
+                self.assertTrue(m.is_trust_critical_tree(glob))
+
+    def test_predicate_rejects_merely_self_source_trees(self):
+        for glob in ("internal/gateway/**", "cmd/fak/**", "tools/**", "", "  "):
+            with self.subTest(glob=glob):
+                self.assertFalse(m.is_trust_critical_tree(glob))
+
+    def test_trust_critical_file_globs_are_held(self):
+        self.assertTrue(m.is_trust_critical_tree("dos.toml"))
+        self.assertTrue(m.is_trust_critical_tree(".dos/registry.json"))
+        self.assertTrue(m.is_trust_critical_tree("VERSION"))
+
+    def test_lane_is_trust_critical_reads_the_lane_tree(self):
+        self.assertTrue(m.lane_is_trust_critical("policy", self.TREES))
+        self.assertFalse(m.lane_is_trust_critical("gateway", self.TREES))
+        self.assertFalse(m.lane_is_trust_critical(None, self.TREES))
+        self.assertFalse(m.lane_is_trust_critical("undeclared", self.TREES))
+
+    def test_held_issue_leaves_the_shippable_lane_priority_order(self):
+        # #3122's acceptance, asserted on the payload an operator actually reads:
+        # the mis-routed issue is gone from lanes['tools'].issues, and the lane the
+        # hold names survives as blocked_lane for triage.
+        misrouted = issue(41, "fix(dispatch): pre-route verdict",
+                          body="internal/architest/architest_test.go")
+        ordinary = issue(42, "fix(dispatch): unrelated tick fix")
+        routes = [self.route(misrouted), self.route(ordinary)]
+        payload = m.build_payload(workspace="C:/work/fleet", routes=routes,
+                                  trees=self.TREES)
+        self.assertEqual(payload["lanes"]["tools"]["issues"], [42])
+        held = [r for r in payload["issues"] if r["number"] == 41][0]
+        self.assertIsNone(held["lane"])
+        self.assertEqual(held["blocked_lane"], "tools")
+
 
 class ExclusiveLaneDerivationTest(unittest.TestCase):
     """#4027: the exclusive-lane set is derived from `dos doctor` lanes.exclusive
