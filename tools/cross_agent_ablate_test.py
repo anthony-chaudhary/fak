@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -298,6 +301,55 @@ class OfflineRegen(unittest.TestCase):
         # the data (arms + comparison) round-trips identically off the embedded raw_reps
         self.assertEqual(rebuilt["arms"], artifact["arms"])
         self.assertEqual(rebuilt["comparison"], artifact["comparison"])
+
+
+class WorkdirLifecycle(unittest.TestCase):
+    """#3510 — the per-rep agent workdir is BOUNDED at its mkdtemp call site.
+
+    Still hermetic: `rep_workdir` is the pure lifecycle seam carved out of run_one_rep, so
+    these drive the reaper directly with no `claude`, no `fak`, and no network.
+    """
+
+    def test_workdir_is_removed_when_the_rep_leaves(self):
+        with M.rep_workdir() as wd:
+            Path(wd, "guard-audit.jsonl").write_text("{}\n", encoding="utf-8")
+            Path(wd, "RESULT.txt").write_text("ok\n", encoding="utf-8")
+            self.assertTrue(os.path.isdir(wd))
+        self.assertFalse(os.path.exists(wd))  # the agent's output goes with it
+
+    def test_workdir_is_removed_on_the_timeout_path(self):
+        # The leak the issue names survives the happy path too: a rep that blows its
+        # per-rep timeout must NOT strand its workdir.
+        with self.assertRaises(subprocess.TimeoutExpired):
+            with M.rep_workdir() as wd:
+                Path(wd, "half-written.txt").write_text("...", encoding="utf-8")
+                raise subprocess.TimeoutExpired("claude", 1)
+        self.assertFalse(os.path.exists(wd))
+
+    def test_a_sweep_of_reps_does_not_accumulate(self):
+        # The growth boundary: arms x K reps leave ZERO workdirs behind, not K.
+        seen = []
+        for _ in range(6):
+            with M.rep_workdir() as wd:
+                seen.append(wd)
+        self.assertEqual(len(set(seen)), 6)                      # each rep really got a fresh dir
+        self.assertEqual([w for w in seen if os.path.exists(w)], [])
+
+    def test_keep_workdirs_opts_out(self):
+        # --keep-workdirs is the debugging escape hatch; it must actually keep the dir.
+        with M.rep_workdir(keep=True) as wd:
+            Path(wd, "RESULT.txt").write_text("ok\n", encoding="utf-8")
+        try:
+            self.assertTrue(os.path.isdir(wd))
+        finally:
+            shutil.rmtree(wd, ignore_errors=True)
+
+    def test_run_defaults_to_reaping(self):
+        # The SHIPPED parser (not a copy of it) must default the escape hatch to off, so a
+        # plain `run` cannot silently opt back into the leak.
+        parser = M.build_parser()
+        self.assertFalse(parser.parse_args(["run", "--task", "pong"]).keep_workdirs)
+        self.assertTrue(parser.parse_args(["run", "--task", "pong", "--keep-workdirs"]).keep_workdirs)
 
 
 if __name__ == "__main__":

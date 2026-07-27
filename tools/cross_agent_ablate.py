@@ -38,11 +38,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
 import importlib.util
 import json
 import math
 import os
+import shutil
 import statistics
 import subprocess
 import sys
@@ -539,44 +541,73 @@ def _claude_argv(prompt):
             "--permission-mode", "acceptEdits", "--allowedTools", "Write", "Edit", "Bash"]
 
 
-def run_one_rep(arm, task, fak_bin, timeout):
-    """Run a single rep of one arm in a fresh temp workdir; return a unified rep record."""
+@contextlib.contextmanager
+def rep_workdir(keep=False):
+    """Yield one rep's scratch workdir and REMOVE it on the way out (#3510).
+
+    Each rep runs a full `claude -p` session with Write/Edit/Bash inside this dir, and the
+    +fak arm writes guard-audit.jsonl here. A sweep is arms x K reps, so an unbounded
+    mkdtemp leaves one whole agent workdir in the OS temp dir per rep, accumulating across
+    every ablation run on the host. The bound lives HERE, at the mkdtemp call site — not in
+    a background reaper — and it holds on the timeout/exception path too, which is exactly
+    the leak the issue names. Every read of the dir (the success check, the journal count)
+    must therefore happen INSIDE the block, before the removal.
+
+    `keep=True` (the `run --keep-workdirs` flag) opts out for debugging and prints where the
+    dir was left, so opting out is a visible choice rather than a silent leak.
+    """
     workdir = tempfile.mkdtemp(prefix="xagent-")
-    journal = os.path.join(workdir, "guard-audit.jsonl") if arm == ARM_CLAUDE_FAK else None
-    if arm == ARM_CLAUDE:
-        argv = _claude_argv(task["prompt"])
-    elif arm == ARM_CLAUDE_FAK:
-        argv = [fak_bin, "guard", "--audit", journal, "--"] + _claude_argv(task["prompt"])
-    else:
-        raise ValueError(f"cross_agent_ablate: arm {arm!r} is not a live cross-agent arm")
-
-    t0 = time.time()
-    completed, result = True, {}
     try:
-        proc = subprocess.run(argv, cwd=workdir, capture_output=True, text=True,
-                              timeout=timeout, encoding="utf-8", errors="replace")
-        try:
-            result = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.stdout.strip() else {}
-        except (json.JSONDecodeError, IndexError):
-            result = {}
-        completed = proc.returncode == 0 and bool(result) and not result.get("is_error", True)
-    except subprocess.TimeoutExpired:
-        completed = False
-    wall = time.time() - t0
+        yield workdir
+    finally:
+        if keep:
+            print(f"cross_agent_ablate: kept workdir {workdir}", file=sys.stderr, flush=True)
+        else:
+            shutil.rmtree(workdir, ignore_errors=True)
 
-    success = completed and task["_check"](workdir, (result or {}).get("result", ""))
 
-    transcript_audit = None
-    tpath = _find_transcript((result or {}).get("session_id"))
-    if tpath:
+def run_one_rep(arm, task, fak_bin, timeout, keep_workdir=False):
+    """Run a single rep of one arm in a fresh temp workdir; return a unified rep record.
+
+    The workdir is reaped when the rep leaves (#3510); everything that reads it — the task
+    success check and the guard-audit journal count — runs inside the block.
+    """
+    with rep_workdir(keep_workdir) as workdir:
+        journal = os.path.join(workdir, "guard-audit.jsonl") if arm == ARM_CLAUDE_FAK else None
+        if arm == ARM_CLAUDE:
+            argv = _claude_argv(task["prompt"])
+        elif arm == ARM_CLAUDE_FAK:
+            argv = [fak_bin, "guard", "--audit", journal, "--"] + _claude_argv(task["prompt"])
+        else:
+            raise ValueError(f"cross_agent_ablate: arm {arm!r} is not a live cross-agent arm")
+
+        t0 = time.time()
+        completed, result = True, {}
         try:
-            transcript_audit = audit_transcript(tpath)
-        except Exception:  # noqa: BLE001 - a missing/locked transcript falls back to result JSON
-            transcript_audit = None
-    adjudication = count_adjudications(journal) if arm == ARM_CLAUDE_FAK else None
-    return rep_from_result_json(result, arm=arm, success=success, completed=completed,
-                               wall_seconds=wall, transcript_audit=transcript_audit,
-                               adjudication=adjudication)
+            proc = subprocess.run(argv, cwd=workdir, capture_output=True, text=True,
+                                  timeout=timeout, encoding="utf-8", errors="replace")
+            try:
+                result = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.stdout.strip() else {}
+            except (json.JSONDecodeError, IndexError):
+                result = {}
+            completed = proc.returncode == 0 and bool(result) and not result.get("is_error", True)
+        except subprocess.TimeoutExpired:
+            completed = False
+        wall = time.time() - t0
+
+        success = completed and task["_check"](workdir, (result or {}).get("result", ""))
+
+        transcript_audit = None
+        tpath = _find_transcript((result or {}).get("session_id"))
+        if tpath:
+            try:
+                transcript_audit = audit_transcript(tpath)
+            except Exception:  # noqa: BLE001 - a missing/locked transcript falls back to result JSON
+                transcript_audit = None
+        adjudication = count_adjudications(journal) if arm == ARM_CLAUDE_FAK else None
+        return rep_from_result_json(result, arm=arm, success=success, completed=completed,
+                                    wall_seconds=wall, transcript_audit=transcript_audit,
+                                    adjudication=adjudication)
 
 
 def cmd_run(a):
@@ -592,7 +623,7 @@ def cmd_run(a):
         reps = []
         for i in range(a.k):
             print(f"[{arm}] rep {i + 1}/{a.k} ...", file=sys.stderr, flush=True)
-            rep = run_one_rep(arm, task, a.fak, a.timeout)
+            rep = run_one_rep(arm, task, a.fak, a.timeout, keep_workdir=a.keep_workdirs)
             print(f"    completed={rep['completed']} success={rep['success']} "
                   f"out_tok={rep['tokens']['output']} turns={rep['turns']}", file=sys.stderr, flush=True)
             reps.append(rep)
@@ -657,12 +688,7 @@ def _emit(report, out):
         sys.stdout.write(blob)
 
 
-def main(argv=None):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:  # noqa: BLE001
-        pass
+def build_parser():
     p = argparse.ArgumentParser(description="Cross-agent (Regime B) ablation controller — claude vs fak-guarded claude.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -673,6 +699,8 @@ def main(argv=None):
     r.add_argument("--fak", default="./fak.exe" if sys.platform == "win32" else "./fak",
                    help="path to the fak binary for the +fak arm")
     r.add_argument("--timeout", type=int, default=240, help="per-rep timeout seconds")
+    r.add_argument("--keep-workdirs", action="store_true",
+                   help="keep each rep's temp workdir for debugging (default: reaped per rep, #3510)")
     r.add_argument("--wall-clock-utc", default=None, help="ISO timestamp of the run (provenance)")
     r.add_argument("--out", default=None)
     r.set_defaults(func=cmd_run)
@@ -684,8 +712,16 @@ def main(argv=None):
 
     tp = sub.add_parser("tasks", help="list the built-in tasks")
     tp.set_defaults(func=cmd_tasks)
+    return p
 
-    a = p.parse_args(argv)
+
+def main(argv=None):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
+    a = build_parser().parse_args(argv)
     a.func(a)
 
 
