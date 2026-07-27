@@ -102,10 +102,31 @@ const maxOutcomeLine = 1 << 20
 // content — content problems are reported in JournalStats so the caller can decide whether
 // the corpus is good enough, which is a judgement this function does not get to make.
 func ReadTurnOutcomes(r io.Reader) ([]TurnOutcome, JournalStats, error) {
-	var (
-		out   []TurnOutcome
-		stats JournalStats
-	)
+	var out []TurnOutcome
+	stats, err := scanJSONLines(r, func(line []byte) bool {
+		var o TurnOutcome
+		if json.Unmarshal(line, &o) != nil {
+			return false
+		}
+		out = append(out, o)
+		return true
+	})
+	if err != nil {
+		return out, stats, fmt.Errorf("read outcome journal: %w", err)
+	}
+	return out, stats, nil
+}
+
+// scanJSONLines walks an append-only JSON-lines file, calling parse on each non-blank line
+// and counting the ones it rejects. It is shared by this leaf's two journals ON PURPOSE:
+// they draw OPPOSITE conclusions from a torn line (see escalatelog.go's header), and the
+// only way that difference stays a deliberate policy rather than a drift is for the
+// detection of a torn line to be one piece of code with one definition.
+//
+// parse returns false for a line it could not use; the count comes back as Malformed. The
+// error is reserved for a genuine reader failure.
+func scanJSONLines(r io.Reader, parse func(line []byte) bool) (JournalStats, error) {
+	var stats JournalStats
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxOutcomeLine)
 	for sc.Scan() {
@@ -114,12 +135,9 @@ func ReadTurnOutcomes(r io.Reader) ([]TurnOutcome, JournalStats, error) {
 			continue
 		}
 		stats.Lines++
-		var o TurnOutcome
-		if err := json.Unmarshal(line, &o); err != nil {
+		if !parse(line) {
 			stats.Malformed++
-			continue
 		}
-		out = append(out, o)
 	}
 	if err := sc.Err(); err != nil {
 		// A too-long line is a content problem wearing an I/O error's clothes: report it
@@ -128,11 +146,11 @@ func ReadTurnOutcomes(r io.Reader) ([]TurnOutcome, JournalStats, error) {
 		if errors.Is(err, bufio.ErrTooLong) {
 			stats.Lines++
 			stats.Malformed++
-			return out, stats, nil
+			return stats, nil
 		}
-		return out, stats, fmt.Errorf("read outcome journal: %w", err)
+		return stats, err
 	}
-	return out, stats, nil
+	return stats, nil
 }
 
 // trimSpaceBytes reports the line with leading/trailing ASCII whitespace removed. Kept
