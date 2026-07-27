@@ -309,10 +309,10 @@ def _parse_git_date(raw: str) -> date | None:
         return _parse_date(raw)
 
 
-def _git_line(args: list[str], root: Path) -> str:
+def _git_line(args: list[str], root: Path, *, timeout: int = 30) -> str:
     try:
         proc = subprocess.run(["git", *args], cwd=str(root), capture_output=True,
-                              text=True, timeout=30)
+                              text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return ""
     if proc.returncode != 0:
@@ -462,11 +462,76 @@ def _git_first_added_date(root: Path, rel: str) -> date | None:
     return _parse_git_date(out.splitlines()[0] if out else "")
 
 
+# A commit header line printed by --format=%cI. No repo path can take the shape of
+# an ISO-8601 timestamp, so this cleanly separates headers from the --name-only
+# file lines that follow them.
+_GIT_ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
+
+def _pathspec_candidates(path: str) -> list[str]:
+    """The pathspecs a reported file could have been requested under.
+
+    --name-only reports FILES, but callers also date DIRECTORY pathspecs
+    (``internal/<pkg>``, ``cmd/<name>``), whose first-add date is the first add of
+    any file beneath them. So a reported ``internal/foo/bar.go`` answers the specs
+    ``internal/foo/bar.go``, ``internal/foo`` and ``internal``.
+    """
+    parts = path.split("/")
+    return [path] + ["/".join(parts[:i]) for i in range(len(parts) - 1, 0, -1)]
+
+
+def _git_first_added_dates(root: Path, specs: list[str], *,
+                           timeout: int = 180) -> dict[str, date | None]:
+    """First-add commit date for MANY pathspecs in ONE history walk.
+
+    ``--diff-filter=A --reverse`` cannot early-exit, so the per-path query walks the
+    ENTIRE history again for every path it is asked about. Measured on this repo
+    that was 405 ``git log`` calls costing 279s — 98.6% of this scorecard's runtime,
+    and on its own more than the 240s budget its control-pane card is allotted.
+    Asking for the union walks the history once and answers all of them: read
+    oldest-first, keep the FIRST date each spec appears under, which is exactly what
+    the per-path query returns.
+
+    A git failure maps every spec to None — the same "no date" the per-path query
+    returns on failure, so callers keep their existing fail-open/fail-closed choice.
+    """
+    wanted = sorted({_rel(s) for s in specs if str(s).strip()})
+    if not wanted:
+        return {}
+    out = _git_line([
+        "log", "--diff-filter=A", "--reverse", "--format=%cI", "--name-only",
+        "--", *wanted,
+    ], root, timeout=timeout)
+    lookup = set(wanted)
+    first: dict[str, date | None] = {}
+    current: date | None = None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if _GIT_ISO_RE.match(line):
+            current = _parse_git_date(line)
+            continue
+        for cand in _pathspec_candidates(_rel(line)):
+            if cand in lookup and cand not in first:
+                first[cand] = current
+    for spec in wanted:
+        first.setdefault(spec, None)
+    return first
+
+
 def _added_on_or_after_stamp(root: Path, rel: str, stamp_date: date | None,
-                             *, require_git_date: bool) -> bool:
+                             *, require_git_date: bool,
+                             first_added: dict[str, date | None] | None = None) -> bool:
     if stamp_date is None:
         return True
-    first = _git_first_added_date(root, rel)
+    # first_added is the batched answer (see _git_first_added_dates); the per-path
+    # query stays the fallback for callers that have not batched.
+    key = _rel(rel)
+    if first_added is not None and key in first_added:
+        first = first_added[key]
+    else:
+        first = _git_first_added_date(root, key)
     if first is None:
         return not require_git_date
     return first > stamp_date
@@ -581,22 +646,39 @@ def derive_teachable_surfaces(root: Path, added_paths: list[str], *,
             if name != "fak" and not _CMD_DIR_PLUMBING_RE.search(name):
                 cmd_dirs.setdefault(name, []).append(rel)
 
-    for pkg, paths in internal_paths.items():
-        ref = f"internal/{pkg}"
-        if _has_nontest_go(root, ref) and _added_on_or_after_stamp(
-                root, ref, stamp_date, require_git_date=require_git_dates):
-            by_key[("internal", pkg)] = _surface("internal", pkg, ref, paths)
-
     main_text = dsc._safe_read(root / "cmd" / "fak" / "main.go")
     verb_to_handler = _fak_verb_handlers(main_text)
     handler_to_file = _cmd_fak_handler_files(root)
     added_set = set(added)
+
+    # Every pathspec the loops below will date, gathered UP FRONT so one history
+    # walk answers all of them. Dating them one at a time is what made this card
+    # the slowest in the control-pane portfolio (405 `git log --diff-filter=A
+    # --reverse` calls / 279s). Skipped entirely when there is no stamp to compare
+    # against, because then _added_on_or_after_stamp never asks git anything.
+    first_added: dict[str, date | None] = {}
+    if stamp_date is not None:
+        first_added = _git_first_added_dates(root, (
+            [f"internal/{pkg}" for pkg in internal_paths]
+            + [f"cmd/{name}" for name in cmd_dirs]
+            + [rel for rel in (handler_to_file.get(h, "") for h in verb_to_handler.values())
+               if rel and rel in added_set]
+        ))
+
+    for pkg, paths in internal_paths.items():
+        ref = f"internal/{pkg}"
+        if _has_nontest_go(root, ref) and _added_on_or_after_stamp(
+                root, ref, stamp_date, require_git_date=require_git_dates,
+                first_added=first_added):
+            by_key[("internal", pkg)] = _surface("internal", pkg, ref, paths)
+
     for verb, handler in verb_to_handler.items():
         rel = handler_to_file.get(handler, "")
         if not rel:
             continue
         handler_added = rel in added_set and _added_on_or_after_stamp(
             root, rel, stamp_date, require_git_date=require_git_dates,
+            first_added=first_added,
         )
         verb_added = verb in added_verbs
         if handler_added or verb_added:
@@ -605,7 +687,8 @@ def derive_teachable_surfaces(root: Path, added_paths: list[str], *,
     for name, paths in cmd_dirs.items():
         ref = f"cmd/{name}"
         if _has_nontest_go(root, ref) and _added_on_or_after_stamp(
-                root, ref, stamp_date, require_git_date=require_git_dates):
+                root, ref, stamp_date, require_git_date=require_git_dates,
+                first_added=first_added):
             by_key[("cmd", name)] = _surface("cmd", name, ref, paths)
 
     return [by_key[k] for k in sorted(by_key)]

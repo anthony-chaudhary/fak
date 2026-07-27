@@ -234,6 +234,110 @@ def test_added_paths_cutoff_is_utc_explicit() -> None:
     assert lsc._before_stamp_end_utc(date(2026, 6, 29)) == "--before=2026-06-29T23:59:59Z"
 
 
+# --- batched first-add dating ----------------------------------------------
+#
+# Dating one pathspec at a time cost 405 `git log --diff-filter=A --reverse` calls
+# / 279s on this repo — 98.6% of the scorecard's runtime, and on its own more than
+# the 240s its control-pane card is allotted, so the gating garden member could
+# only ever report a timeout. _git_first_added_dates answers all of them from ONE
+# walk; these pin the parse that makes that substitution safe.
+
+# One `git log --diff-filter=A --reverse --format=%cI --name-only` transcript:
+# oldest commit first, each date followed by the files it added.
+_ADD_LOG = """2026-01-02T03:04:05+00:00
+
+internal/alpha/first.go
+cmd/tool/main.go
+
+2026-02-03T04:05:06+00:00
+
+internal/alpha/second.go
+cmd/fak/handler.go
+"""
+
+
+def _batched(specs: list[str], transcript: str = _ADD_LOG) -> dict:
+    original = lsc._git_line
+    try:
+        lsc._git_line = lambda args, root, **kw: transcript
+        return lsc._git_first_added_dates(Path("."), specs)
+    finally:
+        lsc._git_line = original
+
+
+def test_first_added_dates_dates_directory_pathspecs() -> None:
+    # Callers date DIRECTORIES (internal/<pkg>, cmd/<name>) but --name-only reports
+    # FILES, so a directory's date is the first add of any file beneath it.
+    got = _batched(["internal/alpha", "cmd/tool", "cmd/fak"])
+    assert got["internal/alpha"] == date(2026, 1, 2), got
+    assert got["cmd/tool"] == date(2026, 1, 2), got
+    assert got["cmd/fak"] == date(2026, 2, 3), got
+
+
+def test_first_added_dates_keeps_the_earliest_add_per_spec() -> None:
+    # internal/alpha gains a second file later; its first-add date must not move.
+    assert _batched(["internal/alpha"])["internal/alpha"] == date(2026, 1, 2)
+
+
+def test_first_added_dates_dates_file_pathspecs() -> None:
+    got = _batched(["internal/alpha/second.go", "cmd/fak/handler.go"])
+    assert got["internal/alpha/second.go"] == date(2026, 2, 3), got
+    assert got["cmd/fak/handler.go"] == date(2026, 2, 3), got
+
+
+def test_first_added_dates_reports_never_added_specs_as_none() -> None:
+    # A spec git never reports must be present and None — the same "no date" the
+    # per-path query returns, so the caller's require_git_date choice still decides.
+    got = _batched(["internal/alpha", "internal/ghost"])
+    assert "internal/ghost" in got and got["internal/ghost"] is None, got
+
+
+def test_first_added_dates_on_git_failure_is_all_none() -> None:
+    got = _batched(["internal/alpha", "cmd/tool"], transcript="")
+    assert got == {"internal/alpha": None, "cmd/tool": None}, got
+
+
+def test_first_added_dates_empty_spec_list_shells_nothing() -> None:
+    called: list[object] = []
+    original = lsc._git_line
+    try:
+        lsc._git_line = lambda args, root, **kw: called.append(args) or ""
+        assert lsc._git_first_added_dates(Path("."), []) == {}
+    finally:
+        lsc._git_line = original
+    assert not called, "an empty spec list must not shell git at all"
+
+
+def test_added_on_or_after_stamp_prefers_the_batch_over_a_git_call() -> None:
+    # The batch is authoritative when it carries the key: no per-path git call.
+    original = lsc._git_first_added_date
+    try:
+        def boom(root, rel):  # noqa: ANN001, ANN202
+            raise AssertionError(f"per-path git call for {rel} despite a batched answer")
+        lsc._git_first_added_date = boom
+        assert lsc._added_on_or_after_stamp(
+            Path("."), "internal/alpha", date(2026, 1, 1), require_git_date=True,
+            first_added={"internal/alpha": date(2026, 6, 30)}) is True
+        assert lsc._added_on_or_after_stamp(
+            Path("."), "internal/alpha", date(2026, 12, 1), require_git_date=True,
+            first_added={"internal/alpha": date(2026, 6, 30)}) is False
+    finally:
+        lsc._git_first_added_date = original
+
+
+def test_added_on_or_after_stamp_falls_back_when_unbatched() -> None:
+    # A key the batch does not carry still resolves through the per-path query, so
+    # callers that have not batched keep working unchanged.
+    original = lsc._git_first_added_date
+    try:
+        lsc._git_first_added_date = lambda root, rel: date(2026, 6, 30)
+        assert lsc._added_on_or_after_stamp(
+            Path("."), "internal/beta", date(2026, 1, 1), require_git_date=True,
+            first_added={"internal/alpha": date(2020, 1, 1)}) is True
+    finally:
+        lsc._git_first_added_date = original
+
+
 def test_added_on_or_after_stamp_excludes_same_day_stamp() -> None:
     original = lsc._git_first_added_date
     try:
