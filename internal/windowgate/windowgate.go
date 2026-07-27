@@ -25,6 +25,7 @@ const (
 
 var (
 	reCreatesTask    = regexp.MustCompile(`(?i)Register-ScheduledTask\b|schtasks(\.exe)?\b[^\n]*/Create\b`)
+	reRegisterTask   = regexp.MustCompile(`(?i)Register-ScheduledTask\b`)
 	reSchtasksCreate = regexp.MustCompile(`(?i)schtasks(\.exe)?\b[^\n]*/Create\b`)
 	reOffDesktop     = regexp.MustCompile(`(?i)-LogonType\s+(S4U|Password|ServiceAccount)\b|-UserId\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)|/RU\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)`)
 	reHeadless       = regexp.MustCompile(`(?i)--headless`)
@@ -736,21 +737,138 @@ func liveTaskConsoleProne(task LiveScheduledTask) bool {
 	return false
 }
 
+// psCodeMatch reports whether re matches somewhere in src that PowerShell would
+// actually EXECUTE — a match that lands entirely inside a comment does not count.
+// A usage block that shows a human the `Register-ScheduledTask` line to restore a
+// captured task is prose, not an installer, and a gate that cannot tell the two
+// apart reds the whole tree on a doc line (the tools/capture_fleet_task_xml.ps1
+// false positive). The same rule applies to the exemptions: a `-LogonType S4U`
+// mentioned only in a comment must not excuse a live interactive registration.
+func psCodeMatch(re *regexp.Regexp, src string) bool {
+	for _, m := range re.FindAllStringIndex(src, -1) {
+		if psCodeOffset(src, m[0]) {
+			return true
+		}
+	}
+	return false
+}
+
+// psCodeOffset reports whether byte offset off in a PowerShell source sits in code
+// rather than inside a `<# … #>` block comment (which nests) or a `#` line comment.
+// Quoted strings count as code — the command line an installer registers lives in
+// one — and are walked only so a `#` inside one cannot open a comment; a `#` opens
+// a comment at a token boundary alone, so a bare word carrying one stays code.
+// Pure: no git, no disk. The Python arm reads offsets the same way
+// (pythonCodeOffset), except there a string is not code.
+func psCodeOffset(src string, off int) bool {
+	if off > len(src) {
+		off = len(src)
+	}
+	depth := 0 // open <# … #> block comments
+	for i := 0; i < off; {
+		if depth > 0 {
+			switch {
+			case strings.HasPrefix(src[i:], "<#"):
+				depth++
+				i += 2
+			case strings.HasPrefix(src[i:], "#>"):
+				depth--
+				i += 2
+			default:
+				i++
+			}
+			continue
+		}
+		switch c := src[i]; {
+		case strings.HasPrefix(src[i:], "<#"):
+			start := i
+			depth, i = 1, i+2
+			for i < len(src) && depth > 0 {
+				switch {
+				case strings.HasPrefix(src[i:], "<#"):
+					depth++
+					i += 2
+				case strings.HasPrefix(src[i:], "#>"):
+					depth--
+					i += 2
+				default:
+					i++
+				}
+			}
+			if off >= start && off < i {
+				return false
+			}
+		case c == '#' && psTokenStart(src, i):
+			start := i
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+			if off >= start && off < i {
+				return false
+			}
+		case c == '\'' || c == '"':
+			// A quoted string is CODE, not prose — the installed command line
+			// lives inside one (-Argument '--headless …'). Skip it only so a `#`
+			// it carries cannot open a comment.
+			i = psSkipString(src, i)
+		default:
+			i++
+		}
+	}
+	return depth == 0
+}
+
+// psTokenStart reports whether the byte at i begins a PowerShell token — it is at
+// the start of the file or follows whitespace. PowerShell only opens a comment at
+// a `#` in that position, so `file#1` and `-Argument x#y` stay code.
+func psTokenStart(src string, i int) bool {
+	if i == 0 {
+		return true
+	}
+	switch src[i-1] {
+	case ' ', '\t', '\r', '\n', ';', '{', '(':
+		return true
+	}
+	return false
+}
+
+// psSkipString returns the offset just past the string literal opening at i. A
+// single-quoted string ends at the next unescaped quote (`''` escapes one); a
+// double-quoted string honours the backtick escape. An unterminated literal
+// consumes the rest of the source, which keeps the scan from reading its tail as
+// code and inventing a match.
+func psSkipString(src string, i int) int {
+	q := src[i]
+	for i++; i < len(src); i++ {
+		switch {
+		case q == '"' && src[i] == '`':
+			i++ // backtick escapes the next byte inside a double-quoted string
+		case src[i] == q:
+			if q == '\'' && i+1 < len(src) && src[i+1] == '\'' {
+				i++ // '' is a literal quote, not the terminator
+				continue
+			}
+			return i + 1
+		}
+	}
+	return len(src)
+}
+
 // PSInstallerViolation returns a one-line violation for a task-creating .ps1 that
 // is neither off-desktop nor headless, and ok=false when the file is clean (or is
 // not a task installer at all). Pure: no git, no disk.
 func PSInstallerViolation(rel, src string) (string, bool) {
-	if !reCreatesTask.MatchString(src) {
+	if !psCodeMatch(reCreatesTask, src) {
 		return "", false
 	}
-	if reHeadless.MatchString(src) {
+	if psCodeMatch(reHeadless, src) {
 		return "", false // a fully headless launcher is safe under any principal
 	}
-	offDesktop := reOffDesktop.MatchString(src)
-	interactive := reInteractive.MatchString(src)
+	offDesktop := psCodeMatch(reOffDesktop, src)
+	interactive := psCodeMatch(reInteractive, src)
 	// A Register-ScheduledTask call that never sets a principal inherits the
 	// Interactive default — treat as interactive unless it goes headless.
-	if strings.Contains(src, "Register-ScheduledTask") && !reSetsPrincipal.MatchString(src) {
+	if psCodeMatch(reRegisterTask, src) && !psCodeMatch(reSetsPrincipal, src) {
 		interactive = true
 	}
 	if interactive {

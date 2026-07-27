@@ -36,6 +36,29 @@ func TestPSInstallerRules(t *testing.T) {
 				"Register-ScheduledTask -TaskName T -Action $a\n", true},
 		{"non-task-ps1-ignored",
 			"Write-Output 'helper'\nStart-Process notepad -WindowStyle Hidden\n", false},
+		// A capture/export tool documents the restore command for a human; it
+		// installs nothing. Reading its prose as an installer reds the tree on a
+		// doc line (tools/capture_fleet_task_xml.ps1).
+		{"register-in-block-comment-is-prose",
+			"<#\nRestore:\n  Register-ScheduledTask -TaskName T -Xml (Get-Content -Raw t.xml)\n#>\n" +
+				"$xml = Export-ScheduledTask -TaskName T\n", false},
+		{"register-in-line-comment-is-prose",
+			"# Register-ScheduledTask -TaskName T -Action $a\nExport-ScheduledTask -TaskName T\n", false},
+		{"schtasks-create-in-comment-is-prose",
+			"<# schtasks /Create /TN T /SC MINUTE /TR 'x.py' #>\nWrite-Output 'export only'\n", false},
+		// The exemptions are code-only too: prose cannot excuse a live install.
+		{"s4u-only-in-comment-does-not-excuse",
+			"# the installer below should use -LogonType S4U one day\n" +
+				"$a = New-ScheduledTaskAction -Execute python.exe -Argument x.py\n" +
+				"Register-ScheduledTask -TaskName T -Action $a\n", true},
+		{"headless-only-in-comment-does-not-excuse",
+			"<# a conhost.exe --headless wrapper is the other fix #>\n" +
+				"$p = New-ScheduledTaskPrincipal -LogonType Interactive\n" +
+				"Register-ScheduledTask -TaskName T -Action $a -Principal $p\n", true},
+		// A `#` that is not at a token boundary does not open a comment, so real
+		// code after it still counts.
+		{"hash-inside-a-word-is-not-a-comment",
+			"$tag = 'run#1'; Register-ScheduledTask -TaskName T -Action $a\n", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
