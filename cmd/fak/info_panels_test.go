@@ -6,7 +6,7 @@ import (
 )
 
 // richVisualVars is provenVisualVars plus the live-usage blocks the new panels render:
-// a runtime resource block and a two-session registry (main agent + one sub-agent).
+// a runtime resource block and a two-session registry (an agent + its continuation).
 func richVisualVars() guardInfoVars {
 	v := provenVisualVars()
 	v.Runtime.NumGoroutine = 24
@@ -18,7 +18,9 @@ func richVisualVars() guardInfoVars {
 	v.Inference.InflightMaxAgeSeconds = 3.4
 	v.Sessions = []guardInfoSession{
 		{TraceID: "main-trace-long", Run: "running", TokensLeft: 380_000, TurnsLeft: 7, ElapsedSeconds: 95},
-		{TraceID: "sub-trace", Run: "running", ParentTrace: "main-trace-long", Generation: 1},
+		// A CONTINUATION of the row above, which is what a ParentTrace means: the same
+		// agent re-continued under a fresh trace after a budget reset. Not a sub-agent.
+		{TraceID: "cont-trace", Run: "running", ParentTrace: "main-trace-long", Generation: 1},
 	}
 	return v
 }
@@ -26,7 +28,7 @@ func richVisualVars() guardInfoVars {
 // TestRenderGuardInfoVisualBlockResourcesAndAgents proves the pane carries the LIVE
 // info the entry/exit summaries used to monopolize: the gateway's own resource usage
 // (heap + sparkline, goroutines, gc, generation rate) and the per-session agent rows
-// (root + sub-agent lineage, wall-clock, remaining budget) — each under its own
+// (root + continuation lineage, wall-clock, remaining budget) — each under its own
 // section rule at roomy height.
 func TestRenderGuardInfoVisualBlockResourcesAndAgents(t *testing.T) {
 	tr := newGuardInfoTrend(guardInfoTrendCap)
@@ -48,7 +50,7 @@ func TestRenderGuardInfoVisualBlockResourcesAndAgents(t *testing.T) {
 		"main-trace · root", // the root session (trace id capped at 10)
 		"running", "1m35s",  // run state + live wall-clock
 		"380k tok left", "7 turns left", // remaining budget axes
-		"sub-trace · sub g1", // the sub-agent lineage row
+		"cont-trace · cont g1", // the continuation lineage row
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("visual block missing %q:\n%s", want, block)
@@ -124,7 +126,7 @@ func TestComposeGuardInfoPanelsDegrades(t *testing.T) {
 		}
 	}
 	tight := strings.Join(composeGuardInfoPanels(ctx, guardInfoPanels(), 6), "\n")
-	if !strings.Contains(tight, "agents 2 active (1 sub, deepest g1)") {
+	if !strings.Contains(tight, "agents 2 active (1 continued, deepest g1)") {
 		t.Errorf("tight compose must keep the agents mini summary:\n%s", tight)
 	}
 
@@ -139,8 +141,8 @@ func TestComposeGuardInfoPanelsDegrades(t *testing.T) {
 }
 
 // TestGuardInfoAgentText pins the per-session row grammar: trace ids cap at 10 chars,
-// a parent trace makes a sub-agent row (generation floored at 1), zero budget axes are
-// omitted (never rendered as exhausted), and empty ids degrade to "?".
+// a parent trace makes a CONTINUATION row (generation floored at 1), zero budget axes
+// are omitted (never rendered as exhausted), and empty ids degrade to "?".
 func TestGuardInfoAgentText(t *testing.T) {
 	root := guardInfoAgentText(guardInfoSession{TraceID: "abcdefghijKLMNOP", Run: "running", TokensLeft: 1_200_000, ElapsedSeconds: 61})
 	for _, want := range []string{"abcdefghij", "root", "running", "1m1s", "1.2M tok left"} {
@@ -151,9 +153,9 @@ func TestGuardInfoAgentText(t *testing.T) {
 	if strings.Contains(root, "turns left") {
 		t.Errorf("unseeded turns axis must be omitted: %q", root)
 	}
-	sub := guardInfoAgentText(guardInfoSession{TraceID: "sub", Run: "paused", ParentTrace: "abc"})
-	if !strings.Contains(sub, "sub g1") || !strings.Contains(sub, "paused") {
-		t.Errorf("sub-agent row must carry lineage + run state: %q", sub)
+	cont := guardInfoAgentText(guardInfoSession{TraceID: "cont", Run: "paused", ParentTrace: "abc"})
+	if !strings.Contains(cont, "cont g1") || !strings.Contains(cont, "paused") {
+		t.Errorf("continuation row must carry lineage + run state: %q", cont)
 	}
 	if got := guardInfoAgentText(guardInfoSession{}); !strings.HasPrefix(got, "?") {
 		t.Errorf("empty session must degrade to ?, got %q", got)
@@ -274,7 +276,7 @@ func TestRenderGuardInfoLineCarriesTurnsSaved(t *testing.T) {
 func TestRenderGuardInfoLineCarriesAgents(t *testing.T) {
 	v := richVisualVars()
 	line := renderGuardInfoLine(v)
-	if !strings.Contains(line, "agents 2 active (1 sub, deepest g1)") {
+	if !strings.Contains(line, "agents 2 active (1 continued, deepest g1)") {
 		t.Errorf("status line must carry the agents summary: %q", line)
 	}
 	var bare guardInfoVars

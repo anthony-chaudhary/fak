@@ -19,13 +19,21 @@
 // both roles correctly. This package imports nothing: it is pure data.
 package guardvars
 
-// SessionVars is one /debug/vars sessions row: the main agent and any sub-agents it spawned,
-// with the remaining budget axes and live wall-clock the `fak info` agents pane renders. A
-// non-empty ParentTrace marks a sub-agent; Generation is its spawn depth. The budget fields are
-// what REMAINS of the seeded allotment (0 usually means "never seeded"). LastTool/SpawnCount/
-// InflightSeconds/IdleSeconds are the live-status activity cell (#2627): the last ADMITTED tool
-// name (payload-free), the admitted subagent-spawn count, and the in-flight-OR-idle age of the
-// trace — a row carries InflightSeconds or IdleSeconds, never both.
+// SessionVars is one /debug/vars sessions row: every session running through the gateway, with
+// the remaining budget axes and live wall-clock the `fak info` agents pane renders.
+//
+// The row carries TWO different lineages, and conflating them misreports the fleet. ParentTrace
+// is CONTINUATION lineage — internal/session writes it only from Table.Recontinue, "the trace
+// this session was re-continued FROM" — so a non-empty ParentTrace marks the same agent after a
+// hidden context reset (or a relay leg handoff), and Generation counts those re-continuations,
+// NOT spawn depth. SpawnCount is the sub-agent axis: the admitted subagent-spawn count this
+// trace issued. It is parent-side by construction; no field here identifies a row as somebody
+// else's child, and the pane may not invent one from the continuation fields.
+//
+// The budget fields are what REMAINS of the seeded allotment (0 usually means "never seeded").
+// LastTool/SpawnCount/InflightSeconds/IdleSeconds are the live-status activity cell (#2627): the
+// last ADMITTED tool name (payload-free), the admitted subagent-spawn count, and the
+// in-flight-OR-idle age of the trace — a row carries InflightSeconds or IdleSeconds, never both.
 type SessionVars struct {
 	TraceID           string `json:"trace_id"`
 	Run               string `json:"run"`

@@ -38,7 +38,11 @@ Each row carries `trace_id`, `run` state, `parent_trace`/`generation` lineage,
 `priority`, wall-clock `elapsed_seconds`, and the **remaining** budget axes
 (`turns_left`, `tokens_left`, `context_tokens_left`), plus an `assumptions`
 count. The one-row mini form (`guardInfoAgentsSummary`, info_panels.go:313)
-already answers **"how many active"**: `"N active (M sub, deepest gK)"`.
+already answers **"how many active"**: `"N active (M continued, deepest gK), S
+spawned"`. (Corrected since this note was written: `parent_trace`/`generation`
+are *re-continuation* lineage — the same agent after a context reset — not spawn
+lineage, so the summary reports them as continuations and sources its sub-agent
+count from `spawn_count` instead. See `guardInfoAgentsSummary`.)
 
 So of the operator's three asks:
 

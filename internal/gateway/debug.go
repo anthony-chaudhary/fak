@@ -588,13 +588,20 @@ func debugProviderExtraBody(planner agent.Planner) (bool, []string) {
 }
 
 // debugSessionVars is the per-session drive-state row /debug/vars mirrors for live
-// operator panes (the `fak info` agents sub-pane): which sessions — the main agent and
-// any sub-agents it spawned — are running through this gateway RIGHT NOW, with the
-// resource axes the session registry already tracks. ParentTrace/Generation carry the
-// sub-agent lineage (a row with a parent IS a sub-agent); the budget fields are the
-// REMAINING allotment (what the operator seeded minus what the session consumed), and
-// ElapsedSeconds is live wall-clock. Everything here is a projection of SessionState —
-// no payloads, no transcript text — so the pane stays redaction-safe by construction.
+// operator panes (the `fak info` agents sub-pane): which sessions are running through
+// this gateway RIGHT NOW, with the resource axes the session registry already tracks.
+//
+// ParentTrace/Generation carry CONTINUATION lineage, not spawn lineage: the registry
+// writes them from session.Table.Recontinue alone, so a row with a parent is the same
+// agent re-continued under a fresh trace after a budget/context reset, and Generation
+// counts those resets. The sub-agent axis is SpawnCount, from the activity registry
+// below — a parent-side count of admitted spawn calls. Reading a parent as a child
+// reported sub-agents nobody spawned, at a depth that was a reset tally.
+//
+// The budget fields are the REMAINING allotment (what the operator seeded minus what the
+// session consumed), and ElapsedSeconds is live wall-clock. Everything here is a
+// projection of SessionState — no payloads, no transcript text — so the pane stays
+// redaction-safe by construction.
 // The wire shape lives in internal/guardvars so the `fak info` pane decodes the exact block
 // this producer emits — one definition, no field-for-field hand-sync to drift (see guardvars).
 type debugSessionVars = guardvars.SessionVars

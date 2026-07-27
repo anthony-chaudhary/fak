@@ -307,9 +307,19 @@ func guardInfoAgentsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 	return rows
 }
 
-// guardInfoAgentText renders one session row: short trace id, root/sub lineage, run
+// guardInfoAgentText renders one session row: short trace id, continuation lineage, run
 // state, live wall-clock, and whatever budget axes are actually seeded (a 0 axis is
 // "never seeded" and is omitted, never fabricated as exhausted).
+//
+// The lineage clause reads CONTINUATION, not spawn. ParentTrace is written by exactly
+// one verb — session.Table.Recontinue — and internal/session defines it as "the trace
+// this session was re-continued FROM", with Generation counting budget-reset
+// re-continuations. That is the SAME agent after a hidden context reset (or a relay leg
+// handoff), not a child anyone spawned. Rendering it as "sub g3" told an operator
+// watching one long-running agent that they were watching a three-deep sub-agent, which
+// is both the wrong entity and a wrong depth. The row's real sub-agent axis is
+// SpawnCount, rendered below, and it is a PARENT-side count: nothing in this row can
+// say "I am someone's child", so nothing here claims it.
 func guardInfoAgentText(s guardInfoSession) string {
 	id := strings.TrimSpace(s.TraceID)
 	if len(id) > 10 {
@@ -324,7 +334,7 @@ func guardInfoAgentText(s guardInfoSession) string {
 		if gen < 1 {
 			gen = 1
 		}
-		role = fmt.Sprintf("sub g%d", gen)
+		role = fmt.Sprintf("cont g%d", gen)
 	}
 	parts := []string{id, role}
 	if run := strings.TrimSpace(s.Run); run != "" {
@@ -362,16 +372,27 @@ func guardInfoAgentText(s guardInfoSession) string {
 }
 
 // guardInfoAgentsSummary is the agents panel's one-row mini form (also reused by the
-// compact status line): active count, sub-agent count, the deepest spawn depth, and how
-// many sessions hold an in-flight request right now (#2627 — the compact "who is hot").
+// compact status line): active count, how many sessions are continuations and the
+// deepest continuation depth, how many sub-agents were spawned, and how many sessions
+// hold an in-flight request right now (#2627 — the compact "who is hot").
+//
+// The two lineage axes are kept apart for the reason guardInfoAgentText spells out: a
+// ParentTrace is a re-continuation of the same agent, so counting those as sub-agents
+// reported a fleet that did not exist ("1 active (1 sub, deepest g3)" for a single agent
+// that had merely been context-reset three times). Spawns are counted from SpawnCount,
+// the admitted subagent-spawn count the gateway actually observed — the one number here
+// that a sub-agent ever moved.
 func guardInfoAgentsSummary(ss []guardInfoSession) string {
-	subs, deepest, inflight := 0, 0, 0
+	continued, deepest, spawned, inflight := 0, 0, 0, 0
 	for _, s := range ss {
 		if s.InflightSeconds > 0 {
 			inflight++
 		}
+		if s.SpawnCount > 0 {
+			spawned += s.SpawnCount
+		}
 		if strings.TrimSpace(s.ParentTrace) != "" {
-			subs++
+			continued++
 			gen := s.Generation
 			if gen < 1 {
 				gen = 1
@@ -382,8 +403,11 @@ func guardInfoAgentsSummary(ss []guardInfoSession) string {
 		}
 	}
 	out := fmt.Sprintf("%d active", len(ss))
-	if subs > 0 {
-		out += fmt.Sprintf(" (%d sub, deepest g%d)", subs, deepest)
+	if continued > 0 {
+		out += fmt.Sprintf(" (%d continued, deepest g%d)", continued, deepest)
+	}
+	if spawned > 0 {
+		out += fmt.Sprintf(", %d spawned", spawned)
 	}
 	if inflight > 0 {
 		out += fmt.Sprintf(", %d in-flight", inflight)

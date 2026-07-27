@@ -164,7 +164,9 @@ type guardInfoWatchdog = resumemetrics.Snapshot
 
 // guardInfoSession is one /debug/vars sessions row. Its shape lives in internal/guardvars,
 // shared with the gateway producer (debugSessionVars) so the block cannot drift between emit and
-// decode. A non-empty ParentTrace marks a sub-agent; Generation is its spawn depth. The budget
+// decode. A non-empty ParentTrace marks a CONTINUATION — the same agent re-continued under a
+// fresh trace — and Generation counts those re-continuations; the sub-agent axis is SpawnCount
+// (see guardvars, and guardInfoAgentText for what the pane may therefore claim). The budget
 // fields are what REMAINS of the seeded allotment (0 usually means "never seeded", so the
 // renderer omits, not fabricates). LastTool/SpawnCount/InflightSeconds/IdleSeconds are the
 // live-status activity cell (#2627); a gateway that predates them omits them and they decode to
