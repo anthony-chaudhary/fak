@@ -483,8 +483,23 @@ func buildSteerPRsViewWaves(root, base, head string, waves []steerpr.WaveBinding
 	// verdict grading is: if gh is unavailable the set is empty, no spine is
 	// found, and every unit reports expected: unknown — never a fabricated
 	// denominator, and never silently M = N.
+	// The two declared denominator sources are routed by the unit's own grouping
+	// basis, never blended. A WAVE unit's M is the cohort plan's declared wave
+	// size; only a LEAF unit's M comes from the fanout marker graph.
+	//
+	// Routing a wave unit through the leaf derivation is the M = N trap in
+	// disguise: a wave key ("wave:2") matches no "fanout-wave:2-" child, so the
+	// derivation collapses to M = 1 and the unit reads COMPLETE on its first
+	// commit — telling an operator a twelve-issue wave had finished at the exact
+	// moment redirecting it was still cheap. See
+	// steerpr.TestWaveUnitNeverRendersCompleteViaLeafDerivation.
 	intentIssues := steerPRsIntentIssues(root)
 	steerpr.AttachPartials(units, func(u steerpr.Unit) (steerpr.Expectation, bool) {
+		if u.GroupedBy == steerpr.GroupedByWave {
+			// No plan, or a wave nobody planned, yields unknown — never a
+			// fabricated wave size.
+			return steerpr.WaveExpectation(u.Leaf, waves)
+		}
 		if len(u.Resolves) == 0 {
 			// No closure-grade binding: there is no intent to count. Unknown.
 			return steerpr.Expectation{}, false

@@ -239,6 +239,118 @@ func TestCohortExpectationRefusesNonPositive(t *testing.T) {
 	}
 }
 
+// cohortPlan is a two-wave `fak issue cohort` plan. Wave 2 lists five refs but
+// one of them (#101) was already claimed by wave 1, so only four can ever fold
+// into the wave-2 unit — the first-claim-wins rule WaveIndex and the fold share.
+func cohortPlan() []WaveBinding {
+	return []WaveBinding{
+		{Index: 1, Issues: []string{"#101", "#102", "#103"}},
+		{Index: 2, Issues: []string{"#201", "#202", "#203", "#204", "#101", "#201", "not-a-number"}},
+	}
+}
+
+// TestWaveExpectationUsesTheDeclaredWaveSize pins the cohort denominator source
+// the issue names beside the fanout one: a wave unit's M is the plan's own
+// declared membership. It also pins what M must NOT count — a duplicate ref, a
+// ref an earlier wave claimed, and a non-numeric member — because each of those
+// would inflate M above the number of commits that can actually land in the unit.
+func TestWaveExpectationUsesTheDeclaredWaveSize(t *testing.T) {
+	bindings := cohortPlan()
+
+	tests := []struct {
+		name      string
+		key       string
+		wantOK    bool
+		wantTotal int
+	}{
+		{name: "wave 1 counts its three members", key: WaveKey(1), wantOK: true, wantTotal: 3},
+		{name: "wave 2 drops the duplicate, the stolen ref and the non-number", key: WaveKey(2), wantOK: true, wantTotal: 4},
+		{name: "a leaf key is not a wave", key: "steerpr", wantOK: false},
+		{name: "an unplanned wave is unknown, not zero", key: WaveKey(9), wantOK: false},
+		{name: "an empty key is unknown", key: "", wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			exp, ok := WaveExpectation(tc.key, bindings)
+			if ok != tc.wantOK {
+				t.Fatalf("WaveExpectation(%q) = (%+v, %v), want ok %v", tc.key, exp, ok, tc.wantOK)
+			}
+			if !tc.wantOK {
+				// The load-bearing half: an unresolvable wave must never render
+				// complete, however many commits have landed under it.
+				if p := NewPartial(6, exp, ok); p.Known() || p.Complete {
+					t.Errorf("unresolvable wave produced %+v, want an explicitly unknown, non-complete partial", p)
+				}
+				return
+			}
+			if exp.Total != tc.wantTotal {
+				t.Errorf("Total = %d, want %d", exp.Total, tc.wantTotal)
+			}
+			if exp.Source != SourceCohort {
+				t.Errorf("Source = %q, want %q", exp.Source, SourceCohort)
+			}
+		})
+	}
+}
+
+// TestWaveExpectationWithoutAPlanIsUnknown pins the overlay's own degraded path:
+// `fak steer prs` run with no --cohort plan hands in no bindings, so a wave key
+// (which cannot occur without a plan, but must not misbehave if it did) reports
+// unknown rather than deriving a denominator from nothing.
+func TestWaveExpectationWithoutAPlanIsUnknown(t *testing.T) {
+	for _, bindings := range [][]WaveBinding{nil, {}, {{Index: 2}}, {{Index: 2, Issues: []string{"", "x"}}}} {
+		exp, ok := WaveExpectation(WaveKey(2), bindings)
+		if ok {
+			t.Errorf("WaveExpectation(%q, %+v) = (%+v, true), want unknown", WaveKey(2), bindings, exp)
+		}
+		if p := NewPartial(3, exp, ok); p.Complete || p.Known() {
+			t.Errorf("bindings %+v produced %+v, want unknown and non-complete", bindings, p)
+		}
+	}
+}
+
+// TestWaveUnitNeverRendersCompleteViaLeafDerivation is the acceptance gate for
+// the cohort case. It first REPRODUCES the trap — a wave unit routed through the
+// leaf fanout derivation finds no "fanout-wave:2-" child, collapses to M = 1, and
+// reads complete on its very first commit — then pins that the cohort source
+// reports the same unit as 1 of 4 forming.
+//
+// This is the M = N failure the issue calls out, reached by a different door: the
+// denominator is not literally copied from N, it just degenerates to a number N
+// always meets. An operator reading "complete" there would believe a twelve-issue
+// wave had finished after one commit, which is the exact moment redirecting was
+// still cheap.
+func TestWaveUnitNeverRendersCompleteViaLeafDerivation(t *testing.T) {
+	key := WaveKey(2)
+	// The gathered graph contains the unit's first bound issue, which is all the
+	// leaf derivation needs to declare the denominator "found".
+	issues := []IntentIssue{{Number: 201, Body: "a planned wave member, carrying no fanout marker"}}
+
+	trap, ok := DeriveExpected(key, "#201", issues)
+	if !ok || trap.Total != 1 {
+		t.Fatalf("DeriveExpected(%q) = (%+v, %v), want the M = 1 collapse this test exists to route around", key, trap, ok)
+	}
+	if !NewPartial(1, trap, ok).Complete {
+		t.Fatal("the trap did not reproduce: a wave unit routed through the leaf derivation should read complete at 1 commit")
+	}
+
+	exp, ok := WaveExpectation(key, cohortPlan())
+	if !ok {
+		t.Fatal("WaveExpectation refused a planned wave")
+	}
+	p := NewPartial(1, exp, ok)
+	if p.Complete {
+		t.Fatalf("wave unit rendered complete at 1 of %d — the acceptance gate this test guards", *p.Expected)
+	}
+	if !p.Forming() {
+		t.Errorf("Partial = %+v, want forming", p)
+	}
+	if line := p.Annotate(); !strings.Contains(line, "1 of 4") || !strings.Contains(line, "forming") {
+		t.Errorf("Annotate() = %q, want it to read \"1 of 4\" and say forming", line)
+	}
+}
+
 // TestAttachPartialsMarksUnknownExplicitly pins the deliberate difference from
 // AttachCurves: a unit whose lookup fails gets an EXPLICITLY unknown Partial, not
 // a nil one. Dropping to nil would make "unknown" indistinguishable from "not

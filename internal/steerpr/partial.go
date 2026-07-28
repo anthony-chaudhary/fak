@@ -210,6 +210,45 @@ func CohortExpectation(wave int) (Expectation, bool) {
 	return Expectation{Total: wave, Source: SourceCohort}, true
 }
 
+// WaveExpectation resolves the cohort half of the denominator: a unit grouped by
+// WAVE takes its M from the `fak issue cohort` plan's own declared membership —
+// the members an operator planned into that wave — never from a leaf's fanout
+// marker.
+//
+// Routing a wave unit through DeriveExpected instead is not merely imprecise, it
+// is the M = N trap the acceptance gate names. A wave unit's key is "wave:2"
+// (WaveKey's colon-prefixed form, which no leaf can spell), never a leaf, so the
+// marker "fanout-wave:2-" matches no child and the
+// derivation collapses to M = 1 (spine + zero children) — at which point a wave
+// one commit into a twelve-member plan renders COMPLETE, which is precisely the
+// inversion this signal exists to prevent. TestWaveUnitNeverRendersCompleteViaLeafDerivation
+// reproduces that trap before pinning the fix.
+//
+// M is counted through WaveIndex rather than off the raw Issues slice so the
+// denominator matches the set of refs that can ACTUALLY fold into this unit:
+// duplicates within a wave collapse, and a ref an earlier wave already claimed
+// stays with that earlier wave under the same first-claim-wins rule the fold
+// uses. Counting the raw slice would over-count M against members that can never
+// land here — a fabricated denominator by a subtler route.
+//
+// A non-wave key, an unplanned wave, or a wave whose members carry no issue
+// numbers all return unknown rather than zero: a wave nobody can count is
+// honestly uncountable, and CohortExpectation already refuses a non-positive
+// wave for that reason.
+func WaveExpectation(key string, bindings []WaveBinding) (Expectation, bool) {
+	key = strings.TrimSpace(key)
+	if !IsWaveKey(key) {
+		return Expectation{}, false
+	}
+	members := 0
+	for _, wave := range WaveIndex(bindings) {
+		if wave == key {
+			members++
+		}
+	}
+	return CohortExpectation(members)
+}
+
 // WithPartial returns the unit with its partial state bound, computing Landed
 // from the unit's own members so the numerator can never disagree with the
 // commit list an operator is reading right below it. A value method returning a
