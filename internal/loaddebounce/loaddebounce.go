@@ -12,21 +12,21 @@
 // real timer, or wall-clock time.Sleep. That is what makes the witness test
 // flake-free.
 //
-// Intended landing site (NOT wired in this pass — the primitive plus its test is
-// the shippable unit; wiring risks the shared cmd/fak build):
+// LIVE landing site (wired — the primitive is no longer a shelf part):
 //
-//	cmd/fak/dispatch_tick_preflight.go:45
-//	  dispatchProbeWorkerCount / OSWorkerProcs — the per-tick worker-count probe
-//	  that today RECOMPUTES load every tick (process-tree scan + log-tail
-//	  classify + scraped-metric fold) instead of reacting to a debounced
-//	  change-stream, so cost scales with tick rate rather than actual change.
+//	cmd/fak/dispatch_tick_preflight.go
+//	  dispatchPublishWorkerLoad wraps the dispatchProbeWorkerCount /
+//	  PreflightInput.OSWorkerProcs seam. That probe RECOMPUTES load every tick
+//	  (process-tree scan + log-tail classify + scraped-metric fold); admission now
+//	  consumes the PUBLISHED value from a Publisher instead of the raw sample, so
+//	  an unchanged sample moves nothing and a burst of changes inside the window
+//	  settles to its latest member before it reaches the cap arithmetic.
 //
 // Structurally-closest analog:
 //
 //	internal/gateway/serving_autoscaler.go:64
 //	  ServingSignalsFromMetricRows — folds normalized serving telemetry rows into
-//	  the per-worker signal shape an autoscaler plans over. A live wiring would
-//	  feed that per-worker load through a Coalescer before it reaches admission.
+//	  the per-worker signal shape an autoscaler plans over.
 package loaddebounce
 
 import "time"
@@ -130,6 +130,22 @@ func (c *Coalescer[T]) Emit(now time.Time) (T, bool) {
 	return v, true
 }
 
+// Prime records value as the published dedup reference WITHOUT waiting out a
+// debounce window, and cancels any in-flight burst.
+//
+// It exists for the cold start of a POLLING caller: a debounce has nothing to
+// debounce against until something has been published, so a caller that must hand
+// a value to a consumer on its very first sample (the dispatch preflight must put
+// some OSWorkerProcs in front of admission on tick 1) primes with that first
+// sample instead of publishing a zero it never observed. Every LATER sample then
+// goes through the normal Observe/Emit path, so the dedup and the coalescing
+// window apply from the second sample on.
+func (c *Coalescer[T]) Prime(value T) {
+	c.published = true
+	c.lastPublished = value
+	c.disarm()
+}
+
 func (c *Coalescer[T]) disarm() {
 	c.pending = false
 	var zero T
@@ -172,6 +188,15 @@ func (p *Publisher[T]) Sample(value T) {
 // call it opportunistically.
 func (p *Publisher[T]) Flush() {
 	p.drain()
+}
+
+// Prime seeds the dedup reference with value at cold start and invokes emit once
+// for it, so a polling caller's first sample reaches its consumer immediately
+// (there is nothing to debounce against yet) while every later sample is gated by
+// the normal dedup + coalescing window. See Coalescer.Prime.
+func (p *Publisher[T]) Prime(value T) {
+	p.core.Prime(value)
+	p.emit(value)
 }
 
 // NextWake returns the debounce deadline and whether one is armed, so a live

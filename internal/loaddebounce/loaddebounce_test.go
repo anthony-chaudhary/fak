@@ -144,6 +144,41 @@ func TestNoNetChangeCancelsBurst(t *testing.T) {
 	}
 }
 
+// TestPrimeSeedsColdStartWithoutWaiting covers the polling caller's cold start: Prime
+// publishes the first value straight away (a polling consumer needs a value on its very
+// first sample, and there is nothing to debounce against yet) and makes it the dedup
+// reference, so an identical follow-up sample publishes nothing while a genuine change
+// still has to wait out its window.
+func TestPrimeSeedsColdStartWithoutWaiting(t *testing.T) {
+	clk := newFakeClock()
+	var emitted []int
+	p := NewPublisher[int](time.Millisecond, clk.now, func(v int) { emitted = append(emitted, v) })
+
+	p.Prime(4)
+	if len(emitted) != 1 || emitted[0] != 4 {
+		t.Fatalf("prime: emitted %v, want [4] immediately", emitted)
+	}
+
+	// Primed value is now the dedup reference: an identical sample is a no-op.
+	p.Sample(4)
+	clk.advance(2 * time.Millisecond)
+	p.Flush()
+	if len(emitted) != 1 {
+		t.Fatalf("prime dedup: emitted %v, want it to stay [4]", emitted)
+	}
+
+	// A genuine change still waits out the window before it publishes.
+	p.Sample(6)
+	if len(emitted) != 1 {
+		t.Fatalf("prime change: emitted %v before the window elapsed", emitted)
+	}
+	clk.advance(2 * time.Millisecond)
+	p.Flush()
+	if len(emitted) != 2 || emitted[1] != 6 {
+		t.Fatalf("prime change: emitted %v, want [4 6]", emitted)
+	}
+}
+
 // TestDeadlineResetsOnEveryChange asserts the reset-on-every-change contract
 // directly on the pure core: each distinct observation moves the deadline to
 // now+debounce, and the value is due only after the FINAL change's window.

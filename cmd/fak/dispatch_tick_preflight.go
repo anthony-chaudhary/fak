@@ -54,6 +54,9 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	t0 = time.Now()
 	kernel := dispatchPreflightKernel(root)
 	stamp("kernel_probe", t0)
+	// OSWorkerProcs is the PUBLISHED per-worker load (#3376), not the raw per-tick
+	// probe: dispatchPublishWorkerLoad still samples every tick but only lets a CHANGED
+	// value through, and only after it survives a reset-on-change coalescing window.
 	in := dispatchtick.PreflightInput{
 		Workspace:     root,
 		MaxWorkers:    maxWorkers,
@@ -64,7 +67,7 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 		Seat:          dispatchPreflightSeat(root, stderr, product),
 		Resources:     dispatchBuildHostResources(processes),
 		Budgets:       dispatchtick.DefaultHostBudgets(),
-		OSWorkerProcs: dispatchProbeWorkerCount(root, product),
+		OSWorkerProcs: dispatchPublishWorkerLoad(root, product),
 	}
 	// The operator concurrency setpoint (#4036, wired live by #4165): fold
 	// FAK_DISPATCH_SETPOINT through the pure ReconcileSetpoint plan into the input
@@ -129,6 +132,15 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	// the fold abstains) leaves the preflight byte-identical to before.
 	res = dispatchApplyFreshSeatCeiling(res, slow.FreshSeatCeiling)
 	out := res.Map()
+	// Debounce transparency (#3376): when the RAW worker-count probe disagrees with the
+	// load that was actually PUBLISHED to admission -- a change still waiting out its
+	// coalescing window -- surface the raw sample alongside it, so an operator reading a
+	// tick payload can tell a debounced lag from a stale probe. The key is absent
+	// whenever the two agree, which is every settled tick, so the steady-state payload is
+	// byte-identical to before the debounce existed.
+	if raw, lagging := dispatchWorkerLoad.pending(); lagging {
+		out["os_worker_procs_sampled"] = raw
+	}
 	// Cross-provider seat failover readout (#3575, gen/next). When the primary product's
 	// seats are walled (REFUSE_NO_ACCOUNT) for a debounced run of ticks and
 	// FLEET_DISPATCH_FALLBACK_PRODUCT names a servable alternative pool (e.g. an ambient
@@ -1069,6 +1081,10 @@ func dispatchPreflightKernel(root string) dispatchtick.KernelCheck {
 	dispatchKernelCache.root, dispatchKernelCache.at, dispatchKernelCache.check = root, now, check
 	return check
 }
+
+// The change-gated + debounced worker-load publish this reads (dispatchPublishWorkerLoad)
+// lives in dispatch_tick_load_debounce.go — one concern, split out to keep this file under
+// the god-file ceiling.
 
 var dispatchRunExternalJSON = dispatchRunExternalJSONImpl
 var dispatchProbeHostResources = dispatchPreflightHostResources
