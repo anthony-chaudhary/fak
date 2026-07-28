@@ -1,3 +1,7 @@
 # The only dependency: the official OpenAI Python SDK. The verdict call in app.py
 # uses the standard library (urllib), so nothing else is needed.
-openai>=1.0
+#
+# Pinned, not floating: an unpinned `openai>=1.0` lets a future SDK release change what
+# this demo does with no commit here. 2.41.0 is the version the captured output in
+# README.md was produced against.
+openai==2.41.0

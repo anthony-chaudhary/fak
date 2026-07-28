@@ -8,12 +8,26 @@ only way in is the governed front door on `:8080`.
 
 ## Run it
 
+You'll need Docker (with `docker compose`), `curl`, and `openssl` — no Go, no Python,
+no model on the host. On Windows, run it from Git Bash or WSL.
+
+```bash
+bash run.sh        # or ./run.sh once it is executable
+```
+
+That's it: it mints an ephemeral `FAK_GATEWAY_KEY`, brings the stack up, waits (with a
+bounded retry, never forever) for the front door, and prints the checks below. With the
+images and the model already cached it completes in well under a minute; the **first**
+run takes several minutes while Docker pulls ~2 GB.
+
+Or drive it by hand:
+
 ```bash
 export FAK_GATEWAY_KEY="$(openssl rand -hex 32)"   # clients must present this as a Bearer token
 docker compose up                                  # first run pulls qwen2.5:1.5b (~1 GB) into a named volume
 ```
 
-That's it. `compose up` starts Ollama, pulls the model once (a one-shot `ollama-pull`
+`compose up` starts Ollama, pulls the model once (a one-shot `ollama-pull`
 service that fak waits on), then starts `fak serve` fronting it. When it's up:
 
 ```bash
@@ -26,6 +40,16 @@ curl -s http://localhost:8080/v1/chat/completions \
 
 Point any OpenAI client at `http://localhost:8080/v1` with that Bearer key and you have
 a governed local model — no code change to the client.
+
+## What you'll see
+
+`run.sh` prints three checks in order: `/healthz` answering `{"ok":true,…}`
+unauthenticated, an unauthenticated `/v1/models` call coming back refused with its
+status code, and an authenticated chat call returning an OpenAI-shaped completion. It
+exits `0` when the run completes.
+
+The captured transcript — plus the two offline checks you can reproduce in seconds
+with no Docker and no model — is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
 ## What each piece does
 
@@ -67,6 +91,16 @@ docker compose up -d --force-recreate fak
 - **This governs the tool-call boundary, not the model's weights.** fak decides which
   tool calls are allowed and quarantines tool results; it does not change what the model
   generates.
+- **Determinism, split honestly.** The **gate** is deterministic: a verdict is a pure
+  function of `(policy.json, the proposed call)`, so the same proposed call yields the
+  same reason and disposition on every run and every machine — that is why the verdicts
+  in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md) are byte-stable and safe to re-run. The
+  **model** is not: `qwen2.5:1.5b` samples, so its text varies run to run.
+- **What this does not claim.** It does not demonstrate that a denied tool call is
+  prevented from *executing* inside your agent — fak returns the verdict; the runtime
+  that honours it is `fak guard` / the managed runtime. It does not prove the model is
+  safe, it does not benchmark answer quality, and because the images are pinned at
+  `:latest` it is not a reproducible-by-digest deployment.
 
 See [`docs/fak/deployment-guide.md`](../../docs/fak/deployment-guide.md) for the
 production compose/Kubernetes patterns this recipe is distilled from, and

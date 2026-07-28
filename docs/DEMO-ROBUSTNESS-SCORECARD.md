@@ -1,11 +1,11 @@
 ---
 title: "fak Demo-Robustness Scorecard: Simplicity, Speed, Durability"
-description: "The fak demo-robustness scorecard grades 78 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
+description: "The fak demo-robustness scorecard grades 80 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
 ---
 
 # Demo-robustness scorecard
 
-<!-- demo-robustness-scorecard: 2026-07-03 · process: tools/demo_robustness_scorecard.py -->
+<!-- demo-robustness-scorecard: 2026-07-28 · process: tools/demo_robustness_scorecard.py -->
 
 > Regenerate: `python tools/demo_robustness_scorecard.py --markdown --stamp DATE > docs/DEMO-ROBUSTNESS-SCORECARD.md`
 > Verify snapshot freshness: `python tools/demo_robustness_scorecard.py --check-doc`
@@ -16,12 +16,12 @@ description: "The fak demo-robustness scorecard grades 78 demos on simplicity, s
 
 | Metric | Value |
 |---|---|
-| Demos scored | 78 |
+| Demos scored | 80 |
 | **Robustness-debt (total defects)** | **0** |
 | Axis-debt | simplicity:0 · speed:0 · durability:0 |
-| Mean score | 97.6/100 |
+| Mean score | 97.7/100 |
 | Median / min / max | 100.0 / 91.6 / 100.0 |
-| Grade distribution | A:78 B:0 C:0 D:0 F:0 |
+| Grade distribution | A:80 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -67,6 +67,7 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/autogen-groupchat` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/bench-latency` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/commit-audit-in-60s` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `examples/compose-ollama` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/crewai-crew` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/dogfood-claude` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/extdriver` |
@@ -79,6 +80,7 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/mobile-ffi` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/normgate-evasion` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/openai-agents-guardrail` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `examples/openai-sdk-minimal` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/presets` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/radixattention` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/steward-demo` |

@@ -20,23 +20,32 @@ and every tool call the model proposes crosses a governed **syscall boundary** �
 fak serve --addr 127.0.0.1:8080
 
 # 2. Run the client:
-pip install -r requirements.txt
+pip install -r requirements.txt        # pinned: openai==2.41.0 (see requirements.txt)
 python app.py
 ```
 
+Once the gateway is up, `python app.py` runs in about 3 seconds — three local HTTP
+round-trips plus interpreter start. The dependency is pinned rather than floating, so
+the run does not change under you when a new SDK ships.
+
 ## What you'll see
 
-The model reply line appears only if you wired an upstream with `fak serve --base-url …`;
-the two verdicts always print:
+Captured against a local keyless `fak serve` with **no** upstream wired (fak v0.41.0,
+openai 2.41.0). The two verdicts always print; the reply line carries real content only
+once you wire an upstream with `fak serve --base-url …`:
 
 ```text
-model reply: 'OK.'                # or a skip note if no upstream is configured
+model reply: None
 
 proposed tool call            ->  fak verdict
 ----------------------------------------------------
   read_file                 ->  verdict=ALLOW
   Bash                      ->  verdict=DENY reason=DEFAULT_DENY disposition=TERMINAL
 ```
+
+`model reply: None` is the honest no-upstream result: the gateway answers the
+`chat.completions` call with an empty completion rather than an error, so the SDK path
+succeeds and prints `None` instead of taking the skip branch.
 
 `read_file` matches the built-in floor's `read_` allow-prefix; `Bash "git push …"` is
 not on the allow-list, so the default-deny floor refuses it — **a verdict, not a crash**

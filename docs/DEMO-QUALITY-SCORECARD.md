@@ -5,7 +5,7 @@ description: "fak's demo-quality scorecard grades 80 demos on five deterministic
 
 # Demo-quality scorecard
 
-<!-- demo-quality-scorecard: 2026-07-03 · process: tools/demo_quality_scorecard.py -->
+<!-- demo-quality-scorecard: 2026-07-28 · process: tools/demo_quality_scorecard.py -->
 
 > Regenerate: `python tools/demo_quality_scorecard.py --markdown --stamp DATE > docs/DEMO-QUALITY-SCORECARD.md`
 > Verify snapshot freshness: `python tools/demo_quality_scorecard.py --check-doc`
@@ -17,10 +17,10 @@ description: "fak's demo-quality scorecard grades 80 demos on five deterministic
 | Metric | Value |
 |---|---|
 | Demos scored | 80 |
-| **Demo-debt (total defects)** | **3** |
-| Mean score | 98.0/100 |
-| Median / min / max | 100.0 / 65.4 / 100.0 |
-| Grade distribution | A:78 B:1 C:0 D:1 F:0 |
+| **Demo-debt (total defects)** | **0** |
+| Mean score | 98.5/100 |
+| Median / min / max | 100.0 / 89.0 / 100.0 |
+| Grade distribution | A:79 B:1 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -28,7 +28,6 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
-| 65.4 | D | 3 | 45 | 48 | 58 | 100 | 90 | `examples/compose-ollama` |
 | 89.0 | B | 0 | 86 | 100 | 90 | 88 | 78 | `cmd/qwen36codedemo` |
 | 91.0 | A | 0 | 86 | 100 | 100 | 88 | 78 | `examples/mobile-ffi` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/playground` |
@@ -38,7 +37,6 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/bench-latency` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/gpu-smoke` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/turntax` |
-| 95.3 | A | 0 | 100 | 86 | 100 | 100 | 90 | `examples/vm-fs-guard` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/autogen-groupchat` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/crewai-crew` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/fanbench` |
@@ -63,11 +61,13 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/session-reload` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/vdso-cache-hit` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/verified-memory-recall` |
+| 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/vm-fs-guard` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `cmd/marketdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/adjudication-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/agentdojo-redteam` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/auth-hardening` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/commit-audit-in-60s` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/compose-ollama` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/deny-in-60s` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/escalation-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/extdriver` |
@@ -111,16 +111,9 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 ## Demo-debt work-list
 
-### `examples/compose-ollama` — 3 defect(s), score 65.4 (D)
-- runnable: no runnable entry: no run script / `go run` / `python x.py` / make command, and no `__main__` script — there is no one-command way to run it
-- reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run — a reader cannot tell what a correct run looks like
-- honest_scope: no scope / 'what this does not claim' statement — a demo that only shows the win overclaims; state the boundary honestly
+No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ## Soft signals (score only, not debt)
-
-### `examples/compose-ollama`
-- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
-- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `cmd/qwen36codedemo`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
@@ -165,10 +158,6 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 ### `examples/turntax`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
-- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
-
-### `examples/vm-fs-guard`
-- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/autogen-groupchat`
@@ -247,6 +236,9 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/verified-memory-recall`
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `examples/vm-fs-guard`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `cmd/marketdemo`
