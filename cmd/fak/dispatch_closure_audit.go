@@ -54,6 +54,10 @@ func runDispatchClosureAudit(stdout, stderr io.Writer, argv []string) int {
 	issueLimit := fs.Int("issue-limit", 1000, "max issues to fetch from gh")
 	asJSON := fs.Bool("json", false, "emit the fleet-issue-closure-audit/1 JSON payload")
 	asMarkdown := fs.Bool("markdown", false, "render the operator closure card as Markdown")
+	resolveAcceptance := fs.Bool("resolve-acceptance", false,
+		"also resolve each still-open issue by ACCEPTANCE-SYMBOL presence on --ref, not by commit-subject grep (#5435)")
+	ref := fs.String("ref", closureaudit.DefaultRef, "git ref the acceptance-symbol probes resolve against")
+	acceptanceLimit := fs.Int("acceptance-limit", 25, "cap how many still-open issues are acceptance-resolved (each costs gh + git probes)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -71,6 +75,14 @@ func runDispatchClosureAudit(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	}
 	rep := collectDispatchClosureAudit(root, *maxCommits, *issueLimit)
+	// The subject-grep binding above is blind to a landing whose commit subject
+	// named a different issue or named none, and to an acceptance item that landed
+	// inside a peer's unrelated commit. Resolve the still-open issues by what their
+	// acceptance NAMES instead, so this view stops reporting shipped work as open
+	// and stops presenting a caller-less primitive as done (#5435).
+	if *resolveAcceptance {
+		resolveAcceptanceForReport(root, *ref, &rep, *acceptanceLimit)
+	}
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, rep); err != nil {
@@ -280,6 +292,7 @@ func renderClosureAudit(rep closureaudit.Report) string {
 		fmt.Fprintf(&b, "  WARN %s — %s\n", cov.Warning, strings.Join(cov.Notes, "; "))
 		fmt.Fprintf(&b, "    re-run for full coverage: %s\n", cov.Recommended.Command)
 	}
+	b.WriteString(closureAuditAcceptanceBlock(rep))
 	var actionable []closureaudit.Graded
 	for _, g := range rep.Issues {
 		if g.Bucket == closureaudit.ClaimedClosed || g.Bucket == closureaudit.OpenWitnessed {
@@ -319,6 +332,9 @@ func renderClosureAuditMarkdown(rep closureaudit.Report) string {
 	if cov := rep.Coverage; cov != nil && cov.Warning != "" {
 		fmt.Fprintf(&b, "\n> **%s** — coverage incomplete. %s\n", cov.Warning, strings.Join(cov.Notes, " "))
 		fmt.Fprintf(&b, ">\n> re-run for full coverage: `%s`\n", cov.Recommended.Command)
+	}
+	if block := closureAuditAcceptanceBlock(rep); block != "" {
+		b.WriteString("\n```\n" + block + "```\n")
 	}
 	return b.String()
 }

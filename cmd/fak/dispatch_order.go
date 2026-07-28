@@ -86,6 +86,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchAudit(stdout, stderr, argv[1:])
 	case "closure-audit":
 		return runDispatchClosureAudit(stdout, stderr, argv[1:])
+	case "acceptance-resolve":
+		return runDispatchAcceptanceResolve(stdout, stderr, argv[1:])
 	case "scorecard":
 		return runDispatchScorecard(stdout, stderr, argv[1:])
 	case "issue-smallness-lint", "smallness":
@@ -110,7 +112,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, timeout-ledger, rung-ledger, or reap)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, acceptance-resolve, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, timeout-ledger, rung-ledger, or reap)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -306,7 +308,8 @@ func dispatchUsage(w io.Writer) {
   fak dispatch sessions [--runs-dir DIR] [--reg-dir DIR] [--now UNIX] [--json | --markdown]
   fak dispatch evidence [--runs-dir DIR] [--materialize] [--now UNIX] [--json]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
-  fak dispatch closure-audit [--workspace DIR] [--max-commits N] [--issue-limit N] [--json | --markdown]
+  fak dispatch closure-audit [--workspace DIR] [--max-commits N] [--issue-limit N] [--resolve-acceptance] [--ref REF] [--acceptance-limit N] [--json | --markdown]
+  fak dispatch acceptance-resolve (--issue N | --body-file FILE | --symbol SYM) [--workspace DIR] [--ref REF] [--json]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
   fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json] [--scorecard]
   fak dispatch commit-links [--range REV..REV] [--json]
@@ -412,6 +415,18 @@ defaulted: an undeclared budget prints "(undeclared)", never a number. It is str
 read-only -- rotating an oversized ledger is an operator act -- and it renders a ledger past
 the actuator's read cap anyway, saying that the actuator is refusing it, since that is exactly
 when someone needs to see the contents. --item narrows the listing, not the arithmetic.
+acceptance-resolve answers "did this issue actually ship?" WITHOUT trusting the commit
+subject. It reads what the issue's acceptance section NAMES (backticked symbols, paths,
+refusal tokens), looks for each on a git ref (default origin/main), and folds the result
+into SHIPPED / PARTIAL / OPEN / UNKNOWN. A present internal/ symbol whose only referents
+are its own package, its own tests, and architest reports PARTIAL with the remaining work
+named as "wire it into <seam>" -- the code-complete-but-unwired shape that makes an
+acceptance sentence literally true while production behaviour is unchanged. Extraction is
+heuristic and declines rather than guesses: no acceptance section, or none of its
+backticked spans classifiable, yields UNKNOWN, never a confident SHIPPED. --symbol runs
+the caller-count half alone. closure-audit --resolve-acceptance folds the same resolver
+over the still-open issues in the backlog view.
+
 tier-status is the offline model-tier account readout: given issue rows (each with its
 tier/T<N>-required|optimal labels and an account pool), it folds them through the pure tier
 chooser and prints which seat each issue would route to, the over-tier waste and under-tier

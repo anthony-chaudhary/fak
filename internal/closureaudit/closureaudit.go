@@ -203,6 +203,12 @@ type Graded struct {
 	WitnessedCommits     []string `json:"witnessed_commits"`
 	DataWitnessedCommits []string `json:"data_witnessed_commits"`
 	Mentions             []string `json:"mentions"`
+	// Acceptance is the acceptance-SYMBOL closure verdict (#5435), attached by
+	// AttachResolutions when the caller resolved this issue's acceptance against
+	// the trunk. It is the binding the commit-subject grep above cannot make: the
+	// four stale-open issues that motivated it are all invisible to `git log
+	// --grep "#<N>"`. nil = not resolved (never "not shipped").
+	Acceptance *Resolution `json:"acceptance,omitempty"`
 }
 
 func commitIsWitnessed(a Audit) bool { return a.Verdict == verdictOK && a.Witness == witnessOK }
@@ -283,6 +289,10 @@ type Report struct {
 	// the I/O shell computes it via ComputeCoverage and attaches it, so a
 	// narrowed audit can never present as complete coverage. nil = not computed.
 	Coverage *Coverage `json:"coverage,omitempty"`
+	// AcceptanceCounts tallies the per-issue acceptance verdicts
+	// (SHIPPED/PARTIAL/OPEN/UNKNOWN) when acceptance resolution ran. nil = it did
+	// not run, which is distinct from "ran and found nothing".
+	AcceptanceCounts map[string]int `json:"acceptance_counts,omitempty"`
 }
 
 // Coverage verdict + warning tokens. A truncated window makes closure_rate a
