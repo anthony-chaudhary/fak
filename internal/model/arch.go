@@ -241,6 +241,20 @@ func applyQKNorm(hv, w []float32, nHeads, hd int, eps float32) {
 }
 
 func applyQKNormCfg(hv, w []float32, nHeads, hd int, eps float32, cfg Config) {
+	if cfg.QKNormPerHeadWeight && hd > 0 && len(w) == nHeads*hd && len(hv) == nHeads*hd {
+		// Cohere: CohereLayerNorm(hidden_size=(num_heads, head_dim)). The TUPLE hidden
+		// size means one reduction PER HEAD over head_dim, scaled by THAT head's own row
+		// of the (num_heads, head_dim) parameter — and, because every Cohere norm is a
+		// CohereLayerNorm, the reduction is mean-subtracting. This weight has exactly the
+		// same LENGTH as OLMo2's flat projection-width q_norm handled just below, so no
+		// length check can tell the two apart; the derived family axis is what
+		// discriminates. Guarding on len(hv) too keeps a tensor-parallel BAND (which
+		// passes a band head count with the full-model weight) out of this branch.
+		for h := 0; h < nHeads; h++ {
+			applyNormInPlaceCfg(hv[h*hd:(h+1)*hd], w[h*hd:(h+1)*hd], eps, cfg)
+		}
+		return
+	}
 	if len(w) == len(hv) {
 		applyRMSNormInPlaceCfg(hv, w, eps, cfg)
 		return
@@ -251,6 +265,34 @@ func applyQKNormCfg(hv, w []float32, nHeads, hd int, eps float32, cfg Config) {
 	for h := 0; h < nHeads; h++ {
 		head := hv[h*hd : (h+1)*hd]
 		applyRMSNormInPlaceCfg(head, w, eps, cfg)
+	}
+}
+
+// applyNormInPlaceCfg normalizes x in place with the model's norm KIND: bias-free
+// mean-subtracting LayerNorm when cfg.LayerNorm, else RMSNorm. It is the in-place
+// counterpart of normCfg, which allocates for the block norms.
+func applyNormInPlaceCfg(x, w []float32, eps float32, cfg Config) {
+	if !cfg.LayerNorm {
+		applyRMSNormInPlaceCfg(x, w, eps, cfg)
+		return
+	}
+	var mean float32
+	for _, v := range x {
+		mean += v
+	}
+	mean /= float32(len(x))
+	var ss float32
+	for _, v := range x {
+		d := v - mean
+		ss += d * d
+	}
+	inv := float32(1.0 / math.Sqrt(float64(ss/float32(len(x))+eps)))
+	for i, v := range x {
+		gain := w[i]
+		if cfg.NormGain1p {
+			gain = 1 + gain
+		}
+		x[i] = (v - mean) * inv * gain
 	}
 }
 
