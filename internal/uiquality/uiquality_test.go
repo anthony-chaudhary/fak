@@ -198,6 +198,15 @@ func TestHelpCompletenessReadsUsageFromAnyFile(t *testing.T) {
 	}
 }
 
+// TestHelpCompletenessReadsTUIPaneRegistry pins the fallback path: when runTUI
+// dispatches through tuiplugin.Lookup instead of a switch, the pane registry is the
+// only oracle for the subcommand set.
+//
+// The registry fixture must live in a file the card actually loads. An earlier version
+// of this test wrote it to cmd/fak/tui_registry.go, which is NOT in renderFiles, so
+// loadSources never read it, `subs` stayed empty and the test passed without ever
+// exercising the extractor — it was vacuous. It now writes into a corpus file and
+// asserts the SIZE of the checked set, which is the assertion that makes it bite.
 func TestHelpCompletenessReadsTUIPaneRegistry(t *testing.T) {
 	f := cleanFixtures()
 	f["cmd/fak/tui.go"] = `package main
@@ -208,7 +217,7 @@ func runTUI() {
 }
 func runTUIIssues() {}
 `
-	f["cmd/fak/tui_registry.go"] = `package main
+	f["cmd/fak/tui_guard_report.go"] += `
 func registerBuiltinTUIPanes() {
 	tuiplugin.Register(tuiplugin.Pane{ID: "loops"})
 	tuiplugin.Register(tuiplugin.Pane{ID: "guard"})
@@ -225,6 +234,81 @@ func registerBuiltinTUIPanes() {
 	help := kpiByKey(p, "help_completeness")
 	if len(help.Defects) != 0 {
 		t.Fatalf("registry help_completeness false-flagged documented panes: %v", help.Defects)
+	}
+	// Non-vacuity: the clean detail names the size of the checked set, so this fails
+	// if the registry went unread and `subs` came back empty.
+	if !strings.Contains(help.Detail, "all 3 console subcommands") {
+		t.Fatalf("pane registry not read: want a 3-pane checked set, detail = %q", help.Detail)
+	}
+}
+
+// TestHelpCompletenessBindsPaneIDNotControlID pins the extractor defect this KPI
+// shipped with: a Pane literal nests a `Controls: []tuiplugin.Control{{ID: ...}}`
+// slice carrying ID fields of its own, and the flat regex (greedy `[^}]*`, which
+// cannot cross a `}`) backtracked onto the FIRST control's id instead of the pane's.
+// On the live tree that reported `as-of`, `at` and `check` as undocumented
+// `fak console` subcommands. None of the three is dispatchable — runTUI looks argv[0]
+// up with tuiplugin.Lookup, whose registry is keyed on Pane.ID — so the debt was
+// false and "fixing" it by writing those flags into tuiUsage would have been false help.
+//
+// The fixture asserts BOTH directions, so no repair can pass by merely making findings
+// disappear:
+//   - pane "issues" is documented while its control "as-of" is not, so a control id
+//     leaking into the checked set shows up as a defect; and
+//   - pane "sessions" is undocumented while its control "top" IS documented, so an
+//     extractor that binds the control would report zero defects and miss a real gap.
+func TestHelpCompletenessBindsPaneIDNotControlID(t *testing.T) {
+	f := cleanFixtures()
+	f["cmd/fak/tui.go"] = `package main
+func runTUI() {
+	pane, ok := tuiplugin.Lookup(argv[0])
+	if !ok { tuiUsage(stderr) }
+	_ = pane
+}
+func runTUIIssues() {}
+`
+	f["cmd/fak/tui_issues_garden.go"] += `
+func init() {
+	tuiplugin.Register(tuiplugin.Pane{
+		ID:      "issues",
+		Summary: "fold GitHub issues into triage lanes",
+		Controls: []tuiplugin.Control{
+			{ID: "as-of", Label: "As Of", Kind: "input", Flag: "--as-of"},
+			{ID: "epic", Label: "Epic", Kind: "input", Flag: "--epic"},
+		},
+		Run: runTUIIssues,
+	})
+	tuiplugin.Register(tuiplugin.Pane{
+		ID:      "sessions",
+		Summary: "render live gateway session state",
+		Controls: []tuiplugin.Control{
+			{ID: "top", Label: "Top Rows", Kind: "input", Flag: "--top"},
+		},
+		Run: runTUISessions,
+	})
+}
+`
+	// Document the "issues" PANE and the "top" CONTROL; leave the "sessions" pane out.
+	f["cmd/fak/tui_loop_render.go"] = strings.Replace(
+		f["cmd/fak/tui_loop_render.go"],
+		"  fak console guard --guard-json FILE\n",
+		"  fak console guard --guard-json FILE\n  fak console issues [--json]\n  fak console top [--json]\n",
+		1)
+	root := writeTree(t, f)
+	p := Build(Options{Root: root})
+	help := kpiByKey(p, "help_completeness")
+	joined := strings.Join(help.Defects, " ")
+	for _, control := range []string{"as-of", "epic", "top"} {
+		if strings.Contains(joined, `"`+control+`"`) {
+			t.Fatalf("control id %q entered the console subcommand set; defects: %v",
+				control, help.Defects)
+		}
+	}
+	if !strings.Contains(joined, `"sessions"`) {
+		t.Fatalf("undocumented pane \"sessions\" not flagged; defects: %v", help.Defects)
+	}
+	if len(help.Defects) != 1 {
+		t.Fatalf("want exactly the one real gap (sessions), got: %v", help.Defects)
 	}
 }
 

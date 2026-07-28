@@ -45,10 +45,14 @@ package uiquality
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -527,9 +531,125 @@ func kpiLegendCoverage(src []source) KPI {
 // ---------------------------------------------------------------------------
 
 var (
-	reConsoleCase    = regexp.MustCompile(`case\s+"([a-z]+)":`)
+	reConsoleCase = regexp.MustCompile(`case\s+"([a-z]+)":`)
+	// reConsolePaneReg is the LAST-RESORT extractor, used only when a render source
+	// does not parse as Go. It is known-lossy: `[^}]*` is greedy and cannot cross a
+	// `}`, so on a Pane literal carrying a nested `Controls: []tuiplugin.Control{...}`
+	// slice it backtracks to the LAST `ID:` before the first closing brace — the first
+	// control's id, not the pane's. paneIDs below is the real extractor; this stays so
+	// an unparseable file still contributes whatever it contributed before rather than
+	// silently dropping panes out of the checked set.
 	reConsolePaneReg = regexp.MustCompile(`tuiplugin\.Pane\s*\{[^}]*ID:\s*"([a-z][a-z0-9-]*)"`)
 )
+
+// paneIDs returns the console pane ids one render source registers, binding each
+// `tuiplugin.Pane{...}` composite literal to its OWN `ID:` field.
+//
+// Parsing, not matching, is the point. A Pane literal nests a
+// `Controls: []tuiplugin.Control{{ID: "as-of", ...}, ...}` slice whose elements each
+// carry an `ID` field of their own, so a flat regex scanning forward from
+// `tuiplugin.Pane{` for `ID:` can land inside a Control instead. That is not
+// hypothetical: it made this KPI report `as-of`, `at` and `check` as undocumented
+// `fak console` subcommands, when they are flag ids. runTUI dispatches solely through
+// tuiplugin.Lookup, whose registry is keyed on Pane.ID, so no control id is reachable
+// as a subcommand and documenting one would be false help.
+//
+// The cheap repair — anchoring the regex to the literal's first field, `Pane\{\s*ID:`
+// — is a trap and is deliberately not used: it stops matching any pane whose literal
+// does not open with ID, which shrinks the checked set and could hide a genuinely
+// undocumented subcommand. This walk is field-order independent and also descends
+// `[]tuiplugin.Pane{...}` / `map[K]tuiplugin.Pane{...}` element literals, so the
+// checked set is a superset of the regex's on every parseable source.
+func paneIDs(rel, body string) []string {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, rel, body, 0)
+	if err != nil {
+		out := []string{}
+		for _, m := range reConsolePaneReg.FindAllStringSubmatch(body, -1) {
+			out = append(out, m[1])
+		}
+		return out
+	}
+	out := []string{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		switch {
+		case isTUIPaneType(lit.Type):
+			if id := litFieldString(lit, "ID"); id != "" {
+				out = append(out, id)
+			}
+		case isTUIPaneContainer(lit.Type):
+			// []tuiplugin.Pane{{ID: ...}} and map[K]tuiplugin.Pane{k: {ID: ...}}
+			// elide the element type, so the elements are untyped literals the
+			// isTUIPaneType arm above cannot recognize on their own.
+			for _, el := range lit.Elts {
+				if kv, ok := el.(*ast.KeyValueExpr); ok {
+					el = kv.Value
+				}
+				inner, ok := el.(*ast.CompositeLit)
+				if !ok || inner.Type != nil {
+					continue
+				}
+				if id := litFieldString(inner, "ID"); id != "" {
+					out = append(out, id)
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// isTUIPaneType reports whether an expression is the type `tuiplugin.Pane`.
+func isTUIPaneType(e ast.Expr) bool {
+	sel, ok := e.(*ast.SelectorExpr)
+	if !ok || sel.Sel == nil || sel.Sel.Name != "Pane" {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "tuiplugin"
+}
+
+// isTUIPaneContainer reports whether an expression is a slice/array/map type whose
+// element (or map value) is `tuiplugin.Pane`.
+func isTUIPaneContainer(e ast.Expr) bool {
+	switch t := e.(type) {
+	case *ast.ArrayType:
+		return isTUIPaneType(t.Elt)
+	case *ast.MapType:
+		return isTUIPaneType(t.Value)
+	}
+	return false
+}
+
+// litFieldString returns the unquoted value of a named string-literal field in a
+// composite literal, or "" when the field is absent, is not a plain string literal,
+// or does not unquote.
+func litFieldString(lit *ast.CompositeLit, field string) string {
+	for _, el := range lit.Elts {
+		kv, ok := el.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := kv.Key.(*ast.Ident)
+		if !ok || key.Name != field {
+			continue
+		}
+		bl, ok := kv.Value.(*ast.BasicLit)
+		if !ok || bl.Kind != token.STRING {
+			continue
+		}
+		s, err := strconv.Unquote(bl.Value)
+		if err != nil {
+			continue
+		}
+		return s
+	}
+	return ""
+}
 
 func kpiHelpCompleteness(src []source) KPI {
 	k := newKPI("help_completeness")
@@ -568,8 +688,8 @@ func kpiHelpCompleteness(src []source) KPI {
 			if !strings.Contains(s.Body, "tuiplugin.Pane") && !strings.Contains(s.Body, "tuiplugin.Register") {
 				continue
 			}
-			for _, m := range reConsolePaneReg.FindAllStringSubmatch(s.Body, -1) {
-				subs[m[1]] = true
+			for _, id := range paneIDs(s.Rel, s.Body) {
+				subs[id] = true
 			}
 		}
 	}
