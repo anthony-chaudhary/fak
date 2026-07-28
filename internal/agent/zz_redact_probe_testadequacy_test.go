@@ -5,6 +5,7 @@ package agent
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -46,19 +47,52 @@ func TestProbeTTLUnconverted(t *testing.T) {
 
 // P3: redact_unconverted on the PLACEMENT path — system array of volatile STRING elements:
 // redaction stabilizes the head but the splice needs an object, so the retry refuses.
+// The contract under test is the wrapper's FAIL-CLOSED rule: when the retried transform
+// still refuses, the caller must get the ORIGINAL bytes back — never a half-applied body
+// carrying the redaction placeholder with no breakpoint spliced onto it.
 func TestProbePlacementUnconverted(t *testing.T) {
 	t.Setenv(CacheBPRedactEnvVar, "1")
 	raw := []byte(`{"model":"m","max_tokens":10,` +
 		`"system":["req ` + probeUUID + `"],` +
 		`"messages":[{"role":"user","content":"hi"}]}`)
-	out, oc := placeAnthropicCacheBreakpointOnce(raw)
+
+	once, oc := placeAnthropicCacheBreakpointOnce(raw)
 	t.Logf("once: reason=%q", oc.Reason)
-	out, oc = PlaceAnthropicCacheBreakpointWithOutcome(raw)
+	if oc.Reason != BreakpointReasonVolatileHead {
+		t.Errorf("once reason = %q, want %q (the only head span carries a per-request uuid)",
+			oc.Reason, BreakpointReasonVolatileHead)
+	}
+	if !bytes.Equal(once, raw) {
+		t.Errorf("once refused but mutated the body:\n got %s\nwant %s", once, raw)
+	}
+
+	out, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
 	t.Logf("wrapped: reason=%q redactReason=%q identity=%v", oc.Reason, oc.RedactReason, bytes.Equal(out, raw))
+	if oc.Reason != BreakpointReasonVolatileHead {
+		t.Errorf("wrapped reason = %q, want the ORIGINAL refusal %q carried through the retry",
+			oc.Reason, BreakpointReasonVolatileHead)
+	}
+	if oc.RedactReason != RedactReasonUnconverted {
+		t.Errorf("redactReason = %q, want %q (redaction held; the retried splice still refused)",
+			oc.RedactReason, RedactReasonUnconverted)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Errorf("unconverted retry must return the ORIGINAL bytes:\n got %s\nwant %s", out, raw)
+	}
+	// Fail-closed means the placeholder never reaches the caller and the caller's own uuid
+	// survives untouched — the two halves of "the redaction was rolled back".
+	if bytes.Contains(out, []byte(redactedUUIDPlaceholder)) {
+		t.Errorf("redaction placeholder leaked into an unconverted body:\n%s", out)
+	}
+	if !bytes.Contains(out, []byte(probeUUID)) {
+		t.Errorf("caller's uuid was dropped from an unconverted body:\n%s", out)
+	}
 }
 
-// P4: duplicate top-level "system" keys, LAST volatile — engine redacts the last-wins span
-// only; what does the converted body still carry?
+// P4: duplicate top-level "system" keys, LAST volatile. JSON last-wins: the decoder — and
+// therefore the upstream API — reads only the SECOND "system". The invariant this pins is
+// that redaction and the breakpoint both land on that EFFECTIVE span: what actually gets
+// sent must be stable, or the cache prefix churns every request.
 func TestProbeDuplicateSystemKeys(t *testing.T) {
 	t.Setenv(CacheBPRedactEnvVar, "1")
 	raw := []byte(`{"model":"m","max_tokens":10,` +
@@ -67,7 +101,36 @@ func TestProbeDuplicateSystemKeys(t *testing.T) {
 		`"messages":[{"role":"user","content":"hi"}]}`)
 	out, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
 	t.Logf("reason=%q redacted=%v uuid=%d\nout=%s", oc.Reason, oc.Redacted, oc.RedactedUUID, out)
-	t.Logf("raw uuid still present in converted body: %v", bytes.Contains(out, []byte(probeUUID)))
+
+	if oc.Reason != BreakpointReasonNone {
+		t.Errorf("reason = %q, want %q (the redacted last-wins span is spliceable)",
+			oc.Reason, BreakpointReasonNone)
+	}
+	if !oc.Redacted || oc.RedactedUUID != 1 {
+		t.Errorf("redacted=%v uuid=%d, want true/1 — exactly the last-wins span normalized",
+			oc.Redacted, oc.RedactedUUID)
+	}
+	// The decoder's view is the one that ships: it must be stable (placeholder), not volatile.
+	dec, err := DecodeAnthropicMessagesRequest(out)
+	if err != nil {
+		t.Fatalf("redecode: %v\n%s", err, out)
+	}
+	if !strings.Contains(dec.System, redactedUUIDPlaceholder) {
+		t.Errorf("decoded system is not stabilized, want the placeholder: %q", dec.System)
+	}
+	if strings.Contains(dec.System, probeUUID) {
+		t.Errorf("per-request uuid survived into the DECODED system span: %q", dec.System)
+	}
+	// ...and the breakpoint must sit on that same effective span, not on the shadowed one.
+	second := bytes.Index(out, []byte("second dup"))
+	bp := bytes.Index(out, []byte(`"cache_control"`))
+	if second < 0 || bp < second {
+		t.Errorf("breakpoint at %d is not on the last-wins span (starts %d):\n%s", bp, second, out)
+	}
+	// Known residue, deliberately NOT asserted as desirable: the SHADOWED first "system"
+	// keeps its raw uuid in the wire bytes. Harmless for cache stability (the decoder never
+	// reads it) but recorded here so a future change to duplicate-key handling is visible.
+	t.Logf("raw uuid still present in the shadowed duplicate: %v", bytes.Contains(out, []byte(probeUUID)))
 }
 
 // P5: seconds-only (no zone) timestamp + MULTIPLE volatile tokens in one block — residue and counts.
