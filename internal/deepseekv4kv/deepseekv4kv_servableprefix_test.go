@@ -37,11 +37,11 @@ func TestServablePrefixTightestBinds(t *testing.T) {
 		kinds []Kind
 		want  int
 	}{
-		{512, []Kind{KindSWA}, SWAWindow},              // lone window binds
-		{512, []Kind{KindTail, KindSWA}, SWAWindow},    // window binds against a full group
-		{64, []Kind{KindSWA, KindTail}, 64},            // below the window, seq binds
-		{SWAWindow, []Kind{KindSWA}, SWAWindow},        // exactly at the window
-		{SWAWindow + 1, []Kind{KindSWA}, SWAWindow},    // one past the window saturates
+		{512, []Kind{KindSWA}, SWAWindow},                  // lone window binds
+		{512, []Kind{KindTail, KindSWA}, SWAWindow},        // window binds against a full group
+		{64, []Kind{KindSWA, KindTail}, 64},                // below the window, seq binds
+		{SWAWindow, []Kind{KindSWA}, SWAWindow},            // exactly at the window
+		{SWAWindow + 1, []Kind{KindSWA}, SWAWindow},        // one past the window saturates
 		{Ctx1M, []Kind{KindCSA, KindHCA, KindTail}, Ctx1M}, // no window, no clamp
 	}
 	for _, c := range cases {

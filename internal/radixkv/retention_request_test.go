@@ -16,8 +16,8 @@ func TestRetentionRequestReclaim(t *testing.T) {
 	// clock is injected, so the boundary (now > Admitted+TTL) is exact and replayable.
 	t.Run("expired_by_ttl_is_reclaim_eligible", func(t *testing.T) {
 		entries := []RetentionEntry{
-			{ID: "past", RetentionRequest: RetentionRequest{Priority: 50, TTL: 10, Admitted: 0}},  // ends at 10
-			{ID: "edge", RetentionRequest: RetentionRequest{Priority: 50, TTL: 10, Admitted: 5}},  // ends at 15
+			{ID: "past", RetentionRequest: RetentionRequest{Priority: 50, TTL: 10, Admitted: 0}},   // ends at 10
+			{ID: "edge", RetentionRequest: RetentionRequest{Priority: 50, TTL: 10, Admitted: 5}},   // ends at 15
 			{ID: "fresh", RetentionRequest: RetentionRequest{Priority: 50, TTL: 10, Admitted: 20}}, // ends at 30
 		}
 		v := ReclaimOrder(entries, 15) // now=15: "past" ended at 10 (expired), "edge" ends at 15 (still live), "fresh" future

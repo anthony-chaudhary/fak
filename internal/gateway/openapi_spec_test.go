@@ -62,7 +62,7 @@ var specPathFor = map[string]string{
 	"/v1/fak/account/rehome":        "/v1/fak/account/rehome",
 	"/v1/models":                    "/v1/models",
 	// Multi-node dev-server read plane (#2297).
-	"/v1/leases":         "/v1/leases",
+	"/v1/leases": "/v1/leases",
 	// Multi-node dev-server write plane (#2299): POST /v1/leases/{acquire,renew,release}.
 	"/v1/leases/":        "/v1/leases/{op}",
 	"/v1/sessions":       "/v1/sessions",

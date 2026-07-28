@@ -58,10 +58,10 @@ func TestChargeTracksGenerationNotCap(t *testing.T) {
 		genNewTokens int
 		wantCharge   int // ceilDiv(128+gen,128)
 	}{
-		{genNewTokens: 0, wantCharge: 1},       // ceilDiv(128,128)=1
-		{genNewTokens: 512, wantCharge: 5},     // ceilDiv(640,128)=5   (below cap)
-		{genNewTokens: 896, wantCharge: 8},     // ceilDiv(1024,128)=8  (near cap)
-		{genNewTokens: 5000, wantCharge: 41},   // ceilDiv(5128,128)=41 (above cap)
+		{genNewTokens: 0, wantCharge: 1},        // ceilDiv(128,128)=1
+		{genNewTokens: 512, wantCharge: 5},      // ceilDiv(640,128)=5   (below cap)
+		{genNewTokens: 896, wantCharge: 8},      // ceilDiv(1024,128)=8  (near cap)
+		{genNewTokens: 5000, wantCharge: 41},    // ceilDiv(5128,128)=41 (above cap)
 		{genNewTokens: 120000, wantCharge: 939}, // full run == uncapped worst case
 	}
 	for _, c := range cases {

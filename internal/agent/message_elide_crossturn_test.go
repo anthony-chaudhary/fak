@@ -29,16 +29,16 @@ func TestElideMessagesFoldsSubThresholdRepeatedResults(t *testing.T) {
 		t.Fatalf("fixture must sit UNDER the head+tail threshold to prove the gap: len=%d", len(body))
 	}
 	in := []Message{
-		{Role: "system", Content: "You are a coding agent."},  // 0
-		{Role: "tool", ToolCallID: "t1", Content: body},       // 1 earliest → stays verbatim
-		{Role: "assistant", Content: "re-running the scan"},   // 2
-		{Role: "tool", ToolCallID: "t3", Content: body},       // 3 repeat → folds
-		{Role: "assistant", Content: "once more"},             // 4
-		{Role: "tool", ToolCallID: "t5", Content: body},       // 5 repeat → folds
-		{Role: "assistant", Content: "checking the recent"},   // 6
-		{Role: "tool", ToolCallID: "t7", Content: body},       // 7 repeat but RECENT → protected
-		{Role: "assistant", Content: "done"},                  // 8
-		{Role: "user", Content: "summarize"},                  // 9
+		{Role: "system", Content: "You are a coding agent."}, // 0
+		{Role: "tool", ToolCallID: "t1", Content: body},      // 1 earliest → stays verbatim
+		{Role: "assistant", Content: "re-running the scan"},  // 2
+		{Role: "tool", ToolCallID: "t3", Content: body},      // 3 repeat → folds
+		{Role: "assistant", Content: "once more"},            // 4
+		{Role: "tool", ToolCallID: "t5", Content: body},      // 5 repeat → folds
+		{Role: "assistant", Content: "checking the recent"},  // 6
+		{Role: "tool", ToolCallID: "t7", Content: body},      // 7 repeat but RECENT → protected
+		{Role: "assistant", Content: "done"},                 // 8
+		{Role: "user", Content: "summarize"},                 // 9
 	}
 	orig3 := in[3].Content
 

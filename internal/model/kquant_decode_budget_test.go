@@ -73,10 +73,10 @@ func TestKQuantDecodeBudgetDerivesFromHostShapeAndStaysOverrideable(t *testing.T
 		want       int
 		wantCapped bool
 	}{
-		{12, "linux", "amd64", 12, false},  // small amd64 — untouched
-		{63, "linux", "amd64", 63, false},  // just below the many-core threshold
-		{256, "linux", "amd64", 64, true},  // the DA33 shape → the witnessed 64-worker knee
-		{512, "linux", "amd64", 64, true},  // wider host, same ceiling
+		{12, "linux", "amd64", 12, false},   // small amd64 — untouched
+		{63, "linux", "amd64", 63, false},   // just below the many-core threshold
+		{256, "linux", "amd64", 64, true},   // the DA33 shape → the witnessed 64-worker knee
+		{512, "linux", "amd64", 64, true},   // wider host, same ceiling
 		{16, "darwin", "arm64", 6, true},    // a different topology picks a different regime
 		{256, "linux", "arm64", 256, false}, // non-amd64 many-core is NOT assumed to share the knee
 	}

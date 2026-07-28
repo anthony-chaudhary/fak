@@ -149,8 +149,8 @@ func TestMooncakeResetTargets(t *testing.T) {
 
 	dirs := []ExternalInvalidationDirective{
 		{
-			Kind:  ExternalInvalidateKVSpan,
-			Entry: EntryID{Digest: "span-xyz", MediaType: MediaKVSpan, Length: 128, Unit: UnitPositions},
+			Kind:   ExternalInvalidateKVSpan,
+			Entry:  EntryID{Digest: "span-xyz", MediaType: MediaKVSpan, Length: 128, Unit: UnitPositions},
 			Reason: "poisoned_kv",
 		},
 		{

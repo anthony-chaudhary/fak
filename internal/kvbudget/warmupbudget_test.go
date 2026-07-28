@@ -60,7 +60,7 @@ func TestDeriveBudgetMonotoneInMeasurement(t *testing.T) {
 // strictly decreasing budget.
 func TestDeriveBudgetReserveShrinksBudget(t *testing.T) {
 	c := WarmupCapacity{UsableBytes: 1000, BytesPerToken: 10}
-	none := c.DeriveTokenBudget(0)      // floor(1000/10)      = 100
+	none := c.DeriveTokenBudget(0)       // floor(1000/10)      = 100
 	quarter := c.DeriveTokenBudget(0.25) // floor(750/10)       = 75
 	threeq := c.DeriveTokenBudget(0.75)  // floor(250/10)       = 25
 	if none.TokenBudget != 100 || quarter.TokenBudget != 75 || threeq.TokenBudget != 25 {

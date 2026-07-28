@@ -23,8 +23,8 @@ import (
 // per-element relative error is far under approxDefaultRelTol — passes regardless of output
 // magnitude, while a handful of blown elements collapses the close-fraction and spikes the tail.
 const (
-	approxDefaultAbsTol    = 1e-3 // absolute slack: |a-b| below this is close regardless of scale
-	approxDefaultRelTol    = 1e-2 // per-element relative slack: |a-b| <= relTol*max(|a|,|b|) is close
+	approxDefaultAbsTol    = 1e-3  // absolute slack: |a-b| below this is close regardless of scale
+	approxDefaultRelTol    = 1e-2  // per-element relative slack: |a-b| <= relTol*max(|a|,|b|) is close
 	approxMinCloseFraction = 0.999 // >= this fraction of elements must be close (zml's floor)
 	approxMaxRelP999       = 0.05  // the 99.9th-pct RELATIVE error must be <= this (scale-free tail bound)
 

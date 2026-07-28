@@ -22,7 +22,7 @@ func TestWeightedBillHotCheapOutranks(t *testing.T) {
 	}
 	freq := map[string]float64{
 		"expensive_cold": 0.5, // 1000 x 0.5 = 500
-		"cheap_hot":      9,    // 100  x 9   = 900
+		"cheap_hot":      9,   // 100  x 9   = 900
 	}
 	got := WeightedBill(items, freq)
 	if got[0].Name != "cheap_hot" {
