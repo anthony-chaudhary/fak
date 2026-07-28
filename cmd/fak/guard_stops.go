@@ -203,6 +203,19 @@ type guardStopTranscript struct {
 	// Observe-only and fail-open: a scannable close leaves both fields zero.
 	ClosingProseWall bool   `json:"closing_prose_wall,omitempty"`
 	ClosingResolve   string `json:"closing_resolve,omitempty"`
+
+	// Leftovers* records the end-of-run doctrine reading (#4385 / #5425): the final turn
+	// narrated deferred work, cross-checked against how many issues the run ACTUALLY
+	// filed — counted from issue-creating tool_use inputs in this transcript, never from
+	// the agent's own claim. LeftoversFilingUnknown marks the third answer: the count
+	// could not be established (only a bounded tail was read and it held no filing), which
+	// is not a zero. Observe-only and fail-open, with no disposition of its own: the signal
+	// soaks first, and only a later ticket may let it touch a stop decision.
+	LeftoversNarrated      int    `json:"leftovers_narrated,omitempty"`
+	LeftoversUnfiled       bool   `json:"leftovers_unfiled,omitempty"`
+	LeftoversIssuesFiled   int    `json:"leftovers_issues_filed,omitempty"`
+	LeftoversFilingUnknown bool   `json:"leftovers_filing_unknown,omitempty"`
+	LeftoversFilingSource  string `json:"leftovers_filing_source,omitempty"`
 }
 
 // ---- transcript reading -----------------------------------------------------
@@ -268,6 +281,7 @@ func readGuardStopTranscript(path string) *guardStopTranscript {
 	if lastText != "" && !sig.LastHadToolUse {
 		applyHeadlessLintSignal(sig, lastText)
 		applyClosingSignal(sig, lastText)
+		applyLeftoversSignal(sig, lastText, recs)
 	}
 	return sig
 }
@@ -305,6 +319,33 @@ func applyClosingSignal(sig *guardStopTranscript, finalTurn string) {
 	}
 	sig.ClosingProseWall = true
 	sig.ClosingResolve = rep.Resolve
+}
+
+// applyLeftoversSignal records the end-of-run leftovers reading: did the final turn
+// narrate deferred work, and did this run actually file it? It is the third sensor
+// beside applyHeadlessLintSignal and applyClosingSignal, over the same final turn — but
+// it is the only one that needs the whole run rather than the last turn, because the
+// cross-check is a COUNT of issue-creating tool calls.
+//
+// That count comes from the records the reader already parsed (guard_leftovers.go walks
+// their tool_use INPUTS), never from a number the agent asserts: `fak headless-lint
+// --leftovers --issues-filed N` let the audited run supply its own cross-check, and a
+// claim about one's own behaviour is exactly what this substrate refuses (#5425). The
+// records are a bounded tail, so a zero count over a truncated read is reported as
+// UNKNOWN, not as "filed nothing".
+//
+// Observe-only and fail-open: a clean or undecided reading changes nothing, and no stop
+// disposition is derived from any of it — the signal soaks first.
+func applyLeftoversSignal(sig *guardStopTranscript, finalTurn string, recs []transcript.Record) {
+	signal := foldGuardLeftovers(guardIssuesFiledEvidenceFromRecords(recs, sig.Truncated), finalTurn)
+	if signal.Narrated == 0 {
+		return
+	}
+	sig.LeftoversNarrated = signal.Narrated
+	sig.LeftoversUnfiled = signal.LeftoversUnfiled
+	sig.LeftoversIssuesFiled = signal.IssuesFiled
+	sig.LeftoversFilingUnknown = signal.FilingUnknown
+	sig.LeftoversFilingSource = signal.FilingSource
 }
 
 // transcriptNotesNoAllowedPath reports whether assistant text carries the sanctioned
@@ -429,7 +470,13 @@ type guardStopsSummary struct {
 	// OperatorDirected counts recorded stops whose final turn asked a human instead
 	// of acting (headless-directed) — the stops the choicetriage doctrine says an
 	// autonomous process should have resolved itself, not paged a person for.
-	OperatorDirected int               `json:"operator_directed,omitempty"`
+	OperatorDirected int `json:"operator_directed,omitempty"`
+	// LeftoversUnfiled counts recorded stops whose final turn narrated deferred work the
+	// run's own transcript shows it never filed. LeftoversUnknown counts the stops where
+	// the filing count could not be established at all — kept separate on purpose, so the
+	// soak can never quietly read "we could not tell" as "the run filed nothing" (#5425).
+	LeftoversUnfiled int               `json:"leftovers_unfiled,omitempty"`
+	LeftoversUnknown int               `json:"leftovers_filing_unknown,omitempty"`
 	FirstTs          string            `json:"first_ts,omitempty"`
 	LastTs           string            `json:"last_ts,omitempty"`
 	Recent           []guardStopRecord `json:"recent,omitempty"`
@@ -462,8 +509,16 @@ func summarizeGuardStops(content string, recentN int) guardStopsSummary {
 		kind := recordKind(r)
 		sum.ByKind[kind]++
 		sum.ByDisp[guardStopDisposition(r.Disposition)]++
-		if r.Transcript != nil && r.Transcript.OperatorDirected {
-			sum.OperatorDirected++
+		if r.Transcript != nil {
+			if r.Transcript.OperatorDirected {
+				sum.OperatorDirected++
+			}
+			if r.Transcript.LeftoversUnfiled {
+				sum.LeftoversUnfiled++
+			}
+			if r.Transcript.LeftoversFilingUnknown {
+				sum.LeftoversUnknown++
+			}
 		}
 		switch kind {
 		case stopKindStandDown:
@@ -534,6 +589,14 @@ func renderGuardStopsSummary(sum guardStopsSummary) string {
 			fmt.Fprintf(&b, "    of these: %d enforced (%d auto-continued, %d escalated), %d observed only (warn/shadow soak).\n",
 				enforced, sum.ByDisp[stopDispOperatorDirectedContinue], sum.ByDisp[stopDispOperatorDirectedEscalate], observed)
 		}
+	}
+
+	if sum.LeftoversUnfiled > 0 {
+		fmt.Fprintf(&b, "  → %d stop(s) narrated leftovers the run's transcript shows it never filed.\n", sum.LeftoversUnfiled)
+		b.WriteString("    The count is read from issue-creating tool calls in the transcript, not from the run's own claim, so \"I filed them\" cannot satisfy it. Observe-only: no stop was changed.\n")
+	}
+	if sum.LeftoversUnknown > 0 {
+		fmt.Fprintf(&b, "  → %d stop(s) narrated leftovers with an UNKNOWN filing count (no usable transcript evidence) — not counted as unfiled.\n", sum.LeftoversUnknown)
 	}
 
 	// per-disposition breakdown, most frequent first

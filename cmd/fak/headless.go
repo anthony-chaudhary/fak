@@ -14,8 +14,10 @@ package main
 //	… | fak headless-lint [--json]             -> scan stdin
 //
 // Exit codes suit `fak headless-lint … && ship`: 0 = clean (headless-safe), 1 =
-// operator-directed notes found (or a failed self-test), 2 = usage. The pure
-// scanner is internal/headlesslint; its self-test corpus is asserted by
+// operator-directed notes found (or a failed self-test), 2 = usage, 3 = --leftovers
+// could not establish the run's issues-filed count from evidence (unknown, which is
+// deliberately neither a pass nor a refusal). The pure scanner is
+// internal/headlesslint; its self-test corpus is asserted by
 // internal/headlesslint/headlesslint_test.go.
 
 import (
@@ -36,13 +38,14 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 	fs := flag.NewFlagSet("headless-lint", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		selfTest    = fs.Bool("self-test", false, "scan the built-in corpus and exit 0 iff every case scans as labeled")
-		asJSON      = fs.Bool("json", false, "emit the Report as JSON")
-		file        = fs.String("file", "", `read the text to scan from this path ("-" = stdin)`)
-		leftovers   = fs.Bool("leftovers", false, "run the RUN-LEVEL end-of-run fold: refuse a final summary that narrates deferred work while zero gh issues were filed")
-		closing     = fs.Bool("closing", false, "run the RUN-LEVEL closing-shape fold: refuse a final summary whose last block is a trailing prose wall instead of scannable bullets")
-		issuesFiled = fs.Int("issues-filed", 0, "with --leftovers: how many gh issues the run filed (or resolved) during its lifetime (the doctrine cross-check)")
-		override    = fs.Bool("override", false, `with --leftovers/--closing: the operator escape ("genuinely nothing left" / "this prose closer is deliberate") — forces clean`)
+		selfTest       = fs.Bool("self-test", false, "scan the built-in corpus and exit 0 iff every case scans as labeled")
+		asJSON         = fs.Bool("json", false, "emit the Report as JSON")
+		file           = fs.String("file", "", `read the text to scan from this path ("-" = stdin)`)
+		leftovers      = fs.Bool("leftovers", false, "run the RUN-LEVEL end-of-run fold: refuse a final summary that narrates deferred work while zero gh issues were filed")
+		closing        = fs.Bool("closing", false, "run the RUN-LEVEL closing-shape fold: refuse a final summary whose last block is a trailing prose wall instead of scannable bullets")
+		issuesFiled    = fs.Int("issues-filed", 0, "with --leftovers: DEPRECATED self-report of how many gh issues the run filed during its lifetime; used only when --transcript is absent, and superseded by it")
+		transcriptPath = fs.String("transcript", "", "with --leftovers: count the issues the run filed from THIS session transcript's tool-use evidence (JSONL); authoritative over --issues-filed")
+		override       = fs.Bool("override", false, `with --leftovers/--closing: the operator escape ("genuinely nothing left" / "this prose closer is deliberate") — forces clean`)
 	)
 	fs.Usage = func() { fmt.Fprint(stderr, headlessLintUsage) }
 	if !parseFlags(fs, argv) {
@@ -64,7 +67,7 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 	}
 
 	if *leftovers {
-		return runHeadlessLeftovers(stdout, stderr, text, *issuesFiled, *override, *asJSON)
+		return runHeadlessLeftovers(stdout, stderr, text, *issuesFiled, *transcriptPath, *override, *asJSON)
 	}
 	// The closing-shape dual of --leftovers (headless_closing.go): same final summary,
 	// the other run-level question — does it CLOSE in a shape the operator can scan?
@@ -88,35 +91,83 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 }
 
 // runHeadlessLeftovers is the RUN-LEVEL fold behind `fak headless-lint --leftovers`:
-// the operator-facing surface over headlesslint.ScanLeftovers, enforcing the AGENTS.md
-// spine-first rule "End of run: file the leftovers, don't narrate them." (#3670). It
-// scans a run's final summary for deferred / out-of-scope narration and cross-checks
-// --issues-filed; exit 1 (LEFTOVERS_UNFILED) when leftovers are narrated but the run
-// filed zero issues and --override was not given, 0 otherwise.
-func runHeadlessLeftovers(stdout, stderr io.Writer, text string, issuesFiled int, override, asJSON bool) int {
-	rep := headlesslint.ScanLeftovers(text, issuesFiled, override)
+// the operator-facing surface over headlesslint.ScanLeftoversEvidence, enforcing the
+// AGENTS.md spine-first rule "End of run: file the leftovers, don't narrate them."
+// (#3670). It scans a run's final summary for deferred / out-of-scope narration and
+// cross-checks how many issues the run filed.
+//
+// Where that cross-check COMES FROM is the point (#5425). --transcript makes it evidence:
+// the count is walked out of the run's own tool_use inputs (guard_leftovers.go), so a
+// summary claiming "I filed them" while the transcript shows no `gh issue create` is
+// still refused, and a `--issues-filed 5` alongside a transcript holding two filings
+// scores two. --issues-filed survives only as the fallback for callers with no
+// transcript to hand over, and the report discloses which of the two produced the number.
+//
+// Exit: 1 (LEFTOVERS_UNFILED) when leftovers are narrated and the filing count is KNOWN
+// to be zero; 3 (filing count unknown) when a transcript was requested but yielded no
+// usable evidence — an unknown count is not a zero, so it is neither a pass nor a
+// refusal; 0 otherwise.
+func runHeadlessLeftovers(stdout, stderr io.Writer, text string, issuesFiled int, transcriptPath string, override, asJSON bool) int {
+	filed := headlesslint.ClaimedIssuesFiled(issuesFiled)
+	if strings.TrimSpace(transcriptPath) != "" {
+		filed = guardIssuesFiledEvidence(transcriptPath)
+		if issuesFiled > 0 {
+			// Keep the superseded claim visible: the gap between what a run says it
+			// filed and what its record shows is the measurement this fold exists for.
+			filed = filed.Supersedes(issuesFiled)
+		}
+	}
+	rep := headlesslint.ScanLeftoversEvidence(text, filed, override)
 	if asJSON {
 		if err := writeIndentedJSON(stdout, rep); err != nil {
 			fmt.Fprintf(stderr, "fak headless-lint: %v\n", err)
 			return 1
 		}
 	} else {
-		fmt.Fprint(stdout, renderLeftoversReport(rep))
+		fmt.Fprint(stdout, renderLeftoversReport(rep, transcriptPath))
 	}
-	if rep.Refused() {
+	switch {
+	case rep.Refused():
 		return 1
+	case rep.Undecided():
+		return 3
+	default:
+		return 0
 	}
-	return 0
 }
 
-// renderLeftoversReport is the human-readable view of the run-level fold.
-func renderLeftoversReport(rep headlesslint.LeftoversReport) string {
-	if !rep.Refused() {
-		return fmt.Sprintf("fak headless-lint --leftovers: clean — %d narrated leftover(s), %d issue(s) filed; doctrine: %q\n",
-			rep.Narrated, rep.IssuesFiled, rep.Doctrine)
+// renderLeftoversReport is the human-readable view of the run-level fold. Every arm
+// names the PROVENANCE of the count, because "2 issues filed" means something different
+// depending on whether the run's transcript showed it or the run asserted it.
+func renderLeftoversReport(rep headlesslint.LeftoversReport, transcriptPath string) string {
+	count, known := rep.FiledCount()
+	switch {
+	case rep.Undecided():
+		var b strings.Builder
+		fmt.Fprintf(&b, "fak headless-lint --leftovers: %s — %d leftover(s) narrated and the issues-filed count is UNKNOWN.\n", rep.Verdict, rep.Narrated)
+		fmt.Fprintf(&b, "  no usable tool-use evidence at %q — unknown is not zero, so this is neither a pass nor a refusal.\n", transcriptPath)
+		fmt.Fprintf(&b, "  doctrine: %q\n\n", rep.Doctrine)
+		for _, h := range rep.Hits {
+			fmt.Fprintf(&b, "  line %-4d %q\n", h.Line, h.Match)
+		}
+		fmt.Fprintf(&b, "\n  instead: %s\n", rep.Resolve)
+		return b.String()
+	case !rep.Refused():
+		// A clean report can still carry an unknown count (nothing was narrated, so the
+		// count never mattered). Say "unknown" rather than printing a zero for it.
+		filed := fmt.Sprintf("%d issue(s) filed (count from: %s)", count, rep.IssuesFiledSource)
+		if !known {
+			filed = fmt.Sprintf("issues-filed count unknown (source: %s)", rep.IssuesFiledSource)
+		}
+		return fmt.Sprintf("fak headless-lint --leftovers: clean — %d narrated leftover(s), %s; doctrine: %q\n",
+			rep.Narrated, filed, rep.Doctrine)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak headless-lint --leftovers: %s — %d leftover(s) narrated but 0 gh issue(s) filed.\n", rep.Verdict, rep.Narrated)
+	fmt.Fprintf(&b, "fak headless-lint --leftovers: %s — %d leftover(s) narrated but %d gh issue(s) filed (count from: %s).\n",
+		rep.Verdict, rep.Narrated, count, rep.IssuesFiledSource)
+	if rep.IssuesFiledClaimed != nil && *rep.IssuesFiledClaimed > count {
+		fmt.Fprintf(&b, "  the run claimed %d filed; its transcript evidences %d. The evidence is what counts.\n", *rep.IssuesFiledClaimed, count)
+	}
 	fmt.Fprintf(&b, "  doctrine: %q\n\n", rep.Doctrine)
 	for _, h := range rep.Hits {
 		fmt.Fprintf(&b, "  line %-4d %q\n", h.Line, h.Match)
@@ -205,7 +256,7 @@ usage:
   fak headless-lint --file out.txt [--json]      ("-" reads the text from stdin)
   fak headless-lint "…text…" [--json]
   … | fak headless-lint [--json]
-  fak headless-lint --leftovers [--issues-filed N] [--override] "…final summary…"
+  fak headless-lint --leftovers [--transcript session.jsonl] [--issues-filed N] [--override] "…final summary…"
   fak headless-lint --closing [--override] [--json] "…final summary…"
 
 run-level closing-shape fold (--closing):
@@ -220,8 +271,22 @@ run-level end-of-run fold (--leftovers):
   Enforces the AGENTS.md rule "End of run: file the leftovers, don't narrate them."
   Refuses (exit 1) a final summary that narrates deferred / out-of-scope follow-ups
   ("two more things worth doing", "out of scope", "follow-up", "left to do", "TODO")
-  while --issues-filed is 0. Pass --issues-filed N once the follow-ups are filed as
-  open gh issues, or --override for a genuine "nothing left".
+  while the run filed zero gh issues. --override is the escape for a genuine
+  "nothing left".
+
+  --transcript session.jsonl COUNTS the filings from evidence: the run's own tool_use
+  inputs are walked for issue-creating calls ("fak issue create", "gh issue create",
+  native issue-creation tools, nested parallel calls), ignoring prose — so narrating
+  "I filed an issue" cannot satisfy the fold, and a claim larger than the record
+  scores the record. This is the authoritative source; it supersedes --issues-filed,
+  and the report names which source produced the number (issues_filed_source).
+
+  --issues-filed N is the DEPRECATED fallback for callers with no transcript: it is a
+  number the audited run asserts about itself, which is the hole --transcript closes.
+
+  When --transcript yields no usable evidence (missing/unreadable/empty) the count is
+  UNKNOWN, not zero: the fold reports leftovers_filing_unknown and exits 3 rather than
+  refusing, because "we could not tell" is a different fact from "the run filed none".
 
 the closed anti-pattern vocabulary (Class -> what to do instead):
   PERMISSION_ASK         asks permission for the obvious next step      -> TAKE_OBVIOUS
@@ -240,4 +305,6 @@ verdict & exit code:
   clean (0)              no operator-directed note — headless-safe
   operator_directed (1)  at least one note assumes a human is watching
   usage (2)              a bad flag or empty input
+  filing unknown (3)     --leftovers only: leftovers narrated and the issues-filed
+                         count could not be established from evidence (not a zero)
 `

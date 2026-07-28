@@ -1,6 +1,7 @@
 package headlesslint
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +64,112 @@ func TestScanLeftoversTicketedLineNotNarration(t *testing.T) {
 	rep := ScanLeftovers("Out of scope for this change: exponential backoff, filed #4001.", 0, false)
 	if rep.Verdict != LeftoversClean {
 		t.Fatalf("ticketed leftover: want clean, got %s %+v", rep.Verdict, rep.Hits)
+	}
+}
+
+// leftoversNarration is the summary every evidence arm below folds — it narrates two
+// deferred follow-ups and cites no ticket, so the verdict turns purely on what the
+// issues-filed evidence says.
+const leftoversNarration = "Shipped the retry fix, tests pass.\n" +
+	"There are two more things worth doing: exponential backoff and a docs pass."
+
+// TestScanLeftoversEvidenceWitnessedZeroRefuses: a count read END TO END off a run's
+// transcript is a real zero — the record was there and showed no filing — so the #3670
+// refusal still fires on evidence, not only on a self-report.
+func TestScanLeftoversEvidenceWitnessedZeroRefuses(t *testing.T) {
+	rep := ScanLeftoversEvidence(leftoversNarration, WitnessedIssuesFiled(0), false)
+	if !rep.Refused() || rep.Verdict != LeftoversUnfiled {
+		t.Fatalf("witnessed zero: want %s/refused, got %s/refused=%v", LeftoversUnfiled, rep.Verdict, rep.Refused())
+	}
+	count, known := rep.FiledCount()
+	if !known || count != 0 || rep.IssuesFiledSource != IssuesFiledFromTranscript {
+		t.Fatalf("witnessed zero: want count=0 known=true source=%s, got %d/%v/%s",
+			IssuesFiledFromTranscript, count, known, rep.IssuesFiledSource)
+	}
+	if rep.Undecided() {
+		t.Errorf("a witnessed zero is decided, not unknown")
+	}
+}
+
+// TestScanLeftoversEvidenceUnknownIsNotZero is the distinction #5425 turns on: with no
+// evidence to read, the fold must say "cannot tell" — not clean (nothing proved the
+// leftovers were filed) and not refused (nothing proved they were not). The wire format
+// has to carry that too: an unknown count must NOT serialize as `"issues_filed": 0`,
+// or every downstream reader silently gets the confident zero back.
+func TestScanLeftoversEvidenceUnknownIsNotZero(t *testing.T) {
+	rep := ScanLeftoversEvidence(leftoversNarration, UnknownIssuesFiled(), false)
+	if rep.Verdict != LeftoversFilingUnknown || !rep.Undecided() {
+		t.Fatalf("no evidence: want %s/undecided, got %s/undecided=%v", LeftoversFilingUnknown, rep.Verdict, rep.Undecided())
+	}
+	if rep.Refused() {
+		t.Errorf("no evidence must not refuse: that would assert a zero the fold does not have")
+	}
+	if _, known := rep.FiledCount(); known {
+		t.Errorf("no evidence: FiledCount must report known=false, got %+v", rep)
+	}
+	if rep.Narrated == 0 || rep.Resolve == "" {
+		t.Errorf("no evidence: want the narration count and a remediation, got %+v", rep)
+	}
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"issues_filed"`) {
+		t.Errorf("unknown count must be ABSENT from the JSON, not rendered as 0: %s", b)
+	}
+	if !strings.Contains(string(b), `"issues_filed_known":false`) {
+		t.Errorf("JSON should state the count is not known: %s", b)
+	}
+}
+
+// TestScanLeftoversEvidenceTailZeroIsUnknown: a count taken over a bounded TAIL of a
+// transcript is a lower bound. Positive settles the question; zero does not, because the
+// filing may sit before the window — so a tail zero resolves to unknown rather than to a
+// refusal. Under-count over over-count, and never a confident zero.
+func TestScanLeftoversEvidenceTailZeroIsUnknown(t *testing.T) {
+	zero := ScanLeftoversEvidence(leftoversNarration, WitnessedIssuesFiledTail(0), false)
+	if zero.Verdict != LeftoversFilingUnknown {
+		t.Fatalf("tail zero: want %s, got %s", LeftoversFilingUnknown, zero.Verdict)
+	}
+	two := ScanLeftoversEvidence(leftoversNarration, WitnessedIssuesFiledTail(2), false)
+	if two.Verdict != LeftoversClean {
+		t.Fatalf("tail lower bound of 2: want %s, got %s", LeftoversClean, two.Verdict)
+	}
+	if count, known := two.FiledCount(); !known || count != 2 {
+		t.Errorf("tail lower bound of 2: want 2/known, got %d/%v", count, known)
+	}
+}
+
+// TestScanLeftoversEvidenceOutranksTheClaim is the ticket in one assertion: a run that
+// asserts it filed three issues while its transcript evidences none is refused, and the
+// report keeps BOTH numbers so the gap between claim and record is measurable.
+func TestScanLeftoversEvidenceOutranksTheClaim(t *testing.T) {
+	rep := ScanLeftoversEvidence(leftoversNarration, WitnessedIssuesFiled(0).Supersedes(3), false)
+	if !rep.Refused() {
+		t.Fatalf("claim of 3 against evidence of 0: want refused, got %s", rep.Verdict)
+	}
+	count, known := rep.FiledCount()
+	if !known || count != 0 {
+		t.Fatalf("the evidence count must survive the claim: got %d/%v", count, known)
+	}
+	if rep.IssuesFiledClaimed == nil || *rep.IssuesFiledClaimed != 3 {
+		t.Fatalf("the superseded claim must stay visible, got %v", rep.IssuesFiledClaimed)
+	}
+	if rep.IssuesFiledSource != IssuesFiledFromTranscript {
+		t.Errorf("source = %q, want %q", rep.IssuesFiledSource, IssuesFiledFromTranscript)
+	}
+}
+
+// TestScanLeftoversTagsTheSelfReport: the legacy ScanLeftovers signature still works for
+// callers with no transcript, but its report now says the number was ASSERTED, so a
+// reader can tell a claimed count from a witnessed one.
+func TestScanLeftoversTagsTheSelfReport(t *testing.T) {
+	rep := ScanLeftovers(leftoversNarration, 2, false)
+	if rep.Verdict != LeftoversClean {
+		t.Fatalf("asserted 2 filed: want clean, got %s", rep.Verdict)
+	}
+	if rep.IssuesFiledSource != IssuesFiledAsserted {
+		t.Errorf("source = %q, want %q — a self-report must not read as evidence", rep.IssuesFiledSource, IssuesFiledAsserted)
 	}
 }
 
