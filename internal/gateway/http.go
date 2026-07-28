@@ -583,6 +583,29 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// #5399 (the remaining half of #4855): the buffered path below blocks in
+	// completeServed for the WHOLE decode, and used to write its first byte only after
+	// that returned — so a stream:true request served by a Complete-only planner (every
+	// in-kernel serve: agent.InKernelPlanner is not an agent.StreamingPlanner) emitted no
+	// status line, no headers and no SSE byte for the entire multi-rank decode. Open the
+	// stream NOW instead: 200 + SSE headers + the opening role chunk, flushed, so the
+	// client can tell an accepted streaming request from a dead socket.
+	//
+	// Placement is load-bearing. Every PRE-decode refusal — the method/body/sampling
+	// 400s, writeSessionRefusal, the inbound-result 502 — is already behind us and kept
+	// its real HTTP status. Everything that can still fail below (the upstream error,
+	// the tool-call conformance fail-closed) has to report in-band now, as an SSE error
+	// event + [DONE]; see chatStreamWriter.fail.
+	var stream *chatStreamWriter
+	if req.Stream {
+		stream = newChatStreamWriter(w, reqModel)
+		if err := stream.open(); err != nil {
+			// The client is already gone; do not spend a decode on a socket nobody reads.
+			s.logf("gateway: client vanished before the streamed preamble landed: %v", err)
+			return
+		}
+	}
+
 	// Forward the client's per-request sampling params to the upstream model. Each
 	// option is a no-op when its field is absent (max_tokens 0, nil temperature/top_p,
 	// empty stop), so an OpenAI client that omits them gets the planner default —
@@ -615,6 +638,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// upstream provider's raw body, which must not cross the trust boundary to a
 		// (possibly unauthenticated) downstream caller.
 		s.logf("gateway: upstream model error: %v", err)
+		if stream != nil {
+			// The 200 + SSE headers went out before the decode, so the status line is
+			// spent: report the SAME classified failure in-band as an SSE error event +
+			// [DONE] rather than truncating the stream. plannerErrorStatus carries the
+			// identical metric/observation side effects writeUpstreamErr would have run,
+			// and msg is the same client-facing string (never the upstream's raw body).
+			status, code, msg := s.plannerErrorStatus(err)
+			stream.fail(status, code, msg)
+			return
+		}
 		s.writeUpstreamErr(w, err)
 		return
 	}
@@ -630,7 +663,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// the gateway as a benign empty turn.
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
 		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s", s.model)
-		writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
+		const conformanceMsg = "upstream tool-call format not recognized; refusing to skip adjudication"
+		if stream != nil {
+			// Fail closed in-band: the preamble already spent the status line, but the
+			// client must still never read a benign empty stop on a skipped adjudication.
+			stream.fail(http.StatusBadGateway, "", conformanceMsg)
+			return
+		}
+		writeErr(w, http.StatusBadGateway, conformanceMsg)
 		return
 	}
 
@@ -645,6 +685,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if respModel == "" {
 		respModel = reqModel
 	}
+	if stream != nil && respModel != stream.model {
+		// The streamed wire announced `model` in the preamble, before the upstream could
+		// report what it served, and OpenAI keeps that field CONSTANT for the life of a
+		// stream — so the #82 served-model echo cannot ride this path without the chunks
+		// contradicting each other mid-stream. Keep the announced (request) model and make
+		// the divergence operator-visible instead of silently flipping the field. The
+		// non-streaming JSON response still echoes the served model truthfully.
+		s.logf("gateway: streamed turn announced model %q in its preamble; upstream served %q (constant-model SSE, #5399)", stream.model, respModel)
+		respModel = stream.model
+	}
 	s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
 	resp := ChatResponse{
 		ID:      "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano())),
@@ -658,8 +708,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 {
 		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, Redactions: redactions}
 	}
-	if req.Stream {
-		writeChatCompletionStream(w, resp)
+	if stream != nil {
+		writeChatCompletionStream(stream, resp)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -988,58 +1038,6 @@ func upstreamRetryAfter(err error) string {
 		return se.RetryAfter
 	}
 	return ""
-}
-
-func writeChatCompletionStream(w http.ResponseWriter, resp ChatResponse) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-
-	choice := resp.Choices[0]
-
-	chunk := func(d ChatDelta, finish *string, usage *agent.Usage) ChatStreamResponse {
-		return ChatStreamResponse{
-			ID:      resp.ID,
-			Object:  "chat.completion.chunk",
-			Created: resp.Created,
-			Model:   resp.Model,
-			Choices: []ChatStreamChoice{{Index: choice.Index, Delta: d, FinishReason: finish}},
-			Usage:   usage,
-		}
-	}
-
-	// Opening chunk: announce the assistant role and the surviving (adjudicated)
-	// tool calls. OpenAI sends the role before any content fragment, so a client
-	// that keys on the first delta's role sees it immediately.
-	opening := chunk(ChatDelta{
-		Role:      choice.Message.Role,
-		ToolCalls: streamToolCalls(choice.Message.ToolCalls),
-	}, nil, nil)
-	if err := writeSSEData(w, opening); err != nil {
-		return
-	}
-
-	// Content chunks: stream the adjudicated content as incremental fragments, one
-	// SSE event per fragment, the way a real OpenAI stream delivers tokens — rather
-	// than collapsing the whole reply into a single delta. segmentContent preserves
-	// every byte, so concatenating the content deltas reproduces the reply exactly.
-	for _, seg := range segmentContent(choice.Message.Content) {
-		if err := writeSSEData(w, chunk(ChatDelta{Content: seg}, nil, nil)); err != nil {
-			return
-		}
-	}
-
-	finish := choice.FinishReason
-	final := chunk(ChatDelta{}, &finish, &resp.Usage)
-	final.Fak = resp.Fak
-	if err := writeSSEData(w, final); err != nil {
-		return
-	}
-	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
 }
 
 // segmentContent splits assistant content into incremental streaming fragments at

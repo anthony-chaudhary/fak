@@ -12,10 +12,11 @@ import (
 // streamChatLive serves POST /v1/chat/completions as a TRUE token stream: it
 // forwards each upstream CONTENT fragment to the client as an OpenAI SSE chunk the
 // instant the model emits it, so time-to-first-token tracks the model rather than the
-// whole turn. The buffered path (writeChatCompletionStream) only synthesizes an SSE
-// stream AFTER the complete turn is generated — so its first byte costs the entire
-// generation; this is the half that makes fak a real low-latency server in front of a
-// streaming upstream (a hosted OpenAI-compatible API, or a local vLLM/SGLang).
+// whole turn. The buffered path (chatStreamWriter) opens the stream up front but can
+// only synthesize the CONTENT chunks after the complete turn is generated — so its
+// first TOKEN still costs the entire generation, even though its first BYTE no longer
+// does (#5399); this is the half that makes fak a real low-latency server in front of
+// a streaming upstream (a hosted OpenAI-compatible API, or a local vLLM/SGLang).
 //
 // The kernel's adjudication invariant is preserved by construction even when tools
 // ARE offered. A tool call is the one thing that must stay buffered until k.Decide

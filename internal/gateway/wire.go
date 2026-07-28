@@ -427,10 +427,10 @@ type ChatResponse struct {
 // (streamChatLive, taken for a no-tools request whose planner can stream the wire)
 // relays each upstream content fragment as its own chunk for a real
 // time-to-first-token, then emits a terminal finish/usage chunk. The BUFFERED path
-// (writeChatCompletionStream, taken for a tool-bearing request or a non-streaming
-// planner) synthesizes the chunks only after the whole turn is adjudicated. Either
-// way a tool-call delta carries only filtered/repaired calls — no un-adjudicated
-// call is ever streamed.
+// (chatStreamWriter, taken for a non-streaming planner) opens the stream with the role
+// chunk BEFORE the decode (#5399) and synthesizes the remaining chunks once the whole
+// turn is adjudicated. Either way a tool-call delta carries only filtered/repaired
+// calls — no un-adjudicated call is ever streamed.
 type ChatStreamResponse struct {
 	ID      string             `json:"id"`
 	Object  string             `json:"object"`
