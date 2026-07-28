@@ -156,7 +156,7 @@ func runGuardSessions(stdout, stderr io.Writer, argv []string) int {
 		_, uuidByTrace := resume.LoadIdentity(regDir)
 		projected := make([]guardSessionJSONRow, 0, len(rows))
 		for _, row := range rows {
-			projected = append(projected, guardSessionJSONRow{Row: row, TranscriptUUID: uuidByTrace[row.TraceID]})
+			projected = append(projected, guardSessionJSONRow{Row: withoutPublishedBearer(row), TranscriptUUID: uuidByTrace[row.TraceID]})
 		}
 		return encodeJSONOrFail(stdout, stderr, map[string]any{
 			"schema":   "fak.guard-sessions.v1",
@@ -204,7 +204,7 @@ func renderGuardSessionResolve(stdout, stderr io.Writer, regDir string, rows []g
 		return 3
 	default:
 		if asJSON {
-			return encodeJSONOrFail(stdout, stderr, res.Row, "fak guard sessions")
+			return encodeJSONOrFail(stdout, stderr, withoutPublishedBearer(res.Row), "fak guard sessions")
 		}
 		renderGuardSessionRow(stdout, res.Row, uuidByTrace)
 		return 0
@@ -218,6 +218,19 @@ func renderGuardSessionResolve(stdout, stderr io.Writer, regDir string, rows []g
 type guardSessionJSONRow struct {
 	guardsessions.Row
 	TranscriptUUID string `json:"transcript_uuid,omitempty"`
+}
+
+// withoutPublishedBearer strips the row's read-scoped gateway token before it is RENDERED.
+// Now that the publish half exists (#5400) the recorded row actually carries a live
+// credential, so every surface that prints a row has to decide whether to echo it; `fak
+// session ls` already answers no (session_query.go), and this is the same answer for the
+// sibling query. The gateway_url stays — that is the discovery half, and it is useless to a
+// caller who cannot authenticate. A consumer that needs the token reads the index file
+// itself, which is where the credential's actual blast radius is scoped and where it is
+// already read-only by construction.
+func withoutPublishedBearer(r guardsessions.Row) guardsessions.Row {
+	r.Bearer = ""
+	return r
 }
 
 func renderGuardSessionTable(w io.Writer, rows []guardsessions.Row, uuidByTrace map[string]string) {

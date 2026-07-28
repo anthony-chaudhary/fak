@@ -78,6 +78,29 @@ func (r Row) WithGateway(url, bearer string) Row {
 	return r
 }
 
+// GatewayPublishEpoch is the UTC instant the PRODUCER half of gateway discovery landed
+// (#5400): from that build forward, a `fak guard` launch re-records its row with
+// gateway_url (and the read-scoped bearer) stamped once its listener is actually serving.
+// It exists so a READER can tell the two causes of a missing gateway_url APART instead of
+// guessing at one: a row started BEFORE this instant was written by a fak that had no
+// publisher at all, so the field could not have been set; a row started AFTER it and still
+// missing the field means that session published nothing — it bound no gateway, or its
+// re-record failed. Same empty field, opposite diagnoses.
+var GatewayPublishEpoch = time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+
+// PredatesGatewayPublish reports whether the row started before the producer existed, so a
+// missing GatewayURL on it is a build fact rather than a session fault. A row whose start
+// time is absent or unparseable counts as predating: an unstamped start is a legacy shape,
+// and attributing it to a live session's publish would be the same wrong guess this
+// distinction removes.
+func (r Row) PredatesGatewayPublish() bool {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(r.StartedAt))
+	if err != nil {
+		return true
+	}
+	return t.Before(GatewayPublishEpoch)
+}
+
 // Handle derives a short, stable, human-referenceable id for a guard session from its
 // trace id and start time. It is deterministic (same trace+start → same handle) and short
 // enough to type, but seeded by the start instant so two sessions that reuse the same

@@ -163,7 +163,18 @@ func runSessionIndexStatus(stdout, stderr io.Writer, row guardsessions.Row, asJS
 		return 1
 	}
 	if strings.TrimSpace(row.GatewayURL) == "" {
-		fmt.Fprintf(stderr, "fak session status: guard session %s published no gateway_url (recorded by an older fak?) — cannot query it cross-process\n", row.Handle)
+		// Two DIFFERENT causes wear the same empty field, and the old text guessed the same
+		// one ("recorded by an older fak?") for both — which was wrong on every row, because
+		// until #5400 no fak build published the field at all. Split them on the row's own
+		// start time against the publish epoch, so the version explanation is printed only
+		// when the row genuinely predates the producer.
+		if row.PredatesGatewayPublish() {
+			fmt.Fprintf(stderr, "fak session status: guard session %s carries no gateway_url — it started %s, before fak published session gateways (%s), so no build could have recorded one. Cannot query it cross-process; relaunch it under `fak guard` to get a reachable row.\n",
+				row.Handle, orDash(row.StartedAt), guardsessions.GatewayPublishEpoch.Format(time.RFC3339))
+		} else {
+			fmt.Fprintf(stderr, "fak session status: guard session %s published no gateway_url — this fak stamps one as soon as the session's gateway is serving, so this session bound no gateway (or its index re-record failed). Cannot query it cross-process; read it from the session's own terminal instead.\n",
+				row.Handle)
+		}
 		return 1
 	}
 	body, err := fetchSessionIndexStatus(row)
