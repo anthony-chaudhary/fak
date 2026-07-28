@@ -63,6 +63,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -2380,7 +2381,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        spawn_probe_s: float = 0.0,
                        log_prefix: str = "resolve",
                        prompt_payload: str | None = None,
-                       worktree_git: "Callable[..., Any] | None" = None) -> dict[str, Any]:
+                       worktree_git: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Launch a detached worker (claude or opencode) on one issue; record pid.
 
     The log keeps the backend-neutral ``resolve-<N>-<stamp>.log`` name so the close
