@@ -625,12 +625,68 @@ def _excluded_go(rel: str) -> bool:
     return any(part.startswith(GO_EXCLUDE_DIR_PREFIXES) for part in parts)
 
 
+_GIT_VISIBLE_CACHE: dict[str, set[str] | None] = {}
+
+
+def _git_visible_go(root: Path) -> set[str] | None:
+    """The .go paths git can SEE at `root`: tracked (``--cached``) PLUS
+    untracked-but-not-ignored (``--others --exclude-standard``). Returns None when
+    that enumeration is unavailable (no git binary, or `root` is not the top level
+    of a repository) so the caller falls back to a plain filesystem walk.
+
+    This is the enumeration-immunity mechanism the scorecard doctrine names
+    (``.claude/skills/scorecard/SKILL.md``, "the clean read"): a path inside a
+    GITIGNORED scratch tree is *structurally unreachable*, instead of being dropped
+    only when someone remembers to add that directory to ``GO_EXCLUDE_DIRS``. The
+    fleet keeps inventing new scratch roots (``.dispatch-runs/``, ``.gotmp/``,
+    ``.st_*``, ``.tmp-*``, ``.probe/``, ``.mcwitness/``, ``_*``) and each one holds
+    stale COPIES of real source, so the name-based exclusion list was permanently
+    one scratch dir behind: on a live shared tree 7479 of the 15138 walked ``.go``
+    files (49%) lived in gitignored scratch, phantom-doubling the architecture,
+    tests and assertion_strength work-lists.
+
+    Keeping ``--others`` preserves this card's original promise that an uncommitted
+    improvement is scored immediately — a brand-new, not-yet-committed ``.go`` is
+    still enumerated. ONLY ignored paths drop out. The ``_excluded_go`` name filter
+    still runs on top, so this change is purely SUBTRACTIVE: it can remove phantom
+    rows, never add new ones.
+    """
+    key = str(root)
+    if key in _GIT_VISIBLE_CACHE:
+        return _GIT_VISIBLE_CACHE[key]
+    result: set[str] | None = None
+    code, out, _err = _run(["git", "rev-parse", "--show-toplevel"], root, timeout=60)
+    top = out.strip()
+    if code == 0 and top:
+        try:
+            same = Path(top).resolve() == root.resolve()
+        except OSError:
+            same = False
+        if same:
+            code, out, _err = _run(
+                ["git", "ls-files", "-z", "--cached", "--others",
+                 "--exclude-standard", "--", "*.go"], root, timeout=120)
+            if code == 0:
+                result = {f.replace("\\", "/") for f in out.split("\0")
+                          if f.endswith(".go")}
+    _GIT_VISIBLE_CACHE[key] = result
+    return result
+
+
 def list_go_files(root: Path, *, tests: bool) -> list[str]:
-    """Tracked-ish enumeration: every .go under root minus excluded dirs. We walk
-    the tree (not git) so an uncommitted improvement is scored immediately."""
+    """Every .go file git can see under root, minus the excluded dirs. Enumeration
+    comes from ``git ls-files --cached --others --exclude-standard`` (see
+    :func:`_git_visible_go`) so a gitignored scratch COPY of the tree can never be
+    graded; outside a git checkout it degrades to the original filesystem walk. The
+    file *bytes* are still read from the working tree, so an uncommitted improvement
+    to a visible file is scored immediately."""
+    visible = _git_visible_go(root)
+    if visible is None:
+        rels = [p.relative_to(root).as_posix() for p in root.rglob("*.go")]
+    else:
+        rels = list(visible)
     out: list[str] = []
-    for p in root.rglob("*.go"):
-        rel = p.relative_to(root).as_posix()
+    for rel in rels:
         if _excluded_go(rel):
             continue
         is_test = rel.endswith("_test.go")
@@ -1041,11 +1097,18 @@ def _gofmt_list(root: Path) -> list[str] | None:
         return None  # gofmt not installed -> KPI skipped, not "0 unformatted"
     if code != 0:
         return []
+    # `gofmt -l .` walks the filesystem, so it reports the gitignored scratch COPIES
+    # too. Hold it to the same git-visible enumeration list_go_files uses, so an
+    # unformatted phantom in `.dispatch-runs/` or `.st_*` can never become format debt.
+    visible = _git_visible_go(root)
     files: list[str] = []
     for ln in out.splitlines():
         ln = ln.strip().replace("\\", "/")
-        if ln.endswith(".go") and not _excluded_go(ln):
-            files.append(ln)
+        if not ln.endswith(".go") or _excluded_go(ln):
+            continue
+        if visible is not None and ln not in visible:
+            continue
+        files.append(ln)
     return files
 
 

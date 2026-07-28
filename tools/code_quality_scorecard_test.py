@@ -581,6 +581,90 @@ def test_since_gate_does_not_fire_in_markdown_mode():
         assert "# Code-quality scorecard" in out, out   # the snapshot rendered
 
 
+# --- enumeration immunity (list_go_files / _gofmt_list) --------------------
+# These fixtures name the scratch dir `phantomcopy/` on purpose: it is NOT in
+# GO_EXCLUDE_DIRS, so a green result here can only come from the git-visible
+# enumeration, never from the hand-maintained name filter.
+
+def _seed_repo_with_ignored_copy(d: str) -> None:
+    """A repo holding one real .go plus a GITIGNORED scratch copy of it — the shape
+    the exclusion list was permanently one directory behind on."""
+    _write(d, "go.mod", "module example.com/x\n\ngo 1.26\n")
+    _write(d, ".gitignore", "phantomcopy/\n")
+    _write(d, "a.go", "package x\n\nfunc A() {}\n")
+    _write(d, "phantomcopy/a.go", "package x\n\nfunc A() {}\n")
+    _write(d, "phantomcopy/a_test.go", "package x\n\nfunc TestA(t *testing.T) {}\n")
+    _git(d, "init", "-q")
+    _git(d, "add", "go.mod", ".gitignore", "a.go")
+    _git(d, "commit", "-qm", "base")
+
+
+def test_enumeration_excludes_gitignored_scratch_copy():
+    # The immunity claim: a .go inside a gitignored scratch tree is structurally
+    # unreachable, so its stale COPY of a real file cannot phantom-double the corpus.
+    if not _have_git():
+        print("code_quality_scorecard_test: git unavailable, skipping immunity case")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        cq._GIT_VISIBLE_CACHE.clear()
+        _seed_repo_with_ignored_copy(d)
+        prod = cq.list_go_files(Path(d), tests=False)
+        tests = cq.list_go_files(Path(d), tests=True)
+        assert "a.go" in prod, prod                      # the real file is still graded
+        assert "phantomcopy/a.go" not in prod, prod      # the ignored copy is not
+        assert "phantomcopy/a_test.go" not in tests, tests
+
+
+def test_enumeration_still_scores_an_uncommitted_new_file():
+    # The card's original promise, preserved: enumeration keeps `--others`, so a
+    # brand-new file that is untracked but NOT ignored is scored immediately. This is
+    # the negative control — it proves the reader got narrower, not blind.
+    if not _have_git():
+        print("code_quality_scorecard_test: git unavailable, skipping untracked case")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        cq._GIT_VISIBLE_CACHE.clear()
+        _seed_repo_with_ignored_copy(d)
+        _write(d, "brandnew.go", "package x\n\nfunc New() {}\n")   # never committed
+        prod = cq.list_go_files(Path(d), tests=False)
+        assert "brandnew.go" in prod, prod
+        assert "phantomcopy/a.go" not in prod, prod
+
+
+def test_enumeration_falls_back_to_walk_outside_a_checkout():
+    # Outside a git checkout the git enumeration is unavailable, so the card must
+    # degrade to the original filesystem walk rather than silently grading nothing.
+    with tempfile.TemporaryDirectory() as d:
+        cq._GIT_VISIBLE_CACHE.clear()
+        _write(d, "go.mod", "module example.com/x\n\ngo 1.26\n")
+        _write(d, "a.go", "package x\n\nfunc A() {}\n")
+        assert cq._git_visible_go(Path(d)) is None
+        assert "a.go" in cq.list_go_files(Path(d), tests=False)
+
+
+def test_gofmt_list_holds_gofmt_to_the_same_visible_set():
+    # `gofmt -l .` walks the filesystem, so it reports the ignored copies too. The
+    # format KPI must drop those phantoms and keep every git-visible file.
+    if not _have_git():
+        print("code_quality_scorecard_test: git unavailable, skipping gofmt case")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        cq._GIT_VISIBLE_CACHE.clear()
+        _seed_repo_with_ignored_copy(d)
+        real_run = cq._run
+
+        def fake_run(cmd, cwd, timeout=240):
+            if cmd[:2] == ["gofmt", "-l"]:
+                return 0, "a.go\nphantomcopy\\a.go\n", ""
+            return real_run(cmd, cwd, timeout=timeout)
+
+        cq._run = fake_run
+        try:
+            assert cq._gofmt_list(Path(d)) == ["a.go"]
+        finally:
+            cq._run = real_run
+
+
 def main() -> int:
     """Pure-stdlib runner: collects and runs every module-level test_* function so the
     suite runs in the pytest-free CI exactly like its scorecard-family siblings
