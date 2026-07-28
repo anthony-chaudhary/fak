@@ -48,12 +48,17 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 
-		// pre-attn norm, per position (parallel across tokens).
+		// pre-attn norm, per position (parallel across tokens). LayerNorm families
+		// (StableLM, GPT-NeoX, Falcon, MPT, biased Cohere) carry a learned norm BIAS;
+		// normCfg must receive it or this lane silently disagrees with Forward, which
+		// passes n.preBias (arch.go:635). rmsnormCfg hard-passes nil and must not be
+		// used here.
 		Xn := make([]float32, P*H)
 		parFor(P, numWorkers, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
+			bIn := m.tensorOptional(lp("input_layernorm.bias"))
 			for t := lo; t < hi; t++ {
-				copy(Xn[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wIn, eps, cfg))
+				copy(Xn[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wIn, bIn, eps, cfg))
 			}
 		})
 
@@ -132,8 +137,9 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 		Xn2 := make([]float32, P*H)
 		parFor(P, numWorkers, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
+			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 			for t := lo; t < hi; t++ {
-				copy(Xn2[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wPost, eps, cfg))
+				copy(Xn2[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
 		I := cfg.IntermediateSize
@@ -153,5 +159,8 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 		s.Cache.pos = append(s.Cache.pos, base+t)
 	}
 	last := X[(P-1)*H : P*H]
-	return rmsnormCfg(last, m.tensor("model.norm.weight"), eps, cfg)
+	// finalNorm, not a hand-rolled normCfg: it is the ONE place the final-norm weight,
+	// its optional bias, and eps are bound together, so this lane cannot drift from the
+	// per-token path again the way the hard-coded nil bias here did.
+	return m.finalNorm(last)
 }
