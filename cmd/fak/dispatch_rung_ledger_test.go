@@ -56,7 +56,7 @@ func rungLedgerRow(t *testing.T, id, item string, from, to modelroute.PlacementZ
 // grantRungAuthority declares the full authority the actuator requires.
 func grantRungAuthority(t *testing.T, ceiling modelroute.PlacementZone, budget string) {
 	t.Helper()
-	t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "1")
+	setDispatchRungPlacement(t, true)
 	t.Setenv(dispatchRungCeilingEnv, string(ceiling))
 	t.Setenv(dispatchRungBudgetEnv, budget)
 	t.Setenv(dispatchRungAccountsEnv, dispatchRungAccountsAll)
@@ -65,8 +65,9 @@ func grantRungAuthority(t *testing.T, ceiling modelroute.PlacementZone, budget s
 // clearRungAuthority removes every declaration, which is the default posture: nothing granted.
 func clearRungAuthority(t *testing.T) {
 	t.Helper()
+	setDispatchRungPlacement(t, false)
 	for _, k := range []string{
-		"FLEET_DISPATCH_RUNG_PLACEMENT", dispatchRungCeilingEnv,
+		dispatchRungCeilingEnv,
 		dispatchRungBudgetEnv, dispatchRungAccountsEnv,
 	} {
 		t.Setenv(k, "")
@@ -221,7 +222,7 @@ func TestRungLedgerRendersANonPositiveBudgetAsDeclared(t *testing.T) {
 // Every blocker, not just the first: fixing one and finding the ladder still dead is half an
 // answer, and the second half is the one nobody goes looking for.
 func TestRungLedgerListsEveryBlockerNotJustTheFirst(t *testing.T) {
-	t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "1")
+	setDispatchRungPlacement(t, true)
 	t.Setenv(dispatchRungBudgetEnv, "2")
 	if err := os.Unsetenv(dispatchRungCeilingEnv); err != nil {
 		t.Fatalf("unset ceiling: %v", err)
@@ -260,7 +261,7 @@ func TestRungLedgerBlockedTokensComeFromTheEnforcersVocabulary(t *testing.T) {
 		{"", "2", "*"},
 	}
 	for _, c := range cases {
-		t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "1")
+		setDispatchRungPlacement(t, true)
 		t.Setenv(dispatchRungCeilingEnv, c.ceiling)
 		t.Setenv(dispatchRungBudgetEnv, c.budget)
 		t.Setenv(dispatchRungAccountsEnv, c.accounts)
@@ -457,7 +458,7 @@ func TestRungLedgerDebitsStayInPurchaseOrder(t *testing.T) {
 // and an empty ledger read as "nothing was eligible".
 func TestRungLedgerReportsTheLadderSwitchSeparatelyFromBlocked(t *testing.T) {
 	grantRungAuthority(t, modelroute.ZoneVendor, "2")
-	t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "off")
+	setDispatchRungPlacement(t, false)
 	if dispatchRungPlacementEnabled() {
 		t.Fatalf("premise gone: the ladder reads as enabled")
 	}
