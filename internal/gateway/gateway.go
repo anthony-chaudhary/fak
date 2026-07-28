@@ -108,9 +108,15 @@ const DefaultVCacheAnchor = true
 // (near the assumed end). The trade is sound because the burst penalty is ONE-TIME and bounded
 // (a cold re-write of the invalidated suffix) while the shed saving is per-turn: an early burst
 // on a session that runs long is a clear win, and a large-suffix shed still refuses regardless.
-// This value is CALIBRATED from the observed session-length distribution in
-// docs/nightrun/gateway-usage.jsonl (n=1893 real guard/serve exits, `cached_turns`): median 7
+// This value is CALIBRATED from the observed session-length distribution in the TRACKED corpus
+// docs/nightrun/gateway-usage.jsonl (gatewayusageledger.PublishedLedgerRel) — NOT the gitignored
+// per-box .fak/nightrun sibling, whose population is night-dispatch fleet traffic (median 6 turns)
+// rather than the interactive sessions this prior is about (#5406). Over that corpus at calibration
+// time (n=1893 real guard/serve exits, `cached_turns`): median 7
 // turns, p75 33, p90 52, p95 70 — 89% of sessions finish by 50 turns and only ~2% exceed 100. The
+// same corpus re-measured 2026-07-28 on the same basis (n=803 rows carrying `cached_turns`) reads
+// median 26, p75 39, p90 54, p95 73: the value 50 has NOT been retuned and still sits between p75
+// and p90, which is what calibration_corpus_drift_test.go asserts every run. The
 // earlier prior of 100 presumed a repaying tail ~14x the median, so warm early bursts on SHORT
 // sessions (compaction fired on a median-6-turn session in that corpus) were justified by turns
 // that never arrived — the low-end over-shed. 50 (~p90) sizes the presumed payback to a genuinely
@@ -134,7 +140,8 @@ const DefaultAssumedSessionTurns = 50
 //
 // headHorizonHeavyResidentFloor is the peak resident-token watermark above which a trace is treated as
 // heavy for the horizon prior. Sized just under the observed real-traffic floor (cached_prompt_tokens
-// per turn is ≥~51k at p10 in docs/nightrun/gateway-usage.jsonl, resident adds this turn's input on
+// per turn is ≥~51k at p10 in the TRACKED docs/nightrun/gateway-usage.jsonl — same population as
+// DefaultAssumedSessionTurns above, and for the same reason (#5406) — resident adds this turn's input on
 // top), so a genuine working session qualifies while a SHORT chat (the token-light majority — median 7
 // turns) stays on the conservative base horizon. headHorizonHeavyHeadroom is the number of repaying
 // turns a heavy trace is guaranteed to retain: the effective TotalTurns becomes

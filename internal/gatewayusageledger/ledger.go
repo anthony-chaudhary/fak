@@ -19,6 +19,19 @@ const (
 	// guard/serve writes under .fak prevents every session exit from dirtying the
 	// shared tree. The tracked docs sibling is a historical publication snapshot.
 	DefaultLedgerRel = ".fak/nightrun/gateway-usage.jsonl"
+	// PublishedLedgerRel is the TRACKED publication snapshot of the same schema —
+	// the committed corpus every checkout carries. It is the READ path for anything
+	// whose verdict has to be reproducible by a second person: a reader pointed at
+	// DefaultLedgerRel sees only whatever sessions happened to run on THIS box (a
+	// gitignored file that is empty in CI and on a fresh clone), so a claim computed
+	// from it can never be shown to anyone else, while a reader pointed here sees the
+	// same bytes everywhere. Writers must still use DefaultLedgerRel — nothing should
+	// append to the tracked snapshot from a session exit; it is refreshed as a
+	// deliberate publication step. #5406 is the concrete cost of confusing the two: a
+	// calibration drift guard resolved DefaultLedgerRel, so it silently skipped in CI
+	// ("thin corpus: only 0 nonzero-length sessions") and red only on fleet boxes,
+	// against a per-box population its constants were never sized on.
+	PublishedLedgerRel = "docs/nightrun/gateway-usage.jsonl"
 )
 
 // Counters is the OBSERVED served-turn counter family this ledger snapshots. Every
