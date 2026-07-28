@@ -65,33 +65,7 @@ func TestToolprocHookJournalRoundTrip(t *testing.T) {
 // long-lived spawn that sat far outside the window — the #3488 leak fix.
 func TestToolprocHookStopCompactsOversizedJournal(t *testing.T) {
 	journal := filepath.Join(t.TempDir(), "journal.jsonl")
-
-	// One live spawn at the very front (older than the 4 MiB window), then enough
-	// terminal spawn/exit pairs to push the file past JournalCompactThresholdBytes.
-	var buf []byte
-	appendEvent := func(ev toolproc.Event) {
-		line, err := json.Marshal(ev)
-		if err != nil {
-			t.Fatal(err)
-		}
-		buf = append(buf, append(line, '\n')...)
-	}
-	appendEvent(toolproc.Event{Kind: toolproc.EvSpawn, CallID: "orphan-live", Tool: "Bash", Session: "s1", AtMS: 1})
-	for i := 0; len(buf) <= toolproc.JournalCompactThresholdBytes+(64<<10); i++ {
-		id := "done-" + strconv.Itoa(i)
-		appendEvent(toolproc.Event{Kind: toolproc.EvSpawn, CallID: id, Tool: "Bash", Session: "s1", AtMS: int64(2 + 2*i)})
-		appendEvent(toolproc.Event{Kind: toolproc.EvExit, CallID: id, AtMS: int64(3 + 2*i), Status: "ok"})
-	}
-	if err := os.WriteFile(journal, buf, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.Stat(journal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if before.Size() <= toolproc.JournalCompactThresholdBytes {
-		t.Fatalf("test fixture must exceed the threshold, got %d", before.Size())
-	}
+	beforeSize := writeOversizedJournal(t, journal)
 
 	// The stop firing appends the session_end and then compacts.
 	if err := toolprocHookOnce(strings.NewReader(`{"session_id":"s1"}`), "stop", journal, toolproc.HookEnvelope{}, 9_000); err != nil {
@@ -102,26 +76,14 @@ func TestToolprocHookStopCompactsOversizedJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Size() >= before.Size() || after.Size() > toolproc.JournalCompactThresholdBytes {
+	if after.Size() >= beforeSize || after.Size() > toolproc.JournalCompactThresholdBytes {
 		t.Fatalf("stop hook did not bound the journal: before=%d after=%d threshold=%d",
-			before.Size(), after.Size(), int64(toolproc.JournalCompactThresholdBytes))
+			beforeSize, after.Size(), int64(toolproc.JournalCompactThresholdBytes))
 	}
 
-	f, err := os.Open(journal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	events, err := toolproc.ParseEvents(f)
-	if err != nil {
-		t.Fatalf("compacted journal must stay fold-clean: %v", err)
-	}
 	// The long-lived spawn survived compaction and folds to a running (now
 	// orphaned, since its session ended) proc — the whole point of preserving it.
-	tab, err := toolproc.Fold(events, 10_000, toolproc.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	tab := foldJournalFile(t, journal, 10_000)
 	var live *toolproc.Proc
 	for i := range tab.Procs {
 		if tab.Procs[i].CallID == "orphan-live" {
@@ -137,6 +99,103 @@ func TestToolprocHookStopCompactsOversizedJournal(t *testing.T) {
 	if live.State != toolproc.StateRunning || !live.Orphaned {
 		t.Fatalf("preserved spawn not running+orphaned: state=%s orphaned=%v", live.State, live.Orphaned)
 	}
+}
+
+// TestToolprocHookGrowthCompactsWithoutAnyStop is #3557's guard: the journal bound
+// must not depend on a clean SessionEnd ever arriving. A session killed mid-tool —
+// OOM, host reboot, a harness that skips Stop — fires only pre/post, and on a box
+// where that is the norm a stop-GATED compaction never runs at all, so the shared
+// file grows until some sibling session happens to exit cleanly. Here an oversized
+// journal is bounded by an ordinary PRE firing with no stop fired at any point, and
+// the far-older live spawn plus the firing's own fresh spawn both survive.
+func TestToolprocHookGrowthCompactsWithoutAnyStop(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "journal.jsonl")
+	beforeSize := writeOversizedJournal(t, journal)
+
+	pre := `{"session_id":"s1","tool_name":"Bash","tool_use_id":"toolu_a","tool_input":{"command":"make test"}}`
+	if err := toolprocHookOnce(strings.NewReader(pre), "pre", journal, toolproc.HookEnvelope{}, 9_000); err != nil {
+		t.Fatalf("pre hook: %v", err)
+	}
+
+	after, err := os.Stat(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() >= beforeSize || after.Size() > toolproc.JournalCompactThresholdBytes {
+		t.Fatalf("an ordinary pre firing did not bound the journal: before=%d after=%d threshold=%d",
+			beforeSize, after.Size(), int64(toolproc.JournalCompactThresholdBytes))
+	}
+
+	// Growth-triggered compaction keeps CompactJournal's invariant exactly as the
+	// stop-triggered one does: the pre-existing long-lived spawn is still there, and
+	// so is the spawn this very firing appended — a bound that swallowed the current
+	// call's own event would break the pairing the next post firing needs.
+	tab := foldJournalFile(t, journal, 10_000)
+	seen := map[string]toolproc.State{}
+	for _, p := range tab.Procs {
+		seen[p.CallID] = p.State
+	}
+	if st, ok := seen["orphan-live"]; !ok || st != toolproc.StateRunning {
+		t.Fatalf("long-lived spawn lost to growth-triggered compaction: state=%q present=%v", st, ok)
+	}
+	if st, ok := seen["toolu_a"]; !ok || st != toolproc.StateRunning {
+		t.Fatalf("this firing's own spawn lost to growth-triggered compaction: state=%q present=%v", st, ok)
+	}
+}
+
+// writeOversizedJournal builds a shared journal past JournalCompactThresholdBytes:
+// one live spawn at the very front — older than the 4 MiB tail window, so only
+// CompactJournal's keep-every-un-exited-spawn invariant can save it — followed by
+// enough fully-terminal spawn/exit pairs to push the file over the threshold. It
+// returns the pre-compaction size.
+func writeOversizedJournal(t *testing.T, path string) int64 {
+	t.Helper()
+	var buf []byte
+	appendEvent := func(ev toolproc.Event) {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf = append(buf, append(line, '\n')...)
+	}
+	appendEvent(toolproc.Event{Kind: toolproc.EvSpawn, CallID: "orphan-live", Tool: "Bash", Session: "s1", AtMS: 1})
+	for i := 0; len(buf) <= toolproc.JournalCompactThresholdBytes+(64<<10); i++ {
+		id := "done-" + strconv.Itoa(i)
+		appendEvent(toolproc.Event{Kind: toolproc.EvSpawn, CallID: id, Tool: "Bash", Session: "s1", AtMS: int64(2 + 2*i)})
+		appendEvent(toolproc.Event{Kind: toolproc.EvExit, CallID: id, AtMS: int64(3 + 2*i), Status: "ok"})
+	}
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Size() <= toolproc.JournalCompactThresholdBytes {
+		t.Fatalf("test fixture must exceed the threshold, got %d", fi.Size())
+	}
+	return fi.Size()
+}
+
+// foldJournalFile reads a journal through the STRICT fold reader (ParseEvents) and
+// folds it, so any post-compaction journal that is not fold-clean fails here rather
+// than silently yielding a thinner table.
+func foldJournalFile(t *testing.T, path string, nowMS int64) toolproc.Table {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	events, err := toolproc.ParseEvents(f)
+	if err != nil {
+		t.Fatalf("journal must stay fold-clean: %v", err)
+	}
+	tab, err := toolproc.Fold(events, nowMS, toolproc.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tab
 }
 
 // TestToolprocHookFailOpen: garbage stdin, an unknown kind, and a missing

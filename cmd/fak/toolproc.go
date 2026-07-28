@@ -150,32 +150,15 @@ func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool
 			return err
 		}
 	}
-	// Bound the shared journal at the session boundary. It is append-only across
-	// every guarded session and grows without limit, so a long-lived box would
-	// eventually parse (and store) an unbounded file — the O(journal) soft-fault
-	// storm the tail-read window (ParseTailFile) only half-solves, since a live
-	// spawn older than the window falls out of every firing's view. stop fires
-	// once per session end: the natural, rare point to reclaim fully-terminal
-	// history while preserving every still-live spawn (CompactJournal's
-	// invariant), folding the whole journal back inside one tail read.
-	//
-	// This runs even on a DEGRADED stop — one whose payload yielded no events or
-	// whose HookEvents errored (a crash-truncated or session_id-less Stop) —
-	// because compaction is a cheap stat-only no-op below threshold, and a session
-	// that never stops cleanly is exactly where unbounded growth is most likely;
-	// gating it behind the append would skip the cases that need it most. The
-	// fault, if any, propagates to runToolprocHook, which renders it fail-open (a
-	// logged stderr note, exit 0) — the "never blocks the harness" guarantee lives
-	// there, not here. replaceFileAtomic owns the Windows rename-under-contention
-	// retry; a swap still contended after that is left for the next stop.
 	if kind == "stop" {
 		// Reap the closing trace's step-advice sidecar (#5353). SessionEnd is the
 		// clean-exit boundary the stepbatoncapture writer's per-turn overwrite has no
 		// counterpart for: the stepadvice-<session>.json it rewrote each turn now has
 		// no reader, and orphans accrete one per dead trace. The delete of the closing
 		// trace's own file, plus an age sweep of any sidecar a CRASHED trace left
-		// behind (its clean-exit delete never ran) past the grace floor, run here on
-		// the same rare once-per-session boundary as the compaction below. Both are
+		// behind (its clean-exit delete never ran) past the grace floor, run on this
+		// rare once-per-session boundary — unlike the compaction below, an advisory
+		// sidecar reap has no growth-triggered form to fall back on. Both are
 		// BEST-EFFORT and their errors are deliberately swallowed — a KB advisory
 		// sidecar must never mask the compaction fault or fail the hook (the fail-open
 		// contract runToolprocHook renders). The sidecars live at <root>/.fak beside
@@ -185,9 +168,46 @@ func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool
 		adviceDir := stepAdviceDirFromJournal(journalPath)
 		_ = stepbatoncapture.ReapClosedAdvice(adviceDir, payload.SessionID)
 		_, _ = stepbatoncapture.SweepStaleAdvice(adviceDir, stepbatoncapture.DefaultStaleFloor, time.Now())
-		if _, err := toolproc.CompactJournalFile(journalPath, toolproc.JournalCompactThresholdBytes, toolproc.JournalCompactTailKeep); err != nil {
-			return fmt.Errorf("journal compaction: %w", err)
+	}
+	// Bound the shared journal on EVERY firing, not only at a clean stop (#3557).
+	// It is append-only across every guarded session and grows without limit, so a
+	// long-lived box would eventually parse (and store) an unbounded file — the
+	// O(journal) soft-fault storm the tail-read window (ParseTailFile) only
+	// half-solves, since a live spawn older than the window falls out of every
+	// firing's view. Compaction reclaims fully-terminal history while preserving
+	// every still-live spawn (CompactJournal's invariant), folding the whole journal
+	// back inside one tail read.
+	//
+	// Triggering on GROWTH rather than on the session boundary is what makes the
+	// bound hold on a crash-heavy box. A stop-gated compaction only ever runs for a
+	// session that ends cleanly: a hard crash, an OOM-kill, a host reboot, or a
+	// harness that skips SessionEnd leaves that session's contribution for some
+	// *other* session's stop to reclaim incidentally, and a workspace where no
+	// session ever stops cleanly never bounds the file at all. Every firing — pre,
+	// post, and stop alike, degraded ones included (a payload that yielded no events
+	// or whose HookEvents errored) — now attempts it, so the reclaim is driven by the
+	// growth that causes the problem instead of by an exit that may never come.
+	//
+	// The economy is CompactJournalFile's own stat gate: below the threshold this is
+	// one stat and a return, so the common case stays free. Above it the firing pays
+	// a full-file read plus a rewrite — but only in a regime where it is ALREADY
+	// reading JournalTailWindowBytes of tail per firing (the threshold is that same
+	// window), and the rewrite drops the file well back under it, so the next several
+	// thousand firings are stat-only again. Concurrent sessions may attempt the same
+	// compaction; the swap is an atomic same-directory rename, so a loser of that
+	// race wastes a rewrite but never tears the file (see CompactJournalFile).
+	//
+	// The fault, if any, propagates to runToolprocHook, which renders it fail-open (a
+	// logged stderr note, exit 0) — the "never blocks the harness" guarantee lives
+	// there, not here. A compaction fault never MASKS the hook's own fault: evErr is
+	// the more informative one and wins. replaceFileAtomic owns the Windows
+	// rename-under-contention retry; a swap still contended after that is simply left
+	// for the next firing.
+	if _, err := toolproc.CompactJournalFile(journalPath, toolproc.JournalCompactThresholdBytes, toolproc.JournalCompactTailKeep); err != nil {
+		if evErr != nil {
+			return evErr
 		}
+		return fmt.Errorf("journal compaction: %w", err)
 	}
 	return evErr
 }
@@ -206,9 +226,10 @@ func stepAdviceDirFromJournal(journalPath string) string {
 
 // appendJournalLines appends lines to the journal at journalPath and closes the
 // handle before returning, so a caller that rewrites the file next (the
-// stop-hook compaction) is never holding an open append handle across the
-// rename. The open shares FILE_SHARE_DELETE on Windows so even the open window
-// itself never blocks a concurrent session's compaction swap (#3555).
+// growth-triggered compaction below) is never holding an open append handle
+// across the rename. The open shares FILE_SHARE_DELETE on Windows so even the
+// open window itself never blocks a concurrent session's compaction swap
+// (#3555).
 func appendJournalLines(journalPath string, lines []byte) error {
 	f, err := toolproc.OpenAppendShareDelete(journalPath)
 	if err != nil {
