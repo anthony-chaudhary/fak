@@ -107,6 +107,8 @@ func (g Gap) NextAction(host string) string {
 		return "Add a regression test in " + host + " that reproduces the bug the revert named."
 	case CoverageDisciplineKey:
 		return "Raise " + host + " back over its coverage ratchet with tests for the uncovered statements."
+	case FlakeQuarantineKey:
+		return "Make the quarantined test in " + host + " deterministic (or skip it behind a tracking ticket); do not raise the rerun budget."
 	}
 	return "Close the qa-process gap in " + host + "."
 }
@@ -118,6 +120,8 @@ func (g Gap) WorkingSpine(host string) string {
 		return "Write a failing test in " + host + " that reproduces the reverted bug, confirm it fails on the reverted code, then land it alongside (or ahead of) the re-land."
 	case CoverageDisciplineKey:
 		return "Identify the uncovered statements in " + host + " (go tool cover -func), add tests that exercise them, and confirm coverage clears the ratchet."
+	case FlakeQuarantineKey:
+		return "Reproduce the non-determinism in " + host + " (run the test in a loop / under -race), fix the shared state, ordering, timing or seed that causes it, then confirm it holds green without --rerun-fail."
 	}
 	return "Fix the underlying qa-process gap in " + host + " and re-run the card."
 }
@@ -129,6 +133,8 @@ func (g Gap) InScope(host string) string {
 		return "Add a regression test in " + host + " covering the reverted behavior."
 	case CoverageDisciplineKey:
 		return "Add tests raising " + host + " over its coverage floor/ratchet."
+	case FlakeQuarantineKey:
+		return "De-flake the one named test identity in " + host + " so it passes deterministically without a rerun."
 	}
 	return "Close the named qa-process gap in " + host + "."
 }
