@@ -375,6 +375,23 @@ CLAUDE_GUARD_TURNS_PER_EPOCH = 12
 # integer identical across all three (Go golden TestClaudeGuardCompactHistoryBudget is
 # the drift tripwire). #4253.
 CLAUDE_GUARD_COMPACT_HISTORY_BUDGET = 96000
+# The CONTEXT-SOLVENCY floor (--compact-solvency-floor), as a PERCENT of the usable
+# per-turn window (CLAUDE_GUARD_MODEL_WINDOW_TOKENS - CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS).
+# DISTINCT from the shed-line above: the shed-line is the target compaction squeezes
+# toward, this is the occupancy at which compaction fires EVEN WHEN THE CACHE ECONOMICS
+# SAY NO. The gateway prices a compaction burst in cache dollars (CacheBurstPaysBack) and
+# has no term for running out of window because it never sees a window SIZE, so it refuses
+# hardest exactly where refusing is most expensive: measured over 3191 served turns the
+# fire rate ran 33% at 96-125k resident, 14% at 140-155k, 3% at 155-170k and 0.0% above
+# 170k, 100% of traces that ever fired never fired again, and 1622 turns ran past the
+# 96000 shed-line without firing. The launch path is the one place that knows the window,
+# so it derives the floor and passes it. 85% of 168000 = 142800 sits well above the
+# shed-line (so ordinary turns keep pure economics) and leaves ~25k of usable window for
+# the forced burst to land. MIRRORS cmd/dispatchworker/guard.go:
+# claudeGuardCompactSolvencyPercent and its 142800 golden by hand -- keep the derived
+# integer identical on both paths (Go TestClaudeGuardSolvencyFloorDerivation is the
+# drift tripwire).
+CLAUDE_GUARD_COMPACT_SOLVENCY_PERCENT = 85
 # Launch-prompt constituents a self-claiming lane worker can SIZE at launch: the
 # orientation files every worker loads (AGENTS.md, llms.txt, CLAUDE.md), plus a
 # workspace-root MEMORY.md when a repo keeps one. NOTE the real injected fleet memory
@@ -463,6 +480,32 @@ def derive_claude_guard_context_budget(baseline_tokens: int) -> int:
     the inline copy they used to each carry is exactly how the two drift."""
     per_turn = CLAUDE_GUARD_MODEL_WINDOW_TOKENS - CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS
     return max(per_turn, baseline_tokens) * CLAUDE_GUARD_TURNS_PER_EPOCH
+
+
+def derive_claude_guard_solvency_floor(
+    hard_context_cap: int, output_reserve: int,
+) -> int:
+    """Pure arithmetic mirror of cmd/dispatchworker/guard.go
+    deriveClaudeGuardSolvencyFloor: CLAUDE_GUARD_COMPACT_SOLVENCY_PERCENT of the USABLE
+    per-turn window. Deliberately NOT floored by the launch baseline the way the drain
+    budget is -- this is an occupancy ALARM, and a model whose usable window barely
+    exceeds the launch prompt is one where it should ring early. A degenerate
+    (non-positive) envelope returns 0, which DISARMS the override and leaves the gateway
+    on pure cache economics -- the fail-safe direction."""
+    usable = hard_context_cap - output_reserve
+    if usable <= 0:
+        return 0
+    return usable * CLAUDE_GUARD_COMPACT_SOLVENCY_PERCENT // 100
+
+
+def claude_guard_compact_solvency_floor_tokens() -> int:
+    """The derived --compact-solvency-floor for the generic envelope: 85% of
+    (200000-32000) = 142800. Mirrors
+    cmd/dispatchworker/guard.go:claudeGuardCompactSolvencyFloorTokens (which is
+    model-aware through ctxplan.EnvelopeForModel; this Python path, like the budget
+    mirror beside it, only covers the generic row)."""
+    return derive_claude_guard_solvency_floor(
+        CLAUDE_GUARD_MODEL_WINDOW_TOKENS, CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS)
 
 
 def claude_guard_context_budget_tokens(
@@ -564,6 +607,8 @@ def claude_guard_budget_args(
         "--context-budget-tokens",
         str(claude_guard_context_budget_tokens(workspace, env)),
         "--compact-history-budget", str(CLAUDE_GUARD_COMPACT_HISTORY_BUDGET),
+        "--compact-solvency-floor",
+        str(claude_guard_compact_solvency_floor_tokens()),
         "--restart-on-budget",
         "--restart-limit", CLAUDE_GUARD_RESTART_LIMIT,
         "--max-duration", CLAUDE_GUARD_MAX_DURATION,

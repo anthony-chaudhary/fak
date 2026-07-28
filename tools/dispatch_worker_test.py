@@ -336,6 +336,46 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertIn("--compact-history-budget", args)
         self.assertEqual(args[args.index("--compact-history-budget") + 1], str(shed))
 
+    def test_claude_guard_compact_solvency_floor(self) -> None:
+        # Python half of the context-solvency floor parity. Mirror of
+        # cmd/dispatchworker/guard_test.go:TestClaudeGuardSolvencyFloorDerivation --
+        # same integers, same argv position. Update both in the same commit.
+        mod = load()
+        usable = (mod.CLAUDE_GUARD_MODEL_WINDOW_TOKENS
+                  - mod.CLAUDE_GUARD_OUTPUT_RESERVE_TOKENS)
+        floor = mod.claude_guard_compact_solvency_floor_tokens()
+        # (a) Golden lock: 85% of (200000-32000).
+        self.assertEqual(
+            floor, 142800,
+            "solvency floor diverged from Go's "
+            "TestClaudeGuardSolvencyFloorDerivation golden; re-sync the mirrors")
+        # (b) STRICTLY above the compact shed-line. A floor at or below it would force a
+        # fire on essentially every past-budget turn and discard the cache economics
+        # wholesale -- the override is a last resort, not a replacement for the gate.
+        self.assertGreater(
+            floor, mod.CLAUDE_GUARD_COMPACT_HISTORY_BUDGET,
+            f"solvency floor {floor} <= compact shed-line "
+            f"{mod.CLAUDE_GUARD_COMPACT_HISTORY_BUDGET}: the override would swallow "
+            "the burst gate entirely")
+        # (c) STRICTLY below the usable window, with real headroom for the forced burst
+        # to land and repay. A floor at the ceiling rings the alarm after the wall.
+        self.assertLess(floor, usable)
+        self.assertGreaterEqual(
+            usable - floor, 20000,
+            f"solvency floor {floor} leaves only {usable - floor} tokens of usable "
+            "window; want >= 20000 for the forced burst to land")
+        # (d) Fail-safe: a degenerate envelope DISARMS the override (0) rather than
+        # forcing a fire every turn. 0 is the documented "pure economics" value.
+        self.assertEqual(mod.derive_claude_guard_solvency_floor(1000, 4000), 0)
+        # (e) Model-aware arithmetic: a smaller window derives its own lower floor.
+        small = mod.derive_claude_guard_solvency_floor(64000, 32000)
+        self.assertTrue(0 < small < floor)
+        # (f) It is actually WIRED into the claude guard argv (not just a constant).
+        args = mod.claude_guard_budget_args()
+        self.assertIn("--compact-solvency-floor", args)
+        self.assertEqual(
+            args[args.index("--compact-solvency-floor") + 1], str(floor))
+
     def test_measure_launch_baseline_floors_and_tracks(self) -> None:
         # Python half of the measurement-seam parity (#3522). Mirror of
         # cmd/dispatchworker/guard_test.go:TestMeasureLaunchBaselineFloorsAndTracks —

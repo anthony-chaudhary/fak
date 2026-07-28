@@ -45,6 +45,11 @@ func cmdGuard(argv []string) {
 	// `allow` is unambiguous and never a program to wrap. It maintains the overlay
 	// out-of-band from the agent (see guard_allow.go) and returns; it never binds a gateway.
 	if len(argv) > 0 && argv[0] == "allow" {
+		// The propose-only modes (#5182) are peeled FIRST: they are extra verbs on the
+		// same `allow` word, and cmdGuardAllow's flag.ExitOnError parse would reject
+		// --propose/--from-proposals as undefined flags before the mode could ever run.
+		// Returns (falls through) whenever no proposals flag is present.
+		guardAllowProposalsRoute(argv[1:])
 		cmdGuardAllow(argv[1:])
 		return
 	}
@@ -127,6 +132,7 @@ func cmdGuard(argv []string) {
 	ctxViewBudget := fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
 	compactAnchorHead := fs.Bool("compact-anchor-head", true, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything (see the 'anchor-starved' diagnostic). DEFAULT-ON, and every fire stays gated on the burst economics (CacheBurstPaysBack, #1408): a WARM session with no bounded turns budget never bursts — it fires only when a wired session-turn horizon repays the one-time burst, or when the trace OBSERVABLY idled past the message-breakpoint cache TTL since its last served turn (the suffix re-bills cold that turn anyway, so the cut is penalty-free — the long-session firing path a plain `fak guard -- claude` actually hits). Pass =false to pin the old warm-only first-breakpoint anchor.")
+	compactSolvencyFloor := fs.Int("compact-solvency-floor", 0, "resident-token occupancy at or above which CONTEXT SOLVENCY overrides the head-anchored burst gate's cache economics: once this trace's OBSERVED peak resident window reaches it, --compact-history-budget fires even when the burst does not repay (CacheBurstPaysBack says no). It fixes the measured inversion where the pure-economics gate refuses HARDEST exactly where refusing is most expensive — over 3191 real served turns the fire rate ran 33% at 96-125k, 14% at 140-155k, 3% at 155-170k and 0% above 170k, and 100% of traces that ever fired never fired again, drifting a median +33.8k further into the window before the run ended. Above the floor the question stops being 'does this burst pay?' and becomes 'can we afford not to?': the burst penalty is one-time and bounded, hitting the context wall costs the whole session. Set it to a fraction (~0.85) of (model context window − output reserve); the gateway cannot derive it because it never sees a window size. 0 (the default) keeps the gate on pure economics, byte-for-byte. Forced fires are counted apart as 'solvency-forced' in the exit summary so they are never booked as cache wins. Consulted only when --compact-anchor-head is on and the head re-anchor engages; it can only ever turn a burst_unprofitable BAIL into a fire, never the reverse.")
 	assumeSessionTurns := fs.Int("assume-session-turns", gateway.DefaultAssumedSessionTurns, "the session length the head-anchored burst gate (--compact-anchor-head) ASSUMES when no bounded turn horizon is wired — the common `fak guard -- claude` case, where the wrapped harness owns the turn loop and hands the gateway no Budget.TurnsLeft. It lets a WARM continuously-active long session shed early instead of waiting to OBSERVABLY idle past the message-span cache TTL: the gate maps the trace's real served-turn depth to CurrentTurn and this value to TotalTurns, fires early (many repaying turns left) and refuses near the presumed end — the same one-time-burst break-even economics (CacheBurstPaysBack, #1408), just given a history-based length instead of refusing outright. DEFAULT-ON at gateway.DefaultAssumedSessionTurns; a genuine wired Budget.TurnsLeft horizon always WINS over this prior, and a large invalidated suffix still refuses regardless. Pass 0 to disable (byte-for-byte the conservative no-horizon behavior). Consulted only when --compact-anchor-head is on and the head re-anchor engages; inert on every other path.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
 	elideStaleReads := fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default (gateway.DefaultElideStaleReads): replace a Read tool_result whose file was Edited/Written in a LATER in-session turn (a stale, superseded snapshot no longer reflecting disk) with a compact fak_context_restore marker, in the SAME cache-safe working-set band as --elide-result-bytes and stashing the pre-edit body behind a restore handle. The safer, restorable sibling of --elide-result-bytes: strictly more conservative predicate (superseded, not merely big), fail-safe identity on any ambiguity, protected cache prefix proven byte-identical. Size-independent; lossy but restorable. Pass =false to opt out. Anthropic passthrough only.")
@@ -367,6 +373,13 @@ func cmdGuard(argv []string) {
 	if logCloser != nil {
 		defer func() { _ = logCloser.Close() }()
 	}
+
+	// Arm the session-scope allow-overlay drop (#5180) BEFORE the floor reads the overlay
+	// layers, so the path armed for teardown is by construction the exact session file this
+	// launch is about to honor. Arming after guardTraceID is finalized (~370 lines below)
+	// would name a DIFFERENT file than the floor read and leak the widening. The matching
+	// drop runs in finishGuardChildAndReport's terminal region — see guard_allow_scope.go.
+	armGuardAllowSessionScopeTeardown()
 
 	// 1. Install the capability floor: an explicit --policy file wins; otherwise the embedded
 	//    guard floor, unioned with the operator allow overlay. With NO floor the kernel
@@ -998,10 +1011,11 @@ func cmdGuard(argv []string) {
 		AutoCheckpoint: func(session, reason string) {
 			_ = runWipAutoCheckpoint(io.Discard, io.Discard, []string{"--session", session, "--reason", reason})
 		},
-		CompactAnchorHead:  *compactAnchorHead,
-		AssumeSessionTurns: *assumeSessionTurns,
-		ElideResultBytes:   *elideResultBytes,
-		ElideStaleReads:    *elideStaleReads,
+		CompactAnchorHead:          *compactAnchorHead,
+		AssumeSessionTurns:         *assumeSessionTurns,
+		CompactSolvencyFloorTokens: *compactSolvencyFloor,
+		ElideResultBytes:           *elideResultBytes,
+		ElideStaleReads:            *elideStaleReads,
 		// Managed-cache posture (--managed-cache, epic #1844 C6): when active, the gateway
 		// upgrades the stable-prefix cache_control breakpoint to the 1h TTL tier on the
 		// outbound Anthropic wire (maybeUpgradeAnthropicCacheTTL1H). Resolved above from

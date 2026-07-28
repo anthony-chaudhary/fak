@@ -161,6 +161,7 @@ func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 		"--precompact-hook", "enforce",
 		"--context-budget-tokens", strconv.Itoa(got),
 		"--compact-history-budget", strconv.Itoa(claudeGuardCompactHistoryBudget),
+		"--compact-solvency-floor", "142800",
 		"--restart-on-budget",
 		"--restart-limit", "16",
 		"--max-duration", "1740s",
@@ -207,6 +208,62 @@ func TestClaudeGuardCompactHistoryBudget(t *testing.T) {
 	if turns := drain / claudeGuardCompactHistoryBudget; turns < claudeGuardTurnsPerEpoch {
 		t.Errorf("drain budget %d funds only %d turns at the shed-line resident %d, want >= %d: compaction is unreachable before BUDGET_CONTEXT_EXHAUSTED",
 			drain, turns, claudeGuardCompactHistoryBudget, claudeGuardTurnsPerEpoch)
+	}
+}
+
+// TestClaudeGuardSolvencyFloorDerivation pins the CONTEXT-SOLVENCY floor the launch path
+// hands the gateway as --compact-solvency-floor. The gateway cannot derive this itself —
+// it prices a compaction burst in cache dollars and never sees a window SIZE — so the
+// launcher, which does know the envelope, must supply it or the override stays inert and
+// the measured fire-rate inversion (33% at 96-125k occupancy down to 0% above 170k, with
+// 100% of firing traces never firing again) simply continues.
+//
+// Parity partner: tools/dispatch_worker_test.py
+// test_claude_guard_compact_solvency_floor (same integers, same argv position).
+func TestClaudeGuardSolvencyFloorDerivation(t *testing.T) {
+	env := ctxplan.EnvelopeForModel("")
+	usable := env.HardContextCap - env.OutputReserve
+	got := deriveClaudeGuardSolvencyFloor(env.HardContextCap, env.OutputReserve)
+
+	// (a) Golden lock: 85% of (200000 − 32000). Keep identical to the Python mirror.
+	if want := 142800; got != want {
+		t.Errorf("derived solvency floor = %d, want %d; keep tools/dispatch_worker.py in sync", got, want)
+	}
+	// (b) STRICTLY ABOVE the compact shed-line. A floor at or below it would force a fire
+	// on essentially every past-budget turn and discard the cache economics wholesale —
+	// the override is a last resort, not a replacement for the gate.
+	if got <= claudeGuardCompactHistoryBudget {
+		t.Errorf("solvency floor %d <= compact shed-line %d: the override would swallow the burst gate entirely",
+			got, claudeGuardCompactHistoryBudget)
+	}
+	// (c) STRICTLY BELOW the usable window, with real headroom left for the forced burst
+	// to land and repay. A floor at the ceiling rings the alarm after the wall.
+	if got >= usable {
+		t.Errorf("solvency floor %d >= usable window %d: the forced fire arrives too late to help", got, usable)
+	}
+	if headroom := usable - got; headroom < 20000 {
+		t.Errorf("solvency floor %d leaves only %d tokens of usable window; want >= 20000 for the forced burst to land",
+			got, headroom)
+	}
+	// (d) Fail-safe: a degenerate envelope DISARMS the override (0) rather than forcing a
+	// fire on every turn. Zero is the documented "pure economics, byte-for-byte" value.
+	if disarmed := deriveClaudeGuardSolvencyFloor(1000, 4000); disarmed != 0 {
+		t.Errorf("a degenerate envelope must disarm the override, got %d", disarmed)
+	}
+	// (e) Model-aware: a smaller window yields a proportionally smaller floor, never the
+	// generic constant. (ctxplan's fable row is the small-window case.)
+	small := deriveClaudeGuardSolvencyFloor(64000, 32000)
+	if small <= 0 || small >= got {
+		t.Errorf("a small-window model must derive its own lower floor, got %d (generic %d)", small, got)
+	}
+	// (f) Actually WIRED into the argv — a derived constant nobody passes is inert.
+	args := claudeGuardArgs("", "", nil)
+	i := slices.Index(args, "--compact-solvency-floor")
+	if i < 0 || i+1 >= len(args) {
+		t.Fatalf("claudeGuardArgs() does not carry --compact-solvency-floor: %v", args)
+	}
+	if args[i+1] != strconv.Itoa(got) {
+		t.Errorf("--compact-solvency-floor argv = %q, want %q", args[i+1], strconv.Itoa(got))
 	}
 }
 

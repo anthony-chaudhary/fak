@@ -773,6 +773,17 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		// session finally shed its sprawled middle (the #1407 cold case), without ever guessing:
 		// a warm trace still refuses without a repaying horizon.
 		opts.ColdCache = s.metrics.coldMessageSpanCache(trace, time.Now(), s.cacheTTL1H)
+		// Context-solvency override (the occupancy axis): hand the gate the trace's OBSERVED peak
+		// resident window alongside the armed floor, so a trace that has climbed into the danger
+		// band sheds even when the burst does not repay. PEAK (the same heldResidentPeak the
+		// volume-aware horizon reads) rather than last-turn resident, for two reasons: it is
+		// monotone, so a single small turn cannot disarm a session that has proven it holds a
+		// large context; and once a trace is that heavy it SHOULD compact every turn — this is a
+		// per-request wire rewrite, so the drop is re-applied each turn and the "burst" the gate
+		// prices as one-time-per-fire is in steady state amortized across turns that all forward
+		// the same compacted shape. Both values must be positive or the override stays disarmed.
+		opts.ResidentTokens = int(s.metrics.heldResidentPeakTokens(trace))
+		opts.SolvencyFloorTokens = s.compactSolvencyFloorTokens
 	}
 	out, outcome := agent.CompactAnthropicHistoryWithOptions(req.Raw, opts)
 	req.Raw = out

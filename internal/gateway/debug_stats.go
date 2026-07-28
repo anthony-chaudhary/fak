@@ -367,9 +367,20 @@ func formatTurnDebugStatsWithBudget(trace, wire string, stream bool, finish stri
 	if len(safetyOpt) > 0 {
 		safety = safetyOpt[0]
 	}
+	// compact= must not conflate the two opposite readings of "did not fire". A bare `none` covers
+	// BOTH the benign case (resident is under the budget line — nothing to shed, working as designed)
+	// and the alarming one (resident is already PAST the line and the burst gate refused anyway),
+	// and that conflation is exactly what let a measured pathology hide in plain sight: across 3191
+	// real served turns, 1622 ran OVER the line without firing — median 23.4k over, max 97.6k over —
+	// every one of them rendered as an unremarkable `compact=none`. Splitting the label makes the
+	// second case greppable, so "compaction is enabled and fired N times" can never again be read as
+	// "occupancy is under control".
 	compact := "none"
-	if compacted {
+	switch {
+	case compacted:
 		compact = "fired"
+	case compactionBudgetPast(prompt, completion, cacheRead, cacheCreate, compactBudget):
+		compact = "none-past-budget"
 	}
 	health := "n/a"
 	if have {

@@ -160,6 +160,33 @@ const (
 	// `bailed: under_budget`). Mirrors gateway.HeadlessCompactHistoryBudget (drift pinned
 	// by TestClaudeGuardCompactHistoryBudget); Python mirrors it by hand. #4253.
 	claudeGuardCompactHistoryBudget = 96000
+	// claudeGuardCompactSolvencyPercent is the fraction (in PERCENT) of the model's
+	// USABLE per-turn window — hardCap − outputReserve, the same ceiling the drain budget
+	// is derived from — at or above which CONTEXT SOLVENCY overrides the head-anchored
+	// burst gate's cache economics (`--compact-solvency-floor`, gateway
+	// Config.CompactSolvencyFloorTokens).
+	//
+	// Why the override needs an operator-supplied number at all: the gateway prices a
+	// compaction burst in cache dollars (CacheBurstPaysBack, #1408) and has NO term for
+	// running out of window, because it never sees a window SIZE — it only sees the bytes
+	// of one request. So it refuses hardest exactly where refusing is most expensive.
+	// Measured over 3191 served turns in .dispatch-runs, the fire rate INVERTED against
+	// occupancy (33.4% at 96–110k, 33.9% at 110–125k, 24.7% at 125–140k, 14.3% at
+	// 140–155k, 3.4% at 155–170k, 0.0% above 170k), 100% of the traces that ever fired
+	// never fired again, and their un-compacted tails carried resident a median +33.8k
+	// further in. 1622 turns ran PAST the 96000 shed-line above without firing (median
+	// 23.4k over, max 97.6k over) and 5% of traces peaked past the usable window. This
+	// file is the one place in the launch path that knows the window, so it derives the
+	// floor and hands it over.
+	//
+	// Why 85%: the floor must sit well ABOVE the shed-line (96000 ≈ 57% of 168000) or it
+	// would fire on every ordinary turn and throw away the cache economics wholesale; and
+	// well BELOW the ceiling or the forced fire arrives after the wall. 85% of 168000 =
+	// 142800 leaves ~25k of usable window — more than a full witnessed turn's ~1.8k/turn
+	// climb plus the largest single tool result — for the forced burst to land and repay.
+	// It is a LAST-RESORT line, not a target: between the shed-line and this floor the
+	// pure economics still decide every fire.
+	claudeGuardCompactSolvencyPercent = 85
 	// claudeGuardRestartLimit caps --restart-on-budget relaunches. The budget above
 	// funds claudeGuardTurnsPerEpoch full-window turns per epoch (each turn debits its
 	// FULL resident window), so a relaunch happens every ~12+ turns rather than the ~2
@@ -205,6 +232,32 @@ func deriveClaudeGuardContextBudget(baselineTokens, hardContextCap, outputReserv
 		perTurn = baselineTokens
 	}
 	return perTurn * claudeGuardTurnsPerEpoch
+}
+
+// deriveClaudeGuardSolvencyFloor is the pure arithmetic behind --compact-solvency-floor:
+// claudeGuardCompactSolvencyPercent of the USABLE per-turn window (hardCap −
+// outputReserve). Model-aware through the same ceiling the drain budget uses, so a
+// small-window model gets a proportionally lower floor rather than an unreachable one.
+//
+// Deliberately NOT floored by the launch baseline the way the drain budget is: the floor
+// is an occupancy ALARM, and a model whose usable window is barely wider than the launch
+// prompt is one where the alarm should ring early and often. Returns 0 for a degenerate
+// (non-positive) envelope, which DISARMS the override and leaves the gate on pure
+// economics — the fail-safe direction.
+func deriveClaudeGuardSolvencyFloor(hardContextCap, outputReserve int) int {
+	usable := hardContextCap - outputReserve
+	if usable <= 0 {
+		return 0
+	}
+	return usable * claudeGuardCompactSolvencyPercent / 100
+}
+
+// claudeGuardCompactSolvencyFloorTokens returns the derived solvency floor as the
+// `--compact-solvency-floor` argv string for this worker's model. Mirrors
+// dispatch_worker.claude_guard_compact_solvency_floor_tokens on the generic envelope.
+func claudeGuardCompactSolvencyFloorTokens(workerModel string) string {
+	envelope := ctxplan.EnvelopeForModel(workerModel)
+	return strconv.Itoa(deriveClaudeGuardSolvencyFloor(envelope.HardContextCap, envelope.OutputReserve))
 }
 
 // launchConstituentFiles are the workspace-ROOT launch-prompt constituents a
@@ -340,6 +393,7 @@ func claudeGuardArgs(workspace, workerModel string, env map[string]string) []str
 		"--precompact-hook", "enforce",
 		"--context-budget-tokens", claudeGuardContextBudgetTokens(workspace, workerModel, env),
 		"--compact-history-budget", strconv.Itoa(claudeGuardCompactHistoryBudget),
+		"--compact-solvency-floor", claudeGuardCompactSolvencyFloorTokens(workerModel),
 		"--restart-on-budget",
 		"--restart-limit", claudeGuardRestartLimit,
 		"--max-duration", claudeGuardMaxDuration(),

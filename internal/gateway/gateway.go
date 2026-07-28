@@ -617,6 +617,25 @@ type Config struct {
 	// DefaultAssumedSessionTurns. Consulted only when CompactAnchorHead is on and the head
 	// re-anchor engages; inert on every other path.
 	AssumeSessionTurns int
+	// CompactSolvencyFloorTokens arms the context-solvency override on the head-anchored burst
+	// gate (agent.CompactOptions.SolvencyFloorTokens): once a trace's OBSERVED peak resident
+	// window reaches this many tokens, a head-anchored compaction fires even when the burst does
+	// not repay in cache dollars. It answers the measured pathology that the pure-economics gate
+	// refuses HARDEST exactly where refusing is most expensive — over 3191 real served turns the
+	// fire rate inverted with occupancy (33% at 96-125k → 3.4% at 155-170k → 0% above 170k) and
+	// 100% of traces that ever fired never fired again, drifting a median +33.8k further into the
+	// window before the run ended.
+	//
+	// The caller supplies it because only the caller knows the model's context window: the right
+	// floor is a fraction of (window − output reserve), which the gateway cannot derive (it never
+	// sees a window size). `fak guard --compact-solvency-floor` surfaces it, and the dispatch
+	// fleet derives it from its own window/reserve constants.
+	//
+	// 0 (the default) leaves the burst gate byte-for-byte on pure economics, so every existing
+	// caller, ablation row and test is unchanged. Consulted only when CompactAnchorHead is on and
+	// the head re-anchor engages; inert on every other path, and it can only ever turn a
+	// burst_unprofitable bail INTO a fire — never the reverse.
+	CompactSolvencyFloorTokens int
 	// ElideResultBytes is the oversized tool-result elision threshold.
 	// 0 keeps the transform inert; a positive value arms the documented head+tail
 	// shrinker for results outside the active working set. The command surfaces default this
@@ -1559,6 +1578,11 @@ type Server struct {
 	// early on a warm continuously-active long session; 0 keeps the conservative behavior.
 	assumeSessionTurns int
 
+	// compactSolvencyFloorTokens mirrors Config.CompactSolvencyFloorTokens: the observed peak
+	// resident occupancy at or above which context solvency overrides the head-anchored burst
+	// gate's cache economics. 0 (the default) leaves the gate on pure economics.
+	compactSolvencyFloorTokens int
+
 	// exposeProfile mirrors Config.ExposeProfile: the descriptive surface label
 	// ("headless"|"interactive") a usage-provenance stamp reads back via ExposeProfile().
 	exposeProfile string
@@ -1905,6 +1929,7 @@ func New(cfg Config) (*Server, error) {
 		ctxExpenseGate:               cfg.CtxExpenseGate || envEnabled("FAK_CTX_EXPENSE_GATE"),
 		compactAnchorHead:            cfg.CompactAnchorHead,
 		assumeSessionTurns:           cfg.AssumeSessionTurns,
+		compactSolvencyFloorTokens:   cfg.CompactSolvencyFloorTokens,
 		exposeProfile:                cfg.ExposeProfile,
 		elideResultBytes:             ablateUncachedTrimBytes(cfg.ElideResultBytes),
 		elideStaleReads:              cfg.ElideStaleReads,

@@ -168,6 +168,12 @@ type CompactOutcome struct {
 	ResidueRestoreBytes    []byte
 	ResidueBytesDropped    int
 	PositiveAssertionsKept int
+	// SolvencyForced marks a FIRED head-anchored compaction that the cache economics REFUSED and
+	// the context-solvency override fired anyway (see CompactOptions.SolvencyFloorTokens). It is
+	// a deliberately unprofitable burst — bounded one-time cost, paid to keep the session inside
+	// its window — so an operator (and the cache-value ledger) must not read it as a profitable
+	// fire. False on every economics-approved fire and on every bail.
+	SolvencyForced bool
 }
 
 // CompactAnchor selects where the protected (verbatim-copied) prefix ends.
@@ -235,6 +241,39 @@ type CompactOptions struct {
 	// e.g. ColdCache) still fires horizon-free regardless of the margin, since there is no estimation
 	// error to hedge.
 	MinHorizonMargin int
+
+	// Context-solvency override — the OCCUPANCY axis of the head-anchored burst gate, and the
+	// answer to "compaction is enabled, fires, and the window still fills up".
+	//
+	// CacheBurstPaysBack prices a fire in CACHE DOLLARS: fire only when the per-turn read saving
+	// repays the one-time cold re-write within the remaining horizon. That objective function has
+	// no term for RUNNING OUT OF WINDOW, so the gate refuses hardest exactly where refusing is
+	// most expensive. Measured over 3191 real served turns in .dispatch-runs (224 traces), the
+	// fire rate INVERTS against occupancy — 33.4% at 96-110k, 33.9% at 110-125k, 24.7% at
+	// 125-140k, 14.3% at 140-155k, 3.4% at 155-170k, 0.0% above 170k — because breakEven ≈ 11.5 ×
+	// (invalidatedSuffix / droppedMiddle) degrades monotonically as a session deepens (Claude
+	// Code's last breakpoint sits ever further toward the tail, growing the invalidated span
+	// faster than the droppable middle). The result is a ONE-WAY LATCH: of the traces that ever
+	// fired, 100% never fired again, running a median 9-turn (max 16) un-compacted tail over
+	// which resident rose a median +33.8k (max +53.3k) — straight into PROMPT_TOO_LONG.
+	//
+	// A burst that never repays in dollars still pays for itself if it keeps the session alive:
+	// the penalty is ONE-TIME and bounded (a cold re-write of the invalidated suffix) while
+	// hitting the context wall costs the whole session. So above a floor the gate stops asking
+	// whether the burst is PROFITABLE and asks only whether it is NECESSARY.
+	//
+	// ResidentTokens is the caller's OBSERVED resident window occupancy for this trace (the same
+	// input+cached currency the coordinator meters); SolvencyFloorTokens is the occupancy at or
+	// above which solvency overrides the economics. BOTH must be positive to arm the override —
+	// either one unset leaves the gate byte-for-byte on its pure-economics behavior, so every
+	// existing caller, ablation row and test is unchanged. The override can ONLY convert a
+	// burst_unprofitable BAIL into a fire: it never suppresses a fire, never fires below the
+	// budget line (it sits downstream of the under_budget bail), and relaxes no correctness guard
+	// — role alternation, the orphaned-tool_result guards, the cached-span refusal and the splice
+	// verification all still run and still fail safe to identity. A forced fire is reported as
+	// CompactOutcome.SolvencyForced so it is never mistaken for a profitable one.
+	ResidentTokens      int
+	SolvencyFloorTokens int
 }
 
 // CompactAnthropicHistory rewrites an outbound Anthropic /v1/messages body so the byte range
@@ -503,6 +542,7 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	//     suffix within the remaining session horizon. An unknown horizon (TotalTurns<=0) returns false,
 	//     so a caller that cannot supply the horizon never bursts the cache. The firstbp default never
 	//     reaches this branch (pfxEnd>=0 there, or Anchor!=Head), so its body is unchanged.
+	solvencyForced := false
 	if opts.Anchor == CompactAnchorHead && pfxEnd < 0 {
 		readMult, writeMult := opts.ReadMult, opts.WriteMult
 		if readMult <= 0 {
@@ -519,7 +559,14 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 			invalidatedSuffixTokens = 0
 		}
 		if !CacheBurstPaysBackWithMargin(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult, opts.MinHorizonMargin) {
-			return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
+			// The burst does not repay in cache dollars. Refuse — UNLESS the trace has climbed to
+			// the solvency floor, where the question stops being "is this profitable?" and becomes
+			// "can we afford not to?" (CompactOptions.SolvencyFloorTokens). A forced fire is
+			// labeled on the outcome so it is never counted as a profitable one.
+			if !compactionSolvencyOverride(opts) {
+				return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
+			}
+			solvencyForced = true
 		}
 	}
 
@@ -538,7 +585,17 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 		PositiveResidue: positiveResidue.Text, ResidueRestoreID: positiveResidue.RestoreID,
 		ResidueRestoreBytes: positiveResidue.RestoreBytes, ResidueBytesDropped: positiveResidue.DroppedBytes,
 		PositiveAssertionsKept: positiveResidue.AssertionsKept,
+		SolvencyForced:         solvencyForced,
 	}
+}
+
+// compactionSolvencyOverride reports whether context SOLVENCY overrides the head-anchored burst
+// gate's cache economics for this attempt: the caller supplied a real observed occupancy AND armed
+// a floor, and the occupancy has reached it. Both zero values disarm it, so a caller that cannot
+// observe occupancy never forces a burst. See CompactOptions.SolvencyFloorTokens for why an
+// unprofitable burst is still the right trade this high in the window.
+func compactionSolvencyOverride(opts CompactOptions) bool {
+	return opts.SolvencyFloorTokens > 0 && opts.ResidentTokens >= opts.SolvencyFloorTokens
 }
 
 // headBurstEconomics prices a head-anchored drop for the CacheBurstPaysBack gate.

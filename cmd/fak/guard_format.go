@@ -149,6 +149,16 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 			b.WriteString(guardRow("  ⚠ anchor-starved", fmt.Sprintf("x%d", sum.CompactionAnchorStarved)))
 			b.WriteString(guardNote(fmt.Sprintf("protected prefix exceeds the %d-tok budget; compaction cannot fire on this traffic regardless of session length (a re-anchor is the fix, not a tighter budget: --compact-anchor-head is default-on, so either it was disabled or the traffic carries no stable system/tools breakpoint — #1407)", sum.CompactionBudget)))
 		}
+		// Solvency-forced is a SUBSET of the fires above, surfaced apart because it is economically
+		// opposite: an ordinary fire repays in cache dollars, a forced one is a burst knowingly taken
+		// at a LOSS to keep the session inside its context window (--compact-solvency-floor). Not a
+		// fault — the override doing its job — but it must never be read as a cache win, and a run
+		// where forced fires dominate is telling the operator the window, not the cache, is what
+		// binds this workload.
+		if sum.CompactionSolvencyForced > 0 {
+			b.WriteString(guardRow("  solvency-forced", fmt.Sprintf("x%d of %d fired", sum.CompactionSolvencyForced, sum.CompactionFired)))
+			b.WriteString(guardNote("the burst economics REFUSED these and --compact-solvency-floor fired them anyway: deliberately unprofitable sheds bought to stay inside the context window. Count them as survival, not savings; if they dominate, the window is the binding constraint on this workload"))
+		}
 	}
 	// Tool-floor prune (the INBOUND tools[] lever): how many unreachable tool DEFINITIONS fak
 	// dropped from the advertised surface this session — a pure uncached-token saving that

@@ -189,6 +189,12 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 		m.compactAttempts["fired"]++
 		m.compactDropped += uint64(out.Dropped)
 		m.compactShed += uint64(out.ShedTokens)
+		if out.SolvencyForced {
+			// A subset of "fired": the burst economics refused and the context-solvency floor
+			// overrode them. Counted apart so an unprofitable-by-design burst is never booked as
+			// a cache win (see AdjudicationSummary.CompactionSolvencyForced).
+			m.compactSolvencyForced++
+		}
 	default:
 		m.compactAttempts["bailed"]++
 		m.compactBailReasons[out.Reason]++

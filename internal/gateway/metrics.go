@@ -130,18 +130,19 @@ type gatewayMetrics struct {
 	//   - OBSERVED (provider-reported, relayed): compactCacheReads / compactLastCacheRd are the
 	//     upstream's cache_read_input_tokens. fak attributes nothing to itself from them.
 	// Kept off inferenceMu — different hot path, no lock coupling.
-	compactMu            sync.Mutex
-	compactAttempts      map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
-	compactBailReasons   map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
-	compactDropped       uint64            // WITNESSED: whole messages stubbed out across all fires
-	compactShed          uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
-	compactCacheReads    uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
-	compactLastCacheRd   float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
-	compactAnchorStarved uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
-	uncachedTrimResults  uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
-	uncachedTrimShed     uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
-	ttlUpgrades          map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
-	placementAttempts    map[string]uint64 // WITNESSED: offensive cache-breakpoint placement attempts by outcome ("placed" | agent.BreakpointReason*). "placed" is the fak-authored slice — a breakpoint spliced onto a caller that sent none, so the provider cache_read it earns is fak-unlocked; "already_set" is the Claude-Code shape fak leaves alone (the client's cache, not fak's).
+	compactMu             sync.Mutex
+	compactAttempts       map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
+	compactBailReasons    map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
+	compactDropped        uint64            // WITNESSED: whole messages stubbed out across all fires
+	compactShed           uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
+	compactCacheReads     uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
+	compactLastCacheRd    float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
+	compactAnchorStarved  uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
+	compactSolvencyForced uint64            // WITNESSED: fires the burst economics REFUSED that the context-solvency floor forced anyway (agent.CompactOutcome.SolvencyForced). A subset of attempts[fired]; these are deliberately unprofitable bursts bought to keep the session inside its window, so they must never be read as cache wins.
+	uncachedTrimResults   uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
+	uncachedTrimShed      uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
+	ttlUpgrades           map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
+	placementAttempts     map[string]uint64 // WITNESSED: offensive cache-breakpoint placement attempts by outcome ("placed" | agent.BreakpointReason*). "placed" is the fak-authored slice — a breakpoint spliced onto a caller that sent none, so the provider cache_read it earns is fak-unlocked; "already_set" is the Claude-Code shape fak leaves alone (the client's cache, not fak's).
 	// anchorMon is the LIVE loop over that same placement stream (#3622): the counter above is a
 	// cumulative tally nobody watches, so a session whose head turns volatile mid-conversation just
 	// stops incrementing "placed" and nothing fires. The monitor folds each outcome into a rolling
@@ -702,6 +703,15 @@ type AdjudicationSummary struct {
 	// a plain under_budget is a benign short session (nothing to shed), an anchor-starved one is the
 	// dormant-on-real-Claude-Code-traffic pathology (#1407) that no budget tightening can fix.
 	CompactionAnchorStarved uint64 `json:"compaction_anchor_starved"`
+	// CompactionSolvencyForced is the count of fires the head-anchored burst economics REFUSED
+	// and the context-solvency floor forced anyway (Config.CompactSolvencyFloorTokens). It is a
+	// SUBSET of CompactionFired, broken out because the two are economically opposite: an
+	// ordinary fire is a burst that repays in cache dollars, a forced one is a burst knowingly
+	// taken at a loss to keep the session inside its context window. A nonzero count is not a
+	// fault — it is the override doing its job — but the cache-value ledger must not book these
+	// as savings, and a count that dominates CompactionFired means the window, not the cache, is
+	// the binding constraint on this workload.
+	CompactionSolvencyForced uint64 `json:"compaction_solvency_forced"`
 	// CompactionBudget is the resident-token threshold the history rewrite fires past
 	// (Config.CompactHistoryBudget; 0 means the lever is OFF, body forwarded byte-for-byte).
 	// Surfaced so the exit line can say whether compaction is ENABLED and merely idle
@@ -857,6 +867,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.CompactionCacheReadTokens = comp.cacheReads
 	sum.LastCompactionCacheRead = comp.lastCacheRd
 	sum.CompactionAnchorStarved = comp.anchorStarved
+	sum.CompactionSolvencyForced = comp.solvencyForced
 	// Carry the per-reason bail breakdown so the banner can explain the bailed lump (the
 	// snapshot already copied it under compactMu); only attach a non-empty map so a clean
 	// session keeps the JSON field absent (omitempty).
