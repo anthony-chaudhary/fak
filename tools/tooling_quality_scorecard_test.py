@@ -6,6 +6,9 @@ Run:  python -m pytest tools/tooling_quality_scorecard_test.py -q
 """
 from __future__ import annotations
 
+import pathlib
+import tempfile
+
 import tooling_quality_scorecard as tq
 
 
@@ -237,14 +240,25 @@ def test_format_unavailable_fails_closed():
     assert k["score"] == 0 and k["errored"] is True
 
 
-def test_gather_ruff_absent_fails_closed(monkeypatch, tmp_path):
+def test_gather_ruff_absent_fails_closed():
     # end-to-end: run_toolchain=True but ruff yields no verdict → lint/format
     # KPIs come back fail-closed (0), NOT skipped@100.
-    (tmp_path / "tools").mkdir()
-    (tmp_path / "tools" / "x.py").write_text("def f():\n    return 1\n", encoding="utf-8")
-    monkeypatch.setattr(tq, "_ruff_check", lambda _d: None)
-    monkeypatch.setattr(tq, "_ruff_format_check", lambda _d: None)
-    kpis = {k["kpi"]: k for k in tq.gather(tmp_path, run_toolchain=True)}
+    #
+    # tempfile + explicit restore rather than pytest's tmp_path/monkeypatch: main()
+    # above is the pytest-free runner CI actually invokes, and it calls every test_*
+    # with no arguments -- so a fixture-taking signature raises TypeError before a
+    # single assertion runs, and the fail-closed behaviour goes unchecked.
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        (root / "tools").mkdir()
+        (root / "tools" / "x.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+        saved = (tq._ruff_check, tq._ruff_format_check)
+        tq._ruff_check = lambda _d: None
+        tq._ruff_format_check = lambda _d: None
+        try:
+            kpis = {k["kpi"]: k for k in tq.gather(root, run_toolchain=True)}
+        finally:
+            tq._ruff_check, tq._ruff_format_check = saved
     assert kpis["lint"]["score"] == 0 and kpis["lint"].get("errored") is True
     assert kpis["format"]["score"] == 0 and kpis["format"].get("errored") is True
 
