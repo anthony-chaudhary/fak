@@ -314,9 +314,11 @@ func TestPkgSplitCatchesInlineCard(t *testing.T) {
 	}
 }
 
-// skill-effectiveness-scorecard is the live embodiment of the pkg_split gap: rostered, its cmd
-// shell resolves, but it has no pure-core internal/ package yet.
-func TestSkillEffectivenessIsRosteredPkgSplitLaggard(t *testing.T) {
+// skill-effectiveness-scorecard was the live embodiment of the pkg_split gap -- rostered, cmd
+// shell resolving, no pure-core package -- until its logic moved to internal/skilleffectiveness.
+// The pin is kept and INVERTED rather than deleted: it now fails if that pure core is removed or
+// its cmd shell stops resolving, so the extension cannot silently regress back into the gap.
+func TestSkillEffectivenessAdoptedPkgSplit(t *testing.T) {
 	root := repoRootForTest(t)
 	probes := ProbeMembers(root, Family)
 	var found *Probe
@@ -331,8 +333,8 @@ func TestSkillEffectivenessIsRosteredPkgSplitLaggard(t *testing.T) {
 	if !found.Exists {
 		t.Fatalf("skill-effectiveness-scorecard cmd shell must resolve: %+v", found.Member)
 	}
-	if found.Adopted["pkg_split"] {
-		t.Fatal("skill-effectiveness-scorecard has no pure-core package -- must read as a pkg_split laggard")
+	if !found.Adopted["pkg_split"] {
+		t.Fatalf("skill-effectiveness-scorecard must keep its pure core at %s: %+v", found.Member.PkgDir, found)
 	}
 }
 

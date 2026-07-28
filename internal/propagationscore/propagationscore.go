@@ -12,8 +12,11 @@
 // kernel that kills grade-table drift, the `--compare` prove-the-drop gate, the
 // `--markdown` published snapshot -- SHOULD ride into every sibling. In practice
 // it doesn't: the kernel was built to de-duplicate the skeleton yet rides only a
-// minority of the cards, and the shared `scorecardCmdSetup` CLI helper never
-// propagated `--compare`. Nothing notices, so the operator carries the debt in
+// minority of the cards, and the shared `scorecardCmdSetup` CLI helper -- which
+// gave a card `--json` + `--markdown` but never `--compare` -- was the earlier,
+// weaker answer to the same duplication (its last caller has since moved onto the
+// kernel, so it survives only as a probe for cards that still hand-roll a shell).
+// Nothing notices, so the operator carries the debt in
 // their head ("remember to add --compare to the new card"). That memory-tax IS
 // the heaviness this card exists to remove: a deterministic measure of which
 // improvements have fanned out, and an auto-filed issue per laggard so the fleet
@@ -83,9 +86,10 @@ var Family = []Member{
 	{Verb: "unwired-scorecard", CmdFile: "cmd/fak/unwiredscore.go", PkgDir: "internal/unwiredscore", DebtKey: "unwired_debt"},
 	// Extended roster (#1516): the remaining self-measurement scorecards in the dispatch table,
 	// added so roster_complete reaches 100% and their convention adoption is measured too.
-	// skill-effectiveness-scorecard has no pure-core package (its logic is inline in cmd/fak) --
-	// it rides in as a real member because its cmd shell resolves, and reads as a pkg_split
-	// laggard, the gap the pkg_split convention exists to name.
+	// skill-effectiveness-scorecard was the gap the pkg_split convention exists to name: rostered
+	// with an aspirational PkgDir that did not exist, so it read as a laggard while its logic sat
+	// inline in cmd/fak. That core now lives at internal/skilleffectiveness and the probe passes;
+	// the roster entry is unchanged because PkgDir always named the destination, not the state.
 	{Verb: "milestone-scorecard", CmdFile: "cmd/fak/milestonescorecard.go", PkgDir: "internal/milestonereport", DebtKey: "roadmap_debt"},
 	{Verb: "repo-hygiene-scorecard", CmdFile: "cmd/fak/scorecardpane.go", PkgDir: "internal/scorecardpane", DebtKey: "hygiene_debt"},
 	{Verb: "sota-coverage-scorecard", CmdFile: "cmd/fak/sota_coverage_scorecard.go", PkgDir: "internal/sotacoverage", DebtKey: "sota_debt"},
