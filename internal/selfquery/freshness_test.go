@@ -265,3 +265,121 @@ func TestQueryStampsStaleRungAfterDeletion(t *testing.T) {
 		t.Errorf("surviving newer note Freshness = %q, want FRESH", newer.Freshness)
 	}
 }
+
+// TestQueryDetailCardCarriesFreshnessRung pins the --detail half of #3163: a
+// faulted detail card is the single card an agent reads in full, so it is the one
+// place a missing rung does the most damage. Query() stamps it from the same
+// precomputed rungs as the ranked list; without that, `--detail` would hand back
+// an unhedged superseded card while the list above it was correctly marked.
+func TestQueryDetailCardCarriesFreshnessRung(t *testing.T) {
+	cat, err := Load(writeFreshnessRepo(t), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cat.Query(Request{
+		Query:  "widget rollout",
+		Plane:  PlaneDev,
+		Detail: "docs/notes/2026-06-25-widget-rollout.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Detail == nil {
+		t.Fatal("Detail requested but not returned")
+	}
+	if want := FreshnessSupersededPrefix + "doc:Widget rollout July"; resp.Detail.Card.Freshness != want {
+		t.Errorf("detail card Freshness = %q, want %q", resp.Detail.Card.Freshness, want)
+	}
+}
+
+// writeLoneNoteRepo lays down a repo whose index carries ONLY the older
+// widget-rollout note. Its card has byte-identical Kind+Name+DetailRef — hence an
+// identical cardKey — to the two-note repo's older card, but no sibling to be
+// superseded by. Merging the two roots is therefore the exact key collision the
+// root-qualified rung map must survive.
+func writeLoneNoteRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"dos.toml": "[lanes.trees]\ndocs = [\"docs/**\"] # docs\n",
+		"INDEX.md": `# INDEX
+- [Widget rollout June](docs/notes/2026-06-25-widget-rollout.md) - widget rollout plan.
+`,
+		"docs/notes/2026-06-25-widget-rollout.md": "# Widget rollout June\n",
+	}
+	for path, body := range files {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// TestMultiRootFreshnessStaysScopedPerRoot pins the cross-repo isolation invariant
+// MultiCatalog.Query claims (#3163 on the #3435 fan-out): supersession is scoped
+// WITHIN a root, so a note supersedes only its own checkout's siblings. Two roots
+// contribute a card with the same cardKey; only the root that actually holds the
+// newer sibling may carry SUPERSEDED_BY. Drop the root qualification from
+// freshnessRungs/applyFreshnessMulti and both cards inherit the rung — a repo
+// would be told its current note is superseded by a note it does not have.
+func TestMultiRootFreshnessStaysScopedPerRoot(t *testing.T) {
+	twoNote := writeFreshnessRepo(t) // June + July -> June is superseded
+	loneNote := writeLoneNoteRepo(t) // June alone  -> nothing supersedes it
+	mc, err := LoadMany([]string{twoNote, loneNote}, Options{})
+	if err != nil {
+		t.Fatalf("LoadMany: %v", err)
+	}
+	if len(mc.Skipped()) != 0 {
+		t.Fatalf("unexpected skips: %v", mc.Skipped())
+	}
+	resp, err := mc.Query(Request{Query: "widget rollout", Plane: PlaneDev})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	// Both roots contribute a "doc:Widget rollout June" card. Compare by rung
+	// rather than by root path so the assertion does not depend on how TempDir
+	// paths are normalized on this host.
+	var junes []FeatureCard
+	var july FeatureCard
+	for _, c := range resp.Cards {
+		switch c.Name {
+		case "doc:Widget rollout June":
+			junes = append(junes, c)
+		case "doc:Widget rollout July":
+			july = c
+		}
+	}
+	if len(junes) != 2 {
+		t.Fatalf("want the June card from both roots, got %d: %v", len(junes), sortedNames(resp.Cards))
+	}
+	if junes[0].Root == "" || junes[1].Root == "" || junes[0].Root == junes[1].Root {
+		t.Fatalf("June cards not attributed to two distinct roots: %q vs %q", junes[0].Root, junes[1].Root)
+	}
+	wantRung := FreshnessSupersededPrefix + "doc:Widget rollout July"
+	marked, unmarked := 0, 0
+	for _, c := range junes {
+		switch c.Freshness {
+		case wantRung:
+			marked++
+		case "":
+			unmarked++
+		default:
+			t.Errorf("June card (root %q) Freshness = %q, want %q or empty", c.Root, c.Freshness, wantRung)
+		}
+	}
+	if marked != 1 || unmarked != 1 {
+		t.Errorf("supersession leaked across roots: %d marked / %d unmarked, want exactly 1 each", marked, unmarked)
+	}
+	// The newer note exists in one root only and must still be FRESH there.
+	if july.Name == "" {
+		t.Fatal("July card missing from the merged result")
+	}
+	if july.Freshness != FreshnessFresh {
+		t.Errorf("July card Freshness = %q, want FRESH", july.Freshness)
+	}
+}
