@@ -102,7 +102,9 @@ func TestGuardAllowProposalsMalformedFailsLoud(t *testing.T) {
 func TestGuardAllowProposeNeverTouchesOverlay(t *testing.T) {
 	overlayPath, proposalsPath := proposalsTestEnv(t)
 	var out, errOut bytes.Buffer
-	if code := runGuardAllowPropose(&out, &errOut, proposalsPath, []string{"WebSearch", "mcp__jira__create"}, false, "issue triage needs these"); code != 0 {
+	// Both names are BEYOND the shipped floor, so both are true grants and queue
+	// (the already-granted case is TestGuardAllowFromProposalsQueuesOnlyGrants).
+	if code := runGuardAllowPropose(&out, &errOut, proposalsPath, []string{"deploy_service", "mcp__jira__create"}, false, "issue triage needs these"); code != 0 {
 		t.Fatalf("propose exit = %d, stderr: %s", code, errOut.String())
 	}
 	if _, err := os.Stat(overlayPath); !os.IsNotExist(err) {
@@ -112,7 +114,7 @@ func TestGuardAllowProposeNeverTouchesOverlay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load proposals: %v", err)
 	}
-	if len(props.Proposals) != 1 || strings.Join(props.Proposals[0].Allow, ",") != "WebSearch,mcp__jira__create" {
+	if len(props.Proposals) != 1 || strings.Join(props.Proposals[0].Allow, ",") != "deploy_service,mcp__jira__create" {
 		t.Fatalf("proposals = %+v", props.Proposals)
 	}
 	if props.Proposals[0].Reason != "issue triage needs these" {
@@ -132,6 +134,71 @@ func TestGuardAllowProposeNeverTouchesOverlay(t *testing.T) {
 	}
 	if len(props.Proposals) != 2 || strings.Join(props.Proposals[1].AllowPrefix, ",") != "mcp__jira__" {
 		t.Fatalf("after prefix propose, proposals = %+v", props.Proposals)
+	}
+}
+
+// TestGuardAllowFromProposalsQueuesOnlyGrants is the #5182 scope-revision witness: the
+// queue exists to spend an operator's attention on a real GRANT, so --propose records
+// only the names the SHIPPED floor would not already admit. A name that floor already
+// allows — by exact entry or by one of its allow_prefix families — expands no authority,
+// so it is reported as already granted and never reaches the queue. Both arms are pinned
+// plus the all-already-granted ask, which must be a calm zero-exit no-op rather than an
+// empty entry the operator still has to read.
+func TestGuardAllowFromProposalsQueuesOnlyGrants(t *testing.T) {
+	overlayPath, proposalsPath := proposalsTestEnv(t)
+	var out, errOut bytes.Buffer
+
+	// WebSearch is an exact floor allow; read_ledger rides the shipped "read_" prefix
+	// family; deploy_service is beyond the floor and is the ONLY true grant here.
+	if code := runGuardAllowPropose(&out, &errOut, proposalsPath, []string{"WebSearch", "read_ledger", "deploy_service"}, false, "mixed ask"); code != 0 {
+		t.Fatalf("propose exit = %d, stderr: %s", code, errOut.String())
+	}
+	props, err := loadGuardAllowProposals(proposalsPath)
+	if err != nil {
+		t.Fatalf("load proposals: %v", err)
+	}
+	if len(props.Proposals) != 1 || strings.Join(props.Proposals[0].Allow, ",") != "deploy_service" {
+		t.Fatalf("proposals = %+v, want only the beyond-floor name queued", props.Proposals)
+	}
+	for _, want := range []string{"WebSearch", "read_ledger", "already granted by the shipped floor", "NOT queued"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("propose output missing %q:\n%s", want, out.String())
+		}
+	}
+
+	// Every name already granted: nothing queues, the exit stays zero, and the pending
+	// count is unchanged — the operator is never handed a decision that grants nothing.
+	out.Reset()
+	if code := runGuardAllowPropose(&out, &errOut, proposalsPath, []string{"Read", "get_status"}, false, "nothing new"); code != 0 {
+		t.Fatalf("all-already propose exit = %d, stderr: %s", code, errOut.String())
+	}
+	if strings.Contains(out.String(), "recorded a PROPOSAL") {
+		t.Errorf("an ask that grants nothing must record no proposal:\n%s", out.String())
+	}
+	if props, err = loadGuardAllowProposals(proposalsPath); err != nil {
+		t.Fatal(err)
+	} else if len(props.Proposals) != 1 {
+		t.Fatalf("pending = %d, want the queue unchanged at 1", len(props.Proposals))
+	}
+
+	// The prefix arm judges COVERAGE, not membership: a proposal that EXTENDS a shipped
+	// prefix admits nothing new, while an unrelated prefix is a real grant.
+	out.Reset()
+	if code := runGuardAllowPropose(&out, &errOut, proposalsPath, []string{"read_deep_", "mcp__jira__"}, true, ""); code != 0 {
+		t.Fatalf("prefix propose exit = %d, stderr: %s", code, errOut.String())
+	}
+	if props, err = loadGuardAllowProposals(proposalsPath); err != nil {
+		t.Fatal(err)
+	} else if len(props.Proposals) != 2 || strings.Join(props.Proposals[1].AllowPrefix, ",") != "mcp__jira__" {
+		t.Fatalf("prefix proposals = %+v, want only mcp__jira__ queued", props.Proposals)
+	}
+	if !strings.Contains(out.String(), "read_deep_") {
+		t.Errorf("prefix output should name the already-covered prefix:\n%s", out.String())
+	}
+
+	// The floor filter runs BEFORE every write path — the real overlay is still untouched.
+	if _, err := os.Stat(overlayPath); !os.IsNotExist(err) {
+		t.Errorf("overlay must remain untouched by --propose; stat err = %v", err)
 	}
 }
 

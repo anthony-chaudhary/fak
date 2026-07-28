@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
 // guard_allow_proposals.go implements the propose-only self-widening seam for the
@@ -118,14 +120,25 @@ func saveGuardAllowProposals(path string, props guardAllowProposals) error {
 // the caller falls through to cmdGuardAllow unchanged. Kept as a separate router so
 // guard_allow.go's operator surface needs no structural change — the seam is additive.
 func guardAllowProposalsRoute(argv []string) {
+	if allowProposalsMode(argv) {
+		os.Exit(cmdGuardAllowProposals(os.Stdout, os.Stderr, argv))
+	}
+}
+
+// allowProposalsMode reports whether this argv selects a proposals mode. Split out of
+// guardAllowProposalsRoute (which can only os.Exit) so the peel itself is testable: the
+// routing decision is what makes the seam REACHABLE from `fak guard allow`, and an
+// unreachable seam is indistinguishable from a missing one.
+func allowProposalsMode(argv []string) bool {
 	for _, a := range argv {
 		switch a {
 		case "--from-proposals", "-from-proposals", "--propose", "-propose":
-			os.Exit(cmdGuardAllowProposals(os.Stdout, os.Stderr, argv))
+			return true
 		case "--":
-			return // flags after a literal -- are positional, never modes
+			return false // flags after a literal -- are positional, never modes
 		}
 	}
+	return false
 }
 
 // cmdGuardAllowProposals parses and runs the two proposals modes:
@@ -164,6 +177,57 @@ func cmdGuardAllowProposals(stdout, stderr io.Writer, argv []string) int {
 	}
 }
 
+// beyondShippedFloor splits proposed names into the ones asking for authority the
+// SHIPPED floor never granted — a true GRANT, the only class this queue carries — and
+// the ones that floor already admits.
+//
+// Scope revision on #5182 (from the #5185 safety analysis): only widen-BEYOND-baseline
+// needs out-of-band operator ratification. Restore-toward-baseline — widening back up
+// to, but never past, what the shipped policy already deemed safe — expands no
+// authority and is #5200's permissive, self-serviceable path, so queuing it would only
+// spend the operator's attention on a decision that grants nothing.
+//
+// The baseline operand is the floor `fak guard` actually SHIPS (the embedded
+// guard-default-policy.json this same binary installs at boot), because that is the
+// floor this overlay unions onto — a name it already allows grants nothing when
+// ratified. A session launched with an explicit --policy may run a narrower floor and
+// still DEFAULT_DENY such a name; that is restore-toward-baseline (#5200), not a grant.
+func beyondShippedFloor(names []string, asPrefix bool) (grants, already []string) {
+	floor, err := policy.Parse(guardDefaultPolicyJSON)
+	if err != nil {
+		// A floor we cannot parse is no evidence that anything is already granted, so
+		// fail toward ratification rather than silently dropping a request: over-asking
+		// costs an operator one glance, under-asking loses the ask entirely.
+		return names, nil
+	}
+	for _, n := range names {
+		within := false
+		if asPrefix {
+			// A proposed PREFIX adds nothing only when a shipped prefix already covers
+			// it — i.e. every name it would admit is admitted already. That is exactly
+			// "the proposal EXTENDS a floor prefix"; a SHORTER proposal is strictly
+			// wider than the floor's, so it stays a grant.
+			for _, pre := range floor.AllowPrefix {
+				if strings.HasPrefix(n, pre) {
+					within = true
+					break
+				}
+			}
+		} else {
+			// NeverAdmits is the floor's own args-independent "this name can never be
+			// Allowed" read, so exact allows AND prefix families are judged with the
+			// adjudicator's semantics instead of a second, drifting copy of them.
+			within = !floor.NeverAdmits(n)
+		}
+		if within {
+			already = append(already, n)
+			continue
+		}
+		grants = append(grants, n)
+	}
+	return grants, already
+}
+
 // runGuardAllowPropose appends one proposal entry. This is the only verb a wrapped
 // agent is meant to reach: it records the request and nothing else — the real overlay
 // is never read, never written.
@@ -172,6 +236,16 @@ func runGuardAllowPropose(stdout, stderr io.Writer, proposalsPath string, args [
 	if len(names) == 0 {
 		fmt.Fprintln(stderr, guardAllowProposalsUsage())
 		return 2
+	}
+	// Queue ONLY true grants (#5182 scope revision); see beyondShippedFloor.
+	names, already := beyondShippedFloor(names, prefix)
+	if len(already) > 0 {
+		fmt.Fprintf(stdout, "fak guard allow: %s — already granted by the shipped floor; NOT queued.\n", strings.Join(already, ", "))
+		fmt.Fprintln(stdout, "  Ratification exists to expand authority; this expands none. Restoring toward the")
+		fmt.Fprintln(stdout, "  shipped baseline is the permissive, self-serviceable path (#5200), not an operator call.")
+	}
+	if len(names) == 0 {
+		return 0
 	}
 	props, err := loadGuardAllowProposals(proposalsPath)
 	if err != nil {

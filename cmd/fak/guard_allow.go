@@ -93,9 +93,9 @@ func guardAllowOverlayPath() string {
 
 // guardAllowWritePathForScope resolves the WRITE target for a named scope from the
 // guard_allow_scope.go precedence table: "session" is this session's overlay (the
-// narrowest layer, and the one MEANT to be dropped at teardown — that drop is mechanism
-// only today, see guard_allow_scope.go), "user" the host-wide per-user file, anything
-// else the default repo-local target (or the env override when one is set).
+// narrowest layer, and the one dropped at guard teardown — armed at boot, dropped in
+// finishGuardChildAndReport, see guard_allow_scope.go), "user" the host-wide per-user
+// file, anything else the default repo-local target (or the env override when one is set).
 func guardAllowWritePathForScope(scope string) (string, error) {
 	switch scope {
 	case guardAllowScopeSession:
