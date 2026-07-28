@@ -288,9 +288,9 @@ func gptneoxReference(t *testing.T, m *Model, ids []int) [][]float32 {
 			addVec(row, bqkv)
 			for h := 0; h < nH; h++ {
 				base := h * 3 * hd
-				gptneoxOraclePartialRope(row[base:base+hd], tt, rot, theta)       // q
-				gptneoxOraclePartialRope(row[base+hd:base+2*hd], tt, rot, theta)  // k
-				_ = row[base+2*hd : base+3*hd]                                    // v is never rotated
+				gptneoxOraclePartialRope(row[base:base+hd], tt, rot, theta)      // q
+				gptneoxOraclePartialRope(row[base+hd:base+2*hd], tt, rot, theta) // k
+				_ = row[base+2*hd : base+3*hd]                                   // v is never rotated
 			}
 			qkv[tt] = row
 		}
