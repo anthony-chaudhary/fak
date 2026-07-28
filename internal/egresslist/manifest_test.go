@@ -271,6 +271,67 @@ func TestSampleListIsNotRefreshable(t *testing.T) {
 	}
 }
 
+// checkLicenseNoticeTravels asserts that the redistribution obligation is actually
+// DISCHARGED for one ingested list, not merely named: a verbatim upstream notice ships
+// beside the artifact, it is a real copyright notice rather than a placeholder, and the
+// artifact — the copy that reaches a reader — points at it.
+//
+// WHY THE ARTIFACT HALF IS THE LOAD-BEARING ONE (issue #5404). A manifest field that
+// nothing renders would let this gate go green while a reader of the copy still has no way
+// to reach the notice, which is exactly the SPDX-identifier-only state it replaces. So the
+// assertion drives the REAL generator rather than re-implementing its formatting: it
+// re-renders the shipped artifact through RenderArtifact and requires the reference in both
+// the fresh rendering (the generator still emits it) and the shipped bytes (the checked-in
+// copy already carries it). Deleting the emission from RenderArtifact reds the first;
+// blanking license_notice reds every branch above them.
+func checkLicenseNoticeTravels(t *testing.T, s Source) {
+	t.Helper()
+	notice, ok := LicenseNoticeFile(s.LicenseNotice)
+	switch {
+	case strings.TrimSpace(s.LicenseNotice) == "":
+		t.Errorf("list %q records license %q but no license_notice: an SPDX identifier NAMES the "+
+			"terms, it does not satisfy them - %s makes reproducing the upstream's own copyright "+
+			"and permission text the PRICE of redistribution, and this artifact is the "+
+			"redistribution", s.Name, s.License, s.License)
+		return
+	case !ok:
+		t.Errorf("list %q records license_notice %q but no such notice ships from %s/: the "+
+			"reference dangles, so the copy points at nothing", s.Name, s.LicenseNotice, ListsDir)
+		return
+	case !strings.Contains(notice, "Copyright"):
+		t.Errorf("the vendored notice %s/%s carries no copyright line: a notice that names no "+
+			"holder attributes nobody", ListsDir, s.LicenseNotice)
+		return
+	}
+
+	artifact, ok := BundledList(s.Name)
+	if !ok {
+		return // the missing-artifact case is TestBundledListsMatchPinnedChecksum's to report.
+	}
+	line := licenseNoticeLine(s)
+	rendered := RenderArtifact(s, NewBuilder().AddFilterText(s.Name, artifact).Build())
+	if !strings.Contains(rendered, line) {
+		t.Errorf("RenderArtifact(%q) does not emit %q: the notice is recorded in the manifest and "+
+			"vendored on disk, but never reaches the artifact - and the artifact is the only part "+
+			"of this a downstream reader of the copy actually sees", s.Name, line)
+	}
+	if !strings.Contains(artifact, line) {
+		t.Errorf("the shipped artifact for %q does not carry %q - re-pin it with "+
+			"`fak egresslist refresh`", s.Name, line)
+	}
+	// The checked-in copy IS the current generator's output. Compared through Checksum
+	// rather than raw bytes for the reason Checksum documents: a CRLF checkout must not red
+	// this on Windows only. This is also the OFFLINE half of "a refresh regenerates
+	// byte-identically" — the artifact is already the normalized form, so re-rendering it
+	// must be a fixpoint, and a notice change that was not re-pinned breaks that fixpoint
+	// here instead of surfacing as surprise churn in someone's next refresh diff.
+	if Checksum(rendered) != Checksum(artifact) {
+		t.Errorf("the shipped artifact for %q is not what the generator now renders (%d shipped vs "+
+			"%d rendered bytes): a refresh against an UNCHANGED upstream would rewrite it, so this "+
+			"change was not re-pinned", s.Name, len(artifact), len(rendered))
+	}
+}
+
 // TestAtLeastOneCommunityListIsIngested is the gate that keeps this registry from silently
 // regressing to a seed-only demo. A bundled set containing nothing but the hand-authored
 // placeholder is indistinguishable, to an operator reading `egress.block_lists`, from one
@@ -293,6 +354,12 @@ func TestAtLeastOneCommunityListIsIngested(t *testing.T) {
 		if strings.TrimSpace(s.License) == "" {
 			t.Errorf("list %q records an upstream but no license: we ship a derived copy of "+
 				"someone else's list, so the terms must travel with it", s.Name)
+		} else {
+			// The terms travelling means the NOTICE travelling, not just the SPDX
+			// identifier naming it. Same gate, one rung deeper — this is the one place
+			// that says what provenance means, so the notice is enforced where the
+			// license is rather than from a second, forgettable test.
+			checkLicenseNoticeTravels(t, s)
 		}
 		if s.LastRefreshed == "" {
 			t.Errorf("list %q records an upstream but was never refreshed - its artifact has no "+

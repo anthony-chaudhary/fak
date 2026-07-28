@@ -1,0 +1,6 @@
+# A vendored upstream notice is a LEGAL text redistributed verbatim: its bytes are the
+# artifact, not a formatting preference. Under core.autocrlf=true a Windows checkout would
+# rewrite it to CRLF, so a downstream packager's license scanner would read a file that no
+# longer matches the upstream blob it claims to reproduce. Pin LF so the vendored copy stays
+# byte-identical to the upstream on every platform.
+*.LICENSE text eol=lf

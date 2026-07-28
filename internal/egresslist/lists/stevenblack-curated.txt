@@ -2,6 +2,7 @@
 ! Name: stevenblack-curated
 ! Source: https://raw.githubusercontent.com/StevenBlack/hosts/master/data/StevenBlack/hosts
 ! Upstream-License: MIT
+! Upstream-License-Notice: internal/egresslist/lists/stevenblack-curated.LICENSE (verbatim upstream copyright and permission notice, vendored beside this artifact)
 ! Description: The StevenBlack/hosts project's own curated host set (data/StevenBlack/hosts) - the maintainer-authored ads/tracking/malware source that seeds the widely-used unified hosts list. Named `-curated` on purpose: this is that one source, NOT the ~220k-entry unified MERGE of AdAway/MVPS/URLhaus/etc. The unified merge is deliberately not bundled - at ~2.8 MB upstream it would embed ~5 MB of block rules into every fak binary and land as a diff no reviewer can actually read, which defeats the `deterministic and reviewable` property this registry is built on. An operator who wants the full merge adds it as their own manifest entry against the same ingest path.
 ! Rules: 2843 block, 0 allow
 ! Last-refreshed is recorded in lists/manifest.json, not here, so an unchanged

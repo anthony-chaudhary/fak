@@ -22,7 +22,7 @@ package egresslist
 
 import (
 	"crypto/sha256"
-	_ "embed"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -36,6 +36,58 @@ import (
 //
 //go:embed lists/manifest.json
 var manifestJSON []byte
+
+// bundledNotices holds the VERBATIM upstream copyright + permission notices for the lists
+// that ship, vendored beside the artifacts they cover.
+//
+// WHY A VENDORED FILE AND NOT INLINE TEXT (issue #5404). Recording `"license": "MIT"` names
+// the terms; it does not satisfy them. MIT and CC BY-SA both require the upstream's own
+// copyright notice to be included in every copy or substantial portion, and a multi-thousand
+// rule derivative of someone else's curation compiled into every fak binary is a substantial
+// portion by any reading. The notice must therefore TRAVEL with the artifact, not be
+// referenced by name from somewhere else. Vendoring it as a file rather than inlining the
+// full text into each artifact header is the form that actually works downstream: a
+// packager's license scanner globs for `*LICENSE*` files, and an inlined block would be
+// ~20 lines of identical boilerplate repeated per list inside a generated file whose whole
+// value is that a human can read its diff.
+//
+// EMBEDDED, NOT MERELY CHECKED IN. The notice is compiled into the binary for the same
+// reason the list is: "all copies" includes the copy an operator installs with
+// `go install`, which carries no checkout to look the notice up in.
+//
+// The suffix is `.LICENSE`, deliberately NOT `.txt`: registry.go embeds `lists/*.txt` as
+// the set of selectable block lists, so a notice named `*.txt` would appear in
+// BundledListNames() as a list an operator could name in `egress.block_lists` and would red
+// TestBundledListsMatchPinnedChecksum for having no manifest entry.
+//
+//go:embed lists/*.LICENSE
+var bundledNotices embed.FS
+
+// NoticeSuffix is the extension a vendored upstream notice carries inside ListsDir. It is
+// the discriminator that keeps notices out of the selectable-list namespace.
+const NoticeSuffix = ".LICENSE"
+
+// LicenseNoticeFile returns the verbatim upstream notice text vendored under the given
+// file name (as recorded in a Source's license_notice), and false when no such notice
+// ships.
+//
+// It rejects a path-shaped or wrong-suffixed name rather than resolving it, for the same
+// reason BundledList does: the manifest is checked-in data, and a data field that can walk
+// out of the lists directory is a traversal seam in something a security artifact reads.
+func LicenseNoticeFile(file string) (text string, ok bool) {
+	file = strings.TrimSpace(file)
+	if file == "" || strings.ContainsAny(file, "/\\") || strings.HasPrefix(file, ".") {
+		return "", false
+	}
+	if !strings.HasSuffix(file, NoticeSuffix) {
+		return "", false
+	}
+	b, err := bundledNotices.ReadFile("lists/" + file)
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
+}
 
 // Source is the provenance of one bundled filter list.
 //
@@ -53,11 +105,19 @@ var manifestJSON []byte
 // packager rather than a detail. Recording it per-list is what lets that decision be
 // audited from the checked-in manifest instead of rediscovered from a URL, and what keeps
 // an attribution-requiring upstream (MIT, CC BY-SA) actually attributed where we ship it.
+//
+// LicenseNotice completes that: License is the SPDX IDENTIFIER, LicenseNotice names the
+// vendored file carrying the upstream's own copyright + permission TEXT. The two are not
+// interchangeable — "MIT" is the name of a bargain whose price is reproducing the
+// copyright line, so a manifest that records only the identifier documents a duty it does
+// not discharge. It holds a bare file name resolved inside ListsDir (never a path), so the
+// notice is a sibling of the artifact it covers and both travel together.
 type Source struct {
 	Name          string `json:"name"`
 	URL           string `json:"url"`
 	Format        string `json:"format"`
 	License       string `json:"license"`
+	LicenseNotice string `json:"license_notice"`
 	SHA256        string `json:"sha256"`
 	Rules         int    `json:"rules"`
 	LastRefreshed string `json:"last_refreshed"`
@@ -229,6 +289,26 @@ func (l *List) Rules() []Rule {
 	return out
 }
 
+// licenseNoticeLine is the ONE place that spells the artifact's pointer at the vendored
+// upstream notice, so the generator that writes it and the provenance gate that checks it
+// cannot drift into disagreeing about the line's text. It returns "" for a source that
+// records no notice, which is how a hand-authored list (whose "upstream" is this repo)
+// stays free of a dangling reference.
+//
+// It emits a REFERENCE, not the notice body. The artifact is a generated file a reviewer
+// reads as a diff; the ~20 lines of MIT boilerplate are identical for every list and would
+// bury the one line that actually changes. The reference resolves to a real vendored file
+// that ships in the same directory and the same binary, so a reader of the copy can get
+// from the copy to the notice — which is the obligation.
+func licenseNoticeLine(s Source) string {
+	notice := strings.TrimSpace(s.LicenseNotice)
+	if notice == "" {
+		return ""
+	}
+	return "! Upstream-License-Notice: " + ListsDir + "/" + notice +
+		" (verbatim upstream copyright and permission notice, vendored beside this artifact)"
+}
+
 // RenderArtifact renders a compiled List back to canonical filter-list text: a provenance
 // header plus one adblock domain-anchor line per rule, block rules then allow rules, each
 // group domain-sorted.
@@ -254,6 +334,9 @@ func RenderArtifact(s Source, l *List) string {
 		// Carried in the artifact as well as the manifest: an MIT/CC BY-SA upstream
 		// requires attribution to travel WITH the copy, and the artifact is the copy.
 		b.WriteString("! Upstream-License: " + s.License + "\n")
+	}
+	if line := licenseNoticeLine(s); line != "" {
+		b.WriteString(line + "\n")
 	}
 	if s.Description != "" {
 		b.WriteString("! Description: " + s.Description + "\n")
