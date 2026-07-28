@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -150,28 +149,14 @@ func (o *SGLangCacheObserver) Observe(ctx context.Context) (SGLangRadixCacheSign
 	if err != nil {
 		return SGLangRadixCacheSignal{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
+	raw, disabled, err := scrapeMetricsText(ctx, o.client, metricsURL, o.cfg.APIKey)
 	if err != nil {
 		return SGLangRadixCacheSignal{}, err
 	}
-	if o.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+o.cfg.APIKey)
+	sig := SGLangRadixCacheSignal{Note: disabled}
+	if disabled == "" {
+		sig = ObserveSGLangRadixCache(raw)
 	}
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return SGLangRadixCacheSignal{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		sig := SGLangRadixCacheSignal{Note: fmt.Sprintf("/metrics returned %d (endpoint disabled)", resp.StatusCode)}
-		o.signal, o.read = sig, true
-		return sig, nil
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return SGLangRadixCacheSignal{}, err
-	}
-	sig := ObserveSGLangRadixCache(string(raw))
 	o.signal, o.read = sig, true
 	return sig, nil
 }

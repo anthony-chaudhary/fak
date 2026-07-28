@@ -124,6 +124,35 @@ func postStreamingRequest(ctx context.Context, client *http.Client, endpoint, ap
 	return cctx, cancel, resp, nil
 }
 
+// scrapeMetricsText reads one worker's Prometheus exposition with the shared
+// bearer-token plumbing and returns it as text. A transport or read error is
+// returned as an error; a NON-200 status is NOT — it comes back as a non-empty
+// `disabled` note and a nil error, because an engine serving its /metrics endpoint
+// off is a legitimate "exposes no such surface" OBSERVATION rather than a failed
+// read. Exactly one of text/disabled is non-empty when err is nil.
+func scrapeMetricsText(ctx context.Context, client *http.Client, metricsURL, apiKey string) (text, disabled string, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
+	if err != nil {
+		return "", "", err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Sprintf("/metrics returned %d (endpoint disabled)", resp.StatusCode), nil
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return "", "", err
+	}
+	return string(raw), "", nil
+}
+
 // closeRequestChannels closes the token/done channels an EngineRequest signals
 // completion through. Callers must set their res/err fields BEFORE calling this —
 // Result() receives on done as its only synchronization point, so closing first

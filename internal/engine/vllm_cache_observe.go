@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -143,28 +142,14 @@ func (o *VLLMCacheObserver) Observe(ctx context.Context) (VLLMPrefixCacheSignal,
 	if err != nil {
 		return VLLMPrefixCacheSignal{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
+	raw, disabled, err := scrapeMetricsText(ctx, o.client, metricsURL, o.cfg.APIKey)
 	if err != nil {
 		return VLLMPrefixCacheSignal{}, err
 	}
-	if o.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+o.cfg.APIKey)
+	sig := VLLMPrefixCacheSignal{Note: disabled}
+	if disabled == "" {
+		sig = ObserveVLLMPrefixCache(raw)
 	}
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return VLLMPrefixCacheSignal{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		sig := VLLMPrefixCacheSignal{Note: fmt.Sprintf("/metrics returned %d (endpoint disabled)", resp.StatusCode)}
-		o.signal, o.read = sig, true
-		return sig, nil
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return VLLMPrefixCacheSignal{}, err
-	}
-	sig := ObserveVLLMPrefixCache(string(raw))
 	o.signal, o.read = sig, true
 	return sig, nil
 }
