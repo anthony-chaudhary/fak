@@ -312,7 +312,7 @@ func ArraySplicePointsWithReason(raw []byte, key string) (breakIdx, prefixEnd, l
 	}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(raw, &obj) != nil {
-		return 0, 0, 0, ArrayNoBreakpoint // REVERT EXPERIMENT
+		return 0, 0, 0, ArrayNotJSONObject
 	}
 	arrRaw, has := obj[key]
 	if !has {
@@ -322,11 +322,11 @@ func ArraySplicePointsWithReason(raw []byte, key string) (breakIdx, prefixEnd, l
 	// object — all legitimate) is never reported as a decoder failure. Only a value that
 	// LOOKS like an array and still fails to decode is structural.
 	if !leadsWithArrayOpen(arrRaw) {
-		return 0, 0, 0, ArrayNoBreakpoint // REVERT EXPERIMENT
+		return 0, 0, 0, ArrayValueNotArray
 	}
 	elems, spans, decoded := decodeArrayElements(raw, arrRaw)
 	if !decoded {
-		return 0, 0, 0, ArrayNoBreakpoint // REVERT EXPERIMENT
+		return 0, 0, 0, ArrayUndecodable
 	}
 	if len(elems) == 0 {
 		return 0, 0, 0, ArrayNoElements
