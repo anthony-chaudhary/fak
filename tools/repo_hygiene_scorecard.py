@@ -65,7 +65,10 @@ things.
 Deterministic + read-only by construction: it reads the git-tracked tree (so two
 clones of the same commit score identically) and edits nothing. Untracked scratch
 a parallel session left behind is reported as an advisory worktree signal, never
-as debt, so the headline number stays reproducible. Run from the repo ROOT::
+as debt, so the headline number stays reproducible. Enumeration also subtracts the
+tracked-but-IGNORED paths (``source_paths``): a file committed inside a tree
+``.gitignore`` declares node-local scratch is not repo source, and grading it as a
+doc would print a remedy the ignore rule contradicts. Run from the repo ROOT::
 
     python tools/repo_hygiene_scorecard.py                 # human scorecard
     python tools/repo_hygiene_scorecard.py --json          # machine payload
@@ -247,8 +250,38 @@ KPI_GROUP: dict[str, str] = {
 
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<target>[^)]+)\)")
 # A dated / issue-numbered research doc: a YYYY-MM-DD stamp or a trailing -NNN
-# issue suffix in the basename. These belong under docs/notes/, not scattered.
-_DATED_RE = re.compile(r"(20\d\d-\d\d-\d\d)|(-\d{3,}\.md$)")
+# issue suffix in the basename. These belong under docs/notes/, not scattered. Kept
+# as two named halves (rather than one alternation) because only the SECOND has an
+# exception, and a constant that no longer matches the behaviour is a drift trap.
+_DATE_STAMP_RE = re.compile(r"20\d\d-\d\d-\d\d")
+_ISSUE_SUFFIX_RE = re.compile(r"-\d{3,}\.md$")
+# ...except when the trailing number is a STANDARDS citation, not an issue number.
+# `safety-case-iec-61508-iso-26262.md` ends in `-26262.md`, but 26262 is ISO 26262
+# (functional safety), not issue #26262 — a standing doc named after the standard it
+# argues against, which belongs beside its evidence, not in the dated-notes journal.
+# The body token must be its own hyphen/underscore-delimited segment, so an ordinary
+# word that merely ENDS in a body name ("golden-440.md" -> "en") is still read as an
+# issue number. Keep this list to real standards bodies: every entry added here is a
+# number the placement KPI stops seeing.
+_STANDARD_BODIES = ("iso", "iec", "rfc", "ieee", "ansi", "nist", "sae", "din",
+                    "astm", "etsi", "itu", "jis", "nfpa", "en", "ul")
+_STANDARD_CITATION_RE = re.compile(
+    r"(?:^|[-_. ])(?:" + "|".join(_STANDARD_BODIES) + r")[-_. ]?\d{3,}\.md$",
+    re.IGNORECASE)
+
+# Toolchain-RESERVED fixture directories. The Go toolchain ignores any directory
+# named `testdata` (go/build), which is precisely why fixtures — and the witness
+# records that document what those fixtures prove — are REQUIRED to live there. A
+# dated witness beside the corpus it annotates is correctly placed by construction:
+# the placement remedy ("move it to docs/notes/") would divorce it from its fixture.
+# `check_committed_files.EXEMPT_DATA_DIRS` (imported above) already draws the same
+# line for file admission; this makes the placement KPI agree with it.
+FIXTURE_DIRS = {"testdata"}
+
+# Where a dated/issue-numbered doc is legitimately at home: the notes journal itself,
+# the per-release archives, the blog, and the experiments run-ledger.
+PLACEMENT_HOME_PREFIXES = (NOTES_DIR + "/", "docs/releases/", "docs/stable-releases/",
+                           "blog/", "experiments/")
 _FENCE_RE = re.compile(r"^(```|~~~)")
 _ACRONYM_RE = re.compile(r"\b([A-Z]{2,5})s?\b")
 # The corpus-wide AI-tell HARD set starts from the vetted doc_appeal lists but
@@ -308,8 +341,60 @@ def grade_letter(score: float) -> str:
 
 
 def is_dated_doc(name: str) -> bool:
-    """A basename that carries a YYYY-MM-DD stamp or a trailing issue number."""
-    return bool(_DATED_RE.search(name))
+    """A basename that carries a YYYY-MM-DD stamp or a trailing issue number.
+
+    A trailing standards citation (`...-iso-26262.md`, `...-rfc-9110.md`) is NOT an
+    issue number, so it is not a dated doc. A date stamp always wins, so a genuinely
+    dated doc that also names a standard is still caught."""
+    if _DATE_STAMP_RE.search(name):
+        return True
+    if _ISSUE_SUFFIX_RE.search(name):
+        return not _STANDARD_CITATION_RE.search(name)
+    return False
+
+
+def is_fixture_path(rel: str) -> bool:
+    """A path living under a toolchain-reserved fixture directory (`**/testdata/**`).
+    Judged on DIRECTORY segments only, so a file merely NAMED `testdata.md` is not
+    exempt — only something genuinely inside the reserved directory."""
+    return any(seg in FIXTURE_DIRS for seg in rel.split("/")[:-1])
+
+
+def misplaced_dated_docs(md_files: list[str]) -> list[str]:
+    """The dated/issue-numbered docs sitting outside their sanctioned homes — the
+    placement KPI's HARD input. Judges NON-root docs only (a root .md is
+    root_hygiene's domain, and the DOC_PLACEMENT allowlist may deliberately keep a
+    dated one, e.g. the per-release HERO doc). Test fixtures under a reserved
+    `testdata/` directory are correctly placed by construction and never counted."""
+    return sorted(
+        f for f in md_files
+        if "/" in f
+        and not f.startswith(PLACEMENT_HOME_PREFIXES)
+        and not is_fixture_path(f)
+        and is_dated_doc(f.rsplit("/", 1)[-1])
+    )
+
+
+def source_paths(tracked: list[str], ignored_tracked: list[str] | set[str]) -> list[str]:
+    """The repo's SOURCE corpus: every path git tracks, MINUS the tracked paths git's
+    own ignore rules disown.
+
+    A path can be both tracked and ignored — committed before the rule existed, or
+    force-added into a scratch tree. `.dispatch-runs/**` is the live case: `.gitignore`
+    declares it node-local, regenerated, operator-private run state, yet four contract
+    overlays are committed there. Grading those as repo DOCS is a category error — the
+    remedy the card would print ("move it to docs/notes/ and index it") is the exact
+    opposite of what the ignore rule asks for. Git already published the verdict; this
+    reads it instead of second-guessing it.
+
+    Note `git ls-files --cached --others --exclude-standard` does NOT do this:
+    `--exclude-standard` filters only the `--others` half, so every cached path is
+    listed however many ignore rules match it. The ignored set has to be asked for
+    separately (`--cached --ignored --exclude-standard`) and subtracted.
+
+    Order-preserving and pure, so the git shell around it stays a one-liner."""
+    drop = set(ignored_tracked)
+    return [f for f in tracked if f not in drop]
 
 
 def is_reader_facing(rel: str) -> bool:
@@ -815,9 +900,19 @@ def _all_local_links(text: str, doc_rel: str, root: Path) -> list[tuple[str, boo
     return out
 
 
+def _source_paths(root: Path) -> list[str]:
+    """The git shell around ``source_paths``: ask git for the tracked set and for the
+    tracked-BUT-IGNORED subset, and subtract. One extra plumbing call buys enumeration
+    immunity to any scratch tree the fleet invents, present or future."""
+    return source_paths(
+        _git_lines(["ls-files"], root),
+        _git_lines(["ls-files", "--cached", "--ignored", "--exclude-standard"], root),
+    )
+
+
 def gather(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     """Read the git-tracked tree and run every pure KPI. Returns (kpis, clutter)."""
-    tracked = _git_lines(["ls-files"], root)
+    tracked = _source_paths(root)
     tracked_set = set(tracked)
     md_files = [f for f in tracked if f.endswith(".md")]
     reader = [f for f in md_files if is_reader_facing(f)]
@@ -833,15 +928,7 @@ def gather(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     # organization: root hygiene + placement + dir discipline
     root_md = [f for f in md_files if "/" not in f]
     root_other = [f for f in tracked if "/" not in f and not f.endswith(".md")]
-    # placement judges NON-root docs only — a root .md is root_hygiene's domain
-    # (and the DOC_PLACEMENT allowlist may deliberately keep a dated one, e.g. the
-    # per-release HERO doc; contradicting that allowlist would be a false positive).
-    dated_misplaced = sorted(
-        f for f in md_files
-        if "/" in f and is_dated_doc(f.rsplit("/", 1)[-1])
-        and not f.startswith((NOTES_DIR + "/", "docs/releases/", "docs/stable-releases/",
-                              "blog/", "experiments/"))
-    )
+    dated_misplaced = misplaced_dated_docs(md_files)
     tracked_dirs = sorted({"/".join(f.split("/")[:-1]) for f in tracked if "/" in f}
                           - {""})
 

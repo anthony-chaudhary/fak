@@ -11,7 +11,10 @@ or `python -m pytest tools/repo_hygiene_scorecard_test.py -q`.
 """
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -25,6 +28,77 @@ def test_dated_doc_detection() -> None:
     assert rh.is_dated_doc("trust-floor-decomposition-492.md")
     assert not rh.is_dated_doc("tutorial.md")
     assert not rh.is_dated_doc("README.md")
+
+
+def test_dated_doc_ignores_standards_citation() -> None:
+    # A trailing -NNN is an ISSUE number — unless it is the number of a STANDARD.
+    # `safety-case-iec-61508-iso-26262.md` argues a functional-safety case against
+    # ISO 26262; there is no issue #26262. Same for an RFC / IEEE / NIST citation.
+    assert not rh.is_dated_doc("safety-case-iec-61508-iso-26262.md")
+    assert not rh.is_dated_doc("http-semantics-rfc-9110.md")
+    assert not rh.is_dated_doc("floating-point-ieee-754.md")
+    assert not rh.is_dated_doc("crypto-baseline-nist-800.md")
+    # a date stamp still wins over a standards citation in the same basename
+    assert rh.is_dated_doc("iso-26262-review-2026-07-01.md")
+
+
+def test_dated_doc_still_catches_real_issue_numbers() -> None:
+    """NEGATIVE CONTROL for the standards narrowing. Deliberately passes BOTH before
+    and after the change — that is exactly its job: it proves the detector got
+    narrower, not blind. A detector that went blind is a worse bug than the FP."""
+    assert rh.is_dated_doc("fix-the-thing-3855.md")
+    assert rh.is_dated_doc("trust-floor-decomposition-492.md")
+    # `-440` here IS issue #440 (the doc's own title says "(#440)" and it links
+    # github.com/.../issues/440), so the real repo doc must STAY flagged.
+    assert rh.is_dated_doc("QWEN36-LOAD-PROFILE-440.md")
+    # a plain word that merely ENDS in a standards-body token ("gold-EN") must not
+    # buy an exemption — the token has to be its own delimited segment.
+    assert rh.is_dated_doc("golden-440.md")
+    assert rh.is_dated_doc("useful-440.md")
+
+
+def test_is_fixture_path_judges_directory_segments_only() -> None:
+    assert rh.is_fixture_path("internal/session/testdata/compactaudit/w-2026-07-16.md")
+    assert rh.is_fixture_path("internal/codexlifecycle/testdata/w-2026-07-18.md")
+    # a FILE merely named testdata is not inside the reserved directory
+    assert not rh.is_fixture_path("docs/testdata.md")
+    assert not rh.is_fixture_path("docs/notes/testdata-plan-2026-07-01.md")
+    assert not rh.is_fixture_path("docs/benchmarks/X-2026-07-01.md")
+
+
+def test_misplaced_dated_docs_exempts_testdata_fixtures() -> None:
+    # `testdata/` is toolchain-RESERVED (go/build ignores it), which is why a fixture
+    # and the witness that documents it must live there — "move it to docs/notes/"
+    # would divorce the witness from the corpus it annotates.
+    md = [
+        "docs/benchmarks/RESULT-2026-07-01.md",                       # real defect
+        "internal/session/testdata/compactaudit/w-2026-07-16.md",     # fixture
+        "internal/codexlifecycle/testdata/w-2026-07-18.md",           # fixture
+        "docs/notes/AT-HOME-2026-07-01.md",                           # at home
+        "PLAN-2026-07-01.md",                                         # root: not ours
+    ]
+    out = rh.misplaced_dated_docs(md)
+    assert out == ["docs/benchmarks/RESULT-2026-07-01.md"], out
+
+
+def test_misplaced_dated_docs_negative_control() -> None:
+    """NEGATIVE CONTROL for the whole placement input: a genuinely misplaced dated doc
+    and a genuinely issue-numbered doc must BOTH still be caught. Passes before and
+    after by design."""
+    md = ["docs/foo/BAR-2026-07-01.md", "docs/foo/thing-3855.md"]
+    assert rh.misplaced_dated_docs(md) == sorted(md)
+
+
+def test_source_paths_drops_tracked_but_ignored() -> None:
+    # A path can be BOTH tracked and ignored (committed before the rule, or force-added
+    # into a scratch tree). Note `git ls-files --cached --others --exclude-standard`
+    # does NOT drop it: --exclude-standard filters only the --others half.
+    tracked = ["README.md", ".dispatch-runs/contract-overlays/issue-2206.md",
+               "docs/keep/PLAN-2026-07-01.md"]
+    ignored = [".dispatch-runs/contract-overlays/issue-2206.md"]
+    assert rh.source_paths(tracked, ignored) == ["README.md", "docs/keep/PLAN-2026-07-01.md"]
+    # nothing ignored -> the corpus is untouched, in order (purely subtractive)
+    assert rh.source_paths(tracked, []) == tracked
 
 
 def test_reader_facing_scoping() -> None:
@@ -280,6 +354,99 @@ def test_live_collect() -> None:
     assert "hygiene_debt" in p["corpus"]
     assert set(p["corpus"]["debt_by_group"]) == set(rh.GROUPS)
     assert isinstance(p["kpis"], list) and len(p["kpis"]) == len(rh.KPI_WEIGHTS)
+
+
+# --- hermetic temp-repo: enumeration immunity, end to end -------------------
+# Follows the harness in code_quality_scorecard_test.py (_have_git/_git/_write).
+# The scratch dir is deliberately named `.overlay-scratch/` — a name that appears in
+# NO hand-maintained exclusion list in this card — so these tests can only pass via
+# the git-ignore read, never vacuously via a name filter.
+
+def _have_git() -> bool:
+    try:
+        subprocess.run(["git", "--version"], capture_output=True)
+        return True
+    except OSError:
+        return False
+
+
+def _git(dir_: str, *args: str) -> None:
+    env = dict(os.environ,
+               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    proc = subprocess.run(["git", "-C", dir_, *args],
+                          capture_output=True, text=True, env=env)
+    if proc.returncode != 0:
+        raise RuntimeError(f"git {args}: {proc.stderr}")
+
+
+def _write(dir_: str, rel: str, body: str) -> None:
+    p = Path(dir_) / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+
+
+# The five shapes the placement KPI has to tell apart, in one hermetic repo.
+_REAL_DATED = "docs/foo/BAR-2026-07-01.md"          # must STAY flagged
+_REAL_ISSUE = "docs/foo/thing-3855.md"              # must STAY flagged
+_SCRATCH_DOC = ".overlay-scratch/issue-2206.md"     # tracked AND ignored -> dropped
+_FIXTURE_DOC = "internal/pkg/testdata/witness-2026-07-18.md"   # reserved dir -> dropped
+_STANDARD_DOC = "docs/foo/safety-case-iso-26262.md"  # standards citation -> dropped
+
+
+def _seed_placement_repo(d: str) -> None:
+    _write(d, ".gitignore", ".overlay-scratch/\n")
+    _write(d, "README.md", "# x\n")
+    _write(d, "INDEX.md", "# index\n")
+    _write(d, "docs/notes/AT-HOME-2026-07-01.md", "# at home\n")
+    for rel in (_REAL_DATED, _REAL_ISSUE, _SCRATCH_DOC, _FIXTURE_DOC, _STANDARD_DOC):
+        _write(d, rel, f"# {rel}\n")
+    _git(d, "init", "-q")
+    _git(d, "add", ".gitignore", "README.md", "INDEX.md",
+         "docs/notes/AT-HOME-2026-07-01.md",
+         _REAL_DATED, _REAL_ISSUE, _FIXTURE_DOC, _STANDARD_DOC)
+    # -f: the live shape is a doc COMMITTED inside a gitignored tree (the four
+    # .dispatch-runs/contract-overlays/issue-*.md are exactly this at HEAD).
+    _git(d, "add", "-f", _SCRATCH_DOC)
+    _git(d, "commit", "-qm", "base")
+
+
+def test_enumeration_drops_tracked_but_ignored_doc() -> None:
+    if not _have_git():
+        print("repo_hygiene_scorecard_test: git unavailable, skipping enumeration case")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_placement_repo(d)
+        root = Path(d)
+        # the polluted read the old enumeration made: plain `ls-files` DOES list it,
+        # so this is not a straw man — the scratch doc really is in the index.
+        assert _SCRATCH_DOC in rh._git_lines(["ls-files"], root)
+        # ...and so does the doctrine's `--cached --others --exclude-standard` form:
+        # --exclude-standard filters only the --others half.
+        both = rh._git_lines(["ls-files", "--cached", "--others", "--exclude-standard"], root)
+        assert _SCRATCH_DOC in both, both
+        # the clean read drops it and keeps every legitimate tracked path.
+        src = rh._source_paths(root)
+        assert _SCRATCH_DOC not in src, src
+        for rel in ("README.md", "INDEX.md", _REAL_DATED, _REAL_ISSUE,
+                    _FIXTURE_DOC, _STANDARD_DOC):
+            assert rel in src, (rel, src)
+
+
+def test_placement_kpi_immune_end_to_end() -> None:
+    """The whole point, measured the way the operator measures it: `collect()` on a
+    repo carrying all five shapes reports EXACTLY the two real defects."""
+    if not _have_git():
+        print("repo_hygiene_scorecard_test: git unavailable, skipping end-to-end case")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_placement_repo(d)
+        payload = rh.collect(Path(d))
+        placement = next(k for k in payload["kpis"] if k["kpi"] == "placement")
+        flagged = sorted(dfx.split(": ", 1)[1].split(" →")[0] for dfx in placement["defects"])
+        # NEGATIVE CONTROL: the detector is narrower, not blind.
+        assert flagged == sorted([_REAL_DATED, _REAL_ISSUE]), flagged
+        assert payload["corpus"]["debt_by_kpi"]["placement"] == 2, payload["corpus"]
 
 
 def test_untracked_dir_bloat_flags_huge_dir() -> None:
