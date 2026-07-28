@@ -6,9 +6,14 @@ package dispatchtick
 // scales linearly with fleet size (root cause of the #3153 whole-machine stall;
 // no registry knob is a substitute for reducing spawns). This file is the
 // reuse policy only — bounded checkout/return with health-checked reuse and
-// max-idle retirement — behind the WarmShell/ShellSpawnFunc seam. The live
-// ConPTY / OS-process spawner (cmd/fak spawnDispatchIssueWorker) wires in
-// behind ShellSpawnFunc as a follow-on; nothing here touches the OS.
+// max-idle retirement — behind the WarmShell/ShellSpawnFunc seam; nothing here
+// touches the OS. The first live wiring is the Windows host-probe seam
+// (cmd/fak dispatchRunHostProbe), which used to burn one `powershell` process
+// per preflight probe and now runs every probe of a tick as a TaskShell task on
+// one racked shell. The long-lived ConPTY worker spawner
+// (cmd/fak spawnDispatchIssueWorker) is a separate follow-on: a worker process
+// is bound to one issue, so it is a pooling candidate only once a worker can
+// outlive its task.
 //
 // Semantics:
 //   - Checkout(key) hands back an idle warm shell for the key when one is
@@ -40,6 +45,21 @@ type WarmShell interface {
 // key they were spawned for.
 type ShellSpawnFunc func(key string) (WarmShell, error)
 
+// TaskShell is a warm shell that can RUN a short task (a probe script, a
+// command line) and hand back its stdout. A bare WarmShell is only a lifetime
+// cache; TaskShell is what turns the rack into a reuse SPINE: N tasks ride one
+// shell, so N console creations collapse into one.
+type TaskShell interface {
+	WarmShell
+	RunTask(task string) ([]byte, error)
+}
+
+// ErrShellNotTaskCapable is returned by RunTask when the rack's spawner hands
+// back a shell that cannot run tasks. It is a wiring defect, not a runtime
+// condition: the caller should fall back to its own one-shot spawn path rather
+// than fail the tick.
+var ErrShellNotTaskCapable = errors.New("shell rack: shell cannot run tasks")
+
 // ShellRackStats counts rack traffic; every field is monotonic.
 type ShellRackStats struct {
 	ColdSpawns       int // spawner invocations (racked misses + overflow)
@@ -48,6 +68,18 @@ type ShellRackStats struct {
 	IdleRetired      int // shells closed because they sat idle past MaxIdle
 	OverflowSpawns   int // cold spawns issued while the rack was full
 	OverflowClosed   int // overflow shells closed at Return (never retained)
+	TasksRun         int // tasks executed through RunTask (reused + cold)
+}
+
+// SpawnsAvoided is the reuse dividend: how many process/console creations the
+// rack removed for the tasks it ran. Without a rack each task is its own spawn,
+// so the unpooled cost is TasksRun; the pooled cost is ColdSpawns. This is the
+// before/after churn axis #3405 is measured on.
+func (s ShellRackStats) SpawnsAvoided() int {
+	if s.TasksRun <= s.ColdSpawns {
+		return 0
+	}
+	return s.TasksRun - s.ColdSpawns
 }
 
 // ShellLease is one checked-out shell plus the bookkeeping Return needs.
@@ -130,6 +162,34 @@ func (p *ShellRack) Checkout(key string) (ShellLease, error) {
 	}
 	p.mu.Unlock()
 	return ShellLease{Shell: shell, Key: key, Racked: racked}, nil
+}
+
+// RunTask is the reuse spine's one-call entry point: check a shell out for key,
+// run task on it, put it back. The SECOND and later calls for the same key ride
+// the shell the first call spawned, so a caller that used to spawn one process
+// per task now spawns one process per key. Callers that cannot tolerate a rack
+// failure should treat any error as "take my own one-shot path": RunTask never
+// retains a shell that failed its task (Return closes an unhealthy one), so a
+// broken shell is retired instead of being handed to the next task.
+func (p *ShellRack) RunTask(key, task string) ([]byte, error) {
+	lease, err := p.Checkout(key)
+	if err != nil {
+		return nil, err
+	}
+	shell, ok := lease.Shell.(TaskShell)
+	if !ok {
+		p.Return(lease)
+		return nil, ErrShellNotTaskCapable
+	}
+	out, runErr := shell.RunTask(task)
+	p.mu.Lock()
+	p.stats.TasksRun++
+	p.mu.Unlock()
+	p.Return(lease)
+	if runErr != nil {
+		return nil, runErr
+	}
+	return out, nil
 }
 
 // takeWarmLocked pops the warmest healthy, unexpired idle shell for key,

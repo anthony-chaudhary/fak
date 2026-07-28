@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,11 +16,297 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
+
+// ---- #3405 host-probe shell reuse spine ---------------------------------- //
+//
+// Every Windows host probe in this file (process scan, free RAM, worker rows,
+// codex rows) used to be its OWN `powershell -Command <script>` spawn. On
+// Windows each of those creates a ConPTY with its own conhost/OpenConsole
+// process plus pipes, so console cost scales linearly with how many probes the
+// fleet runs -- the churn #3153 diagnoses, for which "no registry knob is a
+// substitute". The probes are short, independent, and identical in shape, which
+// is exactly what a warm shell can serve: routing them through
+// dispatchtick.ShellRack collapses a tick's N probe spawns into ONE shell that
+// runs N tasks.
+//
+// Guardrails, in order of what can go wrong:
+//   - Off by default. Until a caller arms dispatchHostProbeShellReuse every
+//     probe takes the historical one-shot path byte for byte.
+//   - Fail-open. A spawn error, a protocol error, or a task timeout falls back
+//     to the one-shot path, so the reuse spine can never wedge a tick; the rack
+//     retires the broken shell rather than handing it to the next probe.
+//   - Bounded. Capacity 1 and a max-idle retirement, so at most one extra
+//     console exists and it does not linger between ticks.
+
+const (
+	// dispatchHostProbeKey is the single reuse domain: all host probes are the
+	// same shape (a short PowerShell script against this host), so one key.
+	dispatchHostProbeKey = "host-probe/powershell"
+	// dispatchHostProbeSentinel terminates one task's output on the wire.
+	dispatchHostProbeSentinel = "@@fak-host-probe-done@@"
+	// dispatchHostProbeMaxIdle retires a warm probe shell that no tick has used
+	// recently, so an idle fleet holds no console open.
+	dispatchHostProbeMaxIdle = 5 * time.Minute
+	// dispatchHostProbeTaskTimeout bounds one task on the warm shell. It is the
+	// longest one-shot probe budget in this file; a task that overruns kills the
+	// shell and the caller falls back to a one-shot spawn.
+	dispatchHostProbeTaskTimeout = 60 * time.Second
+)
+
+// dispatchHostProbeBootstrap is the loop the warm shell runs: read one
+// base64-encoded script per line from stdin, execute it, then emit the
+// sentinel. Owning the read loop (instead of feeding `powershell -Command -`)
+// keeps banners and prompts off the wire, and base64 removes every quoting and
+// newline hazard from the script we hand it. EOF on stdin ends the loop, so
+// closing stdin is a clean, non-violent teardown of the console.
+const dispatchHostProbeBootstrap = "$ErrorActionPreference='Continue'; " +
+	"while ($true) { " +
+	"$line = [Console]::In.ReadLine(); " +
+	"if ($null -eq $line) { break }; " +
+	"if ($line.Length -eq 0) { continue }; " +
+	"try { $src = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line)); & ([ScriptBlock]::Create($src)) } catch { }; " +
+	"[Console]::Out.WriteLine('" + dispatchHostProbeSentinel + "'); " +
+	"[Console]::Out.Flush() }"
+
+var (
+	dispatchHostProbeMu   sync.Mutex
+	dispatchHostProbeRack *dispatchtick.ShellRack
+	// dispatchHostProbeSpawner is the OS boundary the reuse spine sits on. A
+	// test swaps it for an in-process fake so the probe seam can be driven end
+	// to end without creating a single console.
+	dispatchHostProbeSpawner dispatchtick.ShellSpawnFunc = spawnDispatchHostProbeShell
+	// dispatchHostProbeOneShot is the historical path: one process per probe.
+	// It is a var for the same reason -- so the before/after process-creation
+	// count is measurable in-test rather than only in a captured run.
+	dispatchHostProbeOneShot = runDispatchHostProbeOneShot
+)
+
+// dispatchHostProbeShellReuse arms the reuse spine. It is a package seam a
+// caller WRITES, deliberately not an os.LookupEnv: internal/envconfiglint's
+// CONFIG_NOT_ENV rule reserves the environment for secrets and puts behavioral
+// settings on a config surface `--help` can name, and the dispatch tick already
+// publishes its other settings to package seams the same way. Default false
+// keeps every probe on the historical one-shot spawn, so nothing changes until
+// something opts in.
+var dispatchHostProbeShellReuse bool
+
+// setDispatchHostProbeShellReuse arms or disarms the spine under the same mutex
+// that guards the rack, so a caller flipping it cannot race a probe in flight.
+func setDispatchHostProbeShellReuse(on bool) {
+	dispatchHostProbeMu.Lock()
+	dispatchHostProbeShellReuse = on
+	dispatchHostProbeMu.Unlock()
+}
+
+// dispatchHostProbeShellEnabled reports whether the reuse spine is switched on.
+func dispatchHostProbeShellEnabled() bool {
+	dispatchHostProbeMu.Lock()
+	defer dispatchHostProbeMu.Unlock()
+	return dispatchHostProbeShellReuse
+}
+
+// dispatchHostProbeRackHandle returns the process-wide probe rack, building it
+// on first use. A rack that cannot be built (never, at these constants) yields
+// nil so the caller takes the one-shot path.
+func dispatchHostProbeRackHandle() *dispatchtick.ShellRack {
+	dispatchHostProbeMu.Lock()
+	defer dispatchHostProbeMu.Unlock()
+	if dispatchHostProbeRack != nil {
+		return dispatchHostProbeRack
+	}
+	rack, err := dispatchtick.NewShellRack(1, dispatchHostProbeMaxIdle, func(key string) (dispatchtick.WarmShell, error) {
+		return dispatchHostProbeSpawner(key)
+	})
+	if err != nil {
+		return nil
+	}
+	dispatchHostProbeRack = rack
+	return rack
+}
+
+// dispatchHostProbeRackStats exposes the rack's traffic counters (nil rack =
+// zero), so a tick payload or a test can read the reuse dividend directly.
+func dispatchHostProbeRackStats() dispatchtick.ShellRackStats {
+	dispatchHostProbeMu.Lock()
+	rack := dispatchHostProbeRack
+	dispatchHostProbeMu.Unlock()
+	if rack == nil {
+		return dispatchtick.ShellRackStats{}
+	}
+	return rack.Stats()
+}
+
+// dispatchCloseHostProbeShells tears the reuse spine down: every warm probe
+// shell is closed and the rack is dropped, so the next probe starts clean. A
+// long-lived process (the tick, the serve loop) calls this on shutdown so the
+// warm console does not outlive the fleet.
+func dispatchCloseHostProbeShells() {
+	dispatchHostProbeMu.Lock()
+	rack := dispatchHostProbeRack
+	dispatchHostProbeRack = nil
+	dispatchHostProbeMu.Unlock()
+	if rack != nil {
+		rack.Close()
+	}
+}
+
+// dispatchRunHostProbe runs one PowerShell probe script and returns its stdout.
+// With the reuse spine on, the script rides the warm racked shell -- the second
+// and later probes of a tick cost zero process creations. Anything that goes
+// wrong falls back to the historical one-shot spawn, so a probe result is never
+// lost to the pooling. combineStderr applies to the one-shot path only: the
+// warm shell reads stdout, and its bootstrap already swallows script errors.
+func dispatchRunHostProbe(script string, timeout time.Duration, combineStderr bool) ([]byte, error) {
+	if dispatchHostProbeShellEnabled() {
+		if rack := dispatchHostProbeRackHandle(); rack != nil {
+			if out, err := rack.RunTask(dispatchHostProbeKey, script); err == nil {
+				return out, nil
+			}
+		}
+	}
+	return dispatchHostProbeOneShot(script, timeout, combineStderr)
+}
+
+func runDispatchHostProbeOneShot(script string, timeout time.Duration, combineStderr bool) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	configureDispatchHelperCommand(cmd)
+	cmd.WaitDelay = 10 * time.Second
+	if combineStderr {
+		return cmd.CombinedOutput()
+	}
+	return cmd.Output()
+}
+
+// dispatchHostProbeShell is ONE PowerShell process kept alive across probe
+// tasks: the warm shell the rack hands out. Every task is serialized on mu, so
+// the request/sentinel protocol on the pipe can never interleave.
+type dispatchHostProbeShell struct {
+	mu     sync.Mutex
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	dead   bool
+}
+
+// spawnDispatchHostProbeShell cold-starts a warm probe shell. This is the ONLY
+// console creation the reuse spine performs, however many probes run on it.
+func spawnDispatchHostProbeShell(string) (dispatchtick.WarmShell, error) {
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", dispatchHostProbeBootstrap)
+	configureDispatchHelperCommand(cmd)
+	cmd.WaitDelay = 5 * time.Second
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		return nil, err
+	}
+	return &dispatchHostProbeShell{cmd: cmd, stdin: stdin, stdout: bufio.NewReaderSize(stdout, 1<<16)}, nil
+}
+
+// RunTask writes one base64 task line and reads back everything the shell wrote
+// before the sentinel. Any wire failure or overrun marks the shell dead and
+// kills it, so the rack retires it instead of reusing a wedged console.
+func (s *dispatchHostProbeShell) RunTask(task string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dead {
+		return nil, errors.New("host probe shell is dead")
+	}
+	line := base64.StdEncoding.EncodeToString([]byte(task)) + "\n"
+	if _, err := io.WriteString(s.stdin, line); err != nil {
+		s.teardownLocked()
+		return nil, err
+	}
+	type readResult struct {
+		out []byte
+		err error
+	}
+	done := make(chan readResult, 1)
+	go func() {
+		var buf bytes.Buffer
+		for {
+			text, err := s.stdout.ReadString('\n')
+			if strings.TrimRight(text, "\r\n") == dispatchHostProbeSentinel {
+				done <- readResult{out: append([]byte(nil), buf.Bytes()...)}
+				return
+			}
+			buf.WriteString(text)
+			if err != nil {
+				done <- readResult{err: fmt.Errorf("host probe shell output ended before its sentinel: %w", err)}
+				return
+			}
+		}
+	}()
+	select {
+	case res := <-done:
+		if res.err != nil {
+			s.teardownLocked()
+			return nil, res.err
+		}
+		return res.out, nil
+	case <-time.After(dispatchHostProbeTaskTimeout):
+		// The reader goroutine unblocks when teardown closes the pipe.
+		s.teardownLocked()
+		return nil, fmt.Errorf("host probe shell task exceeded %s", dispatchHostProbeTaskTimeout)
+	}
+}
+
+// Healthy reports whether the shell may serve another task. It goes false the
+// moment a task breaks the pipe or overruns, which is what makes the rack's
+// health-checked reuse meaningful rather than decorative.
+func (s *dispatchHostProbeShell) Healthy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.dead
+}
+
+// Close tears the console down. Closing stdin ends the bootstrap loop so
+// PowerShell exits on its own and its conhost goes with it; the kill is only
+// the backstop for a wedged shell, and both waits are bounded so teardown can
+// never hang a tick.
+func (s *dispatchHostProbeShell) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.teardownLocked()
+	return nil
+}
+
+func (s *dispatchHostProbeShell) teardownLocked() {
+	if s.dead {
+		return
+	}
+	s.dead = true
+	_ = s.stdin.Close()
+	exited := make(chan struct{})
+	go func() { _ = s.cmd.Wait(); close(exited) }()
+	select {
+	case <-exited:
+		return
+	case <-time.After(2 * time.Second):
+	}
+	if s.cmd.Process != nil {
+		_ = s.cmd.Process.Kill()
+	}
+	select {
+	case <-exited:
+	case <-time.After(2 * time.Second):
+	}
+}
 
 func dispatchRunExternalJSONImpl(root string, timeout time.Duration, name string, args ...string) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -61,15 +351,13 @@ func dispatchScanProcesses() ([]dispatchtick.ProcInfo, error) {
 	return dispatchScanProcessesPOSIX()
 }
 
+// dispatchProcScanScript enumerates every live process for the procguard input.
+const dispatchProcScanScript = "Get-Process -ErrorAction SilentlyContinue | ForEach-Object { " +
+	"try { [pscustomobject]@{ pid=$_.Id; name=$_.ProcessName; threads=$_.Threads.Count; handles=$_.HandleCount; ws_mb=[int64]($_.WorkingSet64 / 1MB) } } catch {} " +
+	"} | ConvertTo-Json -Compress"
+
 func dispatchScanProcessesWindows() ([]dispatchtick.ProcInfo, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
-		"Get-Process -ErrorAction SilentlyContinue | ForEach-Object { "+
-			"try { [pscustomobject]@{ pid=$_.Id; name=$_.ProcessName; threads=$_.Threads.Count; handles=$_.HandleCount; ws_mb=[int64]($_.WorkingSet64 / 1MB) } } catch {} "+
-			"} | ConvertTo-Json -Compress")
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.CombinedOutput()
+	out, err := dispatchRunHostProbe(dispatchProcScanScript, 60*time.Second, true)
 	if err != nil {
 		return nil, err
 	}
@@ -170,16 +458,15 @@ func dispatchPreflightHostResourcesFromProcesses(processes dispatchtick.ProcGuar
 	return dispatchtick.HostResources{Cores: &cores, FreeRAMMB: freeRAM, TotalThreads: threads}
 }
 
+// dispatchFreeRAMScript reads free physical memory (KB) for the host-resource probe.
+const dispatchFreeRAMScript = "$os=Get-CimInstance Win32_OperatingSystem; [int64]$os.FreePhysicalMemory"
+
 func dispatchFreeRAM() *int {
 	if runtime.GOOS != "windows" {
 		free, _ := dispatchRAMAndThreadsPOSIX()
 		return free
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", "$os=Get-CimInstance Win32_OperatingSystem; [int64]$os.FreePhysicalMemory")
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.Output()
+	out, err := dispatchRunHostProbe(dispatchFreeRAMScript, 20*time.Second, false)
 	if err != nil {
 		return nil
 	}
@@ -495,16 +782,14 @@ func dispatchScanWorkerProcessRowsNative() ([]dispatchCodexProcessRow, error) {
 	return dispatchScanWorkerProcessRowsPOSIX()
 }
 
+// dispatchWorkerRowScanScript lists every agent-worker-shaped process row.
+const dispatchWorkerRowScanScript = "$rows = @(Get-CimInstance Win32_Process " +
+	"-Filter \"Name = 'claude.exe' OR Name = 'opencode.exe' OR Name = 'codex.exe' OR Name = 'node.exe'\" | " +
+	"Select-Object @{n='pid';e={$_.ProcessId}},@{n='ppid';e={$_.ParentProcessId}},@{n='name';e={$_.Name}},@{n='cmdline';e={$_.CommandLine}}); " +
+	"$rows | ConvertTo-Json -Compress"
+
 func dispatchScanWorkerProcessRowsWindows() ([]dispatchCodexProcessRow, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
-		"$rows = @(Get-CimInstance Win32_Process "+
-			"-Filter \"Name = 'claude.exe' OR Name = 'opencode.exe' OR Name = 'codex.exe' OR Name = 'node.exe'\" | "+
-			"Select-Object @{n='pid';e={$_.ProcessId}},@{n='ppid';e={$_.ParentProcessId}},@{n='name';e={$_.Name}},@{n='cmdline';e={$_.CommandLine}}); "+
-			"$rows | ConvertTo-Json -Compress")
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.Output()
+	out, err := dispatchRunHostProbe(dispatchWorkerRowScanScript, 10*time.Second, false)
 	if err != nil {
 		return nil, err
 	}
@@ -541,16 +826,15 @@ func dispatchScanWorkerProcessRowsPOSIX() ([]dispatchCodexProcessRow, error) {
 	return rows, nil
 }
 
+// dispatchCodexRowScanScript lists the codex/node process rows the ambient-session
+// attribution walks.
+const dispatchCodexRowScanScript = "$rows = @(Get-CimInstance Win32_Process " +
+	"-Filter \"Name = 'codex.exe' OR Name = 'node.exe'\" | " +
+	"Select-Object @{n='pid';e={$_.ProcessId}},@{n='ppid';e={$_.ParentProcessId}},@{n='name';e={$_.Name}},@{n='cmdline';e={$_.CommandLine}}); " +
+	"$rows | ConvertTo-Json -Compress"
+
 func dispatchScanCodexProcessRowsWindows() ([]dispatchCodexProcessRow, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
-		"$rows = @(Get-CimInstance Win32_Process "+
-			"-Filter \"Name = 'codex.exe' OR Name = 'node.exe'\" | "+
-			"Select-Object @{n='pid';e={$_.ProcessId}},@{n='ppid';e={$_.ParentProcessId}},@{n='name';e={$_.Name}},@{n='cmdline';e={$_.CommandLine}}); "+
-			"$rows | ConvertTo-Json -Compress")
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.Output()
+	out, err := dispatchRunHostProbe(dispatchCodexRowScanScript, 10*time.Second, false)
 	if err != nil {
 		return nil, err
 	}
