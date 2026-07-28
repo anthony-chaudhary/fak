@@ -8,7 +8,7 @@ description: "A 0-1-2 rubric for reviewing a public fak route before recommendin
 **Primary audience:** maintainers reviewing a public documentation route before it becomes or remains a recommended front door.
 **Lifecycle:** current process contract.
 **Generation:** `gen/now`; score the behavior and support status presented by the route today.
-**Authority:** the dimensions come from the [documentation audience architecture](../project/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md); claim evidence follows the [proof-proximity audit](claim-proof-proximity-audit.md).
+**Authority:** the dimensions come from the [documentation audience architecture](../notes/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md); claim evidence follows the [proof-proximity audit](claim-proof-proximity-audit.md).
 **Support:** use the [contributor route](../../CONTRIBUTING.md) to report a route that cannot meet the rubric.
 
 **Next action:** choose one public route, capture its first screen and destination links, then complete every row in the worksheet before recommending it.

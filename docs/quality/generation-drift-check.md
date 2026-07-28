@@ -36,7 +36,7 @@ Generation is a product horizon, not runtime exposure, priority, branch strategy
 
 The default set is every page in the [documentation audience inventory](../project/documentation-audience-inventory.json) whose `generation` is `gen/now` and whose lifecycle is `current`. At commit `5fa5bd26b33f2bd1cf719fc018fdc811e957a3ed`, that is **17 pages**:
 
-`README.md`, `START-HERE.md`, `llms.txt`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `docs/project/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md`, `docs/project/documentation-audience-inventory.json`, `docs/integrations/README.md`, `docs/supported/clouds.md`, `docs/run-the-demos.md`, `docs/FAQ.md`, `docs/PRODUCT-STATUS.md`, `docs/ROLLBACK.md`, `docs/HARDWARE-MATRIX.md`, `SECURITY.md`, and `docs/vendor/neo-cloud-reference-architecture.md`.
+`README.md`, `START-HERE.md`, `llms.txt`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `docs/notes/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md`, `docs/project/documentation-audience-inventory.json`, `docs/integrations/README.md`, `docs/supported/clouds.md`, `docs/run-the-demos.md`, `docs/FAQ.md`, `docs/PRODUCT-STATUS.md`, `docs/ROLLBACK.md`, `docs/HARDWARE-MATRIX.md`, `SECURITY.md`, and `docs/vendor/neo-cloud-reference-architecture.md`.
 
 The two inventory entries marked `historical` are reference destinations, not current pages under test.
 

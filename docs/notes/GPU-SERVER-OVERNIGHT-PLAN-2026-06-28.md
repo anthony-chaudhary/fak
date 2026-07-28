@@ -13,7 +13,7 @@ where the project's frontier GLM-5.2 witnesses actually live.
 
 It is the durable plan: the next operator or agent reads this, confirms the
 bridge is live, and resumes collection where this night left off. The witnessed
-numbers land in [`collected.jsonl`](collected.jsonl) (durable trunk evidence) and
+numbers land in [`collected.jsonl`](../nightrun/collected.jsonl) (durable trunk evidence) and
 the per-box raw logs stay on the box under a private scratch path.
 
 ## Live fleet state (witnessed 2026-06-28 ~05:48Z via the bridge)
@@ -75,7 +75,7 @@ resident path is operator-gated on this shared box.
 3. **Watch** — poll the private scratch completion marker on a slow cadence (the bridge is
    rate-limited; `cmd_sync` rc is unreliable on busy boxes → read the transcript
    tail directly).
-4. **Record** — fold each completed datum into [`collected.jsonl`](collected.jsonl)
+4. **Record** — fold each completed datum into [`collected.jsonl`](../nightrun/collected.jsonl)
    as one `fak-nightrun-collect/1` row (box, task_id, value=`frontier`, the exact
    command, `outcome`, the captured number, the artifact path). Commit by path.
 
@@ -91,7 +91,7 @@ resident path is operator-gated on this shared box.
   third-party engine — it is the baseline the fak-native arm is measured against,
   never reported as fak's own throughput.
 
-## Results (collected 2026-06-28, in [`collected.jsonl`](collected.jsonl))
+## Results (collected 2026-06-28, in [`collected.jsonl`](../nightrun/collected.jsonl))
 
 All three GPU server numbers are WITNESSED on fak's own CUDA kernel — read-only timed
 completions against the live `--cpu-offload-experts` :8000 serve (the peer serve was

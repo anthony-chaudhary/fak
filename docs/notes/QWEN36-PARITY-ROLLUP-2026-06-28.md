@@ -50,10 +50,10 @@ durable parity floor.
 
 | What | Witness (test / artifact) | Result | Source |
 |---|---|---|---|
-| Architecture math bit-exact vs HF | `TestOptionalQwen35HybridOracleForwardMatchesHF` (tiny `qwen3_5` fixture, 3 GDN + 1 gated full-attn layer) | per-layer hidden-state cosine **1.000000**, max\|Δ\| **~4e-9**, **argmax parity** at every position | [`FAK-NATIVE-QWEN35-RESULTS.md`](FAK-NATIVE-QWEN35-RESULTS.md); [`QWEN36-PARITY-RESULTS.md`](QWEN36-PARITY-RESULTS.md) §"fak-native status" |
-| Tokenizer byte-exact vs llama.cpp | `internal/tokenizer` oracle gate (#90) | byte-exact on the Qwen vocab + the 22-token ChatML smoke prompt | [`QWEN36-PARITY-RESULTS.md`](QWEN36-PARITY-RESULTS.md) |
-| GGUF tensor mapping (tiny + real) | `TestQwen35GGUFConfigCanonicalizesHybridTensorsAndRunsForward`, `TestOptionalQwen35GGUFMapsEveryTensorName` | all 851 real-GGUF tensors map; hybrid knobs derived | [`FAK-NATIVE-QWEN35-RESULTS.md`](FAK-NATIVE-QWEN35-RESULTS.md) |
-| Cached session == cacheless forward | `TestQwen35HybridSessionMatchesForwardAndPersistsState`, `TestQwen35HybridQuantTokenLoopPersistsState` | last-position logits match | [`FAK-NATIVE-QWEN35-RESULTS.md`](FAK-NATIVE-QWEN35-RESULTS.md) |
+| Architecture math bit-exact vs HF | `TestOptionalQwen35HybridOracleForwardMatchesHF` (tiny `qwen3_5` fixture, 3 GDN + 1 gated full-attn layer) | per-layer hidden-state cosine **1.000000**, max\|Δ\| **~4e-9**, **argmax parity** at every position | [`FAK-NATIVE-QWEN35-RESULTS.md`](../benchmarks/FAK-NATIVE-QWEN35-RESULTS.md); [`QWEN36-PARITY-RESULTS.md`](../benchmarks/QWEN36-PARITY-RESULTS.md) §"fak-native status" |
+| Tokenizer byte-exact vs llama.cpp | `internal/tokenizer` oracle gate (#90) | byte-exact on the Qwen vocab + the 22-token ChatML smoke prompt | [`QWEN36-PARITY-RESULTS.md`](../benchmarks/QWEN36-PARITY-RESULTS.md) |
+| GGUF tensor mapping (tiny + real) | `TestQwen35GGUFConfigCanonicalizesHybridTensorsAndRunsForward`, `TestOptionalQwen35GGUFMapsEveryTensorName` | all 851 real-GGUF tensors map; hybrid knobs derived | [`FAK-NATIVE-QWEN35-RESULTS.md`](../benchmarks/FAK-NATIVE-QWEN35-RESULTS.md) |
+| Cached session == cacheless forward | `TestQwen35HybridSessionMatchesForwardAndPersistsState`, `TestQwen35HybridQuantTokenLoopPersistsState` | last-position logits match | [`FAK-NATIVE-QWEN35-RESULTS.md`](../benchmarks/FAK-NATIVE-QWEN35-RESULTS.md) |
 | #71 Metal-hybrid-prefill CPU orchestration | `TestQwen35HybridViaMMMatchesCPUTemplate` (drives `prefillQwen35HybridViaMM`) | logits + KV cache + linear-attn cache match the proven CPU template within ~1e-6 Q8 float-order drift; green on `windows/amd64`, `CGO_ENABLED=0` — **re-built + re-run green 2026-06-29 at `cf8af435`** (#1242 build-hole closure: the prior dogfood's policy-blocked SKIP is now a real build, not a rounded pass) | [`experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §2; [`experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json) |
 | q4_k GEMM/GEMV dispatch bit-identical | `TestQ4KGemmMatchesMatRows`, `TestQ4KGemmInt8MatchesMatRowsInt8`, `TestQ4KMatRowsMatchesF32` | batched GEMM bit-identical to per-token decode GEMV (f32 + int8-SDOT) — the q4_k majority adds **zero** drift | [`experiments/qwen36/metal-q4k-device-gemm-status-2026-06-28.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-q4k-device-gemm-status-2026-06-28.md) §3; [`…decode-gemv-status…`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-q4k-decode-gemv-status-2026-06-28.md) §3 |
 | #71 model-lane code LANDED on `main` | core `prefillQwen35HybridViaMM` (`c80d64fa`); Metal twin + gate + stub + `kv.go` dispatch (`5c065118`) | `dos commit-audit` `diff-witnessed` (`code_effect`) | [`…metal-hybrid-prefill-status…`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §1/§3 |
@@ -92,7 +92,7 @@ now independently witnessed by the #65 decision artifact above.
 
 There is **one** "fak Qwen3.6-27B decode" number, not three rivals: it is a **measured
 progression along three paths on one M3 Pro**, all single-stream / batch=1.
-[`QWEN36-PARITY-RESULTS.md`](QWEN36-PARITY-RESULTS.md) is the **source of record** for the
+[`QWEN36-PARITY-RESULTS.md`](../benchmarks/QWEN36-PARITY-RESULTS.md) is the **source of record** for the
 full reconciliation table — do not duplicate it; this is the one-line summary:
 
 | fak decode path | tok/s | what it measures |
@@ -134,7 +134,7 @@ ledger. Pinned artifacts:
 `experiments/qwen36/native-gguf-q8-multitoken-parity-20260619.json` (fak) and
 `experiments/qwen36/llamacpp-qwen36-multitoken-oracle-20260619.json` (oracle). Sources:
 [`experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md)
-§1, [`QWEN36-PARITY-RESULTS.md`](QWEN36-PARITY-RESULTS.md) §"Token-3 drift RE-DIAGNOSED".
+§1, [`QWEN36-PARITY-RESULTS.md`](../benchmarks/QWEN36-PARITY-RESULTS.md) §"Token-3 drift RE-DIAGNOSED".
 
 Deeper root-cause investigation (which GDN/RoPE op compounds the error):
 `experiments/qwen36/token3-drift-investigation-2026-06-28.md` (sibling agent, this campaign).
@@ -174,8 +174,8 @@ must not be quoted on the same line as the M3 Pro single-stream kernel rows:
 
 - **8-GPU served throughput** (single-stream ≈59–93 tok/s, batched peak ≈820–1085
   completion tok/s) comes from **SGLang-serves + fak-adjudicates** on a datacenter GPU host,
-  not fak's own M3 Pro engine — see [`QWEN36-27B-GPU-SERVER-RESULTS.md`](QWEN36-27B-GPU-SERVER-RESULTS.md).
-- **AMD/Vulkan desktop** ([`QWEN36-AMD-VULKAN-RESULTS.md`](QWEN36-AMD-VULKAN-RESULTS.md))
+  not fak's own M3 Pro engine — see [`QWEN36-27B-GPU-SERVER-RESULTS.md`](../benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md).
+- **AMD/Vulkan desktop** ([`QWEN36-AMD-VULKAN-RESULTS.md`](../benchmarks/QWEN36-AMD-VULKAN-RESULTS.md))
   proves the model *loads and serves* on an RX 7600, but llama.cpp logs `fused Gated Delta
   Net (chunked) not supported, set to disabled` — so its absolute throughput is **not** an
   apples-to-apples GDN bar. Likewise **MLX is an invalid bar** for this arch (its hybrid
@@ -184,7 +184,7 @@ must not be quoted on the same line as the M3 Pro single-stream kernel rows:
 
 The single measured **bar** for the M3 Pro lane is **llama.cpp b9707 Metal (`-ngl 99`):
 prefill 51.55 tok/s, decode 7.29 tok/s, peak RSS ~24.5 GB**; CPU-only (`-ngl 0 -t 6`):
-20.12 / 6.48. (Source: [`QWEN36-PARITY-RESULTS.md`](QWEN36-PARITY-RESULTS.md).)
+20.12 / 6.48. (Source: [`QWEN36-PARITY-RESULTS.md`](../benchmarks/QWEN36-PARITY-RESULTS.md).)
 
 ---
 

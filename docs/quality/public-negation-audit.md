@@ -23,7 +23,7 @@ The bounded audit set comes from entries with `front_door_linked: true` in the [
 - `CONTRIBUTING.md`
 - `SECURITY.md`
 
-The result below audits those six files at commit `bad486577331c70d6d4cd93c5625a76e9c4c23df`. It covers prose outside fenced code and HTML comments. Adding a route to the inventory, changing one of these routes, or superseding the [audience architecture](../project/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md) makes the result stale and requires a new revision entry.
+The result below audits those six files at commit `bad486577331c70d6d4cd93c5625a76e9c4c23df`. It covers prose outside fenced code and HTML comments. Adding a route to the inventory, changing one of these routes, or superseding the [audience architecture](../notes/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md) makes the result stale and requires a new revision entry.
 
 ## Candidate search
 

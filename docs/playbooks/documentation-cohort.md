@@ -8,7 +8,7 @@ description: "Turn documentation findings into disjoint, witnessed work before a
 **Primary audience:** documentation dispatcher  
 **Lifecycle:** current  
 **Generation:** current trunk process  
-**Authority:** [documentation audience architecture](../project/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md)  
+**Authority:** [documentation audience architecture](../notes/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md)  
 **Last verified:** `fak issue contract`, `fak issue cohort`, and `dos arbitrate` CLI contracts on 2026-07-15
 
 Use this playbook to turn documentation findings into disjoint, witnessed work before page edits begin. The default is a small cohort whose issues name exact owned paths, direct navigation consumers, and a read-back witness. This shifts discovery of ambiguous scope, stale routes, and file collisions to contract time instead of merge time.

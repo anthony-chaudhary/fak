@@ -35,15 +35,26 @@ Wiring it into a merge gate re-introduces exactly the serialization continuous m
 exists to avoid — the fence without this reason is a speed bump someone will eventually
 remove, so this paragraph is the reason.
 
-## The OSP unit — five facets
+## The OSP unit — six facets
 
-An OSP unit ([`steerpr.Unit`](../internal/steerpr/steerpr.go)) carries five facets,
+An OSP unit ([`steerpr.Unit`](../internal/steerpr/steerpr.go)) carries six facets,
 each deliberately thin:
 
 - **Binding** — the unit is keyed by the `(fak <leaf>)` ship-stamp; each member commit
   parses its issue bindings apart as `Resolves` (a `#N` in the subject — closure-grade)
   vs `Mentions` (a `#N` only in the body — a safe mention). Unstamped commits are
   listed separately: visible, but carrying no band.
+- **Grouping basis** — leaf is the default and the fallback, but the fleet dispatches by
+  **wave**, not by leaf ([`grouping.go`](../internal/steerpr/grouping.go), #5040). Pass
+  `fak steer prs --cohort PLAN.json` (a `fak issue cohort --json` plan) and the commits
+  whose subject-bound `#N` belongs to a planned wave fold into **one unit per wave**,
+  keyed `wave:<n>` — the wave is what actually got spawned together, so it is the unit an
+  operator can stop or redirect. Everything else keeps folding by leaf. Because two bases
+  coexist, every unit states which one it used (`grouped_by: wave|leaf`, and a wave unit
+  lists the `leaves` it spans): a unit whose basis you have to guess at is worse than one
+  basis, not better. `fak release prplan` stays leaf-grouped — a promotion PR is a lane
+  artifact — and a wave unit bands by the same worst-member rule, so regrouping can never
+  clear a band.
 - **Membership** — the fold is deterministic over git history. There is no plan file to
   go stale: every stamped commit in the range is already a line item in the unit of the
   lane that owns it, so re-running the fold on the same range always yields the same

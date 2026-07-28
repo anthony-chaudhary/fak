@@ -104,7 +104,7 @@ path (#4843) lands and is re-measured against the #4777 baseline under the same 
 - Per-box baseline + next steps (40 vs 80 GiB/card): [`GLM52-DGX-PER-BOX-BASELINE-AND-NEXT-STEPS-2026-07-06.md`](GLM52-DGX-PER-BOX-BASELINE-AND-NEXT-STEPS-2026-07-06.md)
 - Roofline ceiling + lever map: [`GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md`](GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md)
 - 80 GiB/card resident serve (WITNESSED 23.2): [`GLM52-8GPU-FULL-RESIDENT-SERVE-2026-07-01.md`](GLM52-8GPU-FULL-RESIDENT-SERVE-2026-07-01.md)
-- Pure-fak 8-GPU resident functional witness (#4777): [`../benchmarks/GLM52-PURE-FAK-GPU-SERVER-RESULTS-2026-07-15.md`](../benchmarks/GLM52-PURE-FAK-GPU-SERVER-RESULTS-2026-07-15.md)
+- Pure-fak 8-GPU resident functional witness (#4777): [`GLM52-PURE-FAK-GPU-SERVER-RESULTS-2026-07-15.md`](GLM52-PURE-FAK-GPU-SERVER-RESULTS-2026-07-15.md)
 - Roofline dashboard (current-vs-ceiling, generated): [`GLM52-DGX-ROOFLINE-DASHBOARD.md`](GLM52-DGX-ROOFLINE-DASHBOARD.md)
 - Hardware coverage matrix (all platforms): [`../HARDWARE-MATRIX.md`](../HARDWARE-MATRIX.md)
 - Full-size serving witness runbook (#413): [`../serving/glm52-full-size-serving-witness.md`](../serving/glm52-full-size-serving-witness.md)

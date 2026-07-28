@@ -8,7 +8,7 @@ description: "The once-a-week playbook that detects doc-route drift on committed
 - **Primary audience:** documentation maintainer
 - **Lifecycle:** current
 - **Generation:** current trunk process
-- **Authority:** [documentation audience architecture](../project/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md)
+- **Authority:** [documentation audience architecture](../notes/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md)
 - **Companion process:** [documentation cohort dispatch](documentation-cohort.md)
 - **Last verified:** `fak hygiene`, `tools/docs_scorecard.py`, `tools/check_index_sync.py`, and GitHub issue CLI contracts on 2026-07-15
 

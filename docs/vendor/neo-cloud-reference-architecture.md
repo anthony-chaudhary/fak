@@ -10,6 +10,14 @@ mixed GPUs, NPUs, XPUs, and experimental silicon.
 **Goal:** expose many accelerator backends through one agent-kernel control plane
 without pretending all hardware is the same.
 
+> **Scope fence — three pages say "cloud" and mean different things.** This page is the
+> **backend binding layer**: how an operator *of* a neo cloud exposes many accelerator
+> pools behind one control plane. If you are a *renter* standing one gateway up on a box
+> you rented from such a cloud, you want
+> [Deploy fak on a rented GPU cloud](../fak/neo-cloud-deploy.md). If you are fronting a
+> hosted model **API** and own no GPU at all, you want
+> [Clouds & hosted providers](../supported/clouds.md).
+
 ## Status fence
 
 This is a reference architecture, not a shipping multi-vendor fleet product. The

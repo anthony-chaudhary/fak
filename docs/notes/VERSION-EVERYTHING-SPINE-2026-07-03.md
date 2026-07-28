@@ -38,6 +38,7 @@ fak version modules                 # table: r<rev>+g<sha>  last-touch  module
 fak version modules --json          # the same report, machine-readable
 fak version modules --stamp         # append changed-module rows to the ledger
 fak version modules --scores S.json # join a flat {"module": score} map
+fak version modules --coverage coverage.out --stamp   # fold + join + stamp, one command
 ```
 
 Live run at head c9a8c26a: 410 modules versioned; first stamp seeded 410
@@ -56,6 +57,22 @@ weight, and a module's score is the arithmetic mean of its file scores**. Duplic
 normalized paths and paths that cannot map to a module are refused rather than
 silently skewing or mis-joining the result. The output can be passed directly to
 `--scores` through a temporary file or shell process substitution.
+
+`fak version modules --coverage coverage.out --stamp` (#2467) is the same join
+with the fold built in, so a coverage-carrying ledger stamp lands from ONE
+command rather than an adapter step plus a temporary file. It folds a Go
+coverage profile into per-module **statement** coverage — covered statements
+over total statements, the number `go tool cover -func` reports — rather than a
+per-file mean, so a 5-statement helper cannot outweigh a 500-statement core
+file. The profile names files by import path; because this repo's Go module is
+the repository root, trimming that prefix recovers the repo-relative path the
+same `moduleOf` classifier reads, and `internal/<leaf>/<subpkg>` folds into the
+one module `internal/<leaf>`. Rows outside the module (a dependency in a merged
+`-coverpkg` profile) and rows under no tracked keyspace are skipped, never
+misfiled; a malformed profile is refused rather than partially folded. The
+joined score carries `provenance: witnessed` — it is measured off a real run's
+artifact, not modeled. `--scores` and `--coverage` are mutually exclusive: both
+write the same score column.
 
 `--scores` joins any flat `{"module": number}` map into the report and the
 ledger rows, so a score series reads against the version series: score deltas

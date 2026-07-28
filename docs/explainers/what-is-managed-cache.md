@@ -151,7 +151,7 @@ The part to get right is **which lever delivers that on a subscription seat**. I
 *not* the 1h-TTL upgrade: the provider rejects a `ttl:"1h"` cache_control on a
 subscription-OAuth credential with an HTTP 400 in practice (measured 2026-07-18, even
 with the required beta header — see the
-[measured finding](../cache-frontier/2026-07-18-subscription-oauth-400s-1h-ttl-upgrade-MEASURED.md)),
+[measured finding](../notes/2026-07-18-subscription-oauth-400s-1h-ttl-upgrade-MEASURED.md)),
 so the guard refuses `--managed-cache on` there and **downgrades to passive with a
 witnessed reason in the banner** rather than fail your turns. The headroom on Pro/Max
 comes from the family's other members, which run regardless: the provider's 5-minute

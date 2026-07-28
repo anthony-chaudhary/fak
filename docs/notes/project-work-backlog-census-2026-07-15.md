@@ -15,7 +15,7 @@ Verdict: **OBSERVE**. Strict project-work enforcement must not yet be promoted: 
 - Review command: `fak issue contract --from-issues <snapshot> --strict-project-work --json`.
 - Review exited 3, as expected for a corpus containing strict-project-work refusals.
 - Review SHA-256: `d2d7de0eee9dd9501fdcd4cdf443de4e983e29a335bd69c1f020b32d1eac2c4f`.
-- Machine-readable scrubbed census and decision queue (private GPU host aliases are normalized to `GPU-server`; issue numbers and all measured fields are unchanged): [`project-work-backlog-census-2026-07-15.json`](project-work-backlog-census-2026-07-15.json), SHA-256 `e746757433ca2cd8639de068a6c67ff0110575592b2d067d265a58e702219041`.
+- Machine-readable scrubbed census and decision queue (private GPU host aliases are normalized to `GPU-server`; issue numbers and all measured fields are unchanged): [`project-work-backlog-census-2026-07-15.json`](../project-work-backlog-census-2026-07-15.json), SHA-256 `e746757433ca2cd8639de068a6c67ff0110575592b2d067d265a58e702219041`.
 
 ## Coverage
 

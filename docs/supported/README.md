@@ -63,6 +63,7 @@ status follows the witnessed [claims ledger](https://github.com/anthony-chaudhar
 
 ## Related references (the sourced detail behind these pages)
 
+- [Deploy fak on a rented GPU cloud](../fak/neo-cloud-deploy.md) — the **opposite shape** from [Clouds & hosted providers](clouds.md) above, and the one readers most often land on by mistake: not fronting someone else's hosted API, but standing the gateway up on a GPU *you* rent from CoreWeave / Lambda / RunPod / Crusoe / Vast.ai / Nebius — in-kernel on the card, or proxying a co-located vLLM/SGLang. Every provider row is honestly marked `not yet` end-to-end witnessed.
 - [Compatibility matrix](../integrations/compatibility-matrix.md) — 47 surveyed harnesses, frameworks, backends, and protocols, each with the wire it speaks, whether it takes a custom base URL, and the exact repoint key, with a source link per row.
 - [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof.
 - [Hardware matrix](../HARDWARE-MATRIX.md) — every machine fak has been profiled on: 4 platforms, 2 CPU ISAs, 4 GPU backends (Apple Metal, AMD Vulkan, NVIDIA CUDA Ada + Ampere).

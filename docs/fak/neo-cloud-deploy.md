@@ -116,6 +116,25 @@ Each provider is one of the two primitives above. The provider-specific part is 
 | **Vast.ai** | Marketplace GPU instance (Docker-native, most heterogeneous) | Launch the `-cuda` image (build it for the *exact* card you bid on — arch varies wildly here) as the instance image, map 8080 | Static `fak` in front of local vLLM |
 | **Nebius** | GPU VM, or managed k8s | Same two doors as Lambda | Static `fak` in front of local vLLM |
 
+### Per-provider verification status — read before you quote a row
+
+Every recipe above is derived from the committed manifests, **not** from a run on that
+provider. No provider below has an end-to-end witness yet (a gateway on that provider's
+GPU answering an adjudicated request), so every row is `not yet` — a dogfood path to run
+and report, not a verified claim. Parent epic: [#1678](https://github.com/anthony-chaudhary/fak/issues/1678).
+
+| Provider | End-to-end witness | What is actually established | Provider-side prerequisite `fak` does not install |
+|---|---|---|---|
+| **CoreWeave** | `not yet` | The GPU overlay applies as a self-contained stack; CKS is standard k8s + GPU nodes | NVIDIA device plugin / GPU Operator on the pool (CKS ships it); a `.gguf` on the `fak-weights` claim |
+| **Lambda Cloud** | `not yet` | `install.sh` + systemd and `docker run --gpus all` are the repo's documented VM paths | NVIDIA driver + Container Toolkit on the VM image |
+| **RunPod** | `not yet` | Container-native: takes an image + command, which is what both shapes need | A pod template exposing 8080 as an HTTP port |
+| **Crusoe** | `not yet` | Same two doors as Lambda; no Crusoe-specific step is known to be required | NVIDIA driver + Container Toolkit (VM) or device plugin (k8s) |
+| **Vast.ai** | `not yet` | Marketplace instances are Docker-native | A `CUDA_ARCH` build matching the *exact* card you win the bid on |
+| **Nebius** | `not yet` | Same two doors as Lambda | NVIDIA driver + Container Toolkit (VM) or device plugin (k8s) |
+
+No provider here requires a non-default `runtimeClass` as far as the manifests show; if
+yours does, that is a gap in this page, not in your cluster — file it against #1678.
+
 **CoreWeave (CKS).** Managed Kubernetes with GPU nodes; the device plugin ships with the
 pool. Both shapes are pure `kubectl apply -k` — the GPU overlay for in-kernel, the proxy
 base for a co-located engine. Confirm `nvidia.com/gpu` is allocatable before you apply:

@@ -5,6 +5,14 @@ description: "The hosted model providers and cloud gateways fak serve sits in fr
 
 # Clouds and hosted providers fak supports
 
+> **Scope fence — three pages say "cloud" and mean different things.** This page is
+> **fronting a hosted model API**: someone else's GPU, someone else's tokens, you point
+> `--provider`/`--base-url` at their `/v1`. If instead you **rent a raw GPU box or GPU
+> k8s pool** (CoreWeave, Lambda, RunPod, Crusoe, Vast.ai, Nebius) and stand the gateway
+> up *on it*, you want [Deploy fak on a rented GPU cloud](../fak/neo-cloud-deploy.md).
+> If you *are* the neo-cloud exposing many accelerator backends through one control
+> plane, you want the [neo-cloud reference architecture](../vendor/neo-cloud-reference-architecture.md).
+
 This page lists the hosted model providers and cloud gateways `fak serve` can sit in front of. `fak serve` is a gateway: it fronts whatever serves your tokens and runs every proposed tool call through the kernel before it reaches the model. So a cloud is "supported" when you can point fak's `--provider` and `--base-url` at it. Two tiers cover the field: native provider wires that fak speaks directly, and any cloud that exposes an OpenAI-compatible endpoint.
 
 ## Start here: pick a cloud path and confirm it in one check
