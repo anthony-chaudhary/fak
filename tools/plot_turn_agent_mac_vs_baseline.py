@@ -91,6 +91,21 @@ def baseline_lookup(cells: list[dict], turns: int, agents: int, field: str) -> f
     return None
 
 
+def _artifact_label(path: Path) -> str:
+    """Label an artifact repo-relatively, falling back to its absolute path.
+
+    ``--mac`` / ``--baseline`` exist so a sweep bundle copied off a bench node can be
+    plotted from wherever it landed, and ``Path.relative_to`` RAISES on a path outside
+    the repo. It is called while composing the footer, i.e. after the whole figure has
+    been drawn and before anything is saved, so plotting any artifact from outside the
+    checkout died with a bare ValueError traceback and wrote no output at all.
+    """
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def annotate_points(ax, xs, ys, color, yoffset=8):
     for x, y in zip(xs, ys):
         ax.annotate(
@@ -268,8 +283,8 @@ def plot(mac_path: Path, baseline_path: Path, out_path: Path) -> None:
             )
 
     footer = (
-        f"Mac artifact: {mac_path.relative_to(ROOT)}  |  "
-        f"Baseline artifact: {baseline_path.relative_to(ROOT)}"
+        f"Mac artifact: {_artifact_label(mac_path)}  |  "
+        f"Baseline artifact: {_artifact_label(baseline_path)}"
     )
     fig.text(0.5, 0.013, footer, ha="center", fontsize=7.5, color=MUTED)
     fig.subplots_adjust(left=0.07, right=0.97, bottom=0.09, top=0.88, hspace=0.38, wspace=0.28)

@@ -343,12 +343,18 @@ def probe_tier(tier: gcp_accel.AccelTier, *, project: Optional[str],
                     f"{family} limit={lim} >= {tier.gpu_count} in {region}, "
                     f"offered, global cap={g_cap}")
             break
-        if offered is False and (best is None or best[0] == "UNKNOWN"):
-            best = ("NOT_OFFERED", zone, f"{tier.accelerator_type} not offered in {zone}")
-        elif offered and not fam_ok and (best is None or best[0] != "NOT_OFFERED"):
+        # NO_QUOTA outranks NOT_OFFERED no matter what order the zones arrive in: if
+        # the accelerator exists in ANY candidate zone, quota is the real blocker and
+        # "request quota" is the fix. Ranked first-signal-wins, the SAME facts yielded
+        # a different verdict purely from the order of tier.common_zones -- a
+        # not-offered zone listed first buried the quota finding, and a tier that only
+        # needed a quota grant was reported as silicon that does not exist here.
+        if offered and not fam_ok and (best is None or best[0] == "NOT_OFFERED"):
             shown = 0 if fam_limit is None else int(fam_limit)
             best = ("NO_QUOTA", zone,
                     f"{family} region limit={shown} < need {tier.gpu_count} in {region}")
+        elif offered is False and best is None:
+            best = ("NOT_OFFERED", zone, f"{tier.accelerator_type} not offered in {zone}")
     if best:
         result["verdict"], result["zone"], result["reason"] = best
     else:

@@ -2,7 +2,7 @@
 """
 fleet_heatmap.py — render the 2-D fleet turn-tax sweep surfaces as PNG heatmaps.
 
-Reads the cmd/fleetbench CSVs under fak/experiments/fleet/ and renders, on the
+Reads the cmd/fleetbench CSVs under experiments/fleet/ and renders, on the
 turns (T) × agents (A) grid:
 
   * cross_uplift  — the turns the SHARED-cache fleet deletes that the same agents
@@ -25,7 +25,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FLEET = os.path.join(HERE, "..", "fak", "experiments", "fleet")
+# tools/ sits IN the checkout, so HERE/".." is already the repo root: the sweep
+# artifacts are experiments/fleet/, not fak/experiments/fleet/. The extra segment
+# made every run exit 1 with "headline CSV not present" while the CSVs sat in
+# plain sight next to the PNGs this script itself published.
+FLEET = os.path.join(HERE, "..", "experiments", "fleet")
 
 
 def load_csv(path):

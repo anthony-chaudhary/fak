@@ -2,7 +2,7 @@
 """
 turntax_plot.py — render the turn-tax break-even curve as a PNG.
 
-Reads fak/experiments/turn-tax/turntax-breakeven.json (produced by
+Reads experiments/turn-tax/turntax-breakeven.json (produced by
 `fak turntax --breakeven`, harness internal/turnbench/stochastic.go) and renders:
 
   * turntax-breakeven.png — the 2-panel headline over the addressable hit-rate h:
@@ -27,7 +27,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TT = os.path.join(HERE, "..", "fak", "experiments", "turn-tax")
+# tools/ sits IN the checkout, so HERE/".." is already the repo root: the harness
+# writes experiments/turn-tax/, not fak/experiments/turn-tax/. The extra segment
+# made every run die on "missing ... turntax-breakeven.json" while the report and
+# the PNG this script publishes were both present and tracked.
+TT = os.path.join(HERE, "..", "experiments", "turn-tax")
 
 MEAS = "#1f6feb"   # measured (blue)
 MODEL = "#d29922"  # modeled (amber)
@@ -138,7 +142,7 @@ def main():
     path = os.path.join(TT, "turntax-breakeven.json")
     if not os.path.exists(path):
         raise SystemExit(
-            "missing fak/experiments/turn-tax/turntax-breakeven.json — "
+            "missing experiments/turn-tax/turntax-breakeven.json — "
             "run `fak turntax --breakeven` first")
     rep = load(path)
     plot(rep, os.path.join(TT, "turntax-breakeven.png"))

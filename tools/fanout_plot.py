@@ -2,7 +2,7 @@
 """
 fanout_plot.py — render the fanbench one-master-goal -> N-subagent sweep as PNGs.
 
-Reads the cmd/fanbench CSVs under fak/experiments/fanout/ and renders:
+Reads the cmd/fanbench CSVs under experiments/fanout/ and renders:
 
   * fanout-dashboard.png — the 2x2 headline over the fan-out width N (1..1024):
       (a) MEASURED cross-agent tool-result dedup (shared vs isolated, uplift shaded);
@@ -29,7 +29,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FAN = os.path.join(HERE, "..", "fak", "experiments", "fanout")
+# tools/ sits IN the checkout, so HERE/".." is already the repo root: the sweep
+# artifacts are experiments/fanout/, not fak/experiments/fanout/. The extra
+# segment made every run die on "missing ... fanbench-research.csv" while the CSV
+# was present.
+FAN = os.path.join(HERE, "..", "experiments", "fanout")
 
 MEAS = "#1f6feb"   # measured (blue)
 MODEL = "#d29922"  # modeled (amber)
@@ -198,7 +202,7 @@ def model_scaling(out):
 def main():
     cols = load_csv(os.path.join(FAN, "fanbench-research.csv"))
     if cols is None:
-        raise SystemExit("missing fak/experiments/fanout/fanbench-research.csv — run cmd/fanbench first")
+        raise SystemExit("missing experiments/fanout/fanbench-research.csv — run cmd/fanbench first")
     dash_cols, prefix = dashboard_slice(cols)
     dashboard(dash_cols, os.path.join(FAN, "fanout-dashboard.png"), prefix)
     model_scaling(os.path.join(FAN, "fanout-model-scaling.png"))

@@ -40,11 +40,15 @@ except ImportError:
     )
 
 
-# Constants
+# Constants. The checkout IS the Go module root: cmd/fak, go.mod and experiments/
+# all sit directly under it. An extra "fak" path segment here is a relocation
+# artifact from when tools/ lived one level above the checkout -- it makes
+# build_fak() run `go build` with a cwd that does not exist, and it makes the
+# default local shim unfindable, so the sweep dies before any model runs.
 ROOT = Path(__file__).parent.parent
-FAK_DIR = ROOT / "fak"
+FAK_DIR = ROOT
 DEFAULT_BIN_DIR = ROOT / "tools" / ".bin"
-DEFAULT_OUTPUT_DIR = ROOT / "fak" / "experiments" / "agent-live" / "sweep"
+DEFAULT_OUTPUT_DIR = ROOT / "experiments" / "agent-live" / "sweep"
 
 
 def run_command(cmd: List[str], cwd: Path = None, env: Dict[str, str] = None,
@@ -268,12 +272,14 @@ def generate_summary(results: List[SweepResult], output_dir: Path, profile: Swee
 
     # JSON summary
     json_path = output_dir / "summary.json"
-    with open(json_path, 'w') as f:
+    with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=2)
 
-    # Markdown summary
+    # Markdown summary. UTF-8 is explicit: the status glyphs below are outside
+    # cp1252, so the default Windows encoding raises and the summary is lost
+    # AFTER the whole sweep has already been paid for.
     md_path = output_dir / "summary.md"
-    with open(md_path, 'w') as f:
+    with open(md_path, 'w', encoding='utf-8') as f:
         f.write(f"# Sweep Summary: {profile.name}\n\n")
         f.write(f"**Timestamp:** {summary['timestamp']}\n\n")
         f.write(f"**Results:** {summary['successful']}/{summary['total_runs']} successful\n\n")
@@ -285,8 +291,11 @@ def generate_summary(results: List[SweepResult], output_dir: Path, profile: Swee
             status = "✓" if r.success else "✗"
             f.write(f"| {r.model_name} | {r.trial} | {status} | {r.duration_ms:.1f} | {r.tokens_per_sec:.1f} |\n")
 
-        if r.error:
-            f.write(f"\n**Error:** `{r.error}`\n")
+        # Per-run, inside the loop: reporting only the last result's error hides
+        # every earlier failure (and an empty sweep has no last result at all).
+        for r in results:
+            if r.error:
+                f.write(f"\n**Error:** `{r.model_name} trial {r.trial}`: `{r.error}`\n")
 
     print("\nSummary written to:")
     print(f"  JSON: {json_path}")
