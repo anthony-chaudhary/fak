@@ -22,8 +22,13 @@ or `python -m pytest tools/dispatch_worker_glm_guard_test.py -q`.
 """
 from __future__ import annotations
 
+import atexit
+import itertools
+import json
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,18 +39,66 @@ import dispatch_worker as dw  # noqa: E402
 
 GLM_BASE = "http://127.0.0.1:8001/v1"
 LAB_PROXY_BASE = "http://127.0.0.1:18080/v1"
+SEAT_BASE = "http://127.0.0.1:7777/v1"
+# Pinned so guard-wrapping never asks the OS for a free port (a bind is host state,
+# and the port lands in argv). Any value works; nothing listens on it in a test.
+GUARD_ADDR = "127.0.0.1:65432"
+
+# --- the injected opencode seat (#5403) ---------------------------------------
+# `opencode_guard_base_url` resolves, in order: (1) the provider-scoped
+# FLEET_DOGFOOD_GUARD_BASEURL_<PROVIDER>, (2) the selected provider's opencode account
+# config `options.baseURL`, (3) the legacy global FLEET_DOGFOOD_GUARD_BASEURL, and only
+# for the default provider. The tests below assert tiers 2 and 3, so tier 2 has to be
+# STATED rather than inherited from whichever `~/.config/opencode/opencode.json` the
+# running box happens to carry: reading the real seat is what made these red for
+# everyone who has one, green for everyone who does not, and therefore meaningless.
+#
+# `dispatch_worker` resolves the account config entirely from the env mapping it is
+# handed -- OPENCODE_CONFIG first, then XDG_CONFIG_HOME/opencode/ -- so naming both
+# inside a temp dir injects the seat through a seam the product already has, the same
+# way `target_resolver` injects it for the `test_glm_gateway_*` pair below. The
+# precedence chain itself is untouched; only the inputs are now ours.
+_SEAT_DIR = tempfile.mkdtemp(prefix="fak-opencode-seat-")
+atexit.register(shutil.rmtree, _SEAT_DIR, ignore_errors=True)
+_SEAT_SEQ = itertools.count()
 
 
-def _env(base: str | None) -> dict[str, str]:
-    """A hermetic env: a resolvable FAK_BIN (the Python exe) so guard-wrapping
-    engages without a built fak, with FLEET_DOGFOOD_GUARD_BASEURL as the knob."""
-    e = {"FAK_BIN": sys.executable}
+def _seat_config(seat: str | None) -> Path:
+    """A path for the injected opencode account config: written with ``seat`` as the
+    default provider's ``options.baseURL``, or left ABSENT for a host with no seat.
+    Unique per call so one test's seat can never bleed into the next."""
+    path = Path(_SEAT_DIR) / f"opencode-{next(_SEAT_SEQ)}.json"
+    if seat is not None:
+        path.write_text(json.dumps({"provider": {
+            dw.OPENCODE_DEFAULT_PROVIDER_ID: {"options": {"baseURL": seat}}}}),
+            encoding="utf-8")
+    return path
+
+
+def _env(base: str | None, *, seat: str | None = None) -> dict[str, str]:
+    """A hermetic env: a resolvable FAK_BIN (the Python exe) so guard-wrapping engages
+    without a built fak, FLEET_DOGFOOD_GUARD_BASEURL as the tier-3 knob, and the tier-2
+    account config pinned to ``seat`` (default: NO seat configured). Every host-read
+    `dispatch_worker` performs on this path is named here, so the verdict is the same on
+    a box with an opencode seat and on a box without one."""
+    cfg = _seat_config(seat)
+    e = {
+        "FAK_BIN": sys.executable,
+        # Tier 2, pinned twice: OPENCODE_CONFIG is consulted first and falls back to
+        # the ambient value only when absent, and XDG_CONFIG_HOME governs the
+        # `<root>/opencode/opencode.json` candidates that otherwise sit under $HOME.
+        "OPENCODE_CONFIG": str(cfg),
+        "XDG_CONFIG_HOME": _SEAT_DIR,
+        "FLEET_DOGFOOD_GUARD_ADDR": GUARD_ADDR,
+    }
     if base is not None:
         e["FLEET_DOGFOOD_GUARD_BASEURL"] = base
     return e
 
 
 def test_opencode_guarded_when_base_url_set() -> None:
+    # No seat configured (injected), so the legacy tier-3 knob is the only base URL
+    # in play -- which is the tier this test names.
     raw = dw.build_command("glm", "opencode")
     cmd, guarded = dw.guarded_launch_command(raw, "glm", "opencode", ROOT, env=_env(GLM_BASE))
     assert guarded is True, "opencode should be guarded when the GLM base URL is set"
@@ -82,10 +135,26 @@ def test_opencode_guarded_gets_wallclock_max_duration() -> None:
 
 
 def test_opencode_unguarded_without_base_url() -> None:
+    # No seat configured AND no knob: there is no base URL at ANY tier, which is the
+    # only state in which "unguarded" is the right answer. Before #5403 this test read
+    # the real seat off disk, so it asserted the opposite of what it claimed on any box
+    # that had one.
     raw = dw.build_command("glm", "opencode")
     cmd, guarded = dw.guarded_launch_command(raw, "glm", "opencode", ROOT, env=_env(None))
     assert guarded is False, "opencode must stay UNguarded without a base URL (no misroute)"
     assert cmd == raw, cmd
+
+
+def test_configured_seat_base_url_outranks_the_legacy_env_knob() -> None:
+    # The counterpart of the two above, and the guard against "fixing" them by
+    # reordering the tiers: a seat that fronts its own upstream WINS over the legacy
+    # global knob (#4771 depends on this). With the seat injected rather than read off
+    # the host, both directions are pinned by the same seam.
+    raw = dw.build_command("glm", "opencode")
+    cmd, guarded = dw.guarded_launch_command(
+        raw, "glm", "opencode", ROOT, env=_env(GLM_BASE, seat=SEAT_BASE))
+    assert guarded is True, cmd
+    assert cmd[cmd.index("--base-url") + 1] == SEAT_BASE, cmd
 
 
 def test_claude_lane_guarded_without_base_url_override() -> None:
