@@ -53,34 +53,28 @@ func (soStructuredOutput) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	v := Verdict{Oracle: "structured-output-validity", Kind: "rubric", Pass: true, Score: 1}
 	spec, err := soParseSpec(c.Reference.Text)
 	if err != nil {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = "schema spec unusable: " + err.Error()
-		return v
+		return rubricFail(v, "schema spec unusable: "+err.Error())
 	}
 	obj, perr := soParseObject(eng.Text)
 	if perr != nil {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = "output violation: " + perr.Error()
-		return v
+		return rubricFail(v, "output violation: "+perr.Error())
 	}
 	total := len(spec.Required) + len(spec.Expected)
 	passed := 0
 	var violations []string
-	for _, k := range soSortedKeys(spec.Required) {
+	for _, k := range sortedKeys(spec.Required) {
 		want := spec.Required[k]
 		got, ok := obj[k]
 		switch {
 		case !ok:
 			violations = append(violations, fmt.Sprintf("missing required key %q", k))
-		case !soTypeMatches(want, got):
-			violations = append(violations, fmt.Sprintf("key %q has type %s, want %s", k, soJSONType(got), want))
+		case !jsonTypeMatches(want, got):
+			violations = append(violations, fmt.Sprintf("key %q has type %s, want %s", k, jsonTypeName(got), want))
 		default:
 			passed++
 		}
 	}
-	for _, k := range soSortedKeys(spec.Expected) {
+	for _, k := range sortedKeys(spec.Expected) {
 		want := spec.Expected[k]
 		got, ok := obj[k]
 		switch {
@@ -112,9 +106,12 @@ func (soStructuredOutput) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	return v
 }
 
-// soTypeNames is the closed vocabulary of JSON type names a spec may declare,
-// sorted for deterministic error messages.
-var soTypeNames = []string{"array", "boolean", "integer", "null", "number", "object", "string"}
+// jsonTypeNames is the closed vocabulary of JSON type names a case-carried spec
+// may declare, sorted for deterministic error messages. It is shared by every
+// JSON-shaped oracle — the structured-output schema and the tool-call argument
+// contract declare types from ONE vocabulary, so a type name admitted by one is
+// admitted by the other.
+var jsonTypeNames = []string{"array", "boolean", "integer", "null", "number", "object", "string"}
 
 // soParseSpec parses and admission-checks the case-carried schema spec. It
 // refuses (with a reason) an empty, unparseable, or zero-check spec, and a
@@ -131,10 +128,10 @@ func soParseSpec(text string) (soSchemaSpec, error) {
 	if len(s.Required)+len(s.Expected) == 0 {
 		return s, fmt.Errorf("schema spec declares no required keys and no expected values")
 	}
-	for _, k := range soSortedKeys(s.Required) {
-		if !soKnownType(s.Required[k]) {
+	for _, k := range sortedKeys(s.Required) {
+		if !knownJSONType(s.Required[k]) {
 			return s, fmt.Errorf("schema spec key %q declares unknown type %q (known: %s)",
-				k, s.Required[k], strings.Join(soTypeNames, ", "))
+				k, s.Required[k], strings.Join(jsonTypeNames, ", "))
 		}
 	}
 	return s, nil
@@ -149,14 +146,14 @@ func soParseObject(text string) (map[string]any, error) {
 	}
 	obj, ok := v.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("top-level JSON value is %s, want object", soJSONType(v))
+		return nil, fmt.Errorf("top-level JSON value is %s, want object", jsonTypeName(v))
 	}
 	return obj, nil
 }
 
-// soKnownType reports whether t is in the closed type-name vocabulary.
-func soKnownType(t string) bool {
-	for _, n := range soTypeNames {
+// knownJSONType reports whether t is in the closed type-name vocabulary.
+func knownJSONType(t string) bool {
+	for _, n := range jsonTypeNames {
 		if t == n {
 			return true
 		}
@@ -164,11 +161,11 @@ func soKnownType(t string) bool {
 	return false
 }
 
-// soTypeMatches reports whether a decoded JSON value satisfies a declared
+// jsonTypeMatches reports whether a decoded JSON value satisfies a declared
 // type name. "integer" is a number with no fractional part — encoding/json
 // decodes every JSON number to float64, so integrality is checked, not the
 // Go type.
-func soTypeMatches(want string, got any) bool {
+func jsonTypeMatches(want string, got any) bool {
 	switch want {
 	case "string":
 		_, ok := got.(string)
@@ -194,8 +191,9 @@ func soTypeMatches(want string, got any) bool {
 	return false
 }
 
-// soJSONType names the JSON type of a decoded value for violation messages.
-func soJSONType(v any) string {
+// jsonTypeName names the JSON type of a decoded value for violation and fault
+// messages.
+func jsonTypeName(v any) string {
 	switch v.(type) {
 	case nil:
 		return "null"
@@ -222,9 +220,9 @@ func soJSON(v any) string {
 	return string(b)
 }
 
-// soSortedKeys returns m's keys sorted, so violation order — and therefore
-// the FIRST violation a Detail names — is deterministic across runs.
-func soSortedKeys[V any](m map[string]V) []string {
+// sortedKeys returns m's keys sorted, so violation and fault order — and
+// therefore the FIRST one a Detail names — is deterministic across runs.
+func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

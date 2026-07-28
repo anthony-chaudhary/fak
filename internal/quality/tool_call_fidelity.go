@@ -3,8 +3,6 @@ package quality
 import (
 	"encoding/json"
 	"fmt"
-	"math"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -73,27 +71,19 @@ func (toolCallFidelity) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	v := Verdict{Oracle: "tool-call-fidelity", Kind: "rubric", Pass: true, Score: 1}
 	spec, err := toolParseSpec(c.Reference.Text)
 	if err != nil {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = "tool spec unusable: " + err.Error()
-		return v
+		return rubricFail(v, "tool spec unusable: "+err.Error())
 	}
 	call, cerr := toolParseCall(eng.Text)
 	if cerr != nil {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = "tool call malformed: " + cerr.Error()
-		return v
+		return rubricFail(v, "tool call malformed: "+cerr.Error())
 	}
 	if call.Tool != spec.Tool {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = fmt.Sprintf("wrong tool selected: engine called %q, case expects %q", call.Tool, spec.Tool)
-		return v
+		return rubricFail(v, fmt.Sprintf("wrong tool selected: engine called %q, case expects %q",
+			call.Tool, spec.Tool))
 	}
 	passed := 0
 	var faults []string
-	for _, name := range toolSortedKeys(spec.Args) {
+	for _, name := range sortedKeys(spec.Args) {
 		as := spec.Args[name]
 		got, ok := call.Args[name]
 		switch {
@@ -101,8 +91,8 @@ func (toolCallFidelity) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 			faults = append(faults, fmt.Sprintf("missing required argument %q", name))
 		case !ok:
 			passed++ // optional and absent: vacuously conformant
-		case !toolTypeMatches(as.Type, got):
-			faults = append(faults, fmt.Sprintf("argument %q has type %s, want %s", name, toolJSONType(got), as.Type))
+		case !jsonTypeMatches(as.Type, got):
+			faults = append(faults, fmt.Sprintf("argument %q has type %s, want %s", name, jsonTypeName(got), as.Type))
 		default:
 			if fault := toolConstraintFault(name, as, got); fault != "" {
 				faults = append(faults, fault)
@@ -112,7 +102,7 @@ func (toolCallFidelity) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 		}
 	}
 	extra := 0
-	for _, name := range toolSortedKeys(call.Args) {
+	for _, name := range sortedKeys(call.Args) {
 		if _, declared := spec.Args[name]; !declared {
 			extra++
 			faults = append(faults, fmt.Sprintf("argument %q is not in tool %q's schema", name, spec.Tool))
@@ -143,10 +133,6 @@ func (toolCallFidelity) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	return v
 }
 
-// toolTypeNames is the closed vocabulary of JSON type names an argument spec
-// may declare, sorted for deterministic error messages.
-var toolTypeNames = []string{"array", "boolean", "integer", "null", "number", "object", "string"}
-
 // toolParseSpec parses and admission-checks the case-carried tool contract. It
 // refuses (with a reason) an empty or unparseable spec, one naming no expected
 // tool, and an argument declaring a type name outside the closed vocabulary —
@@ -162,10 +148,10 @@ func toolParseSpec(text string) (toolCallSpec, error) {
 	if s.Tool == "" {
 		return s, fmt.Errorf("tool spec names no expected tool")
 	}
-	for _, name := range toolSortedKeys(s.Args) {
-		if !toolKnownType(s.Args[name].Type) {
+	for _, name := range sortedKeys(s.Args) {
+		if !knownJSONType(s.Args[name].Type) {
 			return s, fmt.Errorf("tool spec argument %q declares unknown type %q (known: %s)",
-				name, s.Args[name].Type, strings.Join(toolTypeNames, ", "))
+				name, s.Args[name].Type, strings.Join(jsonTypeNames, ", "))
 		}
 	}
 	return s, nil
@@ -214,77 +200,7 @@ func toolConstraintFault(name string, as toolArgSpec, got any) string {
 	return ""
 }
 
-// toolKnownType reports whether t is in the closed type-name vocabulary.
-func toolKnownType(t string) bool {
-	for _, n := range toolTypeNames {
-		if t == n {
-			return true
-		}
-	}
-	return false
-}
-
-// toolTypeMatches reports whether a decoded JSON argument value satisfies a
-// declared type name. "integer" is a number with no fractional part —
-// encoding/json decodes every JSON number to float64, so integrality is
-// checked, not the Go type.
-func toolTypeMatches(want string, got any) bool {
-	switch want {
-	case "string":
-		_, ok := got.(string)
-		return ok
-	case "boolean":
-		_, ok := got.(bool)
-		return ok
-	case "number":
-		_, ok := got.(float64)
-		return ok
-	case "integer":
-		f, ok := got.(float64)
-		return ok && f == math.Trunc(f)
-	case "object":
-		_, ok := got.(map[string]any)
-		return ok
-	case "array":
-		_, ok := got.([]any)
-		return ok
-	case "null":
-		return got == nil
-	}
-	return false
-}
-
-// toolJSONType names the JSON type of a decoded value for fault messages.
-func toolJSONType(v any) string {
-	switch v.(type) {
-	case nil:
-		return "null"
-	case bool:
-		return "boolean"
-	case float64:
-		return "number"
-	case string:
-		return "string"
-	case []any:
-		return "array"
-	case map[string]any:
-		return "object"
-	}
-	return fmt.Sprintf("%T", v)
-}
-
 // toolNum renders a numeric bound/value compactly for fault messages.
 func toolNum(f float64) string {
 	return strconv.FormatFloat(f, 'g', -1, 64)
-}
-
-// toolSortedKeys returns m's keys sorted, so fault order — and therefore the
-// FIRST fault a Detail names — is deterministic across runs.
-func toolSortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

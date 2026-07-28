@@ -67,10 +67,7 @@ func (ConfidenceCalibration) Judge(ref, eng Trace, c QualityCase) Verdict {
 	v := Verdict{Oracle: "confidence-calibration", Kind: "rubric", Pass: true, Score: 1}
 	claims, err := calParseClaims(eng.Text)
 	if err != nil {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = fmt.Sprintf("engine claim payload unparseable: %v", err)
-		return v
+		return rubricFail(v, fmt.Sprintf("engine claim payload unparseable: %v", err))
 	}
 	if len(claims) == 0 {
 		v.Detail = "report asserts no claims; nothing to calibrate"
@@ -78,10 +75,7 @@ func (ConfidenceCalibration) Judge(ref, eng Trace, c QualityCase) Verdict {
 	}
 	support, err := calParseSupport(ref.Text)
 	if err != nil {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = fmt.Sprintf("reference support payload unparseable: %v", err)
-		return v
+		return rubricFail(v, fmt.Sprintf("reference support payload unparseable: %v", err))
 	}
 	calibrated := 0
 	firstBad := ""

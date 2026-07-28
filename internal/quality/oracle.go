@@ -45,6 +45,19 @@ type Divergence struct {
 	Engine    string `json:"engine"`
 }
 
+// rubricFail is the verdict a rubric oracle returns when the run fails OUTRIGHT
+// rather than scoring a fraction — the payload would not parse, the case declared
+// no usable evidence, a forbidden claim appeared, the wrong tool was called. Such a
+// run is not a low score, it is a zero: the oracle had nothing to grade. Callers
+// pass their own already-formatted reason so the Detail still names the specific
+// fault, and return the result directly.
+func rubricFail(v Verdict, reason string) Verdict {
+	v.Pass = false
+	v.Score = 0
+	v.Detail = reason
+	return v
+}
+
 // GreedyTokenDiff is the deterministic comparator: for a temperature-zero / greedy
 // case, the engine token stream must equal the reference token stream exactly, and
 // the first mismatch (or a length difference) is reported as the first divergence.
@@ -104,10 +117,7 @@ func (GroundingRubric) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	text := strings.ToLower(eng.Text)
 	for _, f := range c.Rubric.Forbidden {
 		if f != "" && strings.Contains(text, strings.ToLower(f)) {
-			v.Pass = false
-			v.Score = 0
-			v.Detail = fmt.Sprintf("forbidden claim present: %q", f)
-			return v
+			return rubricFail(v, fmt.Sprintf("forbidden claim present: %q", f))
 		}
 	}
 	req := c.Rubric.Required

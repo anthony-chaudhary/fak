@@ -92,10 +92,7 @@ func (OAISemantics) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	v := Verdict{Oracle: "openai-compat-semantics", Kind: "rubric", Pass: true, Score: 1}
 	resp, err := oaiParseResponse(eng.Text)
 	if err != nil {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = fmt.Sprintf("response envelope: %v", err)
-		return v
+		return rubricFail(v, fmt.Sprintf("response envelope: %v", err))
 	}
 	violations := oaiAudit(resp, eng, c)
 	v.Score = float64(oaiCheckCount-len(violations)) / float64(oaiCheckCount)
