@@ -145,10 +145,7 @@ func (ActionCompleteness) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	v := Verdict{Oracle: "action-completeness", Kind: "rubric", Pass: true, Score: 1}
 	items, err := actParseItems(eng.Text)
 	if err != nil {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = fmt.Sprintf("report items not parseable as a JSON item array: %v", err)
-		return v
+		return rubricFail(v, fmt.Sprintf("report items not parseable as a JSON item array: %v", err))
 	}
 	actionable, complete := 0, 0
 	var incomplete []string

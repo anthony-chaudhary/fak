@@ -47,17 +47,14 @@ const groundingOverlap = 0.6
 
 func (ClaimGrounding) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	v := Verdict{Oracle: "claim-grounding", Kind: "rubric", Pass: true, Score: 1}
-	claims := splitClaims(eng.Text)
+	claims := reportSentences(eng.Text)
 	if len(claims) == 0 {
 		v.Detail = "report asserts no claims; nothing to ground"
 		return v
 	}
 	evidence := newEvidenceSet(c.Rubric.Required)
 	if len(evidence) == 0 {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = fmt.Sprintf("no evidence snippets declared; first ungrounded claim: %q", claims[0])
-		return v
+		return rubricFail(v, fmt.Sprintf("no evidence snippets declared; first ungrounded claim: %q", claims[0]))
 	}
 	grounded := 0
 	firstUngrounded := ""
@@ -88,16 +85,19 @@ func (ClaimGrounding) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	return v
 }
 
-// splitClaims splits report text into claim sentences on newlines and ". ",
-// trimming whitespace and a trailing period and dropping empties. Figures like
-// "12.5%" survive intact because the split requires a space after the period.
-func splitClaims(text string) []string {
+// reportSentences splits report text into sentences on newlines and ". ",
+// trimming whitespace and a trailing period and dropping empties. It is the split
+// discipline EVERY sentence-scoped report oracle shares — claim grounding, status
+// oscillation, temporal consistency — so a report is cut into the same units no
+// matter which oracle is reading it. Figures like "12.5%" and dates like
+// "2026-07-10" survive intact because the split requires a space after the period.
+func reportSentences(text string) []string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
 		for _, part := range strings.Split(line, ". ") {
-			cl := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(part), "."))
-			if cl != "" {
-				out = append(out, cl)
+			s := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(part), "."))
+			if s != "" {
+				out = append(out, s)
 			}
 		}
 	}

@@ -64,7 +64,7 @@ func (oscStatusOscillation) Judge(ref, eng Trace, c QualityCase) Verdict {
 		v.Detail = "no previous statuses declared in the reference; nothing to compare"
 		return v
 	}
-	sentences := oscSentences(eng.Text)
+	sentences := reportSentences(eng.Text)
 	checked, ok, explained := 0, 0, 0
 	firstViolation := ""
 	for _, ws := range prev {
@@ -213,23 +213,6 @@ var oscRationaleMarkers = []string{
 	"because", "due to", "after", "since", "caused by", "root cause",
 	"owing to", "as a result", "driven by", "following", "explained by",
 	"fixed by", "resolved by", "thanks to",
-}
-
-// oscSentences splits report text into sentences on newlines and ". ",
-// trimming whitespace and a trailing period and dropping empties (the same
-// split discipline as splitClaims; duplicated so sibling oracle files stay
-// edit-disjoint).
-func oscSentences(text string) []string {
-	var out []string
-	for _, line := range strings.Split(text, "\n") {
-		for _, part := range strings.Split(line, ". ") {
-			s := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(part), "."))
-			if s != "" {
-				out = append(out, s)
-			}
-		}
-	}
-	return out
 }
 
 // oscCurrentStatus finds the workstream's current status in the report: the

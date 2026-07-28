@@ -77,7 +77,7 @@ func (tmpTemporalConsistency) Judge(ref, eng Trace, c QualityCase) Verdict {
 		}
 	}
 
-	for _, claim := range tmpSentences(eng.Text) {
+	for _, claim := range reportSentences(eng.Text) {
 		low := strings.ToLower(claim)
 		for _, tl := range topics {
 			if !strings.Contains(low, tl.key) {
@@ -209,23 +209,6 @@ func tmpTopicTimelines(facts []tmpFact) []tmpTimeline {
 			current:    fs[len(fs)-1],
 			superseded: fs[:len(fs)-1],
 		})
-	}
-	return out
-}
-
-// tmpSentences splits report text into claim sentences on newlines and ". ",
-// trimming whitespace and a trailing period and dropping empties. Dates like
-// "2026-07-10" survive intact because the split requires a space after the
-// period.
-func tmpSentences(text string) []string {
-	var out []string
-	for _, line := range strings.Split(text, "\n") {
-		for _, part := range strings.Split(line, ". ") {
-			s := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(part), "."))
-			if s != "" {
-				out = append(out, s)
-			}
-		}
 	}
 	return out
 }

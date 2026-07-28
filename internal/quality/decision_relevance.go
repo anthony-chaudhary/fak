@@ -49,11 +49,8 @@ func (drDecisionRelevance) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 	}
 	sections := drParseSections(eng.Text)
 	if len(sections) == 0 {
-		v.Pass = false
-		v.Score = 0
-		v.Detail = fmt.Sprintf("empty report: no top section for %d material decision(s); first: %q",
-			len(decisions), decisions[0])
-		return v
+		return rubricFail(v, fmt.Sprintf("empty report: no top section for %d material decision(s); first: %q",
+			len(decisions), decisions[0]))
 	}
 	top := sections[0]
 	inTop := 0
@@ -69,13 +66,8 @@ func (drDecisionRelevance) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 			misplaced = append(misplaced, fmt.Sprintf("decision %q absent from the report", d))
 		}
 	}
-	v.Score = float64(inTop) / float64(len(decisions))
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every material decision must lead the top section
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, inTop, len(decisions))
+	if short {
 		v.Detail = fmt.Sprintf("decision relevance %.2f < %.2f (%d/%d material decisions lead %s); %s",
 			v.Score, min, inTop, len(decisions), drDescribe(top), strings.Join(misplaced, "; "))
 		return v
