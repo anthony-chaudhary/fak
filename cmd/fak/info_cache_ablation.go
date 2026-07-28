@@ -61,7 +61,9 @@ func cacheAblationMechs(ca *guardInfoCacheAttribution) []cacheAblationMech {
 // renderInfoCacheAblationRows projects the live CacheAttribution block into the Cache tab's
 // ablation section: a section rule, a one-line framing, then one savings-bar row per token
 // mechanism (bar length ∝ that mechanism's share of the largest mechanism's save), plus the vDSO
-// avoided-CALLS line (calls, not tokens, so it never reads as a token saving on the bars above).
+// avoided-CALLS line (calls, not tokens, so it never reads as a token saving on the bars above) and
+// the cold-tool-defer block (#3647) — the third shed mechanism, kept off the bars for the same
+// reason as vDSO: it is a counted event, not a priced token saving.
 // When no attribution is reported, or every mechanism is zero (a cold / plain-passthrough
 // session), it renders a single honest line so the tab still explains itself rather than showing
 // an empty rule.
@@ -83,7 +85,13 @@ func renderInfoCacheAblationRows(ctx guardInfoPanelCtx) []string {
 			maxEq = m.tokEq
 		}
 	}
-	if maxEq <= 0 && ca.FakVDSOAvoidedCalls == 0 {
+	// The cold-tool-defer shed counts toward "this session has something to show" even though it
+	// prices no tokens, mirroring the producer's own gate (gateway.cacheAttributionVars folds
+	// sum.DeferColdCount into the same emit decision). Without this term a defer-ON session with no
+	// token slice decoded a populated block and then threw it away behind "nothing to ablate on a
+	// cold/passthrough session" — the pane calling a session cold while holding the witness that
+	// fak had deferred N tools on it. That is precisely the defer-on session #3647 asks to surface.
+	if maxEq <= 0 && ca.FakVDSOAvoidedCalls == 0 && !hasColdToolDeferShed(ca) {
 		return append(rows, " ablation  no cache savings witnessed yet — nothing to ablate on a cold/passthrough session")
 	}
 	rows = append(rows, " ablation  turn a mechanism off → tokens you'd lose (click a row for how it's priced):")
@@ -112,7 +120,63 @@ func renderInfoCacheAblationRows(ctx guardInfoPanelCtx) []string {
 		rows = append(rows, fmt.Sprintf("   %s ·  %s engine calls avoided (not tokens)",
 			padRightTUI("fak vDSO memo", 22), guardInfoShortCount(int(ca.FakVDSOAvoidedCalls))))
 	}
-	return rows
+	return append(rows, deferColdAblationRows(ca)...)
+}
+
+// deferColdMechLabel labels the cold-tool-defer block's count row. It is deliberately NOT a
+// substring of any cacheAblationMechs label, so applyInfoCacheMechClick's Contains hit-test can
+// never mistake this informational row for a priced bar and expand a mechanism nobody clicked.
+const deferColdMechLabel = "fak cold-tool defer"
+
+// deferColdMaxNamed caps how many deferred tool names the block spells out before collapsing the
+// tail into "+N more". The cold tail on an MCP-heavy session runs to dozens of tools, and a row
+// naming every one would dwarf the section it belongs to. The producer sorts the names
+// (gateway.toolDeferNamesSnapshot), so the prefix shown is stable turn-over-turn rather than a
+// reshuffling sample.
+const deferColdMaxNamed = 6
+
+// hasColdToolDeferShed reports whether the session witnessed the cold-tool-defer lever firing. Any
+// one of the three counters is sufficient: a producer that reported names but lost its count (or
+// vice versa) still describes a session where the lever fired, and suppressing the block on a
+// partial witness would hide the very thing #3647 exists to surface.
+func hasColdToolDeferShed(ca *guardInfoCacheAttribution) bool {
+	return ca.FakDeferColdCount > 0 || ca.FakDeferColdTurns > 0 || len(ca.FakDeferColdToolNames) > 0
+}
+
+// deferColdAblationRows renders the cold-tool-DEFER shed (#3647, the --defer-cold-tools lever) as
+// its OWN block below the priced bars, never as a savings bar. This is the THIRD shed mechanism and
+// the one most easily conflated with the compaction shed above it: both "drop" something, but defer
+// shrinks NO request bytes and buys NO token-equiv — every def still ships on the wire, and the
+// reduction is provider-side (only the hot core loads into context; a cold schema faults in on
+// demand), so it is OBSERVED in the usage relay rather than priced here. Giving it the vDSO line's
+// " · " gutter instead of a bar is what keeps that distinction legible at a glance: in this section
+// a bar means priced tokens, a · means a counted event. The second row names WHICH tools went cold
+// — the question the raw _tool_defer_* counters could not answer, and the reason an operator can
+// now tell "the lever fired" from "the lever fired on the tools I actually needed".
+//
+// Nil when the lever never fired, so a defer-off session's pane stays byte-identical to before.
+func deferColdAblationRows(ca *guardInfoCacheAttribution) []string {
+	if !hasColdToolDeferShed(ca) {
+		return nil
+	}
+	count, turns := int(ca.FakDeferColdCount), int(ca.FakDeferColdTurns)
+	rows := []string{fmt.Sprintf("   %s ·  %s cold tool %s deferred over %s %s (provider-side, not tokens)",
+		padRightTUI(deferColdMechLabel, 22),
+		guardInfoShortCount(count), pluralWord(count, "def", "defs"),
+		guardInfoShortCount(turns), pluralWord(turns, "turn", "turns"))}
+	names := ca.FakDeferColdToolNames
+	if len(names) == 0 {
+		return rows
+	}
+	shown, extra := names, ""
+	if len(shown) > deferColdMaxNamed {
+		shown = shown[:deferColdMaxNamed]
+		extra = fmt.Sprintf(" (+%d more)", len(names)-deferColdMaxNamed)
+	}
+	// Indented past the 22-cell label column and its " · " gutter so the names hang under the count
+	// clause and the two rows read as one block instead of two unrelated lines.
+	return append(rows, fmt.Sprintf("   %s    deferred: %s%s",
+		padRightTUI("", 22), strings.Join(shown, ", "), extra))
 }
 
 // providerAblationDetail spells the provider prompt-cache NET as its read rebate and its write
