@@ -587,6 +587,9 @@ func tuiUsage(w io.Writer) {
   fak console overview [--pane ID ...] [--console-config FILE]
                    [--issues-json FILE] [--ledger FILE] [--sessions-json FILE]
                    [--garden-json FILE] [--guard-json FILE ...] [--json]
+  fak console ablate [--sweep vdso,...] [--suite NAME] [--report FILE]
+                 [--baseline ARM] [--follow] [--width N]
+                 [--color auto|always|never] [--json]
 
 The issues pane folds GitHub issues into a ranked terminal model: priority lanes,
 orphan/stale/label gaps, optional epic-related rows, and review actions. With no
@@ -645,5 +648,11 @@ Use --pane repeatedly to choose a subset and display order for that invocation.
 Without --pane, overview reads overview_panes from FAK_CONSOLE_FILE or
 ~/.fak/console.json when present; with neither, it includes every registered pane
 that has an overview adapter and ranks by attention.
+
+The ablate pane is the visual twin of the `+"`fak ablate`"+` table: one row per
+managed-context caching concept with a savings bar split provider-vs-fak,
+fidelity/evidence badges, and a delta against --baseline. With no --report it runs
+the in-process --sweep over --suite; with --report FILE it renders a saved
+`+"`fak ablate --out`"+` artifact, and --report --follow tails a running sweep live.
 `)
 }

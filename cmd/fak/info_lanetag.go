@@ -12,7 +12,7 @@ import (
 
 // guardInfoNarrowCols is the pane-width threshold below which the verbose multi-line legend
 // is replaced by a single compact line: a narrow split pane (e.g. the --split right column)
-// cannot show the 4-line legend without wrapping it, which crowds out the live status row.
+// cannot show the full per-term legend without wrapping it, which crowds out the live status row.
 const guardInfoNarrowCols = 80
 
 // fitGuardInfoStatus formats the live status line for the in-place TTY redraw, capped so it
@@ -211,19 +211,7 @@ func guardInfoCompactLegend() string {
 	return "what this means: cache = is re-using text saving money · safety = what fak blocked/fixed/set aside · assumptions = facts/source/confidence/expiry"
 }
 
-// guardInfoLegend explains each part of the live line in plain words, printed once at the top
-// so someone watching in a second pane knows what they are looking at without leaving the
-// terminal.
-func guardInfoLegend() string {
-	var b strings.Builder
-	fmt.Fprintln(&b, "what this means:")
-	fmt.Fprintln(&b, "  cache  = fak re-uses text it already sent so the model costs less. \"saving money\" = the re-use has paid off; \"reused %\" = how much was re-used; \"×N cheaper\" = how much cheaper; tokens = how much you've saved so far (can start below zero).")
-	fmt.Fprintln(&b, "  safety = what fak did to keep you safe: blocked an unsafe action, fixed a risky one before it ran, or set a suspicious result aside.")
-	fmt.Fprintln(&b, "  why    = the reason code(s) behind those blocks — the same breakdown fak prints when the session ends, now live — plus anything held for a witness or deferred.")
-	fmt.Fprintln(&b, "  saved  = \"turns saved\": engine calls fak avoided for you (served from its own cache or handled in-kernel) so the agent never had to make them — shown only once at least one was avoided.")
-	fmt.Fprintln(&b, "  assumptions = active facts the session is relying on, with source class, confidence, expiry, and origin reference from public session/debug state.")
-	fmt.Fprintln(&b, "  agents = live sessions running through this fak — the main agent plus any sub-agents it spawned, with remaining budget and wall-clock.")
-	fmt.Fprintln(&b, "  watchdog = health of the layer that resumes stranded agents and restarts a dead monitor: the rollup verdict (healthy / healing / down / gave up), how many times it has ticked (alive proof), how many resumes it has proven, and whether any monitor needs attention. Absent when no watchdog is running here.")
-	fmt.Fprintln(&b, "  replies = answers the model has given · busy with = work happening right now · running = how long fak has been up · \"nothing yet\" = no re-use has happened.")
-	return b.String()
-}
+// guardInfoLegend — the full multi-line guide this header prints — lives beside the line it
+// explains, in info.go next to renderGuardInfoLine. A legend that drifts from the line is worse
+// than no legend, so the two are kept in one file: change the line, change the legend, in the
+// same diff.
