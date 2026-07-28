@@ -60,6 +60,22 @@ const (
 	// grace window — a writer could be mid-write between process samples. Keep until it
 	// ages past the window.
 	ReclaimKeepFresh IndexLockReclaimReason = "keep_fresh"
+	// ReclaimReapOwnerDead: the lock is frozen past the SHORT owner-dead window AND its
+	// creator is NAMED and provably dead — a sibling .git/fak-commit.lock holding a pid that
+	// is no longer running. That is the same direct dead-owner refutation the next-index path
+	// already trusts (there the pid is in the filename; here it is in the sibling lock fak
+	// writes before it touches the index), so it does not need the fifteen-minute stand-in
+	// for "the holder is gone". This is the branch that unwedges #5335's dominant case: a
+	// `fak commit` killed at its tool timeout orphans its OWN index.lock, and the lane must
+	// not stay blocked for the rest of the grace window while a peer swarm keeps producing
+	// more of them.
+	ReclaimReapOwnerDead IndexLockReclaimReason = "reap_owner_dead"
+	// ReclaimKeepAdvancing: a second sample a settle window later saw the lock's mtime move
+	// or its size change. Some process is writing THIS lock right now, so it is not an
+	// orphan whatever its mtime reads — keep it, and let no age gate override that. This is
+	// the guard that makes the age-only reaps above safe: age can misread a live-but-slow
+	// writer as abandoned, an advancing mtime cannot.
+	ReclaimKeepAdvancing IndexLockReclaimReason = "keep_advancing"
 	// ReclaimKeepLiveOwner: a next-index-<pid>.lock whose named pid is STILL RUNNING.
 	// Only reachable for next-index residue, whose filename carries its writer's pid —
 	// index.lock has no owner to name. Keep: that process may still rename the temp file
@@ -84,15 +100,27 @@ type IndexLockReclaimDecision struct {
 // assists, or it false-closes forever under contention — #5335 item 3). A failed
 // process probe and an unrelated by-name live writer do NOT veto a stale reap; they only
 // refine the keep REASON for a FRESH lock, where a writer could be mid-write between
-// process samples. Absence and freshness are the only states that keep the lock: the
-// checks read raw facts in priority order — absence, then staleness (reap), then, for a
-// fresh lock, probe trust and a live writer — so absence and staleness are the two
-// pillars that decide a reap.
+// process samples. The checks read raw facts in priority order — absence, then an
+// advancing lock, then staleness (reap), then a dead named owner (reap), then, for a fresh
+// lock, probe trust and a live writer.
+//
+// Two witnesses refine that (#5335 item 3). An ADVANCING lock — one whose mtime moved across
+// the observer's bounded settle window — is kept unconditionally, ahead of every age gate:
+// age can misread a live-but-slow writer as abandoned, a moving mtime cannot, so this is
+// what keeps the age-only reaps safe. And a lock frozen past the SHORT owner-dead window
+// whose creator is NAMED and dead (a sibling fak-commit.lock holding a dead pid) reaps
+// without serving out the long grace window, because that window only ever stood in for the
+// owner proof this case actually has.
 func DecideIndexLockReclaim(rep Report) IndexLockReclaimDecision {
 	d := IndexLockReclaimDecision{Path: rep.IndexLock.Path}
 	switch {
 	case !rep.IndexLock.Present:
 		d.Reason = ReclaimKeepAbsent
+	case rep.IndexLock.Advancing:
+		// Someone is writing THIS lock right now — the one fact that outranks every age
+		// gate below, including a stale mtime, because it is observed on the lock itself
+		// rather than inferred from the clock or from an unrelated process listing.
+		d.Reason = ReclaimKeepAdvancing
 	case rep.IndexLock.StaleHint:
 		// Present and stale past the grace window: the orphaned-lock signature. A frozen
 		// mtime refutes any active holder — no git writer holds index.lock for the grace
@@ -104,6 +132,15 @@ func DecideIndexLockReclaim(rep Report) IndexLockReclaimDecision {
 		// lock names its writer's pid.
 		d.Reap = true
 		d.Reason = ReclaimReapStale
+	case indexLockOwnerDead(rep):
+		// Frozen past the short window AND the sibling fak-commit.lock names a dead creator.
+		// The creator is proven dead by pid, not inferred from the absence of a by-name
+		// writer, so the long grace window buys nothing here — and waiting it out is what
+		// left the lane wedged while the swarm manufactured the next orphan. Unrelated live
+		// writers do not veto: they are not this lock's named owner, and the advancing check
+		// above has already ruled out anyone writing this lock.
+		d.Reap = true
+		d.Reason = ReclaimReapOwnerDead
 	case rep.ProcessProbe != "ok":
 		// Fresh lock + untrusted inventory: cannot rule out a live mid-write holder. Keep.
 		d.Reason = ReclaimKeepProbeFailed
@@ -114,6 +151,18 @@ func DecideIndexLockReclaim(rep Report) IndexLockReclaimDecision {
 		d.Reason = ReclaimKeepFresh
 	}
 	return d
+}
+
+// indexLockOwnerDead reports whether a present index.lock has a NAMED creator that is
+// provably dead: fak writes .git/fak-commit.lock, stamped with its own pid, before it lets
+// git touch the index, so a fak-created index.lock always has a sibling that names its
+// owner. safecommit's probe reports Stale only for a lock that exists, parsed a pid, and
+// found that pid gone — a garbage or foreign lock body yields Stale=false, so an
+// unattributable sibling can never manufacture this evidence. The frozen-age half is
+// required alongside it so a *new* lock created by a live peer while a dead fak lock happens
+// to be lying around is never mistaken for that dead fak's residue.
+func indexLockOwnerDead(rep Report) bool {
+	return rep.IndexLock.FrozenHint && rep.CommitLock.Stale && rep.CommitLock.HolderPID > 0
 }
 
 // NextIndexReclaim is the per-file reclaim verdict for one observed

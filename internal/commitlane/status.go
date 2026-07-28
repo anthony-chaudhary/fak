@@ -40,6 +40,24 @@ const (
 
 const DefaultStaleIndexAge = 15 * time.Minute
 
+// DefaultOwnerDeadIndexAge is the SHORT frozen window used when the orphan's creator is
+// NAMED and provably dead (a sibling .git/fak-commit.lock holding a dead pid). The 15-minute
+// DefaultStaleIndexAge exists because a bare .git/index.lock names nobody, so only a long
+// freeze can stand in for "the holder is gone"; once the holder is proven dead by pid, that
+// long wait buys nothing and is exactly the window in which the wedge reproduces itself
+// (#5335: a killed `fak commit` orphans its own index.lock, and the lane stays blocked for
+// the remaining grace period while a peer swarm keeps re-killing committers). One frozen
+// minute plus a dead named creator is already stronger evidence than fifteen frozen minutes
+// with no creator at all.
+const DefaultOwnerDeadIndexAge = 60 * time.Second
+
+// DefaultIndexLockSettleWindow bounds the pause between the two index.lock samples that
+// witness whether the lock's mtime is ADVANCING. It is spent ONLY when a lock is actually
+// present — the clear lane pays nothing — and it is what keeps the age gates honest: an
+// advancing mtime means a live writer is holding this lock right now, however old its
+// mtime looks, so no age-based reap may fire against it.
+const DefaultIndexLockSettleWindow = 300 * time.Millisecond
+
 type Runner func(ctx context.Context, dir string, args ...string) RunResult
 
 type RunResult struct {
@@ -74,6 +92,18 @@ type Options struct {
 	PIDAlive      PIDAliveFunc
 	Now           func() time.Time
 	StaleIndexAge time.Duration
+	// Sleep is the seam behind the bounded pause between the two index.lock samples that
+	// witness an ADVANCING mtime (default time.Sleep). Tests inject a no-op so they take the
+	// real settle path with zero wall-clock wait — a settle witness proven by sleeping would
+	// be untestable without making the suite hang-prone, which is the very failure this
+	// package exists to bound.
+	Sleep func(time.Duration)
+	// SettleWindow bounds that pause (default DefaultIndexLockSettleWindow). It is spent only
+	// when .git/index.lock is present.
+	SettleWindow time.Duration
+	// OwnerDeadIndexAge is the short frozen window that applies when the lock's creator is
+	// named and proven dead (default DefaultOwnerDeadIndexAge). See FrozenHint.
+	OwnerDeadIndexAge time.Duration
 }
 
 type Report struct {
@@ -113,7 +143,21 @@ type IndexLock struct {
 	ModTime    string `json:"mod_time,omitempty"`
 	AgeSeconds int64  `json:"age_seconds,omitempty"`
 	StaleHint  bool   `json:"stale_hint,omitempty"`
-	Detail     string `json:"detail,omitempty"`
+	// FrozenHint is the SHORT freeze witness: the lock's mtime has not moved for at least
+	// OwnerDeadIndexAge and did not move across the settle window either. On its own it
+	// proves nothing (a one-minute freeze is not fifteen); it is the age half of the
+	// owner-dead evidence, and only combines into a reap when a sibling fak-commit.lock
+	// names a DEAD creator for this lock (#5335 item 3).
+	FrozenHint bool `json:"frozen_hint,omitempty"`
+	// Advancing is the live-holder witness: a second sample taken a bounded settle window
+	// after the first saw the mtime move forward or the size change. An advancing lock is
+	// being written RIGHT NOW, so it is never an orphan no matter how old its mtime reads —
+	// this is the distinction every age-based reap here must preserve.
+	Advancing bool `json:"advancing,omitempty"`
+	// SettleMillis records the settle window actually spent, so a reclaim refusal (or a
+	// reap) can be audited against the window that produced its Advancing verdict.
+	SettleMillis int64  `json:"settle_millis,omitempty"`
+	Detail       string `json:"detail,omitempty"`
 }
 
 // NextIndexLock is one observed .git/next-index-<pid>.lock temp file. Unlike index.lock
@@ -190,7 +234,7 @@ func Status(ctx context.Context, opts Options) (Report, error) {
 	rep.GitDir = cleanPath(gitDir)
 
 	rep.CommitLock = probeCommitLock(filepath.Join(rep.GitDir, "fak-commit.lock"), opts.ProbeLock)
-	rep.IndexLock = probeIndexLock(filepath.Join(rep.GitDir, "index.lock"), opts.Stat, now, opts.StaleIndexAge)
+	rep.IndexLock = probeIndexLock(filepath.Join(rep.GitDir, "index.lock"), opts, now)
 	nextIndex, nerr := probeNextIndexLocks(rep.GitDir, opts.Glob, opts.Stat, opts.PIDAlive, now, opts.StaleIndexAge)
 	rep.NextIndexLocks = nextIndex
 	if nerr != "" {
@@ -234,6 +278,15 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.StaleIndexAge == 0 {
 		opts.StaleIndexAge = DefaultStaleIndexAge
+	}
+	if opts.Sleep == nil {
+		opts.Sleep = time.Sleep
+	}
+	if opts.SettleWindow == 0 {
+		opts.SettleWindow = DefaultIndexLockSettleWindow
+	}
+	if opts.OwnerDeadIndexAge == 0 {
+		opts.OwnerDeadIndexAge = DefaultOwnerDeadIndexAge
 	}
 	return opts
 }
@@ -295,26 +348,74 @@ func probeCommitLock(path string, probe ProbeLockFunc) CommitLock {
 	}
 }
 
-func probeIndexLock(path string, stat FileStatFunc, now time.Time, staleAge time.Duration) IndexLock {
-	f := stat(path)
-	out := IndexLock{Path: path, Present: f.Exists}
-	if f.Err != "" {
-		out.Detail = f.Err
+// probeIndexLock observes .git/index.lock TWICE, a bounded settle window apart, and derives
+// the three facts the reclaim decision needs: presence, age, and whether the lock is
+// ADVANCING.
+//
+// The second sample is the point of this function. A single stat can only ever answer "how
+// old does this mtime look", and age alone conflates the two states the commit lane must
+// keep apart: an orphan left by a killed writer (mtime frozen forever) and a live writer
+// that is simply slow (mtime still moving). Sampling twice separates them directly — if the
+// mtime moved, or the file grew, some process is writing this lock right now and no reap may
+// fire against it, however stale the first sample read. Everything downstream is then free to
+// lower its age bar, because the "is anyone actually holding it" question has already been
+// answered from the lock itself rather than inferred from an unrelated process inventory.
+//
+// The window is spent only when a lock is present, so the clear lane costs nothing, and it is
+// spent through the injected Sleep so tests exercise this path without any wall-clock wait.
+// It never removes a file.
+func probeIndexLock(path string, opts Options, now time.Time) IndexLock {
+	first := opts.Stat(path)
+	out := IndexLock{Path: path, Present: first.Exists}
+	if first.Err != "" {
+		out.Detail = first.Err
 		return out
 	}
-	if !f.Exists {
+	if !first.Exists {
 		return out
 	}
-	if !f.ModTime.IsZero() {
-		age := now.Sub(f.ModTime)
+
+	if opts.SettleWindow > 0 {
+		opts.Sleep(opts.SettleWindow)
+		out.SettleMillis = int64(opts.SettleWindow / time.Millisecond)
+	}
+	second := opts.Stat(path)
+	switch {
+	case second.Err != "":
+		// The re-sample failed. Fall back to the first sample and say so: Advancing stays
+		// false, which never widens a reap on its own — the age gates still have to pass.
+		out.Detail = second.Err
+		second = first
+	case !second.Exists:
+		// The lock cleared itself inside the settle window. There is nothing left to
+		// reclaim, and reporting a vanished file as present would invite the actuator to
+		// delete whatever a live writer creates next.
+		out.Present = false
+		return out
+	default:
+		out.Advancing = second.ModTime.After(first.ModTime) || second.Size != first.Size
+	}
+
+	if !second.ModTime.IsZero() {
+		age := now.Sub(second.ModTime)
 		if age < 0 {
 			age = 0
 		}
-		out.ModTime = f.ModTime.UTC().Format(time.RFC3339)
+		out.ModTime = second.ModTime.UTC().Format(time.RFC3339)
 		out.AgeSeconds = int64(age / time.Second)
-		if staleAge > 0 && age >= staleAge {
+		if !out.Advancing && opts.OwnerDeadIndexAge > 0 && age >= opts.OwnerDeadIndexAge {
+			out.FrozenHint = true
+		}
+		if opts.StaleIndexAge > 0 && age >= opts.StaleIndexAge {
 			out.StaleHint = true
-			out.Detail = "index.lock is older than " + staleAge.String() + "; inspect live git processes before deleting"
+			stale := "index.lock is older than " + opts.StaleIndexAge.String() + "; inspect live git processes before deleting"
+			// A failed re-sample already wrote its error here; keep it rather than let the
+			// age note bury the reason the settle witness could not run.
+			if out.Detail == "" {
+				out.Detail = stale
+			} else {
+				out.Detail += "; " + stale
+			}
 		}
 	}
 	return out
@@ -381,7 +482,7 @@ func finalize(rep *Report) {
 		rep.Verdict = VerdictStale
 		rep.Reason = fmt.Sprintf("fak commit lock is held by dead PID %d", rep.CommitLock.HolderPID)
 		rep.NextAction = "run `fak tree-doctor --apply` or retry `fak commit`; both use the PID-guarded stale-lock reaper"
-	case rep.IndexLock.StaleHint && len(rep.LiveWriters) == 0:
+	case rep.IndexLock.StaleHint && !rep.IndexLock.Advancing && len(rep.LiveWriters) == 0:
 		rep.OK = false
 		rep.Verdict = VerdictBlocked
 		rep.Reason = "git index.lock is present with no matching live writer found"
