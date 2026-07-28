@@ -95,13 +95,8 @@ func (OAISemantics) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 		return rubricFail(v, fmt.Sprintf("response envelope: %v", err))
 	}
 	violations := oaiAudit(resp, eng, c)
-	v.Score = float64(oaiCheckCount-len(violations)) / float64(oaiCheckCount)
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every semantics check must hold
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, oaiCheckCount-len(violations), oaiCheckCount)
+	if short {
 		v.Detail = fmt.Sprintf("%d/%d semantics check(s) failed; first: %s",
 			len(violations), oaiCheckCount, violations[0])
 		return v

@@ -87,13 +87,8 @@ func (ConfidenceCalibration) Judge(ref, eng Trace, c QualityCase) Verdict {
 			firstBad = bad
 		}
 	}
-	v.Score = float64(calibrated) / float64(len(claims))
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every claim's confidence must be calibrated
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, calibrated, len(claims))
+	if short {
 		v.Detail = fmt.Sprintf("calibration %.2f < %.2f (%d/%d claims calibrated); first miscalibrated: %s",
 			v.Score, min, calibrated, len(claims), firstBad)
 		return v

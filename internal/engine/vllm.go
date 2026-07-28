@@ -568,41 +568,31 @@ func RecordVLLMKVEventBatch(worker, model, tokenizer string, idx *PrefixResidenc
 			if idx != nil {
 				idx.Store(worker, ev.residencyRecords(worker, model, tokenizer, at)...)
 			}
-			for _, h := range ev.hashDigests() {
-				if rec != nil {
-					out = append(out, rec.Record(CacheEvent{
-						Direction:    cachemeta.KVRestore,
-						SpanDigest:   h,
-						Tokens:       ev.tokensPerBlock(),
-						ModelID:      model,
-						TokenizerID:  tokenizer,
-						PositionMode: cachemeta.PositionPrefixAligned,
-						ToTier:       vllmMediumTier(ev.Medium),
-						Owner:        "vllm:" + worker,
-						Outcome:      cachemeta.KVTransferOK,
-					}))
-				}
-			}
+			out = append(out, recordPerBlock(rec, ev.hashDigests(), CacheEvent{
+				Direction:    cachemeta.KVRestore,
+				Tokens:       ev.tokensPerBlock(),
+				ModelID:      model,
+				TokenizerID:  tokenizer,
+				PositionMode: cachemeta.PositionPrefixAligned,
+				ToTier:       vllmMediumTier(ev.Medium),
+				Owner:        "vllm:" + worker,
+				Outcome:      cachemeta.KVTransferOK,
+			})...)
 		case "BlockRemoved":
 			if idx != nil {
 				idx.Remove(worker, ev.hashDigests()...)
 			}
-			for _, h := range ev.hashDigests() {
-				if rec != nil {
-					out = append(out, rec.Record(CacheEvent{
-						Direction:    cachemeta.KVOffload,
-						SpanDigest:   h,
-						Tokens:       ev.tokensPerBlock(),
-						ModelID:      model,
-						TokenizerID:  tokenizer,
-						PositionMode: cachemeta.PositionPrefixAligned,
-						FromTier:     vllmMediumTier(ev.Medium),
-						ToTier:       cachemeta.TierUnknown,
-						Owner:        "vllm:" + worker,
-						Outcome:      cachemeta.KVTransferOK,
-					}))
-				}
-			}
+			out = append(out, recordPerBlock(rec, ev.hashDigests(), CacheEvent{
+				Direction:    cachemeta.KVOffload,
+				Tokens:       ev.tokensPerBlock(),
+				ModelID:      model,
+				TokenizerID:  tokenizer,
+				PositionMode: cachemeta.PositionPrefixAligned,
+				FromTier:     vllmMediumTier(ev.Medium),
+				ToTier:       cachemeta.TierUnknown,
+				Owner:        "vllm:" + worker,
+				Outcome:      cachemeta.KVTransferOK,
+			})...)
 		case "AllBlocksCleared":
 			if idx != nil {
 				idx.Clear(worker)
@@ -621,6 +611,27 @@ func RecordVLLMKVEventBatch(worker, model, tokenizer string, idx *PrefixResidenc
 				}))
 			}
 		}
+	}
+	return out
+}
+
+// recordPerBlock records one cache event per block digest, stamping each digest
+// onto base. A vLLM block-lifecycle event names a whole SET of block hashes that
+// moved together, but the recorder's unit is a single span — so one reported event
+// lowers to one recorded event per hash, all sharing the identity the caller wrote
+// into base. The stored and removed branches disagree only about direction and
+// which tier the blocks moved between; everything they agree on (model, tokenizer,
+// prefix-aligned position mode, owning worker, transfer outcome) is stated once at
+// the call site instead of twice inside a loop. A nil recorder records nothing,
+// which is how this lowering stays usable as a residency-index-only pass.
+func recordPerBlock(rec *CacheEventRecorder, digests []string, base CacheEvent) []CacheEventResult {
+	if rec == nil {
+		return nil
+	}
+	out := make([]CacheEventResult, 0, len(digests))
+	for _, h := range digests {
+		base.SpanDigest = h
+		out = append(out, rec.Record(base))
 	}
 	return out
 }

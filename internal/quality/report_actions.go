@@ -166,13 +166,8 @@ func (ActionCompleteness) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 		v.Detail = "no risk/blocker items in the report; nothing to require actions for"
 		return v
 	}
-	v.Score = float64(complete) / float64(actionable)
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every raised risk/blocker must be actionable
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, complete, actionable)
+	if short {
 		v.Detail = fmt.Sprintf("action-completeness %.2f < %.2f (%d/%d actionable items complete); incomplete: %s",
 			v.Score, min, complete, actionable, strings.Join(incomplete, "; "))
 		return v

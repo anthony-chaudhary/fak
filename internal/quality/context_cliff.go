@@ -65,13 +65,8 @@ func (ctxCliffOracle) Judge(ref, eng Trace, c QualityCase) Verdict {
 			cliffRate = p.rate
 		}
 	}
-	v.Score = float64(bounded) / float64(len(points))
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: quality must stay bounded at every position
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, bounded, len(points))
+	if short {
 		v.FirstDivergence = &Divergence{
 			Index:     cliffAt,
 			Reference: fmt.Sprintf("windowed repetition <= %.4f", bound),

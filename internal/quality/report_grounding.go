@@ -65,13 +65,8 @@ func (ClaimGrounding) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 			firstUngrounded = cl
 		}
 	}
-	v.Score = float64(grounded) / float64(len(claims))
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every claim must be grounded
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, grounded, len(claims))
+	if short {
 		v.Detail = fmt.Sprintf("claim grounding %.2f < %.2f (%d/%d grounded); first ungrounded claim: %q",
 			v.Score, min, grounded, len(claims), firstUngrounded)
 		return v

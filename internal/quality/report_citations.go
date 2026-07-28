@@ -72,13 +72,8 @@ func (CitationValidity) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 			firstDangling = m.raw
 		}
 	}
-	v.Score = float64(resolved) / float64(len(markers))
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every marker must resolve — no dangling citation
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, resolved, len(markers))
+	if short {
 		v.Detail = fmt.Sprintf("citation validity %.2f < %.2f (%d/%d markers resolved); first dangling citation: %s",
 			v.Score, min, resolved, len(markers), firstDangling)
 		return v

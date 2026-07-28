@@ -49,13 +49,8 @@ func (structWithoutStyle) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 			missing = append(missing, a)
 		}
 	}
-	v.Score = float64(present) / float64(len(anchors))
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every required section must be present
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, present, len(anchors))
+	if short {
 		v.Detail = fmt.Sprintf("structure score %.2f < %.2f; missing required section(s): %s",
 			v.Score, min, structQuoteList(missing))
 		return v

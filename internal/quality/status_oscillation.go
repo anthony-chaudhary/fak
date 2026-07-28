@@ -92,13 +92,8 @@ func (oscStatusOscillation) Judge(ref, eng Trace, c QualityCase) Verdict {
 			len(prev))
 		return v
 	}
-	v.Score = float64(ok) / float64(checked)
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every status flip must carry a rationale
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, ok, checked)
+	if short {
 		v.Detail = fmt.Sprintf("status-oscillation score %.2f < %.2f (%d/%d consistent or explained); %s",
 			v.Score, min, ok, checked, firstViolation)
 		return v

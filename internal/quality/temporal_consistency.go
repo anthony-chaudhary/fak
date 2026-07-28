@@ -118,13 +118,8 @@ func (tmpTemporalConsistency) Judge(ref, eng Trace, c QualityCase) Verdict {
 		v.Detail = "report makes no checkable temporal claims about the declared facts"
 		return v
 	}
-	v.Score = float64(consistent) / float64(checked)
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: no stale claim tolerated
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, consistent, checked)
+	if short {
 		v.Detail = fmt.Sprintf("temporal consistency %.2f < %.2f (%d/%d claims consistent); first violation: %s",
 			v.Score, min, consistent, checked, firstViolation)
 		return v

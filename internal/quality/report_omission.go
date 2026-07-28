@@ -11,7 +11,8 @@ import (
 // blocker, or decision must fail a gate, not merely read fine. The case declares
 // its material items via Rubric.Required — either plain must-mention entries, or
 // categorized entries built by MaterialItems.Rubric — and the oracle scores the
-// fraction present in the engine text. On failure the Detail names EVERY omitted
+// fraction present in the engine text; Pass iff Score >= Rubric.MinScore (default
+// 1: nothing material may be omitted). On failure the Detail names EVERY omitted
 // item (with its category when declared), so the fix is a list, not a hunch.
 type MaterialOmission struct{}
 
@@ -35,13 +36,8 @@ func (MaterialOmission) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 			omitted = append(omitted, it)
 		}
 	}
-	v.Score = float64(present) / float64(len(items))
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: nothing material may be omitted
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, present, len(items))
+	if short {
 		v.Detail = fmt.Sprintf("material-omission score %.2f < %.2f; omitted: %s",
 			v.Score, min, describeMaterialItems(omitted))
 		return v

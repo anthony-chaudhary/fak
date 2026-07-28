@@ -59,13 +59,8 @@ func (instrInstructionFollowing) Judge(_ Trace, eng Trace, c QualityCase) Verdic
 		return v
 	}
 	obeyed := total - len(violations)
-	v.Score = float64(obeyed) / float64(total)
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: every explicit instruction must be followed
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, obeyed, total)
+	if short {
 		v.Detail = fmt.Sprintf("instruction following %.2f < %.2f (%d/%d instructions obeyed); first violated instruction: %s",
 			v.Score, min, obeyed, total, violations[0])
 		return v

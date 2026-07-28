@@ -102,11 +102,7 @@ func (s *ppModelState) next() string {
 // for token.
 func ppDecodeSingle(seed int64, steps int) Trace {
 	st := ppNewModelState(seed)
-	toks := make([]string, 0, steps)
-	for i := 0; i < steps; i++ {
-		toks = append(toks, st.next())
-	}
-	return Trace{Tokens: toks, Text: strings.Join(toks, " ")}
+	return decodeSteps(&st, steps)
 }
 
 // ppSnapshotLen is the exact byte length of a serialized boundary snapshot:

@@ -76,13 +76,8 @@ func (mtConsistency) Judge(ref, eng Trace, c QualityCase) Verdict {
 		v.Detail = fmt.Sprintf("dialog of %d turn(s) asserts no checkable facts; nothing to contradict", len(turns))
 		return v
 	}
-	v.Score = float64(total-contradicted) / float64(total)
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: no turn may contradict a committed fact
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, total-contradicted, total)
+	if short {
 		v.FirstDivergence = &Divergence{Index: firstNew.Turn, Reference: firstOld.Clause, Engine: firstNew.Clause}
 		v.Detail = fmt.Sprintf("multi-turn consistency %.2f < %.2f (%d/%d assertions contradict a committed fact); turn %d asserts %q, contradicting %q committed at %s (subject %q)",
 			v.Score, min, contradicted, total, firstNew.Turn, firstNew.Clause, firstOld.Clause, mtFactSite(*firstOld), firstNew.Subject)

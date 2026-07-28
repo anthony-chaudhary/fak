@@ -86,13 +86,8 @@ func (soStructuredOutput) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 			passed++
 		}
 	}
-	v.Score = float64(passed) / float64(total)
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: full schema conformance and value fidelity
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, passed, total)
+	if short {
 		v.Detail = fmt.Sprintf("structured-output score %.2f < %.2f (%d/%d checks passed); first violation: %s",
 			v.Score, min, passed, total, violations[0])
 		return v

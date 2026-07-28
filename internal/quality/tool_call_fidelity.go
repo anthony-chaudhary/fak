@@ -113,13 +113,8 @@ func (toolCallFidelity) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 		v.Detail = fmt.Sprintf("tool %q selected correctly; no arguments declared or passed", spec.Tool)
 		return v
 	}
-	v.Score = float64(passed) / float64(total)
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: full argument conformance
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, passed, total)
+	if short {
 		v.Detail = fmt.Sprintf("tool-call fidelity %.2f < %.2f (%d/%d argument checks passed); first fault: %s",
 			v.Score, min, passed, total, faults[0])
 		return v

@@ -84,11 +84,7 @@ func resumeRestore(b []byte) (resumeState, error) {
 // faithful resumed decode must reproduce token for token.
 func resumeDecode(seed int64, steps int) Trace {
 	st := resumeNewState(seed)
-	toks := make([]string, 0, steps)
-	for i := 0; i < steps; i++ {
-		toks = append(toks, st.next())
-	}
-	return Trace{Tokens: toks, Text: strings.Join(toks, " ")}
+	return decodeSteps(&st, steps)
 }
 
 // ResumeUninterruptedRunner is the reference path: it decodes the case's full
