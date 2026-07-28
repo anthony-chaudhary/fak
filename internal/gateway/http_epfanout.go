@@ -61,6 +61,15 @@ func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request) 
 	// ranks 1-7 sat idle and no SSE byte ever left the socket (#4855). Followers are
 	// mirrored either way; only how the helper drains their response differs.
 	stream := meta.Stream
+	// Read the inbound trace id HERE, on the handler goroutine, not inside the follower
+	// below. handleChatCompletions calls useHTTPTrace after this function returns, and
+	// that mints-and-writes r.Header when the client supplied no X-Trace-Id — so a Get
+	// from a still-running follower raced the front rank's own Set on the same map and
+	// tripped the detector under `go test -race` (TestEPStreamingEmitsFirstSSEChunkBefore
+	// CollectiveJoin). Hoisting the read puts it in program order before that write, which
+	// also makes what the follower propagates deterministic: the client's own trace id, or
+	// nothing. Never touch r from a follower goroutine — the front rank still owns it.
+	inboundTrace := r.Header.Get(traceHeader)
 	results := make(chan epFanoutResult, len(urls))
 	for _, target := range urls {
 		target := target
@@ -72,8 +81,8 @@ func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request) 
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set(epFollowerHeader, "1")
-			if trace := r.Header.Get("X-Trace-Id"); trace != "" {
-				req.Header.Set("X-Trace-Id", trace)
+			if inboundTrace != "" {
+				req.Header.Set(traceHeader, inboundTrace)
 			}
 			resp, err := epFanoutClient.Do(req)
 			if err != nil {
