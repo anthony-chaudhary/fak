@@ -880,6 +880,39 @@ func TestTierDistributionAdvisory(t *testing.T) {
 			terminal = d.Tier
 		}
 	}
+	// The over-accumulation READING is advisory, but the table it reads is not: a share is
+	// only interpretable if every declared leaf lands in exactly one named bucket. These are
+	// hard -- they catch a leaf declared at a tier the DAG has no name for (a typo like
+	// `"x": 7` silently becomes its own unnamed stratum and skews every share), a lost or
+	// double-counted leaf, and an out-of-order fold.
+	if len(dist) == 0 {
+		t.Fatalf("tierDistribution returned no rows for %d declared leaves", len(tier))
+	}
+	sum, shareSum, prev := 0, 0.0, -1
+	for _, d := range dist {
+		if d.Tier <= prev {
+			t.Errorf("rows are not ordered by tier: %d follows %d", d.Tier, prev)
+		}
+		prev = d.Tier
+		if d.Name == "" {
+			t.Errorf("tier %d holds %d leaf/leaves but has no name in tierName%v -- a leaf is "+
+				"declared at a tier the layering does not define", d.Tier, d.Count, tierName)
+		}
+		if d.Count <= 0 {
+			t.Errorf("tier %d (%s) has a non-positive count %d", d.Tier, d.Name, d.Count)
+		}
+		if want := float64(d.Count) / float64(len(tier)); d.Share != want {
+			t.Errorf("tier %d (%s) share = %v, want %v (%d/%d)", d.Tier, d.Name, d.Share, want, d.Count, len(tier))
+		}
+		sum += d.Count
+		shareSum += d.Share
+	}
+	if sum != len(tier) {
+		t.Errorf("tier counts sum to %d, want %d declared leaves -- a leaf was lost or double-counted", sum, len(tier))
+	}
+	if shareSum < 0.999 || shareSum > 1.001 {
+		t.Errorf("tier shares sum to %v, want 1.0 -- the shares are not over the whole population", shareSum)
+	}
 	t.Logf("tier population (%d declared leaves, threshold %.0f%%):", len(tier), tierShareThreshold*100)
 	for _, d := range dist {
 		marker := ""
@@ -895,6 +928,41 @@ func TestTierDistributionAdvisory(t *testing.T) {
 				"DAG orders the pile rather than heaping it (see #4042: split foundation into "+
 				"primitive/composite).", d.Tier, d.Name, d.Share*100, len(tier), tierShareThreshold*100)
 		}
+	}
+}
+
+// TestTierDistributionFoldsASyntheticTable pins tierDistribution's arithmetic against a
+// population the live `tier` map cannot drift out from under: bucket counts, ascending order,
+// skipped (empty) tiers, tier->name resolution, and the shares' denominator. The advisory
+// above reads this fold's output, so an error here would silently mis-report the layering.
+func TestTierDistributionFoldsASyntheticTable(t *testing.T) {
+	// Counts chosen as exact binary fractions (2/4, 1/4) so share equality is not a float
+	// tolerance question. Tier 3 is deliberately unpopulated: an empty tier gets NO row.
+	got := tierDistribution(map[string]int{"a": 1, "b": 1, "c": 2, "d": 4})
+	want := []tierCount{
+		{Tier: 1, Name: "foundation", Count: 2, Share: 0.5},
+		{Tier: 2, Name: "mechanism", Count: 1, Share: 0.25},
+		{Tier: 4, Name: "integrator", Count: 1, Share: 0.25},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d rows %+v, want %d %+v", len(got), got, len(want), want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("row %d = %+v, want %+v", i, got[i], w)
+		}
+	}
+
+	// A tier with no entry in tierName must fold to an EMPTY name rather than panic on the
+	// index -- that unnamed row is exactly what the advisory's name check surfaces.
+	odd := tierDistribution(map[string]int{"z": 9})
+	if len(odd) != 1 || odd[0] != (tierCount{Tier: 9, Name: "", Count: 1, Share: 1}) {
+		t.Errorf("out-of-range tier folded to %+v, want one unnamed row {9  1 1}", odd)
+	}
+
+	// Empty population: no rows, and no division by a zero total.
+	if empty := tierDistribution(map[string]int{}); len(empty) != 0 {
+		t.Errorf("empty table folded to %+v, want no rows", empty)
 	}
 }
 
