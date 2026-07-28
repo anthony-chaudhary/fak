@@ -10,7 +10,13 @@
 //     OWNING ACCOUNT is rate-limited until <time>; it is only CURRENT when the terminal
 //     meaningful turn is that banner (a later clean turn supersedes it).
 //   - mid-tool  - the last meaningful record is an assistant tool_use with no following
-//     tool_result: the process died mid-work. The safest resume candidate.
+//     tool_result. That signature is produced by TWO OPPOSITE situations: the driver died
+//     mid-work, or the driver is alive and its single tool call simply has not returned yet
+//     (a slow build, a big test suite, a slow network/MCP round trip). The transcript cannot
+//     tell them apart, so the caller's DRIVER-LIVENESS evidence does: gone => STOPPED_MIDTOOL
+//     (a crash, and a resume candidate), live => LIVE (a slow tool call - be patient), and no
+//     evidence at all => MIDTOOL_UNKNOWN, an explicitly-unresolved third verdict that defers
+//     instead of racing a second driver onto a transcript the first one is still writing (#5386).
 //   - interrupt - the last meaningful text is a login/user interruption.
 //   - waiting   - the last assistant text says it is parked on a background task; do not
 //     resume (the harness will wake it).
@@ -20,8 +26,11 @@
 //     user-final tail is STOPPED_MIDTURN (a tool_result/user input was last - the model was
 //     about to act, so work is stranded - resume-eligible); an empty tail stays STOPPED_QUIET.
 //
-// Liveness is mtime-based (a live agent appends within LiveMinutes); the shell supplies
-// the age. Pure by construction: the I/O shell (cmd/fak resume stopped) walks the account
+// Transcript FRESHNESS is mtime-based (a live agent appends within LiveMinutes); the shell
+// supplies the age. Freshness alone cannot settle the mid-tool case - one slow tool call
+// violates the "appends at least this often" assumption it rests on - so DRIVER liveness is
+// a separate, caller-supplied fact (see Liveness) rather than something inferred from the
+// clock. Pure by construction: the I/O shell (cmd/fak resume stopped) walks the account
 // dirs, tails each transcript, and extracts per-record facts; this leaf only classifies
 // and decides. No clock, no filesystem.
 package stopped
@@ -37,8 +46,40 @@ import (
 )
 
 // LiveMinutes is the mtime freshness within which a session counts as LIVE - a live
-// agent appends to its transcript at least this often.
+// agent appends to its transcript at least this often. It is a FRESHNESS threshold, not a
+// liveness probe: a driver parked in one slow tool call appends nothing for as long as the
+// call runs, so an age past LiveMinutes is silence, not death (see Liveness).
 const LiveMinutes = 4.0
+
+// Liveness is the caller-supplied DRIVER-liveness fact for one session: positive evidence
+// about whether the process that owns this transcript is still running. It exists because the
+// mid-tool tail is ambiguous by construction (#5386) - an unmatched trailing tool_use on a
+// transcript nobody has appended to looks IDENTICAL whether the driver crashed while the call
+// was in flight or is alive with a slow call still running - and those two readings want
+// opposite operator actions (recover vs. wait). Reading the ambiguous case as "crashed" is
+// what launches a second driver onto a transcript the first one is still writing.
+//
+// It is deliberately TRI-STATE, and its zero value is LivenessUnknown. Both non-empty values
+// require POSITIVE evidence, in opposite directions; the absence of evidence is never death
+// and never life. That is also why the fact cannot flap: nothing about it is derived from a
+// clock, a threshold, or an elapsed-time budget, so the same underlying observation cannot
+// read live on one tick and gone on the next merely because time passed. Only the shell that
+// can actually observe the process (a recorded driver PID, a heartbeat) may assert either
+// non-empty value; a shell that cannot observe one says LivenessUnknown and means it.
+type Liveness string
+
+const (
+	// LivenessUnknown: no driver-liveness evidence was consulted, or none was available (no
+	// recorded PID, no heartbeat). The ZERO VALUE and the honest default - a caller that cannot
+	// measure liveness declares that instead of guessing one of the two extremes.
+	LivenessUnknown Liveness = ""
+	// LivenessLive: positive evidence that the driver process owning this transcript is STILL
+	// RUNNING. A mid-tool tail under this evidence is a slow tool call, not a death.
+	LivenessLive Liveness = "live"
+	// LivenessGone: positive evidence that the driver process owning this transcript is GONE.
+	// Only under this evidence is a mid-tool tail a crash.
+	LivenessGone Liveness = "gone"
+)
 
 // Record is the closed set of facts about ONE transcript line the classifier needs. The
 // shell extracts these from the raw JSONL; the leaf never sees the JSON.
@@ -75,7 +116,10 @@ type Disp string
 
 // The closed disposition vocabulary.
 const (
-	// DispLive: the transcript was appended to within LiveMinutes - a live agent owns it.
+	// DispLive: a live agent owns this transcript - either it was appended to within
+	// LiveMinutes, or the caller's driver-liveness evidence says the owning process is still
+	// running. The second path is what a stale-but-alive mid-tool session classifies as: the
+	// tool call is slow, not dead, and the right action is to leave it alone (#5386).
 	DispLive Disp = "LIVE"
 	// DispStoppedLimit: the terminal turn is a synthetic usage-limit banner - the owning
 	// account is rate-limited until the named reset.
@@ -87,8 +131,20 @@ const (
 	DispStoppedAuth Disp = "STOPPED_AUTH"
 	// DispStoppedInterrupt: the terminal text is a login/user interruption.
 	DispStoppedInterrupt Disp = "STOPPED_INTERRUPT"
-	// DispStoppedMidtool: an assistant tool_use never got its tool_result - died mid-work.
+	// DispStoppedMidtool: an assistant tool_use never got its tool_result AND the caller's
+	// driver-liveness evidence says the owning process is GONE - it died mid-work. Since #5386
+	// this verdict requires that positive evidence: the tail alone cannot distinguish a crash
+	// from a slow tool call, so an unwitnessed mid-tool tail is DispMidtoolUnknown instead.
 	DispStoppedMidtool Disp = "STOPPED_MIDTOOL"
+	// DispMidtoolUnknown: an assistant tool_use never got its tool_result and NO driver-liveness
+	// evidence was available (LivenessUnknown), so whether the session crashed mid-call or is
+	// alive inside a slow tool call is genuinely unresolved. It is a third, explicitly-unknown
+	// verdict rather than a softer STOPPED_MIDTOOL, because the two readings want opposite
+	// actions and the old single label silently picked the destructive one: Decide DEFERS this
+	// row instead of resuming it, so a still-running driver never gets a second process
+	// launched onto its transcript (#5386). It clears on its own - the next sweep of a
+	// merely-slow session sees the appended tail and reclassifies with no operator action.
+	DispMidtoolUnknown Disp = "MIDTOOL_UNKNOWN"
 	// DispParkedWait: the last assistant text says it is awaiting a background task - the
 	// session is parked, not dead.
 	DispParkedWait Disp = "PARKED_WAIT"
@@ -139,11 +195,16 @@ type Row struct {
 	ThrottleSeen    string `json:"throttle_seen,omitempty"`
 	ThrottleCurrent bool   `json:"throttle_current"`
 	PendingTool     string `json:"pending_tool,omitempty"`
-	LastRole        string `json:"last_role,omitempty"`
-	Last            string `json:"last"`
-	Path            string `json:"path"`
-	Account         string `json:"account,omitempty"`
-	Project         string `json:"project,omitempty"`
+	// Liveness echoes the driver-liveness evidence this row was resolved against - "live" or
+	// "gone" when the caller had positive evidence, empty when it had none. Kept on the row so
+	// a reader can see WHICH evidence produced a STOPPED_MIDTOOL versus a MIDTOOL_UNKNOWN
+	// instead of re-deriving it, and so an unwitnessed row is visibly unwitnessed (#5386).
+	Liveness Liveness `json:"liveness,omitempty"`
+	LastRole string   `json:"last_role,omitempty"`
+	Last     string   `json:"last"`
+	Path     string   `json:"path"`
+	Account  string   `json:"account,omitempty"`
+	Project  string   `json:"project,omitempty"`
 	// WorkKey is the caller-supplied identity of the work this session is doing - the
 	// authoritative /goal, /loop lane, or issue number, sourced from the transcript's FIRST
 	// user turn (and/or dispatch metadata) by the shell, NOT derived here (the tail the
@@ -181,10 +242,40 @@ var (
 	doneRE      = regexp.MustCompile(`(?i)^\s*(Done|Shipped|Complete|Summary|All set|✅)\b|delivered\b|committed and pushed|pushed .* to origin`)
 )
 
-// Classify buckets one session from its parsed transcript tail. ageMin/sizeKB/seenUTC
-// come from the file's stat (the shell's I/O); fallbackSession names the session when no
-// record carried a sessionId (the filename stem); path is echoed for the operator.
+// Classify buckets one session from its parsed transcript tail with NO driver-liveness
+// evidence - the shape every caller that cannot observe the owning process gets. A mid-tool
+// tail therefore resolves to the honest DispMidtoolUnknown rather than being asserted as a
+// crash (#5386). A caller that CAN observe the driver must use ClassifyWithLiveness so the
+// mid-tool tail resolves to a real verdict.
 func Classify(recs []Record, ageMin float64, sizeKB int64, seenUTC, fallbackSession, path string) Row {
+	return ClassifyWithLiveness(recs, ageMin, sizeKB, seenUTC, fallbackSession, path, LivenessUnknown)
+}
+
+// midtoolDisp resolves an unmatched trailing tool_use against the caller's driver-liveness
+// evidence. Positive evidence in either direction decides the verdict; the absence of evidence
+// decides neither and lands on the explicit unknown. Total over the Liveness vocabulary, and
+// the default arm deliberately covers any unrecognized value the same way as "no evidence" -
+// an unreadable liveness claim is not a liveness claim.
+func midtoolDisp(live Liveness) Disp {
+	switch live {
+	case LivenessLive:
+		return DispLive
+	case LivenessGone:
+		return DispStoppedMidtool
+	default:
+		return DispMidtoolUnknown
+	}
+}
+
+// ClassifyWithLiveness buckets one session from its parsed transcript tail. ageMin/sizeKB/seenUTC
+// come from the file's stat (the shell's I/O); fallbackSession names the session when no
+// record carried a sessionId (the filename stem); path is echoed for the operator. live is the
+// caller's driver-liveness evidence and is consulted ONLY on the mid-tool branch - the branch
+// whose transcript signature is genuinely ambiguous. Every other disposition (an auth wall, a
+// current limit banner, an interrupt, a parked wait) reads its own unambiguous terminal signal
+// and is unchanged by liveness: a driver that is alive and sitting at a login wall is still
+// STOPPED_AUTH, not LIVE.
+func ClassifyWithLiveness(recs []Record, ageMin float64, sizeKB int64, seenUTC, fallbackSession, path string, live Liveness) Row {
 	var cwd, git, ver, sid string
 	throttleSeen := ""
 	pendingTool := ""
@@ -258,7 +349,11 @@ func Classify(recs []Record, ageMin float64, sizeKB int64, seenUTC, fallbackSess
 	case interruptRE.MatchString(lt):
 		disp = DispStoppedInterrupt
 	case pendingTool != "":
-		disp = DispStoppedMidtool
+		// The mid-tool tail ALONE cannot tell a crash from a slow tool call (#5386): both leave
+		// an unmatched trailing tool_use on a transcript nobody has appended to since. Only the
+		// caller's positive driver-liveness evidence splits them, and with no evidence the
+		// verdict stays explicitly unresolved instead of defaulting to either extreme.
+		disp = midtoolDisp(live)
 	case parkedRE.MatchString(lt):
 		disp = DispParkedWait
 	case doneRE.MatchString(lt):
@@ -287,7 +382,7 @@ func Classify(recs []Record, ageMin float64, sizeKB int64, seenUTC, fallbackSess
 		Disp: disp, AlsoSignals: alsoSignals, AgeMin: math.Round(ageMin*10) / 10, SizeKB: sizeKB, SeenUTC: seenUTC,
 		Session: session, CWD: cwd, Git: git, Version: ver,
 		ThrottleReset: throttleReset, ThrottleSeen: throttleSeen, ThrottleCurrent: throttleCurrent,
-		PendingTool: pendingTool, LastRole: lastRole, Last: clipLast(lt, 300), Path: path,
+		PendingTool: pendingTool, Liveness: live, LastRole: lastRole, Last: clipLast(lt, 300), Path: path,
 	}
 }
 
@@ -365,6 +460,13 @@ func replaySafetyBlock(r Row) string {
 	return ""
 }
 
+// MidtoolUnknownBlockedBy is the witnessed reason a DispMidtoolUnknown row is deferred. It
+// names the ambiguity itself rather than asserting a state nobody measured, and it names the
+// two ways it resolves, so a reader is never told a still-running session is dead (#5386).
+const MidtoolUnknownBlockedBy = "mid-tool with no driver-liveness evidence - a crashed driver " +
+	"and a slow tool call still in flight look identical from the transcript; observe the " +
+	"driver or re-read the transcript before resuming"
+
 // Decide sorts rows youngest-first, folds the per-account active throttles, and buckets
 // every row into resume/defer/skip. throttleActive reports whether a reset window is
 // still blocking (unparseable resets are conservatively active); it is injected so the
@@ -430,6 +532,16 @@ func Decide(rows []Row, throttleActive func(reset string) bool) Decisions {
 			} else {
 				d.Resume = append(d.Resume, r)
 			}
+		case DispMidtoolUnknown:
+			// Mid-tool with NO driver-liveness evidence: a crashed driver and a driver still
+			// inside a slow tool call are indistinguishable from the transcript alone, and
+			// resuming the second one puts two drivers on one transcript and one working
+			// directory. Fail-closed like the replay-safety gate - DEFER with the reason named,
+			// never resume on a guess (#5386). This wall is not a person's to clear: it lifts by
+			// itself the moment the slow call returns and the session appends again, or the
+			// moment a caller supplies real liveness evidence.
+			r.BlockedBy = MidtoolUnknownBlockedBy
+			d.Defer = append(d.Defer, r)
 		case DispStoppedLimit:
 			r.BlockedBy = "session limit, resets " + r.ThrottleReset
 			d.Defer = append(d.Defer, r)

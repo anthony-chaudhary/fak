@@ -1275,7 +1275,10 @@ adjudicated off the error record only, never assistant prose. It resumes nothing
 
 stopped triages every recently-STOPPED top-level session by HOW it stopped (the Go port of
 tools/stopped_sessions.py): a current synthetic limit banner (STOPPED_LIMIT), an auth wall
-(STOPPED_AUTH), a tool_use that never got its result (STOPPED_MIDTOOL — died mid-work), an
+(STOPPED_AUTH), a tool_use that never got its result (STOPPED_MIDTOOL when there is evidence
+the driver process is gone, else MIDTOOL_UNKNOWN — that same tail is what a driver still
+inside a SLOW tool call leaves, so without evidence the row defers instead of being resumed
+onto a live transcript, #5386), an
 interruption, a parked background wait, a wrap-up, or a quiet stop — then decides
 resume / defer / skip, deferring any session whose ACCOUNT is throttled. It resumes nothing.
 Each row carries TWO independent axes (#3800): disp is ONLY the stop-cause; the dedup

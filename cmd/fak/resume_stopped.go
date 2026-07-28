@@ -59,10 +59,17 @@ func runResumeStopped(stdout, stderr io.Writer, argv []string) int {
 
 Each row carries TWO independent axes (#3800):
   disp          the single-axis stop-cause ONLY: STOPPED_LIMIT / STOPPED_AUTH /
-                STOPPED_MIDTOOL / STOPPED_INTERRUPT / STOPPED_MIDTURN / STOPPED_DONE /
-                STOPPED_QUIET / PARKED_WAIT / DONE / LIVE. When a terminal turn carries
-                BOTH an auth wall and a current limit banner, auth wins (a login wall
-                outlives any reset) and the outranked limit is retained on also_signals.
+                STOPPED_MIDTOOL / MIDTOOL_UNKNOWN / STOPPED_INTERRUPT / STOPPED_MIDTURN /
+                STOPPED_DONE / STOPPED_QUIET / PARKED_WAIT / DONE / LIVE. When a terminal
+                turn carries BOTH an auth wall and a current limit banner, auth wins (a
+                login wall outlives any reset) and the outranked limit is retained on
+                also_signals. A tool_use with no tool_result is reported as a CRASH
+                (STOPPED_MIDTOOL) only with evidence the driver process is gone; the same
+                tail is also what a driver still inside a SLOW tool call leaves, so with no
+                such evidence the row is MIDTOOL_UNKNOWN and DEFERS rather than being
+                resumed onto a transcript its original process may still be writing (#5386).
+                This triage supplies no liveness evidence yet, so every mid-tool row reads
+                MIDTOOL_UNKNOWN; the liveness field echoes which evidence decided the row.
   dup_of_live   the dedup verdict: a stopped row whose (project, work-key) a LIVE
                 sibling already owns is skipped, with the owning key on live_sibling —
                 disp KEEPS the real stop-cause; a duplicate never masks WHY it stopped.

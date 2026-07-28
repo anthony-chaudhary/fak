@@ -7,8 +7,9 @@ import (
 
 // The load-bearing facts these pin (from tools/stopped_sessions.py):
 //   - a synthetic limit banner is only CURRENT when it is the terminal meaningful turn;
-//   - an unmatched tool_use at the tail is STOPPED_MIDTOOL, and a later tool_result
-//     clears it;
+//   - an unmatched tool_use at the tail is a MID-TOOL tail resolved against the caller's
+//     driver-liveness evidence (gone => STOPPED_MIDTOOL, live => LIVE, none => the explicit
+//     MIDTOOL_UNKNOWN, #5386), and a later tool_result clears it;
 //   - liveness (age <= LiveMinutes) outranks the tail heuristics but NOT the banner or
 //     an auth wall;
 //   - Decide defers a resumable session when its ACCOUNT is throttled, and never
@@ -58,9 +59,18 @@ func TestSupersededBannerIsNotCurrent(t *testing.T) {
 }
 
 func TestMidtoolAndClearedTool(t *testing.T) {
-	r := Classify([]Record{
+	midtool := []Record{
 		{Type: "assistant", Role: "assistant", Text: "running a tool", ToolUseName: "Bash"},
-	}, 60, 10, "", "sid", "p")
+	}
+	// The unmatched trailing tool_use is still DETECTED (PendingTool names it), but with no
+	// driver-liveness evidence the verdict is the explicit MIDTOOL_UNKNOWN rather than an
+	// asserted crash: the same tail is produced by a slow tool call still in flight (#5386).
+	r := Classify(midtool, 60, 10, "", "sid", "p")
+	if r.Disp != DispMidtoolUnknown || r.PendingTool != "Bash" {
+		t.Fatalf("disp=%s pending=%q, want MIDTOOL_UNKNOWN/Bash", r.Disp, r.PendingTool)
+	}
+	// With positive evidence that the driver is gone it is a crash, exactly as before.
+	r = ClassifyWithLiveness(midtool, 60, 10, "", "sid", "p", LivenessGone)
 	if r.Disp != DispStoppedMidtool || r.PendingTool != "Bash" {
 		t.Fatalf("disp=%s pending=%q, want STOPPED_MIDTOOL/Bash", r.Disp, r.PendingTool)
 	}
@@ -68,7 +78,7 @@ func TestMidtoolAndClearedTool(t *testing.T) {
 		{Type: "assistant", Role: "assistant", Text: "running a tool", ToolUseName: "Bash"},
 		{Type: "user", Role: "user", Text: "tool output", HasToolResult: true},
 	}, 60, 10, "", "sid", "p")
-	if r.Disp == DispStoppedMidtool || r.PendingTool != "" {
+	if r.Disp == DispStoppedMidtool || r.Disp == DispMidtoolUnknown || r.PendingTool != "" {
 		t.Fatalf("tool_result must clear the pending tool_use, got disp=%s pending=%q", r.Disp, r.PendingTool)
 	}
 }
@@ -400,8 +410,10 @@ func TestResidualSplitByLastRole(t *testing.T) {
 		{"empty tail stays QUIET umbrella", nil, 60, DispStoppedQuiet},
 		{"assistant-final still LIVE when fresh", []Record{assistant("thinking about the next step")}, 2, DispLive},
 		// Precedence: the specific signals outrank the residual role split.
+		// The mid-tool branch still outranks the residual role split; without liveness evidence
+		// it lands on the explicit MIDTOOL_UNKNOWN rather than asserting a crash (#5386).
 		{"pending tool wins over assistant-final DONE",
-			[]Record{{Type: "assistant", Role: "assistant", Text: "running a tool", ToolUseName: "Bash"}}, 60, DispStoppedMidtool},
+			[]Record{{Type: "assistant", Role: "assistant", Text: "running a tool", ToolUseName: "Bash"}}, 60, DispMidtoolUnknown},
 		{"auth wall wins over user-final MIDTURN",
 			[]Record{{Type: "user", Role: "user", Text: "OAuth token has expired · please run /login"}}, 60, DispStoppedAuth},
 		{"interrupt wins over user-final MIDTURN",
