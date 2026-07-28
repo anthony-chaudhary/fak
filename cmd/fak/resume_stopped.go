@@ -68,8 +68,13 @@ Each row carries TWO independent axes (#3800):
                 tail is also what a driver still inside a SLOW tool call leaves, so with no
                 such evidence the row is MIDTOOL_UNKNOWN and DEFERS rather than being
                 resumed onto a transcript its original process may still be writing (#5386).
-                This triage supplies no liveness evidence yet, so every mid-tool row reads
-                MIDTOOL_UNKNOWN; the liveness field echoes which evidence decided the row.
+                This triage OBSERVES that evidence (#5440): a running process naming the
+                session, or the driver pid a launcher recorded, read from the host process
+                table. It claims live/gone only when one of those is actually witnessed —
+                never from age, mtime or size — so an unreadable/incomplete process table or
+                a session with no recorded driver pid still reads MIDTOOL_UNKNOWN and defers.
+                The liveness field echoes which evidence decided the row, and --json carries
+                the per-session reason under driver_liveness.
   dup_of_live   the dedup verdict: a stopped row whose (project, work-key) a LIVE
                 sibling already owns is skipped, with the owning key on live_sibling —
                 disp KEEPS the real stop-cause; a duplicate never masks WHY it stopped.
@@ -103,6 +108,12 @@ Each row carries TWO independent axes (#3800):
 	// excluded ones are exactly the seats a resume must not target).
 	workerDirs := workerAccountDirs(home)
 
+	// Driver-liveness evidence for the mid-tool branch (#5440). Taken once, lazily, from the
+	// host process table plus the durable launch record; see resume_stopped_liveness.go for
+	// why only positive evidence ever produces a non-empty value.
+	drivers := &stoppedDriverProbe{ledgerPath: defaultResumeLedger()}
+	livenessWhy := map[string]string{}
+
 	var rows []stopped.Row
 	for acctDir, acct := range workerDirs {
 		proj := filepath.Join(acctDir, "projects")
@@ -124,8 +135,14 @@ Each row carries TWO independent axes (#3800):
 				continue
 			}
 			recs := loadStoppedRecords(path)
-			r := stopped.Classify(recs, ageMin, fi.Size()/1024,
-				fi.ModTime().UTC().Format(time.RFC3339), stem, path)
+			// The mid-tool tail is ambiguous by construction, so hand the classifier the
+			// observed driver-liveness instead of the LivenessUnknown the Classify wrapper
+			// hard-codes (#5440). live/gone are asserted only when the process table actually
+			// witnessed one; every unwitnessable shape stays LivenessUnknown and defers.
+			live, why := drivers.facts().livenessFor(stem)
+			livenessWhy[stem] = why
+			r := stopped.ClassifyWithLiveness(recs, ageMin, fi.Size()/1024,
+				fi.ModTime().UTC().Format(time.RFC3339), stem, path, live)
 			r.Account = acct
 			r.Project = filepath.Base(filepath.Dir(path))
 			// Work-key for cross-session dedup: the authoritative /goal, /loop lane, or issue
@@ -145,9 +162,24 @@ Each row carries TWO independent axes (#3800):
 	d := stopped.Decide(rows, throttleActive)
 
 	if *asJSON {
+		df := drivers.facts()
 		return encodeJSONOrFail(stdout, stderr, map[string]any{
-			"now_utc":          now.Format(time.RFC3339),
-			"window_h":         *windowH,
+			"now_utc":  now.Format(time.RFC3339),
+			"window_h": *windowH,
+			// driver_liveness is the observability record for the evidence that decided every
+			// mid-tool row: what the process table could see, what it could NOT examine, and
+			// the per-session reason. It is emitted even when nothing was witnessable, so an
+			// unobservable host is visible rather than indistinguishable from a quiet one.
+			"driver_liveness": map[string]any{
+				"readable":             df.readable,
+				"scanned":              df.scanned,
+				"self_seen":            df.selfSeen,
+				"cmdline_not_examined": df.cmdlineUnread,
+				"scan_error":           df.scanErr,
+				"recorded_driver_pids": len(df.launchPIDs),
+				"summary":              df.summary(),
+				"reasons":              livenessWhy,
+			},
 			"account_throttle": d.AccountThrottle,
 			"counts":           d.Counts,
 			"n_resume":         len(d.Resume),
@@ -163,7 +195,8 @@ Each row carries TWO independent axes (#3800):
 	// the throttle/limit rows that clear on their own — so an operator is not told to
 	// babysit a wall that would have cleared without them. Default ("", "warn") keeps
 	// the single DEFER section so the change can soak.
-	renderResumeStopped(stdout, d, now, *windowH, stopped.TriageEnforced(os.Getenv("FAK_RESUME_TRIAGE_GATE")))
+	renderResumeStopped(stdout, d, now, *windowH, stopped.TriageEnforced(os.Getenv("FAK_RESUME_TRIAGE_GATE")),
+		drivers.facts().summary())
 	return 0
 }
 
@@ -363,11 +396,17 @@ func stoppedContentFacts(raw json.RawMessage) (text, lastToolUse string, hasTool
 	return strings.Join(parts, " "), lastToolUse, hasToolResult
 }
 
-// renderResumeStopped prints the operator triage: the counts, the account throttles, and
-// the three action buckets with the reason each deferred row is blocked.
-func renderResumeStopped(w io.Writer, d stopped.Decisions, now time.Time, windowH float64, triage bool) {
+// renderResumeStopped prints the operator triage: the counts, the driver-liveness evidence
+// state, the account throttles, and the three action buckets with the reason each deferred
+// row is blocked. driverNote states what the process table could and could not see, so a
+// host where liveness is unobservable is visibly unobservable rather than silently
+// deferring every mid-tool row (#5440).
+func renderResumeStopped(w io.Writer, d stopped.Decisions, now time.Time, windowH float64, triage bool, driverNote string) {
 	fmt.Fprintf(w, "resume stopped %s  window=%.0fh  resume=%d defer=%d skip=%d\n",
 		now.Format("2006-01-02T15:04:05Z"), windowH, len(d.Resume), len(d.Defer), len(d.Skip))
+	if driverNote != "" {
+		fmt.Fprintf(w, "  %s\n", driverNote)
+	}
 	if len(d.AccountThrottle) > 0 {
 		fmt.Fprintln(w, "  account throttles (most-recent active banner per account):")
 		for acct, thr := range d.AccountThrottle {
