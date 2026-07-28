@@ -92,8 +92,7 @@ var guardFlagGroups = []guardFlagGroup{
 	{"Budgets, resets & session governance", []string{
 		"context-budget-tokens", "max-duration", "budget-envelope",
 		"reset-on-budget", "restart-on-budget", "restart-limit", "restart-seed-dir", "restart-seed-handback",
-		"session-id", "session-pressure-gate", "session-pressure-days",
-		"session-pressure-max", "session-pressure-report", "session-pressure-justify",
+		"session-id", "session-pressure-gate",
 	}},
 	{"Lease admission & ownership", []string{
 		"lease", "promotion-threshold",

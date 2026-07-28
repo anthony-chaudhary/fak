@@ -207,6 +207,80 @@ func TestGuardSessionPressureGateAllowsWhenDisabledOrClean(t *testing.T) {
 	}
 }
 
+// TestParseGuardSessionPressureSpec pins the five-flags-into-one fold. The two
+// properties that matter to an operator: the pre-fold spelling
+// (`--session-pressure-gate high`) still parses to exactly what the five flags
+// produced, and every knob that used to be its own flag is still reachable —
+// nothing became unsettable in the name of a smaller front door.
+func TestParseGuardSessionPressureSpec(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec string
+		want guardSessionPressureSpec
+	}{
+		{
+			name: "empty spec leaves the gate off with the shipped window",
+			spec: "",
+			want: guardSessionPressureSpec{SinceDays: 7, Max: 40},
+		},
+		{
+			name: "bare threshold is the pre-fold spelling, unchanged",
+			spec: "high",
+			want: guardSessionPressureSpec{Threshold: "high", SinceDays: 7, Max: 40},
+		},
+		{
+			name: "every retired flag is still reachable as a key",
+			spec: "medium,days=3,max=5,report=pressure.json",
+			want: guardSessionPressureSpec{Threshold: "medium", SinceDays: 3, Max: 5, ReportPath: "pressure.json"},
+		},
+		{
+			name: "justify takes the rest, so prose may carry commas",
+			spec: "high,days=2,justify=shipping the release, blockers first",
+			want: guardSessionPressureSpec{Threshold: "high", SinceDays: 2, Max: 40, Justification: "shipping the release, blockers first"},
+		},
+		{
+			name: "threshold case and spacing are forgiving",
+			spec: " HIGH , max=9 ",
+			want: guardSessionPressureSpec{Threshold: "high", SinceDays: 7, Max: 9},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseGuardSessionPressureSpec(tc.spec)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tc.spec, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parse %q =\n  %+v\nwant\n  %+v", tc.spec, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseGuardSessionPressureSpecRefusesGarbage: a mistyped knob must REFUSE, not
+// no-op. Silently ignoring `daze=3` would leave the operator believing they had
+// narrowed a window they had not — the exact failure a launch gate exists to prevent.
+func TestParseGuardSessionPressureSpecRefusesGarbage(t *testing.T) {
+	for _, tc := range []struct {
+		spec string
+		want string
+	}{
+		{spec: "high,daze=3", want: "unknown key"},
+		{spec: "high,days=soon", want: "days="},
+		{spec: "high,max=lots", want: "max="},
+		{spec: "days=3,high", want: "must come first"},
+	} {
+		t.Run(tc.spec, func(t *testing.T) {
+			_, err := parseGuardSessionPressureSpec(tc.spec)
+			if err == nil {
+				t.Fatalf("parse %q: want a refusal, got none", tc.spec)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("parse %q error = %v, want it to name %q", tc.spec, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestGuardSessionPressureGateRejectsBadThreshold(t *testing.T) {
 	var stderr bytes.Buffer
 	rc := runGuardSessionPressureGate(&stderr, guardSessionPressureGateConfig{

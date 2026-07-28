@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
@@ -20,6 +21,90 @@ type guardSessionPressureGateConfig struct {
 	ReportPath      string
 	LaunchModel     string
 	Justification   string
+}
+
+const (
+	// guardSessionPressureDefaultDays/Max are the audit window the retired
+	// --session-pressure-days/--session-pressure-max flags defaulted to, held
+	// identical here so a spec that names only a threshold behaves exactly as the
+	// five-flag form did.
+	guardSessionPressureDefaultDays = 7.0
+	guardSessionPressureDefaultMax  = 40
+)
+
+// guardSessionPressureSpec is one --session-pressure-gate value, parsed.
+//
+// The launch gate used to own FIVE front-door flags, four of which existed only to
+// qualify the fifth — their help text literally began "with --session-pressure-gate",
+// and none of them did anything on their own. That is the flag-per-knob shape
+// internal/heavinessscore's front-door burden KPI refuses past its hard ceiling on
+// `fak guard`, the one verb most operators actually type. They fold into one spec
+// string here, the same idiom --budget-envelope already uses on this FlagSet.
+type guardSessionPressureSpec struct {
+	Threshold     string
+	SinceDays     float64
+	Max           int
+	ReportPath    string
+	Justification string
+}
+
+// parseGuardSessionPressureSpec reads `THRESHOLD[,days=N][,max=N][,report=PATH][,justify=TEXT]`.
+//
+// The leading bare word is the severity threshold (high|medium|none|off), so the old
+// `--session-pressure-gate high` keeps working verbatim; every later field is key=value.
+// `justify=` deliberately consumes the REST of the spec, unsplit, because a real
+// justification is prose and prose contains commas — which means it has to come last.
+// An unknown key REFUSES rather than being ignored: a mistyped knob that silently
+// no-ops would leave the operator believing they had armed a gate they had not.
+func parseGuardSessionPressureSpec(spec string) (guardSessionPressureSpec, error) {
+	out := guardSessionPressureSpec{
+		SinceDays: guardSessionPressureDefaultDays,
+		Max:       guardSessionPressureDefaultMax,
+	}
+	rest := strings.TrimSpace(spec)
+	fields := 0
+	for rest != "" {
+		rest = strings.TrimLeft(rest, " \t")
+		if text, ok := strings.CutPrefix(rest, "justify="); ok {
+			out.Justification = strings.TrimSpace(text)
+			return out, nil
+		}
+		field, tail, _ := strings.Cut(rest, ",")
+		rest = tail
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		fields++
+		key, value, hasValue := strings.Cut(field, "=")
+		if !hasValue {
+			if fields != 1 {
+				return out, fmt.Errorf("threshold %q must come first, before the key=value fields", field)
+			}
+			out.Threshold = strings.ToLower(field)
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "days":
+			days, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return out, fmt.Errorf("days=%q: want a number of days", value)
+			}
+			out.SinceDays = days
+		case "max":
+			count, err := strconv.Atoi(value)
+			if err != nil {
+				return out, fmt.Errorf("max=%q: want a transcript count", value)
+			}
+			out.Max = count
+		case "report":
+			out.ReportPath = value
+		default:
+			return out, fmt.Errorf("unknown key %q (want days, max, report, or justify)", key)
+		}
+	}
+	return out, nil
 }
 
 func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateConfig) int {

@@ -154,7 +154,7 @@ fak ablate    --sweep vdso                             # N-arm self-ablation: on
 fak ablate    --rungs --trace TRACE.json               # per-rung attribution: replay a frozen turnbench trace, mask one adjudicator rung per arm, diff the kernel counters (--rungs=grammar,ifc-sink restricts; default suite turntax-airline)
 fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
-fak guard     [--session-pressure-gate high --session-pressure-report pressure.json] -- <agent command>  # wrap a real agent through the kernel; optional recent-session gate refuses high Opus/long-context pressure and can write its JSON action ledger before launch
+fak guard     [--session-pressure-gate high,report=pressure.json] -- <agent command>  # wrap a real agent through the kernel; optional recent-session gate refuses high Opus/long-context pressure and can write its JSON action ledger before launch
 fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)
 fak relay     resume (--baton FILE|- | FILE) [--json]   # inspect a fak.relay.baton.v1 leg handoff OFFLINE: exactly what a successor leg would receive (pointer-only, no reload re-verification); --json emits the canonical byte-stable wire form
 fak task      sample [--json] [--done N --total N]     # process-local task-manager snapshot: hardware/runtime sample + task/step/concept progress and ETA
@@ -668,9 +668,13 @@ commands; add `--fail-on high` to make that ledger a guard gate that exits 1 whe
 recent cost/context pressure should block more high-cost turns. `fak guard
 --session-pressure-gate high --model claude-fable-5` treats the explicit Fable
 route as satisfying those current high-pressure actions while explicit Opus or
-unknown routes still refuse; add `--session-pressure-justify "..."` with an
+unknown routes still refuse; append `,justify=...` to the same spec with an
 explicit Opus model to allow a justified high-cost launch without disabling the
-gate. `GET /v1/fak/session-audit/actions` serves the same read-only action
+gate. The gate is ONE flag carrying a spec —
+`THRESHOLD[,days=N][,max=N][,report=PATH][,justify=TEXT]`, defaults `days=7`
+and `max=40` — so a bare `--session-pressure-gate high` still reads exactly as
+before; `justify=` consumes the rest of the spec (prose has commas) and so
+comes last. `GET /v1/fak/session-audit/actions` serves the same read-only action
 ledger for gateway/control clients. Both are scoped by
 the current workspace's Claude transcript namespace by default, label clipped
 `--max` windows, and keep exact token counts separate from assumed-cost estimates.

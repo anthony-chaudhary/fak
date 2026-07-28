@@ -156,11 +156,7 @@ func cmdGuard(argv []string) {
 	deferColdTools := fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools); every deferred def stays byte-complete in tools[], so a first real use still resolves — nothing goes silently missing. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B token-delta x held-accuracy x poison gates reported PASS, the #3200 pin/quarantine guards the fault-in). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
 	exposeProfile := fs.String("expose-profile", "", "in-kernel fak_* MCP tool-surface profile (#3607): \"\" (full registry, default) | \"headless\" — a curated allowlist for a single-issue dispatch worker (fak_index_work, fak_admit, fak_adjudicate, fak_memory_run, fak_tools_search), pruning the ~9.9k-token full-registry schema floor every worker otherwise pays each turn; the rest page in on demand through the still-exposed fak_tools_search. `fak dispatch` launches workers with =headless. The FAK_GUARD_EXPOSE_PROFILE env OVERRIDES this flag (the fleet opt-out: set it to `full`/`off` to restore the whole registry). Any value other than \"headless\" keeps the full registry.")
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: a fresh launch id derived from host, cwd, and wrapped argv; pass this flag for a stable resumable id)")
-	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist: high|medium|none|off. Off by default; use --session-pressure-days/--session-pressure-max to size the window.")
-	sessionPressureDays := fs.Float64("session-pressure-days", 7, "with --session-pressure-gate, audit transcripts modified within N days for the current workspace namespace")
-	sessionPressureMax := fs.Int("session-pressure-max", 40, "with --session-pressure-gate, maximum recent transcripts to audit before deciding the launch gate")
-	sessionPressureReport := fs.String("session-pressure-report", "", "with --session-pressure-gate, write the fak.session_audit.actions.v1 launch-gate report to FILE before allowing or refusing")
-	sessionPressureJustification := fs.String("session-pressure-justify", "", "with --session-pressure-gate and an explicit Opus --model, non-empty justification that allows the launch while recording the pressure-gate report")
+	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist. Spec: THRESHOLD[,days=N][,max=N][,report=PATH][,justify=TEXT] — THRESHOLD is high|medium|none|off (off by default, so a bare `--session-pressure-gate high` is the common form); days (default 7) and max (default 40) size the audit window over this workspace's transcript namespace; report=PATH writes the fak.session_audit.actions.v1 launch-gate report before allowing or refusing; justify=TEXT, with an explicit Opus --model, is the justification that allows the launch while still recording that report. justify= takes the REST of the spec so prose may contain commas — put it last. e.g. --session-pressure-gate high,days=3,report=pressure.json")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	maxDuration := fs.Duration("max-duration", 0, "govern this guard session to at most this much REAL WALL-CLOCK time (issue #1584), tracked independently of --context-budget-tokens and surviving a --restart-on-budget hidden restart (the elapsed total carries forward, it does not reset to zero). 0 = unbounded (still tracked for `fak session status`, just never stops the run). Query/inspect anytime with `fak session status <id>`; the time budget drains the session to Draining/Stopped with reason TIME_BUDGET_EXHAUSTED exactly like a token-budget exhaustion.")
 	budgetEnvelopeSpec := fs.String("budget-envelope", "", "managed-context budget envelope (#1573): turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms. Seeds this guard session's budget/pace/wall axes; explicit --context-budget-tokens and --max-duration override those envelope axes.")
@@ -329,14 +325,19 @@ func cmdGuard(argv []string) {
 			os.Exit(code)
 		}
 	}
+	sessionPressure, specErr := parseGuardSessionPressureSpec(*sessionPressureGate)
+	if specErr != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: --session-pressure-gate %q: %v\n", *sessionPressureGate, specErr)
+		os.Exit(2)
+	}
 	if code := runGuardSessionPressureGate(os.Stderr, guardSessionPressureGateConfig{
-		Threshold:     *sessionPressureGate,
-		SinceDays:     *sessionPressureDays,
-		Max:           *sessionPressureMax,
+		Threshold:     sessionPressure.Threshold,
+		SinceDays:     sessionPressure.SinceDays,
+		Max:           sessionPressure.Max,
 		Quiet:         *quiet,
-		ReportPath:    *sessionPressureReport,
+		ReportPath:    sessionPressure.ReportPath,
 		LaunchModel:   *model,
-		Justification: *sessionPressureJustification,
+		Justification: sessionPressure.Justification,
 	}); code != 0 {
 		os.Exit(code)
 	}
