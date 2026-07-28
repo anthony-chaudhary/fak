@@ -112,6 +112,15 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 			if w := testSubjectNeedsWitness(r.Subject, paths); w != "" {
 				r.Issues = append(r.Issues, w)
 			}
+			// A code-effect type over a diff with NO program source is the shape the push-seam
+			// claim-honesty gate later reports as a residual for the WHOLE range (#5434). Caught
+			// here it costs one keystroke; caught at push it costs an override, because the landed
+			// subject can no longer be amended on a shared trunk. Advisory (a Note): a genuinely
+			// prose-only fix still commits, and widening the pre-commit refusal set on a shared
+			// tree would wedge lanes this issue is not about.
+			if w := ClaimCodeEffectWithoutSourceWitness(r.Subject, paths); w != "" {
+				r.Notes = append(r.Notes, w)
+			}
 		}
 	}
 

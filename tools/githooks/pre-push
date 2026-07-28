@@ -25,9 +25,16 @@
 # witness could not clear. Soften with FLEET_REVIEW_GUARD=warn while settling an
 # intentional false positive.
 #
+# Cure for an ALREADY-LANDED residual (#5434): amending is forbidden on this shared trunk, so a
+# mistyped subject that reached main used to have no exit but the override. Append a forward-only
+# reclassification record to docs/claim-reclass.txt and commit it; the rung below verifies it
+# against the commit's real diff and clears the range without rewriting anything. A record may only
+# DEMOTE a claim to a type the diff already witnesses, so it cannot launder a subject.
+#
 # Escape hatch:  FLEET_ALLOW_RESIDUAL=1 git push   always allows (e.g. an
 # intentional data-artifact commit whose `test()` subject is a known false-positive;
 # prefer fixing the subject — a JSON result drop is a `docs(...)`/`chore(...)`, not a `test`).
+# A spent hatch is appended to <gitdir>/fak-residual-overrides.log so it is auditable, not silent.
 #
 # Fail-open by design: if the `dos` CLI or the trunk ref is unavailable, the hook
 # says so and allows the push — a missing verifier must never wedge the trunk.
@@ -274,7 +281,24 @@ if [ "$popup_mode" != "off" ] && [ "${FLEET_ALLOW_POPUP:-0}" != "1" ]; then
 fi
 
 [ "$mode" = "off" ] && exit 0
-[ "${FLEET_ALLOW_RESIDUAL:-0}" = "1" ] && exit 0
+
+# A spent override must leave a trace (#5434). The hatch is documented for known false positives,
+# but it is the ONLY exit a landed residual has today, so it also absorbs true positives — and the
+# log cannot tell the two apart afterwards. Append what was waived to a local, untracked ledger
+# before allowing the push. Every command here is best-effort and its output is discarded, and the
+# `exit 0` is unconditional, so this can never change whether the push is allowed.
+if [ "${FLEET_ALLOW_RESIDUAL:-0}" = "1" ]; then
+	gitdir="$(git rev-parse --git-dir 2>/dev/null)"
+	if [ -n "$gitdir" ]; then
+		{
+			printf '%s\toverride=FLEET_ALLOW_RESIDUAL\thead=%s\tcommits=%s\n' \
+				"$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" \
+				"$(git rev-parse HEAD 2>/dev/null)" \
+				"$(git rev-list --max-count=200 origin/main..HEAD 2>/dev/null | tr '\n' ' ')"
+		} >>"$gitdir/fak-residual-overrides.log" 2>/dev/null
+	fi
+	exit 0
+fi
 
 # Need the dos CLI. Resolve it from PATH; if absent, fail open with a note.
 dos_bin="$(command -v dos 2>/dev/null)"
@@ -347,12 +371,45 @@ if [ "$status" -eq 2 ]; then
 fi
 
 # status == 1: a residual exists.
+#
+# Forward-only cure rung (#5434). The review has ALREADY refused. On this shared trunk the advice
+# below — amend the subject — is unavailable for a landed commit: a rebase rewrites peers' commits
+# and moves HEAD under every live session, so one mistyped subject wedges the whole growing range
+# and FLEET_ALLOW_RESIDUAL=1 becomes the only exit, spent on true positives it was never meant for.
+# This rung supplies the missing remedy: it re-reads the review's OWN residual list and allows the
+# push only when EVERY residual carries a verified forward-only reclassification in
+# docs/claim-reclass.txt — a record that may only DEMOTE a claim to a type the commit's own diff
+# already witnesses, so it can never launder a subject.
+#
+# RELAX-ONLY by construction: it runs only after a refusal, and its verdict can only turn that
+# standing refusal into an allow — it can never refuse a push the review passed, so it cannot wedge
+# a lane that is green. An older `fak` without the subcommand exits 2 and the refusal stands.
+# Disable with FLEET_RECLASS_GUARD=off.
+if [ "${FLEET_RECLASS_GUARD:-on}" != "off" ]; then
+	reclass_status=1
+	reclass_out=""
+	if command -v fak >/dev/null 2>&1; then
+		reclass_out="$(printf '%s\n' "$out" | fak hooks claim-reclass --root "$root" 2>&1)"
+		reclass_status=$?
+	elif command -v go >/dev/null 2>&1; then
+		reclass_out="$(cd "$root" && printf '%s\n' "$out" | go run ./cmd/fak hooks claim-reclass --root "$root" 2>&1)"
+		reclass_status=$?
+	fi
+	if [ "$reclass_status" -eq 0 ]; then
+		echo "CLAIM_UNWITNESSED (cured): every residual in $range carries a verified forward-only reclassification." >&2
+		echo "$reclass_out" >&2
+		exit 0
+	fi
+fi
+
 if [ "$mode" = "block" ]; then
 	echo "CLAIM_UNWITNESSED (blocked): a commit in $range claims something its diff does not witness." >&2
 	echo "$out" >&2
-	echo "  fix: amend the subject to match what the diff does (a result-artifact drop is docs/chore, not test)," >&2
+	echo "  fix (not yet pushed): amend the subject to match what the diff does (a result-artifact drop is docs/chore, not test)," >&2
 	echo "       or add the witnessing file; then re-push." >&2
-	echo "  override once: FLEET_ALLOW_RESIDUAL=1 git push   (intentional false-positive only)" >&2
+	echo "  fix (already landed, no rewrite): append a reclassification record to docs/claim-reclass.txt and commit it —" >&2
+	echo "       run 'dos review --workspace \"$root\" \"$range\" 2>&1 | fak hooks claim-reclass --root \"$root\"' to get the exact record." >&2
+	echo "  override once: FLEET_ALLOW_RESIDUAL=1 git push   (intentional false-positive only; the waiver is logged)" >&2
 	exit 1
 else
 	echo "CLAIM_UNWITNESSED (advisory): a commit in $range claims something its diff does not witness." >&2

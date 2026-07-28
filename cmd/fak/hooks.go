@@ -26,7 +26,7 @@ func cmdHooks(argv []string) { os.Exit(runHooks(os.Stdout, os.Stderr, argv)) }
 
 func runHooks(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | pre-push | import-witness | popup-scan | lane-audit)")
+		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | pre-push | import-witness | popup-scan | claim-reclass | lane-audit)")
 		return 2
 	}
 	switch argv[0] {
@@ -40,10 +40,13 @@ func runHooks(stdout, stderr io.Writer, argv []string) int {
 		return runHooksImportWitness(stdout, stderr, argv[1:])
 	case "popup-scan":
 		return runHooksPopupScan(stdout, stderr, argv[1:])
+	case "claim-reclass":
+		// Reads the claim-honesty review's output on stdin; the shell rung pipes it in.
+		return runHooksClaimReclass(stdout, stderr, os.Stdin, argv[1:])
 	case "lane-audit":
 		return runHooksLaneAudit(stdout, stderr, argv[1:])
 	default:
-		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | pre-push | import-witness | popup-scan | lane-audit)\n", argv[0])
+		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | pre-push | import-witness | popup-scan | claim-reclass | lane-audit)\n", argv[0])
 		return 2
 	}
 }
