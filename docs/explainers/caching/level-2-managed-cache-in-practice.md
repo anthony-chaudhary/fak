@@ -18,6 +18,13 @@ date: 2026-07-10
 
 *You are on **Level 2 of 5** of the [fak caching ladder](README.md).*
 
+> **Audience.** Operators who run fak seats and want the cache working for them.
+> Prerequisites: [Level 1](level-1-what-is-caching.md) (what a prompt cache is) and a
+> working `fak guard` launch — no billing, provider-API, or kernel knowledge assumed. By
+> the end you'll be able to choose the right `--managed-cache` value for your credential
+> class, predict which default your launch path actually gives you, and prove from your
+> own run whether the 1-hour TTL upgrade activated or silently stayed passive.
+
 > **Short answer.** [Level 1](level-1-what-is-caching.md) said the provider's cache
 > rewards staying active and punishes long pauses. **Managed cache** is fak working that
 > cache so the pauses hurt less — and it is a **family of levers, not one feature**:
