@@ -220,15 +220,19 @@ func TestTheFoldIsDeterministicAndFailuresAreCountedAsAttempts(t *testing.T) {
 func TestAJournalGradesAndPlacesEndToEnd(t *testing.T) {
 	// The whole track in one test: append real turns, read them back, fold, grade, place.
 	// Nobody asserts a capability anywhere in this path.
+	// Two models, the same number of turns each. The assertions below relate what comes
+	// back to what was WRITTEN — the journal must lose nothing — rather than freezing the
+	// total this loop bound happens to produce.
+	const perModel = 30
 	var buf bytes.Buffer
-	for i := 0; i < 30; i++ {
+	for i := 0; i < perModel; i++ {
 		o := TurnOutcome{ID: "d" + string(rune('a'+i)), Model: "tiny", Class: ClassRoutine,
 			Zone: ZoneDevice, Success: i%10 != 0, Verify: VerifyWitness, At: at(20)}
 		if err := AppendTurnOutcome(&buf, o); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for i := 0; i < 30; i++ {
+	for i := 0; i < perModel; i++ {
 		o := TurnOutcome{ID: "f" + string(rune('a'+i)), Model: "corp-mid", Class: ClassNormalImpl,
 			Zone: ZoneFleet, Success: i%10 != 0, Verify: VerifyJudge, At: at(21)}
 		if err := AppendTurnOutcome(&buf, o); err != nil {
@@ -236,11 +240,11 @@ func TestAJournalGradesAndPlacesEndToEnd(t *testing.T) {
 		}
 	}
 	outcomes, stats, err := ReadTurnOutcomes(&buf)
-	if err != nil || stats.Malformed != 0 || len(outcomes) != 60 {
-		t.Fatalf("read: %v stats=%+v n=%d", err, stats, len(outcomes))
+	if err != nil || stats.Malformed != 0 || len(outcomes) != 2*perModel {
+		t.Fatalf("read: %v stats=%+v n=%d want=%d", err, stats, len(outcomes), 2*perModel)
 	}
 	ev, fold := FoldTurnOutcomes(outcomes, FoldOptions{Since: at(15)})
-	if fold.Counted != 60 || fold.Undated != 0 {
+	if fold.Counted != 2*perModel || fold.Undated != 0 {
 		t.Fatalf("fold = %+v, want every stamped row inside the window", fold)
 	}
 	grades := GradeCandidates([]string{"frontier", "corp-mid", "tiny"}, ev, DefaultGradeFloor())
