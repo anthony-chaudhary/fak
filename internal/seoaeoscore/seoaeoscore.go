@@ -126,7 +126,7 @@ var (
 	reHTMLAlt    = regexp.MustCompile(`(?i)(?:^|[\s"'])alt\s*=\s*["']([^"']*)["']`)
 	reInlineCode = regexp.MustCompile("`[^`\\n]*`")
 	reToken      = regexp.MustCompile(`[A-Za-z][A-Za-z'-]{3,}`)
-	reWordApos   = regexp.MustCompile(`[A-Za-z][A-Za-z'’-]+`)
+	reWordApos   = regexp.MustCompile(`\p{L}[\p{L}\p{M}'’-]+`)
 	reFMKey      = regexp.MustCompile(`^(title|description)\s*:\s*(.*)$`)
 	reExclude    = regexp.MustCompile(`(?m)^exclude:\s*\n((?:[ \t]+-.*\n?|[ \t]*#.*\n?)+)`)
 	reImage      = regexp.MustCompile(`image:\s*"?([^"\n]+)`)
@@ -547,6 +547,10 @@ func parseFrontMatter(text string) map[string]string {
 	return out
 }
 
+// degenerate reports whether a title/description is filler — a single repeated word,
+// one character, or no word long enough to read. Word counting is script-agnostic on
+// purpose (reWordApos spans every Unicode letter): a Latin-only class saw a correct
+// Cyrillic, Arabic, or CJK title as a single word and called the whole page defective.
 func degenerate(s string) bool {
 	words := reWordApos.FindAllString(s, -1)
 	distinct := map[string]bool{}

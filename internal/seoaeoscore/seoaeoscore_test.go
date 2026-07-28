@@ -662,6 +662,31 @@ func TestRealShortTitleNotDegenerate(t *testing.T) {
 	}
 }
 
+// A localized title is a real title. Word counting must not be Latin-only, or every
+// non-English entry page scores as filler and the only "fix" is to stuff Latin words
+// into it — exactly the gaming this scorecard exists to refuse.
+func TestLocalizedTitleNotDegenerate(t *testing.T) {
+	for _, title := range []string{
+		"fak — быстрый старт (10 минут до локальной модели)",
+		"fak — البداية السريعة (نموذج محلي في نحو ١٠ دقائق)",
+		"fak 快速开始（10 分钟跑起一个受管治的本地模型）",
+	} {
+		if k := kpiTitle(map[string]string{"title": title}); len(k.defects) != 0 {
+			t.Fatalf("localized title flagged: %q -> %+v", title, k)
+		}
+	}
+}
+
+// …and the widened word class must still catch real filler in those same scripts.
+func TestRepeatedLocalizedWordStillDegenerate(t *testing.T) {
+	for _, title := range []string{"старт старт старт", "快速开始 快速开始"} {
+		k := kpiTitle(map[string]string{"title": title})
+		if k.score != 0 || !anyContains(k.defects, "degenerate") {
+			t.Fatalf("filler title accepted: %q -> %+v", title, k)
+		}
+	}
+}
+
 func TestMalformedJSONLDNotCounted(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "docs/_includes/head-custom.html",
