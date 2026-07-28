@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -14,9 +14,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/choicetriage"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
+	"github.com/anthony-chaudhary/fak/internal/ghexec"
 	"github.com/anthony-chaudhary/fak/internal/issuestriage"
 	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func init() {
@@ -174,8 +174,8 @@ func loadTUIIssues(path, repo, state string, limit int) ([]tuiIssue, string, err
 	if repo != "" {
 		args = append(args, "--repo", repo)
 	}
-	cmd := exec.Command("gh", args...)
-	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd, cancel := ghexec.CommandTimeout(context.Background(), ghexec.DefaultTimeout, args...)
+	defer cancel()
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

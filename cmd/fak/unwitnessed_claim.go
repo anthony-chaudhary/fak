@@ -9,12 +9,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"os/exec"
 
+	"github.com/anthony-chaudhary/fak/internal/ghexec"
 	"github.com/anthony-chaudhary/fak/internal/unwitnessedclaim"
 )
 
@@ -96,8 +97,8 @@ func parseGhIssueUnwitnessedInput(raw []byte) (unwitnessedclaim.Input, error) {
 }
 
 func ghIssueViewJSON(issue int) ([]byte, error) {
-	cmd := exec.Command("gh", "issue", "view", fmt.Sprint(issue), "--json", "number,state,comments")
-	configureDispatchHelperCommand(cmd)
+	cmd, cancel := ghexec.CommandTimeout(context.Background(), ghexec.DefaultTimeout, "issue", "view", fmt.Sprint(issue), "--json", "number,state,comments")
+	defer cancel()
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
@@ -108,8 +109,8 @@ func ghIssueViewJSON(issue int) ([]byte, error) {
 }
 
 func ghPostIssueComment(issue int, body string) error {
-	cmd := exec.Command("gh", "issue", "comment", fmt.Sprint(issue), "--body", body)
-	configureDispatchHelperCommand(cmd)
+	cmd, cancel := ghexec.CommandTimeout(context.Background(), ghexec.DefaultTimeout, "issue", "comment", fmt.Sprint(issue), "--body", body)
+	defer cancel()
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
