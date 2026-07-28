@@ -135,7 +135,8 @@ def code(s): return {"cell_type": "code", "metadata": {}, "execution_count": Non
 
 
 # --- Notebook A: quickstart (Tier 0 + Tier 1) --------------------------------------
-def quickstart_cells():
+def _quickstart_opening():
+    """Case table, environment setup, the binary, the shared helpers."""
     return [
         md(r'''# fak quickstart - fresh value demos
 
@@ -206,6 +207,12 @@ Run-all on a CPU-only runtime should finish Cases A-C and print these success si
 
 The cells below include assertions for the stable CPU expectations, so a stale policy,
 missing verb, or broken HTTP adjudication path fails where it happens.'''),
+    ]
+
+
+def _quickstart_case_a():
+    """Case A: the no-model policy floor — preflight explains, attest proves."""
+    return [
         md(r'''## Case A - policy floor you can ship
 
 This is the no-model proof. `preflight` runs the same adjudication fold a served call uses,
@@ -243,6 +250,12 @@ print("policy sha256     :", att["policy"]["sha256"][:16] + "...")
 print("probes            :", att["summary"]["probes"])
 print("passed / failed   :", att["summary"]["passed"], "/", att["summary"]["failed"])
 print("floor proven      :", att["summary"]["pass"])'''),
+    ]
+
+
+def _quickstart_case_b():
+    """Case B: your app asks /v1/fak/adjudicate before it executes a tool."""
+    return [
         md(r'''## Case B - app/API drop-in
 
 Use this path when your own application executes tools. The application asks `fak` for a
@@ -282,6 +295,12 @@ for label, payload in api_cases:
     print(f"{label:<24} -> {v['kind']:<5} {v.get('reason','')} {v.get('disposition','')}")
 
 print("\nThis was adjudicate-only: your application still owns execution of allowed tools.")'''),
+    ]
+
+
+def _quickstart_case_c():
+    """Case C: the offline catalog plus two runs on committed fixtures."""
+    return [
         md(r'''## Case C - value measurement without a model
 
 Before you spend GPU time, ask what can be measured offline. The catalog names the benchmark
@@ -300,6 +319,12 @@ turntax_out = fak("turntax", "--suite", "turntax-airline",
                   "--out", "quickstart-turntax.json", timeout=240).stdout
 assert "turns saved" in turntax_out and ": 9" in turntax_out, turntax_out
 print(clip(turntax_out, 2600))'''),
+    ]
+
+
+def _quickstart_case_d():
+    """Case D (GPU): Ollama behind fak serve, driven by the OpenAI SDK."""
+    return [
         md(r'''## Case D - real model gateway
 
 If the runtime has a GPU, this starts Ollama with a small model and puts `fak serve` in front
@@ -354,6 +379,12 @@ if HAS_GPU:
     print("model through fak:", resp.choices[0].message.content)
     models = json.load(urllib.request.urlopen("http://127.0.0.1:8080/v1/models", timeout=10))
     print("\n/v1/models:", json.dumps(models, indent=2)[:900])'''),
+    ]
+
+
+def _quickstart_closing():
+    """Where to go next, and how to stop the background servers."""
+    return [
         md(r'''## Where to go next
 
 - **Tier 2 - the fused in-kernel model** (`fak serve --engine inkernel`, real SmolLM2 via
@@ -365,6 +396,12 @@ if HAS_GPU:
 *Cleanup* - background servers die when the notebook runtime recycles. To stop them now:
 `for p in [fak_api_proc, fak_model_proc, ollama_proc]: p.terminate()`'''),
     ]
+
+
+def quickstart_cells():
+    """Notebook A, in the order a reader meets it: setup, then case by case."""
+    return [*_quickstart_opening(), *_quickstart_case_a(), *_quickstart_case_b(),
+            *_quickstart_case_c(), *_quickstart_case_d(), *_quickstart_closing()]
 
 
 # --- Notebook B: fused in-kernel (Tier 2) ------------------------------------------
@@ -538,8 +575,36 @@ def verify_refs():
     return problems
 
 
+USAGE = ("usage: python tools/gen_notebooks.py [--check]\n"
+         "  (no flags)  rewrite notebooks/*.ipynb from the builders in this file\n"
+         "  --check     CI: fail on drift OR a stale repo reference (read-only)")
+
+
+def parse_args(argv):
+    """Recognize the flags; an unknown one is an error, never a silent write.
+
+    Read-only verification and a destructive rewrite of tracked files differ by a
+    single token here, so `--chek` (or `--help`) must NOT fall through to write
+    mode: that turns a CI drift guard into a permanently-green no-op that also
+    dirties the tree. Returns (check, exit_code); exit_code is None to proceed.
+    """
+    check = False
+    for arg in argv:
+        if arg == "--check":
+            check = True
+        elif arg in ("-h", "--help"):
+            print(USAGE)
+            return check, 0
+        else:
+            print(f"unknown argument: {arg}\n{USAGE}", file=sys.stderr)
+            return check, 2
+    return check, None
+
+
 def main(argv):
-    check = "--check" in argv
+    check, early_exit = parse_args(argv)
+    if early_exit is not None:
+        return early_exit
     drift, missing = [], verify_refs()
     for name in TARGETS:
         want = render(name)

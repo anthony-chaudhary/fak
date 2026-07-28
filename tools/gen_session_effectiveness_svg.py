@@ -100,6 +100,63 @@ def esc(s):
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+          "nine", "ten", "eleven", "twelve"]
+
+
+def word(n):
+    """Spell small counts the way the card's prose reads ("seven straight hours")."""
+    return _WORDS[n] if 0 <= n < len(_WORDS) else f"{n:,}"
+
+
+def run_units(dur_h, dur_m):
+    """How long the run went, as (count, singular unit).
+
+    A session shorter than an hour has to describe itself in minutes: "a 0-hour
+    unattended run" reads as a bug, and most of this prose sits in the <desc>
+    alt-text, where nobody would ever see it.
+    """
+    return (dur_h, "hour") if dur_h else (dur_m, "minute")
+
+
+def plural(n, unit):
+    """Pluralize a unit against its own count ("1 hour", "7 hours")."""
+    return unit if n == 1 else f"{unit}s"
+
+
+def run_length(dur_h, dur_m):
+    """The run's length as an adjective: "7-hour", "5-minute"."""
+    n, unit = run_units(dur_h, dur_m)
+    return f"{n}-{unit}"
+
+
+def run_clock(dur_h, dur_m):
+    """The run's length as a plain phrase: "7 hours", "5 minutes"."""
+    n, unit = run_units(dur_h, dur_m)
+    return f"{n} {plural(n, unit)}"
+
+
+def run_straight(dur_h, dur_m):
+    """The cadence callout's phrase: "seven straight hours"."""
+    n, unit = run_units(dur_h, dur_m)
+    return f"{word(n)} straight {plural(n, unit)}"
+
+
+# The card has room for four blocked-call cards before the work-mix strip.
+MAX_DENY_CARDS = 4
+
+
+def deny_prose(tool, reason, by):
+    """One line describing a blocked call, from the record's own enforcer and tool."""
+    if by == "gitgate":
+        return "off-policy git action — refused at the git gate"
+    if by == "ifc-sink":
+        if tool in ("SendMessage", "Agent", "WebFetch", "TaskCreate"):
+            return "outbound send carrying tainted data — refused"
+        return "tainted data reaching a destructive sink — refused"
+    return f"{str(reason).replace('_', ' ').lower()} — refused by {by}"
+
+
 # ---- tiny SVG helpers -------------------------------------------------------
 class C:
     ink = "#14202b"
@@ -135,18 +192,61 @@ def R(x, y, w, h, fill, rx=0, stroke=None, opacity=None, sw=1):
     return f'<rect x="{x}" y="{y}" width="{w}" height="{h}"{r} fill="{fill}"{st}{o}/>'
 
 
-def build(d):
-    W, H = 1440, 1180
+# The card canvas and the three-panel grid, shared by the section builders below.
+W, H = 1440, 1180
+PY, PW = 360, 424
+PX = (40, 508, 976)
+
+
+def _copy(d, source):
+    """Every headline string on the card, derived from the analysis.
+
+    The card is regenerated whenever the source session changes, so a transcribed
+    number keeps asserting the previous session's result over the new session's data
+    — the one failure this card cannot survive, because nothing about it looks wrong.
+    """
+    return {
+        "total": f"{d['total']:,}",
+        "allow": f"{d['allow']:,}",
+        "dur": f"{d['dur_h']}h {d['dur_m']}m",
+        "run_len": run_length(d["dur_h"], d["dur_m"]),
+        "run_clock": run_clock(d["dur_h"], d["dur_m"]),
+        "run_straight": run_straight(d["dur_h"], d["dur_m"]),
+        "allow_pct": f"{d['allow_pct']:.2f}%",
+        "deny_pct": f"{d['deny_pct']:.2f}%",
+        "src": source or d.get("source") or "the guard-audit journal",
+    }
+
+
+def build(d, source=None):
+    """The whole card, section by section."""
+    s = _copy(d, source)
     P = []
+    _chrome(P, d, s)
+    _header(P, d, s)
+    _panel_safety(P, d, s)
+    _panel_timeline(P, d, s)
+    _panel_tamper(P, d, s)
+    _workmix(P, d, s)
+    _closing(P, d, s)
+    P.append('</svg>')
+    return "\n".join(P)
+
+
+def _chrome(P, d, s):
+    """The svg element, the alt-text, the stylesheet and the background."""
+    total_s, run_len, allow_pct = s["total"], s["run_len"], s["allow_pct"]
+    dur, src_label = s["dur"], s["src"]
     P.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
              f'viewBox="0 0 {W} {H}" role="img" aria-labelledby="se-title se-desc">')
-    P.append('<title id="se-title">One guarded fak session: 1,720 hash-chained '
-             'decisions over 7h 11m, 4 dangerous calls blocked, 0 chain breaks</title>')
+    P.append(f'<title id="se-title">One guarded fak session: {total_s} hash-chained '
+             f'decisions over {dur}, {d["deny"]} dangerous calls blocked, '
+             f'{d["breaks"]} chain breaks</title>')
     P.append('<desc id="se-desc">A live fak guard journal replayed. The kernel '
-             'adjudicated 1,720 tool calls across a 7-hour unattended run, allowed '
-             '99.77% to proceed, blocked exactly the 4 dangerous ones, and chained '
-             'every verdict into a tamper-evident record with zero breaks. Numbers '
-             'computed from .dispatch-runs/guard-audit/interactive-37096-16daf1ca84d5.jsonl.</desc>')
+             f'adjudicated {total_s} tool calls across a {run_len} unattended run, allowed '
+             f'{allow_pct} to proceed, blocked exactly the {d["deny"]} dangerous ones, and chained '
+             f'every verdict into a tamper-evident record with {word(d["breaks"])} breaks. Numbers '
+             f'computed from {esc(src_label)}.</desc>')
     P.append('<defs>')
     P.append('<linearGradient id="se-bg" x1="0" y1="0" x2="1" y2="1">'
              '<stop offset="0%" stop-color="#f7f9fb"/>'
@@ -182,10 +282,12 @@ def build(d):
     P.append(R(0, 0, W, H, "url(#se-bg)"))
     P.append(R(24, 20, W - 48, H - 40, C.card, rx=12, stroke=C.border, opacity=0.62))
 
-    # ---- header -----------------------------------------------------------
+def _header(P, d, s):
+    """Kicker, headline, the two-line deck and the five stat tiles."""
+    total_s, run_clock_s = s["total"], s["run_clock"]
     P.append(T(56, 66, "ONE GUARDED SESSION · CAPTURED LIVE · EVERY TOOL CALL ADJUDICATED", "kick"))
-    P.append(T(56, 112, "1,720 decisions. 4 stopped. 0 tampered.", "ti"))
-    P.append(T(56, 146, "One “fak guard” run drove an agent for 7 hours unattended — the kernel let the real work flow,", "sub"))
+    P.append(T(56, 112, f"{total_s} decisions. {d['deny']} stopped. {d['breaks']} tampered.", "ti"))
+    P.append(T(56, 146, f"One “fak guard” run drove an agent for {run_clock_s} unattended — the kernel let the real work flow,", "sub"))
     P.append(T(56, 172, "blocked only the dangerous calls, and hash-chained every verdict into an unbroken record.", "sub"))
     P.append(f'<line x1="56" y1="190" x2="{W-56}" y2="190" stroke="{C.border}" stroke-width="1"/>')
 
@@ -208,32 +310,32 @@ def build(d):
         P.append(T(x + 22, ty + 108, sub, "statS"))
         x += tw + gap
 
-    # ---- three panels -----------------------------------------------------
-    py = 360
-    pw = 424
-    px = [40, 508, 976]
-
-    # Panel A: safety without friction ------------------------------------
-    ax = px[0]
+def _panel_safety(P, d, s):
+    """Panel A: the allow/deny proportion, and the calls this session really blocked."""
+    allow_s, allow_pct, deny_pct = s["allow"], s["allow_pct"], s["deny_pct"]
+    py, pw, ax = PY, PW, PX[0]
     P.append(R(ax, py, pw, 46, C.steel, rx=8))
     P.append(T(ax + 16, py + 29, "SAFETY IS NOT FRICTION", "pband"))
-    P.append(T(ax + pw - 16, py + 29, "1,716 allow · 4 deny", "pbandR", anchor="end"))
+    P.append(T(ax + pw - 16, py + 29, f"{allow_s} allow · {d['deny']} deny", "pbandR", anchor="end"))
     P.append(T(ax + 2, py + 78, "The kernel waved through the work and stopped only the risk.", "pnote"))
     # proportion bar (allow vs deny, deny magnified to a visible min width)
     bx, bby, bw, bh = ax + 2, py + 92, pw - 4, 26
-    deny_w = 12  # magnified: 4/1720 is sub-pixel, drawn to a visible minimum
+    # The deny cap is drawn to scale with a visible FLOOR, not at a fixed width: on
+    # this session 4/1720 is sub-pixel and has to be magnified to be seen at all, but
+    # a fixed 12px would keep drawing a hairline for a session that denied half its
+    # calls — a bar that contradicts the percentage printed inside it.
+    deny_w = max(12, round(bw * d["deny_pct"] / 100))
     P.append(R(bx, bby, bw, bh, C.steel, rx=6))
     P.append(R(bx + bw - deny_w, bby, deny_w, bh, C.red))  # magnified deny cap
-    P.append(T(bx + 12, bby + 17, "ALLOW 99.77%", "chip", extra=' style="fill:#fff"'))
-    P.append(T(bx + bw - deny_w - 8, bby + 17, "DENY 0.23%", "chip", anchor="end", extra=' style="fill:#fff"'))
-    P.append(T(bx, bby + 44, "↓  the 0.23% is 4 calls — magnified below, not to scale", "statS"))
-    # the 4 caught cards
+    P.append(T(bx + 12, bby + 17, f"ALLOW {allow_pct}", "chip", extra=' style="fill:#fff"'))
+    P.append(T(bx + bw - deny_w - 8, bby + 17, f"DENY {deny_pct}", "chip", anchor="end", extra=' style="fill:#fff"'))
+    P.append(T(bx, bby + 44, f"↓  the {deny_pct} is {d['deny']} calls — magnified below, not to scale", "statS"))
+    # the caught cards — the calls this session actually blocked, in journal order
     cy = py + 152
     caught = [
-        ("Bash", "POLICY_BLOCK", "gitgate", "off-policy git action — refused at the git gate"),
-        ("CronDelete", "TRUST_VIOLATION", "ifc-sink", "tainted data reaching a destructive sink — refused"),
-        ("SendMessage", "TRUST_VIOLATION", "ifc-sink", "outbound send carrying tainted data — refused"),
-        ("SendMessage", "TRUST_VIOLATION", "ifc-sink", "outbound send carrying tainted data — refused"),
+        (r.get("tool", "?"), r.get("reason", "DENY"), r.get("by", "?"),
+         deny_prose(r.get("tool", ""), r.get("reason", ""), r.get("by", "")))
+        for r in d["denies"][:MAX_DENY_CARDS]
     ]
     ch = 66
     cgap = 8
@@ -248,12 +350,19 @@ def build(d):
         P.append(T(ax + 18, cy + 46, what, "rowN"))
         P.append(T(ax + 18, cy + 60, f"enforcer: {by}", "rowN", extra=f' style="fill:{C.amber};font-weight:700"'))
         cy += ch + cgap
+    extra_denies = len(d["denies"]) - MAX_DENY_CARDS
+    if extra_denies > 0:
+        # Silently dropping them would make the panel claim these were the only ones.
+        P.append(T(ax + 2, cy + 12, f"+ {extra_denies:,} more blocked calls — see the stats sidecar",
+                   "statS"))
 
-    # Panel B: throughput / timeline --------------------------------------
-    bx0 = px[1]
+def _panel_timeline(P, d, s):
+    """Panel B: verdicts per interval across the run, plus the cadence callout."""
+    total_s, dur, run_len = s["total"], s["dur"], s["run_len"]
+    py, pw, bx0 = PY, PW, PX[1]
     P.append(R(bx0, py, pw, 46, C.teal, rx=8))
     P.append(T(bx0 + 16, py + 29, "THE GUARD NEVER FELL BEHIND", "pband"))
-    P.append(T(bx0 + pw - 16, py + 29, "7h 11m of work", "pbandR", anchor="end"))
+    P.append(T(bx0 + pw - 16, py + 29, f"{dur} of work", "pbandR", anchor="end"))
     P.append(T(bx0 + 2, py + 78, "Verdicts stayed in lockstep with the agent across the whole run.", "pnote"))
     # timeline bars
     bins = d["bins"]
@@ -278,28 +387,45 @@ def build(d):
         yy = gbot - h
         P.append(R(xx, yy, barw, h, C.teal, rx=4))
     P.append(T(gx0, gbot + 20, "start", "axis"))
-    P.append(T(gx1, gbot + 20, "7h 11m", "axis", anchor="end"))
-    P.append(T((gx0 + gx1) / 2, gbot + 20, "← one 7-hour autonomous session →", "axis", anchor="middle"))
+    P.append(T(gx1, gbot + 20, dur, "axis", anchor="end"))
+    P.append(T((gx0 + gx1) / 2, gbot + 20, f"← one {run_len} autonomous session →", "axis", anchor="middle"))
     # cadence callout
     cadence = d["dur_s"] / max(d["total"], 1)
     P.append(R(bx0, py + 336, pw, 100, C.tint, rx=8, stroke=C.border))
-    P.append(T(bx0 + 18, py + 366, "1,720 verdicts, evenly sustained", "rowT"))
+    P.append(T(bx0 + 18, py + 366, f"{total_s} verdicts, evenly sustained", "rowT"))
     P.append(T(bx0 + 18, py + 392, f"A guarded decision landed roughly every {cadence:.0f}s of wall-clock", "rowN"))
-    P.append(T(bx0 + 18, py + 410, "for seven straight hours — the boundary never became the", "rowN"))
+    P.append(T(bx0 + 18, py + 410, f"for {s['run_straight']} — the boundary never became the", "rowN"))
     P.append(T(bx0 + 18, py + 428, "bottleneck. In-kernel decide cost: 362 ns / verdict.", "rowN"))
 
-    # Panel C: tamper-evident & defended ----------------------------------
-    cx0 = px[2]
+def _panel_tamper(P, d, s):
+    """Panel C: the hash-chain witness and the per-enforcer tally."""
+    py, pw, cx0 = PY, PW, PX[2]
     P.append(R(cx0, py, pw, 46, C.violet, rx=8))
     P.append(T(cx0 + 16, py + 29, "TAMPER-EVIDENT & DEFENDED", "pband"))
-    # big witness
+    # The big witness. THE claim on this card, and it was written as a literal "0" —
+    # so a journal with a real break was still published under "0 breaks", which is
+    # precisely the number the chain exists to make impossible to fake.
+    breaks = d["breaks"]
     P.append(R(cx0, py + 62, pw, 118, "#f4f0fb", rx=8, stroke="#c9b8e8"))
-    P.append(T(cx0 + 18, py + 108, f"✓ 0 breaks in {d['total']:,} links", "big", extra=f' style="fill:{C.violet}"'))
-    P.append(T(cx0 + 18, py + 138, "Each record carries the prior record's hash. Every", "rowN"))
-    P.append(T(cx0 + 18, py + 156, "prev_hash matched — the log can't be rewritten", "rowN"))
-    P.append(T(cx0 + 18, py + 174, "after the fact without the break showing.", "rowN"))
+    P.append(T(cx0 + 18, py + 108,
+               f"{'✓' if not breaks else '✗'} {breaks:,} {plural(breaks, 'break')} in {d['total']:,} links",
+               "big", extra=f' style="fill:{C.violet if not breaks else C.red}"'))
+    note = ([
+        "Each record carries the prior record's hash. Every",
+        "prev_hash matched — the log can't be rewritten",
+        "after the fact without the break showing.",
+    ] if not breaks else [
+        "Each record carries the prior record's hash. A",
+        "prev_hash did NOT match — this journal was altered",
+        "after it was written, and the chain says so.",
+    ])
+    for i, line in enumerate(note):
+        P.append(T(cx0 + 18, py + 138 + i * 18, line, "rowN"))
     # enforcers
-    P.append(T(cx0 + 2, py + 210, "THREE INDEPENDENT ENFORCERS", "statL"))
+    seen = [k for k, v in d["by"].items() if v]
+    n_enf = max(len(seen), 1)
+    P.append(T(cx0 + 2, py + 210,
+               f"{word(n_enf).upper()} INDEPENDENT {plural(n_enf, 'ENFORCER').upper()}", "statL"))
     enf = [
         ("monitor", d["by"].get("monitor", 0), "waved through the safe work", C.steel),
         ("gitgate", d["by"].get("gitgate", 0), "blocked an off-policy git action", C.amber),
@@ -318,7 +444,8 @@ def build(d):
     P.append(T(cx0 + 18, ey + 29, "Read-before-write discipline", "rowT"))
     P.append(T(cx0 + pw - 16, ey + 30, f"{d['rw_ratio']:.1f} : 1", "mid", anchor="end", extra=f' style="fill:{C.teal}"'))
 
-    # ---- work-mix strip (full width) ------------------------------------
+def _workmix(P, d, s):
+    """The full-width strip: what the agent actually did, by tool family."""
     wy = 826
     wh = 132
     P.append(R(40, wy, W - 80, wh, C.card, rx=10, stroke=C.border))
@@ -329,7 +456,10 @@ def build(d):
     P.append(T(60, wy + 108, "author = Edit / Write · orchestrate = agents", "statS"))
     order = ["explore", "execute", "author", "mcp", "orchestrate", "schedule"]
     wm = d["workmix"]
-    wmax = max(wm.get(k, 0) for k in order)
+    # A session whose calls all land outside these six families (a tool-name scheme
+    # change, or a short run of nothing but uncategorized calls) leaves every named
+    # bar at zero; without the floor the whole card dies here on a division by zero.
+    wmax = max(max(wm.get(k, 0) for k in order), 1)
     barx = 470
     barmaxw = 560
     ry = wy + 18
@@ -347,7 +477,9 @@ def build(d):
     P.append(T(W - 60, wy + 78, "distinct tools driven", "rowN", anchor="end"))
     P.append(T(W - 60, wy + 96, "in a single unattended session", "rowN", anchor="end"))
 
-    # ---- thesis band -----------------------------------------------------
+def _closing(P, d, s):
+    """The thesis band and the footer."""
+    total_s, run_len, src_label = s["total"], s["run_len"], s["src"]
     thy = 974
     thh = 128
     P.append(R(40, thy, W - 80, thh, C.dark, rx=12))
@@ -355,14 +487,11 @@ def build(d):
     P.append(T(66, thy + 34, "WHERE EVERY SESSION IS GOING", "thH"))
     P.append(T(66, thy + 64, "This isn’t a special run — it’s the default shape of any agent under fak guard. As agents run longer and more autonomously,", "thB"))
     P.append(T(66, thy + 88, "a real-time verdict on every tool call and a tamper-evident record of every decision stop being nice-to-haves.", "thB"))
-    P.append(T(66, thy + 112, "A 7-hour unattended run that blocks only what’s dangerous and can prove what it did — that’s the floor every session is heading toward.", "thL"))
+    P.append(T(66, thy + 112, f"A {run_len} unattended run that blocks only what’s dangerous and can prove what it did — that’s the floor every session is heading toward.", "thL"))
 
     # ---- footer ----------------------------------------------------------
-    P.append(T(40, H - 26, "Source: .dispatch-runs/guard-audit/interactive-37096-16daf1ca84d5.jsonl — 1,720 hash-chained DECIDE records, replayed.", "foot"))
+    P.append(T(40, H - 26, f"Source: {src_label} — {total_s} hash-chained DECIDE records, replayed.", "foot"))
     P.append(T(W - 40, H - 26, "Per-verdict kernel decide cost 362 ns → BENCHMARK-AUTHORITY.md.", "foot", anchor="end"))
-
-    P.append('</svg>')
-    return "\n".join(P)
 
 
 def main():
@@ -371,7 +500,7 @@ def main():
     out = sys.argv[2] if len(sys.argv) > 2 else "visuals/74-session-effectiveness.svg"
     rows = load(src)
     d = analyze(rows)
-    svg = build(d)
+    svg = build(d, source=src)
     with open(out, "w", encoding="utf-8") as f:
         f.write(svg)
     # Emit a small, committable stats sidecar so every number on the card is
