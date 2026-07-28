@@ -205,7 +205,7 @@ func SafePush(ctx context.Context, opts PushOptions) (res PushResult, err error)
 		}
 		if !isNonFastForward(msg) {
 			res.Reason = PushReasonError
-			res.Detail = pushFirstLine(msg)
+			res.Detail = pushHeadline(msg)
 			return res, nil
 		}
 		lastNetDetail = ""
@@ -496,4 +496,27 @@ func pushFirstLine(s string) string {
 		}
 	}
 	return ""
+}
+
+// pushBlockedMarker is how every pre-push gate spells its REFUSING form: `GATE (blocked): ...`.
+// The same gates also emit `(advisory)`, `(warn)` and `(cured)` lines, which do NOT stop a push.
+const pushBlockedMarker = "(blocked)"
+
+// pushHeadline picks the line of a hook rejection that actually explains the refusal.
+//
+// The naive first-non-empty-line rule misattributes it. A pre-push run prints its gates in order
+// and only the LAST one can be the blocker, so a gate that merely warned — DUPLICATION is the
+// common one, it is advisory by default and prints before the claim review — lands on stderr
+// first and gets reported as the reason. The operator then reads `PUSH_ERROR: DUPLICATION
+// (advisory)`, goes off to dedupe code that was never blocking, and never sees the
+// CLAIM_UNWITNESSED (blocked) line further down that actually refused the push. Preferring the
+// `(blocked)` line names the gate that has to be cleared; without one (an auth failure, a remote
+// hook, any non-fak rejection) the first line is still the best headline.
+func pushHeadline(s string) string {
+	for _, ln := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(ln); strings.Contains(t, pushBlockedMarker) {
+			return t
+		}
+	}
+	return pushFirstLine(s)
 }

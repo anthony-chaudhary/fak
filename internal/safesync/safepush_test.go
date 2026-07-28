@@ -55,6 +55,49 @@ func TestIsNonFastForward(t *testing.T) {
 	}
 }
 
+func TestSafePush_HeadlineNamesTheBlockingGateNotAnEarlierAdvisory(t *testing.T) {
+	// A pre-push run prints its gates in order and only the last one can be the blocker, so a
+	// gate that merely WARNED reaches stderr first. Reporting the first line sends the operator
+	// off to dedupe code that never blocked the push, while the gate they actually have to clear
+	// scrolls past unread.
+	sr := &scriptedRunner{push: []RunResult{{Code: 1, Stderr: []byte(
+		"DUPLICATION (advisory): added Go code clones a tracked site in origin/main..HEAD.\n" +
+			"  internal/x/y.go:12-34 (7 windows)\n" +
+			"CLAIM_UNWITNESSED (blocked): a commit in origin/main..HEAD claims something its diff does not witness.\n" +
+			"  fix (not yet pushed): amend the subject to match what the diff does")}}}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: sr.run})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if res.Pushed || res.Reason != PushReasonError {
+		t.Fatalf("hook rejection = %+v, want PUSH_ERROR", res)
+	}
+	if !strings.Contains(res.Detail, "CLAIM_UNWITNESSED (blocked)") {
+		t.Errorf("detail must name the gate that refused the push, got %q", res.Detail)
+	}
+	if strings.Contains(res.Detail, "DUPLICATION") {
+		t.Errorf("an advisory must never be reported as the refusal, got %q", res.Detail)
+	}
+}
+
+func TestSafePush_HeadlineFallsBackToFirstLineWithoutABlockedGate(t *testing.T) {
+	// Not every rejection comes from a fak gate: a remote-side hook or an auth failure carries no
+	// `(blocked)` marker, and there the first line is still the most actionable headline.
+	sr := &scriptedRunner{push: []RunResult{{Code: 1, Stderr: []byte(
+		"remote: error: hook declined to update refs/heads/main\n" +
+			" ! [remote rejected] main -> main (hook declined)")}}}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: sr.run})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if res.Reason != PushReasonError {
+		t.Fatalf("hook rejection = %+v, want PUSH_ERROR", res)
+	}
+	if res.Detail != "remote: error: hook declined to update refs/heads/main" {
+		t.Errorf("without a blocked gate the first line is the headline, got %q", res.Detail)
+	}
+}
+
 // scriptedRunner replays canned RunResults for a sequence of git calls, matched by the
 // subcommand (args[0]); push results are consumed in order so a retry sees the next one.
 type scriptedRunner struct {
