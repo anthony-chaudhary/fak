@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,25 +47,37 @@ import (
 //
 // EPHEMERALITY is what the session scope is FOR: `fak guard allow --session <tool>`
 // records a widening into the session file, every read path unions that layer last, and
-// dropping the file at session end leaves no permanent hole in the floor. Two halves,
-// and only the first is wired today:
+// dropping the file at session end leaves no permanent hole in the floor. All three
+// halves are wired (#5180):
 //
-//   - WIRED — the WRITE and READ halves. cmdGuardAllow routes --session to
-//     guardAllowSessionOverlayPath via guardAllowWritePathForScope, and every reader
-//     (guardAllowOverlayLayerPaths, guardAllowWinningScope, the --list rendering) unions
-//     the session layer through guardAllowLayersWithSessionScope.
-//   - NOT WIRED — the automatic DROP. armGuardAllowSessionScopeTeardown and
-//     dropGuardAllowSessionScope below are the mechanism, and nothing in the guard boot
-//     or teardown path calls either one yet: no production call site exists outside this
-//     file's tests. So a session-scoped widening PERSISTS across launches today unless
-//     the operator removes the file, and the file name is the only thing scoping it. Said
-//     outright because an ephemerality the code does not perform is exactly the kind of
-//     claim this repo treats as unwitnessed. The arming rung — setGuardAllowSessionScopeID
-//     + arm at cmd/fak/guard.go's resolveGuardSessionID, `defer dropGuardAllowSessionScope()`
-//     beside the interactive-session-registry defer — is filed rather than half-done here.
+//   - WRITE and READ. cmdGuardAllow routes --session to guardAllowSessionOverlayPath via
+//     guardAllowWritePathForScope, and every reader (guardAllowOverlayLayerPaths,
+//     guardAllowWinningScope, the --list rendering) unions the session layer through
+//     guardAllowLayersWithSessionScope.
+//   - DROP. cmdGuard calls armGuardAllowSessionScopeTeardown immediately BEFORE it loads
+//     the capability floor (loadGuardCapabilityFloor), and finishGuardChildAndReport calls
+//     dropGuardAllowSessionScopeAtSessionEnd once the session is over.
 //
-// When the drop IS armed, only the session file is ever removed — repo/user/env are
-// durable operator decisions.
+// TWO ORDERING CONSTRAINTS make that pair of call sites the correct ones, and both are
+// easy to get wrong:
+//
+//   - ARM BEFORE THE FLOOR READ, and do NOT re-key the layer to guardTraceID. The guard
+//     finalizes guardTraceID (resolveGuardSessionID) ~370 lines AFTER the floor loads, so
+//     calling setGuardAllowSessionScopeID at that point would retarget the layer to a file
+//     the floor never read: the widening the session actually HONORED (under the id already
+//     in scope, or the documented current.allow.json fallback) would then survive the drop
+//     while an unrelated, probably nonexistent path got removed. Arming first captures the
+//     exact path the very next read resolves, which is the one that must be dropped.
+//   - DROP IN THE TERMINAL FUNNEL, NOT VIA `defer` IN cmdGuard. finishGuardChildAndReport
+//     ends a nonzero child exit, a non-ExitError launch failure, and a mid-session gateway
+//     error with os.Exit — which does not run cmdGuard's defers. A deferred drop would
+//     therefore fire only on a CLEAN exit and leak the widening on exactly the crash paths
+//     an escalated session is most likely to take. The drop sits beside recordGuardUsage in
+//     that function's terminal region, which every exit path reaches first.
+//
+// Only the session file is ever removed — repo/user/env are durable operator decisions.
+// A SIGKILL'd or power-cut guard still cannot run the drop; that residue is bounded to the
+// session file and the next launch's arm/drop cycle reclaims it.
 
 // guardAllowScopeSession names the session-scope layer. The repo/user/env layer names
 // in guardAllowOverlayPaths double as their scope names.
@@ -151,12 +164,12 @@ func guardAllowScopeRank(scope string) int {
 // operator-facing listing carries it so the question the scope table answers — does a
 // widening recorded HERE survive the next launch? — never has to be inferred from a path.
 // The session line says what is TRUE TODAY rather than what the scope is for: the drop is
-// unarmed (see the header), so a session widening does in fact survive, and a legend that
-// promised otherwise would be the listing telling the operator a comfortable lie.
+// armed at guard boot and runs on every session-end path (see the header), so the legend
+// may now promise ephemerality — but only for a guard that reaches its own teardown.
 func guardAllowScopeDurabilityNote(scope string) string {
 	switch scope {
 	case guardAllowScopeSession:
-		return " (ephemeral by design — but the drop at session end is NOT ARMED yet, so this one persists)"
+		return " (ephemeral — dropped when this guard session ends; survives only a killed guard)"
 	case "user":
 		return " (durable — host-wide, every repo)"
 	case "env":
@@ -171,29 +184,27 @@ func guardAllowScopeDurabilityNote(scope string) string {
 // ARM TIME. Teardown must remove the file this session actually read, not whatever the
 // id resolves to at exit: the guard finalizes guardTraceID (resolveGuardSessionID)
 // AFTER the capability floor loads, so re-resolving at teardown could name a different
-// file and silently leak the widening into the next launch. Empty = nothing armed —
-// which is the state on EVERY launch today, since no boot caller arms it yet — and an
-// unarmed dropGuardAllowSessionScope is a no-op.
+// file and silently leak the widening into the next launch. Empty = nothing armed — the
+// state in any process that never boots a guard session (`fak guard policy explain`, a
+// test) — and an unarmed dropGuardAllowSessionScope is a no-op.
 var guardAllowSessionScopeTeardownPath string
 
 // armGuardAllowSessionScopeTeardown records the session-scope layer path this launch
 // resolved and arms the drop; it returns the armed path so a caller can report it.
-// NO PRODUCTION CALLER YET — this is the mechanism half of the ephemerality contract
-// (see the header). Its intended call site is right after resolveGuardSessionID hands
-// the guard its final guardTraceID.
+// Called from cmdGuard immediately BEFORE loadGuardCapabilityFloor, so the armed path is
+// by construction the one the floor is about to read (see the header's ordering note).
 func armGuardAllowSessionScopeTeardown() string {
 	guardAllowSessionScopeTeardownPath = guardAllowSessionOverlayPath()
 	return guardAllowSessionScopeTeardownPath
 }
 
 // dropGuardAllowSessionScope deletes the ARMED session-scope overlay. It is the half of
-// the scope contract that would make a session widening EPHEMERAL — honored for this
-// session, absent on the next launch — and it is deliberately narrow: it removes ONLY
-// the armed session file, never the repo/user/env layers, which are durable operator
-// decisions. A missing file is the common case (no session-scoped widening was ever
-// added) and is not an error. Disarms itself, so a double teardown cannot delete a path
-// a later launch has since armed. NO PRODUCTION CALLER YET: nothing in the guard's
-// teardown path defers this, so the drop does not happen on a real session end.
+// the scope contract that makes a session widening EPHEMERAL — honored for this session,
+// absent on the next launch — and it is deliberately narrow: it removes ONLY the armed
+// session file, never the repo/user/env layers, which are durable operator decisions. A
+// missing file is the common case (no session-scoped widening was ever added) and is not
+// an error. Disarms itself, so a double teardown cannot delete a path a later launch has
+// since armed. Production callers go through dropGuardAllowSessionScopeAtSessionEnd.
 func dropGuardAllowSessionScope() error {
 	path := strings.TrimSpace(guardAllowSessionScopeTeardownPath)
 	guardAllowSessionScopeTeardownPath = ""
@@ -204,6 +215,22 @@ func dropGuardAllowSessionScope() error {
 		return fmt.Errorf("guard allow session scope: drop %s: %w", path, err)
 	}
 	return nil
+}
+
+// dropGuardAllowSessionScopeAtSessionEnd is the SESSION-END call site of the drop — the
+// production half of the ephemerality contract. It lives in finishGuardChildAndReport's
+// terminal region rather than behind a `defer` in cmdGuard because that function ends
+// three of its four exit paths with os.Exit, which runs no defers; see the header.
+//
+// A failed drop is REPORTED, never fatal, and never changes the exit code: the session is
+// already over, and the operator's own exit status must stay the child's. But it is not
+// swallowed either — a session widening that survived its session is a floor the next
+// launch inherits without anyone deciding to, so the operator is told which file to remove.
+// Suppressed under --quiet, matching the other teardown notices around it.
+func dropGuardAllowSessionScopeAtSessionEnd(quiet bool, stderr io.Writer) {
+	if err := dropGuardAllowSessionScope(); err != nil && !quiet && stderr != nil {
+		fmt.Fprintf(stderr, "fak guard: %v (session-scoped widening will persist into the next launch; remove the file to clear it)\n", err)
+	}
 }
 
 // guardAllowWinningScope reports which scope OWNS an entry when it appears in more

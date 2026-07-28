@@ -674,6 +674,12 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		renderGuardPromotionOffers(os.Stderr)
 	}
 	recordGuardUsage(guardExitCode)
+	// The session is over: drop this session's allow-overlay scope (#5180) so a
+	// `fak guard allow --session <tool>` widening does not silently become the next
+	// launch's floor. HERE, and not as a `defer` in cmdGuard, because every branch below
+	// ends in os.Exit — which runs no defers — so a deferred drop would fire only on a
+	// clean exit and leak on exactly the crash paths. Repo/user/env layers are untouched.
+	dropGuardAllowSessionScopeAtSessionEnd(quiet, os.Stderr)
 	// Faithfully surface the child's exit code first (so `fak guard -- claude -p …`
 	// scripts see what the agent returned).
 	if runErr != nil {
