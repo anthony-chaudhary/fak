@@ -206,6 +206,7 @@ var refClassByExactPath = map[string]string{
 	"tools/worktree_doctor.py":                    RefClassDevelopmentSource,
 
 	"INDEX.md":                   RefClassDevelopmentSource,
+	"LEARNING-PATH.md":           RefClassDevelopmentSource,
 	"cmd/fak/accounts_launch.go": RefClassDevelopmentSource,
 	"cmd/fak/benchloop_" + "fleet_dispatch.go":                       RefClassDevelopmentSource,
 	"cmd/fak/guard_skew.go":                                          RefClassDevelopmentSource,
