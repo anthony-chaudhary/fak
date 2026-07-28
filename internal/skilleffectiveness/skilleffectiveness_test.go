@@ -43,8 +43,21 @@ func TestScanProbesEveryAffordanceFromDisk(t *testing.T) {
 	for _, s := range Scan(root) {
 		got[s.Name] = s
 	}
-	if len(got) != 6 {
-		t.Fatalf("Scan found %d skills, want 6: %v", len(got), got)
+	// Assert the relation the count stood for -- Scan returns exactly the skills that are
+	// on disk -- by deriving the expectation from the tree rather than freezing today's
+	// total. A probe added above then cannot pass while silently going unscanned, and no
+	// magic number needs hand-updating when one is (CHANGE_DETECTOR_TEST).
+	entries, err := os.ReadDir(filepath.Join(root, ".claude", "skills"))
+	if err != nil {
+		t.Fatalf("read skills dir: %v", err)
+	}
+	for _, e := range entries {
+		if _, ok := got[e.Name()]; !ok {
+			t.Fatalf("Scan skipped the %q skill on disk; got %v", e.Name(), got)
+		}
+	}
+	if len(got) != len(entries) {
+		t.Fatalf("Scan found %d skills, want one per dir on disk (%d): %v", len(got), len(entries), got)
 	}
 
 	if s := got["good"]; !s.Readable || !s.HasDescription || !s.HasTrigger || s.OverMetadataBudget() || s.OverBodyBudget() {
