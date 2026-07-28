@@ -72,7 +72,7 @@ func mustNotSpend(t *testing.T, root string) {
 // itself.
 func TestAnUnconfiguredTickNeverEscalates(t *testing.T) {
 	root := escRoot(t)
-	t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "off")
+	setDispatchRungPlacement(t, false)
 	before := seatDefaultFor("opus-5")
 	after, esc, skip := applyRungEscalation(root, true, 5416, routineTierLabels,
 		[]dispatchtick.WitnessRecord{underpoweredSlot(5416, "a.log", modelroute.ZoneDevice, "qwen3.6-4b")}, before)
@@ -674,7 +674,7 @@ func TestAPreviewTickReportsTheRefusalAndLaunchesTheCheapRung(t *testing.T) {
 // to every workspace that has not opted in.
 func TestADefaultTickCarriesNoEscalationKey(t *testing.T) {
 	root := escRoot(t)
-	t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "off")
+	setDispatchRungPlacement(t, false)
 	payload := map[string]any{}
 	records := []dispatchtick.WitnessRecord{underpoweredSlot(5416, "slot-a.log", modelroute.ZoneDevice, "qwen3.6-4b")}
 	if _, _, _, err := prepareDispatchWorkerCommand(root, dispatchTickOptions{Backend: "claude", Live: true},
