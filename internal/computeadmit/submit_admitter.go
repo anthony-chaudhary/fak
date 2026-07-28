@@ -6,6 +6,26 @@
 // file tree do: the second refuses with COLLISION_RISK instead of being
 // silently co-scheduled. It is a decision only — no scheduler, no preemption,
 // no queueing; the caller re-submits once the holder releases.
+//
+// SubmitAdmitter answers BOTH kernel registry seams, which is what makes the
+// serialization a serialization instead of a one-way wedge:
+//
+//   - abi.Adjudicator — the Kernel.Submit fold: price the call's compute claim
+//     against the live lease table; refuse a contender with COLLISION_RISK.
+//   - abi.ResultAdmitter — the Kernel.Reap result-admission fold: RELEASE the
+//     region the completing call's holder took at Submit, so the member that was
+//     serialized behind it admits on its next Submit.
+//
+// Without the second seam nothing in a shipped process ever frees a claimed
+// region: the first admitted member would hold its device forever and every
+// co-targeted peer would refuse for the life of the process. Both seams are
+// driver-blind registry seams, so the kernel never imports this leaf (it is the
+// "driver-blind integrator"; see internal/architest TestKernelImportsOnlyAbi) —
+// a wiring layer installs ONE gate at both:
+//
+//	gate := computeadmit.NewSubmitAdmitter(tax)
+//	abi.RegisterAdjudicator(rank, gate)
+//	abi.RegisterResultAdmitter(rank, gate)
 package computeadmit
 
 import (
@@ -146,6 +166,44 @@ func (g *SubmitAdmitter) Adjudicate(_ context.Context, c *abi.ToolCall) abi.Verd
 		g.live[holder] = Lease{ID: holder, Holder: holder, Claim: claim}
 	}
 	return abi.Verdict{Kind: abi.VerdictDefer, By: By}
+}
+
+// Admit is the Kernel.Reap half of the Submit-seam serialization: when an
+// admitted call completes, the kernel folds the ResultAdmitter chain over its
+// result, and THAT is the driver-blind moment this gate frees the compute region
+// the call's holder took at Submit. The member serialized behind it therefore
+// admits on its next Submit with no scheduler, no queue, and no test-only
+// Release poke — the same "the holder finished, the seat is free" discipline two
+// agents on one file tree get when a lease is dropped.
+//
+// It releases ONLY when the completing call carries a compute claim AND the live
+// lease recorded under that holder is for the SAME region: a claim-less call
+// that happens to share a trace id with a compute holder must never hand that
+// holder's device away underneath it.
+//
+// The verdict is always Allow-with-no-opinion (fold rank 0, the same rank
+// admitResult seeds its default-admit best with), so installing this gate cannot
+// change ANY existing chain's result-admission verdict — the additive guarantee
+// on the result side, matching the Defer-on-no-claim guarantee on the call side.
+func (g *SubmitAdmitter) Admit(_ context.Context, c *abi.ToolCall, _ *abi.Result) abi.Verdict {
+	noOpinion := abi.Verdict{Kind: abi.VerdictAllow, By: By}
+	if c == nil {
+		return noOpinion
+	}
+	claim, ok := g.claimFor(c)
+	if !ok {
+		return noOpinion
+	}
+	holder := holderOf(c)
+	if holder == "" {
+		return noOpinion
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if l, held := g.live[holder]; held && l.Claim == claim {
+		delete(g.live, holder)
+	}
+	return noOpinion
 }
 
 // claimFor resolves the call's compute claim: explicit Meta keys first (the
