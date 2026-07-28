@@ -481,6 +481,22 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 		c.RopeHighFreqFactor = c.LongRope.HighFreqFactor
 		c.RopeOrigContext = c.LongRope.OriginalMaxPositionEmbeddings
 	}
+	// yarn arrives in EITHER HF shape. The newer checkpoints nest it under
+	// rope_parameters (handled just below); the long-context Qwen line — including the
+	// Qwen3.6 hybrid backbone Bonsai is built on — still ships it under the CLASSIC
+	// rope_scaling key, which decodes into LongRope. Only the llama3 kind was promoted
+	// off LongRope above, so a classic-key yarn config left RopeScaling=="" and
+	// applyRopeScaling returned a BARE inv_freq: at a 262K context the rotation was
+	// unscaled and long-offset positions diverged silently. Promote it here, mirroring
+	// the llama3 promotion, so both HF shapes reach the same yarn path (#4874).
+	if c.RopeScaling == "" && c.LongRope != nil && c.LongRope.kind() == "yarn" {
+		c.RopeScaling = "yarn"
+		c.RopeFactor = c.LongRope.Factor
+		c.RopeOrigContext = c.LongRope.OriginalMaxPositionEmbeddings
+		if c.RopeTheta == 0 {
+			c.RopeTheta = c.LongRope.RopeTheta
+		}
+	}
 	if c.RopeScaling == "" {
 		if rp, ok := c.RopeParameters["default"]; ok && rp.kind() == "yarn" {
 			c.RopeScaling = "yarn"

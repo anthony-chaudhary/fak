@@ -53,10 +53,12 @@ func applyRopeScaling(cfg Config, inv []float64) {
 			}
 		}
 	case "yarn":
-		rp, ok := cfg.defaultRopeParameters()
-		if !ok {
-			return
-		}
+		// Resolve the yarn block from EITHER HF shape (see effectiveRopeParameters), then
+		// let each field fall through to its flat Config twin. Reading it opportunistically
+		// — zero value when neither shape is present — instead of returning early is what
+		// stops a yarn config from silently rotating with a BARE inv_freq (#4874); the
+		// explicit all-params-zero guard below still fails safe for a misconfigured yarn.
+		rp := cfg.effectiveRopeParameters()
 		factor := rp.Factor
 		if factor == 0 {
 			factor = cfg.RopeFactor
@@ -101,6 +103,30 @@ func (c Config) defaultRopeParameters() (RopeScaling, bool) {
 	return rp, ok
 }
 
+// effectiveRopeParameters is the SINGLE resolution of "which nested block carries this
+// config's RoPE-scaling params", across the two HF shapes a checkpoint may use: the newer
+// rope_parameters.default object, or the classic rope_scaling object (decoded into
+// LongRope). The nested form wins when both are present; a LongRope carrying the longrope
+// kind is NOT returned here (its per-dimension factor vectors run through ropeLongFactor,
+// a different axis). The zero value when neither is present is deliberate — every caller
+// falls its fields through to the flat Config twins, so an absent block degrades to the
+// flat params rather than to "no scaling at all".
+//
+// Every yarn consumer resolves through THIS function — applyRopeScaling, the
+// ropeAttentionFactor temperature, AND the cachedInvFreq key. That last one is load
+// bearing: the cache key must fold in whichever block actually fed the table, or two
+// configs that differ only in their classic-key yarn params would collide on one cached
+// inv_freq.
+func (c Config) effectiveRopeParameters() RopeScaling {
+	if rp, ok := c.defaultRopeParameters(); ok {
+		return rp
+	}
+	if c.LongRope != nil && c.LongRope.kind() == "yarn" {
+		return *c.LongRope
+	}
+	return RopeScaling{}
+}
+
 func yarnCorrectionRange(lowRot, highRot float64, dim int, base, maxPos float64, truncate bool) (float64, float64) {
 	correctionDim := func(rot float64) float64 {
 		return (float64(dim) * math.Log(maxPos/(rot*2*math.Pi))) / (2 * math.Log(base))
@@ -139,10 +165,7 @@ func (c Config) ropeAttentionFactor() float64 {
 	if c.RopeScaling != "yarn" {
 		return 1
 	}
-	rp, ok := c.defaultRopeParameters()
-	if !ok {
-		return 1
-	}
+	rp := c.effectiveRopeParameters()
 	if rp.AttentionFactor != 0 {
 		return rp.AttentionFactor
 	}
