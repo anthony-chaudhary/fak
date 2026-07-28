@@ -58,6 +58,52 @@ func rubricFail(v Verdict, reason string) Verdict {
 	return v
 }
 
+// rubricScore is the fractional half of every rubric oracle's verdict: it records
+// Score = have/want on v and fails v when that score misses the case's threshold.
+// An unset Rubric.MinScore means 1 — the default across the suite is that NOTHING
+// the case declares may be missed, so a case must opt IN to tolerance rather than
+// get it by forgetting to state a bar. It returns the resolved threshold, which
+// every oracle quotes back in its own Detail, and short, which is simply whether
+// the score fell below it.
+//
+// The Detail stays with the caller on purpose. WHICH required phrase was omitted,
+// WHICH instruction was disobeyed, WHICH citation dangled — that localizing
+// evidence is the whole point of the spine, and it is irreducibly per-oracle. Only
+// the arithmetic and the threshold default are shared, so only those live here.
+func rubricScore(v *Verdict, c QualityCase, have, want int) (min float64, short bool) {
+	v.Score = float64(have) / float64(want)
+	min = c.Rubric.MinScore
+	if min == 0 {
+		min = 1
+	}
+	if v.Score < min {
+		v.Pass = false
+		short = true
+	}
+	return min, short
+}
+
+// tokenSource is anything in this package that can be asked for one more token: a
+// fixture model state stepped forward, mutating itself as it goes. It is the only
+// contract decodeSteps needs, so a fixture stays a plain struct in its own oracle
+// file and no cross-file type has to be invented to share the driver.
+type tokenSource interface{ next() string }
+
+// decodeSteps runs src forward for steps tokens and packages the result as the
+// ground-truth Trace an oracle compares against. Every reference decoder in this
+// package builds its Trace this way, and the ONE thing that must not drift is
+// how: the parity oracles compare Tokens element-wise AND Text as a whole, so a
+// reference decoder that joined its tokens differently would report a text
+// divergence that the token stream does not actually contain. Stating the join
+// once makes that class of false divergence unrepresentable.
+func decodeSteps(src tokenSource, steps int) Trace {
+	toks := make([]string, 0, steps)
+	for i := 0; i < steps; i++ {
+		toks = append(toks, src.next())
+	}
+	return Trace{Tokens: toks, Text: strings.Join(toks, " ")}
+}
+
 // GreedyTokenDiff is the deterministic comparator: for a temperature-zero / greedy
 // case, the engine token stream must equal the reference token stream exactly, and
 // the first mismatch (or a length difference) is reported as the first divergence.
@@ -103,7 +149,8 @@ func tokenAt(toks []string, i int) string {
 
 // GroundingRubric is the deterministic rubric scorer: it scores the engine text on
 // the fraction of the case's required phrases present, fails if any forbidden claim
-// appears, and gates on the case's MinScore. It is the spine stand-in for the
+// appears, and gates on the case's MinScore (default 1: every required phrase must
+// be present). It is the spine stand-in for the
 // report-quality rubric layer (#4550–#4565): even without a calibrated judge, an
 // executive report that silently omits a material required claim, or invents a
 // forbidden one, fails a gate instead of being merely observed in prose.
@@ -134,13 +181,8 @@ func (GroundingRubric) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 			missing = append(missing, r)
 		}
 	}
-	v.Score = float64(present) / float64(len(req))
-	min := c.Rubric.MinScore
-	if min == 0 {
-		min = 1 // default: all required phrases must be present
-	}
-	if v.Score < min {
-		v.Pass = false
+	min, short := rubricScore(&v, c, present, len(req))
+	if short {
 		v.Detail = fmt.Sprintf("grounding score %.2f < %.2f; missing required: %s",
 			v.Score, min, strings.Join(missing, ", "))
 		return v
