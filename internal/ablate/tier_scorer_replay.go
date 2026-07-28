@@ -155,13 +155,7 @@ func (r *ReplayTierScorer) Tiers() []string {
 	for _, rec := range r.scores {
 		seen[rec.Tier] = true
 	}
-	out := make([]string, 0, len(seen))
-	for _, tier := range modelTierLadder {
-		if seen[tier] {
-			out = append(out, tier)
-		}
-	}
-	return out
+	return canonicalTiers(seen)
 }
 
 // ScoreArm replays the recorded outcome for one rung.

@@ -196,13 +196,22 @@ func ParseModelTiers(spec string) ([]string, error) {
 	if len(seen) == 0 {
 		return nil, nil
 	}
+	return canonicalTiers(seen), nil
+}
+
+// canonicalTiers collapses a SET of tier tokens into the weak -> strong ladder order the
+// classifier depends on. Both readers of a tier set need it — the `--models` spec parser
+// and the replay table's own ladder — and both need the SAME answer: whatever order the
+// tiers arrived in, ClassifyStrength reads the last rung, so "strongest" has to mean the
+// same thing on every path. Sharing the ordering keeps that invariant in one place.
+func canonicalTiers(seen map[string]bool) []string {
 	out := make([]string, 0, len(seen))
 	for _, tier := range modelTierLadder {
 		if seen[tier] {
 			out = append(out, tier)
 		}
 	}
-	return out, nil
+	return out
 }
 
 func validModelTier(token string) bool {
