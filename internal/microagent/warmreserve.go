@@ -35,9 +35,15 @@ import "sync"
 // Honest tension (load-bearing, from the issue body): a warm agent holds RAM and goes stale.
 // The reserve is therefore small (cap-bounded, set by the scheduler at or below the
 // ResidentCap Limit / preflight effective cap) and sheddable — Drain (or a per-id Take that
-// discards) lets a scheduler shed stale warm agents on a staleness horizon. A live wiring
-// into the Host.run loop is the documented follow-on, as with the rest of this gen/future
-// hibernation seam (see hibernate.go's package note).
+// discards) lets a scheduler shed stale warm agents on a staleness horizon.
+//
+// That live wiring is no longer a follow-on: it SHIPPED as #5072. A scheduler no longer has
+// to drive Reserve / Take by hand — WarmBand (warmband.go) composes this reserve with a
+// ResidentCap and a HibernationStore, runs the acquire-side background refill producer that
+// warm-wakes parked agents below the low-water mark, enforces the staleness horizon above by
+// cold-parking a warm agent that sat too long, and is wired into the live Host step loop
+// behind Config.Warm. The seam nonetheless stays gen/future (see hibernate.go's package
+// note): nothing in the default fak serve / guard / dispatch path constructs a WarmBand.
 //
 // WarmReserve is safe for concurrent use.
 type WarmReserve struct {

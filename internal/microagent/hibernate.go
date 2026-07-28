@@ -35,10 +35,17 @@ import (
 //     round-trip that is byte-identical (Wake refuses a lossy Thaw), and (b) N
 //     enrolled step-agents driven through an R-slot ResidentCap + a
 //     HibernationStore where the resident set never exceeds R yet all N complete
-//     — the two #2012 acceptance bullets. Promote once the live Host.run loop can
-//     target the store (auto-hibernate a step-parked agent) AND a density /
-//     RSS-vs-R measurement confirms the parked goroutine + context was the
-//     binding cost (the #2000 M8-M12 footprint thesis).
+//     — the two #2012 acceptance bullets. The FIRST half of this promotion gate
+//     has since shipped: the live Host.run loop CAN now target the store, via
+//     Config.Warm (#5072) — a WarmBand (warmband.go) composes this ResidentCap,
+//     a WarmReserve and a HibernationStore into one residency cycle, so a Host
+//     auto-hibernates a step-parked Restorable agent at its step boundary and
+//     N enrolled agents share R resident slots. What still gates promotion is
+//     the OTHER half: a density / RSS-vs-R measurement confirming the parked
+//     goroutine + context was the binding cost (the #2000 M8-M12 footprint
+//     thesis), and a real (non-test) dispatch path electing a banded Host —
+//     nothing in the default fak serve / guard / dispatch path constructs one,
+//     so the seam stays gen/future.
 //   - Demotion / retirement criteria: retire the seam if the footprint benchmark
 //     shows a parked microagent's goroutine + bounded context is cheap enough
 //     that O(N) residency is affordable (hibernation then buys no density), or if
