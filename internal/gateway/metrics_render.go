@@ -1182,8 +1182,15 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "fak_gateway_compaction_attempts_total{outcome=%q} %d\n", o, snap.attempts[o])
 	}
 
+	// The closed-set claim is DERIVED from agent.CompactBailReasons(), never re-typed here.
+	// Hand-spelling it drifted twice: the string declared 9 members while internal/agent
+	// emitted 13, so decode_failed (#5387) and three others were invisible to anyone who
+	// trusted the declaration and built an alert over the listed labels (#5441). The emitter
+	// owns the vocabulary; this rendering reads it, and agent's own registration test fails if
+	// a CompactReason* constant is added without joining it.
 	writeHelpType(b, "fak_gateway_compaction_bail_reason_total",
-		"WITNESSED (fak authored): why a compaction attempt bailed to identity (closed set: under_budget|non_json|no_messages_key|too_few_msgs|no_breakpoint|window_no_drop|splice_failed|redecode_failed|prefix_mismatch). prefix_mismatch>0 is the ONLY fak-fault cache signal and must stay 0; splice_failed/redecode_failed are splice bugs and must stay 0 too.", "counter")
+		"WITNESSED (fak authored): why a compaction attempt bailed to identity (closed set, derived from the emitting package's registered vocabulary: "+
+			strings.Join(agent.CompactBailReasons(), "|")+"). prefix_mismatch>0 is the ONLY fak-fault cache signal and must stay 0; splice_failed/redecode_failed are splice bugs and must stay 0 too.", "counter")
 	rs := make([]string, 0, len(snap.bailReasons))
 	for r := range snap.bailReasons {
 		rs = append(rs, r)
@@ -1192,6 +1199,24 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	for _, r := range rs {
 		fmt.Fprintf(b, "fak_gateway_compaction_bail_reason_total{reason=%q} %d\n", promQuote(r), snap.bailReasons[r])
 	}
+
+	// The ALERTABLE compaction-health pair (#5443). attempts{bailed} above counts every
+	// non-fire, including the requests that were never compaction candidates at all — a
+	// two-message subagent ping cannot compact at any setting — and on mixed fleet traffic
+	// those dominate, pinning bails/(fires+bails) near 1.0 whatever the compactor does. These
+	// two series are added ALONGSIDE the unchanged counters rather than redefining them: the
+	// held-out population is published as its own counter so it is visible, not silently
+	// subtracted, and the rate that divides only over eligible attempts is published beside it.
+	// The same partition drives internal/gatewayusageledger's NonCandidateBails /
+	// CandidateBailRate, so the live scrape and the durable ledger fold agree.
+	nonCandidateBails, candidateBails := compactBailPartition(snap.bailReasons)
+	writeCounter(b, "fak_gateway_compaction_non_candidate_bails_total",
+		"WITNESSED (fak authored): the SUBSET of compaction bails the compactor decided before any compactible span existed (non_json, no_messages_key, decode_failed, too_few_msgs — see the bail_reason vocabulary). These requests were never in the running, so they say nothing about compaction health; they are held out of fak_gateway_compaction_candidate_bail_rate and published here so the held-out population stays visible. A cell whose bails are almost all these is a normal short-request stream, not a sick compactor. Subtract it from attempts{outcome=\"bailed\"} to recover the eligible bails.",
+		int64(nonCandidateBails))
+	writeHelpType(b, "fak_gateway_compaction_candidate_bail_rate",
+		"WITNESSED (fak authored): eligible bails / (fires + eligible bails) — compaction declines over attempts that actually HAD a compactible span. This is the alertable rate; bails/(fires+bails) from attempts{} is not, because it counts requests that were never compactible and therefore reads near 1.0 on healthy and broken traffic alike. 0 when no attempt was ever eligible (an honest zero, not a fabricated ratio). A reason the emitting package has not registered counts as ELIGIBLE, so this can only read conservatively high — it never silently understates a problem.",
+		"gauge")
+	fmt.Fprintf(b, "fak_gateway_compaction_candidate_bail_rate %s\n", promFloat(compactCandidateBailRate(snap.attempts["fired"], candidateBails)))
 
 	writeCounter(b, "fak_gateway_compaction_anchor_starved_total", "WITNESSED (fak authored): under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation, so compaction structurally cannot fire no matter how long the session grows. A SUBSET of bail_reason{reason=\"under_budget\"}, broken out because the two are opposite: plain under_budget is a benign short session, anchor-starved is the dormant-on-real-Claude-Code-traffic pathology (issue #1407) that no budget tightening fixes.", int64(snap.anchorStarved))
 	writeCounter(b, "fak_gateway_compaction_dropped_turns_total", "WITNESSED (fak authored): whole messages stubbed out across all fires.", int64(snap.dropped))

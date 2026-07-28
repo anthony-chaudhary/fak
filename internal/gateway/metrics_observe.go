@@ -196,6 +196,11 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 			m.compactSolvencyForced++
 		}
 	default:
+		// Every non-fire still books "bailed" and its reason bucket, unchanged: those two are
+		// live dashboard series and redefining them underneath a running panel is not a fix.
+		// The pre-eligibility half is held out of the ALERTABLE rate instead, and it is held out
+		// at read time by compactBailPartition below — derived from this same reason tally rather
+		// than from a second counter, so the two numbers cannot drift apart (#5443).
 		m.compactAttempts["bailed"]++
 		m.compactBailReasons[out.Reason]++
 		if out.AnchorStarved {
@@ -204,6 +209,48 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 			m.compactAnchorStarved++
 		}
 	}
+}
+
+// compactBailPartition splits a bail-reason tally into the half the compactor decided BEFORE
+// any compactible span existed and the half it decided after — agent.CompactBailPreEligible
+// owns the classification, so this package never re-types the vocabulary it does not emit.
+//
+// Both halves are returned. The pre-eligibility count is rendered as its own series rather
+// than quietly subtracted: a cell whose bails are almost all non-candidates is a normal
+// short-request stream, not a sick compactor, and an operator can only tell those apart if
+// the held-out population is visible. Nothing is dropped or capped — every reason in the map
+// lands in exactly one of the two returned totals.
+//
+// An UNRECOGNISED reason counts as a CANDIDATE (agent.CompactBailPreEligible fails open), so
+// a reason added upstream without being registered leaves the rate conservatively high
+// instead of silently shrinking the measured population.
+func compactBailPartition(bailReasons map[string]uint64) (nonCandidateBails, candidateBails uint64) {
+	for reason, n := range bailReasons {
+		if agent.CompactBailPreEligible(reason) {
+			nonCandidateBails += n
+			continue
+		}
+		candidateBails += n
+	}
+	return nonCandidateBails, candidateBails
+}
+
+// compactCandidateBailRate is candidateBails / (fires + candidateBails): declines over
+// attempts that were actually ELIGIBLE to compact. It returns 0 when that population is
+// empty, so a gateway that never reached the compactor reads an honest zero rather than a
+// fabricated ratio.
+//
+// This is the health read the raw bail rate — bails/(fires+bails) — structurally cannot
+// carry (#5443/#5388). The gateway attempts compaction on EVERY Anthropic passthrough once a
+// budget is set, so short auxiliary pings and non-JSON bodies flood the raw denominator and
+// pin it near 1.0 on healthy and broken traffic alike. The raw rate stays recoverable from
+// the unchanged attempts{bailed} counter beside it.
+func compactCandidateBailRate(fires, candidateBails uint64) float64 {
+	total := fires + candidateBails
+	if total == 0 {
+		return 0
+	}
+	return float64(candidateBails) / float64(total)
 }
 
 // observeCtxViewRewrite records one successful ctxplan planned-view rewrite. It is
