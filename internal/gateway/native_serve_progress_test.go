@@ -279,8 +279,29 @@ func TestNativeStreamUnwiredLoopIsUnchanged(t *testing.T) {
 	// Non-vacuity FIRST: if the observed run never actually emitted, the equality below
 	// would compare two identical unwired runs and prove nothing. Pin that the observed
 	// run really did see the full lifecycle — both kernel verdicts included.
-	if len(seen) != 12 {
-		t.Fatalf("observed run emitted %d lifecycle events, want the 12-event 3-turn sequence: %+v", len(seen), seen)
+	//
+	// The count is a RELATION over what this run actually did, not a frozen total. The
+	// documented sequence is turn_started → (tool_started → call_adjudicated →
+	// result_admitted)+ → turn_done, so the emission is two boundary events per turn plus
+	// three per adjudicated call. Anchoring the turn count to the UNWIRED run's ArmMetrics
+	// is what keeps this non-vacuous: an observer that emitted nothing scores zero turns
+	// and fails here instead of agreeing with itself.
+	byKind := map[agent.ProgressEventKind]int{}
+	for _, ev := range seen {
+		byKind[ev.Kind]++
+	}
+	turns, calls := byKind[agent.ProgressTurnStarted], byKind[agent.ProgressCallAdjudicated]
+	if turns != int(bareArm.Turns) || byKind[agent.ProgressTurnDone] != turns {
+		t.Fatalf("observed %d turn_started / %d turn_done, want one pair for each of the unwired run's %d turns: %+v",
+			turns, byKind[agent.ProgressTurnDone], bareArm.Turns, seen)
+	}
+	if byKind[agent.ProgressToolStarted] != calls || byKind[agent.ProgressResultAdmitted] != calls {
+		t.Fatalf("observed %d tool_started / %d call_adjudicated / %d result_admitted, want one of each per call: %+v",
+			byKind[agent.ProgressToolStarted], calls, byKind[agent.ProgressResultAdmitted], seen)
+	}
+	if want := 2*turns + 3*calls; len(seen) != want {
+		t.Fatalf("observed run emitted %d lifecycle events, want %d for %d turns and %d calls "+
+			"— something emitted outside the documented sequence: %+v", len(seen), want, turns, calls, seen)
 	}
 	verdicts := map[string]int{}
 	for _, ev := range seen {
