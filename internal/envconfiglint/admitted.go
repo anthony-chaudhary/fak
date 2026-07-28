@@ -18,6 +18,18 @@ package envconfiglint
 // env/config boundary holds with no exceptions outstanding.
 //
 // Tracked for relocation by the follow-up issue filed alongside #2863.
+//
+// SCANNER VISIBILITY — why four entries left WITHOUT relocating. ScanGoEnvReads is a regex
+// over os.Getenv/os.LookupEnv taking a STRING-LITERAL argument, so it only sees a read whose
+// name is spelled at the call site. 5b56bfdb8 deduped four such call sites into helpers that
+// take the name as a parameter — resolveChatopsEnv(name) in cmd/fak/chatops.go and
+// resolveBudgetMS(name, fallback) in cmd/fak/hooks.go — which made FAK_CHATOPS_BOT_USER,
+// FAK_CHATOPS_CHANNEL, FAK_PRECOMMIT_CHECK_BUDGET_MS and FAK_PRECOMMIT_TOTAL_BUDGET_MS
+// invisible to the scan. Those four are still READ at runtime; they did NOT move to a config
+// surface, so their #2862 debt is unpaid. TestAdmittedPostFreezeStaysHonest reds on any entry
+// the scan cannot corroborate, so the lines are deleted below — but record what that costs:
+// the reads are now UNGATED, and nothing stops a new env read from being added behind either
+// helper. Re-add the entry, and prefer a literal call site, if a helper is ever inlined.
 var admittedPostFreeze = []string{
 	// cmd/fak/guard_negframe_summary.go — the comma-separated ablation-token list that turns
 	// named features OFF for an A/B arm; the negframe token here selects #3546's control arm
@@ -27,12 +39,12 @@ var admittedPostFreeze = []string{
 	// the token vocabulary `fak ablate` already owns via internal/ablate.
 	"FAK_ABLATE",
 
-	// cmd/fak/chatops.go — chatops deployment wiring: which channel to post in, which bot
-	// identity to post as, and the admin roster allowed to drive it. Identities and a
-	// channel name, not credentials (the chatops TOKEN is separate and secret-shaped).
+	// cmd/fak/chatops.go — the admin roster allowed to drive the door. An identity list, not a
+	// credential (the chatops TOKEN is separate and secret-shaped). Its two siblings
+	// FAK_CHATOPS_BOT_USER and FAK_CHATOPS_CHANNEL are absent because the scan can no longer
+	// see them, not because they relocated — see SCANNER VISIBILITY above. This one stays: it
+	// is still spelled literally, at resolveChatopsAdmins.
 	"FAK_CHATOPS_ADMINS",
-	"FAK_CHATOPS_BOT_USER",
-	"FAK_CHATOPS_CHANNEL",
 
 	// cmd/fak/garden.go — two filesystem paths for the garden tick's growth collect:
 	// FAK_FLEET_DIR overrides the %LOCALAPPDATA%/Fleet root it censuses beyond the repo, and
@@ -47,16 +59,11 @@ var admittedPostFreeze = []string{
 	// internal/gateway/observer.go — filesystem path for the observer journal.
 	"FAK_OBSERVER_JOURNAL",
 
-	// cmd/fak/hooks.go — the two wall-clock caps that keep the #5335 pre-commit wedge from
-	// stalling the commit lane: FAK_PRECOMMIT_CHECK_BUDGET_MS bounds ONE gate's Check before
-	// it is treated as could-not-run and skipped fail-open (default 60s), and
-	// FAK_PRECOMMIT_TOTAL_BUDGET_MS bounds the WHOLE hook including its prologue (default 90s,
-	// deliberately under the ~120s tool timeout so a wedged hook is never SIGTERM'd
-	// mid-index-write). Timeouts in milliseconds, not credentials; a non-positive value is
-	// ignored precisely because disabling the bound reintroduces the wedge.
-	// Relocate to: `--check-budget-ms` and `--total-budget-ms` flags on `fak hooks pre-commit`.
-	"FAK_PRECOMMIT_CHECK_BUDGET_MS",
-	"FAK_PRECOMMIT_TOTAL_BUDGET_MS",
+	// cmd/fak/hooks.go — FAK_PRECOMMIT_CHECK_BUDGET_MS and FAK_PRECOMMIT_TOTAL_BUDGET_MS, the
+	// two wall-clock caps that keep the #5335 pre-commit wedge from stalling the commit lane,
+	// were listed here until 5b56bfdb8 routed both through resolveBudgetMS(name, fallback).
+	// They are still read; the scan just cannot corroborate them. Their relocation target is
+	// unchanged: `--check-budget-ms` and `--total-budget-ms` flags on `fak hooks pre-commit`.
 
 	// cmd/fak/service.go — env default backing the `fak service status --ledger-dir` flag.
 	"FAK_SERVICE_LEDGER_DIR",
