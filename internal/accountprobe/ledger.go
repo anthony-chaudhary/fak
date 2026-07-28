@@ -24,24 +24,14 @@ type LedgerEntry struct {
 	Reason      string `json:"reason"`
 }
 
-// RegDir resolves the fleet registry dir the probe ledger lives under. It honors a
-// FLEET_REG_DIR override (which the fleet sets in production, so the Go reader and the
-// Python writer agree), else falls back to tools/_registry relative to the working
-// directory — the fak binary runs from the clone root. Mirrors account_probe.reg_dir.
-func RegDir() string {
-	if v := strings.TrimSpace(os.Getenv("FLEET_REG_DIR")); v != "" {
-		return v
-	}
-	return filepath.Join("tools", "_registry")
-}
-
 // ProbeLedgerPath returns the probe_ledger.jsonl path under rd, defaulting rd to
-// RegDir() when empty. Mirrors account_probe.probe_ledger_path.
+// RegDir() when empty. Mirrors account_probe.probe_ledger_path. RegDir lives in
+// regdir.go, which owns the whole "which registry does this host mean" question.
 func ProbeLedgerPath(rd string) string {
 	if rd == "" {
 		rd = RegDir()
 	}
-	return filepath.Join(rd, "probe_ledger.jsonl")
+	return filepath.Join(rd, ledgerFile)
 }
 
 // ReadLedger reads every JSON line of a probe ledger, skipping blank and malformed

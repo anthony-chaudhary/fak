@@ -26,6 +26,9 @@ func TestProbeLedgerPath(t *testing.T) {
 	if got := ProbeLedgerPath("/reg"); got != filepath.Join("/reg", "probe_ledger.jsonl") {
 		t.Fatalf("ProbeLedgerPath = %q", got)
 	}
+	// Pin every registry rung inside t.TempDir() first: the default resolution now surveys
+	// the per-user Fleet dir too, and no test may stat the operator's own registry.
+	newRegFixture(t)
 	t.Setenv("FLEET_REG_DIR", "/env/reg")
 	if got := ProbeLedgerPath(""); got != filepath.Join("/env/reg", "probe_ledger.jsonl") {
 		t.Fatalf("ProbeLedgerPath(default) = %q, want env-based", got)
