@@ -52,11 +52,15 @@ type ToolRefOutcome struct {
 }
 
 const (
-	ToolRefReasonNone         = ""              // FIRED: at least one tool_reference block was rewritten
-	ToolRefReasonEmptyBody    = "empty_body"    // nil/empty raw
-	ToolRefReasonNonJSON      = "non_json"      // body is not a JSON object
-	ToolRefReasonNoMsgsKey    = "no_messages"   // no "messages" key
-	ToolRefReasonNoMsgs       = "no_messages_a" // messages[] could not be decoded / is empty
+	ToolRefReasonNone      = ""              // FIRED: at least one tool_reference block was rewritten
+	ToolRefReasonEmptyBody = "empty_body"    // nil/empty raw
+	ToolRefReasonNonJSON   = "non_json"      // body is not a JSON object
+	ToolRefReasonNoMsgsKey = "no_messages"   // no "messages" key
+	ToolRefReasonNoMsgs    = "no_messages_a" // messages[] decoded but is empty (benign)
+	// ToolRefReasonDecodeFailed is the STRUCTURAL messages[] failure, split out of no_messages_a so a
+	// present-but-undecodable `messages` value is not counted in the benign empty-array bucket.
+	// Mirrors CompactReasonDecodeFailed; same wire token across every subsystem.
+	ToolRefReasonDecodeFailed = "decode_failed"
 	ToolRefReasonNoToolRef    = "no_tool_ref"   // no tool_reference block present — body already valid
 	ToolRefReasonSpliceFailed = "splice_failed" // the edits overlapped or fell out of range
 	ToolRefReasonRedecodeFail = "redecode_fail" // the spliced body failed to re-decode as JSON
@@ -92,7 +96,11 @@ func SanitizeAnthropicToolReferences(raw []byte) ([]byte, ToolRefOutcome) {
 		return raw, ToolRefOutcome{Reason: ToolRefReasonNoToolRef}
 	}
 	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
-	if !ok || len(elems) == 0 {
+	if !ok {
+		// Structural: `messages` is present but is not a decodable JSON array.
+		return raw, ToolRefOutcome{Reason: ToolRefReasonDecodeFailed}
+	}
+	if len(elems) == 0 {
 		return raw, ToolRefOutcome{Reason: ToolRefReasonNoMsgs}
 	}
 
@@ -183,14 +191,18 @@ type EmptyContentOutcome struct {
 }
 
 const (
-	EmptyContentReasonNone       = ""              // FIRED: at least one empty content array was repaired
-	EmptyContentReasonEmptyBody  = "empty_body"    // nil/empty raw
-	EmptyContentReasonNonJSON    = "non_json"      // body is not a JSON object
-	EmptyContentReasonNoMsgsKey  = "no_messages"   // no "messages" key
-	EmptyContentReasonNoMsgs     = "no_messages_a" // messages[] could not be decoded / is empty
-	EmptyContentReasonNoEmpty    = "no_empty"      // every tool_result.content is already non-empty
-	EmptyContentReasonSpliceFail = "splice_failed" // the edits overlapped or fell out of range
-	EmptyContentReasonRedecode   = "redecode_fail" // the spliced body failed to re-decode as JSON
+	EmptyContentReasonNone      = ""              // FIRED: at least one empty content array was repaired
+	EmptyContentReasonEmptyBody = "empty_body"    // nil/empty raw
+	EmptyContentReasonNonJSON   = "non_json"      // body is not a JSON object
+	EmptyContentReasonNoMsgsKey = "no_messages"   // no "messages" key
+	EmptyContentReasonNoMsgs    = "no_messages_a" // messages[] decoded but is empty (benign)
+	// EmptyContentReasonDecodeFailed is the STRUCTURAL messages[] failure, split out of no_messages_a
+	// so a present-but-undecodable `messages` value is not counted in the benign empty-array bucket.
+	// Mirrors CompactReasonDecodeFailed; same wire token across every subsystem.
+	EmptyContentReasonDecodeFailed = "decode_failed"
+	EmptyContentReasonNoEmpty      = "no_empty"      // every tool_result.content is already non-empty
+	EmptyContentReasonSpliceFail   = "splice_failed" // the edits overlapped or fell out of range
+	EmptyContentReasonRedecode     = "redecode_fail" // the spliced body failed to re-decode as JSON
 )
 
 // emptyToolResultText is the placeholder that backfills a tool_result whose content array is empty.
@@ -235,7 +247,11 @@ func RepairEmptyToolResultContent(raw []byte) ([]byte, EmptyContentOutcome) {
 		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoEmpty}
 	}
 	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
-	if !ok || len(elems) == 0 {
+	if !ok {
+		// Structural: `messages` is present but is not a decodable JSON array.
+		return raw, EmptyContentOutcome{Reason: EmptyContentReasonDecodeFailed}
+	}
+	if len(elems) == 0 {
 		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoMsgs}
 	}
 

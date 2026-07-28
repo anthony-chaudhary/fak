@@ -55,11 +55,15 @@ func elideMarkerf(omittedRunes int) string {
 // ElideOutcome so a caller can label a metric and an operator can see WHY elision did nothing
 // (silence must not read as success). ElideReasonNone means the body was rewritten.
 const (
-	ElideReasonNone           = ""                // FIRED: a rewrite happened (Elided/ShedBytes meaningful)
-	ElideReasonOff            = "off"             // threshold<=0 or empty body — disabled
-	ElideReasonNonJSON        = "non_json"        // body is not a JSON object
-	ElideReasonNoMsgsKey      = "no_messages_key" // no "messages" key
-	ElideReasonTooFewMsgs     = "too_few_msgs"    // messages[] could not be decoded / nothing to scan
+	ElideReasonNone       = ""                // FIRED: a rewrite happened (Elided/ShedBytes meaningful)
+	ElideReasonOff        = "off"             // threshold<=0 or empty body — disabled
+	ElideReasonNonJSON    = "non_json"        // body is not a JSON object
+	ElideReasonNoMsgsKey  = "no_messages_key" // no "messages" key
+	ElideReasonTooFewMsgs = "too_few_msgs"    // < 2 messages — nothing to scan (benign, high-volume)
+	// ElideReasonDecodeFailed is the STRUCTURAL messages[] failure, split out of too_few_msgs so a
+	// present-but-undecodable `messages` value is not counted in the benign short-request bucket.
+	// Mirrors CompactReasonDecodeFailed; same wire token, so the three subsystems agree.
+	ElideReasonDecodeFailed   = "decode_failed"
 	ElideReasonNoBreakpoint   = "no_breakpoint"   // no cache_control anchor — cannot know the cache boundary
 	ElideReasonUnderThreshold = "under_threshold" // no oversized eligible tool_result found
 	ElideReasonSpliceFailed   = "splice_failed"   // the edits overlapped or fell out of range
@@ -112,7 +116,11 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 		return raw, ElideOutcome{Reason: ElideReasonNoMsgsKey}
 	}
 	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
-	if !ok || len(elems) < 2 {
+	if !ok {
+		// Structural: `messages` is present but is not a decodable JSON array.
+		return raw, ElideOutcome{Reason: ElideReasonDecodeFailed}
+	}
+	if len(elems) < 2 {
 		return raw, ElideOutcome{Reason: ElideReasonTooFewMsgs}
 	}
 

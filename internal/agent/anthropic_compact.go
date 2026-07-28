@@ -111,11 +111,21 @@ func originatingTaskDigestID(taskBytes []byte) string {
 // CompactOutcome so the gateway can label a metric and an operator can see WHY compaction did
 // nothing (silence must not read as success). CompactReasonNone means the body was rewritten.
 const (
-	CompactReasonNone           = ""             // FIRED: a rewrite happened (Dropped/ShedTokens meaningful)
-	CompactReasonUnderBudget    = "under_budget" // budget<=0, or the compactible suffix already fits
-	CompactReasonNonJSON        = "non_json"     // body is not a JSON object
-	CompactReasonNoMsgsKey      = "no_messages_key"
-	CompactReasonTooFewMsgs     = "too_few_msgs"   // < 3 messages — nothing safe to drop
+	CompactReasonNone        = ""             // FIRED: a rewrite happened (Dropped/ShedTokens meaningful)
+	CompactReasonUnderBudget = "under_budget" // budget<=0, or the compactible suffix already fits
+	CompactReasonNonJSON     = "non_json"     // body is not a JSON object
+	CompactReasonNoMsgsKey   = "no_messages_key"
+	CompactReasonTooFewMsgs  = "too_few_msgs" // < minElems messages — nothing safe to drop (benign, high-volume)
+	// CompactReasonDecodeFailed is the STRUCTURAL messages[] failure: the key is present but its
+	// value does not decode as a JSON array of elements (decodeArrayElements returned ok=false).
+	// It is deliberately NOT folded into too_few_msgs: that bucket is the benign short-request
+	// idle and is expected to be large, so a structural failure counted there raises no suspicion.
+	// Split out, decode_failed>0 is assertable as fak-fault the way prefix_mismatch>0 already is.
+	// On well-formed traffic it is close to unreachable by construction — msgsRaw comes from the
+	// json.Unmarshal of the same raw one line above, so the bytes.Index base cannot miss and the
+	// document is already proven valid JSON; the one live path is a client sending `messages` as a
+	// non-array (null, an object). This is attribution hygiene for defensive code, not a live fault.
+	CompactReasonDecodeFailed   = "decode_failed"
 	CompactReasonNoBreakpoint   = "no_breakpoint"  // no cache_control to anchor the protected prefix
 	CompactReasonCachedSpan     = "cached_span"    // candidate drop would delete cache_control-marked history
 	CompactReasonWindowNoDrop   = "window_no_drop" // the kept window swallowed the whole suffix
@@ -330,7 +340,12 @@ func anchorCompactablePrefixMode(raw []byte, minElems int, anchor CompactAnchor)
 		return nil, nil, 0, CompactOutcome{Reason: CompactReasonNoMsgsKey}, false
 	}
 	elems, spans, decoded := decodeArrayElements(raw, msgsRaw)
-	if !decoded || len(elems) < minElems {
+	if !decoded {
+		// Structural: `messages` is present but is not a decodable JSON array. Distinct from the
+		// benign short-request bail below — see CompactReasonDecodeFailed.
+		return nil, nil, 0, CompactOutcome{Reason: CompactReasonDecodeFailed}, false
+	}
+	if len(elems) < minElems {
 		return nil, nil, 0, CompactOutcome{Reason: CompactReasonTooFewMsgs}, false // nothing safe to compact
 	}
 	pfxEnd = firstBreakpointMessage(elems)

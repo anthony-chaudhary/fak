@@ -47,11 +47,15 @@ import (
 // StaleElideOutcome so a caller can label a metric and an operator can see WHY the pass did nothing
 // (silence must not read as success). StaleReasonNone means the body was rewritten.
 const (
-	StaleReasonNone            = ""                 // FIRED: a rewrite happened (Elided/ShedBytes/Restores meaningful)
-	StaleReasonOff             = "off"              // empty body — nothing to scan
-	StaleReasonNonJSON         = "non_json"         // body is not a JSON object
-	StaleReasonNoMsgsKey       = "no_messages_key"  // no "messages" key
-	StaleReasonTooFewMsgs      = "too_few_msgs"     // messages[] could not be decoded / nothing to scan
+	StaleReasonNone       = ""                // FIRED: a rewrite happened (Elided/ShedBytes/Restores meaningful)
+	StaleReasonOff        = "off"             // empty body — nothing to scan
+	StaleReasonNonJSON    = "non_json"        // body is not a JSON object
+	StaleReasonNoMsgsKey  = "no_messages_key" // no "messages" key
+	StaleReasonTooFewMsgs = "too_few_msgs"    // < 2 messages — nothing to scan (benign, high-volume)
+	// StaleReasonDecodeFailed is the STRUCTURAL messages[] failure, split out of too_few_msgs so a
+	// present-but-undecodable `messages` value is not counted in the benign short-request bucket.
+	// Mirrors CompactReasonDecodeFailed; same wire token, so the three subsystems agree.
+	StaleReasonDecodeFailed    = "decode_failed"
 	StaleReasonNoBreakpoint    = "no_breakpoint"    // no cache_control anchor — cannot know the cache boundary
 	StaleReasonNoStaleReads    = "no_stale_reads"   // no Read superseded by a later edit in the eligible band
 	StaleReasonSpliceFailed    = "splice_failed"    // the edits overlapped or fell out of range
@@ -106,7 +110,11 @@ func ElideStaleReadsWithOutcome(raw []byte) ([]byte, StaleElideOutcome) {
 		return raw, StaleElideOutcome{Reason: StaleReasonNoMsgsKey}
 	}
 	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
-	if !ok || len(elems) < 2 {
+	if !ok {
+		// Structural: `messages` is present but is not a decodable JSON array.
+		return raw, StaleElideOutcome{Reason: StaleReasonDecodeFailed}
+	}
+	if len(elems) < 2 {
 		return raw, StaleElideOutcome{Reason: StaleReasonTooFewMsgs}
 	}
 
