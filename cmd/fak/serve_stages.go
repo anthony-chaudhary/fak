@@ -23,10 +23,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
-	"github.com/anthony-chaudhary/fak/internal/journal"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
-	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -487,26 +485,11 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	// startup contract extended to reload). The watcher reads the SAME atomic Live
 	// the gateway classifies through, so a swap is visible on the hot path; it is
 	// bound to ctx, so it stops with the server. Reloads/rejections are logged so an
-	// operator can confirm the swap landed.
-	if live := rt.srv.RouteLive(); live != nil {
-		watcher := modelroute.NewWatcher(*sf.routeManifest, live, 0, func(ev modelroute.ReloadEvent) {
-			if ev.Err != nil {
-				fmt.Fprintf(os.Stderr, "fak: route-manifest reload REJECTED: %v\n", ev.Err)
-				// A rejected route swap kept last-good, but the refused edit is exactly what
-				// an auditor asks about (#3959): record it with the digest of the malformed
-				// bytes on disk. Nil journal → no-op, unjournaled serve stays byte-identical.
-				journal.Active().AppendConfigSwap(journal.ConfigSwapRoute, ev.Path, configFileDigest(ev.Path), journal.ConfigSwapRejected, ev.Err.Error())
-				return
-			}
-			if ev.Reloaded {
-				fmt.Fprintf(os.Stderr, "fak: model-routing policy hot-reloaded from %s (reload #%d)\n", *sf.routeManifest, ev.Reloads)
-				// The live model-routing boundary just changed: record which bytes became
-				// authoritative (source path + sha256) as a durable CONFIG_SWAP row (#3959).
-				journal.Active().AppendConfigSwap(journal.ConfigSwapRoute, ev.Path, configFileDigest(ev.Path), journal.ConfigSwapOK, "")
-			}
-		})
-		go func() { _ = watcher.Run(ctx) }()
-
+	// operator can confirm the swap landed. armRouteHotReload also publishes that
+	// watcher behind POST /v1/fak/route/reload (#4003), so an edit the poll loop's
+	// size+mtime gate cannot see still has a production trigger — SIGHUP cannot be
+	// that trigger here, it terminates (see the drain above).
+	if watcher := armRouteHotReload(ctx, rt.srv, *sf.routeManifest); watcher != nil {
 		// If --dojo is enabled, log the start of a live dojo episode.
 		if *sf.dojoMode {
 			if err := logDojoEpisodeStart("serve"); err != nil {
