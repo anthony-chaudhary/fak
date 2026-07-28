@@ -1,3 +1,8 @@
+---
+title: "Documentation cohort dispatch"
+description: "Turn documentation findings into disjoint, witnessed work before any page edit: small cohorts whose issues name owned paths, consumers, and a read-back witness."
+---
+
 # Documentation cohort dispatch
 
 **Primary audience:** documentation dispatcher  

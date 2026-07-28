@@ -1,3 +1,8 @@
+---
+title: "Weekly documentation reconciliation"
+description: "The once-a-week playbook that detects doc-route drift on committed main, turns each finding into a bounded issue, and selects the next collision-safe cohort."
+---
+
 # Weekly documentation reconciliation
 
 - **Primary audience:** documentation maintainer

@@ -1,3 +1,8 @@
+---
+title: "Audit mode-specific boundaries in public routes"
+description: "A bounded wording audit that keeps a public front door affirmative and makes every boundary name its subsystem, mode, generation, and supporting evidence."
+---
+
 # Audit mode-specific boundaries in public routes
 
 **Primary audience:** maintainers reviewing current public and contributor front doors.

@@ -1,3 +1,8 @@
+---
+title: "Anchor-strategy net-dollar verdict (#2809)"
+description: "Head-anchored compaction versus the first-breakpoint idle default, measured on real traffic: a conservative net-dollar floor over one pinned ledger week."
+---
+
 # Anchor-strategy net-dollar verdict — `CompactAnchorFirstBP` vs `CompactAnchorHead` (#2809)
 
 **Issue:** #2809 (parent epic #2783, cache-value savings program). Siblings: #2780 (savings

@@ -1,3 +1,8 @@
+---
+title: "Documentation audience architecture"
+description: "The layered plan that routes each fak page to its reader (front door, external builder, contributor, archive) so every first screen stays immediately useful."
+---
+
 # Documentation audience architecture
 
 **Status:** active program seed  

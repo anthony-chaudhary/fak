@@ -1,3 +1,8 @@
+---
+title: "Negframe and managed context are one pipeline"
+description: "Negframe rewrites fak-authored prose and managed context rewrites the session view: one positive-state rule on two data types at the same gateway emit seam."
+---
+
 # Negframe and managed context are one positive-state pipeline
 
 `internal/negframe` and managed context implement one rule on two data types: **before a model-visible emission, construct the positive prose and positive working state that downstream reasoning should reuse.** Negframe performs that construction on fak-authored sentences; managed context performs it on the session view. Both reduce stale operands in the same shared workspace.

@@ -1,3 +1,8 @@
+---
+title: "Project-work backlog census (2026-07-15)"
+description: "Verdict OBSERVE: only 26 of 1,419 open issues carry valid project-work metadata, so strict enforcement stays unpromoted. Includes the reproduction witness."
+---
+
 # Live project-work backlog census — 2026-07-15
 
 Verdict: **OBSERVE**. Strict project-work enforcement must not yet be promoted: only 26 of 1,419 open issues (1.83%) carry valid metadata, while 1,393 (98.17%) have unknown or invalid production denominators.

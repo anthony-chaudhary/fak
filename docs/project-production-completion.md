@@ -1,3 +1,8 @@
+---
+title: "Production completion and project scope"
+description: "Why complete means production complete unless a ticket declares a narrower standard, and the three sections every dispatchable ticket has to declare."
+---
+
 # Production completion and project scope
 
 `complete` means **production complete** unless a ticket explicitly declares a narrower completion standard. A demo, prototype, experiment, research result, staging integration, or toy model bring-up can close under its named standard, but it contributes no production-complete credit.

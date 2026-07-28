@@ -1,3 +1,8 @@
+---
+title: "fak durable artifacts inventory"
+description: "Everything the fak binary writes that survives process exit (logs, ledgers, journals, registries, locks) with a path and line writer citation for every claim."
+---
+
 # fak durable artifacts — inventory
 
 _Refreshed 2026-07-10. A living reference: what the `fak` binary writes to disk that

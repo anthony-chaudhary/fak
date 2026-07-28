@@ -1,3 +1,8 @@
+---
+title: "Documentation choice-table template"
+description: "How to present two or more valid paths on a public route: one observable criterion per row, its outcome, its limit, its proof, and the stated default."
+---
+
 # Documentation choice-table template
 
 **Primary audience:** documentation writers presenting two or more valid modes or paths on a public route.
@@ -91,7 +96,7 @@ Mark each line `pass` or `repair`. One `repair` blocks publication.
 - [ ] The next action exercises the selected path.
 - [ ] Changed links resolve, and an independent reader selects the expected row without guessing.
 
-Use the [public documentation style standard](../standards/public-documentation-style.md) for affirmative wording and scoped claims. Validate local targets with the [front-door link witness](../quality/frontdoor-link-witness.md), then run the [external-reader dogfood rubric](../testing/external-reader-dogfood.md) with a realistic choice goal.
+Use the [public documentation style standard](../standards/public-documentation-style.md) for affirmative wording and scoped claims. Validate local targets with the [front-door link witness](../quality/frontdoor-link-witness.md), then run the [external-reader dogfood rubric](https://github.com/anthony-chaudhary/fak/blob/main/docs/testing/external-reader-dogfood.md) with a realistic choice goal.
 
 ## Publication record
 

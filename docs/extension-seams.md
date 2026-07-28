@@ -1,3 +1,8 @@
+---
+title: "Extension seams: where new behavior belongs"
+description: "fak has no single plugin mechanism; the attachment point is part of the security contract. Pick the least-privileged seam from the runnable seam catalog."
+---
+
 # Extension seams: where new behavior belongs
 
 fak is extensible, but it does not have one undifferentiated "plugin" mechanism. The

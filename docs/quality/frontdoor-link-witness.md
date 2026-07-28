@@ -1,3 +1,8 @@
+---
+title: "Witness curated front-door navigation"
+description: "A link witness proves more than file existence: a curated route must resolve, name its audience, reach the right authority, and end in an action you can start."
+---
+
 # Witness curated front-door navigation
 
 **Primary audience:** maintainers verifying current public and contributor navigation.

@@ -1,3 +1,8 @@
+---
+title: "Performance outcomes and proof routes"
+description: "fak reduces repeated work at the managed-agent boundary; which mechanism applies depends on your run path. Pick the outcome, then reproduce its named witness."
+---
+
 # Performance outcomes and proof routes
 
 **Audience:** technical evaluators deciding which `fak` performance mechanism applies to their run path and which current witness to inspect.

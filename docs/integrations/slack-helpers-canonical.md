@@ -1,3 +1,8 @@
+---
+title: "Slack helper ownership"
+description: "Reusable Slack transport is canonical in the slack-helpers repository; this repo stays canonical for fak product behavior such as guard escalation and outbox."
+---
+
 # Slack helper ownership
 
 Reusable Slack transport and control infrastructure is canonical in

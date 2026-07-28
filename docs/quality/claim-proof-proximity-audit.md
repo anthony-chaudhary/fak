@@ -1,3 +1,8 @@
+---
+title: "Verify a public fak claim from its scoped proof"
+description: "The claim contracts that decide whether one public fak claim is supported: the status, scope, and baseline that must sit adjacent, and the proof route to open."
+---
+
 # Verify a public claim from its scoped proof
 
 **Audience:** evaluators deciding whether one public fak claim is supported.

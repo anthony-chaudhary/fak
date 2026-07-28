@@ -1,6 +1,11 @@
-## Production model readiness inventory — 2026-07-14
+---
+title: "Production model readiness inventory (2026-07-14)"
+description: "The three exact model IDs carrying the Claude fleet, chosen by observed 7-day turns rather than repository mentions, with the session-audit witness command."
+---
 
-### Scope and selection
+# Production model readiness inventory — 2026-07-14
+
+## Scope and selection
 
 This inventory covers the **three exact model IDs carrying the current Claude fleet**, selected by observed turns rather than by repository mention count or a future model wish list:
 
@@ -20,7 +25,7 @@ The companion summary audited 919 transcripts and reported 6,919 non-synthetic t
 
 This scope is different from the local in-kernel Mac candidate study in [`notes/MAC-MANYAGENT-MODEL-SELECTION-2026-07-13.md`](notes/MAC-MANYAGENT-MODEL-SELECTION-2026-07-13.md), whose provisional checkpoint is Qwen2.5-7B Q8 and whose device witnesses remain under #3809.
 
-### What “real production ready” means
+## What “real production ready” means
 
 A model is production-ready only when all six independently checkable gates pass. A code path or traffic volume does not substitute for another gate.
 
@@ -33,7 +38,7 @@ A model is production-ready only when all six independently checkable gates pass
 
 Readiness percentage is `passed gates / 6`; it is a coverage measure, not a probability estimate. `PARTIAL` remains a hold and earns no point.
 
-### Current verdict
+## Current verdict
 
 | Model | Configured | Used | Protocol + cache | Capability | Cost truth | Reliability + rollback | Coverage | Production verdict |
 |---|---|---|---|---|---|---|---:|---|
@@ -43,7 +48,7 @@ Readiness percentage is `passed gates / 6`; it is a coverage measure, not a prob
 
 **Portfolio verdict: heavily used, not yet proven production-ready.** The bounded pilot capability and reliability/rollback gates now pass for all three exact IDs, while the portfolio remains HOLD. The remaining evidence is model-scoped: full protocol/cache conformance and exact identity/cost truth.
 
-### Exact-ID capability provenance
+## Exact-ID capability provenance
 
 The machine-readable join is produced by:
 
@@ -55,9 +60,9 @@ The source artifact is [`examples/model-acceptance-top3.json`](../examples/model
 
 These PASS rows cover only this bounded pilot corpus. They do not relax any configured, protocol/cache, cost-truth, or reliability/rollback gate, and they do not claim broader agentic variance coverage tracked by #4797. Runtime dispatch enforcement remains exact-ID and tier scoped under #4799.
 
-### Evidence and remaining work by model
+## Evidence and remaining work by model
 
-#### `claude-opus-4-8`
+### `claude-opus-4-8`
 
 - **Configured — PASS:** `internal/dispatchtick/launchprofile.go` declares Opus worker profiles; `cmd/fak/accounts_launch.go` and the Fable integration use this exact launch ID.
 - **Used — PASS:** 2,900 observed turns across 61 sessions in the seven-day audit; 61.4% of audited output and 95.0% of estimated spend at the tier level.
@@ -66,7 +71,7 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Cost truth — PARTIAL:** the audit emits an estimate and cache-price tests exist, but production needs raw/canonical-ID provenance and fail-closed unknown handling. #4635.
 - **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy reports this exact ID, the clean-checkout dogfood gate rolled unhealthy Opus back to exact Sonnet, and the live provider-seam drill witnessed exact Opus failure attribution plus recovered Sonnet traffic. #4634.
 
-#### `claude-sonnet-4-6`
+### `claude-sonnet-4-6`
 
 - **Configured — PASS:** account launch/default settings and model fixtures name the exact ID; the tier is recognized throughout session audit and routing surfaces.
 - **Used — PASS:** 2,690 observed turns across 465 sessions, the broadest session footprint of the three.
@@ -76,7 +81,7 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy and alert contract name exact Sonnet; the live drill recovered through Sonnet and the no-safe-fallback control held rather than selecting tier-2 Haiku for tier-1 work. #4634.
 - **Configuration debt:** #3929 already tracks the contradictory ultra-bucket launch table versus preset/docs and must close before the matrix can be called coherent.
 
-#### `claude-haiku-4-5-20251001`
+### `claude-haiku-4-5-20251001`
 
 - **Configured — PASS:** the exact dated ID is present in account defaults and model-aware tests, and the session auditor recognizes the Haiku tier.
 - **Used — PASS:** 1,195 observed turns across 177 sessions.
@@ -85,7 +90,7 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Cost truth — HOLD:** the exact dated emitted name is the known alias hazard documented in `notes/BORROW-ROUTING-SIGNALS-GATEWAY-PLANO-STUDY-2026-07-13.md`; unknown or mismatched catalog names must not become `$0`. #4635.
 - **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy and alert contract name exact Haiku; executable evaluator tests witness Haiku failure holding/escalating with no lower fallback, while the live tier-1 control proves Haiku is not used as an unsafe downgrade. #4634.
 
-### Reliability + rollback
+## Reliability + rollback
 
 The exact-model operations gate is reproducible from committed inputs:
 
@@ -97,7 +102,7 @@ fak model canary-gate --input examples/modelops-top3-canary.json
 
 The executable command returns typed statuses: `0` PROMOTE, `3` ROLLBACK, and `4` HOLD. The clean-checkout [dogfood readout](nightrun/MODELOPS-TOP3-DOGFOOD-2026-07-15.md) captures deterministic Opus→Sonnet rollback with exact-ID counters. The bounded [live provider drill](nightrun/MODELOPS-LIVE-PROVIDER-DRILL-2026-07-15.md) captures exact Opus provider failure, recovered exact Sonnet traffic through the same provider seam, and a no-safe-fallback `HOLD` control that refuses to downgrade tier-1 work to Haiku. Haiku's terminal failure behavior is independently executable in `internal/modelops` tests and holds/escalates because no lower production model exists. Together these artifacts satisfy #4634's report separation, checked-in SLO window/threshold/owner, executable canary/rollback, safe traffic drain, recovery read-back, and bottom-tier hold requirements.
 
-### Delivery map
+## Delivery map
 
 | Work item | Closes |
 |---|---|
@@ -107,6 +112,6 @@ The executable command returns typed statuses: `0` PROMOTE, `3` ROLLBACK, and `4
 | #3929 — reconcile ultra-bucket preset and docs | Sonnet/Opus configuration coherence |
 | #4632 — parent production-readiness epic | Final model-by-model read-back and portfolio closure |
 
-### Promotion rule
+## Promotion rule
 
 Do not promote a model from HOLD because it has many turns, because another model passed the same shared code path, or because an issue closed. Promote only when the linked artifact names the exact provider ID, declares its sample/window and threshold, and can be reproduced from a committed command. The final #4632 read-back must re-run the inventory and mark all six gates PASS for each model.

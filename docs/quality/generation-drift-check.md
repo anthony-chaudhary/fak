@@ -1,3 +1,8 @@
+---
+title: "Detect generation-context drift in current docs"
+description: "How to check whether a gen/now page depends on later-horizon, historical, or simulated detail to be understood, and how to record each dependency as a witness."
+---
+
 # Detect generation-context drift in current documentation
 
 **Primary audience:** maintainers reviewing current (`gen/now`) documentation routes.

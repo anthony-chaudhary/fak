@@ -1,3 +1,8 @@
+---
+title: "Prospective exact-model v3 campaign runbook"
+description: "After v2 produced 18 of 18 provider rejections, a fresh campaign needs a new committed declaration and may not replace the standing attempts. This is that plan."
+---
+
 # Prospective exact-model v3: post-reset campaign runbook
 
 Issue: [#4845](https://github.com/anthony-chaudhary/fak/issues/4845)

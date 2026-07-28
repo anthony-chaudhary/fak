@@ -1,3 +1,8 @@
+---
+title: "Host termination provenance"
+description: "How fak guard and the host-crash sensor share one evidence ledger, recording Windows console close, logoff, and shutdown without duplicating a single event."
+---
+
 # Host termination provenance
 
 `fak guard` and the always-on `fak host-crash` sensor share one host evidence

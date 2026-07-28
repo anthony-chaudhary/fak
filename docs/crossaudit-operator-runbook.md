@@ -1,3 +1,8 @@
+---
+title: "Independent cross-model issue audits"
+description: "The operator front door for fak's reciprocal audit program: how an authored change routes to a family-diverse auditor, and why a display name is not identity."
+---
+
 # Independent cross-model issue audits
 
 This runbook is the public operator front door for the reciprocal audit program in

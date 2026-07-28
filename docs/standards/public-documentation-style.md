@@ -1,3 +1,8 @@
+---
+title: "Public documentation style"
+description: "The prose shape every public fak route follows: a five-step edit that leads with current supported behavior, then a mechanical review before publication."
+---
+
 # Public documentation style
 
 **Primary audience:** writers and reviewers changing a public documentation route.
@@ -85,7 +90,7 @@ Review the candidate from top to bottom. Mark `pass` or `repair` for each check;
 | Action | One checkable next action is explicit |
 | Links and proof | Changed links resolve and named evidence supports only the claim made |
 
-After the mechanical pass, capture the first screen with the [front-door render witness](../testing/frontdoor-render-witness.md) when presentation matters and run an [external-reader read-back](../testing/external-reader-dogfood.md). Publish only when the reader independently restates the audience, job, applicable choice, scope, and next action without an unresolved ambiguity.
+After the mechanical pass, capture the first screen with the [front-door render witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/testing/frontdoor-render-witness.md) when presentation matters and run an [external-reader read-back](https://github.com/anthony-chaudhary/fak/blob/main/docs/testing/external-reader-dogfood.md). Publish only when the reader independently restates the audience, job, applicable choice, scope, and next action without an unresolved ambiguity.
 
 ## Publication record
 

@@ -1,3 +1,8 @@
+---
+title: "Query, not chat: when context appends and when it reseeds"
+description: "A managed fak session is one continuing query against a shared task model, not an append-only transcript. The doctrine for when to append and when to reseed."
+---
+
 # Query, not chat: when managed context appends and when it reseeds
 
 A managed fak session is one continuing query against a shared task model, not an

@@ -1,3 +1,8 @@
+---
+title: "Recurring loops inventory"
+description: "A generated fold over every recurring fak loop, both Windows scheduled tasks and cron workflows, with each one's cadence, purpose, and reporting destination."
+---
+
 # Recurring loops inventory
 
 _Generated 2026-07-11T15:59:16Z by `tools/loops_inventory.py` — a read-only fold over `tools/register_*.ps1` (OS Scheduled Tasks) and `.github/workflows/*.yml` (cron). Do not hand-edit; re-run the tool._

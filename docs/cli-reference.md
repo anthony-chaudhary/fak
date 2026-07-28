@@ -316,8 +316,9 @@ one indented JSON decision. The action and process exit status are intentionally
 Malformed input, unknown JSON fields, trailing JSON values, unreadable files, and unexpected
 arguments exit `2`. Run `fak model canary-gate --help` for the live usage text. The canonical
 top-three policy and rollback witness are
-[`examples/model-canary-top3.json`](../examples/model-canary-top3.json) and
-[`docs/notes/model-canary-rollback-witness.json`](notes/model-canary-rollback-witness.json).
+[`examples/modelops-top3-canary.json`](../examples/modelops-top3-canary.json) and the
+dogfood readout [`docs/nightrun/MODELOPS-TOP3-DOGFOOD-2026-07-15.md`](nightrun/MODELOPS-TOP3-DOGFOOD-2026-07-15.md),
+which records a witnessed `ROLLBACK` decision against that policy.
 ### Region admission: `fak loop region` + the loop drive's region hold
 
 The lease fabric above answers *"who holds what"*; **region admission**

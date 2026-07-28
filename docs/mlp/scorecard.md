@@ -1,3 +1,8 @@
+---
+title: "MLP first-lovable-cut scorecard"
+description: "fak mlp-score grades the five acceptance rows for the first lovable cut of epic #3256, and never counts an untracked working-tree file as evidence."
+---
+
 # MLP first-lovable-cut scorecard
 
 `fak mlp-score` reports whether epic #3256 has reached its first lovable cut for

@@ -1,3 +1,8 @@
+---
+title: "Verifier exposure scorecard"
+description: "How far each of fak's nine ship gates leans on model judgment instead of a deterministic check, ranked by exposure against the debt threshold of 0.35."
+---
+
 # Verifier exposure scorecard
 
 Schema: `fak-verifier-exposure/1`  

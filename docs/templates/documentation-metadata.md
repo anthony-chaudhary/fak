@@ -1,3 +1,8 @@
+---
+title: "Documentation metadata template"
+description: "The smallest metadata block that tells a reader a page's audience, lifecycle, generation, support state, authority, and next action, plus its completion check."
+---
+
 # Documentation metadata
 
 > **Audience:** public documentation writers and reviewers labeling who a page serves and when its guidance applies.  
@@ -101,7 +106,7 @@ Keep the metadata block near the title so direct inbound readers encounter it be
 
 - use the [public documentation style contract](../standards/public-documentation-style.md) for prose shape;
 - use the [generation drift check](../quality/generation-drift-check.md) to verify generation markers and current successors;
-- use the [external-reader dogfood rubric](../testing/external-reader-dogfood.md) to test whether a reader can orient and act without coaching.
+- use the [external-reader dogfood rubric](https://github.com/anthony-chaudhary/fak/blob/main/docs/testing/external-reader-dogfood.md) to test whether a reader can orient and act without coaching.
 
 This template does not decide product behavior, product support, evidence strength, or which route is current. Their owning authorities do. Summarize only the fact required for the reader's decision and link the authority; move implementation history and internal debate to a contributor or historical route.
 

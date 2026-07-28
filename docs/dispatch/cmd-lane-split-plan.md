@@ -1,3 +1,8 @@
+---
+title: "Splitting the cmd lane lease (#4320)"
+description: "Why one exclusive lease over 1251 cmd/fak files serializes unrelated workers, what the measured refusal really is, and the lease split that addresses it."
+---
+
 # cmd lane split — the real collision bottleneck (#4320)
 
 **Issue:** #4320 `fix(dispatch): split the cmd lane lease — the real collision bottleneck (~76% rate on low traffic)` · labels `dispatch`, `class:infra` · **OPEN**

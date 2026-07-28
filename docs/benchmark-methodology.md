@@ -1,3 +1,8 @@
+---
+title: "Benchmark route: current authority and archived evidence"
+description: "Which fak benchmark page is current authority, which pages are historical evidence, and the reproduction command to run before quoting any result."
+---
+
 # Benchmark route: current authority and archived evidence
 
 **Audience:** evaluators deciding which benchmark page is current authority, which pages are historical evidence, and what to reproduce before quoting a result.
@@ -18,8 +23,8 @@
 |---|---|---|---|
 | [`BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md) | **Current authority · lifecycle: current · generation: gen/now** | Selecting a current scoped result, its tuned alternative, honesty fences, artifact, and reproduce command. | That one scoped result applies to another model, device, concurrency shape, or run mode. |
 | [`docs/benchmarks/`](benchmarks/README.md) | **Evidence archive · mixed recorded generations** | Finding individual result sheets, runbooks, contracts, and historical witnesses by topic. A sheet is current only when the authority explicitly selects it. | Directory recency, filename, or a large number makes a page current authority. |
-| [`docs/benchmark/`](benchmark/README.md) | **Infrastructure reference · current workflow, mixed run generations** | Operating the benchmark catalog, machine registry, schemas, run identifiers, and data layout. | Infrastructure documentation validates or promotes a benchmark result. |
-| [`docs/benchmarking/`](benchmarking/README.md) | **Legacy collection index · archived** | Tracing older benchmark narratives and reproductions that still matter to their recorded generation. | Its “primary” labels override the current authority or describe current product support. |
+| [`docs/benchmark/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmark/README.md) | **Infrastructure reference · current workflow, mixed run generations** | Operating the benchmark catalog, machine registry, schemas, run identifiers, and data layout. | Infrastructure documentation validates or promotes a benchmark result. |
+| [`docs/benchmarking/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarking/README.md) | **Legacy collection index · archived** | Tracing older benchmark narratives and reproductions that still matter to their recorded generation. | Its “primary” labels override the current authority or describe current product support. |
 | [`docs/production-benchmark-methodology.md`](production-benchmark-methodology.md) | **Methodology reference · current when selected by the authority** | Understanding controlled production comparison requirements and evidence quality. | A methodology document by itself proves a performance gain. |
 
 ## Classification rules

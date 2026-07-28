@@ -1,3 +1,8 @@
+---
+title: "Operating-envelope declarations"
+description: "Project maturity and operating scope are separate declarations: how fak issue contract reads a ticket's completion standard and its target operating envelope."
+---
+
 # Operating-envelope declarations
 
 Project maturity and operating scope are separate declarations. `demo`, `development`,

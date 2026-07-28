@@ -1,3 +1,8 @@
+---
+title: "Front-door clarity scorecard"
+description: "A 0-1-2 rubric for reviewing a public fak route before recommending it as a front door, scored on the rendered page with one evidence citation per row."
+---
+
 # Front-door clarity scorecard
 
 **Primary audience:** maintainers reviewing a public documentation route before it becomes or remains a recommended front door.

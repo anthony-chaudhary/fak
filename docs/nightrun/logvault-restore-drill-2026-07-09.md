@@ -1,3 +1,8 @@
+---
+title: "logvault restore drill: first recorded run"
+description: "A backup nobody has restored from is a hypothesis. The first witnessed run of fak logvault restore, re-hashing every restored byte against the manifest chain."
+---
+
 # logvault restore drill — first recorded run (2026-07-09)
 
 Issue [#2453](../../) (feat(logvault): restore verb + restore drill), part of epic

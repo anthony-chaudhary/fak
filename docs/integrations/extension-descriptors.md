@@ -1,3 +1,8 @@
+---
+title: "Extension descriptor and local conformance"
+description: "fak-extension-descriptor/1 is inert discovery metadata; local Verify re-hashes the artifact and re-runs the bounded witness, so catalog data is never the proof."
+---
+
 # Extension descriptor and local conformance
 
 `internal/market` defines `fak-extension-descriptor/1`, inert discovery metadata shared by the frozen ABI registry, compute backends, TUI panes, quality checks, and trajectory scorers. A descriptor carries a namespaced identity, `module@rev`, seam ABI range, artifact digest, trust class, error behavior, requested capabilities, and an optional required witness recipe/result digest.

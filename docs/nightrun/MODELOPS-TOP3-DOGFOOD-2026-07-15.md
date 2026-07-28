@@ -1,3 +1,8 @@
+---
+title: "Exact-model canary gate dogfood (2026-07-15)"
+description: "One clean-checkout run of the exact-model operations spine against the checked-in top-three policy: rollback exercised, production promotion still on HOLD."
+---
+
 # Exact-model canary gate dogfood — 2026-07-15
 
 Status: **ROLLBACK exercised; production promotion remains HOLD.**

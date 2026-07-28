@@ -1,3 +1,8 @@
+---
+title: "Codex Memories and fak"
+description: "How fak treats the experimental Codex Memories feature: useful cross-session suggestions, but untrusted context that is never closure or test evidence."
+---
+
 # Codex Memories and fak
 
 Codex 0.144.1 exposes **Memories** as one experimental, default-off feature. Its

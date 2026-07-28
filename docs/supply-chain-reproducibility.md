@@ -1,3 +1,8 @@
+---
+title: "Supply-chain posture: reproducible builds"
+description: "What fak builds byte-reproducibly today, how CI witnesses it, what is documented intent only, and what sits explicitly outside the reproducibility guarantee."
+---
+
 # Supply-chain posture: reproducible builds
 
 Status note for #3711 (epic #3708). This is the honest statement of what is

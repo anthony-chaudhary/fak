@@ -1,3 +1,8 @@
+---
+title: "Positive-state construction: broadcast the target state"
+description: "Why asking a model to invert an unwanted state costs more than naming the state you want, and the pattern fak uses to author guidance affirmatively."
+---
+
 # Positive-state construction: broadcast the target state
 
 > **Doctrine:** Construct and broadcast the state the model should make true; never ask it to subtract, suppress, or invert a salient unwanted state.

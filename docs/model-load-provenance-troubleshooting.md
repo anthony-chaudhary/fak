@@ -1,3 +1,8 @@
+---
+title: "Model-load provenance: route a run difference"
+description: "Tell whether a degraded model run came from the loader, the quantization, or the forward pass, using the fak-model-load-provenance/1 artifact and its algebra."
+---
+
 # Model-load provenance — routing a run difference to loader, quant, or forward
 
 **The troubleshooting guide for [#4746](https://github.com/anthony-chaudhary/fak/issues/4746),

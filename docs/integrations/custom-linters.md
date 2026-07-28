@@ -1,3 +1,8 @@
+---
+title: "Custom linter subprocess ABI"
+description: "The fak-custom-lint/1 wire schema for user- and agent-authored linters: a bounded, verdict-only process boundary with a minimal environment, not an OS sandbox."
+---
+
 # Custom linter subprocess ABI
 
 The `agent-hook` seam in [Extension seams](../extension-seams.md) is the default for

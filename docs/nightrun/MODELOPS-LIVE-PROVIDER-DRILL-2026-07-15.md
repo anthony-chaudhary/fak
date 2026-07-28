@@ -1,3 +1,8 @@
+---
+title: "Exact-model live provider rollback drill"
+description: "A bounded loopback proxy returned a provider-shaped 403 for one exact model on the live seam: rollback and recovery witnessed, production promotion still HOLD."
+---
+
 # Exact-model live provider rollback drill — 2026-07-15
 
 Status: **ROLLBACK and recovery witnessed; production remains HOLD.**

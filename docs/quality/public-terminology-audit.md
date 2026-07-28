@@ -1,3 +1,8 @@
+---
+title: "Public terminology audit"
+description: "The one stable public term fak uses for each concept across README, START-HERE, and integration entry points, with replacement rules and a completion check."
+---
+
 # Public terminology audit
 
 > **Audience:** documentation writers and reviewers aligning reader-facing entry points.

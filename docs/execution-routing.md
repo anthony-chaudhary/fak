@@ -1,3 +1,8 @@
+---
+title: "Execution routing: choose the envelope, not the model"
+description: "Harness route, model route, and session route are three independent choices. fak execution-route composes them into one inspectable JSON envelope."
+---
+
 # Execution routing: choose the execution envelope, not only the model
 
 `fak route` answers one deliberately narrow question: which model plan should handle an
