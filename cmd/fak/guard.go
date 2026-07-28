@@ -495,190 +495,37 @@ func cmdGuard(argv []string) {
 		}
 	}
 
-	// 3. Resolve the upstream wire + credential posture. Two worlds:
-	//
-	//    LOCAL-ONLY (--gguf, no --alongside): fak runs the model itself in-kernel, so
-	//    there is NO upstream API, no API key, and no OAuth. Resolve ONLY the wire
-	//    (anthropic for claude, openai for codex/…) — that still selects which base-URL
-	//    env var points the child at the gateway and labels the banner — and leave the
-	//    credential posture empty.
-	//
-	//    PROXY (default): resolveGuardUpstream picks the provider, base URL, API key, and
-	//    the Claude subscription-OAuth default. --remote-serve, when set, pins provider=openai
-	//    + base=the box inside the resolver. ALONGSIDE (--gguf --alongside / --gguf
-	//    --base-url) takes THIS world too — the API upstream keeps its full credential
-	//    posture unchanged, and the loaded local model rides beside it (dual planner).
-	var (
-		up                   string
-		providerAutodetected bool
-		resolvedBase         string
-		apiKey               string
-		pinUpstream          bool
-		oauthSource          string
-		// keychainAPIKey marks apiKey as Claude Code's saved API key adopted from the
-		// macOS Keychain (#5363) — not an --api-key-env value — so the startup report's
-		// auth line and the managed-cache reason can name the real source.
-		keychainAPIKey bool
-		// credPath is the on-disk .credentials.json path fak is pinning upstream, populated
-		// only when pinUpstream is true. It is threaded through to the post-crash auth-recovery
-		// check (guardMaybeRecoverAuthCrash) so a wrapped-agent exit caused by an expired
-		// subscription token can be diagnosed and, if a fresh login lands, auto-resumed —
-		// without re-deriving the config-dir/credentials-file join at every call site.
-		credPath string
-		// apiKeyFunc re-resolves the upstream credential per request when set. On the
-		// pinned Claude subscription path it re-reads the short-lived OAuth access token
-		// from disk, so a long guarded session (which outlives the ~1h token) always sends
-		// the live token the client has since rotated — never the frozen boot-time one that
-		// would 401 even after a fresh /login.
-		apiKeyFunc       func() string
-		extraHeaders     map[string]string
-		extraHeadersFunc func() map[string]string
-		// accountFailoverFunc, when set on the pinned path, supplies a permitted sibling
-		// account's live token when the current account hits an ACCOUNT-SCOPED 403 wall (org
-		// OAuth disabled / region / billing). It also stickily advances the config dir apiKeyFunc
-		// reads from, so a walled session heals onto a working account and stays there.
-		accountFailoverFunc func(reason string) (string, bool)
-		// guardActiveAccountDir/guardWalledAccounts feed the live accounts+nodes status
-		// area (guard_endpoints.go): the config dir of the seat currently serving turns
-		// (it follows a failover) and the seats an account-scoped 403 walled this session.
-		// Set only on the pinned Claude subscription path; nil elsewhere (a non-subscription
-		// session has no seat "in use", so the status area shows nodes only).
-		guardActiveAccountDir func() string
-		guardWalledAccounts   func() map[string]bool
-		// guardAccountRehome, when set on the pinned path, is the operator "switch seat
-		// now" function the gateway serves at POST /v1/fak/account/rehome (`fak accounts
-		// rehome`) — the on-demand form of the failover above.
-		guardAccountRehome func(reason string) (gateway.AccountRehome, error)
-	)
+	// 3. Resolve the upstream wire + credential posture: LOCAL-ONLY (--gguf without
+	//    --alongside, where fak IS the upstream and there is no credential at all) vs the
+	//    PROXY default (provider + base URL + API key, the Claude subscription-OAuth
+	//    default, the per-request token re-resolver a long session needs, and the
+	//    account-failover controls the gateway and the live status area consult later).
+	//    The whole two-world resolution lives in guard_upstream_posture.go; a credential
+	//    the wrapped agent could never repair still fails the launch there, before any
+	//    spawn, exactly as it did inline.
 	tUpstream := time.Now()
-	if localModel && !localAlongside {
-		up, providerAutodetected = resolveGuardProvider(*provider, command[0])
-	} else {
-		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
-		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
-		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
-		keychainAPIKey = us.keychainAPIKey
-		// resolveGuardUpstream armed the spend meter with the agent name (Opus
-		// default). Re-arm with the statically-known upstream model so a non-default
-		// tier prices at its own rate — e.g. a claude-fable-5 session bills 2x Opus
-		// instead of being under-booked as claude. Falls back to the agent name for
-		// an unknown model, so this only corrects a known misprice (see
-		// guardSpendPricingContext).
-		armServedSpendPricing(up, guardSpendPricingContext(up, *model, command))
-		if pinUpstream && up == "anthropic" {
-			credPath = filepath.Join(us.claudeConfigDir, ".credentials.json")
-		}
-		// No subscription token anywhere AND the child has no key of its own: a headless spawn
-		// would block on a /login the wrapped agent can never complete (the unrecoverable end of
-		// the 'stuck on login' class — distinct from the rotation race, which the pin-on-intent
-		// branch handles). Fail loud with the setup guidance BEFORE spawning, but ONLY when stdin
-		// is not interactive: an attended terminal can complete the login, so it keeps today's
-		// behavior.
-		if us.noTokenAnywhere && !cmdGuardStdinInteractive() {
-			fmt.Fprintf(os.Stderr, "fak guard: no Claude subscription token found and no ANTHROPIC_API_KEY set, and stdin is not a terminal — refusing to spawn a headless agent that would hang on an interactive login it cannot complete.%s\n", guardLoginStatusNote(us))
-			fmt.Fprintln(os.Stderr, "  fix: run `claude` once to log in, or `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN, or set ANTHROPIC_API_KEY for API billing.")
-			os.Exit(2)
-		}
-		if us.passthroughFallback && !*quiet {
-			fmt.Fprintf(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — the wrapped agent's own credential (a subscription login or ANTHROPIC_API_KEY) is forwarded upstream.%s If you hit a 401, run `claude` once or `claude setup-token`.\n", guardLoginStatusNote(us))
-		}
-		if us.ambientKeyOverridden && !*quiet {
-			fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")
-		}
-		if us.keychainAPIKey && !*quiet {
-			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription login found; using Claude Code's saved API key from the macOS Keychain upstream (API billing — the same key the wrapped agent itself authenticates with, so the billed account is unchanged).")
-		}
-		// Pinned Claude subscription: the OAuth access token fak holds upstream is
-		// short-lived (the provider rotates it ~hourly, and Claude Code rewrites the
-		// refreshed value into the same credential file). Resolving it ONCE at startup
-		// pins the boot-time token for the whole session, so a session that outlives the
-		// token 401s — and re-logging in does not help, because the refreshed token lands
-		// in the file the frozen string never re-reads. So on this path we hand the gateway
-		// a credential FUNC that re-reads the live token per request. It falls back to the
-		// boot-time apiKey on a transient read miss (the planner's effectiveAPIKey contract).
-		if pinUpstream && up == "anthropic" {
-			tokenEnv := *oauthTokenEnv
-			// The account-failover state is seeded with the pinned config dir. Until a failover
-			// fires it is inert (currentConfigDir == the pinned dir, walled set empty), so the
-			// token path below is byte-for-byte the historical one. On an account-scoped 403 the
-			// planner's hook calls af.failover, which advances currentConfigDir to a permitted
-			// sibling — and apiKeyFunc then reads THAT account's rotating token, making the swap
-			// sticky across turns. A homeRoot we cannot resolve leaves af nil and disables failover
-			// (the historical terminal-on-account-403 behavior), never a crash.
-			var af *accountFailover
-			if homeRoot, hErr := os.UserHomeDir(); hErr == nil && strings.TrimSpace(homeRoot) != "" {
-				af = newAccountFailover(homeRoot, us.claudeConfigDir, nil)
-				accountFailoverFunc = af.failover
-				guardAccountRehome = af.forceRehome
-			}
-			// Feed the live accounts+nodes status area: the ACTIVE seat follows a failover
-			// (af.currentConfigDir), and af.walledKeys marks the seats an account-scoped 403
-			// skipped. With af nil (home root unresolvable) the active seat is the pinned
-			// config dir and nothing is walled — a stable single-seat view.
-			if af != nil {
-				guardActiveAccountDir = af.currentConfigDir
-				guardWalledAccounts = af.walledKeys
-			} else {
-				pinnedDir := us.claudeConfigDir
-				guardActiveAccountDir = func() string { return pinnedDir }
-			}
-			apiKeyFunc = func() string {
-				// After a failover, read the ADOPTED sibling account's live token directly from its
-				// config dir; that dir differs from the pinned one only once af.failover has run.
-				if af != nil {
-					if dir := af.currentConfigDir(); dir != "" && dir != us.claudeConfigDir {
-						if tok, live := readLiveAccessToken(dir, time.Now()); live {
-							return tok
-						}
-						// The adopted account's token is momentarily unreadable/expired — fall through
-						// to the default resolve rather than dropping auth entirely.
-					}
-				}
-				// Quiet resolve: this runs on EVERY turn to pick up the rotated token, so a
-				// genuinely-expired credential must not reprint the expiry WARNING per request
-				// (it fired once at boot via resolveGuardUpstream). io.Discard silences only the
-				// warning; the token routing/precedence is identical.
-				tok, _, err := resolveAnthropicOAuthTokenWarn(tokenEnv, io.Discard)
-				if err != nil {
-					return ""
-				}
-				return tok
-			}
-		}
-		// #1834: PROACTIVE, not passive. A headless launch has no interactive `claude` process
-		// rewriting .credentials.json, so the reactive 401 self-heal (a 3s-default poll,
-		// internal/agent's authRefreshWindow) never has anything rewrite the file for it to
-		// notice — it always times out and the upstream 401 surfaces raw. Wire the #1183
-		// StaleCred rung (accounts.NewRehydrateCredRung, unwired until now) in HERE, before the
-		// child is spawned and before the first upstream request: on a headless
-		// pinned-subscription launch, force the freshness check (and, if stale, an active wait
-		// for a rotation) now. A refusal means the credential is expired AND could not refresh
-		// within the window — fail loud with the same re-auth guidance the noTokenAnywhere gate
-		// above uses, naming STALE_CRED so the operator/CI can route on it, instead of letting
-		// the child hit a raw upstream_unauthorized. An interactive launch, or a launch not
-		// pinning the subscription, is left alone (Ran=false) — see guardRunHeadlessRehydrate's
-		// doc for why.
-		if pinUpstream && up == "anthropic" {
-			if v := guardRunHeadlessRehydrate(cmdGuardStdinInteractive(), pinUpstream, credPath); v.Refused {
-				fmt.Fprintf(os.Stderr, "fak guard: STALE_CRED — the Claude subscription OAuth token in %s is expired and did not refresh within the wait window, and stdin is not a terminal — refusing to spawn a headless agent that would only hit a raw upstream 401.%s\n", v.CredPath, guardLoginStatusNote(us))
-				fmt.Fprintln(os.Stderr, "  fix: run `claude` once to log in (refreshes the token), or `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN, or raise FAK_AUTH_REFRESH_WINDOW if a refresh is just slow.")
-				os.Exit(2)
-			}
-		}
-		if guardCodexSubscriptionEligible(command, up, *baseURL, remoteBase, *apiKeyEnv) {
-			if cred, err := resolveCodexSubscriptionCredential(*codexHome); err == nil {
-				apiKey = cred.AccessToken
-				pinUpstream = true
-				oauthSource = cred.Source
-				resolvedBase = guardCodexChatGPTBackendBaseURL
-				extraHeaders = guardCodexSubscriptionHeaders(cred)
-				apiKeyFunc, extraHeadersFunc = newCodexSubscriptionRefreshers(*codexHome, cred)
-			} else if strings.TrimSpace(os.Getenv(guardCodexEnvKey(*apiKeyEnv))) == "" && !*quiet {
-				fmt.Fprintf(os.Stderr, "fak guard: Codex ChatGPT subscription unavailable: %v\n", err)
-			}
-		}
-	}
+	posture := resolveGuardUpstreamPosture(guardUpstreamPostureInputs{
+		command:        command,
+		provider:       *provider,
+		baseURL:        *baseURL,
+		remoteBase:     remoteBase,
+		apiKeyEnv:      *apiKeyEnv,
+		anthropicOAuth: *anthropicOAuth,
+		oauthTokenEnv:  *oauthTokenEnv,
+		model:          *model,
+		codexHome:      *codexHome,
+		quiet:          *quiet,
+		localModel:     localModel,
+		localAlongside: localAlongside,
+	})
 	upstreamResolveDur = time.Since(tUpstream)
+	up, providerAutodetected, resolvedBase := posture.up, posture.providerAutodetected, posture.resolvedBase
+	apiKey, pinUpstream, oauthSource := posture.apiKey, posture.pinUpstream, posture.oauthSource
+	keychainAPIKey, credPath := posture.keychainAPIKey, posture.credPath
+	apiKeyFunc, extraHeaders, extraHeadersFunc := posture.apiKeyFunc, posture.extraHeaders, posture.extraHeadersFunc
+	accountFailoverFunc := posture.accountFailoverFunc
+	guardActiveAccountDir, guardWalledAccounts := posture.activeAccountDir, posture.walledAccounts
+	guardAccountRehome := posture.accountRehome
 
 	// Managed-cache posture (epic #1844 C6): decide from the JUST-resolved upstream whether
 	// this session actively manages the provider prompt-cache (the stable-prefix 1h TTL
@@ -767,6 +614,11 @@ func cmdGuard(argv []string) {
 		if err := recordInteractiveSessionRows(row); err != nil && !*quiet {
 			fmt.Fprintf(os.Stderr, "fak guard: interactive session registry start: %v\n", err)
 		}
+		// #5400: this row is recorded BEFORE the listener binds, so it cannot carry the
+		// gateway address yet. Register it for the post-bind stamp below; the republish goes
+		// through the SAME recorder, so the machine control-plane mirror gets it too, and it
+		// updates `row` in place so the deferred tombstone keeps the same fields.
+		trackGuardSessionGatewayPublish(&row, recordInteractiveSessionRows)
 		defer func() {
 			if err := recordInteractiveSessionRows(row.Ended(time.Now())); err != nil && !*quiet {
 				fmt.Fprintf(os.Stderr, "fak guard: interactive session registry exit: %v\n", err)
@@ -876,6 +728,11 @@ func cmdGuard(argv []string) {
 	}
 	listenDur := time.Since(tListen)
 	gwURL := "http://" + ln.Addr().String()
+	// #5400: mint THIS session's read-scoped observability bearer here, before the gateway is
+	// built, because it is a gateway.Config field AND the token published with gwURL into the
+	// guard-session index. The gateway honors it only on /healthz, /debug/vars and /metrics,
+	// so the published credential can read this session's status and can never steer it.
+	guardReadBearer := newGuardReadBearer()
 
 	// A gateway bound BEYOND loopback with no required key is an UNAUTHENTICATED kernel
 	// reachable off-host. `fak serve` warns about this in ListenAndServe, but guard binds
@@ -981,24 +838,30 @@ func cmdGuard(argv []string) {
 		Backend:               chatBackend,
 		PinUpstreamCredential: pinUpstream,
 		RequireKey:            requireKey,
-		VDSO:                  true,
-		Invalidation:          "global",
-		Version:               appversion.Current(),
-		ReloadPolicy:          guardPolicyReloader(*policyPath),
-		ResetTrace:            resetTrace,
-		ObserveTrace:          observeTrace,
-		ObserveSession:        observeSession,
-		ControlSession:        controlSession,
-		SteerSession:          steerSession,
-		ListSessions:          listSessions,
-		DecideSession:         decideSession,
-		DebitSession:          debitSession,
-		ResetOnBudget:         resetOnBudgetHook(*resetOnBudget, contextBudgetLimit),
-		OnBudgetExhausted:     restarter.OnBudgetExhausted,
-		DefaultTraceID:        guardTraceID,
-		GuardRecoveryPrompt:   guardRecoveryPrompt(refusalCarryForward),
-		StartTime:             t0,
-		StartupPhases:         startupPhases,
+		// The read-scoped twin of RequireKey (#5400): accepted ONLY on the observability
+		// reads, and published into the guard-session index so `fak session status <handle>`
+		// can fetch this session's /debug/vars from another process with no port or key
+		// knowledge — including on a guard bound beyond loopback, where the loopback
+		// exemption does not apply and an operator would otherwise need the control key.
+		ReadBearer:          guardReadBearer,
+		VDSO:                true,
+		Invalidation:        "global",
+		Version:             appversion.Current(),
+		ReloadPolicy:        guardPolicyReloader(*policyPath),
+		ResetTrace:          resetTrace,
+		ObserveTrace:        observeTrace,
+		ObserveSession:      observeSession,
+		ControlSession:      controlSession,
+		SteerSession:        steerSession,
+		ListSessions:        listSessions,
+		DecideSession:       decideSession,
+		DebitSession:        debitSession,
+		ResetOnBudget:       resetOnBudgetHook(*resetOnBudget, contextBudgetLimit),
+		OnBudgetExhausted:   restarter.OnBudgetExhausted,
+		DefaultTraceID:      guardTraceID,
+		GuardRecoveryPrompt: guardRecoveryPrompt(refusalCarryForward),
+		StartTime:           t0,
+		StartupPhases:       startupPhases,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
 		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.
 		Logf: gwLogf,
@@ -1081,6 +944,19 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 	srv.MarkReady()
+
+	// PUBLISH this session's gateway into the guard-session index (#5400) — the producer
+	// half of cross-process discovery. Placed HERE, after guardWaitHealthy + MarkReady,
+	// because that is the first instant the address is both known and actually answering:
+	// publishing at bind time would advertise a URL that 503s, and publishing later would
+	// leave `fak session status` blind for the whole startup window. Best-effort by the same
+	// contract as the launch append — a failed republish leaves the launch row intact (the
+	// session simply stays unreachable cross-process) and never blocks the agent.
+	if _, perrs := publishGuardSessionGateway(gwURL, guardReadBearer); len(perrs) > 0 && !*quiet {
+		for _, perr := range perrs {
+			fmt.Fprintf(os.Stderr, "fak guard: guard-session gateway publish: %v\n", perr)
+		}
+	}
 
 	// Feed the live accounts+nodes status area (`fak info` / /debug/vars): which Claude
 	// seats and which serving nodes THIS session uses. The provider is a pull source
