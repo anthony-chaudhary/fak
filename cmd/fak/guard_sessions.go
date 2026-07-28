@@ -12,8 +12,15 @@ package main
 //
 // It is peeled off in cmdGuard before the wrap-a-command flag parse (like `fak guard
 // allow`), so a bare leading `sessions` is the query surface and never a program to wrap.
+//
+// It also holds the PRODUCER side of that index: recordGuardSessionIndex appends the launch
+// row, and publishGuardSessionGateway (#5400) re-records it with the session's live gateway
+// URL + read-scoped bearer once the listener is serving — the stamp `fak session status`
+// and `fak cachevalue census` read back cross-process.
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -51,7 +58,80 @@ func recordGuardSessionIndex(traceID, agent, auditPath, nonce string, startedAt 
 	if err := guardsessions.Record(regDir, row); err != nil {
 		return ""
 	}
+	// #5400: keep the recorded row ADDRESSABLE so the post-bind stamp below can re-record
+	// THIS row once the gateway is serving. The recorder closure carries the same regDir the
+	// launch append used, so the republish lands in the file the launch row is in.
+	trackGuardSessionGatewayPublish(&row, func(r guardsessions.Row) error { return guardsessions.Record(regDir, r) })
 	return row.Handle
+}
+
+// guardSessionGatewayPublication is one row THIS guard process recorded at launch, paired
+// with the recorder that wrote it. The launch record necessarily runs BEFORE the listener
+// binds (the handle is part of the startup report and the crash-relaunch row must exist
+// before the child starts), so the gateway address cannot be known yet. The index is
+// append-only and folds to the LATEST row per handle, so re-recording the SAME row with the
+// address stamped supersedes the launch row rather than inventing a second session.
+type guardSessionGatewayPublication struct {
+	row    *guardsessions.Row
+	record func(guardsessions.Row) error
+}
+
+// guardSessionGatewayPublications accumulates the rows this process recorded (the plain
+// index row and, on an operator terminal, the interactive relaunch row — which mirrors into
+// the machine registry through its own recorder).
+var guardSessionGatewayPublications []guardSessionGatewayPublication
+
+// trackGuardSessionGatewayPublish registers a recorded row for the post-bind gateway stamp.
+// The row is held BY POINTER so the stamp is visible to the caller's later writes too — an
+// interactive session's clean-exit tombstone then carries the same gateway fields its live
+// row did, instead of silently dropping them.
+func trackGuardSessionGatewayPublish(row *guardsessions.Row, record func(guardsessions.Row) error) {
+	if row == nil || record == nil {
+		return
+	}
+	guardSessionGatewayPublications = append(guardSessionGatewayPublications, guardSessionGatewayPublication{row: row, record: record})
+}
+
+// publishGuardSessionGateway is the PRODUCER half of gateway discovery (#5400): it stamps
+// the live gateway URL and its read-scoped bearer onto every row this guard process
+// recorded and re-records each one, so a second process can reach this session's status
+// endpoint from the index alone with no prior port knowledge. Called once, from the guard
+// main flow, at the first instant the address is both known AND actually serving.
+//
+// An empty url is a NO-OP by contract: a guard that binds no gateway keeps its recorded row
+// exactly as it was, with both fields omitted (they are omitempty — their absence is a legal
+// row shape, and `fak session status` reports it as "published nothing", not as an error).
+// Best-effort like the launch append: it returns the append errors for a diagnostic line and
+// never fails the launch.
+func publishGuardSessionGateway(url, bearer string) (published int, errs []error) {
+	if strings.TrimSpace(url) == "" {
+		return 0, nil
+	}
+	for _, pub := range guardSessionGatewayPublications {
+		*pub.row = pub.row.WithGateway(url, bearer)
+		if err := pub.record(*pub.row); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		published++
+	}
+	return published, errs
+}
+
+// newGuardReadBearer mints THIS launch's read-scoped observability token — the bearer the
+// session publishes next to its gateway URL. The gateway accepts it ONLY on the read-only
+// paths (/healthz, /debug/vars, /metrics; internal/gateway/http.go withAuth consults it
+// after the full-strength credential has already failed and only on those routes), so the
+// token that lands in the world-readable session index can read status and can never
+// control the session. 128 bits of crypto/rand, fresh per launch. An entropy failure
+// returns "" — the session then publishes its URL with NO bearer, which is strictly better
+// than publishing a guessable one.
+func newGuardReadBearer() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return "fakread-" + hex.EncodeToString(b[:])
 }
 
 // runGuardSessions is the testable core: exit 0 ok, 1 runtime, 2 usage, 3 an ambiguous or
