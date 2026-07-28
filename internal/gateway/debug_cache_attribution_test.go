@@ -1,6 +1,10 @@
 package gateway
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // The /debug/vars cache_attribution block must carry the SAME provider-vs-fak owner split
 // the /metrics fak_cache_saved_token_equiv_by_owner family emits (writeCacheAttributionMetrics
@@ -46,6 +50,71 @@ func TestCacheAttributionVarsMatchesMechanismSplit(t *testing.T) {
 	// VDSO is an avoided-call counter (not a token-equiv), folded exactly as /metrics does.
 	if got.FakVDSOAvoidedCalls != uint64(vdsoHits)+servedInline {
 		t.Errorf("vdso avoided calls = %d, want %d (VDSOHits + inline-served)", got.FakVDSOAvoidedCalls, uint64(vdsoHits)+servedInline)
+	}
+}
+
+// The cold-tool-DEFER shed (#3647) must ride the /debug/vars block as its OWN fields, never folded
+// into the compaction shed: they are different mechanisms in different currencies — compaction shed
+// is priced in token-equiv, defer prices NOTHING (every def still ships; the reduction is
+// provider-side, only the hot core loading into context). This pins the three-way separation the
+// `fak info` Cache tab renders, and that the deferred tool NAMES survive to the wire so the pane can
+// say WHICH tools went cold rather than only how many.
+func TestCacheAttributionVarsCarriesColdToolDeferShedDistinctly(t *testing.T) {
+	sum := AdjudicationSummary{
+		CompactionShedTokens: 300,
+		KVPrefixReusedTokens: 400,
+		DeferColdTurns:       3,
+		DeferColdCount:       12,
+		DeferColdToolNames:   []string{"mcp__dos__dos_arbitrate", "mcp__fak__fak_index_docs"},
+	}
+	got := cacheAttributionVars(sum, 0, 0)
+	if got == nil {
+		t.Fatal("cacheAttributionVars returned nil for a defer-on session with shed activity")
+	}
+	if got.FakDeferColdTurns != 3 || got.FakDeferColdCount != 12 {
+		t.Errorf("defer shed = (turns %d, count %d), want (3, 12)", got.FakDeferColdTurns, got.FakDeferColdCount)
+	}
+	if len(got.FakDeferColdToolNames) != 2 || got.FakDeferColdToolNames[0] != "mcp__dos__dos_arbitrate" {
+		t.Errorf("deferred tool names = %v, want the producer's sorted set", got.FakDeferColdToolNames)
+	}
+	// The separation that matters: the defer counters never leak into the compaction-shed field, and
+	// the defer count is NOT priced into any token-equiv (defer buys no tokens).
+	if got.FakCompactionShedTokens != 300 {
+		t.Errorf("compaction shed = %d, want 300 (defer must not be folded in)", got.FakCompactionShedTokens)
+	}
+	ms := sum.MechanismSavings()
+	if !approx(got.FakTokenEquiv, ms.FakTokenEquiv()) {
+		t.Errorf("fak token-equiv = %v, want %v — the defer shed must add no token-equiv", got.FakTokenEquiv, ms.FakTokenEquiv())
+	}
+
+	// A defer-ON session with NO token activity and NO avoided calls must STILL emit the block:
+	// defer can never reach HasAnyTokenActivity (it prices no tokens), so gating on token activity
+	// alone would make the lever invisible on exactly the session #3647 asks to surface.
+	only := cacheAttributionVars(AdjudicationSummary{DeferColdTurns: 1, DeferColdCount: 4}, 0, 0)
+	if only == nil {
+		t.Fatal("defer-on session with no token slice must still emit cache_attribution, got nil")
+	}
+	if only.FakDeferColdCount != 4 || only.FakCompactionShedTokens != 0 {
+		t.Errorf("defer-only block = (defer %d, shed %d), want (4, 0)", only.FakDeferColdCount, only.FakCompactionShedTokens)
+	}
+
+	// On the WIRE the defer fields are omitempty, so a defer-OFF session keeps the block byte-stable
+	// (no all-zero defer keys that would read as a measured "0 tools deferred").
+	on, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"fak_defer_cold_turns", "fak_defer_cold_count", "fak_defer_cold_tool_names"} {
+		if !strings.Contains(string(on), key) {
+			t.Errorf("defer-on wire block missing %q: %s", key, on)
+		}
+	}
+	off, err := json.Marshal(cacheAttributionVars(AdjudicationSummary{CompactionShedTokens: 300}, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(off), "fak_defer_cold") {
+		t.Errorf("defer-off wire block must omit the defer keys, got: %s", off)
 	}
 }
 
