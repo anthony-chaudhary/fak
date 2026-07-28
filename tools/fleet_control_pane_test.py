@@ -207,16 +207,24 @@ class FleetControlPaneTest(unittest.TestCase):
         )
         self.assertEqual(pane.scheduler_result_text({"last_result": 1}), "1 (0x00000001)")
 
-    def test_windows_tick_register_script_forces_enable_after_create(self) -> None:
+    def test_windows_tick_register_script_starts_task_after_registering(self) -> None:
         script = (Path(__file__).resolve().parent / "register_control_pane_tick.ps1").read_text(encoding="utf-8")
 
-        create_idx = script.index("schtasks /Create")
-        enable_idx = script.index("schtasks /Change /TN $TaskName /ENABLE")
-        run_idx = script.index("schtasks /Run")
+        # The installer moved off `schtasks /Create` to an S4U Register-ScheduledTask
+        # (#3322), so the old `/Change /TN $TaskName /ENABLE` repair no longer exists:
+        # -Force creates-or-replaces the task already enabled. What still has to hold is
+        # the end state that repair existed to guarantee -- the task is registered, then
+        # started -- plus a registration failure being surfaced rather than swallowed,
+        # because S4U needs an elevated shell and silently skipping that leaves no tick.
+        register_idx = script.index("Register-ScheduledTask -TaskName $TaskName")
+        start_idx = script.index("Start-ScheduledTask -TaskName $TaskName")
 
-        self.assertLess(create_idx, enable_idx)
-        self.assertLess(enable_idx, run_idx)
-        self.assertIn("schtasks /Change /ENABLE failed", script)
+        self.assertLess(register_idx, start_idx)
+        self.assertIn("-Force", script[register_idx:start_idx])
+        self.assertIn("Register-ScheduledTask failed", script)
+        # A re-drift back to the schtasks path would reinstate the disabled-after-create
+        # bug; /Delete stays legal for `-Action remove`, the /Change repair does not.
+        self.assertNotIn("schtasks /Change", script)
 
     def test_disabled_scheduled_task_needs_action(self) -> None:
         task = {"supported": True, "installed": True, "state": "Disabled", "last_result": 0}
