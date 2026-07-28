@@ -379,6 +379,14 @@ func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error)
 	if err := refuseUnsupportedHybridArch(cfg, man); err != nil {
 		return nil, err
 	}
+	// Refuse the two Falcon variants whose fused-qkv layout the contiguous split
+	// below does not implement (Falcon-40B/180B new_decoder_architecture, and
+	// Falcon-RW). Both carry the SAME total row count as the contiguous cut, so
+	// splitFusedProjections cannot catch them and would load them silently wrong;
+	// this must therefore run before it. See falcon_variant.go.
+	if err := refuseUnsupportedFalconVariant(cfg, man); err != nil {
+		return nil, err
+	}
 	if err := splitFusedProjections(cfg, man); err != nil {
 		return nil, err
 	}
