@@ -322,7 +322,9 @@ func loadSafetensorsDir(dir string, cfg Config, open safetensorsFileOpener) (*Mo
 			return nil, fmt.Errorf("shard %s: %w", shard, err)
 		}
 	}
-	return newModel(cfg, man, raw)
+	// HF layout in, so the Cohere rotary re-layout applies here (cohere_rotary.go); the
+	// GGUF loader calls newModel directly because ggufload already normalized its side.
+	return newHFCheckpointModel(cfg, man, raw)
 }
 
 func loadSafetensorsFilePath(path string, cfg Config, open safetensorsFileOpener) (*Model, error) {
@@ -343,7 +345,7 @@ func loadSafetensorsFile(sf *safetensorsFile, cfg Config) (*Model, error) {
 	if err := appendSafetensorsFileInto(sf, man, &raw, &off, cfg); err != nil {
 		return nil, err
 	}
-	return newModel(cfg, man, raw)
+	return newHFCheckpointModel(cfg, man, raw)
 }
 
 // RetainMTP is the GLM-5.2 self-speculation substrate scaffold flag (#3078/#3197). When false

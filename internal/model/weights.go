@@ -417,7 +417,9 @@ func Load(dir string) (*Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("weights: %w", err)
 	}
-	return newModel(cfg, man, raw)
+	// export_oracle.py writes HF tensors verbatim, so this is an HF-layout checkpoint and
+	// takes the same rotary re-layout as the safetensors loaders (cohere_rotary.go).
+	return newHFCheckpointModel(cfg, man, raw)
 }
 
 // NewFromF32Tensors packs decoded source-format tensors into the same little-endian f32
