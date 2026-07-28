@@ -67,6 +67,17 @@ type Config struct {
 	QKNorm    bool    `json:"qk_norm"`
 	QKNormEps float64 `json:"qk_norm_eps"`
 
+	// QKNormPerHeadWeight says the q_norm/k_norm parameter is shaped (num_heads,
+	// head_dim) — ONE norm row per head — so qk-norm reduces over head_dim within each
+	// head and scales it by THAT head's own weight row. Cohere's CohereLayerNorm takes a
+	// TUPLE hidden size exactly for this ("The tuple is used for QKNorm to normalize
+	// across head_dim"). OLMo2's q_norm is the other shape: a single flat vector over the
+	// whole packed projection, normalized in ONE reduction. Both parameters have the same
+	// LENGTH (num_heads*head_dim), so the two forms are indistinguishable at the call site
+	// and this axis is what separates them. Off (default) keeps the OLMo2/Qwen3 behaviour
+	// byte-identical.
+	QKNormPerHeadWeight bool `json:"qk_norm_per_head_weight"`
+
 	// NormGain1p makes RMSNorm read (1+w) instead of w (Gemma's "+1" gain centering).
 	// false (default) = plain Llama weight.
 	NormGain1p bool `json:"norm_gain_1p"`
@@ -624,6 +635,13 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	if strings.Contains(family, "cohere") && h.LayerNorm == nil {
 		c.LayerNorm = true
 	}
+	if strings.Contains(family, "cohere") {
+		// Cohere's optional qk-norm is a CohereLayerNorm with a TUPLE hidden size
+		// (num_heads, head_dim): one mean-subtracting reduction per head over head_dim,
+		// scaled by that head's own weight row. Same parameter LENGTH as OLMo2's flat
+		// projection-width q_norm, so the shape cannot be inferred at the call site.
+		c.QKNormPerHeadWeight = true
+	}
 	if strings.Contains(family, "gptneox") {
 		if h.LayerNorm == nil {
 			c.LayerNorm = true
@@ -660,14 +678,44 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	return nil
 }
 
+// gemmaSlidingWindowPattern is the published local/global cadence PERIOD for a Gemma
+// family — layer l is sliding unless (l+1)%period == 0 — or 0 for a family that has no
+// such cadence.
+//
+// Gemma3 publishes the cadence in config.json (layer_types, or sliding_window_pattern
+// defaulting to 6: five local layers then one global). Gemma2 publishes NEITHER: its
+// config.json carries only `sliding_window`, and the alternation lives in the modeling
+// code as `is_sliding = not bool(layer_idx % 2)` (Gemma2DecoderLayer.__init__) — even
+// layers windowed, ODD layers full causal — which newer transformers lowers to exactly
+// the same rule at period 2 (`"sliding_attention" if bool((i+1) % 2) else
+// "full_attention"`). Before this defaulted, a Gemma2 checkpoint left LayerTypes empty,
+// so the Window loop below stamped `sliding_window` onto EVERY layer and silently
+// clipped the context of the half that must attend the whole prefix. That is invisible
+// until the prompt outgrows the window, which is why only a numeric witness caught it:
+// TestGemmaCPUNumericOracle/gemma2 (family_gemma_cpu_oracle_test.go).
+//
+// Only the window cadence changes for Gemma2. deriveRopeThetaPerLayer now also runs for
+// it, but Gemma2 sets no rope_local_base_freq, so the sliding layers get a 0 entry and
+// ropeThetaForLayer falls back to the single published rope_theta — the same base on
+// every layer, as HF does, and hasLayerSpecificRopeTheta stays false.
+func gemmaSlidingWindowPattern(family string) int {
+	switch {
+	case strings.Contains(family, "gemma3"):
+		return 6
+	case strings.Contains(family, "gemma2"):
+		return 2
+	}
+	return 0
+}
+
 func (c *Config) deriveLayerAttentionAxes(family string, slidingWindow *int, useSlidingWindow *bool) {
 	if c.NumLayers <= 0 {
 		return
 	}
-	if len(c.LayerTypes) == 0 && strings.Contains(family, "gemma3") {
+	if defaultPattern := gemmaSlidingWindowPattern(family); defaultPattern > 0 && len(c.LayerTypes) == 0 {
 		pattern := c.SlidingWindowPattern
 		if pattern == 0 {
-			pattern = 6
+			pattern = defaultPattern
 		}
 		c.LayerTypes = make([]string, c.NumLayers)
 		for l := range c.LayerTypes {
