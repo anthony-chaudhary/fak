@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,11 +25,21 @@ var routineTierLabels = []string{"tier/T2-optimal", "tier/T2-required"}
 // narrowed and undeclared cases each get their own test rather than riding in here.
 func rungRoot(t *testing.T) string {
 	t.Helper()
-	t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "on")
-	t.Setenv("FLEET_DISPATCH_ACCOUNTS", "")
+	setDispatchRungPlacement(t, true)
+	setDispatchAccountsRoster(t, "")
 	t.Setenv(dispatchRungWindowEnv, "")
 	t.Setenv(dispatchRungAccountsEnv, "laptop,cluster,frontier")
 	return t.TempDir()
+}
+
+// setDispatchRungPlacement declares the ladder setting for the duration of one test and
+// restores it afterwards — the config-surface counterpart of the t.Setenv this used to need,
+// now that the switch is `fak dispatch tick --rung-placement` rather than an environment read.
+func setDispatchRungPlacement(t *testing.T, on bool) {
+	t.Helper()
+	old := dispatchRungPlacement
+	dispatchRungPlacement = on
+	t.Cleanup(func() { dispatchRungPlacement = old })
 }
 
 // reachAll is the whole-roster assertion, for the pure resolver tests that are not about
@@ -93,21 +104,32 @@ func seatDefaultFor(models ...string) workerModelPolicy {
 // The seam defaults OFF and every off-ish spelling means off. Turning an automatic placer on
 // by default would re-point a fleet's traffic at hardware nobody said it could reach.
 func TestTheRungLadderStaysOffUntilAnOperatorTurnsItOn(t *testing.T) {
-	for _, off := range []string{"", "0", "off", "false", "no", "disable", "disabled", " OFF "} {
-		t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", off)
-		if dispatchRungPlacementEnabled() {
-			t.Errorf("%q enabled the ladder", off)
-		}
+	// The declaration is on the tick's command surface, not in the ambient environment: an
+	// automatic placer armed by a stray exported variable is exactly the accident this seam
+	// must not have, and a behavioral setting read via os.LookupEnv is what
+	// internal/envconfiglint refuses (CONFIG_NOT_ENV).
+	silent, _, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir()})
+	if code != 0 {
+		t.Fatalf("parse of a bare tick failed with code %d", code)
 	}
-	for _, on := range []string{"1", "on", "true", "yes", "enabled"} {
-		t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", on)
-		if !dispatchRungPlacementEnabled() {
-			t.Errorf("%q did not enable the ladder", on)
-		}
+	if silent.RungPlacement {
+		t.Error("an undeclared tick armed the ladder")
 	}
-	os.Unsetenv("FLEET_DISPATCH_RUNG_PLACEMENT")
+	declared, _, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir(), "--rung-placement"})
+	if code != 0 {
+		t.Fatalf("parse of a declared tick failed with code %d", code)
+	}
+	if !declared.RungPlacement {
+		t.Error("--rung-placement did not reach the options")
+	}
+
+	setDispatchRungPlacement(t, false)
 	if dispatchRungPlacementEnabled() {
-		t.Error("an unset knob enabled the ladder")
+		t.Error("an undeclared setting enabled the ladder")
+	}
+	setDispatchRungPlacement(t, true)
+	if !dispatchRungPlacementEnabled() {
+		t.Error("a declared setting did not enable the ladder")
 	}
 }
 
@@ -118,7 +140,7 @@ func TestAnUnconfiguredTickIsByteIdenticalToBeforeTheLadder(t *testing.T) {
 	root := rungRoot(t)
 	withRungRoster(t, root)
 	withRungJournal(t, root, rungTurns("qwen3.6-4b", 24, time.Minute, modelroute.VerifyWitness))
-	t.Setenv("FLEET_DISPATCH_RUNG_PLACEMENT", "off")
+	setDispatchRungPlacement(t, false)
 
 	before := seatDefaultFor("opus-5", "glm-5.2")
 	after, skip := applyRungPlacement(root, routineTierLabels, before)

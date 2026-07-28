@@ -85,9 +85,19 @@ const (
 	rungSkipUnreachable = "accounts-bind-no-models"   // the declared accounts bind nothing placeable
 )
 
+// dispatchRungPlacement is the ladder's DECLARATION: the config-surface setting
+// `fak dispatch tick --rung-placement` writes, zero value OFF. Declared rather than read from
+// the process environment because a placement posture is behavior, not a credential — the
+// CONFIG_NOT_ENV rule internal/envconfiglint ratchets. A package seam rather than a parameter
+// for the reason dispatchTickView is one: the switch is read from three call chains (the
+// placement half here, the escalation half in dispatch_rung_escalate.go, and the operator
+// ledger surface in dispatch_rung_ledger.go), none of which otherwise needs to carry it.
+// evaluateDispatchTick publishes the parsed dispatchTickOptions into it, beside its siblings
+// in dispatch_placement_evidence.go.
+var dispatchRungPlacement bool
+
 // dispatchRungPlacementEnabled reports whether the opt-in placement-ladder seam
-// (FLEET_DISPATCH_RUNG_PLACEMENT) is switched on. Default (unset / an off-ish value) is OFF.
-// Mirrors dispatchPlacementEvidenceEnabled's truthy/falsy grammar.
+// (`fak dispatch tick --rung-placement`) is switched on. Default (undeclared) is OFF.
 //
 // Off-by-default is not timidity here. A device- or fleet-rung model id is only launchable
 // by a worker whose seat routes to that endpoint, and nothing on this path can PROBE that.
@@ -95,17 +105,7 @@ const (
 // seats reach, so the claim is written down and enforced against every rung instead of
 // being implied by this one boolean. That is an assertion made explicit, not a verified
 // fact — the fleet trust boundary (#5421, track G) is what would make it verifiable.
-func dispatchRungPlacementEnabled() bool {
-	raw, ok := os.LookupEnv("FLEET_DISPATCH_RUNG_PLACEMENT")
-	if !ok {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "0", "off", "false", "no", "disable", "disabled":
-		return false
-	}
-	return true
-}
+func dispatchRungPlacementEnabled() bool { return dispatchRungPlacement }
 
 // rungReach is the operator's declaration of which roster accounts THIS backend can dial.
 //

@@ -82,7 +82,20 @@ type dispatchTickOptions struct {
 	// objective is refused (FOCUS_WIP_SATURATED) instead of merely advised. Continuation of
 	// an already-open objective is never held. Default off (warn), so the fleet is
 	// byte-identical until an operator opts in via --focus-hold / FLEET_DISPATCH_FOCUS_HOLD.
-	FocusHold         bool
+	FocusHold bool
+	// PlacementEvidence, RungPlacement, and AccountsRoster are the #5416 placement seams'
+	// declarations — the tick's own config surface for three behavioral settings, rather than
+	// three os.LookupEnv reads of the ambient process environment (internal/envconfiglint's
+	// CONFIG_NOT_ENV rule: secrets belong in the environment, behavioral settings belong on the
+	// config surface). PlacementEvidence records the work-class/zone sidecars and the graded
+	// turn journal; RungPlacement arms the automatic placement ladder and its escalation half;
+	// AccountsRoster names the roster consulted for zone ATTRIBUTION (never for dispatch), empty
+	// meaning the conventional tools/model-accounts.json. All three zero values are the
+	// pre-seam posture, so a tick that declares nothing is byte-identical to before they landed.
+	// evaluateDispatchTick publishes them into the package seams the leaf helpers read.
+	PlacementEvidence bool
+	RungPlacement     bool
+	AccountsRoster    string
 	Account           *dispatchtick.Account
 	Membership        *dispatchtick.Membership
 	DiscoverySnapshot *runsSnapshot
@@ -239,6 +252,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off (default: $FLEET_CODEX_LOOP_GATE or loop)")
 	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", dispatchCodexLoopGateDefaultSinceHoursValue(), "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
 	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", dispatchCodexLoopGateDefaultLimitValue(), "with --codex-loop-gate, maximum newest Codex sessions to scan")
+	placementEvidence := fs.Bool("placement-evidence", false, "record #5416 placement evidence: write the .workclass/.zone sidecars beside each worker log and append the witness sweep's graded turn outcomes to the runs-directory journal (default off: no extra sidecars, no extra payload keys, no journal)")
+	rungPlacement := fs.Bool("rung-placement", false, "arm the automatic placement ladder: grade the account roster's bound models from the turn journal and start an UNPINNED worker on the cheapest rung the evidence supports, and re-dispatch an underpowered attempt one rung up (default off; also requires $FLEET_DISPATCH_RUNG_ACCOUNTS to declare which accounts this backend can dial)")
+	accountsRoster := fs.String("accounts-roster", "", "model-account roster consulted for placement zone ATTRIBUTION and grading only, never for dispatch (default: tools/model-accounts.json when it exists; with no roster nothing is attributed rather than defaulted to a rung)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 
 	accountTag := fs.String("account-tag", "", "internal: forced account tag (used by dispatch wave)")
@@ -324,6 +340,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		CodexLoopGate:           strings.TrimSpace(*codexLoopGate),
 		CodexLoopGateSinceHours: maxFloat64(0, *codexLoopGateSinceHours),
 		CodexLoopGateLimit:      *codexLoopGateLimit,
+		PlacementEvidence:       *placementEvidence,
+		RungPlacement:           *rungPlacement,
+		AccountsRoster:          strings.TrimSpace(*accountsRoster),
 	}
 	if *accountTag != "" || *accountTier != "" || *accountModel != "" || *accountDir != "" {
 		opts.Account = &dispatchtick.Account{
@@ -543,7 +562,7 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	// default fleet tick is byte-identical to before this seam.
 	tierProfile, tierBucket := dispatchTierLaunchProfile(opts.Backend, labels, opts.WorkKind)
 	modelPolicy := resolveWorkerModelPolicy(opts.Backend, pick.Lane, opts.WorkerModel, account, dispatchTickPolicy(root), opts.PinWorkerModel, tierProfile, opts.WorkClassModel)
-	// Opt-in automatic placement ladder (FLEET_DISPATCH_RUNG_PLACEMENT, #5416 track E): grade
+	// Opt-in automatic placement ladder (--rung-placement, #5416 track E): grade
 	// the roster's bound models from the turn journal and start this worker on the cheapest
 	// rung the evidence supports, instead of the seat's vendor default. Lowest precedence of
 	// all — it can only fill a seat default — and it runs BEFORE the capacity reroute and the
@@ -677,6 +696,18 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	// flag defaults View to `current`; a programmatic tick (wave/sweep/garden)
 	// that leaves View empty keeps today's full-backlog behavior.
 	dispatchTickView = opts.View
+	// #5416 tracks D/E/F: publish this tick's placement settings to the package seams the
+	// placement, escalation, sidecar, and journal helpers read. They are DECLARED on the tick's
+	// own config surface (--placement-evidence / --rung-placement / --accounts-roster) rather
+	// than read out of the process environment, which is the CONFIG_NOT_ENV rule
+	// internal/envconfiglint ratchets: an env var is for a secret, a behavioral setting belongs
+	// where `--help` can name it and a caller can set it per invocation. Written here, beside
+	// dispatchTickView and for the same reason — the readers hang off several call chains whose
+	// many stubs keep their signature. A programmatic tick (wave / sweep / garden) that leaves
+	// them zero gets the pre-seam posture: both switches off, no roster override.
+	dispatchPlacementEvidence = opts.PlacementEvidence
+	dispatchRungPlacement = opts.RungPlacement
+	dispatchAccountsRoster = opts.AccountsRoster
 
 	// Per-phase wall-clock attribution (observability): a slow tick is otherwise a
 	// black box -- the dominant cost (the ~40s fleet_sessions.py registry scan) and

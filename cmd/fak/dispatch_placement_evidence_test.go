@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -35,25 +36,56 @@ func writePlacementRoster(t *testing.T, dir string) string {
 	return p
 }
 
+// setDispatchPlacementEvidence declares the placement-evidence setting for the duration of one
+// test and restores it afterwards — what a test does now that the setting lives on the tick's
+// config surface instead of in the process environment (t.Setenv's job before #5416's reads
+// were relocated off the environment).
+func setDispatchPlacementEvidence(t *testing.T, on bool) {
+	t.Helper()
+	old := dispatchPlacementEvidence
+	dispatchPlacementEvidence = on
+	t.Cleanup(func() { dispatchPlacementEvidence = old })
+}
+
+// setDispatchAccountsRoster declares the attribution roster override the same way.
+func setDispatchAccountsRoster(t *testing.T, path string) {
+	t.Helper()
+	old := dispatchAccountsRoster
+	dispatchAccountsRoster = path
+	t.Cleanup(func() { dispatchAccountsRoster = old })
+}
+
 func TestPlacementEvidenceStaysOffUntilAnOperatorTurnsItOn(t *testing.T) {
 	// The whole seam writes sidecars, payload keys, and a journal file. Defaulting it on
 	// would change every existing fleet's runs directory and payload shape without anyone
-	// asking, so the default must be off and the off-ish spellings must all mean off.
-	for _, off := range []string{"", "0", "off", "false", "no", "disable", "disabled", " OFF "} {
-		t.Setenv("FLEET_DISPATCH_PLACEMENT_EVIDENCE", off)
-		if dispatchPlacementEvidenceEnabled() {
-			t.Errorf("%q enabled the seam", off)
-		}
+	// asking, so a tick that DECLARES nothing must read as off — and the declaration has to be
+	// on the command surface, where --help names it and a caller sets it per invocation, not in
+	// the ambient environment (internal/envconfiglint, CONFIG_NOT_ENV).
+	silent, _, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir()})
+	if code != 0 {
+		t.Fatalf("parse of a bare tick failed with code %d", code)
 	}
-	for _, on := range []string{"1", "on", "true", "yes", "enabled"} {
-		t.Setenv("FLEET_DISPATCH_PLACEMENT_EVIDENCE", on)
-		if !dispatchPlacementEvidenceEnabled() {
-			t.Errorf("%q did not enable the seam", on)
-		}
+	if silent.PlacementEvidence || silent.AccountsRoster != "" {
+		t.Errorf("an undeclared tick opted in: evidence=%v roster=%q", silent.PlacementEvidence, silent.AccountsRoster)
 	}
-	os.Unsetenv("FLEET_DISPATCH_PLACEMENT_EVIDENCE")
+	declared, _, code := parseDispatchTickFlags(io.Discard, []string{
+		"--workspace", t.TempDir(), "--placement-evidence", "--accounts-roster", "roster.json",
+	})
+	if code != 0 {
+		t.Fatalf("parse of a declared tick failed with code %d", code)
+	}
+	if !declared.PlacementEvidence || declared.AccountsRoster != "roster.json" {
+		t.Errorf("--placement-evidence/--accounts-roster did not reach the options: %+v", declared)
+	}
+
+	// And the seam the leaf helpers read is the one the tick publishes.
+	setDispatchPlacementEvidence(t, false)
 	if dispatchPlacementEvidenceEnabled() {
-		t.Error("unset enabled the seam")
+		t.Error("an undeclared setting enabled the seam")
+	}
+	setDispatchPlacementEvidence(t, true)
+	if !dispatchPlacementEvidenceEnabled() {
+		t.Error("a declared setting did not enable the seam")
 	}
 }
 
@@ -61,7 +93,7 @@ func TestARungIsAttributedOnlyForAModelTheRosterBinds(t *testing.T) {
 	// The roster's default is the LOCAL account, so a resolver built on Roster.Resolve would
 	// report every unbound id as running on this box — counting a vendor call as a saving.
 	dir := t.TempDir()
-	t.Setenv("FLEET_DISPATCH_ACCOUNTS", writePlacementRoster(t, dir))
+	setDispatchAccountsRoster(t, writePlacementRoster(t, dir))
 	resolve := dispatchZoneResolver(dir)
 	if resolve == nil {
 		t.Fatal("no resolver from a valid roster")
@@ -86,7 +118,7 @@ func TestARungIsAttributedOnlyForAModelTheRosterBinds(t *testing.T) {
 
 func TestNoRosterAndABrokenRosterBothAttributeNothing(t *testing.T) {
 	dir := t.TempDir()
-	os.Unsetenv("FLEET_DISPATCH_ACCOUNTS")
+	setDispatchAccountsRoster(t, "")
 	if got := dispatchAccountsRosterPath(dir); got != "" {
 		t.Errorf("roster path %q from an empty root", got)
 	}
@@ -100,7 +132,7 @@ func TestNoRosterAndABrokenRosterBothAttributeNothing(t *testing.T) {
 	if err := os.WriteFile(bad, []byte(`{"version":"fak-accounts/v1","accounts":[{"id":"x","kind":"not-a-kind"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FLEET_DISPATCH_ACCOUNTS", bad)
+	setDispatchAccountsRoster(t, bad)
 	if resolve := dispatchZoneResolver(dir); resolve != nil {
 		t.Error("a malformed roster produced a resolver")
 	}
@@ -121,7 +153,7 @@ func TestNoRosterAndABrokenRosterBothAttributeNothing(t *testing.T) {
 
 func TestTheTickRecordsAReasonForEachFactItCannotName(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("FLEET_DISPATCH_ACCOUNTS", writePlacementRoster(t, dir))
+	setDispatchAccountsRoster(t, writePlacementRoster(t, dir))
 	// An untriaged issue on an unpinned (seat-default) slot: neither fact is knowable, and
 	// both refusals must be distinct and named, because they are different work items —
 	// triage the backlog vs. pin and bind the model.

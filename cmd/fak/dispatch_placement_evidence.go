@@ -28,9 +28,9 @@ import (
 //	         the producer as its Class / Zone hooks.
 //	journal  the produced outcomes are appended to a jsonl the grader reads.
 //
-// The whole seam is OFF unless FLEET_DISPATCH_PLACEMENT_EVIDENCE says otherwise, matching
-// how every other dispatch-layer knob here lands: an unconfigured fleet writes no extra
-// sidecars, adds no payload keys, and creates no journal — byte-identical to before.
+// The whole seam is OFF unless `fak dispatch tick --placement-evidence` says otherwise,
+// matching how every other dispatch-layer knob here lands: an unconfigured fleet writes no
+// extra sidecars, adds no payload keys, and creates no journal — byte-identical to before.
 //
 // Two refusals are load-bearing and both point the same way, away from over-claiming:
 //
@@ -56,27 +56,38 @@ const (
 	dispatchZoneUnknownKey      = "placement_zone_unknown"
 )
 
+// The two DECLARATIONS behind this seam, and why they are declarations rather than
+// environment reads.
+//
+// Both are behavioral settings — one switches an evidence-recording seam on, the other names
+// a file to attribute against — and neither is a credential, so both belong on the config
+// surface and not in the environment. That is the rule internal/envconfiglint ratchets
+// (CONFIG_NOT_ENV): an os.LookupEnv of a non-secret name is refused, because a setting read
+// out of the ambient environment is invisible to `--help`, unrecorded in the tick payload,
+// and impossible to give a per-invocation value. `fak dispatch tick` owns them now, as
+// --placement-evidence and --accounts-roster, and evaluateDispatchTick publishes the parsed
+// dispatchTickOptions here.
+//
+// Package seams rather than parameters, for the reason dispatchTickView is one: the readers
+// hang off three different call chains (prepare → record, spawn → sidecars, witness sweep →
+// journal, plus the rung ladder next door), so a parameter would grow the signature of every
+// helper and stub in between to carry a value only the leaves use. The zero values are the
+// pre-seam posture exactly — off, and no roster override.
+var (
+	dispatchPlacementEvidence bool
+	dispatchAccountsRoster    string
+)
+
 // dispatchPlacementEvidenceEnabled reports whether the opt-in placement-evidence seam
-// (FLEET_DISPATCH_PLACEMENT_EVIDENCE) is switched on. Default (unset / an off-ish value) is
-// OFF. Mirrors dispatchTierLaunchEnabled's truthy/falsy grammar.
-func dispatchPlacementEvidenceEnabled() bool {
-	raw, ok := os.LookupEnv("FLEET_DISPATCH_PLACEMENT_EVIDENCE")
-	if !ok {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "0", "off", "false", "no", "disable", "disabled":
-		return false
-	}
-	return true
-}
+// (`fak dispatch tick --placement-evidence`) is switched on. Default (undeclared) is OFF.
+func dispatchPlacementEvidenceEnabled() bool { return dispatchPlacementEvidence }
 
 // dispatchAccountsRosterPath locates the model-account roster used for ZONE ATTRIBUTION
-// only — this path never dispatches anything. FLEET_DISPATCH_ACCOUNTS wins; otherwise a
+// only — this path never dispatches anything. A declared --accounts-roster wins; otherwise a
 // conventional tools/model-accounts.json is used when it exists. An empty result means no
 // roster, which attributes nothing rather than defaulting a rung.
 func dispatchAccountsRosterPath(root string) string {
-	if p := strings.TrimSpace(os.Getenv("FLEET_DISPATCH_ACCOUNTS")); p != "" {
+	if p := strings.TrimSpace(dispatchAccountsRoster); p != "" {
 		return p
 	}
 	p := filepath.Join(root, "tools", "model-accounts.json")
