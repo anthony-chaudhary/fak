@@ -47,7 +47,7 @@ func TestMemberProgressSpinningEndToEnd(t *testing.T) {
 	if prog != superloop.ProgressSpinning || reason != relay.ReasonNoProgress {
 		t.Fatalf("ticking + zero verified steps = (%q, %q), want (spinning, %s)", prog, reason, relay.ReasonNoProgress)
 	}
-	if got := loopDebt(live, prog); got != 1 {
+	if got := loopDebt(live, prog, ""); got != 1 {
 		t.Fatalf("loopDebt(live, spinning) = %d, want 1 (the #4956 progress term; pre-#4956 this read clean)", got)
 	}
 
@@ -60,7 +60,7 @@ func TestMemberProgressSpinningEndToEnd(t *testing.T) {
 	if prog != superloop.ProgressAdvancing || reason != "" {
 		t.Fatalf("ticking + verified step = (%q, %q), want (advancing, \"\")", prog, reason)
 	}
-	if got := loopDebt(live, prog); got != 0 {
+	if got := loopDebt(live, prog, ""); got != 0 {
 		t.Fatalf("loopDebt(live, advancing) = %d, want 0", got)
 	}
 
@@ -73,7 +73,7 @@ func TestMemberProgressSpinningEndToEnd(t *testing.T) {
 	if prog != superloop.ProgressSpinning {
 		t.Fatalf("stale ticking loop progress = %q, want spinning (stale still ticks)", prog)
 	}
-	if got := loopDebt(stale, prog); got != 2 {
+	if got := loopDebt(stale, prog, ""); got != 2 {
 		t.Fatalf("loopDebt(stale, spinning) = %d, want 2 (liveness unit + progress term)", got)
 	}
 
@@ -85,7 +85,7 @@ func TestMemberProgressSpinningEndToEnd(t *testing.T) {
 	if prog != superloop.ProgressUnmeasured || reason != "" {
 		t.Fatalf("unbound anchor = (%q, %q), want (unmeasured, \"\")", prog, reason)
 	}
-	if got := loopDebt(live, prog); got != 0 {
+	if got := loopDebt(live, prog, ""); got != 0 {
 		t.Fatalf("loopDebt(live, unmeasured) = %d, want 0 (surface-only)", got)
 	}
 

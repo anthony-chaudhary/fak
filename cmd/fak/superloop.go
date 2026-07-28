@@ -278,7 +278,8 @@ func (c *superloopCollector) collect(s superloop.Super, onPath map[string]bool) 
 				st.Measured = true
 				st.Dark = lh.Dark
 				st.Progress, st.ProgressReason = c.memberProgress(m, lh)
-				st.Debt = loopDebt(lh, st.Progress)
+				st.FollowOn, st.FollowOnReason = c.memberFollowon(m, lh)
+				st.Debt = loopDebt(lh, st.Progress, st.FollowOn)
 				st.Detail = fmt.Sprintf("state %s, %d run(s), keep %s", lh.State, lh.Runs, keepRateStr(lh.KeepRate))
 				break
 			}
@@ -444,6 +445,7 @@ func (c *superloopCollector) loopFleet(m superloop.Member) []superloop.MemberSta
 			continue
 		}
 		sts[i].Progress, sts[i].ProgressReason = c.memberProgress(sts[i].Member, lh)
+		sts[i].FollowOn, sts[i].FollowOnReason = c.memberFollowon(sts[i].Member, lh)
 		sts[i].Debt = superloop.FleetDebt(string(lh.State), lh.Dark, sts[i].Progress, sts[i].FollowOn)
 	}
 	return sts
@@ -483,18 +485,24 @@ func (c *superloopCollector) memberProgress(m superloop.Member, lh loopfleet.Loo
 // binding (a per-loop persisted cursor) rides the #4958 tend wiring.
 var progressLedgerRef = func(root, kind string) string { return "" }
 
-// loopDebt maps a loop-health row PLUS its progress verdict (#4956) to a debt
-// integer for the worst-first fold: a dark loop carries its urgency in the Dark flag
-// (debt 0), a stale loop is one unit of debt (slipping past its cadence), and a
-// SPINNING loop adds the progress term — one more unit for ticking with zero
-// advanced verified progress — so a live-but-producing-nothing loop can no longer
-// read clean.
-func loopDebt(lh loopfleet.LoopHealth, prog superloop.MemberProgress) int {
+// loopDebt maps a loop-health row PLUS its progress verdict (#4956) and its
+// follow-on verdict (#4957) to a debt integer for the worst-first fold: a dark loop
+// carries its urgency in the Dark flag (debt 0), a stale loop is one unit of debt
+// (slipping past its cadence), a SPINNING loop adds the progress term — one more unit
+// for ticking with zero advanced verified progress — and an ORPHANED loop adds the
+// follow-on term, one more unit for emitting work nobody advances. So neither a
+// live-but-producing-nothing loop nor a producing-into-the-void one can read clean,
+// and a loop that is both compounds. This is the hand-named KindLoop counterpart of
+// the enumerated fleet's superloop.FleetDebt; the two weigh the same three axes.
+func loopDebt(lh loopfleet.LoopHealth, prog superloop.MemberProgress, followOn superloop.MemberFollowon) int {
 	debt := 0
 	if !lh.Dark && lh.State == loopmgr.HealthStale {
 		debt = 1
 	}
 	if prog == superloop.ProgressSpinning {
+		debt++
+	}
+	if followOn == superloop.FollowonOrphaned {
 		debt++
 	}
 	return debt
