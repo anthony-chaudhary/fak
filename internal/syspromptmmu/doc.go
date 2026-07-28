@@ -15,7 +15,9 @@
 // after-breakpoint overlay while copying the resident spine+policy prefix verbatim
 // (SpliceSystemOverlay) — proving bytes.Equal(prefix) e2e (invariants 1+2), fail-safe
 // identity on a mutated spine. It is the system-block twin of promptmmu.CompactInboundTools
-// and anchors on the same cached-prefix boundary via promptmmu.ArraySplicePoints. Rung 3
+// and anchors on the same cached-prefix boundary via promptmmu.ArraySplicePointsWithReason,
+// whose closed-set reason lets both consumers here tell a STRUCTURAL decode failure from an
+// ordinary non-candidate instead of collapsing both into one bare miss (#5442). Rung 3
 // (overlay.go, #1261) fills the overlay by QUERY — the first live caller of the
 // skill-loader keystone (capindex.Catalog): SelectOverlay ranks the at-rest cards for a
 // turn intent, faults winners up to a token budget, and emits the overlay segments the
@@ -28,7 +30,9 @@
 // rollback. Rung 6 (audit.go, #1264) is the observability witness: AuditRealizedPrefix re-derives a
 // wire body's resident prefix and proves it equals the planned spine — divergence is a
 // loud alarm (an accidental head mutation caught before a cache miss), a harness-authored
-// body is a neutral AuditAbsent. It consumes the context-safety doctrine (#1217); it does
+// body is a neutral AuditAbsent, and a body that could not be read at all is AuditUnreadable
+// — held OUT of the neutral bucket so a decode failure cannot hide in the expected-large
+// passthrough count. It consumes the context-safety doctrine (#1217); it does
 // not mint parallel numbers.
 //
 // Tier: mechanism (2) — see internal/architest. This package may import only packages

@@ -35,10 +35,20 @@ const (
 	// least len(plan) blocks) but a resident block's content changed from the plan. THE
 	// ALARM — an accidental head mutation.
 	AuditDiverged = "spine-diverged"
-	// AuditAbsent: the body carries no fak base context to audit (no system[] array, no
-	// breakpoint, too few blocks, or the breakpoint is misplaced — e.g. a harness-authored
-	// passthrough body). Neutral, NOT an alarm: there is simply no fak spine present.
+	// AuditAbsent: the body carries no fak base context to audit (no system[] array, a
+	// non-array system value, an empty array, no breakpoint, too few blocks, or the
+	// breakpoint is misplaced — e.g. a harness-authored passthrough body). Neutral, NOT an
+	// alarm: there is simply no fak spine present, and on today's passthrough traffic this
+	// is the expected-large bucket.
 	AuditAbsent = "no-fak-base-context"
+	// AuditUnreadable: the body could not be READ — it is not a JSON object, or its
+	// system[] value is array-shaped and still failed to decode (spans or text blocks).
+	// Split out of AuditAbsent (#5442) because folding a structural failure into the
+	// expected-large neutral bucket is precisely where a rise raises no suspicion: a
+	// decoder regression would have shown up as fewer AuditOK, never as an error. Not the
+	// spine alarm (nothing is known to have mutated) but not neutral either — a nonzero
+	// count here is a malformed-input or fak-fault signal that is assertable on its own.
+	AuditUnreadable = "unreadable-body"
 )
 
 // SegmentAudit is the per-resident-segment witness comparison.
@@ -54,7 +64,8 @@ type PrefixAudit struct {
 	Present bool
 	// Diverged is the ALARM: Present and at least one resident block's content changed.
 	Diverged bool
-	// Status is the closed-set verdict (AuditOK / AuditDiverged / AuditAbsent).
+	// Status is the closed-set verdict (AuditOK / AuditDiverged / AuditAbsent /
+	// AuditUnreadable).
 	Status string
 	// ExpectDigest is the witness-chain digest of the plan (the expected spine).
 	ExpectDigest string
@@ -92,33 +103,39 @@ func planWitnesses(plan []cachemeta.PromptSegment) []string {
 // fak-shaped (the cache breakpoint sits on the last resident block and there are at least
 // len(plan) blocks), then re-derives each resident block's content witness and compares
 // to the plan. A content mismatch is a loud divergence (the alarm); a body with no
-// fak-shaped base context is AuditAbsent (neutral). The overlay (blocks after the
-// breakpoint) is intentionally NOT audited — it is the per-turn layer that is meant to
-// change.
+// fak-shaped base context is AuditAbsent (neutral); a body that could not be READ at all is
+// AuditUnreadable, held apart from the neutral bucket so a decode failure is not counted as
+// an ordinary passthrough. The overlay (blocks after the breakpoint) is intentionally NOT
+// audited — it is the per-turn layer that is meant to change.
 func AuditRealizedPrefix(raw []byte, plan []cachemeta.PromptSegment) PrefixAudit {
 	a := PrefixAudit{BreakIdx: -1, ExpectDigest: witnessChainDigest(planWitnesses(plan))}
 	if len(raw) == 0 || len(plan) == 0 {
 		a.Status = AuditAbsent
 		return a
 	}
+	// One decode, one reason. ArraySplicePointsWithReason names WHY no offsets came back,
+	// and ArrayReasonIsStructural is the single registered partition of that closed set —
+	// so "the body is malformed / its system[] would not decode" and "this body simply has
+	// no fak base context" stop sharing one verdict here.
+	breakIdx, _, _, reason := promptmmu.ArraySplicePointsWithReason(raw, "system")
+	if reason != promptmmu.ArrayOffsetsResolved {
+		a.Status = AuditAbsent
+		if promptmmu.ArrayReasonIsStructural(reason) {
+			a.Status = AuditUnreadable
+		}
+		return a
+	}
+	// Offsets resolved ⇒ raw IS a JSON object carrying a decodable, anchored system[].
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(raw, &obj) != nil {
-		a.Status = AuditAbsent
-		return a
-	}
-	sysRaw, ok := obj["system"]
-	if !ok {
-		a.Status = AuditAbsent
-		return a
-	}
-	breakIdx, _, _, anchored := promptmmu.ArraySplicePoints(raw, "system")
-	if !anchored {
-		a.Status = AuditAbsent
+		a.Status = AuditUnreadable
 		return a
 	}
 	var blocks []textBlock
-	if json.Unmarshal(sysRaw, &blocks) != nil {
-		a.Status = AuditAbsent
+	if json.Unmarshal(obj["system"], &blocks) != nil {
+		// STRUCTURAL: system[] yielded element spans but not text blocks. Same class as
+		// promptmmu.ArrayUndecodable, so it carries the same verdict.
+		a.Status = AuditUnreadable
 		return a
 	}
 	// A fak-shaped base context has its breakpoint on the LAST resident block and at

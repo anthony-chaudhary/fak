@@ -44,13 +44,19 @@ import (
 // (Changed == false) it ALWAYS names one of these, so an un-spliced body is auditable —
 // never a silent no-op (the house discipline promptmmu.CompactInboundTools follows).
 const (
-	SkipEmptyInput     = "empty-input"        // raw was empty
-	SkipNotJSONObject  = "not-json-object"    // raw is not a JSON object
-	SkipNoSystemArray  = "no-system-array"    // no system[] array (absent, or a bare string)
-	SkipNoBreakpoint   = "no-breakpoint"      // system[] carries no cache_control to anchor the cached prefix on
-	SkipSpineMismatch  = "spine-mismatch"     // the body's resident prefix is not fak's authored spine+policy plan
-	SkipSpliceUnproven = "splice-unproven"    // the spliced body failed the prefix byte check or re-decode
-	SkipUndecodableSys = "undecodable-system" // system[] could not be decoded into text blocks
+	SkipEmptyInput     = "empty-input"     // raw was empty
+	SkipNotJSONObject  = "not-json-object" // raw is not a JSON object
+	SkipNoSystemArray  = "no-system-array" // no system[] array (absent, an empty array, or a non-array value: a bare string, null, an object)
+	SkipNoBreakpoint   = "no-breakpoint"   // system[] IS an array but carries no cache_control to anchor the cached prefix on
+	SkipSpineMismatch  = "spine-mismatch"  // the body's resident prefix is not fak's authored spine+policy plan
+	SkipSpliceUnproven = "splice-unproven" // the spliced body failed the prefix byte check or re-decode
+	// SkipUndecodableSys is the STRUCTURAL failure of this set: system[] is array-shaped but
+	// could not be decoded — either its element spans (promptmmu.ArrayUndecodable) or its
+	// text blocks. It is deliberately NOT folded into SkipNoBreakpoint, which is the benign,
+	// expected-large bucket every harness-authored passthrough lands in; a decode regression
+	// counted there would read as a quiet drop in splice rate rather than as an error (#5442,
+	// the sibling of #5387 / 547e44b70).
+	SkipUndecodableSys = "undecodable-system"
 )
 
 // SpliceResult reports what SpliceSystemOverlay did, so the swap is LEGIBLE.
@@ -165,33 +171,43 @@ func SpliceSystemOverlay(raw []byte, plan, overlay []cachemeta.PromptSegment, de
 		return identity(raw, SkipSpineMismatch)
 	}
 
+	// Anchor on the SAME cached-prefix boundary CompactInboundTools uses, via the shared
+	// promptmmu primitive: breakIdx = the last system block carrying cache_control. The
+	// WithReason form NAMES why no offsets came back, so this maps one closed set onto
+	// another instead of re-parsing sysRaw to guess. The guess it replaces was wrong:
+	// json.Unmarshal of JSON `null` into a []json.RawMessage succeeds, so a body sending
+	// `"system": null` fell through and was reported as the benign SkipNoBreakpoint —
+	// claiming there was a system array that merely lacked an anchor, when there was no
+	// array at all.
+	breakIdx, prefixEnd, lastElemEnd, reason := promptmmu.ArraySplicePointsWithReason(raw, "system")
+	switch {
+	case reason == promptmmu.ArrayOffsetsResolved:
+		// Anchored — fall through to the spine check below.
+	case reason == promptmmu.ArrayNotJSONObject:
+		return identity(raw, SkipNotJSONObject)
+	case promptmmu.ArrayReasonIsStructural(reason):
+		// The value is array-shaped and still would not decode: a bug signal, never the
+		// routine "this request is not spliceable".
+		return identity(raw, SkipUndecodableSys)
+	case reason == promptmmu.ArrayKeyAbsent,
+		reason == promptmmu.ArrayValueNotArray,
+		reason == promptmmu.ArrayNoElements:
+		return identity(raw, SkipNoSystemArray)
+	default: // promptmmu.ArrayNoBreakpoint (ArrayEmptyBody is unreachable: len(raw) checked above)
+		return identity(raw, SkipNoBreakpoint)
+	}
+
+	// Offsets resolved ⇒ raw IS a JSON object carrying a decodable, anchored system[].
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(raw, &obj) != nil {
 		return identity(raw, SkipNotJSONObject)
-	}
-	sysRaw, ok := obj["system"]
-	if !ok {
-		return identity(raw, SkipNoSystemArray)
-	}
-
-	// Anchor on the SAME cached-prefix boundary CompactInboundTools uses, via the shared
-	// promptmmu primitive: breakIdx = the last system block carrying cache_control.
-	breakIdx, prefixEnd, lastElemEnd, anchored := promptmmu.ArraySplicePoints(raw, "system")
-	if !anchored {
-		// Distinguish "system is a bare string / not an array" from "array but no
-		// cache_control" so the skip reason is precise.
-		var probe []json.RawMessage
-		if json.Unmarshal(sysRaw, &probe) != nil {
-			return identity(raw, SkipNoSystemArray)
-		}
-		return identity(raw, SkipNoBreakpoint)
 	}
 
 	// Verify the body's resident prefix IS fak's authored spine+policy plan, and that
 	// the breakpoint sits exactly on the last resident block (not earlier, not inside
 	// the overlay). Any divergence ⇒ this is not a body fak authored ⇒ fail safe.
 	var blocks []textBlock
-	if json.Unmarshal(sysRaw, &blocks) != nil {
+	if json.Unmarshal(obj["system"], &blocks) != nil {
 		return identity(raw, SkipUndecodableSys)
 	}
 	if breakIdx != len(plan)-1 || len(blocks) < len(plan) {
