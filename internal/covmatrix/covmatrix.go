@@ -75,7 +75,13 @@ type Family struct {
 	// independent HF-semantics references in internal/model/family_cpu_oracle_test.go
 	// (#1271 Lane 1); MPT via internal/model/family_mpt_cpu_oracle_test.go, whose
 	// reference adds the ALiBi slope table (including the non-power-of-two head
-	// reorder), the mean-subtracting bias-free LayerNorm, and the fused-Wqkv row cut.
+	// reorder), the mean-subtracting bias-free LayerNorm, and the fused-Wqkv row cut;
+	// Falcon via internal/model/family_falcon_cpu_oracle_test.go, whose reference adds
+	// the parallel-residual dataflow (both branches read the same pre-block x through
+	// the same norm) and the multi-query fused-qkv cut. That Falcon reference covers the
+	// 7B multi_query variant — the one production's contiguous qkv split and single
+	// aliased input_layernorm actually implement; new_decoder_architecture (40B/180B)
+	// and Falcon-RW use different layouts and are NOT witnessed by it.
 	// Every other family's HF oracle is the checkpoint-gated #474 set that SKIPs under
 	// -short. This is the honest "asserted, not proven" boundary the epic names.
 	OracleInCI bool
@@ -89,7 +95,7 @@ var Families = []Family{
 	{Name: "Llama", ResolverToken: "", Topology: PreNorm, OracleInCI: true},
 	{Name: "Qwen2/3.x", ResolverToken: "", Topology: PreNorm, OracleInCI: true},
 	{Name: "GPT-NeoX", ResolverToken: "gptneox", Topology: ParallelResidual, OracleInCI: false},
-	{Name: "Falcon", ResolverToken: "falcon", Topology: ParallelResidual, OracleInCI: false},
+	{Name: "Falcon", ResolverToken: "falcon", Topology: ParallelResidual, OracleInCI: true},
 	{Name: "MPT", ResolverToken: "mpt", Topology: PreNorm, OracleInCI: true},
 	{Name: "StableLM", ResolverToken: "stablelm", Topology: PreNorm, OracleInCI: false},
 	{Name: "OLMo2", ResolverToken: "olmo2", Topology: PostNorm, OracleInCI: true},
