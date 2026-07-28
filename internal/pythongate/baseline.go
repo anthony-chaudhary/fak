@@ -585,4 +585,5 @@ var grandfathered = []string{
 	"tools/public_evidence_manifest_test.py",
 	"tools/skill_lifecycle_test.py",
 	"tools/transcript_workload_test.py",
+	"tools/fak_loop_task_test.py",
 }
