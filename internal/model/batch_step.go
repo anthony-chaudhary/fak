@@ -231,11 +231,15 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(s string) string { return layerName(l, s) }
 
-		// pre-attn RMSNorm, per user.
+		// pre-attn norm, per user. A LayerNorm family carries a learned norm BIAS and
+		// batchDecodeFastPathOK (batch.go:95) has no LayerNorm term, so it routes here; normCfg
+		// must receive that bias or this lane disagrees with the serial Step it is contracted to
+		// be bit-identical to (blockStep passes n.preBias, arch.go:635). rmsnormCfg passes nil.
 		Xn := make([]float32, B*H)
 		wIn := m.tensor(lp("input_layernorm.weight"))
+		bIn := m.tensorOptional(lp("input_layernorm.bias"))
 		for b := 0; b < B; b++ {
-			copy(Xn[b*H:(b+1)*H], rmsnormCfg(X[b*H:(b+1)*H], wIn, eps, cfg))
+			copy(Xn[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wIn, bIn, eps, cfg))
 		}
 
 		// batched q/k/v projections: one weight stream, B rows.
@@ -273,8 +277,9 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		// batched MLP (SwiGLU) + residual.
 		Xn2 := make([]float32, B*H)
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
+		bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 		for b := 0; b < B; b++ {
-			copy(Xn2[b*H:(b+1)*H], rmsnormCfg(X[b*H:(b+1)*H], wPost, eps, cfg))
+			copy(Xn2[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wPost, bPost, eps, cfg))
 		}
 		I := cfg.IntermediateSize
 		G := matMulBatch(m.tensor(lp("mlp.gate_proj.weight")), Xn2, I, H, B)
@@ -289,10 +294,12 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 	}
 
 	// final norm per user; record each user's new absolute position; batched LM head.
-	normW := m.tensor("model.norm.weight")
+	// finalNorm, not a hand-rolled normCfg: it is the ONE place the final-norm weight, its
+	// optional bias, and eps are bound together, so this lane cannot drift from the serial
+	// Step again the way the hard-coded nil bias here did.
 	Xnorm := make([]float32, B*H)
 	for b := 0; b < B; b++ {
-		copy(Xnorm[b*H:(b+1)*H], rmsnormCfg(X[b*H:(b+1)*H], normW, eps, cfg))
+		copy(Xnorm[b*H:(b+1)*H], m.finalNorm(X[b*H:(b+1)*H]))
 		bs.Seqs[b].Cache.pos = append(bs.Seqs[b].Cache.pos, posB[b])
 	}
 	// the 113 MB tied-embedding head streamed ONCE for all B users — the single biggest
@@ -367,9 +374,14 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		Xn := grow(db.Xn, B*H)
 		db.Xn = Xn
 		wIn := m.tensor(lp("input_layernorm.weight"))
+		// nil for every RMSNorm arch, so this is a no-op there; it matters only on the
+		// cfg.LayerNorm disjunct below, which q8FastPreNormOK (quant_forward.go:145) currently
+		// keeps out of this quantized lane. Passing it anyway keeps the norm call identical to
+		// the f32 twin, so relaxing that gate can never silently drop the bias.
+		bIn := m.tensorOptional(lp("input_layernorm.bias"))
 		for b := 0; b < B; b++ {
 			if cfg.NormGain1p || cfg.LayerNorm {
-				copy(Xn[b*H:(b+1)*H], rmsnormCfg(X[b*H:(b+1)*H], wIn, eps, cfg))
+				copy(Xn[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wIn, bIn, eps, cfg))
 			} else {
 				rmsnormInto(Xn[b*H:(b+1)*H], X[b*H:(b+1)*H], wIn, eps)
 			}
@@ -424,9 +436,10 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		Xn2 := grow(db.Xn2, B*H)
 		db.Xn2 = Xn2
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
+		bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 		for b := 0; b < B; b++ {
 			if cfg.NormGain1p || cfg.LayerNorm {
-				copy(Xn2[b*H:(b+1)*H], rmsnormCfg(X[b*H:(b+1)*H], wPost, eps, cfg))
+				copy(Xn2[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wPost, bPost, eps, cfg))
 			} else {
 				rmsnormInto(Xn2[b*H:(b+1)*H], X[b*H:(b+1)*H], wPost, eps)
 			}
@@ -457,7 +470,7 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 	db.Xnorm = Xnorm
 	for b := 0; b < B; b++ {
 		if cfg.NormGain1p || cfg.LayerNorm {
-			copy(Xnorm[b*H:(b+1)*H], rmsnormCfg(X[b*H:(b+1)*H], normW, eps, cfg))
+			copy(Xnorm[b*H:(b+1)*H], m.finalNorm(X[b*H:(b+1)*H]))
 		} else {
 			rmsnormInto(Xnorm[b*H:(b+1)*H], X[b*H:(b+1)*H], normW, eps)
 		}

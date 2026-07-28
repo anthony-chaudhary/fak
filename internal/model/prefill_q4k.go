@@ -129,12 +129,17 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 
+		// kv.go:670 routes here on !q8PrefillNeedsTokenLoop, which has no LayerNorm term, so a
+		// resident-Q4_K PreNorm LayerNorm family prefills HERE while decoding through the
+		// bias-aware blockStep. The learned input_layernorm.bias must ride along; rmsnormCfg
+		// hard-passes nil.
 		Xn := make([]float32, P*H)
 		parFor(P, numWorkers, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
+			bIn := m.tensorOptional(lp("input_layernorm.bias"))
 			for t := lo; t < hi; t++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wIn, eps, cfg))
+					copy(Xn[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wIn, bIn, eps, cfg))
 				} else {
 					rmsnormInto(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps)
 				}
@@ -184,9 +189,10 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		Xn2 := make([]float32, P*H)
 		parFor(P, numWorkers, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
+			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 			for t := lo; t < hi; t++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn2[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wPost, eps, cfg))
+					copy(Xn2[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wPost, bPost, eps, cfg))
 				} else {
 					rmsnormInto(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps)
 				}
@@ -227,5 +233,8 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 			P, ms(total), ms(tGemm), ms(tAttn), ms(tQuant), ms(rest))
 	}
 	last := X[(P-1)*H : P*H]
-	return rmsnormCfg(last, m.tensor("model.norm.weight"), eps, cfg)
+	// finalNorm, not a hand-rolled normCfg: it is the ONE place the final-norm weight, its
+	// optional bias, and eps are bound together, so this lane cannot drift from the per-token
+	// path again the way the hard-coded nil bias here did.
+	return m.finalNorm(last)
 }

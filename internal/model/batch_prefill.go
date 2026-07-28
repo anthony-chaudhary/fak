@@ -95,11 +95,17 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(s string) string { return layerName(l, s) }
 
+		// LayerNorm families (StableLM, GPT-NeoX, Falcon, biased Cohere) carry a learned norm
+		// BIAS; normCfg must receive it or this lane silently disagrees with the per-token path,
+		// which passes n.preBias (arch.go:635). rmsnormCfg hard-passes nil and must not be used
+		// here — batchPreNormFastPathOK (batch.go:109) has no LayerNorm term, so a PreNorm
+		// LayerNorm arch routes straight into this lane.
 		Xn := make([]float32, N*H)
 		wIn := m.tensor(lp("input_layernorm.weight"))
+		bIn := m.tensorOptional(lp("input_layernorm.bias"))
 		parFor(N, numWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
-				copy(Xn[row*H:(row+1)*H], rmsnormCfg(X[row*H:(row+1)*H], wIn, eps, cfg))
+				copy(Xn[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wIn, bIn, eps, cfg))
 			}
 		})
 
@@ -147,9 +153,10 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 
 		Xn2 := make([]float32, N*H)
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
+		bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 		parFor(N, numWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
-				copy(Xn2[row*H:(row+1)*H], rmsnormCfg(X[row*H:(row+1)*H], wPost, eps, cfg))
+				copy(Xn2[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
 		I := cfg.IntermediateSize
@@ -176,10 +183,12 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		return nil
 	}
 	Xnorm := make([]float32, B*H)
-	normW := m.tensor("model.norm.weight")
 	for b := 0; b < B; b++ {
 		row := b*P + P - 1
-		copy(Xnorm[b*H:(b+1)*H], rmsnormCfg(X[row*H:(row+1)*H], normW, eps, cfg))
+		// finalNorm, not a hand-rolled normCfg: it is the ONE place the final-norm weight, its
+		// optional bias, and eps are bound together, so this lane cannot drift from the per-token
+		// path again the way the hard-coded nil bias here did.
+		copy(Xnorm[b*H:(b+1)*H], m.finalNorm(X[row*H:(row+1)*H]))
 	}
 	Logits := matMulBatch(m.lmHead(), Xnorm, cfg.VocabSize, H, B)
 	out := splitLogits(Logits, B, cfg.VocabSize)
@@ -241,10 +250,15 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		Xn := grow(pb.Xn, N*H)
 		pb.Xn = Xn
 		wIn := m.tensor(lp("input_layernorm.weight"))
+		// The bias is nil for every RMSNorm arch, so this is a no-op there; it matters only on the
+		// cfg.LayerNorm disjunct of the branch below, which q8FastPreNormOK (quant_forward.go:145)
+		// currently keeps out of this quantized lane. Passing it anyway keeps the norm call
+		// identical to the f32 twin, so relaxing that gate can never silently drop the bias.
+		bIn := m.tensorOptional(lp("input_layernorm.bias"))
 		parFor(N, numWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn[row*H:(row+1)*H], rmsnormCfg(X[row*H:(row+1)*H], wIn, eps, cfg))
+					copy(Xn[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wIn, bIn, eps, cfg))
 				} else {
 					rmsnormInto(Xn[row*H:(row+1)*H], X[row*H:(row+1)*H], wIn, eps)
 				}
@@ -314,10 +328,11 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		Xn2 := grow(pb.Xn2, N*H)
 		pb.Xn2 = Xn2
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
+		bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 		parFor(N, numWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn2[row*H:(row+1)*H], rmsnormCfg(X[row*H:(row+1)*H], wPost, eps, cfg))
+					copy(Xn2[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wPost, bPost, eps, cfg))
 				} else {
 					rmsnormInto(Xn2[row*H:(row+1)*H], X[row*H:(row+1)*H], wPost, eps)
 				}
@@ -365,7 +380,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 	for b := 0; b < B; b++ {
 		row := b*P + P - 1
 		if cfg.NormGain1p || cfg.LayerNorm {
-			copy(Xnorm[b*H:(b+1)*H], rmsnormCfg(X[row*H:(row+1)*H], normW, eps, cfg))
+			copy(Xnorm[b*H:(b+1)*H], m.finalNorm(X[row*H:(row+1)*H]))
 		} else {
 			rmsnormInto(Xnorm[b*H:(b+1)*H], X[row*H:(row+1)*H], normW, eps)
 		}

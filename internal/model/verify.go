@@ -114,11 +114,17 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 
+		// verifyForwardBatchedOK gates only on backend/quant/topology (q8PrefillNeedsTokenLoop),
+		// never on the norm kind, so a biased-LayerNorm family verifies through this lane. The
+		// documented contract above is bit-identity with serial head(finalNorm(tokenHidden(...))),
+		// and tokenHidden's blockStep passes n.preBias — so this call must too. rmsnormCfg's
+		// hard-coded nil would break exactly that contract.
 		Xn := make([]float32, P*H)
 		parFor(P, numWorkers, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
+			bIn := m.tensorOptional(lp("input_layernorm.bias"))
 			for q := lo; q < hi; q++ {
-				copy(Xn[q*H:(q+1)*H], rmsnormCfg(X[q*H:(q+1)*H], wIn, eps, cfg))
+				copy(Xn[q*H:(q+1)*H], normCfg(X[q*H:(q+1)*H], wIn, bIn, eps, cfg))
 			}
 		})
 
@@ -222,8 +228,9 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 		Xn2 := make([]float32, P*H)
 		parFor(P, numWorkers, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
+			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 			for q := lo; q < hi; q++ {
-				copy(Xn2[q*H:(q+1)*H], rmsnormCfg(X[q*H:(q+1)*H], wPost, eps, cfg))
+				copy(Xn2[q*H:(q+1)*H], normCfg(X[q*H:(q+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
 		inter := cfg.IntermediateSize
