@@ -222,10 +222,13 @@ func printGuardUsage(w io.Writer, fs *flag.FlagSet, all bool) {
 	fmt.Fprintln(w, "  e.g. fak guard -- claude")
 	fmt.Fprintln(w, "       fak guard --provider openai -- codex")
 	fmt.Fprintln(w, "       fak guard --policy my-floor.json -- claude")
-	// The `allow` SUBCOMMAND (not a flag) is the operator control: it always-allows a
-	// tool the floor DEFAULT_DENY'd, out-of-band from the wrapped agent. One synopsis
-	// line keeps `fak guard -h` under its screen budget; `fak guard allow -h` has the rest.
-	fmt.Fprintln(w, "       fak guard allow <tool>   # operator: always-allow a blocked tool, out-of-band (fak guard allow -h)")
+	// The operator SUBCOMMANDS (not flags), on one shared synopsis line: `allow`
+	// always-allows a tool the floor DEFAULT_DENY'd, out-of-band from the wrapped
+	// agent, and `policy explain|diff` reports the floor's amendment model and its
+	// widen-drift from the shipped floor (both read-only). One line — not one per
+	// verb — is what keeps `fak guard -h` under its screen budget as the subcommand
+	// surface grows; `-h` on each subcommand has the rest.
+	fmt.Fprintln(w, "       fak guard allow <tool> | policy explain|diff   # operator subcommands, out-of-band (-h on each)")
 	if all {
 		printGuardAllGrouped(w, fs)
 		fmt.Fprintf(w, "\n%d flags in this build, grouped above. docs/fak/api-reference.md has the deep dive.\n", guardFlagCount(fs))

@@ -57,6 +57,18 @@ func cmdGuard(argv []string) {
 		cmdGuardDeny(argv[1:])
 		return
 	}
+	// `fak guard policy <verb>` is the read-only FLOOR REPORT surface (#5424, epic
+	// #5170 Track A): `explain` groups the effective floor by amendment class, `diff`
+	// reports the widen-drift from the shipped floor with a CI-gateable exit code.
+	// Peeled like `allow`/`deny` — a bare leading verb is unambiguous because a real
+	// wrap always names the agent after `--`, so the wrapped program's own `policy`
+	// argument can never sit here. This peel is the ONLY registration of those verbs
+	// (guard_policy.go holds the table); removing it makes them unreachable rather
+	// than quietly reachable by some other path. Note the exact-match: the flag
+	// spelling `--policy FILE` is untouched.
+	if len(argv) > 0 && argv[0] == "policy" {
+		os.Exit(runGuardPolicy(os.Stdout, os.Stderr, argv[1:]))
+	}
 	// `fak guard compile` performs one authoring-time model extraction and emits
 	// a review-only policy diff. Runtime policy enforcement remains model-free.
 	if len(argv) > 0 && argv[0] == "compile" {
