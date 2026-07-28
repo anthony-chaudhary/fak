@@ -43,13 +43,23 @@ const (
 const guardSessionStartHint = "Reach for the fak substrate verbs (MCP server `fak`) to select ranked repo work and gate tool calls through the kernel. Call `mcp__fak__fak_index_work` to pull ranked open work for this repo; `mcp__fak__fak_admit` / `mcp__fak__fak_adjudicate` to gate/execute a tool call through the kernel; `mcp__fak__fak_memory_run` for durable memory; `mcp__fak__fak_tools_search` to page in the rest. Invoke these deferred tools explicitly to page them in."
 
 func cmdGuardSessionStart(argv []string) {
-	os.Exit(runGuardSessionStart(os.Stdout, os.Stderr, argv))
+	os.Exit(runGuardSessionStartHook(os.Stdout, os.Stderr, os.Stdin, argv))
 }
 
-// runGuardSessionStart is the SessionStart-hook actuator. On the "on" mode (default) it
+// runGuardSessionStart is the retained stdin-free entry: a nil payload carries no hook
+// source, so it composes to the base affordance exactly as before (no look-ahead pickup).
+func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
+	return runGuardSessionStartHook(stdout, stderr, nil, argv)
+}
+
+// runGuardSessionStartHook is the SessionStart-hook actuator. On the "on" mode (default) it
 // prints the additionalContext JSON envelope to stdout and returns 0; "off" returns 0 with
 // no output. It fails OPEN — any bad args return 0 with no injection.
-func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
+//
+// A stdin payload (the real hook) whose SessionStart source is "compact" ALSO injects a
+// fresh same-base-SHA look-ahead lesson beside the reframed affordance (#5207). A nil stdin
+// (the runGuardSessionStart entry) skips the pickup, keeping that path byte-identical.
+func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
 	fs := flag.NewFlagSet("guard-sessionstart", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	modeFlag := fs.String("mode", os.Getenv(guardSessionStartEnvMode), "off|on")
@@ -94,6 +104,15 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 	// journal the exit summary folds into its one-line arm/residual/fallback report.
 	reframed, negframeRow := guardNegframeReframe(negframe.Fak(additionalContext))
 	additionalContext = reframed
+	// #5207 look-ahead pickup: on a real hook payload whose SessionStart source is "compact",
+	// inject the fresh same-base-SHA lesson VERBATIM after the reframed affordance — a
+	// witnessed lesson is a fact to carry, not a string to positive-voice. A nil stdin (the
+	// retained stdin-free entry) never triggers this, so that path stays unchanged.
+	if stdin != nil {
+		if lesson, ok := lookaheadLessonForCompact(stdin); ok {
+			additionalContext = additionalContext + "\n\n" + lesson
+		}
+	}
 	// Begin (not append): SessionStart is the session boundary, so the per-turn stream the exit
 	// summary folds starts fresh here rather than accumulating this workspace's whole history.
 	guardNegframeBegin(guardNegframeJournalRel, negframeRow)
