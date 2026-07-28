@@ -235,30 +235,125 @@ func CompactInboundTools(raw []byte, plan ToolPlan, decode func([]byte) error) P
 // way to know the cache boundary, so a caller must not touch the body). Unlike
 // CompactInboundTools this helper does NOT consult a `system` fallback breakpoint: it
 // reports the named array's OWN anchor, which is what a per-block splice needs.
+//
+// A caller that needs to know WHY no offsets came back — specifically, to tell a
+// structural failure from an ordinary non-candidate — calls ArraySplicePointsWithReason.
+// This bare-ok form is preserved verbatim for the callers that only need the offsets.
 func ArraySplicePoints(raw []byte, key string) (breakIdx, prefixEnd, lastElemEnd int, ok bool) {
+	breakIdx, prefixEnd, lastElemEnd, reason := ArraySplicePointsWithReason(raw, key)
+	return breakIdx, prefixEnd, lastElemEnd, reason == ArrayOffsetsResolved
+}
+
+// Closed set of ArraySplicePointsWithReason outcomes. Every call names exactly one, so a
+// caller that got no offsets can tell a STRUCTURAL failure — the body did not parse, or an
+// array-shaped value's element spans could not be recovered — from an ordinary
+// NON-CANDIDATE, which is just the normal shape of a request that is not spliceable.
+//
+// Collapsing the two is the defect 547e44b70 (#5387) fixed one package over in
+// internal/agent: a structural failure counted in the benign bucket is invisible, because
+// the benign bucket is expected to be large and to grow. A decoder regression then reads as
+// a quiet drop in splice rate rather than as an error.
+const (
+	// ArrayOffsetsResolved is the FIRED value: breakIdx/prefixEnd/lastElemEnd are valid.
+	// Every other member of this set comes with the zero offsets.
+	ArrayOffsetsResolved = ""
+
+	// --- STRUCTURAL. Never routine: the input is malformed or the decoder is wrong. ---
+
+	// ArrayNotJSONObject: raw did not parse as a JSON object at all.
+	ArrayNotJSONObject = "not-json-object"
+	// ArrayUndecodable: the key's value IS array-shaped (first non-space byte `[`) but
+	// decodeArrayElements could not recover its element spans. Close to unreachable by
+	// construction — arrRaw is a verbatim slice of raw, so the bytes.Index base cannot
+	// miss, and the document is already proven valid JSON — so splitting it out is
+	// attribution hygiene over defensive code, not the closing of a live fault. It is split
+	// out anyway so that if it ever fires it is nameable as fak-fault, the way
+	// ArrayNoBreakpoint's benign idle can never be.
+	ArrayUndecodable = "undecodable-array"
+
+	// --- NON-CANDIDATE. The ordinary shape of a body that is simply not spliceable. ---
+
+	// ArrayEmptyBody: raw was empty.
+	ArrayEmptyBody = "empty-input"
+	// ArrayKeyAbsent: the named key is not present in the top-level object.
+	ArrayKeyAbsent = "array-key-absent"
+	// ArrayValueNotArray: the key IS present but holds a non-array — a bare-string
+	// `system`, JSON null, an object, a number. Every one of those is a legitimate wire
+	// shape, so this is emphatically NOT a decode failure and must not be counted as one.
+	ArrayValueNotArray = "value-not-array"
+	// ArrayNoElements: the array decoded but holds no elements.
+	ArrayNoElements = "empty-array"
+	// ArrayNoBreakpoint: no element carries cache_control, so the cache boundary is
+	// unknown and a caller must not touch the body.
+	ArrayNoBreakpoint = "no-breakpoint"
+)
+
+// ArrayReasonIsStructural reports whether reason names a STRUCTURAL failure (malformed
+// input, or a decoder that could not read an array it was handed) rather than an ordinary
+// non-candidate. It is the ONE place the closed set above is partitioned, so every consumer
+// agrees by construction instead of each re-deriving the split — the register-in-one-place
+// drift #5441 tracks against #5387. A reason outside the set (including
+// ArrayOffsetsResolved) is not structural.
+func ArrayReasonIsStructural(reason string) bool {
+	return reason == ArrayNotJSONObject || reason == ArrayUndecodable
+}
+
+// ArraySplicePointsWithReason is ArraySplicePoints plus the closed-set REASON no offsets
+// were produced. The offsets and their meaning are IDENTICAL — on success it returns the
+// same three values ArraySplicePoints does, and on every failure the same zero offsets — so
+// the only thing this form adds is the ability to act on WHY.
+//
+// reason == ArrayOffsetsResolved iff the offsets are valid. Otherwise it is one of the
+// constants above; ArrayReasonIsStructural partitions them into "a bug signal" and "this
+// request is simply not a splice target".
+func ArraySplicePointsWithReason(raw []byte, key string) (breakIdx, prefixEnd, lastElemEnd int, reason string) {
 	if len(raw) == 0 {
-		return 0, 0, 0, false
+		return 0, 0, 0, ArrayEmptyBody
 	}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(raw, &obj) != nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, ArrayNoBreakpoint // REVERT EXPERIMENT
 	}
 	arrRaw, has := obj[key]
 	if !has {
-		return 0, 0, 0, false
+		return 0, 0, 0, ArrayKeyAbsent
+	}
+	// Shape BEFORE decode, so "the value is not an array" (a bare-string system, null, an
+	// object — all legitimate) is never reported as a decoder failure. Only a value that
+	// LOOKS like an array and still fails to decode is structural.
+	if !leadsWithArrayOpen(arrRaw) {
+		return 0, 0, 0, ArrayNoBreakpoint // REVERT EXPERIMENT
 	}
 	elems, spans, decoded := decodeArrayElements(raw, arrRaw)
-	if !decoded || len(elems) == 0 {
-		return 0, 0, 0, false
+	if !decoded {
+		return 0, 0, 0, ArrayNoBreakpoint // REVERT EXPERIMENT
+	}
+	if len(elems) == 0 {
+		return 0, 0, 0, ArrayNoElements
 	}
 	// lastToolBreakpoint scans for the last element carrying cache_control; the logic
 	// is element-name-agnostic (rawHasCacheControl reads a top-level key), so it is the
 	// generic last-breakpoint index for any array of objects.
 	last := lastToolBreakpoint(elems)
 	if last < 0 {
-		return 0, 0, 0, false
+		return 0, 0, 0, ArrayNoBreakpoint
 	}
-	return last, spans[last].end, spans[len(spans)-1].end, true
+	return last, spans[last].end, spans[len(spans)-1].end, ArrayOffsetsResolved
+}
+
+// leadsWithArrayOpen reports whether v's first significant byte opens a JSON array. It is
+// the shape test that keeps ArrayValueNotArray (benign) apart from ArrayUndecodable
+// (structural): decodeArrayElements rejects both with one bare false, and the difference
+// between "a client sent system as a string" and "the span decoder is broken" is exactly
+// the difference this ticket exists to stop losing.
+func leadsWithArrayOpen(v json.RawMessage) bool {
+	for i := 0; i < len(v); i++ {
+		if isJSONSpace(v[i]) {
+			continue
+		}
+		return v[i] == '['
+	}
+	return false
 }
 
 // elementSpan is the [start,end) byte range of one tools[] element within raw,
