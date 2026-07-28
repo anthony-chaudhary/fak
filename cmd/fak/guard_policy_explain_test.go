@@ -131,3 +131,133 @@ func TestPolicyExplainBareCheckout(t *testing.T) {
 	policyExplainRowLine(t, got, "danger.arg_rules", idx["== FROZEN"], idx["== RATCHET"])
 	policyExplainRowLine(t, got, "allow.tools", idx["== GATED-WIDEN"], idx["== SELF-AMENDABLE"])
 }
+
+// policyExplainScopeLayer writes an allow overlay carrying `tools` and returns the layer
+// naming it under `scope`.
+func policyExplainScopeLayer(t *testing.T, dir, scope string, tools ...string) guardAllowOverlayLayer {
+	t.Helper()
+	path := filepath.Join(dir, scope+".allow.json")
+	if err := saveGuardAllowOverlay(path, guardAllowOverlay{Allow: tools}); err != nil {
+		t.Fatal(err)
+	}
+	return guardAllowOverlayLayer{Name: scope, Path: path}
+}
+
+// TestGuardAllowScopeExplainShowsResolvedScopePerEntry is the #5180 witness for the
+// "policy explain shows the scope of each overlay entry" half of the done condition.
+//
+// Three things are pinned at once, because a scope column that got any of them wrong
+// would be worse than no column:
+//
+//   - EVERY overlay entry carries a scope= cell naming the layer it came from;
+//   - an entry named by SEVERAL scopes renders ONCE, attributed to the NARROWEST one
+//     (guard_allow_scope.go's precedence) — not once per layer, which would show the
+//     same widening three times and leave the operator guessing which one governs;
+//   - the attribution agrees with guardAllowWinningScope, the overlay's own provenance
+//     seam, so the report and the enforcement path cannot disagree.
+func TestGuardAllowScopeExplainShowsResolvedScopePerEntry(t *testing.T) {
+	t.Setenv(guardDenyOverlayEnv, "")
+	dir := t.TempDir()
+	// Broadest-first, exactly as guardAllowOverlayPaths + the session layer order them.
+	// zz_everywhere_tool is named by all three scopes; the rest by one each.
+	layers := []guardAllowOverlayLayer{
+		policyExplainScopeLayer(t, dir, "repo", "zz_repo_tool", "zz_everywhere_tool"),
+		policyExplainScopeLayer(t, dir, "user", "zz_user_only_tool", "zz_everywhere_tool"),
+		policyExplainScopeLayer(t, dir, guardAllowScopeSession, "zz_session_tool", "zz_everywhere_tool"),
+	}
+	got := policyExplainRun(t, layers, filepath.Join(dir, "deny.json"))
+	idx := policyExplainHeaderIndex(t, got)
+	from, to := idx["== GATED-WIDEN"], idx["== SELF-AMENDABLE"]
+
+	for _, tc := range []struct{ tool, scope, provenance string }{
+		{"zz_repo_tool", "repo", "repo-overlay"},
+		{"zz_user_only_tool", "user", "user-overlay"},
+		{"zz_session_tool", guardAllowScopeSession, "session-overlay"},
+		// Present in repo, user AND session — the session scope is the narrowest, so it
+		// owns the entry and the two broader layers must not claim it.
+		{"zz_everywhere_tool", guardAllowScopeSession, "session-overlay"},
+	} {
+		row := "allow.tools[" + tc.tool + "]"
+		line := policyExplainRowLine(t, got, row, from, to)
+		if !strings.Contains(line, "scope="+tc.scope) {
+			t.Fatalf("%s row lacks scope=%s: %q", row, tc.scope, line)
+		}
+		if !strings.Contains(line, "provenance="+tc.provenance) {
+			t.Fatalf("%s row lacks provenance=%s: %q", row, tc.provenance, line)
+		}
+		if n := strings.Count(got, row); n != 1 {
+			t.Fatalf("%s rendered %d times, want exactly one resolved-scope row", row, n)
+		}
+	}
+}
+
+// TestGuardAllowScopeExplainAgreesWithWinningScope ties the report's attribution to the
+// overlay's own resolver: for the same layer set, policyExplainResolvedAllowEntries must
+// pick the scope guardAllowWinningScope would. Drift between them is how an operator ends
+// up reading a scope the enforcement path does not actually honor.
+func TestGuardAllowScopeExplainAgreesWithWinningScope(t *testing.T) {
+	scopeTestRepo(t, "explain-agreement")
+
+	if err := saveGuardAllowOverlay(guardAllowOverlayPath(), guardAllowOverlay{Allow: []string{"zz_shared_tool"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveGuardAllowOverlay(guardAllowSessionOverlayPath(), guardAllowOverlay{Allow: []string{"zz_shared_tool"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	layers := guardPolicyExplainAllowLayers()
+	byLayer := make([]guardAllowOverlay, len(layers))
+	for i, l := range layers {
+		ov, err := loadGuardAllowOverlay(l.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byLayer[i] = ov
+	}
+	entries := policyExplainResolvedAllowEntries(layers, byLayer, false)
+
+	want, err := guardAllowWinningScope("zz_shared_tool", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want != guardAllowScopeSession {
+		t.Fatalf("guardAllowWinningScope = %q, want the session scope to own the shared entry", want)
+	}
+	found := 0
+	for _, e := range entries {
+		if e.Name != "zz_shared_tool" {
+			continue
+		}
+		found++
+		if e.Scope != want {
+			t.Fatalf("explain attributed zz_shared_tool to %q, guardAllowWinningScope says %q", e.Scope, want)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("zz_shared_tool resolved to %d entries, want exactly 1", found)
+	}
+}
+
+// TestGuardAllowScopeExplainRendersPrecedenceLegend: the per-row scope= cell is only
+// readable against the precedence order, so the GATED-WIDEN group must print the scope
+// table — every scope, with the durability answer (does a widening recorded here survive
+// the next launch?) that guardAllowScopeDurabilityNote owns.
+func TestGuardAllowScopeExplainRendersPrecedenceLegend(t *testing.T) {
+	t.Setenv(guardDenyOverlayEnv, "")
+	got := policyExplainRun(t, nil, filepath.Join(t.TempDir(), "deny.json"))
+	idx := policyExplainHeaderIndex(t, got)
+	legend := got[idx["== GATED-WIDEN"]:idx["== SELF-AMENDABLE"]]
+
+	for _, scope := range policyExplainScopeOrder {
+		if !strings.Contains(legend, "scope="+scope) {
+			t.Fatalf("GATED-WIDEN legend omits scope %q:\n%s", scope, legend)
+		}
+		if note := guardAllowScopeDurabilityNote(scope); note != "" && !strings.Contains(legend, note) {
+			t.Fatalf("GATED-WIDEN legend omits the %s durability note %q:\n%s", scope, note, legend)
+		}
+	}
+	// The legend belongs to the widening channel alone — the frozen floor has no scope.
+	if frozen := got[idx["== FROZEN"]:idx["== RATCHET"]]; strings.Contains(frozen, "scope precedence") {
+		t.Fatalf("scope precedence legend leaked into the FROZEN group:\n%s", frozen)
+	}
+}

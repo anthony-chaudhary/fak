@@ -52,6 +52,10 @@ type policyExplainKnob struct {
 	Channels   string
 	Value      string
 	Provenance string
+	// Scope is the guard_allow_scope.go SCOPE that owns an overlay-supplied entry
+	// (#5180): the narrowest layer naming it. Empty for rows that are not overlay
+	// entries (the embedded floor, whose value ships with the binary and has no scope).
+	Scope string
 }
 
 const (
@@ -62,7 +66,8 @@ const (
 )
 
 // policyExplainAllowProvenance maps an allow-overlay layer name (guard_allow.go's
-// guardAllowOverlayPaths: "user" / "repo" / "env") to the explain provenance vocab.
+// guardAllowOverlayPaths: "user" / "repo" / "env", plus guard_allow_scope.go's
+// "session") to the explain provenance vocab.
 func policyExplainAllowProvenance(layerName string) string {
 	switch layerName {
 	case "user":
@@ -71,8 +76,55 @@ func policyExplainAllowProvenance(layerName string) string {
 		return "repo-overlay"
 	case "env":
 		return "env-overlay"
+	case guardAllowScopeSession:
+		return "session-overlay"
 	}
 	return layerName
+}
+
+// policyExplainScopeOrder lists the widening scopes broadest-first, matching the
+// guard_allow_scope.go precedence table (guardAllowScopeRank). Rendered once under the
+// GATED-WIDEN header so an operator reading a `scope=` cell can see where that scope
+// sits in the precedence order and whether a widening recorded there survives a relaunch.
+var policyExplainScopeOrder = []string{"repo", "user", "env", guardAllowScopeSession}
+
+// policyExplainAllowEntry is one operator-added overlay entry attributed to the scope
+// that OWNS it.
+type policyExplainAllowEntry struct {
+	Name  string
+	Scope string
+}
+
+// policyExplainResolvedAllowEntries folds the allow layers into ONE row per distinct
+// entry, attributed to the RESOLVED scope — the narrowest layer that names it — instead
+// of one row per layer that happens to repeat it (#5180). This is the same rule
+// guardAllowWinningScope enforces (higher rank wins, later layer wins a tie), so the
+// explain report and the overlay's own provenance seam can never disagree about which
+// scope owns a widening. First-seen order is preserved so the report is deterministic.
+func policyExplainResolvedAllowEntries(layers []guardAllowOverlayLayer, byLayer []guardAllowOverlay, prefix bool) []policyExplainAllowEntry {
+	var out []policyExplainAllowEntry
+	at := make(map[string]int)
+	for i, layer := range layers {
+		if i >= len(byLayer) {
+			break
+		}
+		list := byLayer[i].Allow
+		if prefix {
+			list = byLayer[i].AllowPrefix
+		}
+		for _, entry := range list {
+			j, seen := at[entry]
+			if !seen {
+				at[entry] = len(out)
+				out = append(out, policyExplainAllowEntry{Name: entry, Scope: layer.Name})
+				continue
+			}
+			if guardAllowScopeRank(layer.Name) >= guardAllowScopeRank(out[j].Scope) {
+				out[j].Scope = layer.Name
+			}
+		}
+	}
+	return out
 }
 
 // policyExplainKnobs builds the fallback knob rows for one amendment class from the
@@ -88,43 +140,61 @@ func policyExplainKnobs(class string, m policy.Manifest, allowLayers []guardAllo
 	switch class {
 	case policyClassFrozen:
 		rows = append(rows,
-			policyExplainKnob{"danger.arg_rules", class, policyChannelsFrozen, countOf(len(m.ArgRules), "rule", "rules"), "embedded"},
-			policyExplainKnob{"self_modify.globs", class, policyChannelsFrozen, countOf(len(m.SelfModifyGlobs), "glob", "globs"), "embedded"},
-			policyExplainKnob{"egress.metadata_block", class, policyChannelsFrozen, "always-on (cloud metadata + link-local)", "embedded"},
+			policyExplainKnob{"danger.arg_rules", class, policyChannelsFrozen, countOf(len(m.ArgRules), "rule", "rules"), "embedded", ""},
+			policyExplainKnob{"self_modify.globs", class, policyChannelsFrozen, countOf(len(m.SelfModifyGlobs), "glob", "globs"), "embedded", ""},
+			policyExplainKnob{"egress.metadata_block", class, policyChannelsFrozen, "always-on (cloud metadata + link-local)", "embedded", ""},
 		)
 	case policyClassRatchet:
 		// Only the v1 name-level deny list is rendered here; the deny overlay's
 		// richer tighten-only fields belong to the #5171 registry rows once landed.
-		rows = append(rows, policyExplainKnob{"deny.tools", class, policyChannelsDeny, countOf(len(m.Deny), "reason", "reasons"), "embedded"})
+		rows = append(rows, policyExplainKnob{"deny.tools", class, policyChannelsDeny, countOf(len(m.Deny), "reason", "reasons"), "embedded", ""})
 		for _, tool := range deny.Deny {
-			rows = append(rows, policyExplainKnob{fmt.Sprintf("deny.tools[%s]", tool), class, policyChannelsDeny, "denied", denyProvenance})
+			rows = append(rows, policyExplainKnob{fmt.Sprintf("deny.tools[%s]", tool), class, policyChannelsDeny, "denied", denyProvenance, ""})
 		}
 	case policyClassGatedWiden:
 		rows = append(rows,
-			policyExplainKnob{"allow.tools", class, policyChannelsAllow, countOf(len(m.Allow), "tool", "tools"), "embedded"},
-			policyExplainKnob{"allow.prefixes", class, policyChannelsAllow, countOf(len(m.AllowPrefix), "prefix", "prefixes"), "embedded"},
+			policyExplainKnob{"allow.tools", class, policyChannelsAllow, countOf(len(m.Allow), "tool", "tools"), "embedded", ""},
+			policyExplainKnob{"allow.prefixes", class, policyChannelsAllow, countOf(len(m.AllowPrefix), "prefix", "prefixes"), "embedded", ""},
 		)
-		for i, layer := range allowLayers {
-			prov := policyExplainAllowProvenance(layer.Name)
-			for _, tool := range allowByLayer[i].Allow {
-				rows = append(rows, policyExplainKnob{fmt.Sprintf("allow.tools[%s]", tool), class, policyChannelsAllow, "allow", prov})
-			}
-			for _, prefix := range allowByLayer[i].AllowPrefix {
-				rows = append(rows, policyExplainKnob{fmt.Sprintf("allow.prefixes[%s]", prefix), class, policyChannelsAllow, "allow", prov})
-			}
+		// One row per distinct entry, carrying the scope that OWNS it — not one row per
+		// layer repeating it, which would show the same widening two or three times and
+		// leave the operator to guess which layer actually governs.
+		for _, e := range policyExplainResolvedAllowEntries(allowLayers, allowByLayer, false) {
+			rows = append(rows, policyExplainKnob{fmt.Sprintf("allow.tools[%s]", e.Name), class, policyChannelsAllow, "allow", policyExplainAllowProvenance(e.Scope), e.Scope})
+		}
+		for _, e := range policyExplainResolvedAllowEntries(allowLayers, allowByLayer, true) {
+			rows = append(rows, policyExplainKnob{fmt.Sprintf("allow.prefixes[%s]", e.Name), class, policyChannelsAllow, "allow", policyExplainAllowProvenance(e.Scope), e.Scope})
 		}
 	case policyClassSelfAmendable:
 		rows = append(rows,
-			policyExplainKnob{"report.debug_stats", class, policyChannelsLaunch + " (--debug-stats/--quiet)", "on", "embedded"},
-			policyExplainKnob{"report.banner", class, policyChannelsLaunch + " (--banner)", "auto", "embedded"},
+			policyExplainKnob{"report.debug_stats", class, policyChannelsLaunch + " (--debug-stats/--quiet)", "on", "embedded", ""},
+			policyExplainKnob{"report.banner", class, policyChannelsLaunch + " (--banner)", "auto", "embedded", ""},
 		)
 	}
 	return rows
 }
 
+// guardPolicyExplainAllowLayers names the allow-layer set the explain report must
+// render: the same one loadGuardAllowOverlayLayers folds into the enforced floor,
+// session scope included. The CLI adapter (runGuardPolicyExplainVerb, guard_policy.go)
+// spells that expression out at its own call site, so this exists to give the tests ONE
+// name for it — a witness that re-derived the layer set by hand could agree with itself
+// while both drifted from the floor, which is exactly the session-scope blind spot
+// described below.
+func guardPolicyExplainAllowLayers() []guardAllowOverlayLayer {
+	return guardAllowLayersWithSessionScope(guardAllowOverlayPaths())
+}
+
 // runGuardPolicyExplain renders the effective floor grouped by amendment class.
-// allowLayers/denyPath are injected (production passes guardAllowOverlayPaths() /
-// guardDenyOverlayPath()) so tests can point the report at a constructed overlay.
+// allowLayers/denyPath are injected so tests can point the report at a constructed
+// overlay; production passes the session-scoped layer set (the value
+// guardPolicyExplainAllowLayers names) and guardDenyOverlayPath().
+//
+// The allowLayers set is load-bearing, not cosmetic: explain claims to show the floor the
+// guard enforces, so it must be handed the SAME layer set the floor loader reads
+// (loadGuardAllowOverlayLayers). Passing the bare guardAllowOverlayPaths() would silently
+// omit the session scope and render a session-scoped widening as absent — the report
+// telling the operator the floor is narrower than it is. Hence the named helper above.
 func runGuardPolicyExplain(stdout, stderr io.Writer, allowLayers []guardAllowOverlayLayer, denyPath string) int {
 	m, err := policy.ParseManifest(guardDefaultPolicyJSON)
 	if err != nil {
@@ -162,9 +232,24 @@ func runGuardPolicyExplain(stdout, stderr io.Writer, allowLayers []guardAllowOve
 	}
 	for _, g := range groups {
 		fmt.Fprintf(stdout, "\n== %s — %s ==\n", g.class, g.legend)
+		// The widening scopes are only meaningful for the gated-widen channel, so the
+		// precedence legend prints once here rather than trailing every row: it answers
+		// "where does this scope sit, and does a widening recorded there survive the
+		// next launch" in one place, and the per-row scope= cell then reads as a key
+		// into it (#5180).
+		if g.class == policyClassGatedWiden {
+			fmt.Fprintln(stdout, "  scope precedence — broadest first; the NARROWEST scope naming an entry owns it:")
+			for _, s := range policyExplainScopeOrder {
+				fmt.Fprintf(stdout, "    scope=%-8s%s\n", s, guardAllowScopeDurabilityNote(s))
+			}
+		}
 		for _, k := range policyExplainKnobs(g.class, m, allowLayers, allowByLayer, deny, denyProvenance) {
-			fmt.Fprintf(stdout, "  %-36s  class=%-14s  value=%-40s  provenance=%-12s  channels=%s\n",
-				k.Name, k.Class, k.Value, k.Provenance, k.Channels)
+			scope := k.Scope
+			if scope == "" {
+				scope = "-" // not an overlay entry; the embedded floor has no widening scope
+			}
+			fmt.Fprintf(stdout, "  %-36s  class=%-14s  value=%-40s  provenance=%-12s  scope=%-8s  channels=%s\n",
+				k.Name, k.Class, k.Value, k.Provenance, scope, k.Channels)
 		}
 	}
 	return 0
