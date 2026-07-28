@@ -14,8 +14,10 @@
 //     over time, or stalling?"
 //   - The ROADMAP (the Epics dimension): per-tracked-epic child-issue completion,
 //     read live from `gh`. A child signal is resolved by a PROVENANCE-honest priority
-//     chain (a track label, then the epic body's task-list checklist) and each row
-//     records WHICH source answered. An epic with no resolvable child signal is an
+//     chain (a track label, then the epic body's task-list checklist — whose rows are
+//     themselves decided by the LIVE state of any child issue they name, so a stale or
+//     optimistic checkbox never sets the count) and each row records WHICH source
+//     answered. An epic with no resolvable child signal is an
 //     ERRORED row, never a fabricated 0%. The roadmap is split two ways: by work
 //     class (discrete deliverables vs ongoing optimization programs) and by
 //     generation horizon (now/next/second-next/future/unclassified), so an operator

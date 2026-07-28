@@ -26,7 +26,8 @@ type Runner = epicprogress.Runner
 
 // TrackedEpics is the data-driven list of epics the milestone roadmap dimension
 // tracks — the analog of covmatrix.Families. Each entry's child-completion signal
-// is resolved by epicprogress.Counts (track label, then body checklist).
+// is resolved by epicprogress.Counts (track label, then body checklist cross-checked
+// against the referenced children's live state).
 // Seeded from the live fleet epics; edit this slice (not the logic) to track more.
 // A `--epics-from` JSON file overrides it for ad-hoc tracking.
 var TrackedEpics = []EpicSpec{

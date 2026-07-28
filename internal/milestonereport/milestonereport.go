@@ -117,8 +117,10 @@ func InterpretMaturity(cells []covmatrix.Cell) Maturity {
 // epic: how many children, how many closed, by which source — or an Err when no
 // child signal could be witnessed. A failed read MUST set Err, never Total 0; the
 // interpreter relies on that to tell "0 of 4 done" from "could not read". Source is
-// the provenance label ("label" | "checklist") so the fold can report HOW the
-// number was witnessed (the conflation-honesty contract).
+// the provenance label ("label" | "checklist" | "checklist+issue-state") so the fold
+// can report HOW the number was witnessed (the conflation-honesty contract) — in
+// particular whether a checklist count was cross-checked against the referenced
+// children's real state or read off the hand-ticked boxes alone.
 type EpicCounts struct {
 	Number int
 	Closed int
