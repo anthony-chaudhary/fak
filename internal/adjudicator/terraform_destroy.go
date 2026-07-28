@@ -169,12 +169,47 @@ func terraformArgvDestroys(argv []string) bool {
 	}
 }
 
-// terraformSubcommand returns the first non-flag word of a terraform argv, so a
-// global flag before the subcommand (`terraform -chdir=infra destroy`) is stepped
-// over rather than mistaken for it.
+// terraformSubcommands is the set of words terraform itself accepts at the
+// subcommand position. It exists only to tell a SUBCOMMAND apart from a global
+// flag's SEPARATED VALUE (see terraformSubcommand); an unrecognised word is still
+// treated as the subcommand, so a newer or vendored subcommand reads exactly as it
+// did before — as "not destroy", i.e. admitted.
+var terraformSubcommands = map[string]bool{
+	"apply": true, "console": true, "destroy": true, "env": true, "fmt": true,
+	"force-unlock": true, "get": true, "graph": true, "import": true, "init": true,
+	"login": true, "logout": true, "metadata": true, "modules": true, "output": true,
+	"plan": true, "providers": true, "push": true, "refresh": true, "show": true,
+	"state": true, "taint": true, "test": true, "untaint": true, "validate": true,
+	"version": true, "workspace": true,
+}
+
+// terraformSubcommand returns the first non-flag word of a terraform argv that is
+// actually the SUBCOMMAND, so a global flag before it is stepped over rather than
+// mistaken for it.
+//
+// Stepping over `-chdir=infra` is trivial — the value rides on the flag token. The
+// SEPARATED spelling is not: in `terraform -chdir infra destroy -auto-approve` the
+// value `infra` is its own non-flag word, and taking the first non-flag word made
+// `infra` the subcommand, so the real `destroy` after it was never read and a live
+// teardown was admitted (it is the `PowerShell terraform destroy denied` case of
+// cmd/fak's TestGuardDefaultPolicyDeniesDangerAllowsBenign). A word is skipped as a
+// flag's value only when it BOTH follows a bare `-flag` token (no `=`) and is not
+// itself a terraform subcommand — so `terraform show  # inspect before a destroy`,
+// where the trailing words follow no flag at all, still stops at `show` and stays
+// admitted, and `terraform -chdir infra plan -destroy` still resolves to `plan`.
 func terraformSubcommand(argv []string) (string, []string, bool) {
+	prevBareFlag := false
 	for i, tok := range argv {
-		if strings.HasPrefix(tok, "-") || tok == "" {
+		if tok == "" {
+			continue
+		}
+		if strings.HasPrefix(tok, "-") {
+			// A flag carrying its own value (`-chdir=infra`) consumes nothing else.
+			prevBareFlag = !strings.Contains(tok, "=")
+			continue
+		}
+		if prevBareFlag && !terraformSubcommands[strings.ToLower(tok)] {
+			prevBareFlag = false // this word was the preceding flag's value
 			continue
 		}
 		return strings.ToLower(tok), argv[i+1:], true

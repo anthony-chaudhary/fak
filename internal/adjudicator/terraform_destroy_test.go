@@ -133,6 +133,50 @@ func TestTerraformDestroyPowerShellSurface(t *testing.T) {
 	}
 }
 
+// TestTerraformSeparatedGlobalFlagValueDoesNotHideTheSubcommand pins the shape that
+// slipped past the first command-word decision: a global flag whose value is a
+// SEPARATE word (`-chdir infra`) rather than an attached one (`-chdir=infra`). The
+// subcommand walk took the first non-flag word, so `infra` was read as the
+// subcommand, the real `destroy` behind it was never examined, and a live teardown
+// was admitted on every surface. This is the `PowerShell terraform destroy denied`
+// case of cmd/fak's TestGuardDefaultPolicyDeniesDangerAllowsBenign.
+//
+// The benign half is pinned in the same place: stepping over the flag's value must
+// not start stepping over ordinary trailing words, or the mention and read-only
+// classes this rule deliberately admits would come back as refusals.
+func TestTerraformSeparatedGlobalFlagValueDoesNotHideTheSubcommand(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want abi.VerdictKind
+	}{
+		{`terraform -chdir infra destroy -auto-approve`, abi.VerdictDeny},
+		{`terraform.exe -chdir infra destroy -auto-approve`, abi.VerdictDeny},
+		{`terraform -chdir infra apply -destroy -auto-approve`, abi.VerdictDeny},
+		{`terraform -chdir infra -input false destroy`, abi.VerdictDeny},
+		// The advertised remedy and the read-only subcommands keep working through
+		// the same separated spelling.
+		{`terraform -chdir infra plan -destroy`, abi.VerdictAllow},
+		{`terraform -chdir infra show  # inspect before a destroy`, abi.VerdictAllow},
+		// No flag precedes these words, so nothing is stepped over and the walk
+		// still stops at the real subcommand.
+		{`terraform show  # inspect before a destroy`, abi.VerdictAllow},
+		{`terraform state list  # inspect before a destroy`, abi.VerdictAllow},
+	}
+	for _, tool := range []string{"Bash", "PowerShell"} {
+		re := terraformDestroyDenyRegex
+		if tool == "PowerShell" {
+			re = terraformDestroyDenyRegexCI
+		}
+		a := tfAdj(t, tool, re)
+		for _, tc := range cases {
+			v := a.Adjudicate(context.Background(), inlineCall(tool, jsonCmd(tc.cmd)))
+			if v.Kind != tc.want {
+				t.Errorf("%s %q: got %v/%s, want %v", tool, tc.cmd, v.Kind, abi.ReasonName(v.Reason), tc.want)
+			}
+		}
+	}
+}
+
 // TestTerraformUndecidableKeepsTheDeny pins the fail-CLOSED direction: a command the
 // walk cannot read must keep the refusal rather than be read as a mention.
 func TestTerraformUndecidableKeepsTheDeny(t *testing.T) {
