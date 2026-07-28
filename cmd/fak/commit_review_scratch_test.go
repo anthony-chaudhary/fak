@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const scratchPreamble = `---
@@ -103,6 +104,195 @@ func TestAppendGoalScratchStaysBounded(t *testing.T) {
 	if !strings.Contains(string(b), payload(turns-1)) {
 		t.Fatalf("newest refusal missing after cap:\n%s", string(b))
 	}
+}
+
+// TestAppendGoalScratchLogRetainsUnboundedHistory is the retention half of #3826: driving far
+// more turns than goalScratchCap must leave EVERY refusal readable in the append-only sidecar
+// — including the earliest ones the bounded GOAL.md section drops — while GOAL.md itself stays
+// bounded so the loop driver's per-turn re-parse does not regress to #3453.
+func TestAppendGoalScratchLogRetainsUnboundedHistory(t *testing.T) {
+	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	if err := os.WriteFile(goal, []byte(scratchPreamble), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const turns = goalScratchCap * 4 // 200 turns vs a 50-entry cap
+	payload := func(i int) string { return "NOT_YET turn " + pad4(i) }
+	for i := 0; i < turns; i++ {
+		if err := appendGoalScratch(goal, payload(i)); err != nil {
+			t.Fatalf("append turn %d: %v", i, err)
+		}
+	}
+
+	b, err := os.ReadFile(goalScratchLogPath(goal))
+	if err != nil {
+		t.Fatalf("read scratch log: %v", err)
+	}
+	history := nonEmptyLines(string(b))
+	if len(history) != turns {
+		t.Fatalf("history entries = %d, want every one of %d turns", len(history), turns)
+	}
+	if len(history) <= goalScratchCap {
+		t.Fatalf("history retained %d entries, want > cap %d (unbounded retention)", len(history), goalScratchCap)
+	}
+	// The oldest entry is precisely the one the bounded section discards — that is the
+	// observability gap this ticket exists to close.
+	if oldest := payload(0); !strings.Contains(history[0], oldest) {
+		t.Fatalf("oldest history entry = %q, want it to carry %q", history[0], oldest)
+	}
+	if newest := payload(turns - 1); !strings.Contains(history[len(history)-1], newest) {
+		t.Fatalf("newest history entry = %q, want it to carry %q", history[len(history)-1], newest)
+	}
+	if strings.Contains(string(b), payload(0)) == strings.Contains(string(b), payload(turns-1)) {
+		// both true — assert explicitly that the dropped-from-GOAL.md range survives here.
+		if !strings.Contains(string(b), payload(goalScratchCap/2)) {
+			t.Fatalf("mid-history entry %q missing from sidecar", payload(goalScratchCap/2))
+		}
+	}
+	// Every entry carries a timestamp, which is what makes the sidecar answer the "why did
+	// this drive cycle the same plan item for hours" question the ticket names.
+	if _, err := time.Parse(goalScratchLogStampLayout, strings.Fields(history[0])[0]); err != nil {
+		t.Fatalf("history entry %q lacks a parsable %s stamp: %v", history[0], goalScratchLogStampLayout, err)
+	}
+
+	// No #3453 regression: the hot file the drive loop re-parses every turn is still capped.
+	g, err := os.ReadFile(goal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries := scratchEntryLines(string(g)); len(entries) != goalScratchCap {
+		t.Fatalf("GOAL.md scratch entries = %d, want it still bounded at %d", len(entries), goalScratchCap)
+	}
+	if strings.Contains(string(g), payload(0)) {
+		t.Fatalf("GOAL.md unexpectedly retained the oldest entry — bounded section regressed")
+	}
+}
+
+// TestAppendGoalScratchLogWriteCostIsConstant is the cost half of #3826. It asserts the
+// append-only WRITE SIZE stays constant per turn — deliberately NOT that total file size is
+// constant, which is the bounded-file invariant unbounded retention contradicts.
+//
+// What this proves: the bytes added per turn do not scale with the entries already retained,
+// so N turns cost O(N) total rather than the O(N^2) whole-file rewrite #3453 fixed. It also
+// pins the hot re-parsed surface (GOAL.md) to a constant steady-state size, so neither the
+// write nor the read side of a long drive grows with the turn count.
+func TestAppendGoalScratchLogWriteCostIsConstant(t *testing.T) {
+	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	if err := os.WriteFile(goal, []byte(scratchPreamble), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := goalScratchLogPath(goal)
+	const turns = goalScratchCap * 4
+	payload := func(i int) string { return "NOT_YET turn " + pad4(i) } // fixed width
+
+	size := func(p string) int64 {
+		fi, err := os.Stat(p)
+		if err != nil {
+			return 0
+		}
+		return fi.Size()
+	}
+
+	var firstDelta, goalSteady int64
+	for i := 0; i < turns; i++ {
+		before := size(logPath)
+		if err := appendGoalScratch(goal, payload(i)); err != nil {
+			t.Fatalf("append turn %d: %v", i, err)
+		}
+		delta := size(logPath) - before
+		switch {
+		case i == 0:
+			firstDelta = delta
+		case delta != firstDelta:
+			// A read-modify-rewrite of the history would make this grow with i.
+			t.Fatalf("turn %d wrote %d bytes, want the constant %d of turn 0 (append-only)", i, delta, firstDelta)
+		}
+		if i == goalScratchCap {
+			goalSteady = size(goal)
+		}
+		if i > goalScratchCap && size(goal) != goalSteady {
+			t.Fatalf("turn %d: GOAL.md = %d bytes, want steady-state %d (bounded re-parse)", i, size(goal), goalSteady)
+		}
+	}
+	if firstDelta <= 0 {
+		t.Fatalf("per-turn append wrote %d bytes", firstDelta)
+	}
+	// Retention is linear in turns while the per-turn cost is flat — the point of the split.
+	if got, want := size(logPath), firstDelta*int64(turns); got != want {
+		t.Fatalf("history = %d bytes after %d turns, want %d (linear total, constant per-turn)", got, turns, want)
+	}
+}
+
+// TestRotateGoalScratchLogSealsWithoutLoss: the sidecar is append-only UNTIL ROTATED, so an
+// oversized active segment is sealed to "<path>.NNN" and appends continue in a fresh file.
+// Rotation must bound the HOT file without dropping history — sealed + active together still
+// hold every entry (the #3287 / #3455 tension the ticket flags, resolved by sealing not
+// truncating).
+func TestRotateGoalScratchLogSealsWithoutLoss(t *testing.T) {
+	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	if err := os.WriteFile(goal, []byte(scratchPreamble), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := goalScratchLogPath(goal)
+	const (
+		turns  = 40
+		rotate = int64(200) // tiny, so several rotations happen inside the run
+	)
+	for i := 0; i < turns; i++ {
+		appendGoalScratchLog(goal, "NOT_YET turn "+pad4(i), rotate)
+	}
+
+	segments, err := filepath.Glob(logPath + ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) == 0 {
+		t.Fatalf("no sealed segment beside %s — rotation never fired", logPath)
+	}
+	total := 0
+	for _, p := range append(segments, logPath) {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		total += len(nonEmptyLines(string(b)))
+	}
+	if total != turns {
+		t.Fatalf("sealed+active entries = %d, want all %d turns (rotation must not drop history)", total, turns)
+	}
+	// The hot append target is what rotation exists to bound.
+	fi, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Size() >= rotate {
+		t.Fatalf("active segment = %d bytes, want it held under the %d rotate threshold", fi.Size(), rotate)
+	}
+	// A non-positive threshold disables rotation entirely.
+	before, _ := os.Stat(logPath)
+	rotateGoalScratchLog(logPath, 0)
+	after, err := os.Stat(logPath)
+	if err != nil || after.Size() != before.Size() {
+		t.Fatalf("non-positive rotate threshold must be a no-op")
+	}
+}
+
+// TestGoalScratchLogPath pins the sidecar naming: the extension is replaced (not appended) so
+// a goal file's history is the "GOAL.scratch.log" the ticket names, and an empty goal path
+// yields no surface rather than a stray "./.scratch.log".
+func TestGoalScratchLogPath(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{filepath.Join("d", "GOAL.md"), filepath.Join("d", "GOAL.scratch.log")},
+		{"GOAL.md", "GOAL.scratch.log"},
+		{"GOAL", "GOAL.scratch.log"},
+		{"  ", ""},
+		{"", ""},
+	} {
+		if got := goalScratchLogPath(tc.in); got != tc.want {
+			t.Fatalf("goalScratchLogPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// An unconfigured goal path must not create anything.
+	appendGoalScratchLog("", "NOT_YET orphan", goalScratchLogRotateBytes)
 }
 
 // scratchEntryLines returns the non-empty lines under the last scratch header.

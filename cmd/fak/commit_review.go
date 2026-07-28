@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
@@ -271,7 +273,96 @@ func appendGoalScratch(path, line string) error {
 	// the last scratch line is ever consumed (lastLoopGoalScratchLine / FAK_GOAL_LAST_REFUSAL),
 	// so trimming to the most recent entries is loss-free for every reader.
 	text = capGoalScratch(text, goalScratchCap)
-	return os.WriteFile(path, []byte(text), 0o644)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return err
+	}
+	// The bounded section above is the functional + at-a-glance surface; the FULL refusal
+	// history goes to an append-only sidecar the hot loop never re-parses (#3826). Writing
+	// it here — the one choke point every scratch call site funnels through (the commit
+	// gate's refuted review plus all four loop-driver paths) — is what makes retention
+	// unbounded without reintroducing #3453 on either the write or the read side.
+	appendGoalScratchLog(path, line, goalScratchLogRotateBytes)
+	return nil
+}
+
+// goalScratchLogSuffix names the append-only plaintext refusal history that rides beside a
+// goal file: GOAL.md -> GOAL.scratch.log. It is deliberately a ".log" so growthgate
+// classifies it as ClassLog and its "rotate by size" remedy applies (see the rotation below);
+// a name outside that filter would make it an unclassified grower, which is the very defect
+// epic #3287 / #3455 track.
+const goalScratchLogSuffix = ".scratch.log"
+
+// goalScratchLogRotateBytes caps the ACTIVE sidecar segment. Retention stays unbounded —
+// rotation seals the full segment to "<path>.NNN" rather than dropping entries — but the hot
+// append target never becomes an unbounded single file. Matched to loopmgr.DefaultRotateBytes
+// so the sibling ledger and this sidecar bound their hot files the same way.
+const goalScratchLogRotateBytes int64 = 8 << 20
+
+// goalScratchLogStampLayout is RFC3339 pinned to UTC. Fixed-width by construction (20 bytes),
+// which is what lets the O(1)-per-turn witness compare byte deltas across turns.
+const goalScratchLogStampLayout = "2006-01-02T15:04:05Z"
+
+// goalScratchLogPath maps a goal file to its history sidecar, replacing the extension so
+// "GOAL.md" becomes "GOAL.scratch.log". An empty goal path yields an empty sidecar path,
+// which callers treat as "no history surface configured".
+func goalScratchLogPath(goalPath string) string {
+	goalPath = strings.TrimSpace(goalPath)
+	if goalPath == "" {
+		return ""
+	}
+	return strings.TrimSuffix(goalPath, filepath.Ext(goalPath)) + goalScratchLogSuffix
+}
+
+// appendGoalScratchLog appends one timestamped entry to the goal's history sidecar with a
+// single O_APPEND write — no read, no whole-file rewrite — so the per-turn cost is O(1) in
+// the number of entries already retained, and the file the drive loop re-parses every turn
+// (GOAL.md) is untouched by it.
+//
+// It is deliberately BEST-EFFORT: this is an observability surface, and the functional write
+// (the bounded GOAL.md section that FAK_GOAL_LAST_REFUSAL reads) has already succeeded by the
+// time it runs. Failing a drive turn because a supplementary log could not be opened would
+// trade a real capability for a nice-to-have, so the error is dropped. The trade-off is that
+// a sidecar that cannot be created is silent rather than loud.
+func appendGoalScratchLog(goalPath, line string, rotateBytes int64) {
+	path := goalScratchLogPath(goalPath)
+	if path == "" {
+		return
+	}
+	rotateGoalScratchLog(path, rotateBytes)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(time.Now().UTC().Format(goalScratchLogStampLayout) + " " + strings.TrimSpace(line) + "\n")
+}
+
+// rotateGoalScratchLog seals the active sidecar into the next free "<path>.NNN" segment once
+// it reaches rotateBytes, so appends continue into a fresh file. Nothing is dropped or
+// rewritten — sealed segments stay on disk and the concatenation of "<path>.001".."<path>",
+// in index order, is the whole history. This is append-only-UNTIL-ROTATED, which is what the
+// growthgate ClassLog remedy ("rotate by size") asks of a plaintext grower.
+//
+// A non-positive rotateBytes disables rotation (used by callers that bound the file some
+// other way). Stat/rename failures leave the active file in place: appending to an oversized
+// log is strictly better than losing the turn's entry.
+func rotateGoalScratchLog(path string, rotateBytes int64) {
+	if rotateBytes <= 0 {
+		return
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() < rotateBytes {
+		return
+	}
+	// Segment indices are parsed numerically by readers, so the zero-pad width is cosmetic
+	// and the scan simply takes the first free slot.
+	for i := 1; i < 1000; i++ {
+		seg := fmt.Sprintf("%s.%03d", path, i)
+		if _, statErr := os.Stat(seg); os.IsNotExist(statErr) {
+			_ = os.Rename(path, seg)
+			return
+		}
+	}
 }
 
 // goalScratchCap bounds the "# Scratch / last-refusal" section to its most recent entries.
