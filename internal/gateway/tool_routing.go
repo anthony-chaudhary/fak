@@ -187,7 +187,11 @@ func (s *Server) dispatchEnsemble(ctx context.Context, base *abi.ToolCall, plan 
 		// sensitive payload, and the fold below stays in Plan.Members order. An unresolvable
 		// member fails LOUD for the whole ensemble — never a silently-dropped or
 		// default-routed vote. Without a roster the member model id is the route (pre-#2528).
-		route, rerr := s.resolveRoute(mem.Model)
+		// Each member is adjudicated for the SAME principal the parent call presented, so
+		// an ensemble can never reach an account the tenant is not provisioned for by
+		// spreading across members. A refused member fails the whole ensemble LOUD rather
+		// than silently dropping a vote — a residency denial is not a missing opinion.
+		route, rerr := s.resolveRoute(mem.Model, base.Meta[vdso.MetaPrincipal])
 		if rerr != nil {
 			return WireVerdict{}, nil, rerr
 		}
@@ -359,7 +363,10 @@ func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string)
 	if d.Plan.IsEnsemble() {
 		return "", nil
 	}
-	return s.resolveRoute(d.Plan.Primary())
+	// meta already carries the request's isolation principal (buildCall lowered it from
+	// ctx onto vdso.MetaPrincipal), so the residency arm reads the SAME principal the
+	// vDSO scopes its cache by — one identity, not two that could disagree.
+	return s.resolveRoute(d.Plan.Primary(), meta[vdso.MetaPrincipal])
 }
 
 // resolveRoute maps a routed model id to the engine route bound to abi.ToolCall.Engine
@@ -372,13 +379,35 @@ func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string)
 // FAIL-LOUD error carrying the recovery hint from the pure resolver — never a silent
 // fallback to the default engine. An empty id (no primary member) resolves to "" (the
 // kernel default), never through the roster.
-func (s *Server) resolveRoute(modelID string) (string, error) {
+//
+// principal is the caller's tenant ISOLATION principal (the org/project a keyset key
+// authenticated as, #5332) and gates WHICH account this call may resolve through — the
+// residency arm of the keyset. The check runs HERE, at the same pre-Submit seam that
+// binds Engine, because that is the last point before the call reaches the kernel: an
+// account the principal is not provisioned for must never become a bound route. It is
+// fail-CLOSED in both directions — an account naming principals admits only its listed
+// tenants, and the EMPTY principal (an unattributed caller: no keyset, or the single
+// --require-key-env bearer) is refused by a restricted account rather than inheriting
+// its credential. A roster whose accounts name NO principals admits everyone, so a
+// pre-#5332 roster routes byte-for-byte as before.
+func (s *Server) resolveRoute(modelID, principal string) (string, error) {
 	if s.roster == nil || modelID == "" {
 		return modelID, nil
 	}
 	t, err := s.roster.Resolve(modelID)
 	if err != nil {
 		return "", fmt.Errorf("gateway: route accounts: %w (fix the roster binding for %q or set a default account; no silent fallback)", err, modelID)
+	}
+	if !t.Admits(principal) {
+		// Name the principal and the account, never the credential: the operator needs to
+		// see WHICH tenancy was refused to fix the roster, and Target carries only the
+		// credential env NAME anyway. An empty principal is reported as such so an operator
+		// can tell "wrong tenant" apart from "unattributed caller".
+		who := principal
+		if strings.TrimSpace(who) == "" {
+			who = "<unattributed>"
+		}
+		return "", fmt.Errorf("gateway: route accounts: principal %s is not admitted to account %q (routed model %q): that account's principals allowlist scopes it to another tenant (#5332) — add this principal to the account, or bind its key to an account it is provisioned for", who, t.Account, modelID)
 	}
 	return t.EngineRoute(), nil
 }
