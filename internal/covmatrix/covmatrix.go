@@ -73,9 +73,11 @@ type Family struct {
 	// runs in CI for this family. Llama qualifies via the SmolLM2 anchor + Float32bits
 	// gate (refactor_test.go's legacy hand-copy web); OLMo2 and Qwen2/3.x via the
 	// independent HF-semantics references in internal/model/family_cpu_oracle_test.go
-	// (#1271 Lane 1). Every other family's HF oracle is the checkpoint-gated #474 set
-	// that SKIPs under -short. This is the honest "asserted, not proven" boundary the
-	// epic names.
+	// (#1271 Lane 1); MPT via internal/model/family_mpt_cpu_oracle_test.go, whose
+	// reference adds the ALiBi slope table (including the non-power-of-two head
+	// reorder), the mean-subtracting bias-free LayerNorm, and the fused-Wqkv row cut.
+	// Every other family's HF oracle is the checkpoint-gated #474 set that SKIPs under
+	// -short. This is the honest "asserted, not proven" boundary the epic names.
 	OracleInCI bool
 }
 
@@ -88,7 +90,7 @@ var Families = []Family{
 	{Name: "Qwen2/3.x", ResolverToken: "", Topology: PreNorm, OracleInCI: true},
 	{Name: "GPT-NeoX", ResolverToken: "gptneox", Topology: ParallelResidual, OracleInCI: false},
 	{Name: "Falcon", ResolverToken: "falcon", Topology: ParallelResidual, OracleInCI: false},
-	{Name: "MPT", ResolverToken: "mpt", Topology: PreNorm, OracleInCI: false},
+	{Name: "MPT", ResolverToken: "mpt", Topology: PreNorm, OracleInCI: true},
 	{Name: "StableLM", ResolverToken: "stablelm", Topology: PreNorm, OracleInCI: false},
 	{Name: "OLMo2", ResolverToken: "olmo2", Topology: PostNorm, OracleInCI: true},
 	{Name: "Cohere", ResolverToken: "cohere", Topology: ParallelResidual, OracleInCI: false},
