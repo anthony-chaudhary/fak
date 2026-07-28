@@ -270,3 +270,43 @@ func TestSampleListIsNotRefreshable(t *testing.T) {
 		t.Errorf("last_refreshed = %q, want empty: the placeholder has never been refreshed", s.LastRefreshed)
 	}
 }
+
+// TestAtLeastOneCommunityListIsIngested is the gate that keeps this registry from silently
+// regressing to a seed-only demo. A bundled set containing nothing but the hand-authored
+// placeholder is indistinguishable, to an operator reading `egress.block_lists`, from one
+// that actually carries a community feed — except that it blocks nothing real. So the
+// presence of at least one list with a genuine upstream is an invariant, not a milestone
+// someone can quietly undo by deleting the last ingested artifact.
+func TestAtLeastOneCommunityListIsIngested(t *testing.T) {
+	sources, err := Sources()
+	if err != nil {
+		t.Fatalf("Sources(): %v", err)
+	}
+	ingested := 0
+	for _, s := range sources {
+		if !s.Refreshable() {
+			continue // a hand-authored/operator-pinned list is legitimate; it just is not this.
+		}
+		ingested++
+		// Provenance is the whole contract for redistributing someone else's curation:
+		// where it came from, under what terms, pinned to which bytes, checked when.
+		if strings.TrimSpace(s.License) == "" {
+			t.Errorf("list %q records an upstream but no license: we ship a derived copy of "+
+				"someone else's list, so the terms must travel with it", s.Name)
+		}
+		if s.LastRefreshed == "" {
+			t.Errorf("list %q records an upstream but was never refreshed - its artifact has no "+
+				"provenance in time", s.Name)
+		}
+		// A real community feed is thousands of rules. A handful means a truncated fetch
+		// got pinned, which is the fail-closed case egressrefresh exists to prevent.
+		if s.Rules < 100 {
+			t.Errorf("list %q pins only %d rules - too few for a real community feed; a nearly "+
+				"empty block list is all-permissive, not merely small", s.Name, s.Rules)
+		}
+	}
+	if ingested == 0 {
+		t.Error("no bundled list records an upstream: the registry is still seed-only, so " +
+			"`egress.block_lists` offers an operator nothing that blocks a real host")
+	}
+}

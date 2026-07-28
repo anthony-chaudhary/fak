@@ -3,9 +3,12 @@ package hooks
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/egresslist"
 )
 
 // gate_publicleak.go — the PUBLIC_LEAK gate, a byte-faithful port of
@@ -71,7 +74,11 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 			continue
 		}
 		findings = append(findings, publicLeakLineFindings(norm, 0, norm, needles)...)
+		pinned := isPinnedUpstreamArtifact(d, norm)
 		for _, al := range d.AddedByFile[f] {
+			if pinned && egresslist.IsUpstreamRuleLine(al.Text) {
+				continue
+			}
 			payloadL := strings.ToLower(al.Text)
 			for _, n := range needles {
 				if strings.Contains(payloadL, strings.ToLower(n)) {
@@ -92,6 +99,47 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 		}
 	}
 	return findings, nil
+}
+
+// isPinnedUpstreamArtifact reports whether the STAGED bytes of `rel` are the checksum-pinned
+// rendering that the manifest beside them records for that list (#5405). It is the one
+// condition under which gatePublicLeak will skip an added line, and it delegates the whole
+// definition to internal/egresslist — the leaf that OWNS the artifact grammar — rather than
+// re-deriving it here, so the exemption cannot drift away from what the generator emits.
+//
+// WHY AN EXEMPTION IS SAFE HERE AND NOWHERE ELSE. A community ad/telemetry filter feed names
+// vendor brands by construction: naming a host is how you block it. That collides head-on with
+// an affiliation needle, and every other resolution is worse — dropping the rules loses them on
+// the next refresh, and rewriting them at export makes the published fak block DIFFERENT hosts
+// than the private one, which is silent divergence in a security artifact.
+//
+// The load-bearing condition is the PIN, not the path. A path allowlist would exempt anything
+// dropped in the directory; a checksum means a hand-smuggled line changes the hash, so a leak
+// cannot ride in under the exemption without re-pinning the manifest in the same reviewable
+// diff. IsUpstreamRuleLine then narrows it to the single line SHAPE the generator emits for feed
+// data, so a needle in the artifact's `!` prose header — the one place a human can write a claim
+// into a generated file — is still a leak.
+//
+// Both file reads go through d.FileBytes, which resolves the STAGED blob: the bytes that would
+// actually land, not whatever is loose on disk. Every failure mode (not a declared artifact path,
+// missing artifact, missing manifest) returns false and the line is scanned as usual — fail-closed
+// is the only correct direction, since a false negative costs one FLEET_ALLOW_LEAK override while
+// a false positive silently publishes a leak.
+func isPinnedUpstreamArtifact(d *StagedDiff, rel string) bool {
+	if _, ok := egresslist.ArtifactName(rel); !ok {
+		return false
+	}
+	artifact, ok := d.FileBytes(rel)
+	if !ok {
+		return false
+	}
+	// Resolved BESIDE the artifact, so this works unchanged whether the tree is rooted at the
+	// repo or nested under the export layout's `fak/` prefix — the same tolerance ArtifactName has.
+	manifest, ok := d.FileBytes(path.Join(path.Dir(rel), egresslist.ManifestFile))
+	if !ok {
+		return false
+	}
+	return egresslist.IsPinnedArtifact(rel, artifact, manifest)
 }
 
 // effectiveAuditNeedles unions the base list with the sidecar JSON's audit_needles +

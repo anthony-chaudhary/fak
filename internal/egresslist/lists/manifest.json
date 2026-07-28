@@ -5,10 +5,21 @@
       "name": "sample-malware",
       "url": "",
       "format": "mixed",
+      "license": "Apache-2.0",
       "sha256": "1913f260c98ab44e199339ff3d392c7195a9a1011e9fff39a49a5ab493e7e293",
       "rules": 5,
       "last_refreshed": "",
-      "description": "Hand-authored placeholder proving the block_lists ingestion pipeline end-to-end. Not a real threat feed and NOT refreshable: it records no upstream URL, so `fak egresslist refresh` reports it skipped rather than inventing a provenance. The real community feeds (StevenBlack hosts, EasyPrivacy, URLhaus) arrive with the ingestion issue and land here with a real url + last_refreshed."
+      "description": "Hand-authored placeholder proving the block_lists ingestion pipeline end-to-end. Not a real threat feed and NOT refreshable: it records no upstream URL, so `fak egresslist refresh` reports it skipped rather than inventing a provenance. Authored in this repo, so it carries this repo's own license."
+    },
+    {
+      "name": "stevenblack-curated",
+      "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/data/StevenBlack/hosts",
+      "format": "hosts",
+      "license": "MIT",
+      "sha256": "20ef72639a8d2397f09fe107336250e6ab26e25900c0ef2c86d55dbe65caeba5",
+      "rules": 2843,
+      "last_refreshed": "2026-07-26T09:44:50Z",
+      "description": "The StevenBlack/hosts project's own curated host set (data/StevenBlack/hosts) - the maintainer-authored ads/tracking/malware source that seeds the widely-used unified hosts list. Named `-curated` on purpose: this is that one source, NOT the ~220k-entry unified MERGE of AdAway/MVPS/URLhaus/etc. The unified merge is deliberately not bundled - at ~2.8 MB upstream it would embed ~5 MB of block rules into every fak binary and land as a diff no reviewer can actually read, which defeats the `deterministic and reviewable` property this registry is built on. An operator who wants the full merge adds it as their own manifest entry against the same ingest path."
     }
   ]
 }

@@ -45,10 +45,19 @@ var manifestJSON []byte
 // to 3 is a broken fetch, not a quiet upstream). LastRefreshed is the staleness witness an
 // operator reads; it is deliberately NOT stamped into the artifact, so an unchanged
 // upstream re-renders byte-identical and produces an empty diff.
+//
+// License records the UPSTREAM's terms under which we redistribute the derived artifact.
+// It is provenance, not decoration: bundling a community list means shipping someone
+// else's curation inside our binary, and several of the most popular feeds (EasyList and
+// EasyPrivacy among them) are copyleft in a way that is a real decision for a downstream
+// packager rather than a detail. Recording it per-list is what lets that decision be
+// audited from the checked-in manifest instead of rediscovered from a URL, and what keeps
+// an attribution-requiring upstream (MIT, CC BY-SA) actually attributed where we ship it.
 type Source struct {
 	Name          string `json:"name"`
 	URL           string `json:"url"`
 	Format        string `json:"format"`
+	License       string `json:"license"`
 	SHA256        string `json:"sha256"`
 	Rules         int    `json:"rules"`
 	LastRefreshed string `json:"last_refreshed"`
@@ -240,6 +249,11 @@ func RenderArtifact(s Source, l *List) string {
 	b.WriteString("! Name: " + s.Name + "\n")
 	if s.URL != "" {
 		b.WriteString("! Source: " + s.URL + "\n")
+	}
+	if s.License != "" {
+		// Carried in the artifact as well as the manifest: an MIT/CC BY-SA upstream
+		// requires attribution to travel WITH the copy, and the artifact is the copy.
+		b.WriteString("! Upstream-License: " + s.License + "\n")
 	}
 	if s.Description != "" {
 		b.WriteString("! Description: " + s.Description + "\n")
