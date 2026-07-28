@@ -170,7 +170,22 @@ func TestModelTierFromNameGeminiFlashIsTier2(t *testing.T) {
 		{"gpt-5.6-terra", 1},
 		{"openai/gpt-5.6-sol", 1},
 		{"gpt-5.6-luna", 2},
+		// The Opus FAMILY ranks frontier in every generation and id shape. Enumerating only
+		// opus-4.6 here used to leave the SHIPPED fleet default (claude-opus-4-8) at tier 3,
+		// so the router treated the strongest seat as "everything else"; these rows pin the
+		// family match that fixed it, and keep the next model bump from re-opening the hole.
 		{"opus-4.6", 1},
+		{"claude-opus-5", 1},
+		{"claude-opus-4-8", 1},
+		{"claude-opus-4.8", 1},
+		{"anthropic/claude-opus-5", 1},
+		{"Claude Opus 5", 1},
+		{"claudeopus5", 1},
+		{"opus", 1},
+		{"claude-opus", 1},
+		// …but only as a NAME, never as a substring: an unrelated id that merely CONTAINS
+		// the letters must not be promoted into the frontier set.
+		{"octopus-7b", 3},
 		{"deepseek-v4-pro", 1},
 		{"kimi-k2.6", 1},
 		{"gemini-3.5-pro", 3}, // only Flash is tier 2; Pro is not classified here
