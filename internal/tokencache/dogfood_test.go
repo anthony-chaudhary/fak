@@ -69,6 +69,13 @@ func TestDogfoodRealTreeNetTrue(t *testing.T) {
 	if testing.Short() {
 		t.Skip("dogfood run lexes the whole tracked tree; skipped under -short")
 	}
+	if raceDetectorEnabled {
+		// The verdict is a wall-clock comparison (uncached re-lex vs warm hit), which
+		// ThreadSanitizer's instrumentation makes meaningless. It also lexes the whole
+		// tracked tree four times, which ran past the race job's per-package timeout
+		// and killed the binary -- taking every later package's result down with it.
+		t.Skip("net-true wall-clock witness is not meaningful under go test -race instrumentation")
+	}
 	root, tree := realTrackedGoTree(t)
 	if len(tree) < dogfoodMinFiles {
 		t.Skipf("tracked tree has %d .go files (< %d): not the real tree this witness is about", len(tree), dogfoodMinFiles)
