@@ -137,6 +137,24 @@ rules in [`fleet.md`](fleet.md), then derive the public `fak.lab_readiness/v1` r
 `INDETERMINATE`—hold dispatch while an authorized operator follows the private recovery
 runbook.
 
+## Record: two 2026-07-27 corrections to this note were typed `fix:`
+
+Commits `bf05047c7` and `3e2404d4d` changed only this file, yet carry `fix(dgxbridge):`
+subjects. `fix:` asserts a code effect, and the claim-honesty gate grades that assertion
+against the file set git itself recorded: a code-effect claim whose diff touches no source
+file is `CLAIM_UNWITNESSED`. Both were held out of a trunk push until an operator cleared
+them.
+
+Both changes were real, and their bodies describe them accurately — they correct what this
+note tells an operator to conclude from a bridge-package run on a Windows host. The defect
+is the type alone: both should have been `docs(dgxbridge):`. The durable code fix each one
+discusses lives in the private tree, which the public repository refuses by placement
+policy, so no public diff could ever have witnessed a `fix:` claim here.
+
+They are recorded rather than amended because both had already landed on the shared trunk,
+where rewriting published history is refused. Correct the record forward; do not retype a
+published subject.
+
 ## Related routes
 
 - [Fleet compute nodes](fleet-compute-nodes.md) — choose the sanctioned compute target for a
