@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"os"
 	"sort"
 	"strings"
 
@@ -48,16 +47,16 @@ const deniedGuardIncompleteReason = "fak_guard_denied"
 
 // denialRecoveryEnabled reports whether the #5212 recovery sample is armed. ON by
 // default — a denial-only turn rendered as a completed answer is the defect, so the
-// recovery is the default behavior. FAK_DENIAL_RECOVERY=0|false|no|off stands it down
-// for a deploy that would rather pay no second sample and take the typed blocked
-// state directly.
-func denialRecoveryEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_DENIAL_RECOVERY"))) {
-	case "0", "false", "no", "off":
-		return false
-	default:
-		return true
-	}
+// recovery is the default behavior. Config.DenialRecoveryOff stands it down for a deploy
+// that would rather pay no second sample and take the typed blocked state directly.
+//
+// Declared on the gateway's Config surface rather than read from the ambient process
+// environment: whether a refused turn gets a second chance is behavior, not a credential,
+// and internal/envconfiglint ratchets exactly that distinction (CONFIG_NOT_ENV). A setting
+// read out of the environment is invisible to the host that constructs the Server and
+// cannot differ between two gateways in one process; a Config field is neither.
+func (s *Server) denialRecoveryEnabled() bool {
+	return !s.denialRecoveryOff
 }
 
 // turnIsDenialOnly reports whether the adjudicated turn has nothing left to show the
@@ -176,7 +175,7 @@ func deniedToolResult(a ToolAdjudication) string {
 // The recovery sample runs on the SAME served session turn, so it is admitted, budgeted,
 // and debited exactly like the first: a recovery cannot outrun a session's token budget.
 func (s *Server) recoverDeniedResponsesTurn(ctx context.Context, turn servedSessionTurn, base []agent.Message, proposed agent.Message, adjs []ToolAdjudication, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, bool) {
-	if !denialRecoveryEnabled() {
+	if !s.denialRecoveryEnabled() {
 		return nil, false
 	}
 	msgs := deniedRecoveryMessages(base, proposed, adjs)

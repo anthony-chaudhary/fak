@@ -231,12 +231,25 @@ func TestResponsesDenialThenModelAuthoredAnswerStaysCompleted(t *testing.T) {
 	}
 }
 
-// TestResponsesDenialRecoveryStandsDownOnOptOut proves FAK_DENIAL_RECOVERY=0 is a real kill
-// switch: no second sample is spent, and the turn falls through to the same typed
+// TestResponsesDenialRecoveryStandsDownOnOptOut proves Config.DenialRecoveryOff is a real
+// kill switch: no second sample is spent, and the turn falls through to the same typed
 // blocked state rather than silently reverting to the false-completion shape.
 func TestResponsesDenialRecoveryStandsDownOnOptOut(t *testing.T) {
-	t.Setenv("FAK_DENIAL_RECOVERY", "0")
 	srv := newTestServer(t)
+	// The stand-down reaches the server THROUGH Config, so witness that copy first —
+	// otherwise setting the unexported field by hand below would pass even if New dropped
+	// the declaration on the floor and no host could ever actually stand recovery down.
+	wired, err := New(Config{EngineID: "test", Model: "test-model", DenialRecoveryOff: true})
+	if err != nil {
+		t.Fatalf("New with the stand-down declared: %v", err)
+	}
+	if wired.denialRecoveryEnabled() {
+		t.Fatal("Config.DenialRecoveryOff never reached the server: recovery is still armed")
+	}
+	if !srv.denialRecoveryEnabled() {
+		t.Fatal("an undeclared Config must leave recovery ARMED — that is the shipped default")
+	}
+	srv.denialRecoveryOff = true
 	planner := &sequencePlanner{comps: []*agent.Completion{
 		toolCallTurn("call_denied", "deny_shell", `{"command":"bash install-openssh-linux.sh"}`),
 	}}

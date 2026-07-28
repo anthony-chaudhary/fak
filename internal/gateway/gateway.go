@@ -438,6 +438,16 @@ type Config struct {
 	// UpstreamBadRequestNotify receives the same scrubbed, bounded provider 400 detail
 	// exposed to a trusted local child, for persistence in an operator-side audit journal.
 	UpstreamBadRequestNotify func(detail string)
+	// DenialRecoveryOff stands down the #5212 denial-recovery sample: a turn whose every
+	// proposed call the capability floor refused goes straight to the typed blocked state
+	// instead of spending one bounded re-sample looking for an allowed alternative.
+	//
+	// Stated in the NEGATIVE on purpose. Recovery is the shipped default — a denial-only
+	// turn dressed as a completed answer is the defect the feature exists to fix — so the
+	// zero value has to mean ARMED. Every Config literal that predates this field (and
+	// every embedder that never heard of it) therefore keeps the recovering behavior;
+	// standing it down is the thing a deploy must say out loud.
+	DenialRecoveryOff bool
 	// VDSO toggles the kernel's dedup fast path for fak_syscall.
 	VDSO bool
 	// Invalidation selects the process-global vDSO tier-2 invalidation granularity for
@@ -1177,13 +1187,17 @@ type Server struct {
 	// path (fak guard, loopback-bound); FALSE (the default) keeps the no-leak
 	// #82/#346 boundary the externally-exposed serve path relies on. See Config.
 	exposeUpstreamErrorDetail bool
-	upstreamBadRequestNotify  func(detail string)
-	version                   string
-	logf                      func(format string, args ...any)
-	debugStatsf               func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
-	feed                      *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
-	sessionFeed               *sessionFeed                     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
-	metrics                   *gatewayMetrics
+	// denialRecoveryOff mirrors Config.DenialRecoveryOff: recovery is armed unless the
+	// host stood it down. Negative sense so the zero-value Server recovers, matching the
+	// field it copies.
+	denialRecoveryOff        bool
+	upstreamBadRequestNotify func(detail string)
+	version                  string
+	logf                     func(format string, args ...any)
+	debugStatsf              func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
+	feed                     *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
+	sessionFeed              *sessionFeed                     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
+	metrics                  *gatewayMetrics
 	// toolPages is the tool catalog's home (#2440): each advertised tool schema is a
 	// content-hashed read-only page owned by the ctxmmu, registered at the
 	// maybeCompactInboundTools seam. The page table — not the transcript — is the
@@ -1897,6 +1911,7 @@ func New(cfg Config) (*Server, error) {
 		readBearer:                   cfg.ReadBearer,
 		keyset:                       newKeyset(cfg.KeyPrincipals),
 		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail,
+		denialRecoveryOff:            cfg.DenialRecoveryOff,
 		upstreamBadRequestNotify:     cfg.UpstreamBadRequestNotify,
 		version:                      version,
 		logf:                         logf,
