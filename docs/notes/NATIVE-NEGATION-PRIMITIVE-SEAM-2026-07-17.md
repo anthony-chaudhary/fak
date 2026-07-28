@@ -21,4 +21,4 @@ negation. This synthetic result demonstrates the seam and falsifiable cost disti
 does not claim quality on a weight-backed language model.
 
 The L4 seam is additive to the residual-hook and L3a affine seams documented in
-[`MODEL-ARCH-SEAM.md`](../../MODEL-ARCH-SEAM.md); it does not alter their production routing.
+[`MODEL-ARCH-SEAM.md`](MODEL-ARCH-SEAM.md); it does not alter their production routing.
