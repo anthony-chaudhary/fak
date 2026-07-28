@@ -172,9 +172,17 @@ func (idx *JournalIndex) Add(row JournalRow) {
 		return
 	}
 	// Fast path: post only the new row's tokens at its index.
-	i := len(idx.rows) - 1
+	idx.postRow(len(idx.rows)-1, row.Text)
+}
+
+// postRow posts row i's DISTINCT tokens into the inverted index. The de-duplication is
+// load-bearing: a term repeated inside one row must post that row ONCE, or overlap scoring
+// would count the same row several times. Both the incremental Add above and the post-trim
+// reindex below go through here, so an index rebuilt from scratch is identical to one grown
+// a row at a time — which is the property that makes the trim safe.
+func (idx *JournalIndex) postRow(i int, text string) {
 	seen := map[string]bool{}
-	for _, t := range tokenize(row.Text) {
+	for _, t := range tokenize(text) {
 		if seen[t] {
 			continue
 		}
@@ -188,14 +196,7 @@ func (idx *JournalIndex) Add(row JournalRow) {
 func (idx *JournalIndex) reindex() {
 	idx.postings = make(map[string][]int, len(idx.postings))
 	for i, r := range idx.rows {
-		seen := map[string]bool{}
-		for _, t := range tokenize(r.Text) {
-			if seen[t] {
-				continue
-			}
-			seen[t] = true
-			idx.postings[t] = append(idx.postings[t], i)
-		}
+		idx.postRow(i, r.Text)
 	}
 }
 

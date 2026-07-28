@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/callavoid"
@@ -129,12 +128,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 		// no_breakpoint (can't fire) and prefix_mismatch (the ONLY fak-fault cache signal — call
 		// it out explicitly when nonzero so a real regression can never hide in the lump).
 		if len(sum.CompactionBailReasons) > 0 {
-			reasons := make([]string, 0, len(sum.CompactionBailReasons))
-			for r := range sum.CompactionBailReasons {
-				reasons = append(reasons, r)
-			}
-			sort.Strings(reasons)
-			for _, r := range reasons {
+			for _, r := range sortedMapKeys(sum.CompactionBailReasons) {
 				b.WriteString(guardRow("  bailed: "+r, fmt.Sprintf("x%d", sum.CompactionBailReasons[r])))
 				if r == "prefix_mismatch" || r == "splice_failed" || r == "redecode_failed" {
 					b.WriteString(guardNote("⚠ fak-fault: a fired rewrite would have burst the cache — must stay 0"))
@@ -224,12 +218,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 		b.WriteString(guardSection("managed cache"))
 		b.WriteString(guardRow("⚠ "+guardvars.FindingUpgradeNeverFired,
 			fmt.Sprintf("0 upgraded across %d refused attempt(s)", sum.TTLUpgradeAttempts())))
-		reasons := make([]string, 0, len(sum.CacheTTLUpgradeReasons))
-		for r := range sum.CacheTTLUpgradeReasons {
-			reasons = append(reasons, r)
-		}
-		sort.Strings(reasons)
-		for _, r := range reasons {
+		for _, r := range sortedMapKeys(sum.CacheTTLUpgradeReasons) {
 			b.WriteString(guardRow("  refused: "+r, fmt.Sprintf("x%d", sum.CacheTTLUpgradeReasons[r])))
 		}
 		b.WriteString(guardNote("posture=ACTIVE but the 1h-TTL upgrade never fired: an idle gap >5m re-writes the prefix at full cost; every head was refused, so check the traffic carries a byte-stable system/tools head (also on /debug/vars managed_cache.finding)"))
@@ -248,12 +237,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 		b.WriteString(guardSection("cold-tool deferral"))
 		b.WriteString(guardRow("⚠ "+guardvars.FindingDeferEnabledButInert,
 			fmt.Sprintf("0 cold def(s) deferred across %d eligible turn(s)", sum.DeferAttempts())))
-		reasons := make([]string, 0, len(sum.DeferStandDownReasons))
-		for r := range sum.DeferStandDownReasons {
-			reasons = append(reasons, r)
-		}
-		sort.Strings(reasons)
-		for _, r := range reasons {
+		for _, r := range sortedMapKeys(sum.DeferStandDownReasons) {
 			b.WriteString(guardRow("  stood down: "+r, fmt.Sprintf("x%d", sum.DeferStandDownReasons[r])))
 		}
 		b.WriteString(guardNote("--defer-cold-tools is ARMED but never bit: you are paying the full eager tool slice the lever claimed to shed. 'no_cold_tools' means every advertised tool was hot (benign); 'already_deferred' means the client deferred first; anything else (decode_failed, splice_unproven, remarshal_failed) is fak standing down from a body it could not prove — check the dated tool_search_tool type is one the account has enabled (also on /debug/vars cache_attribution.fak_defer_finding)"))
@@ -283,12 +267,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	}
 	if len(sum.ByReason) > 0 {
 		b.WriteString(guardSection("blocked by reason"))
-		reasons := make([]string, 0, len(sum.ByReason))
-		for r := range sum.ByReason {
-			reasons = append(reasons, r)
-		}
-		sort.Strings(reasons)
-		for _, r := range reasons {
+		for _, r := range sortedMapKeys(sum.ByReason) {
 			b.WriteString(guardRow("  blocked: "+r, fmt.Sprintf("x%d", sum.ByReason[r])))
 		}
 	}

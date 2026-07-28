@@ -252,10 +252,49 @@ func ReadNextRecords(r io.Reader) ([]NextRecord, error) {
 	return records, nil
 }
 
-var (
-	steerNextMu sync.Mutex
-	steerNext   = map[string][]NextRecord{}
-)
+// nextMailbox is ONE channel of independently re-readable Next witnesses, keyed by
+// trace. Every lowering surface below owns its own mailbox — the channels stay
+// separate, so a reader draining recovery prompts can never consume steer messages —
+// but they share this one file/drain mechanic rather than six copies of it. What
+// still differs per surface, and is what a reader should be looking at, is the Move
+// each one lowers: its Kind, Render, Gate, and Source.
+type nextMailbox struct {
+	mu      sync.Mutex
+	records map[string][]NextRecord
+}
+
+func newNextMailbox() *nextMailbox {
+	return &nextMailbox{records: map[string][]NextRecord{}}
+}
+
+// file witnesses one move and files the resulting record under trace. A move that
+// fails to witness is dropped, so the mailbox only ever holds records an
+// independent re-reader can verify.
+func (m *nextMailbox) file(trace string, move Move, result ApplyResult) {
+	record, err := WitnessMove(move, result)
+	if err != nil {
+		return
+	}
+	m.mu.Lock()
+	m.records[trace] = append(m.records[trace], record)
+	m.mu.Unlock()
+}
+
+// drain returns AND clears the witnesses filed for trace. An empty mailbox yields
+// no rows.
+func (m *nextMailbox) drain(trace string) []NextRecord {
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	records := append([]NextRecord(nil), m.records[trace]...)
+	delete(m.records, trace)
+	return records
+}
+
+var steerNext = newNextMailbox()
 
 // RecordSteerNext lowers one admitted freeform operator steer onto the shared
 // interactive Next contract. The caller has already consumed the a2achan message;
@@ -265,38 +304,18 @@ func RecordSteerNext(trace, payload string, result ApplyResult) {
 	if trace == "" || (payload == "" && result.Applied) {
 		return
 	}
-	move := Move{
+	steerNext.file(trace, Move{
 		Kind: MoveAnnotate, Render: RenderUserSplice,
 		Session: SessionInteractive, Gate: "a2achan-recv",
 		Source: "agent-turn-boundary", Payload: payload,
-	}
-	record, err := WitnessMove(move, result)
-	if err != nil {
-		return
-	}
-	steerNextMu.Lock()
-	steerNext[trace] = append(steerNext[trace], record)
-	steerNextMu.Unlock()
+	}, result)
 }
 
 // ReadSteerNextRecords returns and clears the independently re-readable Next
 // witnesses for steer messages applied to trace. An empty mailbox yields no rows.
-func ReadSteerNextRecords(trace string) []NextRecord {
-	trace = strings.TrimSpace(trace)
-	if trace == "" {
-		return nil
-	}
-	steerNextMu.Lock()
-	defer steerNextMu.Unlock()
-	records := append([]NextRecord(nil), steerNext[trace]...)
-	delete(steerNext, trace)
-	return records
-}
+func ReadSteerNextRecords(trace string) []NextRecord { return steerNext.drain(trace) }
 
-var (
-	advisoryNextMu sync.Mutex
-	advisoryNext   = map[string][]NextRecord{}
-)
+var advisoryNext = newNextMailbox()
 
 // RecordContextAdvisoryNext lowers one consumed context-spike advisory onto the
 // shared interactive Next contract. The advisory is rendered as a user splice;
@@ -306,26 +325,14 @@ func RecordContextAdvisoryNext(trace, payload string) {
 	if trace == "" || payload == "" {
 		return
 	}
-	move := Move{
+	advisoryNext.file(trace, Move{
 		Kind: MoveAnnotate, Render: RenderUserSplice,
 		Session: SessionInteractive, Gate: "context-spike",
 		Source: "agent-turn-boundary", Payload: payload,
-	}
-	record, err := WitnessMove(move, ApplyResult{Applied: true})
-	if err != nil {
-		return
-	}
-	advisoryNextMu.Lock()
-	advisoryNext[trace] = append(advisoryNext[trace], record)
-	advisoryNextMu.Unlock()
+	}, ApplyResult{Applied: true})
 }
 
-// ReadContextAdvisoryNextRecords returns and clears independently re-readable
-// Next witnesses for context advisories consumed by trace.
-var (
-	stopWitnessNextMu sync.Mutex
-	stopWitnessNext   = map[string][]NextRecord{}
-)
+var stopWitnessNext = newNextMailbox()
 
 // RecordStopWitnessNext lowers one denied final answer onto the shared
 // interactive Next contract. The denial is rendered as a user splice that
@@ -335,38 +342,18 @@ func RecordStopWitnessNext(trace, payload string) {
 	if trace == "" || payload == "" {
 		return
 	}
-	move := Move{
+	stopWitnessNext.file(trace, Move{
 		Kind: MoveContinue, Render: RenderUserSplice,
 		Session: SessionInteractive, Gate: "stop-witness",
 		Source: "agent-turn-boundary", Payload: payload,
-	}
-	record, err := WitnessMove(move, ApplyResult{Applied: true})
-	if err != nil {
-		return
-	}
-	stopWitnessNextMu.Lock()
-	stopWitnessNext[trace] = append(stopWitnessNext[trace], record)
-	stopWitnessNextMu.Unlock()
+	}, ApplyResult{Applied: true})
 }
 
 // ReadStopWitnessNextRecords returns and clears independently re-readable Next
 // witnesses for final-answer denials consumed by trace.
-func ReadStopWitnessNextRecords(trace string) []NextRecord {
-	trace = strings.TrimSpace(trace)
-	if trace == "" {
-		return nil
-	}
-	stopWitnessNextMu.Lock()
-	defer stopWitnessNextMu.Unlock()
-	records := append([]NextRecord(nil), stopWitnessNext[trace]...)
-	delete(stopWitnessNext, trace)
-	return records
-}
+func ReadStopWitnessNextRecords(trace string) []NextRecord { return stopWitnessNext.drain(trace) }
 
-var (
-	budgetResetNextMu sync.Mutex
-	budgetResetNext   = map[string][]NextRecord{}
-)
+var budgetResetNext = newNextMailbox()
 
 // RecordBudgetResetNext lowers one context-budget reset onto the shared
 // interactive Next contract. The recap re-anchors a newly reopened child
@@ -383,38 +370,18 @@ func RecordBudgetResetNextResult(trace, payload string, result ApplyResult) {
 	if trace == "" || payload == "" {
 		return
 	}
-	move := Move{
+	budgetResetNext.file(trace, Move{
 		Kind: MoveReanchor, Render: RenderReopen,
 		Session: SessionInteractive, Gate: "served-session-reset",
 		Source: "gateway-reset-hook", Payload: payload,
-	}
-	record, err := WitnessMove(move, result)
-	if err != nil {
-		return
-	}
-	budgetResetNextMu.Lock()
-	budgetResetNext[trace] = append(budgetResetNext[trace], record)
-	budgetResetNextMu.Unlock()
+	}, result)
 }
 
 // ReadBudgetResetNextRecords returns and clears independently re-readable
 // Next witnesses for context-budget reopens keyed by the child trace.
-func ReadBudgetResetNextRecords(trace string) []NextRecord {
-	trace = strings.TrimSpace(trace)
-	if trace == "" {
-		return nil
-	}
-	budgetResetNextMu.Lock()
-	defer budgetResetNextMu.Unlock()
-	records := append([]NextRecord(nil), budgetResetNext[trace]...)
-	delete(budgetResetNext, trace)
-	return records
-}
+func ReadBudgetResetNextRecords(trace string) []NextRecord { return budgetResetNext.drain(trace) }
 
-var (
-	guardRecoveryNextMu sync.Mutex
-	guardRecoveryNext   = map[string][]NextRecord{}
-)
+var guardRecoveryNext = newNextMailbox()
 
 // RecordGuardRecoveryNext lowers one consumed gateway recovery prompt onto the
 // shared interactive Next contract. The prompt redirects the next live user turn
@@ -424,49 +391,22 @@ func RecordGuardRecoveryNext(trace, payload string) {
 	if trace == "" || payload == "" {
 		return
 	}
-	move := Move{
+	guardRecoveryNext.file(trace, Move{
 		Kind: MoveRedirect, Render: RenderUserSplice,
 		Session: SessionInteractive, Gate: "guard-recovery",
 		Source: "gateway-anthropic-boundary", Payload: payload,
-	}
-	record, err := WitnessMove(move, ApplyResult{Applied: true})
-	if err != nil {
-		return
-	}
-	guardRecoveryNextMu.Lock()
-	guardRecoveryNext[trace] = append(guardRecoveryNext[trace], record)
-	guardRecoveryNextMu.Unlock()
+	}, ApplyResult{Applied: true})
 }
 
 // ReadGuardRecoveryNextRecords returns and clears independently re-readable
 // recovery-prompt Next witnesses for trace.
-func ReadGuardRecoveryNextRecords(trace string) []NextRecord {
-	trace = strings.TrimSpace(trace)
-	if trace == "" {
-		return nil
-	}
-	guardRecoveryNextMu.Lock()
-	defer guardRecoveryNextMu.Unlock()
-	records := append([]NextRecord(nil), guardRecoveryNext[trace]...)
-	delete(guardRecoveryNext, trace)
-	return records
-}
-func ReadContextAdvisoryNextRecords(trace string) []NextRecord {
-	trace = strings.TrimSpace(trace)
-	if trace == "" {
-		return nil
-	}
-	advisoryNextMu.Lock()
-	defer advisoryNextMu.Unlock()
-	records := append([]NextRecord(nil), advisoryNext[trace]...)
-	delete(advisoryNext, trace)
-	return records
-}
+func ReadGuardRecoveryNextRecords(trace string) []NextRecord { return guardRecoveryNext.drain(trace) }
 
-var (
-	toolTerminalWakeNextMu sync.Mutex
-	toolTerminalWakeNext   = map[string][]NextRecord{}
-)
+// ReadContextAdvisoryNextRecords returns and clears independently re-readable
+// Next witnesses for context advisories consumed by trace.
+func ReadContextAdvisoryNextRecords(trace string) []NextRecord { return advisoryNext.drain(trace) }
+
+var toolTerminalWakeNext = newNextMailbox()
 
 // RecordToolTerminalWakeNext lowers one consumed background-tool terminal wake
 // onto the shared interactive Next contract at the turn boundary that renders it.
@@ -475,30 +415,15 @@ func RecordToolTerminalWakeNext(trace, payload string) {
 	if trace == "" || payload == "" {
 		return
 	}
-	move := Move{
+	toolTerminalWakeNext.file(trace, Move{
 		Kind: MoveContinue, Render: RenderUserSplice,
 		Session: SessionInteractive, Gate: "tool-terminal-wake",
 		Source: "agent-turn-boundary", Payload: payload,
-	}
-	record, err := WitnessMove(move, ApplyResult{Applied: true})
-	if err != nil {
-		return
-	}
-	toolTerminalWakeNextMu.Lock()
-	toolTerminalWakeNext[trace] = append(toolTerminalWakeNext[trace], record)
-	toolTerminalWakeNextMu.Unlock()
+	}, ApplyResult{Applied: true})
 }
 
 // ReadToolTerminalWakeNextRecords returns and clears independently re-readable
 // terminal-wake Next witnesses for trace.
 func ReadToolTerminalWakeNextRecords(trace string) []NextRecord {
-	trace = strings.TrimSpace(trace)
-	if trace == "" {
-		return nil
-	}
-	toolTerminalWakeNextMu.Lock()
-	defer toolTerminalWakeNextMu.Unlock()
-	records := append([]NextRecord(nil), toolTerminalWakeNext[trace]...)
-	delete(toolTerminalWakeNext, trace)
-	return records
+	return toolTerminalWakeNext.drain(trace)
 }

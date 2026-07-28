@@ -107,17 +107,22 @@ func composeGuardInfoPanels(ctx guardInfoPanelCtx, panels []guardInfoPanel, heig
 		states = append(states, &paneState{panel: p, full: full, mini: p.rows(ctx, guardPanelMini), level: guardPanelFull, show: true})
 	}
 
+	// rowsAt is the single place a pane's CURRENT rows are chosen. count and render must
+	// agree here exactly: if they could disagree, the pane set that fits the budget would
+	// not be the pane set that actually gets drawn, and the fit would be a lie.
+	rowsAt := func(st *paneState) []string {
+		if st.level == guardPanelMini {
+			return st.mini
+		}
+		return st.full
+	}
 	count := func(rules bool) int {
 		n := 0
 		for _, st := range states {
 			if !st.show {
 				continue
 			}
-			rows := st.full
-			if st.level == guardPanelMini {
-				rows = st.mini
-			}
-			n += len(rows)
+			n += len(rowsAt(st))
 			if rules && st.level == guardPanelFull {
 				n++ // the section rule row
 			}
@@ -130,14 +135,10 @@ func composeGuardInfoPanels(ctx guardInfoPanelCtx, panels []guardInfoPanel, heig
 			if !st.show {
 				continue
 			}
-			rows := st.full
-			if st.level == guardPanelMini {
-				rows = st.mini
-			}
 			if rules && st.level == guardPanelFull {
 				out = append(out, guardInfoRuleTUI(st.panel.name, ctx.width))
 			}
-			out = append(out, rows...)
+			out = append(out, rowsAt(st)...)
 		}
 		return out
 	}

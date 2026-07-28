@@ -700,78 +700,70 @@ func tuiGuardDecisionRow(artifact, kind, status string, m map[string]any) tuiGua
 func scoreTUIGuardRow(row tuiGuardRow) ([]string, int) {
 	tags := []string{}
 	score := 0
+	// tag is the one bookkeeping step every rule below performs: name the row and add that
+	// rule's weight. Naming it once lets each rule read as CONDITION -> (name, weight),
+	// which is the entire content of this function. The ladder ORDER and the
+	// exact-match-vs-substring distinction are deliberately left as written: they are what
+	// decides the ranking, so they stay visible instead of collapsing into a table.
+	tag := func(name string, weight int) {
+		tags = append(tags, name)
+		score += weight
+	}
 	status := strings.ToUpper(row.Status)
 	verdict := strings.ToUpper(row.Verdict)
 	reason := strings.ToUpper(row.Reason)
 	switch verdict {
 	case "DENY":
-		tags = append(tags, "deny")
-		score += 45
+		tag("deny", 45)
 	case "ALLOW":
-		tags = append(tags, "allow")
-		score += 5
+		tag("allow", 5)
 	case "TRANSFORM":
-		tags = append(tags, "transform")
-		score += 25
+		tag("transform", 25)
 	case "QUARANTINE":
-		tags = append(tags, "quarantine")
-		score += 70
+		tag("quarantine", 70)
 	}
 	switch reason {
 	case "POLICY_BLOCK":
-		tags = append(tags, "policy-block")
-		score += 25
+		tag("policy-block", 25)
 	case "DEFAULT_DENY":
-		tags = append(tags, "default-deny")
-		score += 15
+		tag("default-deny", 15)
 	case "TRUST_VIOLATION":
-		tags = append(tags, "trust-violation")
-		score += 30
+		tag("trust-violation", 30)
 	}
 	if row.Kind == "sample" {
-		tags = append(tags, "sample")
-		score += 15
+		tag("sample", 15)
 	}
 	if row.Kind == "settlement-candidate" {
-		tags = append(tags, "settlement")
-		score += 30
+		tag("settlement", 30)
 	}
 	if row.Kind == "default-blocker" {
-		tags = append(tags, "blocker")
-		score += 20
+		tag("blocker", 20)
+		// An exactly-ACTIVE blocker outranks one that merely mentions ACTIVE, so this arm
+		// must stay a first-match ladder rather than a set of independent tests.
 		switch {
 		case status == "ACTIVE":
-			tags = append(tags, "active")
-			score += 160
+			tag("active", 160)
 		case strings.Contains(status, "ACTIVE"):
-			tags = append(tags, "active")
-			score += 60
+			tag("active", 60)
 		case strings.Contains(status, "STALE"):
-			tags = append(tags, "stale")
-			score += 40
+			tag("stale", 40)
 		case strings.Contains(status, "HISTORICAL"):
-			tags = append(tags, "historical")
-			score += 15
+			tag("historical", 15)
 		case strings.Contains(status, "EXTERNAL"):
-			tags = append(tags, "external")
-			score += 15
+			tag("external", 15)
 		}
 		if strings.Contains(status, "DEBT") {
-			tags = append(tags, "debt")
-			score += 10
+			tag("debt", 10)
 		}
 	}
 	if strings.Contains(status, "DENIED_EXPECTED") {
-		tags = append(tags, "expected-deny")
-		score += 5
+		tag("expected-deny", 5)
 	}
 	if strings.Contains(status, "WARN") {
-		tags = append(tags, "warn")
-		score += 35
+		tag("warn", 35)
 	}
 	if status == "FAIL" || strings.Contains(status, "UNEXPECTED") || strings.Contains(status, "ERROR") || strings.Contains(status, "BLOCKED") {
-		tags = append(tags, "unexpected")
-		score += 100
+		tag("unexpected", 100)
 	}
 	if row.Count > 1 {
 		score += minTUI(row.Count, 50)

@@ -28,25 +28,27 @@ import (
 // `fak version` a reliable "is the fak/guard I'm running current?" check. The first line is
 // still appversion.Current() verbatim, so anything parsing line 1 is unaffected.
 func cmdVersion(w io.Writer) {
-	// `fak version modules` — the per-module version report (internal/modver).
-	// Dispatched here rather than in main.go so the contested dispatch table
-	// stays untouched; the bare `fak version` output below is unchanged (the
-	// self-update "build:" line parser depends on it).
-	if len(os.Args) > 2 && os.Args[2] == "modules" {
-		os.Exit(runVersionModules(os.Stdout, os.Stderr, os.Args[3:]))
-	}
-
-	// `fak version score-adapter` folds per-file scorecard rows into the flat
-	// module score map consumed by `fak version modules --scores` (#2466).
-	if len(os.Args) > 2 && os.Args[2] == "score-adapter" {
-		os.Exit(runVersionScoreAdapter(os.Stdout, os.Stderr, os.Args[3:]))
-	}
-
-	// `fak version trend` — the historical companion to `modules`: fold the
-	// append-only module-versions ledger into a per-module movement summary
-	// (internal/modver.Trend). Reads only what was stamped; no git, no tree.
-	if len(os.Args) > 2 && os.Args[2] == "trend" {
-		os.Exit(runVersionTrend(os.Stdout, os.Stderr, os.Args[3:]))
+	// The `fak version <sub>` subcommands. They are dispatched HERE rather than in main.go
+	// so the contested dispatch table stays untouched, and they are gathered into one switch
+	// so the full set of them is visible in one place. An unrecognized word is deliberately
+	// NOT an error: it falls through to the flag-shaped handling below.
+	if len(os.Args) > 2 {
+		switch os.Args[2] {
+		case "modules":
+			// The per-module version report (internal/modver). The bare `fak version`
+			// output below is unchanged — the self-update "build:" line parser depends
+			// on it.
+			os.Exit(runVersionModules(os.Stdout, os.Stderr, os.Args[3:]))
+		case "score-adapter":
+			// Folds per-file scorecard rows into the flat module score map consumed by
+			// `fak version modules --scores` (#2466).
+			os.Exit(runVersionScoreAdapter(os.Stdout, os.Stderr, os.Args[3:]))
+		case "trend":
+			// The historical companion to `modules`: fold the append-only
+			// module-versions ledger into a per-module movement summary
+			// (internal/modver.Trend). Reads only what was stamped; no git, no tree.
+			os.Exit(runVersionTrend(os.Stdout, os.Stderr, os.Args[3:]))
+		}
 	}
 
 	// `fak version --json` — the machine-readable binary identity (commit + dirty

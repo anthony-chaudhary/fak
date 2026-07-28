@@ -73,6 +73,22 @@ func loadFleetPaneConfig(root string) (fleetpane.Config, error) {
 	return fleetpane.LoadConfig(root)
 }
 
+// emitFleetPaneDoc is the one emit path every fleetpane verb shares: with --json the
+// document goes out as JSON, otherwise the verb's rendered pane text does. `text` is a
+// thunk so the renderer never runs in JSON mode. It returns 0, or 1 after naming the
+// verb whose JSON write failed — so a broken readout is attributable to its subcommand.
+func emitFleetPaneDoc(stdout, stderr io.Writer, verb string, asJSON bool, doc any, text func() string) int {
+	if !asJSON {
+		fmt.Fprintln(stdout, text())
+		return 0
+	}
+	if err := fleetpane.WriteJSON(stdout, doc); err != nil {
+		fmt.Fprintf(stderr, "fak fleetpane %s: write JSON: %v\n", verb, err)
+		return 1
+	}
+	return 0
+}
+
 func runFleetPaneStatus(stdout, stderr io.Writer, cfg fleetpane.Config, opts fleetpane.Options, argv []string) int {
 	fs := flag.NewFlagSet("fak fleetpane status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -88,22 +104,20 @@ func runFleetPaneStatus(stdout, stderr io.Writer, cfg fleetpane.Config, opts fle
 		return 2
 	}
 	doc := fleetpane.CollectStatus(context.Background(), cfg, opts)
-	if *asJSON {
-		if err := fleetpane.WriteJSON(stdout, doc); err != nil {
-			fmt.Fprintf(stderr, "fak fleetpane status: write JSON: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, fleetpane.PaneText(doc))
+	if rc := emitFleetPaneDoc(stdout, stderr, "status", *asJSON, doc, func() string {
+		pane := fleetpane.PaneText(doc)
 		// Decenter the human at the source: under FAK_FLEETPANE_TRIAGE_GATE=enforce,
 		// append the worker-health split — the workers that genuinely wait on a person
 		// (an account auth wall) vs the ones the fleet's launcher clears itself. Default
 		// ("", "warn") leaves the pane readout byte-for-byte unchanged while it soaks.
 		if fleetpane.FleetTriageEnforced(os.Getenv("FAK_FLEETPANE_TRIAGE_GATE")) {
 			if line := fleetpane.WorkerHealthTriageLine(doc.WorkerHealth); line != "" {
-				fmt.Fprintln(stdout, line)
+				pane += "\n" + line
 			}
 		}
+		return pane
+	}); rc != 0 {
+		return rc
 	}
 	if *failOnAction && doc.Verdict != "OK" {
 		return 1
@@ -126,13 +140,10 @@ func runFleetPaneFleet(stdout, stderr io.Writer, cfg fleetpane.Config, opts flee
 		return 2
 	}
 	doc := fleetpane.FleetView(context.Background(), cfg, !*snapshotOnly, false, opts)
-	if *asJSON {
-		if err := fleetpane.WriteJSON(stdout, doc); err != nil {
-			fmt.Fprintf(stderr, "fak fleetpane fleet: write JSON: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, fleetpane.FleetText(doc))
+	if rc := emitFleetPaneDoc(stdout, stderr, "fleet", *asJSON, doc, func() string {
+		return fleetpane.FleetText(doc)
+	}); rc != 0 {
+		return rc
 	}
 	if *failOnAction && doc.Verdict != "OK" {
 		return 1
@@ -148,13 +159,10 @@ func runFleetPaneLoopList(stdout, stderr io.Writer, cfg fleetpane.Config, opts f
 		return rc
 	}
 	doc := fleetpane.LoopList(cfg, opts)
-	if *asJSON {
-		if err := fleetpane.WriteJSON(stdout, doc); err != nil {
-			fmt.Fprintf(stderr, "fak fleetpane loop-list: write JSON: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, fleetpane.LoopListText(doc))
+	if rc := emitFleetPaneDoc(stdout, stderr, "loop-list", *asJSON, doc, func() string {
+		return fleetpane.LoopListText(doc)
+	}); rc != 0 {
+		return rc
 	}
 	if !doc.OK {
 		return 1
@@ -183,13 +191,10 @@ func runFleetPaneLoopCheck(stdout, stderr io.Writer, cfg fleetpane.Config, opts 
 		return 2
 	}
 	doc := fleetpane.LoopCheckPlan(context.Background(), cfg, args[0], *recover, false, opts)
-	if *asJSON {
-		if err := fleetpane.WriteJSON(stdout, doc); err != nil {
-			fmt.Fprintf(stderr, "fak fleetpane loop-check: write JSON: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, fleetpane.LoopCheckText(doc))
+	if rc := emitFleetPaneDoc(stdout, stderr, "loop-check", *asJSON, doc, func() string {
+		return fleetpane.LoopCheckText(doc)
+	}); rc != 0 {
+		return rc
 	}
 	if !doc.OK {
 		return 1
@@ -232,13 +237,10 @@ func runFleetPaneLoopAudit(stdout, stderr io.Writer, cfg fleetpane.Config, opts 
 	}
 	names := fleetPaneSplitCSV(*namesCSV)
 	doc := fleetpane.LoopAudit(context.Background(), cfg, names, opts)
-	if *asJSON {
-		if err := fleetpane.WriteJSON(stdout, doc); err != nil {
-			fmt.Fprintf(stderr, "fak fleetpane loop-audit: write JSON: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, fleetpane.LoopAuditText(doc))
+	if rc := emitFleetPaneDoc(stdout, stderr, "loop-audit", *asJSON, doc, func() string {
+		return fleetpane.LoopAuditText(doc)
+	}); rc != 0 {
+		return rc
 	}
 	if !doc.OK {
 		return 1

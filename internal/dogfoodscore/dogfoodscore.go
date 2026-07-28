@@ -774,28 +774,23 @@ func Render(p ScorecardPayload) string {
 		"  evidence: " + scorecard.ValueText(c["conflation_turns"]) + " conflation turn(s) / " + scorecard.ValueText(c["transcripts_seen"]) +
 			" recent transcript(s); " + scorecard.ValueText(c["recent_wedged"]) + " wedged session(s) of " + scorecard.ValueText(c["stop_markers"]) + " marker(s)",
 		"",
-		"  WIRING (is the loop set up to run honestly?):",
 	}
-	for _, r := range p.Wiring {
-		lines = append(lines, scorecardLine(r))
-		if !r.Passed {
-			lines = append(lines, "           -> "+r.Detail)
+	// section renders one KPI group: its heading, one line per KPI, and — only for a KPI
+	// that did NOT pass — the detail hung underneath it. The three groups below differ only
+	// in their heading and their rows, so stating the shape once leaves the reader looking at
+	// the three QUESTIONS the scorecard asks rather than at three copies of the same loop.
+	section := func(heading string, rows []KPIResult) {
+		lines = append(lines, heading)
+		for _, r := range rows {
+			lines = append(lines, scorecardLine(r))
+			if !r.Passed {
+				lines = append(lines, "           -> "+r.Detail)
+			}
 		}
 	}
-	lines = append(lines, "  HONESTY (does it run, and report itself truthfully?):")
-	for _, r := range p.Honesty {
-		lines = append(lines, scorecardLine(r))
-		if !r.Passed {
-			lines = append(lines, "           -> "+r.Detail)
-		}
-	}
-	lines = append(lines, "  CHAIN (does packet friction reach the tracker before an outsider does?):")
-	for _, r := range p.Chain {
-		lines = append(lines, scorecardLine(r))
-		if !r.Passed {
-			lines = append(lines, "           -> "+r.Detail)
-		}
-	}
+	section("  WIRING (is the loop set up to run honestly?):", p.Wiring)
+	section("  HONESTY (does it run, and report itself truthfully?):", p.Honesty)
+	section("  CHAIN (does packet friction reach the tracker before an outsider does?):", p.Chain)
 	if len(p.Evidence.ConflationHits) > 0 {
 		lines = append(lines, "", "  conflation examples (success claimed over a reported Stop-hook error):")
 		for _, h := range p.Evidence.ConflationHits {

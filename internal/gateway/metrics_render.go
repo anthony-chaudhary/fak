@@ -383,48 +383,55 @@ func (m *gatewayMetrics) writeRequestMemoryAggregateMetrics(b *strings.Builder) 
 		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_observations_total{backend=\"%s\"} %d\n",
 			promQuote(backend), snap.observed[backend])
 	}
+	// The plan / token / fit families each publish several metrics over the SAME rows,
+	// so each family renders its label set once here. Building the labels in one place
+	// is what keeps the members of a family label-identical — a Prometheus consumer that
+	// joins plan_bytes_total against plan_observations_total needs exactly that.
+	planLabels := func(k requestMemoryMetricKey) string {
+		return fmt.Sprintf("backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"",
+			promQuote(k.backend), promQuote(k.class), promQuote(k.scope), promQuote(k.dtype))
+	}
+	tokenLabels := func(k requestMemoryTokenKey) string {
+		return fmt.Sprintf("backend=\"%s\",kind=\"%s\"", promQuote(k.backend), promQuote(k.kind))
+	}
+	fitLabels := func(k requestMemoryFitKey) string {
+		return fmt.Sprintf("backend=\"%s\",scope=\"%s\"", promQuote(k.backend), promQuote(k.scope))
+	}
+
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_observations_total", "Observed in-kernel request memory plan rows by backend, class, scope, and dtype.", "counter")
 	for _, row := range snap.plans {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_observations_total{backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
-			promQuote(row.key.backend), promQuote(row.key.class), promQuote(row.key.scope), promQuote(row.key.dtype), row.observations)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_observations_total{%s} %d\n", planLabels(row.key), row.observations)
 	}
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_bytes_total", "Cumulative planned bytes observed for served in-kernel backend requests, by backend, class, scope, and dtype.", "counter")
 	for _, row := range snap.plans {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_bytes_total{backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
-			promQuote(row.key.backend), promQuote(row.key.class), promQuote(row.key.scope), promQuote(row.key.dtype), row.totalBytes)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_bytes_total{%s} %d\n", planLabels(row.key), row.totalBytes)
 	}
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_high_water_bytes", "Largest single observed in-kernel request memory plan row, by backend, class, scope, and dtype.", "gauge")
 	for _, row := range snap.plans {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_high_water_bytes{backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
-			promQuote(row.key.backend), promQuote(row.key.class), promQuote(row.key.scope), promQuote(row.key.dtype), row.highWaterBytes)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_high_water_bytes{%s} %d\n", planLabels(row.key), row.highWaterBytes)
 	}
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_tokens_total", "Cumulative prompt/max_new/planned token windows from observed in-kernel request memory plans.", "counter")
 	for _, row := range snap.tokens {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens_total{backend=\"%s\",kind=\"%s\"} %d\n",
-			promQuote(row.key.backend), promQuote(row.key.kind), row.total)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens_total{%s} %d\n", tokenLabels(row.key), row.total)
 	}
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_tokens_high_water", "Largest prompt/max_new/planned token window from an observed in-kernel request memory plan.", "gauge")
 	for _, row := range snap.tokens {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens_high_water{backend=\"%s\",kind=\"%s\"} %d\n",
-			promQuote(row.key.backend), promQuote(row.key.kind), row.highWater)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens_high_water{%s} %d\n", tokenLabels(row.key), row.highWater)
 	}
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_observations_total", "Observed in-kernel request memory fit rows by backend and scope.", "counter")
 	for _, row := range snap.fits {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_observations_total{backend=\"%s\",scope=\"%s\"} %d\n",
-			promQuote(row.key.backend), promQuote(row.key.scope), row.observations)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_observations_total{%s} %d\n", fitLabels(row.key), row.observations)
 	}
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes", "Largest observed planned in-kernel request memory bytes by backend and scope.", "gauge")
 	for _, row := range snap.fits {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes{backend=\"%s\",scope=\"%s\"} %d\n",
-			promQuote(row.key.backend), promQuote(row.key.scope), row.wantHighWater)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes{%s} %d\n", fitLabels(row.key), row.wantHighWater)
 	}
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes", "Smallest observed headroom-adjusted fit margin for known-capacity in-kernel requests, by backend and scope. Omitted for scopes whose capacity was unknown.", "gauge")
 	for _, row := range snap.fits {
 		if !row.marginKnown {
 			continue
 		}
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes{backend=\"%s\",scope=\"%s\"} %d\n",
-			promQuote(row.key.backend), promQuote(row.key.scope), row.marginLowWater)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes{%s} %d\n", fitLabels(row.key), row.marginLowWater)
 	}
 }
 

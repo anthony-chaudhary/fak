@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -20,7 +21,14 @@ import (
 // publishes the accepted lease to origin (plane 0) so offline nodes converge too — a push
 // failure never fails the arbitrated verdict (the CAS already committed locally; the
 // coordinator's store is authoritative for reachable nodes, and the next `fak leaseref
-// sync` reconverges the laggards), so a publish error is logged, not returned.
+// sync` reconverges the laggards), so a publish error is dropped, not returned.
+//
+// That publish is HANDED OFF, never performed inline (#5422). The gateway holds
+// leaseWriteMu across this whole call, so a git push executed here would put a network
+// round trip inside the single-arbiter critical section and queue every concurrent lease
+// write behind the slowest push. leasePublishQueue takes the request and returns at once;
+// the push runs on the queue's own goroutine after this function — and therefore the
+// mutex — has been released.
 func init() {
 	gateway.SetLeaseWriteFunc(serveLeaseWrite)
 }
@@ -33,46 +41,43 @@ func serveLeaseWrite(ctx context.Context, op string, req gateway.LeaseWriteReque
 	now := time.Now()
 	store := leaseref.NewInDir(leasePlaneDir())
 
+	// settle states the post-write policy every verb shares exactly once. An
+	// INFRASTRUCTURE error propagates untouched. An ACCEPTED write REQUESTS a publish to
+	// origin (plane 0) so offline nodes converge — a release included, which converges as
+	// a deletion. The request is a hand-off, not a push: it latches work onto
+	// leasePublishes and returns immediately, so the arbiter's critical section never
+	// contains a network round trip. That publish is best-effort exactly as before: a push
+	// failure never un-accepts the arbitrated verdict, because the local CAS already
+	// committed and is authoritative here. Every verdict, accept or refusal, then folds to
+	// the gateway's wire shape.
+	settle := func(rec leaseref.Record, v leaseref.FenceVerdict, err error) (gateway.LeaseWriteResult, error) {
+		if err != nil {
+			return gateway.LeaseWriteResult{}, err
+		}
+		if v.OK {
+			leasePublishes.request(store)
+		}
+		return leaseVerdictToResult(op, req, rec, v), nil
+	}
+
 	switch op {
 	case "acquire":
-		rec, v, err := store.AcquireFenced(ctx, leaseref.Record{
+		return settle(store.AcquireFenced(ctx, leaseref.Record{
 			ID:          req.ID,
 			TreeGlobs:   req.TreeGlobs,
 			Holder:      req.Holder,
 			TTLSeconds:  req.TTLSeconds,
 			Description: req.Description,
-		}, now)
-		if err != nil {
-			return gateway.LeaseWriteResult{}, err
-		}
-		if v.OK {
-			// Plane-0 convergence: publish the accepted lease to origin so offline nodes
-			// see it too. Best-effort — a push failure never un-accepts the arbitrated
-			// verdict (the local CAS already committed and is authoritative here).
-			publishAcceptedLease(ctx, store)
-		}
-		return leaseVerdictToResult(op, req, rec, v), nil
+		}, now))
 
 	case "renew":
-		rec, v, err := store.Renew(ctx, req.ID, req.Holder, req.TTLSeconds, now)
-		if err != nil {
-			return gateway.LeaseWriteResult{}, err
-		}
-		if v.OK {
-			publishAcceptedLease(ctx, store)
-		}
-		return leaseVerdictToResult(op, req, rec, v), nil
+		return settle(store.Renew(ctx, req.ID, req.Holder, req.TTLSeconds, now))
 
 	case "release":
+		// A release deletes the record rather than writing one, so there is nothing to
+		// fold back beyond the verdict itself.
 		v, err := store.ReleaseFenced(ctx, req.ID, req.Holder, req.Generation, now)
-		if err != nil {
-			return gateway.LeaseWriteResult{}, err
-		}
-		if v.OK {
-			// A release is a delete; publish so the deletion converges to origin too.
-			publishAcceptedLease(ctx, store)
-		}
-		return leaseVerdictToResult(op, req, leaseref.Record{}, v), nil
+		return settle(leaseref.Record{}, v, err)
 	}
 
 	// The gateway already rejects an unknown verb with 404 before it reaches here; this is
@@ -120,9 +125,110 @@ func leaseVerdictToResult(op string, req gateway.LeaseWriteRequest, rec leaseref
 
 // publishAcceptedLease pushes the local refs/fak/locks/* namespace to origin (plane 0)
 // so nodes that cannot reach this coordinator still converge on the accepted lease via a
-// git fetch. Best-effort: a push failure is swallowed here — the arbitrated verdict stands
+// git fetch. Best-effort: a push failure is dropped here — the arbitrated verdict stands
 // on the coordinator's authoritative local store, and `fak leaseref sync` reconverges the
 // laggards on the next tick.
 func publishAcceptedLease(ctx context.Context, store *leaseref.Store) {
 	_, _ = store.Sync(ctx, "origin", true, false)
+}
+
+// leasePublish is the plane-0 publish BOUNDARY, held as a package var so a test can
+// observe the hand-off without a real network push. Production is publishAcceptedLease.
+var leasePublish = publishAcceptedLease
+
+// leasePublishTimeout bounds ONE asynchronous publish. The push no longer rides the
+// request's context — that one is cancelled the moment the arbiter's response is written —
+// so it carries its own deadline: a wedged `git push` must expire rather than pin the
+// publisher goroutine forever. It is deliberately wider than the gateway's 15s write
+// timeout that used to bound it inline, because it no longer holds a caller waiting.
+const leasePublishTimeout = 30 * time.Second
+
+// leasePublishes is the process-wide publisher. One queue, because the thing being
+// published is one namespace (refs/fak/locks/*) on one coordinator clone.
+var leasePublishes leasePublishQueue
+
+// leasePublishQueue moves the plane-0 publish OFF the gateway's leaseWriteMu critical
+// section (#5422) without reordering a publish ahead of the accepted write it represents.
+//
+// THE ORDERING GUARANTEE IT KEEPS — publish-after-write, serialized, coalescing:
+//
+//   - SERIALIZED. At most one publish is ever in flight. Concurrent pushes of the same
+//     refspec to the same remote could otherwise land out of order and leave origin
+//     holding an OLDER namespace snapshot than one already published.
+//   - PUBLISH-AFTER-WRITE. request() is called only after the local CAS has committed, so
+//     the publish it causes always begins strictly after that write is readable in the
+//     store. A push therefore never carries a namespace older than the write that asked
+//     for it.
+//   - COALESCING, NOT DROPPING. If a publish is already in flight when request() lands,
+//     that push may have read the ref store BEFORE this write committed, so it cannot be
+//     assumed to cover it: the request is LATCHED and the runner starts a fresh push as
+//     soon as the current one returns. No accepted write is left unpublished; several
+//     accepted writes may be covered by one push, which is sound because Sync publishes
+//     the whole namespace snapshot rather than a single record.
+//
+// What deliberately changed: the publish is no longer complete when the 200 is written. It
+// was already best-effort and eventually-convergent (a push failure was, and still is,
+// dropped), so no caller could have relied on origin being current at response time.
+type leasePublishQueue struct {
+	mu       sync.Mutex
+	inFlight bool            // a publish goroutine is running
+	pending  bool            // an accepted write landed while one was running
+	store    *leaseref.Store // the store the next publish reads
+	idle     chan struct{}   // closed when the queue drains; nil while idle
+}
+
+// request latches a plane-0 publish for store and returns IMMEDIATELY. It is the only
+// call the arbiter makes, and it performs no I/O, so nothing here can extend the
+// leaseWriteMu critical section beyond a mutex hand-off.
+func (q *leasePublishQueue) request(store *leaseref.Store) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.store = store
+	if q.inFlight {
+		q.pending = true
+		return
+	}
+	q.inFlight = true
+	q.idle = make(chan struct{})
+	go q.run()
+}
+
+// run drains the queue: publish, then publish again if a write latched one while the
+// previous push was out on the network, until nothing is pending.
+func (q *leasePublishQueue) run() {
+	for {
+		q.mu.Lock()
+		store := q.store
+		q.mu.Unlock()
+
+		if store != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), leasePublishTimeout)
+			leasePublish(ctx, store)
+			cancel()
+		}
+
+		q.mu.Lock()
+		if !q.pending {
+			q.inFlight = false
+			close(q.idle)
+			q.idle = nil
+			q.mu.Unlock()
+			return
+		}
+		q.pending = false
+		q.mu.Unlock()
+	}
+}
+
+// idleC returns a channel closed once every latched publish has run. An already-drained
+// queue answers with a closed channel, so a caller never blocks on a queue with no work.
+func (q *leasePublishQueue) idleC() <-chan struct{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.idle == nil {
+		drained := make(chan struct{})
+		close(drained)
+		return drained
+	}
+	return q.idle
 }

@@ -356,7 +356,11 @@ func copyStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func sortedMapKeys(m map[string]string) []string {
+// sortedMapKeys returns a string-keyed map's keys in stable sorted order. Any renderer
+// that walks a map needs this: Go randomizes map iteration, so a report built straight
+// off `range m` reorders itself between runs and no two readouts can be diffed. The
+// value type is free because only the keys are read.
+func sortedMapKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

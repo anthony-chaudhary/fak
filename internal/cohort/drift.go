@@ -241,41 +241,43 @@ func judgeCohort(rev string, o CohortObservation) CohortDrift {
 		return d
 	}
 
+	// stopAt ends the scan on the FIRST signal that is not cleanly within tolerance. That
+	// "first" is the contract: the scan walks signals in sorted order and the divergence it
+	// reports must be the earliest one, with a scrubbed replay attached, so two runs over the
+	// same inputs name the same signal. Each arm below supplies only what actually differs —
+	// the resulting state, the operator-facing reason, the divergence, and the replay note.
+	stopAt := func(state DriftState, reason string, div *SignalDivergence, note string) CohortDrift {
+		d.State, d.Reason = state, reason
+		d.FirstDivergence = div
+		d.Replay = replayOf(rev, o.Cohort, div, note)
+		return d
+	}
 	for _, sig := range sortedKeys(o.Baseline) {
 		base := o.Baseline[sig]
 		tol, hasTol := o.Tolerance[sig]
 		if !hasTol {
-			div := &SignalDivergence{
-				Signal: sig, Baseline: base,
-				Detail: "no tolerance declared for baselined signal",
-			}
-			d.State, d.Reason = DriftInconclusive, "signal "+sig+": no tolerance declared"
-			d.FirstDivergence = div
-			d.Replay = replayOf(rev, o.Cohort, div, "inconclusive: undeclared tolerance")
-			return d
+			return stopAt(DriftInconclusive, "signal "+sig+": no tolerance declared",
+				&SignalDivergence{
+					Signal: sig, Baseline: base,
+					Detail: "no tolerance declared for baselined signal",
+				}, "inconclusive: undeclared tolerance")
 		}
 		obsVal, hasObs := o.Observed[sig]
 		if !hasObs {
-			div := &SignalDivergence{
-				Signal: sig, Baseline: base, Tolerance: tol,
-				Detail: "no observation recorded for baselined signal",
-			}
-			d.State, d.Reason = DriftInconclusive, "signal "+sig+": no observation recorded"
-			d.FirstDivergence = div
-			d.Replay = replayOf(rev, o.Cohort, div, "inconclusive: missing observation")
-			return d
+			return stopAt(DriftInconclusive, "signal "+sig+": no observation recorded",
+				&SignalDivergence{
+					Signal: sig, Baseline: base, Tolerance: tol,
+					Detail: "no observation recorded for baselined signal",
+				}, "inconclusive: missing observation")
 		}
 		delta := math.Abs(obsVal - base)
 		if delta > tol {
-			div := &SignalDivergence{
-				Signal: sig, Baseline: base, Observed: obsVal, Delta: delta, Tolerance: tol,
-				Detail: fmt.Sprintf("|%.6g - %.6g| = %.6g > tolerance %.6g", obsVal, base, delta, tol),
-			}
-			d.State = DriftDrifted
-			d.Reason = fmt.Sprintf("signal %s drifted %.6g beyond tolerance %.6g", sig, delta, tol)
-			d.FirstDivergence = div
-			d.Replay = replayOf(rev, o.Cohort, div, "drifted beyond tolerance")
-			return d
+			return stopAt(DriftDrifted,
+				fmt.Sprintf("signal %s drifted %.6g beyond tolerance %.6g", sig, delta, tol),
+				&SignalDivergence{
+					Signal: sig, Baseline: base, Observed: obsVal, Delta: delta, Tolerance: tol,
+					Detail: fmt.Sprintf("|%.6g - %.6g| = %.6g > tolerance %.6g", obsVal, base, delta, tol),
+				}, "drifted beyond tolerance")
 		}
 	}
 

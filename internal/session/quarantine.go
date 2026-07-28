@@ -408,15 +408,23 @@ func RecoverCorruptRegistry(path string, cause error, policy QuarantineRetention
 		}
 		return recordRecoveryLocked(path, ev)
 	}
+	// deferToWinner is how this pass reports "someone else already recovered this file":
+	// no new ledger event (the corruption was counted once, by the winner), just the
+	// already-recorded stats. Both places that can observe a lost race — the pre-rename
+	// stat and the rename itself — must report it identically, or the two paths would
+	// disagree about whether a deferral counts.
+	deferToWinner := func() (RegistryRecovery, error) {
+		rec.Event = ev
+		rec.AlreadyRecovered = true
+		rec.Stats, _, _ = ReadRecoveryStats(path)
+		return rec, nil
+	}
 	fi, statErr := os.Stat(path)
 	if errors.Is(statErr, os.ErrNotExist) {
 		// A concurrent recoverer quarantined the active file before we held
 		// the lock; the corruption was already counted once. Do not
 		// double-count it.
-		rec.Event = ev
-		rec.AlreadyRecovered = true
-		rec.Stats, _, _ = ReadRecoveryStats(path)
-		return rec, nil
+		return deferToWinner()
 	}
 	if statErr == nil {
 		ev.Bytes = fi.Size()
@@ -425,10 +433,7 @@ func RecoverCorruptRegistry(path string, cause error, policy QuarantineRetention
 	if qErr != nil && errors.Is(qErr, os.ErrNotExist) {
 		// Reachable only when the lock could not be taken and a concurrent
 		// recoverer won the rename between our stat and rename.
-		rec.Event = ev
-		rec.AlreadyRecovered = true
-		rec.Stats, _, _ = ReadRecoveryStats(path)
-		return rec, nil
+		return deferToWinner()
 	}
 	if qErr != nil {
 		ev.QuarantineError = qErr.Error()

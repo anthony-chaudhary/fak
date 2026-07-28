@@ -249,25 +249,54 @@ func assign(m *Manifest, section, key, rawVal string, lineNo int) error {
 	badValue := func(msg string) error {
 		return &LoadError{Reason: ReasonBadValue, Section: section, Key: key, Line: lineNo, Message: msg}
 	}
+	// Every field below is one of exactly three shapes. Naming the three coercions once —
+	// each already carrying this line's section/key/line in its refusal — lets the arms show
+	// what a reader is here for: which manifest key lands in which struct field. A count is
+	// its own shape rather than "an int": a negative budget and a negative retention are the
+	// same class of nonsense and must refuse identically.
+	boolVal := func() (bool, error) {
+		v, err := parseBool(rawVal)
+		if err != nil {
+			return false, badValue(err.Error())
+		}
+		return v, nil
+	}
+	stringVal := func(what string) (string, error) {
+		v, ok := parseString(rawVal)
+		if !ok {
+			return "", badValue(what + " must be a quoted string")
+		}
+		return v, nil
+	}
+	countVal := func(what string) (int, error) {
+		v, err := parseInt(rawVal)
+		if err != nil {
+			return 0, badValue(err.Error())
+		}
+		if v < 0 {
+			return 0, badValue(what + " must not be negative")
+		}
+		return v, nil
+	}
 	switch section {
 	case "runtimes":
 		switch key {
 		case "gateway":
-			v, err := parseBool(rawVal)
+			v, err := boolVal()
 			if err != nil {
-				return badValue(err.Error())
+				return err
 			}
 			m.Runtimes.Gateway = v
 		case "agent_runtime":
-			v, err := parseBool(rawVal)
+			v, err := boolVal()
 			if err != nil {
-				return badValue(err.Error())
+				return err
 			}
 			m.Runtimes.AgentRuntime = v
 		case "model":
-			v, ok := parseString(rawVal)
-			if !ok {
-				return badValue("model must be a quoted string")
+			v, err := stringVal("model")
+			if err != nil {
+				return err
 			}
 			if !validModel[v] {
 				return badValue(fmt.Sprintf("model %q must be one of upstream|in-kernel", v))
@@ -275,9 +304,9 @@ func assign(m *Manifest, section, key, rawVal string, lineNo int) error {
 			m.Runtimes.Model = v
 		}
 	case "policy":
-		v, ok := parseString(rawVal)
-		if !ok {
-			return badValue(key + " must be a quoted string")
+		v, err := stringVal(key)
+		if err != nil {
+			return err
 		}
 		if key == "floor" {
 			m.Policy.Floor = v
@@ -285,60 +314,54 @@ func assign(m *Manifest, section, key, rawVal string, lineNo int) error {
 			m.Policy.Inline = v
 		}
 	case "auth":
-		v, ok := parseString(rawVal)
-		if !ok {
-			return badValue("require_key_env must be a quoted string")
+		v, err := stringVal("require_key_env")
+		if err != nil {
+			return err
 		}
 		m.Auth.RequireKeyEnv = v
 	case "budgets":
-		v, err := parseInt(rawVal)
+		v, err := countVal("default_tokens")
 		if err != nil {
-			return badValue(err.Error())
-		}
-		if v < 0 {
-			return badValue("default_tokens must not be negative")
+			return err
 		}
 		m.Budgets.DefaultTokens = v
 	case "audit":
 		if key == "journal" {
-			v, ok := parseString(rawVal)
-			if !ok {
-				return badValue("journal must be a quoted string")
+			v, err := stringVal("journal")
+			if err != nil {
+				return err
 			}
 			m.Audit.Journal = v
 		} else {
-			v, err := parseInt(rawVal)
+			v, err := countVal("retention_days")
 			if err != nil {
-				return badValue(err.Error())
-			}
-			if v < 0 {
-				return badValue("retention_days must not be negative")
+				return err
 			}
 			m.Audit.RetentionDays = v
 		}
 	case "tenants":
-		v, err := parseBool(rawVal)
+		v, err := boolVal()
 		if err != nil {
-			return badValue(err.Error())
+			return err
 		}
 		m.Tenants.Enabled = v
 	case "agent_templates":
-		v, ok := parseString(rawVal)
-		if !ok {
-			return badValue("dir must be a quoted string")
+		v, err := stringVal("dir")
+		if err != nil {
+			return err
 		}
 		m.AgentTemplates.Dir = v
 	case "observability":
 		if key == "metrics" {
-			v, err := parseBool(rawVal)
+			v, err := boolVal()
 			if err != nil {
-				return badValue(err.Error())
+				return err
 			}
 			m.Observability.Metrics = v
 		} else {
-			v, ok := parseString(rawVal)
-			if !ok {
-				return badValue("bind must be a quoted string")
+			v, err := stringVal("bind")
+			if err != nil {
+				return err
 			}
 			m.Observability.Bind = v
 		}

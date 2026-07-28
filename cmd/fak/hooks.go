@@ -130,15 +130,23 @@ var errCheckBudgetExceeded = errors.New("pre-commit gate exceeded its time budge
 // the wedge.
 const defaultCheckBudget = 60 * time.Second
 
-// resolveCheckBudget returns the FAK_PRECOMMIT_CHECK_BUDGET_MS override (when it parses to a
-// positive millisecond count) or defaultCheckBudget.
-func resolveCheckBudget() time.Duration {
-	if raw := strings.TrimSpace(os.Getenv("FAK_PRECOMMIT_CHECK_BUDGET_MS")); raw != "" {
+// resolveBudgetMS is the one override grammar both hook budgets share: the named variable is
+// read as a millisecond count, and ONLY a value that parses to a positive count wins. Unset,
+// unparseable, zero, and negative all fall back to the compiled-in default, because every one
+// of those spellings would otherwise disable the bound and reintroduce the #5335 wedge.
+func resolveBudgetMS(name string, fallback time.Duration) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
 		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
 			return time.Duration(ms) * time.Millisecond
 		}
 	}
-	return defaultCheckBudget
+	return fallback
+}
+
+// resolveCheckBudget returns the FAK_PRECOMMIT_CHECK_BUDGET_MS override (when it parses to a
+// positive millisecond count) or defaultCheckBudget.
+func resolveCheckBudget() time.Duration {
+	return resolveBudgetMS("FAK_PRECOMMIT_CHECK_BUDGET_MS", defaultCheckBudget)
 }
 
 // defaultTotalBudget bounds the WHOLE pre-commit hook's wall clock, prologue included. The
@@ -155,12 +163,24 @@ const defaultTotalBudget = 90 * time.Second
 // resolveTotalBudget returns the FAK_PRECOMMIT_TOTAL_BUDGET_MS override (when it parses to a
 // positive millisecond count) or defaultTotalBudget.
 func resolveTotalBudget() time.Duration {
-	if raw := strings.TrimSpace(os.Getenv("FAK_PRECOMMIT_TOTAL_BUDGET_MS")); raw != "" {
-		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
-			return time.Duration(ms) * time.Millisecond
-		}
+	return resolveBudgetMS("FAK_PRECOMMIT_TOTAL_BUDGET_MS", defaultTotalBudget)
+}
+
+// spentHookBudget reports whether a prologue step failed because the hook's shared wall clock
+// ran out rather than for its own reasons, announcing the named step when it did. Both
+// prologue steps need exactly this distinction, and they must not disagree about it: a step
+// that ran out of budget means git is WEDGED, so falling through to the (unbounded) Python
+// gates would rebuild the very wedge the budget exists to break — the caller returns
+// exitBoundedFailOpen instead. A step that failed for any other reason is a plain
+// could-not-run and does fall through.
+func spentHookBudget(stderr io.Writer, asJSON bool, step string, deadline time.Time, budget time.Duration) bool {
+	if !time.Now().After(deadline) {
+		return false
 	}
-	return defaultTotalBudget
+	if !asJSON {
+		fmt.Fprintf(stderr, "pre-commit: %s exceeded the %s hook budget; gates skipped (fail-open, #5335)\n", step, budget)
+	}
+	return true
 }
 
 // gateBudgetFor returns the budget for the NEXT gate under the hook's shared wall clock: the
@@ -238,10 +258,7 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	r := resolveRootWithin(rootCtx, *root)
 	cancelRoot()
 	if r == "" {
-		if time.Now().After(hookDeadline) {
-			if !*asJSON {
-				fmt.Fprintf(stderr, "pre-commit: repo-root probe exceeded the %s hook budget; gates skipped (fail-open, #5335)\n", totalBudget)
-			}
+		if spentHookBudget(stderr, *asJSON, "repo-root probe", hookDeadline, totalBudget) {
 			return exitBoundedFailOpen
 		}
 		return 2 // not in a repo => could-not-run => fall through to python
@@ -254,12 +271,9 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	d, err := hooks.ReadStagedDiffWithin(readCtx, r)
 	cancelRead()
 	if err != nil {
-		if time.Now().After(hookDeadline) {
-			// Git is wedged, not missing. Handing off to the (unbounded) Python gates would
-			// rebuild the wedge, so stop here and let the commit through.
-			if !*asJSON {
-				fmt.Fprintf(stderr, "pre-commit: staged-diff read exceeded the %s hook budget; gates skipped (fail-open, #5335)\n", totalBudget)
-			}
+		// Git is wedged, not missing. Handing off to the (unbounded) Python gates would
+		// rebuild the wedge, so stop here and let the commit through.
+		if spentHookBudget(stderr, *asJSON, "staged-diff read", hookDeadline, totalBudget) {
 			return exitBoundedFailOpen
 		}
 		// could-not-run: never block. The shell wrapper treats exit 2 as "fall back to python".

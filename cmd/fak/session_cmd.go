@@ -377,6 +377,14 @@ func (c *sessionClient) paceVerb(stdout, stderr io.Writer, asJSON bool, id strin
 // own control verbs. An unstated axis is never written (no verb is issued for it),
 // so applying an envelope that names only token budgets is byte-identical to the
 // pre-#2762 two-verb apply.
+// sessionEnvelopeFacet is one control mutation an envelope decomposes into: the control
+// verb name (which also names it in the report's Applied list and in a failure message)
+// and the request that carries it. IfRev is filled in at apply time from the chain.
+type sessionEnvelopeFacet struct {
+	name string
+	req  gateway.SessionControlRequest
+}
+
 func (c *sessionClient) envelopeVerb(stdout, stderr io.Writer, asJSON bool, id, spec string, ifRev uint64, inspectOnly bool) int {
 	env, err := session.ParseBudgetEnvelope(spec)
 	if err != nil {
@@ -388,6 +396,10 @@ func (c *sessionClient) envelopeVerb(stdout, stderr io.Writer, asJSON bool, id, 
 		return emitSessionEnvelopeReport(stdout, stderr, asJSON, rep)
 	}
 
+	// An envelope lands as an ORDERED sequence of control mutations. Budget is always
+	// applied; the other three only when the spec actually set them. Collect the facets
+	// first, then apply them below — so "which facets does this spec carry" stays
+	// separate from "how a facet is applied and revision-chained".
 	sb := env.SessionBudget()
 	gb := gateway.SessionBudget{
 		TurnsLeft:           sb.TurnsLeft,
@@ -396,48 +408,39 @@ func (c *sessionClient) envelopeVerb(stdout, stderr io.Writer, asJSON bool, id, 
 		SpendMicroCentsLeft: sb.SpendMicroCentsLeft,
 		SpendMicroCentsCap:  sb.SpendMicroCentsCap,
 	}
-	st, err := c.control(id, "budget", gateway.SessionControlRequest{Budget: &gb, IfRev: ifRev})
-	if err != nil {
-		fmt.Fprintf(stderr, "fak session envelope: apply budget: %v\n", err)
-		return 1
+	facets := []sessionEnvelopeFacet{
+		{"budget", gateway.SessionControlRequest{Budget: &gb}},
 	}
-	rep.Applied = append(rep.Applied, "budget")
-	rep.State = &st
-
-	pace := env.SessionPace()
-	if pace.MaxTokensPerTurn > 0 || pace.MinTurnGapMs > 0 {
+	if pace := env.SessionPace(); pace.MaxTokensPerTurn > 0 || pace.MinTurnGapMs > 0 {
 		gp := gateway.SessionPace{MaxTokensPerTurn: pace.MaxTokensPerTurn, MinTurnGapMs: pace.MinTurnGapMs}
-		st, err = c.control(id, "pace", gateway.SessionControlRequest{Pace: &gp, IfRev: st.Rev})
-		if err != nil {
-			fmt.Fprintf(stderr, "fak session envelope: apply pace: %v\n", err)
-			return 1
-		}
-		rep.Applied = append(rep.Applied, "pace")
-		rep.State = &st
+		facets = append(facets, sessionEnvelopeFacet{"pace", gateway.SessionControlRequest{Pace: &gp}})
 	}
-
 	if env.WallClockLimitNanos > 0 {
 		gw := gateway.SessionWall{LimitNanos: env.WallClockLimitNanos}
-		st, err = c.control(id, "wall", gateway.SessionControlRequest{Wall: &gw, IfRev: st.Rev})
-		if err != nil {
-			fmt.Fprintf(stderr, "fak session envelope: apply wall: %v\n", err)
-			return 1
-		}
-		rep.Applied = append(rep.Applied, "wall")
-		rep.State = &st
+		facets = append(facets, sessionEnvelopeFacet{"wall", gateway.SessionControlRequest{Wall: &gw}})
 	}
-
 	if !env.Throughput.IsZero() {
 		gt := gateway.SessionThroughput{
 			ExpectedTokensPerSec: env.Throughput.ExpectedTokensPerSec,
 			MinTokensPerSec:      env.Throughput.MinTokensPerSec,
 		}
-		st, err = c.control(id, "throughput", gateway.SessionControlRequest{Throughput: &gt, IfRev: st.Rev})
+		facets = append(facets, sessionEnvelopeFacet{"throughput", gateway.SessionControlRequest{Throughput: &gt}})
+	}
+
+	// The first mutation carries the caller's --if-rev precondition; each later one
+	// chains the revision its predecessor returned, so a concurrent writer cannot slip
+	// in between and leave a half-applied envelope. A failure stops the sequence and
+	// leaves rep.Applied naming exactly the facets that did land.
+	rev := ifRev
+	for _, f := range facets {
+		f.req.IfRev = rev
+		st, err := c.control(id, f.name, f.req)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak session envelope: apply throughput: %v\n", err)
+			fmt.Fprintf(stderr, "fak session envelope: apply %s: %v\n", f.name, err)
 			return 1
 		}
-		rep.Applied = append(rep.Applied, "throughput")
+		rev = st.Rev
+		rep.Applied = append(rep.Applied, f.name)
 		rep.State = &st
 	}
 	return emitSessionEnvelopeReport(stdout, stderr, asJSON, rep)

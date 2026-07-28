@@ -438,24 +438,25 @@ func Sync(plan []PlanRow, repo string, runner Runner) []SyncRow {
 				Stderr: "write body file: " + err.Error()})
 			continue
 		}
+		// edit and create differ in exactly two ways: edit names the issue number, and gh
+		// spells the label flag differently for them (`edit --add-label` ADDS to whatever
+		// labels the issue already carries, `create --label` sets the initial set). Labels
+		// and milestone are otherwise appended the same way, so they are written once —
+		// which also makes it impossible for the two verbs to drift apart on them.
 		var args []string
+		labelFlag := "--label"
 		if row.Action == "update" && row.Number != nil {
 			args = []string{"issue", "edit", strconv.Itoa(*row.Number),
 				"--title", row.Title, "--body-file", bodyFile}
-			for _, label := range row.Labels {
-				args = append(args, "--add-label", label)
-			}
-			if row.Milestone != "" {
-				args = append(args, "--milestone", row.Milestone)
-			}
+			labelFlag = "--add-label"
 		} else {
 			args = []string{"issue", "create", "--title", row.Title, "--body-file", bodyFile}
-			for _, label := range row.Labels {
-				args = append(args, "--label", label)
-			}
-			if row.Milestone != "" {
-				args = append(args, "--milestone", row.Milestone)
-			}
+		}
+		for _, label := range row.Labels {
+			args = append(args, labelFlag, label)
+		}
+		if row.Milestone != "" {
+			args = append(args, "--milestone", row.Milestone)
 		}
 		if repo != "" {
 			args = append(args, "--repo", repo)

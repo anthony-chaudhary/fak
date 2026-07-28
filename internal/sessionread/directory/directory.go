@@ -301,9 +301,11 @@ func Directory(journalRows []sessionjournal.Classified, driveRows []DriveRow, id
 		return r
 	}
 
-	// Lifecycle store first, so a "both" row keeps its journal identity in the output order.
-	for _, c := range journalRows {
-		trace, uuid := resolveTrace(c.ID, traceByUUID, uuidByTrace)
+	// rowFor resolves the row for one (trace, uuid) identity — creating it on first sight —
+	// and fills in whichever half of the identity is still blank. Blank-only filling IS the
+	// merge rule: the store that saw an identity first keeps it, which is exactly why the
+	// lifecycle store is folded in before the drive store below.
+	rowFor := func(trace, uuid string) *DirectoryRow {
 		r := get(rowKey(trace, uuid))
 		if r.TraceID == "" {
 			r.TraceID = trace
@@ -311,6 +313,12 @@ func Directory(journalRows []sessionjournal.Classified, driveRows []DriveRow, id
 		if r.UUID == "" {
 			r.UUID = uuid
 		}
+		return r
+	}
+
+	// Lifecycle store first, so a "both" row keeps its journal identity in the output order.
+	for _, c := range journalRows {
+		r := rowFor(resolveTrace(c.ID, traceByUUID, uuidByTrace))
 		r.Lifecycle = c.Status
 		r.addSource(SourceJournal)
 	}
@@ -318,14 +326,7 @@ func Directory(journalRows []sessionjournal.Classified, driveRows []DriveRow, id
 	// Drive-state store: fold onto the same trace key; a match merges to Source="both".
 	for _, d := range driveRows {
 		trace := strings.TrimSpace(d.TraceID)
-		uuid := uuidByTrace[trace]
-		r := get(rowKey(trace, uuid))
-		if r.TraceID == "" {
-			r.TraceID = trace
-		}
-		if r.UUID == "" {
-			r.UUID = uuid
-		}
+		r := rowFor(trace, uuidByTrace[trace])
 		r.RunState = d.Run
 		r.Priority = d.Priority
 		r.ParentTrace = d.ParentTrace

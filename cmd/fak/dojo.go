@@ -249,16 +249,21 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	// provider-cache window) contributes nothing, so the fold stays honestly
 	// unmeasured rather than fabricated.
 	var episodes []dojo.Episode
-	for _, in := range dojo.ScorableLiveEpisodes(lc) {
-		episodes = append(episodes, dojo.Score("live-episodes", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	// score folds one cell's inputs into the run under the scenario label naming the
+	// corpus they came from. Every cell below goes through it, so they all share one
+	// calibration band and the reader sees the LIST of cells rather than eleven copies
+	// of the same loop.
+	score := func(scenario string, inputs []dojo.ScoredInput) {
+		for _, in := range inputs {
+			episodes = append(episodes, dojo.Score(scenario, in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+		}
 	}
+	score("live-episodes", dojo.ScorableLiveEpisodes(lc))
 	// The live arm also measures dispatch-yield/verified_ship_rate over the loop
 	// ledger (#4497): the closure yield the dispatch loop itself recorded, folded
 	// alongside the provider-cache rows so `fak dojo run --live` scores the loop's
 	// headline KPI without a transcript corpus.
-	for _, in := range dispatchYieldEpisodesFromLoopLedger(loadLoopLedgerEvents(root)) {
-		episodes = append(episodes, dojo.Score("loop-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("loop-ledger", dispatchYieldEpisodesFromLoopLedger(loadLoopLedgerEvents(root)))
 	// And the cross-provider leaderboard cells from ONE load of the local
 	// multi-provider session corpus: provider-turns/turns_per_task (#4505), one
 	// episode per provider of median assistant turns per completed session, and
@@ -266,60 +271,44 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	// billed cache_read / total-input share — so the live run renders where every
 	// provider fak routes to sits on turns AND cache economy.
 	sessionCorpus := loadProviderTurnsSessions()
-	for _, in := range providerTurnsEpisodesFromSessions(sessionCorpus) {
-		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
-	for _, in := range providerCacheEpisodesFromSessions(sessionCorpus) {
-		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("session-corpus", providerTurnsEpisodesFromSessions(sessionCorpus))
+	score("session-corpus", providerCacheEpisodesFromSessions(sessionCorpus))
 	// And the WITNESSED top-line cache-read fraction (#4498/#4484): one overall
 	// episode aggregating billed cache_read across the whole corpus, the single
 	// headline that complements the per-provider provider-cache leaderboard.
-	for _, in := range cacheReadShareEpisodeFromSessions(sessionCorpus) {
-		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("session-corpus", cacheReadShareEpisodeFromSessions(sessionCorpus))
 	// And the cross-provider cost-to-close economics cell (#4488): one episode per
 	// provider of billed USD per completed session (the corpus proxy for a verified
 	// close), priced by the existing sessionaudit per-model table — so the live run
 	// renders where every provider fak routes to sits on cost-to-close, UNMEASURED
 	// for a provider with no priced billing rather than a fabricated $0.00.
-	for _, in := range providerCostEpisodesFromSessions(sessionCorpus) {
-		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("session-corpus", providerCostEpisodesFromSessions(sessionCorpus))
 	// And the cross-provider tokens-to-close cell (#4503): one episode per provider
 	// of TOTAL billed tokens (input + output + cache_read + cache_creation) per
 	// completed session — where every provider fak routes to sits on total token
 	// spend to close, UNMEASURED for a provider with no billed tokens rather than a
 	// fabricated 0.
-	for _, in := range providerTokensEpisodesFromSessions(sessionCorpus) {
-		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("session-corpus", providerTokensEpisodesFromSessions(sessionCorpus))
 	// And the cross-provider verified-completion-rate cell (#4506): one episode per
 	// provider of verified closes / dispatched — the per-provider analog of the
 	// fak-aggregate dispatch-yield cell, folded from the session corpus so the live
 	// run renders where every provider fak routes to sits on completion rate,
 	// UNMEASURED only when nothing was dispatched rather than a fabricated rate.
-	for _, in := range providerCompletionEpisodesFromSessions(sessionCorpus) {
-		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("session-corpus", providerCompletionEpisodesFromSessions(sessionCorpus))
 	// And the cross-provider tool-use-reliability cell (#4493): one episode per
 	// provider of first-try tool-call success (non-errored tool_result / total
 	// tool_result) — so the live run renders where every provider fak routes to
 	// sits on tool-call reliability, with no episode for a provider whose
 	// sessions never called a tool and UNMEASURED only when no billed provider
 	// called a tool at all, never a fabricated rate.
-	for _, in := range providerToolcallEpisodesFromCorpus(sessionCorpus) {
-		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("session-corpus", providerToolcallEpisodesFromCorpus(sessionCorpus))
 	// And the context-continuity cell (#4486): ONE episode of
 	// fak_context_restore's restore recall — restored spans over dropped spans —
 	// folded from fak's own durable context-span ledger (the gateway-usage
 	// ledger's compaction-dropped turns). That ledger records drops but no
 	// restore counter yet, so the cell scores UNMEASURED honestly (never a
 	// fabricated 0.0 recall) until a restore field lands on the usage row.
-	for _, in := range dojo.ContextRestoreEpisodes(loadContextSpanLedger(root)) {
-		episodes = append(episodes, dojo.Score("context-span-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("context-span-ledger", dojo.ContextRestoreEpisodes(loadContextSpanLedger(root)))
 	// And the cross-provider single-shot-quality cell (#4494): one episode per
 	// provider of provider-firsttry/first_try_green_rate — acceptance-gate
 	// passes with NO retry over dispatch attempts — folded from the dispatch
@@ -328,9 +317,7 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	// provider but no per-worker acceptance-gate attempt record yet, so the
 	// cell scores UNMEASURED honestly (never a fabricated 0.0 rate) until a
 	// gate-attempt record lands on the ledger row.
-	for _, in := range dojo.ProviderFirstTryEpisodes(loadDispatchFirstTryAttempts(root)) {
-		episodes = append(episodes, dojo.Score("attempt-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
-	}
+	score("attempt-ledger", dojo.ProviderFirstTryEpisodes(loadDispatchFirstTryAttempts(root)))
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
 	report := dojo.Fold(episodes, dojo.FoldOpts{

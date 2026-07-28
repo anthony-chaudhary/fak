@@ -137,48 +137,44 @@ func dispatchWorkerFallbackModel(backend string) string {
 	return strings.TrimSpace(raw)
 }
 
-func guardDisabled() bool {
-	raw, ok := os.LookupEnv("FLEET_DOGFOOD_GUARD")
+// fleetEnvSwitchOn is the ONE truthy/falsy grammar every FLEET_* on/off switch below
+// shares, so the switches can never drift apart by copy-paste: an unset variable takes
+// `whenUnset`, any of the off-ish words is OFF, and every other value is ON. The Python
+// mirrors (tools/worker_worktree.py, tools/tier_launch.py) reproduce exactly this
+// grammar. Note `dispatchWorkerFallbackModel` deliberately does NOT use it — its
+// vocabulary carries an extra "none", which means a model name, not a switch.
+func fleetEnvSwitchOn(name string, whenUnset bool) bool {
+	raw, ok := os.LookupEnv(name)
 	if !ok {
-		return false
+		return whenUnset
 	}
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", "0", "off", "false", "no", "disable", "disabled":
-		return true
+		return false
 	}
-	return false
+	return true
+}
+
+func guardDisabled() bool {
+	// Inverted: the switch turns the guard ON, so "off-ish" means the guard is disabled.
+	// Unset leaves the guard ON, hence not disabled.
+	return !fleetEnvSwitchOn("FLEET_DOGFOOD_GUARD", true)
 }
 
 // workerWorktreeEnabled reports whether #3168 per-worker git worktree isolation is
 // switched on via FLEET_WORKER_WORKTREE. Default (unset / an off-ish value) is OFF,
 // which restores the shared-trunk spawn behavior byte-for-byte; any other value
-// turns isolation on. Mirrors guardDisabled's truthy/falsy grammar (inverted).
+// turns isolation on.
 func workerWorktreeEnabled() bool {
-	raw, ok := os.LookupEnv("FLEET_WORKER_WORKTREE")
-	if !ok {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "0", "off", "false", "no", "disable", "disabled":
-		return false
-	}
-	return true
+	return fleetEnvSwitchOn("FLEET_WORKER_WORKTREE", false)
 }
 
 // dispatchTierLaunchEnabled reports whether the opt-in per-issue tier launch profile
 // (FLEET_TIER_LAUNCH) is switched on. Default (unset / an off-ish value) is OFF, which keeps
 // every worker on the seat-default model with no effort/ultracode uplift — byte-identical to
-// before this seam. Mirrors workerWorktreeEnabled's truthy/falsy grammar.
+// before this seam.
 func dispatchTierLaunchEnabled() bool {
-	raw, ok := os.LookupEnv("FLEET_TIER_LAUNCH")
-	if !ok {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "0", "off", "false", "no", "disable", "disabled":
-		return false
-	}
-	return true
+	return fleetEnvSwitchOn("FLEET_TIER_LAUNCH", false)
 }
 
 // dispatchTierLaunchTable is the tier→launch-profile table the resolver consults. Today it is

@@ -210,13 +210,21 @@ func buildDispatchPlanLiveTelemetry(root string, requested int) dispatchPlanLive
 		Workspace: root,
 		Requested: requested,
 	}
-	router, err := dispatchRouteIssues(root, io.Discard)
-	if err != nil {
+	// unavailable is how this readout reports that a LIVE input could not be produced at all.
+	// That is deliberately NOT a failing verdict — the telemetry is absent, not negative — and
+	// the operator's next move is always the same repair-then-re-run loop, named after the
+	// input that could not be built. Both live inputs report it through here so a consumer can
+	// never tell them apart by shape, only by the stated reason.
+	unavailable := func(reason, input string) dispatchPlanLiveTelemetry {
 		live.OK = false
 		live.Verdict = "UNAVAILABLE"
-		live.Reason = "current issue router failed: " + err.Error()
-		live.NextAction = "repair the live router inputs, then re-run dispatch scorecard --live-router"
+		live.Reason = reason
+		live.NextAction = "repair the live " + input + " inputs, then re-run dispatch scorecard --live-router"
 		return live
+	}
+	router, err := dispatchRouteIssues(root, io.Discard)
+	if err != nil {
+		return unavailable("current issue router failed: "+err.Error(), "router")
 	}
 	live.RouterOK = router.OK
 	live.RouterVerdict = router.Verdict
@@ -225,11 +233,7 @@ func buildDispatchPlanLiveTelemetry(root string, requested int) dispatchPlanLive
 	live.LaneCount = len(router.Lanes)
 	price, err := priceDispatchWavePayload(root, router, requested, requested, "", nil, dispatchtick.DefaultCooldownMinutes)
 	if err != nil {
-		live.OK = false
-		live.Verdict = "UNAVAILABLE"
-		live.Reason = "current issue fan-out could not be priced: " + err.Error()
-		live.NextAction = "repair the live fan-out inputs, then re-run dispatch scorecard --live-router"
-		return live
+		return unavailable("current issue fan-out could not be priced: "+err.Error(), "fan-out")
 	}
 	live.Action = price.Action
 	live.CandidateCount = price.CandidateCount

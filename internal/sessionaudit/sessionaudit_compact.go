@@ -115,6 +115,67 @@ const (
 	processIssueMinChurn = 12
 )
 
+// classEntry is one class's accumulated cross-session evidence. Sessions and namespaces are
+// SETS, so a session that hits the same class ten times still counts as one session — which
+// is what makes "seen in N distinct sessions" mean recurring rather than merely frequent.
+type classEntry struct {
+	sessions   map[string]bool
+	namespaces map[string]bool
+	example    string
+	total      int64
+}
+
+// distinctSessions is the number of separate sessions that hit this class.
+func (e *classEntry) distinctSessions() int64 { return int64(len(e.sessions)) }
+
+// classRollup is the one cross-session join both recurring-* aggregations below share: fold
+// many per-session rows into one entry per class, in first-sight order. Stating it once is
+// what makes the two aggregations provably agree on what "recurring" means; the key type is
+// free because only the counting is shared, not the vocabulary being counted.
+type classRollup[K comparable] struct {
+	entries map[K]*classEntry
+	order   []K
+}
+
+func newClassRollup[K comparable]() *classRollup[K] {
+	return &classRollup[K]{entries: map[K]*classEntry{}}
+}
+
+// observe folds one row into class k. First sight of a class fixes BOTH its example and its
+// position in the output order, so the join is deterministic for a given input order. An
+// empty namespace is not recorded: an unattributable path must not invent one.
+func (r *classRollup[K]) observe(k K, session, namespace, example string, n int64) {
+	e := r.entries[k]
+	if e == nil {
+		e = &classEntry{sessions: map[string]bool{}, namespaces: map[string]bool{}, example: example}
+		r.entries[k] = e
+		r.order = append(r.order, k)
+	}
+	e.sessions[session] = true
+	if namespace != "" {
+		e.namespaces[namespace] = true
+	}
+	e.total += n
+}
+
+// recurring walks, in first-sight order, every class seen in at least minSessions DISTINCT
+// sessions and hands it to emit with its namespace set already sorted. Below the threshold a
+// class is a one-off rather than a pattern, and is skipped.
+func (r *classRollup[K]) recurring(minSessions int, emit func(k K, e *classEntry, namespaces []string)) {
+	for _, k := range r.order {
+		e := r.entries[k]
+		if len(e.sessions) < minSessions {
+			continue
+		}
+		names := make([]string, 0, len(e.namespaces))
+		for n := range e.namespaces {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		emit(k, e, names)
+	}
+}
+
 // aggregateCompactBehavior folds the per-session Behavior lens across the audited
 // window: window totals (timeout-kills, sleep-polls, wasted read-discipline mutations,
 // stuck sessions) plus the cross-session recurring-failure join. It returns nil when
@@ -122,14 +183,7 @@ const (
 func aggregateCompactBehavior(sessions []Session) *CompactBehavior {
 	cb := &CompactBehavior{}
 	type fkey struct{ tool, sig string }
-	type facc struct {
-		sessions    map[string]bool
-		namespaces  map[string]bool
-		occurrences int64
-		example     string
-	}
-	classes := map[fkey]*facc{}
-	var order []fkey
+	classes := newClassRollup[fkey]()
 	for _, s := range sessions {
 		if s.Error != "" {
 			continue
@@ -146,39 +200,20 @@ func aggregateCompactBehavior(sessions []Session) *CompactBehavior {
 		}
 		ns := namespaceName(s.Path)
 		for _, row := range b.FailureMass {
-			k := fkey{row.Tool, row.Sig}
-			acc := classes[k]
-			if acc == nil {
-				acc = &facc{sessions: map[string]bool{}, namespaces: map[string]bool{}, example: s.Session}
-				classes[k] = acc
-				order = append(order, k)
-			}
-			acc.sessions[s.Session] = true
-			if ns != "" {
-				acc.namespaces[ns] = true
-			}
-			acc.occurrences += row.Count
+			// The example a failure class carries is the session it was first seen in.
+			classes.observe(fkey{row.Tool, row.Sig}, s.Session, ns, s.Session, row.Count)
 		}
 	}
-	for _, k := range order {
-		acc := classes[k]
-		if len(acc.sessions) < processIssueMinSessions {
-			continue
-		}
-		names := make([]string, 0, len(acc.namespaces))
-		for n := range acc.namespaces {
-			names = append(names, n)
-		}
-		sort.Strings(names)
+	classes.recurring(processIssueMinSessions, func(k fkey, e *classEntry, names []string) {
 		cb.RecurringFailures = append(cb.RecurringFailures, RecurringFailureRow{
 			Tool:           k.tool,
 			Sig:            k.sig,
-			Sessions:       int64(len(acc.sessions)),
-			Occurrences:    acc.occurrences,
+			Sessions:       e.distinctSessions(),
+			Occurrences:    e.total,
 			Namespaces:     names,
-			ExampleSession: acc.example,
+			ExampleSession: e.example,
 		})
-	}
+	})
 	sort.SliceStable(cb.RecurringFailures, func(i, j int) bool {
 		if cb.RecurringFailures[i].Sessions != cb.RecurringFailures[j].Sessions {
 			return cb.RecurringFailures[i].Sessions > cb.RecurringFailures[j].Sessions
@@ -268,14 +303,7 @@ const (
 func aggregateCompactConfusion(sessions []Session) *CompactConfusion {
 	cc := &CompactConfusion{}
 	type mkey struct{ category, label string }
-	type macc struct {
-		sessions   map[string]bool
-		namespaces map[string]bool
-		count      int64
-		example    string
-	}
-	classes := map[mkey]*macc{}
-	var order []mkey
+	classes := newClassRollup[mkey]()
 	var confused []ConfusedSessionRow
 	for _, s := range sessions {
 		if s.Error != "" {
@@ -289,18 +317,9 @@ func aggregateCompactConfusion(sessions []Session) *CompactConfusion {
 		cc.ConfusionTurns += conf.ConfusionTurns
 		ns := namespaceName(s.Path)
 		for _, row := range conf.Markers {
-			k := mkey{row.Category, row.Label}
-			acc := classes[k]
-			if acc == nil {
-				acc = &macc{sessions: map[string]bool{}, namespaces: map[string]bool{}, example: row.Example}
-				classes[k] = acc
-				order = append(order, k)
-			}
-			acc.sessions[s.Session] = true
-			if ns != "" {
-				acc.namespaces[ns] = true
-			}
-			acc.count += row.Count
+			// A marker class carries the marker TEXT it was first seen with as its example,
+			// not a session id — the text is what an auditor needs to recognize the pattern.
+			classes.observe(mkey{row.Category, row.Label}, s.Session, ns, row.Example, row.Count)
 		}
 		if confusedSession(conf) {
 			cc.ConfusedSessions++
@@ -320,25 +339,16 @@ func aggregateCompactConfusion(sessions []Session) *CompactConfusion {
 			})
 		}
 	}
-	for _, k := range order {
-		acc := classes[k]
-		if len(acc.sessions) < confusionMinSessions {
-			continue
-		}
-		names := make([]string, 0, len(acc.namespaces))
-		for n := range acc.namespaces {
-			names = append(names, n)
-		}
-		sort.Strings(names)
+	classes.recurring(confusionMinSessions, func(k mkey, e *classEntry, names []string) {
 		cc.RecurringMarkers = append(cc.RecurringMarkers, RecurringMarkerRow{
 			Category:   k.category,
 			Label:      k.label,
-			Sessions:   int64(len(acc.sessions)),
-			Count:      acc.count,
+			Sessions:   e.distinctSessions(),
+			Count:      e.total,
 			Namespaces: names,
-			Example:    acc.example,
+			Example:    e.example,
 		})
-	}
+	})
 	sort.SliceStable(cc.RecurringMarkers, func(i, j int) bool {
 		if cc.RecurringMarkers[i].Sessions != cc.RecurringMarkers[j].Sessions {
 			return cc.RecurringMarkers[i].Sessions > cc.RecurringMarkers[j].Sessions

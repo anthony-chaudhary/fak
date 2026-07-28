@@ -151,29 +151,28 @@ func cmdChatOps(argv []string) {
 // surface's default. The token falls back to the shared scoreboard bot so one workspace bot
 // can serve the door and the status feeders alike.
 
-func resolveChatopsToken() string {
-	if v := strings.TrimSpace(os.Getenv("FAK_CHATOPS_TOKEN")); v != "" {
+// resolveChatopsEnv is the env->file half every FAK_CHATOPS_* setting shares: the process
+// environment wins, otherwise a matching line in .env.slack.local. Empty means "not
+// configured" — the settings that have a further fallback say so themselves, below.
+func resolveChatopsEnv(name string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		return v
 	}
-	if v := slackenv.FileValue("FAK_CHATOPS_TOKEN"); v != "" {
+	return slackenv.FileValue(name)
+}
+
+// resolveChatopsToken is the one setting with a third source: an unset door token falls back
+// to the shared scoreboard bot.
+func resolveChatopsToken() string {
+	if v := resolveChatopsEnv("FAK_CHATOPS_TOKEN"); v != "" {
 		return v
 	}
 	return scoreboard.ResolveToken()
 }
 
-func resolveChatopsChannel() string {
-	if v := strings.TrimSpace(os.Getenv("FAK_CHATOPS_CHANNEL")); v != "" {
-		return v
-	}
-	return slackenv.FileValue("FAK_CHATOPS_CHANNEL")
-}
+func resolveChatopsChannel() string { return resolveChatopsEnv("FAK_CHATOPS_CHANNEL") }
 
-func resolveChatopsBotUser() string {
-	if v := strings.TrimSpace(os.Getenv("FAK_CHATOPS_BOT_USER")); v != "" {
-		return v
-	}
-	return slackenv.FileValue("FAK_CHATOPS_BOT_USER")
-}
+func resolveChatopsBotUser() string { return resolveChatopsEnv("FAK_CHATOPS_BOT_USER") }
 
 // resolveChatopsAdmins returns the admin allowlist: the explicit --admins flag when non-empty,
 // else $FAK_CHATOPS_ADMINS, else a FAK_CHATOPS_ADMINS= line in .env.slack.local. The value is a
