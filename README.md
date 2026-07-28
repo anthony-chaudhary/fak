@@ -6,7 +6,9 @@
 
 **fak turns a tool-using agent into a managed agent.**
 
-The agent keeps its interface and model, while a fak kernel manages its model traffic, context lifetime, cache reuse, capabilities, and recovery.
+The agent keeps its interface and model. A fak kernel manages its model traffic and cache reuse, its context lifetime, and its capabilities and recovery.
+
+> **TL;DR:** install one binary and run `fak agent --offline`. The managed agent still finishes its task while the kernel blocks a poisoned tool result and a destructive operation. No API key, model download, or GPU needed.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
@@ -14,7 +16,7 @@ The agent keeps its interface and model, while a fak kernel manages its model tr
 
 ## Try the kernel without a key, model, or GPU
 
-**Audience:** first-time evaluators checking whether fak can manage a tool-using agent.
+Audience: first-time evaluators checking whether fak can manage a tool-using agent.
 
 For the shortest public proof, install the one binary and run one deterministic end-to-end check:
 
@@ -26,23 +28,23 @@ fak agent --offline
 
 Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
 
-**Next action:** run it and check those three rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md); to stand up a running, server-side governed agent — offline, with a default-deny floor, an audit journal, and a visible DENY — in under 10 minutes, follow the [governed-agent quickstart](docs/fak/governed-agent-quickstart.md).
+Next action: run it and check those three rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md). To stand up a running, server-side governed agent in under 10 minutes, follow the [governed-agent quickstart](docs/fak/governed-agent-quickstart.md). That path is offline and gives you a default-deny floor, an audit journal, and a visible DENY.
 
 ## One managed agent, two ways to run the kernel
 
-A **managed agent** pairs Claude Code, Codex, opencode, or your own client—and its chosen model—with fak. The client keeps the task loop and user experience; fak owns the operational boundary around it: what context is retained, what work is reused, which tools may run, what results may return, and how the session recovers.
+A managed agent pairs fak with Claude Code, Codex, opencode, or your own client and its chosen model. fak owns the operational boundary around that session: what context is retained and what work is reused. It also governs which tools may run, what results may return, and how the session recovers.
 
-The roles stay separate: the **agent or client** owns the task loop and user experience; the **fak kernel** is the management plane; the **model provider or server** generates tokens. Change any one without replacing the others.
+The roles stay separate. The agent or client owns the task loop and user experience; the fak kernel is the management plane; the model provider or server generates tokens. Change any one without replacing the others.
 
 | Where the kernel runs | Start here | Use it when… |
 |---|---|---|
-| **Beside one agent** | [`fak guard`](#manage-one-local-agent-fak-guard) | You want a local launcher and supervisor for an existing agent. `guard` starts a private kernel gateway, points the child agent at it, and manages that session. |
-| **As an endpoint** | [`fak serve`](#run-the-managed-agent-endpoint-fak-serve) | One or many OpenAI, Anthropic, or MCP clients need a durable kernel service. It can front an existing model server or load GGUF itself. |
-| **Entirely offline** | [Run the one-minute proof](#try-the-kernel-without-a-key-model-or-gpu) | You want to evaluate the managed-agent path without an API key, model download, or GPU. |
+| Beside one agent | [`fak guard`](#manage-one-local-agent-fak-guard) | You want a local launcher and supervisor for an existing agent. `guard` starts a private kernel gateway, points the child agent at it, and manages that session. |
+| As an endpoint | [`fak serve`](#run-the-managed-agent-endpoint-fak-serve) | One or many OpenAI, Anthropic, or MCP clients need a durable kernel service. It can front an existing model server or load GGUF itself. |
+| Entirely offline | [Run the one-minute proof](#try-the-kernel-without-a-key-model-or-gpu) | You want to evaluate the managed-agent path without an API key, model download, or GPU. |
 
-**Default:** start with `fak guard` for one existing agent; choose `fak serve` when the kernel must be a shared or durable endpoint.
+Default: start with `fak guard` for one existing agent; choose `fak serve` when the kernel must be a shared or durable endpoint.
 
-Both commands run the **same kernel**. `guard` runs it beside one agent session, as that session's launcher and supervisor; `serve` runs it as a standalone service. The model remains a replaceable backend—cloud API, local model server, or in-kernel GGUF.
+Both commands run the same kernel. `guard` runs it beside one agent session, as that session's launcher and supervisor; `serve` runs it as a standalone service. The model remains a replaceable backend—cloud API, local model server, or in-kernel GGUF.
 
 ```mermaid
 flowchart LR
@@ -60,10 +62,10 @@ For architecture, current evidence, and development workflow, start at [START-HE
 
 ## What the managed agent gains
 
-- **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system—on by default, and without changing the model's output: it keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses KV directly when it owns inference. **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on larger models).
-- **Long runs keep moving.** Sessions compact their own history (up to **~107K tokens** per trim) and can resume after a crash instead of dying at the context limit.
-- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor—**362 ns** in process, with no policy model or network hop. Tool results carry provenance too, so poisoned content read from an untrusted source is stopped before the model acts on it.
-- **Big local models are first-class.** The kernel loads GGUF weights itself and serves OpenAI, Anthropic, and MCP clients directly. For mixture-of-experts models (where each token uses only a few of the model's expert blocks), it pages just the needed expert weights in from SSD and stripes weight reads across sources by measured bandwidth—so the whole model does not have to sit in RAM. Quantized (e.g. Q4) inference and grammar-constrained structured output are built in.
+- **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system. That coordination is on by default and does not change the model's output. It keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses KV directly when it owns inference. That is ~4.1× less work than a tuned warm-cache stack, and up to 6.95× on larger models.
+- **Long runs keep moving.** Sessions compact their own history (up to ~107K tokens per trim) and can resume after a crash instead of dying at the context limit.
+- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor. That verdict takes 362 ns in process, with no policy model or network hop. Tool results carry provenance too, so poisoned content read from an untrusted source is stopped before the model acts on it.
+- **Big local models are first-class.** The kernel loads GGUF weights itself and serves OpenAI, Anthropic, and MCP clients directly. Mixture-of-experts models use only a few of the model's expert blocks per token. For those, the kernel pages just the needed expert weights in from SSD and stripes weight reads across sources by measured bandwidth. The whole model does not have to sit in RAM. Quantized (e.g. Q4) inference and grammar-constrained structured output are built in.
 
 Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims ledger](CLAIMS.md).
 
@@ -73,7 +75,7 @@ Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims 
 
 ## Manage one local agent: `fak guard`
 
-Start with the agent you already run—no rewrite, config file, API key, or second terminal:
+Start with the agent you already run. No rewrite, config file, API key, or second terminal:
 
 ```bash
 fak guard -- claude                                  # keep a Claude Pro/Max subscription — no API key
@@ -87,9 +89,9 @@ Read: [Claude Code walkthrough](docs/integrations/claude.md) · [Codex](docs/int
 
 ## Run the managed-agent endpoint: `fak serve`
 
-Use fak as a shared OpenAI, Anthropic, or MCP endpoint, with reuse, compaction, routing, observability, authentication, and policy in one place.
+Use fak as a shared OpenAI, Anthropic, or MCP endpoint. That one endpoint carries reuse and compaction, routing and observability, authentication and policy.
 
-**Front an existing local or remote model server:**
+Front an existing local or remote model server:
 
 ```bash
 fak serve --addr 127.0.0.1:8080 \
@@ -98,7 +100,7 @@ fak serve --addr 127.0.0.1:8080 \
   --policy examples/dev-agent-policy.json
 ```
 
-**Or stand alone with GGUF weights—no separate model server:**
+Or stand alone with GGUF weights and no separate model server:
 
 ```bash
 fak serve --addr 127.0.0.1:8080 \
@@ -110,6 +112,13 @@ Point OpenAI clients at `http://127.0.0.1:8080/v1` and Anthropic clients at the 
 
 Read: [server quickstart](docs/fak/server-quickstart.md) · [serving architecture and engines](docs/serving/README.md) · [configuration](docs/fak/server-config.md) · [API reference](docs/fak/api-reference.md) · [deployment](docs/fak/deployment-guide.md)
 
+**Showcase — Claude Code on your own Mac's local model.** One command points Claude Code at your own Mac's `fak serve` gateway running Qwen3.6-27B:
+
+```bash
+fak mac                                              # long form: fak claude-mac-fak
+```
+
+A premium cloud agent, open weights on your own silicon, one static binary in between. The first full local turn is slow (10–15 min prefill on an M3 Pro) and single-stream. The wow is that it works end to end and stays observable the whole time via the preflight panel. See the [walkthrough](docs/fak/mac-agent-ui.md).
 
 ## Install
 
@@ -121,11 +130,11 @@ Go 1.26+; no external Go dependencies. Source builds, archives, and containers: 
 
 ## Going deeper
 
-- **Use it:** [tutorial](docs/fak/tutorial.md) · [integration guides](docs/integrations/) · [examples](examples/README.md)
-- **Run Claude Code on your own Mac's local model:** `fak claude-mac-fak` points Claude Code at your Mac's own `fak serve` gateway (Qwen3.6-27B). The first local turn is slow (10–15 min prefill on an M3 Pro) and single-stream; the wow is that it works end to end and is fully observable via the preflight panel — [walkthrough](docs/fak/mac-agent-ui.md).
-- **Operate it:** [serving](docs/serving/README.md) · [observability](docs/fak/observability.md) · [deployment](docs/fak/deployment-guide.md)
-- **Understand it:** [performance outcomes and proofs](docs/performance.md) · [managed cache](docs/explainers/what-is-managed-cache.md) · [external system architecture](docs/architecture.md) · [concepts and story](docs/concepts-and-story.md)
-- **Verify it:** [benchmark route](docs/benchmark-methodology.md) · [current benchmark authority](BENCHMARK-AUTHORITY.md) · [claims ledger](CLAIMS.md) · [reproduction packet](docs/repro-packet.md)
-- **Build it:** [contributing](CONTRIBUTING.md) · [security](SECURITY.md) · [documentation home by audience](docs/index.md) · [front-page overflow](docs/README-legacy.md)
+- Use it: [tutorial](docs/fak/tutorial.md) · [integration guides](docs/integrations/) · [examples](examples/README.md)
+- Show it off: [Claude Code on your own Mac's local model](docs/fak/mac-agent-ui.md) via `fak mac`; slow first turn and single-stream, observable end to end
+- Operate it: [serving](docs/serving/README.md) · [observability](docs/fak/observability.md) · [deployment](docs/fak/deployment-guide.md)
+- Understand it: [performance outcomes and proofs](docs/performance.md) · [managed cache](docs/explainers/what-is-managed-cache.md) · [external system architecture](docs/architecture.md) · [concepts and story](docs/concepts-and-story.md)
+- Verify it: [benchmark route](docs/benchmark-methodology.md) · [current benchmark authority](BENCHMARK-AUTHORITY.md) · [claims ledger](CLAIMS.md) · [reproduction packet](docs/repro-packet.md)
+- Build it: [contributing](CONTRIBUTING.md) · [security](SECURITY.md) · [documentation home by audience](docs/index.md) · [front-page overflow](docs/README-legacy.md)
 
 Apache-2.0. Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
