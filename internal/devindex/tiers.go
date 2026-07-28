@@ -118,6 +118,7 @@ var verbTiers = map[string]VerbTier{
 	"cadence":                       TierDev,
 	"callavoid":                     TierDev,
 	"chat":                          TierDev,
+	"chatops":                       TierDev,
 	"chatrelay":                     TierDev,
 	"check-tool-failure":            TierDev,
 	"checkpoint-debt-dispatch":      TierDev,

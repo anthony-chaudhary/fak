@@ -102,6 +102,7 @@ var verbManifest = []Verb{
 	{Name: "cadence", Synopsis: "consolidated regular-cadence report: scores, maturity, work-done, releases in one envelope", Lane: "cmd"},
 	{Name: "callavoid", Synopsis: "the call-avoidance report: identical-call dedup (vDSO) round-trips saved", Lane: "cmd"},
 	{Name: "chat", Synopsis: "minimal chat client against a fak serve/guard gateway", Lane: "cmd"},
+	{Name: "chatops", Synopsis: "the inbound read-only Slack control door: answers help/ping/status/fleet behind a fail-closed admin allowlist", Lane: "cmd"},
 	{Name: "chatrelay", Synopsis: "the chat-relay Slack surface bridging a channel to a gateway", Lane: "cmd"},
 	{Name: "check-tool-failure", Synopsis: "lookup the closed non-guard tool-failure vocabulary (summary/fix/retryable)", Lane: "cmd"},
 	{Name: "checkpoint-debt-dispatch", Synopsis: "checkpoint-scorecard -> sink: fan one deduped finding per (subsystem, axis) gap to stdout/localdb/github", Lane: "cmd"},
