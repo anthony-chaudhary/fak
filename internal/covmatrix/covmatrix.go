@@ -82,6 +82,13 @@ type Family struct {
 	// 7B multi_query variant — the one production's contiguous qkv split and single
 	// aliased input_layernorm actually implement; new_decoder_architecture (40B/180B)
 	// and Falcon-RW use different layouts and are NOT witnessed by it.
+	// GPT-NeoX via internal/model/family_gptneox_cpu_oracle_test.go, whose reference adds
+	// the parallel residual, the two learned-bias LayerNorms, the INTERLEAVED fused-QKV
+	// split and the exact-erf GELU, and which runs at BOTH published rotary_pct lineages
+	// (1.0 and 0.25); StableLM via internal/model/family_stablelm_cpu_oracle_test.go at
+	// both use_qkv_bias lineages. Their partial-rotary halves were red until invFreqDenom
+	// stopped denominating inv_freq by head_dim (rope.go) — the bit is set on the fix, not
+	// on a widened tolerance.
 	// Every other family's HF oracle is the checkpoint-gated #474 set that SKIPs under
 	// -short. This is the honest "asserted, not proven" boundary the epic names.
 	OracleInCI bool
@@ -94,10 +101,10 @@ type Family struct {
 var Families = []Family{
 	{Name: "Llama", ResolverToken: "", Topology: PreNorm, OracleInCI: true},
 	{Name: "Qwen2/3.x", ResolverToken: "", Topology: PreNorm, OracleInCI: true},
-	{Name: "GPT-NeoX", ResolverToken: "gptneox", Topology: ParallelResidual, OracleInCI: false},
+	{Name: "GPT-NeoX", ResolverToken: "gptneox", Topology: ParallelResidual, OracleInCI: true},
 	{Name: "Falcon", ResolverToken: "falcon", Topology: ParallelResidual, OracleInCI: true},
 	{Name: "MPT", ResolverToken: "mpt", Topology: PreNorm, OracleInCI: true},
-	{Name: "StableLM", ResolverToken: "stablelm", Topology: PreNorm, OracleInCI: false},
+	{Name: "StableLM", ResolverToken: "stablelm", Topology: PreNorm, OracleInCI: true},
 	{Name: "OLMo2", ResolverToken: "olmo2", Topology: PostNorm, OracleInCI: true},
 	{Name: "Cohere", ResolverToken: "cohere", Topology: ParallelResidual, OracleInCI: false},
 	{Name: "Gemma2/3", ResolverToken: "gemma", Topology: SandwichNorm, OracleInCI: false},

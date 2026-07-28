@@ -37,13 +37,22 @@ func invFreq(cfg Config, layer int) []float64 {
 // latent attention.key_length). Centralized here so invFreq AND the cache key agree — a config
 // whose denom differs must never collide on a cached inv-freq table.
 func (c Config) invFreqDenom() int {
+	// NOT redundant with the fall-through below: this branch must win over the MLA one,
+	// so a config that is both a Qwen3.5 hybrid and an MLA/MoE layout keeps the rotary_dim.
 	if c.IsQwen35Hybrid() || c.isMiniMax() {
 		return c.rotaryDim()
 	}
 	if c.usesMLAMoELayout() && c.QKRopeHeadDim > 0 {
 		return c.QKRopeHeadDim
 	}
-	return c.HeadDim
+	// rotaryDim, not HeadDim: partial rotary is NOT a Qwen3.5/MiniMax-only axis. GPT-NeoX
+	// (rotary_pct) and StableLM (partial_rotary_factor) rotate a prefix of each head too,
+	// and HF inits their inv_freq over that prefix. Denominating by the full head_dim made
+	// every frequency too high, so the rotation drifted with position -- silently, because
+	// rotaryDim() already returns HeadDim whenever the factor is absent, <=0, or >=1, which
+	// is every full-rotary family. So this is exactly identity for them and a fix for the
+	// partial-rotary ones.
+	return c.rotaryDim()
 }
 
 func (c Config) rotaryDim() int {
@@ -83,7 +92,7 @@ type ropeInvKey struct {
 var ropeInvCache sync.Map // map[ropeInvKey][]float64
 
 func cachedInvFreq(cfg Config, layer int) []float64 {
-	rp, _ := cfg.defaultRopeParameters()
+	rp := cfg.effectiveRopeParameters()
 	factor := cfg.RopeFactor
 	if factor == 0 {
 		factor = rp.Factor
