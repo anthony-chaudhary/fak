@@ -21,9 +21,14 @@ import (
 // raw env VALUE, the registry, and now/TTL explicitly — no os.Getenv, no wall
 // clock, no ssh/exec — so the spill decision is trivially deterministic and
 // the single-host default (no FAK_DISPATCH_HOSTS) is provably
-// behavior-unchanged. Executing the placed worker on the chosen remote host (a
-// RemoteHost executor behind the launch seam) is the follow-on slice; this
-// seam only DECIDES.
+// behavior-unchanged.
+//
+// Two halves live here. ResolveHostSpill DECIDES; HostSpill.PlaceLaunch (the
+// launch seam, further down) APPLIES that decision to the argv the tick is
+// about to spawn, so the decision reaches the command instead of being an
+// unconsulted opinion. Actually spawning the rewritten argv — handing it to the
+// dispatch shell's spawner — remains the cmd/fak call site's job; nothing here
+// executes anything.
 
 // DispatchHostsEnv names the env knob holding the configured multi-host
 // candidate set: a comma- and/or whitespace-separated list of hostnames the
@@ -121,4 +126,195 @@ func ResolveHostSpill(hostsRaw string, reg *hostplacement.Registry, threshold fl
 		return hostplacement.Decision{StayLocal: true, Reason: hostplacement.ReasonNoneEligible}
 	}
 	return hostplacement.Place(candidates, threshold, now, ttl)
+}
+
+// ---------------------------------------------------------------------------
+// Launch seam — applying the decision to the worker argv.
+//
+// ResolveHostSpill above only DECIDES. The live tick builds the worker argv
+// (BuildWorkerCommand, then GuardedLaunchCommand fronts it with `fak guard`)
+// and hands it straight to the spawner, so a decision nothing CONSULTS leaves
+// dispatch single-host no matter what it answers. HostSpill.PlaceLaunch is that
+// consult: it takes the argv the tick is about to spawn and returns the argv it
+// should actually spawn — unchanged for every local outcome, rewritten through
+// the RemoteHost executor when the decision spills the worker to another box.
+// It stays PURE (no os.Getenv, no wall clock, no exec): the shell passes the
+// raw env value, the registry, the local hostname and now, so the whole
+// placement is one deterministic function of its inputs and the single-host
+// default is provably byte-identical.
+
+// Placement reason tokens. hostplacement.ReasonNoHosts and ReasonNoneEligible
+// pass through from the decision unchanged; these four say what the LAUNCH seam
+// did once a host WAS placed on.
+const (
+	// PlacementLocal means the placed host IS the local host: the argv is
+	// spawned verbatim, exactly as before this seam existed. A configured
+	// multi-host fleet whose primary still has headroom keeps running local.
+	PlacementLocal = "placed_local"
+
+	// PlacementRemote means a DIFFERENT host was placed on and the argv was
+	// rewritten to execute there. This is the spill.
+	PlacementRemote = "placed_remote"
+
+	// PlacementLocalHostUnknown means a remote host was eligible but the caller
+	// supplied no local hostname, so the seam cannot tell "spill" from "stay".
+	// It refuses to rewrite: an unknown local identity must never silently turn
+	// a local launch into a remote one (and a host that is really the local box
+	// would be re-entered through the remote executor).
+	PlacementLocalHostUnknown = "local_host_unknown"
+
+	// PlacementNoCommand means there was no argv to place.
+	PlacementNoCommand = "no_command"
+)
+
+// DefaultRemoteLaunchProgram is the RemoteHost executor used when the caller
+// names none: plain ssh, which is the transport the fleet already reaches its
+// other boxes over. It is a thin seam on purpose — this file only BUILDS the
+// argv, it never executes it.
+const DefaultRemoteLaunchProgram = "ssh"
+
+// HostSpill bundles the per-tick placement inputs so the live call site is one
+// line. The zero value is the single-host default: no hosts configured, so
+// PlaceLaunch returns the caller's argv untouched.
+type HostSpill struct {
+	// LocalHost is the hostname of the box running this tick — the identity the
+	// placed host is compared against to tell a local placement from a spill.
+	// Empty means "unknown", which disables spilling (PlacementLocalHostUnknown).
+	LocalHost string
+
+	// HostsRaw is the raw FAK_DISPATCH_HOSTS value (see DispatchHostsEnv).
+	// Empty is the single-host default.
+	HostsRaw string
+
+	// Registry holds the latest headroom heartbeat per host; nil is a valid
+	// empty registry.
+	Registry *hostplacement.Registry
+
+	// Threshold is the saturation ceiling; non-positive selects
+	// DefaultSpillSaturationThreshold.
+	Threshold float64
+
+	// TTL is the heartbeat staleness ceiling; non-positive selects
+	// DefaultHeartbeatTTL.
+	TTL time.Duration
+
+	// RemoteProgram overrides the RemoteHost executor; empty selects
+	// DefaultRemoteLaunchProgram.
+	RemoteProgram string
+}
+
+// LaunchPlacement is what the launch seam decided to actually spawn.
+type LaunchPlacement struct {
+	// Command is the argv to spawn. It is a COPY of the caller's argv whenever
+	// Remote is false, so every local outcome is byte-identical to the argv the
+	// tick built and no caller slice is aliased.
+	Command []string
+
+	// Host is the host placed on, or "" when the decision stayed local.
+	Host string
+
+	// Remote is true only when Command was rewritten to run on another box.
+	Remote bool
+
+	// Reason is the launch-seam token (see the Placement* constants, plus the
+	// hostplacement.Reason* tokens that pass through).
+	Reason string
+
+	// Decision is the raw ResolveHostSpill outcome that produced this placement.
+	Decision hostplacement.Decision
+}
+
+// PlaceLaunch is the per-tick launch-seam consult: resolve the spill decision
+// for now, then apply it to command.
+//
+// Local outcomes — no hosts configured, none eligible, the placed host is the
+// local box, an unknown local identity, or an empty argv — all return the
+// caller's argv unchanged, which is what makes the single-host default
+// behavior-unchanged rather than merely "intended to be". Only a placed host
+// that differs from LocalHost rewrites the argv, and then only by fronting it
+// with the RemoteHost executor; the worker command itself is preserved verbatim
+// inside the remote word so the guard front, model flags and prompt survive.
+func (s HostSpill) PlaceLaunch(command []string, now time.Time) LaunchPlacement {
+	decision := ResolveHostSpill(s.HostsRaw, s.Registry, s.Threshold, now, s.TTL)
+	stay := LaunchPlacement{
+		Command:  append([]string(nil), command...),
+		Decision: decision,
+		Reason:   decision.Reason,
+	}
+	if decision.StayLocal {
+		return stay
+	}
+	stay.Host = decision.Host
+	if len(command) == 0 {
+		stay.Reason = PlacementNoCommand
+		return stay
+	}
+	host := strings.TrimSpace(decision.Host)
+	local := strings.TrimSpace(s.LocalHost)
+	if local == "" {
+		stay.Reason = PlacementLocalHostUnknown
+		return stay
+	}
+	if host == local {
+		stay.Reason = PlacementLocal
+		return stay
+	}
+	return LaunchPlacement{
+		Command:  remoteLaunchCommand(s.remoteProgram(), host, command),
+		Host:     host,
+		Remote:   true,
+		Reason:   PlacementRemote,
+		Decision: decision,
+	}
+}
+
+func (s HostSpill) remoteProgram() string {
+	if p := strings.TrimSpace(s.RemoteProgram); p != "" {
+		return p
+	}
+	return DefaultRemoteLaunchProgram
+}
+
+// remoteLaunchCommand renders the RemoteHost executor argv for one worker: the
+// executor, the host, and the worker command collapsed into a SINGLE
+// shell-quoted word. Passing the command as one already-quoted word is the only
+// safe shape here — a remote shell re-splits whatever follows the host, so
+// handing it the argv element-by-element would tear the worker prompt (which
+// carries spaces, quotes and newlines) apart at the far end.
+func remoteLaunchCommand(program, host string, command []string) []string {
+	if len(command) == 0 {
+		return nil
+	}
+	return []string{program, host, shellQuoteArgv(command)}
+}
+
+// shellQuoteArgv joins an argv into one POSIX-shell-safe command line.
+func shellQuoteArgv(argv []string) string {
+	parts := make([]string, 0, len(argv))
+	for _, a := range argv {
+		parts = append(parts, shellQuoteArg(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// shellQuoteArg wraps one argument in single quotes unless every rune is
+// already shell-inert. A literal single quote is emitted as close-escape-reopen,
+// the only escape a POSIX single-quoted string admits.
+func shellQuoteArg(s string) string {
+	if s != "" && !strings.ContainsFunc(s, shellUnsafeRune) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func shellUnsafeRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return false
+	}
+	switch r {
+	case '_', '@', '%', '+', '=', ':', ',', '.', '/', '-':
+		return false
+	}
+	return true
 }
