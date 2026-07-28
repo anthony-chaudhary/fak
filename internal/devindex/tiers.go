@@ -110,6 +110,7 @@ var verbTiers = map[string]VerbTier{
 	"bgloop":                        TierDev,
 	"blast":                         TierDev,
 	"blockers":                      TierDev,
+	"boundary":                      TierDev,
 	"budget":                        TierDev,
 	"buildcheck":                    TierDev,
 	"c":                             TierDev,

@@ -93,7 +93,7 @@ var verbManifest = []Verb{
 	{Name: "bgloop", Synopsis: "background runner for the durable long-running-loop ledger", Lane: "cmd"},
 	{Name: "blast", Synopsis: "estimate the dependency blast radius of a broken package against live leases and queued issues", Lane: "cmd"},
 	{Name: "blockers", Synopsis: "the blockers report/Slack surface: what is gating the fleet right now", Lane: "cmd"},
-	{Name: "boundary", Synopsis: "the boundary-tell linter as a verb: pathlint/urllint/boundarylint witnesses (unexpanded paths, hardcoded URLs, no-timeout HTTP)", Lane: "cmd"},
+	{Name: "boundary", Synopsis: "boundary-tell linter: unexpanded paths, hardcoded URLs, no-timeout HTTP, change-detector tests", Lane: "cmd"},
 	{Name: "budget", Synopsis: "per-task budget readout: tokens/turns spent vs a soft target with a per-category breakdown", Lane: "cmd"},
 	{Name: "buildcheck", Synopsis: "collision-free compile check: discard output (never in-tree), -overlay-masking untracked sibling .go files", Lane: "cmd"},
 	{Name: "c", Synopsis: "shorthand for 'fak console agent': launch a fak-guard-wrapped interactive Claude Code session", Lane: "cmd"},
