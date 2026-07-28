@@ -75,6 +75,28 @@ func TestPlanPositionFailureLeavesAllFilesUnchanged(t *testing.T) {
 		t.Fatal("validation failure changed glossary")
 	}
 }
+
+// A twin row that no shard owns has no bytes to carry the reverse boundary. The
+// resolver used to re-anchor that empty source on the catalog directory and read
+// the whole rows-*.json corpus directory as if it were one file.
+func TestPlanPositionSkipsBackReferenceForRowNoFileOwns(t *testing.T) {
+	c, _ := fixture(t)
+	for i := range c.Rows {
+		c.Rows[i].Source = ""
+	}
+	p, err := PlanPosition(c, PositionRequest{ID: "cache-c", Canonical: "Cache C", Family: "cache", Definition: "the third cache", Distinction: "not the first cache", Kind: "symbol", Grounding: "CacheC", GroundingKind: "symbol", Glossary: "docs/glossary.md", DistinctFrom: []string{"cache-a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Files) != 2 {
+		t.Fatalf("want the row file and the glossary only, got %v", p.Files)
+	}
+	for _, f := range p.Files {
+		if filepath.Clean(f) == filepath.Clean(c.Dir) {
+			t.Fatalf("planned a write to the corpus directory itself: %v", p.Files)
+		}
+	}
+}
 func TestPlanClassifyAndRefuseGroundedConcept(t *testing.T) {
 	c, _ := fixture(t)
 	p, err := PlanClassify(c, ClassifyRequest{Family: "cache", Token: "cache_helper_test", Category: "test-only", Reason: "only a fixture helper"})

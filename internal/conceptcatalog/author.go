@@ -94,10 +94,12 @@ func PlanPosition(c Catalog, req PositionRequest) (Plan, error) {
 		if !ok {
 			return Plan{}, fmt.Errorf("distinct_from %q is not an existing row ID", ref)
 		}
-		src := filepath.FromSlash(twin.Source)
-		if _, statErr := os.Stat(src); statErr != nil {
-			// A catalog loaded through a relative root records a relative source.
-			src = filepath.Join(c.Dir, filepath.Base(src))
+		src, backed := twinRowFile(c, twin)
+		if !backed {
+			// The twin's row is owned by no data file - an in-memory catalog a caller
+			// built rather than one LoadDir read - so there are no bytes to rewrite.
+			// The new row still records its own half of the boundary.
+			continue
 		}
 		b, ok := edited[src]
 		if !ok {
@@ -170,6 +172,29 @@ func PlanPosition(c Catalog, req PositionRequest) (Plan, error) {
 		return Plan{}, errors.New(b.String())
 	}
 	return plan, nil
+}
+
+// twinRowFile resolves the data file whose bytes own a row, reporting false when
+// no file owns it. LoadDir stamps every row it reads with its shard, so a row
+// without one came from a catalog assembled in memory. Re-anchoring an empty
+// source on the catalog directory used to yield that directory itself - the
+// corpus is a directory of rows-*.json shards, not one file - and reading it
+// failed with a path that named the whole corpus.
+func twinRowFile(c Catalog, twin Row) (string, bool) {
+	src := filepath.FromSlash(strings.TrimSpace(twin.Source))
+	if src == "" {
+		return "", false
+	}
+	if st, err := os.Stat(src); err == nil && !st.IsDir() {
+		return src, true
+	}
+	// A catalog loaded through a relative root records a relative source, so the
+	// shard's own name is re-anchored on this catalog's directory.
+	base := filepath.Base(src)
+	if base == "." || base == string(filepath.Separator) {
+		return "", false
+	}
+	return filepath.Join(c.Dir, base), true
 }
 
 func rowByID(c Catalog, id string) (Row, bool) {
