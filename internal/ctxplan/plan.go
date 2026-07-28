@@ -359,20 +359,14 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 		// lower-bound evidence and required roots do not fit, fail open to more resident
 		// context rather than silently keeping an unsupported tiny fact.
 		p.OverBudget = true
-		for _, c := range floor {
-			p.Selected = append(p.Selected, selectionOf(c, false, true))
-			used += c.Cost
-			p.Benefit += c.Benefit
-		}
+		used += selectFloor(&p, floor)
 		if len(floor) > 0 {
 			p.MinEvidenceOverBudget = true
 			p.BindingConstraint = BindMinEvidenceFloor
 		} else {
 			p.BindingConstraint = BindPinsOverBudget
 		}
-		for _, c := range free {
-			p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
-		}
+		elideOverBudget(&p, free)
 		applyBackpressure(&p, b.Backpressure)
 		finalize(&p, used)
 		return p
@@ -383,19 +377,13 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 	// needed. Pay those cluster spans before optional/background evidence. If they do not fit,
 	// fail open by preserving the whole cluster and flagging OverBudget instead of silently
 	// keeping a tiny unsupported needle.
-	for _, c := range floor {
-		p.Selected = append(p.Selected, selectionOf(c, false, true))
-		used += c.Cost
-		p.Benefit += c.Benefit
-	}
+	used += selectFloor(&p, floor)
 	remaining = budgetTokens - used
 	if remaining < 0 {
 		p.OverBudget = true
 		p.MinEvidenceOverBudget = true
 		p.BindingConstraint = BindMinEvidenceFloor
-		for _, c := range free {
-			p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
-		}
+		elideOverBudget(&p, free)
 		applyBackpressure(&p, b.Backpressure)
 		finalize(&p, used)
 		return p
@@ -853,6 +841,29 @@ func coverageTieBreak(a, b Candidate, margA, margB float64) bool {
 		return margA > margB
 	}
 	return candidateStepIDLess(a, b)
+}
+
+// selectFloor rides every minimum-evidence floor candidate into the plan as a required
+// (non-pinned) selection, folds their benefit into the objective, and returns the token
+// cost they add so the caller can charge it against the budget. Both the over-budget
+// bail-out and the normal path pay the floor the same way — this is that payment.
+func selectFloor(p *Plan, floor []Candidate) int {
+	cost := 0
+	for _, c := range floor {
+		p.Selected = append(p.Selected, selectionOf(c, false, true))
+		cost += c.Cost
+		p.Benefit += c.Benefit
+	}
+	return cost
+}
+
+// elideOverBudget records every optional candidate as elided for budget. It is what both
+// over-budget exits do with the free candidates once the plan can afford nothing more:
+// the spans stay recoverable through their elision handles, they just do not ride.
+func elideOverBudget(p *Plan, free []Candidate) {
+	for _, c := range free {
+		p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
+	}
 }
 
 func selectionOf(c Candidate, pinned bool, minEvidenceFloor bool) Selection {

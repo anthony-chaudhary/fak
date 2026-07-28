@@ -1090,119 +1090,93 @@ func keptWindowOrphansToolUse(elems []json.RawMessage, compactStart, keepStart i
 func keptResultToolUseIDs(elems []json.RawMessage, keepStart int) map[string]bool {
 	var ids map[string]bool
 	for i := keepStart; i < len(elems); i++ {
-		var m struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		}
-		if json.Unmarshal(elems[i], &m) != nil || m.Role != "user" {
-			continue
-		}
-		var blocks []map[string]json.RawMessage
-		if json.Unmarshal(m.Content, &blocks) != nil {
-			continue
-		}
-		for _, b := range blocks {
-			if t, ok := b["type"]; ok {
-				var s string
-				if json.Unmarshal(t, &s) != nil || s != "tool_result" {
-					continue
+		walkTypedBlocks(elems[i], "user", "tool_result", func(b map[string]json.RawMessage) bool {
+			var id string
+			if raw, ok := b["tool_use_id"]; ok && json.Unmarshal(raw, &id) == nil && id != "" {
+				if ids == nil {
+					ids = map[string]bool{}
 				}
-				var id string
-				if raw, ok := b["tool_use_id"]; ok && json.Unmarshal(raw, &id) == nil && id != "" {
-					if ids == nil {
-						ids = map[string]bool{}
-					}
-					ids[id] = true
-				}
+				ids[id] = true
 			}
-		}
+			return true
+		})
 	}
 	return ids
+}
+
+// walkTypedBlocks decodes one messages[] element and hands `visit` every content block of type
+// blockType carried by a `role` turn, stopping early the first time visit returns false. An
+// element that will not parse, one with a different role, or content that is not a block array
+// is skipped silently: the pairing scans below are a safety check on the compacted body, and a
+// shape this decoder does not recognize must never fail the request. Those scans differ only in
+// the role, the block type, and what they do with each block, so the decode-and-walk that every
+// one of them would otherwise re-spell lives here once.
+func walkTypedBlocks(el json.RawMessage, role, blockType string, visit func(b map[string]json.RawMessage) bool) {
+	var m struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(el, &m) != nil || m.Role != role {
+		return
+	}
+	var blocks []map[string]json.RawMessage
+	if json.Unmarshal(m.Content, &blocks) != nil {
+		return
+	}
+	for _, b := range blocks {
+		t, ok := b["type"]
+		if !ok {
+			continue
+		}
+		var s string
+		if json.Unmarshal(t, &s) != nil || s != blockType {
+			continue
+		}
+		if !visit(b) {
+			return
+		}
+	}
 }
 
 // clearProvidedToolUseIDs deletes from want every id that an assistant tool_use block in el defines
 // (an id whose tool_use is itself in the kept window is not orphaned). It is the in-window
 // bookkeeping half of keptWindowOrphansToolUse.
 func clearProvidedToolUseIDs(el json.RawMessage, want map[string]bool) {
-	var m struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
-	}
-	if json.Unmarshal(el, &m) != nil || m.Role != "assistant" {
-		return
-	}
-	var blocks []map[string]json.RawMessage
-	if json.Unmarshal(m.Content, &blocks) != nil {
-		return
-	}
-	for _, b := range blocks {
-		if t, ok := b["type"]; ok {
-			var s string
-			if json.Unmarshal(t, &s) != nil || s != "tool_use" {
-				continue
-			}
-			var id string
-			if raw, ok := b["id"]; ok && json.Unmarshal(raw, &id) == nil {
-				delete(want, id)
-			}
+	walkTypedBlocks(el, "assistant", "tool_use", func(b map[string]json.RawMessage) bool {
+		var id string
+		if raw, ok := b["id"]; ok && json.Unmarshal(raw, &id) == nil {
+			delete(want, id)
 		}
-	}
+		return true
+	})
 }
 
 // messageProvidesToolUseID reports whether an assistant messages[] element carries a tool_use block
 // whose id is in want — i.e. dropping this message would orphan a kept tool_result. It is the
 // tool_use-side mirror of messageHasToolResult.
 func messageProvidesToolUseID(el json.RawMessage, want map[string]bool) bool {
-	var m struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
-	}
-	if json.Unmarshal(el, &m) != nil || m.Role != "assistant" {
-		return false
-	}
-	var blocks []map[string]json.RawMessage
-	if json.Unmarshal(m.Content, &blocks) != nil {
-		return false
-	}
-	for _, b := range blocks {
-		if t, ok := b["type"]; ok {
-			var s string
-			if json.Unmarshal(t, &s) != nil || s != "tool_use" {
-				continue
-			}
-			var id string
-			if raw, ok := b["id"]; ok && json.Unmarshal(raw, &id) == nil && want[id] {
-				return true
-			}
+	provides := false
+	walkTypedBlocks(el, "assistant", "tool_use", func(b map[string]json.RawMessage) bool {
+		var id string
+		if raw, ok := b["id"]; ok && json.Unmarshal(raw, &id) == nil && want[id] {
+			provides = true
+			return false
 		}
-	}
-	return false
+		return true
+	})
+	return provides
 }
 
 // messageHasToolResult reports whether a messages[] element is a user turn carrying at
 // least one tool_result block — the case whose matching assistant tool_use turn must not be
 // dropped from under it.
 func messageHasToolResult(el json.RawMessage) bool {
-	var m struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
-	}
-	if json.Unmarshal(el, &m) != nil || m.Role != "user" {
+	has := false
+	walkTypedBlocks(el, "user", "tool_result", func(map[string]json.RawMessage) bool {
+		has = true
 		return false
-	}
-	var blocks []map[string]json.RawMessage
-	if json.Unmarshal(m.Content, &blocks) != nil {
-		return false
-	}
-	for _, b := range blocks {
-		if t, ok := b["type"]; ok {
-			var s string
-			if json.Unmarshal(t, &s) == nil && s == "tool_result" {
-				return true
-			}
-		}
-	}
-	return false
+	})
+	return has
 }
 
 // messageRole returns a messages[] element's role ("user"/"assistant"), or "" if it cannot be

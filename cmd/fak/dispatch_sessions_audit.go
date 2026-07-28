@@ -101,6 +101,21 @@ type sessionGroup struct {
 	noopToks  uint64 // tokens burned by those no-ops
 }
 
+// finding builds one waste finding for this (backend, lane) group. The three detectors differ
+// only in their class prefix, headline, and evidence sentence — the code-site spelling, the
+// namespaced fingerprint derived from it, and the backend binding are identical every time, so
+// they are derived here once instead of being re-spelled (and re-diverged) per detector.
+func (g *sessionGroup) finding(class, headline, detail string) dispatchaudit.Finding {
+	site := class + "/" + g.backend + "/" + g.lane
+	return dispatchaudit.Finding{
+		Fingerprint: dispatchSessionsWasteFingerprint(site),
+		Backend:     dispatchaudit.Backend(g.backend),
+		CodeSite:    site,
+		Title:       "dispatch waste: " + headline + " on " + g.backend + " (lane " + g.lane + ")",
+		Detail:      detail,
+	}
+}
+
 // foldDispatchSessionsWaste is the PURE systemic-waste detector: it folds the session
 // snapshot into deterministic, fingerprinted findings. It groups by (backend, lane),
 // then evaluates each group against the three detectors, walking the group keys in
@@ -152,42 +167,24 @@ func foldDispatchSessionsWaste(snap dispatchSessionsSnapshot, th dispatchSession
 		if g.finished >= th.MinGroup {
 			rate := float64(g.wasted) / float64(g.finished)
 			if rate >= th.WasteRate {
-				site := "waste-rate/" + g.backend + "/" + g.lane
-				findings = append(findings, dispatchaudit.Finding{
-					Fingerprint: dispatchSessionsWasteFingerprint(site),
-					Backend:     dispatchaudit.Backend(g.backend),
-					CodeSite:    site,
-					Title:       "dispatch waste: high retry/quota-storm rate on " + g.backend + " (lane " + g.lane + ")",
-					Detail: fmt.Sprintf("%d of %d finished %s/%s sessions wasted work (retry storm / quota wall / wasted spawn / errored) — a %.0f%% waste rate. Investigate the backend/lane routing or the account cooldown before spending more here.",
-						g.wasted, g.finished, g.backend, g.lane, rate*100),
-				})
+				findings = append(findings, g.finding("waste-rate", "high retry/quota-storm rate",
+					fmt.Sprintf("%d of %d finished %s/%s sessions wasted work (retry storm / quota wall / wasted spawn / errored) — a %.0f%% waste rate. Investigate the backend/lane routing or the account cooldown before spending more here.",
+						g.wasted, g.finished, g.backend, g.lane, rate*100)))
 			}
 		}
 
 		// 2. Cache-read-share collapse across substantial sessions.
 		if g.collapsed >= th.CacheCollapseMin {
-			site := "cache-read-collapse/" + g.backend + "/" + g.lane
-			findings = append(findings, dispatchaudit.Finding{
-				Fingerprint: dispatchSessionsWasteFingerprint(site),
-				Backend:     dispatchaudit.Backend(g.backend),
-				CodeSite:    site,
-				Title:       "dispatch waste: cache-read-share collapse on " + g.backend + " (lane " + g.lane + ")",
-				Detail: fmt.Sprintf("%d substantial %s/%s sessions read <%.0f%% of their prompt tokens from cache (worst %.0f%%). A cold prefix on every spawn means the stable head is not being reused — check the prompt-prefix stability / managed-cache lever for this lane.",
-					g.collapsed, g.backend, g.lane, th.CacheReadFloor*100, g.worstCach*100),
-			})
+			findings = append(findings, g.finding("cache-read-collapse", "cache-read-share collapse",
+				fmt.Sprintf("%d substantial %s/%s sessions read <%.0f%% of their prompt tokens from cache (worst %.0f%%). A cold prefix on every spawn means the stable head is not being reused — check the prompt-prefix stability / managed-cache lever for this lane.",
+					g.collapsed, g.backend, g.lane, th.CacheReadFloor*100, g.worstCach*100)))
 		}
 
 		// 3. Token-heavy no-op cluster (spend with no shipped result).
 		if g.noops >= th.NoOpMinCount {
-			site := "token-heavy-noop/" + g.backend + "/" + g.lane
-			findings = append(findings, dispatchaudit.Finding{
-				Fingerprint: dispatchSessionsWasteFingerprint(site),
-				Backend:     dispatchaudit.Backend(g.backend),
-				CodeSite:    site,
-				Title:       "dispatch waste: token-heavy no-op sessions on " + g.backend + " (lane " + g.lane + ")",
-				Detail: fmt.Sprintf("%d %s/%s sessions burned ~%d tokens total and shipped nothing (NO_OP / WASTED_SPAWN). That spend is pure waste — tighten the pre-dispatch gate or the worker prompt for this lane.",
-					g.noops, g.backend, g.lane, g.noopToks),
-			})
+			findings = append(findings, g.finding("token-heavy-noop", "token-heavy no-op sessions",
+				fmt.Sprintf("%d %s/%s sessions burned ~%d tokens total and shipped nothing (NO_OP / WASTED_SPAWN). That spend is pure waste — tighten the pre-dispatch gate or the worker prompt for this lane.",
+					g.noops, g.backend, g.lane, g.noopToks)))
 		}
 	}
 	return findings

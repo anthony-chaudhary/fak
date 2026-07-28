@@ -127,17 +127,7 @@ func Rewind(in RewindInput) (*RewindVerdict, error) {
 	}
 
 	if out.Admit {
-		if in.Journal != nil {
-			if err := in.Journal.Record(RewindEvent{Kind: EvRewindAdmitted, Holder: in.Holder, Tree: v.Tree, At: now}); err != nil {
-				return out, err
-			}
-		}
-		if in.Applier != nil {
-			if err := in.Applier.Apply(); err != nil {
-				return out, err
-			}
-		}
-		return out, nil
+		return out, journalThenApply(in, EvRewindAdmitted, v.Tree, now)
 	}
 
 	// Refused. An operator force path clears the geometric / same-lane conflicts
@@ -157,17 +147,7 @@ func Rewind(in RewindInput) (*RewindVerdict, error) {
 			out.Reason = ""
 			out.Detail = ""
 			out.Conflicts = nil
-			if in.Journal != nil {
-				if err := in.Journal.Record(RewindEvent{Kind: EvRewindForced, Holder: in.Holder, Tree: v.Tree, At: now}); err != nil {
-					return out, err
-				}
-			}
-			if in.Applier != nil {
-				if err := in.Applier.Apply(); err != nil {
-					return out, err
-				}
-			}
-			return out, nil
+			return out, journalThenApply(in, EvRewindForced, v.Tree, now)
 		}
 		out.Conflicts = kept
 		out.Detail = fmt.Sprintf(
@@ -182,4 +162,21 @@ func Rewind(in RewindInput) (*RewindVerdict, error) {
 		}
 	}
 	return out, nil
+}
+
+// journalThenApply is the tail every PERMITTED restore runs: record the admission on the
+// ledger first, then perform the bulk write. The order is the guarantee — a journal write
+// that fails aborts before the Applier touches a file, so the ledger can never be missing a
+// restore that actually happened. A nil Journal or Applier makes its step a no-op (admission
+// decision only). The plain-admit and operator-force paths differ solely in the event kind.
+func journalThenApply(in RewindInput, kind string, tree []string, now time.Time) error {
+	if in.Journal != nil {
+		if err := in.Journal.Record(RewindEvent{Kind: kind, Holder: in.Holder, Tree: tree, At: now}); err != nil {
+			return err
+		}
+	}
+	if in.Applier != nil {
+		return in.Applier.Apply()
+	}
+	return nil
 }

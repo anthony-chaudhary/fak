@@ -447,7 +447,15 @@ func Load(path string) ([]Event, error) {
 }
 
 func SnapshotFile(path string, now time.Time) (Status, error) {
-	events, err := Load(path)
+	return snapshotLedger(path, now, Load)
+}
+
+// snapshotLedger reads a ledger with `load`, folds it into a Status, and stamps the
+// ledger path on the result. SnapshotFile and SnapshotFileAll differ ONLY in which
+// loader they hand it (active segment vs. every sealed segment too), so the fold and
+// the stamping live here once.
+func snapshotLedger(path string, now time.Time, load func(string) ([]Event, error)) (Status, error) {
+	events, err := load(path)
 	if err != nil {
 		return Status{}, err
 	}
@@ -467,13 +475,7 @@ func SnapshotFile(path string, now time.Time) (Status, error) {
 // unrotated. It is O(total-history) today; the carried-snapshot seal optimization reduces
 // it to O(active) later without changing this result or its signature.
 func SnapshotFileAll(path string, now time.Time) (Status, error) {
-	events, err := LoadAll(path)
-	if err != nil {
-		return Status{}, err
-	}
-	st := Summarize(events, now)
-	st.LedgerPath = path
-	return st, nil
+	return snapshotLedger(path, now, LoadAll)
 }
 
 // Summarize folds an ordered event slice into a per-loop Status snapshot, starting from

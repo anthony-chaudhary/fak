@@ -420,39 +420,30 @@ func isOperatorReason(reason string) bool {
 	return false
 }
 
-// isReasonToken accepts a closed UPPER_SNAKE reason token — [A-Z][A-Z0-9_]*,
-// at most 64 bytes. Anything with spacing, casing, or punctuation beyond that
-// is prose and refused.
-func isReasonToken(s string) bool {
+// isSnakeToken accepts a closed snake-case token in ONE letter register: a first byte
+// in [lo, hi], then at most 63 more bytes drawn from that same register, the digits, and
+// '_'. Anything with spacing, the other casing, or punctuation beyond that is prose and
+// refused. The two registers the ledger admits are spelled out by the wrappers below.
+func isSnakeToken(s string, lo, hi byte) bool {
 	if s == "" || len(s) > 64 {
 		return false
 	}
-	if s[0] < 'A' || s[0] > 'Z' {
+	if s[0] < lo || s[0] > hi {
 		return false
 	}
 	for i := 1; i < len(s); i++ {
 		c := s[i]
-		if (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '_' {
+		if (c < lo || c > hi) && (c < '0' || c > '9') && c != '_' {
 			return false
 		}
 	}
 	return true
 }
 
+// isReasonToken accepts a closed UPPER_SNAKE reason token — [A-Z][A-Z0-9_]*,
+// at most 64 bytes.
+func isReasonToken(s string) bool { return isSnakeToken(s, 'A', 'Z') }
+
 // isLowerToken accepts a closed lower_snake token — [a-z][a-z0-9_]*, at most
 // 64 bytes. Same prose refusal as isReasonToken, lowercase register.
-func isLowerToken(s string) bool {
-	if s == "" || len(s) > 64 {
-		return false
-	}
-	if s[0] < 'a' || s[0] > 'z' {
-		return false
-	}
-	for i := 1; i < len(s); i++ {
-		c := s[i]
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
-			return false
-		}
-	}
-	return true
-}
+func isLowerToken(s string) bool { return isSnakeToken(s, 'a', 'z') }

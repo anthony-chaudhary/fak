@@ -527,47 +527,45 @@ func renderWindowgate(p windowgatePayload) string {
 	return b.String()
 }
 
-func visibleWindowCategoryCounts(findings []windowgate.VisibleWindowFinding) map[string]int {
+// countFindingsByKey tallies findings by the key each one contributes, dropping the ones
+// that key to the empty string, and reports nil when nothing was counted — the renderers
+// treat a nil map as "no rows" and omit the section entirely. The window/process tallies
+// below differ only in the finding type and which field they key on, so the counting
+// itself lives here once.
+func countFindingsByKey[T any](findings []T, key func(T) string) map[string]int {
 	out := map[string]int{}
 	for _, finding := range findings {
-		key := strings.TrimSpace(finding.Category)
-		if key != "" {
-			out[key]++
+		if k := key(finding); k != "" {
+			out[k]++
 		}
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func visibleWindowCategoryCounts(findings []windowgate.VisibleWindowFinding) map[string]int {
+	return countFindingsByKey(findings, func(f windowgate.VisibleWindowFinding) string {
+		return strings.TrimSpace(f.Category)
+	})
 }
 
 func liveProcessCategoryCounts(findings []windowgate.LiveProcessFinding) map[string]int {
-	out := map[string]int{}
-	for _, finding := range findings {
-		key := strings.TrimSpace(finding.Category)
-		if key != "" {
-			out[key]++
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return countFindingsByKey(findings, func(f windowgate.LiveProcessFinding) string {
+		return strings.TrimSpace(f.Category)
+	})
 }
 
 func liveProcessParentCounts(findings []windowgate.LiveProcessFinding) map[string]int {
-	out := map[string]int{}
-	for _, finding := range findings {
-		name := strings.TrimSpace(finding.ParentName)
-		if name == "" {
-			name = "unknown"
+	// An unnamed parent buckets under "unknown" rather than being dropped: a live process
+	// whose parent could not be read is still a row the operator must see.
+	return countFindingsByKey(findings, func(f windowgate.LiveProcessFinding) string {
+		if name := strings.TrimSpace(f.ParentName); name != "" {
+			return name
 		}
-		out[name]++
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+		return "unknown"
+	})
 }
 
 func limitedRows(rows []string, limit int) []string {

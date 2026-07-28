@@ -256,6 +256,11 @@ func main() {
 		cmdSelfUpdate(os.Args[2:])
 	case "slack":
 		cmdSlack(os.Args[2:])
+	case "chatops":
+		// The inbound read-only Slack control door (chatops.go). docs/cli-reference.md has
+		// documented `fak chatops` since it landed, but the verb was never routed here, so
+		// every invocation fell through to the unknown-verb path.
+		cmdChatOps(os.Args[2:])
 	case "release":
 		cmdRelease(os.Args[2:])
 	case "release-lock":

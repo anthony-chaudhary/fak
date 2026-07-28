@@ -56,53 +56,69 @@ func BuildStatus(ctx context.Context) StatusReport {
 	return rep
 }
 
+// pluginDescriptors holds the STATIC half of each built-in plugin's status row — the
+// ownership/fidelity/evidence vocabulary and the row it reports before any live signal
+// is folded in. Only these constants differed between the four cases, so they live as
+// data here and pluginStatus keeps just the live overrides.
+var pluginDescriptors = map[string]PluginStatus{
+	NoopName: {
+		Owner:        "fak",
+		Dependency:   "none",
+		Fidelity:     "no-op",
+		Evidence:     "configured",
+		Status:       "inactive",
+		Reachability: "not_applicable",
+		Reason:       "identity compressor registered; selecting it leaves tool results unchanged",
+	},
+	NativeName: {
+		Owner:        "fak",
+		Dependency:   "in_process",
+		Fidelity:     "recoverable",
+		Evidence:     "witnessed",
+		Status:       "available",
+		Reachability: "not_applicable",
+		Reason:       "in-process structural compressor; gate preserves the original bytes when a transform fires",
+	},
+	HeadroomName: {
+		Owner:        "external",
+		Dependency:   "external_http_sidecar",
+		Fidelity:     "recoverable",
+		Evidence:     "observed",
+		Status:       "unavailable",
+		Reachability: "unreachable",
+		Reason:       "headroom sidecar is not reachable; bridge passes original bytes through unchanged",
+	},
+}
+
+// unknownPluginDescriptor is the static row for a compressor registered by a third
+// party: it is present and usable, but carries no first-party capability claims.
+var unknownPluginDescriptor = PluginStatus{
+	Owner:        "unknown",
+	Dependency:   "registered_plugin",
+	Fidelity:     "unknown",
+	Evidence:     "configured",
+	Status:       "available",
+	Reachability: "unknown",
+	Reason:       "registered compressor has no built-in status descriptor",
+}
+
+// pluginStatus folds the live signals (is this plugin the selected one, is the external
+// sidecar answering) into the plugin's static descriptor. Only the plugins whose live
+// wording differs from "selected ⇒ active" carry a case of their own.
 func pluginStatus(name string, selected, headroomReachable bool) PluginStatus {
+	st, ok := pluginDescriptors[name]
+	if !ok {
+		st = unknownPluginDescriptor
+	}
+	st.Name = name
+	st.Selected = selected
 	switch name {
 	case NoopName:
-		st := PluginStatus{
-			Name:         name,
-			Selected:     selected,
-			Owner:        "fak",
-			Dependency:   "none",
-			Fidelity:     "no-op",
-			Evidence:     "configured",
-			Status:       "inactive",
-			Reachability: "not_applicable",
-			Reason:       "identity compressor registered; selecting it leaves tool results unchanged",
-		}
 		if selected {
 			st.Status = "no-op"
 			st.Reason = "identity compressor selected; context compression is intentionally off"
 		}
-		return st
-	case NativeName:
-		st := PluginStatus{
-			Name:         name,
-			Selected:     selected,
-			Owner:        "fak",
-			Dependency:   "in_process",
-			Fidelity:     "recoverable",
-			Evidence:     "witnessed",
-			Status:       "available",
-			Reachability: "not_applicable",
-			Reason:       "in-process structural compressor; gate preserves the original bytes when a transform fires",
-		}
-		if selected {
-			st.Status = "active"
-		}
-		return st
 	case HeadroomName:
-		st := PluginStatus{
-			Name:         name,
-			Selected:     selected,
-			Owner:        "external",
-			Dependency:   "external_http_sidecar",
-			Fidelity:     "recoverable",
-			Evidence:     "observed",
-			Status:       "unavailable",
-			Reachability: "unreachable",
-			Reason:       "headroom sidecar is not reachable; bridge passes original bytes through unchanged",
-		}
 		if headroomReachable {
 			st.Status = "available"
 			st.Reachability = "reachable"
@@ -111,22 +127,10 @@ func pluginStatus(name string, selected, headroomReachable bool) PluginStatus {
 				st.Status = "active"
 			}
 		}
-		return st
 	default:
-		st := PluginStatus{
-			Name:         name,
-			Selected:     selected,
-			Owner:        "unknown",
-			Dependency:   "registered_plugin",
-			Fidelity:     "unknown",
-			Evidence:     "configured",
-			Status:       "available",
-			Reachability: "unknown",
-			Reason:       "registered compressor has no built-in status descriptor",
-		}
 		if selected {
 			st.Status = "active"
 		}
-		return st
 	}
+	return st
 }

@@ -22,8 +22,9 @@ import (
 // is overridden in tests so runCommit is exercised without a real git or repo.
 var commitFn = safecommit.Commit
 
-func cmdCommit(argv []string) { os.Exit(runCommitCommand(os.Stdout, os.Stderr, argv)) }
-
+// runCommitCommand routes `fak commit [<sub>]` to its subcommand handler and returns the
+// process exit code. main.go calls it directly (inside the observed-git-operation wrapper)
+// so the exit is recorded with the rest of the git lane.
 func runCommitCommand(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
 		return runCommit(stdout, stderr, argv)

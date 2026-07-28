@@ -35,16 +35,7 @@ func runNewLeaf(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak new-leaf: %v\n", err)
 			return 2
 		}
-		raw, err := s.JSON()
-		if err != nil {
-			fmt.Fprintf(stderr, "fak new-leaf: %v\n", err)
-			return 1
-		}
-		if _, err := stdout.Write(append(raw, '\n')); err != nil {
-			fmt.Fprintf(stderr, "fak new-leaf: %v\n", err)
-			return 1
-		}
-		return 0
+		return writeNewLeafJSON(stdout, stderr, s)
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "fak new-leaf: pass exactly one package name")
@@ -66,7 +57,14 @@ func runNewLeaf(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak new-leaf: %v\n", err)
 		return 2
 	}
-	raw, err := report.JSON()
+	return writeNewLeafJSON(stdout, stderr, report)
+}
+
+// writeNewLeafJSON marshals one `fak new-leaf` result and writes it as a single line on
+// stdout. Both the suggestion and the apply path end this way, and both report a marshal
+// or write failure as exit 1 with the reason on stderr.
+func writeNewLeafJSON(stdout, stderr io.Writer, doc interface{ JSON() ([]byte, error) }) int {
+	raw, err := doc.JSON()
 	if err != nil {
 		fmt.Fprintf(stderr, "fak new-leaf: %v\n", err)
 		return 1

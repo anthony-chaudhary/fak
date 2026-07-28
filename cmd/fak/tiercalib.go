@@ -83,39 +83,32 @@ func tierCalibrateUsage(w io.Writer) {
 	fmt.Fprintln(w, "  retunes a live policy). A decision with no witnessed outcome is counted but never bucketed.")
 }
 
-// readTierDecisions loads a JSON array of tier-decision rows. An empty path is
-// not an error — it yields no rows, so an operator can fold outcomes-only or
-// decisions-only input.
-func readTierDecisions(path string) ([]issuecost.TierDecision, error) {
+// readTierCalibRows loads a JSON array of calibration input rows. An empty path is not
+// an error — it yields no rows, so an operator can fold outcomes-only or decisions-only
+// input. `noun` names the input in the read/parse error text.
+func readTierCalibRows[T any](path, noun string) ([]T, error) {
 	if path == "" {
 		return nil, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read decisions %s: %w", path, err)
+		return nil, fmt.Errorf("read %s %s: %w", noun, path, err)
 	}
-	var rows []issuecost.TierDecision
+	var rows []T
 	if err := json.Unmarshal(data, &rows); err != nil {
-		return nil, fmt.Errorf("parse decisions %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s %s: %w", noun, path, err)
 	}
 	return rows, nil
 }
 
-// readWitnessedOutcomes loads a JSON array of witnessed-outcome rows. An empty
-// path yields no rows (see readTierDecisions).
+// readTierDecisions loads a JSON array of tier-decision rows.
+func readTierDecisions(path string) ([]issuecost.TierDecision, error) {
+	return readTierCalibRows[issuecost.TierDecision](path, "decisions")
+}
+
+// readWitnessedOutcomes loads a JSON array of witnessed-outcome rows.
 func readWitnessedOutcomes(path string) ([]issuecost.WitnessedOutcome, error) {
-	if path == "" {
-		return nil, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read outcomes %s: %w", path, err)
-	}
-	var rows []issuecost.WitnessedOutcome
-	if err := json.Unmarshal(data, &rows); err != nil {
-		return nil, fmt.Errorf("parse outcomes %s: %w", path, err)
-	}
-	return rows, nil
+	return readTierCalibRows[issuecost.WitnessedOutcome](path, "outcomes")
 }
 
 // tierCalibrateDemo returns a small, hand-verified fixture that exercises all

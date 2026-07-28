@@ -108,6 +108,17 @@ func parseEnvelope(raw string, target bool) ([]EnvelopeValue, []string) {
 	}
 	values := map[string]EnvelopeValue{}
 	var invalid []string
+	// record admits one parsed dimension, refusing a second entry for a dimension already
+	// claimed on an earlier line. First-wins is deliberate: a contract that states a dimension
+	// twice is ambiguous, so the repeat is reported as invalid rather than silently overriding.
+	// Both the not-applicable and the measured-value branch admit through here.
+	record := func(v EnvelopeValue) {
+		if _, duplicate := values[v.Dimension]; duplicate {
+			invalid = append(invalid, fmt.Sprintf("%s: duplicate dimension", v.Dimension))
+			return
+		}
+		values[v.Dimension] = v
+	}
 	for _, original := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
 		line := strings.TrimSpace(original)
 		if line == "" {
@@ -123,11 +134,7 @@ func parseEnvelope(raw string, target bool) ([]EnvelopeValue, []string) {
 				invalid = append(invalid, fmt.Sprintf("%s: not-applicable requires a reason", dim))
 				continue
 			}
-			if _, duplicate := values[dim]; duplicate {
-				invalid = append(invalid, fmt.Sprintf("%s: duplicate dimension", dim))
-				continue
-			}
-			values[dim] = EnvelopeValue{Dimension: dim, NotApplicable: true, Reason: reason}
+			record(EnvelopeValue{Dimension: dim, NotApplicable: true, Reason: reason})
 			continue
 		}
 		m := envelopeLineRE.FindStringSubmatch(line)
@@ -149,11 +156,7 @@ func parseEnvelope(raw string, target bool) ([]EnvelopeValue, []string) {
 			invalid = append(invalid, fmt.Sprintf("%s: invalid non-negative value/unit", dim))
 			continue
 		}
-		if _, duplicate := values[dim]; duplicate {
-			invalid = append(invalid, fmt.Sprintf("%s: duplicate dimension", dim))
-			continue
-		}
-		values[dim] = EnvelopeValue{Dimension: dim, Operator: op, Value: value, Unit: unit}
+		record(EnvelopeValue{Dimension: dim, Operator: op, Value: value, Unit: unit})
 	}
 	out := make([]EnvelopeValue, 0, len(values))
 	for _, v := range values {

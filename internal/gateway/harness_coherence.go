@@ -394,16 +394,26 @@ func (m *gatewayMetrics) coldMessageSpanCache(trace string, now time.Time, ttl1h
 // turn N-1, so CurrentTurn = servedTurns()+1 is the correct 1-based "this is turn N" index. An
 // unknown trace (first turn, or a metrics-less server) reports 0.
 func (h *harnessCoherenceMetrics) servedTurns(trace string) uint64 {
+	return coordField(h, trace, func(e *coordEntry) uint64 { return e.turns })
+}
+
+// coordField reads one field of a trace's coordinator entry under the metrics lock. A nil
+// receiver (metrics-less server), an empty trace, or a trace that has not been observed yet
+// all report T's zero value — the conservative reading every caller's fallback prior wants.
+// The per-trace accessors differ only in which field they pick, so the nil-safety and the
+// locking live here once instead of being re-derived per field.
+func coordField[T any](h *harnessCoherenceMetrics, trace string, pick func(*coordEntry) T) T {
+	var zero T
 	if h == nil || trace == "" {
-		return 0
+		return zero
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	entry := h.coords[trace]
 	if entry == nil {
-		return 0
+		return zero
 	}
-	return entry.turns
+	return pick(entry)
 }
 
 // servedTurnCount is the gatewayMetrics-level, nil-safe accessor for servedTurns: the per-trace
@@ -423,16 +433,7 @@ func (m *gatewayMetrics) servedTurnCount(trace string) uint64 {
 // as servedTurns, and the conservative direction (a not-yet-observed heavy turn keeps the base horizon).
 // An unknown trace (first turn, or a metrics-less server) reports 0 ⇒ the conservative base horizon.
 func (h *harnessCoherenceMetrics) heldResidentPeak(trace string) int64 {
-	if h == nil || trace == "" {
-		return 0
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	entry := h.coords[trace]
-	if entry == nil {
-		return 0
-	}
-	return entry.heldPeak
+	return coordField(h, trace, func(e *coordEntry) int64 { return e.heldPeak })
 }
 
 // heldResidentPeakTokens is the gatewayMetrics-level, nil-safe accessor for heldResidentPeak.

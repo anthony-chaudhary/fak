@@ -39,6 +39,17 @@ var serviceTick = func(stdout, stderr io.Writer) int {
 	return runResumeWatchdog(stdout, stderr, []string{"--live", "--json"})
 }
 
+// defaultRootedPath fills an unset path flag with a default anchored at the filesystem
+// root, joining `segments` under the platform separator so the same call yields the
+// systemd/launchd location on each host instead of a hand-spelled literal per platform.
+// A flag the operator already set is left exactly as given.
+func defaultRootedPath(flagValue *string, segments ...string) {
+	if *flagValue != "" {
+		return
+	}
+	*flagValue = filepath.Join(append([]string{string(filepath.Separator)}, segments...)...)
+}
+
 func cmdService(args []string) { os.Exit(runService(os.Stdout, os.Stderr, args)) }
 func runService(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
@@ -93,15 +104,9 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	case "linux":
 		manager = "systemd-system"
 		name = systemservice.SystemdUnitName
-		if *unitDir == "" {
-			*unitDir = filepath.Join(string(filepath.Separator), "etc", "systemd", "system")
-		}
-		if *stateDir == "" {
-			*stateDir = filepath.Join(string(filepath.Separator), "var", "lib", "fak")
-		}
-		if *execPath == "" {
-			*execPath = filepath.Join(string(filepath.Separator), "usr", "local", "libexec", "fak-guard-control")
-		}
+		defaultRootedPath(unitDir, "etc", "systemd", "system")
+		defaultRootedPath(stateDir, "var", "lib", "fak")
+		defaultRootedPath(execPath, "usr", "local", "libexec", "fak-guard-control")
 		stagedExecutable = *execPath
 		path = filepath.Join(*unitDir, name)
 		definition, err = systemservice.RenderSystemdSystemUnit(systemservice.SystemdConfig{Executable: stagedExecutable, StateDir: *stateDir})
@@ -122,18 +127,12 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	case "darwin":
 		manager = "launchd-system"
 		name = systemservice.LaunchdLabel
-		if *unitDir == "" {
-			*unitDir = filepath.Join(string(filepath.Separator), "Library", "LaunchDaemons")
-		}
-		if *stateDir == "" {
-			*stateDir = filepath.Join(string(filepath.Separator), "var", "db", "fak")
-		}
+		defaultRootedPath(unitDir, "Library", "LaunchDaemons")
+		defaultRootedPath(stateDir, "var", "db", "fak")
 		if *principal == "" {
 			*principal = "nobody"
 		}
-		if *execPath == "" {
-			*execPath = filepath.Join(string(filepath.Separator), "usr", "local", "libexec", "fak-guard-control")
-		}
+		defaultRootedPath(execPath, "usr", "local", "libexec", "fak-guard-control")
 		stagedExecutable = *execPath
 		logDir := filepath.Join(*stateDir, "logs")
 		path = filepath.Join(*unitDir, name+".plist")

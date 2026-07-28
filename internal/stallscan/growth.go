@@ -74,61 +74,54 @@ func ClassifyWithBaseline(baseline, cur Sample, t Thresholds) Verdict {
 // non-mutating. Matching requires the name to agree so a reused PID (a different
 // process that inherited the number) never reads as growth.
 func worstHandleGrowth(baseline, cur []ProcHandles, delta, floor int) (ProcHandles, int, bool) {
-	if delta <= 0 {
-		return ProcHandles{}, 0, false
-	}
-	base := make(map[int]ProcHandles, len(baseline))
-	for _, p := range baseline {
-		base[p.PID] = p
-	}
-	worst := ProcHandles{}
-	worstClimb := 0
-	found := false
-	for _, p := range cur {
-		if p.Handles < floor {
-			continue
-		}
-		b, ok := base[p.PID]
-		if !ok || b.Name != p.Name {
-			continue // first sight or PID reuse: no trajectory to measure
-		}
-		climb := p.Handles - b.Handles
-		if climb < delta {
-			continue
-		}
-		if !found || climb > worstClimb || (climb == worstClimb && p.PID < worst.PID) {
-			worst, worstClimb, found = p, climb, true
-		}
-	}
-	return worst, worstClimb, found
+	return worstGrowth(baseline, cur, delta, floor, func(p ProcHandles) (int, string, int) {
+		return p.PID, p.Name, p.Handles
+	})
 }
 
 // worstThreadGrowth mirrors worstHandleGrowth for the thread census.
 func worstThreadGrowth(baseline, cur []ProcThreads, delta, floor int) (ProcThreads, int, bool) {
+	return worstGrowth(baseline, cur, delta, floor, func(p ProcThreads) (int, string, int) {
+		return p.PID, p.Name, p.Threads
+	})
+}
+
+// worstGrowth is the census-independent body of worstHandleGrowth / worstThreadGrowth: the
+// two censuses differ only in the row type and which counter they read, and `census` supplies
+// exactly that (a row's PID, its process name, and the counter under observation). Ties break
+// on the lower PID so the verdict is deterministic across two scans of the same machine.
+func worstGrowth[T any](baseline, cur []T, delta, floor int, census func(T) (int, string, int)) (T, int, bool) {
+	var worst T
 	if delta <= 0 {
-		return ProcThreads{}, 0, false
+		return worst, 0, false
 	}
-	base := make(map[int]ProcThreads, len(baseline))
+	type sample struct {
+		name  string
+		count int
+	}
+	base := make(map[int]sample, len(baseline))
 	for _, p := range baseline {
-		base[p.PID] = p
+		pid, name, count := census(p)
+		base[pid] = sample{name: name, count: count}
 	}
-	worst := ProcThreads{}
 	worstClimb := 0
+	worstPID := 0
 	found := false
 	for _, p := range cur {
-		if p.Threads < floor {
+		pid, name, count := census(p)
+		if count < floor {
 			continue
 		}
-		b, ok := base[p.PID]
-		if !ok || b.Name != p.Name {
-			continue
+		b, ok := base[pid]
+		if !ok || b.name != name {
+			continue // first sight or PID reuse: no trajectory to measure
 		}
-		climb := p.Threads - b.Threads
+		climb := count - b.count
 		if climb < delta {
 			continue
 		}
-		if !found || climb > worstClimb || (climb == worstClimb && p.PID < worst.PID) {
-			worst, worstClimb, found = p, climb, true
+		if !found || climb > worstClimb || (climb == worstClimb && pid < worstPID) {
+			worst, worstClimb, worstPID, found = p, climb, pid, true
 		}
 	}
 	return worst, worstClimb, found

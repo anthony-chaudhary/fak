@@ -103,4 +103,6 @@ func registerBuiltins() {
 // panics at process start in every binary importing this package. The var is
 // "unreferenced" on purpose — it exists only for this ordering guarantee; do not fold
 // it back into init().
+//
+//slop:keep intentionally unreferenced — the var initializer IS the ordering guarantee.
 var builtinsRegistered = func() bool { registerBuiltins(); return true }()

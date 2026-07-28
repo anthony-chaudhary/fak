@@ -215,17 +215,23 @@ func modelTierFromName(model string) int {
 	text = strings.ReplaceAll(text, "_", "-")
 	text = strings.ReplaceAll(text, " ", "-")
 	compact := nonAlnum.ReplaceAllString(text, "")
+	// names matches a family id in BOTH spellings the taxonomy keeps side by side: the
+	// separator-normalized form ("gpt-5.6-luna") and the punctuation-stripped one
+	// ("gpt56luna"). Every rule below is one or more such pairs, so a new family is added by
+	// naming its two spellings rather than by re-deriving the two-form match each time.
+	names := func(spaced, stripped string) bool {
+		return strings.Contains(text, spaced) || strings.Contains(compact, stripped)
+	}
 	// GPT-5.6 Luna is OpenAI's fast/cheap seat in the 5.6 generation — the
 	// lightweight tier, checked before the generation-wide frontier match below so
 	// the `gpt-5.6` substring does not sweep it up into tier 1.
-	if strings.Contains(text, "gpt-5.6-luna") || strings.Contains(compact, "gpt56luna") {
+	if names("gpt-5.6-luna", "gpt56luna") {
 		return 2
 	}
 	// GPT-5.6 Sol (the flagship, aliased by the bare `gpt-5.6` id) and GPT-5.6 Terra
 	// (≈ GPT-5.5) are the current OpenAI frontier seats; GPT-5.5 stays classified
 	// alongside them.
-	if strings.Contains(text, "gpt-5.6") || strings.Contains(compact, "gpt56") ||
-		strings.Contains(text, "gpt-5.5") || strings.Contains(compact, "gpt55") {
+	if names("gpt-5.6", "gpt56") || names("gpt-5.5", "gpt55") {
 		return 1
 	}
 	// The Opus FAMILY is the Claude frontier class in every generation — opus-5 (the
@@ -238,16 +244,15 @@ func modelTierFromName(model string) int {
 	if isOpusFamily(text, compact) {
 		return TierFrontier
 	}
-	if strings.Contains(text, "deepseek-v4-pro") || strings.Contains(compact, "deepseekv4pro") ||
-		strings.Contains(text, "kimi-k2.6") || strings.Contains(compact, "kimik26") {
+	if names("deepseek-v4-pro", "deepseekv4pro") || names("kimi-k2.6", "kimik26") {
 		return 1
 	}
-	if strings.Contains(text, "glm-5.2") || strings.Contains(compact, "glm52") {
+	if names("glm-5.2", "glm52") {
 		return 2
 	}
 	// Gemini 3.5 Flash — Google's fast/lightweight tier, served via GCP Vertex AI on the
 	// OpenAI-compatible endpoint as `google/gemini-3.5-flash`. Lightweight work, tier 2.
-	if strings.Contains(text, "gemini-3.5-flash") || strings.Contains(compact, "gemini35flash") {
+	if names("gemini-3.5-flash", "gemini35flash") {
 		return 2
 	}
 	return 3

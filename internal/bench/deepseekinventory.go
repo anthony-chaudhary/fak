@@ -266,11 +266,11 @@ func DeepSeekV4ProInventory() DeepSeekInventory {
 	inv := DeepSeekInventory{
 		Schema: DeepSeekInventorySchema,
 
-		ModelID:        "deepseek-ai/DeepSeek-V4-Pro",
-		Revision:       "b5968e9190ef611bbf34a7229255be88a0e937c1",
-		License:        "MIT",
-		Gated:          false,
-		Source:         "huggingface",
+		ModelID:  "deepseek-ai/DeepSeek-V4-Pro",
+		Revision: "b5968e9190ef611bbf34a7229255be88a0e937c1",
+		License:  "MIT",
+		Gated:    false,
+		Source:   "huggingface",
 		// The one pinned artifact size for the whole package: the placement seam
 		// (#4801) already exports it as ArtifactBytes and measures its reservation bars
 		// against it. Re-typing the literal here would let the two sibling records drift

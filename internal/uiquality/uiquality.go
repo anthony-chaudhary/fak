@@ -317,14 +317,8 @@ func kpiRuneSafety(src []source) KPI {
 			}
 		}
 	}
-	if len(k.Defects) == 0 {
-		k.Score = 100
-		k.Detail = "truncation accumulates whole runes by display width; columns pad cell-aware"
-	} else {
-		k.Score = 0
-		k.Detail = fmt.Sprintf("%d byte-width hazard(s) in the render surface", len(k.Defects))
-	}
-	return k
+	return k.verdict("truncation accumulates whole runes by display width; columns pad cell-aware",
+		"%d byte-width hazard(s) in the render surface")
 }
 
 // ---------------------------------------------------------------------------
@@ -365,14 +359,8 @@ func kpiWidthConsistency(src []source) KPI {
 			}
 		}
 	}
-	if len(k.Defects) == 0 {
-		k.Score = 100
-		k.Detail = "no width-padded verb consumes a bare trimTUI column; multibyte rows stay aligned"
-	} else {
-		k.Score = 0
-		k.Detail = fmt.Sprintf("%d column(s) byte-padded around trimTUI", len(k.Defects))
-	}
-	return k
+	return k.verdict("no width-padded verb consumes a bare trimTUI column; multibyte rows stay aligned",
+		"%d column(s) byte-padded around trimTUI")
 }
 
 // ---------------------------------------------------------------------------
@@ -410,14 +398,8 @@ func kpiEmptyState(src []source) KPI {
 			k.Defects = append(k.Defects, s.Rel+" missing any empty-state line")
 		}
 	}
-	if len(k.Defects) == 0 {
-		k.Score = 100
-		k.Detail = "every list pane has an explicit no-rows branch"
-	} else {
-		k.Score = 0
-		k.Detail = fmt.Sprintf("%d pane(s) render a blank on an empty model", len(k.Defects))
-	}
-	return k
+	return k.verdict("every list pane has an explicit no-rows branch",
+		"%d pane(s) render a blank on an empty model")
 }
 
 // ---------------------------------------------------------------------------
@@ -494,18 +476,13 @@ func kpiHeaderAlignment(src []source) KPI {
 				fmt.Sprintf("%s: header+row both changed from the pinned spec — re-pin alignmentPanes() to re-arm the drift check", spec.rel))
 		}
 	}
-	if len(k.Defects) == 0 {
-		k.Score = 100
-		if checked == 0 {
-			k.Detail = "no fixed-header pane matched the pin to check"
-		} else {
-			k.Detail = fmt.Sprintf("%d fixed-header pane(s) still aligned to their pinned row format", checked)
-		}
-	} else {
-		k.Score = 0
-		k.Detail = fmt.Sprintf("%d pane(s) where the header and row format drifted apart", len(k.Defects))
+	// Fail-open: a pin that matched nothing reports that plainly rather than claiming
+	// alignment it never checked.
+	held := "no fixed-header pane matched the pin to check"
+	if checked > 0 {
+		held = fmt.Sprintf("%d fixed-header pane(s) still aligned to their pinned row format", checked)
 	}
-	return k
+	return k.verdict(held, "%d pane(s) where the header and row format drifted apart")
 }
 
 // changedSide names which half of a header/row pair diverged from the pin.
@@ -540,14 +517,8 @@ func kpiLegendCoverage(src []source) KPI {
 				fmt.Sprintf("info line term %q has no legend entry", t))
 		}
 	}
-	if len(k.Defects) == 0 {
-		k.Score = 100
-		k.Detail = "every info-line term is expanded in the legend"
-	} else {
-		k.Score = 0
-		k.Detail = fmt.Sprintf("%d info-line term(s) undocumented", len(k.Defects))
-	}
-	return k
+	return k.verdict("every info-line term is expanded in the legend",
+		"%d info-line term(s) undocumented")
 }
 
 // ---------------------------------------------------------------------------
@@ -614,14 +585,8 @@ func kpiHelpCompleteness(src []source) KPI {
 		k.Defects = append(k.Defects,
 			fmt.Sprintf("console subcommand %q is not documented in tuiUsage", name))
 	}
-	if len(k.Defects) == 0 {
-		k.Score = 100
-		k.Detail = fmt.Sprintf("all %d console subcommands documented in help", len(subs))
-	} else {
-		k.Score = 0
-		k.Detail = fmt.Sprintf("%d console subcommand(s) missing from help", len(k.Defects))
-	}
-	return k
+	return k.verdict(fmt.Sprintf("all %d console subcommands documented in help", len(subs)),
+		"%d console subcommand(s) missing from help")
 }
 
 // ---------------------------------------------------------------------------
@@ -701,6 +666,22 @@ func newKPI(key string) KPI {
 		Hard:   kpiHard[key],
 		Weight: kpiWeight[key],
 	}
+}
+
+// verdict closes a KPI whose defects have all been accumulated. Every KPI on this scorecard
+// is pass/fail on the same rule — no defects scores 100 and reports the invariant that held,
+// any defect scores 0 — so the scoring lives here instead of at the bottom of each detector,
+// where a stray 100 next to a non-empty defect list would be invisible. `clean` is the
+// already-rendered holds sentence; `flawed` is a format string taking the defect count.
+func (k KPI) verdict(clean, flawed string) KPI {
+	if len(k.Defects) == 0 {
+		k.Score = 100
+		k.Detail = clean
+		return k
+	}
+	k.Score = 0
+	k.Detail = fmt.Sprintf(flawed, len(k.Defects))
+	return k
 }
 
 // summarize builds the finding/reason/next-action prose the fold needs. The score

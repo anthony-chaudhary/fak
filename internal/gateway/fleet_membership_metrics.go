@@ -163,34 +163,33 @@ func renderWorkerGauges(b *strings.Builder, snap []WorkerStatus) {
 		b.WriteString("\"} 1\n")
 	}
 
-	writeHelpType(b, "fak_gateway_fleet_worker_admissible",
+	writeWorkerGauge(b, "fak_gateway_fleet_worker_admissible",
 		"Whether the router may place NEW work on the worker (1 when healthy and not draining, else 0).",
-		"gauge")
-	for _, w := range snap {
-		b.WriteString("fak_gateway_fleet_worker_admissible{worker=\"")
-		b.WriteString(promQuote(w.Spec.ID))
-		b.WriteString("\"} ")
-		writeBool(b, w.Health == HealthHealthy && !w.Draining)
-	}
+		snap, func(b *strings.Builder, w WorkerStatus) {
+			writeBool(b, w.Health == HealthHealthy && !w.Draining)
+		})
 
-	writeHelpType(b, "fak_gateway_fleet_worker_draining",
+	writeWorkerGauge(b, "fak_gateway_fleet_worker_draining",
 		"Whether the worker is draining (1) — the router routes no new work to it while in-flight requests finish.",
-		"gauge")
-	for _, w := range snap {
-		b.WriteString("fak_gateway_fleet_worker_draining{worker=\"")
-		b.WriteString(promQuote(w.Spec.ID))
-		b.WriteString("\"} ")
-		writeBool(b, w.Draining)
-	}
+		snap, func(b *strings.Builder, w WorkerStatus) { writeBool(b, w.Draining) })
 
-	writeHelpType(b, "fak_gateway_fleet_worker_inflight",
+	writeWorkerGauge(b, "fak_gateway_fleet_worker_inflight",
 		"In-flight requests acquired against the worker (drain waits for this to reach zero before removal).",
-		"gauge")
+		snap, func(b *strings.Builder, w WorkerStatus) { writeInt(b, w.Inflight) })
+}
+
+// writeWorkerGauge emits one HELP/TYPE header for `name` followed by a single
+// `name{worker="<id>"} <value>` sample per worker in snap. Only the value differs
+// between the fleet's worker-keyed gauges, so the label rendering lives here once and
+// each caller supplies just its value encoder (writeBool / writeInt).
+func writeWorkerGauge(b *strings.Builder, name, help string, snap []WorkerStatus, value func(*strings.Builder, WorkerStatus)) {
+	writeHelpType(b, name, help, "gauge")
 	for _, w := range snap {
-		b.WriteString("fak_gateway_fleet_worker_inflight{worker=\"")
+		b.WriteString(name)
+		b.WriteString("{worker=\"")
 		b.WriteString(promQuote(w.Spec.ID))
 		b.WriteString("\"} ")
-		writeInt(b, w.Inflight)
+		value(b, w)
 	}
 }
 

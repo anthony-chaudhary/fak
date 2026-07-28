@@ -83,16 +83,26 @@ func LoadSafetensorsQuant(path string, cfg Config, opts ...LoadOption) (*Model, 
 	return loadSafetensorsQuantFile(path, cfg, openSafetensorsFile, opts...)
 }
 
-func loadSafetensorsQuantFile(path string, cfg Config, open safetensorsFileOpener, opts ...LoadOption) (*Model, error) {
-	// Admit a DeepSeek-V4 config before any file I/O or model allocation, exactly
-	// as newModel does for the f32 path (#4807): a mis-shaped deepseek_v4 config
-	// must fail here with the typed admission error, not later at ensureV4LiveExpert.
+// admitQuantLoad is the pre-I/O gate every quant loader shares. A DeepSeek-V4 config is
+// admitted BEFORE any file is opened or any model allocated (#4807), exactly as newModel does
+// for the f32 path, so a mis-shaped deepseek_v4 config fails with the typed admission error
+// instead of surfacing much later at ensureV4LiveExpert; identity alone never authorizes the
+// V4 lazy-expert path, and ErrV4ConfigAdmission propagates unchanged. Only once the config is
+// admitted are the caller's load options resolved.
+func admitQuantLoad(cfg Config, opts []LoadOption) (loadOptions, error) {
 	if cfg.IsDeepSeekV4() {
 		if err := AdmitDeepSeekV4Config(cfg); err != nil {
-			return nil, err
+			return loadOptions{}, err
 		}
 	}
-	lo := resolveLoadOptions(opts)
+	return resolveLoadOptions(opts), nil
+}
+
+func loadSafetensorsQuantFile(path string, cfg Config, open safetensorsFileOpener, opts ...LoadOption) (*Model, error) {
+	lo, err := admitQuantLoad(cfg, opts)
+	if err != nil {
+		return nil, err
+	}
 	sf, err := open(path)
 	if err != nil {
 		return nil, err
@@ -123,15 +133,11 @@ func LoadSafetensorsQuantDir(dir string, cfg Config, opts ...LoadOption) (*Model
 }
 
 func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener, opts ...LoadOption) (*Model, error) {
-	// Admit a DeepSeek-V4 config before touching the index or allocating the model,
-	// mirroring newModel's f32-path gate (#4807). Identity alone never authorizes
-	// the V4 lazy-expert path; the typed ErrV4ConfigAdmission propagates unchanged.
-	if cfg.IsDeepSeekV4() {
-		if err := AdmitDeepSeekV4Config(cfg); err != nil {
-			return nil, err
-		}
+	// The gate runs before the index is even touched, let alone the model allocated.
+	lo, err := admitQuantLoad(cfg, opts)
+	if err != nil {
+		return nil, err
 	}
-	lo := resolveLoadOptions(opts)
 	idxPath := filepath.Join(dir, "model.safetensors.index.json")
 	if _, err := os.Stat(idxPath); err != nil {
 		return loadSafetensorsQuantFile(filepath.Join(dir, "model.safetensors"), cfg, open, opts...)

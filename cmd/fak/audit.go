@@ -128,11 +128,9 @@ func auditReceiptSoundRows(err error) int {
 	return 0
 }
 
-// auditVerifyVerdict retains the command helper used by older callers.
-func auditVerifyVerdict(path, rowKind string, n int, err error) {
-	os.Exit(renderAuditVerifyVerdict(os.Stdout, os.Stderr, path, rowKind, n, err))
-}
-
+// renderAuditVerifyVerdict writes the one-line verdict for a chain verification and
+// returns the process exit code: 1 (with the tampered/broken text on stderr) when the
+// chain failed to verify, 0 (with the sound-row count on stdout) when it held.
 func renderAuditVerifyVerdict(stdout, stderr io.Writer, path, rowKind string, n int, err error) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
@@ -168,8 +166,6 @@ func auditVerifySchema(path string) string {
 	}
 	return ""
 }
-
-func isUsageLog(path string) bool { return auditVerifySchema(path) == usagelog.SchemaV1 }
 
 // cmdAuditExport re-emits a journal as JSONL on stdout. It opens the file-backed
 // journal (append mode, recovering the chain head) and streams its durable history

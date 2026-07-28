@@ -67,6 +67,30 @@ func orphanedAction(st MemberStatus) string {
 		st.Member.Ref, relay.ReasonOrphanedFollowon)
 }
 
+// loopDriveAction is the shared next-action ladder for a driveable loop member (both
+// KindLoop and KindLoopFleet run it): a spinning loop or one emitting orphaned follow-on
+// work reports that first, then an explicit enter-command wins, and a loop that has gone
+// dark asks to be revived rather than driven. `darkSubject` names the member in the
+// revive-via-command wording — the only phrasing the two kinds spell differently.
+func loopDriveAction(st MemberStatus, darkSubject string) string {
+	if st.Progress == ProgressSpinning {
+		return spinningAction(st)
+	}
+	if st.FollowOn == FollowonOrphaned {
+		return orphanedAction(st)
+	}
+	if e := strings.TrimSpace(st.Member.Enter); e != "" {
+		if st.Dark {
+			return fmt.Sprintf("revive via `%s` — %s has gone dark", e, darkSubject)
+		}
+		return fmt.Sprintf("drive via `%s`", e)
+	}
+	if st.Dark {
+		return fmt.Sprintf("revive the %s loop — it has gone dark", st.Member.Ref)
+	}
+	return fmt.Sprintf("drive the %s loop", st.Member.Ref)
+}
+
 func actionFor(st MemberStatus) string {
 	switch st.Member.Kind {
 	case KindScorecard:
@@ -78,22 +102,7 @@ func actionFor(st MemberStatus) string {
 		}
 		return fmt.Sprintf("enter the %s scorecard's reduce loop (its skill) to retire debt", st.Member.Ref)
 	case KindLoop:
-		if st.Progress == ProgressSpinning {
-			return spinningAction(st)
-		}
-		if st.FollowOn == FollowonOrphaned {
-			return orphanedAction(st)
-		}
-		if e := strings.TrimSpace(st.Member.Enter); e != "" {
-			if st.Dark {
-				return fmt.Sprintf("revive via `%s` — %s has gone dark", e, st.Member.Ref)
-			}
-			return fmt.Sprintf("drive via `%s`", e)
-		}
-		if st.Dark {
-			return fmt.Sprintf("revive the %s loop — it has gone dark", st.Member.Ref)
-		}
-		return fmt.Sprintf("drive the %s loop", st.Member.Ref)
+		return loopDriveAction(st, st.Member.Ref)
 	case KindGarden:
 		return "run `fak garden` then `fak garden tick` to tend the bundle"
 	case KindSuperloop:
@@ -112,22 +121,7 @@ func actionFor(st MemberStatus) string {
 		if !st.Measured {
 			return fmt.Sprintf("read `fak superloop roster` — %q has no foldable ledger here (known gap)", st.Member.Ref)
 		}
-		if st.Progress == ProgressSpinning {
-			return spinningAction(st)
-		}
-		if st.FollowOn == FollowonOrphaned {
-			return orphanedAction(st)
-		}
-		if e := strings.TrimSpace(st.Member.Enter); e != "" {
-			if st.Dark {
-				return fmt.Sprintf("revive via `%s` — fleet loop %s has gone dark", e, st.Member.Ref)
-			}
-			return fmt.Sprintf("drive via `%s`", e)
-		}
-		if st.Dark {
-			return fmt.Sprintf("revive the %s loop — it has gone dark", st.Member.Ref)
-		}
-		return fmt.Sprintf("drive the %s loop", st.Member.Ref)
+		return loopDriveAction(st, "fleet loop "+st.Member.Ref)
 	case KindTrajectory:
 		if !st.Measured {
 			return fmt.Sprintf("read the trajctl ledger to fold objective %q's curve", st.Member.Ref)

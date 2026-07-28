@@ -833,7 +833,8 @@ func psTokenStart(src string, i int) bool {
 }
 
 // psSkipString returns the offset just past the string literal opening at i. A
-// single-quoted string ends at the next unescaped quote (`''` escapes one); a
+// single-quoted string ends at the next unescaped quote (a doubled single quote
+// escapes one); a
 // double-quoted string honours the backtick escape. An unterminated literal
 // consumes the rest of the source, which keeps the scan from reading its tail as
 // code and inventing a match.

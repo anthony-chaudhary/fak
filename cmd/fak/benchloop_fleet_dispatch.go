@@ -439,8 +439,6 @@ func benchFleetRoutes(root string) benchFleetRouteConfig {
 	return cfg
 }
 
-func benchFleetMacHost(root string) string { return strings.TrimSpace(benchFleetRoutes(root).MacHost) }
-
 func benchFleetWorkstationScript(req benchFleetRequest) string {
 	command := req.Command
 	switch req.Benchmark {
