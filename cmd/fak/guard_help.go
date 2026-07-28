@@ -80,6 +80,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Token economy (cache & context savers)", []string{
 		"compact-history-budget", "compact-anchor-head", "assume-session-turns",
+		"compact-solvency-floor",
 		"elide-result-bytes", "elide-stale-reads", "ctx-view-budget", "managed-cache", "compress",
 		"vcache-anchor", "defer-cold-tools",
 	}},

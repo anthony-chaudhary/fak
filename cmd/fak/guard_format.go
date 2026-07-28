@@ -359,8 +359,16 @@ func formatFakSliceDiagnostic(sum gateway.AdjudicationSummary) string {
 	// guess. This is the common WARM continuously-active long-session case (a headless worker that
 	// never idles 5 min); the fix is a bounded horizon (a turn/context budget) or an idle gap, NOT
 	// a tighter budget. Named apart so its "did not fire" reads as working-as-designed, not a bug.
+	//
+	// "Working-as-designed" is TRUE ON THE CACHE AXIS ONLY, and saying so without naming the other
+	// axis is how a run that never shed anything read as healthy all night. The gate prices a fire
+	// in cache dollars and has no term for running out of window, so across 3191 measured served
+	// turns its fire rate INVERTED against occupancy (33% at 96-125k resident, 0.0% above 170k).
+	// Once the trace is deep into the window the honest answer is not "the cache says wait" but
+	// "the window says go" — which is the third fix, --compact-solvency-floor, so the diagnostic
+	// names it rather than leaving the operator with two levers that cannot help a warm worker.
 	if n := sum.CompactionBailReasons["burst_unprofitable"]; n > 0 {
-		reasons = append(reasons, fmt.Sprintf("burst-unprofitable x%d (shed-able middle, but no repaying turn-horizon and not idle past the message-cache TTL, so the burst economics keep the warm cache; fix = a bounded turn/context budget or an idle gap, not a tighter budget)", n))
+		reasons = append(reasons, fmt.Sprintf("burst-unprofitable x%d (shed-able middle, but no repaying turn-horizon and not idle past the message-cache TTL, so the burst economics keep the warm cache; fix = a bounded turn/context budget, an idle gap, or --compact-solvency-floor when it is the WINDOW rather than the cache that binds — never a tighter budget)", n))
 	}
 	switch {
 	case sum.KVPrefixPromptTokens == 0:

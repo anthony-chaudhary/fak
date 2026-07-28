@@ -115,6 +115,16 @@ var offWithReason = map[string]string{
 	// Re-anchoring can intentionally burst the recent provider-cache breakpoint once;
 	// it stays opt-in until a live session-turn horizon proves the burst pays back.
 	"compact-anchor-head": "re-anchors the protected compact-history prefix and can burst the recent provider-cache breakpoint once -- opt-in until a live session-turn horizon proves the burst pays back",
+	// The solvency floor is a TOKEN COUNT that only the launcher can know: it is a
+	// fraction of (model context window - output reserve), and the gateway never sees a
+	// window size -- it sees the bytes of one request. There is no honest default here,
+	// only a guess, and a guessed floor is actively harmful in both directions (too low
+	// forces unprofitable bursts on every turn, too high rings after the wall). So the
+	// zero value means DISARMED and the number arrives from whoever owns the envelope --
+	// `fak dispatch` derives 85% of window-reserve = 142800 and passes it, and an operator
+	// running `fak guard` by hand names their own. This is the same shape as
+	// context-budget-tokens above: an operator policy, not a silent default.
+	"compact-solvency-floor": "a token count only the LAUNCHER can derive (a fraction of model window - output reserve); the gateway never sees a window size, so there is no honest default -- 0 = disarmed keeps pure cache economics byte-for-byte, and `fak dispatch` supplies the derived floor",
 	// Self-hosted serving-engine cache-reset family: every knob needs an external engine +
 	// its control URL/admin key, so none can default on without a configured engine. The
 	// whole family is gated behind --engine-cache-engine being set.
