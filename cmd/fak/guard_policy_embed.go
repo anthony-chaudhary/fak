@@ -118,4 +118,4 @@ var guardDefaultPolicyJSON []byte
 // reaches this session is appended to a tamper-evident, hash-chained file you can
 // later replay with `fak audit verify`. fak is the disinterested referee, and the
 // journal is the verifiable record of what it allowed vs blocked — a self-report is
-// not a witness. Point it with --audit PATH, or turn it off with --no-audit.
+// not a witness. Point it with --audit PATH, or turn it off with --audit off.

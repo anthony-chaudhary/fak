@@ -695,7 +695,7 @@ func guardEnableAudit(auditPath string, noAudit bool) (label string, active *jou
 	}
 	if path == "" {
 		if optedOut {
-			return "off  (default-on; disabled by --no-audit / --audit off)", nil
+			return "off  (default-on; disabled by --audit off)", nil
 		}
 		return "off", nil
 	}
@@ -708,7 +708,7 @@ func guardEnableAudit(auditPath string, noAudit bool) (label string, active *jou
 			// Default-on trail nobody asked for: warn and continue unaudited rather
 			// than os.Exit the whole guarded launch.
 			fmt.Fprintf(os.Stderr, "fak: audit journal disabled — %v\n", err)
-			return "off  (default-on; unwritable dir — run from a repo, or pass --audit PATH / --no-audit)", nil
+			return "off  (default-on; unwritable dir — run from a repo, or pass --audit PATH / --audit off)", nil
 		}
 		must(err) // operator explicitly named --audit PATH; a silent no-trail is worse than a loud stop
 	}

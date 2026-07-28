@@ -217,8 +217,10 @@ func buildCodexLaunchArgv(fakBin string, o codexLaunchOptions) []string {
 		argv = append(argv, "--managed-cache", m)
 	}
 	appendKV("--audit", o.auditPath)
+	// `fak guard` no longer carries a --no-audit alias; 'off' is the spelling --audit
+	// documents. Emitted after the --audit passthrough above so it wins on a flag parse.
 	if o.noAudit {
-		argv = append(argv, "--no-audit")
+		argv = append(argv, "--audit", "off")
 	}
 	if o.quiet {
 		argv = append(argv, "--quiet")

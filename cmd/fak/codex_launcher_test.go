@@ -66,7 +66,7 @@ func TestBuildCodexLaunchArgvAdvancedFlagsAndPassthrough(t *testing.T) {
 		"--base-url", "https://api.example.test/v1",
 		"--model", "gpt-test",
 		"--audit", "audit.jsonl",
-		"--no-audit",
+		"--audit", "off",
 		"--quiet",
 		"--local",
 		"--gguf", "qwen.gguf",

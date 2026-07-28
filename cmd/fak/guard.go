@@ -104,7 +104,11 @@ func cmdGuard(argv []string) {
 	requireKeyEnv := fs.String("require-key-env", "", "require this env var's bearer token on the gateway (loopback rarely needs it)")
 	logPath := fs.String("log", "", "write the gateway's per-request + per-verdict structured logs to this file (or '-' for stderr); default off to keep the agent's terminal clean")
 	auditPath := fs.String("audit", "", "write the durable, hash-chained DECISION JOURNAL to this file (default: .dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl; pass 'off' to disable). Every kernel verdict this session is appended as a tamper-evident JSONL row you can later replay with `fak audit verify`.")
-	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
+	// --no-audit was a pure alias for `--audit off` (both landed on the same branch in
+	// guardAuditPlan), so it cost the front door a flag and bought nothing a caller could
+	// not already spell. Folded into --audit, which documents 'off' in its own help text.
+	// The internal noAudit seam stays — guardAuditPlan/runGuardReplay are still exercised
+	// with it directly — but nothing on the CLI sets it any more.
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	probeMode := fs.Bool("probe", false, "local one-shot smoke mode: keep the normal guarded gateway but default the task-handoff Stop gate OFF, so `fak guard --probe -- claude -p \"say pong\"` proves the wire without demanding a fleet handoff. Explicit --task-handoff still wins.")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
@@ -299,7 +303,7 @@ func cmdGuard(argv []string) {
 	// journal + summary as the live path (see guard_replay.go), so what it shows is what
 	// a real session would do.
 	if *replayTrace != "" {
-		os.Exit(runGuardReplay(*replayTrace, *replayWire, *policyPath, *auditPath, *noAudit, os.Stdout))
+		os.Exit(runGuardReplay(*replayTrace, *replayWire, *policyPath, *auditPath, false, os.Stdout))
 		return
 	}
 
@@ -395,10 +399,10 @@ func cmdGuard(argv []string) {
 	//     So it is ON by default (announced in the banner, not silent). The kernel's
 	//     EvDecide/EvDeny events on the proxy adjudication path are exactly what the
 	//     journal records, so a guard session produces a populated ledger. Precedence:
-	//     FAK_AUDIT_JOURNAL honored at boot wins; --no-audit / --audit off disables;
+	//     FAK_AUDIT_JOURNAL honored at boot wins; --audit off disables;
 	//     --audit PATH or a repo-local per-session path otherwise. Enable BEFORE serving so
 	//     the emitter is registered before the first decision crosses the floor.
-	auditLabel, auditJournal := guardEnableAudit(*auditPath, *noAudit)
+	auditLabel, auditJournal := guardEnableAudit(*auditPath, false)
 	var auditSeq0 uint64
 	var refusalCarryForward []guardRefusalCarry
 	if auditJournal != nil {

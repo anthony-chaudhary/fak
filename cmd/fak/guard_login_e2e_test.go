@@ -224,7 +224,7 @@ func TestGuardDefaultLaunchDoesNotSpawnGit(t *testing.T) {
 	env[guardCrashRestartLimitEnv] = "3"
 
 	code, out, timedOut := runGuardE2E(t,
-		"--provider openai --base-url http://127.0.0.1:9 --quiet --no-audit -- "+child,
+		"--provider openai --base-url http://127.0.0.1:9 --quiet --audit off -- "+child,
 		env,
 	)
 	if timedOut {
@@ -248,7 +248,7 @@ func TestGuardDurableLaunchStillPublishes(t *testing.T) {
 	env := guardE2EGitEnv(binDir, logPath, registryPath)
 
 	code, out, timedOut := runGuardE2E(t,
-		"--provider openai --base-url http://127.0.0.1:9 --quiet --no-audit --session-id e2e-durable -- "+child,
+		"--provider openai --base-url http://127.0.0.1:9 --quiet --audit off --session-id e2e-durable -- "+child,
 		env,
 	)
 	if timedOut {

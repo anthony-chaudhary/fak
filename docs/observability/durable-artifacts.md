@@ -98,7 +98,7 @@ CAP_VERSION_BIND`), flushed per write, each row carrying the prior row's chained
   `fak guard` defaults it **on** (`guardEnableAudit`, `cmd/fak/guard_support.go:530`; wired at
   `guard.go:477`), writing to `.dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl`
   where `<hash>` = first 12 hex of sha256(abs repo root) (`guardDefaultAuditPath`,
-  `guard_support.go:461`). `--audit PATH` overrides; `--no-audit` / `--audit off` disables.
+  `guard_support.go:461`). `--audit PATH` overrides; `--audit off` disables.
 - **Rotation:** `Cut` archives a sealed segment to a sibling `<path>.cut-<finalSeq>` without
   breaking the chain (`internal/journal/rotate.go:43`); a rotated set verifies end-to-end.
 - Fleet workers name theirs `<lane>-<backend>-<pid>-<id>.jsonl` in the same dir;

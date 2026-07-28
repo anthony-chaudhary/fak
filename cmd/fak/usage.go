@@ -558,7 +558,7 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
   fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL | --remote-serve HOST[:PORT]|@lab/glm-5.2] [--policy FILE]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget|--restart-on-budget]]
                 [--restart-limit N] [--restart-seed-dir DIR]
-                [--api-key-env VAR] [--env VAR] [--audit FILE|off] [--no-audit] [--dump-policy] [--quiet]
+                [--api-key-env VAR] [--env VAR] [--audit FILE|off] [--dump-policy] [--quiet]
                 [--split auto|on|off] [--split-where bottom|right] -- <agent command...>
                 (RUN YOUR REAL AGENT THROUGH THE KERNEL: the one-command front door.
                  Starts the gateway in-process on a private loopback port, injects its
@@ -568,7 +568,7 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  your normal Claude Code  -  your key + prompt cache flow through, every
                  proposed tool call crosses the capability floor first. Every verdict is
                  appended to a durable, tamper-evident DECISION JOURNAL by default
-                 (--audit FILE to relocate, --no-audit to turn off; replay with
+                 (--audit FILE to relocate, --audit off to turn off; replay with
                  'fak audit verify'). --dump-policy prints the built-in floor to edit;
                  --policy FILE enforces your own. --split (auto) opens a 20% 'fak info'
                  pane beside the agent in a multiplexer terminal so the live cache
