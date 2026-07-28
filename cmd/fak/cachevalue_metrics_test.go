@@ -253,6 +253,83 @@ func TestRenderCachevalueExposition_CompactionSegments(t *testing.T) {
 	}
 }
 
+// TestRenderCachevalueExposition_CandidateBailRate drives the WHOLE exposition path the
+// scrape uses — ledger rows → gatewayusageledger.FoldCompaction (the same call
+// cachevalueMetricsHandler makes) → renderCachevalueExposition — over a population that
+// mixes served requests, genuine declines, and requests that were never compaction
+// CANDIDATES (#5388). It pins the rate, not just the labels: bail_rate must still read the
+// pinned-near-1.0 number for continuity, while candidate_bail_rate reads the declines over
+// ELIGIBLE attempts, which is the series a health alert can be written against.
+func TestRenderCachevalueExposition_CandidateBailRate(t *testing.T) {
+	prov := &gatewayusageledger.Provenance{CompactHistoryBudget: 48000}
+	at := time.Unix(6000, 0)
+	rows := []gatewayusageledger.Row{
+		// 2 compactions fired and shed.
+		gatewayusageledger.NewRow("exit", "guard", "claude", "", 0, prov, gatewayusageledger.Counters{
+			ObservedTurns: 5, CompactionFired: 2, CompactionShedTokens: 100, CachedPromptTokens: 900,
+		}, at),
+		// 198 bails, of which only 4 were about a real candidate.
+		gatewayusageledger.NewRow("exit", "guard", "claude", "", 0, prov, gatewayusageledger.Counters{
+			ObservedTurns: 6, CompactionBailed: 198,
+			CompactionBailReasons: map[string]uint64{
+				"under_budget": 3, "burst_unprofitable": 1,
+				"too_few_msgs": 190, "non_json": 1, "no_messages_key": 1, "decode_failed": 2,
+			},
+		}, at),
+	}
+	fold := gatewayusageledger.FoldCompaction(rows, "")
+
+	out := renderCachevalueExposition(richReport(), nil, fold, fixedNow(t))
+
+	// Continuity: the pre-existing gauge is unchanged, near 1.0 — the defect made visible.
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_bail_rate", `regime="interactive"`); !strings.HasSuffix(got, "0.99") {
+		t.Errorf("bail_rate = %q, want 0.99 (raw accounting preserved for continuity)", got)
+	}
+	// The held-out population is its own series, so it is visible rather than dropped.
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_non_candidate_bails", `regime="interactive"`); !strings.HasSuffix(got, "194") {
+		t.Errorf("non_candidate_bails = %q, want 194", got)
+	}
+	// The fix: 4 declines over 6 eligible attempts on the SAME population that read 0.99.
+	got := sampleLine(t, out, "fak_cachevalue_compaction_candidate_bail_rate", `regime="interactive"`)
+	if !strings.Contains(got, "0.666") {
+		t.Errorf("candidate_bail_rate = %q, want ~0.6667 (4 candidate bails / (2 fires + 4)); bail_rate on the same rows was 0.99", got)
+	}
+	if !strings.Contains(got, `band="0-20"`) || !strings.Contains(got, `budget="48000"`) {
+		t.Errorf("candidate_bail_rate missing regime/budget/band labels: %q", got)
+	}
+	// The top-bail label must not be won by a non-candidate on raw volume (too_few_msgs is
+	// 190 of 198 bails) — it would point the operator at the one bucket with nothing to do.
+	if top := sampleLine(t, out, "fak_cachevalue_compaction_top_bail_share", `regime="interactive"`); !strings.Contains(top, `reason="under_budget"`) {
+		t.Errorf("top_bail_share reason = %q, want under_budget (a non-candidate must not win on volume)", top)
+	}
+	// The per-reason mix still carries every non-candidate, so decode_failed stays
+	// assertable as fak-fault (#5387) even though the candidate rate holds it out.
+	if r := sampleLine(t, out, "fak_cachevalue_compaction_bail_reason", `reason="decode_failed"`); !strings.HasSuffix(r, "2") {
+		t.Errorf("bail_reason decode_failed = %q, want 2 (non-candidates must stay individually visible)", r)
+	}
+	// The reason-mix help must no longer file too_few_msgs under "tuning-sensitive": no
+	// budget or anchor setting makes a 2-message request compactible.
+	help := helpLine(t, out, "fak_cachevalue_compaction_bail_reason")
+	if strings.Contains(help, "burst_unprofitable/too_few_msgs are the tuning-sensitive slices") {
+		t.Errorf("bail_reason help still groups too_few_msgs with the tuning-sensitive slice: %q", help)
+	}
+	if !strings.Contains(help, "NOT CANDIDATES") {
+		t.Errorf("bail_reason help does not describe the non-candidate reasons: %q", help)
+	}
+}
+
+// helpLine returns the "# HELP <name> ..." line for a family, or "" if absent.
+func helpLine(t *testing.T, exposition, name string) string {
+	t.Helper()
+	want := "# HELP " + name + " "
+	for _, ln := range strings.Split(exposition, "\n") {
+		if strings.HasPrefix(ln, want) {
+			return ln
+		}
+	}
+	return ""
+}
+
 func TestRenderCachevalueExposition_HonestAbsence(t *testing.T) {
 	// A nil pointer field is omitted (honest absence, not a zero sample).
 	rep := richReport()

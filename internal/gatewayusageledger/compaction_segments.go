@@ -77,6 +77,50 @@ func compactionBudgetRegimeLabel(budget int) string {
 	}
 }
 
+// compactionNonCandidateReasons is the NON-CANDIDATE half of the closed
+// agent.CompactReason* bail vocabulary: outcomes the compactor returns from its
+// ELIGIBILITY gate, before any compactible candidate span exists. They are not
+// declined compactions — they are requests that were never in the running.
+//
+// The distinction is the difference between a rate that can signal and one that cannot.
+// The gateway attempts compaction on EVERY Anthropic passthrough once a budget is set, so
+// every sub-three-message subagent ping and every non-JSON body lands here; on real fleet
+// traffic that population dominates. Fold it into Bails/(Fires+Bails) and the headline
+// rate is pinned near 1.0 whether compaction is perfectly healthy or completely broken,
+// which is exactly the state #5388 reports. Held out, CandidateBailRate measures decisions
+// about real candidates and a high reading is actionable.
+//
+// decode_failed (#5387) is deliberately on THIS side. It is a structural fault, not a
+// benign idle, but it is decided at the same eligibility gate — the messages value never
+// decoded into a span, so there was no candidate to decline — and a fault has no place in
+// a rate that asks "how often does the compactor say no to work it could have done".
+// Nothing is hidden by that placement: it stays individually visible in BailReasons and in
+// the per-reason metric, where a nonzero count is assertable as fak-fault on its own.
+//
+// The LATER structural aborts (splice_failed, redecode_failed, prefix_mismatch,
+// malformed_body) are NOT here: each one aborts a real candidate after the drop was
+// already computed — a compaction that should have fired and did not — which is precisely
+// what the rate must keep measuring.
+//
+// An UNRECOGNIZED reason counts as a candidate (fail-open). A vocabulary member added
+// upstream therefore leaves the rate conservatively high rather than silently shrinking
+// the measured population — the safe direction for a health signal. The tokens are spelled
+// out here rather than referenced because this package is a stdlib-shaped tier-1 leaf that
+// does not import internal/agent, the same reason compactionBudgetRegimeLabel spells out
+// the two budget defaults.
+var compactionNonCandidateReasons = map[string]bool{
+	"too_few_msgs":    true, // < minElems messages — nothing safe to drop (benign, high-volume)
+	"non_json":        true, // body is not a JSON object
+	"no_messages_key": true, // no messages[] at all
+	"decode_failed":   true, // messages[] present but undecodable — structural, still never a candidate
+}
+
+// compactionReasonIsNonCandidate reports whether a bail reason means the request was never
+// a compaction candidate. Unknown reasons are candidates (see the fail-open note above).
+func compactionReasonIsNonCandidate(reason string) bool {
+	return compactionNonCandidateReasons[reason]
+}
+
 // CompactionSegment is the folded compaction stats for one (budget × length-band) cell.
 // ShedPctMedian/Mean are over the segment's VALID-denominator fired rows only; a segment
 // can have Sessions>0 yet an absent (NaN-free) percentile if every row bailed or every
@@ -97,6 +141,22 @@ type CompactionSegment struct {
 	BailRate      float64 `json:"bail_rate"`      // Bails / (Fires+Bails); 0 when neither
 	ShedTokens    uint64  `json:"shed_tokens"`    // sum CompactionShedTokens
 
+	// NonCandidateBails is the subset of Bails whose reason means the request was never a
+	// compaction CANDIDATE (compactionNonCandidateReasons). Reported so the population held
+	// out of CandidateBailRate is visible rather than silently dropped — a cell whose bails
+	// are almost all non-candidates is a normal short-request stream, not a sick compactor.
+	// It is derived from CompactionBailReasons, so a row that recorded a bail COUNT but no
+	// reason map (an older schema) contributes 0 here and stays in the candidate
+	// denominator: unclassified bails are never assumed benign.
+	NonCandidateBails uint64 `json:"non_candidate_bails"`
+	// CandidateBailRate is (Bails-NonCandidateBails) / (Fires + Bails-NonCandidateBails):
+	// declines over ELIGIBLE attempts, 0 when the eligible population is empty. This is the
+	// health read BailRate cannot carry (#5388) — BailRate counts requests that were never
+	// compactible, so it sits near 1.0 by construction on any traffic that mixes short
+	// auxiliary calls in with real sessions, and cannot separate a healthy compactor from a
+	// broken one. BailRate is kept beside it unchanged for continuity of the existing gauge.
+	CandidateBailRate float64 `json:"candidate_bail_rate"`
+
 	// ValidDenomRows is the count of rows usable for a shed fraction (fired>0 AND
 	// cached+input>0); ShedPctMedian/Mean fold over exactly these. DenomZeroRows is the
 	// quarantined phantom-100% class (shed>0 but cached+input==0), reported but never
@@ -106,12 +166,15 @@ type CompactionSegment struct {
 	ShedPctMedian  float64 `json:"shed_pct_median"`
 	ShedPctMean    float64 `json:"shed_pct_mean"`
 
-	// TopBailReason is the most common CompactReason across the cell's bailed attempts
-	// (empty when nothing bailed), the WHY behind a low shed slice.
+	// TopBailReason is the most common CompactReason across the cell's CANDIDATE bailed
+	// attempts (empty when no candidate bailed), the WHY behind a low shed slice. Restricted
+	// to candidates for the same reason as CandidateBailRate: a non-candidate reason can win
+	// on volume alone (too_few_msgs routinely does) and then the one cause an operator is
+	// pointed at is the one bucket where there is nothing to do.
 	TopBailReason string `json:"top_bail_reason,omitempty"`
 
-	// TopBailShare is the top reason's fraction of all CLASSIFIED bails in the cell
-	// (0 when nothing bailed). It separates a bail slice that is ONE dominant reason —
+	// TopBailShare is the top reason's fraction of all CLASSIFIED CANDIDATE bails in the
+	// cell (0 when no candidate bailed). It separates a bail slice that is ONE dominant reason —
 	// e.g. under_budget·0.89, a headless band correctly declining under a right-sized
 	// budget — from a split mix where a second reason (burst_unprofitable, a tuning
 	// call) is quietly eating fires. TopBailReason alone cannot tell those apart: both
@@ -126,8 +189,9 @@ type CompactionSegment struct {
 	// bailed, so a clean cell stays terse.
 	BailReasons map[string]uint64 `json:"bail_reasons,omitempty"`
 
-	bailReasons map[string]uint64
-	fracs       []float64
+	bailReasons     map[string]uint64
+	candBailReasons map[string]uint64
+	fracs           []float64
 }
 
 // CompactionReport is the whole segmentation, plus corpus-level totals so a reader can
@@ -183,12 +247,13 @@ func FoldCompactionByPeriod(rows []Row, since, granularity string) CompactionRep
 		seg := cells[k]
 		if seg == nil {
 			seg = &CompactionSegment{
-				Period:        period,
-				ExposeProfile: profile,
-				Budget:        budget,
-				BudgetRegime:  compactionBudgetRegimeLabel(budget),
-				Band:          band,
-				bailReasons:   map[string]uint64{},
+				Period:          period,
+				ExposeProfile:   profile,
+				Budget:          budget,
+				BudgetRegime:    compactionBudgetRegimeLabel(budget),
+				Band:            band,
+				bailReasons:     map[string]uint64{},
+				candBailReasons: map[string]uint64{},
 			}
 			cells[k] = seg
 		}
@@ -199,6 +264,14 @@ func FoldCompactionByPeriod(rows []Row, since, granularity string) CompactionRep
 		seg.ShedTokens += c.CompactionShedTokens
 		for reason, n := range c.CompactionBailReasons {
 			seg.bailReasons[reason] += n
+			// Partition as we fold: the full mix stays in bailReasons (nothing is hidden from
+			// the per-reason breakdown), while the candidate half drives the headline rate and
+			// the top-reason pick.
+			if compactionReasonIsNonCandidate(reason) {
+				seg.NonCandidateBails += n
+			} else {
+				seg.candBailReasons[reason] += n
+			}
 		}
 		if c.CompactionFired > 0 {
 			seg.FiredSessions++
@@ -217,9 +290,22 @@ func FoldCompactionByPeriod(rows []Row, since, granularity string) CompactionRep
 		if tot := seg.Fires + seg.Bails; tot > 0 {
 			seg.BailRate = float64(seg.Bails) / float64(tot)
 		}
+		// Candidate rate: hold the non-candidates out of BOTH sides of the ratio. The clamp
+		// guards the one way the two counters can disagree — a row whose reason map sums to
+		// more than its CompactionBailed total — so the eligible population can never go
+		// negative and wrap the unsigned subtraction.
+		candBails := seg.Bails
+		if seg.NonCandidateBails >= candBails {
+			candBails = 0
+		} else {
+			candBails -= seg.NonCandidateBails
+		}
+		if tot := seg.Fires + candBails; tot > 0 {
+			seg.CandidateBailRate = float64(candBails) / float64(tot)
+		}
 		seg.ShedPctMedian = medianPct(seg.fracs)
 		seg.ShedPctMean = meanPct(seg.fracs)
-		seg.TopBailReason, seg.TopBailShare = topReasonWithShare(seg.bailReasons)
+		seg.TopBailReason, seg.TopBailShare = topReasonWithShare(seg.candBailReasons)
 		if len(seg.bailReasons) > 0 {
 			seg.BailReasons = seg.bailReasons
 		}
@@ -305,7 +391,9 @@ func meanPct(fracs []float64) float64 {
 }
 
 // topReasonWithShare returns the most common reason AND its fraction of all classified
-// bails in the map (the total of every reason's count). The share is what turns the bare
+// bails in the map (the total of every reason's count). Callers pass the CANDIDATE half of
+// the partition, so a high-volume non-candidate cannot win on count alone and point the
+// operator at a bucket with nothing to do. The share is what turns the bare
 // label into a health read: under_budget at 0.89 is a headless band correctly declining,
 // while under_budget at 0.51 means a second reason is eating nearly half the attempts —
 // same TopBailReason, different diagnosis. Keys are sorted for a deterministic tie-break
@@ -349,10 +437,17 @@ func RenderCompaction(rep CompactionReport) string {
 	if rep.QuarantinedRows > 0 {
 		fmt.Fprintf(&b, "; %d quarantined (shed>0 but cached+input==0 — excluded from shed%%)", rep.QuarantinedRows)
 	}
-	b.WriteString("\n\n")
+	b.WriteByte('\n')
+	// The printed rate is the CANDIDATE one. Bails/(fires+bails) counts requests that were
+	// never compactible, so it reads near 1.0 on healthy and broken traffic alike; the raw
+	// bails and noncand columns are both here, so the old ratio stays recoverable by hand.
+	b.WriteString("  candbail = candidate bails / (fires + candidate bails) — the actionable rate\n")
+	b.WriteString("  noncand = bails that were never candidates (too_few_msgs, non_json, no_messages_key,\n")
+	b.WriteString("            decode_failed); held out of candbail and out of top_bail\n")
+	b.WriteString("\n")
 
-	header := fmt.Sprintf("  %-11s %-19s %-8s %5s %6s %6s %6s %8s  %-9s  %s",
-		"profile", "regime", "band", "sess", "fired", "fires", "bails", "shed%med", "bailrate", "top_bail")
+	header := fmt.Sprintf("  %-11s %-19s %-8s %5s %6s %6s %6s %7s %8s  %-9s  %s",
+		"profile", "regime", "band", "sess", "fired", "fires", "bails", "noncand", "shed%med", "candbail", "top_bail")
 	b.WriteString(header + "\n")
 
 	const noPeriod = "\x00" // sentinel distinct from a real "" (default un-bucketed) period
@@ -388,16 +483,18 @@ func RenderCompaction(rep CompactionReport) string {
 		if s.ValidDenomRows > 0 {
 			shed = fmt.Sprintf("%7.1f%%", s.ShedPctMedian)
 		}
-		// top_bail carries the reason's SHARE of classified bails, not just the label, so a
-		// reader tells a dominant correct-by-design decline (under_budget·89%) from a split
-		// mix (under_budget·51%) where a tuning-driven reason is quietly eating fires.
+		// top_bail carries the reason's SHARE of classified CANDIDATE bails, not just the
+		// label, so a reader tells a dominant correct-by-design decline (under_budget·89%)
+		// from a split mix (under_budget·51%) where a tuning-driven reason is quietly eating
+		// fires. A cell whose bails were ALL non-candidates has no actionable top reason and
+		// prints none — the noncand column is the whole story there.
 		topBail := s.TopBailReason
 		if topBail != "" {
 			topBail = fmt.Sprintf("%s·%.0f%%", topBail, s.TopBailShare*100)
 		}
 		regime := fmt.Sprintf("%s(%d)", s.BudgetRegime, s.Budget)
-		fmt.Fprintf(&b, "  %-11s %-19s %-8s %5d %6d %6d %6d %8s  %8.2f  %s\n",
-			s.ExposeProfile, regime, s.Band, s.Sessions, s.FiredSessions, s.Fires, s.Bails, shed, s.BailRate, topBail)
+		fmt.Fprintf(&b, "  %-11s %-19s %-8s %5d %6d %6d %6d %7d %8s  %8.2f  %s\n",
+			s.ExposeProfile, regime, s.Band, s.Sessions, s.FiredSessions, s.Fires, s.Bails, s.NonCandidateBails, shed, s.CandidateBailRate, topBail)
 	}
 	return b.String()
 }

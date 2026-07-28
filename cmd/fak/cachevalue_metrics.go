@@ -333,7 +333,9 @@ func renderCompactionSegments(w *promWriter, rep gatewayusageledger.CompactionRe
 		w.gauge("fak_cachevalue_compaction_fired_sessions", "WITNESSED: rows in this cell that fired compaction at least once.", float64(s.FiredSessions), lbl...)
 		w.gauge("fak_cachevalue_compaction_fires", "WITNESSED: compaction fires summed over this cell.", float64(s.Fires), lbl...)
 		w.gauge("fak_cachevalue_compaction_bails", "WITNESSED: compaction bails summed over this cell.", float64(s.Bails), lbl...)
-		w.gauge("fak_cachevalue_compaction_bail_rate", "WITNESSED: bails / (fires + bails) for this cell; 0 when neither fired nor bailed.", s.BailRate, lbl...)
+		w.gauge("fak_cachevalue_compaction_bail_rate", "WITNESSED: bails / (fires + bails) for this cell, NON-CANDIDATES INCLUDED; 0 when neither fired nor bailed. Near 1.0 by construction on mixed traffic — alert on candidate_bail_rate instead.", s.BailRate, lbl...)
+		w.gauge("fak_cachevalue_compaction_non_candidate_bails", "WITNESSED: bails in this cell that were never compaction CANDIDATES (too_few_msgs, non_json, no_messages_key, decode_failed) — held out of candidate_bail_rate.", float64(s.NonCandidateBails), lbl...)
+		w.gauge("fak_cachevalue_compaction_candidate_bail_rate", "WITNESSED: candidate bails / (fires + candidate bails) — declines over ELIGIBLE attempts, the alertable compaction-health rate; 0 when nothing was eligible.", s.CandidateBailRate, lbl...)
 		w.gauge("fak_cachevalue_compaction_shed_tokens_by_segment", "WITNESSED: context tokens shed by compaction in this cell.", float64(s.ShedTokens), lbl...)
 		w.gauge("fak_cachevalue_compaction_valid_denom_rows", "WITNESSED: fired rows with a usable shed denominator (cached+input>0) — the rows the shed%% folds over.", float64(s.ValidDenomRows), lbl...)
 		w.gauge("fak_cachevalue_compaction_denom_zero_rows", "WITNESSED: fired rows quarantined from the shed%% (shed>0 but cached+input==0).", float64(s.DenomZeroRows), lbl...)
@@ -348,17 +350,19 @@ func renderCompactionSegments(w *promWriter, rep gatewayusageledger.CompactionRe
 		// creeping up is a tuning call worth watching. Reasons sorted for a deterministic
 		// exposition. The top reason's SHARE is emitted alongside so a dashboard can gate on
 		// "the dominant reason no longer dominates" without summing the per-reason series.
+		// The FULL mix is emitted, non-candidates included, so decode_failed stays assertable
+		// on its own even though candidate_bail_rate holds it out.
 		reasons := make([]string, 0, len(s.BailReasons))
 		for r := range s.BailReasons {
 			reasons = append(reasons, r)
 		}
 		sort.Strings(reasons)
 		for _, r := range reasons {
-			w.gauge("fak_cachevalue_compaction_bail_reason", "WITNESSED: compaction bails in this cell attributed to one CompactReason (under_budget is correct-by-design; burst_unprofitable/too_few_msgs are the tuning-sensitive slices).", float64(s.BailReasons[r]), "regime", s.BudgetRegime, "budget", strconv.Itoa(s.Budget), "band", s.Band, "reason", r)
+			w.gauge("fak_cachevalue_compaction_bail_reason", "WITNESSED: compaction bails in this cell attributed to one CompactReason (under_budget is correct-by-design; burst_unprofitable is the tuning-sensitive slice, moving with --compact-history-budget/--assume-session-turns; too_few_msgs/non_json/no_messages_key/decode_failed are NOT CANDIDATES at all — no setting makes a 2-message request compactible — and are excluded from candidate_bail_rate).", float64(s.BailReasons[r]), "regime", s.BudgetRegime, "budget", strconv.Itoa(s.Budget), "band", s.Band, "reason", r)
 		}
 		if s.TopBailReason != "" {
 			topLbl := []string{"regime", s.BudgetRegime, "budget", strconv.Itoa(s.Budget), "band", s.Band, "reason", s.TopBailReason}
-			w.gauge("fak_cachevalue_compaction_top_bail_share", "WITNESSED: the top bail reason's fraction of this cell's classified bails (1.0 = one dominant reason; a falling share means a second reason is eating attempts).", s.TopBailShare, topLbl...)
+			w.gauge("fak_cachevalue_compaction_top_bail_share", "WITNESSED: the top bail reason's fraction of this cell's classified CANDIDATE bails (1.0 = one dominant reason; a falling share means a second reason is eating attempts). Non-candidate reasons cannot win this label.", s.TopBailShare, topLbl...)
 		}
 	}
 }
