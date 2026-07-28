@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -382,19 +383,19 @@ func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (
 	stamp := time.Now().UTC().Format("20060102T150405Z")
 	copiedCred := ""
 	if fileExists(filepath.Join(source.Dir, ".credentials.json")) {
-		if err := backupIfExists(filepath.Join(target.Dir, ".credentials.json"), backupDir, ".credentials.json.before-hydrate-"+stamp+".bak"); err != nil {
+		if err := backupIfExists(target.Dir, backupDir, ".credentials.json", stamp); err != nil {
 			return "", err
 		}
 		if err := copyFile(filepath.Join(source.Dir, ".credentials.json"), filepath.Join(target.Dir, ".credentials.json")); err != nil {
 			return "", err
 		}
-		if err := backupIfExists(filepath.Join(target.Dir, ".oauth-token"), backupDir, ".oauth-token.before-hydrate-"+stamp+".bak"); err != nil {
+		if err := backupIfExists(target.Dir, backupDir, ".oauth-token", stamp); err != nil {
 			return "", err
 		}
 		_ = os.Remove(filepath.Join(target.Dir, ".oauth-token"))
 		copiedCred = ".credentials.json"
 	} else if fileExists(filepath.Join(source.Dir, ".oauth-token")) {
-		if err := backupIfExists(filepath.Join(target.Dir, ".oauth-token"), backupDir, ".oauth-token.before-hydrate-"+stamp+".bak"); err != nil {
+		if err := backupIfExists(target.Dir, backupDir, ".oauth-token", stamp); err != nil {
 			return "", err
 		}
 		if err := copyFile(filepath.Join(source.Dir, ".oauth-token"), filepath.Join(target.Dir, ".oauth-token")); err != nil {
@@ -416,11 +417,75 @@ func fileExists(path string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-func backupIfExists(path, backupDir, name string) error {
+// hydrateBackupKeep bounds how many timestamped before-hydrate backups of ONE credential file
+// a seat retains. Every hydrate writes a fresh "<file>.before-hydrate-<stamp>.bak" under
+// <seat>/backups/, so with no cap the dir grows strictly monotonically for the seat's whole
+// lifetime AND keeps every superseded plaintext credential/OAuth token forever (#3505). Five is
+// deep enough to walk back through a bad hydrate chain while keeping the retained-secret window
+// short. The cap is per file, so a .credentials.json chain never evicts an .oauth-token pre-image.
+const hydrateBackupKeep = 5
+
+// hydrateBackupPrefix is the name stem shared by every before-hydrate backup of `file`. It is
+// BOTH what the writer stamps and what the prune matches on, so the writer and the reaper can
+// never disagree about which entries in backups/ are before-hydrate backups of this file. The
+// two credential names are prefix-disjoint (neither stem prefixes the other), so a prune of one
+// file's chain can never see the other's.
+func hydrateBackupPrefix(file string) string { return file + ".before-hydrate-" }
+
+// backupIfExists copies dir/<file> into backupDir as its stamped before-hydrate backup, then
+// prunes that file's chain back to hydrateBackupKeep. An absent source is a no-op, not an error —
+// a seat with no prior credential simply has no pre-image to keep. The cap lives HERE, on the
+// write path, rather than in a separate reaper pass: one write, one prune, same function, so no
+// call site can add an unbounded backup by forgetting to reap (#3505).
+func backupIfExists(dir, backupDir, file, stamp string) error {
+	path := filepath.Join(dir, file)
 	if !fileExists(path) {
 		return nil
 	}
-	return copyFile(path, filepath.Join(backupDir, name))
+	if err := copyFile(path, filepath.Join(backupDir, hydrateBackupPrefix(file)+stamp+".bak")); err != nil {
+		return err
+	}
+	return pruneHydrateBackups(backupDir, file, hydrateBackupKeep)
+}
+
+// pruneHydrateBackups deletes the OLDEST "<file>.before-hydrate-<stamp>.bak" entries in backupDir
+// until at most `keep` survive. The stamp is a sortable UTC token, so ordering the names
+// lexicographically is ordering them by age, and no stat call is needed to find the oldest.
+// keep <= 0 is a no-op: a cap must never prune to empty and discard the pre-image the operator
+// just took. A missing backupDir is likewise not an error — nothing backed up yet is a valid
+// state. Only names ending .bak are considered, so a torn copy's .bak.tmp is never mistaken for
+// a completed backup and counted against the cap.
+func pruneHydrateBackups(backupDir, file string, keep int) error {
+	if keep <= 0 {
+		return nil
+	}
+	ents, err := os.ReadDir(backupDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	prefix := hydrateBackupPrefix(file)
+	var names []string
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		if n := e.Name(); strings.HasPrefix(n, prefix) && strings.HasSuffix(n, ".bak") {
+			names = append(names, n)
+		}
+	}
+	if len(names) <= keep {
+		return nil
+	}
+	sort.Strings(names) // oldest stamp first
+	for _, n := range names[:len(names)-keep] {
+		if err := os.Remove(filepath.Join(backupDir, n)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func copyMissingProjectFiles(srcRoot, dstRoot string) (int, error) {
