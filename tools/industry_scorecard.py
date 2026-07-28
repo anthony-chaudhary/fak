@@ -1301,9 +1301,11 @@ def render_index_page(payload: dict[str, Any], data: dict[str, Any],
     out.append("> **Read this right.** The metric to optimize is fak's **standing** on the field "
                "(raise it above its floor by turning a gap/parity axis into a measured lead) and the "
                "**honest-gap count** (drive it toward 0 as benchmarks land). The bounded /100 grade-A "
-               "composite grades only map completeness + honesty — it SATURATES near the top once the "
-               "map is honestly drawn and can no longer tell you how much of the field fak still does "
-               "not contest, so it is kept only as a labeled legacy line, not the driver. fak is a "
+               "composite grades only map completeness + honesty — it scores how complete and honest "
+               "fak's competitive MAP is, explicitly **not how much fak wins** — and it SATURATES near "
+               "the top once the map is honestly drawn and can no longer tell you how much of the field "
+               "fak still does not contest, so it is kept only as a labeled legacy line, not the "
+               "driver. fak is a "
                "focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps "
                "(out-of-scope or not-yet-measured), shown plainly below.")
     out.append("")
