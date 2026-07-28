@@ -20,15 +20,24 @@ package toolproc
 // consumers and never by this package's init. That is what lets
 // internal/toolproc stay an init-free fold with no defconfig entry.
 //
-// AND TODAY THERE IS NO CONSUMER. This file ships as a FOUNDATION: nothing in
-// the tree calls ReuseReasonPairs or ReuseReasonCode yet, so no live seam
-// currently renders a reuse verdict. Said plainly because the alternative —
-// naming a call site that does not exist — is the failure mode this repo
-// treats as an unwitnessed claim. Promotion evidence is a seam that actually
-// serves a repeat, registers these pairs once at startup, and cites the code on
-// the wire; the arming rung is filed rather than half-done here. Until then the
-// value of the file is that the vocabulary is allocated, contiguous, collision-
-// checked and total, so the consumer that arrives does not invent a second one.
+// AND THE CONSUMER IS internal/toolprocgate/reusearm.go (#5407). This file
+// shipped as a FOUNDATION with nothing in the tree calling either exported
+// function; that posture is now retired, and the promotion evidence it named is
+// exactly what landed. ReuseArm.Serve answers a repeat from the armed store and
+// cites the code the receipt maps to, rendering the stable token on
+// abi.Result.Meta["reuse_reason"] — beside kill_reason, the surface an operator
+// already reads for a quarantined completion, so a served repeat is
+// distinguishable from a fresh fetch without a second reporting channel. The
+// pairs register in that leaf's own init: one site, run once, which is what
+// makes a second registration under a different name unreachable rather than
+// merely discouraged. The fail-closed half is honoured at the call site and not
+// only documented here: a reason outside the closed set names NOTHING and also
+// serves nothing, so bytes no verdict blessed never answer a call.
+//
+// Registration still does not belong to THIS leaf's init. The offline
+// `fak toolproc repeats` fold runs in a process where nothing is registered and
+// stays init-free, exactly as before — arming a serving seam changed the
+// consumer, not the classifier.
 //
 // THE BLOCK. The process-table family holds 1040–1044 (toolproc.go's four
 // supervision verdicts plus monitor.go's coverage verdict). The reuse verdicts
