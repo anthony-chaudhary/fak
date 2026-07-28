@@ -19,7 +19,10 @@ import (
 //   - Grouping is keyed on author provenance. When a receipt carries no author
 //     provenance, its finding collapses into a single unattributed bucket that
 //     is always marked insufficient (NO_PROVENANCE) — stripping provenance
-//     structurally prevents any model-specific claim.
+//     structurally prevents any model-specific claim. Provider and family are
+//     normalized independently, so a receipt attributed on only ONE axis is
+//     marked insufficient too (PARTIAL_PROVENANCE): a redaction that drops a
+//     single axis must not leave a half-named row still able to claim.
 
 const AuditClusterReportSchema = "fak-crossaudit-failure-clusters/v1"
 
@@ -81,7 +84,13 @@ const (
 	ClusterInsufficientLowSample    = "LOW_SAMPLE"
 	ClusterInsufficientLowAudits    = "LOW_AUDITS"
 	ClusterInsufficientNoProvenance = "NO_PROVENANCE"
-	ClusterInsufficientConfounded   = "CONFOUNDED"
+	// ClusterInsufficientPartialProvenance marks a group attributed on only ONE
+	// of the two provenance axes. Provider and family are normalized
+	// independently (neither is derived from the other), so a redaction that
+	// drops just one axis would otherwise leave a fully claimable, half-named
+	// row — and render a dangling "Provenance /opus" proposal.
+	ClusterInsufficientPartialProvenance = "PARTIAL_PROVENANCE"
+	ClusterInsufficientConfounded        = "CONFOUNDED"
 )
 
 // ClusterConfig sets the sample floors below which a group is insufficient to
@@ -277,8 +286,11 @@ func ClusterAuditFailures(receipts []IssueAuditReceipt, cfg ClusterConfig) Audit
 			}
 		}
 
-		if agg.provider == "" && agg.family == "" {
+		switch {
+		case agg.provider == "" && agg.family == "":
 			row.InsufficientReasons = append(row.InsufficientReasons, ClusterInsufficientNoProvenance)
+		case agg.provider == "" || agg.family == "":
+			row.InsufficientReasons = append(row.InsufficientReasons, ClusterInsufficientPartialProvenance)
 		}
 		if row.Findings < cfg.MinFindings {
 			row.InsufficientReasons = append(row.InsufficientReasons, ClusterInsufficientLowSample)

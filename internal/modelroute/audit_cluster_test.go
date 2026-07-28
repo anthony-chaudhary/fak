@@ -143,6 +143,55 @@ func TestAuditFailureClusters(t *testing.T) {
 		}
 	})
 
+	// A PARTIALLY redacted receipt — one provenance axis stripped, the other
+	// kept — must not support a model-specific claim either. Otherwise a
+	// redaction that drops only the provider still lets a family-keyed claim
+	// escape, and the proposal renders a dangling "Provenance /opus".
+	t.Run("partial_provenance_is_insufficient", func(t *testing.T) {
+		// build makes a group that clears every other floor: 3 findings across
+		// diverse harnesses over 6 audits, above a base rate diluted by a fully
+		// attributed contrast family.
+		build := func(provider, family string) []IssueAuditReceipt {
+			var rs []IssueAuditReceipt
+			rs = append(rs,
+				clusterReceipt(provider, family, "claude-code", "", CrossAuditRefute, silentReason),
+				clusterReceipt(provider, family, "cursor", "", CrossAuditRefute, silentReason),
+				clusterReceipt(provider, family, "aider", "", CrossAuditRefute, silentReason),
+			)
+			for i := 0; i < 3; i++ {
+				rs = append(rs, clusterReceipt(provider, family, "claude-code", "", CrossAuditPass, "clean"))
+			}
+			for i := 0; i < 4; i++ {
+				rs = append(rs, clusterReceipt("anthropic", "sonnet", "claude-code", "", CrossAuditPass, "clean"))
+			}
+			return rs
+		}
+
+		for _, c := range []struct{ name, provider, family string }{
+			{"family_only", "", "opus"},
+			{"provider_only", "anthropic", ""},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				res := ClusterAuditFailures(build(c.provider, c.family), DefaultClusterConfig())
+				row := findClusterRow(t, res, MechanismSilentOmission, c.provider, c.family)
+				if row.Findings < DefaultClusterConfig().MinFindings || row.ProvenanceAudits < DefaultClusterConfig().MinAudits {
+					t.Fatalf("fixture should clear the sample floors so provenance is the sole reason: %+v", row)
+				}
+				if !row.Insufficient {
+					t.Fatalf("partially attributed row must be insufficient: %+v", row)
+				}
+				if !containsStr(row.InsufficientReasons, ClusterInsufficientPartialProvenance) {
+					t.Fatalf("reasons = %v, want %s", row.InsufficientReasons, ClusterInsufficientPartialProvenance)
+				}
+				for _, p := range res.Proposals {
+					if p.Provider == c.provider && p.Family == c.family {
+						t.Fatalf("partial provenance must not yield a model-specific proposal: %+v", p)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("stripping_provenance_prevents_model_claim", func(t *testing.T) {
 		// findFamily carries the findings; contrastFamily adds clean audits that
 		// dilute the base rate so an attributed group clears it. Stripping
