@@ -152,3 +152,6 @@ and measurable (tool-search still resolves a tool from a leaner description).
 - **#3232** — gateway tool-floor deferral (the 10× lever on this same floor).
 - **#3234** — the userland analogue: `fak skill footprint` for the resident
   `.claude/skills` description floor.
+- **#5444** — that userland floor's own one-way ratchet, built to this page's
+  pattern: [resident skill-description floor](skill-description-floor.md)
+  (`SKILL_DESC_BUDGET_EXCEEDED` / `SKILL_DESC_BUDGET_STALE`).

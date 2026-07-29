@@ -20,69 +20,41 @@ package main
 // slice itself and exposes no session `--settings` knob to trim it today).
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/capindex"
+	"github.com/anthony-chaudhary/fak/internal/skillfootprint"
 )
 
-// skillFootprintEntry is one skill's resident cost row.
-type skillFootprintEntry struct {
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Version   string `json:"version"`
-	Digest    string `json:"digest"`
-	CardBytes int    `json:"card_bytes"`        // fak's at-rest serialized card
-	DescBytes int    `json:"description_bytes"` // the harness-resident description slice
-	NameBytes int    `json:"name_bytes"`        // the name-only resident slice (headless profile, #3612)
-}
-
-// skillFootprint is the whole-catalog resident floor: per-skill rows plus the
-// two floor totals — the description floor (the harness `/context` Skills slice)
-// and the card floor (fak's own at-rest index cost).
-type skillFootprint struct {
-	Entries    []skillFootprintEntry
-	DescFloor  int // interactive resident floor: sum of description bytes (#3234)
-	NameFloor  int // headless resident floor: sum of name bytes only (#3612)
-	CardFloor  int
-	SkillCount int
-}
-
 // computeSkillFootprint folds the at-rest cards into a resident-floor scorecard.
-// It is pure (no filesystem) and deterministic: entries sort by resident
-// description bytes descending, then name, then kind — so the heaviest resident
-// skills lead and equal-weight rows have a stable order.
-func computeSkillFootprint(cards []capindex.CapCard) skillFootprint {
-	fp := skillFootprint{SkillCount: len(cards), Entries: make([]skillFootprintEntry, 0, len(cards))}
-	for _, c := range cards {
-		desc := len(c.Trigger)
-		name := len(c.Ref.Name)
-		cb := len(c.CardBytes)
-		fp.DescFloor += desc
-		fp.NameFloor += name
-		fp.CardFloor += cb
-		fp.Entries = append(fp.Entries, skillFootprintEntry{
-			Kind:      string(c.Ref.Kind),
-			Name:      c.Ref.Name,
-			Version:   c.Ref.Version,
-			Digest:    c.Digest,
-			CardBytes: cb,
-			DescBytes: desc,
-			NameBytes: name,
-		})
+//
+// The fold itself lives in internal/skillfootprint, which also holds the #5444
+// ratchet that gates the number. Keeping the two in one package is deliberate: the
+// figure this verb prints and the figure the budget refuses on are then the same
+// measurement by construction, and no second estimator can drift into existence.
+func computeSkillFootprint(cards []capindex.CapCard) skillfootprint.Floor {
+	return skillfootprint.Fold(cards)
+}
+
+// skillDescriptionBudgetStatus reports how the measured description floor sits
+// against the committed #5444 ceiling: the refusal token when the ratchet would
+// refuse, "ok" when it sits inside the band. The verb REPORTS the gate rather than
+// enforcing it — enforcement is the package test over the real `.claude/skills`
+// tree, so a scorecard run against an arbitrary tree (a fixture, another checkout)
+// stays a measurement and never a refusal.
+func skillDescriptionBudgetStatus(fp skillfootprint.Floor) string {
+	err := skillfootprint.CheckDescriptions(fp)
+	if err == nil {
+		return "ok"
 	}
-	sort.Slice(fp.Entries, func(i, j int) bool {
-		if fp.Entries[i].DescBytes != fp.Entries[j].DescBytes {
-			return fp.Entries[i].DescBytes > fp.Entries[j].DescBytes
-		}
-		if fp.Entries[i].Name != fp.Entries[j].Name {
-			return fp.Entries[i].Name < fp.Entries[j].Name
-		}
-		return fp.Entries[i].Kind < fp.Entries[j].Kind
-	})
-	return fp
+	var sbe *skillfootprint.SkillDescBudgetError
+	if errors.As(err, &sbe) {
+		return sbe.Reason
+	}
+	return "refused"
 }
 
 func runSkillFootprint(out, errw io.Writer, argv []string) int {
@@ -132,15 +104,22 @@ func runSkillFootprint(out, errw io.Writer, argv []string) int {
 			"name_floor_bytes":        fp.NameFloor,
 			"resident_floor_bytes":    residentFloor,
 			"card_floor_bytes":        fp.CardFloor,
-			"approx_tokens":           residentFloor / 4, // ~4 bytes/token
-			"entries":                 fp.Entries,
-			"heaviest":                heaviest,
+			"approx_tokens":           skillfootprint.ApproxTokens(residentFloor),
+			// The #5444 ratchet, reported alongside the measurement it gates: the
+			// committed ceiling and which way (if either) the floor has drifted out
+			// of the band. Enforcement lives in the internal/skillfootprint test.
+			"description_budget_bytes":  skillfootprint.SkillDescriptionBudgetBytes,
+			"description_budget_status": skillDescriptionBudgetStatus(fp),
+			"entries":                   fp.Entries,
+			"heaviest":                  heaviest,
 		})
 		return 0
 	}
 
 	fmt.Fprintf(out, "skill footprint [%s]: %d skill(s); resident floor = %d bytes (~%d tokens); description floor = %d B; name-only floor = %d B; at-rest card floor = %d bytes; mcp=%v\n",
-		*profile, fp.SkillCount, residentFloor, residentFloor/4, fp.DescFloor, fp.NameFloor, fp.CardFloor, *includeMCP)
+		*profile, fp.SkillCount, residentFloor, skillfootprint.ApproxTokens(residentFloor), fp.DescFloor, fp.NameFloor, fp.CardFloor, *includeMCP)
+	fmt.Fprintf(out, "  description budget (#5444): %d B committed, measured %d B -> %s\n",
+		skillfootprint.SkillDescriptionBudgetBytes, fp.DescFloor, skillDescriptionBudgetStatus(fp))
 	if len(heaviest) == 0 {
 		fmt.Fprintln(out, "  (no skills discovered under .claude/skills)")
 		return 0

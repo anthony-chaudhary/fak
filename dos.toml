@@ -1941,6 +1941,30 @@ summary  = "A member loop is ORPHANED-FOLLOWON: work it emitted (a durable baton
 fix      = "Chase or close the emitted work through the member's OWN front door (the walk's worklist prints the chase/redirect entry): route the orphaned issue to an owner who advances it, or stop emitting into the void. Never re-file or re-dispatch from the witness path. If the emission is genuinely being carried, make the advance visible: update/close the issue so the durable state shows it. Floor: go test ./internal/superloop -run 'Followon|Orphaned'; go test ./cmd/fak -run SuperloopFleet."
 see_also = ["internal/relay/orphanfollowon.go", "internal/superloop/superloop.go", "internal/superloop/fleetwalk.go", "cmd/fak/superloop_fleet.go", "RELAY_NO_PROGRESS"]
 
+# The resident skill-description ratchet (issue #5444, epic #3229): the userland twin of
+# internal/mcpfootprint's MCP floor gates. #3234 shipped the MEASUREMENT (`fak skill
+# footprint`) and closed; in the twenty days that followed, the measured resident floor grew
+# 30.4% with nothing opposing it, because a number that cannot REFUSE a change is taste.
+# internal/skillfootprint.CheckDescriptions is the refusal, and it is two-sided: growth is
+# refused, and so is an unbanked trim -- otherwise recovered slack silently becomes headroom
+# for the next skill and the ratchet stops ratcheting. Declaring both tokens here makes
+# `dos_check_reason SKILL_DESC_BUDGET_EXCEEDED` classify them as known OPERATOR_GATEs an
+# author clears by re-pinning the constant, not UNCLASSIFIED free-text drift. The floor under
+# both is `go test ./internal/skillfootprint`, which prices the real `.claude/skills` tree.
+[reasons.SKILL_DESC_BUDGET_EXCEEDED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The resident .claude/skills description floor -- the sum of every SKILL.md frontmatter `description`, held at rest and growing linearly with skill count -- rose above the committed ceiling skillfootprint.SkillDescriptionBudgetBytes. A new skill, or a fattened description on an existing one, added a per-session tax that no single author would otherwise see grow (issue #5444, the one-way ratchet over #3234's measurement)."
+fix      = "Prefer trimming the description: the skill stays invocable by NAME, so the resident prose only has to say WHEN to load it, not what it does (the name-only floor is ~2% of the description floor). If the growth is justified, raise skillfootprint.SkillDescriptionBudgetBytes to the measured value in the SAME commit and re-pin the baseline block in docs/context-budget/skill-description-floor.md -- that diff line is the review the ratchet exists to force. Measure with `fak skill footprint --top 8`. Floor: `go test ./internal/skillfootprint`."
+see_also = ["internal/skillfootprint/descbudget.go", "docs/context-budget/skill-description-floor.md", "fak skill footprint", "SKILL_DESC_BUDGET_STALE"]
+
+[reasons.SKILL_DESC_BUDGET_STALE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The resident .claude/skills description floor fell materially below the committed ceiling skillfootprint.SkillDescriptionBudgetBytes -- a trim was won but never banked into the constant, so the recovered headroom would be silently refilled by the next skill added. Also the fail-closed reading of a broken probe: a skills tree that cannot be read folds to a zero floor and refuses here rather than greening on a measurement of nothing (issue #5444)."
+fix      = "Re-pin skillfootprint.SkillDescriptionBudgetBytes DOWN to the newly measured floor and update docs/context-budget/skill-description-floor.md in the same commit, so the ratchet tightens. If instead the floor priced as zero or near-zero, the probe is broken, not the catalog: check that `.claude/skills` is present and readable from the working directory. Measure with `fak skill footprint --json`. Floor: `go test ./internal/skillfootprint`."
+see_also = ["internal/skillfootprint/descbudget.go", "docs/context-budget/skill-description-floor.md", "fak skill footprint", "SKILL_DESC_BUDGET_EXCEEDED"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).
