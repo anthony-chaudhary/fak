@@ -73,8 +73,24 @@ type spineFixture struct {
 	Note    string            `json:"note,omitempty"`
 	Concept string            `json:"concept"`
 	Task    string            `json:"task"`
+	Leaf    string            `json:"leaf,omitempty"` // the lane a correct ship stamp names; derived from the seed paths when absent
 	Seed    map[string]string `json:"seed"`
 	Arms    []spineArm        `json:"arms"`
+}
+
+// stampLeaf resolves the lane leaf the #5380 affordance hint would echo into its
+// `(fak <leaf>)` template: an explicit fixture "leaf" wins, else the seed paths'
+// own directory convention. An empty answer means the hint cannot name the lane
+// honestly, and AffordanceAsk then refuses to inject rather than teach a guess.
+func (fx spineFixture) stampLeaf() string {
+	if s := strings.TrimSpace(fx.Leaf); s != "" {
+		return s
+	}
+	paths := make([]string, 0, len(fx.Seed))
+	for p := range fx.Seed {
+		paths = append(paths, p)
+	}
+	return conceptbench.LeafOfPaths(paths)
 }
 
 // spineRow is one graded model arm: {model, concept, pass, witness_source,
@@ -82,21 +98,26 @@ type spineFixture struct {
 // never be read as a strong one. SignalClass marks a live arm that hit a
 // usage/entitlement wall — recorded, never scored (report.go excludes it from
 // every headline claim).
+// AffordanceHint records whether THIS row's arm was driven with the #5380
+// tier-gated affordance hint in its frame, so a re-run artifact states which rows
+// were treated and which were the untouched control — the promotion evidence the
+// issue asks for is a comparison, and a comparison needs the treatment labeled.
 type spineRow struct {
-	Model         string `json:"model"`
-	Concept       string `json:"concept"`
-	Pass          bool   `json:"pass"`
-	Source        string `json:"source"`
-	Verdict       string `json:"verdict"`
-	Witness       string `json:"witness"`
-	WitnessSource string `json:"witness_source"`
-	SignalClass   string `json:"signal_class,omitempty"`
-	StampKind     string `json:"stamp_kind"`
-	StampLeaf     string `json:"stamp_leaf,omitempty"`
-	Branch        string `json:"branch"`
-	CommitSHA     string `json:"commit_sha"`
-	Subject       string `json:"subject"`
-	Evidence      string `json:"evidence"`
+	Model          string `json:"model"`
+	Concept        string `json:"concept"`
+	Pass           bool   `json:"pass"`
+	Source         string `json:"source"`
+	AffordanceHint bool   `json:"affordance_hint,omitempty"`
+	Verdict        string `json:"verdict"`
+	Witness        string `json:"witness"`
+	WitnessSource  string `json:"witness_source"`
+	SignalClass    string `json:"signal_class,omitempty"`
+	StampKind      string `json:"stamp_kind"`
+	StampLeaf      string `json:"stamp_leaf,omitempty"`
+	Branch         string `json:"branch"`
+	CommitSHA      string `json:"commit_sha"`
+	Subject        string `json:"subject"`
+	Evidence       string `json:"evidence"`
 }
 
 type spineReport struct {
@@ -198,7 +219,18 @@ func runSpine(f flags, budget budgetInfo) int {
 		)
 		if arm.Source == "live" {
 			anyLive = true
-			row, err = driveAndGradeLiveArm(resolved[i], dosBin, fx, arm)
+			// The #5380 ask is built PER ARM: the tier comes from the registry's own
+			// rating of this model id, so --affordance-hint can turn the experiment on
+			// but can never reach a frontier arm's frame. A replay arm is deliberately
+			// not asked — its commit is recorded, so a hint in its frame would change
+			// nothing while making the artifact claim a treatment that did not happen.
+			ask := conceptbench.AffordanceAsk{
+				Concept: conceptbench.Concept(fx.Concept),
+				Leaf:    fx.stampLeaf(),
+				Tier:    reg.TierOf(arm.Model),
+				Enabled: f.affordanceHint,
+			}
+			row, err = driveAndGradeLiveArm(resolved[i], dosBin, fx, arm, ask)
 		} else {
 			row, err = runSpineArm(dosBin, fx, arm.Model, arm.Source, arm.Commit)
 		}
@@ -291,29 +323,40 @@ func spineHonesty(rows []spineRow) (conceptbench.HonestyGate, bool) {
 // path as a replay arm; the model's returned text is the produced commit's subject
 // (the diff still comes from the fixture recipe until #2741 wires the full forward
 // pass), so the row is a genuine live, referee-witnessed headline candidate.
-func driveAndGradeLiveArm(ma conceptbench.ModelArm, dosBin string, fx spineFixture, arm spineArm) (spineRow, error) {
-	tr, err := ma.Drive(conceptbench.Task{ID: arm.Model, Prompt: fx.Task})
+// ask carries the #5380 tier-gated affordance hint: ask.Frame returns the fixture's
+// task text UNCHANGED for a frontier, unrated, or opted-out arm, and appends the
+// hint only for an opted-in weaker-tier arm — so the frame the transport receives
+// is the honest record of which arm was treated.
+func driveAndGradeLiveArm(ma conceptbench.ModelArm, dosBin string, fx spineFixture, arm spineArm, ask conceptbench.AffordanceAsk) (spineRow, error) {
+	_, hinted := ask.Hint()
+	tr, err := ma.Drive(conceptbench.Task{ID: arm.Model, Prompt: ask.Frame(fx.Task)})
 	if err != nil {
 		return spineRow{}, err
 	}
 	if !tr.Scoreable() {
 		return spineRow{
-			Model:       arm.Model,
-			Concept:     fx.Concept,
-			Pass:        false,
-			Source:      "live",
-			Verdict:     "CLASSIFIED",
-			Witness:     "walled",
-			SignalClass: tr.SignalClass,
-			Subject:     arm.Commit.Subject,
-			Evidence:    fmt.Sprintf("live arm walled (%s), recorded not scored: %s", tr.SignalClass, strings.TrimSpace(tr.ErrText)),
+			Model:          arm.Model,
+			Concept:        fx.Concept,
+			Pass:           false,
+			Source:         "live",
+			AffordanceHint: hinted,
+			Verdict:        "CLASSIFIED",
+			Witness:        "walled",
+			SignalClass:    tr.SignalClass,
+			Subject:        arm.Commit.Subject,
+			Evidence:       fmt.Sprintf("live arm walled (%s), recorded not scored: %s", tr.SignalClass, strings.TrimSpace(tr.ErrText)),
 		}, nil
 	}
 	commit := arm.Commit
 	if s := strings.TrimSpace(tr.Output); s != "" {
 		commit.Subject = s
 	}
-	return runSpineArm(dosBin, fx, arm.Model, "live", commit)
+	row, err := runSpineArm(dosBin, fx, arm.Model, "live", commit)
+	if err != nil {
+		return row, err
+	}
+	row.AffordanceHint = hinted
+	return row, nil
 }
 
 // runSpineArm grades one arm's produced commit in a fresh scratch repo. The pass
