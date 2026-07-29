@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **9** (clarity 0 + coverage 9) |
 | **Crystal-clear concepts (and climbing)** | **401** crystal of 2114 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2287 / 2296** (99.6% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2288 / 2297** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 190 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **60** of 2786 indexed names |
 | As of |  (fak ) |
@@ -75,7 +75,7 @@ coverage by family (positioned / discovered):
   dev-tier         ............................ 0/0
   evict            ############################ 45/45
   gateway-engine   ############################ 169/169
-  guard-gate       ############################ 380/380
+  guard-gate       ############################ 381/381
   layout           ############################ 14/14
   loop             ############################ 77/77
   policy-capability ############################ 151/151
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 139/139
 
-namespace coverage  [################################] 99.6%  (2287/2296 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2288/2297 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -2416,7 +2416,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | dev-tier | 0 | 0 | 0 |
 | evict | 45 | 45 | 0 |
 | gateway-engine | 169 | 169 | 0 |
-| guard-gate | 380 | 380 | 0 |
+| guard-gate | 381 | 381 | 0 |
 | layout | 14 | 14 | 0 |
 | loop | 77 | 77 | 0 |
 | policy-capability | 151 | 151 | 0 |
