@@ -15,7 +15,9 @@ def write_json(root: Path, rel_path: str, data: object) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def good_artifacts(root: Path) -> None:
+def _write_witness_artifacts(root: Path) -> None:
+    """Seed the witness triple the audit reads first: the source witness matrix,
+    the executed witness gate, and the proof roll-up over them."""
     host_command = "go test ./internal/gateway -run 'TestChatProxyOpenAICompatibleAliasIsHostAgnostic$'"
     host_argv = ["go", "test", "./internal/gateway", "-run", "TestChatProxyOpenAICompatibleAliasIsHostAgnostic$", "-count=1"]
     profile_command = "go test ./internal/gateway -run 'TestChatProxyOpenAICompatibleHostProfileConformance$'"
@@ -95,6 +97,10 @@ def good_artifacts(root: Path) -> None:
             {"id": "blocked_paid_or_keyed_hosts", "status": "EXTERNAL_STATE", "reason": "billing/key"},
         ],
     })
+
+def _write_inventory_artifacts(root: Path) -> None:
+    """Seed the permission-system benchmark plus the candidate-host inventory:
+    the acceptance sweep, the roster, and the blocked-host retry packet."""
     write_json(root, audit.DEFAULT_PATHS["benchmark"], {
         "schema": "fak.permission-system-benchmark.v1",
         "metrics": [
@@ -154,6 +160,11 @@ def good_artifacts(root: Path) -> None:
             "retry_packet_gate": True,
         },
     })
+
+def _write_readiness_artifacts(root: Path) -> None:
+    """Seed the paid/keyed readiness chain: the external-state audit, the
+    conformance certificate, the qualification predicate, and the live-smoke
+    queue plus its runner gate."""
     write_json(root, audit.DEFAULT_PATHS["external_state"], {
         "schema": "fak.api-host-external-state-audit.v1",
         "summary": {
@@ -238,6 +249,14 @@ def good_artifacts(root: Path) -> None:
         },
         "runs": [],
     })
+
+
+def good_artifacts(root: Path) -> None:
+    """Seed a complete, self-consistent artifact set under `root` — the shared
+    fixture every test starts from before perturbing exactly one artifact."""
+    _write_witness_artifacts(root)
+    _write_inventory_artifacts(root)
+    _write_readiness_artifacts(root)
 
 
 class APIHostGoalAuditTest(unittest.TestCase):

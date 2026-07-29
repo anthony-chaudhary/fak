@@ -302,131 +302,261 @@ def write_native_hook_manifest(home: Path, *, repaired_at: datetime | None = Non
         os.utime(backup, (marker, marker))
 
 
+def write_session_rollout(home: Path) -> None:
+    """Write the Codex rollout JSONL the witness reads: a prompt-bearing
+    response item, a token-count event, a completed turn, and two shell
+    calls. Every prose payload here is a string the privacy assertions must
+    NOT find in the emitted witness."""
+    sessions = home / "sessions" / "2026" / "06" / "25"
+    sessions.mkdir(parents=True)
+    session = sessions / "rollout-abc123.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "response_item", "payload": {"content": "drop this prompt"}}),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "token_count",
+                            "info": {
+                                "last_token_usage": {
+                                    "input_tokens": 2006,
+                                    "cached_input_tokens": 1920,
+                                    "output_tokens": 9,
+                                },
+                                "prompt_text": "drop this too",
+                            },
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "turn.completed",
+                        "timestamp": "2026-06-25T11:58:10Z",
+                        "usage": {"input_tokens": 2006, "cached_input_tokens": 0, "output_tokens": 5},
+                        "item": {"text": "drop response"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "timestamp": "2026-06-25T11:58:40Z",
+                        "payload": {
+                            "type": "function_call",
+                            "name": "shell_command",
+                            "arguments": json.dumps({"command": "rg needle tools"}),
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "timestamp": "2026-06-25T11:58:50Z",
+                        "payload": {
+                            "type": "function_call",
+                            "name": "shell_command",
+                            "arguments": json.dumps({"command": "echo x > tools/out.txt"}),
+                        },
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 class DogfoodWitnessTest(unittest.TestCase):
+    def _write_gate_reports(self, root: Path) -> tuple[Path, Path]:
+        """Write the two local fak-gate reports the witness folds — a redacted
+        PASS and an expected-DENY — and return their paths. Both carry the
+        stdout/stderr the redaction assertions must not find downstream."""
+        gate = root / "gate.json"
+        deny_gate = root / "deny-gate.json"
+        gate.write_text(
+            json.dumps(
+                {
+                    "status": "PASS",
+                    "tool": "run_tests",
+                    "policy": "examples/dev-agent-policy.json",
+                    "executed": True,
+                    "dry_run": False,
+                    "command_redacted": True,
+                    "command_label": "dogfood-witness-test",
+                    "command_digest": "abc123",
+                    "command_executable": "python",
+                    "command_argc": 2,
+                    "command": ["python", "tools\\codex_fak_gate_test.py"],
+                    "command_exit_code": 0,
+                    "command_stdout": "drop command stdout",
+                    "command_stderr": "drop command stderr",
+                    "preflight": {
+                        "verdict": "ALLOW",
+                        "reason": "NONE",
+                        "by": "monitor",
+                        "exit_code": 0,
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        deny_gate.write_text(
+            json.dumps(
+                {
+                    "status": "DENIED_EXPECTED",
+                    "tool": "git_push",
+                    "policy": "examples/dev-agent-policy.json",
+                    "executed": False,
+                    "dry_run": True,
+                    "expect_deny": True,
+                    "expect_reason": "POLICY_BLOCK",
+                    "command_redacted": True,
+                    "command_label": "git-push-deny",
+                    "command_digest": None,
+                    "command_executable": None,
+                    "command_argc": 0,
+                    "command": ["git", "push"],
+                    "preflight": {
+                        "verdict": "DENY",
+                        "reason": "POLICY_BLOCK",
+                        "by": "monitor",
+                        "exit_code": 0,
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return gate, deny_gate
+
+    def _assert_witness_summary(self, mod, saved: dict) -> None:
+        """Assert the witness summary: the adjudication verdicts, the gate and
+        hook-fast-path roll-ups, the actionability residual, and the vcache and
+        DOS numbers."""
+        self.assertEqual(saved["schema"], mod.SCHEMA)
+        self.assertEqual(saved["summary"]["status"], "PROVEN")
+        self.assertEqual(saved["summary"]["policy_adjudication"]["deny"]["tool"], "git_push")
+        self.assertEqual(saved["summary"]["policy_adjudication"]["deny"]["verdict"], "DENY")
+        self.assertEqual(saved["summary"]["policy_adjudication"]["allow"]["tool"], "git_status")
+        self.assertEqual(saved["summary"]["policy_adjudication"]["mcp_stdio_status"], "PASS")
+        self.assertEqual(saved["summary"]["local_fak_gate"]["status"], "PASS")
+        self.assertEqual(saved["summary"]["local_fak_gate"]["passed"], 2)
+        self.assertEqual(saved["summary"]["local_fak_gate"]["denied"], 1)
+        self.assertEqual(saved["summary"]["local_fak_gate"]["expected_denied"], 1)
+        self.assertEqual(saved["summary"]["local_fak_gate"]["tools"], ["git_push", "run_tests"])
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["status"], "PASS")
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["target_command_mode"], "native_launcher")
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_native_launcher_hooks"], 1)
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_powershell_native_hooks"], 0)
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_python_cli_hooks"], 0)
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_status"], "PASS")
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_delegate_count"], 0)
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_unknown_tree_admission_warnings"], 0)
+        self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_command_shape_status"], "PASS")
+        self.assertEqual(
+            saved["summary"]["codex_hook_fast_path"]["post_repair_shell_shape_counts"],
+            {
+                "shell_in_tree_or_safe_write_target": 1,
+                "shell_no_write_target_detected": 1,
+            },
+        )
+        self.assertEqual(saved["summary"]["codex_actionability"]["status"], "PASS")
+        self.assertEqual(saved["summary"]["codex_actionability"]["residual"], ["HOST_SHELL_OPACITY"])
+        self.assertEqual(saved["summary"]["codex_actionability"]["delegate_count"], 0)
+        self.assertEqual(saved["summary"]["codex_actionability"]["post_repair_shell_shape_counts"]["shell_no_write_target_detected"], 1)
+        self.assertEqual(
+            saved["summary"]["codex_actionability"]["post_repair_shell_family_counts"],
+            {"search_rg": 1, "shell_redirect": 1},
+        )
+        self.assertEqual(
+            saved["summary"]["codex_actionability"]["post_repair_mutating_shell_family_counts"],
+            {},
+        )
+        self.assertEqual(saved["summary"]["vcache"]["status"], "PROVEN")
+        self.assertEqual(saved["summary"]["vcache"]["saved_pct"], 43.07078763708873)
+        self.assertEqual(saved["summary"]["dos"]["status"], "PASS")
+        self.assertEqual(saved["summary"]["dos"]["unknown_tree_warning_rate"], 0.0)
+        self.assertEqual(saved["summary"]["dos"]["session_advisory_cautions"], 3)
+        self.assertEqual(saved["summary"]["dos"]["session_advisory_by_tool"], {"Bash": 2, "apply_patch": 1})
+        self.assertEqual(
+            set(saved["summary"]["next_actions"]),
+            {
+                "reduce Bash calls that DOS cannot scope to a declared file tree",
+                "post-repair Codex shell calls include commands with no path-visible write target",
+            },
+        )
+
+    def _assert_witness_checks(self, saved: dict) -> None:
+        """Assert the per-check evidence AND the privacy contract: every check
+        carries its verdict, and no prompt, response, command or command output
+        text survives into the saved witness."""
+        self.assertEqual(saved["checks"]["capability_floor_denies_publish"]["verdict"], "DENY")
+        self.assertEqual(saved["checks"]["capability_floor_allows_status"]["verdict"], "ALLOW")
+        self.assertEqual(saved["checks"]["mcp_stdio_adjudication"]["status"], "PASS")
+        self.assertEqual(saved["checks"]["mcp_stdio_adjudication"]["denies_publish"]["reason"], "POLICY_BLOCK")
+        self.assertEqual(saved["checks"]["codex_exec_mcp_usage"]["status"], "SKIPPED")
+        gate_reports = saved["checks"]["local_fak_gate_reports"]
+        self.assertEqual(gate_reports["status"], "PASS")
+        self.assertEqual(gate_reports["reports"][0]["preflight"]["verdict"], "ALLOW")
+        self.assertEqual(gate_reports["reports"][0]["command_label"], "dogfood-witness-test")
+        self.assertTrue(gate_reports["reports"][0]["command_redacted"])
+        self.assertNotIn("command", gate_reports["reports"][0])
+        self.assertEqual(gate_reports["reports"][1]["status"], "DENIED_EXPECTED")
+        self.assertEqual(gate_reports["reports"][1]["preflight"]["verdict"], "DENY")
+        self.assertTrue(gate_reports["reports"][1]["expect_deny"])
+        self.assertEqual(gate_reports["expected_denied"], 1)
+        self.assertNotIn("command", gate_reports["reports"][1])
+        self.assertNotIn("command_stdout", gate_reports["reports"][0])
+        self.assertNotIn("command_stderr", gate_reports["reports"][0])
+        self.assertEqual(saved["checks"]["codex_hook_fast_path"]["status"], "PASS")
+        self.assertEqual(saved["checks"]["codex_hook_fast_path"]["post_repair_observations"]["status"], "PASS")
+        self.assertEqual(saved["checks"]["codex_hook_fast_path"]["post_repair_command_shapes"]["status"], "PASS")
+        self.assertNotIn("dos-hook.ps1 pretool", json.dumps(saved["checks"]["codex_hook_fast_path"]))
+        self.assertNotIn("rg needle tools", json.dumps(saved["checks"]["codex_hook_fast_path"]))
+        self.assertNotIn("echo x", json.dumps(saved["checks"]["codex_hook_fast_path"]))
+        self.assertEqual(saved["checks"]["codex_actionability"]["status"], "PASS")
+        self.assertEqual(saved["checks"]["codex_actionability"]["residual"], ["HOST_SHELL_OPACITY"])
+        self.assertEqual(
+            saved["checks"]["codex_actionability"]["post_repair_shell_family_counts"],
+            {"search_rg": 1, "shell_redirect": 1},
+        )
+        self.assertEqual(saved["checks"]["codex_actionability"]["post_repair_mutating_shell_family_counts"], {})
+        self.assertNotIn("rg needle tools", json.dumps(saved["checks"]["codex_actionability"]))
+        self.assertNotIn("echo x", json.dumps(saved["checks"]["codex_actionability"]))
+        self.assertEqual(saved["checks"]["vcache_telemetry_proof"]["status"], "PROVEN")
+        self.assertEqual(saved["checks"]["dos_helped_session"]["status"], "FOUND")
+        self.assertEqual(saved["checks"]["dos_helped_session"]["by_advisory_tool"], {"Bash": 2, "apply_patch": 1})
+        self.assertNotIn("examples", saved["checks"]["dos_helped_session"])
+        dos = saved["checks"]["dos_session_audit"]
+        self.assertEqual(dos["status"], "PASS")
+        self.assertEqual(dos["stream"]["steps"], 2)
+        self.assertIn("timestamp-window", dos["observations"]["scope"])
+        self.assertEqual(dos["observations"]["pretool_calls"], 2)
+        self.assertEqual(dos["observations"]["unknown_tree_admission_warnings"], 0)
+        encoded_dos = json.dumps(dos)
+        self.assertNotIn("drop this prompt", encoded_dos)
+        self.assertNotIn("drop response", encoded_dos)
+        encoded_summary = json.dumps(saved["summary"])
+        self.assertNotIn("drop this prompt", encoded_summary)
+        self.assertNotIn("drop response", encoded_summary)
+        self.assertNotIn("drop command stdout", json.dumps(saved))
+        self.assertNotIn("drop command stderr", json.dumps(saved))
+        self.assertNotIn("C:/secret/path.txt", json.dumps(saved))
+        self.assertNotIn("drop example reason", json.dumps(saved))
+
     def test_builds_privacy_preserving_proven_witness(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             home = root / "codex-home"
-            sessions = home / "sessions" / "2026" / "06" / "25"
-            sessions.mkdir(parents=True)
-            session = sessions / "rollout-abc123.jsonl"
-            session.write_text(
-                "\n".join(
-                    [
-                        json.dumps({"type": "response_item", "payload": {"content": "drop this prompt"}}),
-                        json.dumps(
-                            {
-                                "type": "event_msg",
-                                "payload": {
-                                    "type": "token_count",
-                                    "info": {
-                                        "last_token_usage": {
-                                            "input_tokens": 2006,
-                                            "cached_input_tokens": 1920,
-                                            "output_tokens": 9,
-                                        },
-                                        "prompt_text": "drop this too",
-                                    },
-                                },
-                            }
-                        ),
-                        json.dumps(
-                            {
-                                "type": "turn.completed",
-                                "timestamp": "2026-06-25T11:58:10Z",
-                                "usage": {"input_tokens": 2006, "cached_input_tokens": 0, "output_tokens": 5},
-                                "item": {"text": "drop response"},
-                            }
-                        ),
-                        json.dumps(
-                            {
-                                "type": "response_item",
-                                "timestamp": "2026-06-25T11:58:40Z",
-                                "payload": {
-                                    "type": "function_call",
-                                    "name": "shell_command",
-                                    "arguments": json.dumps({"command": "rg needle tools"}),
-                                },
-                            }
-                        ),
-                        json.dumps(
-                            {
-                                "type": "response_item",
-                                "timestamp": "2026-06-25T11:58:50Z",
-                                "payload": {
-                                    "type": "function_call",
-                                    "name": "shell_command",
-                                    "arguments": json.dumps({"command": "echo x > tools/out.txt"}),
-                                },
-                            }
-                        ),
-                    ]
-                ),
-                encoding="utf-8",
-            )
+            write_session_rollout(home)
             write_dos_fixture(root)
             write_native_hook_manifest(home, repaired_at=datetime(2026, 6, 25, 11, 58, 5, tzinfo=timezone.utc))
 
             out = root / "witness.json"
             usage = root / "usage.jsonl"
-            gate = root / "gate.json"
-            deny_gate = root / "deny-gate.json"
-            gate.write_text(
-                json.dumps(
-                    {
-                        "status": "PASS",
-                        "tool": "run_tests",
-                        "policy": "examples/dev-agent-policy.json",
-                        "executed": True,
-                        "dry_run": False,
-                        "command_redacted": True,
-                        "command_label": "dogfood-witness-test",
-                        "command_digest": "abc123",
-                        "command_executable": "python",
-                        "command_argc": 2,
-                        "command": ["python", "tools\\codex_fak_gate_test.py"],
-                        "command_exit_code": 0,
-                        "command_stdout": "drop command stdout",
-                        "command_stderr": "drop command stderr",
-                        "preflight": {
-                            "verdict": "ALLOW",
-                            "reason": "NONE",
-                            "by": "monitor",
-                            "exit_code": 0,
-                        },
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            deny_gate.write_text(
-                json.dumps(
-                    {
-                        "status": "DENIED_EXPECTED",
-                        "tool": "git_push",
-                        "policy": "examples/dev-agent-policy.json",
-                        "executed": False,
-                        "dry_run": True,
-                        "expect_deny": True,
-                        "expect_reason": "POLICY_BLOCK",
-                        "command_redacted": True,
-                        "command_label": "git-push-deny",
-                        "command_digest": None,
-                        "command_executable": None,
-                        "command_argc": 0,
-                        "command": ["git", "push"],
-                        "preflight": {
-                            "verdict": "DENY",
-                            "reason": "POLICY_BLOCK",
-                            "by": "monitor",
-                            "exit_code": 0,
-                        },
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            gate, deny_gate = self._write_gate_reports(root)
             args = mod.parse_args(
                 [
                     "--thread-id",
@@ -466,111 +596,8 @@ class DogfoodWitnessTest(unittest.TestCase):
             self.assertNotIn("output_tokens", usage_text)
 
             saved = json.loads(out.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema"], mod.SCHEMA)
-            self.assertEqual(saved["summary"]["status"], "PROVEN")
-            self.assertEqual(saved["summary"]["policy_adjudication"]["deny"]["tool"], "git_push")
-            self.assertEqual(saved["summary"]["policy_adjudication"]["deny"]["verdict"], "DENY")
-            self.assertEqual(saved["summary"]["policy_adjudication"]["allow"]["tool"], "git_status")
-            self.assertEqual(saved["summary"]["policy_adjudication"]["mcp_stdio_status"], "PASS")
-            self.assertEqual(saved["summary"]["local_fak_gate"]["status"], "PASS")
-            self.assertEqual(saved["summary"]["local_fak_gate"]["passed"], 2)
-            self.assertEqual(saved["summary"]["local_fak_gate"]["denied"], 1)
-            self.assertEqual(saved["summary"]["local_fak_gate"]["expected_denied"], 1)
-            self.assertEqual(saved["summary"]["local_fak_gate"]["tools"], ["git_push", "run_tests"])
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["status"], "PASS")
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["target_command_mode"], "native_launcher")
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_native_launcher_hooks"], 1)
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_powershell_native_hooks"], 0)
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_python_cli_hooks"], 0)
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_status"], "PASS")
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_delegate_count"], 0)
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_unknown_tree_admission_warnings"], 0)
-            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_command_shape_status"], "PASS")
-            self.assertEqual(
-                saved["summary"]["codex_hook_fast_path"]["post_repair_shell_shape_counts"],
-                {
-                    "shell_in_tree_or_safe_write_target": 1,
-                    "shell_no_write_target_detected": 1,
-                },
-            )
-            self.assertEqual(saved["summary"]["codex_actionability"]["status"], "PASS")
-            self.assertEqual(saved["summary"]["codex_actionability"]["residual"], ["HOST_SHELL_OPACITY"])
-            self.assertEqual(saved["summary"]["codex_actionability"]["delegate_count"], 0)
-            self.assertEqual(saved["summary"]["codex_actionability"]["post_repair_shell_shape_counts"]["shell_no_write_target_detected"], 1)
-            self.assertEqual(
-                saved["summary"]["codex_actionability"]["post_repair_shell_family_counts"],
-                {"search_rg": 1, "shell_redirect": 1},
-            )
-            self.assertEqual(
-                saved["summary"]["codex_actionability"]["post_repair_mutating_shell_family_counts"],
-                {},
-            )
-            self.assertEqual(saved["summary"]["vcache"]["status"], "PROVEN")
-            self.assertEqual(saved["summary"]["vcache"]["saved_pct"], 43.07078763708873)
-            self.assertEqual(saved["summary"]["dos"]["status"], "PASS")
-            self.assertEqual(saved["summary"]["dos"]["unknown_tree_warning_rate"], 0.0)
-            self.assertEqual(saved["summary"]["dos"]["session_advisory_cautions"], 3)
-            self.assertEqual(saved["summary"]["dos"]["session_advisory_by_tool"], {"Bash": 2, "apply_patch": 1})
-            self.assertEqual(
-                set(saved["summary"]["next_actions"]),
-                {
-                    "reduce Bash calls that DOS cannot scope to a declared file tree",
-                    "post-repair Codex shell calls include commands with no path-visible write target",
-                },
-            )
-            self.assertEqual(saved["checks"]["capability_floor_denies_publish"]["verdict"], "DENY")
-            self.assertEqual(saved["checks"]["capability_floor_allows_status"]["verdict"], "ALLOW")
-            self.assertEqual(saved["checks"]["mcp_stdio_adjudication"]["status"], "PASS")
-            self.assertEqual(saved["checks"]["mcp_stdio_adjudication"]["denies_publish"]["reason"], "POLICY_BLOCK")
-            self.assertEqual(saved["checks"]["codex_exec_mcp_usage"]["status"], "SKIPPED")
-            gate_reports = saved["checks"]["local_fak_gate_reports"]
-            self.assertEqual(gate_reports["status"], "PASS")
-            self.assertEqual(gate_reports["reports"][0]["preflight"]["verdict"], "ALLOW")
-            self.assertEqual(gate_reports["reports"][0]["command_label"], "dogfood-witness-test")
-            self.assertTrue(gate_reports["reports"][0]["command_redacted"])
-            self.assertNotIn("command", gate_reports["reports"][0])
-            self.assertEqual(gate_reports["reports"][1]["status"], "DENIED_EXPECTED")
-            self.assertEqual(gate_reports["reports"][1]["preflight"]["verdict"], "DENY")
-            self.assertTrue(gate_reports["reports"][1]["expect_deny"])
-            self.assertEqual(gate_reports["expected_denied"], 1)
-            self.assertNotIn("command", gate_reports["reports"][1])
-            self.assertNotIn("command_stdout", gate_reports["reports"][0])
-            self.assertNotIn("command_stderr", gate_reports["reports"][0])
-            self.assertEqual(saved["checks"]["codex_hook_fast_path"]["status"], "PASS")
-            self.assertEqual(saved["checks"]["codex_hook_fast_path"]["post_repair_observations"]["status"], "PASS")
-            self.assertEqual(saved["checks"]["codex_hook_fast_path"]["post_repair_command_shapes"]["status"], "PASS")
-            self.assertNotIn("dos-hook.ps1 pretool", json.dumps(saved["checks"]["codex_hook_fast_path"]))
-            self.assertNotIn("rg needle tools", json.dumps(saved["checks"]["codex_hook_fast_path"]))
-            self.assertNotIn("echo x", json.dumps(saved["checks"]["codex_hook_fast_path"]))
-            self.assertEqual(saved["checks"]["codex_actionability"]["status"], "PASS")
-            self.assertEqual(saved["checks"]["codex_actionability"]["residual"], ["HOST_SHELL_OPACITY"])
-            self.assertEqual(
-                saved["checks"]["codex_actionability"]["post_repair_shell_family_counts"],
-                {"search_rg": 1, "shell_redirect": 1},
-            )
-            self.assertEqual(saved["checks"]["codex_actionability"]["post_repair_mutating_shell_family_counts"], {})
-            self.assertNotIn("rg needle tools", json.dumps(saved["checks"]["codex_actionability"]))
-            self.assertNotIn("echo x", json.dumps(saved["checks"]["codex_actionability"]))
-            self.assertEqual(saved["checks"]["vcache_telemetry_proof"]["status"], "PROVEN")
-            self.assertEqual(saved["checks"]["dos_helped_session"]["status"], "FOUND")
-            self.assertEqual(saved["checks"]["dos_helped_session"]["by_advisory_tool"], {"Bash": 2, "apply_patch": 1})
-            self.assertNotIn("examples", saved["checks"]["dos_helped_session"])
-            dos = saved["checks"]["dos_session_audit"]
-            self.assertEqual(dos["status"], "PASS")
-            self.assertEqual(dos["stream"]["steps"], 2)
-            self.assertIn("timestamp-window", dos["observations"]["scope"])
-            self.assertEqual(dos["observations"]["pretool_calls"], 2)
-            self.assertEqual(dos["observations"]["unknown_tree_admission_warnings"], 0)
-            encoded_dos = json.dumps(dos)
-            self.assertNotIn("drop this prompt", encoded_dos)
-            self.assertNotIn("drop response", encoded_dos)
-            encoded_summary = json.dumps(saved["summary"])
-            self.assertNotIn("drop this prompt", encoded_summary)
-            self.assertNotIn("drop response", encoded_summary)
-            self.assertNotIn("drop command stdout", json.dumps(saved))
-            self.assertNotIn("drop command stderr", json.dumps(saved))
-            self.assertNotIn("C:/secret/path.txt", json.dumps(saved))
-            self.assertNotIn("drop example reason", json.dumps(saved))
+            self._assert_witness_summary(mod, saved)
+            self._assert_witness_checks(saved)
 
     def test_dos_session_audit_flags_unknown_tree_warning_rate(self) -> None:
         mod = load()
