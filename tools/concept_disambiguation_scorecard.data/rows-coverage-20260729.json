@@ -1,0 +1,1811 @@
+{
+  "rows": [
+    {
+      "id": "c729-guard-allow-scope-file",
+      "canonical": "guard_allow_scope.go (allow-overlay scope ladder)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "cmd/fak/guard_allow_scope.go (#5180, epic #5170): the file that defines the guard allow-overlay SCOPE ladder - repo < user < env < session - and the rule that a narrower, more-ephemeral scope layers on top and therefore wins.",
+      "distinction": "The scope PRECEDENCE table, not a storage location: it ranks the overlay layers - NOT guardAllowOverlayPaths (which enumerates the ordered read PATHS) and NOT guard_policy.go (the `fak guard policy` verb router).",
+      "distinct_from": [
+        "cov5300-guard-allow-overlay-paths",
+        "c729-guard-allow-scope-rank",
+        "c729-guard-policy-router"
+      ],
+      "aliases": [],
+      "grounding": "guard_allow_scope",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-allow-scope-rank",
+      "canonical": "guardAllowScopeRank (scope precedence rank)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_allow_scope.go: maps a scope name to its integer precedence rank - higher rank = narrower and more ephemeral = layered on top; an unknown scope ranks below everything so it can never claim to shadow a known scope.",
+      "distinction": "The ORDERING function over scopes - NOT guardAllowScopeSession (the string constant naming one scope) and NOT guardAllowScopeDurabilityNote (the prose legend about how long a scope's widening lives).",
+      "distinct_from": [
+        "c729-guard-allow-scope-session",
+        "c729-guard-allow-scope-durability-note",
+        "c729-guard-allow-scope-file"
+      ],
+      "aliases": [],
+      "grounding": "guardAllowScopeRank",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-allow-scope-session",
+      "canonical": "guardAllowScopeSession (session scope name const)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_allow_scope.go: the string constant \"session\" naming the session-scope overlay layer; the repo/user/env layer names come from guardAllowOverlayPaths, so this is the one scope name that needs its own constant.",
+      "distinction": "The NAME of the narrowest scope - NOT guardAllowScopeRank (its position in the precedence order) and NOT guardAllowLayersWithSessionScope (the function that appends the layer).",
+      "distinct_from": [
+        "c729-guard-allow-scope-rank",
+        "c729-guard-allow-layers-with-session-scope",
+        "cov5300-guard-allow-overlay-paths"
+      ],
+      "aliases": [],
+      "grounding": "guardAllowScopeSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-allow-scope-durability-note",
+      "canonical": "guardAllowScopeDurabilityNote (scope durability legend)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_allow_scope.go: returns the one-clause operator legend saying whether a widening recorded at a given scope survives the next launch, so every scope listing answers the durability question without the reader inferring it from a path.",
+      "distinction": "The human-readable DURABILITY sentence for a scope - NOT guardAllowScopeRank (its numeric precedence) and NOT the overlay file the widening is stored in.",
+      "distinct_from": [
+        "c729-guard-allow-scope-rank",
+        "c729-guard-allow-scope-session",
+        "cov5300-guard-allow-overlay"
+      ],
+      "aliases": [],
+      "grounding": "guardAllowScopeDurabilityNote",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-allow-layers-with-session-scope",
+      "canonical": "guardAllowLayersWithSessionScope (session layer appender)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_allow_scope.go: appends the session-scope layer AFTER the base overlay layers, leaving the base order untouched, so the session scope is applied last and therefore takes precedence.",
+      "distinction": "The function that ADDS the session layer to a layer list - NOT guardAllowOverlayPaths (which builds the base layers) and NOT guardAllowScopeSession (the scope's name constant).",
+      "distinct_from": [
+        "cov5300-guard-allow-overlay-paths",
+        "c729-guard-allow-scope-session",
+        "c729-guard-allow-scope-rank"
+      ],
+      "aliases": [],
+      "grounding": "guardAllowLayersWithSessionScope",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-fak-guard-session-id-env",
+      "canonical": "FAK_GUARD_SESSION_ID (guard session-id env)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_allow_scope.go: the environment variable (constant guardAllowSessionIDEnv) that carries the guard session id to a process that did not resolve it itself, so operator tooling beside a guarded session can address that session's scope.",
+      "distinction": "The env var that TRANSPORTS an already-resolved guard session id - NOT FAK_GUARD_ALLOW_OVERLAY (which names an overlay file) and NOT maybeRecordGuardSessionIndex (which publishes a session into the fleet index).",
+      "distinct_from": [
+        "cov5300-fak-guard-allow-overlay-env",
+        "c729-maybe-record-guard-session-index",
+        "c729-guard-allow-scope-session"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_SESSION_ID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-fak-guard-stops-ledger-env",
+      "canonical": "FAK_GUARD_STOPS_LEDGER (stops-ledger path env)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_stops.go: the environment variable whose VALUE is the absolute stops-ledger path the guard installer injects into the Stop hook child; unset means recording is disabled entirely.",
+      "distinction": "The env var NAME as it appears in the environment - NOT guardStopsLedgerEnv (the Go constant that holds this string) and NOT the ledger file itself.",
+      "distinct_from": [
+        "c729-guard-stops-ledger-env-const",
+        "c729-fak-guard-session-id-env"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_STOPS_LEDGER",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-stops-ledger-env-const",
+      "canonical": "guardStopsLedgerEnv (stops-ledger env constant)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_stops.go: the Go constant that holds the string \"FAK_GUARD_STOPS_LEDGER\" - the single in-code spelling of the stops-ledger env var, so the installer and the Stop hook can never disagree about the name.",
+      "distinction": "The identifier in Go source - NOT the FAK_GUARD_STOPS_LEDGER environment variable it names, and NOT guardToolprocJournalRel (a relative journal PATH constant, not an env var name).",
+      "distinct_from": [
+        "c729-fak-guard-stops-ledger-env",
+        "c729-guard-toolproc-journal-rel"
+      ],
+      "aliases": [],
+      "grounding": "guardStopsLedgerEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-fleet-msg-guard-env",
+      "canonical": "FLEET_MSG_GUARD (commit-message advisory mode env)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/commit_msg_advisory.go: the gate-mode env var for the commit-message advisory; it can only SILENCE the advisory (`off`), never escalate it to a refusal.",
+      "distinction": "A SILENCE-only advisory knob - NOT a refusing guard gate, and NOT FLEET_ALLOW_MSG (the paired escape variable read beside it).",
+      "distinct_from": [
+        "c729-fak-guard-stops-ledger-env",
+        "c729-render-commit-msg-advisory"
+      ],
+      "aliases": [],
+      "grounding": "FLEET_MSG_GUARD",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-gated-widen",
+      "canonical": "GATED_WIDEN (amendment class)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/policy/amendment.go: the AmendmentClass constant for operator-gated LOOSENING of a policy knob (allow overlay, reload-widen) - the class that may move a knob outward, but only through an operator gate.",
+      "distinction": "One of the three amendment CLASSES (beside FROZEN and RATCHET), so it describes what an amendment is allowed to do - NOT guardAllowScopeRank (where a widening is recorded) and NOT the allow-overlay file that records one.",
+      "distinct_from": [
+        "c729-guard-allow-scope-rank",
+        "c729-guard-allow-scope-file"
+      ],
+      "aliases": [],
+      "grounding": "GATED_WIDEN",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-codex-chatgpt-backend-base-url",
+      "canonical": "guardCodexChatGPTBackendBaseURL (Codex backend base URL)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_codex_oauth.go: the constant base URL of the ChatGPT backend Codex API the guard's Codex OAuth path talks to.",
+      "distinction": "A remote HTTP endpoint constant - NOT guardToolprocJournalRel (a workspace-relative file path) and NOT an env var an operator sets.",
+      "distinct_from": [
+        "c729-guard-toolproc-journal-rel",
+        "c729-fak-guard-session-id-env"
+      ],
+      "aliases": [],
+      "grounding": "guardCodexChatGPTBackendBaseURL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-toolproc-journal-rel",
+      "canonical": "guardToolprocJournalRel (toolproc journal path)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "cmd/fak/guard_toolproc_hooks.go: the workspace-relative journal path (.fak/toolproc/journal.jsonl) the toolproc hooks append to - one shared journal per workspace, made absolute at install so the hook is cwd-independent.",
+      "distinction": "The TOOL-PROCESS journal every guarded session in a workspace shares - NOT the stops ledger (FAK_GUARD_STOPS_LEDGER, a per-install path) and NOT the negframe journal the reframe telemetry writes.",
+      "distinct_from": [
+        "c729-fak-guard-stops-ledger-env",
+        "c729-guard-negframe-summary"
+      ],
+      "aliases": [],
+      "grounding": "guardToolprocJournalRel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-cmd-guard-stdin-interactive",
+      "canonical": "cmdGuardStdinInteractive (attended-STDIN probe)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_support.go: reports whether the guard's own STDIN is a real console, using term.IsTerminal rather than an os.ModeCharDevice test - because on Windows a redirected stdin reports AS a character device and a FileMode check would read the headless case as interactive.",
+      "distinction": "A probe of the STDIN handle only, used so an attended user is never blocked - NOT guardOwnsInteractiveTerminal, which asks the different question of whether this process owns a terminal HOST it may launch a window in.",
+      "distinct_from": [
+        "c729-guard-owns-interactive-terminal"
+      ],
+      "aliases": [],
+      "grounding": "cmdGuardStdinInteractive",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-owns-interactive-terminal",
+      "canonical": "guardOwnsInteractiveTerminal (terminal-host ownership probe)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_resolve.go: reports whether this guard owns an interactive terminal host it may act in - false for any dispatcher-owned session (FAK_DISPATCH_ID, FAK_HEADLESS, CI), then per-OS on WT_SESSION / TERM_PROGRAM / TERM+SSH_TTY.",
+      "distinction": "An OWNERSHIP question about the terminal host, guarding the double-launch of a dispatcher-owned session - NOT cmdGuardStdinInteractive, which only asks whether the STDIN handle is a console.",
+      "distinct_from": [
+        "c729-cmd-guard-stdin-interactive"
+      ],
+      "aliases": [],
+      "grounding": "guardOwnsInteractiveTerminal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-info-agent-text",
+      "canonical": "guardInfoAgentText (info-panel agent cell)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/info_panels.go: renders the agent cell of one `fak info` guard-session row; it deliberately does NOT render Recontinue as sub-agent depth, because Recontinue is the same agent after a budget-reset re-continuation, not a spawned child.",
+      "distinction": "A per-row RENDERER for the info panel - NOT the guard-session index row it reads, and NOT SpawnCount (the parent-side sub-agent count rendered beside it).",
+      "distinct_from": [
+        "c729-maybe-record-guard-session-index",
+        "c729-render-overview"
+      ],
+      "aliases": [],
+      "grounding": "guardInfoAgentText",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-negframe-begin",
+      "canonical": "guardNegframeBegin (SessionStart negframe row)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_negframe_summary.go: records the SessionStart negframe row and TRUNCATES the journal first, because SessionStart is the session boundary - without the reset the exit summary would report a lifetime total under a per-session label.",
+      "distinction": "The journal RESET-and-open call at session start - NOT guardNegframeReframe (the per-emit reframe) and NOT guardNegframeSummary (the exit-time fold).",
+      "distinct_from": [
+        "c729-guard-negframe-reframe",
+        "c729-guard-negframe-summary"
+      ],
+      "aliases": [],
+      "grounding": "guardNegframeBegin",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-negframe-reframe",
+      "canonical": "guardNegframeReframe (gated emit-time reframe)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_negframe_summary.go: the single gated seam that reframes fak-authored fragments at emit time - on the treatment arm it reframes and reports that pass's telemetry, on the control arm it concatenates the fragments unreframed; non-fak-authored fragments survive byte-for-byte on both arms.",
+      "distinction": "The A/B-gated TRANSFORM applied to outgoing text - NOT guardNegframeBegin (which opens the journal) and NOT negframe.ReframeFakOnly, which it wraps so no caller reaches the transform ungated.",
+      "distinct_from": [
+        "c729-guard-negframe-begin",
+        "c729-guard-negframe-summary"
+      ],
+      "aliases": [],
+      "grounding": "guardNegframeReframe",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-negframe-summary",
+      "canonical": "guardNegframeSummary (exit-summary negframe fold)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_negframe_summary.go: folds the workspace negframe journal that the SessionStart reframe feeds into the one-line guard exit summary.",
+      "distinction": "The EXIT-time reader of the journal - NOT guardNegframeReframe (the emit-time writer) and NOT RenderNegframePane (the scorecard pane rendered elsewhere).",
+      "distinct_from": [
+        "c729-guard-negframe-reframe",
+        "c729-guard-negframe-begin",
+        "cov5301-render-negframe-pane"
+      ],
+      "aliases": [],
+      "grounding": "guardNegframeSummary",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-maybe-record-guard-session-index",
+      "canonical": "maybeRecordGuardSessionIndex (guarded index append)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_sessions.go: the precondition wrapper around recordGuardSessionIndex - it returns \"\" without touching the index when there is no audit journal, no command or no trace id, so a launch with nothing to publish never appends a partial row.",
+      "distinction": "The GUARD in front of the index append, not the append itself - NOT recordGuardSessionIndex (which does the write) and NOT recordGuardUsage (which appends a usage row at exit).",
+      "distinct_from": [
+        "c729-record-guard-usage",
+        "c729-guard-info-agent-text"
+      ],
+      "aliases": [],
+      "grounding": "maybeRecordGuardSessionIndex",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-record-guard-usage",
+      "canonical": "recordGuardUsage (guard exit usage row)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/usagelog_record.go: appends the single best-effort usage row for a `fak guard` invocation at exit, once (sync.Once) and only when a start time was stamped; any failure is swallowed so meta-observability can never change the verb's outcome.",
+      "distinction": "The EXIT-time usage-log append for the guard verb - NOT maybeRecordGuardSessionIndex (the START-time session-index publish) and NOT the stops ledger.",
+      "distinct_from": [
+        "c729-maybe-record-guard-session-index",
+        "c729-fak-guard-stops-ledger-env"
+      ],
+      "aliases": [],
+      "grounding": "recordGuardUsage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-policy-router",
+      "canonical": "guard_policy.go (guard policy verb router)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "cmd/fak/guard_policy.go (#5424, epic #5170): the router for `fak guard policy <verb>` - it holds the verb table and dispatches to the explain / diff implementations that live in their own files.",
+      "distinction": "The CLI verb ROUTER for policy inspection - NOT internal/policy (the amendment-class model it reports on) and NOT guard_allow_scope.go (the overlay scope ladder).",
+      "distinct_from": [
+        "c729-guard-allow-scope-file",
+        "c729-gated-widen"
+      ],
+      "aliases": [],
+      "grounding": "guard_policy",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-floorgate",
+      "canonical": "floorgate.go (tool-schema floor-growth gate)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "internal/mcpfootprint/floorgate.go (#2924): the one-way ratchet on fak's always-sent MCP tool-schema floor - it refuses GROWTH past FloorBudgetTokens (FLOOR_BUDGET_EXCEEDED) and also refuses SLACK once a deferral lever has driven the floor well below the ceiling (FLOOR_BUDGET_STALE), so the budget must be re-pinned.",
+      "distinction": "The REFUSAL half of the tool-footprint work, denominated in ESTIMATED tokens - NOT Price()/PerToolSorted() (the measurement half) and NOT a provider-billed count it must never be compared against.",
+      "distinct_from": [
+        "c729-tool-defer-cold-total",
+        "c729-guard-policy-router"
+      ],
+      "aliases": [],
+      "grounding": "floorgate",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-batched-gated-mlp",
+      "canonical": "batchedGatedMLP (batched FFN gated-MLP)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/model/arch.go: runs one layer's f32 gated MLP over N already-post-normed rows and returns the [N,H] down projection - gate/up matMulBatch, then fuseGatedMLPPanels, then down.",
+      "distinction": "\"Gated\" here is FFN GATING (SwiGLU-style gate/up), not a policy gate: this is a compute path - NOT floorgate (a refusal gate) and NOT fuseGatedMLPPanels (the in-place panel step it calls).",
+      "distinct_from": [
+        "c729-fuse-gated-mlp-panels",
+        "c729-floorgate",
+        "gate-up-proj"
+      ],
+      "aliases": [],
+      "grounding": "batchedGatedMLP",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-fuse-gated-mlp-panels",
+      "canonical": "fuseGatedMLPPanels (in-place gate/up panel fuse)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/model/arch.go: finishes a batched gated MLP's gate and up panels IN PLACE - the single source of truth for that mechanical axis, so every prefill/quant/batch twin applies it identically.",
+      "distinction": "The in-place PANEL step, one axis of the FFN - NOT batchedGatedMLP (the whole gate/up/down layer that calls it) and NOT a policy gate.",
+      "distinct_from": [
+        "c729-batched-gated-mlp",
+        "gate-up-proj"
+      ],
+      "aliases": [],
+      "grounding": "fuseGatedMLPPanels",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-append-growthgate-reap-ledger",
+      "canonical": "appendGrowthgateReapLedger (reap accountability trail)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/growthgate.go: appends one JSON line per growth-gate reap decision - the accountability trail for BOTH a dry run and an --apply run, mirroring the fleet-janitor ledger.",
+      "distinction": "The LEDGER WRITER for reap decisions - NOT growthReapDecision (the record it writes) and NOT the growth gate's refusal itself.",
+      "distinct_from": [
+        "c729-growth-reap-decision",
+        "c729-floorgate"
+      ],
+      "aliases": [],
+      "grounding": "appendGrowthgateReapLedger",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-fak-max-sessions-env",
+      "canonical": "FAK_MAX_SESSIONS (governed-session ceiling env)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "internal/gateway/session_ceiling.go (constant envMaxSessions): the operator-configured ceiling on CONCURRENT governed sessions; 0 or unset means unbounded.",
+      "distinction": "The operator's ceiling INPUT - NOT SESSION_CEILING_SATURATED (the refusal reason emitted when the ceiling is reached) and NOT the fak_sessions gauge (the live count it is compared against).",
+      "distinct_from": [
+        "c729-session-ceiling-saturated",
+        "c729-fak-sessions-gauge"
+      ],
+      "aliases": [],
+      "grounding": "FAK_MAX_SESSIONS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-session-ceiling-saturated",
+      "canonical": "SESSION_CEILING_SATURATED (admission refusal reason)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "internal/gateway/session_ceiling.go: the closed-vocabulary refusal reason a new-session admission carries when the live governed-session count is at or over the configured ceiling; declared in dos.toml so dos_check_reason resolves it.",
+      "distinction": "A REASON code returned on refusal - NOT FAK_MAX_SESSIONS (the ceiling that produced it) and NOT the fak_sessions gauge (the live count).",
+      "distinct_from": [
+        "c729-fak-max-sessions-env",
+        "c729-fak-sessions-gauge"
+      ],
+      "aliases": [],
+      "grounding": "SESSION_CEILING_SATURATED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-fak-sessions-gauge",
+      "canonical": "fak_sessions (live sessions by run-state gauge)",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "internal/gateway/metrics_render.go: the Prometheus gauge fak_sessions{state} - a READ-TIME fold of the session registry into live served sessions per DRIVE run-state token, so a GC'd session decrements its bucket on the next scrape.",
+      "distinction": "A per-run-state gauge of LIVE served sessions - NOT the governed-session count measured against the ceiling, NOT FAK_MAX_SESSIONS (the ceiling itself), and NOT FAK_SESSION_ID, which is one session's identity rather than a population count.",
+      "distinct_from": [
+        "c729-fak-max-sessions-env",
+        "c729-session-ceiling-saturated",
+        "x-session-runtime-faksessionid"
+      ],
+      "aliases": [],
+      "grounding": "fak_sessions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-session-query-file",
+      "canonical": "session_query.go (cross-process session discovery)",
+      "family": "session-runtime",
+      "kind": "subsystem",
+      "definition": "cmd/fak/session_query.go (#3461): the SECOND process's side of the guard-session contract - it discovers a running `fak guard` through the guard-session index and performs a read-scoped raw status read against the address and bearer it published.",
+      "distinction": "The READER side of the guard-session index - NOT maybeRecordGuardSessionIndex (the publishing side) and NOT internal/guardsessions (the index storage package).",
+      "distinct_from": [
+        "c729-maybe-record-guard-session-index",
+        "c729-resolve-session-plane"
+      ],
+      "aliases": [],
+      "grounding": "session_query",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-example-session",
+      "canonical": "ExampleSession (session-audit exemplar id)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "internal/sessionaudit: the field carrying ONE representative session id for an aggregated audit finding, so an operator reading a count can open a concrete session that exhibits it.",
+      "distinction": "A single EXEMPLAR id attached to an aggregate - NOT StuckSessions or SilentConfusedSessions (the counts it exemplifies) and NOT a session-id format.",
+      "distinct_from": [
+        "c729-stuck-sessions",
+        "c729-silent-confused-sessions"
+      ],
+      "aliases": [],
+      "grounding": "ExampleSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-max-ctx-restore-sessions",
+      "canonical": "maxCtxRestoreSessions (ctx-restore stash bound)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "internal/gateway/ctxrestore.go: the ceiling on the per-session context-restore stash table; on overflow the whole table takes a generational reset, so a gateway minting a fresh trace per session cannot grow it without limit.",
+      "distinction": "A bound on the ctx-RESTORE stash (tombstones for a dropped first user turn) - NOT maxCtxValueSessions (the sibling bound on the ctx-VALUE table it mirrors) and NOT FAK_MAX_SESSIONS (an admission ceiling, not a table size).",
+      "distinct_from": [
+        "c729-fak-max-sessions-env"
+      ],
+      "aliases": [],
+      "grounding": "maxCtxRestoreSessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-resolve-session-plane",
+      "canonical": "resolveSessionPlane (serve session-plane stage)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "cmd/fak/serve_stages.go: the `fak serve` startup stage that resolves auth/key material, validates the budget flags, cold-resumes persisted session drive state (#629), and seeds the default trace's budget and durability registration.",
+      "distinction": "The SESSION plane of serve startup - NOT buildGateway (the later stage that constructs the gateway server and arms admission) and NOT the session registry it seeds.",
+      "distinct_from": [
+        "c729-build-gateway",
+        "c729-session-query-file"
+      ],
+      "aliases": [],
+      "grounding": "resolveSessionPlane",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-session-prefix-const",
+      "canonical": "sessionPrefix (leaseref session-ref basename prefix)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "internal/leaseref/session.go: the basename prefix \"session-\" that marks a session DESCRIPTOR ref apart from a lock lease inside the shared refs/fak/locks/ namespace; the stored id omits it, so a caller addresses a session by its plain id.",
+      "distinction": "A git-ref NAMESPACE marker for lease refs - NOT SessionPrefixIndex (a warm prompt-prefix map in the gateway); the two share the word \"prefix\" and mean entirely different things.",
+      "distinct_from": [
+        "c729-session-prefix-index"
+      ],
+      "aliases": [],
+      "grounding": "sessionPrefix",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-session-prefix-index",
+      "canonical": "SessionPrefixIndex (warm prompt-prefix by conversation)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "internal/gateway/session_prefix_index.go: maps a platform-agnostic session-prefix key to the warm PROMPT prefix a conversation established, so a channel hop reuses that prefix instead of cold-re-sending the transcript; Establish keeps the first channel as home and Resume prices the cache_read the reuse served.",
+      "distinction": "A warm PROMPT-prefix reuse index across channels - NOT sessionPrefix (a git-ref basename marker) and NOT the KV cache itself.",
+      "distinct_from": [
+        "c729-session-prefix-const",
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "SessionPrefixIndex",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-session-throughput",
+      "canonical": "SessionThroughput (wire form of the throughput budget)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "internal/gateway/gateway.go: the WIRE form of internal/session.ThroughputBudget (#2762) - the soft pace-shaping rate plus the enforced minimum sustained-rate floor; ObservedTokensPerSec is a read-only projection and is ignored on control writes.",
+      "distinction": "The transport-facing DTO for a session's configured rates - NOT session.ThroughputBudget (the internal type it mirrors) and NOT the observed rate field it carries read-only.",
+      "distinct_from": [
+        "c729-session-ceiling-saturated"
+      ],
+      "aliases": [],
+      "grounding": "SessionThroughput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-silent-confused-sessions",
+      "canonical": "SilentConfusedSessions (confusion invisible to the tool lens)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "internal/sessionaudit: counts confused sessions the tool-I/O Behavior lens was BLIND to (behaviorSessionStuck == false) - prose thrash while every tool call succeeded. It is the slice that justifies the prose lens and the primary gate for the confusion_pressure recommendation.",
+      "distinction": "The subset of confusion NO tool-failure signal can see - NOT StuckSessions (the behaviour-lens stuck count) and NOT a total of all confused sessions.",
+      "distinct_from": [
+        "c729-stuck-sessions",
+        "c729-example-session"
+      ],
+      "aliases": [],
+      "grounding": "SilentConfusedSessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-stuck-sessions",
+      "canonical": "StuckSessions (behaviour-lens stuck count)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "internal/sessionaudit: the count of sessions the tool-I/O Behavior lens judged STUCK, carried through the audit feed and the compact projection.",
+      "distinction": "The count the BEHAVIOUR lens can see - NOT SilentConfusedSessions (precisely the cases that lens is blind to) and NOT ExampleSession (one exemplar id).",
+      "distinct_from": [
+        "c729-silent-confused-sessions",
+        "c729-example-session"
+      ],
+      "aliases": [],
+      "grounding": "StuckSessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-wip-session-of",
+      "canonical": "wipSessionOf (WIP record session identity)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "cmd/fak/wip.go: recovers a WIP record's session id from its stamp, falling back to the ref name - the same identity rule the pure fold uses, so the census and the ticket path agree on who owns a checkpoint.",
+      "distinction": "The IDENTITY rule for a WIP checkpoint's owner - NOT DISCARD_WITNESSED (a reconciliation verdict about that checkpoint) and NOT the ref itself.",
+      "distinct_from": [
+        "c729-discard-witnessed"
+      ],
+      "aliases": [],
+      "grounding": "wipSessionOf",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-non-candidate-bails",
+      "canonical": "NonCandidateBails (bails that were never compactible)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gatewayusageledger/compaction_segments.go: the subset of compaction Bails whose reason means the request was never a compaction CANDIDATE. Reported rather than silently subtracted, and derived from the reason map - a row with a bail COUNT but no reasons contributes 0 here and stays in the candidate denominator.",
+      "distinction": "The population HELD OUT of the candidate rate - NOT candidateBails (the eligible population) and NOT CandidateBailRate (the ratio computed from both).",
+      "distinct_from": [
+        "c729-candidate-bails",
+        "c729-candidate-bail-rate"
+      ],
+      "aliases": [],
+      "grounding": "NonCandidateBails",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-candidate-bails",
+      "canonical": "candidateBails (eligible compaction bails)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway/metrics_observe.go: the half of compactBailPartition's split that WAS a compaction candidate. An unrecognised reason counts here (fail-open), so a reason added upstream without registration leaves the measured rate conservatively high instead of silently shrinking the population.",
+      "distinction": "The ELIGIBLE bail population - NOT NonCandidateBails (its complement) and NOT the raw attempts{bailed} counter that mixes both.",
+      "distinct_from": [
+        "c729-non-candidate-bails",
+        "c729-compact-candidate-bail-rate"
+      ],
+      "aliases": [],
+      "grounding": "candidateBails",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-candidate-bail-rate",
+      "canonical": "CandidateBailRate (ledger candidate-bail ratio field)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gatewayusageledger/compaction_segments.go: the ledger field (Bails-NonCandidateBails)/(Fires + Bails-NonCandidateBails) - declines over ELIGIBLE attempts, 0 when the eligible population is empty. It is the health read BailRate cannot carry (#5388), and BailRate is kept beside it unchanged for continuity.",
+      "distinction": "The SEGMENTED-LEDGER field - NOT compactCandidateBailRate (the live gateway computation of the same ratio) and NOT BailRate (the raw ratio over all attempts).",
+      "distinct_from": [
+        "c729-compact-candidate-bail-rate",
+        "c729-non-candidate-bails"
+      ],
+      "aliases": [],
+      "grounding": "CandidateBailRate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-compact-candidate-bail-rate",
+      "canonical": "compactCandidateBailRate (live candidate-bail computation)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway/metrics_observe.go: computes fires/(fires+candidateBails) at observe time, returning an honest zero when the eligible population is empty rather than a fabricated ratio (#5443/#5388).",
+      "distinction": "The live GATEWAY-side function - NOT CandidateBailRate (the persisted ledger field it feeds) and NOT the raw bail rate, which the unchanged attempts{bailed} counter still makes recoverable.",
+      "distinct_from": [
+        "c729-candidate-bail-rate",
+        "c729-candidate-bails"
+      ],
+      "aliases": [],
+      "grounding": "compactCandidateBailRate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-placement-candidates",
+      "canonical": "placementCandidates (rung-eligible model pool)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/route_place.go: builds the candidate pool a rung placement draws from, excluding compatibility-only and deprecated-alias bindings (legacy spellings of a model already in the pool) and admitting a model with no declared capability UNMEASURED at the strictest tier.",
+      "distinction": "The UNGRADED admission pool - NOT gradedPool (the same pool after evidence grading) and NOT GradeCandidates (the grader that produces those grades).",
+      "distinct_from": [
+        "c729-graded-pool",
+        "c729-grade-candidates"
+      ],
+      "aliases": [],
+      "grounding": "placementCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-dispatch-candidate-keys",
+      "canonical": "dispatchCandidateKeys (candidate-slice key projection)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/dispatch_price.go: projects any candidate slice onto the plain string slice the shared wave/lane helpers take, with the key accessor supplied by the caller because the price and wave candidate types name their identity differently (Name vs ID).",
+      "distinction": "A generic KEY PROJECTION over candidates - NOT placementCandidates (which builds a model pool) and NOT the wave/lane helpers it feeds.",
+      "distinct_from": [
+        "c729-placement-candidates"
+      ],
+      "aliases": [],
+      "grounding": "dispatchCandidateKeys",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-grade-candidates",
+      "canonical": "GradeCandidates (deterministic multi-model grader)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/modelroute/capability.go: grades EVERY model in a fixed order so a placement built from evidence is as reproducible as one built from a hand-written declaration; a model with no evidence still appears, ungraded and therefore top-rung only.",
+      "distinction": "The plural, order-fixed grader over a model LIST - NOT GradeCapability (the single-model fold it calls) and NOT gradedPool (the candidate pool the grades are then applied to).",
+      "distinct_from": [
+        "c729-grade-capability",
+        "c729-graded-pool"
+      ],
+      "aliases": [],
+      "grounding": "GradeCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-guard-audit-plan",
+      "canonical": "guardAuditPlan (audit-journal enable decision)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_support.go: the side-effect-free decision of WHETHER to enable the guard audit journal, at what path, and whether that path was SYNTHESIZED from the repo-local default - so the precedence (boot env, then --no-audit/--audit off, then --audit PATH, then repo default) is unit-testable without touching the global journal.",
+      "distinction": "A pure PLANNING function whose output the caller acts on - NOT guardEnableAudit (which performs the enable) and NOT the journal file itself; the isDefault bit is what lets a failed default-on enable degrade to a warning.",
+      "distinct_from": [
+        "c729-maybe-record-guard-session-index"
+      ],
+      "aliases": [],
+      "grounding": "guardAuditPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-select-chat-planner",
+      "canonical": "selectChatPlanner (chat backend selection)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway/gateway.go: picks the chat backend for the /v1/chat/completions and /v1/messages surfaces from the wired configuration - a dual local-alongside-API planner, a proxy planner, the in-kernel chat planner, or the deterministic mock - and records the planner-init startup phase.",
+      "distinction": "The BACKEND CHOOSER for the chat surfaces, so \"planner\" here means a serving backend - NOT a work planner that produces a plan document.",
+      "distinct_from": [
+        "c729-build-gateway",
+        "c729-suite-plan"
+      ],
+      "aliases": [],
+      "grounding": "selectChatPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-suite-plan",
+      "canonical": "SuitePlan (quality suite corpus split)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/quality/suite_corpus.go: the planned shape of a quality suite run over its corpus - what suite_split.go then splits into the executed parts.",
+      "distinction": "A CORPUS/split plan for a quality suite - NOT selectChatPlanner (which selects a serving backend) and NOT a dispatch launch plan.",
+      "distinct_from": [
+        "c729-select-chat-planner"
+      ],
+      "aliases": [],
+      "grounding": "SuitePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-cache-aware-policy",
+      "canonical": "CacheAwarePolicy (power-of-two-choices prefix router)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/gateway/residency_router.go: forms TWO choices per request - the LOCALITY target (longest resident prefix overlap) and the BALANCE target (least-loaded worker) - and routes to whichever wins prefix-overlap-length x inverse-load; past SkewThreshold it drops locality entirely and routes by load alone.",
+      "distinction": "A ROUTING policy that uses cache residency as a score - NOT a cache eviction or admission policy, and NOT PrefixResidencyIndex (the index it reads and self-populates).",
+      "distinct_from": [
+        "x2-guard-gate-residencygate",
+        "c729-eviction-strategy"
+      ],
+      "aliases": [],
+      "grounding": "CacheAwarePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-dispatch-preflight-timed",
+      "canonical": "dispatchPreflightTimed (instrumented preflight)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cmd/fak/dispatch_tick_preflight.go: the timed form of the dispatch preflight - it returns the preflight map PLUS a per-stage millisecond timing map (process_snapshot, kernel_probe, ...); dispatchPreflight is the thin wrapper that drops the timings.",
+      "distinction": "The variant that also reports WHERE the preflight time went - NOT dispatchPreflight (the untimed wrapper) and NOT PreflightRefuseNoAccount (one of the refusal reasons the preflight can produce).",
+      "distinct_from": [
+        "c729-preflight-refuse-no-account",
+        "c729-dispatch-tick-preflight-file"
+      ],
+      "aliases": [],
+      "grounding": "dispatchPreflightTimed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-dispatch-tick-preflight-file",
+      "canonical": "dispatch_tick_preflight.go (tick admission preflight)",
+      "family": "policy-capability",
+      "kind": "subsystem",
+      "definition": "cmd/fak/dispatch_tick_preflight.go: the file holding the dispatch tick's admission preflight - the host process snapshot, the kernel probe, the seat pool read and the published per-worker load (OSWorkerProcs) that together decide how many workers a tick may admit.",
+      "distinction": "The ADMISSION-CAPACITY preflight run before a tick dispatches - NOT the guard's per-tool adjudication and NOT dispatch_tick_load_debounce.go (the load publisher it reads from).",
+      "distinct_from": [
+        "c729-dispatch-preflight-timed",
+        "c729-preflight-refuse-no-account"
+      ],
+      "aliases": [],
+      "grounding": "dispatch_tick_preflight",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-grade-capability",
+      "canonical": "GradeCapability (single-model capability fold)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/modelroute/capability.go: folds ONE model's observed outcomes into a capability grade, deterministically in the evidence - rows are merged per class before anything is compared, so the same rows in any order yield the same grade.",
+      "distinction": "The SINGLE-model grader - NOT GradeCandidates (the fixed-order grader over a list of models) and NOT gradedPool (the pool the resulting grades are applied to).",
+      "distinct_from": [
+        "c729-grade-candidates",
+        "c729-graded-pool"
+      ],
+      "aliases": [],
+      "grounding": "GradeCapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-no-commit-policy-block",
+      "canonical": "NoCommitPolicyBlock (no-commit cause: policy_block)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/dispatchtick/witness.go: the no-commit CAUSE constant \"policy_block\" - the witness classification for a worker that produced no commit because policy refused it, as distinct from a worker that simply did nothing.",
+      "distinction": "A no-commit CLASSIFICATION recorded by the witness - NOT the policy refusal itself, and NOT PreflightRefuseNoAccount (a pre-launch refusal reason, before any worker ran).",
+      "distinct_from": [
+        "c729-preflight-refuse-no-account",
+        "c729-witness-exited-workers"
+      ],
+      "aliases": [],
+      "grounding": "NoCommitPolicyBlock",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-preflight-refuse-no-account",
+      "canonical": "PreflightRefuseNoAccount (REFUSE_NO_ACCOUNT)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "internal/dispatchtick/preflight.go: the preflight refusal constant \"REFUSE_NO_ACCOUNT\" - a dispatch is refused before launch because no seat/account is available to run it.",
+      "distinction": "A PRE-LAUNCH refusal reason - NOT NoCommitPolicyBlock (a POST-run witness cause) and NOT the preflight capacity numbers themselves.",
+      "distinct_from": [
+        "c729-no-commit-policy-block",
+        "c729-dispatch-tick-preflight-file"
+      ],
+      "aliases": [],
+      "grounding": "PreflightRefuseNoAccount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-resolve-worker-model-policy",
+      "canonical": "resolveWorkerModelPolicy (worker model precedence)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cmd/fak/dispatch_model_policy.go: resolves which model a dispatched worker runs under, through a fixed precedence - operator pin, bench gate, per-issue tier profile, then the work-class model default - and builds the downgrade chain with the primary dropped so a Layer-2 switch never re-dispatches onto the walled model.",
+      "distinction": "The PRECEDENCE resolver for a worker's model - NOT GradeCapability (which measures what a model can do) and NOT the fallback chain it emits.",
+      "distinct_from": [
+        "c729-grade-capability",
+        "c729-graded-pool"
+      ],
+      "aliases": [],
+      "grounding": "resolveWorkerModelPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-cache-break-file",
+      "canonical": "cache_break.go (per-session cache-break witness)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/metrics/cache_break.go (#2916): the observability half of the cache-integrity invariant - a first-class runtime counter of how often the prompt prefix actually broke and what each break cost, under a CLOSED cause label, so a cache regression is caught by a gate rather than by the invoice.",
+      "distinction": "The WITNESS surface for prefix breaks - NOT the prefix-mutation detector that reports a break, and NOT the cache-value pricing ledger.",
+      "distinct_from": [
+        "c4681-cachebreakevent",
+        "c4681-cachebreakreport",
+        "c729-cache-break-cause"
+      ],
+      "aliases": [],
+      "grounding": "cache_break",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-cache-break-cause",
+      "canonical": "CacheBreakCause (closed break-cause vocabulary)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "internal/metrics/cache_break.go: the CLOSED vocabulary for why a cached prompt prefix broke; a closed set (rather than free text) is what lets a regression gate reason by cause, and anything outside it folds to CacheBreakUnknown.",
+      "distinction": "The CAUSE label, not the event: it says WHY a prefix broke - NOT CacheBreakEvent (one witnessed break, cause plus cost) and NOT CacheBreakReport (the folded readout).",
+      "distinct_from": [
+        "c4681-cachebreakevent",
+        "c4681-cachebreakreport",
+        "c729-fold-cache-breaks"
+      ],
+      "aliases": [],
+      "grounding": "CacheBreakCause",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-fold-cache-breaks",
+      "canonical": "FoldCacheBreaks (session break fold)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "internal/metrics/cache_break.go: folds a session's cache-break witnesses into the CacheBreakReport, enumerating causes in a canonical deterministic order so the witnessed output is stable across runs.",
+      "distinction": "The READ-side fold from events to a report - NOT recordCacheBreak / WitnessCacheBreak (the write side that appends one event) and NOT CacheBreakCause (the label it groups by).",
+      "distinct_from": [
+        "c729-record-cache-break",
+        "c729-cache-break-cause",
+        "c4681-cachebreakreport"
+      ],
+      "aliases": [],
+      "grounding": "FoldCacheBreaks",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-record-cache-break",
+      "canonical": "recordCacheBreak (gateway break witness seam)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "internal/gateway/metrics_observe.go: the gateway-side CONSUMER seam that witnesses one cache-break event - the caller supplies cause and cold-rebuild token cost, internal/metrics normalizes them, a nil metrics is a no-op, and the append is off the hot path under its own lock.",
+      "distinction": "The WRITE seam a gateway calls per break - NOT FoldCacheBreaks (the read-time fold) and NOT the prefix-mutation detector that decides a break happened.",
+      "distinct_from": [
+        "c729-fold-cache-breaks",
+        "c729-cache-break-cause"
+      ],
+      "aliases": [],
+      "grounding": "recordCacheBreak",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-cache-breakpoint-placement-total",
+      "canonical": "fak_gateway_cache_breakpoint_placement_total (placement outcomes)",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "internal/gateway/metrics_render.go: the counter of cache_control BREAKPOINT PLACEMENT attempts on the outbound body, labelled by outcome (placed, or the refusal reason).",
+      "distinction": "Counts attempts to PLACE a cache breakpoint - NOT the cache-break counters, which count an established prefix BREAKING; placement is a write-side decision, a break is an observed loss.",
+      "distinct_from": [
+        "x2-cache-placeanthropiccachebreakpoint",
+        "c729-cache-break-file",
+        "c729-record-cache-break"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_cache_breakpoint_placement_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-vcache-saved-token-equiv",
+      "canonical": "fak_vcache_saved_token_equiv (net realized saving)",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "internal/gateway/metrics_render.go: the gauge of NET realized provider-cache saving in input-token-equivalents (baseline minus actual). It is NEGATIVE on a cold-write-dominated session until reads repay the writes, and is the same engine and number as `fak vcache observe`.",
+      "distinction": "A NET, signed saving that can legitimately read negative - NOT VCacheTokenEquiv (the unit conversion it is denominated in) and NOT a gross cache-read count.",
+      "distinct_from": [
+        "x-cache-vcachetokenequiv",
+        "x-cache-vcacheobserve"
+      ],
+      "aliases": [],
+      "grounding": "fak_vcache_saved_token_equiv",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-compaction-lever-buckets",
+      "canonical": "compactionLeverBuckets (lever-telemetry bucket filter)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "internal/cachevaluereport/fleet_benefit.go: selects the savings buckets that carry compaction-lever telemetry - the fak-authored rows plus any mechanism in the compaction family - so the terminal and markdown renderers fold the fire/starve/shed trend from exactly the same rows; nil means no lever-health section.",
+      "distinction": "A ROW SELECTOR over savings buckets - NOT compaction_segments.go (which segments by budget regime and session length) and NOT the lever itself.",
+      "distinct_from": [
+        "c729-compaction-segments-file",
+        "c729-score-compaction-fire"
+      ],
+      "aliases": [],
+      "grounding": "compactionLeverBuckets",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-compaction-segments-file",
+      "canonical": "compaction_segments.go (regime-segmented effectiveness fold)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "internal/gatewayusageledger/compaction_segments.go: the compaction-effectiveness fold SEGMENTED by budget regime x session-length band - it exists because the fleet's compaction-shed numbers are only comparable WITHIN a budget regime (the 48000 interactive default versus the headless one).",
+      "distinction": "A SEGMENTED fold whose whole point is refusing to average across regimes - NOT compactionLeverBuckets (a bucket filter) and NOT the raw ledger rows.",
+      "distinct_from": [
+        "c729-compaction-lever-buckets",
+        "c729-candidate-bail-rate"
+      ],
+      "aliases": [],
+      "grounding": "compaction_segments",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-compaction-solvency-forced",
+      "canonical": "CompactionSolvencyForced (fires forced by the solvency floor)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "internal/gateway/metrics.go: the count of fires the head-anchored burst economics REFUSED and the context-solvency floor forced anyway - a SUBSET of CompactionFired, broken out because an ordinary fire repays in cache dollars while a forced one is knowingly taken at a loss to keep the session inside its context window.",
+      "distinction": "The knowingly-uneconomic SUBSET of fires, which the cache-value ledger must not book as savings - NOT CompactionFired (the total) and NOT a fault count; a forced fire is the override working.",
+      "distinct_from": [
+        "c729-score-compaction-fire",
+        "c729-compaction-segments-file"
+      ],
+      "aliases": [],
+      "grounding": "CompactionSolvencyForced",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-format-compaction-budget-nudge",
+      "canonical": "formatCompactionBudgetNudge (budget line for the debug pane)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "internal/gateway/debug_stats.go: renders the ' budget=spent:... ctx:.../...' nudge line from prompt/completion/cache-read/cache-create against the compaction budget; empty when no budget is set or nothing is resident.",
+      "distinction": "A RENDERER of the residency-versus-budget line - NOT compactionBudgetPast (the boolean predicate beside it that decides whether the budget is exceeded) and NOT the compactor's own fire decision.",
+      "distinct_from": [
+        "c729-compaction-solvency-forced",
+        "c729-score-compaction-fire"
+      ],
+      "aliases": [],
+      "grounding": "formatCompactionBudgetNudge",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-score-compaction-fire",
+      "canonical": "ScoreCompactionFire (ex-post fire pricing)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "internal/rsiloop/firenettune.go: the PURE fold that prices ONE fire's OBSERVED facts into a scored receipt on the canonical cacheprice basis (#2798) - the same economics CacheBurstBreakEvenTurns prices ex-ante.",
+      "distinction": "The EX-POST scoring of a fire that already happened - NOT CacheBurstBreakEvenTurns (the ex-ante estimate on the same basis) and NOT CompactionSolvencyForced (a count of overridden fires).",
+      "distinct_from": [
+        "c729-compaction-solvency-forced",
+        "c729-compaction-lever-buckets"
+      ],
+      "aliases": [],
+      "grounding": "ScoreCompactionFire",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-render-commit-msg-advisory",
+      "canonical": "renderCommitMsgAdvisory (post-derivation message warning)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "cmd/fak/commit_msg_advisory.go: prints the commit-message advisory by RE-LINTING the final message rather than reusing the pre-derivation report, so a subject the derivation healed produces no warning; exempt subject classes (a release anchor, a merge/revert, a bookkeeping snapshot) are honoured and never nagged.",
+      "distinction": "An ADVISORY renderer that describes what will actually land - NOT the commit-message linter it calls, and NOT a refusal: FLEET_MSG_GUARD can only silence it.",
+      "distinct_from": [
+        "c729-fleet-msg-guard-env"
+      ],
+      "aliases": [],
+      "grounding": "renderCommitMsgAdvisory",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-render-coverage",
+      "canonical": "RenderCoverage (fan-out coverage scorecard printer)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "internal/issuefanout/coverage.go: prints the issue-fan-out coverage scorecard for a human - the two headline rates, one evidence row per new leaf, and the named offenders behind each rate.",
+      "distinction": "The PRINTER for a CoverageReport - NOT Coverage() (the fold that computes it) and NOT coverageReport in cmd/fak/route_coverage.go, which renders MODEL-ROUTE coverage and merely shares the word.",
+      "distinct_from": [
+        "c729-coverage-report-name",
+        "c729-leaf-coverage"
+      ],
+      "aliases": [],
+      "grounding": "RenderCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-render-overview",
+      "canonical": "RenderOverview (device fleet overview grid)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "internal/metrics/device_spine_tui.go: renders the fleet overview grid - one fixed-height card per device, column-wrapped to the given width, in the view's stable first-seen order, over the SAME snapshot slice every other renderer reads.",
+      "distinction": "A TUI GRID over device metrics - NOT RenderReceipt (a per-field receipt view) and NOT a metrics collection path; it adds no new collection.",
+      "distinct_from": [
+        "c729-render-receipt",
+        "c729-render-refusal-notes"
+      ],
+      "aliases": [],
+      "grounding": "RenderOverview",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-render-receipt",
+      "canonical": "RenderReceipt (agent receipt + verification verdict)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "internal/agent/receipt.go: writes the human, per-field-labeled receipt view of an agent Receipt plus the verification verdict (a nil verifyErr means it verified against the journal).",
+      "distinction": "A per-RECEIPT human view that also states whether the receipt verified - NOT RenderOverview (a device grid) and NOT the journal it is verified against.",
+      "distinct_from": [
+        "c729-render-overview",
+        "c729-render-refusal-notes"
+      ],
+      "aliases": [],
+      "grounding": "RenderReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-render-refusal-notes",
+      "canonical": "renderRefusalNotes (folded actionable refusal notes)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "internal/gateway/refusal_notes.go: folds every registered note renderer over ONE refused adjudication and returns the space-joined actionable notes plus whether any of them was a preview-confirm recipe; both content-channel call sites consume this instead of stitching notes by hand.",
+      "distinction": "The single FOLD over refusal-note renderers - NOT an individual note renderer, and NOT the adjudication decision it explains.",
+      "distinct_from": [
+        "c729-render-receipt",
+        "c729-render-overview"
+      ],
+      "aliases": [],
+      "grounding": "renderRefusalNotes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-collect-superloop-statuses",
+      "canonical": "collectSuperloopStatuses (super-loop member status walk)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "cmd/fak/superloop.go: reads each super-loop member's status from the cheap committed surfaces off the hot path - scorecard debt from the pinned control-pane baseline, loop liveness from the cross-ledger loop-health fold - descending a sub-super-loop inline while garden/surface members stay descend pointers.",
+      "distinction": "The ENTRY POINT for one walk - NOT superloopCollector (the once-per-walk cache of those surfaces it constructs) and NOT runSuperloopDrive (which admits and may run a member).",
+      "distinct_from": [
+        "c729-superloop-collector",
+        "c729-run-superloop-drive"
+      ],
+      "aliases": [],
+      "grounding": "collectSuperloopStatuses",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-superloop-collector",
+      "canonical": "superloopCollector (once-per-walk surface cache)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "cmd/fak/superloop.go: holds the cheap committed surfaces read ONCE per walk (the pinned scorecard baseline, the cross-ledger loop-health fold, the trajectory ledger), so a recursive descent through sub-super-loops re-reads nothing; its descend() refuses an unknown ref or a cycle as UNMEASURED.",
+      "distinction": "The per-walk STATE that makes the recursive descent cheap and cycle-safe - NOT collectSuperloopStatuses (the function that creates and drives it).",
+      "distinct_from": [
+        "c729-collect-superloop-statuses",
+        "c729-run-superloop-drive"
+      ],
+      "aliases": [],
+      "grounding": "superloopCollector",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-run-superloop-drive",
+      "canonical": "runSuperloopDrive (super-loop drive CLI)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "cmd/fak/superloop_drive.go: the `fak superloop drive` entry point - it admits up to --batch worst-first members whose regions are mutually disjoint (and disjoint from live leases) through the lease-admission gate, optionally executing each admitted member's own front door behind the held lease.",
+      "distinction": "The ADMIT-and-optionally-RUN verb - NOT collectSuperloopStatuses (the read-only status walk it decides from) and NOT the loop ledger it records its admission witness to.",
+      "distinct_from": [
+        "c729-collect-superloop-statuses",
+        "c729-load-loop-ledger-events"
+      ],
+      "aliases": [],
+      "grounding": "runSuperloopDrive",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-load-loop-ledger-events",
+      "canonical": "loadLoopLedgerEvents (tolerant loop-ledger read)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "cmd/fak/dojo.go: tolerantly reads the workspace's ACTIVE loop-ledger segment; a missing ledger or a chain break degrades to the recovered prefix, so the dispatch-yield episode reports itself UNMEASURED instead of failing the run.",
+      "distinction": "A TOLERANT reader that degrades rather than errors - NOT recordDispatchTickLoop (the writer that appends a tick row) and NOT the ledger file itself.",
+      "distinct_from": [
+        "c729-record-dispatch-tick-loop",
+        "c729-run-superloop-drive"
+      ],
+      "aliases": [],
+      "grounding": "loadLoopLedgerEvents",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-record-dispatch-tick-loop",
+      "canonical": "recordDispatchTickLoop (tick row into the loop ledger)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "cmd/fak/dispatch_tick_worker.go: appends one dispatch-tick row to the loop ledger - deriving the run id and loop id from the payload and recording the tick's live flag, lane issue count, step budget, worker cap and preflight live/cap numbers.",
+      "distinction": "The WRITER of a dispatch-tick loop row - NOT loadLoopLedgerEvents (the tolerant reader) and NOT the dispatch preflight whose numbers it copies.",
+      "distinct_from": [
+        "c729-load-loop-ledger-events",
+        "c729-dispatch-tick-preflight-file"
+      ],
+      "aliases": [],
+      "grounding": "recordDispatchTickLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-arch-support-file",
+      "canonical": "arch_support.go (in-kernel architecture support surface)",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "internal/model/arch_support.go: the surface stating which checkpoint architectures fak's in-kernel forward actually implements - it carries the forward-path classification and the typed refusal for anything it does not.",
+      "distinction": "The SUPPORT/refusal surface for an architecture - NOT the per-architecture forward code itself, and NOT the GGUF loader's arch metadata read.",
+      "distinct_from": [
+        "c729-unsupported-arch-error",
+        "c729-gguf-arch-stores-hf-rotary-layout"
+      ],
+      "aliases": [],
+      "grounding": "arch_support",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-unsupported-arch-error",
+      "canonical": "UnsupportedArchError (typed unsupported-arch refusal)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "internal/model/arch_support.go: the typed refusal newModel returns when a checkpoint carries weights for an architecture whose in-kernel forward fak does not yet implement, so `fak serve` can surface a named refusal before serving a token instead of binding the gateway and panicking on the first turn.",
+      "distinction": "A LOAD-TIME typed refusal about the architecture - NOT a runtime forward error and NOT arch_support.go (the file that classifies support).",
+      "distinct_from": [
+        "c729-arch-support-file"
+      ],
+      "aliases": [],
+      "grounding": "UnsupportedArchError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-coverage-report-name",
+      "canonical": "CoverageReport (four same-named per-package coverage folds)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "CoverageReport is a REUSED name, not one type: internal/accountprobe grades an enrolled seat roster (and separately reports whether the ledger said anything at all); internal/issuefanout is the two-rate adoption scorecard with per-leaf evidence; internal/productscorecard.CoverageReport is a FUNCTION over a catalog; and cmd/fak/route_coverage.go's lowercase coverageReport renders model-route coverage.",
+      "distinction": "A name a reader must disambiguate BY PACKAGE before trusting it - NOT one type; in particular the accountprobe and issuefanout reports measure entirely different populations (seats versus new leaves).",
+      "distinct_from": [
+        "c729-leaf-coverage",
+        "c729-render-coverage",
+        "c729-default-coverage-scan-cap"
+      ],
+      "aliases": [],
+      "grounding": "CoverageReport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-default-coverage-scan-cap",
+      "canonical": "DefaultCoverageScanCap (fan-out issue scan bound)",
+      "family": "support-maturity",
+      "kind": "config",
+      "definition": "internal/issuefanout/coverage.go: the default cap on issues scanned when measuring fan-out coverage (20000). It is deliberately NOT the dedupe bound - fan-out markers cluster in OLDER issues, so a small window returns zero markers and reports a confident 0% that is simply wrong; a scan that hits the cap is marked truncated and forces OK false.",
+      "distinction": "A SCAN-WINDOW bound whose exhaustion is reported as NOT PROVEN - NOT the dedupe bound it was deliberately split from, and NOT a coverage rate.",
+      "distinct_from": [
+        "c729-coverage-report-name",
+        "c729-leaf-coverage"
+      ],
+      "aliases": [],
+      "grounding": "DefaultCoverageScanCap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-leaf-coverage",
+      "canonical": "LeafCoverage (per-leaf fan-out evidence row)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "internal/issuefanout/coverage.go: ONE leaf's evidence row inside the fan-out coverage scorecard - the per-leaf witness behind the headline rates.",
+      "distinction": "A per-leaf EVIDENCE ROW - NOT internal/wiki's leaf_coverage float (a wiki score field that shares the name) and NOT CoverageReport (the whole scorecard).",
+      "distinct_from": [
+        "c729-coverage-report-name",
+        "c729-render-coverage"
+      ],
+      "aliases": [],
+      "grounding": "LeafCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-query-pre-attn-scalar",
+      "canonical": "QueryPreAttnScalar (Gemma per-head scale override)",
+      "family": "attention",
+      "kind": "config",
+      "definition": "internal/model/config.go: the config field that OVERRIDES the per-head attention scale denominator - when non-zero (Gemma) the scale is 1/sqrt(QueryPreAttnScalar) instead of 1/sqrt(HeadDim), which is why Gemma 27B's 144 differs from its head dim.",
+      "distinction": "The DENOMINATOR OVERRIDE, a config input - NOT attnScale (the computed SDPA denominator it feeds) and NOT longropeAttnScaleMul (a multiplicative Phi-longrope adjustment applied to the same scale).",
+      "distinct_from": [
+        "x-attention-attnscale",
+        "c729-longrope-attn-scale-mul"
+      ],
+      "aliases": [],
+      "grounding": "QueryPreAttnScalar",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-longrope-attn-scale-mul",
+      "canonical": "longropeAttnScaleMul (Phi longrope attention-scale multiplier)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "internal/model/longrope.go: the multiplicative attention-scale adjustment the Phi longrope path applies on top of the 1/sqrt(denominator) term.",
+      "distinction": "A MULTIPLIER on the attention scale, driven by the rope configuration - NOT QueryPreAttnScalar (which replaces the denominator) and NOT attnScale itself.",
+      "distinct_from": [
+        "c729-query-pre-attn-scalar",
+        "x-attention-attnscale"
+      ],
+      "aliases": [],
+      "grounding": "longropeAttnScaleMul",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-self-attention-tensor-prefix",
+      "canonical": "self_attention (Falcon checkpoint tensor namespace)",
+      "family": "attention",
+      "kind": "concept",
+      "definition": "internal/model: the FALCON-family checkpoint tensor namespace - self_attention.query_key_value.weight (a fused QKV panel split at materialize time) and self_attention.dense, which fak canonicalizes to self_attn.o_proj.",
+      "distinction": "The Falcon-export SPELLING, which fak aliases away at load - NOT self_attn (fak's canonical projection namespace) and NOT a runtime attention kernel.",
+      "distinct_from": [
+        "x-attention-selfattn"
+      ],
+      "aliases": [],
+      "grounding": "self_attention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-growth-reap-decision",
+      "canonical": "growthReapDecision (one growth-gate reap outcome)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "cmd/fak/growthgate.go: one reap outcome record - what a dry run WOULD delete, or what an --apply run reaped or failed to reap; the JSON-tagged accountability record the reap ledger is made of.",
+      "distinction": "A per-item REAP RECORD covering both dry-run and apply - NOT RestartDecision (a process-restart verdict) and NOT appendGrowthgateReapLedger (the writer that serialises it).",
+      "distinct_from": [
+        "c729-append-growthgate-reap-ledger",
+        "c729-restart-decision"
+      ],
+      "aliases": [],
+      "grounding": "growthReapDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-restart-decision",
+      "canonical": "RestartDecision (loopmgr restart verdict)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "internal/loopmgr/restart.go: the structured verdict returned by RestartPolicy.Decide - Restart means a restart is still allowed and is scheduled for RestartAtUnixNano; GiveUp means the caller must stop restarting and surface Reason. Re-deciding inside the backoff window returns the SAME time, so duplicate watchdog ticks debounce instead of spawning a second process.",
+      "distinction": "A RESTART-or-GIVE-UP verdict about a supervised process - NOT TrajectoryWatchdogDecision (which decides how to INTERVENE in a live agent session) and NOT growthReapDecision (a deletion record).",
+      "distinct_from": [
+        "c729-trajectory-watchdog-decision",
+        "c729-growth-reap-decision"
+      ],
+      "aliases": [],
+      "grounding": "RestartDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-trajectory-watchdog-decision",
+      "canonical": "TrajectoryWatchdogDecision (agent-stall intervention verdict)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "internal/resume/trajectory_watchdog.go: the clock- and IO-free intervention verdict for a watched agent session. Liveness dominates: a dead session revives from the independently-read fresh anchor; a living healthy or slow session is untouched; a living STALL gets the cheapest reversible nudge first and only escalates after that nudge was tried.",
+      "distinction": "An INTERVENTION choice for a live agent trajectory - NOT RestartDecision (a process-restart schedule) and NOT the soft diagnostic dump the SoftWatchdog captures beside it, which never alters this decision.",
+      "distinct_from": [
+        "c729-restart-decision"
+      ],
+      "aliases": [],
+      "grounding": "TrajectoryWatchdogDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-build-gateway",
+      "canonical": "buildGateway (serve gateway-construction stage)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "cmd/fak/serve_stages.go: the `fak serve` startup stage that loads the optional model-routing policy, constructs the gateway server from the already-resolved planes, and arms the admission controller for a pure in-kernel serve.",
+      "distinction": "The CONSTRUCTION stage of serve startup - NOT resolveSessionPlane (the earlier stage that resolves auth, budgets and session drive state it consumes) and NOT the gateway type itself.",
+      "distinct_from": [
+        "c729-resolve-session-plane",
+        "c729-select-chat-planner"
+      ],
+      "aliases": [],
+      "grounding": "buildGateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-tool-defer-cold-total",
+      "canonical": "fak_gateway_tool_defer_cold_total (cold tool definitions deferred)",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "internal/gateway/metrics_render.go: the cumulative count of COLD tool DEFINITIONS marked defer_loading:true on the outbound Anthropic body across a session - the 10x floor lever (--defer-cold-tools, #3232). It is cache-safe by construction (deterministic, byte-stable tools[] turn over turn), and the provider-side context drop it drives is OBSERVED via input_tokens/cache_read, never claimed by this counter.",
+      "distinction": "Counts DEFINITIONS deferred, not turns and not tokens saved - NOT fak_gateway_tool_defer_standdown_turns_total (its denominator: turns where the transform ran and stood down) and NOT floorgate (the budget that refuses growth).",
+      "distinct_from": [
+        "gateway-engine-fakgatewaytooldefer",
+        "c729-floorgate"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_tool_defer_cold_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-discard-witnessed",
+      "canonical": "DISCARD_WITNESSED (wip-recon safe-discard action)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "internal/wiprecon/recon.go: the reconciliation ACTION for a crashed owner's checkpoint whose delta already LANDED in HEAD (git-witnessed), so dropping it loses nothing. Fail-safe by construction: the only path to it requires Landed==true.",
+      "distinction": "The one action justified by a GIT WITNESS that the work is already in HEAD - NOT RECLAIM or QUARANTINE (the actions for deltas that did NOT land) and NOT wipSessionOf (which only identifies the owner).",
+      "distinct_from": [
+        "c729-wip-session-of",
+        "c729-valid-witness"
+      ],
+      "aliases": [],
+      "grounding": "DISCARD_WITNESSED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-valid-witness",
+      "canonical": "validWitness (two same-named witness membership tests)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "validWitness is a REUSED name for two different membership tests: internal/dsparity's map of accepted parity Witness values, and internal/trajctl's function over a WitnessRung. Both answer 'is this witness value in the closed set', over unrelated vocabularies.",
+      "distinction": "A per-package VOCABULARY check, not one shared validator - NOT a claim that a witness is TRUE of the tree; it only says the value is a known member.",
+      "distinct_from": [
+        "c729-discard-witnessed",
+        "c729-witness-exited-workers"
+      ],
+      "aliases": [],
+      "grounding": "validWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-witness-exited-workers",
+      "canonical": "witnessExitedWorkers (post-run commit-claim audit)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "cmd/fak/dispatch_tick_witness.go: audits the workers that have EXITED, bucketing each resolve log into witnessed / unwitnessed / no-commit claims and returning the per-worker witness records.",
+      "distinction": "A POST-EXIT audit of what a worker actually committed - NOT NoCommitPolicyBlock (one of the no-commit causes it can record) and NOT validWitness (a vocabulary membership test).",
+      "distinct_from": [
+        "c729-no-commit-policy-block",
+        "c729-valid-witness"
+      ],
+      "aliases": [],
+      "grounding": "witnessExitedWorkers",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-eviction-strategy",
+      "canonical": "evictionStrategy (radix tree victim rule)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "internal/radixkv/eviction_strategy.go: the tree's CURRENT victim rule accessor - it defaults an unset tree (a bare New()) to pure LRU so the zero value keeps its historical behaviour.",
+      "distinction": "The rule that chooses WHICH resident block to drop - NOT CacheAwarePolicy (a routing policy that reads residency) and NOT the retention request that asks for space.",
+      "distinct_from": [
+        "c729-cache-aware-policy",
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "evictionStrategy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-gguf-arch-stores-hf-rotary-layout",
+      "canonical": "ggufArchStoresHFRotaryLayout (NEOX-layout allow-list)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "internal/ggufload/gguf_tensor_canonical.go: the allow-list predicate for architectures whose GGUF q/k weights are stored in the HF rotary layout and must be consumed exactly as stored - running those through unpermuteRotaryTensor would scramble every head's rotary pairs. Anything off the list keeps the historical unpermute.",
+      "distinction": "A per-architecture LAYOUT question about how q/k weights are STORED - NOT the rotary computation itself, and NOT UnsupportedArchError (whether the arch is implemented at all).",
+      "distinct_from": [
+        "c729-unsupported-arch-error",
+        "c729-arch-support-file"
+      ],
+      "aliases": [],
+      "grounding": "ggufArchStoresHFRotaryLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "c729-graded-pool",
+      "canonical": "gradedPool (evidence-graded candidate pool)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "cmd/fak/route_place_evidence.go: applies capability grades to a candidate pool. A grade that did not reach the bar leaves its candidate exactly as it was - ungraded and therefore top-rung only - because failing to MEASURE something is not evidence against it; a model claimed by both a hand declaration and evidence is refused by the caller before this runs.",
+      "distinction": "The pool AFTER evidence grading - NOT placementCandidates (the ungraded admission pool it starts from) and NOT GradeCandidates (the grader that produced the grades).",
+      "distinct_from": [
+        "c729-placement-candidates",
+        "c729-grade-candidates",
+        "c729-grade-capability"
+      ],
+      "aliases": [],
+      "grounding": "gradedPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
