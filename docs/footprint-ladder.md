@@ -148,6 +148,9 @@ prints the number and `CheckFloor` can refuse the diff.
   per slice).
 - [MCP tool-schema floor — committed baseline](context-budget/mcp-tool-floor.md) — the
   measured floor `CheckFloor` ratchets down, and how to justify growth.
+- [The AGENTS.md instruction-pulled floor](context-budget/agents-md-floor.md) — the other
+  half of the per-agent floor: bytes a resident instruction tells the agent to `Read`, so
+  they land in neither `/context` nor `fak footprint`. Priced by `fak footprint --doc`.
 - [Hermes Agent integration](integrations/hermes.md) — the upstream source of the ladder idea.
 - [Add a feature as a leaf, not a core edit](../AGENTS.md) — the rung-1 default the kernel
   already enforces via `internal/architest`.

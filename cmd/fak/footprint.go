@@ -33,13 +33,17 @@ func runMCPFootprint(out, errw io.Writer, argv []string) int {
 	heldAcc := fs.Bool("held-accuracy", false, "run the #3533 cold-tool-deferral held-accuracy fault-in-recall eval")
 	audit := fs.Bool("audit", false, "run the #5050 session-config token-bloat audit (floor split + verifiable config wastes + the fak lever for each)")
 	reqFile := fs.String("req", "", "audit: path to a captured Anthropic Messages request JSON body (default: the representative Claude-Code-shaped body)")
-	flagArgs, _ := partitionArgs(argv, map[string]bool{"top": true, "req": true})
+	doc := fs.String("doc", "", "price a markdown doc's INSTRUCTION-PULLED floor per section (#5445, schema fak-doc-footprint/1)")
+	flagArgs, _ := partitionArgs(argv, map[string]bool{"top": true, "req": true, "doc": true})
 	if err := fs.Parse(flagArgs); err != nil {
 		fmt.Fprintln(errw, err)
 		footprintUsage(errw)
 		return 2
 	}
 
+	if *doc != "" {
+		return runFootprintDoc(out, errw, *doc, *top, *asJSON)
+	}
 	if *audit {
 		return runFootprintAudit(out, errw, *reqFile, *top, *asJSON)
 	}
@@ -114,6 +118,12 @@ agent request footprint uses, so it never drifts from EstimateAnthropicTokens.
             number is ESTIMATED (~4 chars/token), never a provider-measured saving.
   --req F   with --audit: audit a captured Anthropic Messages request body from file F
             instead of the representative Claude-Code-shaped body
+  --doc P   price markdown doc P's INSTRUCTION-PULLED floor, per section (#5445,
+            schema fak-doc-footprint/1). A doc a resident instruction tells the agent
+            to read (CLAUDE.md -> AGENTS.md) is paid as a turn-1 Read, so it lands in
+            neither /context nor the tool-schema floor above. Ranks sections
+            heaviest-first so a paging-out lever has a cut line. Baseline:
+            docs/context-budget/agents-md-floor.md
 
 The measurement foundation of epic #3229: run before/after a deferral change
 (#3231, #3232) to witness the reduction. Baseline: docs/context-budget/mcp-tool-floor.md.
