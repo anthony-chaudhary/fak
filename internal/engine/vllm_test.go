@@ -207,3 +207,37 @@ vllm:prefix_cache_hits 7
 		}
 	}
 }
+
+// joinURLErr lets the JoinEndpoint test supply its own invalid-URL wording without
+// pulling a new import into this file -- the point of the parameter is that the
+// CALLER owns that sentence (the vLLM adapter and `fak llmd-smoke` word it
+// differently and both wordings are load-bearing for their operators).
+type joinURLErr string
+
+func (e joinURLErr) Error() string { return string(e) }
+
+func TestJoinEndpointNormalizesPathQueryAndFragment(t *testing.T) {
+	bad := func(b string) error { return joinURLErr("invalid " + b) }
+
+	got, err := JoinEndpoint("https://example.invalid:8000/v1/", "/models", bad)
+	if err != nil {
+		t.Fatalf("JoinEndpoint(trailing slash) error: %v", err)
+	}
+	if got != "https://example.invalid:8000/v1/models" {
+		t.Fatalf("JoinEndpoint(trailing slash) = %q, want the slash collapsed", got)
+	}
+
+	got, err = JoinEndpoint("  https://example.invalid:8000/v1?key=v#frag  ", "/chat/completions", bad)
+	if err != nil {
+		t.Fatalf("JoinEndpoint(query+fragment) error: %v", err)
+	}
+	if got != "https://example.invalid:8000/v1/chat/completions" {
+		t.Fatalf("JoinEndpoint(query+fragment) = %q, want query and fragment dropped", got)
+	}
+
+	if _, err := JoinEndpoint("example.invalid/v1", "/models", bad); err == nil {
+		t.Fatalf("JoinEndpoint(no scheme) must refuse")
+	} else if err.Error() != "invalid example.invalid/v1" {
+		t.Fatalf("JoinEndpoint refusal = %q, want the caller-supplied wording", err.Error())
+	}
+}

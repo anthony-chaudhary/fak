@@ -254,18 +254,40 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
-func joinEndpoint(baseURL, suffix string) (string, error) {
+// JoinEndpoint resolves an OpenAI-compatible API path (suffix, e.g. "/v1/completions")
+// against an operator-supplied base URL: trim, require an ABSOLUTE url (scheme AND host —
+// a bare "localhost:8080" is a parse-success with an empty host and must not silently
+// become a relative request), append the suffix to the base's trimmed path, and drop any
+// query/fragment the operator pasted in. The base's own path prefix is kept, so a gateway
+// mounted at /proxy keeps its mount point.
+//
+// invalidURL builds the not-absolute error. It is a CALLER-SUPPLIED closure, not a prefix
+// string, because the two callers word this differently on purpose and both texts are
+// user-facing: the engine adapter prefixes its own name ("vllm: invalid base URL %q"),
+// while the `fak llmd` smoke verb names the subsystem inline ("invalid llm-d base URL %q").
+// Collapsing them to one wording would have been a silent CLI-output change, so the
+// divergence is preserved as a parameter instead.
+//
+// Exported because the URL-composition rule is the shared part: the vLLM adapter here and
+// the llm-d smoke verb in cmd/fak carried byte-identical private copies of it.
+func JoinEndpoint(baseURL, suffix string, invalidURL func(baseURL string) error) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
 		return "", err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("vllm: invalid base URL %q", baseURL)
+		return "", invalidURL(baseURL)
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + suffix
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String(), nil
+}
+
+func joinEndpoint(baseURL, suffix string) (string, error) {
+	return JoinEndpoint(baseURL, suffix, func(b string) error {
+		return fmt.Errorf("vllm: invalid base URL %q", b)
+	})
 }
 
 type vllmRequest struct {
