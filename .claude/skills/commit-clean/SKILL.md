@@ -67,6 +67,7 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 | `MESSAGE_RACE` | the landed subject/body ≠ the one you requested — surface it for review. |
 | `SYMLINK_ESCAPE` | a landed path resolves through a symlink to a target outside your lease (the CVE-2025-53109 class) — the commit is left intact for review and NOT pushed; surface it, never force-push. |
 | `STALE_BASE_DELETION` | your working blob predates peer lines already on origin and would silently delete them — refresh your copy of the file first. |
+| `STALE_UNTRACKED` | the path is `??` here but ALREADY exists on `origin/<trunk>`: your HEAD is behind, so this is not new work. Fetch + merge, then re-check — `git diff origin/main -- <p>` is misleading for an untracked path (it shows trunk's whole file as deleted); compare with `git show origin/main:<p>`. |
 | `SPURIOUS_STAGED_DELETION` | a stale-index whole-path deletion with an untracked copy present — repair the index, keep the disk copy. |
 | `CACHED_REMOVE_WORKTREE_PRESENT` | `git rm --cached` left the file on disk — reconcile intent before committing. |
 | `PRESTAGED_PATH_OVERLAP` | a requested path already has staged hunks of unknown ownership — unstage it and keep the worktree bytes. |
@@ -83,7 +84,7 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 
 - **0** — success: committed, verified, (pushed if asked).
 - **2** — usage error.
-- **3** — a PRE-commit refusal: nothing landed, safe to retry or replan. Reasons: `OFF_TRUNK`, `MERGE_IN_PROGRESS`, `NOTHING_STAGED`, `LOCK_BUSY`, `WINDOW_FULL`, `WRITER_LEASE_HELD`, `STALE_BASE_DELETION`, `SPURIOUS_STAGED_DELETION`, `CACHED_REMOVE_WORKTREE_PRESENT`, `PRESTAGED_PATH_OVERLAP`, `CORE_SELF_MODIFY`, `REVIEW_REFUTED`.
+- **3** — a PRE-commit refusal: nothing landed, safe to retry or replan. Reasons: `OFF_TRUNK`, `MERGE_IN_PROGRESS`, `NOTHING_STAGED`, `LOCK_BUSY`, `WINDOW_FULL`, `WRITER_LEASE_HELD`, `STALE_BASE_DELETION`, `STALE_UNTRACKED`, `SPURIOUS_STAGED_DELETION`, `CACHED_REMOVE_WORKTREE_PRESENT`, `PRESTAGED_PATH_OVERLAP`, `CORE_SELF_MODIFY`, `REVIEW_REFUTED`.
 - **1** — a POST-attempt failure: the commit ran but its result is bad — halt and have a human review. Reasons: `PATHSPEC_RACE`, `MESSAGE_RACE`, `SYMLINK_ESCAPE`, `HOOK_REFUSED`, `PUSH_REJECTED`.
 
 ## Steps

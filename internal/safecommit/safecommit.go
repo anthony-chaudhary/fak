@@ -706,6 +706,38 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		res.CoreLockWitness = strings.TrimSpace(opts.CoreLockMaintenanceWitness)
 	}
 
+	// (4a2) STALE_UNTRACKED — blob-identity, lock-free, before any `git add` (#5408). A path
+	// this checkout has never indexed can ALREADY exist on origin/<trunk> when HEAD has fallen
+	// behind: `git status` reports it `??`, indistinguishable from new work by local index
+	// state alone, and the pathspec commit then lands a working-tree copy that predates the
+	// trunk. Only a DIFFERING copy is refused; a byte-identical one supersedes nothing, so it
+	// is named in Detail and allowed through (40 of the 69 untracked paths measured in #5408
+	// were that no-op case — refusing them would block more honest work than it protects).
+	//
+	// It runs BEFORE (4b), and whatever it claims is WITHHELD from (4b): (4b)'s line-run
+	// reading also trips on this class but describes it wrongly — for an untracked path
+	// `git diff origin/<trunk> -- P` shows trunk's blob as wholly deleted, so its "would drop
+	// N line(s)" is just trunk's own line count. Reads the already-present-locally
+	// remote-tracking ref only (no fetch); every unknown falls back to the prior behavior by
+	// leaving the path for (4b). Shares (4b)'s block|warn|off escape.
+	staleBasePaths := paths
+	if mode := staleBaseGuardMode(); mode != staleBaseOff {
+		refusal, advisory, unclaimed := checkStaleUntrackedPath(ctx, run, opts.Dir, trunk, paths)
+		staleBasePaths = unclaimed
+		if advisory != "" {
+			res.Detail = appendDetail(res.Detail, "STALE_UNTRACKED (no-op): "+advisory)
+		}
+		if refusal != "" {
+			if mode == staleBaseWarn {
+				res.Detail = appendDetail(res.Detail, "STALE_UNTRACKED (warn): "+refusal)
+			} else {
+				res.Reason = ReasonStaleUntrackedPath
+				res.Detail = appendDetail(res.Detail, refusal)
+				return res, true, nil
+			}
+		}
+	}
+
 	// (4b) STALE-BASE-DELETION guard — content-level, lock-free, before any `git add`. The
 	// pathspec commit lands the WORKING-TREE blob of each requested path; if that blob predates
 	// a block a peer already pushed to origin/<trunk>, the commit SILENTLY deletes the peer's
@@ -716,11 +748,11 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 	// before the lock and before any add, so a refusal stages and commits NOTHING — strictly
 	// cleaner than PATHSPEC_RACE, which leaves a commit behind. Gated by FAK_STALE_BASE_GUARD
 	// (block|warn|off, default block); off skips entirely, warn records the would-be refusal in
-	// Detail and proceeds.
-	if mode := staleBaseGuardMode(); mode != staleBaseOff {
-		if detail, fired := checkStaleBaseDeletion(ctx, run, opts.Dir, trunk, paths); fired {
+	// Detail and proceeds. It judges only the paths (4a2) left unclaimed.
+	if mode := staleBaseGuardMode(); mode != staleBaseOff && len(staleBasePaths) > 0 {
+		if detail, fired := checkStaleBaseDeletion(ctx, run, opts.Dir, trunk, staleBasePaths); fired {
 			if mode == staleBaseWarn {
-				res.Detail = "STALE_BASE_DELETION (warn): " + detail
+				res.Detail = appendDetail(res.Detail, "STALE_BASE_DELETION (warn): "+detail)
 			} else {
 				res.Reason = ReasonStaleBaseDeletion
 				res.Detail = detail

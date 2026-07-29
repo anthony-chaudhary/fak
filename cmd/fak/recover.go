@@ -168,6 +168,20 @@ func recoveryPlans(trunk string) map[string]recoveryPlan {
 			},
 			Notes: []string{"retry the original path-scoped commit after the merge is clean"},
 		},
+		"STALE_UNTRACKED": {
+			Reason:     "STALE_UNTRACKED",
+			Summary:    "a requested path is untracked here but already on the trunk with different content",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "fetch", "origin", trunk}, Summary: "refresh the trunk ref before comparing", Safe: true},
+				{Argv: []string{"git", "show", originTrunk + ":<path>"}, Summary: "read the trunk copy content-to-content; git diff shows an untracked path as wholly deleted, so its line counts are the trunk file's own"},
+			},
+			Notes: []string{
+				"merging while the path is untracked can stop on an overwrite refusal: move your copy aside, merge, then re-apply only the parts that are genuinely yours",
+				"if the trunk copy is the one to keep, discard the local copy rather than committing it",
+				"to supersede the trunk copy deliberately, having read it, re-run the commit with FAK_STALE_BASE_GUARD=warn",
+			},
+		},
 		"FRESH_DELETION": {
 			Reason:     "FRESH_DELETION",
 			Summary:    "a staged commit deletes a recently-added path without naming it in the message",
