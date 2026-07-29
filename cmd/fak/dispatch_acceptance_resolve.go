@@ -105,13 +105,9 @@ func runDispatchAcceptanceResolve(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		if *asJSON {
-			if err := writeIndentedJSON(stdout, acceptanceResolveOut{
+			return encodeJSONOrFail(stdout, stderr, acceptanceResolveOut{
 				Schema: acceptanceResolveSchema, Symbol: sym, Ref: trunk.ref, Workspace: root, Callers: &cc,
-			}); err != nil {
-				fmt.Fprintf(stderr, "fak dispatch acceptance-resolve: encode json: %v\n", err)
-				return 1
-			}
-			return 0
+			}, "fak dispatch acceptance-resolve")
 		}
 		fmt.Fprint(stdout, acceptanceCallersLine(trunk.ref, cc))
 		return 0
@@ -136,13 +132,9 @@ func runDispatchAcceptanceResolve(stdout, stderr io.Writer, argv []string) int {
 
 	res := resolveAcceptanceBody(trunk, body)
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, acceptanceResolveOut{
+		return encodeJSONOrFail(stdout, stderr, acceptanceResolveOut{
 			Schema: acceptanceResolveSchema, Issue: *issue, Ref: trunk.ref, Workspace: root, Resolution: &res,
-		}); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch acceptance-resolve: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		}, "fak dispatch acceptance-resolve")
 	}
 	fmt.Fprint(stdout, acceptanceResolutionBlock(*issue, res))
 	return 0

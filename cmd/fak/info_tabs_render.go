@@ -48,13 +48,7 @@ func renderGuardInfoInteractiveBlock(state infoViewState, v guardInfoVars, tr *g
 	}
 	rows = append(rows, body...)
 
-	if height > 0 && len(rows) > height {
-		rows = rows[:height]
-	}
-	for i, r := range rows {
-		rows[i] = takeCellsTUI(r, width)
-	}
-	return strings.Join(rows, "\n")
+	return joinPaneRowsTUI(rows, width, height)
 }
 
 // buildInfoCopyBanner is the one-line banner that replaces the tab bar while copy/freeze mode is

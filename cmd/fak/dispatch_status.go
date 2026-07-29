@@ -98,11 +98,7 @@ func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
 	snap := dispatchStatusScan(*runsDir, root)
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, snap); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch status: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, snap, "fak dispatch status")
 	}
 	if *asMarkdown {
 		fmt.Fprint(stdout, renderDispatchStatusMarkdown(snap))

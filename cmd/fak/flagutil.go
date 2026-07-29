@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // parseFlagsOrHelp parses argv into fs with the standard cmd/fak exit convention:
@@ -43,4 +44,20 @@ func parseFlagsRejectArgs(fs *flag.FlagSet, argv []string, stderr io.Writer) (in
 // the flag sets that do not special-case -h/--help.
 func parseFlags(fs *flag.FlagSet, argv []string) bool {
 	return fs.Parse(argv) == nil
+}
+
+// splitCommaList splits a comma-separated flag value ("a,b ,c") into trimmed,
+// non-empty tokens (["a","b","c"]); an empty or all-blank value yields no tokens.
+// This is the single comma-list flag parser for cmd/fak: it unifies four copies
+// that were byte-identical in behaviour — ablate's --sweep feature list, cron
+// chain's --context-from, dispatch's --exclude-lane/--lease-tree, and gh-spam's
+// --trusted-associations.
+func splitCommaList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

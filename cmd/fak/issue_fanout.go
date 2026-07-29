@@ -163,11 +163,7 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 	}
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, plan); err != nil {
-			fmt.Fprintf(stderr, "fak issue fanout: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, plan, "fak issue fanout")
 	}
 	fmt.Fprint(stdout, issuefanout.Render(plan))
 	return 0

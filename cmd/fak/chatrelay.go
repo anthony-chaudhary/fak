@@ -87,14 +87,7 @@ func cmdChatRelay(argv []string) {
 		return
 	}
 
-	if tok == "" {
-		fmt.Fprintln(os.Stderr, "fak chatrelay: no Slack token — set --token, FAK_CHATRELAY_TOKEN, or add it to .env.slack.local")
-		os.Exit(2)
-	}
-	if ch == "" {
-		fmt.Fprintln(os.Stderr, "fak chatrelay: no channel — set --channel or FAK_CHATRELAY_CHANNEL (no silent fallback to another channel)")
-		os.Exit(2)
-	}
+	requireSlackTokenAndChannel("fak chatrelay", "FAK_CHATRELAY", tok, ch)
 
 	relay := &chatrelay.Relay{
 		Slack: &chatrelay.HTTPSlack{Token: tok},
@@ -117,27 +110,70 @@ func cmdChatRelay(argv []string) {
 	fmt.Printf("fak chatrelay: bridging channel %s <-> %s/v1/chat/completions (model=%s), answering %s\n",
 		ch, *endpoint, *model, mentionMode)
 
-	if *prime {
-		if err := relay.Prime(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "fak chatrelay: prime (skip backlog) failed: %v — will answer the visible history on the first poll\n", err)
+	runSlackPollLifecycle(ctx, relay, "fak chatrelay", "answered", *prime, *once, *interval)
+}
+
+// slackPoller is the poll lifecycle the Slack-polling fak commands share: skip the
+// backlog once, then either take a single poll or loop on a ticker. `fak chatops`'s
+// read-only door (chatopsDoor) and `fak chatrelay`'s bridge (chatrelay.Relay) implement
+// it independently — the interface exists so the SHELL around them is written once.
+type slackPoller interface {
+	Prime(ctx context.Context) error
+	Tick(ctx context.Context) (int, error)
+	Run(ctx context.Context, interval time.Duration, onErr func(error)) error
+}
+
+// requireSlackTokenAndChannel refuses to start a Slack-polling command that resolved no
+// bot token or no channel, printing the exact refusal each command used to print itself:
+// `label` is the command name ("fak chatops") and `envPrefix` its env namespace
+// ("FAK_CHATOPS"). Both refusals exit 2 — an unconfigured door/bridge is an operator
+// mistake, not a running mode. NOT folded in: `fak chatops`' third refusal (an empty
+// admin allowlist), which only the fail-closed door has.
+func requireSlackTokenAndChannel(label, envPrefix, token, channel string) {
+	if token == "" {
+		fmt.Fprintf(os.Stderr, "%s: no Slack token — set --token, %s_TOKEN, or add it to .env.slack.local\n",
+			label, envPrefix)
+		os.Exit(2)
+	}
+	if channel == "" {
+		fmt.Fprintf(os.Stderr, "%s: no channel — set --channel or %s_CHANNEL (no silent fallback to another channel)\n",
+			label, envPrefix)
+		os.Exit(2)
+	}
+}
+
+// runSlackPollLifecycle drives a slackPoller through the prime -> (once | loop) shell both
+// commands had copied: a failed prime is a warning and the run continues, `--once` takes a
+// single poll and reports the count, and the long-lived loop exits 1 on a real error but
+// stays silent when the operator interrupted it (ctx cancelled).
+//
+// `tickedVerb` is the past-tense verb the --once summary uses: the door says "handled" and
+// the bridge says "answered" — a real wording divergence, kept as a parameter so each
+// command prints exactly what it printed before rather than being quietly unified.
+func runSlackPollLifecycle(ctx context.Context, p slackPoller, label, tickedVerb string,
+	prime, once bool, interval time.Duration) {
+	if prime {
+		if err := p.Prime(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: prime (skip backlog) failed: %v — will answer the visible history on the first poll\n",
+				label, err)
 		}
 	}
 
-	if *once {
-		n, err := relay.Tick(ctx)
+	if once {
+		n, err := p.Tick(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak chatrelay: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s: %v\n", label, err)
 			os.Exit(1)
 		}
-		fmt.Printf("fak chatrelay: answered %d message(s)\n", n)
+		fmt.Printf("%s: %s %d message(s)\n", label, tickedVerb, n)
 		return
 	}
 
-	err := relay.Run(ctx, *interval, func(e error) {
-		fmt.Fprintf(os.Stderr, "fak chatrelay: poll error (continuing): %v\n", e)
+	err := p.Run(ctx, interval, func(e error) {
+		fmt.Fprintf(os.Stderr, "%s: poll error (continuing): %v\n", label, e)
 	})
 	if err != nil && ctx.Err() == nil {
-		fmt.Fprintf(os.Stderr, "fak chatrelay: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s: %v\n", label, err)
 		os.Exit(1)
 	}
 }

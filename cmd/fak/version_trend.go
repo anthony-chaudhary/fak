@@ -51,19 +51,9 @@ func runVersionTrend(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	view, verr := modver.Trend(b).Select(*only, *sortKey, *top)
-	if verr != nil {
-		fmt.Fprintf(stderr, "fak version trend: %v\n", verr)
-		return 2
-	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, view); err != nil {
-			fmt.Fprintf(stderr, "fak version trend: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-	renderTrendReport(stdout, view)
-	return 0
+	return emitModverView(stdout, stderr, "fak version trend", view, verr, *asJSON, func() {
+		renderTrendReport(stdout, view)
+	})
 }
 
 // renderTrendReport prints the human trend table: per module, the revision

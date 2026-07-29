@@ -297,17 +297,6 @@ func runAblateArm(stdin io.Reader, stdout, stderr io.Writer, _ []string) int {
 	return 0
 }
 
-// splitCommaList splits "a,b ,c" into ["a","b","c"], dropping empties.
-func splitCommaList(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 // printAblation renders the N-arm table for a human: one row per arm with the kernel
 // counters, then deltas vs the baseline arm.
 func printAblation(w io.Writer, rep *ablate.Report) {

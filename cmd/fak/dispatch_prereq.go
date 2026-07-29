@@ -15,7 +15,6 @@ package main
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -58,8 +57,9 @@ func holdOpenPrereqForRoute(payload dispatchtick.RouterPayload) dispatchtick.Rou
 
 	// Identify the held issues in payload.Issues order (deterministic). Only a DISPATCHABLE issue
 	// (in a lane) is held -- an unrouted issue is not pickable anyway, so holding it would be noise.
-	held := map[int]bool{}
-	openPrereqs := map[int][]string{}
+	// The map value is the issue's still-open prerequisite ids, which is also this hold's evidence:
+	// a number is present here only when `open` was non-empty, so presence == held.
+	held := map[int][]string{}
 	stepByNum := map[int]int{}
 	var heldRoutes []dispatchtick.IssueRoute
 	for _, iss := range payload.Issues {
@@ -68,89 +68,21 @@ func holdOpenPrereqForRoute(payload dispatchtick.RouterPayload) dispatchtick.Rou
 			continue
 		}
 		open := blocked[strconv.Itoa(iss.Number)]
-		if len(open) == 0 || held[iss.Number] {
+		if _, done := held[iss.Number]; len(open) == 0 || done {
 			continue
 		}
-		held[iss.Number] = true
-		openPrereqs[iss.Number] = open
+		held[iss.Number] = open
 		heldRoutes = append(heldRoutes, iss)
 	}
 	if len(held) == 0 {
 		return payload
 	}
-
-	// Rebuild the lane map without the held issues, dropping any lane held to empty and re-deriving
-	// its count/step budget. Stale per-issue maps for a held number are pruned so a consumer reading
-	// them cannot resurrect the hold. This removal is what makes PickTargetIssue unable to select a
-	// held leaf: pick.Numbers flows from the lane's Issues.
-	newLanes := make(map[string]dispatchtick.RouterLaneGroup, len(payload.Lanes))
-	routedSteps := 0
-	for lane, grp := range payload.Lanes {
-		kept := make([]int, 0, len(grp.Issues))
-		steps := 0
-		for _, n := range grp.Issues {
-			if held[n] {
-				continue
-			}
-			kept = append(kept, n)
-			steps += stepByNum[n]
-		}
-		if len(kept) == 0 {
-			continue
-		}
-		grp.Issues = kept
-		grp.Count = len(kept)
-		grp.StepBudget = steps
-		grp.Priority = prunePrereqIntMap(grp.Priority, held)
-		grp.Generation = prunePrereqStrMap(grp.Generation, held)
-		grp.WorkUnits = prunePrereqStrMap(grp.WorkUnits, held)
-		grp.IssueSteps = prunePrereqIntMap(grp.IssueSteps, held)
-		routedSteps += steps
-		newLanes[lane] = grp
-	}
-
-	// Drop held issues from the candidate list too, so `fak dispatch route --json` never offers a
-	// held issue as a routable candidate.
-	keptIssues := make([]dispatchtick.IssueRoute, 0, len(payload.Issues))
-	for _, iss := range payload.Issues {
-		if held[iss.Number] {
-			continue
-		}
-		keptIssues = append(keptIssues, iss)
-	}
-
-	// Append the held issues to the skipped set as BLOCKED_BY_OPEN_PREREQ rows, then re-sort the whole
-	// skipped slice highest-number-first to match the router's own ordering.
-	skipped := append([]dispatchtick.SkippedIssue(nil), payload.SkippedHumanBlocked...)
-	for _, iss := range heldRoutes {
-		skipped = append(skipped, dispatchtick.SkippedIssue{
-			Number:        iss.Number,
-			Title:         iss.Title,
-			Reason:        reasonBlockedByOpenPrereq,
-			NextAction:    openPrereqNextAction(openPrereqs[iss.Number]),
-			WorkUnit:      iss.WorkUnit,
-			ExpectedSteps: iss.ExpectedSteps,
+	// The rest -- lane rebuild, candidate drop, skipped rows, counts -- is the shared
+	// dispatch-hold rewrite (dispatch_hold.go).
+	return applyDispatchHold(payload, held, heldRoutes, stepByNum, reasonBlockedByOpenPrereq,
+		func(iss dispatchtick.IssueRoute) string {
+			return openPrereqNextAction(held[iss.Number])
 		})
-	}
-	sort.SliceStable(skipped, func(i, j int) bool { return skipped[i].Number > skipped[j].Number })
-
-	byReason := map[string]int{}
-	for k, v := range payload.Counts.SkippedByReason {
-		byReason[k] = v
-	}
-	byReason[reasonBlockedByOpenPrereq] += len(held)
-
-	payload.Lanes = newLanes
-	payload.Issues = keptIssues
-	payload.SkippedHumanBlocked = skipped
-	payload.Counts.Routed -= len(held)
-	if payload.Counts.Routed < 0 {
-		payload.Counts.Routed = 0
-	}
-	payload.Counts.RoutedStepBudget = routedSteps
-	payload.Counts.SkippedHumanBlocked = len(skipped)
-	payload.Counts.SkippedByReason = byReason
-	return payload
 }
 
 // openPrereqNextAction is the "what unblocks this" hint a held row carries: the open prerequisite(s)
@@ -172,40 +104,6 @@ func openPrereqBlockedSkipped(router dispatchtick.RouterPayload) []dispatchtick.
 		if s.Reason == reasonBlockedByOpenPrereq {
 			out = append(out, s)
 		}
-	}
-	return out
-}
-
-// prunePrereqIntMap / prunePrereqStrMap return m without the held keys (nil when nothing remains), so
-// a rebuilt lane group carries no stale per-issue entry for a held number.
-func prunePrereqIntMap(m map[int]int, held map[int]bool) map[int]int {
-	if len(m) == 0 {
-		return m
-	}
-	out := make(map[int]int, len(m))
-	for k, v := range m {
-		if !held[k] {
-			out[k] = v
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func prunePrereqStrMap(m map[int]string, held map[int]bool) map[int]string {
-	if len(m) == 0 {
-		return m
-	}
-	out := make(map[int]string, len(m))
-	for k, v := range m {
-		if !held[k] {
-			out[k] = v
-		}
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }

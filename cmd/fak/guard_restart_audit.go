@@ -134,6 +134,15 @@ func guardRestartHopFromEventHandback(ev guardBudgetRestartEvent, hop int, agent
 // unrecognized agent for symmetry with guardRestartHopFromEventHandback, though the wire-retry arm
 // only ever fires for a recognized agent (guardMaybeRetryTransientWireCrash gates on the resume flag).
 func guardWireRetryHop(guardTraceID, agentName string, hop int) journal.RestartHop {
+	return guardSameTraceRelaunchHop(guardTraceID, agentName, hop)
+}
+
+// guardSameTraceRelaunchHop is the shared body behind every RESTART_HOP whose relaunch
+// reattaches IN PLACE: from/to/child are all guardTraceID because no continuation trace is
+// minted and no seed is written. For a recognized agent the handback is "continue" and the
+// hop is ok; for an agent fak cannot resume it degrades to the ORPHANED/inert shape. The
+// wire-retry and crash-restart arms differ only in WHEN they fire, not in what they record.
+func guardSameTraceRelaunchHop(guardTraceID, agentName string, hop int) journal.RestartHop {
 	handback := guardRestartHandbackOrphaned
 	status := journal.RestartHopInert
 	if _, ok := guardContinueFlagForAgent(agentName); ok {

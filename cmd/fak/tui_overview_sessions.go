@@ -76,7 +76,7 @@ func tuiOverviewCardToPlugin(card tuiOverviewCard) tuiplugin.OverviewCard {
 		Summary:   card.Summary,
 		Command:   card.Command,
 		Attention: card.Attention,
-		Counts:    cloneTUIIntMap(card.Counts),
+		Counts:    copyIntMap(card.Counts),
 		Tags:      append([]string(nil), card.Tags...),
 	}
 }
@@ -89,20 +89,9 @@ func tuiOverviewCardFromPlugin(card tuiplugin.OverviewCard) tuiOverviewCard {
 		Summary:   card.Summary,
 		Command:   card.Command,
 		Attention: card.Attention,
-		Counts:    cloneTUIIntMap(card.Counts),
+		Counts:    copyIntMap(card.Counts),
 		Tags:      append([]string(nil), card.Tags...),
 	}
-}
-
-func cloneTUIIntMap(in map[string]int) map[string]int {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]int, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func resolveTUIOverviewPanes(requested []string, panes []tuiplugin.Pane) ([]tuiplugin.Pane, bool, error) {

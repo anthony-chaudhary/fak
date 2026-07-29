@@ -311,18 +311,35 @@ func dispatchPriceLaneSerialWaveCount(candidates []dispatchPriceCandidate) int {
 	if len(candidates) == 0 {
 		return 0
 	}
-	keys := make([]string, 0, len(candidates))
+	return dispatchLaneSerialWaveCount(dispatchCandidateKeys(candidates,
+		func(cand dispatchPriceCandidate) string {
+			return dispatchLaneSerialKey(cand.Lane, cand.LeaseID, cand.Name)
+		}))
+}
+
+// dispatchCandidateKeys projects a candidate slice onto the plain string slice the shared
+// wave/lane helpers take. The price and wave candidate types are structurally parallel but
+// name their identity differently (Name vs ID), so the accessor is the caller's — this is
+// the one loop both projections were writing out.
+func dispatchCandidateKeys[C any](candidates []C, key func(C) string) []string {
+	out := make([]string, 0, len(candidates))
 	for _, cand := range candidates {
-		key := strings.TrimSpace(cand.Lane)
-		if key == "" {
-			key = strings.TrimSpace(cand.LeaseID)
-		}
-		if key == "" {
-			key = cand.Name
-		}
-		keys = append(keys, key)
+		out = append(out, key(cand))
 	}
-	return dispatchLaneSerialWaveCount(keys)
+	return out
+}
+
+// dispatchLaneSerialKey is the serialization key one candidate contributes: its lane, else
+// its lease id, else its own identity. Only the first two are trimmed — the identity
+// fallback is used raw, as both call sites already did.
+func dispatchLaneSerialKey(lane, leaseID, id string) string {
+	if key := strings.TrimSpace(lane); key != "" {
+		return key
+	}
+	if key := strings.TrimSpace(leaseID); key != "" {
+		return key
+	}
+	return id
 }
 
 func dispatchLaneSerialWaveCount(keys []string) int {
@@ -347,17 +364,19 @@ func positiveDelta(a, b int) int {
 }
 
 func dispatchPriceWaves(candidates []dispatchPriceCandidate, collisions []dispatchorder.Collision, safeNow []string) []dispatchPriceWave {
-	if len(candidates) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(candidates))
-	for _, cand := range candidates {
-		ids = append(ids, cand.Name)
-	}
-	return dispatchWavesForIDs(ids, collisions, safeNow)
+	return dispatchWavesForIDs(
+		dispatchCandidateKeys(candidates, func(cand dispatchPriceCandidate) string { return cand.Name }),
+		collisions, safeNow)
 }
 
+// dispatchWavesForIDs packs ids into collision-free waves, with safeNow (when non-empty)
+// pinned as wave 1. The no-ids early return is load-bearing, not a fast path: both callers
+// used to guard `len(candidates) == 0` themselves, and without it an empty candidate set
+// plus a non-empty safeNow would still emit a one-wave plan for agents nobody asked to run.
 func dispatchWavesForIDs(ids []string, collisions []dispatchorder.Collision, safeNow []string) []dispatchPriceWave {
+	if len(ids) == 0 {
+		return nil
+	}
 	collides := map[string]map[string]bool{}
 	for _, c := range collisions {
 		if collides[c.A] == nil {

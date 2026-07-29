@@ -58,11 +58,5 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref release: %v\n", err)
 		return 1
 	}
-	if code := emitLeaserefJSON(stdout, stderr, v, "release"); code != 0 {
-		return code
-	}
-	if !v.OK {
-		return leaserefRefused
-	}
-	return 0
+	return emitLeaserefOutcome(stdout, stderr, v, v.OK, "release")
 }

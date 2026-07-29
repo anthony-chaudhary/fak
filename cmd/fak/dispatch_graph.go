@@ -80,11 +80,7 @@ func runDispatchGraph(stdout, stderr io.Writer, argv []string) int {
 	}
 	graph := buildDispatchGraph(payload)
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, graph); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch graph: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, graph, "fak dispatch graph")
 	}
 	fmt.Fprint(stdout, renderDispatchGraph(graph))
 	return 0

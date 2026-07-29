@@ -558,11 +558,7 @@ func (c *sessionClient) renderList(stdout, stderr io.Writer, asJSON bool) int {
 }
 
 func emitSessionJSON(stdout, stderr io.Writer, v any) int {
-	if err := writeIndentedJSON(stdout, v); err != nil {
-		fmt.Fprintf(stderr, "fak session: encode json: %v\n", err)
-		return 1
-	}
-	return 0
+	return encodeJSONOrFail(stdout, stderr, v, "fak session")
 }
 
 func emitSessionEnvelopeReport(stdout, stderr io.Writer, asJSON bool, rep sessionEnvelopeReport) int {

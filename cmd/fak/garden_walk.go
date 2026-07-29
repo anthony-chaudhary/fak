@@ -238,22 +238,7 @@ func witnessGardenWalk(ledgerPath string, plan gardenbundle.WalkPlan) {
 // registerGardenWalkLoop installs the durable garden-walk loop (the #1281 precedent):
 // an armed Schedule that survives a restart and re-arms at boot. Idempotent.
 func registerGardenWalkLoop(registryPath string) error {
-	reg, err := loopmgr.LoadRegistry(registryPath)
-	if err != nil {
-		return err
-	}
-	if err := reg.Put(loopmgr.Job{
-		Schedule: loopmgr.Schedule{
-			JobID:           gardenWalkLoopID,
-			IntervalSeconds: gardenWalkIntervalSeconds,
-			MissedRun:       loopmgr.MissedSkip,
-			JitterSeconds:   600,
-		},
-		State: loopmgr.JobArmed,
-	}, time.Now()); err != nil {
-		return err
-	}
-	return loopmgr.SaveRegistry(registryPath, reg)
+	return registerGardenLoop(registryPath, gardenWalkLoopID, gardenWalkIntervalSeconds, 600)
 }
 
 // renderGardenWalk prints the walk as an aligned worklist: the envelope verdict,

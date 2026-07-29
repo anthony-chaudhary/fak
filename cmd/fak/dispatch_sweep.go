@@ -40,30 +40,14 @@ const dispatchSweepLoopID = "dispatch-issue-sweep"
 
 // deriveSweepSeatParkState folds the loop ledger's dispatch-sweep run-ends
 // (newest→oldest) into the consecutive no-seat park count + most-recent no-seat time
-// seatpark.Decide keys on. It DELIBERATELY MIRRORS deriveSeatParkState (garden_dispatch.go)
-// on a different loop id, reusing the SAME shared tokens (seatParkReasonNoSeat,
-// seatpark.StatusParked): a deferred run (SEAT_PARKED) is neutral in the tail; a no-seat
-// stop counts; anything else (progress, an exhausted park, another stop) ends the tail so
-// a fresh cycle starts from zero. Pure: ledger in, counts out.
+// seatpark.Decide keys on. It is the dispatch-sweep binding of the SHARED fold
+// deriveSeatParkStateForLoop (garden_dispatch.go) — the loop id was always the only
+// difference from the garden-dispatch tail, so the two now run the same code rather than
+// mirroring it by hand: a deferred run (SEAT_PARKED) is neutral in the tail; a no-seat stop
+// counts; anything else (progress, an exhausted park, another stop) ends the tail so a
+// fresh cycle starts from zero. Pure: ledger in, counts out.
 func deriveSweepSeatParkState(events []loopmgr.Event) (parks int, lastParkUnix int64) {
-	for i := len(events) - 1; i >= 0; i-- {
-		ev := events[i]
-		if ev.LoopID != dispatchSweepLoopID || ev.Kind != loopmgr.EventEnd {
-			continue
-		}
-		switch ev.Reason {
-		case string(seatpark.StatusParked):
-			continue // a chosen wait — transparent in the park tail
-		case seatParkReasonNoSeat:
-			parks++
-			if lastParkUnix == 0 {
-				lastParkUnix = ev.TSUnixNano / 1_000_000_000
-			}
-		default:
-			return parks, lastParkUnix // tail boundary: progress, exhaustion, or another stop
-		}
-	}
-	return parks, lastParkUnix
+	return deriveSeatParkStateForLoop(events, dispatchSweepLoopID)
 }
 
 // recordSweepSeatPark appends a dispatch-sweep run-end to the loop ledger carrying the
@@ -133,7 +117,7 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 			WorkKind:     dispatchtickWorkKind(*backend),
 			Lane:         *lane,
 			Backend:      *backend,
-			ExcludeLanes: dispatchSplitCSV(*excludeLane),
+			ExcludeLanes: splitCommaList(*excludeLane),
 			Live:         *live,
 			// Refresh the fleet registry (the ~40s tools/fleet_sessions.py scan) only on the
 			// FIRST tick of the drain, then reuse it -- mirroring the wave execution loop's

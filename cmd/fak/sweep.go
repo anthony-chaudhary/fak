@@ -97,11 +97,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 		return runSweepApply(stdout, stderr, root, plan, *lane, *msg, only, *unit, *push)
 	}
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, plan); err != nil {
-			fmt.Fprintf(stderr, "fak sweep: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFailPrefixed(stdout, stderr, plan, "fak sweep")
 	}
 	renderSweepPlan(stdout, plan)
 	return 0

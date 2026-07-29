@@ -158,15 +158,10 @@ func runGuardSessions(stdout, stderr io.Writer, argv []string) int {
 		for _, row := range rows {
 			projected = append(projected, guardSessionJSONRow{Row: withoutPublishedBearer(row), TranscriptUUID: uuidByTrace[row.TraceID]})
 		}
-		return encodeJSONOrFail(stdout, stderr, map[string]any{
-			"schema":   "fak.guard-sessions.v1",
-			"reg_dir":  regDir,
-			"sessions": projected,
-		}, "fak guard sessions")
+		return encodeSessionListingJSON(stdout, stderr, "fak.guard-sessions.v1", regDir, projected, "fak guard sessions")
 	}
 	if len(rows) == 0 {
-		fmt.Fprintf(stdout, "no recorded guard sessions in %s — start one with `fak guard -- <agent>`\n",
-			guardsessions.IndexPath(regDir))
+		reportNoGuardSessions(stdout, regDir)
 		return 0
 	}
 	// A5 (#4116): join each session's guard trace to its transcript UUID (the A1/A2 store),
@@ -176,6 +171,26 @@ func runGuardSessions(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "\nreference one with `fak guard sessions <handle-or-trace-prefix>` (index: %s)\n",
 		guardsessions.IndexPath(regDir))
 	return 0
+}
+
+// encodeSessionListingJSON emits the {schema, reg_dir, sessions} envelope that BOTH session
+// listings print under --json. `fak guard sessions` and `fak session ls` read the same
+// on-disk index and differ only in the schema string, the projected row type, and the stderr
+// label; the envelope shape is one contract and stays one construction site.
+func encodeSessionListingJSON(stdout, stderr io.Writer, schema, regDir string, sessions any, label string) int {
+	return encodeJSONOrFail(stdout, stderr, map[string]any{
+		"schema":   schema,
+		"reg_dir":  regDir,
+		"sessions": sessions,
+	}, label)
+}
+
+// reportNoGuardSessions prints the shared empty-listing line for those same two commands.
+// They read the same index, so an empty listing must point the operator at the same path and
+// the same way to start one.
+func reportNoGuardSessions(stdout io.Writer, regDir string) {
+	fmt.Fprintf(stdout, "no recorded guard sessions in %s — start one with `fak guard -- <agent>`\n",
+		guardsessions.IndexPath(regDir))
 }
 
 // renderGuardSessionResolve resolves one query to a session, printing the matched row or

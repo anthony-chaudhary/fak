@@ -86,37 +86,33 @@ func runLab(stdout, stderr io.Writer, argv []string) int {
 	}
 }
 
-// labReportsDir resolves the reports directory in the order that makes the common
-// case zero-flag: an explicit --reports wins, then $FAK_FLEET_REPORTS, then the
-// documented default the private bridge writes into (~/.config/fak/fleet/reports,
-// %APPDATA%\fak\fleet\reports on Windows). It reuses nodeConfigDir() so the lab and
-// node tooling agree on the config root.
-func labReportsDir(flagVal string) (string, error) {
+// labConfigPath is the resolution order every lab path shares, in the order that makes
+// the common case zero-flag: an explicit flag wins, then the setting's own env var, then
+// the documented default under the fak config root (~/.config/fak/...,
+// %APPDATA%\fak\... on Windows). It reuses nodeConfigDir() so the lab and node tooling
+// agree on that root. `rel` is the setting's own tail below the root.
+func labConfigPath(flagVal, envKey string, rel ...string) (string, error) {
 	if flagVal != "" {
 		return flagVal, nil
 	}
-	if env := os.Getenv("FAK_FLEET_REPORTS"); env != "" {
+	if env := os.Getenv(envKey); env != "" {
 		return env, nil
 	}
 	cfgDir, err := nodeConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cfgDir, "fleet", "reports"), nil
+	return filepath.Join(append([]string{cfgDir}, rel...)...), nil
 }
 
+// labReportsDir resolves the reports directory the private bridge writes into.
+func labReportsDir(flagVal string) (string, error) {
+	return labConfigPath(flagVal, "FAK_FLEET_REPORTS", "fleet", "reports")
+}
+
+// labReadinessPath resolves the lab-readiness snapshot path.
 func labReadinessPath(flagVal string) (string, error) {
-	if flagVal != "" {
-		return flagVal, nil
-	}
-	if env := os.Getenv("FAK_LAB_READINESS"); env != "" {
-		return env, nil
-	}
-	cfgDir, err := nodeConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cfgDir, "fleet", "lab-readiness.json"), nil
+	return labConfigPath(flagVal, "FAK_LAB_READINESS", "fleet", "lab-readiness.json")
 }
 
 // labLoadRoster loads the roster from --roster, or the embedded generic default when
@@ -196,11 +192,7 @@ func labStatus(stdout, stderr io.Writer, argv []string) int {
 	snap.Orphans = fleet.OrphanReports(dir, fullRoster)
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, snap); err != nil {
-			fmt.Fprintf(stderr, "fak lab: encode: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFailPrefixed(stdout, stderr, snap, "fak lab: encode")
 	}
 
 	fmt.Fprintln(stdout, fleet.Render(snap, *all, 72))
@@ -493,11 +485,7 @@ func labLs(stdout, stderr io.Writer, argv []string) int {
 	}
 	ro = labSelect(ro, *group, *class)
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, ro); err != nil {
-			fmt.Fprintf(stderr, "fak lab: encode: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFailPrefixed(stdout, stderr, ro, "fak lab: encode")
 	}
 	fmt.Fprintf(stdout, "%-10s %-10s %-10s %s\n", "ID", "CLASS", "GROUP", "ENDPOINT")
 	for _, b := range ro.Boxes {

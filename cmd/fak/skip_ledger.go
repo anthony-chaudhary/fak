@@ -10,11 +10,9 @@ package main
 // ledger file.
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -82,24 +80,7 @@ func runDispatchSkipLedger(stdout, stderr io.Writer, argv []string) int {
 // file, creating the runs dir if needed. Append-only, matching the
 // dispatch-progress ledger's own persistence shape.
 func skipLedgerAppend(runsDir string, rep skipledger.Report) error {
-	if len(rep.Rows) == 0 {
-		return nil
-	}
-	if err := os.MkdirAll(runsDir, 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(filepath.Join(runsDir, skipLedgerLogName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	for _, row := range rep.Rows {
-		if err := enc.Encode(row); err != nil {
-			return err
-		}
-	}
-	return nil
+	return appendJSONLRows(runsDir, skipLedgerLogName, rep.Rows)
 }
 
 // renderSkipLedger prints the tick's rows as an aligned, scannable table,

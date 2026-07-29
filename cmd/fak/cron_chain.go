@@ -122,7 +122,7 @@ func runCronPrompt(stdout, stderr io.Writer, argv []string) int {
 	// --context-from: chain each upstream job's LAST witnessed output. A source
 	// with no OBSERVED output on the ledger is refused (exit 2) — B consumes only
 	// what A provably produced, and the handoff is recorded as an edge.
-	for _, src := range cronSplitCSV(*contextFrom) {
+	for _, src := range splitCommaList(*contextFrom) {
 		up, ok, err := cronLatestOutput(*ledger, src)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak cron prompt: read ledger: %v\n", err)
@@ -353,16 +353,4 @@ func cronAppendJSONL(path string, rec any) error {
 	defer f.Close()
 	_, err = f.Write(append(line, '\n'))
 	return err
-}
-
-// cronSplitCSV splits a comma-separated flag value into trimmed, non-empty
-// tokens (the --context-from job list). An empty value yields no sources.
-func cronSplitCSV(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }

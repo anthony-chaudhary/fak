@@ -477,6 +477,27 @@ func takeCellsTUI(s string, n int) string {
 	return s
 }
 
+// joinPaneRowsTUI is the shared last step of every full-pane render: cap the row COUNT to
+// the pane height (a defensive cap, so the caller's in-place redraw cursor math stays exact
+// even if a panel mis-sizes for an odd height), cap each row to the pane WIDTH, and join
+// with newlines. A height of 0 or less means "no row cap" — the caller is not drawing into
+// a fixed pane.
+//
+// The width cap is takeCellsTUI and NOT trimTUI on purpose: pane rows align their gutter
+// labels, gauges and sparklines on intentional interior spacing, which trimTUI's
+// whitespace-collapse would destroy. takeCellsTUI truncates to the cell budget without
+// touching interior spacing, so a narrow pane loses the tail of a row rather than having its
+// columns shear. rows is capped in place, matching what the hand-written copies did.
+func joinPaneRowsTUI(rows []string, width, height int) string {
+	if height > 0 && len(rows) > height {
+		rows = rows[:height]
+	}
+	for i, r := range rows {
+		rows[i] = takeCellsTUI(r, width)
+	}
+	return strings.Join(rows, "\n")
+}
+
 // padRightTUI left-justifies s into a field of width display CELLS, padding with
 // spaces. It is the rune-aware analogue of fmt's "%-*s", which pads by BYTE count
 // and so over-pads any field whose text carries multibyte runes (a column with an

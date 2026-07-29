@@ -106,15 +106,10 @@ func runSessionIndexLS(stdout, stderr io.Writer, regDir string, asJSON bool) int
 			red.Bearer = "" // never print the read token in a listing
 			projected = append(projected, sessionIndexJSONRow{Row: red, State: sessionIndexState(r, alive, aliveOK)})
 		}
-		return encodeJSONOrFail(stdout, stderr, map[string]any{
-			"schema":   "fak.session-ls.v1",
-			"reg_dir":  regDir,
-			"sessions": projected,
-		}, "fak session ls")
+		return encodeSessionListingJSON(stdout, stderr, "fak.session-ls.v1", regDir, projected, "fak session ls")
 	}
 	if len(rows) == 0 {
-		fmt.Fprintf(stdout, "no recorded guard sessions in %s — start one with `fak guard -- <agent>`\n",
-			guardsessions.IndexPath(regDir))
+		reportNoGuardSessions(stdout, regDir)
 		return 0
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)

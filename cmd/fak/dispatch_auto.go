@@ -73,7 +73,7 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak dispatch auto: %v\n", goalErr)
 		return 2
 	}
-	excluded := dispatchSplitCSV(*excludeLane)
+	excluded := splitCommaList(*excludeLane)
 
 	in, notes, probeErrors := probeDispatchAutoInput(root, stderr, *maxWorkers, wk, backendNorm, *lane, excluded)
 	in.RequiredWorkers = *requiredWorkers

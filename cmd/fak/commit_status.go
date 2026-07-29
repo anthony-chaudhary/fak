@@ -45,11 +45,7 @@ func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
 		return runIndexLockReclaim(stdout, stderr, rep, *apply)
 	}
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, rep); err != nil {
-			fmt.Fprintf(stderr, "fak commit status: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFailPrefixed(stdout, stderr, rep, "fak commit status")
 	}
 	renderCommitStatus(stdout, rep)
 	return 0

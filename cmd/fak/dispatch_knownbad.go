@@ -16,7 +16,6 @@ package main
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -82,78 +81,13 @@ func applyKnownBadHold(payload dispatchtick.RouterPayload, records []knownbad.Re
 	if len(held) == 0 {
 		return payload
 	}
-
-	// Rebuild the lane map without the held issues, dropping any lane held to empty and
-	// re-deriving its count/step budget. Stale per-issue maps (priority/generation/etc.)
-	// for a held number are pruned so a consumer reading them cannot resurrect the hold.
-	newLanes := make(map[string]dispatchtick.RouterLaneGroup, len(payload.Lanes))
-	routedSteps := 0
-	for lane, grp := range payload.Lanes {
-		kept := make([]int, 0, len(grp.Issues))
-		steps := 0
-		for _, n := range grp.Issues {
-			if _, isHeld := held[n]; isHeld {
-				continue
-			}
-			kept = append(kept, n)
-			steps += stepByNum[n]
-		}
-		if len(kept) == 0 {
-			continue
-		}
-		grp.Issues = kept
-		grp.Count = len(kept)
-		grp.StepBudget = steps
-		grp.Priority = pruneIntMap(grp.Priority, held)
-		grp.Generation = pruneStrMap(grp.Generation, held)
-		grp.WorkUnits = pruneStrMap(grp.WorkUnits, held)
-		grp.IssueSteps = pruneIntMap(grp.IssueSteps, held)
-		routedSteps += steps
-		newLanes[lane] = grp
-	}
-
-	// Drop held issues from the candidate list too, so `fak dispatch route --json` never
-	// offers a held issue as a routable candidate.
-	keptIssues := make([]dispatchtick.IssueRoute, 0, len(payload.Issues))
-	for _, iss := range payload.Issues {
-		if _, isHeld := held[iss.Number]; isHeld {
-			continue
-		}
-		keptIssues = append(keptIssues, iss)
-	}
-
-	// Append the held issues to the skipped set as BLOCKED_BY_KNOWN_BAD rows, then re-sort
-	// the whole skipped slice highest-number-first to match the router's own ordering.
-	skipped := append([]dispatchtick.SkippedIssue(nil), payload.SkippedHumanBlocked...)
-	for _, iss := range heldRoutes {
-		skipped = append(skipped, dispatchtick.SkippedIssue{
-			Number:        iss.Number,
-			Title:         iss.Title,
-			Reason:        reasonBlockedByKnownBad,
-			NextAction:    knownBadNextAction(held[iss.Number], iss.Paths),
-			WorkUnit:      iss.WorkUnit,
-			ExpectedSteps: iss.ExpectedSteps,
+	// The rest -- lane rebuild, candidate drop, skipped rows, counts -- is the shared
+	// dispatch-hold rewrite (dispatch_hold.go). The known-bad hint names the signature the
+	// issue's own declared paths hit, so it reads both the record and iss.Paths.
+	return applyDispatchHold(payload, held, heldRoutes, stepByNum, reasonBlockedByKnownBad,
+		func(iss dispatchtick.IssueRoute) string {
+			return knownBadNextAction(held[iss.Number], iss.Paths)
 		})
-	}
-	sort.SliceStable(skipped, func(i, j int) bool { return skipped[i].Number > skipped[j].Number })
-
-	byReason := map[string]int{}
-	for k, v := range payload.Counts.SkippedByReason {
-		byReason[k] = v
-	}
-	byReason[reasonBlockedByKnownBad] += len(held)
-
-	payload.Lanes = newLanes
-	payload.Issues = keptIssues
-	payload.SkippedHumanBlocked = skipped
-	payload.Counts.Routed -= len(held)
-	if payload.Counts.Routed < 0 {
-		payload.Counts.Routed = 0
-	}
-	payload.Counts.RoutedStepBudget = routedSteps
-	payload.Counts.SkippedHumanBlocked = len(skipped)
-	payload.Counts.SkippedByReason = byReason
-	return payload
 }
 
 // routeIssueSteps mirrors dispatchtick's routeStepBudget (which is unexported): an issue's
@@ -208,38 +142,4 @@ func renderSkippedKnownBadCard(issues []dispatchtick.SkippedIssue, repoURL strin
 		fmt.Fprintf(&b, "\n… and %d more", len(issues)-skippedMaxRows)
 	}
 	return b.String()
-}
-
-// pruneIntMap / pruneStrMap return m without the keys that were held, or nil when nothing
-// remains, so a rebuilt lane group carries no stale per-issue entry for a held number.
-func pruneIntMap(m map[int]int, held map[int]knownbad.Record) map[int]int {
-	if len(m) == 0 {
-		return m
-	}
-	out := make(map[int]int, len(m))
-	for k, v := range m {
-		if _, isHeld := held[k]; !isHeld {
-			out[k] = v
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func pruneStrMap(m map[int]string, held map[int]knownbad.Record) map[int]string {
-	if len(m) == 0 {
-		return m
-	}
-	out := make(map[int]string, len(m))
-	for k, v := range m {
-		if _, isHeld := held[k]; !isHeld {
-			out[k] = v
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }

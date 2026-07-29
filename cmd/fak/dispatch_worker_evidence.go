@@ -138,11 +138,7 @@ func runDispatchWorkerEvidence(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, snap); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch evidence: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, snap, "fak dispatch evidence")
 	}
 	fmt.Fprint(stdout, renderWorkerEvidence(snap))
 	return 0
@@ -211,13 +207,7 @@ func collectWorkerPartialEvidence(scope dispatchLiveScope, now time.Time) worker
 	// obfuscated secret that has no raw span (RawSecretComplete=false), SEAL the tail
 	// rather than emit bytes a raw redactor can't reach — the artifact must be safe to
 	// attach to a public issue.
-	tail := raw
-	if len(tail) > dispatchWorkerEvidenceTailBytes {
-		tail = tail[len(tail)-dispatchWorkerEvidenceTailBytes:]
-		if i := bytes.IndexByte(tail, '\n'); i >= 0 && i+1 <= len(tail) {
-			tail = tail[i+1:]
-		}
-	}
+	tail := lineAlignedTranscriptTail(raw)
 	if canon.RawSecretComplete(tail) {
 		scrubbed, masked := canon.RedactSecrets(tail)
 		ev.SecretsMasked = masked
@@ -228,6 +218,23 @@ func collectWorkerPartialEvidence(scope dispatchLiveScope, now time.Time) worker
 		ev.TranscriptTail = ""
 	}
 	return ev
+}
+
+// lineAlignedTranscriptTail returns at most dispatchWorkerEvidenceTailBytes of raw's tail,
+// advanced past the first newline inside the window so the cut lands on a LINE boundary and
+// can never split a credential mid-token. Input shorter than the window is returned whole.
+// Shared by the evidence sidecar and `fak dispatch sessions --tail`, which must agree: both
+// hand the result to canon.RawSecretComplete, and a mid-token cut is exactly what would make
+// a raw secret span unrecognizable to the redactor.
+func lineAlignedTranscriptTail(raw []byte) []byte {
+	tail := raw
+	if len(tail) > dispatchWorkerEvidenceTailBytes {
+		tail = tail[len(tail)-dispatchWorkerEvidenceTailBytes:]
+		if i := bytes.IndexByte(tail, '\n'); i >= 0 && i+1 <= len(tail) {
+			tail = tail[i+1:]
+		}
+	}
+	return tail
 }
 
 // materializeWorkerEvidence writes the scrubbed evidence record next to its transcript as

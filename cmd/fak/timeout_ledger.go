@@ -14,7 +14,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -116,24 +115,7 @@ func toAttempts(in []timeoutAttemptJSON) []timeoutphase.Attempt {
 // timeoutLedgerAppend persists one JSON line per row to the durable ledger file, creating the
 // runs dir if needed. Append-only, matching skip-ledger's persistence shape exactly.
 func timeoutLedgerAppend(runsDir string, rep timeoutphase.Report) error {
-	if len(rep.Rows) == 0 {
-		return nil
-	}
-	if err := os.MkdirAll(runsDir, 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(filepath.Join(runsDir, timeoutLedgerLogName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	for _, row := range rep.Rows {
-		if err := enc.Encode(row); err != nil {
-			return err
-		}
-	}
-	return nil
+	return appendJSONLRows(runsDir, timeoutLedgerLogName, rep.Rows)
 }
 
 // renderTimeoutLedger prints the phase breakdown, then each row as an aligned table, then the
