@@ -1,4 +1,41 @@
-# Policy Manifest Examples
+# fak Examples
+
+`examples/` holds three different kinds of thing. Most of it is **runnable** — the
+policy manifests this page used to be named after are the smallest of the three.
+
+| Kind | What it is | Count |
+|---|---|---|
+| **Runnable demos** | self-contained directories, each with a command that proves one claim — most need no key, model, GPU, or network | 62 directories, 56 with their own README |
+| **Framework integrations** | eight of those directories put fak in front of an agent you already run: OpenAI SDK, MCP (server and client), OpenAI Agents, AutoGen, CrewAI, Ollama, and a generic external driver | 8 |
+| **Policy manifests** | starter capability floors to copy and adapt, at the top level of `examples/` | 21 `*.json` |
+
+> **Start here:** [`playground/`](playground/README.md) — one command, nothing to
+> install beyond `fak` itself. You propose tool calls and read the kernel's verdict
+> for each (ALLOW, DEFAULT_DENY, POLICY_BLOCK, and a redact TRANSFORM), then try
+> your own. If you would rather see a single claim proved in under a minute, use
+> [`deny-in-60s/`](deny-in-60s/README.md).
+
+## Runnable Example Tracks
+
+The top-level demo front door is the lowest-common-denominator set in
+[`docs/run-the-demos.md`](../docs/run-the-demos.md): no key, no model, no GPU, no network.
+The rest of `examples/` is intentionally specialized and grouped by job:
+
+| Track | Directories | Purpose |
+|---|---|---|
+| **Onboarding** | [`playground/`](playground/README.md) **← try this first**, [`deny-in-60s/`](deny-in-60s/README.md), [`commit-audit-in-60s/`](commit-audit-in-60s/README.md), [`trace-authoring/`](trace-authoring/README.md) | the 60-second first touch — one command, no key/model/GPU: a guided, browser-free REPL where you *propose* tool calls and read the kernel's verdict for each (ALLOW, DEFAULT_DENY, POLICY_BLOCK, and a redact TRANSFORM), then poke at your own; an irreversible call is refused under a default-deny floor, then the same call clears under a permissive one; a lying commit message (`fix: …` over a README-only diff) is caught from the diff while an honest one clears; and author your own `fak run --trace` fixture from scratch (the trace schema + an ALLOW/DENY trace and a quarantine trace), no model or network |
+| **Cache internals** | [`addressable-evict/`](addressable-evict/README.md), [`vdso-cache-hit/`](vdso-cache-hit/README.md) | the addressable bit-exact KV cache, made runnable — evict one poisoned span from a kept run and prove the post-eviction cache is bit-for-bit identical to a run that never saw it (`max\|Δ\| = 0`, with a non-vacuous poison control), and serve a repeated read-only tool call from the kernel content cache with no engine or round-trip; both offline, no key/model/GPU/network |
+| **Memory and recall** | [`verified-memory-recall/`](verified-memory-recall/README.md) | the loop-facing memory store, served through the verified [memq](../internal/memq) path — `fak memory recall` renders a note whose concrete claim still verifies (`[fresh]`), refuses one that names a moved/deleted path (`[withheld:stale_recall_artifact]`, the failing claim named as evidence, body never rendered), and hedges a prose-only note (`[unverified]`); a backend, not a driver, so `fak memory drivers` is unchanged; no key/model/GPU/network |
+| **Security and policy** | [`adjudication-demo/`](adjudication-demo/README.md), [`agentdojo-redteam/`](agentdojo-redteam/README.md), [`normgate-evasion/`](normgate-evasion/README.md), [`wire-proof/`](wire-proof/README.md), [`quarantine-demo/`](quarantine-demo/README.md), [`wire-quarantine-demo/`](wire-quarantine-demo/README.md), [`auth-hardening/`](auth-hardening/README.md), [`presets/`](presets/README.md) | default-deny, tool poisoning, attack-corpus, normgate evasion catches, wire-level proof, result-side quarantine (a booby-trapped tool result paged out of context on the model loop, and the same containment over the bare wire), auth-boundary witnesses, and curated policy floors |
+| **Policy lifecycle** | [`escalation-demo/`](escalation-demo/README.md), [`policy-hot-reload/`](policy-hot-reload/README.md), [`trace-reset/`](trace-reset/README.md), [`observability/`](observability/README.md), [`policy-loader-properties/`](policy-loader-properties/README.md) | safe-sink routing, reloads, per-trace reset, operator visibility, and the loader's own fail-loud/replace-not-merge/round-trip guarantees |
+| **Adoption and integrations** | [`openai-sdk-minimal/`](openai-sdk-minimal/README.md), [`compose-ollama/`](compose-ollama/README.md), [`mcp/`](mcp/README.md), [`mcp-client/`](mcp-client/README.md), [`openai-agents-guardrail/`](openai-agents-guardrail/README.md), [`autogen-groupchat/`](autogen-groupchat/README.md), [`crewai-crew/`](crewai-crew/README.md), [`extdriver/`](extdriver/README.md) | the universal "set one base URL" recipe (OpenAI SDK) and a one-command governed-Ollama compose stack, plus framework-specific ways to put fak in front of existing agents |
+| **Research/science fixtures** | [`routing-bench/`](routing-bench/), [`routing-presets/`](routing-presets/), [`trajectory/`](trajectory/) | recorded corpora and manifests for routing, trajectory scoring, and reproducible analysis |
+| **Shared task records** | [`shared-task-record/`](shared-task-record/README.md), [`shared-task-record-verdicts/`](shared-task-record-verdicts/README.md) | task-record interchange and verdict fixtures |
+
+That split keeps the first-run path small while preserving the heavier research,
+security, and framework demos for readers who came for those tracks.
+
+## Policy manifests
 
 These files are starter floors for the gateway-first adoption path. They are not
 universal security policies; each one is a reviewable allow-list with a concrete
@@ -47,26 +84,6 @@ flowchart LR
 > and a CI test asserts every preset round-trips exactly through
 > `fak policy --check`. It includes [`presets/coding-agent-safe.json`](presets/coding-agent-safe.json),
 > the hardened coding-agent floor built on the `gitgate` refusals (issue #578).
-
-## Runnable Example Tracks
-
-The top-level demo front door is now the lowest-common-denominator set in
-[`docs/run-the-demos.md`](../docs/run-the-demos.md): no key, no model, no GPU, no network.
-The rest of `examples/` is intentionally specialized and grouped by job:
-
-| Track | Directories | Purpose |
-|---|---|---|
-| **Onboarding** | [`playground/`](playground/README.md) **← try this first**, [`deny-in-60s/`](deny-in-60s/README.md), [`commit-audit-in-60s/`](commit-audit-in-60s/README.md), [`trace-authoring/`](trace-authoring/README.md) | the 60-second first touch — one command, no key/model/GPU: a guided, browser-free REPL where you *propose* tool calls and read the kernel's verdict for each (ALLOW, DEFAULT_DENY, POLICY_BLOCK, and a redact TRANSFORM), then poke at your own; an irreversible call is refused under a default-deny floor, then the same call clears under a permissive one; a lying commit message (`fix: …` over a README-only diff) is caught from the diff while an honest one clears; and author your own `fak run --trace` fixture from scratch (the trace schema + an ALLOW/DENY trace and a quarantine trace), no model or network |
-| **Cache internals** | [`addressable-evict/`](addressable-evict/README.md), [`vdso-cache-hit/`](vdso-cache-hit/README.md) | the addressable bit-exact KV cache, made runnable — evict one poisoned span from a kept run and prove the post-eviction cache is bit-for-bit identical to a run that never saw it (`max\|Δ\| = 0`, with a non-vacuous poison control), and serve a repeated read-only tool call from the kernel content cache with no engine or round-trip; both offline, no key/model/GPU/network |
-| **Memory and recall** | [`verified-memory-recall/`](verified-memory-recall/README.md) | the loop-facing memory store, served through the verified [memq](../internal/memq) path — `fak memory recall` renders a note whose concrete claim still verifies (`[fresh]`), refuses one that names a moved/deleted path (`[withheld:stale_recall_artifact]`, the failing claim named as evidence, body never rendered), and hedges a prose-only note (`[unverified]`); a backend, not a driver, so `fak memory drivers` is unchanged; no key/model/GPU/network |
-| **Security and policy** | [`adjudication-demo/`](adjudication-demo/README.md), [`agentdojo-redteam/`](agentdojo-redteam/README.md), [`normgate-evasion/`](normgate-evasion/README.md), [`wire-proof/`](wire-proof/README.md), [`quarantine-demo/`](quarantine-demo/README.md), [`wire-quarantine-demo/`](wire-quarantine-demo/README.md), [`auth-hardening/`](auth-hardening/README.md), [`presets/`](presets/README.md) | default-deny, tool poisoning, attack-corpus, normgate evasion catches, wire-level proof, result-side quarantine (a booby-trapped tool result paged out of context on the model loop, and the same containment over the bare wire), auth-boundary witnesses, and curated policy floors |
-| **Policy lifecycle** | [`escalation-demo/`](escalation-demo/README.md), [`policy-hot-reload/`](policy-hot-reload/README.md), [`trace-reset/`](trace-reset/README.md), [`observability/`](observability/README.md), [`policy-loader-properties/`](policy-loader-properties/README.md) | safe-sink routing, reloads, per-trace reset, operator visibility, and the loader's own fail-loud/replace-not-merge/round-trip guarantees |
-| **Adoption and integrations** | [`openai-sdk-minimal/`](openai-sdk-minimal/README.md), [`compose-ollama/`](compose-ollama/README.md), [`mcp/`](mcp/README.md), [`mcp-client/`](mcp-client/README.md), [`openai-agents-guardrail/`](openai-agents-guardrail/README.md), [`autogen-groupchat/`](autogen-groupchat/README.md), [`crewai-crew/`](crewai-crew/README.md), [`extdriver/`](extdriver/README.md) | the universal "set one base URL" recipe (OpenAI SDK) and a one-command governed-Ollama compose stack, plus framework-specific ways to put fak in front of existing agents |
-| **Research/science fixtures** | [`routing-bench/`](routing-bench/), [`routing-presets/`](routing-presets/), [`trajectory/`](trajectory/) | recorded corpora and manifests for routing, trajectory scoring, and reproducible analysis |
-| **Shared task records** | [`shared-task-record/`](shared-task-record/README.md), [`shared-task-record-verdicts/`](shared-task-record-verdicts/README.md) | task-record interchange and verdict fixtures |
-
-That split keeps the first-run path small while preserving the heavier research,
-security, and framework demos for readers who came for those tracks.
 
 Run checks from `fak/`:
 
