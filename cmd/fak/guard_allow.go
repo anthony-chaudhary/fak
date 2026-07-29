@@ -316,7 +316,7 @@ func cmdGuardAllow(argv []string) {
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, guardAllowUsage()) }
 	list := fs.Bool("list", false, "print effective allow layers with per-layer provenance, then exit")
 	user := fs.Bool("user", false, "write the per-user home overlay instead of the repo-local overlay")
-	session := fs.Bool("session", false, "write the SESSION-scope overlay: the narrowest layer, applied last, so it is the last word over the repo/user/env layers. EPHEMERAL — a guard drops this layer both at its boot and at its session end, so the widening never survives into another session. Caveat: no launch yet supplies a session id, so all sessions on a checkout share sessions/current.allow.json — a guard booting NEXT TO yours drops your entry, and you re-grant it")
+	session := fs.Bool("session", false, "write the SESSION-scope overlay: the narrowest layer, applied last, so it is the last word over the repo/user/env layers. EPHEMERAL — a guard drops this layer both at its boot and at its session end, so the widening never survives into another session. Scoped PER LAUNCH: run this INSIDE a guarded session, where the guard's injected $FAK_GUARD_SESSION_ID names the file it is reading. Run outside one it lands in sessions/current.allow.json, which no live guard resolves — so nothing honors it")
 	remove := fs.Bool("remove", false, "remove the named tool(s)/prefix(es) from the overlay instead of adding")
 	prefix := fs.Bool("prefix", false, "treat the positional args as allow_prefix entries (a tool-name PREFIX) rather than exact names")
 	fromJournal := fs.Bool("from-journal", false, "list the tools a guarded session BLOCKED (DEFAULT_DENY) from an audit journal, each with the exact command to allow it")
