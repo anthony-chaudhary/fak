@@ -62,6 +62,23 @@ optimal forever: `--compact-history-budget` sheds old compactible turns after ro
 tokens, and `--ctx-view-budget` defaults the planned resident view to 8K. Those values
 should move only with a stronger witness or a clearly labeled re-budgeting decision.
 
+Two things about that 48K a reader will otherwise get wrong (#5430):
+
+- **48K is the flag's default, not what a `fak guard` launch runs at.** Every `fak guard`
+  launch that does not pass `--compact-history-budget` explicitly is resolved to **96K**
+  (`gateway.HeadlessCompactHistoryBudget`, via `resolveGuardCompactBudget`), because every
+  guard launch fronts Claude Code and therefore carries its large fixed system+tools floor —
+  a floor that already sits at or above the lean 48K line. The flag's printed default is the
+  pre-resolution value; the number actually in force is on the running gateway at
+  `/debug/vars` under `adjudication.compaction_budget`, and `fak info`'s cache tab prints it
+  next to the compaction shed bar. An explicit `--compact-history-budget` always wins,
+  including an explicit `0` (off, body forwarded byte-for-byte).
+- **The budget is measured against `messages[]` alone.** The cut sums estimated tokens over
+  message elements only (`agent.CompactAnthropicHistoryWithOptions`); the system+tools block
+  is never counted against it. A budget sized from "my whole context is N tokens" is
+  therefore set too HIGH, in the safe-looking direction, and the only symptom is an
+  `under_budget` bail that sheds nothing — for as long as the session runs.
+
 ## When More Than 128K Is Acceptable
 
 Use more than 128K resident context only when at least one condition is true:
