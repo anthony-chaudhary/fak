@@ -15,7 +15,7 @@ package engine
 // CacheVerdict is the CLOSED vocabulary of engine cache capabilities — the only
 // wire-neutral labels a report may use. It matches the capability-inventory terms
 // (item 31 / #1549) so the contract and the inventory never drift, and a new engine
-// cannot smuggle in a bespoke class. The zero value is the empty string, which is NOT
+// cannot smuggle in a class of its own. The zero value is the empty string, which is NOT
 // a member of the vocabulary (Valid() == false): an unset verdict is fail-closed to
 // CacheUnknown by a reporter (see gateway.ReportEngineCacheCapability), never read as
 // a fabricated positive. CacheUnknown is the explicit "capability not established"
