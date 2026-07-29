@@ -23,9 +23,26 @@ class LockTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
+        # Neutralize an INHERITED lock-root override for the duration of each test, so the
+        # tempfile root above actually isolates. lock_path() consults $FAK_RELEASE_LOCK_ROOT
+        # ahead of the root it is handed, so a value already in the environment silently
+        # redirects every acquire below onto the repo's real .release.lock -- the isolation
+        # this module's docstring promises, quietly voided by an ambient variable.
+        #
+        # That is not a hypothetical: `fak release ship` exports FAK_RELEASE_LOCK_ROOT=<repo>
+        # so the release cut it drives shares its lease, and that cut runs THIS suite as its
+        # release-substrate dry-run witness. The suite inherited the variable, every acquire
+        # landed on the very lock ship was still holding, and six tests failed EXIT_CONTENDED
+        # != EXIT_OK -- making a shipped release unable to pass its own witness, and leaving
+        # the test's owner token stranded in the repo lock afterwards. The one test that
+        # exercises the override sets it explicitly, so it is unaffected.
+        self._old_lock_root = os.environ.pop("FAK_RELEASE_LOCK_ROOT", None)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
+        os.environ.pop("FAK_RELEASE_LOCK_ROOT", None)
+        if self._old_lock_root is not None:
+            os.environ["FAK_RELEASE_LOCK_ROOT"] = self._old_lock_root
 
     # --- acquire / mutual exclusion -------------------------------------------------
 
