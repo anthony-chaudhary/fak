@@ -38,6 +38,43 @@ func cmdClaudeMacFak(argv []string) {
 	os.Exit(runClaudeMacFak(os.Stdout, os.Stderr, argv))
 }
 
+// claudeMacUnconfiguredGateway reports the refusal text for the ONE failure a
+// first-time reader of the README's Mac showcase actually hits: they run
+// `fak mac` having configured nothing, so --gateway-url is still the public-safe
+// placeholder above. Without this check the run dead-ends five seconds later in
+// an ssh error naming `node-macos-a.local` — a host from someone else's lab that
+// tells the reader neither that it is a placeholder nor that `fak mac` needs a
+// gateway to exist first. Returns "" once the gateway has been supplied.
+//
+// The distinction this message carries is the one the verb's name hides:
+// `fak mac` is a LAUNCHER, not an installer. It points Claude Code at a Mac
+// gateway you are already running; standing that gateway up is a separate,
+// documented step (#5457).
+func claudeMacUnconfiguredGateway(gatewayURL string) string {
+	if strings.TrimSpace(gatewayURL) != defaultClaudeMacGateway {
+		return ""
+	}
+	return fmt.Sprintf(`fak claude-mac-fak: no Mac gateway configured.
+
+--gateway-url is still the built-in placeholder %q. That is not a real host and
+will not resolve — it stands in for YOUR Mac.
+
+`+"`fak mac`"+` launches Claude Code against a Mac gateway; it does not create one.
+The gateway is a local model server with `+"`fak serve`"+` in front of it, running on
+the Mac. To get there:
+
+  1. stand the gateway up on the Mac   docs/fak/server-quickstart.md
+  2. point fak mac at it               export FAK_MAC_GATEWAY="http://<your-mac>:8080"
+                                       (or pass --gateway-url)
+  3. re-run                            fak mac
+
+If the gateway needs a bearer token, fak fetches it over ssh from the same Mac;
+set FAK_MAC_SSH_HOST to that host, or set FAK_GATEWAY_KEY directly to skip the
+fetch. The launcher's flags, preflight panel, and live overlay are documented in
+docs/fak/mac-agent-ui.md.
+`, defaultClaudeMacGateway)
+}
+
 func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("claude-mac-fak", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -82,6 +119,13 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *overlayInterval <= 0 {
 		fmt.Fprintln(stderr, "fak claude-mac-fak: --overlay-interval must be positive")
+		return 2
+	}
+	// Last of the up-front refusals, deliberately AFTER the flag-shape checks: a
+	// malformed argument the caller actually typed is a better thing to report
+	// than the configuration they have not reached yet.
+	if msg := claudeMacUnconfiguredGateway(*gatewayURL); msg != "" {
+		fmt.Fprint(stderr, msg)
 		return 2
 	}
 	if err := os.MkdirAll(*configDir, 0o700); err != nil {
@@ -296,6 +340,17 @@ func ensureClaudeMacGatewayKey(envName string, fetch bool, host, keyPath, gatewa
 		detail := strings.TrimSpace(errBuf.String())
 		if detail == "" {
 			detail = err.Error()
+		}
+		// A reader who set FAK_MAC_GATEWAY but not FAK_MAC_SSH_HOST is now
+		// failing against the OTHER placeholder, and the ssh error names a host
+		// they never chose. Say so, rather than leaving them to guess whether
+		// `user@node-macos-a.local` is something they were supposed to have (#5457).
+		if host == defaultClaudeMacSSHHost {
+			return fmt.Errorf("fetch gateway key from %s over ssh: %s\n"+
+				"  %s is the built-in PLACEHOLDER ssh host, not your Mac — the gateway URL is set but the ssh host is not.\n"+
+				"  set FAK_MAC_SSH_HOST=<user>@<your-mac> so fak can read ~/.fak-gateway-key from it,\n"+
+				"  or set %s directly (or pass --fetch-key=false) if the gateway needs no bearer",
+				host, detail, defaultClaudeMacSSHHost, envName)
 		}
 		return fmt.Errorf("fetch gateway key from %s over ssh: %s\n"+
 			"  set %s directly (or --gateway-key-env / FAK_MAC_SSH_HOST) to skip the ssh fetch",

@@ -314,6 +314,103 @@ func TestClaudeMacFakSSHHelperProcess(t *testing.T) {
 	os.Exit(255)
 }
 
+// TestClaudeMacFakRefusesTheUnconfiguredPlaceholderGateway is the regression for
+// the first-run experience of the README's Mac showcase (#5457): a reader who
+// runs `fak mac` having configured nothing used to wait out an ssh connect
+// timeout and then get a resolve error naming `node-macos-a.local` — a host from
+// someone else's lab. Nothing in that told them the host was a placeholder, or
+// that `fak mac` needs a gateway to already exist. Refuse UP FRONT instead, name
+// the placeholder as a placeholder, and hand over the setup path.
+func TestClaudeMacFakRefusesTheUnconfiguredPlaceholderGateway(t *testing.T) {
+	t.Setenv("FAK_MAC_GATEWAY", "")
+	t.Setenv("FAK_GATEWAY_KEY", "")
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		t.Fatalf("unconfigured gateway must refuse before any ssh fetch; got %s %v", name, args)
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--dry-run",
+		"--claude-config-dir", t.TempDir(),
+	})
+	if code != 2 {
+		t.Fatalf("runClaudeMacFak code=%d, want 2 (usage refusal)\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	msg := stderr.String()
+	for _, want := range []string{
+		"no Mac gateway configured",       // the actual problem, in the first line
+		"placeholder",                     // the host is ours, not theirs
+		defaultClaudeMacGateway,           // ...and which value is the placeholder
+		"does not create one",             // fak mac is a launcher, not an installer
+		"docs/fak/server-quickstart.md",   // where to stand the gateway up
+		`export FAK_MAC_GATEWAY="http://`, // the exact next command
+		"docs/fak/mac-agent-ui.md",        // the operator walkthrough, once it works
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("refusal missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+// TestClaudeMacFakAcceptsAConfiguredGateway is the other half of the gate: the
+// refusal keys on the untouched PLACEHOLDER, never on "a gateway I cannot reach".
+// Supplying any gateway — including one that is merely down — must get past it,
+// or the check would break every real operator instead of helping a newcomer.
+func TestClaudeMacFakAcceptsAConfiguredGateway(t *testing.T) {
+	t.Setenv("FAK_MAC_GATEWAY", "http://mac.example:8080")
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--dry-run",
+		"--claude-config-dir", t.TempDir(),
+		"--model", "qwen-local",
+	})
+	if code != 0 {
+		t.Fatalf("configured gateway should not trip the placeholder gate: code=%d stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "no Mac gateway configured") {
+		t.Fatalf("placeholder refusal fired on a configured gateway:\n%s", stderr.String())
+	}
+}
+
+// TestEnsureClaudeMacGatewayKeyNamesThePlaceholderSSHHost covers the second step
+// of the same trap (#5457): the reader sets FAK_MAC_GATEWAY, gets past the gate
+// above, and then fails on the OTHER placeholder — the ssh host. The ssh stderr
+// alone still names a host they never chose, so the error must say which knob is
+// still unset rather than leaving them to guess.
+func TestEnsureClaudeMacGatewayKeyNamesThePlaceholderSSHHost(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "")
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		cs := append([]string{"-test.run=TestClaudeMacFakSSHHelperProcess", "--", name}, args...)
+		cmd := exec.Command(os.Args[0], cs...)
+		cmd.Env = append(os.Environ(), "GO_WANT_SSH_HELPER_PROCESS=1")
+		return cmd
+	}
+
+	// Gateway configured (a real-looking remote), ssh host still the placeholder.
+	err := ensureClaudeMacGatewayKey("FAK_GATEWAY_KEY", true, defaultClaudeMacSSHHost, "", "http://mac.example:8080")
+	if err == nil {
+		t.Fatal("expected an error when the ssh fetch fails against the placeholder host")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"Could not resolve hostname",         // still carries the real ssh cause
+		"PLACEHOLDER ssh host",               // ...plus which knob is unset
+		"FAK_MAC_SSH_HOST=<user>@<your-mac>", // the exact fix
+		"set FAK_GATEWAY_KEY directly",       // the skip-the-fetch escape
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error missing %q:\n%s", want, msg)
+		}
+	}
+}
+
 func TestClaudeMacFakDryRunDoesNotProbeDebugGateway(t *testing.T) {
 	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
 	dir := t.TempDir()
