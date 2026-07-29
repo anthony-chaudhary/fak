@@ -86,24 +86,13 @@ func (cf *ctxFootprintBytes) report() *CtxValueFootprint {
 	}
 }
 
-// deFoldSystemReq corrects the folded-system double-count specific to a decoded
-// live request. DecodeAnthropicMessagesRequest prepends the system prompt as a
-// leading RoleSystem message into req.Messages AND keeps req.System, so a naive
-// RequestFootprint counts the system twice (the System bucket AND a History/Tail
-// message). This returns a shallow copy whose leading folded-system duplicate is
-// dropped, so System is counted once and Floor == System + Tools matches
-// /context. The original req is never mutated (the hot path forwards it verbatim).
+// deFoldSystemReq is agent.DeFoldSystemRequest, which now owns the folded-system
+// double-count correction beside RequestFootprint (the function whose precondition it is).
+// This surface and `fak footprint-audit` used to carry byte-identical private copies; a
+// drift between them would have made the live gateway and the offline audit price the SAME
+// request differently.
 func deFoldSystemReq(req *agent.AnthropicMessagesRequest) *agent.AnthropicMessagesRequest {
-	if req == nil {
-		return nil
-	}
-	if req.System != "" && len(req.Messages) > 0 &&
-		req.Messages[0].Role == agent.RoleSystem && req.Messages[0].Content == req.System {
-		cp := *req
-		cp.Messages = req.Messages[1:]
-		return &cp
-	}
-	return req
+	return agent.DeFoldSystemRequest(req)
 }
 
 // observeCtxFootprint prices the inbound request's ESTIMATED footprint and folds

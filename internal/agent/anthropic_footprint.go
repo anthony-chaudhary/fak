@@ -103,6 +103,34 @@ func toolBytes(t ToolDef) int {
 	return len(t.Function.Name) + len(t.Function.Description) + len(t.Function.Parameters)
 }
 
+// DeFoldSystemRequest corrects the folded-system double-count that is specific to a DECODED
+// live request. DecodeAnthropicMessagesRequest prepends the system prompt as a leading
+// RoleSystem message into req.Messages AND keeps req.System, so a naive RequestFootprint
+// counts the system twice (the System bucket AND a History/Tail message). This returns a
+// shallow copy whose leading folded-system duplicate is dropped, so System is counted once
+// and Floor == System + Tools matches /context.
+//
+// The original req is NEVER mutated — the gateway hot path forwards the same pointer
+// verbatim after pricing it, so a mutation here would silently drop the system prompt from
+// the request actually sent upstream. A nil req returns nil.
+//
+// It lives beside RequestFootprint because it is that function's precondition, and it is
+// exported because every caller that prices a decoded request needs it: the gateway's
+// per-trace footprint observer and `fak footprint-audit` both used to carry a
+// byte-identical private copy of it.
+func DeFoldSystemRequest(req *AnthropicMessagesRequest) *AnthropicMessagesRequest {
+	if req == nil {
+		return nil
+	}
+	if req.System != "" && len(req.Messages) > 0 &&
+		req.Messages[0].Role == RoleSystem && req.Messages[0].Content == req.System {
+		cp := *req
+		cp.Messages = req.Messages[1:]
+		return &cp
+	}
+	return req
+}
+
 // RequestFootprint decomposes req into the estimated per-slice token audit. It is the
 // bucketed twin of EstimateAnthropicTokens: Total.Tokens == EstimateAnthropicTokens(req)
 // by construction (same char-walk, same divisor). A nil req returns a zero footprint

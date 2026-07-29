@@ -58,21 +58,12 @@ const (
 	findingToolSearchUnset = "TOOL_SEARCH_UNSET"
 )
 
-// deFoldAuditSystemReq mirrors gateway's unexported deFoldSystemReq: a decoded live
-// request carries the system prompt BOTH in req.System and as a prepended RoleSystem
-// message (DecodeAnthropicMessagesRequest folds it in), so a naive RequestFootprint
-// counts it twice. Drop the leading folded duplicate; never mutate the original.
+// deFoldAuditSystemReq no longer MIRRORS the gateway's correction — it IS the same one.
+// agent.DeFoldSystemRequest owns the folded-system double-count fix beside RequestFootprint;
+// this audit and the live gateway observer both call it, so the offline audit can never
+// price a request differently from the server that served it.
 func deFoldAuditSystemReq(req *agent.AnthropicMessagesRequest) *agent.AnthropicMessagesRequest {
-	if req == nil {
-		return nil
-	}
-	if req.System != "" && len(req.Messages) > 0 &&
-		req.Messages[0].Role == agent.RoleSystem && req.Messages[0].Content == req.System {
-		cp := *req
-		cp.Messages = req.Messages[1:]
-		return &cp
-	}
-	return req
+	return agent.DeFoldSystemRequest(req)
 }
 
 // buildFootprintAudit is the pure aggregator: raw is one Anthropic Messages request
