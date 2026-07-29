@@ -167,9 +167,11 @@ external dependency set is **two `golang.org/x` extended-standard-library module
 pinned by a **4-line `go.sum`**.
 
 > **The older "zero external dependencies, no `go.sum`" phrasing is stale — do not use it.**
-> It still survives as a comment in `go.mod` and in some older pages. It was true once;
-> it is not true at this commit, and shipping it would be a false claim. The correct
-> number is two modules.
+> It was true once; it is not true at this commit, and shipping it would be a false claim.
+> The correct number is two modules. The `go.mod` header comment has since been corrected,
+> and `internal/architest/zerodep_claim_test.go` reds if the older wording reaches a new
+> reader-facing page — three (`AGENTS.md`, `INDEX.md`, `docs/product-scorecard/README.md`)
+> still carry it as pinned, review-visible debt.
 
 | Module | Version | Direct? | License |
 |---|---|---|---|
