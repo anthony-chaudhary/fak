@@ -1,8 +1,12 @@
 package main
 
 // fak mlp-score reports the witnessed first-lovable-cut grade for epic #3256,
-// milestone #17. The pure fold lives in internal/mlpscore; this shell captures a
-// committed HEAD snapshot and owns output/exit behavior.
+// milestone #17. The pure fold lives in internal/mlpscore (which rides the shared
+// pkg/scorecard kernel); this shell captures a committed HEAD snapshot and owns the
+// family-standard output surface -- --json (the stable payload, now carrying the
+// control-pane corpus), --markdown (the committed snapshot for the published page) and
+// --compare (the prove-the-debt-drop regression gate against a prior --json run) -- plus
+// the exit behavior, which stays owned by --check.
 
 import (
 	"flag"
@@ -14,6 +18,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/mlpscore"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 func cmdMLPScore(argv []string) {
@@ -25,9 +30,11 @@ func runMLPScore(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit the stable scorecard JSON")
-	var asMarkdown bool
-	fs.BoolVar(&asMarkdown, "markdown", false, "emit the markdown rollup")
-	fs.BoolVar(&asMarkdown, "md", false, "alias for --markdown")
+	// --markdown is defined in the family-standard form (the shape every sibling card uses)
+	// with --md kept as a real alias, so the two flags stay independent bools OR'd together.
+	markdownFlag := fs.Bool("markdown", false, "emit the markdown rollup")
+	mdAlias := fs.Bool("md", false, "alias for --markdown")
+	comparePath := fs.String("compare", "", "compare against a prior --json payload")
 	check := fs.Bool("check", false, "exit 1 when the scorecard is not-yet")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -36,6 +43,7 @@ func runMLPScore(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak mlp-score: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
+	asMarkdown := *markdownFlag || *mdAlias
 	if *asJSON && asMarkdown {
 		fmt.Fprintln(stderr, "fak mlp-score: choose only one of --json or --markdown")
 		return 2
@@ -55,6 +63,12 @@ func runMLPScore(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	switch {
+	case *comparePath != "":
+		base, ok := readCompareBase(stderr, "fak mlp-score", *comparePath)
+		if !ok {
+			return 2
+		}
+		fmt.Fprintln(stdout, scorecard.Compare(mlpscore.KernelPayload(score), base, mlpscore.DebtKey))
 	case *asJSON:
 		if err := writeIndentedJSONNoEscape(stdout, score); err != nil {
 			fmt.Fprintf(stderr, "fak mlp-score: encode json: %v\n", err)

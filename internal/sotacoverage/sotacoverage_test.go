@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/sotamatrix"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const cleanSource = `package sotamatrix
@@ -30,17 +32,6 @@ func cleanOps() []sotamatrix.Op {
 			PrimaryLink: "https://example.com/beta",
 			Oracle:      "HF reference",
 		},
-	}
-}
-
-func TestGradeBands(t *testing.T) {
-	for _, tc := range []struct {
-		debt int
-		want string
-	}{{0, "A"}, {1, "B"}, {2, "B"}, {4, "C"}, {9, "D"}, {40, "F"}} {
-		if got := GradeLetter(tc.debt); got != tc.want {
-			t.Fatalf("GradeLetter(%d)=%q, want %q", tc.debt, got, tc.want)
-		}
 	}
 }
 
@@ -78,11 +69,63 @@ func TestGlobMatchNormalizesSeparators(t *testing.T) {
 func TestCleanMatrixHasNoHardDebt(t *testing.T) {
 	root := makeRepo(t, cleanOps())
 	payload := CollectWithOps(root, cleanOps(), cleanSource, "2026-06-30")
-	if payload.Error != "" {
-		t.Fatalf("error = %q", payload.Error)
+	if got := scorecard.StringValue(payload.Corpus["error"]); got != "" {
+		t.Fatalf("error = %q", got)
 	}
-	if payload.Corpus.HardDebt != 0 || payload.Corpus.Grade != "A" || !payload.OK {
-		t.Fatalf("payload = %+v", payload)
+	if debt := scorecard.IntValue(payload.Corpus[DebtKey]); debt != 0 || !payload.OK {
+		t.Fatalf("debt = %d, ok = %v (corpus %+v)", debt, payload.OK, payload.Corpus)
+	}
+	if payload.Corpus["grade"] != "A" || payload.Verdict != "OK" {
+		t.Fatalf("grade/verdict = %v/%q", payload.Corpus["grade"], payload.Verdict)
+	}
+}
+
+// TestPayloadRidesTheSharedKernel pins the migration itself: the card's payload is the
+// shared pkg/scorecard envelope (kernel-written value/grade/pressure keys, the kernel's one
+// grade table, [] not null KPI lists), not a hand-rolled look-alike.
+func TestPayloadRidesTheSharedKernel(t *testing.T) {
+	root := makeRepo(t, cleanOps())
+	payload := CollectWithOps(root, cleanOps(), cleanSource, "2026-06-30")
+	if payload.Schema != Schema {
+		t.Fatalf("schema = %q", payload.Schema)
+	}
+	for _, key := range []string{"value", "value_unit", "score", "legacy_score", "grade", "pressure", "slack", DebtKey} {
+		if _, ok := payload.Corpus[key]; !ok {
+			t.Fatalf("corpus is missing the kernel key %q: %+v", key, payload.Corpus)
+		}
+	}
+	composite, _ := payload.Corpus["score"].(float64)
+	if want := scorecard.GradeStd(composite); payload.Corpus["grade"] != want {
+		t.Fatalf("grade %v is not the kernel table's %q for score %v", payload.Corpus["grade"], want, composite)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"defects":null`) || strings.Contains(string(raw), `"soft":null`) {
+		t.Fatalf("kernel KPI lists must marshal as [], got %s", raw)
+	}
+}
+
+// TestCorpusKeysSurviveTheKernelMigration pins the control-pane contract the card emitted
+// before it rode the kernel: every corpus key a downstream reader keys on is still there.
+func TestCorpusKeysSurviveTheKernelMigration(t *testing.T) {
+	root := makeRepo(t, cleanOps())
+	payload := CollectWithOps(root, cleanOps(), cleanSource, "2026-06-30")
+	if got := scorecard.IntValue(payload.Corpus["matrix_rows"]); got != 2 {
+		t.Fatalf("matrix_rows = %d", got)
+	}
+	if got := scorecard.IntValue(payload.Corpus["hard_debt"]); got != scorecard.IntValue(payload.Corpus[DebtKey]) {
+		t.Fatalf("hard_debt %d must alias %s %d", got, DebtKey, scorecard.IntValue(payload.Corpus[DebtKey]))
+	}
+	byGroup, ok := payload.Corpus["debt_by_group"].(map[string]int)
+	if !ok {
+		t.Fatalf("debt_by_group = %T", payload.Corpus["debt_by_group"])
+	}
+	for _, group := range []string{"complete", "honest", "fresh"} {
+		if _, ok := byGroup[group]; !ok {
+			t.Fatalf("debt_by_group is missing %q: %+v", group, byGroup)
+		}
 	}
 }
 
@@ -91,9 +134,15 @@ func TestMissingFakPathRaisesDebt(t *testing.T) {
 	ops[0].FakPath = "internal/compute/DELETED.go (Reference)"
 	root := makeRepo(t, cleanOps())
 	payload := CollectWithOps(root, ops, cleanSource, "2026-06-30")
-	by := kpisByName(payload.KPIs)
-	if by["fak_path_exists"].Passed || by["fak_path_exists"].Debt != 1 || payload.OK {
+	by := kpisByKey(payload.KPIs)
+	if len(by["fak_path_exists"].Defects) != 1 || payload.OK {
 		t.Fatalf("payload = %+v", payload)
+	}
+	if !containsSubstring(by["fak_path_exists"].Defects, "internal/compute/DELETED.go") {
+		t.Fatalf("defect does not name the missing path: %+v", by["fak_path_exists"].Defects)
+	}
+	if scorecard.IntValue(payload.Corpus[DebtKey]) != 1 {
+		t.Fatalf("%s = %v", DebtKey, payload.Corpus[DebtKey])
 	}
 }
 
@@ -103,12 +152,15 @@ func TestMissingLinkAndOracleRaiseDebt(t *testing.T) {
 	ops[1].Oracle = ""
 	root := makeRepo(t, cleanOps())
 	payload := CollectWithOps(root, ops, cleanSource, "2026-06-30")
-	by := kpisByName(payload.KPIs)
-	if by["has_primary_link"].Passed || by["has_primary_link"].Debt != 1 {
+	by := kpisByKey(payload.KPIs)
+	if len(by["has_primary_link"].Defects) != 1 {
 		t.Fatalf("link kpi = %+v", by["has_primary_link"])
 	}
-	if by["has_oracle"].Passed || by["has_oracle"].Debt != 1 {
+	if len(by["has_oracle"].Defects) != 1 {
 		t.Fatalf("oracle kpi = %+v", by["has_oracle"])
+	}
+	if got := scorecard.IntValue(payload.Corpus["debt_by_group"].(map[string]int)["complete"]); got != 2 {
+		t.Fatalf("complete group debt = %d", got)
 	}
 }
 
@@ -117,58 +169,111 @@ func TestUncoveredKernelFileRaisesTreeCoverageDebt(t *testing.T) {
 	writeFile(t, root, "internal/model/moe.go", "package model\n")
 	git(t, root, "add", "-A")
 	payload := CollectWithOps(root, cleanOps(), cleanSource, "2026-06-30")
-	tc := kpisByName(payload.KPIs)["tree_coverage"]
-	if tc.Passed || tc.Debt < 1 || !containsItem(tc.Items, "internal/model/moe.go") {
+	tc := kpisByKey(payload.KPIs)["tree_coverage"]
+	if len(tc.Defects) < 1 || !containsSubstring(tc.Defects, "internal/model/moe.go") {
 		t.Fatalf("tree coverage = %+v", tc)
+	}
+	if tc.Score >= 100 {
+		t.Fatalf("an uncovered file must drop the coverage score, got %v", tc.Score)
 	}
 }
 
+// TestFreshnessIsSoftAndNeedsToday pins the one deliberate semantic move of the kernel
+// migration: staleness is a SOFT nudge, so it lands in KPI.Soft and can never move the
+// sota_debt integer or red the gate. Its count is still visible as corpus.soft_debt.
 func TestFreshnessIsSoftAndNeedsToday(t *testing.T) {
 	root := makeRepo(t, cleanOps())
 	payload := CollectWithOps(root, cleanOps(), cleanSource, "")
-	fresh := kpisByName(payload.KPIs)["freshness"]
-	if !fresh.Passed || fresh.Hard {
+	fresh := kpisByKey(payload.KPIs)["freshness"]
+	if len(fresh.Soft) != 0 || len(fresh.Defects) != 0 {
 		t.Fatalf("freshness without today = %+v", fresh)
 	}
+
 	stale := CollectWithOps(root, cleanOps(), cleanSource, "2027-01-01")
-	fresh = kpisByName(stale.KPIs)["freshness"]
-	if fresh.Passed || fresh.Debt != 1 || fresh.Hard || stale.Corpus.HardDebt != 0 || !stale.OK {
-		t.Fatalf("stale = %+v", stale)
+	fresh = kpisByKey(stale.KPIs)["freshness"]
+	if len(fresh.Soft) != 1 || len(fresh.Defects) != 0 {
+		t.Fatalf("stale freshness = %+v", fresh)
+	}
+	if scorecard.IntValue(stale.Corpus[DebtKey]) != 0 || !stale.OK {
+		t.Fatalf("a soft signal must not become debt: %+v", stale.Corpus)
+	}
+	if got := scorecard.IntValue(stale.Corpus["soft_debt"]); got != 1 {
+		t.Fatalf("soft_debt = %d, want 1", got)
+	}
+}
+
+func TestUnreadableWorkspaceFoldsAsARetirableDefect(t *testing.T) {
+	payload := Collect(filepath.Join(t.TempDir(), "not-a-repo"), "")
+	if payload.OK {
+		t.Fatal("a workspace with no go.mod must not fold OK")
+	}
+	if got := scorecard.StringValue(payload.Corpus["error"]); !strings.Contains(got, "no go.mod") {
+		t.Fatalf("corpus.error = %q", got)
+	}
+	by := kpisByKey(payload.KPIs)
+	if len(by["matrix_source"].Defects) != 1 {
+		t.Fatalf("matrix_source kpi = %+v", by["matrix_source"])
+	}
+}
+
+func TestMarkdownAndCompareRideTheKernelRenderers(t *testing.T) {
+	root := makeRepo(t, cleanOps())
+	payload := CollectWithOps(root, cleanOps(), cleanSource, "2026-06-30")
+
+	md := scorecard.Markdown(payload, MarkdownDoc(payload))
+	for _, want := range []string{"---\ntitle: ", "# SOTA-coverage scorecard", "| KPI | value | legacy score | detail |", DebtKey} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q:\n%s", want, md)
+		}
+	}
+	if scorecard.Markdown(payload, MarkdownDoc(payload)) != md {
+		t.Fatal("markdown render is not deterministic")
+	}
+
+	// The regression gate must read a prior --json payload and prove the direction of travel.
+	prior := map[string]any{"corpus": map[string]any{DebtKey: 3, "pressure": 12.0}}
+	line := scorecard.Compare(payload, prior, DebtKey)
+	if !strings.Contains(line, "compare: "+DebtKey+" 3 -> 0 (improved by 3)") {
+		t.Fatalf("compare line missing the debt drop:\n%s", line)
 	}
 }
 
 func TestLiveMatrixParsesAndCompleteGroupIsClean(t *testing.T) {
 	payload := Collect(repoRoot(t), "2026-06-30")
-	if payload.Error != "" {
-		t.Fatalf("error = %q", payload.Error)
+	if got := scorecard.StringValue(payload.Corpus["error"]); got != "" {
+		t.Fatalf("error = %q", got)
 	}
-	if payload.Corpus.MatrixRows < 5 {
-		t.Fatalf("rows = %d", payload.Corpus.MatrixRows)
+	if got := scorecard.IntValue(payload.Corpus["matrix_rows"]); got < 5 {
+		t.Fatalf("rows = %d", got)
 	}
-	by := kpisByName(payload.KPIs)
-	for _, name := range []string{"fak_path_exists", "has_primary_link", "has_oracle"} {
-		if !by[name].Passed {
-			t.Fatalf("%s failed: %+v", name, by[name])
+	by := kpisByKey(payload.KPIs)
+	for _, key := range []string{"fak_path_exists", "has_primary_link", "has_oracle"} {
+		if len(by[key].Defects) != 0 {
+			t.Fatalf("%s failed: %+v", key, by[key])
 		}
 	}
-	if payload.Corpus.DebtByGroup["complete"] != 0 {
-		t.Fatalf("complete debt = %+v", payload.Corpus)
+	if got := payload.Corpus["debt_by_group"].(map[string]int)["complete"]; got != 0 {
+		t.Fatalf("complete debt = %d", got)
 	}
 }
 
 func TestLiveDebtAndGradeConsistentAndJSONRoundTrips(t *testing.T) {
 	payload := Collect(repoRoot(t), "2026-06-30")
-	if payload.Corpus.Grade != GradeLetter(payload.Corpus.SOTADebt) {
-		t.Fatalf("grade mismatch: %+v", payload.Corpus)
+	debt := 0
+	for _, k := range payload.KPIs {
+		debt += len(k.Defects)
 	}
-	if payload.OK != (payload.Corpus.HardDebt == 0) {
-		t.Fatalf("ok mismatch: %+v", payload.Corpus)
+	if got := scorecard.IntValue(payload.Corpus[DebtKey]); got != debt {
+		t.Fatalf("%s %d is not the defect count %d", DebtKey, got, debt)
+	}
+	if payload.OK != (debt == 0) {
+		t.Fatalf("ok mismatch: ok=%v debt=%d", payload.OK, debt)
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var decoded Payload
+	var decoded scorecard.Payload
 	if err := json.Unmarshal(b, &decoded); err != nil {
 		t.Fatal(err)
 	}
@@ -213,17 +318,17 @@ func git(t *testing.T, root string, args ...string) {
 	}
 }
 
-func kpisByName(kpis []KPI) map[string]KPI {
-	out := map[string]KPI{}
+func kpisByKey(kpis []scorecard.KPI) map[string]scorecard.KPI {
+	out := map[string]scorecard.KPI{}
 	for _, kpi := range kpis {
-		out[kpi.Name] = kpi
+		out[kpi.Key] = kpi
 	}
 	return out
 }
 
-func containsItem(items []string, want string) bool {
+func containsSubstring(items []string, want string) bool {
 	for _, item := range items {
-		if item == want {
+		if strings.Contains(item, want) {
 			return true
 		}
 	}

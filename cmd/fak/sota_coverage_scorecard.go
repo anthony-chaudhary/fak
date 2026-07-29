@@ -1,5 +1,12 @@
 package main
 
+// sota_coverage_scorecard.go is the thin CLI shell over internal/sotacoverage: it resolves
+// the workspace, folds the card through the shared pkg/scorecard kernel, and owns the
+// standard family surface --json (the control-pane payload) / --markdown (the committed
+// snapshot for the published page) / --compare (the prove-the-debt-drop regression gate
+// against a prior --json payload). --check keeps owning the exit code, so the gate reds
+// only when the operator asks for it.
+
 import (
 	"flag"
 	"fmt"
@@ -7,6 +14,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/sotacoverage"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 func cmdSOTACoverageScorecard(argv []string) {
@@ -17,7 +25,9 @@ func runSOTACoverageScorecard(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("sota-coverage-scorecard", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
-	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	asJSON := fs.Bool("json", false, "emit the control-pane JSON payload")
+	asMarkdown := fs.Bool("markdown", false, "emit the committed snapshot body")
+	comparePath := fs.String("compare", "", "compare against a prior --json payload")
 	today := fs.String("today", "", "evaluate freshness against this YYYY-MM-DD date")
 	check := fs.Bool("check", false, "exit nonzero when there is any HARD sota-debt")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
@@ -31,14 +41,25 @@ func runSOTACoverageScorecard(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	payload := sotacoverage.Collect(root, *today)
-	if *asJSON {
+
+	switch {
+	case *comparePath != "":
+		base, ok := readCompareBase(stderr, "sota-coverage-scorecard", *comparePath)
+		if !ok {
+			return 2
+		}
+		fmt.Fprintln(stdout, scorecard.Compare(payload, base, sotacoverage.DebtKey))
+	case *asJSON:
 		if err := writeIndentedJSONNoEscape(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "sota-coverage-scorecard: encode json: %v\n", err)
 			return 2
 		}
-	} else {
-		fmt.Fprintln(stdout, sotacoverage.Render(payload))
+	case *asMarkdown:
+		fmt.Fprint(stdout, scorecard.Markdown(payload, sotacoverage.MarkdownDoc(payload)))
+	default:
+		fmt.Fprintln(stdout, scorecard.Render(payload, sotacoverage.DebtKey))
 	}
+
 	if *check && !payload.OK {
 		return 1
 	}

@@ -79,6 +79,72 @@ func TestMLPScoreCLIOutputAndGate(t *testing.T) {
 	}
 }
 
+// TestMLPScoreCLICompareReadsAPriorPayload covers the surface this card gained when it
+// joined the shared kernel family: --compare must actually read a prior --json run off disk
+// and report the real direction of travel, and it must refuse a payload it cannot read.
+func TestMLPScoreCLICompareReadsAPriorPayload(t *testing.T) {
+	root := initMLPTestRepo(t)
+	dir := t.TempDir()
+
+	// Capture a prior run the way an operator would, then compare this run against it.
+	var out, errb bytes.Buffer
+	if code := runMLPScore(&out, &errb, []string{"--workspace", root, "--json"}); code != 0 {
+		t.Fatalf("--json code = %d, stderr=%s", code, errb.String())
+	}
+	prior := filepath.Join(dir, "prior.json")
+	writeMLPFile(t, prior, out.String())
+
+	out.Reset()
+	errBReset(&errb)
+	if code := runMLPScore(&out, &errb, []string{"--workspace", root, "--compare", prior}); code != 0 {
+		t.Fatalf("--compare code = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "compare: "+mlpscore.DebtKey+" 5 -> 5 (flat by 0)") {
+		t.Fatalf("comparing a run against itself must read flat:\n%s", out.String())
+	}
+
+	// A baseline that had every criterion witnessed must read as a regression, not as prose.
+	clean := filepath.Join(dir, "clean.json")
+	writeMLPJSON(t, clean, map[string]any{"corpus": map[string]any{mlpscore.DebtKey: 0}})
+	out.Reset()
+	errBReset(&errb)
+	if code := runMLPScore(&out, &errb, []string{"--workspace", root, "--compare", clean}); code != 0 {
+		t.Fatalf("--compare code = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "compare: "+mlpscore.DebtKey+" 0 -> 5 (regressed by 5)") {
+		t.Fatalf("compare did not report the regression:\n%s", out.String())
+	}
+
+	out.Reset()
+	errBReset(&errb)
+	if code := runMLPScore(&out, &errb, []string{"--workspace", root, "--compare", filepath.Join(dir, "absent.json")}); code != 2 {
+		t.Fatalf("unreadable --compare code = %d, want 2", code)
+	}
+	if !strings.Contains(errb.String(), "read --compare") {
+		t.Fatalf("unreadable --compare stderr = %q", errb.String())
+	}
+}
+
+// TestMLPScoreCLIMarkdownAliasStaysEquivalent pins that moving to the family-standard
+// --markdown flag kept --md working as a real alias rather than a differently-rendered path.
+func TestMLPScoreCLIMarkdownAliasStaysEquivalent(t *testing.T) {
+	root := initMLPTestRepo(t)
+	var longOut, shortOut, errb bytes.Buffer
+	if code := runMLPScore(&longOut, &errb, []string{"--workspace", root, "--markdown"}); code != 0 {
+		t.Fatalf("--markdown code = %d, stderr=%s", code, errb.String())
+	}
+	errBReset(&errb)
+	if code := runMLPScore(&shortOut, &errb, []string{"--workspace", root, "--md"}); code != 0 {
+		t.Fatalf("--md code = %d, stderr=%s", code, errb.String())
+	}
+	if longOut.String() != shortOut.String() {
+		t.Fatalf("--md is not an alias for --markdown:\n%s\n---\n%s", longOut.String(), shortOut.String())
+	}
+	if !strings.Contains(longOut.String(), "**Grade F** - value 0 - "+mlpscore.DebtKey+" **5**") {
+		t.Fatalf("markdown is missing the folded kernel headline:\n%s", longOut.String())
+	}
+}
+
 func TestMLPMilestoneProjectionPreservesCriterionRows(t *testing.T) {
 	score := mlpscore.Grade(nil, mlpscore.FoldOpts{Commit: "abc", Date: "2026-07-10"})
 	card := mlpMilestoneScorecard(score)

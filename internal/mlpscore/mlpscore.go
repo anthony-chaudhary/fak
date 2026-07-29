@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const (
@@ -120,14 +121,22 @@ type Criterion struct {
 }
 
 // Score is the stable MLP scorecard envelope.
+//
+// Corpus and KPIs are the shared pkg/scorecard control-pane envelope this card folds
+// through (kernel.go). They are additive: every field this payload emitted before the
+// kernel migration is still here and still carries the same number, and a control-pane
+// reader now also finds corpus.mlp_debt / corpus.grade / corpus.value / corpus.pressure
+// in exactly the place it finds them on every sibling card.
 type Score struct {
 	trendreport.Envelope
-	Criteria   []Criterion `json:"criteria"`
-	Witnessed  int         `json:"witnessed"`
-	Total      int         `json:"total"`
-	Debt       int         `json:"mlp_debt"`
-	Lovable    bool        `json:"lovable"`
-	MLPVerdict string      `json:"mlp_verdict"` // lovable | not-yet
+	Criteria   []Criterion     `json:"criteria"`
+	Witnessed  int             `json:"witnessed"`
+	Total      int             `json:"total"`
+	Debt       int             `json:"mlp_debt"`
+	Lovable    bool            `json:"lovable"`
+	MLPVerdict string          `json:"mlp_verdict"` // lovable | not-yet
+	Corpus     map[string]any  `json:"corpus"`
+	KPIs       []scorecard.KPI `json:"kpis"`
 }
 
 type FoldOpts = trendreport.Opts
@@ -136,6 +145,11 @@ type FoldOpts = trendreport.Opts
 // passes only when its schema and criterion match, every required claim appears
 // exactly once, and every claim links to a committed proof artifact. A nil
 // snapshot fails closed with every criterion not-yet.
+//
+// The rows are this card's own domain judgement; everything downstream of them -- the debt
+// integer, the grade, the composite/value, the ok+verdict decision and the envelope prose
+// -- is stamped from the shared pkg/scorecard fold (kernel.go), so this card cannot drift
+// from its siblings and never computes the same number twice.
 func Grade(snapshot Snapshot, opts FoldOpts) Score {
 	if snapshot == nil {
 		snapshot = emptySnapshot{}
@@ -149,20 +163,14 @@ func Grade(snapshot Snapshot, opts FoldOpts) Score {
 		s.Criteria = append(s.Criteria, row)
 	}
 	s.Total = len(s.Criteria)
-	s.Debt = s.Total - s.Witnessed
-	s.Lovable = s.Total > 0 && s.Debt == 0
-	if s.Lovable {
-		s.MLPVerdict = "lovable"
-		s.OK, s.Verdict, s.Finding = true, trendreport.VerdictOK, "mlp_lovable"
-		s.Reason = fmt.Sprintf("MLP first lovable cut: all %d criteria have committed witnesses", s.Total)
-		s.NextAction = "keep every linked witness reproducible as the milestone evolves"
-		return s
-	}
 
-	s.MLPVerdict = "not-yet"
-	s.OK, s.Verdict, s.Finding = false, "ACTION", "mlp_not_yet"
-	s.Reason = fmt.Sprintf("MLP first lovable cut: %d of %d criteria witnessed; %d remain", s.Witnessed, s.Total, s.Debt)
-	s.NextAction = "land the next missing witness manifest and its linked test or captured run"
+	p := fold(s.Criteria)
+	s.Corpus, s.KPIs = p.Corpus, p.KPIs
+	s.Debt = scorecard.IntValue(p.Corpus[DebtKey])
+	s.Lovable = scorecard.True(p.Corpus["lovable"])
+	s.MLPVerdict = scorecard.StringValue(p.Corpus["mlp_verdict"])
+	s.OK, s.Verdict, s.Finding = p.OK, p.Verdict, p.Finding
+	s.Reason, s.NextAction = p.Reason, p.NextAction
 	return s
 }
 
@@ -299,6 +307,11 @@ func RenderMarkdown(s Score) string {
 	var b strings.Builder
 	b.WriteString("### MLP scorecard - first lovable cut (epic #3256, milestone #17)\n\n")
 	fmt.Fprintf(&b, "Verdict: %s - %d/%d criteria witnessed (`@%s` %s)\n\n", verdict, s.Witnessed, s.Total, shortCommit(s.Commit), s.Date)
+	// The folded headline, straight off the shared kernel corpus, so the committed snapshot
+	// carries the same grade/value/debt triple every sibling card's page does.
+	fmt.Fprintf(&b, "**Grade %s** - value %s - %s **%s**\n\n",
+		scorecard.StringValue(s.Corpus["grade"]), scorecard.MetricText(s.Corpus["value"]),
+		DebtKey, scorecard.MetricText(s.Corpus[DebtKey]))
 	b.WriteString("| Criterion | Workstream | Grade | Witness | Owners |\n")
 	b.WriteString("|---|---|---|---|---|\n")
 	for _, c := range s.Criteria {
