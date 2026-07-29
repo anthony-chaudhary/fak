@@ -206,7 +206,25 @@ func normalizeMinePaths(root string, raw []string) ([]string, error) {
 	return out, nil
 }
 
+// overlayMinePaths copies each owned working-tree path onto the materialized tip.
+//
+// The containment check canonicalizes both sides, the same both-sides discipline
+// dispatchWitnessSamePath uses. EvalSymlinks(src) returns a fully resolved path, so
+// measuring it against an unresolved srcRoot refuses honest owned paths on every host
+// whose repo root is merely reachable through a symlink — macOS puts TMPDIR under /var,
+// a symlink to /private/var, and the resolved file then reads as outside its own root.
+//
+// Resolving the root is best-effort on purpose: when EvalSymlinks cannot canonicalize it
+// the raw spelling is kept rather than the check being skipped. A raw root can only
+// refuse more than a canonical one — no canonical path lies under a symlinked spelling of
+// a directory — so the fallback stays on the strict side, where an uncertain containment
+// check belongs. Containment stays on filepath.Rel rather than a string prefix: Rel is
+// separator-aware, so /a/bc reads as outside /a/b, and it is case-insensitive on Windows.
 func overlayMinePaths(srcRoot, dstRoot string, paths []string) error {
+	realRoot := srcRoot
+	if resolved, rootErr := filepath.EvalSymlinks(srcRoot); rootErr == nil {
+		realRoot = resolved
+	}
 	for _, rel := range paths {
 		src := filepath.Join(srcRoot, filepath.FromSlash(rel))
 		dst := filepath.Join(dstRoot, filepath.FromSlash(rel))
@@ -220,7 +238,7 @@ func overlayMinePaths(srcRoot, dstRoot string, paths []string) error {
 		if evalErr != nil {
 			return evalErr
 		}
-		inside, relErr := filepath.Rel(srcRoot, realSrc)
+		inside, relErr := filepath.Rel(realRoot, realSrc)
 		if relErr != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("owned path %q resolves outside repo root", rel)
 		}
