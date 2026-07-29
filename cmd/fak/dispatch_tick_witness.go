@@ -364,23 +364,11 @@ func dispatchWitnessCommitPathsGit(root, sha string) ([]string, bool) {
 	return paths, true
 }
 
+// dispatchCountPathsOutsideTrees is workerworktree.CountPathsOutsideTrees — the SAME
+// out-of-lane rule the land step refuses on, so the witness sweep can never grade a diff
+// in-lane that Land would have called out-of-lane. It used to be a byte-identical copy.
 func dispatchCountPathsOutsideTrees(changed, trees []string) int {
-	outside := 0
-	for _, path := range changed {
-		path = strings.Trim(strings.ReplaceAll(path, "\\", "/"), "/")
-		inside := false
-		for _, tree := range trees {
-			tree = strings.Trim(strings.ReplaceAll(tree, "\\", "/"), "/")
-			if tree != "" && (path == tree || strings.HasPrefix(path, tree+"/")) {
-				inside = true
-				break
-			}
-		}
-		if !inside {
-			outside++
-		}
-	}
-	return outside
+	return workerworktree.CountPathsOutsideTrees(changed, trees)
 }
 
 // dispatchWitnessCommitAuditDos grades sha through `dos commit-audit --json` and
