@@ -54,6 +54,7 @@ var overviewGroups = []struct {
 	entries []overviewEntry
 }{
 	{"guard + serve (the front doors)", []overviewEntry{
+		{"agent", "the offline proof: run one managed-agent task end to end ('fak agent --offline')"},
 		{"guard", "wrap an agent harness: adjudicate every tool call in-process"},
 		{"serve", "the OpenAI-compatible gateway in front of a local or remote model"},
 		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},

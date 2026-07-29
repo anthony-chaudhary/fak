@@ -57,6 +57,10 @@ const (
 var verbTiers = map[string]VerbTier{
 	// ---- frontdoor: the product (ceiling gated by TestFrontdoorTierStaysSmall) ----
 	"ablate":      TierFrontdoor,
+	// `agent` is the README's headline proof (`fak agent --offline`) and the first
+	// command a new evaluator is told to run, so it belongs in the visible front
+	// door rather than under `fak dev` (#5464).
+	"agent":       TierFrontdoor,
 	"attest":      TierFrontdoor,
 	"audit":       TierFrontdoor,
 	"codex":       TierFrontdoor,
@@ -93,7 +97,6 @@ var verbTiers = map[string]VerbTier{
 	// ---- dev: everything else — spelled `fak dev <verb>` once C2 lands ----
 	"accounts":                      TierDev,
 	"affected":                      TierDev,
-	"agent":                         TierDev,
 	"ailuminate":                    TierDev,
 	"amd-gpu-facts":                 TierDev,
 	"answer-shape":                  TierDev,

@@ -990,6 +990,7 @@ func printBreakEven(w io.Writer, r *turnbench.BreakEvenReport) {
 // measurement the static bench could not produce.
 func cmdAgent(argv []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
+	verbFlagUsage(fs, "agent")
 	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
 	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")

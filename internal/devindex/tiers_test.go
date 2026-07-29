@@ -92,8 +92,14 @@ func TestVerbTiersNameOnlyLiveVerbs(t *testing.T) {
 // 25 (was 24): `ablate` promoted — it now renders the live savings dashboard by
 // default (one command, no `fak console ablate`) and earns its own front-door
 // category (help.go overviewGroups), so it is a product surface, not dev tooling.
+//
+// 26 (was 25): `agent` promoted — README.md leads with `fak agent --offline` as
+// "the shortest public proof" and it is the first command a new evaluator is told
+// to run, but it was classified dev, so `fak help` did not list it and
+// `fak help agent` printed "fak dev agent — …". A newcomer could not find the one
+// command the front page told them to run. It is a product surface (#5464).
 func TestFrontdoorTierStaysSmall(t *testing.T) {
-	const ceiling = 25
+	const ceiling = 26
 	var front []string
 	for key, tier := range verbTiers {
 		if tier == TierFrontdoor {
