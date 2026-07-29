@@ -2008,3 +2008,17 @@ The modver adapter that lifts a flat {module: statement-coverage-percent} map in
 The modver fold that decodes a go-coverprofile and returns the flat {module: percent} map, statement-WEIGHTED per module (covered statements over total statements across every file mapping to that module) rather than averaged per file, with repeated file+span blocks merged once and a malformed profile returned as an error instead of a partial fold (#2467).
 
 **Distinct from:** The COMPUTATION of per-module coverage percents from a profile, distinct from CoverageEntries which merely lifts those percents into scored entries for JoinScores, and distinct from the per-file scorecard adapter which takes an arithmetic mean because it has no statement counts to weight by.
+
+
+### policyExclusion
+
+The operator-configured exclude / include_only gate that drops a discovered account row from the fleet registry, extracted from the inline discovery checks so the discovery path and the seat-stamping path share one decision.
+
+**Distinct from:** Not the policy document itself (policy-manifest) and not a refusal verdict (policyblock): it is the per-row filter decision derived from an already-loaded manifest, and it is the operator-configured counterpart to the structural exclusion checks.
+
+
+### checkPolicyFile
+
+The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier.
+
+**Distinct from:** Not the manifest validator and not the envelope verifier it dispatches to, and not the policy document itself: it is the CLI-level router that decides which checker owns the file, keyed on the payload's schema shape rather than on its filename or extension.

@@ -37,5 +37,25 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "cmd-check-policy-file",
+      "canonical": "checkPolicyFile",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier.",
+      "distinction": "Not the manifest validator and not the envelope verifier it dispatches to, and not the policy document itself: it is the CLI-level router that decides which checker owns the file, keyed on the payload's schema shape rather than on its filename or extension.",
+      "distinct_from": [
+        "policy-manifest",
+        "fleetaccounts-policy-exclusion"
+      ],
+      "aliases": [],
+      "grounding": "checkPolicyFile",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

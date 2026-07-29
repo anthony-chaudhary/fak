@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "fleetaccounts-policy-exclusion",
+      "canonical": "policyExclusion",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The operator-configured exclude / include_only gate that drops a discovered account row from the fleet registry, extracted from the inline discovery checks so the discovery path and the seat-stamping path share one decision.",
+      "distinction": "Not the policy document itself (policy-manifest) and not a refusal verdict (policyblock): it is the per-row filter decision derived from an already-loaded manifest, and it is the operator-configured counterpart to the structural exclusion checks.",
+      "distinct_from": [
+        "policy-manifest",
+        "x-policy-capability-policyblock",
+        "cmd-check-policy-file"
+      ],
+      "aliases": [],
+      "grounding": "policyExclusion",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

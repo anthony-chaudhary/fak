@@ -339,7 +339,8 @@
       "distinction": "It marks an explicit-rule denial, not the catch-all fail-closed \u2014 unlike ReasonDefaultDeny, cited when no rule affirmatively allowed the call.",
       "distinct_from": [
         "reason-code",
-        "verdict"
+        "verdict",
+        "fleetaccounts-policy-exclusion"
       ],
       "aliases": [
         "reasonpolicyblock"
