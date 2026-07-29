@@ -21,6 +21,15 @@ func (a Account) MarshalJSON() ([]byte, error) {
 	o.set("reason", a.Reason)
 	o.set("notes", a.Notes)
 
+	// Credential KIND (#5331), emitted ONLY for an api-key seat: the historical
+	// subscription-OAuth row leaves both fields empty and so keeps the exact legacy key set
+	// the cross-surface parity gate compares. api_key_env is the env var's NAME — the
+	// reference the registry stores — never the key.
+	if a.CredKind != "" {
+		o.set("cred_kind", string(a.CredKind))
+		o.set("api_key_env", a.APIKeyEnv)
+	}
+
 	// worker profile block (present iff this row was classified as a worker)
 	if a.ModelTier != nil {
 		o.set("model_tier", *a.ModelTier)

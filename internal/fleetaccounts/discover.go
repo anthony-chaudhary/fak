@@ -29,6 +29,15 @@ type Account struct {
 	Reason  string `json:"reason"`
 	Notes   string `json:"notes"`
 
+	// CredKind is the credential KIND this seat's config-home registry entry declares
+	// (#5331). It is EMPTY for the historical subscription-OAuth seat — the zero value the
+	// registry itself reads as oauth — so an OAuth row's published JSON keeps the exact
+	// legacy key set the cross-surface parity gate compares; only an api-key seat stamps it.
+	// APIKeyEnv is the NAME of the environment variable holding that seat's Anthropic API
+	// key: a REFERENCE, never the secret, matching the registry's own posture.
+	CredKind  configaccounts.CredKind `json:"cred_kind,omitempty"`
+	APIKeyEnv string                  `json:"api_key_env,omitempty"`
+
 	// Worker profile (omitted for non-worker rows, matching the Python row which only
 	// stamps these on worker rows). Pointers so an unset profile serializes as absent.
 	ModelTier     *int    `json:"model_tier,omitempty"`
@@ -133,12 +142,14 @@ func ReadAccountIdentity(acctDir string) Identity {
 	return out
 }
 
-// classifyRow applies policy + structure checks to one discovered dir. The caller has
-// already confirmed acctDir is an account dir (projects/ for Claude, opencode.json for
-// opencode) before invoking this.
+// accountsRegistryIndex folds the config-home registry into the lookups discovery needs: the
+// ACTIVE seats by name and by cleaned dir path, and the TOMBSTONED seats by name, dir, and
+// account identity. The active maps carry the whole Home rather than a mere presence bit so a
+// discovered dir can INHERIT its seat's credential kind (#5331) instead of only learning that
+// the dir is enrolled.
 type accountsRegistryIndex struct {
-	activeNames          map[string]bool
-	activeDirs           map[string]bool
+	activeNames          map[string]configaccounts.Home
+	activeDirs           map[string]configaccounts.Home
 	tombstonedNames      map[string]configaccounts.Home
 	tombstonedDirs       map[string]configaccounts.Home
 	tombstonedIdentities map[string]configaccounts.Home
@@ -161,8 +172,8 @@ func loadAccountsRegistry(home string) configaccounts.Registry {
 
 func indexAccountsRegistry(reg configaccounts.Registry) accountsRegistryIndex {
 	idx := accountsRegistryIndex{
-		activeNames:          map[string]bool{},
-		activeDirs:           map[string]bool{},
+		activeNames:          map[string]configaccounts.Home{},
+		activeDirs:           map[string]configaccounts.Home{},
 		tombstonedNames:      map[string]configaccounts.Home{},
 		tombstonedDirs:       map[string]configaccounts.Home{},
 		tombstonedIdentities: map[string]configaccounts.Home{},
@@ -173,10 +184,10 @@ func indexAccountsRegistry(reg configaccounts.Registry) accountsRegistryIndex {
 		ident := h.Identity.AccountKey()
 		if h.Active() {
 			if name != "" {
-				idx.activeNames[name] = true
+				idx.activeNames[name] = h
 			}
 			if dir != "" {
-				idx.activeDirs[dir] = true
+				idx.activeDirs[dir] = h
 			}
 			continue
 		}
@@ -249,12 +260,14 @@ func accountsRegistryExclusion(acctDir, product, account, tag string, id Identit
 	}
 
 	for k := range keys {
-		if idx.activeNames[k] {
+		if _, ok := idx.activeNames[k]; ok {
 			return ""
 		}
 	}
-	if dkey != "" && idx.activeDirs[dkey] {
-		return ""
+	if dkey != "" {
+		if _, ok := idx.activeDirs[dkey]; ok {
+			return ""
+		}
 	}
 
 	identityKey := ""
@@ -269,6 +282,101 @@ func accountsRegistryExclusion(acctDir, product, account, tag string, id Identit
 	return ""
 }
 
+// activeSeat returns the ACTIVE config-home registry seat backing a discovered dir. It
+// matches on the cleaned dir path first — the strongest binding, since one dir is one seat —
+// and then on the seat-name aliases the roster tag can carry, walked in sorted order so an
+// ambiguous fixture resolves deterministically. It is how a discovered dir learns the
+// credential KIND its registry entry declares (#5331); an unenrolled dir returns the zero
+// Home and false, which reads as the historical OAuth seat everywhere downstream.
+func (idx accountsRegistryIndex) activeSeat(acctDir, product, account, tag string) (configaccounts.Home, bool) {
+	if dkey := pathKey(acctDir); dkey != "" {
+		if h, ok := idx.activeDirs[dkey]; ok {
+			return h, true
+		}
+	}
+	keys := make([]string, 0, 4)
+	for k := range registryLookupKeys(account, tag, product) {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if h, ok := idx.activeNames[k]; ok {
+			return h, true
+		}
+	}
+	return configaccounts.Home{}, false
+}
+
+// intrinsicExclusion returns the reason an account is kept off the roster by its NAME alone —
+// the `.DELETED` tombstone marker and the fak-kernel dogfood homes — or "" when the name
+// carries no intrinsic exclusion. Shared by the dir-driven classifyRow and the
+// registry-driven apiKeySeatRow so both roster paths agree on which names are never offered.
+func intrinsicExclusion(account string) string {
+	if strings.Contains(strings.ToLower(account), ".deleted") {
+		return "tombstoned (.DELETED marker)"
+	}
+	// The `.claude-faklocal*` homes are the fak-kernel dogfood dirs — synthesized on demand by
+	// Resolve(--faklocal-ok), never an enrolled account. They carry no login and only exist to
+	// point Claude Code at a locally served model, so a credential-less `needs_login` row for
+	// one just clutters the switcher roster. Keep them off it the way a .DELETED marker does;
+	// the dogfood resolve path bypasses discovery entirely, so nothing that depends on it
+	// regresses. Re-offer as a first-class servable seat once native `fak serve` is stable
+	// (see #3558).
+	if strings.HasPrefix(strings.ToLower(account), ".claude-faklocal") {
+		return "fak-kernel dogfood home (synthesized on demand; not a roster account)"
+	}
+	return ""
+}
+
+// policyExclusion returns the reason operator POLICY keeps this account off the roster — an
+// exclude-list hit (reported with the operator's note when one exists) or an include_only
+// allowlist miss — or "" when policy offers it. loginEmail is folded into the exclude match so
+// a rule can name the account by its login as well as by its tag/dir; pass "" when no login
+// identity is available (an api-key seat derives none offline).
+func policyExclusion(account, tag string, pol Policy, loginEmail string) string {
+	if hit := excludedMatch(tag, account, pol.Exclude, loginEmail); hit != "" {
+		if note := pol.Notes[tag]; note != "" {
+			return note
+		}
+		if hitNote := pol.Notes[hit]; hitNote != "" {
+			return hitNote
+		}
+		return "excluded by policy (matches '" + hit + "')"
+	}
+	var includeOnly []string
+	for _, t := range pol.IncludeOnly {
+		if t != "" {
+			includeOnly = append(includeOnly, t)
+		}
+	}
+	if len(includeOnly) == 0 {
+		return ""
+	}
+	for _, t := range includeOnly {
+		if strings.Contains(strings.ToLower(tag), strings.ToLower(t)) {
+			return ""
+		}
+	}
+	return "not in include_only allowlist"
+}
+
+// stampProfile fills a worker row's model-routing profile and route weight from policy. Both
+// roster paths (dir-driven and registry-driven) stamp the identical block, so it lives here
+// rather than being restated per path where the two could silently drift apart.
+func stampProfile(row *Account, pol Policy) {
+	prof := accountProfile(*row, pol)
+	row.ModelTier = intp(prof.ModelTier)
+	row.Model = strp(prof.Model)
+	row.SmallModel = strp(prof.SmallModel)
+	row.ModelEffort = strp(prof.ModelEffort)
+	row.Agent = strp(prof.Agent)
+	row.ProfileSource = strp(prof.ProfileSource)
+	row.RouteWeight = intp(accountRouteWeight(*row, pol))
+}
+
+// classifyRow applies policy + structure checks to one discovered dir. The caller has
+// already confirmed acctDir is an account dir (projects/ for Claude, opencode.json for
+// opencode) before invoking this.
 func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsRegistryIndex) Account {
 	tag := AccountTag(account)
 	note := pol.Notes[tag]
@@ -280,22 +388,11 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 		base.Reason = "not a directory"
 		return base
 	}
-	// Intrinsic tombstone: a `.DELETED` marker decommissions the dir regardless of policy.
-	if strings.Contains(strings.ToLower(account), ".deleted") {
+	// Intrinsic tombstones: a `.DELETED` marker or a dogfood home is off the roster
+	// regardless of policy.
+	if reason := intrinsicExclusion(account); reason != "" {
 		base.Kind = KindExcluded
-		base.Reason = "tombstoned (.DELETED marker)"
-		return base
-	}
-	// Intrinsic dogfood exclusion: the `.claude-faklocal*` homes are the fak-kernel
-	// dogfood dirs — synthesized on demand by Resolve(--faklocal-ok), never an enrolled
-	// account. They carry no login and only exist to point Claude Code at a locally
-	// served model, so a credential-less `needs_login` row for one just clutters the
-	// switcher roster. Keep them off it the way a .DELETED marker does; the dogfood
-	// resolve path bypasses discovery entirely, so nothing that depends on it regresses.
-	// Re-offer as a first-class servable seat once native `fak serve` is stable (see #3558).
-	if strings.HasPrefix(strings.ToLower(account), ".claude-faklocal") {
-		base.Kind = KindExcluded
-		base.Reason = "fak-kernel dogfood home (synthesized on demand; not a roster account)"
+		base.Reason = reason
 		return base
 	}
 	id := Identity{}
@@ -304,46 +401,34 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 	} else if product == "codex" {
 		id, _, _ = codexLoginStatus(acctDir, tag)
 	}
-	// The ~/.claude-accounts registry is a Claude config-home registry. Its role names
-	// (especially "default") are not globally unique product ids, so applying it to a
-	// `.codex` row would falsely inherit a Claude tombstone/rehome with the same short tag.
+	// seat is this dir's ACTIVE config-home registry entry, when it has one; the zero Home
+	// otherwise, which reads as the historical OAuth seat everywhere downstream.
+	//
+	// Both folds below are Claude-only on purpose: the ~/.claude-accounts registry is a Claude
+	// config-home registry, and its role names (especially "default") are not globally unique
+	// product ids, so applying it to a `.codex` row would falsely inherit a Claude
+	// tombstone/rehome with the same short tag.
+	seat := configaccounts.Home{}
 	if product == "claude" {
 		if reason := accountsRegistryExclusion(acctDir, product, account, tag, id, acctIdx); reason != "" {
 			base.Kind = KindExcluded
 			base.Reason = reason
 			return base
 		}
+		// An enrolled api-key dir INHERITS its seat's credential reference (the kind + the
+		// env-var NAME, never the secret) so its readiness is read by KIND below instead of by
+		// the OAuth disk probe, which would mis-report it as credential-less (#5331).
+		if h, ok := acctIdx.activeSeat(acctDir, product, account, tag); ok &&
+			h.CredentialKind() == configaccounts.CredKindAPIKey {
+			seat = h
+			base.CredKind = configaccounts.CredKindAPIKey
+			base.APIKeyEnv = h.APIKeyEnv
+		}
 	}
-	if hit := excludedMatch(tag, account, pol.Exclude, id.LoginEmail); hit != "" {
+	if reason := policyExclusion(account, tag, pol, id.LoginEmail); reason != "" {
 		base.Kind = KindExcluded
-		if note != "" {
-			base.Reason = note
-		} else if hitNote := pol.Notes[hit]; hitNote != "" {
-			base.Reason = hitNote
-		} else {
-			base.Reason = "excluded by policy (matches '" + hit + "')"
-		}
+		base.Reason = reason
 		return base
-	}
-	var includeOnly []string
-	for _, t := range pol.IncludeOnly {
-		if t != "" {
-			includeOnly = append(includeOnly, t)
-		}
-	}
-	if len(includeOnly) > 0 {
-		matched := false
-		for _, t := range includeOnly {
-			if strings.Contains(strings.ToLower(tag), strings.ToLower(t)) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			base.Kind = KindExcluded
-			base.Reason = "not in include_only allowlist"
-			return base
-		}
 	}
 	label := "real offered account"
 	switch product {
@@ -352,24 +437,20 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 	case "codex":
 		label = "real offered Codex account"
 	}
+	if base.CredKind == configaccounts.CredKindAPIKey {
+		label = apiKeySeatReason(base.APIKeyEnv)
+	}
 	row := base
 	row.Kind = KindWorker
 	row.Reason = label
-	prof := accountProfile(row, pol)
-	row.ModelTier = intp(prof.ModelTier)
-	row.Model = strp(prof.Model)
-	row.SmallModel = strp(prof.SmallModel)
-	row.ModelEffort = strp(prof.ModelEffort)
-	row.Agent = strp(prof.Agent)
-	row.ProfileSource = strp(prof.ProfileSource)
-	row.RouteWeight = intp(accountRouteWeight(row, pol))
+	stampProfile(&row, pol)
 	if product == "claude" {
 		row.AccountUUID = strp(id.AccountUUID)
 		row.LoginEmail = strp(id.LoginEmail)
 		row.OrgUUID = strp(id.OrgUUID)
 		row.OrgType = strp(id.OrgType)
 		row.Plan = strp(id.Plan)
-		st, can := claudeLoginStatus(acctDir, tag)
+		st, can := claudeLoginStatus(acctDir, tag, seat)
 		row.LoginStatus = strp(string(st))
 		row.CanServe = boolp(can)
 	} else if product == "codex" {
@@ -396,20 +477,139 @@ func codexLoginStatus(acctDir, tag string) (Identity, configaccounts.LoginStatus
 	return Identity{AccountUUID: derived.AccountUUID}, st, st == configaccounts.LoginReady
 }
 
-func claudeLoginStatus(acctDir, tag string) (configaccounts.LoginStatus, bool) {
+// claudeLoginStatus folds a Claude config dir into the shared login verdict. seat is the dir's
+// ACTIVE config-home registry entry (the zero Home when the dir is not enrolled): only its
+// credential REFERENCE is consumed — the KIND and, for an api-key seat, the env-var NAME — so
+// the derivation dispatches on kind (DerivedIdentity) rather than always probing the OAuth
+// disk credential. Without that, an api-key seat read as HasCreds=false and reported
+// needs_login/can_serve=false, which made it unroutable no matter how the registry was
+// authored (#5331). An OAuth seat carries an empty kind and so keeps the exact prior path.
+func claudeLoginStatus(acctDir, tag string, seat configaccounts.Home) (configaccounts.LoginStatus, bool) {
 	h := configaccounts.Home{
-		Name:     tag,
-		Dir:      acctDir,
-		Identity: configaccounts.DeriveIdentity(acctDir),
+		Name:      tag,
+		Dir:       acctDir,
+		CredKind:  seat.CredKind,
+		APIKeyEnv: seat.APIKeyEnv,
 	}
+	h.Identity = h.DerivedIdentity()
 	st := h.LoginStatus()
-	if st == configaccounts.LoginNeedsLogin {
+	// The .credentials.json expiry reprieve below is an OAUTH-disk concept: an api-key seat is
+	// ready exactly when its named env var holds a key, so a stale OAuth blob left in its dir
+	// must never reopen it. Gating on kind is what keeps the fail-open reprieve from becoming
+	// a false "serving" verdict for a seat whose key is simply not set.
+	if st == configaccounts.LoginNeedsLogin && h.CredentialKind() != configaccounts.CredKindAPIKey {
 		exp := ReadCredExpiry(acctDir)
 		if exp.HasExpiry && !exp.NeedsLogin(time.Now().UTC()) {
 			return configaccounts.LoginReady, true
 		}
 	}
 	return st, st == configaccounts.LoginReady
+}
+
+// discoverAPIKeySeats surfaces the ACTIVE api-key seats (#5331) that directory discovery
+// structurally cannot reach. Discovery globs config DIRS, but an api-key seat's credential is
+// an env-var reference rather than a directory — accounts.Validate deliberately exempts an
+// active api-key home from the "must have a dir" rule — so a dir-less seat would never appear
+// on the roster and could never be routed to a dispatch worker. This pass folds each such seat
+// in straight from the registry. A seat the glob ALREADY produced a row for is skipped (by
+// cleaned dir first, then by name), so the directory-driven path stays the single owner of
+// every dir it can see and existing rows are untouched.
+func discoverAPIKeySeats(reg configaccounts.Registry, pol Policy, found []Account) []Account {
+	seenDirs := map[string]bool{}
+	seenTags := map[string]bool{}
+	for _, r := range found {
+		if r.Product != "claude" {
+			continue
+		}
+		if k := pathKey(r.Dir); k != "" {
+			seenDirs[k] = true
+		}
+		if t := strings.ToLower(strings.TrimSpace(r.Tag)); t != "" {
+			seenTags[t] = true
+		}
+	}
+	var rows []Account
+	for _, h := range reg.Homes {
+		if !h.Active() || h.CredentialKind() != configaccounts.CredKindAPIKey {
+			continue
+		}
+		if k := pathKey(h.Dir); k != "" && seenDirs[k] {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(h.Name))
+		if name != "" && seenTags[name] {
+			continue
+		}
+		row := apiKeySeatRow(h, pol)
+		if name != "" {
+			seenTags[name] = true
+		}
+		if t := strings.ToLower(strings.TrimSpace(row.Tag)); t != "" {
+			seenTags[t] = true
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// apiKeySeatReason is the roster reason text for an offered api-key seat. It names the env
+// var by NAME only — the reference the registry stores — so the roster never carries, and can
+// never print, the key itself. Both roster paths use it, so a seat reads the same whether it
+// happened to be reached through its config dir or straight from the registry.
+func apiKeySeatReason(env string) string {
+	return "real offered API-key account (credential from $" + env + ")"
+}
+
+// apiKeySeatRow builds the roster row for one ACTIVE api-key registry seat. It is the
+// registry-driven twin of classifyRow: the same intrinsic and policy gates decide whether the
+// seat is offered, and an offered seat gets the same worker profile stamp — but its readiness
+// comes from the seat's credential KIND (is the named env var set?) instead of from probing a
+// config dir, which a dir-less api-key seat does not have. The row names the env VAR only; the
+// key itself is never read here, let alone reported.
+func apiKeySeatRow(h configaccounts.Home, pol Policy) Account {
+	account := strings.TrimSpace(h.Name)
+	if strings.TrimSpace(h.Dir) != "" {
+		account = filepath.Base(h.Dir)
+	}
+	tag := AccountTag(account)
+	base := Account{
+		Dir:       h.Dir,
+		Product:   "claude",
+		Account:   account,
+		Tag:       tag,
+		Notes:     pol.Notes[tag],
+		CredKind:  configaccounts.CredKindAPIKey,
+		APIKeyEnv: h.APIKeyEnv,
+	}
+	if reason := intrinsicExclusion(account); reason != "" {
+		base.Kind = KindExcluded
+		base.Reason = reason
+		return base
+	}
+	// No login email to match on: an api-key seat's identity derivation is offline and yields
+	// no org email (deriving one needs a live Console probe of the key).
+	if reason := policyExclusion(account, tag, pol, ""); reason != "" {
+		base.Kind = KindExcluded
+		base.Reason = reason
+		return base
+	}
+	row := base
+	row.Kind = KindWorker
+	row.Reason = apiKeySeatReason(h.APIKeyEnv)
+	stampProfile(&row, pol)
+	// Re-derive by kind off the registry seat itself, so Status/Enabled still gate the verdict
+	// (a disabled api-key seat reports disabled, not ready) exactly as they do for an OAuth one.
+	seat := h
+	seat.Identity = h.DerivedIdentity()
+	st := seat.LoginStatus()
+	row.AccountUUID = strp(seat.Identity.AccountUUID)
+	row.LoginEmail = strp(seat.Identity.Email)
+	row.OrgUUID = strp("")
+	row.OrgType = strp("")
+	row.Plan = strp("")
+	row.LoginStatus = strp(string(st))
+	row.CanServe = boolp(st == configaccounts.LoginReady)
+	return row
 }
 
 // discoverProduct globs pattern under root and folds each match into an Account
@@ -646,13 +846,18 @@ func derefInt(p *int) int {
 	return *p
 }
 
-// Discover classifies every account config dir across all products, then reconciles shared
-// Claude/Codex identities. Rows are sorted by (product, kind != worker, tag) to match
+// Discover classifies every account config dir across all products, folds in the config-home
+// registry's api-key seats that own no discoverable dir, then reconciles shared Claude/Codex
+// identities. Rows are sorted by (product, kind != worker, tag) to match
 // fleet_accounts.discover_accounts.
 func Discover(home, configHome string, pol Policy) []Account {
-	acctIdx := indexAccountsRegistry(loadAccountsRegistry(home))
+	reg := loadAccountsRegistry(home)
+	acctIdx := indexAccountsRegistry(reg)
 	rows := append(discoverClaude(home, pol, acctIdx), discoverCodex(home, pol, acctIdx)...)
 	rows = append(rows, discoverOpencode(configHome, pol, acctIdx)...)
+	// Fold in the api-key seats the directory glob structurally cannot reach — a seat whose
+	// credential is an env var need not own a config dir at all (#5331).
+	rows = append(rows, discoverAPIKeySeats(reg, pol, rows)...)
 	reconcileIdentities(rows)
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Product != rows[j].Product {
