@@ -89,15 +89,7 @@ Each row carries TWO independent axes (#3800):
 		return 2
 	}
 
-	home := *homeFlag
-	if home == "" {
-		home = strings.TrimSpace(os.Getenv("FLEET_USER_HOME"))
-	}
-	if home == "" {
-		if h, err := os.UserHomeDir(); err == nil {
-			home = h
-		}
-	}
+	home := resolveFleetUserHome(*homeFlag, "FLEET_USER_HOME")
 	if home == "" {
 		fmt.Fprintln(stderr, "fak resume stopped: cannot resolve the user home (pass --home)")
 		return 1
@@ -198,6 +190,27 @@ Each row carries TWO independent axes (#3800):
 	renderResumeStopped(stdout, d, now, *windowH, stopped.TriageEnforced(os.Getenv("FAK_RESUME_TRIAGE_GATE")),
 		drivers.facts().summary())
 	return 0
+}
+
+// resolveFleetUserHome resolves the --home flag for the resume verbs, falling back to the OS
+// user home. envKey, when non-empty, is consulted BETWEEN the two.
+//
+// The env step is a parameter rather than a constant because the two callers genuinely
+// differ: `fak resume stopped` honours FLEET_USER_HOME, `fak resume sweep` never has. That
+// asymmetry is preserved here verbatim — arming the env var for the sweep would silently
+// change which account tree it walks on any host that exports it, which is a behaviour
+// change that needs its own witness, not a refactor's side effect.
+func resolveFleetUserHome(flagVal, envKey string) string {
+	home := flagVal
+	if home == "" && envKey != "" {
+		home = strings.TrimSpace(os.Getenv(envKey))
+	}
+	if home == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			home = h
+		}
+	}
+	return home
 }
 
 // workerAccountDirs maps each offered worker account's config dir to its basename, using

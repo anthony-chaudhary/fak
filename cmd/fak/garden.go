@@ -392,16 +392,25 @@ func gardenTickUnmeasured(plan gardenbundle.TickPlan) int {
 // boot, so the act-pass recurs. Idempotent: re-registering keeps the original
 // CreatedUnixNano and re-arms the same job id.
 func registerGardenTickLoop(registryPath string) error {
+	return registerGardenLoop(registryPath, gardenTickLoopID, gardenTickIntervalSeconds, 300)
+}
+
+// registerGardenLoop is the shared registrar behind the durable garden loops: load the
+// registry, Put an ARMED MissedSkip schedule, save. Idempotent, because Put keeps the
+// original CreatedUnixNano and re-arms the same job id. jitterSeconds is a parameter rather
+// than a constant because the loops deliberately spread differently — the hourly tick jitters
+// by 5 minutes, the 6-hourly walk by 10 — so each caller passes the value it already used.
+func registerGardenLoop(registryPath, jobID string, intervalSeconds, jitterSeconds int64) error {
 	reg, err := loopmgr.LoadRegistry(registryPath)
 	if err != nil {
 		return err
 	}
 	if err := reg.Put(loopmgr.Job{
 		Schedule: loopmgr.Schedule{
-			JobID:           gardenTickLoopID,
-			IntervalSeconds: gardenTickIntervalSeconds,
+			JobID:           jobID,
+			IntervalSeconds: intervalSeconds,
 			MissedRun:       loopmgr.MissedSkip,
-			JitterSeconds:   300,
+			JitterSeconds:   jitterSeconds,
 		},
 		State: loopmgr.JobArmed,
 	}, time.Now()); err != nil {

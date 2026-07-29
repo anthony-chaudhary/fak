@@ -154,19 +154,5 @@ func guardReportCrashRestart(stderr io.Writer, agentName, class string, code, at
 // crash CLASS itself rides the paired CHILD_CRASH witness (appendGuardChildExitWitness), which the
 // guard-RSI fold already consumes; this hop carries the lineage.
 func guardCrashRestartHop(guardTraceID, agentName string, hop int) journal.RestartHop {
-	handback := guardRestartHandbackOrphaned
-	status := journal.RestartHopInert
-	if _, ok := guardContinueFlagForAgent(agentName); ok {
-		handback = guardRestartHandbackContinue
-		status = journal.RestartHopOK
-	}
-	return journal.RestartHop{
-		Schema:    journal.RestartChainSchema,
-		Hop:       hop,
-		FromTrace: guardTraceID,
-		ToTrace:   guardTraceID,
-		Handback:  handback,
-		Child:     guardTraceID,
-		Status:    status,
-	}
+	return guardSameTraceRelaunchHop(guardTraceID, agentName, hop)
 }

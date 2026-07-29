@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
@@ -62,18 +61,9 @@ type labTargetReportValidation struct {
 	probeLatencyMS float64
 }
 
+// labTargetPath resolves the lab-target roster path.
 func labTargetPath(flagVal string) (string, error) {
-	if flagVal != "" {
-		return flagVal, nil
-	}
-	if env := os.Getenv("FAK_LAB_TARGETS"); env != "" {
-		return env, nil
-	}
-	cfgDir, err := nodeConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cfgDir, "fleet", "lab-targets.json"), nil
+	return labConfigPath(flagVal, "FAK_LAB_TARGETS", "fleet", "lab-targets.json")
 }
 
 func labTarget(stdout, stderr io.Writer, argv []string) int {
@@ -113,11 +103,7 @@ func labTarget(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, res); err != nil {
-			fmt.Fprintf(stderr, "fak lab target: encode: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFailPrefixed(stdout, stderr, res, "fak lab target: encode")
 	}
 	fmt.Fprintf(stdout, "lab target %s: %s (%s)\n", res.Alias, res.Status, res.NextAction)
 	fmt.Fprintf(stdout, "guard: %s\n", res.GuardCommand)

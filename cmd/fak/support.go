@@ -63,11 +63,7 @@ func runSupport(stdout, stderr io.Writer, argv []string) int {
 	rows := filterSupportRows(supportReadOut(), *family, *backend)
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, rows); err != nil {
-			fmt.Fprintf(stderr, "fak support: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, rows, "fak support")
 	}
 	fmt.Fprint(stdout, renderSupportReadOut(rows))
 	return 0

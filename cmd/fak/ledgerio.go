@@ -8,9 +8,49 @@ package main
 // (#1437).
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 )
+
+// readLedgerText reads a durable ledger as raw text. An absent file is a valid EMPTY view
+// (nothing has been witnessed yet), not an error; any other read error is still returned.
+// Unlike readLedgerFile it parses nothing, for the ledgers whose callers fold the raw text
+// themselves.
+func readLedgerText(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(b), nil
+}
+
+// appendJSONLRows appends one JSON line per row to logName under runsDir, creating runsDir
+// on first write. Append-only. An EMPTY row set writes nothing at all — not even the
+// directory — which is what keeps a no-op pass from materialising an empty ledger.
+func appendJSONLRows[T any](runsDir, logName string, rows []T) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(runsDir, logName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	for _, row := range rows {
+		if err := enc.Encode(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // readLedgerFile reads the durable ledger if present and parses it with the
 // report package's own tolerant parser (absent ledger -> no prior rows, the

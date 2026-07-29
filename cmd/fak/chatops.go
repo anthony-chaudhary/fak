@@ -76,14 +76,7 @@ func cmdChatOps(argv []string) {
 		return
 	}
 
-	if tok == "" {
-		fmt.Fprintln(os.Stderr, "fak chatops: no Slack token — set --token, FAK_CHATOPS_TOKEN, or add it to .env.slack.local")
-		os.Exit(2)
-	}
-	if ch == "" {
-		fmt.Fprintln(os.Stderr, "fak chatops: no channel — set --channel or FAK_CHATOPS_CHANNEL (no silent fallback to another channel)")
-		os.Exit(2)
-	}
+	requireSlackTokenAndChannel("fak chatops", "FAK_CHATOPS", tok, ch)
 	if len(adminList) == 0 {
 		// Fail-closed is the kernel's contract, but a door with no admins can never answer a
 		// single command — that is an operator mistake, not a running mode, so we refuse to start.
@@ -119,29 +112,7 @@ func cmdChatOps(argv []string) {
 	fmt.Printf("fak chatops: read-only door listening in %s (%d verbs, %d admin(s)); read verbs answer, act verbs are declined (#2264)\n",
 		ch, len(chatops.Grammar()), len(adminList))
 
-	if *prime {
-		if err := door.Prime(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "fak chatops: prime (skip backlog) failed: %v — will answer the visible history on the first poll\n", err)
-		}
-	}
-
-	if *once {
-		n, err := door.Tick(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak chatops: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("fak chatops: handled %d message(s)\n", n)
-		return
-	}
-
-	err := door.Run(ctx, *interval, func(e error) {
-		fmt.Fprintf(os.Stderr, "fak chatops: poll error (continuing): %v\n", e)
-	})
-	if err != nil && ctx.Err() == nil {
-		fmt.Fprintf(os.Stderr, "fak chatops: %v\n", err)
-		os.Exit(1)
-	}
+	runSlackPollLifecycle(ctx, door, "fak chatops", "handled", *prime, *once, *interval)
 }
 
 // --- config resolution (flags → env → .env.slack.local) ------------------------------

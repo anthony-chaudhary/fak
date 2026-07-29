@@ -168,18 +168,10 @@ func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, heig
 	// always has room; on a narrow pane they shrink rather than push the value off-screen.
 	ctx := newGuardInfoPanelCtx(v, tr, width)
 	rows := composeGuardInfoPanels(ctx, guardInfoPanels(), height)
-	// Defensive cap: never emit more rows than the pane can hold (keeps the redraw cursor math
-	// exact even if a panel mis-sizes for an odd pane height).
-	if height > 0 && len(rows) > height {
-		rows = rows[:height]
-	}
-	// Cap each row to the pane width with takeCellsTUI (NOT trimTUI): the gutter labels, gauges,
-	// and sparklines align on intentional internal spacing, which trimTUI's whitespace-collapse
-	// would destroy. takeCellsTUI truncates to the cell budget without touching interior spacing.
-	for i, r := range rows {
-		rows[i] = takeCellsTUI(r, width)
-	}
-	return strings.Join(rows, "\n")
+	// Height-cap, width-cap and join: see joinPaneRowsTUI for why the width cap is
+	// takeCellsTUI rather than trimTUI (this pane's gauges and sparklines align on interior
+	// spacing that a whitespace-collapsing trim would destroy).
+	return joinPaneRowsTUI(rows, width, height)
 }
 
 // guardInfoVisualIdentityRow is the block's header: which fak this pane watches, how long it has

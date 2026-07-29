@@ -67,11 +67,7 @@ func runIssueDedup(stdout, stderr io.Writer, argv []string) int {
 	rep := issuededup.Census(issues, *threshold, *topK)
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, rep); err != nil {
-			fmt.Fprintf(stderr, "fak issue dedup: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, rep, "fak issue dedup")
 	}
 	fmt.Fprint(stdout, issuededup.RenderCensus(rep))
 	return 0

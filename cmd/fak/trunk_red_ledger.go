@@ -715,12 +715,5 @@ func runTrunkRed(stdout, stderr io.Writer, argv []string) int {
 // readTrunkRedLedger reads the ledger file. A missing file is a valid empty view (no
 // pre-existing red has been witnessed yet), not an error.
 func readTrunkRedLedger(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	return string(b), nil
+	return readLedgerText(path)
 }

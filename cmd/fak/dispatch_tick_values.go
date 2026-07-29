@@ -19,17 +19,6 @@ func accountFromMap(m map[string]any) dispatchtick.Account {
 	}
 }
 
-func dispatchSplitCSV(s string) []string {
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
 func dispatchtickWorkKind(backend string) string {
 	b, err := dispatchtick.NormalizeBackend(backend)
 	if err != nil {

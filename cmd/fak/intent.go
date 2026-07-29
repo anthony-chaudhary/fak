@@ -122,13 +122,7 @@ func runIntentClaim(stdout, stderr io.Writer, argv []string) int {
 	if v.OK {
 		out.Record = &rec
 	}
-	if code := emitLeaserefJSON(stdout, stderr, out, "intent claim"); code != 0 {
-		return code
-	}
-	if !v.OK {
-		return leaserefRefused
-	}
-	return 0
+	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "intent claim")
 }
 
 func runIntentRelease(stdout, stderr io.Writer, argv []string) int {

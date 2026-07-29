@@ -959,16 +959,12 @@ func runLoopPolicyPropose(stdout, stderr io.Writer, argv []string) int {
 		if proposals == nil {
 			proposals = []loopmgr.PolicyProposal{}
 		}
-		if err := writeIndentedJSON(stdout, map[string]any{
+		return encodeJSONOrFail(stdout, stderr, map[string]any{
 			"schema":      "fak.loop-policy-propose.v1",
 			"ledger_path": *ledger,
 			"policy_path": *policyPath,
 			"proposals":   proposals,
-		}); err != nil {
-			fmt.Fprintf(stderr, "fak loop policy propose: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		}, "fak loop policy propose")
 	}
 
 	if len(proposals) == 0 {

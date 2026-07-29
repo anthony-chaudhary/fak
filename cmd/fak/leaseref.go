@@ -597,13 +597,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	if v.OK {
 		out.Record = &rec
 	}
-	if code := emitLeaserefJSON(stdout, stderr, out, "acquire"); code != 0 {
-		return code
-	}
-	if !v.OK {
-		return leaserefRefused
-	}
-	return 0
+	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "acquire")
 }
 
 func runLeaserefFence(stdout, stderr io.Writer, argv []string) int {
@@ -627,13 +621,7 @@ func runLeaserefFence(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref fence: %v\n", err)
 		return 1
 	}
-	if code := emitLeaserefJSON(stdout, stderr, v, "fence"); code != 0 {
-		return code
-	}
-	if !v.OK {
-		return leaserefRefused
-	}
-	return 0
+	return emitLeaserefOutcome(stdout, stderr, v, v.OK, "fence")
 }
 
 func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
@@ -661,13 +649,7 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	if v.OK {
 		out.Record = &rec
 	}
-	if code := emitLeaserefJSON(stdout, stderr, out, "renew"); code != 0 {
-		return code
-	}
-	if !v.OK {
-		return leaserefRefused
-	}
-	return 0
+	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "renew")
 }
 
 // runLeaserefSync is the convergence verb: move the refs/fak/locks/* namespace
@@ -739,9 +721,24 @@ func runLeaserefDrain(stdout, stderr io.Writer, argv []string) int {
 }
 
 func emitLeaserefJSON(stdout, stderr io.Writer, v any, sub string) int {
-	if err := writeIndentedJSON(stdout, v); err != nil {
-		fmt.Fprintf(stderr, "fak leaseref %s: encode json: %v\n", sub, err)
-		return 1
+	return encodeJSONOrFail(stdout, stderr, v, "fak leaseref "+sub)
+}
+
+// emitLeaserefOutcome is the shared tail of every fenced-lease verb that can be REFUSED:
+// emit the payload under the verb's own label, then map a denied verdict to leaserefRefused
+// (3) instead of 0, so a caller can tell a structured refusal from a broken store. The
+// verdict JSON is emitted either way — a refusal is a value, not an error.
+//
+// payload and ok are separate arguments because the verbs genuinely diverge in what they
+// print: acquire, renew and `intent claim` emit a wrapper carrying the stamped record on a
+// win, while fence and release emit the bare verdict. Only the OK bit is shared, so only
+// the OK bit is passed; nothing here reaches into the payload to re-derive it.
+func emitLeaserefOutcome(stdout, stderr io.Writer, payload any, ok bool, sub string) int {
+	if code := emitLeaserefJSON(stdout, stderr, payload, sub); code != 0 {
+		return code
+	}
+	if !ok {
+		return leaserefRefused
 	}
 	return 0
 }

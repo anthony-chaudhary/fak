@@ -64,12 +64,9 @@ func runResumeSweep(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	home := *homeFlag
-	if home == "" {
-		if h, err := os.UserHomeDir(); err == nil {
-			home = h
-		}
-	}
+	// envKey is deliberately EMPTY here: `fak resume sweep` has never consulted
+	// FLEET_USER_HOME the way `fak resume stopped` does. See resolveFleetUserHome.
+	home := resolveFleetUserHome(*homeFlag, "")
 	if home == "" {
 		fmt.Fprintln(stderr, "fak resume sweep: cannot resolve the user home (pass --home)")
 		return 1

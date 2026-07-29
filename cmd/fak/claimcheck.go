@@ -152,11 +152,7 @@ func runClaimCheckSelfTest(stdout io.Writer, asJSON bool) int {
 func runClaimCheckWitnessFor(stdout, stderr io.Writer, claim string, asJSON bool) int {
 	plan := claimcheck.WitnessFor(claim)
 	if asJSON {
-		if err := writeIndentedJSON(stdout, plan); err != nil {
-			fmt.Fprintf(stderr, "fak claim-check: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFailPrefixed(stdout, stderr, plan, "fak claim-check")
 	}
 	fmt.Fprintf(stdout, "claim:     %s\nclass:     %s\nrationale: %s\ncommand:   %s\nreference: %s\n",
 		plan.Claim, plan.Class, plan.Rationale, plan.Command, plan.Reference)

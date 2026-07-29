@@ -121,11 +121,7 @@ func runDispatchRolloutStatus(stdout, stderr io.Writer, argv []string) int {
 
 	rep := dispatchtick.FoldShadowReport(items)
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, rep); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch rollout-status: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, rep, "fak dispatch rollout-status")
 	}
 	fmt.Fprint(stdout, renderShadowReport(rep))
 	return 0

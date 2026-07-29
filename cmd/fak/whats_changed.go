@@ -50,11 +50,7 @@ func runWhatsChanged(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, rep); err != nil {
-			fmt.Fprintf(stderr, "fak whats-changed: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFailPrefixed(stdout, stderr, rep, "fak whats-changed")
 	}
 	renderWhatsChanged(stdout, rep)
 	return 0

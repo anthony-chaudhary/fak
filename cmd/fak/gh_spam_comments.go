@@ -83,7 +83,7 @@ func runGHSpamCommentsWith(stdout, stderr io.Writer, argv []string, runner ghSpa
 	}
 
 	opt := ghspam.Options{
-		TrustedAssociations: splitGHSpamCSV(*trustedAssociations),
+		TrustedAssociations: splitCommaList(*trustedAssociations),
 		TrustedUsers:        []string(trustedUsers),
 	}
 	rep := ghspam.Analyze(comments, opt)
@@ -284,17 +284,6 @@ func ownerRepoFromPath(path string) string {
 func validOwnerRepo(repo string) bool {
 	parts := strings.Split(repo, "/")
 	return len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != ""
-}
-
-func splitGHSpamCSV(s string) []string {
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 func renderGHSpamCommentsReport(w io.Writer, rep ghspam.Report, applied bool) {

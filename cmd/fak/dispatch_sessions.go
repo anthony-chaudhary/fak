@@ -34,7 +34,6 @@ package main
 // EvidenceSummary), never the raw transcript.
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -165,11 +164,7 @@ func runDispatchSessions(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, snap); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch sessions: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, snap, "fak dispatch sessions")
 	}
 	if *asMarkdown {
 		fmt.Fprint(stdout, renderDispatchSessionsMarkdown(snap))
@@ -532,13 +527,7 @@ func runDispatchSessionsTail(stdout, stderr io.Writer, runsDir, regDir, query st
 	}
 
 	// Line-aligned tail so the cut never splits a credential mid-token.
-	tail := raw
-	if len(tail) > dispatchWorkerEvidenceTailBytes {
-		tail = tail[len(tail)-dispatchWorkerEvidenceTailBytes:]
-		if i := bytes.IndexByte(tail, '\n'); i >= 0 && i+1 <= len(tail) {
-			tail = tail[i+1:]
-		}
-	}
+	tail := lineAlignedTranscriptTail(raw)
 
 	fmt.Fprintf(stdout, "dispatch session tail — handle=%s trace=%s pid=%d\n", g.Handle, g.TraceID, g.PID)
 	fmt.Fprintf(stdout, "worker=%s\n\n", logPath)

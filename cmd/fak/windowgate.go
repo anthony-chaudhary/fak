@@ -575,6 +575,10 @@ func limitedRows(rows []string, limit int) []string {
 	return rows[:limit]
 }
 
+// copyIntMap returns an independent copy of a string->count map, and nil for an empty or
+// nil input. Deliberately NOT maps.Clone: that preserves an empty-but-non-nil map, and the
+// callers here (the windowgate report and the TUI overview cards) both rely on an empty
+// count map serializing as an absent field rather than `{}`.
 func copyIntMap(in map[string]int) map[string]int {
 	if len(in) == 0 {
 		return nil

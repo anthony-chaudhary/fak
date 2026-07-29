@@ -102,11 +102,7 @@ func runDispatchTierStatus(stdout, stderr io.Writer, argv []string) int {
 
 	rep := dispatchtick.BuildTierStatusReport(inputs)
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, rep); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch tier-status: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, rep, "fak dispatch tier-status")
 	}
 	fmt.Fprint(stdout, rep.Render())
 	return 0

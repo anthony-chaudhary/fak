@@ -695,12 +695,5 @@ func runGuardStops(stdout, stderr io.Writer, argv []string) int {
 // readGuardStopsLedger reads the ledger file. A missing file is a valid empty view
 // (a fresh session has recorded nothing), not an error.
 func readGuardStopsLedger(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	return string(b), nil
+	return readLedgerText(path)
 }

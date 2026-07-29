@@ -91,11 +91,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	})
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, plan); err != nil {
-			fmt.Fprintf(stderr, "fak issue cohort: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, plan, "fak issue cohort")
 	}
 	fmt.Fprintln(stdout, issuecohort.Render(plan))
 	return 0

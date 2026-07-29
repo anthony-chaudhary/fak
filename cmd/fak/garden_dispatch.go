@@ -96,9 +96,18 @@ var gardenDispatchSeatRefuses = map[string]bool{
 // any run that made progress or ended for another reason (including an exhausted park)
 // ends the tail, so a fresh cycle starts from zero. Pure: ledger in, counts out.
 func deriveSeatParkState(events []loopmgr.Event) (parks int, lastParkUnix int64) {
+	return deriveSeatParkStateForLoop(events, gardenDispatchLoopID)
+}
+
+// deriveSeatParkStateForLoop is the shared fold behind every seat-park tail. The loop id is
+// the ONLY thing that ever differed between the per-loop copies — the park vocabulary
+// (seatParkReasonNoSeat, seatpark.StatusParked) and the tail-boundary rule are shared on
+// purpose, because seatpark.Decide is one policy and two loops reading the same ledger with
+// different boundary rules would back off on different schedules for the same seat shortage.
+func deriveSeatParkStateForLoop(events []loopmgr.Event, loopID string) (parks int, lastParkUnix int64) {
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := events[i]
-		if ev.LoopID != gardenDispatchLoopID || ev.Kind != loopmgr.EventEnd {
+		if ev.LoopID != loopID || ev.Kind != loopmgr.EventEnd {
 			continue
 		}
 		switch ev.Reason {

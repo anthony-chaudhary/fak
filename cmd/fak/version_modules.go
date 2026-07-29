@@ -87,18 +87,24 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 		return stampModverLedger(stdout, stderr, root, *ledger, rep)
 	}
 	view, verr := rep.View(*only, *sortKey, *top)
+	return emitModverView(stdout, stderr, "fak version modules", view, verr, *asJSON, func() {
+		renderModuleReportN(stdout, view, len(rep.Modules))
+	})
+}
+
+// emitModverView is the shared tail of the two modver report commands: a --only/--sort/--top
+// selection error is a USAGE failure (exit 2, not 1), --json emits the selected view, and the
+// human path defers to the command's own renderer. `fak version modules` and
+// `fak version trend` differ only in which selector built the view and how it renders.
+func emitModverView(stdout, stderr io.Writer, label string, view any, verr error, asJSON bool, render func()) int {
 	if verr != nil {
-		fmt.Fprintf(stderr, "fak version modules: %v\n", verr)
+		fmt.Fprintf(stderr, "%s: %v\n", label, verr)
 		return 2
 	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, view); err != nil {
-			fmt.Fprintf(stderr, "fak version modules: %v\n", err)
-			return 1
-		}
-		return 0
+	if asJSON {
+		return encodeJSONOrFailPrefixed(stdout, stderr, view, label)
 	}
-	renderModuleReportN(stdout, view, len(rep.Modules))
+	render()
 	return 0
 }
 
@@ -177,11 +183,7 @@ func runVersionModulesGhosts(stdout, stderr io.Writer, root string, asJSON bool)
 		return 1
 	}
 	if asJSON {
-		if err := writeIndentedJSON(stdout, ghosts); err != nil {
-			fmt.Fprintf(stderr, "fak version modules: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFailPrefixed(stdout, stderr, ghosts, "fak version modules")
 	}
 	renderGhostReport(stdout, ghosts)
 	return 0

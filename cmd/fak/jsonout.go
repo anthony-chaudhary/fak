@@ -48,8 +48,18 @@ func writeIndentedJSONFile(path string, v any) error {
 // On an encode error it reports `<label>: encode json: <err>` to stderr and
 // returns 1, matching the convention the per-command JSON branches use.
 func encodeJSONOrFail(stdout, stderr io.Writer, v any, label string) int {
+	return encodeJSONOrFailPrefixed(stdout, stderr, v, label+": encode json")
+}
+
+// encodeJSONOrFailPrefixed is encodeJSONOrFail for the --json branches whose stderr
+// wording is not the "<cmd>: encode json:" convention. errPrefix is the exact text printed
+// ahead of ": <err>" and is passed whole rather than assembled from a command name because
+// the existing messages are genuinely inconsistent — most commands say
+// "fak dispatch status: encode json", `fak lab` says "fak lab: encode", and `fak sweep`
+// prints the bare command name — so every call site keeps the string it already printed.
+func encodeJSONOrFailPrefixed(stdout, stderr io.Writer, v any, errPrefix string) int {
 	if err := writeIndentedJSON(stdout, v); err != nil {
-		fmt.Fprintf(stderr, "%s: encode json: %v\n", label, err)
+		fmt.Fprintf(stderr, "%s: %v\n", errPrefix, err)
 		return 1
 	}
 	return 0

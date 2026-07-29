@@ -203,7 +203,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 
-	excludedLanes := dispatchSplitCSV(*excludeLane)
+	excludedLanes := splitCommaList(*excludeLane)
 	router, err := dispatchRouteIssues(root, stderr)
 	if err != nil {
 		rec["stop_reason"] = "price fan-out: " + err.Error()
@@ -276,7 +276,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	for i := 0; i < limit; i++ {
 		row := executionPlan[i]
 		snapshot := <-discovery[i].Snapshots
-		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, dispatchSplitCSV(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, snapshot), stderr)
+		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, splitCommaList(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, snapshot), stderr)
 		if err != nil {
 			ticks = append(ticks, map[string]any{"ok": false, "error": err.Error(), "rank": i})
 			rec["stop_reason"] = err.Error()
@@ -706,14 +706,9 @@ func sameLaneParallelism(targets []dispatchWaveCandidate) int {
 }
 
 func dispatchWaveWaves(candidates []dispatchWaveCandidate, collisions []dispatchorder.Collision, safeNow []string) []dispatchPriceWave {
-	if len(candidates) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(candidates))
-	for _, cand := range candidates {
-		ids = append(ids, cand.ID)
-	}
-	return dispatchWavesForIDs(ids, collisions, safeNow)
+	return dispatchWavesForIDs(
+		dispatchCandidateKeys(candidates, func(cand dispatchWaveCandidate) string { return cand.ID }),
+		collisions, safeNow)
 }
 
 func dispatchWaveLaunchPlan(waves []dispatchPriceWave, candidates []dispatchWaveCandidate) []dispatchLaunchWave {
@@ -1081,18 +1076,10 @@ func dispatchWaveLaneSerialWaveCount(candidates []dispatchWaveCandidate) int {
 	if len(candidates) == 0 {
 		return 0
 	}
-	keys := make([]string, 0, len(candidates))
-	for _, cand := range candidates {
-		key := strings.TrimSpace(cand.Lane)
-		if key == "" {
-			key = strings.TrimSpace(cand.LeaseID)
-		}
-		if key == "" {
-			key = cand.ID
-		}
-		keys = append(keys, key)
-	}
-	return dispatchLaneSerialWaveCount(keys)
+	return dispatchLaneSerialWaveCount(dispatchCandidateKeys(candidates,
+		func(cand dispatchWaveCandidate) string {
+			return dispatchLaneSerialKey(cand.Lane, cand.LeaseID, cand.ID)
+		}))
 }
 
 func dispatchWaveRouteStepBudget(route dispatchtick.IssueRoute) int {

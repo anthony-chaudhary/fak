@@ -100,11 +100,7 @@ func emitNegframePerDoc(stdout, stderr io.Writer, root string, paths []string, a
 		docs = append(docs, docView{Path: rel, Mechanical: d.Mechanical, Judgement: d.Judgement, Findings: d.Findings})
 	}
 	if asJSON {
-		if err := writeIndentedJSON(stdout, docs); err != nil {
-			fmt.Fprintf(stderr, "fak score negframe: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, docs, "fak score negframe")
 	}
 	total := 0
 	for _, d := range docs {
