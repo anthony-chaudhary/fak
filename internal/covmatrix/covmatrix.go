@@ -48,7 +48,15 @@ const (
 	ParallelResidual Topology = "ParallelResidual"
 	// SparseAttn marks the MLA/DSA/MSA families whose sparse-attention index is
 	// host-resident; their accelerated path is gated by a dedicated fence
-	// (requireGLMDsaSession, internal/model/kv.go) rather than requirePreNorm.
+	// (requireGLMDsaSession / requireMiniMaxSession, internal/model) rather than by
+	// requirePreNorm — Step/Prefill test usesMLAMoELayout / isMiniMaxSparseAttn BEFORE
+	// the Backend branch, so these families never reach requirePreNorm at all. The two
+	// fences do NOT cover the same ground, and only requireMiniMaxSession is total:
+	// it refuses Quant/Q4/Q4K/Backend/Metal/PrecisionPolicy alike. requireGLMDsaSession
+	// refuses only Metal and PrecisionPolicy and explicitly PERMITS a compute.Backend
+	// (#86 partial: the dense GEMMs run on the backend while the index scoring, the
+	// sparse attention and the KV stay host-resident). See classify for what that
+	// exception means for the MLA/DSA cells this table still calls FENCED.
 	SparseAttn Topology = "SparseAttn"
 )
 
@@ -198,9 +206,22 @@ func classify(f Family, backend string) Support {
 	if f.Topology == PreNorm {
 		return Supported
 	}
-	// Every non-PreNorm topology has an installed accelerated-path fence today
-	// (requirePreNorm for PostNorm/SandwichNorm/ParallelResidual; requireGLMDsaSession
-	// for the SparseAttn families). The fence is what keeps these cells out of debt.
+	// PostNorm/SandwichNorm/ParallelResidual on an accelerated backend hit
+	// requirePreNorm, and MiniMax-MSA hits requireMiniMaxSession, which refuses a
+	// Backend as well as Metal — those cells are fenced in fact.
+	//
+	// KNOWN EXCEPTION, recorded rather than silently asserted away: the MLA/DSA half of
+	// SparseAttn (GLM-MoE-DSA and deepseek2, per usesMLAMoELayout) is fenced ONLY on
+	// Metal. requireGLMDsaSession permits a compute.Backend, and
+	// ValidateBackendForwardConfig refuses only the Qwen3.5 hybrid, so a cuda/vulkan
+	// session for those two families RUNS with no fence and no CI oracle. Four cells
+	// (DeepSeek-MLA and GLM-5.2-DSA x cuda/vulkan) therefore report FENCED behind a
+	// fence that does not cover them. They are NOT reclassified here: calling them
+	// SUPPORTED asserts an unwitnessed accelerated numeric claim, calling them UNDEFINED
+	// asserts a silently-wrong result that the deliberate #86 offload contradicts, and
+	// internal/supportmaturityscore separately treats the fence as these cells' regime
+	// ceiling. Which value is right is a kernel-owner call, and the fence-coverage
+	// witness in covmatrix_test.go reds the moment the exception is closed.
 	return Fenced
 }
 

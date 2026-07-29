@@ -301,3 +301,142 @@ func TestCountBy(t *testing.T) {
 		t.Errorf("counts[Undefined] = %d, want 2", counts[Undefined])
 	}
 }
+
+// modelSource reads one file out of internal/model relative to this test's own path, or
+// skips. It is the file-loading half of TestResolverTokensExistInSource, shared by the two
+// cross-checks below so each one asserts rather than re-derives the repo layout.
+func modelSource(t *testing.T, name string) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Skip("cannot locate test source path")
+	}
+	// internal/covmatrix/covmatrix_test.go -> repo root is two dirs up from internal/.
+	root := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+	b, err := os.ReadFile(filepath.Join(root, "internal", "model", name))
+	if err != nil {
+		t.Skipf("internal/model/%s not readable (%v); cross-check skipped", name, err)
+	}
+	return string(b)
+}
+
+// kernelTopologyCases parses internal/model/config.go's family -> BlockTopology default
+// switch and returns each assigned topology mapped to the `case` condition that assigns it.
+// The switch is a flat "case <family predicates>: c.BlockTopology = X" ladder, so remembering
+// the last `case` line and reading the assignment under it is enough — no go/ast needed, and a
+// restructure that breaks the shape is caught by the completeness check in the caller.
+func kernelTopologyCases(src string) map[Topology]string {
+	assigned := map[string]Topology{
+		"PostNorm":         PostNorm,
+		"SandwichNorm":     SandwichNorm,
+		"ParallelResidual": ParallelResidual,
+	}
+	out := map[Topology]string{}
+	pending := ""
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "case ") {
+			pending = trimmed
+			continue
+		}
+		rhs, isAssign := strings.CutPrefix(trimmed, "c.BlockTopology = ")
+		if !isAssign || pending == "" {
+			continue
+		}
+		if topo, known := assigned[rhs]; known {
+			out[topo] = pending
+		}
+		pending = ""
+	}
+	return out
+}
+
+// TestFamilyTopologyMatchesKernel binds the roster's TOPOLOGY axis to the kernel, the way
+// TestResolverTokensExistInSource binds its FAMILY axis. covmatrix.go names this as the
+// #1080 follow-on ("read the topology + fence facts straight from go/ast so even the
+// per-family topology cannot drift"), and until now it was the *unwitnessed* axis — yet it
+// is the one that decides FENCED vs SUPPORTED for every accelerated cell, so a silent drift
+// here moves the whole climb-debt headline the milestone scorecard folds.
+//
+// The binding runs both ways. A family the roster calls PostNorm/SandwichNorm/
+// ParallelResidual must be named by the config.go case that assigns exactly that topology; a
+// family the roster calls PreNorm (or SparseAttn, which is a covmatrix-local fence axis, not
+// a model.BlockTopology — the MLA/DSA/MSA families lower to the PreNorm zero value) must be
+// named by NO case, because the kernel's switch is what would move it off PreNorm.
+func TestFamilyTopologyMatchesKernel(t *testing.T) {
+	cases := kernelTopologyCases(modelSource(t, "config.go"))
+	for _, topo := range []Topology{PostNorm, SandwichNorm, ParallelResidual} {
+		if cases[topo] == "" {
+			t.Fatalf("no `case ...: c.BlockTopology = %s` found in internal/model/config.go; the topology switch moved or changed shape — re-derive this cross-check before trusting the roster", topo)
+		}
+	}
+
+	checked := 0
+	for _, f := range Families {
+		if f.ResolverToken == "" {
+			continue // identity default / config-predicate families carry no substring to match
+		}
+		checked++
+		needle := "\"" + f.ResolverToken
+		for topo, cond := range cases {
+			named := strings.Contains(cond, needle)
+			if topo == f.Topology && !named {
+				t.Errorf("family %q pins Topology %s but config.go's %s case does not name %q — the roster has drifted from the kernel: %s",
+					f.Name, f.Topology, topo, f.ResolverToken, cond)
+			}
+			if topo != f.Topology && named {
+				t.Errorf("family %q pins Topology %s but config.go assigns %s for %q — the roster has drifted from the kernel: %s",
+					f.Name, f.Topology, topo, f.ResolverToken, cond)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("no family carried a ResolverToken; this cross-check would be vacuous")
+	}
+}
+
+// funcBody returns the source of the named method, from its signature line to the first
+// column-0 closing brace, or "" when the signature is absent.
+func funcBody(src, signature string) string {
+	i := strings.Index(src, signature)
+	if i < 0 {
+		return ""
+	}
+	rest := src[i:]
+	if end := strings.Index(rest, "\n}"); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
+// TestSparseAttnFenceCoverageMatchesKernel pins the fence-coverage exception classify()
+// records: the two SparseAttn fences do NOT cover the same backends. requireMiniMaxSession
+// refuses a compute.Backend, so MiniMax-MSA is fenced on every accelerated backend and its
+// FENCED cells are honest. requireGLMDsaSession refuses only Metal and PrecisionPolicy and
+// permits a Backend (#86 partial), so the MLA/DSA cells on the HAL backends are called FENCED
+// behind a fence that does not reach them.
+//
+// The asymmetry is the whole point of the test: a comment saying "these four cells are
+// mis-classified" rots the instant someone closes the gap, and a stale disclaimer is just
+// another wrong claim. Pinning the gap makes closing it RED here, which forces the classify()
+// comment and the FENCED/SUPPORTED question to be revisited in the same change.
+func TestSparseAttnFenceCoverageMatchesKernel(t *testing.T) {
+	glm := funcBody(modelSource(t, "kv.go"), "func (s *Session) requireGLMDsaSession() {")
+	if glm == "" {
+		t.Fatal("requireGLMDsaSession not found in internal/model/kv.go; the SparseAttn fence named by covmatrix.go no longer exists")
+	}
+	if !strings.Contains(glm, "s.Metal") {
+		t.Error("requireGLMDsaSession no longer guards on s.Metal; the MLA/DSA metal cells may no longer be FENCED — re-check classify()")
+	}
+	if strings.Contains(glm, "s.Backend") {
+		t.Error("requireGLMDsaSession now names s.Backend: the MLA/DSA HAL exception recorded in classify() has changed. Re-read the fence and update classify()'s KNOWN EXCEPTION note (and revisit whether DeepSeek-MLA / GLM-5.2-DSA x cuda,vulkan should still classify as FENCED)")
+	}
+
+	msa := funcBody(modelSource(t, "minimax_m3_session.go"), "func (s *Session) requireMiniMaxSession() {")
+	if msa == "" {
+		t.Fatal("requireMiniMaxSession not found in internal/model/minimax_m3_session.go; the MSA fence named by covmatrix.go no longer exists")
+	}
+	if !strings.Contains(msa, "s.Backend") || !strings.Contains(msa, "s.Metal") {
+		t.Error("requireMiniMaxSession no longer refuses both s.Backend and s.Metal; MiniMax-MSA's accelerated cells may no longer be FENCED — re-check classify()")
+	}
+}
