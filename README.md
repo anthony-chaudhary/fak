@@ -75,6 +75,16 @@ Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims 
   <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token-economics summary for real fak guard sessions, separating provider prompt-cache rebates from fak-authored compaction savings and comparing fak with a tuned warm-cache baseline." width="900">
 </p>
 
+## What fak is not
+
+fak is a management plane. It is not a model, not a faster model server, and not a prompt-injection detector. The boundaries, so you can rule it out quickly:
+
+- **Not a faster model server.** vLLM, SGLang, llm-d, and llama.cpp win raw throughput; you run `fak serve` *in front of* one of them. The in-kernel GGUF path makes model state kernel-owned state and is checked at the tensor layer against a HuggingFace oracle — it is not a production serving engine. ([serving scope](docs/serving/README.md))
+- **The security floor is structural, not detection.** An active policy limits which tools can run and quarantine holds classified results out of model context. fak does not claim to *detect* a successful prompt injection; it removes the tools and results an injection would need. Allow-listing a destructive tool is policy authoring, not a gate bypass. ([SECURITY.md](SECURITY.md) · [POLICY.md](POLICY.md))
+- **Tool-calling turns are gated whole-turn, not token-streamed.** A call cannot be allowed, denied, or repaired until its arguments have fully arrived, so `stream:true` is adjudicated in full and then re-serialized as a well-formed SSE sequence. Prose deltas still stream; tool-call bytes do not. Expect full-turn latency when wiring an interactive harness to the gateway. That is the enforcement model, not a missing feature.
+- **It does not change what your model says.** The cache coordination is output-neutral by design — it removes repeated work, not wrong answers.
+- **Pre-1.0; interfaces still move.** Every capability claim carries exactly one of `[SHIPPED]`, `[SIMULATED]`, or `[STUB]` in [CLAIMS.md](CLAIMS.md), and [product status](docs/PRODUCT-STATUS.md) separates the concepts you can run today from the real subsystems that have no command yet. Check a capability's tag before you build on it.
+
 ## Manage one local agent: `fak guard`
 
 Start with the agent you already run. No rewrite, config file, API key, or second terminal:
