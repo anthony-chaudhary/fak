@@ -89,8 +89,44 @@ type Family struct {
 	// both use_qkv_bias lineages. Their partial-rotary halves were red until invFreqDenom
 	// stopped denominating inv_freq by head_dim (rope.go) — the bit is set on the fix, not
 	// on a widened tolerance.
-	// Every other family's HF oracle is the checkpoint-gated #474 set that SKIPs under
-	// -short. This is the honest "asserted, not proven" boundary the epic names.
+	// Cohere via internal/model/family_cohere_cpu_oracle_test.go, whose reference adds the
+	// half-split rotary pairing, plus internal/model/cohere_loader_routing_test.go, which
+	// pins the three HF-source f32 loaders to the re-layout constructor the oracle proves —
+	// the bit is set on that FIX, not on the pairing it replaced. gptq.go still routes
+	// through newModel, so the quantized loader is outside the claim.
+	// Gemma2/3 via internal/model/family_gemma_cpu_oracle_test.go, the first SandwichNorm
+	// reference, covering both lineages: four distinct sandwich norms, the (1+w) gain, the
+	// sqrt(hidden_size) embedding scale, the local/global cadence and Gemma3's two rope
+	// bases, a query_pre_attn_scalar deliberately != head_dim, Gemma2's two soft-caps and
+	// Gemma3's per-head QK-norm.
+	// Mixtral-MoE via internal/model/family_mixtral_cpu_oracle_test.go, whose reference
+	// reads the HF SOURCE expert names rather than production's canonical aliases, and
+	// which fails if routing is degenerate; gpt-oss-MoE via
+	// internal/model/family_gptoss_cpu_oracle_test.go — set on the sliding-window cadence
+	// FIX (familySlidingWindowPattern). Neither covers the batched MoE kernel, and gpt-oss
+	// additionally excludes YaRN and the MXFP4 expert dequant.
+	// DeepSeek-MLA via internal/model/family_deepseek_cpu_oracle_test.go, which witnesses
+	// the batched prefill and the separately written cached decode against the SAME
+	// reference and pins the MLA head_dim derivation without which the rotary table is too
+	// short to cover the pe slice. It builds the dense first_k_dense_replace lineage, so
+	// the routed DeepseekMoE block and YaRN are outside it.
+	// GLM-5.2-DSA via internal/model/family_glm_cpu_oracle_test.go, which compares the
+	// discrete top-k SELECTION SETS as well as the logits. Its fixture omits
+	// mlp.gate.weight, so glmMoeFFN and glmRoute are unwitnessed, and its two indexer scale
+	// constants are provably unreachable by ANY end-to-end oracle: each multiplies every
+	// score by the same positive constant ahead of a ranking.
+	// MiniMax-MSA via internal/model/family_minimax_cpu_oracle_test.go, whose
+	// block-selector reference is an independent RE-IMPLEMENTATION of the documented
+	// algorithm rather than a transcription (no shipped transformers release carries
+	// minimax_m3_vl), so it catches implementation defects but not a spec misreading it
+	// shares with production. Every other semantic there IS transcribed from a cited file.
+	// That completes the roster, so the honest boundary this bit records MOVED rather than
+	// disappearing. It used to run between FAMILIES — a few proven, most merely asserted.
+	// It now runs between PATHS: every oracle above is a CPU f32 HF-checkpoint-path
+	// witness, and the quantized loaders (which hold their projections in their own decoded
+	// stores rather than the f32 blob), the GGUF path (a different constructor) and the
+	// accelerated backends (separate hot-path copies) are witnessed by NONE of them. The
+	// checkpoint-gated #474 oracles that SKIP under -short remain the only cover there.
 	OracleInCI bool
 }
 
@@ -106,13 +142,13 @@ var Families = []Family{
 	{Name: "MPT", ResolverToken: "mpt", Topology: PreNorm, OracleInCI: true},
 	{Name: "StableLM", ResolverToken: "stablelm", Topology: PreNorm, OracleInCI: true},
 	{Name: "OLMo2", ResolverToken: "olmo2", Topology: PostNorm, OracleInCI: true},
-	{Name: "Cohere", ResolverToken: "cohere", Topology: ParallelResidual, OracleInCI: false},
-	{Name: "Gemma2/3", ResolverToken: "gemma", Topology: SandwichNorm, OracleInCI: false},
-	{Name: "Mixtral-MoE", ResolverToken: "mixtral", Topology: PreNorm, OracleInCI: false},
-	{Name: "gpt-oss-MoE", ResolverToken: "gptoss", Topology: PreNorm, OracleInCI: false},
-	{Name: "DeepSeek-MLA", ResolverToken: "deepseek", Topology: SparseAttn, OracleInCI: false},
-	{Name: "GLM-5.2-DSA", ResolverToken: "", Topology: SparseAttn, OracleInCI: false},
-	{Name: "MiniMax-MSA", ResolverToken: "", Topology: SparseAttn, OracleInCI: false},
+	{Name: "Cohere", ResolverToken: "cohere", Topology: ParallelResidual, OracleInCI: true},
+	{Name: "Gemma2/3", ResolverToken: "gemma", Topology: SandwichNorm, OracleInCI: true},
+	{Name: "Mixtral-MoE", ResolverToken: "mixtral", Topology: PreNorm, OracleInCI: true},
+	{Name: "gpt-oss-MoE", ResolverToken: "gptoss", Topology: PreNorm, OracleInCI: true},
+	{Name: "DeepSeek-MLA", ResolverToken: "deepseek", Topology: SparseAttn, OracleInCI: true},
+	{Name: "GLM-5.2-DSA", ResolverToken: "", Topology: SparseAttn, OracleInCI: true},
+	{Name: "MiniMax-MSA", ResolverToken: "", Topology: SparseAttn, OracleInCI: true},
 }
 
 // Backends is the --backend roster (cmd/fak/serve.go). cpu is the topology-aware
@@ -186,9 +222,10 @@ func Grid() []Cell {
 
 // StaleReason names why a cell is on the --stale honest-but-incomplete list.
 // The matrix tracks no per-cell oracle DATE, so "stale" here is the structural
-// residual: a cell that RUNS but whose family carries no CI-runnable numeric
-// oracle (OracleInCI == false), so its correctness is asserted, not proven in
-// CI. This is the union the C5 ticket (#1084) names — "oracle older than N days
+// residual: a cell that RUNS but that no CI-runnable numeric oracle executes, so
+// its correctness is asserted, not proven in CI. That is either a family with no
+// oracle at all (OracleInCI == false) or ANY accelerated cell, because every oracle
+// in the roster witnesses the cpu path only. This is the union the C5 ticket (#1084) names — "oracle older than N days
 // OR support level PROOF-PATH-ONLY past a grace window" — in the limit where a
 // family with no CI oracle has an oracle age of effectively infinite (older than
 // any N). The N-days refinement (discriminating by a real per-family oracle date)
@@ -203,9 +240,10 @@ const (
 	// (the #487/S4 residual carried forever).
 	StaleProofPath StaleReason = "PROOF-PATH-ONLY: runs on the cpu proof path, no CI oracle (correctness asserted, not proven)"
 	// StaleUnwitnessed: the cell is SUPPORTED by topology — a PreNorm family on an
-	// accelerated backend — but its family has no CI oracle, so the accelerated
+	// accelerated backend — but no CI oracle executes that backend, so the accelerated
 	// numeric claim is unwitnessed in CI (the "oracle older than N days" criterion,
-	// at infinite age).
+	// at infinite age). A CPU oracle for the same family does NOT clear this: the
+	// accelerated backend is a separate hot-path copy the cpu oracle never runs.
 	StaleUnwitnessed StaleReason = "SUPPORTED but no CI oracle: accelerated path runs, numeric claim unwitnessed in CI"
 )
 
@@ -216,10 +254,20 @@ type StaleCell struct {
 }
 
 // StaleCells returns the honest-but-incomplete residual: every cell that RUNS
-// (SUPPORTED or PROOF-PATH-ONLY) whose family carries no CI-runnable numeric
-// oracle. The OracleInCI families (Llama, Qwen2/3.x, OLMo2) never appear; FENCED cells
-// (honest refusals) and UNDEFINED cells (growth_debt) are excluded by design.
-// Output is deterministic: Grid() is already in (family, backend) order.
+// (SUPPORTED or PROOF-PATH-ONLY) that no CI-runnable numeric oracle witnesses.
+// FENCED cells (honest refusals) and UNDEFINED cells (growth_debt) are excluded by
+// design. Output is deterministic: Grid() is already in (family, backend) order.
+//
+// An OracleInCI family clears its OWN cpu cell and nothing else. Every oracle in the
+// roster is a CPU f32 HF-checkpoint-path witness (see Family.OracleInCI), and each
+// accelerated backend is a separate hot-path copy that no cpu oracle executes — so an
+// accelerated cell classified SUPPORTED from topology alone stays unwitnessed however
+// many families carry an oracle. Exempting the whole family on a cpu-only witness is
+// what this function used to do; it under-reported from the start, and once the roster
+// completed it reported an empty residual for a grid with 18 unwitnessed accelerated
+// cells. The per-family shortcut is gone: the doctrine (#1244) and FromSupport
+// (internal/supportmaturity) both already describe this function as flagging "the
+// accelerated-SUPPORTED cells whose witness is in fact absent", and it now does.
 func StaleCells() []StaleCell {
 	oracle := make(map[string]bool, len(Families))
 	for _, f := range Families {
@@ -227,8 +275,8 @@ func StaleCells() []StaleCell {
 	}
 	var out []StaleCell
 	for _, c := range Grid() {
-		if oracle[c.Family] {
-			continue // a CI oracle witnesses this family — not stale
+		if oracle[c.Family] && !accelerated(c.Backend) {
+			continue // the family's CPU oracle witnesses its cpu cell — not stale
 		}
 		switch c.Support {
 		case ProofPathOnly:

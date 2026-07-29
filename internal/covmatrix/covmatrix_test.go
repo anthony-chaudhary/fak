@@ -183,12 +183,43 @@ func TestBuildEmitsControlPanePayload(t *testing.T) {
 }
 
 // TestStaleCells is the C5 (#1084) gate: the --stale lens must surface exactly the
-// honest-but-incomplete residual — cells that RUN but carry no CI oracle — and must
-// exclude the CI-witnessed family, the fenced cells, and the debt cells.
+// honest-but-incomplete residual — cells that RUN but that no CI oracle executes — and
+// must exclude the CI-witnessed cpu cells, the fenced cells, and the debt cells.
+//
+// The residual is keyed per CELL, not per family. Every oracle in the roster is a CPU
+// f32 witness, so it clears its family's cpu cell only; an accelerated cell is a
+// separate hot-path copy no cpu oracle runs. Asserting merely "non-empty" was not
+// enough to hold that line: while some families still had OracleInCI == false the list
+// stayed non-empty for the wrong reason, and completing the oracle roster emptied it
+// entirely even though 18 accelerated cells remained unwitnessed. The accelerated
+// assertion below is the one that actually binds.
 func TestStaleCells(t *testing.T) {
 	stale := StaleCells()
 	if len(stale) == 0 {
-		t.Fatal("StaleCells returned empty; expected the non-Llama runs-but-unwitnessed residual")
+		t.Fatal("StaleCells returned empty; expected the runs-but-unwitnessed residual")
+	}
+
+	// The contract the doctrine (#1244) and supportmaturity.FromSupport both state:
+	// StaleCells flags "the accelerated-SUPPORTED cells whose witness is in fact
+	// absent". No oracle in the roster executes an accelerated backend, so EVERY
+	// accelerated SUPPORTED cell must appear — including those of a family that
+	// carries a CPU oracle.
+	inStale := make(map[Cell]bool, len(stale))
+	for _, c := range stale {
+		inStale[c.Cell] = true
+	}
+	acceleratedSupported := 0
+	for _, c := range Grid() {
+		if !accelerated(c.Backend) || c.Support != Supported {
+			continue
+		}
+		acceleratedSupported++
+		if !inStale[c] {
+			t.Errorf("accelerated SUPPORTED cell %+v is unwitnessed in CI and must be stale", c)
+		}
+	}
+	if acceleratedSupported == 0 {
+		t.Error("no accelerated SUPPORTED cells in the grid; this gate would be vacuous")
 	}
 
 	// Determinism: two calls byte-identical (the package's whole-grid contract).
@@ -209,8 +240,8 @@ func TestStaleCells(t *testing.T) {
 		oracle[f.Name] = f.OracleInCI
 	}
 	for _, c := range stale {
-		if oracle[c.Family] {
-			t.Errorf("family %q has a CI oracle and must not be stale: %+v", c.Family, c)
+		if oracle[c.Family] && !accelerated(c.Backend) {
+			t.Errorf("family %q has a CPU oracle, so its cpu cell must not be stale: %+v", c.Family, c)
 		}
 		if c.Support == Fenced || c.Support == Undefined {
 			t.Errorf("stale list must exclude %s cells: %+v", c.Support, c)
@@ -233,7 +264,7 @@ func TestStaleCells(t *testing.T) {
 	// Cross-check the count against an independent recomputation over the grid.
 	want := 0
 	for _, c := range Grid() {
-		if oracle[c.Family] {
+		if oracle[c.Family] && !accelerated(c.Backend) {
 			continue
 		}
 		if c.Support == ProofPathOnly || c.Support == Supported {
