@@ -128,7 +128,9 @@ func guardAllowOverlayLayerPaths() []string {
 
 func loadGuardAllowOverlayLayers() (guardAllowOverlay, []guardAllowOverlayLayer, error) {
 	merged := guardAllowOverlay{Version: guardAllowOverlayVersion}
-	layers := guardAllowLayersWithSessionScope(guardAllowOverlayPaths())
+	// The ENFORCEMENT read: guardAllowEffectiveReadLayers, not the raw stack, so a session
+	// layer the boot reclaim could not clear is not merged into the floor (guard_allow_scope.go).
+	layers := guardAllowEffectiveReadLayers()
 	for _, layer := range layers {
 		ov, err := loadGuardAllowOverlay(layer.Path)
 		if err != nil {
@@ -314,7 +316,7 @@ func cmdGuardAllow(argv []string) {
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, guardAllowUsage()) }
 	list := fs.Bool("list", false, "print effective allow layers with per-layer provenance, then exit")
 	user := fs.Bool("user", false, "write the per-user home overlay instead of the repo-local overlay")
-	session := fs.Bool("session", false, "write the SESSION-scope overlay: the narrowest layer, applied last, so it is the last word over the repo/user/env layers. NOT YET EPHEMERAL — the drop at session end is unarmed and no launch supplies a session id, so this writes the shared sessions/current.allow.json and the widening PERSISTS until you remove that file")
+	session := fs.Bool("session", false, "write the SESSION-scope overlay: the narrowest layer, applied last, so it is the last word over the repo/user/env layers. EPHEMERAL — a guard drops this layer both at its boot and at its session end, so the widening never survives into another session. Caveat: no launch yet supplies a session id, so all sessions on a checkout share sessions/current.allow.json — a guard booting NEXT TO yours drops your entry, and you re-grant it")
 	remove := fs.Bool("remove", false, "remove the named tool(s)/prefix(es) from the overlay instead of adding")
 	prefix := fs.Bool("prefix", false, "treat the positional args as allow_prefix entries (a tool-name PREFIX) rather than exact names")
 	fromJournal := fs.Bool("from-journal", false, "list the tools a guarded session BLOCKED (DEFAULT_DENY) from an audit journal, each with the exact command to allow it")
@@ -551,7 +553,7 @@ func guardAllowUsage() string {
 		"  fak guard allow --remove <name>...     remove entr(ies) from the overlay",
 		"  fak guard allow --list                 print every effective layer with its scope, precedence and provenance",
 		"  fak guard allow --user <tool>...       write the per-user home layer instead of repo-local",
-		"  fak guard allow --session <tool>...    write the session-scope layer (narrowest, applied last; its drop-at-exit is NOT armed yet, so the entry persists)",
+		"  fak guard allow --session <tool>...    write the session-scope layer (narrowest, applied last; dropped at guard boot AND at session end, so it never outlives a session)",
 		"  fak guard allow --from-journal         list what a guarded session BLOCKED + the command to allow each",
 		"  fak guard allow --from-journal --add-all   add every blocked tool in one step",
 		"  fak guard allow --from-claude-settings [path]   import permissions.allow from .claude/settings.json (name-level only)",

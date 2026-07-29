@@ -14,9 +14,11 @@ import (
 //   - the WRITE-SCOPE router behind `fak guard allow --session`
 //     (guardAllowWritePathForScope), which must land a widening in the session layer and
 //     NOT in the durable repo-local or per-user files; and
-//   - the arm/drop teardown mechanism, which is defined but deliberately NOT called from
-//     the guard boot yet (see guard_allow_scope.go's header). Pinning its contract here
-//     means the wiring rung lands against witnessed behaviour rather than a fresh claim.
+//   - the arm/drop teardown MECHANISM in isolation — that a drop touches only the armed
+//     session file, that an unarmed drop is a no-op, and that the drop self-disarms.
+//     Those hold independently of who calls them; the production call sites (guard boot and
+//     finishGuardChildAndReport) and the end-to-end lifecycle are pinned next door in
+//     guard_allow_scope_wiring_test.go.
 //
 // These reuse scopeTestRepo (guard_allow_scope_test.go), which chdirs into a fresh temp
 // repo with an empty HOME and no env override, so they must not run in parallel.

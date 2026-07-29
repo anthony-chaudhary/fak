@@ -23,6 +23,11 @@ func scopeTestRepo(t *testing.T, sessionID string) string {
 	t.Setenv(guardAllowSessionIDEnv, "")
 	setGuardAllowSessionScopeID(sessionID)
 	t.Cleanup(func() { setGuardAllowSessionScopeID("") })
+	// The boot-reclaim quarantine (guard_allow_scope.go) is process-global, so a test that
+	// arms over an unclearable path could otherwise suppress the session layer for whatever
+	// runs next. Clear it on both sides rather than trusting test order.
+	guardAllowSessionScopeQuarantined = false
+	t.Cleanup(func() { guardAllowSessionScopeQuarantined = false })
 	old, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

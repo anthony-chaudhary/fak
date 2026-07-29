@@ -47,16 +47,48 @@ import (
 //
 // EPHEMERALITY is what the session scope is FOR: `fak guard allow --session <tool>`
 // records a widening into the session file, every read path unions that layer last, and
-// dropping the file at session end leaves no permanent hole in the floor. All three
-// halves are wired (#5180):
+// dropping the file leaves no permanent hole in the floor. All halves are wired (#5180):
 //
 //   - WRITE and READ. cmdGuardAllow routes --session to guardAllowSessionOverlayPath via
 //     guardAllowWritePathForScope, and every reader (guardAllowOverlayLayerPaths,
 //     guardAllowWinningScope, the --list rendering) unions the session layer through
 //     guardAllowLayersWithSessionScope.
-//   - DROP. cmdGuard calls armGuardAllowSessionScopeTeardown immediately BEFORE it loads
-//     the capability floor (loadGuardCapabilityFloor), and finishGuardChildAndReport calls
-//     dropGuardAllowSessionScopeAtSessionEnd once the session is over.
+//   - DROP AT SESSION END. cmdGuard calls armGuardAllowSessionScopeTeardown immediately
+//     BEFORE it loads the capability floor (loadGuardCapabilityFloor), and
+//     finishGuardChildAndReport calls dropGuardAllowSessionScopeAtSessionEnd once the
+//     session is over.
+//   - DROP AT BOOT. The same arm call ALSO reclaims whatever session file is already there
+//     (reclaimStaleGuardAllowSessionScope), because a session-end drop alone cannot make the
+//     scope ephemeral. See the next paragraph — this is the load-bearing half.
+//
+// WHY A BOOT DROP IS REQUIRED, not merely tidy (#5417 §2). Nothing in production supplies a
+// session id: setGuardAllowSessionScopeID has no production caller and nothing exports
+// $FAK_GUARD_SESSION_ID, so guardAllowSessionID() returns "" and EVERY launch on a checkout
+// resolves the SAME fallback file, sessions/current.allow.json. With only a session-end drop
+// that shared file is a durable grant wearing an ephemeral label, in two ways, and both fail
+// in the dangerous direction — authority OUTLIVING the consent that created it:
+//
+//   - A guard that never reaches its teardown (SIGKILL, power cut, host reboot) leaves the
+//     file behind. The NEXT launch resolves that same path as its own session layer, so a
+//     dead session's widening is HONORED for the whole next session and only dropped at
+//     THAT session's end — one full session of authority nobody granted, repeating for as
+//     long as launches keep being killed.
+//   - Two concurrent guards on one checkout share the file, so a --session grant made in
+//     one session is honored by the other, which never consented to it.
+//
+// The boot reclaim closes both: at the instant a guard boots it has consented to nothing, so
+// any session-scoped grant already on disk provably belongs to a DIFFERENT session and can
+// never be proved in scope for this one. The rule is therefore mechanical rather than
+// heuristic — a session grant is honored only if THIS session wrote it after its own boot —
+// and the failure direction is to drop (the operator re-grants), never to retain.
+//
+// QUARANTINE. If the boot reclaim cannot clear the file, the grant is both unprovable and
+// undroppable, so it must not be honored either: guardAllowEffectiveReadLayers omits the
+// session layer for the rest of the process. Note that guardAllowLayersWithSessionScope
+// stays UNCONDITIONAL, because its other consumer is guardAllowOverlayLayerPaths, which
+// feeds protectGuardPolicyConfig — the set of files the wrapped agent may not write. Hiding
+// a quarantined path from THAT list would let the agent author its own session overlay, so
+// quarantine narrows what is read and never what is protected.
 //
 // TWO ORDERING CONSTRAINTS make that pair of call sites the correct ones, and both are
 // easy to get wrong:
@@ -76,8 +108,8 @@ import (
 //     that function's terminal region, which every exit path reaches first.
 //
 // Only the session file is ever removed — repo/user/env are durable operator decisions.
-// A SIGKILL'd or power-cut guard still cannot run the drop; that residue is bounded to the
-// session file and the next launch's arm/drop cycle reclaims it.
+// A SIGKILL'd or power-cut guard still cannot run its own drop; the boot reclaim above is
+// what bounds that residue, by clearing it BEFORE the next launch's floor can read it.
 
 // guardAllowScopeSession names the session-scope layer. The repo/user/env layer names
 // in guardAllowOverlayPaths double as their scope names.
@@ -144,6 +176,34 @@ func guardAllowLayersWithSessionScope(base []guardAllowOverlayLayer) []guardAllo
 	return append(out, guardAllowSessionLayer())
 }
 
+// guardAllowSessionScopeQuarantined records that the boot reclaim could NOT clear a
+// pre-existing session overlay (see armGuardAllowSessionScopeTeardown). The file then holds
+// a widening this session cannot prove it consented to AND cannot delete, so the only
+// fail-safe left is to stop honoring it. Cleared by every arm and by every drop, so the flag
+// never outlives the launch that set it.
+var guardAllowSessionScopeQuarantined bool
+
+// guardAllowEffectiveReadLayers is the layer list the ENFORCEMENT readers use: the full
+// stack, minus a quarantined session layer. It is deliberately NOT the list
+// guardAllowOverlayLayerPaths hands to protectGuardPolicyConfig — that one must keep the
+// session path even while quarantined, or the wrapped agent gains write access to a file the
+// guard has stopped watching. Narrowing what is READ is fail-safe; narrowing what is
+// PROTECTED would be the opposite.
+func guardAllowEffectiveReadLayers() []guardAllowOverlayLayer {
+	layers := guardAllowLayersWithSessionScope(guardAllowOverlayPaths())
+	if !guardAllowSessionScopeQuarantined {
+		return layers
+	}
+	out := make([]guardAllowOverlayLayer, 0, len(layers))
+	for _, layer := range layers {
+		if layer.Name == guardAllowScopeSession {
+			continue
+		}
+		out = append(out, layer)
+	}
+	return out
+}
+
 // guardAllowScopeRank is the precedence order defined in the header comment: higher
 // rank = narrower, more-ephemeral scope = layers on top. An unknown scope ranks below
 // everything (conservative: it can never claim to shadow a known scope).
@@ -163,13 +223,14 @@ func guardAllowScopeRank(scope string) int {
 // guardAllowScopeDurabilityNote is the one-clause durability legend for a scope. Every
 // operator-facing listing carries it so the question the scope table answers — does a
 // widening recorded HERE survive the next launch? — never has to be inferred from a path.
-// The session line says what is TRUE TODAY rather than what the scope is for: the drop is
-// armed at guard boot and runs on every session-end path (see the header), so the legend
-// may now promise ephemerality — but only for a guard that reaches its own teardown.
+// The session line says what is TRUE TODAY rather than what the scope is for: the drop runs
+// at guard BOOT as well as on every session-end path (see the header), so the legend may
+// promise ephemerality without the "unless the guard was killed" hedge the session-end drop
+// alone needed — a killed guard's residue is cleared by the next boot before it is read.
 func guardAllowScopeDurabilityNote(scope string) string {
 	switch scope {
 	case guardAllowScopeSession:
-		return " (ephemeral — dropped when this guard session ends; survives only a killed guard)"
+		return " (ephemeral — dropped at guard boot and when this guard session ends)"
 	case "user":
 		return " (durable — host-wide, every repo)"
 	case "env":
@@ -189,12 +250,45 @@ func guardAllowScopeDurabilityNote(scope string) string {
 // test) — and an unarmed dropGuardAllowSessionScope is a no-op.
 var guardAllowSessionScopeTeardownPath string
 
-// armGuardAllowSessionScopeTeardown records the session-scope layer path this launch
-// resolved and arms the drop; it returns the armed path so a caller can report it.
-// Called from cmdGuard immediately BEFORE loadGuardCapabilityFloor, so the armed path is
-// by construction the one the floor is about to read (see the header's ordering note).
+// reclaimStaleGuardAllowSessionScope clears a session-scope overlay left at path by SOME
+// OTHER session — the boot half of the ephemerality contract (#5417). A booting guard has
+// consented to nothing yet, so a session file already on disk belongs to a session that
+// ended, was killed, or is running concurrently; none of those is this one, and there is no
+// evidence that could make it this one. So the file goes, unconditionally, before the floor
+// reads it. Absent is the common case and counts as clear.
+//
+// Reports whether the path is now PROVABLY clear. A false return is the uncertain case the
+// caller must fail closed on: the widening is still readable and could not be removed, so it
+// is reported to the operator (who is told exactly which file to delete) and quarantined out
+// of the read path rather than silently added to this session's floor.
+func reclaimStaleGuardAllowSessionScope(path string, stderr io.Writer) bool {
+	if strings.TrimSpace(path) == "" {
+		return true
+	}
+	err := os.Remove(path)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	if stderr != nil {
+		fmt.Fprintf(stderr, "fak guard: could not reclaim the stale session-scope allow overlay %s: %v (it is being IGNORED for this session; remove the file to re-enable --session widenings)\n", path, err)
+	}
+	return false
+}
+
+// armGuardAllowSessionScopeTeardown reclaims any session-scope overlay left behind by an
+// earlier or concurrent session, records the path this launch resolved, and arms the
+// session-end drop; it returns the armed path so a caller can report it. Called from cmdGuard
+// immediately BEFORE loadGuardCapabilityFloor, so the reclaim lands before the floor's very
+// first read and the armed path is by construction the file that read resolves (see the
+// header's ordering note).
+//
+// The reclaim is what makes --session ephemeral. The session-end drop alone cannot: it never
+// runs on a killed guard, and because no launch supplies a session id every launch shares one
+// file, so a skipped drop is inherited and honored by the next session in full.
 func armGuardAllowSessionScopeTeardown() string {
-	guardAllowSessionScopeTeardownPath = guardAllowSessionOverlayPath()
+	path := guardAllowSessionOverlayPath()
+	guardAllowSessionScopeQuarantined = !reclaimStaleGuardAllowSessionScope(path, os.Stderr)
+	guardAllowSessionScopeTeardownPath = path
 	return guardAllowSessionScopeTeardownPath
 }
 
@@ -208,6 +302,9 @@ func armGuardAllowSessionScopeTeardown() string {
 func dropGuardAllowSessionScope() error {
 	path := strings.TrimSpace(guardAllowSessionScopeTeardownPath)
 	guardAllowSessionScopeTeardownPath = ""
+	// Disarming also ends the quarantine: it was scoped to the launch whose boot reclaim
+	// failed, and leaving it set would silently suppress the session layer for a later one.
+	guardAllowSessionScopeQuarantined = false
 	if path == "" {
 		return nil
 	}
@@ -242,7 +339,7 @@ func dropGuardAllowSessionScopeAtSessionEnd(quiet bool, stderr io.Writer) {
 // AllowPrefix instead of Allow. Returns "" (no error) when no scope names the entry.
 func guardAllowWinningScope(entry string, prefix bool) (string, error) {
 	winner, best := "", -1
-	for _, layer := range guardAllowLayersWithSessionScope(guardAllowOverlayPaths()) {
+	for _, layer := range guardAllowEffectiveReadLayers() {
 		ov, err := loadGuardAllowOverlay(layer.Path)
 		if err != nil {
 			return "", err
