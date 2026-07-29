@@ -253,13 +253,7 @@ func q4kGemmExtractOnceInt8Into(qt *q4kTensor, qp *q8Panel, Y []float32) {
 func q4kExtractGemmWeights(qt *q4kTensor) q4kExtractedGemm {
 	nblk := qt.nblk * 8
 	out, in := qt.out, qt.in
-	q8 := &q8Tensor{
-		out:  out,
-		in:   in,
-		nblk: nblk,
-		q:    make([]int8, out*in),
-		d:    make([]float32, out*nblk),
-	}
+	q8 := newQ8Tensor(out, in, nblk)
 	minScale := make([]float32, out*nblk)
 	rowBytes := qt.q4kRowBytes()
 	body := func(lo, hi int) {

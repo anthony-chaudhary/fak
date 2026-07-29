@@ -242,24 +242,12 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		Q := matMulBatch(m.tensor(lp("self_attn.q_proj.weight")), Xn, nH*hd, H, B)
 		K := matMulBatch(m.tensor(lp("self_attn.k_proj.weight")), Xn, w, H, B)
 		V := matMulBatch(m.tensor(lp("self_attn.v_proj.weight")), Xn, w, H, B)
-		for b := 0; b < B; b++ {
-			m.applyProjBias(l, Q[b*nH*hd:(b+1)*nH*hd], K[b*w:(b+1)*w], V[b*w:(b+1)*w])
-			m.applyLayerQKNorm(l, Q[b*nH*hd:(b+1)*nH*hd], K[b*w:(b+1)*w])
-		}
+		m.applyBatchProjBiasQKNorm(l, B, nH, hd, w, Q, K, V)
 
 		// per-user RoPE + append k/v to each user's own cache (cheap serial pass; the append
 		// mutates each user's distinct cache so it can't be raced). The per-user single-row
 		// rotate-and-stash is the same one the decode block funnels through (ropeRowQK).
-		for b := 0; b < B; b++ {
-			qb := Q[b*nH*hd : (b+1)*nH*hd]
-			kb := K[b*w : (b+1)*w]
-			vb := V[b*w : (b+1)*w]
-			c := caches[b]
-			c.Kraw[l] = append(c.Kraw[l], kb...) // pre-RoPE, for lossless eviction
-			ropeRowQKInto(qb, kb, cosB[b], sinB[b], hd, nH, nKV)
-			c.K[l] = append(c.K[l], kb...)
-			c.V[l] = append(c.V[l], vb...)
-		}
+		ropeAppendBatchKV(l, B, nH, nKV, hd, w, Q, K, V, caches, cosB, sinB)
 		// causal GQA attention, each user over its own cache (parallel, allocation-light).
 		attnOut := make([]float32, B*nH*hd)
 		db.scores = attnDecodeBatch(attnOut, Q, caches, l, B, nH, hd, w, grp, cfg.windowForLayer(l), scale, dot, nil, db.scores, m.attnObs)
@@ -303,6 +291,35 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 	out := splitScaledLogits(nil, Logits, B, cfg.VocabSize, cfg)
 	bs.recordStepMACs(B) // B-proportional projection MAC count for this step (see LastStepMACs)
 	return out
+}
+
+// applyBatchProjBiasQKNorm applies layer l's optional q/k/v projection bias and its
+// optional per-head q/k norm to every user's row of the batch panel, exactly as the
+// serial Step does per token. The f32 and Q8 decode lanes differ only in how they
+// produced Q/K/V, never in this post-projection pass, so it lives here once.
+func (m *Model) applyBatchProjBiasQKNorm(l, B, nH, hd, w int, Q, K, V []float32) {
+	for b := 0; b < B; b++ {
+		m.applyProjBias(l, Q[b*nH*hd:(b+1)*nH*hd], K[b*w:(b+1)*w], V[b*w:(b+1)*w])
+		m.applyLayerQKNorm(l, Q[b*nH*hd:(b+1)*nH*hd], K[b*w:(b+1)*w])
+	}
+}
+
+// ropeAppendBatchKV rotates each user's q/k row against that user's OWN position table
+// and stashes the row in that user's OWN cache. The statement order is load-bearing: the
+// pre-RoPE k goes into Kraw first (lossless eviction depends on the unrotated row), then
+// the in-place rotate, then the rotated k and the untouched v. Serial on purpose — each
+// user touches a distinct cache, so there is nothing to race and nothing to fan out.
+func ropeAppendBatchKV(l, B, nH, nKV, hd, w int, Q, K, V []float32, caches []*KVCache, cosB, sinB [][]float32) {
+	for b := 0; b < B; b++ {
+		qb := Q[b*nH*hd : (b+1)*nH*hd]
+		kb := K[b*w : (b+1)*w]
+		vb := V[b*w : (b+1)*w]
+		c := caches[b]
+		c.Kraw[l] = append(c.Kraw[l], kb...) // pre-RoPE, for lossless eviction
+		ropeRowQKInto(qb, kb, cosB[b], sinB[b], hd, nH, nKV)
+		c.K[l] = append(c.K[l], kb...)
+		c.V[l] = append(c.V[l], vb...)
+	}
 }
 
 func (bs *BatchSession) qgemmBatchTensorInto(qt *q8Tensor, X []float32, B, width int, dst []float32) {
@@ -389,21 +406,8 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 			qgemm8Target{qt: ql.kProj, Y: K},
 			qgemm8Target{qt: ql.vProj, Y: V},
 		)
-		for b := 0; b < B; b++ {
-			m.applyProjBias(l, Q[b*nH*hd:(b+1)*nH*hd], K[b*w:(b+1)*w], V[b*w:(b+1)*w])
-			m.applyLayerQKNorm(l, Q[b*nH*hd:(b+1)*nH*hd], K[b*w:(b+1)*w])
-		}
-
-		for b := 0; b < B; b++ {
-			qb := Q[b*nH*hd : (b+1)*nH*hd]
-			kb := K[b*w : (b+1)*w]
-			vb := V[b*w : (b+1)*w]
-			c := caches[b]
-			c.Kraw[l] = append(c.Kraw[l], kb...)
-			ropeRowQKInto(qb, kb, cosB[b], sinB[b], hd, nH, nKV)
-			c.K[l] = append(c.K[l], kb...)
-			c.V[l] = append(c.V[l], vb...)
-		}
+		m.applyBatchProjBiasQKNorm(l, B, nH, hd, w, Q, K, V)
+		ropeAppendBatchKV(l, B, nH, nKV, hd, w, Q, K, V, caches, cosB, sinB)
 		// attention is the same f32 math over the f32 KV cache as the f32 lane.
 		attnOut := grow(db.attn, B*nH*hd)
 		db.attn = attnOut

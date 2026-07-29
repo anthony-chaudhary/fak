@@ -456,6 +456,22 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 	return c.deriveConfigAxes(hints)
 }
 
+// promoteLongRope lifts a CLASSIC-key rope_scaling block of the named kind onto the flat
+// Rope* axes and reports whether it fired. Nothing is promoted once some other source has
+// already claimed RopeScaling, so the first matching kind wins — the precedence the
+// per-kind callers below rely on. The kind-specific extras (llama3's low/high frequency
+// factors, yarn's theta) stay at the call sites; only the three axes every kind sets in
+// the same way — the name, the factor and the original context — live here.
+func (c *Config) promoteLongRope(kind string) bool {
+	if c.RopeScaling != "" || c.LongRope == nil || c.LongRope.kind() != kind {
+		return false
+	}
+	c.RopeScaling = kind
+	c.RopeFactor = c.LongRope.Factor
+	c.RopeOrigContext = c.LongRope.OriginalMaxPositionEmbeddings
+	return true
+}
+
 func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	// MLA (DeepSeek-V2/V3, GLM-5.2) heads are NOT hidden_size/num_heads wide. HF's
 	// DeepseekV2Config declares no head_dim at all; DeepseekV2Attention builds
@@ -499,12 +515,9 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	if c.IntermediateSize == 0 && strings.Contains(family, "falcon") && c.HiddenSize > 0 {
 		c.IntermediateSize = 4 * c.HiddenSize
 	}
-	if c.RopeScaling == "" && c.LongRope != nil && c.LongRope.kind() == "llama3" {
-		c.RopeScaling = "llama3"
-		c.RopeFactor = c.LongRope.Factor
+	if c.promoteLongRope("llama3") {
 		c.RopeLowFreqFactor = c.LongRope.LowFreqFactor
 		c.RopeHighFreqFactor = c.LongRope.HighFreqFactor
-		c.RopeOrigContext = c.LongRope.OriginalMaxPositionEmbeddings
 	}
 	// yarn arrives in EITHER HF shape. The newer checkpoints nest it under
 	// rope_parameters (handled just below); the long-context Qwen line — including the
@@ -514,13 +527,8 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	// applyRopeScaling returned a BARE inv_freq: at a 262K context the rotation was
 	// unscaled and long-offset positions diverged silently. Promote it here, mirroring
 	// the llama3 promotion, so both HF shapes reach the same yarn path (#4874).
-	if c.RopeScaling == "" && c.LongRope != nil && c.LongRope.kind() == "yarn" {
-		c.RopeScaling = "yarn"
-		c.RopeFactor = c.LongRope.Factor
-		c.RopeOrigContext = c.LongRope.OriginalMaxPositionEmbeddings
-		if c.RopeTheta == 0 {
-			c.RopeTheta = c.LongRope.RopeTheta
-		}
+	if c.promoteLongRope("yarn") && c.RopeTheta == 0 {
+		c.RopeTheta = c.LongRope.RopeTheta
 	}
 	if c.RopeScaling == "" {
 		if rp, ok := c.RopeParameters["default"]; ok && rp.kind() == "yarn" {

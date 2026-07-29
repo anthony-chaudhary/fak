@@ -192,6 +192,15 @@ func (s *Session) phaseStart() time.Time {
 	return time.Now()
 }
 
+// tapOp hands one stage's output tensor to an active op tap. The nil/ops guard is the
+// reason this is a call and not a bare tap.dumpOp: every stage in a taped kernel ends with
+// the same three-line conditional, and only the stage name and the tensor differ.
+func (s *Session) tapOp(l int, op string, out []float32) {
+	if tap := s.tapActive; tap != nil && tap.ops {
+		tap.dumpOp(l, op, out)
+	}
+}
+
 // headLogitsBuf returns the reused, grown logits buffer for one decode head together with a
 // fresh phase timer — the shared setup of headQ / headQ4 / headQ4K / headGPTQ.
 func (s *Session) headLogitsBuf() ([]float32, time.Time) {

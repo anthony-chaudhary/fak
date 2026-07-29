@@ -69,13 +69,6 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 					emitAttnRow(obs, l, nPos-1, h0+1, j0, sc1)
 					emitAttnRow(obs, l, nPos-1, h0+2, j0, sc2)
 				}
-				for g := 0; g < grp; g++ {
-					h := h0 + g
-					out := attnOut[b*nH*hd+h*hd : b*nH*hd+(h+1)*hd]
-					for i := range out {
-						out[i] = 0
-					}
-				}
 			} else {
 				for g := 0; g < grp; g++ {
 					h := kvh*grp + g
@@ -89,10 +82,17 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 					if obs != nil { // #852: query is the just-appended row at abs pos nPos-1
 						emitAttnRow(obs, l, nPos-1, h, j0, sc)
 					}
-					out := attnOut[b*nH*hd+h*hd : b*nH*hd+(h+1)*hd]
-					for i := range out {
-						out[i] = 0
-					}
+				}
+			}
+			// Clear this kv-head's query-head output rows before the value accumulation
+			// below adds into them. Both score branches above leave attnOut untouched, and
+			// the fused branch's h0 is kvh*grp, so the rows to clear are the same set either
+			// way — one loop, not one per branch.
+			for g := 0; g < grp; g++ {
+				h := kvh*grp + g
+				out := attnOut[b*nH*hd+h*hd : b*nH*hd+(h+1)*hd]
+				for i := range out {
+					out[i] = 0
 				}
 			}
 			if grp == 3 {

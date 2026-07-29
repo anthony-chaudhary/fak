@@ -148,17 +148,9 @@ func (m *Model) ForwardEP(ids []int, ep EPConfig) (*Activations, error) {
 			return m.glmDsaAttnSeqShared(l, xn, &glmDsaSharedTopK)
 		}
 		// FFN is EXPERT-PARALLEL on routed MoE layers, monolith on dense first-k layers.
-		mlpSub := func(xn [][]float32) [][]float32 {
-			if subErr != nil {
-				return zeroRows(seq, H)
-			}
-			out, err := m.epMoeLayer(l, xn, mat, plan, coll)
-			if err != nil {
-				subErr = err
-				return zeroRows(seq, H)
-			}
-			return out
-		}
+		mlpSub := guardedSublayer(&subErr, seq, H, func(xn [][]float32) ([][]float32, error) {
+			return m.epMoeLayer(l, xn, mat, plan, coll)
+		})
 
 		if topo == ParallelResidual {
 			// Both branches read the original residual (mirrors layerGLMDsa's ParallelResidual leg).
@@ -180,12 +172,6 @@ func (m *Model) ForwardEP(ids []int, ep EPConfig) (*Activations, error) {
 		act.Hidden = append(act.Hidden, flatten(x))
 	}
 
-	act.Logits = make([][]float32, seq)
-	for t := 0; t < seq; t++ {
-		xf := m.finalNorm(x[t])
-		logits := mat.mul(m.headName(), mat.prep(xf), cfg.VocabSize, H)
-		logitScaleInPlace(logits, cfg)
-		act.Logits[t] = logits
-	}
+	m.fillSeqLogits(act, x)
 	return act, nil
 }

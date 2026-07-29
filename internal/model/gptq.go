@@ -375,26 +375,37 @@ func decodeGPTQGIdx(base string, part *gptqPart, in int) ([]int, error) {
 	if len(part.entry.Shape) != 1 || part.entry.Shape[0] != in {
 		return nil, fmt.Errorf("gptq load %s.g_idx shape %v, want [%d]", base, part.entry.Shape, in)
 	}
-	out := make([]int, in)
+	var width int
 	switch part.entry.Dtype {
 	case "I32", "U32":
-		if len(part.data) != in*4 {
-			return nil, fmt.Errorf("gptq load %s.g_idx bytes %d != %d", base, len(part.data), in*4)
-		}
-		for i := range out {
-			out[i] = int(int32(binary.LittleEndian.Uint32(part.data[i*4:])))
-		}
+		width = 4
 	case "I64", "U64":
-		if len(part.data) != in*8 {
-			return nil, fmt.Errorf("gptq load %s.g_idx bytes %d != %d", base, len(part.data), in*8)
-		}
-		for i := range out {
-			out[i] = int(int64(binary.LittleEndian.Uint64(part.data[i*8:])))
-		}
+		width = 8
 	default:
 		return nil, fmt.Errorf("gptq load %s.g_idx dtype %q, want I32/I64", base, part.entry.Dtype)
 	}
+	if len(part.data) != in*width {
+		return nil, fmt.Errorf("gptq load %s.g_idx bytes %d != %d", base, len(part.data), in*width)
+	}
+	out := make([]int, in)
+	decodeGroupIdxWords(out, part.data, width)
 	return out, nil
+}
+
+// decodeGroupIdxWords fills out from consecutive little-endian words of the given byte
+// width, sign-extending each word exactly as its source dtype does: I32/U32 read as a
+// signed 32-bit word, I64/U64 as a signed 64-bit one. The width test is hoisted above the
+// element loop, so neither dtype pays a per-element branch for the other's existence.
+func decodeGroupIdxWords(out []int, data []byte, width int) {
+	if width == 8 {
+		for i := range out {
+			out[i] = int(int64(binary.LittleEndian.Uint64(data[i*8:])))
+		}
+		return
+	}
+	for i := range out {
+		out[i] = int(int32(binary.LittleEndian.Uint32(data[i*4:])))
+	}
 }
 
 func newGPTQTensor(qweight, qzeros []uint32, scales []float32, gidx []int, out, in, bits, groupSize int) (*gptqTensor, error) {

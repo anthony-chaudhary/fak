@@ -20,7 +20,6 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"unsafe"
 )
 
 // RetainVision is the "an mmproj / vision source is present" gate, mirroring
@@ -126,12 +125,7 @@ func (t *VisionTower) has(name string) bool {
 }
 
 func (t *VisionTower) tensor(name string) []float32 {
-	meta, ok := t.manifest[name]
-	if !ok {
-		panic("model: vision tower missing tensor " + name)
-	}
-	n := meta.Nbytes / 4
-	return unsafe.Slice((*float32)(unsafe.Pointer(&t.raw[meta.Offset])), n)
+	return manifestTensor(t.manifest, t.raw, "vision tower ", name)
 }
 
 func (t *VisionTower) tensorOptional(name string) []float32 {
@@ -239,27 +233,7 @@ func atoiStrict(s string) (int, bool) {
 // tensor and the candidates searched — the same contract ResolveTensorNames gives
 // the decoder families. It inspects manifest KEYS only, never bytes.
 func ResolveVisionTensorNames(cfg VisionConfig, manifest map[string]tensorMeta) (*Resolution, error) {
-	spec := visionSpec(cfg)
-	res := &Resolution{Family: spec.family, Resolved: make(map[string]string)}
-	reqs := append([]tensorReq(nil), spec.globals...)
-	if spec.perLayer != nil {
-		for l := 0; l < cfg.NumLayers; l++ {
-			reqs = append(reqs, spec.perLayer(l)...)
-		}
-	}
-	for _, r := range reqs {
-		src, ok := r.resolve(manifest)
-		if ok {
-			res.Resolved[r.canonical] = src
-			continue
-		}
-		if r.optional {
-			continue
-		}
-		return nil, fmt.Errorf("model: %s family: required canonical tensor %q has no source in the manifest (searched: %s)",
-			spec.family, r.canonical, strings.Join(r.candidates(), ", "))
-	}
-	return res, nil
+	return resolveAgainstSpec(visionSpec(cfg), cfg.NumLayers, manifest)
 }
 
 // visionSpec is the CLIP/ViT tower's required-tensor table under the canonical mmproj

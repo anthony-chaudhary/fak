@@ -622,11 +622,7 @@ func (s *Session) Prefill(ids []int) []float32 {
 	}
 	if s.M.Cfg.usesMLAMoELayout() {
 		s.requireGLMDsaSession()
-		var last []float32
-		for _, id := range ids {
-			last = s.tokenHiddenGLMDsa(id, s.Cache.Len())
-		}
-		return s.glmDsaHead(last)
+		return s.glmDsaHead(s.tokenLoopHidden(s.tokenHiddenGLMDsa, ids))
 	}
 	if s.M.Cfg.isMiniMaxSparseAttn() {
 		// MiniMax-M3 MSA: the incremental cache path runs the lightning-indexer block
@@ -634,21 +630,13 @@ func (s *Session) Prefill(ids []int) []float32 {
 		// decode/prefix-reuse agree with the cacheless Forward. It must precede the generic
 		// MoE token-loop below, which would otherwise run dense GQA on the sparse layers.
 		s.requireMiniMaxSession()
-		var last []float32
-		for _, id := range ids {
-			last = s.tokenHiddenMiniMax(id, s.Cache.Len())
-		}
-		return s.head(last)
+		return s.head(s.tokenLoopHidden(s.tokenHiddenMiniMax, ids))
 	}
 	if s.Q4 {
 		// Resident int4 prefill: the batched Q8 GEMM has no int4 twin yet, so prefill runs
 		// the shared per-token blockStep with the int4 kernel. Slower than batched but uses
 		// only the resident int4 weights (the lean q4-only mode freed the Q8_0 copy).
-		var last []float32
-		for _, id := range ids {
-			last = s.tokenHiddenQ(id, s.Cache.Len())
-		}
-		return s.headQ4(last)
+		return s.headQ4(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 	}
 	if s.Backend != nil {
 		// A device session executes the WHOLE forward through the HAL (matWeightHAL now
@@ -677,18 +665,10 @@ func (s *Session) Prefill(ids []int) []float32 {
 		if q4kQwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
 			return s.prefillQwen35HybridQ4K(ids)
 		}
-		var last []float32
-		for _, id := range ids {
-			last = s.tokenHiddenQ(id, s.Cache.Len())
-		}
-		return s.headResident(last)
+		return s.headResident(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 	}
 	if s.GPTQ {
-		var last []float32
-		for _, id := range ids {
-			last = s.tokenHiddenGPTQ(id, s.Cache.Len())
-		}
-		return s.headResident(last)
+		return s.headResident(s.tokenLoopHidden(s.tokenHiddenGPTQ, ids))
 	}
 	if s.Metal {
 		// The Qwen3.6 hybrid (Gated-DeltaNet) cannot run through the generic full-attention
@@ -709,11 +689,7 @@ func (s *Session) Prefill(ids []int) []float32 {
 			return s.prefillQwen35HybridQ(ids)
 		}
 		if cfg := s.M.Cfg; q8PrefillNeedsTokenLoop(cfg) {
-			var last []float32
-			for _, id := range ids {
-				last = s.tokenHiddenQ(id, s.Cache.Len())
-			}
-			return s.headQ(last)
+			return s.headQ(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 		}
 		return s.headQ(s.prefillBatchedQ(ids))
 	}
@@ -826,15 +802,24 @@ func q8PrefillNeedsTokenLoop(cfg Config) bool {
 	return cfg.IsMoE() || cfg.DenseMLP || cfg.Alibi || cfg.IsQwen35Hybrid() || cfg.AttnOutputGate || cfg.BlockTopology != PreNorm || cfg.hasLayerSpecificRopeTheta()
 }
 
+// tokenLoopHidden feeds ids through step one at a time, each at the cache's CURRENT
+// absolute length (step appends to the cache, so the position advances with it), and
+// returns the last token's hidden row. Every resident-quant prefill lane funnels through
+// this when its batched GEMM does not cover the architecture; they differ only in which
+// per-token step they hand in and which head they run on the result.
+func (s *Session) tokenLoopHidden(step func(id, pos int) []float32, ids []int) []float32 {
+	var last []float32
+	for _, id := range ids {
+		last = step(id, s.Cache.Len())
+	}
+	return last
+}
+
 // prefillTokenLoop runs the per-token f32 forward (tokenHidden) over ids in cache order and
 // returns the head logits of the final token — the non-batched prefill path taken by the
 // arches q8PrefillNeedsTokenLoop selects out of the one-GEMM batched lane.
 func (s *Session) prefillTokenLoop(ids []int) []float32 {
-	var last []float32
-	for _, id := range ids {
-		last = s.tokenHidden(id, s.Cache.Len())
-	}
-	return s.head(last)
+	return s.head(s.tokenLoopHidden(s.tokenHidden, ids))
 }
 
 // Step decodes one already-chosen token and returns the next-token logits. Quantized

@@ -92,11 +92,21 @@ func (r *Resolution) SourceFor(canonical string) string { return r.Resolved[cano
 // Llama / SmolLM2 / Qwen route to the identity spec: every required canonical tensor
 // resolves to itself, so the result is a pure no-op map.
 func ResolveTensorNames(cfg Config, manifest map[string]tensorMeta) (*Resolution, error) {
-	spec := resolveSpecFor(cfg)
+	return resolveAgainstSpec(resolveSpecFor(cfg), cfg.NumLayers, manifest)
+}
+
+// resolveAgainstSpec walks spec's required tensors — the globals plus numLayers expansions
+// of the per-layer table — and maps each canonical name onto the source name in manifest
+// that provides it. Presence only: manifest KEYS are read, never tensor bytes. An optional
+// tensor with no source is simply absent from the result; a REQUIRED one is a refusal
+// naming the family, the canonical name, and every candidate searched. The decoder
+// resolver and the vision-tower resolver differ only in which spec and layer count they
+// hand in, so the walk itself lives here once.
+func resolveAgainstSpec(spec resolverSpec, numLayers int, manifest map[string]tensorMeta) (*Resolution, error) {
 	res := &Resolution{Family: spec.family, Resolved: make(map[string]string)}
 	reqs := append([]tensorReq(nil), spec.globals...)
 	if spec.perLayer != nil {
-		for l := 0; l < cfg.NumLayers; l++ {
+		for l := 0; l < numLayers; l++ {
 			reqs = append(reqs, spec.perLayer(l)...)
 		}
 	}

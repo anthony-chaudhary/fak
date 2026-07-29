@@ -44,72 +44,84 @@ func awqDotProductAsmAVX2(src *byte, scale float32, x *float32, nbytes int) floa
 //go:noescape
 func awqDotProductAsmAVX512(src *byte, scale float32, x *float32, nbytes int) float32
 
-// ---- AVX2 wrappers -----------------------------------------------------------
+// ---- shared block-then-tail drivers ------------------------------------------
+//
+// Both cores consume whole SIMD blocks only, so every row runs the same shape: the core
+// over the whole blocks, then the scalar reference over the sub-block remainder [full,nb).
+// The ISA contributes exactly two facts — the block width in packed bytes, and which core
+// runs — so the drivers below take the width and the wrappers pass it. The core is chosen
+// by a direct branch on that width, NOT a func value: the asm declarations are //go:noescape
+// and an indirect call would forfeit that, pushing the caller's dst/x buffers onto the heap
+// in a per-row loop.
 
-// awqDequantRowAVX2 dequantizes one AWQ row using the AVX2 core for the whole
-// 4-byte (8-weight) blocks and the scalar reference for the sub-block tail.
-// Bit-identical to awqDequantRowScalar.
+// AWQ SIMD block widths, in packed source bytes (2 weights per byte).
+const (
+	awqBlockBytesAVX2   = 4 // 4 bytes = 8 weights per AVX2 block
+	awqBlockBytesAVX512 = 8 // 8 bytes = 16 weights per AVX-512 block
+)
+
+// awqDequantRowSIMD dequantizes one AWQ row of n weights: whole blockBytes-wide blocks
+// through the matching asm core, the sub-block tail through awqDequantRowScalar. Every
+// element is the same int16(nibble)-8 → float32 → *scale in the same order as the scalar
+// reference (dequant is elementwise, no reduction), so the result is bit-identical to
+// awqDequantRowScalar for any n.
+func awqDequantRowSIMD(dst []float32, scale float32, src *byte, n, blockBytes int) {
+	nb := n / 2                    // packed bytes (2 weights per byte)
+	full := nb &^ (blockBytes - 1) // whole SIMD blocks
+	if full > 0 {
+		if blockBytes == awqBlockBytesAVX512 {
+			awqDequantRowAsmAVX512(&dst[0], scale, src, full)
+		} else {
+			awqDequantRowAsmAVX2(&dst[0], scale, src, full)
+		}
+	}
+	if full < nb {
+		srcSlice := unsafe.Slice(src, nb)
+		awqDequantRowScalar(dst[full*2:], scale, &srcSlice[full], (nb-full)*2)
+	}
+}
+
+// awqDotProductSIMD computes dot(scale*(code-8), x) over n weights: whole blockBytes-wide
+// blocks through the matching asm core, the sub-block tail through awqDotProductScalar.
+// The tail is ADDED to the core's accumulator only when it exists, rather than folding an
+// unconditional +0 in (a zero add is not a no-op on a negatively-signed zero). Cosine-parity
+// with awqDotProductScalar, not bit-identity: the core reduces across SIMD lanes.
+func awqDotProductSIMD(src *byte, scale float32, x *float32, n, blockBytes int) float32 {
+	nb := n / 2
+	full := nb &^ (blockBytes - 1)
+	var acc float32
+	if full > 0 {
+		if blockBytes == awqBlockBytesAVX512 {
+			acc = awqDotProductAsmAVX512(src, scale, x, full)
+		} else {
+			acc = awqDotProductAsmAVX2(src, scale, x, full)
+		}
+	}
+	if full < nb {
+		srcSlice := unsafe.Slice(src, nb)
+		xSlice := unsafe.Slice(x, n)
+		acc += awqDotProductScalar(&srcSlice[full], scale, &xSlice[full*2], (nb-full)*2)
+	}
+	return acc
+}
+
+// ---- per-ISA entry points ----------------------------------------------------
+//
+// These are what awq_amd64.go's CPUID/FAK_AWQ_KERNEL dispatch selects; each names its
+// block width and nothing else.
+
 func awqDequantRowAVX2(dst []float32, scale float32, src *byte, n int) {
-	nb := n / 2     // packed bytes (2 weights per byte)
-	full := nb &^ 3 // whole 4-byte AVX2 blocks
-	if full > 0 {
-		awqDequantRowAsmAVX2(&dst[0], scale, src, full)
-	}
-	if full < nb {
-		srcSlice := unsafe.Slice(src, nb)
-		awqDequantRowScalar(dst[full*2:], scale, &srcSlice[full], (nb-full)*2)
-	}
+	awqDequantRowSIMD(dst, scale, src, n, awqBlockBytesAVX2)
 }
 
-// awqDotProductAVX2 computes dot(scale*(code-8), x) using the AVX2 core for the
-// whole 4-byte (8-weight) blocks and the scalar reference for the tail.
-// Cosine-parity with awqDotProductScalar (lane-reduced sum).
-func awqDotProductAVX2(src *byte, scale float32, x *float32, n int) float32 {
-	nb := n / 2
-	full := nb &^ 3
-	var acc float32
-	if full > 0 {
-		acc = awqDotProductAsmAVX2(src, scale, x, full)
-	}
-	if full < nb {
-		srcSlice := unsafe.Slice(src, nb)
-		xSlice := unsafe.Slice(x, n)
-		acc += awqDotProductScalar(&srcSlice[full], scale, &xSlice[full*2], (nb-full)*2)
-	}
-	return acc
-}
-
-// ---- AVX-512 wrappers --------------------------------------------------------
-
-// awqDequantRowAVX512 dequantizes one AWQ row using the AVX-512 core for the
-// whole 8-byte (16-weight) blocks and the scalar reference for the tail.
-// Bit-identical to awqDequantRowScalar.
 func awqDequantRowAVX512(dst []float32, scale float32, src *byte, n int) {
-	nb := n / 2     // packed bytes
-	full := nb &^ 7 // whole 8-byte AVX-512 blocks
-	if full > 0 {
-		awqDequantRowAsmAVX512(&dst[0], scale, src, full)
-	}
-	if full < nb {
-		srcSlice := unsafe.Slice(src, nb)
-		awqDequantRowScalar(dst[full*2:], scale, &srcSlice[full], (nb-full)*2)
-	}
+	awqDequantRowSIMD(dst, scale, src, n, awqBlockBytesAVX512)
 }
 
-// awqDotProductAVX512 computes dot(scale*(code-8), x) using the AVX-512 core for
-// the whole 8-byte (16-weight) blocks and the scalar reference for the tail.
-// Cosine-parity with awqDotProductScalar (lane-reduced sum).
+func awqDotProductAVX2(src *byte, scale float32, x *float32, n int) float32 {
+	return awqDotProductSIMD(src, scale, x, n, awqBlockBytesAVX2)
+}
+
 func awqDotProductAVX512(src *byte, scale float32, x *float32, n int) float32 {
-	nb := n / 2
-	full := nb &^ 7
-	var acc float32
-	if full > 0 {
-		acc = awqDotProductAsmAVX512(src, scale, x, full)
-	}
-	if full < nb {
-		srcSlice := unsafe.Slice(src, nb)
-		xSlice := unsafe.Slice(x, n)
-		acc += awqDotProductScalar(&srcSlice[full], scale, &xSlice[full*2], (nb-full)*2)
-	}
-	return acc
+	return awqDotProductSIMD(src, scale, x, n, awqBlockBytesAVX512)
 }

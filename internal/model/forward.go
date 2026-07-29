@@ -53,7 +53,6 @@ func (m *Model) Forward(ids []int) *Activations {
 // externally-produced vision embeddings after admission checks.
 func (m *Model) forwardHiddenRows(x [][]float32) *Activations {
 	cfg := m.Cfg
-	H := cfg.HiddenSize
 	seq := len(x)
 	act := &Activations{Seq: seq, Hidden: [][]float32{flatten(x)}}
 	var glmDsaSharedTopK [][]int
@@ -78,16 +77,26 @@ func (m *Model) forwardHiddenRows(x [][]float32) *Activations {
 		act.Hidden = append(act.Hidden, flatten(x))
 	}
 
-	// final norm + tied LM head
+	m.fillSeqLogits(act, x)
+	return act
+}
+
+// fillSeqLogits writes act.Logits for every position of x: the final norm, the (tied) LM
+// head through the resident kernel, and the architecture's logit scale (Cohere/Gemma2;
+// a no-op for Llama). Forward and its parallel twins ForwardTP/ForwardEP must END here
+// IDENTICALLY — at ranks=1 each twin is held bit-identical to Forward, which is the
+// transitive HF-oracle gate — so the tail is one function rather than one copy per twin
+// that could drift a norm, a head name or a scale apart from the others.
+func (m *Model) fillSeqLogits(act *Activations, x [][]float32) {
+	cfg := m.Cfg
 	mat := residentKernel{m}
-	act.Logits = make([][]float32, seq)
-	for t := 0; t < seq; t++ {
+	act.Logits = make([][]float32, act.Seq)
+	for t := 0; t < act.Seq; t++ {
 		xf := m.finalNorm(x[t])
-		logits := mat.mul(m.headName(), mat.prep(xf), cfg.VocabSize, H)
-		logitScaleInPlace(logits, cfg) // Cohere/Gemma2; no-op for Llama
+		logits := mat.mul(m.headName(), mat.prep(xf), cfg.VocabSize, cfg.HiddenSize)
+		logitScaleInPlace(logits, cfg)
 		act.Logits[t] = logits
 	}
-	return act
 }
 
 // layer applies one decoder block to x in place. The default (Llama, PreNorm) is

@@ -103,6 +103,15 @@ func q8round(x float32) int8 {
 	return int8(t)
 }
 
+// newQ8Tensor allocates the zeroed code and scale storage for an [out,in] Q8_0 tensor
+// carrying nblk blocks per row. nblk is a parameter rather than in/qBlk because the Q4_K
+// extraction path re-blocks a row into eight sub-blocks per super-block; every other
+// producer passes in/qBlk. Codes start at zero, which is what a d==0 block encodes, so a
+// producer may skip writing zero blocks entirely.
+func newQ8Tensor(out, in, nblk int) *q8Tensor {
+	return &q8Tensor{out: out, in: in, nblk: nblk, q: make([]int8, out*in), d: make([]float32, out*nblk)}
+}
+
 // quantizeQ8 converts a row-major f32 weight matrix [out,in] to Q8_0. Each 32-wide block
 // gets d = maxabs/127 and codes q = round(w/d); a zero block (d==0) stays all-zero. Built
 // once at load (Model.Quantize), parallel across rows — quantization itself is not on the
@@ -116,33 +125,17 @@ func quantizeQ8(w []float32, out, in int) *q8Tensor {
 		panic("model: Q8_0 reduction dim not a multiple of 32")
 	}
 	nblk := in / qBlk
-	qt := &q8Tensor{out: out, in: in, nblk: nblk, q: make([]int8, out*in), d: make([]float32, out*nblk)}
+	qt := newQ8Tensor(out, in, nblk)
+	// Per-block math is quantizeRowQ8scalar's, verbatim: it IS the Q8_0 reference (amax,
+	// d = amax/127, q8round(x/d)) and the weight path must produce the same codes the
+	// activation path does or the dot products disagree. The one difference the shared
+	// kernel introduces is harmless here — it writes explicit zeros for a d==0 block where
+	// this loop used to `continue`, and qt.q is freshly allocated, so those codes are
+	// already zero. Deliberately the SCALAR reference, not the dispatching twin: this is
+	// load-time work, so there is nothing to buy by widening it.
 	parFor(out, numWorkers, func(lo, hi int) {
 		for o := lo; o < hi; o++ {
-			row := w[o*in : o*in+in]
-			for b := 0; b < nblk; b++ {
-				blk := row[b*qBlk : b*qBlk+qBlk]
-				var amax float32
-				for _, v := range blk {
-					a := v
-					if a < 0 {
-						a = -a
-					}
-					if a > amax {
-						amax = a
-					}
-				}
-				d := amax / 127
-				qt.d[o*nblk+b] = d
-				base := o*in + b*qBlk
-				if d == 0 {
-					continue // codes already zero
-				}
-				inv := 1.0 / d
-				for i := 0; i < qBlk; i++ {
-					qt.q[base+i] = q8round(blk[i] * inv)
-				}
-			}
+			quantizeRowQ8scalar(w[o*in:o*in+in], qt.q[o*in:(o+1)*in], qt.d[o*nblk:(o+1)*nblk], nblk)
 		}
 	})
 	q8PrepareAccelWeight(qt)

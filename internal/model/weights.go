@@ -475,15 +475,23 @@ func tensorShapeElems(name string, shape []int) (int, error) {
 	return n, nil
 }
 
-// tensor returns a zero-copy []float32 view of a named weight. The blob is
-// little-endian f32 and amd64 is little-endian, so the bytes reinterpret directly.
-func (m *Model) tensor(name string) []float32 {
-	meta, ok := m.manifest[name]
+// manifestTensor returns a zero-copy []float32 view of the named tensor inside raw, the
+// blob its manifest indexes. The blob is little-endian f32 and amd64 is little-endian, so
+// the bytes reinterpret directly. A missing name is a load-time contract break, not a
+// runtime condition, so it panics; owner prefixes the message ("" for the decoder's own
+// weights, "vision tower " for the encoder's) to keep the two crashes distinguishable.
+func manifestTensor(manifest map[string]tensorMeta, raw []byte, owner, name string) []float32 {
+	meta, ok := manifest[name]
 	if !ok {
-		panic("model: missing tensor " + name)
+		panic("model: " + owner + "missing tensor " + name)
 	}
 	n := meta.Nbytes / 4
-	return unsafe.Slice((*float32)(unsafe.Pointer(&m.raw[meta.Offset])), n)
+	return unsafe.Slice((*float32)(unsafe.Pointer(&raw[meta.Offset])), n)
+}
+
+// tensor returns a zero-copy []float32 view of a named weight.
+func (m *Model) tensor(name string) []float32 {
+	return manifestTensor(m.manifest, m.raw, "", name)
 }
 
 // has reports whether a tensor is present (e.g. q/k/v bias only exist on Qwen2).

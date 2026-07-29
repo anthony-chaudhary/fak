@@ -93,6 +93,29 @@ func (m *Model) forwardTPSupported() error {
 	return nil
 }
 
+// The per-layer tensors each TP lane slices raw f32 rows out of. Named sets rather than
+// literals at the refusal site: the attention lane shards q/k/v by head band and the FFN
+// lane shards gate/up/down by intermediate band, and which tensors define each band is the
+// fact worth naming.
+var (
+	tpAttnRequiredF32 = []string{"self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight"}
+	tpFFNRequiredF32  = []string{"mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight"}
+)
+
+// requireTPResidentF32 refuses unless every named per-layer tensor is present as raw f32
+// on layer l. The TP lanes shard by slicing raw weight rows, so a resident-quant tensor is
+// not merely slower there — it is a different layout the slicer cannot address at all. lever
+// names the work that would lift the restriction and is quoted verbatim in the refusal, so
+// each caller keeps its own "why not yet" without keeping its own copy of the scan.
+func (m *Model) requireTPResidentF32(l int, lever string, names ...string) error {
+	for _, name := range names {
+		if qualified := layerName(l, name); !m.has(qualified) {
+			return fmt.Errorf("model: ForwardTP requires f32-resident %s (%s)", qualified, lever)
+		}
+	}
+	return nil
+}
+
 // tpAttnBandPreProj computes the pre-output-projection attention output for the query-head
 // band [band.QLo,band.QHi) (mapped onto kv-head band [band.KVLo,band.KVHi)) over the whole
 // sequence of already-normalized inputs, applying EXACTLY the live attnSeq feature set —
@@ -112,10 +135,8 @@ func (m *Model) tpAttnBandPreProj(l int, xn [][]float32, rp rope, band attnHeadB
 	attnCap := float32(cfg.AttnSoftcap)
 	p := func(s string) string { return layerName(l, s) }
 
-	for _, name := range []string{"self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight"} {
-		if !m.has(p(name)) {
-			return nil, fmt.Errorf("model: ForwardTP requires f32-resident %s (quant-aware TP sharding is a later lever)", p(name))
-		}
+	if err := m.requireTPResidentF32(l, "quant-aware TP sharding is a later lever", tpAttnRequiredF32...); err != nil {
+		return nil, err
 	}
 	qW := m.tensor(p("self_attn.q_proj.weight"))
 	kW := m.tensor(p("self_attn.k_proj.weight"))
@@ -323,10 +344,8 @@ func (m *Model) tpFFNLayerPartials(l int, xn [][]float32, plan TPPlan) ([][][]fl
 		return nil, fmt.Errorf("model: tpFFNLayer plan.Dim = %d, want intermediate = %d", plan.Dim, I)
 	}
 	p := func(s string) string { return layerName(l, s) }
-	for _, name := range []string{"mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight"} {
-		if !m.has(p(name)) {
-			return nil, fmt.Errorf("model: ForwardTP requires f32-resident %s (dense SwiGLU TP only; quant/MoE TP are later levers)", p(name))
-		}
+	if err := m.requireTPResidentF32(l, "dense SwiGLU TP only; quant/MoE TP are later levers", tpFFNRequiredF32...); err != nil {
+		return nil, err
 	}
 	gateW := m.tensor(p("mlp.gate_proj.weight")) // [I,H]
 	upW := m.tensor(p("mlp.up_proj.weight"))     // [I,H]
@@ -442,6 +461,28 @@ func zeroRows(seq, width int) [][]float32 {
 	return out
 }
 
+// guardedSublayer adapts a fallible per-layer sub-layer to the plain [][]float32 closure
+// composeSeqSublayer takes, which has nowhere to put an error. The FIRST failure is latched
+// into *subErr and that call — and every later one in the same Forward — yields zero rows,
+// so the residual add never indexes a nil row before the caller checks the latch and
+// returns. Both parallel Forward twins need exactly this shape for every sharded sub-layer,
+// so the latch-and-fall-back protocol is written once: a second copy that returned nil on
+// the failing call instead of zero rows would panic in the residual rather than surface the
+// error, which is the whole reason the protocol exists.
+func guardedSublayer(subErr *error, seq, width int, run func([][]float32) ([][]float32, error)) func([][]float32) [][]float32 {
+	return func(xn [][]float32) [][]float32 {
+		if *subErr != nil {
+			return zeroRows(seq, width)
+		}
+		out, err := run(xn)
+		if err != nil {
+			*subErr = err
+			return zeroRows(seq, width)
+		}
+		return out
+	}
+}
+
 // ForwardTP is the tensor-parallel twin of Forward: a full cacheless prefill whose attention
 // and dense-SwiGLU FFN sub-layers are SHARDED across ranks (tpAttnLayer / tpFFNLayer) and
 // recombined through the Collective, with every live feature applied. It returns the same
@@ -480,28 +521,12 @@ func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 	var subErr error
 	for l := 0; l < cfg.NumLayers; l++ {
 		rp := newRopeForLayer(cfg, l, seq)
-		attnSub := func(xn [][]float32) [][]float32 {
-			if subErr != nil {
-				return zeroRows(seq, H)
-			}
-			out, err := m.tpAttnLayer(l, xn, rp, attnPlan, coll)
-			if err != nil {
-				subErr = err
-				return zeroRows(seq, H)
-			}
-			return out
-		}
-		mlpSub := func(xn [][]float32) [][]float32 {
-			if subErr != nil {
-				return zeroRows(seq, H)
-			}
-			out, err := m.tpFFNLayer(l, xn, ffnPlan, coll)
-			if err != nil {
-				subErr = err
-				return zeroRows(seq, H)
-			}
-			return out
-		}
+		attnSub := guardedSublayer(&subErr, seq, H, func(xn [][]float32) ([][]float32, error) {
+			return m.tpAttnLayer(l, xn, rp, attnPlan, coll)
+		})
+		mlpSub := guardedSublayer(&subErr, seq, H, func(xn [][]float32) ([][]float32, error) {
+			return m.tpFFNLayer(l, xn, ffnPlan, coll)
+		})
 		composeSeqSublayer(cfg.BlockTopology, x, m.attentionNorms(l), eps, cfg, attnSub)
 		composeSeqSublayer(cfg.BlockTopology, x, m.mlpNorms(l), eps, cfg, mlpSub)
 		if subErr != nil {
@@ -510,13 +535,6 @@ func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 		act.Hidden = append(act.Hidden, flatten(x))
 	}
 
-	mat := residentKernel{m}
-	act.Logits = make([][]float32, seq)
-	for t := 0; t < seq; t++ {
-		xf := m.finalNorm(x[t])
-		logits := mat.mul(m.headName(), mat.prep(xf), cfg.VocabSize, H)
-		logitScaleInPlace(logits, cfg)
-		act.Logits[t] = logits
-	}
+	m.fillSeqLogits(act, x)
 	return act, nil
 }
