@@ -61,7 +61,11 @@ the live-tree floor is zero debt, and the scorecard's signal lives in the *index
 the SOFT drift signals, exactly as intended. ``churn_concentration`` is the one
 HEAD-relative KPI (like ``code_quality``'s ``ship_integrity``): it reads recent git
 history, so its number moves as commits land even when the tree is byte-identical —
-pin ``--range`` for a stable read. It scores but can never anchor the baseline.
+pin ``--range`` for a stable read. It scores but can never anchor the baseline, and
+when that history read yields nothing (git failed to run, the range is unresolvable
+or empty) it fails **CLOSED** — score 0 + ``errored``, never a phantom-perfect 100.
+There is no operator flag that skips it, so an unreadable range is always a
+measurement failure, and "no measurement" must never read as "clean" (#3833).
 
 The growth-invariant KPI shape is the lesson this scorecard contributes back to the
 ``scorecard`` doctrine: score on an invariant rate, emit debt only on a fixed-
@@ -572,13 +576,28 @@ def kpi_churn_concentration(churn: dict[str, int], rng: str, available: bool) ->
     over `--range`): is a small file-set absorbing most change — a hot spot the
     fleet keeps re-touching? This reads git HISTORY, so its number moves as commits
     land even on a byte-identical tree (the `ship_integrity` precedent). It scores
-    but can NEVER anchor the baseline. Unavailable git -> fail-open (scored 100,
-    soft note), never a failure."""
+    but can NEVER anchor the baseline.
+
+    `available` is False ONLY when the history read itself produced nothing —
+    `gather_churn`'s `git log --numstat` failed to exec, exited non-zero (a bad or
+    unresolvable range), or the range is empty. There is NO operator flag that turns
+    this KPI off (`--range` only moves the window), and `collect` has already proven
+    the workspace IS a git repo before we get here, so this branch is always a
+    measurement FAILURE, never a deliberate opt-out. It therefore fails CLOSED:
+    score 0 + `errored`, never a phantom-perfect 100. Scoring 100 from a branch that
+    admits it could not measure is the "no detection reads as clean" fail-OPEN the
+    family law forbids (#3833; mirrors code_quality/observability `ship_integrity`).
+    Safe to fail closed here because `RATCHET_EXCLUDED_KPIS` already keeps this KPI
+    out of the hard control-pane grade ratchet — an unmeasurable range dents the
+    human headline index by this KPI's weight and cannot wedge the ratchet."""
     if not available:
-        return {"kpi": "churn_concentration", "group": "correction", "score": 100,
-                "pressure": 0,
-                "detail": f"churn unavailable (no git / empty range {rng})",
-                "defects": [], "soft": [f"churn UNMEASURED for {rng} (git unavailable)"]}
+        return {"kpi": "churn_concentration", "group": "correction", "score": 0,
+                "errored": True, "pressure": 0,
+                "detail": f"UNMEASURED (churn unavailable: no git history for range {rng})",
+                "defects": [],
+                "soft": [f"churn UNMEASURED for {rng} — the git history read returned "
+                         f"nothing; scored 0 (fail-closed, not a witnessed-flat churn) so "
+                         f"an unreadable range cannot inflate the index"]}
     g = gini([float(v) for v in churn.values()])
     span = max(1e-9, GINI_RED - GINI_GREEN)
     score = _clamp(100 - 100 * (g - GINI_GREEN) / span)

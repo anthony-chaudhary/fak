@@ -200,13 +200,57 @@ def test_kpi_worst_pkg_drift_soft() -> None:
 
 
 def test_kpi_churn_concentration_head_relative_soft() -> None:
-    unavailable = st.kpi_churn_concentration({}, "HEAD~40..HEAD", available=False)
-    assert unavailable["score"] == 100 and unavailable["defects"] == []
     flat = st.kpi_churn_concentration({"a": 5, "b": 5, "c": 5}, "R", available=True)
     assert flat["defects"] == []   # never debt — HEAD-relative advisory
     hot = st.kpi_churn_concentration({"a": 1, "b": 1, "c": 1, "d": 1, "hot": 200},
                                      "R", available=True)  # Gini ~0.78 > green
     assert hot["defects"] == [] and hot["soft"]
+
+
+def test_kpi_churn_concentration_unmeasurable_fails_closed() -> None:
+    """The anti-gaming law, pinned: an UNMEASURABLE churn range must not manufacture
+    a passing grade out of an absence of evidence. `available=False` is only ever a
+    measurement FAILURE here (git failed to run / the range is unresolvable or empty
+    — there is no operator flag that skips this KPI), so it fails CLOSED at 0 +
+    `errored`, mirroring code_quality/observability `ship_integrity` (#3833)."""
+    k = st.kpi_churn_concentration({}, "HEAD~40..HEAD", available=False)
+    assert k["score"] == 0, f"unmeasurable churn must not score high, got {k['score']}"
+    assert k.get("errored") is True    # flagged unmeasured, not silently 0
+    assert k["defects"] == []          # still SOFT — fail-closed is not HARD debt
+    assert k["soft"]                   # and it says so out loud
+    # the tooling_quality fail-open self-audit's own floor: a branch confessing a
+    # measurement failure must stay UNDER it, or it is fail-OPEN by definition.
+    assert k["score"] < 90
+
+
+def test_unmeasurable_churn_drags_the_index_down() -> None:
+    """The fail-closed remedy must actually COST something in the fold, otherwise it
+    is cosmetic: an unmeasurable churn read lowers the headline index by this KPI's
+    weight — while `ratchet_excluded_kpis` keeps it out of the hard ratchet grade, so
+    an unreadable range can never wedge the control pane."""
+    measured = st.build_payload(workspace="/x", kpis=_kpis())
+    unmeasured = st.build_payload(workspace="/x", kpis=_kpis(
+        churn_concentration={"score": 0, "soft": ["churn UNMEASURED"]}))
+    assert unmeasured["corpus"]["index"] < measured["corpus"]["index"]
+    # weight 0.06 of a 100-point drop, over the full weight denominator
+    assert unmeasured["corpus"]["index"] == 94.0
+    # ...but the HARD ratchet grade is untouched (churn is ratchet-excluded)
+    assert unmeasured["corpus"]["ratchet_score"] == measured["corpus"]["ratchet_score"]
+    # and fail-closing is not HARD debt: it must not flip `ok`
+    assert unmeasured["ok"] is True
+
+
+def test_no_failopen_branch_in_this_scorer() -> None:
+    """Scorer-of-scorers, pinned locally: no KPI branch in THIS module may return a
+    high score from a branch whose own text admits it could not measure. Reuses the
+    tooling_quality self-audit so the two can never drift apart."""
+    try:
+        import tooling_quality_scorecard as tq
+    except Exception:  # noqa: BLE001 — sibling absent (stand-alone ship)
+        return
+    src = Path(st.__file__).read_text(encoding="utf-8")
+    findings = tq.audit_failopen([("steerability_scorecard.py", src)])
+    assert findings == [], f"fail-open branch(es) reintroduced: {findings}"
 
 
 # --- the fold --------------------------------------------------------------
