@@ -103,6 +103,7 @@ type serveFlags struct {
 	vdso                         *bool
 	invalidation                 *string
 	requireKeyEnv                *string
+	keyPrincipal                 repeatedStringFlag
 	routeManifest                *string
 	routeAccounts                *string
 	ggufPath                     *string
@@ -167,6 +168,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.vdso = fs.Bool("vdso", true, "enable the vDSO dedup fast path")
 	sf.invalidation = fs.String("invalidation", "global", "vDSO tier-2 invalidation granularity for the live fleet: global|namespace|resource")
 	sf.requireKeyEnv = fs.String("require-key-env", "", "env var holding a bearer token to REQUIRE on every request (default: no auth)")
+	fs.Var(&sf.keyPrincipal, "key-principal", "bind an ADDITIONAL api key to an org/project PRINCIPAL as PRINCIPAL=ENV_VAR, so N corporate keys authenticate against one `fak serve` and every turn is attributed to the tenant that made it (#5332). The value names the env var HOLDING that tenant's key, never the key itself — the raw secret never lands in a unit file, a plist, or shell history, and gateway.New hashes it to a SHA-256 digest and drops the plaintext at construction. Repeat for N tenants (--key-principal acme=ACME_KEY --key-principal beta=BETA_KEY); binding one principal to several env vars is key ROTATION and is allowed. A matching inbound key (x-api-key or Authorization: Bearer) both AUTHENTICATES the caller and stamps its principal onto the access log and /v1/fak/events, joinable by X-Trace-Id. ADDITIVE to --require-key-env: that single bearer still authenticates the anonymous single-tenant caller and an empty keyset leaves that path byte-for-byte unchanged. Fails startup LOUD on a malformed spec, an unset/empty env var, or two tenants sharing a key — a keyset that silently forgot a binding looks armed and is not.")
 	sf.routeManifest = fs.String("route-manifest", "", "model-routing policy to install: each fak_syscall call is classified into a modelroute.Subject and a single-model (PICK) plan binds abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the real route (#601). Empty (default) leaves Engine unset → the kernel default engine, byte-for-byte the pre-routing behavior. A malformed manifest fails startup loud (a mis-routed model is a security boundary, never a silent default). The installed file is HOT-RELOADED: an edit is picked up without a restart and swapped atomically (a request classifies against the whole old or whole new policy, never a torn read); a malformed edit is rejected and the last-good policy stays installed (#842).")
 	sf.routeAccounts = fs.String("route-accounts", "", "model-ACCOUNT roster (fak-accounts/v1) to install ALONGSIDE --route-manifest (#2528): after the manifest PICKs an abstract model id, the roster BINDS it to a concrete provider account + upstream wire model, and the account-resolved EngineRoute (openai:acct/model, local:acct/model) — not the bare plan-member string — is written to abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the ACCOUNT-resolved route and an ensemble member each binds independently. A route to a provider with no registered adapter fails LOUD at dispatch (no silent fallback to the default engine). Credentials are env-var NAMES in the roster, never secrets. Empty (default) leaves the plan-member string as the route, byte-for-byte the pre-#2528 behavior. A malformed roster fails startup loud. Preflight it no-spend first with `fak api-host acceptance --from-model-accounts FILE`.")
 	sf.ggufPath = fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
@@ -281,6 +283,26 @@ func warnIfNotFakWorkspace(stderr io.Writer) {
 		wd)
 }
 
+// serveKeyPrincipals resolves the repeated `--key-principal PRINCIPAL=ENV_VAR` specs into
+// the gateway.Config.KeyPrincipals map (#5332), reporting a refusal on stderr rather than
+// returning it — the same (value, ok) shape resolveRequiredKey uses, so both auth flags
+// fail closed identically. ok=false means the caller MUST NOT boot: a gateway serving with
+// a keyset the operator believes is armed, but which never resolved, does not merely lose
+// attribution — with no keyset matched, principalFor falls through to the CALLER-supplied
+// X-Fak-Principal header, and that value is what the account allowlist adjudicates. So a
+// half-resolved keyset is a tenant-isolation hole, not a cosmetic one.
+//
+// No specs is not a failure: it returns a nil map, which gateway.New turns into a nil
+// keyset, leaving the --require-key-env single-bearer path byte-for-byte unchanged.
+func serveKeyPrincipals(specs []string, lookupEnv func(string) string, stderr io.Writer) (map[string]string, bool) {
+	keyPrincipals, err := gateway.ParseKeyPrincipals(specs, lookupEnv)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak serve: --key-principal %v — refusing to start a gateway whose tenant keyset did not fully resolve (an unresolved binding leaves that tenant attributed by the caller-supplied X-Fak-Principal header instead of by its key)\n", err)
+		return nil, false
+	}
+	return keyPrincipals, true
+}
+
 // buildGateway loads the optional model-routing policy, constructs the gateway
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
@@ -318,6 +340,18 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		fmt.Printf("fak: model-account roster loaded from %s\n", *sf.routeAccounts)
 	}
 
+	// Resolve the optional multi-tenant KEYSET (#5332). Off by default: no --key-principal
+	// leaves keyPrincipals nil, so gateway.New builds a nil *keyset and the RequireKey-only
+	// auth path stays byte-for-byte what it was. A malformed spec, an unset/empty env var, or
+	// two tenants sharing one key fails LOUD here — the same refusal --require-key-env makes
+	// in resolveSessionPlane, and for the stronger reason: without a matched keyset the
+	// gateway attributes the turn from the caller-asserted X-Fak-Principal header, so a
+	// silently-forgotten binding does not just mislabel a tenant, it lets one assert another.
+	keyPrincipals, keysetOK := serveKeyPrincipals(sf.keyPrincipal.Values(), os.Getenv, os.Stderr)
+	if !keysetOK {
+		os.Exit(2)
+	}
+
 	srv, err := gateway.New(gateway.Config{
 		EngineID:                     *sf.engineID,
 		Model:                        *sf.model,
@@ -338,6 +372,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		Metal:                        rt.useMetal,
 		ExpertParallelRanks:          *sf.expertParallel,
 		RequireKey:                   rt.requireKey,
+		KeyPrincipals:                keyPrincipals,
 		VDSO:                         *sf.vdso,
 		Invalidation:                 *sf.invalidation,
 		Version:                      appversion.Current(),
