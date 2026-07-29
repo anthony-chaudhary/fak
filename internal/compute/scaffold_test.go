@@ -8,15 +8,18 @@ package compute
 //     Lookup*Arch/*Token normalizer pair, and a Known*Arches enumerator — the pattern
 //     ROCM-C002-NOTES.md / TPU-C004-NOTES.md / OPENVINO-C006-NOTES.md all document.
 //  2. The generated taxonomy ACTUALLY BUILDS AND PASSES as real Go: the arch + arch_test files
-//     are staged into this package under a disposable, collision-proof name, `go test -run
-//     <Name>Arch` is run as a real subprocess, and the staged files are removed in a deferred
-//     cleanup — so the acceptance bullet ("go build ./... clean, go test -run <Name>Arch green
-//     immediately after generation") is witnessed, not asserted.
+//     are handed to the toolchain through a build overlay under a disposable, collision-proof
+//     name, and `go build`/`go test -run <Name>Arch` are run as real subprocesses against it — so
+//     the acceptance bullet ("go build ./... clean, go test -run <Name>Arch green immediately
+//     after generation") is witnessed, not asserted. The overlay is what keeps that witness from
+//     costing anything: the generated file is never written into the package directory, so a
+//     module-wide build racing this test in the same checkout can never observe it half-there.
 //
 // A throwaway name (not "mychip") avoids colliding with anything a human might type by hand
 // while trying the tool interactively in this same checkout.
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -161,23 +164,15 @@ func TestScaffoldGeneratedTaxonomyBuildsAndTestsGreen(t *testing.T) {
 		t.Fatalf("Getwd: %v", err)
 	}
 
-	var staged []string
-	cleanup := func() {
-		for _, p := range staged {
-			os.Remove(p)
-		}
-	}
-	defer cleanup()
-
-	// Stale-artifact sweep. The deferred cleanup above only runs on a normal return: a KILLED run
-	// (CI timeout, operator ^C, harness kill) skips it and leaves zzscaffbuildgolden_*.go on disk.
-	// The staging loop below then refuses over the orphan, so one killed run used to red this test
-	// FOREVER on that tree — and in a shared multi-session checkout that reds internal/compute for
-	// every other session until somebody hand-diagnoses and removes the files. `zzscaffbuildgolden`
-	// is this test's RESERVED disposable name (the zz-prefix exists precisely so no real backend
-	// takes it), so a file bearing it is by construction our own leftover: sweep it. The refusal
-	// intent is preserved where it earns its keep — the sweep is scoped to exactly the three
-	// reserved names, and an orphan we cannot remove still fails loudly rather than silently.
+	// Stale-artifact sweep. Earlier revisions of this test STAGED the generated files into this
+	// package directory, and a KILLED run (CI timeout, operator ^C, harness kill) skipped the
+	// cleanup and left zzscaffbuildgolden_*.go on disk — reding internal/compute for every other
+	// session on a shared checkout until somebody hand-diagnosed it. The overlay below no longer
+	// writes here at all, but a leftover from one of those older runs is still real and still
+	// poisons the package (and would now be shadowed by the overlay, hiding itself).
+	// `zzscaffbuildgolden` is this test's RESERVED disposable name (the zz-prefix exists precisely
+	// so no real backend takes it), so a file bearing it is by construction such a leftover: sweep
+	// it. An orphan we cannot remove still fails loudly rather than silently.
 	for _, rel := range []string{name + "_arch.go", name + "_arch_test.go", name + "_backend.go"} {
 		full := filepath.Join(wd, rel)
 		if _, statErr := os.Stat(full); statErr != nil {
@@ -189,18 +184,37 @@ func TestScaffoldGeneratedTaxonomyBuildsAndTestsGreen(t *testing.T) {
 		t.Logf("removed stale scaffold artifact %s left by a killed earlier run", full)
 	}
 
+	// The generated sources reach the toolchain through a build OVERLAY rather than being written
+	// into this package directory. Staging them on disk raced every module-wide `go build` running
+	// alongside this test — seven test files in this module shell out to one, and cmd/fak's doctor
+	// self-check caught the window on the release gate: the build saw the file in the directory
+	// listing and then failed to open it after cleanup removed it, reding ci-fast with
+	//   open internal/compute/zzscaffbuildgolden_arch.go: no such file or directory
+	// on a tree where nothing was actually wrong. An overlay keeps the witness exactly as strong —
+	// the real go toolchain still compiles the real package with the generated source in it — while
+	// the shared tree never observes the file at all, so there is no window left to race.
+	overlayDir := t.TempDir()
+	replace := make(map[string]string)
 	for _, f := range files {
 		if f.RelPath != name+"_arch.go" && f.RelPath != name+"_arch_test.go" && f.RelPath != name+"_backend.go" {
-			continue // NOTES.md is not Go source; skip staging it
+			continue // NOTES.md is not Go source; there is nothing to compile
 		}
-		full := filepath.Join(wd, f.RelPath)
-		if _, statErr := os.Stat(full); statErr == nil {
-			t.Fatalf("refusing to stage over existing file %s (name collision — pick a different golden name)", full)
+		backing := filepath.Join(overlayDir, f.RelPath)
+		if err := os.WriteFile(backing, []byte(f.Content), 0o644); err != nil {
+			t.Fatalf("write overlay source %s: %v", backing, err)
 		}
-		if err := os.WriteFile(full, []byte(f.Content), 0o644); err != nil {
-			t.Fatalf("stage %s: %v", full, err)
-		}
-		staged = append(staged, full)
+		replace[filepath.Join(wd, f.RelPath)] = backing
+	}
+	if len(replace) == 0 {
+		t.Fatal("Generate produced no Go sources to overlay")
+	}
+	overlay, err := json.Marshal(struct{ Replace map[string]string }{Replace: replace})
+	if err != nil {
+		t.Fatalf("marshal overlay manifest: %v", err)
+	}
+	overlayPath := filepath.Join(overlayDir, "overlay.json")
+	if err := os.WriteFile(overlayPath, overlay, 0o644); err != nil {
+		t.Fatalf("write overlay manifest: %v", err)
 	}
 
 	repoRoot := findRepoRootForTest(t, wd)
@@ -209,15 +223,15 @@ func TestScaffoldGeneratedTaxonomyBuildsAndTestsGreen(t *testing.T) {
 	// present. Scoped to internal/... rather than the whole repo (./...) so this golden test's
 	// verdict depends only on scaffold.go's own output, not on the health of unrelated
 	// concurrently-edited packages elsewhere in this shared tree (e.g. cmd/**).
-	buildCmd := exec.Command("go", "build", "./internal/...")
+	buildCmd := exec.Command("go", "build", "-overlay", overlayPath, "./internal/...")
 	buildCmd.Dir = repoRoot
 	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build ./internal/... failed with generated scaffold staged:\n%s", out)
+		t.Fatalf("go build ./internal/... failed with generated scaffold overlaid:\n%s", out)
 	}
 
 	// (b) go test -run <Name>Arch must be green immediately after generation (the taxonomy
 	// half only — no build tag needed).
-	testCmd := exec.Command("go", "test", "./internal/compute/", "-run", exp+"Arch", "-v")
+	testCmd := exec.Command("go", "test", "-overlay", overlayPath, "./internal/compute/", "-run", exp+"Arch", "-v")
 	testCmd.Dir = repoRoot
 	out, err := testCmd.CombinedOutput()
 	if err != nil {
