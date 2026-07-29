@@ -508,26 +508,17 @@ def summarize_claude_transcript_shape(path: Path) -> dict[str, Any]:
     return {"status": "MISSING"}
 
 
-def workspace_stop_failure_audit(
+def read_stop_failure_markers(
+    stop_dir: Path,
     repo_root: Path,
     *,
-    since_days: int,
-    limit: int = 20,
-    codex_thread_ids: set[str] | None = None,
-) -> dict[str, Any]:
-    stop_dir = repo_root / ".dos" / "stop-failures"
-    if not stop_dir.exists():
-        return {
-            "status": "MISSING",
-            "path": ".dos/stop-failures",
-            "reason": "no workspace stop-failure directory",
-        }
-
-    codex_threads_lower = {tid.lower() for tid in (codex_thread_ids or set())}
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=max(1, since_days))
+    now: datetime,
+    cutoff: datetime,
+    codex_threads_lower: set[str],
+    user_home: Path,
+) -> tuple[list[dict[str, Any]], dict[str, Path], int]:
+    """Read each in-window StopFailure marker into one entry, tagging its origin, any progress recorded after the marker, and the action that would settle it."""
     active_recent_seconds = ACTIVE_STOP_FAILURE_RECENT_HOURS * 3600
-    user_home = Path(os.environ.get("FLEET_USER_HOME") or str(Path.home()))
     entries: list[dict[str, Any]] = []
     transcript_paths: dict[str, Path] = {}
     malformed = 0
@@ -589,6 +580,11 @@ def workspace_stop_failure_audit(
         entries.append(entry)
 
     entries.sort(key=lambda item: str(item.get("mtime") or ""), reverse=True)
+    return entries, transcript_paths, malformed
+
+
+def partition_stop_failure_entries(entries: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Split markers into the categories the verdict is built from: nonzero totals, active consecutive runs, currently-live runs, stale runs, healed markers, and markers with later progress."""
     nonzero = [entry for entry in entries if int(entry.get("total") or 0) > 0]
     progress_after_marker = [
         entry for entry in entries
@@ -601,6 +597,25 @@ def workspace_stop_failure_audit(
     recent_active = [entry for entry in active if bool(entry.get("active_recent"))]
     stale_active = [entry for entry in active if not bool(entry.get("active_recent"))]
     healed_nonzero = [entry for entry in nonzero if int(entry.get("consecutive") or 0) == 0]
+    return {
+        "entries": entries,
+        "nonzero": nonzero,
+        "progress_after_marker": progress_after_marker,
+        "active": active,
+        "recent_active": recent_active,
+        "stale_active": stale_active,
+        "healed_nonzero": healed_nonzero,
+    }
+
+
+def rank_stop_failure_entries(buckets: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    """Order each marker category worst-first so the report's top_* lists are stable and the loudest sessions surface."""
+    nonzero = buckets["nonzero"]
+    active = buckets["active"]
+    recent_active = buckets["recent_active"]
+    stale_active = buckets["stale_active"]
+    progress_after_marker = buckets["progress_after_marker"]
+
     top_nonzero = sorted(
         nonzero,
         key=lambda item: (
@@ -647,13 +662,28 @@ def workspace_stop_failure_audit(
         ),
         reverse=True,
     )
+    return {
+        "top_nonzero": top_nonzero,
+        "top_active": top_active,
+        "top_recent_active": top_recent_active,
+        "top_stale_active": top_stale_active,
+        "top_progress_after_marker": top_progress_after_marker,
+    }
+
+
+def attach_transcript_summaries(
+    ranked: dict[str, list[dict[str, Any]]],
+    transcript_paths: dict[str, Path],
+    limit: int,
+) -> tuple[int, Counter[str]]:
+    """Summarize the Claude transcript shape for every top-ranked marker that has one, recording the sanitized summary on the entry itself."""
     summary_targets: dict[str, dict[str, Any]] = {}
     for entry in (
-        top_nonzero[: max(1, limit)]
-        + top_active[: max(1, limit)]
-        + top_recent_active[: max(1, limit)]
-        + top_stale_active[: max(1, limit)]
-        + top_progress_after_marker[: max(1, limit)]
+        ranked["top_nonzero"][: max(1, limit)]
+        + ranked["top_active"][: max(1, limit)]
+        + ranked["top_recent_active"][: max(1, limit)]
+        + ranked["top_stale_active"][: max(1, limit)]
+        + ranked["top_progress_after_marker"][: max(1, limit)]
     ):
         session_id = str(entry.get("session_id") or "")
         if session_id:
@@ -670,29 +700,52 @@ def workspace_stop_failure_audit(
             summarized_transcripts += 1
             for tag in summary.get("evidence_tags") or []:
                 transcript_evidence_tags[str(tag)] += 1
-    codex_entries = [entry for entry in entries if stop_failure_provenance(entry) == "codex"]
-    claude_entries = [entry for entry in entries if stop_failure_provenance(entry) == "claude"]
-    other_entries = [entry for entry in entries if stop_failure_provenance(entry) == "other"]
-    codex_active = [entry for entry in active if stop_failure_provenance(entry) == "codex"]
-    claude_active = [entry for entry in active if stop_failure_provenance(entry) == "claude"]
-    codex_recent_active = [entry for entry in recent_active if stop_failure_provenance(entry) == "codex"]
-    claude_recent_active = [entry for entry in recent_active if stop_failure_provenance(entry) == "claude"]
-    codex_stale_active = [entry for entry in stale_active if stop_failure_provenance(entry) == "codex"]
-    claude_stale_active = [entry for entry in stale_active if stop_failure_provenance(entry) == "claude"]
-    codex_progress_after_marker = [entry for entry in progress_after_marker if stop_failure_provenance(entry) == "codex"]
-    claude_progress_after_marker = [entry for entry in progress_after_marker if stop_failure_provenance(entry) == "claude"]
-    codex_total_failures = sum(int(entry.get("total") or 0) for entry in codex_entries)
-    codex_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in codex_active)
-    codex_current_live_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in codex_recent_active)
-    claude_total_failures = sum(int(entry.get("total") or 0) for entry in claude_entries)
-    claude_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in claude_active)
-    claude_current_live_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in claude_recent_active)
-    total_failures = sum(int(entry.get("total") or 0) for entry in entries)
-    max_consecutive = max((int(entry.get("consecutive") or 0) for entry in entries), default=0)
-    active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in active)
-    recent_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in recent_active)
-    stale_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in stale_active)
-    progress_after_marker_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in progress_after_marker)
+    return summarized_transcripts, transcript_evidence_tags
+
+
+def stop_failure_origin_rollup(
+    provenance: str,
+    buckets: dict[str, list[dict[str, Any]]],
+    *,
+    scope: str = "",
+) -> dict[str, Any]:
+    """Counts and totals for one marker provenance, kept apart so a Claude-origin marker never lands in the Codex health verdict."""
+    def of(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [entry for entry in rows if stop_failure_provenance(entry) == provenance]
+
+    own = of(buckets["entries"])
+    own_active = of(buckets["active"])
+    own_recent_active = of(buckets["recent_active"])
+    own_stale_active = of(buckets["stale_active"])
+    own_progress_after_marker = of(buckets["progress_after_marker"])
+    current_live_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in own_recent_active)
+
+    rollup: dict[str, Any] = {}
+    if scope:
+        rollup["scope"] = scope
+    rollup.update({
+        "markers": len(own),
+        "total_failures": sum(int(entry.get("total") or 0) for entry in own),
+        "active_consecutive_markers": len(own_active),
+        "active_consecutive_total": sum(int(entry.get("consecutive") or 0) for entry in own_active),
+        "current_live_consecutive_markers": len(own_recent_active),
+        "current_live_consecutive_total": current_live_consecutive_total,
+        "recent_review_markers": len(own_recent_active),
+        "recent_review_consecutive_total": current_live_consecutive_total,
+        "stale_active_consecutive_markers": len(own_stale_active),
+        "stale_active_consecutive_total": sum(int(entry.get("consecutive") or 0) for entry in own_stale_active),
+        "progress_after_marker_markers": len(own_progress_after_marker),
+        "progress_after_marker_consecutive_total": sum(int(entry.get("consecutive") or 0) for entry in own_progress_after_marker),
+        "origin_counts": stop_failure_origin_counts(own),
+        "active_origin_counts": stop_failure_origin_counts(own_active),
+        "current_live_origin_counts": stop_failure_origin_counts(own_recent_active),
+        "progress_after_marker_origin_counts": stop_failure_origin_counts(own_progress_after_marker),
+    })
+    return rollup
+
+
+def stop_failure_day_buckets(entries: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Roll markers up per calendar day so marker pressure can be read as a trend instead of a single total."""
     by_day: dict[str, dict[str, int]] = {}
     for entry in entries:
         day = str(entry.get("mtime") or "")[:10] or "unknown"
@@ -736,10 +789,16 @@ def workspace_stop_failure_audit(
         if consecutive and not entry.get("progress_after_marker"):
             bucket["active_consecutive_total"] += consecutive
         bucket["max_consecutive"] = max(bucket["max_consecutive"], consecutive)
-    active_ids = {str(entry.get("session_id") or "") for entry in active}
-    current_live_ids = {str(entry.get("session_id") or "") for entry in recent_active}
-    progress_after_marker_ids = {str(entry.get("session_id") or "") for entry in progress_after_marker}
-    stale_active_ids = {str(entry.get("session_id") or "") for entry in stale_active}
+    return by_day
+
+
+def stop_failure_session_settlement(buckets: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
+    """Per-session settlement ledger: what state each session's marker is in and which action would clear it."""
+    entries = buckets["entries"]
+    active_ids = {str(entry.get("session_id") or "") for entry in buckets["active"]}
+    current_live_ids = {str(entry.get("session_id") or "") for entry in buckets["recent_active"]}
+    progress_after_marker_ids = {str(entry.get("session_id") or "") for entry in buckets["progress_after_marker"]}
+    stale_active_ids = {str(entry.get("session_id") or "") for entry in buckets["stale_active"]}
     session_settlement: dict[str, dict[str, Any]] = {}
     for entry in entries:
         session_id = str(entry.get("session_id") or "")
@@ -760,6 +819,62 @@ def workspace_stop_failure_audit(
             "latest_activity": entry.get("latest_activity"),
             "mtime": entry.get("mtime"),
         }
+    return session_settlement
+
+
+def workspace_stop_failure_audit(
+    repo_root: Path,
+    *,
+    since_days: int,
+    limit: int = 20,
+    codex_thread_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    stop_dir = repo_root / ".dos" / "stop-failures"
+    if not stop_dir.exists():
+        return {
+            "status": "MISSING",
+            "path": ".dos/stop-failures",
+            "reason": "no workspace stop-failure directory",
+        }
+
+    now = datetime.now(timezone.utc)
+    entries, transcript_paths, malformed = read_stop_failure_markers(
+        stop_dir,
+        repo_root,
+        now=now,
+        cutoff=now - timedelta(days=max(1, since_days)),
+        codex_threads_lower={tid.lower() for tid in (codex_thread_ids or set())},
+        user_home=Path(os.environ.get("FLEET_USER_HOME") or str(Path.home())),
+    )
+
+    buckets = partition_stop_failure_entries(entries)
+    nonzero = buckets["nonzero"]
+    active = buckets["active"]
+    recent_active = buckets["recent_active"]
+    stale_active = buckets["stale_active"]
+    progress_after_marker = buckets["progress_after_marker"]
+    healed_nonzero = buckets["healed_nonzero"]
+
+    ranked = rank_stop_failure_entries(buckets)
+    summarized_transcripts, transcript_evidence_tags = attach_transcript_summaries(ranked, transcript_paths, limit)
+
+    codex_origin = stop_failure_origin_rollup("codex", buckets)
+    claude_origin = stop_failure_origin_rollup(
+        "claude",
+        buckets,
+        scope="Claude-origin StopFailure markers (advisory only; NOT counted toward Codex health)",
+    )
+    other_entries = [entry for entry in entries if stop_failure_provenance(entry) == "other"]
+    codex_current_live_consecutive_total = codex_origin["current_live_consecutive_total"]
+    claude_total_failures = claude_origin["total_failures"]
+
+    total_failures = sum(int(entry.get("total") or 0) for entry in entries)
+    max_consecutive = max((int(entry.get("consecutive") or 0) for entry in entries), default=0)
+    active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in active)
+    recent_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in recent_active)
+    stale_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in stale_active)
+    progress_after_marker_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in progress_after_marker)
+
     return {
         "status": "WARN" if codex_current_live_consecutive_total else "PASS",
         "codex_origin_status": "WARN" if codex_current_live_consecutive_total else "PASS",
@@ -773,43 +888,8 @@ def workspace_stop_failure_audit(
         ),
         "provenance_counts": stop_failure_provenance_counts(entries),
         "active_provenance_counts": stop_failure_provenance_counts(active),
-        "codex_origin": {
-            "markers": len(codex_entries),
-            "total_failures": codex_total_failures,
-            "active_consecutive_markers": len(codex_active),
-            "active_consecutive_total": codex_active_consecutive_total,
-            "current_live_consecutive_markers": len(codex_recent_active),
-            "current_live_consecutive_total": codex_current_live_consecutive_total,
-            "recent_review_markers": len(codex_recent_active),
-            "recent_review_consecutive_total": codex_current_live_consecutive_total,
-            "stale_active_consecutive_markers": len(codex_stale_active),
-            "stale_active_consecutive_total": sum(int(entry.get("consecutive") or 0) for entry in codex_stale_active),
-            "progress_after_marker_markers": len(codex_progress_after_marker),
-            "progress_after_marker_consecutive_total": sum(int(entry.get("consecutive") or 0) for entry in codex_progress_after_marker),
-            "origin_counts": stop_failure_origin_counts(codex_entries),
-            "active_origin_counts": stop_failure_origin_counts(codex_active),
-            "current_live_origin_counts": stop_failure_origin_counts(codex_recent_active),
-            "progress_after_marker_origin_counts": stop_failure_origin_counts(codex_progress_after_marker),
-        },
-        "claude_origin": {
-            "scope": "Claude-origin StopFailure markers (advisory only; NOT counted toward Codex health)",
-            "markers": len(claude_entries),
-            "total_failures": claude_total_failures,
-            "active_consecutive_markers": len(claude_active),
-            "active_consecutive_total": claude_active_consecutive_total,
-            "current_live_consecutive_markers": len(claude_recent_active),
-            "current_live_consecutive_total": claude_current_live_consecutive_total,
-            "recent_review_markers": len(claude_recent_active),
-            "recent_review_consecutive_total": claude_current_live_consecutive_total,
-            "stale_active_consecutive_markers": len(claude_stale_active),
-            "stale_active_consecutive_total": sum(int(entry.get("consecutive") or 0) for entry in claude_stale_active),
-            "progress_after_marker_markers": len(claude_progress_after_marker),
-            "progress_after_marker_consecutive_total": sum(int(entry.get("consecutive") or 0) for entry in claude_progress_after_marker),
-            "origin_counts": stop_failure_origin_counts(claude_entries),
-            "active_origin_counts": stop_failure_origin_counts(claude_active),
-            "current_live_origin_counts": stop_failure_origin_counts(claude_recent_active),
-            "progress_after_marker_origin_counts": stop_failure_origin_counts(claude_progress_after_marker),
-        },
+        "codex_origin": codex_origin,
+        "claude_origin": claude_origin,
         "other_origin": {
             "scope": "StopFailure markers with neither a Codex thread nor a Claude transcript (advisory only)",
             "markers": len(other_entries),
@@ -854,14 +934,14 @@ def workspace_stop_failure_audit(
         "total_failures": total_failures,
         "max_consecutive": max_consecutive,
         "malformed_markers": malformed,
-        "by_day": {day: by_day[day] for day in sorted(by_day)},
-        "session_settlement": session_settlement,
+        "by_day": {day: bucket for day, bucket in sorted(stop_failure_day_buckets(entries).items())},
+        "session_settlement": stop_failure_session_settlement(buckets),
         "recent": entries[: max(1, limit)],
-        "top_nonzero": top_nonzero[: max(1, limit)],
-        "top_active": top_active[: max(1, limit)],
-        "top_recent_active": top_recent_active[: max(1, limit)],
-        "top_stale_active": top_stale_active[: max(1, limit)],
-        "top_progress_after_marker": top_progress_after_marker[: max(1, limit)],
+        "top_nonzero": ranked["top_nonzero"][: max(1, limit)],
+        "top_active": ranked["top_active"][: max(1, limit)],
+        "top_recent_active": ranked["top_recent_active"][: max(1, limit)],
+        "top_stale_active": ranked["top_stale_active"][: max(1, limit)],
+        "top_progress_after_marker": ranked["top_progress_after_marker"][: max(1, limit)],
         "settlement_plan": stop_failure_settlement_plan(entries, limit=max(5, limit)),
         "summarized_transcripts": summarized_transcripts,
         "transcript_evidence_tag_counts": limited_counter(transcript_evidence_tags),
@@ -1794,6 +1874,216 @@ def actionable_gate(
     }
 
 
+def audit_sessions(
+    witness: Any,
+    repo_root: Path,
+    streams: list[tuple[str, Path]],
+    codex_threads: dict[str, Path],
+    workspace_stop: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Audit each correlated Codex/DOS stream, splitting its StopFailure total into current-live blockage versus already-settled debt."""
+    args = argparse.Namespace(repo_root=repo_root)
+    sessions: list[dict[str, Any]] = []
+    session_settlement = workspace_stop.get("session_settlement") if isinstance(workspace_stop.get("session_settlement"), dict) else {}
+    for thread_id, _path in streams:
+        audit = witness.dos_session_audit(args, thread_id)
+        session = compact_session(audit, codex_threads[thread_id])
+        settlement = session_settlement.get(thread_id)
+        if isinstance(settlement, dict):
+            session["stop_failure_settlement"] = settlement
+            if session["stop_failures_total"] and not bool(settlement.get("codex_current_live")):
+                session["stop_failures_live_blocker_total"] = 0
+                session["stop_failures_settlement_debt_total"] = session["stop_failures_total"]
+                if (
+                    session.get("status") == "WARN"
+                    and not session.get("delegate_count")
+                    and not session.get("unknown_tree_admission_warnings")
+                    and not session.get("stop_blocks")
+                ):
+                    session["status"] = "PASS"
+                    session["status_note"] = "StopFailure marker is settlement debt, not a current-live blocker"
+            else:
+                session["stop_failures_live_blocker_total"] = session["stop_failures_total"]
+                session["stop_failures_settlement_debt_total"] = 0
+        else:
+            session["stop_failures_live_blocker_total"] = session["stop_failures_total"]
+            session["stop_failures_settlement_debt_total"] = 0
+        sessions.append(session)
+    return sessions
+
+
+def workload_recommendations(
+    sessions: list[dict[str, Any]],
+    post_repair: dict[str, Any],
+    *,
+    total_steps: int,
+    bash_steps: int,
+    unknown_rate: float | None,
+    unknown_threshold: float,
+    delegate_total: int,
+    max_delegates: int | None,
+) -> list[str]:
+    """Advice about the audited sessions' own shape: shell dominance, unknown-tree admission rate, and native hook delegates."""
+    recommendations: list[str] = []
+    if sessions and total_steps and bash_steps / total_steps > 0.8:
+        recommendations.append("recent Codex DOS streams are Bash-dominated; prefer path-visible tools or narrower shell commands")
+    if unknown_rate is not None and unknown_rate > unknown_threshold:
+        recommendations.append("unknown-tree admission warning rate exceeds the transfer-playbook threshold")
+    if delegate_total and (max_delegates is None or delegate_total > max_delegates):
+        if post_repair.get("observations") and not post_repair.get("delegate_count"):
+            recommendations.append("recent-window delegate count includes pre-repair history; post-repair Codex delegates are zero")
+        else:
+            recommendations.append("native DOS hook delegates are present; inspect fallback reasons upstream")
+    return recommendations
+
+
+def hook_and_shell_recommendations(
+    hook_fast_path: dict[str, Any],
+    post_repair: dict[str, Any],
+    git_gate: dict[str, Any],
+    command_shapes: dict[str, Any],
+    *,
+    target: str,
+) -> list[str]:
+    """Advice about the Codex hook fast path and how opaque the shell commands it observed still are."""
+    recommendations: list[str] = []
+    if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("codex_python_cli_hooks"):
+        recommendations.append("Codex hook manifest uses the Python hook path; track native-fast-path wiring separately from package freshness")
+    if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("repair_projection", {}).get("codex_replacements_available"):
+        recommendations.append(f"Codex hook manifest is not on the host-preferred {target} native launcher; rerun the hook doctor with --apply")
+    if post_repair.get("status") == "WARN":
+        if post_repair.get("unknown_tree_admission_warnings") and not post_repair.get("delegate_count"):
+            recommendations.append("fast path is repaired; remaining post-repair issue is unknown-tree admission for opaque Codex host calls")
+        else:
+            recommendations.append("post-repair Codex hook observations still include delegates or unknown-tree warnings")
+    shape_counts = command_shapes.get("shell_shape_counts") if isinstance(command_shapes.get("shell_shape_counts"), dict) else {}
+    remediation_counts = command_shapes.get("shell_remediation_counts") if isinstance(command_shapes.get("shell_remediation_counts"), dict) else {}
+    if shape_counts.get("shell_no_write_target_detected"):
+        read_candidates = int(remediation_counts.get("replace_with_path_visible_read_tool") or 0)
+        repo_context = int(remediation_counts.get("keep_repo_context_but_expose_workspace_scope") or 0)
+        if read_candidates or repo_context:
+            recommendations.append(
+                "post-repair shell opacity is mostly read/search/test/git-read shape; expose those as path-visible or workspace-scoped host tools before treating remaining shell as irreducible"
+            )
+        else:
+            recommendations.append("post-repair shell usage is opaque; prefer host-visible read/search tools when available")
+    if shape_counts.get("shell_out_of_tree_write_target"):
+        recommendations.append("post-repair shell usage includes out-of-tree write targets; inspect repo-guard findings before continuing")
+    family_counts = command_shapes.get("shell_family_counts") if isinstance(command_shapes.get("shell_family_counts"), dict) else {}
+    if mutating_shell_family_counts(family_counts):
+        recommendations.append("post-repair shell usage includes opaque mutating git operations; route commit/push/add through explicit operator gates")
+    post_gate_shapes = git_gate.get("post_gate_command_shapes") if isinstance(git_gate.get("post_gate_command_shapes"), dict) else {}
+    post_gate_families = post_gate_shapes.get("shell_family_counts") if isinstance(post_gate_shapes.get("shell_family_counts"), dict) else {}
+    if mutating_shell_family_counts(post_gate_families):
+        recommendations.append("structured git gates have stale evidence; rerun expected-deny git gate probes after the latest opaque git mutation")
+    return recommendations
+
+
+def stop_failure_recommendations(
+    workspace_stop: dict[str, Any],
+    *,
+    session_stop_live_total: int,
+    session_stop_settlement_debt_total: int,
+) -> list[str]:
+    """Advice about StopFailure markers, keeping Codex-origin current-live blockage apart from settlement debt and advisory Claude/other-origin markers."""
+    recommendations: list[str] = []
+    if session_stop_live_total:
+        recommendations.append("stop-hook blocks/failures appeared; review before treating affected sessions as closed")
+    if session_stop_settlement_debt_total:
+        recommendations.append("session StopFailure totals include settlement debt already separated from current-live blockers")
+    codex_origin_stop = workspace_stop.get("codex_origin") if isinstance(workspace_stop.get("codex_origin"), dict) else {}
+    claude_origin_stop = workspace_stop.get("claude_origin") if isinstance(workspace_stop.get("claude_origin"), dict) else {}
+    codex_origin_stop_total = int(codex_origin_stop.get("total_failures") or 0)
+    codex_origin_stop_current_live_total = int(codex_origin_stop.get("current_live_consecutive_total") or 0)
+    claude_origin_stop_total = int(claude_origin_stop.get("total_failures") or 0)
+    claude_origin_stop_active_total = int(claude_origin_stop.get("active_consecutive_total") or 0)
+    if codex_origin_stop_current_live_total:
+        recommendations.append("Codex-origin current-live StopFailure API-wall breaker markers are present in audited Codex sessions; inspect .dos/stop-failures for the Codex thread markers")
+    elif codex_origin_stop_total:
+        recommendations.append("Codex-origin StopFailure markers are present, but none are current live blockers; treat them as settlement debt unless a new marker appears")
+    if claude_origin_stop_total:
+        recommendations.append(
+            "Claude-origin StopFailure API-wall breaker markers are present (advisory only): "
+            f"{claude_origin_stop.get('markers')} markers, {claude_origin_stop_active_total} active consecutive — "
+            "these are NOT counted toward Codex health; inspect .dos/stop-failures for the Claude-origin sessions"
+        )
+    other_origin_stop = workspace_stop.get("other_origin") if isinstance(workspace_stop.get("other_origin"), dict) else {}
+    if int(other_origin_stop.get("total_failures") or 0):
+        recommendations.append("other-origin StopFailure markers (no Codex thread, no Claude transcript) appeared in .dos/stop-failures; advisory only, not counted toward Codex health")
+    if int(workspace_stop.get("recent_active_consecutive_total") or 0):
+        recommendations.append("recent workspace StopFailure markers need review; they are reported as settlement debt unless they are Codex-origin current-live blockers")
+    if int(workspace_stop.get("progress_after_marker_consecutive_total") or 0):
+        recommendations.append(
+            "progress-after-marker StopFailure markers have later activity and are resettable settlement debt; "
+            "dry-run with `fak stopfailure reset-stale --json`, then apply with `fak stopfailure reset-stale --apply`"
+        )
+    if int(workspace_stop.get("stale_active_consecutive_total") or 0):
+        recommendations.append("stale workspace StopFailure markers still have nonzero consecutive counts; report them as settlement debt, not current live blockage")
+    return recommendations
+
+
+def stop_failure_summary_fields(workspace_stop: dict[str, Any]) -> dict[str, Any]:
+    """Project the workspace StopFailure audit into the report summary's flat per-origin marker and consecutive-run counters."""
+    codex_origin_stop = workspace_stop.get("codex_origin") if isinstance(workspace_stop.get("codex_origin"), dict) else {}
+    claude_origin_stop = workspace_stop.get("claude_origin") if isinstance(workspace_stop.get("claude_origin"), dict) else {}
+    return {
+        "workspace_stop_failures_total": int(workspace_stop.get("total_failures") or 0),
+        "workspace_stop_failure_provenance_counts": workspace_stop.get("provenance_counts"),
+        "workspace_stop_failure_active_provenance_counts": workspace_stop.get("active_provenance_counts"),
+        "codex_origin_stop_failures_total": int(codex_origin_stop.get("total_failures") or 0),
+        "codex_origin_stop_failure_markers": codex_origin_stop.get("markers"),
+        "codex_origin_stop_failure_active_markers": codex_origin_stop.get("active_consecutive_markers"),
+        "codex_origin_stop_failure_active_consecutive_total": int(codex_origin_stop.get("active_consecutive_total") or 0),
+        "codex_origin_stop_failure_current_live_markers": codex_origin_stop.get("current_live_consecutive_markers"),
+        "codex_origin_stop_failure_current_live_consecutive_total": int(codex_origin_stop.get("current_live_consecutive_total") or 0),
+        "codex_origin_stop_failure_progress_after_marker_markers": codex_origin_stop.get("progress_after_marker_markers"),
+        "codex_origin_stop_failure_progress_after_marker_consecutive_total": codex_origin_stop.get("progress_after_marker_consecutive_total"),
+        "claude_origin_stop_failures_total": int(claude_origin_stop.get("total_failures") or 0),
+        "claude_origin_stop_failure_markers": claude_origin_stop.get("markers"),
+        "claude_origin_stop_failure_active_markers": claude_origin_stop.get("active_consecutive_markers"),
+        "claude_origin_stop_failure_active_consecutive_total": int(claude_origin_stop.get("active_consecutive_total") or 0),
+        "claude_origin_stop_failure_current_live_markers": claude_origin_stop.get("current_live_consecutive_markers"),
+        "claude_origin_stop_failure_current_live_consecutive_total": claude_origin_stop.get("current_live_consecutive_total"),
+        "claude_origin_stop_failure_progress_after_marker_markers": claude_origin_stop.get("progress_after_marker_markers"),
+        "claude_origin_stop_failure_progress_after_marker_consecutive_total": claude_origin_stop.get("progress_after_marker_consecutive_total"),
+        "claude_origin_stop_failure_active_origin_counts": claude_origin_stop.get("active_origin_counts"),
+        "workspace_stop_failure_markers": workspace_stop.get("markers"),
+        "workspace_stop_failure_zero_markers": workspace_stop.get("zero_total_markers"),
+        "workspace_stop_failure_nonzero_markers": workspace_stop.get("nonzero_total_markers"),
+        "workspace_stop_failure_active_markers": workspace_stop.get("active_consecutive_markers"),
+        "workspace_stop_failure_active_consecutive_total": int(workspace_stop.get("active_consecutive_total") or 0),
+        "workspace_stop_failure_current_live_markers": workspace_stop.get("current_live_consecutive_markers"),
+        "workspace_stop_failure_current_live_consecutive_total": int(workspace_stop.get("current_live_consecutive_total") or 0),
+        "workspace_stop_failure_active_recent_threshold_hours": workspace_stop.get("active_recent_threshold_hours"),
+        "workspace_stop_failure_recent_review_markers": workspace_stop.get("recent_review_markers"),
+        "workspace_stop_failure_recent_review_consecutive_total": workspace_stop.get("recent_review_consecutive_total"),
+        "workspace_stop_failure_recent_active_markers": workspace_stop.get("recent_active_consecutive_markers"),
+        "workspace_stop_failure_recent_active_consecutive_total": int(workspace_stop.get("recent_active_consecutive_total") or 0),
+        "workspace_stop_failure_stale_active_markers": workspace_stop.get("stale_active_consecutive_markers"),
+        "workspace_stop_failure_stale_active_consecutive_total": int(workspace_stop.get("stale_active_consecutive_total") or 0),
+        "workspace_stop_failure_progress_after_marker_markers": workspace_stop.get("progress_after_marker_markers"),
+        "workspace_stop_failure_progress_after_marker_consecutive_total": int(workspace_stop.get("progress_after_marker_consecutive_total") or 0),
+        "workspace_stop_failure_reset_stale_candidate_markers": workspace_stop.get("reset_stale_candidate_markers"),
+        "workspace_stop_failure_reset_stale_apply_command": workspace_stop.get("reset_stale_apply_command"),
+        "workspace_stop_failure_reset_stale_dry_run_command": workspace_stop.get("reset_stale_dry_run_command"),
+        "workspace_stop_failure_healed_nonzero_markers": workspace_stop.get("healed_nonzero_markers"),
+        "workspace_stop_failure_transcript_evidence_tags": workspace_stop.get("transcript_evidence_tag_counts"),
+        "workspace_stop_failure_origin_counts": workspace_stop.get("origin_counts"),
+        "workspace_stop_failure_active_origin_counts": workspace_stop.get("active_origin_counts"),
+        "workspace_stop_failure_current_live_origin_counts": workspace_stop.get("current_live_origin_counts"),
+        "workspace_stop_failure_recent_active_origin_counts": workspace_stop.get("recent_active_origin_counts"),
+        "workspace_stop_failure_stale_active_origin_counts": workspace_stop.get("stale_active_origin_counts"),
+        "workspace_stop_failure_progress_after_marker_origin_counts": workspace_stop.get("progress_after_marker_origin_counts"),
+        "workspace_stop_failure_nonzero_origin_counts": workspace_stop.get("nonzero_origin_counts"),
+        "workspace_stop_failure_settlement_action_counts": workspace_stop.get("settlement_action_counts"),
+        "workspace_stop_failure_active_settlement_action_counts": workspace_stop.get("active_settlement_action_counts"),
+        "workspace_stop_failure_current_live_settlement_action_counts": workspace_stop.get("current_live_settlement_action_counts"),
+        "workspace_stop_failure_recent_active_settlement_action_counts": workspace_stop.get("recent_active_settlement_action_counts"),
+        "workspace_stop_failure_stale_active_settlement_action_counts": workspace_stop.get("stale_active_settlement_action_counts"),
+        "workspace_stop_failure_progress_after_marker_settlement_action_counts": workspace_stop.get("progress_after_marker_settlement_action_counts"),
+    }
+
+
 def build_report(
     repo_root: Path,
     home: Path,
@@ -1810,7 +2100,6 @@ def build_report(
     codex_threads = discover_codex_threads(home, since_days=since_days)
     streams = discover_streams(repo_root, codex_threads, limit)
     stream_correlation = stream_correlation_diagnosis(repo_root, codex_threads, streams)
-    args = argparse.Namespace(repo_root=repo_root)
     target = normalize_target_shell(target_shell)
     hook_fast_path = codex_hook_fast_path(home, target_shell=target)
     post_repair = codex_observations_since(repo_root, hook_fast_path.get("repaired_at"))
@@ -1840,32 +2129,7 @@ def build_report(
             scope="post_git_gate_audited_dos_streams",
         )
 
-    sessions: list[dict[str, Any]] = []
-    session_settlement = workspace_stop.get("session_settlement") if isinstance(workspace_stop.get("session_settlement"), dict) else {}
-    for thread_id, _path in streams:
-        audit = witness.dos_session_audit(args, thread_id)
-        session = compact_session(audit, codex_threads[thread_id])
-        settlement = session_settlement.get(thread_id)
-        if isinstance(settlement, dict):
-            session["stop_failure_settlement"] = settlement
-            if session["stop_failures_total"] and not bool(settlement.get("codex_current_live")):
-                session["stop_failures_live_blocker_total"] = 0
-                session["stop_failures_settlement_debt_total"] = session["stop_failures_total"]
-                if (
-                    session.get("status") == "WARN"
-                    and not session.get("delegate_count")
-                    and not session.get("unknown_tree_admission_warnings")
-                    and not session.get("stop_blocks")
-                ):
-                    session["status"] = "PASS"
-                    session["status_note"] = "StopFailure marker is settlement debt, not a current-live blocker"
-            else:
-                session["stop_failures_live_blocker_total"] = session["stop_failures_total"]
-                session["stop_failures_settlement_debt_total"] = 0
-        else:
-            session["stop_failures_live_blocker_total"] = session["stop_failures_total"]
-            session["stop_failures_settlement_debt_total"] = 0
-        sessions.append(session)
+    sessions = audit_sessions(witness, repo_root, streams, codex_threads, workspace_stop)
 
     total_steps = sum(s["steps"] for s in sessions)
     total_pretool = sum(s["pretool_calls"] for s in sessions)
@@ -1878,94 +2142,42 @@ def build_report(
     unknown_rate = (total_unknown / total_pretool) if total_pretool else None
     warned = [s for s in sessions if s.get("status") == "WARN"]
     bash_steps = tool_counts.get("Bash", 0)
-    recommendations: list[str] = []
     unknown_threshold = (
         max_unknown_tree_rate
         if max_unknown_tree_rate is not None
         else witness.DOS_UNKNOWN_TREE_WARN_THRESHOLD
     )
-    if sessions and total_steps and bash_steps / total_steps > 0.8:
-        recommendations.append("recent Codex DOS streams are Bash-dominated; prefer path-visible tools or narrower shell commands")
-    if unknown_rate is not None and unknown_rate > unknown_threshold:
-        recommendations.append("unknown-tree admission warning rate exceeds the transfer-playbook threshold")
     delegate_total = sum(s["delegate_count"] for s in sessions)
-    if delegate_total and (max_delegates is None or delegate_total > max_delegates):
-        if post_repair.get("observations") and not post_repair.get("delegate_count"):
-            recommendations.append("recent-window delegate count includes pre-repair history; post-repair Codex delegates are zero")
-        else:
-            recommendations.append("native DOS hook delegates are present; inspect fallback reasons upstream")
-    if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("codex_python_cli_hooks"):
-        recommendations.append("Codex hook manifest uses the Python hook path; track native-fast-path wiring separately from package freshness")
-    if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("repair_projection", {}).get("codex_replacements_available"):
-        recommendations.append(f"Codex hook manifest is not on the host-preferred {target} native launcher; rerun the hook doctor with --apply")
-    if post_repair.get("status") == "WARN":
-        if post_repair.get("unknown_tree_admission_warnings") and not post_repair.get("delegate_count"):
-            recommendations.append("fast path is repaired; remaining post-repair issue is unknown-tree admission for opaque Codex host calls")
-        else:
-            recommendations.append("post-repair Codex hook observations still include delegates or unknown-tree warnings")
     command_shapes = hook_fast_path.get("post_repair_command_shapes") if isinstance(hook_fast_path.get("post_repair_command_shapes"), dict) else {}
-    shape_counts = command_shapes.get("shell_shape_counts") if isinstance(command_shapes.get("shell_shape_counts"), dict) else {}
-    remediation_counts = command_shapes.get("shell_remediation_counts") if isinstance(command_shapes.get("shell_remediation_counts"), dict) else {}
-    if shape_counts.get("shell_no_write_target_detected"):
-        read_candidates = int(remediation_counts.get("replace_with_path_visible_read_tool") or 0)
-        repo_context = int(remediation_counts.get("keep_repo_context_but_expose_workspace_scope") or 0)
-        if read_candidates or repo_context:
-            recommendations.append(
-                "post-repair shell opacity is mostly read/search/test/git-read shape; expose those as path-visible or workspace-scoped host tools before treating remaining shell as irreducible"
-            )
-        else:
-            recommendations.append("post-repair shell usage is opaque; prefer host-visible read/search tools when available")
-    if shape_counts.get("shell_out_of_tree_write_target"):
-        recommendations.append("post-repair shell usage includes out-of-tree write targets; inspect repo-guard findings before continuing")
-    family_counts = command_shapes.get("shell_family_counts") if isinstance(command_shapes.get("shell_family_counts"), dict) else {}
-    mutating_families = mutating_shell_family_counts(family_counts)
-    if mutating_families:
-        recommendations.append("post-repair shell usage includes opaque mutating git operations; route commit/push/add through explicit operator gates")
-    post_gate_shapes = git_gate.get("post_gate_command_shapes") if isinstance(git_gate.get("post_gate_command_shapes"), dict) else {}
-    post_gate_families = post_gate_shapes.get("shell_family_counts") if isinstance(post_gate_shapes.get("shell_family_counts"), dict) else {}
-    if mutating_shell_family_counts(post_gate_families):
-        recommendations.append("structured git gates have stale evidence; rerun expected-deny git gate probes after the latest opaque git mutation")
     session_stop_live_total = sum(s["stop_blocks"] + s.get("stop_failures_live_blocker_total", s["stop_failures_total"]) for s in sessions)
     session_stop_settlement_debt_total = sum(s.get("stop_failures_settlement_debt_total", 0) for s in sessions)
-    if session_stop_live_total:
-        recommendations.append("stop-hook blocks/failures appeared; review before treating affected sessions as closed")
-    if session_stop_settlement_debt_total:
-        recommendations.append("session StopFailure totals include settlement debt already separated from current-live blockers")
-    workspace_stop_total = int(workspace_stop.get("total_failures") or 0)
-    workspace_stop_active_total = int(workspace_stop.get("active_consecutive_total") or 0)
-    workspace_stop_current_live_total = int(workspace_stop.get("current_live_consecutive_total") or 0)
-    workspace_stop_recent_active_total = int(workspace_stop.get("recent_active_consecutive_total") or 0)
-    workspace_stop_stale_active_total = int(workspace_stop.get("stale_active_consecutive_total") or 0)
-    workspace_stop_progress_after_marker_total = int(workspace_stop.get("progress_after_marker_consecutive_total") or 0)
-    codex_origin_stop = workspace_stop.get("codex_origin") if isinstance(workspace_stop.get("codex_origin"), dict) else {}
-    claude_origin_stop = workspace_stop.get("claude_origin") if isinstance(workspace_stop.get("claude_origin"), dict) else {}
-    codex_origin_stop_total = int(codex_origin_stop.get("total_failures") or 0)
-    codex_origin_stop_active_total = int(codex_origin_stop.get("active_consecutive_total") or 0)
-    codex_origin_stop_current_live_total = int(codex_origin_stop.get("current_live_consecutive_total") or 0)
-    claude_origin_stop_total = int(claude_origin_stop.get("total_failures") or 0)
-    claude_origin_stop_active_total = int(claude_origin_stop.get("active_consecutive_total") or 0)
-    if codex_origin_stop_current_live_total:
-        recommendations.append("Codex-origin current-live StopFailure API-wall breaker markers are present in audited Codex sessions; inspect .dos/stop-failures for the Codex thread markers")
-    elif codex_origin_stop_total:
-        recommendations.append("Codex-origin StopFailure markers are present, but none are current live blockers; treat them as settlement debt unless a new marker appears")
-    if claude_origin_stop_total:
-        recommendations.append(
-            "Claude-origin StopFailure API-wall breaker markers are present (advisory only): "
-            f"{claude_origin_stop.get('markers')} markers, {claude_origin_stop_active_total} active consecutive — "
-            "these are NOT counted toward Codex health; inspect .dos/stop-failures for the Claude-origin sessions"
-        )
-    other_origin_stop = workspace_stop.get("other_origin") if isinstance(workspace_stop.get("other_origin"), dict) else {}
-    if int(other_origin_stop.get("total_failures") or 0):
-        recommendations.append("other-origin StopFailure markers (no Codex thread, no Claude transcript) appeared in .dos/stop-failures; advisory only, not counted toward Codex health")
-    if workspace_stop_recent_active_total:
-        recommendations.append("recent workspace StopFailure markers need review; they are reported as settlement debt unless they are Codex-origin current-live blockers")
-    if workspace_stop_progress_after_marker_total:
-        recommendations.append(
-            "progress-after-marker StopFailure markers have later activity and are resettable settlement debt; "
-            "dry-run with `fak stopfailure reset-stale --json`, then apply with `fak stopfailure reset-stale --apply`"
-        )
-    if workspace_stop_stale_active_total:
-        recommendations.append("stale workspace StopFailure markers still have nonzero consecutive counts; report them as settlement debt, not current live blockage")
+    codex_origin_stop_current_live_total = int(
+        (workspace_stop.get("codex_origin") or {}).get("current_live_consecutive_total") or 0
+    )
+
+    recommendations: list[str] = []
+    recommendations.extend(workload_recommendations(
+        sessions,
+        post_repair,
+        total_steps=total_steps,
+        bash_steps=bash_steps,
+        unknown_rate=unknown_rate,
+        unknown_threshold=unknown_threshold,
+        delegate_total=delegate_total,
+        max_delegates=max_delegates,
+    ))
+    recommendations.extend(hook_and_shell_recommendations(
+        hook_fast_path,
+        post_repair,
+        git_gate,
+        command_shapes,
+        target=target,
+    ))
+    recommendations.extend(stop_failure_recommendations(
+        workspace_stop,
+        session_stop_live_total=session_stop_live_total,
+        session_stop_settlement_debt_total=session_stop_settlement_debt_total,
+    ))
 
     gates = codex_gates(hook_fast_path, stream_correlation, len(sessions))
 
@@ -2024,60 +2236,7 @@ def build_report(
             "stop_failures_total": sum(s["stop_failures_total"] for s in sessions),
             "stop_failures_live_blocker_total": sum(s.get("stop_failures_live_blocker_total", s["stop_failures_total"]) for s in sessions),
             "stop_failures_settlement_debt_total": sum(s.get("stop_failures_settlement_debt_total", 0) for s in sessions),
-            "workspace_stop_failures_total": workspace_stop_total,
-            "workspace_stop_failure_provenance_counts": workspace_stop.get("provenance_counts"),
-            "workspace_stop_failure_active_provenance_counts": workspace_stop.get("active_provenance_counts"),
-            "codex_origin_stop_failures_total": codex_origin_stop_total,
-            "codex_origin_stop_failure_markers": codex_origin_stop.get("markers"),
-            "codex_origin_stop_failure_active_markers": codex_origin_stop.get("active_consecutive_markers"),
-            "codex_origin_stop_failure_active_consecutive_total": codex_origin_stop_active_total,
-            "codex_origin_stop_failure_current_live_markers": codex_origin_stop.get("current_live_consecutive_markers"),
-            "codex_origin_stop_failure_current_live_consecutive_total": codex_origin_stop_current_live_total,
-            "codex_origin_stop_failure_progress_after_marker_markers": codex_origin_stop.get("progress_after_marker_markers"),
-            "codex_origin_stop_failure_progress_after_marker_consecutive_total": codex_origin_stop.get("progress_after_marker_consecutive_total"),
-            "claude_origin_stop_failures_total": claude_origin_stop_total,
-            "claude_origin_stop_failure_markers": claude_origin_stop.get("markers"),
-            "claude_origin_stop_failure_active_markers": claude_origin_stop.get("active_consecutive_markers"),
-            "claude_origin_stop_failure_active_consecutive_total": claude_origin_stop_active_total,
-            "claude_origin_stop_failure_current_live_markers": claude_origin_stop.get("current_live_consecutive_markers"),
-            "claude_origin_stop_failure_current_live_consecutive_total": claude_origin_stop.get("current_live_consecutive_total"),
-            "claude_origin_stop_failure_progress_after_marker_markers": claude_origin_stop.get("progress_after_marker_markers"),
-            "claude_origin_stop_failure_progress_after_marker_consecutive_total": claude_origin_stop.get("progress_after_marker_consecutive_total"),
-            "claude_origin_stop_failure_active_origin_counts": claude_origin_stop.get("active_origin_counts"),
-            "workspace_stop_failure_markers": workspace_stop.get("markers"),
-            "workspace_stop_failure_zero_markers": workspace_stop.get("zero_total_markers"),
-            "workspace_stop_failure_nonzero_markers": workspace_stop.get("nonzero_total_markers"),
-            "workspace_stop_failure_active_markers": workspace_stop.get("active_consecutive_markers"),
-            "workspace_stop_failure_active_consecutive_total": workspace_stop_active_total,
-            "workspace_stop_failure_current_live_markers": workspace_stop.get("current_live_consecutive_markers"),
-            "workspace_stop_failure_current_live_consecutive_total": workspace_stop_current_live_total,
-            "workspace_stop_failure_active_recent_threshold_hours": workspace_stop.get("active_recent_threshold_hours"),
-            "workspace_stop_failure_recent_review_markers": workspace_stop.get("recent_review_markers"),
-            "workspace_stop_failure_recent_review_consecutive_total": workspace_stop.get("recent_review_consecutive_total"),
-            "workspace_stop_failure_recent_active_markers": workspace_stop.get("recent_active_consecutive_markers"),
-            "workspace_stop_failure_recent_active_consecutive_total": workspace_stop_recent_active_total,
-            "workspace_stop_failure_stale_active_markers": workspace_stop.get("stale_active_consecutive_markers"),
-            "workspace_stop_failure_stale_active_consecutive_total": workspace_stop_stale_active_total,
-            "workspace_stop_failure_progress_after_marker_markers": workspace_stop.get("progress_after_marker_markers"),
-            "workspace_stop_failure_progress_after_marker_consecutive_total": workspace_stop_progress_after_marker_total,
-            "workspace_stop_failure_reset_stale_candidate_markers": workspace_stop.get("reset_stale_candidate_markers"),
-            "workspace_stop_failure_reset_stale_apply_command": workspace_stop.get("reset_stale_apply_command"),
-            "workspace_stop_failure_reset_stale_dry_run_command": workspace_stop.get("reset_stale_dry_run_command"),
-            "workspace_stop_failure_healed_nonzero_markers": workspace_stop.get("healed_nonzero_markers"),
-            "workspace_stop_failure_transcript_evidence_tags": workspace_stop.get("transcript_evidence_tag_counts"),
-            "workspace_stop_failure_origin_counts": workspace_stop.get("origin_counts"),
-            "workspace_stop_failure_active_origin_counts": workspace_stop.get("active_origin_counts"),
-            "workspace_stop_failure_current_live_origin_counts": workspace_stop.get("current_live_origin_counts"),
-            "workspace_stop_failure_recent_active_origin_counts": workspace_stop.get("recent_active_origin_counts"),
-            "workspace_stop_failure_stale_active_origin_counts": workspace_stop.get("stale_active_origin_counts"),
-            "workspace_stop_failure_progress_after_marker_origin_counts": workspace_stop.get("progress_after_marker_origin_counts"),
-            "workspace_stop_failure_nonzero_origin_counts": workspace_stop.get("nonzero_origin_counts"),
-            "workspace_stop_failure_settlement_action_counts": workspace_stop.get("settlement_action_counts"),
-            "workspace_stop_failure_active_settlement_action_counts": workspace_stop.get("active_settlement_action_counts"),
-            "workspace_stop_failure_current_live_settlement_action_counts": workspace_stop.get("current_live_settlement_action_counts"),
-            "workspace_stop_failure_recent_active_settlement_action_counts": workspace_stop.get("recent_active_settlement_action_counts"),
-            "workspace_stop_failure_stale_active_settlement_action_counts": workspace_stop.get("stale_active_settlement_action_counts"),
-            "workspace_stop_failure_progress_after_marker_settlement_action_counts": workspace_stop.get("progress_after_marker_settlement_action_counts"),
+            **stop_failure_summary_fields(workspace_stop),
             "warned_sessions": len(warned),
         },
         "actionability": actionability,
