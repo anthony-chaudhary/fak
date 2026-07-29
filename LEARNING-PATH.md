@@ -2355,7 +2355,7 @@ package name. One honest line each.
 
 | Package | Purpose |
 | --- | --- |
-| `internal/blastradius` | The pure join at the heart of blast-radius containment: given a broken package, which live leases and queued issues intersect its transitive dependency radius — so a hold stops being all-or-nothing guesswork. |
+| `internal/blastradius` | The pure join blast-radius containment is built on: given a broken package, which live leases and queued issues intersect its transitive dependency radius — so a hold stops being all-or-nothing guesswork. |
 | `internal/egresslist` | Adblock-style site allow/block layer above the hardwired cloud-metadata egress floor and below the WebFetch research allowlist. |
 | `internal/egressrefresh` | Re-fetches the bundled egress filter lists from their provenance URLs and rewrites the checked-in artifact + pinned checksum. |
 | `internal/ghspam` | Reusable GitHub-comment abuse match families — the release-archive download lure and the fake patch/fix lure. Each needs two independent signals, so a genuine outsider bug report that merely says "fix" does not match. |
