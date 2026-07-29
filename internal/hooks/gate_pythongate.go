@@ -76,12 +76,12 @@ func gatePythonToolTree(t *TrackedTree) ([]Finding, error) {
 	}
 	var findings []Finding
 	for _, p := range t.Paths {
+		// prefix+suffix at ANY depth is the ratchet's real scope: git pathspec `*` is not
+		// shell-glob `*` — it spans `/`, so `git ls-files tools/*.py` returns nested
+		// tools/**/x.py too (the tracked tree has one today). Restricting this gate to a
+		// single level would let a NEW nested python tool pass pre-push and then red CI when
+		// pythongate.ScanTree, which uses that very pathspec, sees it.
 		if !strings.HasPrefix(p, "tools/") || !strings.HasSuffix(p, ".py") {
-			continue
-		}
-		// A nested tools/**/x.py is not what the ratchet scans (git ls-files tools/*.py is
-		// one level); keep the gate's scope identical so it never over-refuses.
-		if strings.Count(p, "/") != 1 {
 			continue
 		}
 		if baseline[p] {
