@@ -164,6 +164,25 @@ var matrix = []Op{
 		Note:        "Bind to the GGUF format; fak's resident-q4k is the parity target, not a new format.",
 	},
 	{
+		Slug:  "gguf-ternary-q2-resident",
+		Title: "GGUF ternary Q2_0 resident GEMV (g128 {-1,0,+1})",
+		// The g128 GGUF-resident ternary path (#4870): 34-byte blocks (one f16 scale + 128
+		// 2-bit codes, y=(c-1)*d) are fed VERBATIM into the CPU GEMV — no load-time
+		// re-quantize (a f32->quantize round trip re-derives scales and shifts the code
+		// offset) and no dequant-to-f32 residency. Same "the resident bytes ARE the GGUF
+		// bytes" discipline as quant_q4k.go, so the prior art to read is ggml's packed
+		// block-quant container + its dequant->dot decode, not a new format. Honest fence:
+		// no upstream ggml TERNARY type is claimed here — this container arrives with the
+		// Ternary-Bonsai-27B checkpoint (docs/supported/models.md).
+		FileGlobs:   []string{"internal/model/quant_q2_resident*.go"},
+		FakPath:     "internal/model/quant_q2_resident.go (wrapQ2G128FromRaw, q2G128MatRowsRange, dequantQ2G128Block)",
+		SOTA:        "llama.cpp / ggml packed block-quant containers + their dequant->dot resident decode",
+		PrimaryLink: "https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-quants.c",
+		Route:       RouteBind,
+		Oracle:      "TestQ2ResidentMatchesDequant (internal/model): resident GEMV via residentMatRows vs an independent restatement of the container dequant — argmax-exact, |Δ|<=1e-4; block dequant element-EXACT vs that reference; packed 34 B per 128 weights",
+		Note:        "Bind to the container: never re-quantize at load, and never widen the resident form to f32 (~15x the footprint).",
+	},
+	{
 		Slug:  "cpu-quant-simd",
 		Title: "CPU K-quant / Q4_K / Q6_K SIMD dequant-GEMM",
 		// The biggest "from scratch" risk surface in the tree: the hand-written amd64/arm64/noasm
@@ -186,6 +205,23 @@ var matrix = []Op{
 		Note:        "Borrow the block-dequant + vec_dot layout; do NOT re-derive a SIMD lane without reading ggml-quants first.",
 	},
 	{
+		Slug:  "iq3-xxs-int8-decode",
+		Title: "IQ3_XXS codebook decode (int8 GEMV spine)",
+		// The i-quant family is NOT the k-quant family: an IQ3_XXS sub-block decodes through
+		// a 256-entry codebook grid plus a 7-bit sign selector, not a packed-scale bit field,
+		// so the cpu-quant-simd row's K-quant advice does not transfer. The tables this file
+		// indexes (internal/ggufload/gguf_iq3_tables.go) are transcribed VERBATIM from ggml's
+		// ggml-common.h and the loader's dequant is held bit-faithful to llama.cpp's
+		// dequantize_row_iq3_xxs — so ggml-quants is the reference for any arch lane here.
+		FileGlobs:   []string{"internal/model/quant_iq3*.go"},
+		FakPath:     "internal/model/quant_iq3_int8.go (iq3xxsReduceRowScalar, iq3xxsCombineRow, iq3xxsMatRowsRangeInt8); codebook tables in internal/ggufload/gguf_iq3_tables.go",
+		SOTA:        "llama.cpp ggml-quants i-quants (dequantize_row_iq3_xxs; the IQ3_XXS grid + IQ2/IQ3 sign tables in ggml-common.h)",
+		PrimaryLink: "https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-quants.c",
+		Route:       RouteBorrow,
+		Oracle:      "TestIQ3XXSReduceScalarMatchesDequantizedIntegerOracle (each int32 sub-block dot EXACT vs an oracle rebuilt from the dequantized block) + TestW3MLPDispatchRealReductionDimensions (dispatch seam == the int8 body exactly at in=5120/17408; max|int8-f32|/referenceRMS <= 0.05)",
+		Note:        "Borrow ggml's grid+sign decode; the spine is default-off (FAK_W3_MLP) and an arch lane may replace it only under the exact-reducer witness.",
+	},
+	{
 		Slug:        "moe-expert-dispatch",
 		Title:       "MoE expert dispatch",
 		FileGlobs:   []string{"internal/model/moe.go", "internal/model/moe_*.go", "internal/model/glm_dsa.go"},
@@ -196,6 +232,25 @@ var matrix = []Op{
 		Oracle:      "dense reference / HF",
 		Papers:      []string{"DeepSeek-V3 expert-parallel report; GShard (Lepikhin et al.) arXiv:2006.16668"},
 		Note:        "Borrow grouped-decode cleanup; the cross-process EP transport is the collective-comm row.",
+	},
+	{
+		Slug:  "moe-expert-residency-ring",
+		Title: "MoE expert-weight residency ring (bounded device weight cache)",
+		// The WEIGHT-side twin of the kv-cache-paging row: for a MoE model the hot working
+		// set is which EXPERTS are resident, not the KV. pagedRing is a byte-budgeted LRU
+		// over polymodel.Pool (pinned exemption, all-or-nothing admit) staging f32 / Q8_0 /
+		// Q4_K weights — the Tier-1 GPU ring of the 3-tier GPU/pinned-CPU/SSD expert cache
+		// docs/awesome-caching/README.md tracks as M11. Standalone and OFF the live serve
+		// path today; the open question is the PLACEMENT POLICY, which is where the prior
+		// art lives — do not re-derive an expert-placement heuristic here.
+		FileGlobs:   []string{"internal/model/paging_ring*.go", "internal/model/expert_warmpins*.go"},
+		FakPath:     "internal/model/paging_ring.go (pagedRing: LRU byte budget over polymodel.Pool) + internal/model/expert_warmpins.go (the resident pin-set)",
+		SOTA:        "ktransformers GPU/CPU expert placement (activation-aware expert orchestration); DeepSeek EPLB expert-parallel placement",
+		PrimaryLink: "https://github.com/kvcache-ai/ktransformers",
+		Route:       RouteBorrow,
+		Oracle:      "paging_ring_test.go: ring GEMM bit-equal to a resident cpu-ref GEMM on both a HIT and a MISS (f32, Q8_0, Q4_K), exact pageIn/hit/evict counters, used()<=budget(), and an evicted weight pages back IN",
+		Papers:      []string{"FlexGen: LP-scheduled GPU+CPU+disk placement of weights/KV/activations arXiv:2303.06865"},
+		Note:        "Borrow the activation-aware placement policy before extending the LRU; fak's value today is the bounded-residency lifecycle plus the bit-equality witness, not a placement heuristic.",
 	},
 	{
 		Slug:  "collective-comm",
