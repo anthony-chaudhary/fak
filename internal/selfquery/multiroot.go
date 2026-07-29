@@ -152,48 +152,23 @@ func (mc *MultiCatalog) Cards(plane Plane) []FeatureCard {
 // own checkout) and applied with a root-qualified key so two repos carrying a
 // same-named card never cross-contaminate rungs.
 func (mc *MultiCatalog) Query(req Request) (Response, error) {
-	q := strings.TrimSpace(req.Query)
-	if q == "" {
-		return Response{}, errors.New("feature query requires a non-empty query")
-	}
-	if req.Limit < 0 {
-		return Response{}, errors.New("feature query limit must be non-negative")
-	}
-	plane := normalizePlane(req.Plane)
-	if plane == "" {
-		return Response{}, fmt.Errorf("unknown feature query plane %q (want dev, live, or all)", req.Plane)
-	}
-	all := mc.Cards(plane)
-	cards := rankCards(all, q)
-	if req.Limit > 0 && len(cards) > req.Limit {
-		cards = cards[:req.Limit]
-	}
-	rungs := mc.freshnessRungs(all)
-	applyFreshnessMulti(cards, rungs)
-	resp := Response{Root: mc.primaryRoot(), Query: q, Plane: plane, Cards: cards}
-	if len(req.MissingContext) > 0 {
-		plan := MissingContextClarifications(req.MissingContext)
-		resp.Clarifications = &plan
-	}
-	if strings.TrimSpace(req.Detail) != "" {
-		card, ok := findCard(all, req.Detail)
-		if !ok {
-			return Response{}, fmt.Errorf("feature detail %q not found", req.Detail)
-		}
-		if r, ok := rungs[card.Root+"\x00"+cardKey(card)]; ok {
-			card.Freshness = r
-		}
-		owner := mc.catalogForRoot(card.Root)
-		if owner == nil {
-			owner = mc.members[0].cat
-		}
-		d, err := owner.detail(card, q)
-		if err != nil {
-			return Response{}, err
-		}
-		resp.Detail = &d
-	}
-	return resp, nil
+	return runQuery(req, queryPaths{
+		root:    mc.primaryRoot(),
+		cards:   mc.Cards,
+		rungs:   mc.freshnessRungs,
+		apply:   applyFreshnessMulti,
+		rungKey: func(c FeatureCard) string { return c.Root + "\x00" + cardKey(c) },
+		detail: func(card FeatureCard, q string) (Detail, error) {
+			// The detail must be built by the card's OWN checkout, since its DetailRef
+			// resolves there. A card whose Root names no member (it cannot, but the
+			// fallback keeps the fan-out total) falls back to the primary.
+			owner := mc.catalogForRoot(card.Root)
+			if owner == nil {
+				owner = mc.members[0].cat
+			}
+			return owner.detail(card, q)
+		},
+	})
 }
 
 // freshnessRungs computes the advisory currency rungs per source root, keyed by

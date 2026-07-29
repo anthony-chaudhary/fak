@@ -173,14 +173,10 @@ func atomicWrite(final string, b []byte) error {
 	}
 	name := tmp.Name()
 	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("l3kv: write %s: %w", name, err)
+		return abortTmp(tmp, name, "write", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("l3kv: fsync %s: %w", name, err)
+		return abortTmp(tmp, name, "fsync", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(name)
@@ -191,6 +187,16 @@ func atomicWrite(final string, b []byte) error {
 		return fmt.Errorf("l3kv: commit %s: %w", final, err)
 	}
 	return nil
+}
+
+// abortTmp discards the half-written temp file — close it, unlink it — and wraps err
+// with the step that failed. Shared by atomicWrite's Write and Sync failure paths,
+// which differ only in the verb they name; `verb` carries each site's own wording
+// ("write" / "fsync") so the returned messages stay byte-identical to before.
+func abortTmp(tmp *os.File, name, verb string, err error) error {
+	tmp.Close()
+	os.Remove(name)
+	return fmt.Errorf("l3kv: %s %s: %w", verb, name, err)
 }
 
 // memStore is a process-lifetime, in-memory Store — the S0 stand-in the seam study

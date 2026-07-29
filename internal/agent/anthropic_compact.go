@@ -558,31 +558,16 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	//     so a caller that cannot supply the horizon never bursts the cache. The firstbp default never
 	//     reaches this branch (pfxEnd>=0 there, or Anchor!=Head), so its body is unchanged.
 	solvencyForced := false
-	if opts.Anchor == CompactAnchorHead && pfxEnd < 0 {
-		readMult, writeMult := opts.ReadMult, opts.WriteMult
-		if readMult <= 0 {
-			readMult = defaultCacheReadMult
-		}
-		if writeMult <= 0 {
-			writeMult = defaultCacheWriteMult
-		}
-		droppedCachedTokens, invalidatedSuffixTokens := headBurstEconomics(elems, pfxEnd+1, keepStart)
-		if opts.ColdCache {
-			// Observed-cold (never guessed): the suffix's cache entries have already expired, so
-			// this turn re-bills them at the cold write rate with or without the drop — the burst
-			// carries no marginal penalty and the gate fires horizon-free (breakEven 0).
-			invalidatedSuffixTokens = 0
-		}
-		if !CacheBurstPaysBackWithMargin(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult, opts.MinHorizonMargin) {
-			// The burst does not repay in cache dollars. Refuse — UNLESS the trace has climbed to
-			// the solvency floor, where the question stops being "is this profitable?" and becomes
-			// "can we afford not to?" (CompactOptions.SolvencyFloorTokens). A forced fire is
-			// labeled on the outcome so it is never counted as a profitable one.
-			if !compactionSolvencyOverride(opts) {
-				return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
-			}
-			solvencyForced = true
-		}
+	// Nothing survives the dropped middle here (excludeIdx -1), and this path DOES grant the
+	// solvency-floor escape below.
+	switch headBurstGate(opts, elems, pfxEnd, keepStart, -1, true) {
+	case headBurstRefuse:
+		return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
+	case headBurstForced:
+		// Unprofitable in cache dollars, but the trace has climbed to the solvency floor, where the
+		// question stops being "is this profitable?" and becomes "can we afford not to?". A forced
+		// fire is labeled on the outcome so it is never counted as a profitable one.
+		solvencyForced = true
 	}
 
 	// 4. Splice on ORIGINAL bytes. The prefix span [0, spans[pfxEnd].end) (or just the
@@ -602,6 +587,86 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 		PositiveAssertionsKept: positiveResidue.AssertionsKept,
 		SolvencyForced:         solvencyForced,
 	}
+}
+
+// headBurstVerdict is what the head-anchored cache-economics gate decided.
+type headBurstVerdict int
+
+const (
+	// headBurstNotApplicable: not head-anchored, or a protected prefix exists — no burst, so no gate.
+	headBurstNotApplicable headBurstVerdict = iota
+	// headBurstPays: the burst repays inside the remaining session horizon.
+	headBurstPays
+	// headBurstForced: unprofitable, but the solvency floor forces the drop anyway.
+	headBurstForced
+	// headBurstRefuse: unprofitable — do not compact.
+	headBurstRefuse
+)
+
+// headBurstGate runs the head-anchored economics gate (#1407/#1408) both compaction rewrites apply
+// before they drop a middle. When head re-anchoring engaged (pfxEnd<0 under CompactAnchorHead) the
+// drop deliberately bursts the recent breakpoint's cached suffix — the stable head itself stays
+// byte-stable because it precedes messages[] (see anchorCompactablePrefixMode) — so the drop may
+// fire only if the per-turn read saving from the cached middle we shed forever repays the one-time
+// cold re-write of the invalidated suffix within the remaining session horizon. An unknown horizon
+// (TotalTurns<=0) returns false, so a caller that cannot supply the horizon never bursts the cache.
+// The firstbp default never reaches this branch (pfxEnd>=0 there, or Anchor!=Head).
+//
+// The two callers' divergences are parameters, not branches:
+//   - excludeIdx names one message inside the dropped middle that SURVIVES the rewrite — the
+//     goal-pin path re-inserts its hoisted goal verbatim, so those tokens are re-read every future
+//     turn and are NOT part of the per-turn saving; crediting them would over-credit the saving and
+//     fire a burst the true economics reject. Pass -1 when nothing survives.
+//   - allowSolvencyOverride is whether an unprofitable burst may still fire because the trace
+//     reached the solvency floor (CompactOptions.SolvencyFloorTokens). Only the main path grants it;
+//     the goal-pin path passes false, reproducing its existing refuse-outright behaviour exactly.
+func headBurstGate(opts CompactOptions, elems []json.RawMessage, pfxEnd, keepStart, excludeIdx int, allowSolvencyOverride bool) headBurstVerdict {
+	if opts.Anchor != CompactAnchorHead || pfxEnd >= 0 {
+		return headBurstNotApplicable
+	}
+	readMult, writeMult := opts.ReadMult, opts.WriteMult
+	if readMult <= 0 {
+		readMult = defaultCacheReadMult
+	}
+	if writeMult <= 0 {
+		writeMult = defaultCacheWriteMult
+	}
+	droppedCachedTokens, invalidatedSuffixTokens := headBurstEconomics(elems, pfxEnd+1, keepStart)
+	if excludeIdx >= 0 {
+		if droppedCachedTokens -= estimateElementTokens(elems[excludeIdx]); droppedCachedTokens < 0 {
+			droppedCachedTokens = 0
+		}
+	}
+	if opts.ColdCache {
+		// Observed-cold (never guessed): the suffix's cache entries have already expired, so this
+		// turn re-bills them at the cold write rate with or without the drop — the burst carries no
+		// marginal penalty and the gate fires horizon-free (breakEven 0).
+		invalidatedSuffixTokens = 0
+	}
+	if CacheBurstPaysBackWithMargin(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult, opts.MinHorizonMargin) {
+		return headBurstPays
+	}
+	if allowSolvencyOverride && compactionSolvencyOverride(opts) {
+		return headBurstForced
+	}
+	return headBurstRefuse
+}
+
+// beginCompactSplice opens the byte-level splice both compaction rewrites share: it resolves the
+// protected-prefix end (just past the last protected element, or the array's content head when no
+// message is protected), locates the first kept element and the verbatim body tail, and returns a
+// buffer already holding the prefix bytes verbatim. Nothing here is re-serialized, which is exactly
+// what keeps the cached prefix byte-identical. bodyTail runs from just past the last element to EOF
+// (the `]` plus any trailing top-level keys), so the caller copies it last.
+func beginCompactSplice(raw []byte, spans []elementSpan, pfxEnd, keepStart, n int) (b *bytes.Buffer, keptFrom int, bodyTail []byte) {
+	prefixEnd := arrayContentStart(spans)
+	if pfxEnd >= 0 {
+		prefixEnd = spans[pfxEnd].end
+	}
+	b = &bytes.Buffer{}
+	b.Grow(len(raw))
+	b.Write(raw[:prefixEnd]) // verbatim protected prefix (includes `[` when pfxEnd<0)
+	return b, spans[keepStart].start, raw[spans[n-1].end:]
 }
 
 // compactionSolvencyOverride reports whether context SOLVENCY overrides the head-anchored burst
@@ -1388,21 +1453,9 @@ func spliceCompacted(raw []byte, spans []elementSpan, pfxEnd, keepStart, n, drop
 		return nil, false
 	}
 
-	// prefixEnd: byte just past the last protected element, or the first element's start
-	// (the array's content head) when no message is protected.
-	prefixEnd := arrayContentStart(spans)
-	if pfxEnd >= 0 {
-		prefixEnd = spans[pfxEnd].end
-	}
-	// tailStart: byte at the first kept element's start. Everything from arrayClose (the
-	// `]`) onward rides along inside the kept-elements + tail copy, so we copy from the
-	// first kept element through end of body.
-	keptFrom := spans[keepStart].start
-	bodyTail := raw[spans[n-1].end:] // from just past the last element to EOF (the `]` + trailing keys)
-
-	var b bytes.Buffer
-	b.Grow(len(raw))
-	b.Write(raw[:prefixEnd]) // verbatim protected prefix (includes `[` and any kept-element-leading bytes up to prefixEnd)
+	// Everything from arrayClose (the `]`) onward rides along inside the kept-elements + tail copy,
+	// so the splice copies from the first kept element through end of body.
+	b, keptFrom, bodyTail := beginCompactSplice(raw, spans, pfxEnd, keepStart, n)
 	// Separator before the stub: a comma only if at least one protected element preceded it.
 	if pfxEnd >= 0 {
 		b.WriteByte(',')

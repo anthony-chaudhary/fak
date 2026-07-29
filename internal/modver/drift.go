@@ -106,33 +106,21 @@ var driftSemverRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
 // empty readout (Head set, no rows) rather than an error or a false drift, matching
 // releasestale's "no reference point => Unknown, never a spurious stale" stance.
 func DriftSnapshot(ctx context.Context, dir string, run Runner) (DriftReport, error) {
-	if run == nil {
-		run = RealRunner
-	}
-	headOut, err := run(ctx, dir, "rev-parse", "--short=8", "HEAD")
+	run = gitRunner(run)
+	head, err := headShort(ctx, dir, run)
 	if err != nil {
 		return DriftReport{}, err
 	}
-	head := strings.TrimSpace(string(headOut))
 
 	tag, tagSHA := latestMergedSemverTag(ctx, dir, run)
 	if tag == "" {
 		return DriftReport{Schema: DriftSchema, Head: head}, nil
 	}
 
-	lsArgs := append([]string{"ls-files", "-z", "--"}, trackedRoots...)
-	lsOut, err := run(ctx, dir, lsArgs...)
-	if err != nil {
-		return DriftReport{}, err
-	}
-	live := liveModules(lsOut)
-
-	// Same shape and rev semantics as Snapshot's history walk (--no-merges pins rev to
-	// distinct non-merge commits — see Snapshot), but BOUNDED to tag..HEAD so each
-	// module's rev IS its commit count since the last tag. The range selector must
-	// precede the "--" pathspec separator (git parses everything after "--" as a path).
-	logArgs := append([]string{"log", "--no-merges", "--pretty=format:%x1e%h%x09%cI", "--name-only", tag + "..HEAD", "--"}, trackedRoots...)
-	logOut, err := run(ctx, dir, logArgs...)
+	// Same shape and rev semantics as Snapshot's history walk (liveAndLog owns both),
+	// but BOUNDED to tag..HEAD so each module's rev IS its commit count since the last
+	// tag — the one thing this pass does differently.
+	live, logOut, err := liveAndLog(ctx, dir, run, tag+"..HEAD")
 	if err != nil {
 		return DriftReport{}, err
 	}

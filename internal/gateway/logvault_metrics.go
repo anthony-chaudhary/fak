@@ -16,12 +16,7 @@ import "strings"
 // family. Passing nil detaches it; the default `fak serve` path never sets it and
 // renders nothing. Safe on a nil Server.
 func (s *Server) SetLogvaultMetricsProvider(fn func() string) {
-	if s == nil || s.metrics == nil {
-		return
-	}
-	s.metrics.servingMu.Lock()
-	s.metrics.logvaultProvider = fn
-	s.metrics.servingMu.Unlock()
+	s.withMetricsLocked(func(m *gatewayMetrics) { m.logvaultProvider = fn })
 }
 
 // writeLogvaultMetrics appends the host-injected fak_logvault_* family, if a
@@ -29,16 +24,5 @@ func (s *Server) SetLogvaultMetricsProvider(fn func() string) {
 // provider emits HELP/TYPE headers itself), so an empty string — no vault on this
 // box — adds nothing rather than an empty family block.
 func (m *gatewayMetrics) writeLogvaultMetrics(b *strings.Builder) {
-	if m == nil {
-		return
-	}
-	m.servingMu.Lock()
-	fn := m.logvaultProvider
-	m.servingMu.Unlock()
-	if fn == nil {
-		return
-	}
-	if text := fn(); text != "" {
-		b.WriteString(text)
-	}
+	m.writeProvidedFamily(b, func(m *gatewayMetrics) func() string { return m.logvaultProvider })
 }

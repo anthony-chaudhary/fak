@@ -95,6 +95,42 @@ func (s *Server) SetServingMetricsEmitters(emitters ...ServingMetricsEmitter) {
 	s.metrics.setServingMetricsEmitters(emitters...)
 }
 
+// withMetricsLocked runs fn against the Server's metrics registry under the serving
+// lock, or does nothing when there is no registry to touch. It is the nil-safe
+// install-a-host-injected-provider preamble every Set*MetricsProvider setter shares:
+// those setters differ only in WHICH provider slot they fill, so the "safe on a nil
+// Server, and the write is serialized against a concurrent scrape" contract is stated
+// once here rather than re-derived per family.
+func (s *Server) withMetricsLocked(fn func(*gatewayMetrics)) {
+	if s == nil || s.metrics == nil {
+		return
+	}
+	s.metrics.servingMu.Lock()
+	fn(s.metrics)
+	s.metrics.servingMu.Unlock()
+}
+
+// writeProvidedFamily appends one host-injected Prometheus family, read from its slot
+// under the serving lock. slot names which provider to render. The provider's output is
+// written VERBATIM — each provider owns its own schema and emits its own HELP/TYPE
+// headers — so an empty string (a provider with nothing to report) adds nothing rather
+// than an empty family block, and an unset provider adds nothing at all. Safe on a nil
+// registry, which is the default `fak serve` shape.
+func (m *gatewayMetrics) writeProvidedFamily(b *strings.Builder, slot func(*gatewayMetrics) func() string) {
+	if m == nil {
+		return
+	}
+	m.servingMu.Lock()
+	fn := slot(m)
+	m.servingMu.Unlock()
+	if fn == nil {
+		return
+	}
+	if text := fn(); text != "" {
+		b.WriteString(text)
+	}
+}
+
 func (m *gatewayMetrics) setServingMetricsEmitters(emitters ...ServingMetricsEmitter) {
 	if m == nil {
 		return

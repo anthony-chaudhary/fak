@@ -759,16 +759,27 @@ func kpiAgentsEntrypoint(agentsText string, present bool) KPI {
 	return KPI{"agents_entrypoint", "discover", clamp(100 - 22*float64(len(defects))), detail, defects, []string{}}
 }
 
-func kpiAgentConfig(missing []string) KPI {
+// kpiCoverage renders the "N of M families are covered" KPI shape: one defect per
+// missing label, score = covered/total. `defect` and `noun` carry each caller's own
+// wording so the rendered strings are unchanged.
+func kpiCoverage(kpi, group string, total int, missing []string, defect func(label string) string, noun string) KPI {
 	defects := []string{}
 	for _, label := range missing {
-		defects = append(defects, "no auto-discovered config for "+label+" — add it so that harness drops in with no setup")
+		defects = append(defects, defect(label))
 	}
-	covered := len(agentConfigs) - len(missing)
-	return KPI{"agent_config", "discover",
-		clamp(100 * float64(covered) / float64(max1(len(agentConfigs)))),
-		strconv.Itoa(covered) + "/" + strconv.Itoa(len(agentConfigs)) + " agent harnesses have a zero-setup config",
+	covered := total - len(missing)
+	return KPI{kpi, group,
+		clamp(100 * float64(covered) / float64(max1(total))),
+		strconv.Itoa(covered) + "/" + strconv.Itoa(total) + " " + noun,
 		defects, []string{}}
+}
+
+func kpiAgentConfig(missing []string) KPI {
+	return kpiCoverage("agent_config", "discover", len(agentConfigs), missing,
+		func(label string) string {
+			return "no auto-discovered config for " + label + " — add it so that harness drops in with no setup"
+		},
+		"agent harnesses have a zero-setup config")
 }
 
 func kpiLLMSMap(llmsPresent, llmsFullPresent bool) KPI {
@@ -821,32 +832,37 @@ func kpiEntryLinksResolve(dead []string) KPI {
 	return KPI{"entry_links_resolve", "discover", clamp(100 - 14*float64(len(defects))), detail, defects, []string{}}
 }
 
-func kpiFirstCommand(found bool, where string) KPI {
+// kpiPresence renders the "the one runnable thing is either there or it is not" KPI
+// shape: 100 and a locating detail when found, otherwise a fixed floor plus one defect
+// naming what to add. `absentScore` keeps each caller's own floor — 20 for a missing
+// first command, 40 for a missing install one-liner — which is the only number the two
+// KPIs disagree on.
+func kpiPresence(kpi string, found bool, absentScore int, absentDefect, absentDetail, presentDetail string) KPI {
 	defects := []string{}
 	if !found {
-		defects = append(defects, "no copy-pasteable no-key/no-model/no-GPU first command in a fenced block of "+strings.Join(firstCommandDocs, ", ")+" (e.g. `fak preflight …`)")
+		defects = append(defects, absentDefect)
 	}
-	score := 20
-	detail := "no runnable no-setup first command"
+	score := absentScore
+	detail := absentDetail
 	if found {
 		score = 100
-		detail = "first command present in " + where
+		detail = presentDetail
 	}
-	return KPI{"first_command", "adopt", score, detail, defects, []string{}}
+	return KPI{kpi, "adopt", score, detail, defects, []string{}}
+}
+
+func kpiFirstCommand(found bool, where string) KPI {
+	return kpiPresence("first_command", found, 20,
+		"no copy-pasteable no-key/no-model/no-GPU first command in a fenced block of "+strings.Join(firstCommandDocs, ", ")+" (e.g. `fak preflight …`)",
+		"no runnable no-setup first command",
+		"first command present in "+where)
 }
 
 func kpiInstallOneliner(found bool, where string) KPI {
-	defects := []string{}
-	if !found {
-		defects = append(defects, "no one-line install (`go install …@latest`) in "+strings.Join(installDocs, ", ")+" — give an agent the one-command install")
-	}
-	score := 40
-	detail := "no one-line install"
-	if found {
-		score = 100
-		detail = "install one-liner present in " + where
-	}
-	return KPI{"install_oneliner", "adopt", score, detail, defects, []string{}}
+	return kpiPresence("install_oneliner", found, 40,
+		"no one-line install (`go install …@latest`) in "+strings.Join(installDocs, ", ")+" — give an agent the one-command install",
+		"no one-line install",
+		"install one-liner present in "+where)
 }
 
 func kpiHonestyLedger(present bool, untagged []string) KPI {
@@ -878,15 +894,11 @@ func kpiHonestyLedger(present bool, untagged []string) KPI {
 }
 
 func kpiIntegrationRecipes(missing []string) KPI {
-	defects := []string{}
-	for _, label := range missing {
-		defects = append(defects, "no integration recipe for "+label+" — add one under docs/integrations/")
-	}
-	covered := len(requiredRecipes) - len(missing)
-	return KPI{"integration_recipes", "adopt",
-		clamp(100 * float64(covered) / float64(max1(len(requiredRecipes)))),
-		strconv.Itoa(covered) + "/" + strconv.Itoa(len(requiredRecipes)) + " agent families have an integration recipe",
-		defects, []string{}}
+	return kpiCoverage("integration_recipes", "adopt", len(requiredRecipes), missing,
+		func(label string) string {
+			return "no integration recipe for " + label + " — add one under docs/integrations/"
+		},
+		"agent families have an integration recipe")
 }
 
 func kpiCodexRecipeCurrent(gaps []string) KPI {

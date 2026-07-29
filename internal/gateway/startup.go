@@ -293,6 +293,22 @@ func (p *ModelLoadProfile) memoryPlanByClassScopeDType() []ModelLoadMemoryDemand
 	return out
 }
 
+// writeCapacityKnownGauge emits one scope-keyed 0/1 gauge family over the model-load
+// memory capacities: the HELP/TYPE header, then one sample per scope. `known` is the
+// caller's own predicate — reported capacity vs reported free bytes — which is the only
+// thing the two families differ on beyond their name and help text.
+func writeCapacityKnownGauge(b *strings.Builder, caps []ModelLoadMemoryCapacity, name, help string,
+	known func(ModelLoadMemoryCapacity) bool) {
+	writeHelpType(b, name, help, "gauge")
+	for _, cap := range caps {
+		v := 0
+		if known(cap) {
+			v = 1
+		}
+		fmt.Fprintf(b, "%s{scope=\"%s\"} %d\n", name, promQuote(cap.Scope), v)
+	}
+}
+
 func (p *ModelLoadProfile) sortedMemoryCapacities() []ModelLoadMemoryCapacity {
 	if p == nil {
 		return nil
@@ -474,22 +490,14 @@ func (s *Server) writeModelLoadMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "fak_model_load_memory_headroom_ratio %s\n", promFloat(p.MemoryHeadroomRatio))
 	}
 	if caps := p.sortedMemoryCapacities(); len(caps) > 0 {
-		writeHelpType(b, "fak_model_load_memory_capacity_known", "Whether the backend reported capacity for a memory scope used by the boot-time model-load fit check.", "gauge")
-		for _, cap := range caps {
-			known := 0
-			if cap.Known {
-				known = 1
-			}
-			fmt.Fprintf(b, "fak_model_load_memory_capacity_known{scope=\"%s\"} %d\n", promQuote(cap.Scope), known)
-		}
-		writeHelpType(b, "fak_model_load_memory_capacity_free_known", "Whether the backend reported current free bytes for a memory scope used by the boot-time model-load fit check.", "gauge")
-		for _, cap := range caps {
-			known := 0
-			if cap.Known && cap.FreeKnown {
-				known = 1
-			}
-			fmt.Fprintf(b, "fak_model_load_memory_capacity_free_known{scope=\"%s\"} %d\n", promQuote(cap.Scope), known)
-		}
+		writeCapacityKnownGauge(b, caps,
+			"fak_model_load_memory_capacity_known",
+			"Whether the backend reported capacity for a memory scope used by the boot-time model-load fit check.",
+			func(c ModelLoadMemoryCapacity) bool { return c.Known })
+		writeCapacityKnownGauge(b, caps,
+			"fak_model_load_memory_capacity_free_known",
+			"Whether the backend reported current free bytes for a memory scope used by the boot-time model-load fit check.",
+			func(c ModelLoadMemoryCapacity) bool { return c.Known && c.FreeKnown })
 		writeHelpType(b, "fak_model_load_memory_capacity_bytes", "Reported backend capacity bytes for the boot-time model load. The free row is omitted when current free bytes are unknown.", "gauge")
 		for _, cap := range caps {
 			if !cap.Known {

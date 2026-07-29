@@ -88,7 +88,7 @@ func (q *BudgetQueue) Admit(ctx context.Context, cost int64, priority int) (rele
 	// Slow path: park. The waiter blocks on its own channel — no CPU until a
 	// release (or Close) signals it.
 	q.seq++
-	w := &budgetWaiter{priority: priority, seq: q.seq, cost: cost, ready: make(chan struct{}), index: -1}
+	w := &budgetWaiter{parkedWaiter: parkedWaiter{priority: priority, seq: q.seq, ready: make(chan struct{}), index: -1}, cost: cost}
 	heap.Push(&q.waiters, w)
 	q.mu.Unlock()
 
@@ -175,51 +175,13 @@ func (q *BudgetQueue) Waiting() int {
 	return q.waiters.Len()
 }
 
-// budgetWaiter is one parked Admit. ready is closed under q.mu to wake it;
-// granted distinguishes a reservation grant from a Close drain. index is its
-// position in the heap (-1 once popped/removed), maintained by
-// budgetWaiterHeap.Swap.
+// budgetWaiter is one parked Admit: the shared parked-caller bookkeeping plus the
+// reservation this admit is waiting to make.
 type budgetWaiter struct {
-	priority int
-	seq      uint64
-	cost     int64
-	ready    chan struct{}
-	granted  bool
-	index    int
+	parkedWaiter
+	cost int64
 }
 
-// budgetWaiterHeap orders parked admits by priority (higher first), ties
-// broken by arrival sequence (lower first = FIFO), so capacity always goes to
-// the most urgent waiter and equal-priority waiters never starve.
-type budgetWaiterHeap []*budgetWaiter
-
-func (h budgetWaiterHeap) Len() int { return len(h) }
-
-func (h budgetWaiterHeap) Less(i, j int) bool {
-	if h[i].priority != h[j].priority {
-		return h[i].priority > h[j].priority
-	}
-	return h[i].seq < h[j].seq
-}
-
-func (h budgetWaiterHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-	h[i].index = i
-	h[j].index = j
-}
-
-func (h *budgetWaiterHeap) Push(x any) {
-	w := x.(*budgetWaiter)
-	w.index = len(*h)
-	*h = append(*h, w)
-}
-
-func (h *budgetWaiterHeap) Pop() any {
-	old := *h
-	n := len(old)
-	w := old[n-1]
-	old[n-1] = nil // don't hold the popped waiter alive via the backing array.
-	w.index = -1
-	*h = old[:n-1]
-	return w
-}
+// budgetWaiterHeap is the budget queue's parked-admit queue. It uses the same
+// priority/FIFO ordering as the slot scheduler's waiterHeap (see waiterHeapOf).
+type budgetWaiterHeap = waiterHeapOf[*budgetWaiter]

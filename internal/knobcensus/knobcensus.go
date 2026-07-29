@@ -234,20 +234,26 @@ func scanGoFile(path, rel string) ([]Knob, error) {
 		text := sc.Text()
 		if loc := reFlagReg.FindStringIndex(text); loc != nil {
 			if m := reFirstStr.FindStringSubmatch(text[loc[1]-1:]); m != nil {
-				if k, ok := classify(SurfaceFlag, m[1], rel, line); ok && !seen[k.Key()] {
-					seen[k.Key()] = true
-					knobs = append(knobs, k)
-				}
+				knobs = admitKnob(knobs, seen, SurfaceFlag, m[1], rel, line)
 			}
 		}
 		for _, m := range reEnv.FindAllStringSubmatch(text, -1) {
-			if k, ok := classify(SurfaceEnv, m[1], rel, line); ok && !seen[k.Key()] {
-				seen[k.Key()] = true
-				knobs = append(knobs, k)
-			}
+			knobs = admitKnob(knobs, seen, SurfaceEnv, m[1], rel, line)
 		}
 	}
 	return knobs, sc.Err()
+}
+
+// admitKnob classifies one surface match and records it unless this (surface,name) pair
+// was already seen in the file. The flag-registration and env lanes differ only in the
+// surface they claim, so both admit through here.
+func admitKnob(knobs []Knob, seen map[string]bool, surface Surface, name, rel string, line int) []Knob {
+	k, ok := classify(surface, name, rel, line)
+	if !ok || seen[k.Key()] {
+		return knobs
+	}
+	seen[k.Key()] = true
+	return append(knobs, k)
 }
 
 // intentTokens name a user choice the system cannot infer (which/what/consent).

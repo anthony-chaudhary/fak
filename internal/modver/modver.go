@@ -121,31 +121,12 @@ var trackedRoots = []string{"internal", "cmd", ".github/workflows", "tools", "ex
 // `git ls-files` to bound the LIVE module set, one `git log --name-only`
 // pass over the history to derive each module's rev and last touch.
 func Snapshot(ctx context.Context, dir string, run Runner) (Report, error) {
-	if run == nil {
-		run = RealRunner
-	}
-	headOut, err := run(ctx, dir, "rev-parse", "--short=8", "HEAD")
+	run = gitRunner(run)
+	head, err := headShort(ctx, dir, run)
 	if err != nil {
 		return Report{}, err
 	}
-	lsArgs := append([]string{"ls-files", "-z", "--"}, trackedRoots...)
-	lsOut, err := run(ctx, dir, lsArgs...)
-	if err != nil {
-		return Report{}, err
-	}
-	live := liveModules(lsOut)
-	// --no-merges pins the rev semantics (#2475): rev counts distinct NON-MERGE
-	// commits touching the module. A merge commit carries no authored module
-	// work — the file changes live in the non-merge commits it joins, each of
-	// which git's DAG walk lists exactly once, so there is no double-counting.
-	// git suppresses merge diffs from --name-only by default, but that default is
-	// overridable (--diff-merges, log.diffMerges); --no-merges makes the exclusion
-	// explicit and independent of git config, so rev is stable across an in-place
-	// trunk merge. Deliberately NOT --first-parent: work that reaches the trunk
-	// through a merge lives off the first-parent line, and --first-parent would
-	// silently undercount it while the merge commit itself contributes no files.
-	logArgs := append([]string{"log", "--no-merges", "--pretty=format:%x1e%h%x09%cI", "--name-only", "--"}, trackedRoots...)
-	logOut, err := run(ctx, dir, logArgs...)
+	live, logOut, err := liveAndLog(ctx, dir, run, "")
 	if err != nil {
 		return Report{}, err
 	}
@@ -155,10 +136,71 @@ func Snapshot(ctx context.Context, dir string, run Runner) (Report, error) {
 		appVer = v
 	}
 	return Report{
-		Head:       strings.TrimSpace(string(headOut)),
+		Head:       head,
 		AppVersion: appVer,
 		Modules:    modules,
 	}, nil
+}
+
+// gitRunner resolves the Runner seam's nil default — "a nil Runner means real git" is
+// the contract every modver entry point (Snapshot, Ghosts, DriftSnapshot) opens with,
+// and this is the one place that substitution happens.
+func gitRunner(run Runner) Runner {
+	if run == nil {
+		return RealRunner
+	}
+	return run
+}
+
+// headShort resolves HEAD's short (8-char) sha through the Runner seam — the boundary
+// stamp both the module report and the drift readout are pinned to. The trim is part of
+// the contract: callers store the returned string directly.
+func headShort(ctx context.Context, dir string, run Runner) (string, error) {
+	out, err := run(ctx, dir, "rev-parse", "--short=8", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// liveAndLog runs the two git calls every modver pass is bounded by, and is why the
+// three passes cannot drift apart on what a module or a revision IS: one `git ls-files`
+// fixing the LIVE module set at HEAD, then one `git log --no-merges --name-only` walk
+// over the same trackedRoots, whose raw bytes the caller folds its own way (parseLog,
+// parseGhosts, Drift).
+//
+// rev selects the walk's range: "" for the whole history (Snapshot's rev-since-forever
+// and Ghosts' tombstones) or "<tag>..HEAD" for the tag-bounded drift readout, where each
+// module's rev IS its commit count since the last tag. The range selector is placed
+// BEFORE the "--" separator because git parses everything after "--" as a pathspec.
+//
+// --no-merges pins the rev semantics (#2475): rev counts distinct NON-MERGE commits
+// touching the module. A merge commit carries no authored module work — the file changes
+// live in the non-merge commits it joins, each of which git's DAG walk lists exactly
+// once, so there is no double-counting, and a merge is likewise never mistaken for a
+// ghost's deletion commit. git suppresses merge diffs from --name-only by default, but
+// that default is overridable (--diff-merges, log.diffMerges); --no-merges makes the
+// exclusion explicit and independent of git config, so rev is stable across an in-place
+// trunk merge. Deliberately NOT --first-parent: work that reaches the trunk through a
+// merge lives off the first-parent line, and --first-parent would silently undercount it
+// while the merge commit itself contributes no files.
+func liveAndLog(ctx context.Context, dir string, run Runner, rev string) (map[string]bool, []byte, error) {
+	lsArgs := append([]string{"ls-files", "-z", "--"}, trackedRoots...)
+	lsOut, err := run(ctx, dir, lsArgs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	logArgs := []string{"log", "--no-merges", "--pretty=format:%x1e%h%x09%cI", "--name-only"}
+	if rev != "" {
+		logArgs = append(logArgs, rev)
+	}
+	logArgs = append(logArgs, "--")
+	logArgs = append(logArgs, trackedRoots...)
+	logOut, err := run(ctx, dir, logArgs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return liveModules(lsOut), logOut, nil
 }
 
 // liveModules folds NUL-separated `git ls-files` output into the set of

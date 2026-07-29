@@ -21,9 +21,7 @@ package sessionimage
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 )
 
@@ -76,19 +74,6 @@ func writeQualityDelta(path string, entries []QualityDelta) error {
 // LoadDir/verifyParts before this is reachable; this re-reads them only to decode. A
 // version mismatch fails closed.
 func (img *Image) QualityDeltas() ([]QualityDelta, error) {
-	b, err := os.ReadFile(filepath.Join(img.Dir, QualityFile))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var set QualityDeltaSet
-	if err := json.Unmarshal(b, &set); err != nil {
-		return nil, fmt.Errorf("sessionimage: bad %s: %w", QualityFile, err)
-	}
-	if set.Version != Version {
-		return nil, fmt.Errorf("sessionimage: quality delta version %q != %q", set.Version, Version)
-	}
-	return set.Entries, nil
+	return readImageSidecar(img.Dir, QualityFile, "quality delta",
+		func(s QualityDeltaSet) (string, []QualityDelta) { return s.Version, s.Entries })
 }

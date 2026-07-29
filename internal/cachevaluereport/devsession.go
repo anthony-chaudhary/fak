@@ -139,10 +139,7 @@ func (r *DevSessionBenefitReport) fillFinding() {
 // the fenced style RenderFleetBenefit uses.
 func RenderDevSessionBenefit(r DevSessionBenefitReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nDev-session lens (Track 3, real un-proxied Claude Code transcripts)\n")
-	if r.Finding != "" {
-		fmt.Fprintf(&b, "  %s\n", r.Finding)
-	}
+	benefitLensHead(&b, "Dev-session lens (Track 3, real un-proxied Claude Code transcripts)", r.Finding)
 	if r.Sessions == 0 {
 		fmt.Fprintf(&b, "  provenance: %s\n", r.Provenance)
 		return b.String()
@@ -156,11 +153,7 @@ func RenderDevSessionBenefit(r DevSessionBenefitReport) string {
 	fmt.Fprintf(&b, "  tokens: input=%d output=%d cache_read=%d cache_write=%d\n",
 		r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheCreationTokens)
 	fmt.Fprintf(&b, "  saved token-equiv: %.0f\n", r.SavedTokenEquiv)
-	if r.ObservedCounterfactualUSD != 0 || r.ObservedActualSpendUSD != 0 || r.ObservedAPICostAvoidedUSD != 0 {
-		reduction := "-"
-		if r.ObservedAPICostReductionPct != nil {
-			reduction = fmt.Sprintf("%.2f%%", *r.ObservedAPICostReductionPct)
-		}
+	if reduction, ok := apiCostReduction(r.ObservedCounterfactualUSD, r.ObservedActualSpendUSD, r.ObservedAPICostAvoidedUSD, r.ObservedAPICostReductionPct); ok {
 		fmt.Fprintf(&b, "  API cost: observed_spend=$%.4f counterfactual=$%.4f avoided=$%.4f reduction=%s\n",
 			r.ObservedActualSpendUSD, r.ObservedCounterfactualUSD, r.ObservedAPICostAvoidedUSD, reduction)
 	}

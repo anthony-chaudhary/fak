@@ -350,12 +350,19 @@ func appendLedgerLine(path string, r any) error {
 	return f.Close()
 }
 
+// appendLedgerRow is the whole append act every rsiloop ledger performs: write the
+// durable line first, and admit the row in memory only once that write succeeded, so a
+// failed append never leaves an in-memory row the journal does not carry.
+func appendLedgerRow[R any](path string, rows *[]R, r R) error {
+	if err := appendLedgerLine(path, r); err != nil {
+		return err
+	}
+	*rows = append(*rows, r)
+	return nil
+}
+
 // append records the row in memory and, if the ledger is file-backed, durably
 // appends it as one JSON line so the journal survives a restart.
 func (l *CuratorLedger) append(r CuratorRow) error {
-	if err := appendLedgerLine(l.path, r); err != nil {
-		return err
-	}
-	l.rows = append(l.rows, r)
-	return nil
+	return appendLedgerRow(l.path, &l.rows, r)
 }

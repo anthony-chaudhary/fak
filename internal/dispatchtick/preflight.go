@@ -354,16 +354,7 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 	// seat pool. floorApplied carries the ceiling-bounded value into cap_terms.
 	floorApplied := 0
 	if in.WorkerFloor > 0 {
-		ceiling := in.MaxWorkers
-		if hostCapInfo.HostCap != nil {
-			ceiling = minInt(ceiling, *hostCapInfo.HostCap)
-		}
-		if foldSeats {
-			ceiling = minInt(ceiling, *in.Seat.Total)
-		}
-		if ceiling < 0 {
-			ceiling = 0
-		}
+		ceiling := hardCeiling(in.MaxWorkers, hostCapInfo.HostCap, foldSeats, in.Seat.Total)
 		floorApplied = minInt(in.WorkerFloor, ceiling)
 		if floorApplied > capacity {
 			capacity = floorApplied
@@ -387,17 +378,7 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 	// target. Applied BEFORE the contraction clamp so a pending drain still bounds it.
 	worktreeApplied := 0
 	if proven := WorktreeProvenCap(in.WorktreeIsolation); proven > 0 {
-		ceiling := minInt(proven, in.MaxWorkers)
-		if hostCapInfo.HostCap != nil {
-			ceiling = minInt(ceiling, *hostCapInfo.HostCap)
-		}
-		if foldSeats {
-			ceiling = minInt(ceiling, *in.Seat.Total)
-		}
-		if ceiling < 0 {
-			ceiling = 0
-		}
-		worktreeApplied = ceiling
+		worktreeApplied = hardCeiling(minInt(proven, in.MaxWorkers), hostCapInfo.HostCap, foldSeats, in.Seat.Total)
 		if worktreeApplied > capacity {
 			capacity = worktreeApplied
 		}
@@ -762,6 +743,29 @@ func nonEmpty(in []string) []string {
 		}
 	}
 	return out
+}
+
+// hardCeiling clamps a RAISING capacity term to the hard ceilings only — host capacity
+// (#1337) and, when seats are being folded, seat inventory — and never below zero. Both
+// raising terms bound themselves this way: the #3368 predictive worker floor and the
+// #3185 evidence-gated worktree raise. Sharing one clamp is what keeps the guarantee
+// uniform — neither raise can overbook the box or the seat pool, and (deliberately)
+// neither is bounded by the REACTIVE lease target each one exists to override.
+//
+// foldSeats is passed rather than inferred from seatTotal because the fold is gated on a
+// POSITIVE inventory, not merely a present one: a seat total of 0 means "seat data not
+// meaningful here", and must not clamp the ceiling to zero.
+func hardCeiling(ceiling int, hostCap *int, foldSeats bool, seatTotal *int) int {
+	if hostCap != nil {
+		ceiling = minInt(ceiling, *hostCap)
+	}
+	if foldSeats {
+		ceiling = minInt(ceiling, *seatTotal)
+	}
+	if ceiling < 0 {
+		return 0
+	}
+	return ceiling
 }
 
 func minInt(a, b int) int {

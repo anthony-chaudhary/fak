@@ -105,38 +105,10 @@ func LoadPolicy(p Paths) Policy {
 			pol.IncludeOnly = v
 		}
 	}
-	if raw, ok := user["notes"]; ok {
-		var v map[string]string
-		if json.Unmarshal(raw, &v) == nil {
-			for k, val := range v {
-				pol.Notes[k] = val
-			}
-		}
-	}
-	if raw, ok := user["account_profiles"]; ok {
-		var v map[string]ProfileOverride
-		if json.Unmarshal(raw, &v) == nil {
-			for k, val := range v {
-				pol.AccountProfiles[k] = val
-			}
-		}
-	}
-	if raw, ok := user["route_weights"]; ok {
-		var v map[string]int
-		if json.Unmarshal(raw, &v) == nil {
-			for k, val := range v {
-				pol.RouteWeights[k] = val
-			}
-		}
-	}
-	if raw, ok := user["lane_models"]; ok {
-		var v map[string]string
-		if json.Unmarshal(raw, &v) == nil {
-			for k, val := range v {
-				pol.LaneModels[k] = val
-			}
-		}
-	}
+	mergeMapOverride(user, "notes", pol.Notes)
+	mergeMapOverride(user, "account_profiles", pol.AccountProfiles)
+	mergeMapOverride(user, "route_weights", pol.RouteWeights)
+	mergeMapOverride(user, "lane_models", pol.LaneModels)
 	if raw, ok := user["routing"]; ok {
 		var v Routing
 		if json.Unmarshal(raw, &v) == nil {
@@ -149,6 +121,24 @@ func LoadPolicy(p Paths) Policy {
 		}
 	}
 	return pol
+}
+
+// mergeMapOverride folds one user-policy map field into the built-in defaults, entry by
+// entry so an override of one key never drops the rest. The policy file is advisory:
+// an absent key, or one whose JSON does not parse as this map's shape, leaves the
+// defaults exactly as they were rather than failing the load.
+func mergeMapOverride[V any](user map[string]json.RawMessage, key string, into map[string]V) {
+	raw, ok := user[key]
+	if !ok {
+		return
+	}
+	var v map[string]V
+	if json.Unmarshal(raw, &v) != nil {
+		return
+	}
+	for k, val := range v {
+		into[k] = val
+	}
 }
 
 func fileExists(path string) bool {

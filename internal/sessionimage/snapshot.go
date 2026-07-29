@@ -33,7 +33,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/recall"
 )
@@ -94,13 +93,9 @@ func SnapshotDir(srcDir, destDir string, opts SnapshotOptions) (Meta, error) {
 	// content-addressed sharing is why the capture is cheap), then the fresh image.json:
 	// same identity/provenance, UpdatedUnix restamped, and the migration entry that makes the
 	// checkpoint an audited fact.
-	parts, err := indexParts(destDir)
+	parts, now, err := indexPartsAndStamp(destDir, opts.Now)
 	if err != nil {
 		return Meta{}, err
-	}
-	now := opts.Now
-	if now == 0 {
-		now = time.Now().Unix()
 	}
 	meta := src.Meta
 	meta.UpdatedUnix = now

@@ -49,10 +49,8 @@ const TickLockTTL = 2 * time.Minute
 func TryTickLock(regDir string) (release func() error, acquired bool, err error) {
 	path := filepath.Join(regDir, TickLockName)
 
-	if cerr := createTickLock(path); cerr == nil {
-		return tickLockReleaser(path), true, nil
-	} else if !os.IsExist(cerr) {
-		return noopRelease, false, cerr
+	if release, acquired, cerr, held := attemptTickLock(path); !held {
+		return release, acquired, cerr
 	}
 
 	// The lockfile already exists. Live (another tick holds it) or stale (a crashed
@@ -68,14 +66,26 @@ func TryTickLock(regDir string) (release func() error, acquired bool, err error)
 	// stat (the holder released concurrently) — either way, reclaim: remove + retry the
 	// create once.
 	_ = os.Remove(path)
-	if cerr := createTickLock(path); cerr == nil {
-		return tickLockReleaser(path), true, nil
-	} else if !os.IsExist(cerr) {
-		return noopRelease, false, cerr
+	if release, acquired, cerr, held := attemptTickLock(path); !held {
+		return release, acquired, cerr
 	}
 	// A concurrent tick won the retry-create race; back off correctly rather than
 	// force a second acquire.
 	return noopRelease, false, nil
+}
+
+// attemptTickLock runs the one O_EXCL create act and folds its outcome into
+// TryTickLock's return shape — the step TryTickLock performs twice, once on the
+// first try and once after reclaiming a stale lockfile. held=true means the create
+// lost to an existing lockfile (os.IsExist); the caller decides whether that means
+// "reclaim and retry" or "back off", which is the only thing the two sites differ on.
+func attemptTickLock(path string) (release func() error, acquired bool, err error, held bool) {
+	if cerr := createTickLock(path); cerr == nil {
+		return tickLockReleaser(path), true, nil, false
+	} else if !os.IsExist(cerr) {
+		return noopRelease, false, cerr, false
+	}
+	return noopRelease, false, nil, true
 }
 
 // createTickLock does the one atomic O_EXCL create that IS the acquire act, then best-

@@ -469,11 +469,7 @@ func (l *QuarantineLedger) releasedSet() map[int]bool {
 func (l *QuarantineLedger) isReleased(seq int) bool { return l.releasedSet()[seq] }
 
 func (l *QuarantineLedger) append(r QuarantineRow) error {
-	if err := appendLedgerLine(l.path, r); err != nil {
-		return err
-	}
-	l.rows = append(l.rows, r)
-	return nil
+	return appendLedgerRow(l.path, &l.rows, r)
 }
 
 // DuplicateThreshold is the line-set Jaccard similarity at/above which a candidate

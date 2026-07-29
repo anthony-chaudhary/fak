@@ -1085,13 +1085,7 @@ func RenderTwoTrack(r TwoTrackReport) string {
 	}
 	// Compaction lever health (#2039): surface the fire/starve/shed trend so an inert
 	// lever (fired>0, shed=0) is distinguishable from an idle one across the folded ledger.
-	var compactionBuckets []SavingsBucket
-	for _, b := range r.Track2 {
-		if b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction") {
-			compactionBuckets = append(compactionBuckets, b)
-		}
-	}
-	if len(compactionBuckets) > 0 {
+	if compactionBuckets := compactionLeverBuckets(r.Track2); len(compactionBuckets) > 0 {
 		fmt.Fprintf(&sb, "\nCompaction lever health (fire/starve/shed trend)\n")
 		fmt.Fprintf(&sb, "  %-9s  %5s  %6s  %6s  %8s  %10s  %8s\n",
 			"week", "sess", "fired", "bailed", "starved", "shed_tok", "budget")

@@ -339,6 +339,47 @@ func indexParts(dir string) ([]Part, error) {
 	return parts, nil
 }
 
+// indexPartsAndStamp seals a freshly populated image directory, the one step both derivations of
+// an image — the fork (branch.go) and the checkpoint (snapshot.go) — perform before writing their
+// image.json: index the directory's parts for integrity (shared parts keep their source's digests,
+// which is exactly why both derivations are cheap) and resolve the stamp clock. A zero `now` means
+// the wall clock, so a caller that wants a deterministic stamp passes its own.
+func indexPartsAndStamp(dir string, now int64) ([]Part, int64, error) {
+	parts, err := indexParts(dir)
+	if err != nil {
+		return nil, 0, err
+	}
+	if now == 0 {
+		now = time.Now().Unix()
+	}
+	return parts, now, nil
+}
+
+// readImageSidecar reads one versioned JSON sidecar of an image directory back. An absent file is
+// not an error — it means the image simply carries no record of that kind — so it yields a nil
+// slice and a nil error. The bytes were already integrity-checked by LoadDir/verifyParts before
+// any of these readers is reachable, so this re-reads them only to decode. A version mismatch
+// fails closed; `label` names the record in that refusal, so each sidecar keeps its own wording,
+// and `unpack` lifts the version + entries out of that sidecar's own set type.
+func readImageSidecar[S any, E any](dir, file, label string, unpack func(S) (string, []E)) ([]E, error) {
+	b, err := os.ReadFile(filepath.Join(dir, file))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var set S
+	if err := json.Unmarshal(b, &set); err != nil {
+		return nil, fmt.Errorf("sessionimage: bad %s: %w", file, err)
+	}
+	version, entries := unpack(set)
+	if version != Version {
+		return nil, fmt.Errorf("sessionimage: %s version %q != %q", label, version, Version)
+	}
+	return entries, nil
+}
+
 // LoadDir reads image.json + session.json from a bundle directory and verifies the
 // integrity of every part (size + sha256), failing closed on a version mismatch, a
 // missing listed part, or a digest that does not match its bytes. A returned Image is a

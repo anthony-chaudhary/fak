@@ -482,14 +482,56 @@ func (r *FleetBenefitReport) fillFinding() {
 	r.Finding = strings.Join(parts, "; ")
 }
 
+// benefitLensHead opens a benefit-lens section the way every lens opens one: a blank
+// separator line, the section title, and the one-line Finding when the fold produced
+// one. The caller keeps its OWN "nothing to report" early return, because what counts as
+// an empty lens differs per lens (no transcripts vs no durable ledger rows).
+func benefitLensHead(b *strings.Builder, title, finding string) {
+	fmt.Fprintf(b, "\n%s\n", title)
+	if finding != "" {
+		fmt.Fprintf(b, "  %s\n", finding)
+	}
+}
+
+// apiCostReduction is the shared gate and reduction cell of every lens's API-cost line:
+// it reports whether ANY observed cost axis is non-zero (an all-zero lens prints no cost
+// line at all, rather than a row of zeros that reads like a measurement), and renders the
+// reduction cell identically everywhere — "-" when the pointer is nil, because a missing
+// counterfactual denominator has no honest percentage, else a 2-decimal percent. The
+// Fprintf itself stays with each caller: the lenses print different cost breakdowns (the
+// fleet aggregate splits avoided cost into provider and fak halves; the dev-session lens
+// has no such split).
+func apiCostReduction(counterfactual, spend, avoided float64, pct *float64) (string, bool) {
+	if counterfactual == 0 && spend == 0 && avoided == 0 {
+		return "", false
+	}
+	reduction := "-"
+	if pct != nil {
+		reduction = fmt.Sprintf("%.2f%%", *pct)
+	}
+	return reduction, true
+}
+
+// compactionLeverBuckets selects the savings buckets carrying compaction-lever telemetry
+// — the fak-authored rows plus any mechanism in the compaction family — so the terminal
+// and markdown render paths agree on exactly which rows the fire/starve/shed trend is
+// folded from. Returns nil when the ledger has none, which both callers read as "no
+// lever health section".
+func compactionLeverBuckets(buckets []SavingsBucket) []SavingsBucket {
+	var out []SavingsBucket
+	for _, b := range buckets {
+		if b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction") {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // RenderFleetBenefit renders the all-time/caller-window aggregate as a compact section
 // beneath the two-track report.
 func RenderFleetBenefit(r FleetBenefitReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nFleet aggregate (cumulative over recorded rows)\n")
-	if r.Finding != "" {
-		fmt.Fprintf(&b, "  %s\n", r.Finding)
-	}
+	benefitLensHead(&b, "Fleet aggregate (cumulative over recorded rows)", r.Finding)
 	if r.UsageRows == 0 && r.Track1Sessions == 0 && r.TotalSavedTokenEq == 0 {
 		fmt.Fprintf(&b, "  no durable usage/savings rows yet\n")
 		return b.String()
@@ -516,11 +558,7 @@ func RenderFleetBenefit(r FleetBenefitReport) string {
 		fmt.Fprintf(&b, "  fak_share basis sweep (shed valued 3 ways; #2807): gross(1.0x)=%.4f%% marginal(0.1x)=%.4f%% net(observed)=%.4f%% — gross−net gap=%.4f pp (overstatement)\n",
 			*r.FakShareGrossPct, *r.FakShareMarginalPct, *r.FakSharePct, *r.FakShareGrossPct-*r.FakSharePct)
 	}
-	if r.ObservedCounterfactualUSD != 0 || r.ObservedActualSpendUSD != 0 || r.ObservedAPICostAvoidedUSD != 0 {
-		reduction := "-"
-		if r.ObservedAPICostReductionPct != nil {
-			reduction = fmt.Sprintf("%.2f%%", *r.ObservedAPICostReductionPct)
-		}
+	if reduction, ok := apiCostReduction(r.ObservedCounterfactualUSD, r.ObservedActualSpendUSD, r.ObservedAPICostAvoidedUSD, r.ObservedAPICostReductionPct); ok {
 		fmt.Fprintf(&b, "  API cost: observed_spend=$%.4f counterfactual=$%.4f avoided=$%.4f (provider $%.4f + fak $%.4f) reduction=%s\n",
 			r.ObservedActualSpendUSD, r.ObservedCounterfactualUSD, r.ObservedAPICostAvoidedUSD,
 			r.ProviderAPICostAvoidedUSD, r.FakAPICostAvoidedUSD, reduction)
