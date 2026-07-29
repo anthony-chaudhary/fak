@@ -183,14 +183,27 @@ func FoldDriveStates(rows []DriveStateRow) map[string]WatchdogDriveState {
 // rows do not clobber a prior carry, and carry-only rows do not clobber holds.
 func FoldDriveCarry(rows []DriveStateRow) map[string]DriveCarry {
 	out := make(map[string]DriveCarry)
+	eachCarryRow(rows, func(sid string, row DriveStateRow) {
+		out[sid] = row.driveCarry()
+	})
+	return out
+}
+
+// eachCarryRow visits every row that actually carries a carry for a named session, in
+// append (write) order. It states the admission rule for a carry row exactly once: a
+// blank session id is unattributable and a hold-only row is not a carry, so neither
+// may reach a fold and clobber a session's budget. Both carry folds — the raw
+// last-wins FoldDriveCarry and the non-regrant ReconcileDriveCarry — walk the rows
+// through here, so the two can never drift on WHICH rows count while disagreeing only
+// on how to combine them. Pure and total: nil rows visit nothing.
+func eachCarryRow(rows []DriveStateRow, visit func(sid string, row DriveStateRow)) {
 	for _, row := range rows {
 		sid := strings.TrimSpace(row.Session)
 		if sid == "" || !row.hasCarry() {
 			continue
 		}
-		out[sid] = row.driveCarry()
+		visit(sid, row)
 	}
-	return out
 }
 
 // ReconcileDriveCarry folds the append-only carry rows into the SAFE remaining budget
@@ -214,20 +227,16 @@ func FoldDriveCarry(rows []DriveStateRow) map[string]DriveCarry {
 // re-seed path consumes THIS clamped fold so a relaunch can never over-grant.
 func ReconcileDriveCarry(rows []DriveStateRow) map[string]DriveCarry {
 	out := make(map[string]DriveCarry)
-	for _, row := range rows {
-		sid := strings.TrimSpace(row.Session)
-		if sid == "" || !row.hasCarry() {
-			continue
-		}
+	eachCarryRow(rows, func(sid string, row DriveStateRow) {
 		prev, seen := out[sid]
 		if !seen || row.ReArm {
 			// First carry for the session, or an explicit operator re-arm: adopt the
 			// row's snapshot as-is. Re-arm is the sanctioned way to raise an axis.
 			out[sid] = row.driveCarry()
-			continue
+			return
 		}
 		out[sid] = row.clampNonRegrant(prev)
-	}
+	})
 	return out
 }
 

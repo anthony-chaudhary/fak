@@ -209,20 +209,14 @@ func SpecDecodeTree(prompt []int, draft TreeDrafter, verify TreeVerifier, cfg Sp
 			if len(out) >= max {
 				break
 			}
-			tok := tree.Nodes[idx].Token
-			out = append(out, tok)
-			committed = append(committed, tok)
 			last = idx
-			if cfg.StopEnabled && tok == cfg.StopToken {
+			if commitToken(&out, &committed, tree.Nodes[idx].Token, cfg.StopEnabled, cfg.StopToken) {
 				stop = true
 				break
 			}
 		}
 		if !stop && len(out) < max {
-			corr := tree.Nodes[last].TargetArgmax
-			out = append(out, corr)
-			committed = append(committed, corr)
-			if cfg.StopEnabled && corr == cfg.StopToken {
+			if commitToken(&out, &committed, tree.Nodes[last].TargetArgmax, cfg.StopEnabled, cfg.StopToken) {
 				stop = true
 			}
 		}

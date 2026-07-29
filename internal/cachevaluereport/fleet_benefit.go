@@ -517,6 +517,18 @@ func apiCostReduction(counterfactual, spend, avoided float64, pct *float64) (str
 // and markdown render paths agree on exactly which rows the fire/starve/shed trend is
 // folded from. Returns nil when the ledger has none, which both callers read as "no
 // lever health section".
+// leverCells is one compaction-lever row's cells in the fixed column order every
+// renderer prints: period, sessions, fired, bailed, anchor-starved, shed tokens,
+// budget. The markdown P&L and the terminal P&L differ only in their format string
+// (pipe table vs padded columns), so the ORDER and the SET of columns live here once.
+// That is the part that actually goes wrong twice: a lever counter added to one
+// renderer and forgotten in the other reads as an inert lever in exactly one view.
+// Each caller keeps its own verbs, so the rendered bytes of both views are unchanged.
+func (b SavingsBucket) leverCells() []any {
+	return []any{b.Period, b.Sessions, b.CompactionFired, b.CompactionBailed,
+		b.CompactionAnchorStarved, b.CompactionShedTokens, b.CompactionBudget}
+}
+
 func compactionLeverBuckets(buckets []SavingsBucket) []SavingsBucket {
 	var out []SavingsBucket
 	for _, b := range buckets {

@@ -103,15 +103,5 @@ func WitnessSkillReplay(r SkillSituationReplay) SkillPromotion {
 		SuiteGreen:  !r.Candidate.Errored,
 		TruthClean:  r.TruthClean,
 	}
-	decision, witness := shipgate.Evaluate(w)
-	p := SkillPromotion{
-		Skill:    r.Skill,
-		Decision: decision,
-		Promoted: witness.Kept(), // the non-forgeable keep-bit, never the candidate's say-so
-		Witness:  witness,
-	}
-	if !p.Promoted {
-		p.Reason = CuratorReason{Kind: ReasonUnwitnessed}
-	}
-	return p
+	return promotionFromWitness(r.Skill, w)
 }

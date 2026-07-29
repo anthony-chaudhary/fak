@@ -359,6 +359,25 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 	)
 	tracker := newRegrowthTracker()
 
+	// fire records one compaction fire of `kind` at `ts` and, only when that call
+	// actually appended a NEW fire (recordFire coalesces a same-fire pair reported by
+	// two rows), hands the fire to the regrowth tracker. Both fire-bearing rows a
+	// rollout can carry — the top-level `compacted` row and the `context_compacted`
+	// event_msg — are the SAME rule, so recording a fire and sampling its regrowth
+	// stay welded together: a second fire row spelled differently cannot land in the
+	// report while going unseen by the tracker, which is what would leave the regrowth
+	// series silently short of the fire count it is supposed to explain.
+	fire := func(kind string, ts time.Time) {
+		nFires := len(rep.Fires)
+		rep, pending, lastFireKind, lastFireTime, haveFire = recordFire(
+			rep, pending, kind, ts, turn,
+			lastNonZero, lastNZTurn, lastNZTime, haveNonZero,
+			lastFireKind, lastFireTime, haveFire)
+		if len(rep.Fires) > nFires {
+			tracker.onFire(len(rep.Fires)-1, ts, turn, toolCalls)
+		}
+	}
+
 	for {
 		head, truncated, rowLen, err := readRollupRow(br)
 		if errors.Is(err, io.EOF) {
@@ -430,14 +449,7 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 			}
 			tracker.observeResponseItem(parsed, row.Payload, head, rowLen)
 		case "compacted":
-			nFires := len(rep.Fires)
-			rep, pending, lastFireKind, lastFireTime, haveFire = recordFire(
-				rep, pending, "compacted", ts, turn,
-				lastNonZero, lastNZTurn, lastNZTime, haveNonZero,
-				lastFireKind, lastFireTime, haveFire)
-			if len(rep.Fires) > nFires {
-				tracker.onFire(len(rep.Fires)-1, ts, turn, toolCalls)
-			}
+			fire("compacted", ts)
 			// The compacted row's replacement_history is the summary the compactor
 			// injects into the fresh window; attribute it there.
 			tracker.observeCompacted(rowLen)
@@ -452,14 +464,7 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 			case "task_started":
 				turn++
 			case "context_compacted":
-				nFires := len(rep.Fires)
-				rep, pending, lastFireKind, lastFireTime, haveFire = recordFire(
-					rep, pending, "context_compacted", ts, turn,
-					lastNonZero, lastNZTurn, lastNZTime, haveNonZero,
-					lastFireKind, lastFireTime, haveFire)
-				if len(rep.Fires) > nFires {
-					tracker.onFire(len(rep.Fires)-1, ts, turn, toolCalls)
-				}
+				fire("context_compacted", ts)
 			case "token_count":
 				if !parsed || len(row.Payload) == 0 {
 					continue

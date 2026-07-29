@@ -232,16 +232,15 @@ func isRefKind(kind string) bool {
 
 // simulatedShedRefcountProvenance labels the hermetic-fixture path.
 func simulatedShedRefcountProvenance() Provenance {
-	return Provenance{
-		Kind:        ProvenanceSimulated,
-		Command:     "go test ./internal/bench -run ShedRefcount",
-		GeneratedBy: "fak/internal/bench.BuildShedRefcountReport",
-		Note: "Transcript is a labeled hermetic FIXTURE, not a live capture. It witnesses " +
-			"the deterministic MEASUREMENT — a known shed-then-reference lands refcount > 0 " +
-			"and fires USE_AFTER_FREE per span, a clean session lands every shed span at " +
-			"refcount 0. A live gateway ctxspans/ctxrestore × turn-reference capture feeds " +
+	return simulatedProvenance(
+		"go test ./internal/bench -run ShedRefcount",
+		"fak/internal/bench.BuildShedRefcountReport",
+		"Transcript is a labeled hermetic FIXTURE, not a live capture. It witnesses "+
+			"the deterministic MEASUREMENT — a known shed-then-reference lands refcount > 0 "+
+			"and fires USE_AFTER_FREE per span, a clean session lands every shed span at "+
+			"refcount 0. A live gateway ctxspans/ctxrestore × turn-reference capture feeds "+
 			"the same shape via BuildShedRefcountReportFor to promote the signal.",
-	}
+	)
 }
 
 // DefaultShedThenReferencedTranscript is the known-bad acceptance fixture: a

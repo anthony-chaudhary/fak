@@ -174,6 +174,23 @@ func Qwen35TransformContracts() []TensorTransformContract {
 			Lossless:   true, Invertible: true,
 		}
 	}
+	// qkvValueDeinterleave declares a fused [q;k;v] tensor whose VALUE block alone is
+	// deinterleaved while the query and key parts pass through untouched. The fused
+	// weight rows and the fused conv1d channels take the SAME transform over the SAME
+	// GDN row domains and differ only in what the fused axis is called, so the axis
+	// nouns are parameters (`fused` names it in the domain clause, `plain` in the
+	// unchanged clause) and every shipped contract string stays byte-identical.
+	qkvValueDeinterleave := func(external, canonical, fused, plain string) TensorTransformContract {
+		return TensorTransformContract{
+			External: external, Canonical: canonical,
+			Transform:    TransformQKVValueRowsDeinterleave,
+			SourceDomain: "fused [q;k;v] " + fused + " with the value block in " + gdnRowsSource,
+			CanonicalDomain: "fused [q;k;v] " + fused + " with the value block in " + gdnRowsCanon +
+				"; query/key " + plain + " unchanged",
+			Provenance: gdnProvenance,
+			Lossless:   true, Invertible: true,
+		}
+	}
 	return []TensorTransformContract{
 		{
 			External: "ssm_a", Canonical: "linear_attn.A_log",
@@ -216,27 +233,12 @@ func Qwen35TransformContracts() []TensorTransformContract {
 			Provenance: rotaryProvenance,
 			Lossless:   true, Invertible: true,
 		},
-		{
-			External: "attn_qkv.weight", Canonical: "self_attn.qkv_proj.weight",
-			Transform:    TransformQKVValueRowsDeinterleave,
-			SourceDomain: "fused [q;k;v] rows with the value block in " + gdnRowsSource,
-			CanonicalDomain: "fused [q;k;v] rows with the value block in " + gdnRowsCanon +
-				"; query/key rows unchanged",
-			Provenance: gdnProvenance,
-			Lossless:   true, Invertible: true,
-		},
+		qkvValueDeinterleave("attn_qkv.weight", "self_attn.qkv_proj.weight", "rows", "rows"),
 		deinterleave("attn_gate.weight", "self_attn.q_gate_proj.weight"),
 		deinterleave("ssm_alpha.weight", "linear_attn.in_proj_a.weight"),
 		deinterleave("ssm_beta.weight", "linear_attn.in_proj_b.weight"),
-		{
-			External: "ssm_conv1d.weight", Canonical: "linear_attn.conv1d.weight",
-			Transform:    TransformQKVValueRowsDeinterleave,
-			SourceDomain: "fused [q;k;v] conv channels with the value block in " + gdnRowsSource,
-			CanonicalDomain: "fused [q;k;v] conv channels with the value block in " + gdnRowsCanon +
-				"; query/key channels unchanged",
-			Provenance: gdnProvenance,
-			Lossless:   true, Invertible: true,
-		},
+		qkvValueDeinterleave("ssm_conv1d.weight", "linear_attn.conv1d.weight",
+			"conv channels", "channels"),
 		deinterleave("ssm_dt.bias", "linear_attn.dt_bias"),
 		{
 			External: "ssm_out.weight", Canonical: "linear_attn.out_proj.weight",

@@ -285,6 +285,22 @@ const (
 	ProvenanceObserved  = "OBSERVED"
 )
 
+// simulatedProvenance stamps a report as the SIMULATED (hermetic model or labeled
+// fixture) leg, given the re-runnable command that produces it, the builder that
+// generated it, and the note that says what the run does and does not witness. Every
+// hermetic report in this package is built through it, so the honesty label and the
+// SIMULATED kind are asserted in ONE place: a new hermetic bench cannot ship
+// accidentally wearing the OBSERVED kind, and a leg that later becomes live moves by
+// dropping this call rather than by editing a field.
+func simulatedProvenance(command, generatedBy, note string) Provenance {
+	return Provenance{
+		Kind:        ProvenanceSimulated,
+		Command:     command,
+		GeneratedBy: generatedBy,
+		Note:        note,
+	}
+}
+
 // LoopVerifyReport is the full naive-vs-gated comparison.
 type LoopVerifyReport struct {
 	Schema         string        `json:"schema"`
@@ -317,15 +333,14 @@ func BuildLoopVerifyReport() LoopVerifyReport {
 // BuildLoopVerifyReportFor folds an arbitrary corpus (the seam the live driver
 // will feed real turn records into).
 func BuildLoopVerifyReportFor(corpus []Episode) LoopVerifyReport {
-	return buildLoopVerifyReport(corpus, Provenance{
-		Kind:        ProvenanceSimulated,
-		Command:     "go test ./internal/bench/ -run TestLoopVerifyBench",
-		GeneratedBy: "fak/internal/bench.BuildLoopVerifyReport",
-		Note: "Corpus is a labeled fixture: the kernel-native loop driver (#1173 #S1) " +
-			"is shipped, but this report is not a live naive-vs-gated wall-clock. This " +
-			"witnesses the MEASUREMENT and the metric definitions; live turn records " +
+	return buildLoopVerifyReport(corpus, simulatedProvenance(
+		"go test ./internal/bench/ -run TestLoopVerifyBench",
+		"fak/internal/bench.BuildLoopVerifyReport",
+		"Corpus is a labeled fixture: the kernel-native loop driver (#1173 #S1) "+
+			"is shipped, but this report is not a live naive-vs-gated wall-clock. This "+
+			"witnesses the MEASUREMENT and the metric definitions; live turn records "+
 			"can feed the same report shape.",
-	})
+	))
 }
 
 func buildLoopVerifyReport(corpus []Episode, provenance Provenance) LoopVerifyReport {

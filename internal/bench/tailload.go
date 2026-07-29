@@ -238,20 +238,13 @@ func foldTailArm(label string, samples []int64) TailArm {
 			over++
 		}
 	}
-	pct := func(p float64) int64 {
-		idx := int(float64(len(sorted)) * p)
-		if idx >= len(sorted) {
-			idx = len(sorted) - 1
-		}
-		return sorted[idx]
-	}
 	return TailArm{
 		Label:     label,
 		Samples:   len(sorted),
-		P50NS:     pct(0.50),
-		P90NS:     pct(0.90),
-		P99NS:     pct(0.99),
-		P999NS:    pct(0.999),
+		P50NS:     percentileAt(sorted, 0.50),
+		P90NS:     percentileAt(sorted, 0.90),
+		P99NS:     percentileAt(sorted, 0.99),
+		P999NS:    percentileAt(sorted, 0.999),
 		MaxNS:     sorted[len(sorted)-1],
 		MeanNS:    float64(sum) / float64(len(sorted)),
 		Over100us: int(over),

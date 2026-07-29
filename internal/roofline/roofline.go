@@ -408,11 +408,8 @@ func (d Dashboard) Markdown() string {
 		b.WriteString("artifacts label their own numbers an \"optimistic lower bound\" on the work the real 753B\n")
 		b.WriteString("MoE must do — i.e. an optimistic *upper* bound on real-model speed. They are listed for\n")
 		b.WriteString("transparency and deliberately do **not** fill any lane's Current column.\n\n")
-		b.WriteString("| Run | Machine | Synthetic measurement(s) |\n")
-		b.WriteString("|-----|---------|--------------------------|\n")
-		for _, a := range d.Synthetic {
-			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", a.RunID, a.MachineID, measList(a.Meas))
-		}
+		writeArtifactTable(&b, "Synthetic measurement(s)", "--------------------------",
+			d.Synthetic, func(a Artifact) string { return measList(a.Meas) })
 	}
 
 	if len(d.FailedReal) > 0 {
@@ -420,11 +417,8 @@ func (d Dashboard) Markdown() string {
 		b.WriteString("Real GLM-5.2 attempts that were committed as artifacts but produced no clean throughput\n")
 		b.WriteString("(a wedge or an abort). They keep the relevant lane PENDING — a failed attempt is not a\n")
 		b.WriteString("measurement — but are surfaced so the gap is not silent.\n\n")
-		b.WriteString("| Run | Machine | Why no number |\n")
-		b.WriteString("|-----|---------|---------------|\n")
-		for _, a := range d.FailedReal {
-			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", a.RunID, a.MachineID, a.FailNote)
-		}
+		writeArtifactTable(&b, "Why no number", "---------------",
+			d.FailedReal, func(a Artifact) string { return a.FailNote })
 	}
 
 	b.WriteString("\n## Notes\n\n")
@@ -442,6 +436,21 @@ func (d Dashboard) Markdown() string {
 }
 
 // --- small helpers ---------------------------------------------------------
+
+// writeArtifactTable writes one artifact side-table: the `Run | Machine | <third>`
+// header, its dash separator, and one row per artifact. Only the third column varies
+// between the synthetic-witness table and the failed-real table, so it is passed as a
+// heading plus a cell function while the run/machine columns are stated once — a
+// column added to these tables now lands in both instead of drifting between them.
+// `sep` is each caller's own dash run, passed verbatim so the regenerated dashboard
+// stays byte-identical to the committed doc TestGenerateRealDashboardDoc compares.
+func writeArtifactTable(b *bytes.Buffer, third, sep string, arts []Artifact, cell func(Artifact) string) {
+	fmt.Fprintf(b, "| Run | Machine | %s |\n", third)
+	fmt.Fprintf(b, "|-----|---------|%s|\n", sep)
+	for _, a := range arts {
+		fmt.Fprintf(b, "| `%s` | %s | %s |\n", a.RunID, a.MachineID, cell(a))
+	}
+}
 
 func isGLM(raw []byte) bool {
 	l := strings.ToLower(string(raw))

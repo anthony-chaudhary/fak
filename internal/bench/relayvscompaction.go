@@ -568,16 +568,15 @@ func BuildRelayVsCompactionReportFor(m RVCModel, durations []int) RelayVsCompact
 
 // simulatedRVCProvenance labels the hermetic analytic path.
 func simulatedRVCProvenance() Provenance {
-	return Provenance{
-		Kind:        ProvenanceSimulated,
-		Command:     "go test ./internal/bench -run RelayVsCompaction",
-		GeneratedBy: "fak/internal/bench.BuildRelayVsCompactionReport",
-		Note: "Hermetic ANALYTIC model, not a live provider run (the issue permits a " +
-			"hermetic/replayed comparison). It witnesses the MEASUREMENT and the sign " +
-			"of the comparison under the named constants in `model`; a live relay-vs-" +
-			"compaction leg-record run can feed the same report shape via " +
+	return simulatedProvenance(
+		"go test ./internal/bench -run RelayVsCompaction",
+		"fak/internal/bench.BuildRelayVsCompactionReport",
+		"Hermetic ANALYTIC model, not a live provider run (the issue permits a "+
+			"hermetic/replayed comparison). It witnesses the MEASUREMENT and the sign "+
+			"of the comparison under the named constants in `model`; a live relay-vs-"+
+			"compaction leg-record run can feed the same report shape via "+
 			"BuildRelayVsCompactionReportFromRecords and either confirm or demote the claim.",
-	}
+	)
 }
 
 // assembleRVCReport folds an already-populated sweep (simulated OR observed) into

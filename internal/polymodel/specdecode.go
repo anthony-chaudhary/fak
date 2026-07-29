@@ -136,6 +136,20 @@ var (
 // speed, depends on it). draft may be nil (every round is then a plain single-token
 // decode). It reports MeanAcceptanceLength = emitted/Rounds, the honest throughput the
 // drafting bought.
+// commitToken emits one token: it appends tok to BOTH the emitted output and the
+// committed context, and reports whether that token is the configured stop token.
+// Every commit site in both speculative loops goes through it — the accepted-prefix
+// loop and the correction/bonus token here, the accepted-path loop and the correction
+// token in SpecDecodeTree — because "emit a token" has exactly one meaning: the two
+// streams advance together. Advancing them by hand at four sites is what would let
+// `out` and `committed` drift apart, and a drifted context silently stops being the
+// greedy prefix the next verify() round is contracted to score against.
+func commitToken(out, committed *[]int, tok int, stopEnabled bool, stopToken int) bool {
+	*out = append(*out, tok)
+	*committed = append(*committed, tok)
+	return stopEnabled && tok == stopToken
+}
+
 func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConfig) (SpecDecodeRun, error) {
 	var run SpecDecodeRun
 	if verify == nil {
@@ -179,9 +193,7 @@ func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConf
 		// mid-commit.
 		stop := false
 		for j := 0; j < res.Accepted && len(out) < max; j++ {
-			out = append(out, d[j])
-			committed = append(committed, d[j])
-			if cfg.StopEnabled && d[j] == cfg.StopToken {
+			if commitToken(&out, &committed, d[j], cfg.StopEnabled, cfg.StopToken) {
 				stop = true
 				break
 			}
@@ -191,10 +203,7 @@ func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConf
 		// verifier that returns exactly len(draft) with everything accepted carries no
 		// correction — guard the index so a broken binding cannot panic.
 		if !stop && len(out) < max && res.Accepted < len(targetArgmax) {
-			corr := targetArgmax[res.Accepted]
-			out = append(out, corr)
-			committed = append(committed, corr)
-			if cfg.StopEnabled && corr == cfg.StopToken {
+			if commitToken(&out, &committed, targetArgmax[res.Accepted], cfg.StopEnabled, cfg.StopToken) {
 				stop = true
 			}
 		}

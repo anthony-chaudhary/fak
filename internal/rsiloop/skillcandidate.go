@@ -123,11 +123,23 @@ func PromoteSkill(c SkillCandidate) SkillPromotion {
 		SuiteGreen:  c.Corpus.suiteGreen(),
 		TruthClean:  c.TruthClean,
 	}
+	return promotionFromWitness(c.Skill, w)
+}
+
+// promotionFromWitness puts a built witness through the shipgate and packages the
+// verdict as skill's SkillPromotion. Every promotion path — the corpus-metric
+// PromoteSkill (#2872) and the situation-replay WitnessSkillReplay — differs ONLY in
+// how it builds the witness; the verdict rules are one rule, stated here: the
+// Promoted flag is the shipgate's non-forgeable keep-bit and never the candidate's
+// say-so, and an unpromoted candidate always carries ReasonUnwitnessed. Keeping this
+// tail in one place is what stops a second promotion path from quietly shipping a
+// skill on its own claim or archiving it under a reason that means something else.
+func promotionFromWitness(skill string, w shipgate.Witness) SkillPromotion {
 	decision, witness := shipgate.Evaluate(w)
 	p := SkillPromotion{
-		Skill:    c.Skill,
+		Skill:    skill,
 		Decision: decision,
-		Promoted: witness.Kept(), // the non-forgeable keep-bit, never the candidate's say-so
+		Promoted: witness.Kept(),
 		Witness:  witness,
 	}
 	if !p.Promoted {

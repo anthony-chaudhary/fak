@@ -583,6 +583,21 @@ func readMemInfo() (total, avail, free int64, ok bool) {
 	return total, avail, free, total > 0
 }
 
+// percentileAt is the nearest-rank pick of quantile p from an ALREADY-SORTED
+// ascending sample slice: index floor(len*p), clamped to the last element so p=1.0
+// (and any float overshoot) lands on the max rather than panicking. It is the single
+// definition of "the p-th percentile" for every latency report in this package —
+// cpumemstress's percentiles and tailload's foldTailArm both call it, so a published
+// number can never mean one rounding here and a different one there. Callers must
+// sort first; an empty slice has no percentile and the callers gate on that.
+func percentileAt(sorted []int64, p float64) int64 {
+	idx := int(float64(len(sorted)) * p)
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
+}
+
 // percentiles folds raw nanosecond samples into exact p50/p90/p99/max/mean (no
 // bucket quantization). Empty input yields all zeros.
 func percentiles(samples []int64) (p50, p90, p99, max int64, mean float64) {
@@ -596,14 +611,8 @@ func percentiles(samples []int64) (p50, p90, p99, max int64, mean float64) {
 	for _, s := range sorted {
 		sum += s
 	}
-	pct := func(p float64) int64 {
-		idx := int(float64(len(sorted)) * p)
-		if idx >= len(sorted) {
-			idx = len(sorted) - 1
-		}
-		return sorted[idx]
-	}
-	return pct(0.50), pct(0.90), pct(0.99), sorted[len(sorted)-1], float64(sum) / float64(len(sorted))
+	return percentileAt(sorted, 0.50), percentileAt(sorted, 0.90), percentileAt(sorted, 0.99),
+		sorted[len(sorted)-1], float64(sum) / float64(len(sorted))
 }
 
 // computeDigest returns the SHA-256 hex of the report's canonical JSON with the

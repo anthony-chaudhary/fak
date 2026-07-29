@@ -600,6 +600,45 @@ func (tr *regrowthTracker) finalize(rep *CompactSessionReport) {
 	}
 }
 
+// regrowthCohortAccum collects the per-window samples behind ONE regrowth cohort. The
+// rollup splits windows into a fast cohort and a slow cohort, and the two are the same
+// cohort measured over different windows, not two different measurements — so which
+// per-window facts a cohort collects, and how those samples become the reported
+// medians, are each stated once here rather than mirrored per cohort. Mirroring is
+// what makes the fast and slow rows quietly incomparable: a fact added to one arm and
+// missed in the other, or a cohort summarised with a different rounding, breaks the
+// only thing the two rows exist to support — reading them against each other.
+type regrowthCohortAccum struct {
+	tools, turns, growth []int
+	reuse                []float64
+}
+
+// add records one window. A negative CacheReadFraction means the window carried no
+// reuse telemetry at all, so it is omitted from the reuse samples instead of being
+// folded in as a zero — a missing measurement must not drag the median down.
+func (c *regrowthCohortAccum) add(r *CompactRegrowth) {
+	c.tools = append(c.tools, r.ToolCalls)
+	c.turns = append(c.turns, r.Turns)
+	c.growth = append(c.growth, r.GrowthTokens)
+	if r.CacheReadFraction >= 0 {
+		c.reuse = append(c.reuse, r.CacheReadFraction)
+	}
+}
+
+// cohort reports the accumulated windows as the published cohort row. Windows counts
+// every added window (the reuse samples can be fewer); the reuse median keeps the
+// rollup's round4 so a cohort figure never renders at a different precision than the
+// corpus figures beside it.
+func (c *regrowthCohortAccum) cohort() RegrowthCohort {
+	return RegrowthCohort{
+		Windows:                 len(c.tools),
+		MedianToolCalls:         medianInt(c.tools),
+		MedianTurns:             medianInt(c.turns),
+		MedianGrowthTokens:      medianInt(c.growth),
+		MedianCacheReadFraction: round4(medianFloat(c.reuse)),
+	}
+}
+
 // rollupCompactRegrowth rolls every fire's trajectory into the corpus answer.
 // Wall-clock statistics use clean-clock rebounds only; suspect windows are counted,
 // never timed.
@@ -612,10 +651,7 @@ func rollupCompactRegrowth(reports []CompactSessionReport) *CompactRegrowthRollu
 	var reboundSamples []int
 	var nextFire []float64
 	var reuseFrac []float64
-	var fastTools, fastTurns, fastGrowth []int
-	var fastReuse []float64
-	var slowTools, slowTurns, slowGrowth []int
-	var slowReuse []float64
+	var fast, slow regrowthCohortAccum
 
 	for _, rep := range reports {
 		for _, f := range rep.Fires {
@@ -651,12 +687,7 @@ func rollupCompactRegrowth(reports []CompactSessionReport) *CompactRegrowthRollu
 			}
 			if !r.Rebounded {
 				agg.Censored++
-				slowTools = append(slowTools, r.ToolCalls)
-				slowTurns = append(slowTurns, r.Turns)
-				slowGrowth = append(slowGrowth, r.GrowthTokens)
-				if r.CacheReadFraction >= 0 {
-					slowReuse = append(slowReuse, r.CacheReadFraction)
-				}
+				slow.add(r)
 				continue
 			}
 			agg.Rebounds++
@@ -668,7 +699,7 @@ func rollupCompactRegrowth(reports []CompactSessionReport) *CompactRegrowthRollu
 					break
 				}
 			}
-			fast := false
+			isFast := false
 			if !suspect && reboundSec > 0 {
 				cleanSeconds = append(cleanSeconds, reboundSec)
 				if reboundSec <= RegrowthWithin15MinSeconds {
@@ -676,23 +707,13 @@ func rollupCompactRegrowth(reports []CompactSessionReport) *CompactRegrowthRollu
 				}
 				if reboundSec <= RegrowthFastReboundSeconds {
 					agg.ReboundsWithin30Min++
-					fast = true
+					isFast = true
 				}
 			}
-			if fast {
-				fastTools = append(fastTools, r.ToolCalls)
-				fastTurns = append(fastTurns, r.Turns)
-				fastGrowth = append(fastGrowth, r.GrowthTokens)
-				if r.CacheReadFraction >= 0 {
-					fastReuse = append(fastReuse, r.CacheReadFraction)
-				}
+			if isFast {
+				fast.add(r)
 			} else {
-				slowTools = append(slowTools, r.ToolCalls)
-				slowTurns = append(slowTurns, r.Turns)
-				slowGrowth = append(slowGrowth, r.GrowthTokens)
-				if r.CacheReadFraction >= 0 {
-					slowReuse = append(slowReuse, r.CacheReadFraction)
-				}
+				slow.add(r)
 			}
 		}
 	}
@@ -702,20 +723,8 @@ func rollupCompactRegrowth(reports []CompactSessionReport) *CompactRegrowthRollu
 	agg.MedianSamplesToRebound = medianInt(reboundSamples)
 	agg.MedianNextFireSeconds = round4(medianFloat(nextFire))
 	agg.MedianCacheReadFraction = round4(medianFloat(reuseFrac))
-	agg.Fast = RegrowthCohort{
-		Windows:                 len(fastTools),
-		MedianToolCalls:         medianInt(fastTools),
-		MedianTurns:             medianInt(fastTurns),
-		MedianGrowthTokens:      medianInt(fastGrowth),
-		MedianCacheReadFraction: round4(medianFloat(fastReuse)),
-	}
-	agg.Slow = RegrowthCohort{
-		Windows:                 len(slowTools),
-		MedianToolCalls:         medianInt(slowTools),
-		MedianTurns:             medianInt(slowTurns),
-		MedianGrowthTokens:      medianInt(slowGrowth),
-		MedianCacheReadFraction: round4(medianFloat(slowReuse)),
-	}
+	agg.Fast = fast.cohort()
+	agg.Slow = slow.cohort()
 	if agg.FiresWithTelemetry == 0 {
 		return nil
 	}

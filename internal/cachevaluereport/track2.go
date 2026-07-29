@@ -1090,9 +1090,7 @@ func RenderTwoTrack(r TwoTrackReport) string {
 		fmt.Fprintf(&sb, "  %-9s  %5s  %6s  %6s  %8s  %10s  %8s\n",
 			"week", "sess", "fired", "bailed", "starved", "shed_tok", "budget")
 		for _, b := range compactionBuckets {
-			fmt.Fprintf(&sb, "  %-9s  %5d  %6d  %6d  %8d  %10d  %8d\n",
-				b.Period, b.Sessions, b.CompactionFired, b.CompactionBailed,
-				b.CompactionAnchorStarved, b.CompactionShedTokens, b.CompactionBudget)
+			fmt.Fprintf(&sb, "  %-9s  %5d  %6d  %6d  %8d  %10d  %8d\n", b.leverCells()...)
 		}
 	}
 	sb.WriteString(RenderComponentHealth(r.ComponentHealth))

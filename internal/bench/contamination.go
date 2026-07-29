@@ -233,14 +233,13 @@ type ContaminationReport struct {
 // AuditContamination runs the audit over a corpus and folds the per-case outcomes
 // into the report. Cases are processed in input order; the report is deterministic.
 func AuditContamination(cases []ContaminationCase) ContaminationReport {
-	return auditContamination(cases, Provenance{
-		Kind:        ProvenanceSimulated,
-		Command:     "go test ./internal/bench -run TestContaminationAudit -count=1",
-		GeneratedBy: "fak/internal/bench.AuditContamination",
-		Note: "Corpus is a labeled fixture of content HASHES + provenance (never raw eval text): the audit " +
-			"witnesses the dedupe/exposure/provenance gate and the scrubbed replay artifact. Real corpora feed " +
+	return auditContamination(cases, simulatedProvenance(
+		"go test ./internal/bench -run TestContaminationAudit -count=1",
+		"fak/internal/bench.AuditContamination",
+		"Corpus is a labeled fixture of content HASHES + provenance (never raw eval text): the audit "+
+			"witnesses the dedupe/exposure/provenance gate and the scrubbed replay artifact. Real corpora feed "+
 			"the same report shape by supplying observed hashes, publish dates, and per-case run cost.",
-	})
+	))
 }
 
 func auditContamination(cases []ContaminationCase, provenance Provenance) ContaminationReport {

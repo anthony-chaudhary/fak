@@ -133,9 +133,7 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 		fmt.Fprintf(&sb, "### Compaction lever health (fire/starve/shed trend)\n\n")
 		fmt.Fprintf(&sb, "| week | sessions | fired | bailed | anchor_starved | shed_tok | budget |\n|---|---|---|---|---|---|---|\n")
 		for _, b := range compactionBuckets {
-			fmt.Fprintf(&sb, "| %s | %d | %d | %d | %d | %d | %d |\n",
-				b.Period, b.Sessions, b.CompactionFired, b.CompactionBailed,
-				b.CompactionAnchorStarved, b.CompactionShedTokens, b.CompactionBudget)
+			fmt.Fprintf(&sb, "| %s | %d | %d | %d | %d | %d | %d |\n", b.leverCells()...)
 		}
 		sb.WriteString("\n")
 	}
