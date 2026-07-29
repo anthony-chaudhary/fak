@@ -115,6 +115,113 @@ entirely dark fleet reports `INSUFFICIENT` rather than a fabricated zero. Cadenc
 the weekly digest plus an operator running the census on demand; `--json` is the
 poster-ready surface if the census itself is ever put on a schedule.
 
+## Session Shapes
+
+The views above answer "how much reuse did we get, and did it move?". `fak cachevalue
+shapes` (#3115) answers the orthogonal question the week × session_type trend hides: **which
+KINDS of sessions earn KV-prefix reuse?** It re-folds the same Track-1 WITNESSED kernel
+ledger into `(length × outcome)` clusters — `cachevaluereport.FoldShapes`
+(`internal/cachevaluereport/shapes.go`), pure and deterministic, rows in, report out — so a
+reader can see whether a handful of long warm sessions carries most of the realized reuse
+while single-turn cold runs dominate the row count, a fact the time trend averages away.
+
+```bash
+fak cachevalue shapes                        # the static (length × outcome) cluster table
+fak cachevalue shapes --json                 # the same fold as fak-cache-value-shapes/1 JSON
+fak cachevalue shapes --trend                # each shape's week-over-week reuse-share drift
+fak cachevalue shapes --ledger PATH --since 2026-07-01
+```
+
+The one-line synopsis and full flag surface live in
+[the CLI reference](cli-reference.md) under `fak cachevalue shapes`.
+
+### Both axes are modelling choices, not findings
+
+The band edges are **cutoffs the fold chose**, not breaks measured in the data. They are
+code constants in `internal/cachevaluereport/shapes.go`, pinned by
+`go test ./internal/cachevaluereport` — read them there rather than trusting a number
+retyped into prose.
+
+**Length band** (turn count; `MinShortTurns`, `MinLongTurns`):
+
+| Band | Turns | Why this boundary |
+|---|---|---|
+| `single` | 1 | A single-turn run has no previous turn to reuse from. It is structurally reuse-free, so it gets its own band instead of being averaged into a reuse number it could never earn. |
+| `short` | 2–4 | `>= 2` is the multi-turn floor the rest of the ledger already uses; the shape view inherits it rather than inventing a second definition of "multi-turn". |
+| `long` | >= 5 | A chosen split that gives "does a long trajectory earn its warm KV?" a clean population — not a measured elbow. If the corpus later shows a different natural break, this constant is the one place to move it. |
+
+**Outcome band** (realized reuse ratio = `reused_tokens / prompt_tokens`; `coldOutcomeMax`,
+`warmOutcomeMin`):
+
+| Band | Realized reuse | Why this boundary |
+|---|---|---|
+| `n/a` | — (single-turn only) | Never folded into `cold`. Recording a structurally impossible reuse as a cold failure would slander the shape and inflate any "we run cold" reading. |
+| `cold` | `< 0.10` | Below a tenth of prompt tokens reused, a multi-turn session paid essentially full prefill every turn. The tenth is a legible round number, not a measured cliff. |
+| `partial` | `0.10` … `< 0.50` | The near-miss band: reuse is happening, but most of the prompt is still re-prefilled. |
+| `warm` | `>= 0.50` | Majority of prompt tokens reused. Half is a deliberately conservative, legible line — not a target, a ratchet, or a claimed steady state. |
+
+### `health` — the failure mode a neutral cluster list buries
+
+`health` is a **pure function of the `(length × outcome)` pair** (`classifyHealth`), not a
+separate measurement. It exists so the expensive failure class cannot hide in a table that
+treats every cell as equally interesting:
+
+| `health` | Clusters | Reading |
+|---|---|---|
+| `earning` | any `warm`, plus `single × n/a` | Fine. The `single × n/a` cluster is earning by definition — reuse-free by structure, not by failure. |
+| `weak` | `short × cold`, `short × partial` | Cheap and low-stakes: a 2–4 turn session that earns little reuse wastes little. |
+| `underwarmed` | `long × partial` | A near-miss worth a look. |
+| `wasteful` | `long × cold` | The expensive failure: turn after turn of full prompt cost with effectively no realized KV-prefix reuse. The report also surfaces it as `wasteful_sessions` / `wasteful_session_share`, and names it in `next_action` (check for cache-busting prefix churn). |
+
+### `--trend` — the longitudinal complement
+
+The static table is one all-corpus snapshot. `--trend` swaps it for
+`cachevaluereport.FoldShapeTrend` (`fak-cache-value-shape-trend/1`): the same clustering
+run **within each ISO week**, then each shape's within-week share of reused tokens compared
+with that same shape's previous week, using the report's existing `reuseEpsilon` dead-band
+(`internal/cachevaluereport/cachevaluereport.go`) so `flat` means "inside noise" exactly as
+it does on the weekly card. Every point is `new` / `improved` / `flat` / `regressed`, and
+the header names which shapes gained and lost share in the latest week.
+
+Read it for the signal the snapshot cannot show: a shrinking `long × warm` share of reused
+tokens is an early regression even while the headline reuse ratio holds, because it means
+the reuse is migrating to shapes that carry fewer tokens.
+
+### The fence, and reading an empty ledger
+
+The #1066 fence below applies **verbatim** to both shape reports: the outcome bands are cut
+on WITNESSED realized reuse (`reused_tokens / prompt_tokens`) only, and the vs-naive
+`1/(1-reuse)` re-prefill multiple is never computed. Both envelopes carry the self-labels
+`publishable_value_family` and `vs_naive_multiple_excluded: true`, so a downstream card
+cannot mistake one for the other.
+
+The default `--ledger` is `docs/nightrun/cache-value.jsonl`, a **gitignored local nightrun
+artifact**. On a fresh checkout it is absent, and the verb reports the empty read rather
+than a fabricated zero. Running `fak cachevalue shapes` on a tree with no ledger prints:
+
+```text
+cache-value session shapes (Track 1, WITNESSED kernel reuse) — INSUFFICIENT
+  0 session(s), all single-turn; no multi-turn shape to cluster reuse on yet
+  fence: marginal-over-tuned-warm-KV (~1.0x single-session; the vs-naive 1/(1-reuse) re-prefill multiple is excluded per #1066)
+```
+
+That `INSUFFICIENT` is the thin-corpus fence falling open, not a broken verb — `ok` stays
+true and the verb exits 0. Point `--ledger` at your own Track-1 JSONL to fold rows
+meanwhile.
+
+**No populated cluster figures are quoted here.** The populated table is per-machine, local,
+and moves every nightrun, so any number retyped into this doc would rot silently and could
+not be re-derived. Run the verb against your own ledger and read the columns it prints:
+
+| Column | Meaning |
+|---|---|
+| `length`, `outcome`, `health` | the cluster key and its classification, as above |
+| `sessions`, `turns` | rows and turns folded into the cluster |
+| `reuse` | the cluster's aggregate `reused_tokens / prompt_tokens` |
+| `sess%` | the cluster's share of all sessions |
+| `reuse-tok%` | the cluster's share of all reused tokens — the column that shows a rare shape carrying most of the reuse |
+| `by session_type` | attribution back to the front door (`guard` / `serve` / `run`), so a shape stays traceable to where it came from |
+
 ## Honesty Fences
 
 - **#1066 marginal-over-warm-KV fence.** The published Track-1 number is realized
