@@ -209,23 +209,28 @@ func (m *Model) addBiasIfPresent(y []float32, name string) {
 // fuseGatedMLPPanels finishes a batched gated MLP's gate/up panels IN PLACE: it adds the
 // optional gate/up projection biases and then fuses the config's activation into G,
 // G[i] = act(G[i], cfg) * U[i]. G and U are row-major [N,I]. For Llama act==silu, so this
-// is the ordinary SwiGLU; for Gemma it is the GeGLU. Five batched lanes carried their own
+// is the ordinary SwiGLU; for Gemma it is the GeGLU. Six batched lanes carried their own
 // transcription of these two loops.
 //
-// withProjBias is NOT a tuning knob and NOT cosmetic: it RECORDS an existing divergence
-// between those lanes that this extraction deliberately refuses to paper over. The
-// rectangular-batch lanes (batch_prefill.go, f32 and Q8) add mlp.{gate,up,down}_proj.bias;
-// prefillBatched (prefill_batch.go), verifyForwardBatched (verify.go) and the batched f32
-// decode (batch_step.go) never did, and their gates have no bias term to keep a
-// bias-carrying model out. Each caller passes exactly the value its own copy implemented,
-// so no model's numerics move by a bit here. Making the lanes AGREE is a behaviour fix that
-// needs its own witness and its own commit — not a side effect of removing a clone.
-func (m *Model) fuseGatedMLPPanels(lp func(string) string, G, U []float32, N, I int, cfg Config, withProjBias bool) {
-	if withProjBias {
-		for row := 0; row < N; row++ {
-			m.addBiasIfPresent(G[row*I:(row+1)*I], lp("mlp.gate_proj.bias"))
-			m.addBiasIfPresent(U[row*I:(row+1)*I], lp("mlp.up_proj.bias"))
-		}
+// The bias add is UNCONDITIONAL here — there is no withProjBias knob — and that is the
+// point. It used to be a parameter, because prefillBatched (prefill_batch.go),
+// verifyForwardBatched (verify.go), the batched f32 decode and the batched Q8 decode
+// (both batch_step.go) dropped mlp.{gate,up,down}_proj.bias while every other lane applied
+// it. That was a real wrong-numbers bug, not a design choice: the f32 lanes' own headers
+// each contract them to be BIT-IDENTICAL to the per-token path, whose denseSwiGLU (moe.go)
+// adds all three; the Q8 decode is licensed to differ from serial only by the tile GEMM's
+// reduction order, which a dropped term is not; and none of their admission gates
+// (q8PrefillNeedsTokenLoop, batchPreNormFastPathOK, verifyForwardBatchedOK, q8FastPreNormOK)
+// has a bias term to keep a bias-carrying checkpoint out. Removing the parameter is what
+// makes the divergence unreintroducible.
+//
+// addBiasIfPresent is a no-op when the tensor is absent, so a bias-free checkpoint (Llama,
+// SmolLM2, Qwen2/3, Gemma, Mistral — every f32 CPU numeric oracle in the suite) is
+// byte-for-byte unchanged. proj_bias_batched_lanes_test.go is the witness.
+func (m *Model) fuseGatedMLPPanels(lp func(string) string, G, U []float32, N, I int, cfg Config) {
+	for row := 0; row < N; row++ {
+		m.addBiasIfPresent(G[row*I:(row+1)*I], lp("mlp.gate_proj.bias"))
+		m.addBiasIfPresent(U[row*I:(row+1)*I], lp("mlp.up_proj.bias"))
 	}
 	for i := range G {
 		G[i] = act(G[i], cfg) * U[i]
@@ -237,16 +242,14 @@ func (m *Model) fuseGatedMLPPanels(lp func(string) string, G, U []float32, N, I 
 // matMulBatch, then the optional down bias. Every arithmetic call and its order is the one
 // the four hand-copied lanes ran, and matMulBatch's reduction is in-order, so the bit-exact
 // f32 rungs still hold. lp is the caller's layer-name closure. See fuseGatedMLPPanels for
-// what withProjBias means and why it is not defaulted.
-func (m *Model) batchedGatedMLP(lp func(string) string, Xn2 []float32, N, H, I int, cfg Config, withProjBias bool) []float32 {
+// why the projection biases are unconditional.
+func (m *Model) batchedGatedMLP(lp func(string) string, Xn2 []float32, N, H, I int, cfg Config) []float32 {
 	G := matMulBatch(m.tensor(lp("mlp.gate_proj.weight")), Xn2, I, H, N)
 	U := matMulBatch(m.tensor(lp("mlp.up_proj.weight")), Xn2, I, H, N)
-	m.fuseGatedMLPPanels(lp, G, U, N, I, cfg, withProjBias)
+	m.fuseGatedMLPPanels(lp, G, U, N, I, cfg)
 	Down := matMulBatch(m.tensor(lp("mlp.down_proj.weight")), G, H, I, N)
-	if withProjBias {
-		for row := 0; row < N; row++ {
-			m.addBiasIfPresent(Down[row*H:(row+1)*H], lp("mlp.down_proj.bias"))
-		}
+	for row := 0; row < N; row++ {
+		m.addBiasIfPresent(Down[row*H:(row+1)*H], lp("mlp.down_proj.bias"))
 	}
 	return Down
 }
