@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func runValidateJSON(t *testing.T, argv []string) (validateResult, int, string) {
@@ -150,6 +155,104 @@ func TestNormalizeMinePathsRejectsEscape(t *testing.T) {
 	if _, err := normalizeMinePaths(root, []string{"."}); err == nil {
 		t.Fatal("expected repo-root refusal")
 	}
+}
+
+// TestOverlayMinePathsContainmentUsesResolvedRoot pins overlayMinePaths' containment
+// check to a canonicalized root. EvalSymlinks(src) hands back a fully resolved path, so
+// comparing it against a raw srcRoot refused every owned path on any host whose repo root
+// is merely reachable through a symlink — macOS puts TMPDIR under /var, a symlink to
+// /private/var, and `fak validate` there died with "resolves outside repo root" for files
+// plainly inside the repo (#5364). The escape case runs on every platform and pins that
+// resolving both sides did not widen what the check admits.
+func TestOverlayMinePathsContainmentUsesResolvedRoot(t *testing.T) {
+	t.Run("refuses an owned path that resolves outside the root", func(t *testing.T) {
+		parent := t.TempDir()
+		root := filepath.Join(parent, "repo")
+		writeOverlayFixtureFile(t, filepath.Join(root, "p", "p.go"), "package p\n")
+		writeOverlayFixtureFile(t, filepath.Join(parent, "peer", "peer.go"), "package peer\n")
+		err := overlayMinePaths(root, t.TempDir(), []string{"../peer/peer.go"})
+		if err == nil || !strings.Contains(err.Error(), "resolves outside repo root") {
+			t.Fatalf("err=%v; want a containment refusal", err)
+		}
+	})
+
+	t.Run("accepts an owned path under an aliased root spelling", func(t *testing.T) {
+		body := "package p\n\nfunc Add(a, b int) int { return a + b }\n"
+		root := filepath.Join(t.TempDir(), "validate_overlay_root_with_a_long_name")
+		writeOverlayFixtureFile(t, filepath.Join(root, "p", "p.go"), body)
+		alias := aliasedOverlayRootSpelling(t, root)
+
+		// Non-vacuity: the alias must actually reproduce #5364, i.e. the resolved source
+		// must read as an escape when measured against the raw alias spelling. Otherwise
+		// the case below would pass with or without the fix.
+		resolved, err := filepath.EvalSymlinks(filepath.Join(alias, "p", "p.go"))
+		if err != nil {
+			t.Fatalf("resolve owned path through alias %q: %v", alias, err)
+		}
+		if raw, relErr := filepath.Rel(alias, resolved); relErr == nil && !strings.HasPrefix(raw, "..") {
+			t.Fatalf("alias %q does not exercise the raw-root asymmetry (rel=%q)", alias, raw)
+		}
+
+		dst := t.TempDir()
+		if err := overlayMinePaths(alias, dst, []string{"p/p.go"}); err != nil {
+			t.Fatalf("overlay through aliased root %q: %v", alias, err)
+		}
+		got, err := os.ReadFile(filepath.Join(dst, "p", "p.go"))
+		if err != nil {
+			t.Fatalf("read overlaid file: %v", err)
+		}
+		if string(got) != body {
+			t.Fatalf("overlaid body=%q want %q", got, body)
+		}
+	})
+}
+
+func writeOverlayFixtureFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// aliasedOverlayRootSpelling returns a second spelling of root that resolves to the same
+// directory: a symlink where the OS grants one, otherwise the Windows 8.3 short name,
+// which needs no privilege and which EvalSymlinks normalizes back to the long form. Both
+// stand in for the darwin /var -> /private/var TMPDIR the issue was reported against.
+func aliasedOverlayRootSpelling(t *testing.T, root string) string {
+	t.Helper()
+	link := filepath.Join(t.TempDir(), "alias")
+	symlinkErr := os.Symlink(root, link)
+	if symlinkErr == nil {
+		return link
+	}
+	if runtime.GOOS != "windows" {
+		t.Fatalf("symlink an aliased root: %v", symlinkErr)
+	}
+	// Unprivileged Windows cannot create a symlink at all, so fall back to the 8.3 alias
+	// rather than skipping: a containment check must not be witnessed vacuously.
+	short := windowsShortPathSpelling(root)
+	if short == "" || short == root {
+		t.Skipf("no aliased root spelling available on this host: os.Symlink refused (%v) and 8.3 short names are off for %q", symlinkErr, root)
+	}
+	return short
+}
+
+// windowsShortPathSpelling reports dir's 8.3 name. The directory travels as the child's
+// working directory rather than as an argument: cmd.exe re-parses its own command line
+// and does not understand the backslash-escaped quotes Go emits, so a spelled-out path
+// with a space or a quote in it comes back mangled.
+func windowsShortPathSpelling(dir string) string {
+	cmd := exec.Command("cmd", "/c", "for", "%I", "in", "(.)", "do", "@echo", "%~sfI")
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func validateContains(values []string, want string) bool {
