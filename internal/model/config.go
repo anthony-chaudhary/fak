@@ -457,6 +457,20 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 }
 
 func (c *Config) deriveConfigAxes(h configJSONHints) error {
+	// MLA (DeepSeek-V2/V3, GLM-5.2) heads are NOT hidden_size/num_heads wide. HF's
+	// DeepseekV2Config declares no head_dim at all; DeepseekV2Attention builds
+	// q_head_dim = qk_nope_head_dim + qk_rope_head_dim and cuts every per-head width from
+	// that. On DeepSeek-V3 the two numbers are unrelated: hidden_size/num_heads is
+	// 7168/128 = 56 while q_head_dim is 128+64 = 192. Letting the generic fallback below
+	// win would size the rotary table at HeadDim/2 = 28 frequencies while the MLA rotary
+	// (glmDsaApplyInterleavedRoPE) indexes qk_rope_head_dim/2 = 32 of them — a slice-bounds
+	// panic on the first token. This branch fires ONLY when head_dim is absent and both MLA
+	// widths are present, so a config that states head_dim (fak's own exports, and every
+	// GGUF, which carries it as attention.key_length) is untouched, and a non-MLA config
+	// never reaches it. Witness: TestDeepSeekMLADerivedHeadDimCoversRopeSlice.
+	if c.HeadDim == 0 && c.QKNopeHeadDim > 0 && c.QKRopeHeadDim > 0 {
+		c.HeadDim = c.QKNopeHeadDim + c.QKRopeHeadDim
+	}
 	if c.HeadDim == 0 && c.HiddenSize != 0 && c.NumHeads != 0 {
 		c.HeadDim = c.HiddenSize / c.NumHeads
 	}
@@ -708,11 +722,37 @@ func gemmaSlidingWindowPattern(family string) int {
 	return 0
 }
 
+// familySlidingWindowPattern extends the Gemma cadence default above to every family
+// whose HF config class SYNTHESIZES layer_types when config.json omits it. Gemma is not
+// the only one: gpt-oss (GptOssForCausalLM) alternates with PERIOD 2, because
+// GptOssConfig.__init__ builds
+// `["sliding_attention" if bool((i + 1) % 2) else "full_attention" for i in range(n)]` —
+// even layers windowed, odd layers full, which is exactly the `(l+1)%pattern == 0 =>
+// full_attention` rule deriveLayerAttentionAxes applies at period 2.
+//
+// Without this, a gpt-oss config that carries `sliding_window` but no `layer_types` left
+// LayerTypes empty, so the Window loop stamped the sliding window onto EVERY layer and
+// silently clipped the context of the half of the stack that must attend the whole
+// prefix — the identical defect Gemma2 had, and identically invisible until the prompt
+// outgrows the window. The published 20B/120B config.json does ship layer_types, so the
+// checkpoint path was unaffected and only configs that omit it (GGUF-derived, minimal, or
+// re-exported) were wrong. Witness: TestGPTOSSCPUNumericOracle/derived_cadence in
+// family_gptoss_cpu_oracle_test.go.
+func familySlidingWindowPattern(family string) int {
+	if pattern := gemmaSlidingWindowPattern(family); pattern > 0 {
+		return pattern
+	}
+	if strings.Contains(family, "gptoss") {
+		return 2
+	}
+	return 0
+}
+
 func (c *Config) deriveLayerAttentionAxes(family string, slidingWindow *int, useSlidingWindow *bool) {
 	if c.NumLayers <= 0 {
 		return
 	}
-	if defaultPattern := gemmaSlidingWindowPattern(family); defaultPattern > 0 && len(c.LayerTypes) == 0 {
+	if defaultPattern := familySlidingWindowPattern(family); defaultPattern > 0 && len(c.LayerTypes) == 0 {
 		pattern := c.SlidingWindowPattern
 		if pattern == 0 {
 			pattern = defaultPattern
