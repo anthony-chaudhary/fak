@@ -49,8 +49,8 @@ func TestInboundSystemNilPredicateIsIdentity(t *testing.T) {
 	}
 	orig := append([]byte(nil), req.Raw...)
 	s := anthropicServerWithSystemDrop(nil)
-	if pruned := s.maybeCompactInboundSystem(req); pruned != nil {
-		t.Fatalf("nil predicate must prune nothing, got %v", pruned)
+	if rec := s.maybeCompactInboundSystem(req); rec.Pruned != nil {
+		t.Fatalf("nil predicate must prune nothing, got %v", rec.Pruned)
 	}
 	if !bytes.Equal(req.Raw, orig) {
 		t.Fatalf("nil predicate must leave req.Raw unchanged")
@@ -71,8 +71,8 @@ func TestInboundSystemNonPassthroughIsIdentity(t *testing.T) {
 		},
 		logf: func(string, ...any) {},
 	}
-	if pruned := s.maybeCompactInboundSystem(req); pruned != nil {
-		t.Fatalf("non-passthrough must prune nothing, got %v", pruned)
+	if rec := s.maybeCompactInboundSystem(req); rec.Pruned != nil {
+		t.Fatalf("non-passthrough must prune nothing, got %v", rec.Pruned)
 	}
 	if !bytes.Equal(req.Raw, orig) {
 		t.Fatalf("non-passthrough wire must leave req.Raw unchanged")
@@ -94,9 +94,13 @@ func TestInboundSystemPrunesSelectedBlockKeepsPrefix(t *testing.T) {
 	s := anthropicServerWithSystemDrop(func(block, name string) bool {
 		return block == promptmmu.BlockSkills && name == "old_skill"
 	})
-	pruned := s.maybeCompactInboundSystem(req)
+	rec := s.maybeCompactInboundSystem(req)
+	pruned := rec.Pruned
 	if len(pruned) != 1 || pruned[0] != promptmmu.BlockSkills+":old_skill" {
 		t.Fatalf("Pruned = %v, want [skills:old_skill]", pruned)
+	}
+	if rec.SkipReason != "" || rec.Structural {
+		t.Fatalf("a real prune must carry no skip reason, got %+v", rec)
 	}
 	if bytes.Equal(req.Raw, orig) {
 		t.Fatalf("expected a system-block prune, got identity")

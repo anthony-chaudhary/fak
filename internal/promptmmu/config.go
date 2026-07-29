@@ -133,8 +133,13 @@ func ExplainToolSchemaStrategy(res PruneResult) ToolSchemaDecision {
 		CacheTradeoff: "request body forwarded byte-identical",
 		TokenTradeoff: "no tool-definition tokens removed",
 	}
+	// SkipUndecodableSystem sits here for the same reason SkipUndecodableTools does: it
+	// means "the array was there and we could not read it", i.e. NOT SAFE TO CUT. Without
+	// this arm a structural system[] failure fell through to ToolSchemaUnchanged — the
+	// "nothing needed doing" verdict — which is the opposite of the defensive posture the
+	// same failure earns on the tools side (#5446).
 	switch res.SkipReason {
-	case SkipNoBreakpoint, SkipNothingAfter, SkipUndecodableTools, SkipSpliceUnproven:
+	case SkipNoBreakpoint, SkipNothingAfter, SkipUndecodableTools, SkipUndecodableSystem, SkipSpliceUnproven:
 		dec.Strategy = ToolSchemaMask
 		dec.CacheTradeoff = "kept advertised tool definitions to preserve the warm prefix or avoid an unproven splice"
 		dec.TokenTradeoff = "no tool-definition tokens saved; call-time floor masks unreachable tools"

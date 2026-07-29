@@ -59,7 +59,7 @@ func runServeRequestChain(s *Server, req *agent.AnthropicMessagesRequest) {
 	s.compactAnthropicRawWithReason(req, 1000, "stable-prefix-witness") // #555 history compaction
 	s.maybeElideAnthropicRaw(req)                                       // oversized tool_result elision
 	s.maybeCompactInboundTools(req)                                     // #555 twin: prune floor-denied tool defs
-	s.maybeCompactInboundSystem(req)                                    // system-block prune
+	s.logInboundSystemPrune(s.maybeCompactInboundSystem(req))           // system-block prune + its witness
 }
 
 // TestServeRequestChainKeepsAnthropicCacheControlPrefix drives a real /v1/messages body

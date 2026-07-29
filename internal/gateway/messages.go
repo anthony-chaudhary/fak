@@ -1039,7 +1039,7 @@ func canonicalToolSchemaBytes(t agent.ToolDef) []byte {
 
 func (s *Server) compactInboundToolsWithDecision(req *agent.AnthropicMessagesRequest) promptmmu.ToolSchemaDecision {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || s.toolFloorDenies == nil {
-		return promptmmu.ToolSchemaDecision{Strategy: promptmmu.ToolSchemaUnchanged, SkipReason: "gateway-disabled"}
+		return promptmmu.ToolSchemaDecision{Strategy: promptmmu.ToolSchemaUnchanged, SkipReason: inboundPruneDisabled}
 	}
 	if len(req.Tools) == 0 {
 		return promptmmu.ToolSchemaDecision{Strategy: promptmmu.ToolSchemaUnchanged, SkipReason: promptmmu.SkipNoTools}
@@ -1111,52 +1111,123 @@ func (s *Server) logInboundToolSchemaDecision(decision promptmmu.ToolSchemaDecis
 		decision.Strategy, len(decision.Removed), decision.SkipReason, decision.CacheTradeoff, decision.TokenTradeoff)
 }
 
-func (s *Server) maybeCompactInboundSystem(req *agent.AnthropicMessagesRequest) (pruned []string) {
+// inboundSystemPrune is the legible outcome of one turn's inbound system[] prune — the
+// system-side twin of the promptmmu.ToolSchemaDecision the tools path already produces.
+// Before #5446 maybeCompactInboundSystem returned a bare name list its only caller threw
+// away and dropped every promptmmu SkipReason on the floor, so a turn that pruned nothing
+// because the request carried no system[] array and a turn that pruned nothing because the
+// blocks could not be read were indistinguishable from outside the process.
+type inboundSystemPrune struct {
+	// Pruned names the removed blocks as "<block>:<name>", in system[] order. These are
+	// fak-internal block identifiers, never prompt bytes, so they are safe to emit.
+	Pruned []string
+	// SkipReason is the closed-set promptmmu reason nothing was pruned; empty when
+	// something was.
+	SkipReason string
+	// Structural reports whether SkipReason names a fak fault (a malformed body, an
+	// unreadable system[], an unproven splice) rather than an ordinary idle turn. It is
+	// promptmmu.SkipReasonIsStructural's verdict, never re-derived here.
+	Structural bool
+}
+
+// maybeCompactInboundSystem prunes the floor-denied system[] blocks from the outbound body
+// and REPORTS what happened. The report is the point: an operator must be able to tell
+// "pruned nothing because there was no system[] array" from "pruned nothing because the
+// blocks could not be read", and before #5446 both surfaced as an empty list.
+func (s *Server) maybeCompactInboundSystem(req *agent.AnthropicMessagesRequest) inboundSystemPrune {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || s.systemBlockDrop == nil {
-		return nil
+		return inboundSystemPrune{SkipReason: inboundPruneDisabled}
 	}
-	plans := inboundSystemBlockPlans(req.Raw, s.systemBlockDrop)
+	plans, reason := inboundSystemBlockPlans(req.Raw, s.systemBlockDrop)
 	if len(plans) == 0 {
-		return nil
+		return inboundSystemPrune{SkipReason: reason, Structural: promptmmu.SkipReasonIsStructural(reason)}
 	}
+	var out inboundSystemPrune
 	for _, plan := range plans {
 		res := promptmmu.CompactInboundSystem(req.Raw, plan, func(b []byte) error {
 			_, err := agent.DecodeAnthropicMessagesRequest(b)
 			return err
 		})
-		if !res.Changed {
+		if res.Changed {
+			req.Raw = res.Body
+			for _, name := range res.Pruned {
+				out.Pruned = append(out.Pruned, plan.Block+":"+name)
+			}
 			continue
 		}
-		req.Raw = res.Body
-		for _, name := range res.Pruned {
-			pruned = append(pruned, plan.Block+":"+name)
+		// A structural identity outranks everything else this turn, including a sibling
+		// block's successful prune: it is never routine, so it must not vanish behind a
+		// busy turn. A benign identity is kept only when nothing better was recorded.
+		if promptmmu.SkipReasonIsStructural(res.SkipReason) {
+			out.SkipReason, out.Structural = res.SkipReason, true
+			continue
+		}
+		if out.SkipReason == "" {
+			out.SkipReason = res.SkipReason
 		}
 	}
-	return pruned
+	if len(out.Pruned) > 0 && !out.Structural {
+		out.SkipReason = ""
+	}
+	return out
+}
+
+// inboundPruneDisabled is the reason both inbound prune paths report when the seam is not
+// armed at all — a non-Anthropic wire, or no floor predicate supplied. It is deliberately
+// NOT a promptmmu constant: the spine never ran, so no spine reason applies.
+const inboundPruneDisabled = "gateway-disabled"
+
+// logInboundSystemPrune emits the out-of-band witness for one inbound system[] prune,
+// mirroring logInboundToolSchemaDecision on the tools side. It stays silent on the dominant
+// idle turn (no system[] array, or nothing droppable) so the log never fills with vacuous
+// lines, and speaks on exactly the two events worth reading: a real prune, and a STRUCTURAL
+// skip — a fak fault that must never be readable as "there was nothing to do".
+func (s *Server) logInboundSystemPrune(rec inboundSystemPrune) {
+	if s == nil || s.logf == nil {
+		return
+	}
+	if len(rec.Pruned) == 0 && !rec.Structural {
+		return
+	}
+	s.logf("gateway: inbound system-block prune pruned=%d blocks=%v skip=%s structural=%t",
+		len(rec.Pruned), rec.Pruned, rec.SkipReason, rec.Structural)
 }
 
 func auditPromptSerialization(raw []byte) promptmmu.SerializationAudit {
 	return promptmmu.AuditJSONRemarshal(raw)
 }
 
-func inboundSystemBlockPlans(raw []byte, drop func(block, name string) bool) []promptmmu.BlockPlan {
+// inboundSystemBlockPlans reads raw's droppable system[] blocks, grouped by block, AND
+// names the closed-set promptmmu reason it produced none. The reason is what makes the
+// prune legible: this reader — not the promptmmu spine below it — is where a system[]
+// failure is actually REACHABLE on wire bytes, because it is the step that insists the
+// elements are typed block objects. Returning a bare empty list from all four exits made an
+// unreadable system[] look exactly like an absent one (#5446). reason is "" iff at least
+// one plan came back.
+func inboundSystemBlockPlans(raw []byte, drop func(block, name string) bool) ([]promptmmu.BlockPlan, string) {
 	if drop == nil {
-		return nil
+		return nil, inboundPruneDisabled
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return nil
+		return nil, promptmmu.SkipNotJSONObject
 	}
 	systemRaw := obj["system"]
+	// Shape BEFORE any typed read, so an absent `system`, a bare-string one, a JSON null
+	// and an object are each reported as the benign non-array they are. Every one of those
+	// is a legitimate wire shape and must never be counted as a read failure.
 	if len(systemRaw) == 0 || systemRaw[0] != '[' {
-		return nil
+		return nil, promptmmu.SkipNoSystem
 	}
 	var elems []struct {
 		Block string `json:"block"`
 		Name  string `json:"name"`
 	}
 	if err := json.Unmarshal(systemRaw, &elems); err != nil {
-		return nil
+		// system[] IS array-shaped and still would not read — a non-object element, or a
+		// block/name of the wrong JSON type. STRUCTURAL: the ordinary idle turn does not
+		// look like this, so it must not share the idle turn's reason.
+		return nil, promptmmu.SkipUndecodableSystem
 	}
 	byBlock := map[string]map[string]bool{}
 	var order []string
@@ -1172,11 +1243,16 @@ func inboundSystemBlockPlans(raw []byte, drop func(block, name string) bool) []p
 		}
 		byBlock[block][name] = true
 	}
+	if len(order) == 0 {
+		// The array read fine and simply held nothing the floor denies — the dominant,
+		// expected-large shape. Benign, and named as such.
+		return nil, promptmmu.SkipEmptyPlan
+	}
 	plans := make([]promptmmu.BlockPlan, 0, len(order))
 	for _, block := range order {
 		plans = append(plans, promptmmu.BlockPlan{Block: block, Drop: byBlock[block]})
 	}
-	return plans
+	return plans, ""
 }
 
 // writeAnthropicTurn renders a fully-formed turn to the wire as either a buffered JSON

@@ -8,16 +8,42 @@ import (
 // Closed set of fail-safe SkipReasons. When a call returns identity (Changed ==
 // false) it ALWAYS names one of these, so an un-pruned request is auditable.
 const (
-	SkipEmptyInput       = "empty-input"              // raw was empty
-	SkipEmptyPlan        = "empty-plan"               // plan.Drop had no names
-	SkipNotJSONObject    = "not-json-object"          // raw is not a JSON object
-	SkipNoTools          = "no-tools"                 // no tools[] array, or it is empty
-	SkipNoSystem         = "no-system"                // no system[] array, or system is a bare string
-	SkipUndecodableTools = "undecodable-tools"        // tools[] spans could not be recovered exactly
-	SkipNoBreakpoint     = "no-breakpoint"            // no cache_control to anchor the cached prefix on
-	SkipNothingAfter     = "nothing-after-breakpoint" // no droppable tool sits strictly after the breakpoint
-	SkipSpliceUnproven   = "splice-unproven"          // the spliced body failed re-decode or the prefix byte check
+	SkipEmptyInput        = "empty-input"              // raw was empty
+	SkipEmptyPlan         = "empty-plan"               // plan.Drop had no names
+	SkipNotJSONObject     = "not-json-object"          // raw is not a JSON object
+	SkipNoTools           = "no-tools"                 // no tools[] array, or it is empty
+	SkipNoSystem          = "no-system"                // no system[] array, it is empty, or system is a bare string
+	SkipUndecodableTools  = "undecodable-tools"        // tools[] spans could not be recovered exactly
+	SkipUndecodableSystem = "undecodable-system"       // system[] IS array-shaped but its elements could not be read
+	SkipNoBreakpoint      = "no-breakpoint"            // no cache_control to anchor the cached prefix on
+	SkipNothingAfter      = "nothing-after-breakpoint" // no droppable tool sits strictly after the breakpoint
+	SkipSpliceUnproven    = "splice-unproven"          // the spliced body failed re-decode or the prefix byte check
 )
+
+// SkipReasonIsStructural partitions the closed set above into STRUCTURAL failures — the
+// input was malformed, or a reader could not read a value it was handed, or our own
+// splice failed its own proof — and ordinary NON-CANDIDATES, which are just the normal
+// shape of a body nothing was droppable from. It is the ONE place the split lives, so
+// every consumer agrees by construction instead of each re-deriving it (the
+// register-in-one-place drift #5441 tracks). It mirrors ArrayReasonIsStructural for the
+// deliberately disjoint Array* vocabulary; the two sets never mix.
+//
+// Why it matters: the non-candidate bucket is expected to be large and to grow, so a
+// structural failure counted there is invisible — a reader regression reads as a quiet
+// drop in prune rate rather than as an error. That is the defect #5387 and #5442 filed
+// and #5446 extends to the system[] side.
+//
+// Note this is NOT the mask-vs-remove set in ExplainToolSchemaStrategy: that one also
+// contains SkipNoBreakpoint and SkipNothingAfter, which are perfectly benign but still
+// mean "not safe to cut". Structural answers "is this a fak fault?", the mask set answers
+// "should the definitions stay advertised?"; they overlap without being the same question.
+func SkipReasonIsStructural(reason string) bool {
+	switch reason {
+	case SkipNotJSONObject, SkipUndecodableTools, SkipUndecodableSystem, SkipSpliceUnproven:
+		return true
+	}
+	return false
+}
 
 // ToolPlan is the spine's pure, caller-supplied verdict over the request's
 // tools[]: the set of tool NAMES the caller has proven the model can never
@@ -42,8 +68,20 @@ func CompactInboundSystem(raw []byte, plan BlockPlan, decode func([]byte) error)
 	if !ok || len(systemRaw) == 0 || systemRaw[0] != '[' {
 		return identity(raw, SkipNoSystem)
 	}
+	// Split exactly the way the CompactInboundTools twin below already splits it. The
+	// value IS array-shaped (the byte test above proved it), so a reader that cannot
+	// recover its element spans is a fak fault, not the ordinary shape of a request that
+	// carries nothing to drop. Folding the two into one reason made the fault report as
+	// "no-system" — a FALSE description of what happened, and one that hides in the
+	// expected-large benign bucket. Like ArrayUndecodable this arm is close to unreachable
+	// by construction (decodeCurateInput already validated the whole document, so systemRaw
+	// is provably valid JSON), so naming it is attribution hygiene: if it ever does fire it
+	// is nameable as ours.
 	elems, spans, ok := decodeArrayElements(raw, systemRaw)
-	if !ok || len(elems) == 0 {
+	if !ok {
+		return identity(raw, SkipUndecodableSystem)
+	}
+	if len(elems) == 0 {
 		return identity(raw, SkipNoSystem)
 	}
 	breakIdx, keep, pruned, bad, ok := breakpointAnchor(raw, elems, false)

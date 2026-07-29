@@ -131,7 +131,12 @@ func (s *Server) prepareServedAnthropicRequest(ctx context.Context, r *http.Requ
 	// Also remember the concrete names per trace so a later model proposal of a pruned name is
 	// logged once as a floor-vs-observed drift witness.
 	s.recordInboundPrunedToolDefinitions(reqTrace, s.maybeCompactInboundTools(req))
-	s.maybeCompactInboundSystem(req)
+	// The system[] twin of the line above, and — until #5446 — the one inbound prune whose
+	// result was simply dropped here. It now reports what it did, and the emitter below
+	// puts a real prune and a STRUCTURAL failure to read system[] on the log, while the
+	// dominant idle turn stays silent. Without this consumption the promptmmu reason split
+	// would be correct and still unobservable, which is the ships-unwired shape #5435 tracks.
+	s.logInboundSystemPrune(s.maybeCompactInboundSystem(req))
 	// The 10x floor lever (#3232): defer the cold tool tail (defer_loading:true) and inject
 	// a tool_search_tool on the outbound body, so the provider loads only the hot core into
 	// context. OFF by default; deterministic + cache-safe + fail-safe identity. Runs AFTER
