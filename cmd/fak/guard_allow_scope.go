@@ -33,10 +33,11 @@ import (
 // guardAllowWinningScope attributes an entry present in several scopes to the
 // NARROWEST scope that names it, never a broader one.
 //
-// The session layer is keyed to the guard session id the guard already resolves at
-// launch (guardTraceID — see resolveGuardSessionID): the guard boot, or a test, hands
-// it to setGuardAllowSessionScopeID, and $FAK_GUARD_SESSION_ID serves the same id to
-// out-of-process callers (`fak guard allow`-style tooling run beside a session). When
+// The session layer is keyed to a session id THIS LAUNCH mints at boot
+// (guardAllowSessionScopeLaunchID): cmdGuard hands it to setGuardAllowSessionScopeID
+// immediately before it arms the teardown, and $FAK_GUARD_SESSION_ID carries the SAME id
+// into the wrapped child, so an in-session `fak guard allow --session` — a separate process
+// that resolves nothing itself — writes the very file this guard reads and drops. When
 // NO session id is available the layer falls back to the DOCUMENTED session-scoped
 // path <repo>/.fak/guard/sessions/current.allow.json — "the current session on this
 // checkout" — so a session-scoped widening always has a well-known home. A missing
@@ -61,19 +62,16 @@ import (
 //     (reclaimStaleGuardAllowSessionScope), because a session-end drop alone cannot make the
 //     scope ephemeral. See the next paragraph — this is the load-bearing half.
 //
-// WHY A BOOT DROP IS REQUIRED, not merely tidy (#5417 §2). Nothing in production supplies a
-// session id: setGuardAllowSessionScopeID has no production caller and nothing exports
-// $FAK_GUARD_SESSION_ID, so guardAllowSessionID() returns "" and EVERY launch on a checkout
-// resolves the SAME fallback file, sessions/current.allow.json. With only a session-end drop
-// that shared file is a durable grant wearing an ephemeral label, in two ways, and both fail
-// in the dangerous direction — authority OUTLIVING the consent that created it:
+// WHY A BOOT DROP IS REQUIRED, not merely tidy (#5417 §2). A session-scoped file that THIS
+// guard did not write is a durable grant wearing an ephemeral label, and both ways one can be
+// there fail in the dangerous direction — authority OUTLIVING the consent that created it:
 //
 //   - A guard that never reaches its teardown (SIGKILL, power cut, host reboot) leaves the
-//     file behind. The NEXT launch resolves that same path as its own session layer, so a
-//     dead session's widening is HONORED for the whole next session and only dropped at
-//     THAT session's end — one full session of authority nobody granted, repeating for as
-//     long as launches keep being killed.
-//   - Two concurrent guards on one checkout share the file, so a --session grant made in
+//     file behind. Any later launch resolving that same path takes it as its own session
+//     layer, so a dead session's widening is HONORED for the whole next session and only
+//     dropped at THAT session's end — one full session of authority nobody granted,
+//     repeating for as long as launches keep being killed.
+//   - Two guards that resolve the same path share the file, so a --session grant made in
 //     one session is honored by the other, which never consented to it.
 //
 // The boot reclaim closes both: at the instant a guard boots it has consented to nothing, so
@@ -81,6 +79,17 @@ import (
 // never be proved in scope for this one. The rule is therefore mechanical rather than
 // heuristic — a session grant is honored only if THIS session wrote it after its own boot —
 // and the failure direction is to drop (the operator re-grants), never to retain.
+//
+// PER-LAUNCH KEYING is the other half of #5417 §2, and the two do NOT substitute for each
+// other. Until it landed nothing supplied an id at all — setGuardAllowSessionScopeID had no
+// production caller and nothing exported $FAK_GUARD_SESSION_ID — so guardAllowSessionID()
+// returned "" and EVERY launch on a checkout resolved the one fallback file. Against a
+// CONCURRENT peer the boot reclaim is then not a fix but a denial: each guard deletes a live
+// peer's layer and the operator re-grants forever. cmdGuard now mints
+// guardAllowSessionScopeLaunchID BEFORE the arm, so concurrent launches resolve DISTINCT
+// files and never reach for each other's. Keying makes a collision improbable; the reclaim
+// keeps the invariant mechanical for whatever collision happens anyway (a degraded launch
+// nonce, a shared checkout across hosts, a process that reaches the arm with no id set).
 //
 // QUARANTINE. If the boot reclaim cannot clear the file, the grant is both unprovable and
 // undroppable, so it must not be honored either: guardAllowEffectiveReadLayers omits the
@@ -93,13 +102,16 @@ import (
 // TWO ORDERING CONSTRAINTS make that pair of call sites the correct ones, and both are
 // easy to get wrong:
 //
-//   - ARM BEFORE THE FLOOR READ, and do NOT re-key the layer to guardTraceID. The guard
-//     finalizes guardTraceID (resolveGuardSessionID) ~370 lines AFTER the floor loads, so
-//     calling setGuardAllowSessionScopeID at that point would retarget the layer to a file
-//     the floor never read: the widening the session actually HONORED (under the id already
-//     in scope, or the documented current.allow.json fallback) would then survive the drop
-//     while an unrelated, probably nonexistent path got removed. Arming first captures the
-//     exact path the very next read resolves, which is the one that must be dropped.
+//   - KEY, THEN ARM, BOTH BEFORE THE FLOOR READ — and never re-key afterwards. cmdGuard calls
+//     setGuardAllowSessionScopeID and then armGuardAllowSessionScopeTeardown immediately
+//     before loadGuardCapabilityFloor, so the id, the armed path, the path the floor reads,
+//     and the path protectGuardPolicyConfig write-protects are one file by construction. Key
+//     after the arm and the arm captures the shared fallback instead. Re-key later — at
+//     guardTraceID's finalization, ~220 lines AFTER the floor loads — and the layer is
+//     retargeted to a file the floor never read: the widening the session actually HONORED
+//     would survive the drop while an unrelated, probably nonexistent path got removed. Worse,
+//     the floor would have write-protected the OLD path, leaving the agent a writable overlay
+//     over the new one — the fail-open direction this scope exists to close.
 //   - DROP IN THE TERMINAL FUNNEL, NOT VIA `defer` IN cmdGuard. finishGuardChildAndReport
 //     ends a nonzero child exit, a non-ExitError launch failure, and a mid-session gateway
 //     error with os.Exit — which does not run cmdGuard's defers. A deferred drop would
@@ -124,6 +136,46 @@ const guardAllowSessionIDEnv = "FAK_GUARD_SESSION_ID"
 var guardAllowSessionScopeID string
 
 func setGuardAllowSessionScopeID(id string) { guardAllowSessionScopeID = strings.TrimSpace(id) }
+
+// guardAllowSessionScopeLaunchID mints the id that keys THIS launch's session-scope layer.
+// cmdGuard calls it at boot, before the arm, and no two calls can return the same value: an
+// operator-legible base — the explicit --session-id when there is one, else "guard" — plus a
+// fresh per-process launch nonce.
+//
+// The nonce is UNCONDITIONAL, and that is the whole point (#5417 §2). The obvious id to reuse
+// is guardTraceID, but resolveGuardSessionID hands an ordinary non-durable launch the CONSTANT
+// "guard" — which is every attended `fak guard -- claude` — so keying to it would leave the
+// common case sharing one file under a new name, still dropping a live peer's widening. Always
+// suffixing is the narrowing that actually separates concurrent launches; the base only keeps
+// the file name joinable to the session an operator named.
+//
+// Sanitization is deliberately left to guardAllowSessionPathComponent at path-build time: that
+// is the one place that has to be right for an id from ANY source, including the
+// $FAK_GUARD_SESSION_ID a caller outside this process supplies.
+func guardAllowSessionScopeLaunchID(explicitSessionID string) string {
+	base := strings.TrimSpace(explicitSessionID)
+	if base == "" {
+		base = "guard"
+	}
+	return base + "-" + newGuardLaunchNonce()
+}
+
+// guardAllowSessionScopeChildEnv is the $FAK_GUARD_SESSION_ID pair cmdGuard injects into the
+// wrapped agent's environment. Its contract is one sentence: THE CHILD MUST RESOLVE THE FILE
+// THIS GUARD READS. `fak guard allow --session <tool>` run inside the session is a separate
+// process that resolves no id of its own, so without this pair its widening lands in the
+// shared fallback and the guard that was asked for it never reads it.
+//
+// The pair is returned UNCONDITIONALLY, empty value included, and that is a security
+// requirement rather than tidiness. The name is not credential-shaped, so
+// policy.StripInheritedSecrets keeps it and a child would otherwise INHERIT an outer guard's
+// id — aiming its writes at a different, LIVE session's overlay, which is exactly the
+// cross-session authority the boot reclaim exists to deny. Both spawn paths take the last
+// value bound to a name (os/exec's env dedup, toolprocgate.normalizeEnv), so appending this
+// pair overwrites the ambient one instead of racing it.
+func guardAllowSessionScopeChildEnv() [2]string {
+	return [2]string{guardAllowSessionIDEnv, guardAllowSessionID()}
+}
 
 // guardAllowSessionID resolves the session id keying the session-scope layer:
 // programmatic override first (the guard's own resolved id), then the documented env

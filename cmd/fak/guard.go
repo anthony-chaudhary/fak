@@ -391,11 +391,18 @@ func cmdGuard(argv []string) {
 		defer func() { _ = logCloser.Close() }()
 	}
 
-	// Arm the session-scope allow-overlay drop (#5180) BEFORE the floor reads the overlay
-	// layers, so the path armed for teardown is by construction the exact session file this
-	// launch is about to honor. Arming after guardTraceID is finalized (~370 lines below)
-	// would name a DIFFERENT file than the floor read and leak the widening. The matching
-	// drop runs in finishGuardChildAndReport's terminal region — see guard_allow_scope.go.
+	// Key the session-scope allow overlay to THIS launch (#5417), then arm its drop (#5180) —
+	// both BEFORE the floor reads the overlay layers. The order is load-bearing three ways:
+	// key before arm, or the armed path is the shared fallback every other guard also resolves;
+	// arm before the floor, or the armed path is not the one the floor read; and BOTH before
+	// loadGuardCapabilityFloor, because that is where protectGuardPolicyConfig write-protects
+	// the layer paths — protecting a path resolved under a different id than the one read would
+	// hand the wrapped agent a writable overlay over its own permissions. guardTraceID here is
+	// only the explicit --session-id (or ""), used as a legible file-name base; it is NOT the
+	// resolved trace, which is finalized ~220 lines below and collapses to the constant "guard"
+	// on an ordinary launch. The matching drop runs in finishGuardChildAndReport's terminal
+	// region, and the id reaches the child via $FAK_GUARD_SESSION_ID — see guard_allow_scope.go.
+	setGuardAllowSessionScopeID(guardAllowSessionScopeLaunchID(guardTraceID))
 	armGuardAllowSessionScopeTeardown()
 
 	// 1. Install the capability floor: an explicit --policy file wins; otherwise the embedded
@@ -1260,6 +1267,12 @@ func cmdGuard(argv []string) {
 	// TTY-less $EDITOR — the top recurring stall in the trajectory audit (#2365). No-op for an
 	// attended interactive child; never overrides an inherited value. See guard_provider.go.
 	injected = append(injected, guardGitNonInteractiveEnv(command, os.Getenv)...)
+	// Carry THIS launch's session-scope allow id into the child (#5417), so an in-session
+	// `fak guard allow --session <tool>` writes the overlay this guard actually reads and drops
+	// — and so the child cannot inherit an outer guard's id and write into a live peer
+	// session's layer instead. Appended late on purpose: both spawn paths take the last value
+	// bound to a name, so this overwrites any ambient one. See guard_allow_scope.go.
+	injected = append(injected, guardAllowSessionScopeChildEnv())
 	// Live discovery (#1499): register fak's fak_index_*/fak_memory_*/fak_tools_search
 	// MCP tools into the wrapped Claude child by default, so a default `fak guard --
 	// claude` session can reach them with no manual .mcp.json setup.

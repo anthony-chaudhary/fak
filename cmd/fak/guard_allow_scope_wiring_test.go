@@ -168,12 +168,13 @@ func TestGuardAllowScopeTeardownIsWiredIntoTheGuardBootAndExitPaths(t *testing.T
 // guard boots is dropped BEFORE that guard's floor reads it, so it is never honored by a
 // session that did not grant it.
 //
-// This is the case a session-end drop alone cannot reach. No launch supplies a session id
-// (nothing calls setGuardAllowSessionScopeID in production, nothing exports
-// $FAK_GUARD_SESSION_ID), so every launch on a checkout resolves the same session file — and
-// a guard killed before its teardown therefore hands its widening to the NEXT launch, which
-// honors it for a full session. The fixture below is exactly that killed guard: a session
-// overlay on disk with no live session behind it.
+// This is the case a session-end drop alone cannot reach: a guard killed before its teardown
+// leaves its widening on disk, and any launch that resolves that same path honors it for a
+// full session. Per-launch keying (guardAllowSessionScopeLaunchID, witnessed in
+// guard_allow_scope_launch_id_test.go) makes two LIVE guards stop colliding, but it cannot
+// make this case safe: the reclaim is what holds whenever a path is resolved twice anyway.
+// The fixture below is exactly that killed guard — a session overlay on disk with no live
+// session behind it — pinned here under a fixed id so the collision is certain, not chanced.
 func TestGuardAllowScopeBootDropsAGrantFromAnEarlierSession(t *testing.T) {
 	scopeTestRepo(t, "guard-inherit")
 	guardAllowSessionScopeTeardownPath = ""
