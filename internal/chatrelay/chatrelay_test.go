@@ -365,10 +365,13 @@ func TestTSAfter(t *testing.T) {
 		{"1000000000.0", "999999999.9", true}, // numeric, not lexical
 		{"5", "", true},
 		{"", "5", false},
+		// Micros-width case inherited from `fak chatops`' retired private copy: two ts values
+		// that differ only in the last micro digit must still order strictly.
+		{"1699999999.000200", "1699999999.000100", true},
 	}
 	for _, c := range cases {
-		if got := tsAfter(c.a, c.b); got != c.want {
-			t.Errorf("tsAfter(%q,%q) = %v, want %v", c.a, c.b, got, c.want)
+		if got := TSAfter(c.a, c.b); got != c.want {
+			t.Errorf("TSAfter(%q,%q) = %v, want %v", c.a, c.b, got, c.want)
 		}
 	}
 }

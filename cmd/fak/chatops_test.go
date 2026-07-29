@@ -24,7 +24,7 @@ type fakePost struct{ channel, thread, text string }
 func (f *fakeSlack) History(_ context.Context, _ string, oldestTS string, _ int) ([]chatrelay.Message, error) {
 	var out []chatrelay.Message
 	for _, m := range f.msgs {
-		if chatopsTSAfter(m.TS, oldestTS) {
+		if chatrelay.TSAfter(m.TS, oldestTS) {
 			out = append(out, m)
 		}
 	}
@@ -297,24 +297,10 @@ func TestParseAdminList(t *testing.T) {
 	}
 }
 
-func TestChatopsTSAfter(t *testing.T) {
-	cases := []struct {
-		a, b string
-		want bool
-	}{
-		{"2.0", "1.0", true},
-		{"1.0", "2.0", false},
-		{"1.0", "1.0", false},
-		{"1.0", "", true},  // everything is after the zero mark
-		{"", "1.0", false}, // the zero ts is after nothing
-		{"1699999999.000200", "1699999999.000100", true},
-	}
-	for _, tc := range cases {
-		if got := chatopsTSAfter(tc.a, tc.b); got != tc.want {
-			t.Errorf("chatopsTSAfter(%q,%q)=%v, want %v", tc.a, tc.b, got, tc.want)
-		}
-	}
-}
+// The door's ts ordering is chatrelay.TSAfter; its table test lives with the function in
+// internal/chatrelay (TestTSAfter), which absorbed this file's micros-width case when the
+// private copy here was retired. The door's own use of it is still witnessed end-to-end by
+// the Tick/Prime tests above, which drive the high-water mark through fakeSlack.
 
 func decodeAudit(t *testing.T, s string) []chatopsAuditRow {
 	t.Helper()

@@ -116,7 +116,7 @@ func (r *Relay) Prime(ctx context.Context) error {
 		return err
 	}
 	for _, m := range msgs {
-		if tsAfter(m.TS, r.lastTS) {
+		if TSAfter(m.TS, r.lastTS) {
 			r.lastTS = m.TS
 		}
 	}
@@ -132,15 +132,14 @@ func (r *Relay) Tick(ctx context.Context) (handled int, err error) {
 	if limit <= 0 {
 		limit = historyLimitDefault
 	}
-	msgs, err := r.Slack.History(ctx, r.Channel, r.lastTS, limit)
-	if err != nil {
-		return 0, fmt.Errorf("history: %w", err)
-	}
 	// Oldest-first so we answer in conversational order and advance the mark monotonically.
-	sort.SliceStable(msgs, func(i, j int) bool { return tsAfter(msgs[j].TS, msgs[i].TS) })
+	msgs, err := PollHistory(ctx, r.Slack, r.Channel, r.lastTS, limit)
+	if err != nil {
+		return 0, err
+	}
 
 	for _, m := range msgs {
-		if !tsAfter(m.TS, r.lastTS) {
+		if !TSAfter(m.TS, r.lastTS) {
 			continue // already seen (or the inclusive oldest echo)
 		}
 		prompt, ok := r.promptFor(m)
@@ -179,21 +178,10 @@ func (r *Relay) Tick(ctx context.Context) (handled int, err error) {
 // non-nil) and the loop continues — a single bad poll must not tear down a long-lived relay.
 // interval<=0 uses pollIntervalDefault. It returns ctx.Err() when cancelled.
 func (r *Relay) Run(ctx context.Context, interval time.Duration, onErr func(error)) error {
-	if interval <= 0 {
-		interval = pollIntervalDefault
-	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		if _, err := r.Tick(ctx); err != nil && onErr != nil {
-			onErr(err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.C:
-		}
-	}
+	return PollLoop(ctx, interval, pollIntervalDefault, func(ctx context.Context) error {
+		_, err := r.Tick(ctx)
+		return err
+	}, onErr)
 }
 
 // promptFor decides whether a message should be answered and, if so, returns the prompt to
@@ -271,12 +259,16 @@ func atLabel(sub []string) string {
 	return "@" + sub[1]
 }
 
-// tsAfter reports whether Slack ts a is strictly after b. Slack timestamps are
+// TSAfter reports whether Slack ts a is strictly after b. Slack timestamps are
 // "<seconds>.<micros>" decimals; a numeric compare is correct across widths (string compare
 // is not, e.g. "1000000000.0" vs "999999999.9"). A "" b is the zero mark (everything is
 // after it); an unparseable ts falls back to a string compare so a malformed value still
 // orders deterministically rather than panicking.
-func tsAfter(a, b string) bool {
+//
+// Exported because every Slack poll door needs the SAME high-water comparison: this relay,
+// and `fak chatops`'s read-only door, which previously carried a byte-identical private copy
+// (chatopsTSAfter). One definition, one test, one ordering rule.
+func TSAfter(a, b string) bool {
 	if b == "" {
 		return a != ""
 	}
@@ -289,6 +281,55 @@ func tsAfter(a, b string) bool {
 		return a > b
 	}
 	return af > bf
+}
+
+// PollHistory fetches one page of channel history strictly after sinceTS and returns it
+// OLDEST-FIRST. Both halves matter and neither is optional for a high-water-mark poller:
+// the fetch error is wrapped "history: …" so a caller's error names the failing call, and
+// the sort is by TSAfter (numeric ts order, not lexical) so a door answers in conversational
+// order and advances its mark monotonically. Slack's API may over-return; re-filtering by
+// the caller's own mark is still the caller's job.
+//
+// Exported because every high-water Slack door needs the SAME fetch-and-order preamble:
+// this relay and `fak chatops`'s read-only door carried byte-identical private copies, and
+// a door that sorted differently would have advanced its mark past unanswered messages.
+func PollHistory(ctx context.Context, slack SlackClient, channel, sinceTS string, limit int) ([]Message, error) {
+	msgs, err := slack.History(ctx, channel, sinceTS, limit)
+	if err != nil {
+		return nil, fmt.Errorf("history: %w", err)
+	}
+	sort.SliceStable(msgs, func(i, j int) bool { return TSAfter(msgs[j].TS, msgs[i].TS) })
+	return msgs, nil
+}
+
+// PollLoop runs tick every interval until ctx is cancelled, returning ctx.Err(). A tick
+// error is delivered to onErr (when non-nil) and the loop CONTINUES — a single bad poll
+// must not tear down a long-lived door. The first tick fires immediately, before the first
+// interval elapses, so a door starts working the moment it is run.
+//
+// fallback is the interval used when the caller passes interval<=0. It is a parameter, not
+// a package constant, because the two doors deliberately poll at different cadences (a chat
+// relay answers a human; the chatops control door polls faster) — that divergence is real
+// and is preserved by making the caller name its own default.
+//
+// Exported because the LIFECYCLE is the shared part: this relay and `fak chatops`'s door
+// carried byte-identical private copies of the ticker/select/keep-going rule.
+func PollLoop(ctx context.Context, interval, fallback time.Duration, tick func(context.Context) error, onErr func(error)) error {
+	if interval <= 0 {
+		interval = fallback
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		if err := tick(ctx); err != nil && onErr != nil {
+			onErr(err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
 }
 
 // --- live HTTP implementations -------------------------------------------------------

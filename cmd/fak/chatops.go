@@ -8,8 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -267,7 +265,7 @@ func (d *chatopsDoor) Prime(ctx context.Context) error {
 		return err
 	}
 	for _, m := range msgs {
-		if chatopsTSAfter(m.TS, d.lastTS) {
+		if chatrelay.TSAfter(m.TS, d.lastTS) {
 			d.lastTS = m.TS
 		}
 	}
@@ -278,15 +276,14 @@ func (d *chatopsDoor) Prime(ctx context.Context) error {
 // return how many were replied to. A Post failure is returned WITHOUT advancing the mark past
 // that message, so a transient failure is retried on the next Tick rather than dropping a turn.
 func (d *chatopsDoor) Tick(ctx context.Context) (replied int, err error) {
-	msgs, err := d.Slack.History(ctx, d.Channel, d.lastTS, d.limit())
-	if err != nil {
-		return 0, fmt.Errorf("history: %w", err)
-	}
 	// Oldest-first so we answer in conversational order and advance the mark monotonically.
-	sort.SliceStable(msgs, func(i, j int) bool { return chatopsTSAfter(msgs[j].TS, msgs[i].TS) })
+	msgs, err := chatrelay.PollHistory(ctx, d.Slack, d.Channel, d.lastTS, d.limit())
+	if err != nil {
+		return 0, err
+	}
 
 	for _, m := range msgs {
-		if !chatopsTSAfter(m.TS, d.lastTS) {
+		if !chatrelay.TSAfter(m.TS, d.lastTS) {
 			continue // already seen (or the inclusive oldest echo) — idempotent re-poll
 		}
 		// Message edits/joins/system posts carry a subtype; they are not fresh human turns.
@@ -318,21 +315,12 @@ func (d *chatopsDoor) Tick(ctx context.Context) (replied int, err error) {
 // Run polls every interval until ctx is cancelled. A Tick error is delivered to onErr (when
 // non-nil) and the loop continues — a single bad poll must not tear down a long-lived door.
 func (d *chatopsDoor) Run(ctx context.Context, interval time.Duration, onErr func(error)) error {
-	if interval <= 0 {
-		interval = chatopsPollDefault
-	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		if _, err := d.Tick(ctx); err != nil && onErr != nil {
-			onErr(err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.C:
-		}
-	}
+	// chatopsPollDefault (not the relay's) stays this door's cadence — a control door polls
+	// faster than a chat bridge; only the ticker/keep-going lifecycle is shared.
+	return chatrelay.PollLoop(ctx, interval, chatopsPollDefault, func(ctx context.Context) error {
+		_, err := d.Tick(ctx)
+		return err
+	}, onErr)
 }
 
 // chatopsAuditRow is one journaled decision: what the kernel decided and whether the door
@@ -436,21 +424,8 @@ func renderChatopsHelp() string {
 	return b.String()
 }
 
-// chatopsTSAfter reports whether Slack ts a is strictly after b. Slack timestamps are
-// "<seconds>.<micros>" decimals; a numeric compare is correct across widths where a raw string
-// compare is not. "" b is the zero mark (everything is after it); an unparseable ts falls back
-// to a string compare so a malformed value still orders deterministically.
-func chatopsTSAfter(a, b string) bool {
-	if b == "" {
-		return a != ""
-	}
-	if a == "" {
-		return false
-	}
-	af, aerr := strconv.ParseFloat(a, 64)
-	bf, berr := strconv.ParseFloat(b, 64)
-	if aerr != nil || berr != nil {
-		return a > b
-	}
-	return af > bf
-}
+// The door's Slack high-water comparison is chatrelay.TSAfter — the ONE ordering rule, shared
+// with `fak chatrelay`'s bridge instead of re-derived here. It used to be a byte-identical
+// private copy (chatopsTSAfter); the rule (numeric compare across micros widths, "" is the
+// zero mark, an unparseable ts falls back to a string compare) lives with its table test in
+// internal/chatrelay.
