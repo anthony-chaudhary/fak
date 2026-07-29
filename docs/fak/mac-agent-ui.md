@@ -1,6 +1,6 @@
 ---
 title: "Use the always-on Mac gateway from the fak UI"
-description: "Repeatable operator steps for launching Claude Code from fak console against the node-macos-a fak serve gateway."
+description: "Launch Claude Code against a Mac running your own local model behind fak serve: what to stand up first, then the repeatable operator steps."
 ---
 
 # Mac Agent UI
@@ -10,60 +10,106 @@ through a single `fak` binary, and watch fak prove the gateway is live before it
 over the terminal. A premium cloud agent, open weights running on your own silicon, one
 static binary in between. It is the whole fak thesis, runnable on a laptop.
 
-Being honest about it: the fast headless probe is now a smoke test, not a full
+> **`fak mac` is a launcher, not an installer.** It points Claude Code at a Mac
+> gateway that is **already running**; it does not create one. If you have not stood
+> that gateway up yet, start at [Stand up the Mac side](#stand-up-the-mac-side) —
+> running `fak mac` first will just refuse and send you back here.
+
+> **Audience.** Anyone driving Claude Code against a Mac `fak serve` gateway — the
+> Mac itself or another machine on the same network. By the end you can open
+> interactive Claude Code against your Mac with one command.
+
+Being honest about it: the fast headless probe is a smoke test, not a full
 agent session. `--probe` launches Claude Code in safe mode with tools, skills, and
 session persistence disabled, so the 2026-07-04 Mac witness sent 1,889 input
 tokens and returned `pong` in 13.1 seconds through the live gateway. A full
-interactive first turn can still be much slower because Claude Code includes the
-normal agent context and tool surface. The loop stays observable the entire time,
-through the preflight panel, `--overlay`, and `--metrics` below.
+interactive first turn can still be much slower — expect 10–15 minutes of prefill
+on an M3 Pro — because Claude Code includes the normal agent context and tool
+surface, and the session is single-stream. The loop stays observable the entire
+time, through the preflight panel, `--overlay`, and `--metrics` below.
 
-> **Audience.** Operators launching Claude Code from the fak console against an already-running Mac `fak serve` gateway. By the end you can open interactive Claude Code against `node-macos-a` with one command.
-
-Use this when `node-macos-a` is already running the always-on Qwen3.6 stack:
+The shape you are building:
 
 ```text
-Claude Code <- fak console agent -> http://node-macos-a.local:8080
-                                    fak serve -> Qwen3.6 OpenAI-compatible server
+Claude Code <- fak console agent -> http://<your-mac>:8080
+                                    fak serve -> local OpenAI-compatible model server
 ```
 
 The UI surface is `fak console agent`. With `--gateway-url`, it does not start a
 second local guard; it launches Claude Code directly against the existing `fak
 serve` gateway and reads the bearer from an environment variable.
 
+Throughout this page, `<your-mac>` is the hostname or IP of your Mac and `<you>` is
+your username on it. The values compiled into `fak` as defaults
+(`node-macos-a.local`, `user@node-macos-a.local`) are deliberately non-resolving
+placeholders, not hosts you are expected to have — see
+[scrubbing real values](scrubbing-real-values.md).
+
+## Stand up the Mac side
+
+Two processes on the Mac, in this order. Both are prerequisites for every command
+below.
+
+1. **A local model server** speaking the OpenAI API on loopback. Any of
+   `llama-server` (llama.cpp), LM Studio, or Ollama works; you need its base URL
+   (typically `http://127.0.0.1:8081/v1`) and the model id it serves. The reference
+   deployment below uses `llama-server` with a Qwen3.6-27B GGUF, but nothing here is
+   specific to that model.
+
+2. **`fak serve` in front of it**, bound to an address the driving machine can
+   reach — `0.0.0.0`, not loopback, if you are driving from another machine:
+
+   ```bash
+   fak serve --addr 0.0.0.0:8080 \
+     --base-url http://127.0.0.1:8081/v1 \
+     --model qwen3.6-27b \
+     --policy examples/dev-agent-policy.json
+   ```
+
+   Full options, including how to have `fak serve` load GGUF weights itself with no
+   separate model server, are in the [server quickstart](server-quickstart.md).
+
+A local first turn is slow, so raise the timeouts before a real session:
+`FAK_PLANNER_TIMEOUT_S=1800` and `FAK_HTTP_WRITE_TIMEOUT_S=1800`. To keep both
+processes running across reboots as LaunchAgents, see
+[Mac service prerequisites](#mac-service-prerequisites).
+
+**Bearer token.** If you started `fak serve` with `--require-key-env`, it needs a
+bearer. `fak mac` reads it from `FAK_GATEWAY_KEY`, and when that is empty it fetches
+`~/.fak-gateway-key` from the Mac over SSH. Either set `FAK_GATEWAY_KEY` yourself, or
+set `FAK_MAC_SSH_HOST=<you>@<your-mac>` so the fetch has somewhere to go. A gateway
+started without `--require-key-env` needs no token at all.
+
 ## One-command test
 
-From the repo root, this opens interactive Claude Code against the Mac gateway.
-`fak mac` is the crisp handle; `fak claude-mac-fak` is the equivalent long form —
-both route to the same launcher, byte-for-byte:
+Point `fak` at the gateway you just started, then launch. `fak mac` is the crisp
+handle; `fak claude-mac-fak` is the equivalent long form — both route to the same
+launcher, byte-for-byte:
 
-```powershell
-go run ./cmd/fak mac
+```bash
+export FAK_MAC_GATEWAY="http://<your-mac>:8080"
+export FAK_MAC_SSH_HOST="<you>@<your-mac>"   # only if the gateway requires a bearer
+fak mac
 ```
 
-If `FAK_GATEWAY_KEY` is empty, the command fetches the gateway bearer from
-`user@node-macos-a.local:~/.fak-gateway-key` over SSH using
-`~/.ssh/id_ed25519_prod_to_laptop`. Override that host with `FAK_MAC_SSH_HOST`.
-The SSH fetch is non-interactive and bounded (`BatchMode=yes`,
-`ConnectTimeout=5`, one attempt), so an unreachable Mac fails quickly with the
-SSH reason instead of hanging before the preflight panel.
-It then runs the same `fak console agent` gateway launcher with an isolated
-Claude config dir.
+This works from the Mac itself or from any machine that can reach the gateway —
+`fak mac` targets it over the network either way.
+
+The SSH fetch is non-interactive and bounded (`BatchMode=yes`, `ConnectTimeout=5`,
+one attempt), so an unreachable Mac fails quickly with the SSH reason instead of
+hanging before the preflight panel. `fak mac` then runs the same `fak console agent`
+gateway launcher with an isolated Claude config dir.
 
 Useful variants:
 
-```powershell
-go run ./cmd/fak claude-mac-fak --dry-run
-go run ./cmd/fak claude-mac-fak --probe
-go run ./cmd/fak claude-mac-fak --probe --prompt "Reply with exactly: OK"
+```bash
+fak mac --dry-run
+fak mac --probe
+fak mac --probe --prompt "Reply with exactly: OK"
 ```
 
-With an installed `fak` binary, the same commands shorten to:
-
-```powershell
-fak claude-mac-fak
-fak claude-mac-fak --probe
-```
+Working from a clone instead of an installed binary? Every `fak <verb>` below is
+`go run ./cmd/fak <verb>` from the repository root.
 
 ## See what fak is doing
 
@@ -117,7 +163,7 @@ fak claude-mac-fak --metrics
 `/debug/vars` and prints one fak line per tick (Ctrl-C to stop):
 
 ```powershell
-go run ./cmd/fak claude-mac-fak --overlay
+fak mac --overlay
 # submits 1240  hits 1101 (88.8%)  engine 139  inflight 1  heap 412.0M  gor 47
 ```
 
@@ -142,7 +188,11 @@ shown in the preflight panel comes from `--grafana-url` / `FAK_MAC_GRAFANA`.
 
 ## Mac service prerequisites
 
-The always-on Mac services must be sized for a real Claude Code first turn:
+This section is the **reference deployment** — the always-on LaunchAgent setup this
+page was written against. Treat it as a worked example to adapt, not a checklist you
+must match: the service names, model, and paths are ours. What generalizes is the
+sizing, because the always-on Mac services must be big enough for a real Claude Code
+first turn:
 
 - `com.fak.qwen36-kernel` runs `llama-server` with a 32K-or-larger context
   window, the `qwen3.6-27b` alias, Metal enabled, and the OpenAI-compatible API
@@ -167,27 +217,35 @@ launchctl kickstart -k "gui/$(id -u)/com.fak.serve-gateway"
 
 ## One-time shell setup
 
-PowerShell from the Windows driver:
+Substitute your own host, user, and model id. `FAK_MAC_MODEL` must be the model id
+your `fak serve` gateway advertises — `curl $FAK_MAC_GATEWAY/v1/models` lists them.
+`-i <ssh-key>` is only needed if the Mac is not reachable with your default SSH
+identity.
+
+Bash/zsh:
+
+```bash
+export FAK_MAC_GATEWAY="http://<your-mac>:8080"
+export FAK_MAC_SSH_HOST="<you>@<your-mac>"
+export FAK_GATEWAY_KEY="$(ssh "$FAK_MAC_SSH_HOST" 'cat ~/.fak-gateway-key')"
+export FAK_MAC_MODEL="qwen3.6-27b"
+export FAK_CLAUDE_CONFIG_DIR="${TMPDIR:-/tmp}/fak-claude-ui-probe"
+mkdir -p "$FAK_CLAUDE_CONFIG_DIR"
+```
+
+PowerShell, driving the Mac from Windows:
 
 ```powershell
-$env:FAK_MAC_GATEWAY = "http://node-macos-a.local:8080"
-$env:FAK_MAC_SSH_HOST = "user@node-macos-a.local"
-$env:FAK_GATEWAY_KEY = ssh -i $env:USERPROFILE\.ssh\id_ed25519_prod_to_laptop $env:FAK_MAC_SSH_HOST 'cat ~/.fak-gateway-key'
-$env:FAK_MAC_MODEL = "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"
+$env:FAK_MAC_GATEWAY = "http://<your-mac>:8080"
+$env:FAK_MAC_SSH_HOST = "<you>@<your-mac>"
+$env:FAK_GATEWAY_KEY = ssh $env:FAK_MAC_SSH_HOST 'cat ~/.fak-gateway-key'
+$env:FAK_MAC_MODEL = "qwen3.6-27b"
 $env:FAK_CLAUDE_CONFIG_DIR = Join-Path $env:TEMP "fak-claude-ui-probe"
 New-Item -ItemType Directory -Force -Path $env:FAK_CLAUDE_CONFIG_DIR | Out-Null
 ```
 
-Bash/zsh from a tailnet machine:
-
-```bash
-export FAK_MAC_GATEWAY="http://node-macos-a.local:8080"
-export FAK_MAC_SSH_HOST="user@node-macos-a.local"
-export FAK_GATEWAY_KEY="$(ssh "$FAK_MAC_SSH_HOST" 'cat ~/.fak-gateway-key')"
-export FAK_MAC_MODEL="lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"
-export FAK_CLAUDE_CONFIG_DIR="${TMPDIR:-/tmp}/fak-claude-ui-probe"
-mkdir -p "$FAK_CLAUDE_CONFIG_DIR"
-```
+If the gateway was started without `--require-key-env`, skip `FAK_GATEWAY_KEY` and
+`FAK_MAC_SSH_HOST` entirely — there is no bearer to fetch.
 
 ## Verify the gateway
 
@@ -199,7 +257,7 @@ curl.exe -sS -H "Authorization: Bearer $env:FAK_GATEWAY_KEY" "$env:FAK_MAC_GATEW
 ## Dry-run the UI launch
 
 ```powershell
-go run ./cmd/fak console agent `
+fak console agent `
   --claude-config-dir $env:FAK_CLAUDE_CONFIG_DIR `
   --gateway-url $env:FAK_MAC_GATEWAY `
   --gateway-key-env FAK_GATEWAY_KEY `
@@ -215,7 +273,7 @@ The dry-run should show `provider=existing-fak-gateway`, `auth=gateway-bearer`,
 ## Run a probe
 
 ```powershell
-go run ./cmd/fak console agent `
+fak console agent `
   --claude-config-dir $env:FAK_CLAUDE_CONFIG_DIR `
   --gateway-url $env:FAK_MAC_GATEWAY `
   --gateway-key-env FAK_GATEWAY_KEY `
@@ -231,7 +289,7 @@ A healthy run returns JSON with `"is_error": false`, `"result": "OK"`, and a low
 For an interactive session, omit `--prompt`:
 
 ```powershell
-go run ./cmd/fak console agent `
+fak console agent `
   --claude-config-dir $env:FAK_CLAUDE_CONFIG_DIR `
   --gateway-url $env:FAK_MAC_GATEWAY `
   --gateway-key-env FAK_GATEWAY_KEY `
@@ -241,7 +299,7 @@ go run ./cmd/fak console agent `
 ## Inspect served sessions
 
 ```powershell
-go run ./cmd/fak console sessions `
+fak console sessions `
   --addr $env:FAK_MAC_GATEWAY `
   --key $env:FAK_GATEWAY_KEY
 ```
