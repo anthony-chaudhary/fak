@@ -91,7 +91,7 @@ var tier = map[string]int{
 	"guardvars": 1, "xprobe": 1, // guardvars: pure /debug/vars sessions-row schema (SessionVars) the fak info agents pane renders. xprobe: throwaway end-to-end buildcheck-fallback ping probe (Ping). Both stdlib-only, import nothing internal, off the hot path.
 	"glm52prefillsweep": 1, "turnkind": 1, // glm52prefillsweep: GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); imports windowgate(1) for hidden subprocesses. turnkind: content-free last-user-turn structural classifier (#3307); imports nothing internal. Both off the hot path.
 	"questionledger":       1,                // /question-loop ledger discipline (Go port of tools/question_ledger.py): lint/next-id/dedupe-check/stats over docs/questions/asked.jsonl; stdlib-only, off the hot path.
-	"quality":              1,                // missing-middle quality-ladder spine (epic #4509): versioned quality-case schema + reference/engine Runner adapters + deterministic differential comparator & rubric oracle + replay-complete result/failure-bundle; stdlib-only, imports nothing internal, off the hot path.
+	"quality":              1,                // missing-middle quality-ladder spine (epic #4509): versioned quality-case schema + reference/engine Runner adapters + deterministic differential comparator & rubric oracle + replay-complete result/failure-bundle; off the hot path. NOT pureRoot: the incremental-Unicode oracle's first-divergence offset delegates to strmatch(1) rather than carrying the copy `fak benchmarks`' name matcher already had (bfb2e3fa7), so it imports a sibling leaf.
 	"trunkbuildprobe":      1,                // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; imports windowgate(1) for hidden subprocesses, off the hot path.
 	"godsplitplan":         1,                // doc-comment-aware Go split boundary+hazard planner (Go port of tools/godsplit_plan.py): the /modularize skill's planner + the decl-fold refactorverify reuses; stdlib-only, off the hot path.
 	"refactorverify":       2,                // proves a god-split dropped no top-level decl (Go port of tools/refactor_verify.py): folds each touched package's decl multiset before/after via godsplitplan.Compute; imports godsplitplan, off the hot path.
@@ -517,7 +517,7 @@ var pureRoot = map[string]bool{
 	"mutationbudget": true, "negframe": true, "newleaf": true, "newmodel": true, "nodecompare": true, "numfmt": true,
 	"orphanscan": true, "pathlint": true, "pathutil": true, "planaudit": true, "polymodel": true, "popularizationtickets": true,
 	"promalert": true, "promptaudit": true, "promptlint": true, "provenance": true,
-	"quality": true, "qwen36parity": true, "randhex": true, "releasestale": true, "renameconcept": true, "repoguard": true, "resumemetrics": true,
+	"qwen36parity": true, "randhex": true, "releasestale": true, "renameconcept": true, "repoguard": true, "resumemetrics": true,
 	"rsl": true, "savingsvector": true, "seatpark": true, "sensecheck": true, "sessionaudit": true, "sessiondesc": true,
 	"sessionread": true, "sessionsignals": true, "sessionsteer": true, "signals": true, "simhash": true, "slackenv": true,
 	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "steerpr": true, "stepbaton": true, "stopfailure": true,

@@ -154,10 +154,6 @@ var retractionCue = regexp.MustCompile(`(?i)\bstale\b|\bno longer true\b|\bnot t
 // then be deleted, so the list can only shrink) and pins the size, so growing it is a
 // review-visible act. Every entry below is a file this lane is fenced out of writing.
 var zeroDepClaimDebt = map[string]string{
-	"README.md": "line ~129 (\"no external Go dependencies\"). The repo front page; owned by another lane " +
-		"and dirty in the shared tree at the time this gate landed. Its localized mirrors under " +
-		"docs/i18n/*/README.md carry the same claim in translation and are pinned separately in " +
-		"localizedZeroDepDebt.",
 	"AGENTS.md": "line ~32 (\"Zero external deps, so no `go.sum`\"). The workspace agent contract; " +
 		"out of this lane's fence.",
 	"INDEX.md": "line ~658 (\"the zero-`go.sum` constraint\"), inside a one-line abstract of a dated " +
@@ -170,7 +166,7 @@ var zeroDepClaimDebt = map[string]string{
 
 // zeroDepClaimDebtSize pins the debt. It may only ever go DOWN. Raising it means a new
 // reader-facing page was allowed to ship the false claim.
-const zeroDepClaimDebtSize = 4
+const zeroDepClaimDebtSize = 3
 
 // zeroDepRetractionSites pins which files may quote the stale phrasing in order to retract
 // it, and how many lines each may spend doing so. See retractionCue for why this is pinned.
