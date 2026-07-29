@@ -627,3 +627,86 @@ func toIntForTest(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
 }
+
+// seenTestRecord stands in for a debt-dispatch surface's own record type.
+type seenTestRecord struct {
+	FiledAt  string `json:"filed_at"`
+	IssueURL string `json:"issue_url,omitempty"`
+}
+
+func TestLoadSeenReadsMissingAndEmptyFilesAsNothingFiled(t *testing.T) {
+	const schema = "fak.test-debt-dispatch.seen.v1"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "seen.json")
+
+	// A first run has no cache file at all. That MUST NOT be an error: an error here
+	// would stop every dispatcher from ever filing its first issue.
+	cache, err := LoadSeen[seenTestRecord](path, schema)
+	if err != nil {
+		t.Fatalf("LoadSeen(missing file) error: %v", err)
+	}
+	if cache.Schema != schema || cache.Seen == nil || len(cache.Seen) != 0 {
+		t.Fatalf("LoadSeen(missing file) = %+v, want an empty cache stamped %q", cache, schema)
+	}
+
+	// A zero-length file is what a killed writer leaves behind; same rule.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("  \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache, err = LoadSeen[seenTestRecord](path, schema)
+	if err != nil {
+		t.Fatalf("LoadSeen(empty file) error: %v", err)
+	}
+	if cache.Schema != schema || cache.Seen == nil || len(cache.Seen) != 0 {
+		t.Fatalf("LoadSeen(empty file) = %+v, want an empty cache stamped %q", cache, schema)
+	}
+
+	// A cache whose map serialized as null must still be writable by the caller.
+	if err := os.WriteFile(path, []byte(`{"schema":"","seen":null}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache, err = LoadSeen[seenTestRecord](path, schema)
+	if err != nil {
+		t.Fatalf("LoadSeen(null map) error: %v", err)
+	}
+	if cache.Schema != schema || cache.Seen == nil {
+		t.Fatalf("LoadSeen(null map) = %+v, want the schema stamped and a usable map", cache)
+	}
+
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSeen[seenTestRecord](path, schema); err == nil {
+		t.Fatalf("LoadSeen(corrupt file) must report the error")
+	}
+}
+
+func TestSaveSeenStampsSchemaAndRoundTrips(t *testing.T) {
+	const schema = "fak.test-debt-dispatch.seen.v1"
+	path := filepath.Join(t.TempDir(), "nested", "seen.json")
+
+	// The parent directory does not exist yet, and the cache carries no schema tag.
+	err := SaveSeen(path, schema, SeenCache[seenTestRecord]{
+		Seen: map[string]seenTestRecord{"key-1": {FiledAt: "2026-01-01T00:00:00Z", IssueURL: "u"}},
+	})
+	if err != nil {
+		t.Fatalf("SaveSeen error: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("SaveSeen wrote nothing: %v", err)
+	}
+	if !strings.Contains(string(raw), schema) {
+		t.Fatalf("SaveSeen output %q does not carry the schema tag", string(raw))
+	}
+	back, err := LoadSeen[seenTestRecord](path, schema)
+	if err != nil {
+		t.Fatalf("LoadSeen after SaveSeen error: %v", err)
+	}
+	if back.Schema != schema || back.Seen["key-1"].IssueURL != "u" {
+		t.Fatalf("round trip = %+v, want the record and schema preserved", back)
+	}
+}

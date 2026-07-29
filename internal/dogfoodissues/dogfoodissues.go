@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -39,6 +40,70 @@ const DefaultMilestone = "Generation G0 - Now / Immediate"
 // DefaultProjectSignalLabel keeps the missing-project fact visible without
 // requiring this issue bridge to own GitHub Projects API plumbing.
 const DefaultProjectSignalLabel = "needs-project"
+
+// SeenCache is the persisted dedup state of ONE issue-filing surface: a schema tag plus a
+// key->record map, keyed by the same stable dedup key the filed issue carries in its marker.
+// R is the surface's own record type, and it is the ONLY thing that differs between the
+// debt-dispatch siblings -- each records different provenance (a doc/class/exact triple, a
+// scaffold id and grade, ...) while the file format, the defaulting and the write path are
+// one shared contract. Two dispatchers that disagreed about what an absent or empty cache
+// means would refile issues they had already filed.
+type SeenCache[R any] struct {
+	Schema string       `json:"schema"`
+	Seen   map[string]R `json:"seen"`
+}
+
+// LoadSeen reads a SeenCache from path. A missing file, an empty file, an absent schema tag
+// and a null map all default to an empty cache stamped with schema: the FIRST run of any
+// dispatcher has no cache file, and a zero-length file is what a killed writer leaves behind,
+// so neither may read as an error and block filing. A corrupt (non-empty, non-JSON) cache is
+// reported -- the already-defaulted cache is returned alongside the error so a caller that
+// chooses to continue past it still holds a usable value.
+func LoadSeen[R any](path, schema string) (SeenCache[R], error) {
+	cache := SeenCache[R]{Schema: schema, Seen: map[string]R{}}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return cache, nil
+	}
+	if err != nil {
+		return cache, err
+	}
+	if strings.TrimSpace(string(b)) == "" {
+		return cache, nil
+	}
+	if err := json.Unmarshal(b, &cache); err != nil {
+		return cache, err
+	}
+	if cache.Schema == "" {
+		cache.Schema = schema
+	}
+	if cache.Seen == nil {
+		cache.Seen = map[string]R{}
+	}
+	return cache, nil
+}
+
+// SaveSeen writes cache to path as indented JSON with a trailing newline, creating the parent
+// directory first (the cache lives under a per-surface .fak/ subdirectory that need not exist
+// yet). The schema tag and the map are defaulted on the way out for the same reason LoadSeen
+// defaults them on the way in: a cache written without its schema tag would read back as an
+// unversioned file.
+func SaveSeen[R any](path, schema string, cache SeenCache[R]) error {
+	if cache.Schema == "" {
+		cache.Schema = schema
+	}
+	if cache.Seen == nil {
+		cache.Seen = map[string]R{}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
 
 // ReportFreshness records the timestamp/age of the selected dogfood report.
 type ReportFreshness struct {
