@@ -152,9 +152,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 				copy(Xn2[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
-		// withProjBias=true: this rect-batch lane has always applied the mlp gate/up/down
-		// biases. Its serial twins deliberately still do not — see fuseGatedMLPPanels.
-		Down := m.batchedGatedMLP(lp, Xn2, N, H, cfg.IntermediateSize, cfg, true)
+		Down := m.batchedGatedMLP(lp, Xn2, N, H, cfg.IntermediateSize, cfg)
 		for i := range X {
 			X[i] += Down[i]
 		}
@@ -322,7 +320,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 			qgemm8Target{qt: ql.gateProj, Y: G},
 			qgemm8Target{qt: ql.upProj, Y: U},
 		)
-		m.fuseGatedMLPPanels(lp, G, U, N, I, cfg, true)
+		m.fuseGatedMLPPanels(lp, G, U, N, I, cfg)
 		quantizeBatchPanelInto(bs.scratch, G, N, I)
 		Down := grow(pb.Down, N*H)
 		pb.Down = Down

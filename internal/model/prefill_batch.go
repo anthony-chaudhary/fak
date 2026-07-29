@@ -13,6 +13,18 @@ package model
 // TestPrefillBatchedMatchesSerial. So the cache it builds is byte-for-byte what the
 // proven per-token Prefill builds, and R2/R3/R14 (which assert exact fak-vs-fak
 // identity) stay green whether prefill ran batched or per-token.
+//
+// "By construction" is a claim about the ARITHMETIC only; it is not self-enforcing, and
+// this lane has twice been caught doing the same thing to it — silently omitting a term
+// the per-token path applies, on an axis no fixture exercised. First the learned norm
+// biases (fixed; TestPrefillBatchedMatchesSerialWithNormBias), then the projection biases
+// self_attn.o_proj.bias and mlp.{gate,up,down}_proj.bias (fixed;
+// TestPrefillBatchedProjBias). Both classes hid because TestPrefillBatchedMatchesSerial
+// runs on an RMSNorm, bias-free SmolLM2 export where the missing term is identically zero,
+// so the identity assertion held vacuously — and that test is export-gated (it SKIPs
+// without a local .cache SmolLM2 export), so on a bare checkout it does not even run. Any
+// term added to blockStep must be added here AND witnessed on a SYNTHETIC fixture that
+// actually carries it, or this header is false again.
 
 // prefillBatched ingests `ids` as a batch, appending P positions to the cache starting
 // at the current absolute position (Cache.Len(), so a prior Evict() compaction shifts
@@ -127,8 +139,14 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 			}
 		})
 
-		// batched output projection + residual.
+		// batched output projection + residual. The optional self_attn.o_proj.bias must be
+		// added per row before the residual, exactly as the per-token path does (kv.go's
+		// addBiasIfPresent after mat.mul); dropping it here was a silent numerics divergence
+		// on every checkpoint that carries the tensor.
 		O := matMulBatch(m.tensor(lp("self_attn.o_proj.weight")), attnOut, H, nH*hd, P)
+		for t := 0; t < P; t++ {
+			m.addBiasIfPresent(O[t*H:(t+1)*H], lp("self_attn.o_proj.bias"))
+		}
 		for i := range X {
 			X[i] += O[i]
 		}
@@ -142,9 +160,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 				copy(Xn2[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
-		// withProjBias=false preserves this lane exactly: prefillBatched has never applied the
-		// mlp projection biases (see fuseGatedMLPPanels for the divergence this preserves).
-		Down := m.batchedGatedMLP(lp, Xn2, P, H, cfg.IntermediateSize, cfg, false)
+		Down := m.batchedGatedMLP(lp, Xn2, P, H, cfg.IntermediateSize, cfg)
 		for i := range X {
 			X[i] += Down[i]
 		}

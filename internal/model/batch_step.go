@@ -264,8 +264,13 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		attnOut := make([]float32, B*nH*hd)
 		db.scores = attnDecodeBatch(attnOut, Q, caches, l, B, nH, hd, w, grp, cfg.windowForLayer(l), scale, dot, nil, db.scores, m.attnObs)
 
-		// batched output projection + residual.
+		// batched output projection + residual. The optional self_attn.o_proj.bias is added
+		// per user before the residual, exactly as the serial Step this lane is contracted
+		// to reproduce bit-for-bit does.
 		O := matMulBatch(m.tensor(lp("self_attn.o_proj.weight")), attnOut, H, nH*hd, B)
+		for b := 0; b < B; b++ {
+			m.addBiasIfPresent(O[b*H:(b+1)*H], lp("self_attn.o_proj.bias"))
+		}
 		for i := range X {
 			X[i] += O[i]
 		}
@@ -277,9 +282,7 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		for b := 0; b < B; b++ {
 			copy(Xn2[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wPost, bPost, eps, cfg))
 		}
-		// withProjBias=false preserves this lane exactly: the batched f32 decode has never
-		// applied the mlp projection biases (see fuseGatedMLPPanels for the divergence).
-		Down := m.batchedGatedMLP(lp, Xn2, B, H, cfg.IntermediateSize, cfg, false)
+		Down := m.batchedGatedMLP(lp, Xn2, B, H, cfg.IntermediateSize, cfg)
 		for i := range X {
 			X[i] += Down[i]
 		}
@@ -410,9 +413,16 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		}
 		db.scores = attnDecodeBatch(attnOut, Q, caches, l, B, nH, hd, w, grp, cfg.windowForLayer(l), scale, fdot, scoreDot3, db.scores, m.attnObs)
 
+		// The optional self_attn.o_proj.bias is a term, not a rounding: this lane is allowed to
+		// differ from the serial qdot8 decode only by the tile GEMM's reduction ORDER, and both
+		// the per-token Q8 decode (quant_forward.go) and the Q8 rect prefill (batch_prefill.go)
+		// add it. Witness: TestBatchedDecodeQProjBias.
 		O := grow(db.O, B*H)
 		db.O = O
 		bs.qgemmBatchTensorInto(ql.oProj, attnOut, B, nH*hd, O)
+		for b := 0; b < B; b++ {
+			m.addBiasIfPresent(O[b*H:(b+1)*H], lp("self_attn.o_proj.bias"))
+		}
 		for i := range X {
 			X[i] += O[i]
 		}
@@ -438,12 +448,17 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 			qgemm8Target{qt: ql.gateProj, Y: G},
 			qgemm8Target{qt: ql.upProj, Y: U},
 		)
-		for i := range G {
-			G[i] = act(G[i], cfg) * U[i]
-		}
+		// fuseGatedMLPPanels, not a bare act(G)*U loop: it is the ONE place the optional
+		// mlp.{gate,up}_proj.bias adds and the config-driven activation are bound together, so
+		// this lane cannot drift from its Q8 twin prefillEachRectQ (batch_prefill.go:323) the way
+		// the hand-rolled loop here did. It is byte-identical to that loop on a bias-free model.
+		m.fuseGatedMLPPanels(lp, G, U, B, I, cfg)
 		Down := grow(db.Down, B*H)
 		db.Down = Down
 		bs.qgemmBatchTensorInto(ql.downProj, G, B, I, Down)
+		for b := 0; b < B; b++ {
+			m.addBiasIfPresent(Down[b*H:(b+1)*H], lp("mlp.down_proj.bias"))
+		}
 		for i := range X {
 			X[i] += Down[i]
 		}

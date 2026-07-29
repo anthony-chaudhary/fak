@@ -220,7 +220,12 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 			})
 		}
 
+		// The optional self_attn.o_proj.bias goes on before the residual, exactly as the
+		// per-token Step this lane is contracted to reproduce bit-for-bit does.
 		O := matMulBatch(m.tensor(lp("self_attn.o_proj.weight")), attnOut, H, nH*hd, P)
+		for q := 0; q < P; q++ {
+			m.addBiasIfPresent(O[q*H:(q+1)*H], lp("self_attn.o_proj.bias"))
+		}
 		for i := range X {
 			X[i] += O[i]
 		}
@@ -233,9 +238,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 				copy(Xn2[q*H:(q+1)*H], normCfg(X[q*H:(q+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
-		// withProjBias=false preserves this lane exactly: verifyForwardBatched shares
-		// prefillBatched's math, biases included (i.e. excluded) — see fuseGatedMLPPanels.
-		Down := m.batchedGatedMLP(lp, Xn2, P, H, cfg.IntermediateSize, cfg, false)
+		Down := m.batchedGatedMLP(lp, Xn2, P, H, cfg.IntermediateSize, cfg)
 		for i := range X {
 			X[i] += Down[i]
 		}
