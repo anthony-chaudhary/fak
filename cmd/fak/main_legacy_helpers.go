@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,10 +12,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
@@ -27,27 +32,197 @@ import (
 // the built-in DefaultPolicy as a manifest (the starting point an adopter edits);
 // --check validates a manifest against the closed refusal vocabulary and prints
 // the floor it admits, so a misconfigured policy is caught BEFORE it gates a run.
+//
+// --check ALSO accepts a `fak-org-policy/v1` signed envelope (issue #5320): the CLI
+// seam onto policy.VerifyEnvelope, so an operator can prove a centrally-issued floor
+// offline  -  authentic (signed by the org root key given with --org-key), fresh
+// (inside its not_before/expires window), not a rolled-back older version, and
+// applicable to this binary (min_version)  -  BEFORE that floor is trusted anywhere.
+// The trust anchor is ALWAYS operator-supplied, never read from an enrollment store:
+// the verifier is deliberately a pure function over a caller-supplied key (issue
+// #5323 pins the key at enroll time and is still open). Routing is by the file's
+// SHAPE, never its name, and a verification failure exits non-zero with the closed
+// vocabulary refusal named on stderr  -  the envelope arm never fails open.
 func cmdPolicy(argv []string) {
 	fs := flag.NewFlagSet("policy", flag.ExitOnError)
 	verbFlagUsage(fs, "policy")
 	dump := fs.Bool("dump", false, "write the built-in DefaultPolicy as a manifest to stdout")
-	check := fs.String("check", "", "validate a manifest file and print the floor it admits")
+	check := fs.String("check", "", "validate a manifest (or a fak-org-policy/v1 signed envelope) and print the floor it admits")
+	orgKey := fs.String("org-key", "", "org root Ed25519 public key, base64 or a file holding it; required to verify a fak-org-policy/v1 envelope")
+	orgIssuer := fs.String("org-issuer", "", "require a fak-org-policy/v1 envelope to be issued by this identity")
+	orgSeenVersion := fs.Uint64("org-seen-version", 0, "anti-rollback floor: refuse a fak-org-policy/v1 envelope whose version is below this")
 	_ = fs.Parse(argv)
 
 	switch {
 	case *dump:
 		os.Stdout.Write(policy.FromPolicy(adjudicator.DefaultPolicy()).JSON())
 	case *check != "":
-		rt, err := policy.LoadRuntime(*check)
+		report, err := checkPolicyFile(*check, orgCheckOptions{
+			Key:            *orgKey,
+			ExpectedIssuer: *orgIssuer,
+			SeenVersion:    *orgSeenVersion,
+			Now:            time.Now(),
+			RunningVersion: appversion.Current(),
+		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fak policy:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("OK  %s  (manifest valid; every deny cites a closed-vocabulary reason)\n\n%s", *check, policy.SummaryRuntime(rt))
+		fmt.Print(report)
 	default:
 		fmt.Fprintln(os.Stderr, "fak policy: pass --dump (emit the default manifest) or --check FILE (validate one)")
 		os.Exit(2)
 	}
+}
+
+// orgCheckOptions gathers everything the org-envelope arm of `fak policy --check`
+// needs from its flags AND from the ambient process, so checkPolicyFile stays a pure
+// function of its inputs: it reads neither the clock nor the build identity nor any
+// stored key for itself. That mirrors policy.VerifyOptions one field at a time, which
+// is the whole point  -  the verifier's determinism is what makes the CLI seam
+// table-testable rather than something you can only observe by running a binary.
+type orgCheckOptions struct {
+	// Key is --org-key verbatim: base64 key material, or the path of a file holding it.
+	Key string
+	// ExpectedIssuer is --org-issuer; empty accepts whichever issuer the root key signed for.
+	ExpectedIssuer string
+	// SeenVersion is --org-seen-version, the highest envelope version already accepted.
+	SeenVersion uint64
+	// Now is the wall clock the not_before/expires window is checked against.
+	Now time.Time
+	// RunningVersion is the binary version the envelope's min_version is checked against.
+	RunningVersion string
+}
+
+// checkPolicyFile is the PURE core of `fak policy --check`, factored out (like
+// lintExitCode) so both arms are unit-testable without os.Exit. It returns the report
+// to print on stdout, or an error to name on stderr with a non-zero exit  -  it never
+// returns a floor it did not first validate.
+//
+// A `fak-org-policy/v1` envelope is fully verified before its wrapped floor is
+// rendered; anything else takes the original policy.LoadRuntime path unchanged, so a
+// plain manifest  -  including an unreadable or invalid one  -  keeps the exact wording
+// this verb has always produced.
+func checkPolicyFile(path string, org orgCheckOptions) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err == nil && isOrgEnvelope(raw) {
+		return checkOrgEnvelope(path, raw, org)
+	}
+	rt, err := policy.LoadRuntime(path)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("OK  %s  (manifest valid; every deny cites a closed-vocabulary reason)\n\n%s", path, policy.SummaryRuntime(rt)), nil
+}
+
+// isOrgEnvelope sniffs whether raw is a signed `fak-org-policy/v1` envelope rather
+// than a plain `fak-policy/v1` manifest. It routes on SHAPE, never on the filename: an
+// operator may call an envelope anything, and a name is not a trust input.
+//
+// The two schemas are disjoint at their `version` key. A manifest carries the schema
+// TAG there  -  the JSON STRING "fak-policy/v1"  -  while an envelope carries its
+// monotonic anti-rollback COUNTER, a JSON number, beside the `alg`/`sig` pair no
+// manifest field spells. Requiring the signature pair AND a non-string `version` means
+// neither schema can be mistaken for the other.
+//
+// The sniff only CHOOSES a verifier; it grants nothing. policy.VerifyEnvelope re-decodes
+// the same bytes under DisallowUnknownFields, so a near-miss envelope is refused
+// MALFORMED rather than quietly admitted, and a file that is neither shape lands on the
+// manifest path whose unknown-field rejection reports the real problem loudly.
+func isOrgEnvelope(raw []byte) bool {
+	var probe struct {
+		Version json.RawMessage `json:"version"`
+		Alg     string          `json:"alg"`
+		Sig     string          `json:"sig"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	if probe.Alg == "" || probe.Sig == "" {
+		return false
+	}
+	v := bytes.TrimSpace(probe.Version)
+	return len(v) == 0 || v[0] != '"'
+}
+
+// checkOrgEnvelope verifies a `fak-org-policy/v1` envelope against the operator's trust
+// anchor and renders its provenance followed by the floor it would install. Every
+// failure  -  an absent or malformed --org-key, or any *policy.EnvelopeError from the
+// verifier  -  returns an error instead of a report, so the caller exits non-zero and an
+// unproven central floor is never printed as though it had been trusted.
+func checkOrgEnvelope(path string, raw []byte, org orgCheckOptions) (string, error) {
+	key, err := orgRootKey(org.Key)
+	if err != nil {
+		return "", err
+	}
+	v, err := policy.VerifyEnvelope(raw, policy.VerifyOptions{
+		RootPublicKey:      key,
+		ExpectedIssuer:     org.ExpectedIssuer,
+		Now:                org.Now,
+		HighestSeenVersion: org.SeenVersion,
+		RunningVersion:     org.RunningVersion,
+	})
+	if err != nil {
+		// *policy.EnvelopeError already renders its closed-vocabulary Reason plus the
+		// Detail token that separates causes sharing one Reason (expired vs rollback).
+		return "", err
+	}
+
+	e := v.Envelope
+	var b strings.Builder
+	fmt.Fprintf(&b, "OK  %s  (%s envelope verified: signature, issuer, freshness window, anti-rollback)\n\n", path, policy.OrgEnvelopeVersion)
+	fmt.Fprintf(&b, "issuer             : %s\n", e.Issuer)
+	fmt.Fprintf(&b, "envelope version   : %d (anti-rollback floor %d)\n", e.Version, org.SeenVersion)
+	fmt.Fprintf(&b, "valid              : %s .. %s\n", orgInstant(e.NotBefore), orgInstant(e.Expires))
+	fmt.Fprintf(&b, "target             : %s\n", orgFieldOrAny(e.Target))
+	fmt.Fprintf(&b, "min fak version    : %s (running %s)\n", orgFieldOrAny(e.MinVersion), org.RunningVersion)
+	b.WriteString("\n")
+	b.WriteString(policy.SummaryRuntime(v.Runtime))
+	return b.String(), nil
+}
+
+// orgRootKey resolves --org-key into the pinned org root Ed25519 public key. The value
+// is standard base64 key material, or the path of a file holding it  -  a 44-character
+// blob is awkward to paste on a command line and operators keep the key in a file.
+//
+// It fails LOUD on an absent or wrong-sized key rather than skipping the signature
+// check: without a trust anchor the envelope cannot be authenticated AT ALL, and the
+// one thing this verb must never do is present an unverified central floor as verified.
+func orgRootKey(value string) (ed25519.PublicKey, error) {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return nil, fmt.Errorf("--check names a %s envelope: pass --org-key with the org root public key (base64, or a file holding it)", policy.OrgEnvelopeVersion)
+	}
+	if b, err := os.ReadFile(v); err == nil {
+		v = strings.TrimSpace(string(b))
+	}
+	key, err := base64.StdEncoding.DecodeString(v)
+	if err != nil {
+		return nil, fmt.Errorf("--org-key is not base64 key material nor a readable key file: %w", err)
+	}
+	if len(key) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("--org-key decodes to %d bytes, want a %d-byte Ed25519 public key", len(key), ed25519.PublicKeySize)
+	}
+	return ed25519.PublicKey(key), nil
+}
+
+// orgInstant renders one edge of the envelope's validity window. A zero bound prints
+// "unbounded" because that is what the verifier actually did with it (0 means "no bound
+// on this side"); printing the 1970 epoch there would misreport the check that ran.
+func orgInstant(sec int64) string {
+	if sec == 0 {
+		return "unbounded"
+	}
+	return time.Unix(sec, 0).UTC().Format(time.RFC3339)
+}
+
+// orgFieldOrAny renders an optional envelope selector, naming the empty case rather
+// than leaving a blank the reader has to interpret.
+func orgFieldOrAny(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "(any)"
+	}
+	return s
 }
 
 // fak lint  -  the STATIC tool linter. The kernel never trusts a tool's self-declared
