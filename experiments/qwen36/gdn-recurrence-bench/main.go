@@ -35,29 +35,34 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"math"
 	"os"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/experiments/qwen36/gdn"
 )
 
-// Qwen3.6-27B Gated-DeltaNet layer dims (the 48 linear_attn layers).
+// Qwen3.6-27B Gated-DeltaNet layer dims, single-sourced from the shared gdn package. They are
+// aliased to short local names (rather than spelled gdn.NV etc. at each use) because the FLOP
+// formulas below are dense dimensional arithmetic that only stays auditable against the layer
+// definition when the names match it; the aliases are compiler-checked identities, so the shapes
+// cannot drift from the shared package.
 const (
-	H   = 5120 // hidden size
-	nK  = 16   // LinearNumKeyHeads
-	nV  = 48   // LinearNumValueHeads
-	kHd = 128  // LinearKeyHeadDim
-	vHd = 128  // LinearValueHeadDim
-	K   = 4    // ssm.conv_kernel (Qwen3-Next); negligible term
-	pp  = 22   // prefill length the #65 table benchmarks (pp22)
+	H   = gdn.Hidden27B // hidden size
+	nK  = gdn.NK        // LinearNumKeyHeads
+	nV  = gdn.NV        // LinearNumValueHeads
+	kHd = gdn.KHd       // LinearKeyHeadDim
+	vHd = gdn.VHd       // LinearValueHeadDim
+	K   = gdn.K         // ssm.conv_kernel (Qwen3-Next); negligible term
+	pp  = 22            // prefill length the #65 table benchmarks (pp22)
 )
 
 const (
-	keyDim  = nK * kHd          // 2048
-	valDim  = nV * vHd          // 6144
-	convDim = 2*keyDim + valDim // 10240
+	keyDim  = gdn.KeyDim  // 2048
+	valDim  = gdn.ValDim  // 6144
+	convDim = gdn.ConvDim // 10240
 )
 
 // flopCounts returns the exact per-token multiply-accumulate counts for the three
@@ -83,12 +88,13 @@ func flopCounts() (projMACs, convMACs, recurMACs int64) {
 
 // ---- faithful CPU reproductions, timed at pp22 ----
 
-func silu(x float32) float32 { return x / (1 + float32(math.Exp(float64(-x)))) }
-
-func sigmoidf(x float32) float32 { return 1 / (1 + float32(math.Exp(float64(-x)))) }
-
-func softplus(x float32) float32 { return float32(math.Log1p(math.Exp(float64(x)))) }
-
+// l2normInto is deliberately NOT gdn.L2NormInto and must not be folded into it: it divides the
+// squared sum by len(src) (a MEAN of squares) where qwen35.go:l2normInto — which gdn.L2NormInto
+// reproduces — uses the plain SUM. That is a real numeric difference, not a formatting one; on a
+// 128-wide head it scales inv by sqrt(128). It is kept here because this file measures TIME, not
+// values: the two variants execute the identical instruction mix (one multiply-add per element,
+// one sqrt, one multiply per element), so the timing is faithful either way, and rewriting the
+// arithmetic would silently change a benchmark that has been reported against the #65 decision.
 func l2normInto(dst, src []float32, eps float32) {
 	var ss float32
 	for _, v := range src {
@@ -157,16 +163,16 @@ func timeRecurrence() time.Duration {
 	for t := 0; t < pp; t++ {
 		row := make([]float32, convDim)
 		for c := range row {
-			row[c] = silu(0.01 * float32((c%7)-3))
+			row[c] = gdn.Silu(0.01 * float32((c%7)-3))
 		}
 		convOut[t] = row
 		g := make([]float32, nV)
 		bt := make([]float32, nV)
 		for h := 0; h < nV; h++ {
 			a := float32(math.Exp(float64(-0.5)))
-			dt := softplus(0.1)
+			dt := gdn.Softplus(0.1)
 			g[h] = float32(math.Exp(float64(-a * dt)))
-			bt[h] = sigmoidf(0.2)
+			bt[h] = gdn.Sigmoidf(0.2)
 		}
 		gDecay[t] = g
 		beta[t] = bt
@@ -308,9 +314,7 @@ func main() {
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(res)
+		_ = gdn.EmitJSON(os.Stdout, res)
 		return
 	}
 

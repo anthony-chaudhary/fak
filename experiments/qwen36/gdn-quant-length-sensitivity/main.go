@@ -63,32 +63,25 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"math"
 	"math/rand"
 	"os"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
+
+	"github.com/anthony-chaudhary/fak/experiments/qwen36/gdn"
 )
 
-// Qwen3.6-27B Gated-DeltaNet layer dims (the 48 linear_attn layers). H (hidden) is a flag: rho is
+// The Qwen3.6-27B Gated-DeltaNet layer dims (nK/nV/kHd/vHd/K and the derived keyDim/valDim/
+// convDim) live in the shared gdn package. H (hidden) is a flag HERE and not a constant: rho is
 // relative (||Δh||/||h||), so it is ~independent of the matmul fan-in H, which only drives cost —
 // the recurrence dynamics that #4273 lives in depend on nV/kHd/vHd/K and the carried length, all
 // real here. -hidden 5120 reproduces the true H for a (slow) confirmatory run.
-const (
-	nK  = 16  // LinearNumKeyHeads
-	nV  = 48  // LinearNumValueHeads
-	kHd = 128 // LinearKeyHeadDim
-	vHd = 128 // LinearValueHeadDim
-	K   = 4   // ssm.conv_kernel (Qwen3-Next)
-)
-
-// hidden is set from -hidden in main; keyDim/valDim/convDim below are H-independent.
+//
+// hidden is set from -hidden in main; the gdn package's derived widths are H-independent.
 var hidden = 1024
 
 // aLogMean is the mean of the per-head A_log draw, set from -alog. It controls the recurrent decay
@@ -96,160 +89,6 @@ var hidden = 1024
 // (long memory, ~100+ positions). It is the load-bearing knob for whether per-step error can
 // compound across a long decode, so the sweep MUST include a near-1-decay run to be honest.
 var aLogMean = -2.0
-
-const (
-	keyDim  = nK * kHd          // 2048
-	valDim  = nV * vHd          // 6144
-	convDim = 2*keyDim + valDim // 10240
-)
-
-func silu(x float32) float32     { return x / (1 + float32(math.Exp(float64(-x)))) }
-func sigmoidf(x float32) float32 { return 1 / (1 + float32(math.Exp(float64(-x)))) }
-func softplus(x float32) float32 { return float32(math.Log1p(math.Exp(float64(x)))) }
-
-// l2normInto reproduces qwen35.go:l2normInto — sum (not mean) of squares, eps inside sqrt.
-func l2normInto(dst, src []float32, eps float32) {
-	var ss float32
-	for _, v := range src {
-		ss += v * v
-	}
-	inv := 1.0 / float32(math.Sqrt(float64(ss+eps)))
-	for i := range src {
-		dst[i] = src[i] * inv
-	}
-}
-
-// rmsnormGain1p reproduces the (1+w) RMSNorm used by every non-GDN-readout norm in qwen35.
-func rmsnormGain1p(dst, src, w []float32, eps float32) {
-	var ss float32
-	for _, v := range src {
-		ss += v * v
-	}
-	inv := 1.0 / float32(math.Sqrt(float64(ss/float32(len(src)))+float64(eps)))
-	for i := range src {
-		dst[i] = src[i] * inv * (1 + w[i])
-	}
-}
-
-// rmsNormGatedInPlace reproduces qwen35.go:rmsNormGatedInPlace — the GDN readout's gated norm with
-// PLAIN (not 1+w) weight and a silu(gate) multiply.
-func rmsNormGatedInPlace(x, w, gate []float32, eps float32) {
-	var ss float32
-	for _, v := range x {
-		ss += v * v
-	}
-	inv := 1.0 / float32(math.Sqrt(float64(ss/float32(len(x)))+float64(eps)))
-	for i := range x {
-		x[i] = w[i] * (x[i] * inv) * silu(gate[i])
-	}
-}
-
-func depthwiseCausalSilu(dst, src, weights []float32, steps, channels, kernel int) {
-	for t := 0; t < steps; t++ {
-		outRow := dst[t*channels : (t+1)*channels]
-		for c := 0; c < channels; c++ {
-			var acc float32
-			base := c * kernel
-			for j := 0; j < kernel; j++ {
-				source := t + j - (kernel - 1)
-				if source >= 0 {
-					acc += weights[base+j] * src[source*channels+c]
-				}
-			}
-			outRow[c] = silu(acc)
-		}
-	}
-}
-
-func parMatmul(Y, X, W []float32, P, outDim, inDim int) {
-	workers := runtime.GOMAXPROCS(0)
-	var wg sync.WaitGroup
-	chunk := (outDim + workers - 1) / workers
-	for w := 0; w < workers; w++ {
-		lo := w * chunk
-		hi := lo + chunk
-		if hi > outDim {
-			hi = outDim
-		}
-		if lo >= hi {
-			break
-		}
-		wg.Add(1)
-		go func(lo, hi int) {
-			defer wg.Done()
-			for t := 0; t < P; t++ {
-				xr := X[t*inDim : (t+1)*inDim]
-				yr := Y[t*outDim : (t+1)*outDim]
-				for i := lo; i < hi; i++ {
-					wr := W[i*inDim : (i+1)*inDim]
-					var acc float32
-					for j := 0; j < inDim; j++ {
-						acc += wr[j] * xr[j]
-					}
-					yr[i] = acc
-				}
-			}
-		}(lo, hi)
-	}
-	wg.Wait()
-}
-
-// layerWeights holds one GDN layer's parameters. The five projection matrices (wqkv, wz, wb, wa,
-// wOut) are the isQuantWeight tensors that the real loader stores as Q8; the control tensors (wIn,
-// conv, aLog, dtB, normW) take the dequant->f32 path in the loader and are kept f32 here too.
-type layerWeights struct {
-	wIn   []float32 // input_layernorm.weight        [H]      (f32 in loader)
-	wqkv  []float32 // in_proj_qkv                    [convDim, H]  (Q8)
-	wz    []float32 // in_proj_z                      [valDim, H]   (Q8)
-	wb    []float32 // in_proj_b                      [nV, H]       (Q8)
-	wa    []float32 // in_proj_a                      [nV, H]       (Q8)
-	conv  []float32 // conv1d.weight                  [convDim, K]  (f32 in loader)
-	aLog  []float32 // A_log                          [nV]          (f32)
-	dtB   []float32 // dt_bias                        [nV]          (f32)
-	normW []float32 // linear_attn.norm.weight        [vHd]         (f32)
-	wOut  []float32 // out_proj                       [H, valDim]   (Q8)
-}
-
-func newLayerWeights() *layerWeights {
-	return &layerWeights{
-		wIn:   make([]float32, hidden),
-		wqkv:  make([]float32, convDim*hidden),
-		wz:    make([]float32, valDim*hidden),
-		wb:    make([]float32, nV*hidden),
-		wa:    make([]float32, nV*hidden),
-		conv:  make([]float32, convDim*K),
-		aLog:  make([]float32, nV),
-		dtB:   make([]float32, nV),
-		normW: make([]float32, vHd),
-		wOut:  make([]float32, hidden*valDim),
-	}
-}
-
-// fill draws each weight from a per-layer seeded normal with 1/sqrt(fan_in) scaling, so the
-// projections behave like trained weights (bounded activations) without the artifact. Identical
-// draw to gdn-divergence-sensitivity so the two experiments share a residual regime.
-func (lw *layerWeights) fill(layer int) {
-	r := rand.New(rand.NewSource(int64(0x9E3779B9 ^ layer)))
-	gauss := func(s []float32, scale float32) {
-		for i := range s {
-			s[i] = float32(r.NormFloat64()) * scale
-		}
-	}
-	gauss(lw.wIn, 0.02)
-	gauss(lw.wqkv, float32(1.0/math.Sqrt(float64(hidden))))
-	gauss(lw.wz, float32(1.0/math.Sqrt(float64(hidden))))
-	gauss(lw.wb, float32(1.0/math.Sqrt(float64(hidden))))
-	gauss(lw.wa, float32(1.0/math.Sqrt(float64(hidden))))
-	gauss(lw.conv, 0.5)
-	gauss(lw.wOut, float32(1.0/math.Sqrt(float64(valDim))))
-	for h := 0; h < nV; h++ {
-		lw.aLog[h] = float32(r.NormFloat64())*0.5 + float32(aLogMean) // decay strength; see aLogMean
-		lw.dtB[h] = float32(r.NormFloat64()) * 0.2
-	}
-	for i := range lw.normW {
-		lw.normW[i] = float32(r.NormFloat64()) * 0.02
-	}
-}
 
 // quantMode selects the weight-quantization applied to the GDN projections in the test run.
 type quantMode int
@@ -352,147 +191,18 @@ func q4kRowRoundTrip(w []float32, out, in int) []float32 {
 // quantizeProjections returns a copy of lw with the five isQuantWeight projection matrices
 // round-tripped through the given quant mode and the control tensors shared (f32) — exactly the
 // tensor split the real loader applies.
-func quantizeProjections(lw *layerWeights, mode quantMode) *layerWeights {
+func quantizeProjections(lw *gdn.LayerWeights, mode quantMode) *gdn.LayerWeights {
 	rt := q8RowRoundTrip
 	if mode == modeQ4K {
 		rt = q4kRowRoundTrip
 	}
 	q := *lw // copy the slice headers; the control tensors are shared read-only
-	q.wqkv = rt(lw.wqkv, convDim, hidden)
-	q.wz = rt(lw.wz, valDim, hidden)
-	q.wb = rt(lw.wb, nV, hidden)
-	q.wa = rt(lw.wa, nV, hidden)
-	q.wOut = rt(lw.wOut, hidden, valDim)
+	q.Wqkv = rt(lw.Wqkv, gdn.ConvDim, lw.Hidden)
+	q.Wz = rt(lw.Wz, gdn.ValDim, lw.Hidden)
+	q.Wb = rt(lw.Wb, gdn.NV, lw.Hidden)
+	q.Wa = rt(lw.Wa, gdn.NV, lw.Hidden)
+	q.WOut = rt(lw.WOut, lw.Hidden, gdn.ValDim)
 	return &q
-}
-
-// gdnLayer runs one linear_attn (GDN) layer's forward over P tokens and returns its output [P,H]
-// (to be added to the residual). Verbatim metal_prefill_hybrid_core.go body; recurrent + conv state
-// start at zero (fresh-prefill precondition — prefill on this path is itself a token loop, so this
-// is also the decode carry). No mode branch: the ONLY difference between the two runs is which
-// (quantized-or-not) weights are passed in.
-func gdnLayer(lw *layerWeights, X []float32, P int, eps float32) []float32 {
-	Xn := make([]float32, P*hidden)
-	for t := 0; t < P; t++ {
-		rmsnormGain1p(Xn[t*hidden:(t+1)*hidden], X[t*hidden:(t+1)*hidden], lw.wIn, eps)
-	}
-
-	mixed := make([]float32, P*convDim)
-	zAll := make([]float32, P*valDim)
-	bvec := make([]float32, P*nV)
-	avec := make([]float32, P*nV)
-	parMatmul(mixed, Xn, lw.wqkv, P, convDim, hidden)
-	parMatmul(zAll, Xn, lw.wz, P, valDim, hidden)
-	parMatmul(bvec, Xn, lw.wb, P, nV, hidden)
-	parMatmul(avec, Xn, lw.wa, P, nV, hidden)
-
-	convOut := make([]float32, P*convDim)
-	depthwiseCausalSilu(convOut, mixed, lw.conv, P, convDim, K)
-
-	scale := float32(1.0 / math.Sqrt(float64(kHd)))
-	repeat := nV / nK
-	qNormAll := make([]float32, P*keyDim)
-	kNormAll := make([]float32, P*keyDim)
-	for t := 0; t < P; t++ {
-		row := convOut[t*convDim : (t+1)*convDim]
-		q := row[0:keyDim]
-		k := row[keyDim : 2*keyDim]
-		qNorm := qNormAll[t*keyDim : (t+1)*keyDim]
-		kNorm := kNormAll[t*keyDim : (t+1)*keyDim]
-		for h := 0; h < nK; h++ {
-			l2normInto(qNorm[h*kHd:(h+1)*kHd], q[h*kHd:(h+1)*kHd], 1e-6)
-			l2normInto(kNorm[h*kHd:(h+1)*kHd], k[h*kHd:(h+1)*kHd], 1e-6)
-			for i := h * kHd; i < (h+1)*kHd; i++ {
-				qNorm[i] *= scale
-			}
-		}
-	}
-
-	aExp := make([]float32, nV)
-	for h := 0; h < nV; h++ {
-		aExp[h] = float32(math.Exp(float64(lw.aLog[h])))
-	}
-
-	core := make([]float32, P*valDim)
-	var wg sync.WaitGroup
-	workers := runtime.GOMAXPROCS(0)
-	chunk := (nV + workers - 1) / workers
-	for wk := 0; wk < workers; wk++ {
-		hlo := wk * chunk
-		hhi := hlo + chunk
-		if hhi > nV {
-			hhi = nV
-		}
-		if hlo >= hhi {
-			break
-		}
-		wg.Add(1)
-		go func(hlo, hhi int) {
-			defer wg.Done()
-			st := make([]float32, kHd*vHd)
-			kvmem := make([]float32, vHd)
-			delta := make([]float32, vHd)
-			for h := hlo; h < hhi; h++ {
-				for i := range st {
-					st[i] = 0
-				}
-				kh := h / repeat
-				a := aExp[h]
-				dtB := lw.dtB[h]
-				for t := 0; t < P; t++ {
-					row := convOut[t*convDim : (t+1)*convDim]
-					qn := qNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
-					kn := kNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
-					vh := row[2*keyDim+h*vHd : 2*keyDim+(h+1)*vHd]
-					bt := sigmoidf(bvec[t*nV+h])
-					dt := softplus(avec[t*nV+h] + dtB)
-					g := float32(math.Exp(float64(-a * dt)))
-					for i := range st {
-						st[i] *= g
-					}
-					for d := range kvmem {
-						kvmem[d] = 0
-					}
-					for i := 0; i < kHd; i++ {
-						ki := kn[i]
-						base := i * vHd
-						for d := 0; d < vHd; d++ {
-							kvmem[d] += st[base+d] * ki
-						}
-					}
-					for d := 0; d < vHd; d++ {
-						delta[d] = (vh[d] - kvmem[d]) * bt
-					}
-					od := core[t*valDim+h*vHd : t*valDim+(h+1)*vHd]
-					for i := 0; i < kHd; i++ {
-						ki := kn[i]
-						qi := qn[i]
-						base := i * vHd
-						for d := 0; d < vHd; d++ {
-							st[base+d] += ki * delta[d]
-							od[d] += st[base+d] * qi
-						}
-					}
-				}
-			}
-		}(hlo, hhi)
-	}
-	wg.Wait()
-
-	for t := 0; t < P; t++ {
-		for h := 0; h < nV; h++ {
-			rmsNormGatedInPlace(
-				core[t*valDim+h*vHd:t*valDim+(h+1)*vHd],
-				lw.normW,
-				zAll[t*valDim+h*vHd:t*valDim+(h+1)*vHd],
-				eps,
-			)
-		}
-	}
-
-	o := make([]float32, P*hidden)
-	parMatmul(o, core, lw.wOut, P, hidden, valDim)
-	return o
 }
 
 // runStackForLength runs the 48-GDN-layer residual stack over P positions TWICE — a reference run
@@ -500,6 +210,10 @@ func gdnLayer(lw *layerWeights, X []float32, P int, eps float32) []float32 {
 // returns the relative hidden divergence rho of the LAST token after the whole stack, plus the
 // per-layer rho curve. Both runs share identical inputs and identical (pre-quantization) weights, so
 // the only source of divergence is projection weight quantization.
+//
+// The layer itself is gdn.Layer in gdn.ModeForward: this experiment perturbs only the WEIGHTS, so
+// the scan keeps the trunk's ascending-i f32 order in BOTH runs and contributes no divergence of its
+// own (the depth-axis sibling gdn-divergence-sensitivity is the one that varies the scan).
 func runStackForLength(P, layers int, mode quantMode) (perLayerRho []float64, finalRho float64) {
 	eps := float32(1e-6)
 	X := make([]float32, P*hidden)
@@ -510,35 +224,21 @@ func runStackForLength(P, layers int, mode quantMode) (perLayerRho []float64, fi
 		X[i] = v
 		Y[i] = v
 	}
-	lw := newLayerWeights()
+	lw := gdn.NewLayerWeights(hidden)
 	last := (P - 1) * hidden
 	for l := 0; l < layers; l++ {
-		lw.fill(l)
+		lw.Fill(l, aLogMean)
 		qw := quantizeProjections(lw, mode)
-		oRef := gdnLayer(lw, X, P, eps)
-		oTst := gdnLayer(qw, Y, P, eps)
+		oRef := gdn.Layer(lw, X, P, gdn.ModeForward, eps)
+		oTst := gdn.Layer(qw, Y, P, gdn.ModeForward, eps)
 		for i := range X {
 			X[i] += oRef[i]
 			Y[i] += oTst[i]
 		}
-		perLayerRho = append(perLayerRho, relDiv(X[last:last+hidden], Y[last:last+hidden]))
+		perLayerRho = append(perLayerRho, gdn.RelDiv(X[last:last+hidden], Y[last:last+hidden]))
 	}
-	finalRho = relDiv(X[last:last+hidden], Y[last:last+hidden])
+	finalRho = gdn.RelDiv(X[last:last+hidden], Y[last:last+hidden])
 	return
-}
-
-// relDiv = ||a-b|| / ||a||.
-func relDiv(a, b []float32) float64 {
-	var num, den float64
-	for i := range a {
-		d := float64(a[i] - b[i])
-		num += d * d
-		den += float64(a[i]) * float64(a[i])
-	}
-	if den == 0 {
-		return 0
-	}
-	return math.Sqrt(num) / math.Sqrt(den)
 }
 
 type lengthPoint struct {
@@ -618,10 +318,11 @@ func main() {
 	const rhoStar = 1.75 / logitScale // ~0.0875: the relative hidden move at which a near-tie argmax flips
 
 	res := result{
-		Schema:     "qwen36-gdn-quant-length-sensitivity/v1",
-		Issue:      "#4273 (long-context quantized repetition collapse); length sibling of gdn-divergence-sensitivity",
-		Host:       "windows/amd64 (CGO_ENABLED=0); device-independent, no Mac / no GPU / no 27B artifact",
-		Model:      fmt.Sprintf("Qwen3.6-27B GDN shapes (H=%d nK=%d nV=%d kHd=%d vHd=%d K=%d), projections round-tripped Q8_0 / Q4_K", hidden, nK, nV, kHd, vHd, K),
+		Schema: "qwen36-gdn-quant-length-sensitivity/v1",
+		Issue:  "#4273 (long-context quantized repetition collapse); length sibling of gdn-divergence-sensitivity",
+		Host:   "windows/amd64 (CGO_ENABLED=0); device-independent, no Mac / no GPU / no 27B artifact",
+		Model: fmt.Sprintf("Qwen3.6-27B GDN shapes (H=%d nK=%d nV=%d kHd=%d vHd=%d K=%d), projections round-tripped Q8_0 / Q4_K",
+			hidden, gdn.NK, gdn.NV, gdn.KHd, gdn.VHd, gdn.K),
 		Hidden:     hidden,
 		ALogMean:   aLogMean,
 		Layers:     *layers,
@@ -686,15 +387,13 @@ func main() {
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(res)
+		_ = gdn.EmitJSON(os.Stdout, res)
 		return
 	}
 
 	fmt.Printf("Qwen3.6-27B GDN weight-quant / decode-length sensitivity — #4273 (device-independent)\n")
 	fmt.Printf("  shapes: H=%d nK=%d nV=%d kHd=%d vHd=%d convDim=%d valDim=%d K=%d, %d GDN layers\n",
-		hidden, nK, nV, kHd, vHd, convDim, valDim, K, *layers)
+		hidden, gdn.NK, gdn.NV, gdn.KHd, gdn.VHd, gdn.ConvDim, gdn.ValDim, gdn.K, *layers)
 	fmt.Printf("  swept carried positions: %v   (rho* to flip a near-tie ~ %.4f at |logit|~%.0f)\n\n", positions, rhoStar, logitScale)
 	for _, m := range res.Modes {
 		fmt.Printf("  mode: %s\n", m.Mode)

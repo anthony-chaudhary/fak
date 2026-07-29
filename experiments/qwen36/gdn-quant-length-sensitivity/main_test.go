@@ -3,6 +3,8 @@ package main
 import (
 	"math"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/experiments/qwen36/gdn"
 )
 
 // TestQ8RoundTripBounded checks the Q8_0 weight round-trip is faithful: every dequantized value is
@@ -60,12 +62,12 @@ func TestQ4KRoundTripBounded(t *testing.T) {
 // projection matrices and leaves the control tensors (kept f32 by the real loader) bit-identical.
 func TestQuantizeProjectionsSplit(t *testing.T) {
 	hidden = 256 // small, block-aligned
-	lw := newLayerWeights()
-	lw.fill(0)
+	lw := gdn.NewLayerWeights(hidden)
+	lw.Fill(0, aLogMean)
 	q := quantizeProjections(lw, modeQ8)
 
 	// control tensors must be the SAME backing arrays (shared, untouched).
-	if &q.conv[0] != &lw.conv[0] || &q.aLog[0] != &lw.aLog[0] || &q.normW[0] != &lw.normW[0] || &q.wIn[0] != &lw.wIn[0] {
+	if &q.Conv[0] != &lw.Conv[0] || &q.ALog[0] != &lw.ALog[0] || &q.NormW[0] != &lw.NormW[0] || &q.WIn[0] != &lw.WIn[0] {
 		t.Fatalf("control tensors must be shared f32, not copied/quantized")
 	}
 	// projection matrices must differ (quantization changed them) and be new arrays.
@@ -81,11 +83,11 @@ func TestQuantizeProjectionsSplit(t *testing.T) {
 		return false
 	}
 	for name, pair := range map[string][2][]float32{
-		"wqkv": {lw.wqkv, q.wqkv},
-		"wz":   {lw.wz, q.wz},
-		"wb":   {lw.wb, q.wb},
-		"wa":   {lw.wa, q.wa},
-		"wOut": {lw.wOut, q.wOut},
+		"wqkv": {lw.Wqkv, q.Wqkv},
+		"wz":   {lw.Wz, q.Wz},
+		"wb":   {lw.Wb, q.Wb},
+		"wa":   {lw.Wa, q.Wa},
+		"wOut": {lw.WOut, q.WOut},
 	} {
 		if !changed(pair[0], pair[1]) {
 			t.Fatalf("projection %s should be quantized to a new, different array", name)
@@ -93,15 +95,55 @@ func TestQuantizeProjectionsSplit(t *testing.T) {
 	}
 }
 
-// TestRelDiv checks the relative-divergence metric on identity and a known perturbation.
-func TestRelDiv(t *testing.T) {
-	a := []float32{3, 4} // norm 5
-	if got := relDiv(a, a); got != 0 {
-		t.Fatalf("relDiv(a,a)=%g want 0", got)
+// TestQuantizeProjectionsReadsTheWeightSetsOwnHidden guards the parameter that replaced the
+// package-level `hidden` inside the round-trip: the matrices must be reshaped from the weight
+// set they were allocated with, not from whatever the global happens to hold. A mismatch would
+// slice the rows at the wrong stride and quantize garbage blocks.
+func TestQuantizeProjectionsReadsTheWeightSetsOwnHidden(t *testing.T) {
+	saved := hidden
+	defer func() { hidden = saved }()
+
+	lw := gdn.NewLayerWeights(256)
+	lw.Fill(0, aLogMean)
+	hidden = 1024 // deliberately disagrees with the weight set
+
+	q := quantizeProjections(lw, modeQ8)
+	if len(q.Wqkv) != len(lw.Wqkv) || len(q.WOut) != len(lw.WOut) {
+		t.Fatalf("round-trip changed a projection's length: Wqkv %d->%d, WOut %d->%d",
+			len(lw.Wqkv), len(q.Wqkv), len(lw.WOut), len(q.WOut))
 	}
-	b := []float32{3, 4 + 5} // Δ=(0,5), ||Δ||=5, ||a||=5 -> rho=1
-	if got := relDiv(a, b); math.Abs(got-1) > 1e-6 {
-		t.Fatalf("relDiv=%g want 1", got)
+	// Row 0 of Wqkv is 256 wide (8 Q8_0 blocks). Quantizing it at the wrong stride would let
+	// row 0's block scales be computed from a different row's values, so check the bound holds
+	// row-locally on the LAST row too, where a wrong stride runs off the intended data.
+	last := (gdn.ConvDim - 1) * 256
+	for i := last; i < last+256; i++ {
+		if d := math.Abs(float64(q.Wqkv[i] - lw.Wqkv[i])); d > 0.05 {
+			t.Fatalf("last row element %d moved by %g; the round-trip is reading the wrong stride", i, d)
+		}
+	}
+}
+
+// TestQ4KPerturbsMoreThanQ8 pins the ordering the swept modes rely on: a 4-bit affine
+// sub-block must distort the projections strictly more than an 8-bit symmetric block. If this
+// inverted, the "lower bound" framing of the Q4_K arm would be backwards.
+func TestQ4KPerturbsMoreThanQ8(t *testing.T) {
+	saved := hidden
+	defer func() { hidden = saved }()
+	hidden = 256
+
+	lw := gdn.NewLayerWeights(hidden)
+	lw.Fill(0, aLogMean)
+	q8 := quantizeProjections(lw, modeQ8)
+	q4 := quantizeProjections(lw, modeQ4K)
+
+	e8 := gdn.RelDiv(lw.Wqkv, q8.Wqkv)
+	e4 := gdn.RelDiv(lw.Wqkv, q4.Wqkv)
+	t.Logf("relative weight error: Q8=%g Q4_K=%g", e8, e4)
+	if e8 <= 0 {
+		t.Fatalf("Q8 round-trip left the weights untouched (err=%g)", e8)
+	}
+	if e4 <= e8 {
+		t.Fatalf("Q4_K error %g must exceed Q8 error %g (4 bits vs 8)", e4, e8)
 	}
 }
 
