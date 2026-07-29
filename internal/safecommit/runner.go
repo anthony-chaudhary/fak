@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
@@ -208,11 +209,12 @@ func withLeasePublish(inner func()) func() {
 	}
 }
 
-// reapEventf receives a LOCK_BROKEN notice the first-and-only time a stale commit lock
-// is actually broken (issue #2339's "logged event" acceptance). It is a package var so
-// the rare break is visible to an operator by default (stderr) and capturable in tests.
-// A break is genuinely rare — it fires only when a dead/foreign holder's lock is removed —
-// so this is a signal, not hot-path noise.
+// reapEventf receives a LOCK_BROKEN notice the first-and-only time a stale commit lock is
+// actually broken (issue #2339's "logged event" acceptance), and a throttled
+// LOCK_REAP_FAILED notice when a break was DECIDED and the OS refused it (#5335). It is a
+// package var so both are visible to an operator by default (stderr) and capturable in
+// tests. Both are rare — one fires only when a dead/foreign holder's lock is removed, the
+// other only when such a removal is refused — so this is a signal, not hot-path noise.
 var reapEventf = func(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "fak: "+format+"\n", args...)
 }
@@ -226,19 +228,33 @@ var reapEventf = func(format string, args ...any) {
 // clean lock on a fresh inode. Every step is best-effort and fail-safe:
 //   - an unreadable/absent file, an unparseable PID, a STILL-ALIVE committer, or an image
 //     we cannot read => do nothing (we never delete a lock a live committer holds);
-//   - a remove failure is ignored — Acquire's bounded wait/timeout is the backstop, so the
-//     worst case is the pre-reap regression (wait it out), never a corrupted lock.
+//   - a remove failure never fails the commit — Acquire's bounded wait/timeout is the
+//     backstop, so the worst case is the pre-reap regression (wait it out), never a
+//     corrupted lock. It is no longer SILENT, though: see LOCK_REAP_FAILED below.
 //
 // A successful break emits one structured LOCK_BROKEN event naming the reason, holder PID,
 // and lock age, so a fleet operator can see WHY the lane was unwedged instead of a silent
-// disappearance. This is the in-code form of the manual `rm .git/fak-commit.lock` that
-// unblocked a wedged 56-minute commit stall in the field, made automatic, PID-guarded, and
-// auditable so it is safe to run on every acquire.
+// disappearance. A break that was decided but REFUSED by the OS emits a throttled
+// LOCK_REAP_FAILED carrying the errno class and a cumulative attempt count — the evidence
+// an 85-minute wedge produced none of (#5335). This is the in-code form of the manual
+// `rm .git/fak-commit.lock` that unblocked a wedged 56-minute commit stall in the field,
+// made automatic, PID-guarded, and auditable so it is safe to run on every acquire.
 func reapStaleLock(path string) {
 	res := ReapStaleLockResult(path)
 	if !res.Reaped {
+		if res.Failed() {
+			// The lock is PROVABLY not held by a live committer and the OS still refused to
+			// remove it. Nothing downstream will clear it, so this is the one not-reaped
+			// outcome that must reach an operator (#5335): the 85-minute lane wedge ran this
+			// exact path every 250ms and recorded nothing, leaving no evidence of why.
+			if attempts, announce := noteReapFailure(path, time.Now()); announce {
+				reapEventf("LOCK_REAP_FAILED %s pid=%d age=%ds attempts=%d err=%s path=%s detail=%q",
+					res.Reason, res.HolderPID, res.AgeSeconds, attempts, res.RemoveErrClass, path, res.RemoveErr)
+			}
+		}
 		return
 	}
+	clearReapFailure(path)
 	if res.Reason == ReapReasonHolderForeign && res.Image != "" {
 		reapEventf("LOCK_BROKEN %s pid=%d age=%ds image=%s path=%s",
 			res.Reason, res.HolderPID, res.AgeSeconds, res.Image, path)
@@ -246,6 +262,54 @@ func reapStaleLock(path string) {
 	}
 	reapEventf("LOCK_BROKEN %s pid=%d age=%ds path=%s",
 		res.Reason, res.HolderPID, res.AgeSeconds, path)
+}
+
+// reapFailureNoticeInterval bounds how often a REPEATEDLY-failing reap re-announces
+// itself. acquireWithReap calls reapStaleLock every lockReapPoll (250ms) for the whole of
+// its bounded wait (DefaultLockTimeout, 10s), so one wedged acquire would otherwise emit
+// ~40 identical lines — and a flood is its own kind of silence. The first failure is
+// always announced immediately; after that the notice repeats at this cadence carrying a
+// cumulative attempt count, so a single acquire leaves one line and a caller that keeps
+// retrying against a persistent wedge leaves a readable trail instead of one line per poll.
+const reapFailureNoticeInterval = 30 * time.Second
+
+// reapFailures tracks, per lock path, how many consecutive remove refusals have been
+// seen and when the last notice was emitted. It is reset the moment a reap finally
+// succeeds, so a later failure streak starts from a fresh, immediately-announced first
+// attempt rather than inheriting a throttle from a resolved incident.
+var (
+	reapFailureMu sync.Mutex
+	reapFailures  = map[string]*reapFailureStreak{}
+)
+
+type reapFailureStreak struct {
+	attempts   int
+	lastNotice time.Time
+}
+
+// noteReapFailure records one refused remove and reports whether this occurrence should
+// be announced, along with the cumulative attempt count to announce it with.
+func noteReapFailure(path string, now time.Time) (attempts int, announce bool) {
+	reapFailureMu.Lock()
+	defer reapFailureMu.Unlock()
+	st := reapFailures[path]
+	if st == nil {
+		st = &reapFailureStreak{}
+		reapFailures[path] = st
+	}
+	st.attempts++
+	if st.attempts == 1 || now.Sub(st.lastNotice) >= reapFailureNoticeInterval {
+		st.lastNotice = now
+		return st.attempts, true
+	}
+	return st.attempts, false
+}
+
+// clearReapFailure forgets a path's failure streak once the lock is gone.
+func clearReapFailure(path string) {
+	reapFailureMu.Lock()
+	delete(reapFailures, path)
+	reapFailureMu.Unlock()
 }
 
 // leaseID derives a stable-enough, ref-safe lease id for this holder. It is a single safe

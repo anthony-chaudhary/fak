@@ -1,9 +1,13 @@
 package safecommit
 
 import (
+	"errors"
+	"io/fs"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -15,6 +19,60 @@ const (
 	ReapReasonHolderDead    = "holder_dead"    // recorded PID is no longer a running process
 	ReapReasonHolderForeign = "holder_foreign" // PID is alive but its image is not a fak/git committer (PID reuse)
 )
+
+// Reason tokens classifying WHY an attempted reap's os.Remove was refused by the OS.
+// The set is closed so a log consumer can group repeated failures without parsing
+// localized OS text (the Windows messages this class produces are localized; the
+// numeric codes behind them are not).
+const (
+	ReapRemoveErrPermission = "permission_denied" // ERROR_ACCESS_DENIED / EPERM / EACCES
+	ReapRemoveErrBusy       = "file_in_use"       // ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION / EBUSY
+	ReapRemoveErrNotExist   = "not_exist"         // raced away between the probe and the remove
+	ReapRemoveErrOther      = "other"             // any other failure; read RemoveErr for the text
+)
+
+// Win32 error codes returned when a still-open handle prevents a delete. Named here
+// because they are the two most likely causes of the exact wedge this observability
+// exists to explain, and because Go surfaces them as bare syscall.Errno values with no
+// portable constant.
+const (
+	winErrSharingViolation = 32 // ERROR_SHARING_VIOLATION
+	winErrLockViolation    = 33 // ERROR_LOCK_VIOLATION
+)
+
+// lockRemove is os.Remove, injectable so the reap-FAILURE path is unit-testable. A real
+// remove refusal needs another process to hold an un-shareable handle on the lockfile,
+// which a table-driven test cannot manufacture portably; the seam lets the failure
+// classification and the surfaced error be proven without one.
+var lockRemove = os.Remove
+
+// classifyRemoveErr maps an os.Remove failure to a closed ReapRemoveErr* token. It
+// checks the Windows sharing/lock-violation codes FIRST because those are the ones the
+// wedge produces and they do not map onto fs.ErrPermission, then falls back to the
+// portable fs sentinels.
+func classifyRemoveErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	if runtime.GOOS == "windows" {
+		var errno syscall.Errno
+		if errors.As(err, &errno) {
+			switch uintptr(errno) {
+			case winErrSharingViolation, winErrLockViolation:
+				return ReapRemoveErrBusy
+			}
+		}
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return ReapRemoveErrNotExist
+	case errors.Is(err, fs.ErrPermission):
+		return ReapRemoveErrPermission
+	case errors.Is(err, syscall.EBUSY):
+		return ReapRemoveErrBusy
+	}
+	return ReapRemoveErrOther
+}
 
 // LockProbe is the result of inspecting an advisory lockfile without mutating it.
 // It reports the recorded holder PID and whether that holder is still a live process,
@@ -134,25 +192,63 @@ type ReapResult struct {
 	Path       string
 	HolderPID  int
 	AgeSeconds int64
-	Reason     string // ReapReason* when Reaped, else ""
+	Reason     string // ReapReason* naming why the lock was judged breakable; "" when it was not reapable
 	Image      string // the foreign image that justified a holder_foreign break, else ""
+
+	// Attempted records that the probe judged the lock REAPABLE and a remove was actually
+	// issued. It splits the two very different states that Reaped=false used to collapse
+	// into one: "we never tried, a live committer holds it" (Attempted=false — the
+	// fail-safe, expected outcome) and "we tried and the OS refused" (Attempted=true — a
+	// wedge that will not clear on its own).
+	Attempted bool
+	// RemoveErr is the os.Remove failure text when Attempted && !Reaped, else "".
+	//
+	// Discarding this error is the observability defect behind #5335: a .git/fak-commit.lock
+	// holding a dead PID wedged the whole fleet's commit lane for 85 minutes while every
+	// queued committer's acquireWithReap re-reaped it every 250ms for the whole of its 10s
+	// bounded wait — so a reaper ran on every one of those attempts, its remove was failing
+	// every time, and not one byte of evidence was recorded. `fak commit status --json`
+	// correctly reported verdict=stale throughout (commitlane.finalize keys that verdict off
+	// exactly this dead-holder lock), so DETECTION was never the gap; the missing errno was.
+	RemoveErr string
+	// RemoveErrClass is the closed ReapRemoveErr* token for RemoveErr, so repeated failures
+	// can be grouped without parsing OS text.
+	RemoveErrClass string
 }
+
+// Failed reports whether a reap was ATTEMPTED (the lock was judged breakable) and the
+// removal was nonetheless refused. This is the state that must never be silent: the lock
+// is provably not held by a live committer, yet it survives, so nothing downstream will
+// clear it and the lane stays wedged until a human intervenes.
+func (r ReapResult) Failed() bool { return r.Attempted && !r.Reaped }
 
 // ReapStaleLockResult removes the lockfile at path IFF the probe says it is reapable
 // (a dead holder, or a live-but-foreign reused PID), and returns the structured outcome
 // so the caller can emit a LOCK_BROKEN event. It is fail-safe: a live committer, an
 // absent file, or an unattributable file are all left untouched and yield Reaped=false.
+//
+// A remove that the OS REFUSES is still fail-safe — Acquire's bounded wait remains the
+// backstop and no lock is corrupted — but it is no longer silent: the error is carried
+// out on RemoveErr/RemoveErrClass with Attempted=true, so the caller can say WHY a
+// provably-breakable lock survived instead of reporting an indistinguishable
+// Reaped=false. Reap POLICY is unchanged: exactly the same locks are broken as before.
 func ReapStaleLockResult(path string) ReapResult {
 	p := ProbeLock(path)
 	res := ReapResult{Path: path, HolderPID: p.HolderPID, AgeSeconds: p.AgeSeconds, Image: p.Image}
 	if !p.Reapable() {
 		return res
 	}
-	if err := os.Remove(path); err != nil {
-		return res // remove failed => report not-reaped; Acquire's bounded wait is the backstop
+	// Reason is set here, before the remove, because it explains the DECISION to break the
+	// lock — which the probe has already made — not the outcome of the syscall. A failed
+	// remove needs it just as much as a successful one does.
+	res.Reason = p.Reason
+	res.Attempted = true
+	if err := lockRemove(path); err != nil {
+		res.RemoveErr = err.Error()
+		res.RemoveErrClass = classifyRemoveErr(err)
+		return res // remove refused => report not-reaped WITH the reason; Acquire's bounded wait is the backstop
 	}
 	res.Reaped = true
-	res.Reason = p.Reason
 	return res
 }
 
