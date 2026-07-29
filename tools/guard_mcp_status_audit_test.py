@@ -30,17 +30,9 @@ def write_json(root: Path, rel: str, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def seed_tree(
-    root: Path,
-    *,
-    post_gate_git_write: bool = False,
-    codex_continued: bool = True,
-    agents_output_ok: bool = True,
-    openai_prereq_ok: bool = True,
-    openai_hosted_ok: bool = True,
-    claude_historical_ok: bool = True,
-) -> None:
-    mod = load()
+def _seed_status_packet(root: Path, mod) -> None:
+    """Seed the status packet and the guard-test corpus, the Codex dogfood
+    witness, and one DENIED_EXPECTED report per gated git tool."""
     (root / mod.STATUS_PACKET).parent.mkdir(parents=True, exist_ok=True)
     (root / mod.STATUS_PACKET).write_text(
         "\n".join(
@@ -96,6 +88,11 @@ def seed_tree(
                 "preflight": {"verdict": "DENY", "reason": reason},
             },
         )
+
+def _seed_codex_dos_audit(root: Path, mod, *, post_gate_git_write: bool) -> None:
+    """Seed the Codex DOS session audit: the stop-failure settlement plan, the
+    actionability roll-up, and the post-gate command shapes — which carry a
+    `git_write` family only when the caller asks for the leaky variant."""
     families = {"python_script": 1}
     if post_gate_git_write:
         families["git_write"] = 1
@@ -202,6 +199,11 @@ def seed_tree(
             },
         },
     )
+
+def _seed_claude_evidence(root: Path, mod, *, codex_continued: bool,
+                          claude_historical_ok: bool) -> None:
+    """Seed the Claude Code evidence: the live guard session, the historical
+    replay (JSON + markdown), and the Codex MCP live session."""
     write_json(
         root,
         mod.CLAUDE_LIVE,
@@ -278,6 +280,11 @@ def seed_tree(
             "final_message": {"denied_attempt": True, "useful_continued": codex_continued},
         },
     )
+
+def _seed_openai_evidence(root: Path, mod, *, agents_output_ok: bool,
+                          openai_prereq_ok: bool, openai_hosted_ok: bool) -> None:
+    """Seed the OpenAI evidence: the Agents SDK guardrail demo plus its output,
+    the live-prereq audit, and the hosted live pilot (JSON + markdown each)."""
     (root / mod.OPENAI_AGENTS_DEMO).parent.mkdir(parents=True, exist_ok=True)
     (root / mod.OPENAI_AGENTS_DEMO).write_text("print('demo')\n", encoding="utf-8")
     agents_text = (
@@ -348,6 +355,35 @@ def seed_tree(
         "- status: **`BLOCKED_ENV`**\n\n"
         "It never writes API key values or raw hosted OpenAI response text.\n",
         encoding="utf-8",
+    )
+
+
+def seed_tree(
+    root: Path,
+    *,
+    post_gate_git_write: bool = False,
+    codex_continued: bool = True,
+    agents_output_ok: bool = True,
+    openai_prereq_ok: bool = True,
+    openai_hosted_ok: bool = True,
+    claude_historical_ok: bool = True,
+) -> None:
+    """Seed a complete evidence tree under `root`. Every keyword flips exactly
+    one piece of evidence to its failing shape, so a test perturbs one input and
+    reads the audit's verdict for it."""
+    mod = load()
+    _seed_status_packet(root, mod)
+    _seed_codex_dos_audit(root, mod, post_gate_git_write=post_gate_git_write)
+    _seed_claude_evidence(
+        root, mod,
+        codex_continued=codex_continued,
+        claude_historical_ok=claude_historical_ok,
+    )
+    _seed_openai_evidence(
+        root, mod,
+        agents_output_ok=agents_output_ok,
+        openai_prereq_ok=openai_prereq_ok,
+        openai_hosted_ok=openai_hosted_ok,
     )
 
 

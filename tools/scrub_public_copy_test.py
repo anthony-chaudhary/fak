@@ -149,15 +149,11 @@ def _write(repo: str, rel: str, text: str) -> None:
         f.write(text)
 
 
-def main() -> int:
-    failures = []
-
-    def check(name: str, cond: bool, detail: str = "") -> None:
-        status = "ok" if cond else "FAIL"
-        print(f"  [{status}] {name}" + (f"  -- {detail}" if not cond and detail else ""))
-        if not cond:
-            failures.append(name)
-
+def _check_commit_gate(check) -> None:
+    """The pre-commit range gate: a clean range passes, a planted needle is
+    named, removing one is not a hit, derived lab-host and bare node aliases
+    are caught in prose/data/path, the denylist file itself is exempt, and an
+    unreadable range exits 2."""
     with tempfile.TemporaryDirectory() as repo:
         _git(repo, "init", "-q")
         _git(repo, "config", "commit.gpgsign", "false")
@@ -252,6 +248,11 @@ def main() -> int:
         rc, out = _audit_range(repo, "nope-no-such-ref..HEAD")
         check("unreadable range exits 2", rc == 2, out)
 
+
+def _check_audit_tree(check) -> None:
+    """The HARD-CUT full-tree backstop: shape-only mode without a pulled
+    sidecar still catches live-token, GCP service-account and lab-alias shapes;
+    full mode catches a pulled needle; --json emits the ok+mode contract."""
     # ---- audit-tree: the HARD-CUT full-tree backstop (its own repo) --------
     # Separate repo so the sidecar's presence/absence is controlled here and does
     # not interact with the commit-gate block above.
@@ -330,6 +331,10 @@ def main() -> int:
         rc, jout = _audit_tree(repo, as_json=True)
         check("audit-tree --json emits ok+mode keys", '"ok"' in jout and '"mode"' in jout, jout)
 
+
+def _check_scrub_transforms(check) -> None:
+    """The two scrub TRANSFORMS: the root-hoisted catalog drops private-machine
+    runs, and the export rewrites a derived lab alias in content AND in path."""
     # ---- root-hoisted DGX catalog/run scrub --------------------------------
     with tempfile.TemporaryDirectory() as repo:
         _write(repo, "experiments/benchmark/catalog.json", json.dumps({
@@ -361,6 +366,11 @@ def main() -> int:
                 body = f.read()
         check("export leaves no derived lab alias in artifact", LAB_ALIAS not in body and "gpu-server" in body, body)
 
+
+def _check_export_tier_and_message_gate(check) -> None:
+    """The EXPORT/identity tier at commit time: ungated without a sidecar,
+    gated with one; plus the commit-MESSAGE gate, where scissors lines, comment
+    lines and DCO/co-author trailers are exempt but body prose is not."""
     # ---- §6 commit-gate EXPORT/identity-tier fold (its own repo) ------------
     # Under the hard cut the PUBLIC clone has no export step left to rewrite the
     # identity tier, so a provisioned clone (sidecar present) must catch an
@@ -440,6 +450,12 @@ def main() -> int:
         rc, out = _audit_message(repo, body)
         check("identity needle in body is still caught", rc == 1, out)
 
+
+def _check_pinned_artifact_commit_gate(check) -> None:
+    """The generated, checksum-pinned third-party artifact exemption at commit
+    time — one positive, and the negatives that bound it: hand-written prose
+    beside it, a forged banner, a stale pin, a real IP, a credential shape,
+    an affiliation claim in the artifact prose, and an undeclared directory."""
     # ---- #5405 GENERATED, CHECKSUM-PINNED THIRD-PARTY ARTIFACT --------------
     # The commit half. A community filter feed rendered by `fak egresslist refresh`
     # carries vendor ad/telemetry domains verbatim; an AFFILIATION needle inside one is
@@ -552,6 +568,11 @@ def main() -> int:
         check("pinned artifact outside the declared dir is refused", rc == 1, out)
         check("undeclared-dir refusal names that copy", "docs/lists/feed.txt" in out, out)
 
+
+def _check_pinned_artifact_export_audit(check) -> None:
+    """The same exemption on the EXPORT path — the half FLEET_ALLOW_LEAK cannot
+    reach: a pinned artifact publishes clean, a stale pin and hand-written
+    affiliation prose both stay a MISS."""
     # ---- #5405 EXPORT half: the post-scrub audit --------------------------
     # This is the half FLEET_ALLOW_LEAK=1 cannot reach. The affiliation needle is in
     # EXPORT_AUDIT_NEEDLES with NO REPLACEMENTS rewrite, so without the exemption here
@@ -584,6 +605,25 @@ def main() -> int:
         rc, out = _export(exp)
         check("post-scrub export audit refuses hand-written affiliation prose", rc == 1, out)
         check("export MISS names the hand-written file", "notes.txt" in out, out)
+
+
+def main() -> int:
+    """Run every scrub-gate check group against throwaway repos and report.
+    Returns 1 if any check failed, 0 otherwise."""
+    failures = []
+
+    def check(name: str, cond: bool, detail: str = "") -> None:
+        status = "ok" if cond else "FAIL"
+        print(f"  [{status}] {name}" + (f"  -- {detail}" if not cond and detail else ""))
+        if not cond:
+            failures.append(name)
+
+    _check_commit_gate(check)
+    _check_audit_tree(check)
+    _check_scrub_transforms(check)
+    _check_export_tier_and_message_gate(check)
+    _check_pinned_artifact_commit_gate(check)
+    _check_pinned_artifact_export_audit(check)
 
     print()
 

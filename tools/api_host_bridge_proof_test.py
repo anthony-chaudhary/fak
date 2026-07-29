@@ -15,7 +15,9 @@ def write_json(root: Path, rel_path: str, data: object) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def good_artifacts(root: Path) -> None:
+def _write_witness_artifacts(root: Path) -> None:
+    """Seed the bridge witnesses: the source witness matrix, the executed witness
+    gate, the committed live inventory, and the current-host readiness sweep."""
     host_command = "go test ./internal/gateway -run 'TestChatProxyOpenAICompatibleAliasIsHostAgnostic$'"
     host_argv = ["go", "test", "./internal/gateway", "-run", "TestChatProxyOpenAICompatibleAliasIsHostAgnostic$", "-count=1"]
     profile_command = "go test ./internal/gateway -run 'TestChatProxyOpenAICompatibleHostProfileConformance$'"
@@ -82,6 +84,10 @@ def good_artifacts(root: Path) -> None:
         "schema": "fak.api-host-readiness.v1",
         "summary": {"targets": 13, "readiness_gate": True, "models_confirmed": 1, "unclassified": 0, "invalid_targets": 0},
     })
+
+def _write_host_inventory_artifacts(root: Path) -> None:
+    """Seed the candidate-host inventory: the acceptance sweep, the roster, the
+    paid/keyed external-state audit, and the compatibility contract."""
     write_json(root, proof.DEFAULT_PATHS["acceptance"], {
         "schema": "fak.api-host-acceptance.v1",
             "summary": {
@@ -161,6 +167,10 @@ def good_artifacts(root: Path) -> None:
         ],
         "artifact_errors": {},
     })
+
+def _write_conformance_artifacts(root: Path) -> None:
+    """Seed the conformance chain: the certificate, the qualification predicate,
+    and the live-smoke queue plus its runner gate."""
     write_json(root, proof.DEFAULT_PATHS["certificate"], {
         "schema": "fak.api-host-conformance-certificate.v1",
         "summary": {
@@ -237,6 +247,9 @@ def good_artifacts(root: Path) -> None:
         "runs": [],
         "artifact_errors": {},
     })
+
+def _write_permission_artifacts(root: Path) -> None:
+    """Seed the permission-system benchmark and the source audit that backs it."""
     write_json(root, proof.DEFAULT_PATHS["benchmark"], {
         "schema": "fak.permission-system-benchmark.v1",
         "api_host_bridge_dimensions": [
@@ -279,6 +292,15 @@ def good_artifacts(root: Path) -> None:
         "summary": {"sources": 7, "verified": 7, "failed": 0, "source_audit_gate": True},
         "sources": [],
     })
+
+
+def good_artifacts(root: Path) -> None:
+    """Seed a complete, self-consistent artifact set under `root` — the shared
+    fixture every test starts from before perturbing exactly one artifact."""
+    _write_witness_artifacts(root)
+    _write_host_inventory_artifacts(root)
+    _write_conformance_artifacts(root)
+    _write_permission_artifacts(root)
 
 
 class APIHostBridgeProofTest(unittest.TestCase):
