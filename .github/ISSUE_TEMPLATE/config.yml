@@ -1,1 +1,11 @@
 blank_issues_enabled: true
+contact_links:
+  - name: 📖 Documentation — start here
+    url: https://github.com/anthony-chaudhary/fak/blob/main/README.md
+    about: Install, the offline proof, and the two ways to run the kernel. Most setup questions are answered here or in GETTING-STARTED.md.
+  - name: 🔒 Report a security vulnerability (privately)
+    url: https://github.com/anthony-chaudhary/fak/security/advisories/new
+    about: Please do NOT open a public issue for a way past the capability floor or the containment gate. See SECURITY.md.
+  - name: 🤝 Contributing — open your first pull request
+    url: https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md
+    about: The fork-and-pull-request walkthrough, what your PR needs to pass, and the DCO sign-off.

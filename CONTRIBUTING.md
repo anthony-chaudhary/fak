@@ -14,6 +14,73 @@ production operation starts at [`docs/operator/`](docs/operator/).
 **Next action:** from the repository root, run `go version` and confirm Go 1.26 or newer
 (the `go.mod` toolchain directive can fetch the required toolchain automatically).
 
+## First: which contributor are you?
+
+This page serves two audiences with different mechanics. Pick your row before reading on —
+several rules below apply to only one of them.
+
+| You are… | How your change lands | Read |
+|---|---|---|
+| **An outside contributor** (no write access to this repository) | Fork → branch on your fork → pull request | [Fork and open a pull request](#fork-and-open-a-pull-request), then the route table and the licensing section |
+| **A maintainer or an in-repo agent** (working in the shared `main` checkout) | Commit directly to `main` by explicit path | Everything, including [Set up and verify the checkout](#set-up-and-verify-the-checkout) and the trunk rules in [Development workflow](#development-workflow) |
+
+If you are not sure, you are an outside contributor. The direct-to-`main` workflow described
+later requires push access to `anthony-chaudhary/fak`; it is not the path for a first PR.
+
+## Fork and open a pull request
+
+The standard GitHub flow. Nothing in this section needs write access to this repository, and
+the trunk guard never sees your fork.
+
+```bash
+# 1. Fork on GitHub, then clone YOUR fork
+git clone https://github.com/<your-username>/fak.git
+cd fak
+git remote add upstream https://github.com/anthony-chaudhary/fak.git
+
+# 2. Branch on your fork — branches are fine here; the no-branches rule
+#    below governs the maintainers' shared checkout, not your fork.
+git checkout -b my-change
+
+# 3. Make the change, then check it (see "What your PR needs to pass")
+go build ./... && go vet ./...
+go test ./internal/<package-you-touched>/...
+
+# 4. Commit with a DCO sign-off — this one IS required (see Licensing)
+git commit -s -m "docs(readme): fix the install path"
+
+# 5. Push to your fork and open a PR against anthony-chaudhary/fak main
+git push origin my-change
+```
+
+Then open the pull request on GitHub and fill in the contributor section of the template.
+
+### What your PR needs to pass
+
+Run the check that matches your change; CI runs the full gate on the PR, so you do not need
+to reproduce it locally.
+
+| Your change | Run before pushing |
+|---|---|
+| Go code | `go build ./...`, `go vet ./...`, and the tests for the package you touched |
+| Documentation | Confirm every link you added or moved resolves |
+| Anything | `git commit -s` (DCO sign-off — enforced) |
+
+You do **not** need `python tools/install_trunk_guard.py`, `make ci`, or `fak ci-preflight`
+for a forked PR. Those are the shared-checkout gates described further down; a maintainer
+runs the equivalent before your change lands on `main`.
+
+Keeping your fork current:
+
+```bash
+git fetch upstream && git merge upstream/main
+```
+
+**Windows:** `go build` and `go vet` work natively. Running the *test suite* can hit an OS
+Application-Control policy that blocks freshly compiled test binaries — that is an OS quirk,
+not a code failure. Run the tests under WSL if you need them; see the Windows note in
+[`GETTING-STARTED.md`](GETTING-STARTED.md).
+
 ## Choose the route for your change
 
 | Change | Start here | Proof before landing |
@@ -30,6 +97,11 @@ or a doc-sized item from the
 from an old planning note when a current issue or authority disagrees.
 
 ## Set up and verify the checkout
+
+> **Maintainers and in-repo agents only.** This section describes the shared `main` checkout.
+> If you are contributing from a fork, you have already done what you need — see
+> [What your PR needs to pass](#what-your-pr-needs-to-pass) — and can skip to
+> [Licensing](#licensing--read-this-before-your-first-pr).
 
 1. Work from the repository root on `main`; this repository does not use contributor
    feature branches. Install the repository hooks with
@@ -124,8 +196,8 @@ kernel), in addition to the CLA grant to Netra.
   regenerate the JSON-LD (CI hard-gates that it is in sync). The discoverability
   **scores** are strategic and live in the private repo (`--transfer`); the tool and the
   read-only work-list are public.
-- **Tests run through WSL, not native Windows** — `.\fak\test.ps1` (whole suite) or
-  `.\fak\test.ps1 ./internal/<pkg>/`. `go build` / `go vet` work natively; only test
+- **Tests run through WSL, not native Windows** — from the repository root, `.\test.ps1`
+  (whole suite) or `.\test.ps1 ./internal/<pkg>/`. `go build` / `go vet` work natively; only test
   *execution* is blocked on the Windows host. See the Windows note in
   [`GETTING-STARTED.md`](GETTING-STARTED.md) for why. **Never commit a red tree.**
 - **Add a feature as a leaf, not a core edit** — `fak new-leaf <name> --tier
@@ -134,8 +206,10 @@ kernel), in addition to the CLA grant to Netra.
   attaches through a `Register*` seam. `internal/architest` fails the build on an upward/
   cross-tier import, and `CLAIMS.md` requires every claim to carry exactly one of
   `[SHIPPED]`/`[SIMULATED]`/`[STUB]`.
-- **Work directly on `main` — do not open a feature branch.** This is the
-  single-source-of-truth operator law (`main-is-single-source`): every contributor,
+- **Work directly on `main` — do not open a feature branch.** *(Shared-checkout rule. It does
+  not apply to a fork: branch freely there — see [Fork and open a pull
+  request](#fork-and-open-a-pull-request).)* This is the
+  single-source-of-truth operator law (`main-is-single-source`): everyone with write access,
   human or agent, commits to `main` in the main worktree. Creating a side branch or a
   new worktree to route around a dirty/diverged tree is the `OFF_TRUNK` anti-pattern that
   the trunk guard (`tools/githooks/reference-transaction`) and `dos.toml` actively
@@ -199,3 +273,9 @@ Pick one, read the entry doc it points to, and ship it small and by explicit pat
 Use the GitHub tracker. Security-sensitive reports (a way past the capability floor or the
 containment gate) should be raised **privately** — see [`SECURITY.md`](SECURITY.md) — rather
 than filed as a public issue.
+
+## Code of Conduct
+
+Participation in this project — issues, pull requests, and reviews — is governed by the
+[Code of Conduct](.github/CODE_OF_CONDUCT.md). It also names the route for reporting a
+problem with someone's conduct.

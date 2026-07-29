@@ -1,6 +1,6 @@
 <!-- Thanks for contributing! First PR? Welcome — don't sweat the checklist;
      a maintainer will help you through anything unfamiliar.
-     The full contract lives in CONTRIBUTING.md and AGENTS.md. -->
+     New here? CONTRIBUTING.md has a fork-and-PR walkthrough. -->
 
 ## What & why
 
@@ -8,16 +8,27 @@
 
 ## Evidence
 
-<!-- What gate you ran and what it said — e.g. `.\test.ps1 ./internal/<pkg>/`
-     for Go changes, or `python tools/docs_scorecard.py --scope reachable`
-     for docs. "Verify, don't trust" applies to our own PRs first:
-     a claim with no gate run is `not yet`, not done. -->
+<!-- What you ran and what it said. For Go changes, the tests for the package you
+     touched (`go test ./internal/<pkg>/...`, or `.\test.ps1 ./internal/<pkg>/`
+     on Windows). For docs, that the links you added or moved resolve.
+     "Verify, don't trust" applies to our own PRs first: a claim with no check
+     run is `not yet`, not done. CI runs the full gate on this PR. -->
 
-## Ship-discipline checklist
+## Checklist
 
 - [ ] Commits are signed off (`git commit -s`, DCO — see CONTRIBUTING.md)
-- [ ] Conventional-Commits subject ending in a `(fak <leaf>)` stamp,
-      e.g. `fix(gateway): treat same-tick ready as positive (fak gateway)`
-- [ ] Staged by explicit path (`git commit -s -- <paths>`, never `git add -A`)
-- [ ] The gate named under **Evidence** was actually run, output quoted
+- [ ] The check named under **Evidence** was actually run, output quoted
 - [ ] Numbers are witnessed; anything simulated is labeled simulated
+
+<!-- ─────────────────────────────────────────────────────────────────────
+     MAINTAINERS / IN-REPO AGENTS ONLY — committing directly to the shared
+     `main` checkout. Ignore this block if you are contributing from a fork;
+     a maintainer applies it when your change lands.
+
+     - [ ] Conventional-Commits subject ending in a `(fak <leaf>)` stamp,
+           e.g. `fix(gateway): treat same-tick ready as positive (fak gateway)`
+           (leaf names are the `[lanes]` in dos.toml)
+     - [ ] Staged by explicit path (`git commit -s -- <paths>`, never `git add -A`)
+     - [ ] `make ci` green before the commit; `fak ci-preflight` after it
+     The full contract is in AGENTS.md.
+     ───────────────────────────────────────────────────────────────────── -->

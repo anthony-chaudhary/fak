@@ -12,7 +12,7 @@ body:
     attributes:
       label: What happened
       description: What did you run, and what did you see?
-      placeholder: "Example: `fak commit --path docs/x.md -m \"...\"` refused with PATHSPEC_RACE even though the tree was clean."
+      placeholder: "Example: `fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwen2.5:1.5b` started, but every tool call came back DENY even though the tool is on my policy's allow-list."
     validations:
       required: true
   - type: textarea
@@ -27,6 +27,6 @@ body:
     attributes:
       label: Version / environment
       description: Output of `fak --version` (or the commit SHA), plus OS if relevant.
-      placeholder: "Example: fak v0.9.3, Windows 11 / WSL2"
+      placeholder: "Example: fak 0.41.0, Windows 11 / WSL2"
     validations:
       required: false

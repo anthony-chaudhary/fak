@@ -21,10 +21,12 @@ Audience: first-time evaluators checking whether fak can manage a tool-using age
 For the shortest public proof, install the one binary and run one deterministic end-to-end check:
 
 ```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 fak agent --offline
 # -> task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
 ```
+
+(Go 1.26+ users can substitute `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`. Run it from any directory — no clone needed; it writes `agent-report.json` into the current one.)
 
 Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
 
@@ -112,21 +114,32 @@ Point OpenAI clients at `http://127.0.0.1:8080/v1` and Anthropic clients at the 
 
 Read: [server quickstart](docs/fak/server-quickstart.md) · [serving architecture and engines](docs/serving/README.md) · [configuration](docs/fak/server-config.md) · [API reference](docs/fak/api-reference.md) · [deployment](docs/fak/deployment-guide.md)
 
-**Showcase — Claude Code on your own Mac's local model.** One command points Claude Code at your own Mac's `fak serve` gateway running Qwen3.6-27B:
+**Showcase — Claude Code on a Mac's own local model.** A premium cloud agent, open weights on your own silicon, one static binary in between.
+
+This one needs setup first: a Mac running a Qwen3.6-27B server with a `fak serve` gateway in front of it. Stand that up with the [server quickstart](docs/fak/server-quickstart.md). Once it is running, `fak mac` launches Claude Code against it:
 
 ```bash
+export FAK_MAC_GATEWAY="http://<your-mac>:8080"       # the gateway you started above
 fak mac                                              # long form: fak claude-mac-fak
 ```
 
-A premium cloud agent, open weights on your own silicon, one static binary in between. The first full local turn is slow (10–15 min prefill on an M3 Pro) and single-stream. The wow is that it works end to end and stays observable the whole time via the preflight panel. See the [walkthrough](docs/fak/mac-agent-ui.md).
+`fak mac` targets a gateway over the network, so it works whether you are on the Mac or driving it from another machine — set `FAK_MAC_GATEWAY` either way. Honest expectations: the first full local turn is slow (10–15 min prefill on an M3 Pro) and single-stream. The wow is that it works end to end and stays observable the whole time via the preflight panel. The [operator walkthrough](docs/fak/mac-agent-ui.md) covers the launcher's flags, the preflight panel, and the live overlay — it assumes the gateway already exists.
 
 ## Install
+
+No Go toolchain needed — the installer downloads a prebuilt binary and verifies its SHA-256 against the release's `SHA256SUMS`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
+```
+
+If you already have Go 1.26+, or you are on Windows without a POSIX shell:
 
 ```bash
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 ```
 
-Go 1.26+; no external Go dependencies. Source builds, archives, and containers: [INSTALL.md](INSTALL.md).
+Either way, `fak version` confirms it. Manual archive downloads, containers, build-from-source, and release-provenance verification: [INSTALL.md](INSTALL.md).
 
 ## Going deeper
 

@@ -111,9 +111,15 @@ go build -o fak ./cmd/fak          # -> ./fak   (Windows: build with -o fak.exe 
 
 ## 2. Tier 0 — try the kernel (zero downloads, ~2 min)
 
-Everything here is offline and deterministic. Run from inside `fak/` (the commands
-find `testdata/` relative to the working directory, and write their report files,
-such as `report.json` and `agent-report.json`, into the current directory).
+Everything here is offline and deterministic.
+
+**You do not need a clone for the default proof.** `./fak agent --offline` below runs from
+any directory, so the `go install` and one-line-installer paths reach it too. Only the
+commands that name a path under `testdata/` — such as the optional `fak run --trace` replay —
+must run from inside the clone, or be given an absolute path.
+
+Each command writes its report file (`report.json`, `agent-report.json`) into the current
+working directory; pass `--out <path>` to put it elsewhere.
 
 **Run the default offline proof:**
 
@@ -432,7 +438,7 @@ whatever the caller proposed. `--base-url` (Tier 1 proxy) wins if both are set.
 
 ## Where to go next
 
-- **`fak guard --gguf <model> -- claude`: local model, one command.** Run Claude Code (or any OpenAI-compatible agent) with a local GGUF model behind the kernel — no API key, no network, no second terminal. The model loads in-kernel, the kernel adjudicates every tool call, and your data never leaves your box. Example: `fak guard --gguf qwen2.5:7b -- claude` (downloads on first run, ~5 GB cached). Small-model agentic quality is a ramp; for frontier-quality coding, `fak guard -- claude` (proxy to Anthropic) is still the default. See [`docs/integrations/claude.md`](docs/integrations/claude.md). For a witnessed A/B comparison of local vs frontier coding on a minimal CPU-runnable fixture, see [`docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-2026-06-27.md`](docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-2026-06-27.md).
+- **`fak guard --gguf <model> -- claude`: local model, one command.** Run Claude Code (or any OpenAI-compatible agent) with a local GGUF model behind the kernel — no API key, no network, no second terminal. The model loads in-kernel, the kernel adjudicates every tool call, and your data never leaves your box. Example: `fak guard --gguf qwen2.5:7b -- claude` (downloads on first run, ~5 GB cached). Small-model agentic quality is a ramp; for frontier-quality coding, `fak guard -- claude` (proxy to Anthropic) is still the default. See [`docs/integrations/claude.md`](docs/integrations/claude.md). For the runbook that measures local vs frontier coding on a minimal CPU-runnable fixture, see [`docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-RUNBOOK.md`](docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-RUNBOOK.md).
 - **`fak guard -- claude`: the one-command proxy front door.** Run the Claude Code (or any agent) you already use, with the kernel adjudicating every tool call it proposes. It starts the gateway in-process, injects the base URL into the child only (your shell is untouched), proxies your real Anthropic key + prompt cache through in passthrough mode, and prints what it allowed vs blocked on exit. No script, no second terminal, any OS. Embedded secure floor (`fak guard --dump-policy` to see it). See [`docs/integrations/claude.md`](docs/integrations/claude.md).
 - [`docs/fak/tutorial.md`](docs/fak/tutorial.md): **the guided first session**. It walks
   step by step through Tiers 0–2 with the real, captured output of every command
