@@ -288,9 +288,10 @@ type trunkRedClassRollup struct {
 }
 
 // trunkRedSummary is the folded value view: the distinct shared breaks currently
-// witnessed, worst (most clones stuck) first. Classes whose base the trunk has
-// PROVABLY moved past are folded out of the live view and only counted, so a wall
-// of stale rows never buries the breaks that are still biting.
+// witnessed, worst (most clones stuck) first. Classes PROVABLY resolved — the trunk
+// moved past the base AND the symbol that broke is defined at HEAD — are folded out
+// of the live view and only counted, so a wall of stale rows never buries the breaks
+// that are still biting.
 type trunkRedSummary struct {
 	Ledger          string                `json:"ledger"`
 	Total           int                   `json:"total"`   // LIVE witness rows (resolved rows excluded)
@@ -303,44 +304,32 @@ type trunkRedSummary struct {
 // or foreign lines are skipped. Classes are ordered by session spread (how much of the
 // fleet is stuck), then row count, then class key — the worst shared break first.
 //
-// resolved is the KEEP-SIDE resolve predicate: it must return true ONLY when the
-// break recorded against baseSha is PROVABLY resolved (see trunkRedGitResolver).
-// A resolved class is folded out of the live view and counted in
-// ResolvedClasses/ResolvedRows instead. nil, an empty base, or ANY uncertainty in
-// the predicate keeps the row — a hidden live break is far worse than a surfaced
-// stale one. The predicate is consulted once per distinct base.
-func summarizeTrunkRed(content string, resolved func(baseSha string) bool) trunkRedSummary {
+// resolved is the KEEP-SIDE resolve predicate. It is consulted ONCE PER CLASS, after
+// the fold rather than per row, so every row of a class shares one verdict and a class
+// can never be half-dropped (rows of one class may disagree about first_break, and a
+// class that surfaced with some of its rows silently missing would under-report how
+// much of the fleet is stuck). It must return true ONLY when the break is PROVABLY
+// resolved — see trunkRedGitResolver. A resolved class is folded out of the live view
+// and counted in ResolvedClasses/ResolvedRows instead.
+//
+// The fold refuses to even ASK about a class carrying no base sha or no first-break
+// symbol: with nothing to check ancestry or definedness against, such a class can never
+// be PROVEN resolved, so it is kept structurally — the keep-side invariant then holds
+// even against a buggy or always-true predicate, which is what pins it in a test. A nil
+// predicate likewise keeps everything. A hidden live break is far worse than a surfaced
+// stale one, so every uncertainty resolves toward KEEP.
+func summarizeTrunkRed(content string, resolved func(trunkRedBreak) bool) trunkRedSummary {
 	rows := jsonlledger.Parse(content, func(r trunkRedRecord) bool {
 		return r.Schema == trunkRedRecordSchema
 	})
-	resolvedByBase := map[string]bool{}
-	baseResolved := func(baseSha string) bool {
-		base := strings.TrimSpace(baseSha)
-		if resolved == nil || base == "" {
-			return false // nothing checkable — KEEP
-		}
-		v, ok := resolvedByBase[base]
-		if !ok {
-			v = resolved(base)
-			resolvedByBase[base] = v
-		}
-		return v
-	}
 	byClass := map[string]*trunkRedClassRollup{}
 	order := []string{}
 	sessionsByClass := map[string]map[string]struct{}{}
 	anonByClass := map[string]bool{}
 	gatesByClass := map[string]map[string]struct{}{}
-	resolvedClasses := map[string]struct{}{}
 	sum := trunkRedSummary{}
 	for _, r := range rows {
 		class := r.Class()
-		if baseResolved(r.BaseSha) {
-			sum.ResolvedRows++
-			resolvedClasses[class] = struct{}{}
-			continue
-		}
-		sum.Total++
 		roll, ok := byClass[class]
 		if !ok {
 			roll = &trunkRedClassRollup{
@@ -387,6 +376,12 @@ func summarizeTrunkRed(content string, resolved func(baseSha string) bool) trunk
 		}
 		sort.Strings(gates)
 		roll.Gates = gates
+		if trunkRedClassResolved(*roll, resolved) {
+			sum.ResolvedClasses++
+			sum.ResolvedRows += roll.Rows
+			continue
+		}
+		sum.Total += roll.Rows
 		sum.Classes = append(sum.Classes, *roll)
 	}
 	sort.SliceStable(sum.Classes, func(i, j int) bool {
@@ -399,33 +394,196 @@ func summarizeTrunkRed(content string, resolved func(baseSha string) bool) trunk
 		}
 		return a.Class < b.Class
 	})
-	sum.ResolvedClasses = len(resolvedClasses)
 	return sum
 }
 
-// trunkRedGitResolver returns the production resolve predicate for summarizeTrunkRed:
-// a base sha is PROVABLY resolved only when it is a STRICT ancestor of the remote
-// trunk tip (`git merge-base --is-ancestor` exits 0 and the base is not that tip
-// itself) — the trunk has moved PAST the commit the red was proven at, so the break
-// was very likely fixed upstream. EVERY uncertainty — no repo root, an unresolvable
-// sha, a missing remote trunk ref (fresh clone, no remote), any git error — reports
-// NOT resolved, keeping the row surfaced: a hidden live break is far worse than a
-// stale one. Results are memoized per base so a large ledger shells git once per
-// distinct base.
-func trunkRedGitResolver(root string) func(baseSha string) bool {
-	cache := map[string]bool{}
-	return func(baseSha string) bool {
-		base := strings.TrimSpace(baseSha)
-		if strings.TrimSpace(root) == "" || base == "" {
+// trunkRedBreak is everything the fold knows about ONE witnessed break class, handed to
+// the resolve predicate. It carries the first-break SYMBOL and the failing PACKAGES, not
+// just the base sha, because ancestry alone is NOT evidence of a fix: any unrelated peer
+// commit landing on the trunk makes a recorded base an ancestor of the tip, so a
+// base-only predicate folds still-LIVE breaks out of the view. Proving a break resolved
+// takes both conjuncts — the trunk moved past the base AND the symbol that broke is
+// defined at HEAD — which is why the predicate needs the whole class, not one field.
+type trunkRedBreak struct {
+	BaseSha    string
+	FirstBreak string
+	Packages   []string
+}
+
+// trunkRedClassResolved is the keep-side guard rail the fold puts AROUND the predicate.
+// It answers false — KEEP — for every class the predicate could not possibly prove
+// resolved, and only then asks. Deliberately structural: the invariant must not depend
+// on the predicate being correct.
+func trunkRedClassResolved(roll trunkRedClassRollup, resolved func(trunkRedBreak) bool) bool {
+	if resolved == nil {
+		return false // no way to check — KEEP
+	}
+	base := strings.TrimSpace(roll.BaseSha)
+	sym := strings.TrimSpace(roll.FirstBreak)
+	if base == "" || sym == "" {
+		return false // no base to date, or no symbol to look up — KEEP
+	}
+	return resolved(trunkRedBreak{BaseSha: base, FirstBreak: sym, Packages: roll.Packages})
+}
+
+// trunkRedGitResolver returns the production resolve predicate for summarizeTrunkRed. A
+// break is PROVABLY resolved only when BOTH conjuncts hold:
+//
+//  1. its base sha is a STRICT ancestor of the remote trunk tip (`git merge-base
+//     --is-ancestor` exits 0 and the base is not the tip itself) — the trunk has moved
+//     PAST the commit the red was proven at; AND
+//  2. its first-break symbol is DEFINED at HEAD inside the failing packages' own
+//     directories — the thing that actually broke is back.
+//
+// Conjunct 1 alone is NOT evidence of a fix, and shipping it alone is a live-break
+// hazard rather than a stale-row cleanup: every recorded base becomes an ancestor of the
+// tip the moment ANY unrelated peer commit lands, so a base-only predicate silently
+// folds out breaks that are still red. Measured on a real 338-row ledger, ancestry alone
+// dropped 309 rows (91%) — everything except the bases git could not resolve at all.
+// Conjunct 2 is what makes the drop mean "fixed" instead of "old".
+//
+// EVERY uncertainty reports NOT resolved, keeping the class surfaced: no repo root, an
+// empty base or symbol, an unresolvable sha, a missing remote trunk ref (fresh clone, no
+// remote), a package outside this module, a symbol that is not a bare identifier, or any
+// git error at all. A hidden live break is far worse than a surfaced stale one.
+//
+// Both conjuncts are memoized — ancestry per base, definedness per symbol+dirs — so a
+// large ledger shells git once per distinct question rather than once per class, and
+// conjunct 2 is only asked when conjunct 1 already held.
+func trunkRedGitResolver(root string) func(trunkRedBreak) bool {
+	mergedPast := map[string]bool{}
+	definedAtHead := map[string]bool{}
+	return func(b trunkRedBreak) bool {
+		base := strings.TrimSpace(b.BaseSha)
+		sym := strings.TrimSpace(b.FirstBreak)
+		if strings.TrimSpace(root) == "" || base == "" || sym == "" {
 			return false // nothing checkable — KEEP
 		}
-		v, ok := cache[base]
-		if !ok {
-			v = trunkRedBaseMergedPast(root, base)
-			cache[base] = v
+		dirs := trunkRedPackageDirs(root, b.Packages)
+		if len(dirs) == 0 {
+			return false // no in-module tree to search for the symbol — KEEP
 		}
-		return v
+		merged, ok := mergedPast[base]
+		if !ok {
+			merged = trunkRedBaseMergedPast(root, base)
+			mergedPast[base] = merged
+		}
+		if !merged {
+			return false // the trunk has not provably moved past the base — KEEP
+		}
+		key := sym + " :: " + strings.Join(dirs, " ")
+		defined, ok := definedAtHead[key]
+		if !ok {
+			defined = trunkRedSymbolDefinedAtHead(root, dirs, sym)
+			definedAtHead[key] = defined
+		}
+		return defined
 	}
+}
+
+// trunkRedModulePath reads the module path out of <root>/go.mod so import paths can be
+// mapped to directories without hard-coding this repo's own module name. "" on any
+// read or parse failure, which makes every package unmappable and therefore keeps every
+// class — the keep-side direction.
+func trunkRedModulePath(root string) string {
+	b, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if fields := strings.Fields(line); len(fields) >= 2 && fields[0] == "module" {
+			return fields[1]
+		}
+	}
+	return ""
+}
+
+// trunkRedPackageDirs maps a class's failing IMPORT PATHS to the repo-relative
+// directories to search at HEAD. It returns nil unless EVERY package maps into this
+// module, because a class whose failing surface includes something we cannot inspect is
+// a class we cannot clear: a gate's own fixture files its break against a synthetic path
+// like "buildcheck.test/p", and a stdlib path like "time" names no tree here. The bare
+// module path is treated as unmappable too — it would widen the search to the whole
+// worktree, which is both slow and prone to matching an unrelated package's symbol.
+func trunkRedPackageDirs(root string, pkgs []string) []string {
+	mod := trunkRedModulePath(root)
+	if mod == "" || len(pkgs) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	dirs := make([]string, 0, len(pkgs))
+	for _, p := range pkgs {
+		p = strings.TrimSpace(p)
+		if !strings.HasPrefix(p, mod+"/") {
+			return nil // foreign, synthetic, or the module root — nothing to check — KEEP
+		}
+		rel := strings.TrimPrefix(p, mod+"/")
+		if rel == "" || strings.Contains(rel, "..") {
+			return nil
+		}
+		if _, dup := seen[rel]; dup {
+			continue
+		}
+		seen[rel] = struct{}{}
+		dirs = append(dirs, rel)
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// trunkRedSymbolDefinedAtHead reports whether sym has a package-level Go declaration at
+// HEAD in one of dirs — resolve conjunct 2. It reads HEAD, never the working tree: on a
+// shared multi-session checkout the tree is full of peers' uncommitted work, and a
+// symbol that only exists in someone's unstaged edit is not a fix anyone else has.
+//
+// `git grep` exits non-zero both when it finds NO match and when it fails outright, and
+// this collapses the two to the same answer on purpose: false, meaning KEEP.
+func trunkRedSymbolDefinedAtHead(root string, dirs []string, sym string) bool {
+	if strings.TrimSpace(root) == "" || len(dirs) == 0 || !trunkRedPlainIdent(sym) {
+		return false
+	}
+	args := []string{"grep", "--no-color", "-I", "-l", "-E", trunkRedDefinitionPattern(sym), "HEAD", "--"}
+	for _, d := range dirs {
+		args = append(args, d+"/*.go")
+	}
+	out, err := gitOut(root, args...)
+	if err != nil {
+		return false // no match, or git failed — either way KEEP
+	}
+	return strings.TrimSpace(out) != ""
+}
+
+// trunkRedDefinitionPattern is the POSIX-ERE `git grep` pattern matching a PACKAGE-LEVEL
+// Go declaration of sym: an unindented func/type/var/const whose name is sym, optionally
+// followed by a signature or a generic parameter list. Anchoring at column 0 is what
+// keeps the answer honest — an indented match is a struct field, a local variable, or a
+// grouped-decl member, none of which proves the package-scope symbol the build reported
+// as undefined now exists.
+func trunkRedDefinitionPattern(sym string) string {
+	return "^(func|type|var|const)[[:space:]]+" + sym + "([[:space:]]|\\(|\\[|$)"
+}
+
+// trunkRedPlainIdent reports whether sym is a bare Go identifier — the only shape this
+// file is willing to search for. A qualified break like "metrics.AnchorRefusalMonitor"
+// names a symbol in ANOTHER package, which the failing class's own directories cannot
+// witness; and anything else risks injecting regex metacharacters into the grep pattern.
+// Both are unresolvable rather than unresolved, so both KEEP.
+func trunkRedPlainIdent(sym string) bool {
+	if sym == "" {
+		return false
+	}
+	for i, r := range sym {
+		switch {
+		case r == '_', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // trunkRedTrunkRef names the remote trunk ref this file compares bases against. The
@@ -464,7 +622,7 @@ func renderTrunkRed(sum trunkRedSummary) string {
 	var b strings.Builder
 	if sum.Total == 0 {
 		if sum.ResolvedRows > 0 {
-			fmt.Fprintf(&b, "fak trunk-red: no LIVE shared breaks — %d resolved class(es) across %d witness row(s) folded out (base already merged past on the remote trunk).\n", sum.ResolvedClasses, sum.ResolvedRows)
+			fmt.Fprintf(&b, "fak trunk-red: no LIVE shared breaks — %d resolved class(es) across %d witness row(s) folded out (base merged past on the remote trunk AND first-break symbol defined at HEAD).\n", sum.ResolvedClasses, sum.ResolvedRows)
 			fmt.Fprintf(&b, "  ledger: %s", sum.Ledger)
 			return strings.TrimRight(b.String(), "\n")
 		}
@@ -501,7 +659,7 @@ func renderTrunkRed(sum trunkRedSummary) string {
 		}
 	}
 	if sum.ResolvedRows > 0 {
-		fmt.Fprintf(&b, "  (+ %d resolved class(es) across %d row(s) folded out: base already merged past on the remote trunk)\n", sum.ResolvedClasses, sum.ResolvedRows)
+		fmt.Fprintf(&b, "  (+ %d resolved class(es) across %d row(s) folded out: base merged past on the remote trunk AND first-break symbol defined at HEAD)\n", sum.ResolvedClasses, sum.ResolvedRows)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
