@@ -230,3 +230,39 @@ func TestCurrentDoesNotBorrowVersionFromWorkingTree(t *testing.T) {
 		t.Fatalf("Current() = %q, want %q; installed binary borrowed cwd VERSION", got, fallback)
 	}
 }
+
+func TestReleaseFromModuleVersionAcceptsOnlyReleaseTags(t *testing.T) {
+	// debug.ReadBuildInfo() inside `go test` reports the TEST binary, whose main module
+	// version is "(devel)" with no VCS settings at all, so the go-install path cannot be
+	// exercised in-process. This pins the pure decision that path delegates to, over exactly
+	// the strings the Go toolchain produces: a resolved release tag (`go install …@vX.Y.Z`),
+	// "(devel)" and a VCS pseudo-version (`go build` from source), and "" (no module stamp).
+	cases := []struct {
+		name   string
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{name: "release tag", in: "v0.42.0", want: "0.42.0", wantOK: true},
+		{name: "multi digit release tag", in: "v10.7.123", want: "10.7.123", wantOK: true},
+		{name: "devel", in: "(devel)", wantOK: false},
+		{name: "no module stamp", in: "", wantOK: false},
+		{name: "pseudo version", in: "v0.41.1-0.20260729114657-6ef585379011", wantOK: false},
+		{name: "dirty pseudo version", in: "v0.41.1-0.20260729114657-6ef585379011+dirty", wantOK: false},
+		{name: "prerelease tag", in: "v0.42.0-rc1", wantOK: false},
+		{name: "incompatible", in: "v2.0.0+incompatible", wantOK: false},
+		{name: "missing v prefix", in: "0.42.0", wantOK: false},
+		{name: "too few fields", in: "v0.42", wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := releaseFromModuleVersion(tc.in)
+			if ok != tc.wantOK {
+				t.Fatalf("releaseFromModuleVersion(%q) ok=%v, want %v", tc.in, ok, tc.wantOK)
+			}
+			if got != tc.want {
+				t.Fatalf("releaseFromModuleVersion(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
