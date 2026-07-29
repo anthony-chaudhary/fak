@@ -47,7 +47,18 @@ type AnthropicSSEEvent struct {
 // 408/5xx transient) is RETRIED here with backoff+jitter+Retry-After — BEFORE any onEvent
 // call, where the retry is invisible to the client — exactly as Complete/CompleteStream
 // do, so a real Anthropic 429/529 window no longer collapses the flagship stream to the
-// slower buffered fallback on the first hit. A connection or non-retryable status failure
+// slower buffered fallback on the first hit.
+//
+// An IN-BAND refusal is retried on the same budget (#5491). An overloaded Anthropic may
+// answer 200 + text/event-stream and then send an SSE `error` frame instead of a
+// message_start; because the loop's own decision is made on the HTTP status, that refusal
+// is only visible to the CALLER's onEvent, which reports it back by returning an
+// *UpstreamInBandError. A retryable one (overloaded_error and friends — see
+// anthropic_inband.go) re-sends here, still invisibly; a request error surfaces at once with
+// the upstream's real status. onEvent MUST only return that type while nothing has been
+// relayed to the client, since a re-send is what it asks for.
+//
+// A connection or non-retryable status failure
 // (or a retryable one that survived every attempt) surfaces BEFORE any onEvent call, so the
 // caller can still fall back to the buffered path having sent the client nothing AND
 // without a second generation having been billed (a non-200 produced no tokens). Once
@@ -116,7 +127,9 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	accountFailoverPending := false
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
-	var resp *http.Response
+	// served is set once an attempt produced a genuinely relayed turn, so the loop can tell
+	// "the budget ran out" apart from "we are done" without a nil-response sentinel.
+	served := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Surface the retry BEFORE the otherwise-invisible backoff sleep (the same hook the
@@ -159,7 +172,32 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 				notifyAccountFailover(p, AccountFailoverRecovered, attempt)
 				accountFailoverPending = false
 			}
-			resp = r
+			// A 200 is not yet a SERVED turn. An overloaded Anthropic also refuses IN-BAND:
+			// 200 + text/event-stream, then an SSE `error` frame instead of a message_start.
+			// That refusal is invisible to the status check above, so relayAnthropicStream
+			// reports it back as an *UpstreamInBandError (the caller's onEvent verdict that
+			// nothing has reached the client yet) and a retryable one re-sends HERE — the only
+			// place the re-send is still invisible. Without this the flagship
+			// `fak guard -- claude` stream died on the first in-band overload: one upstream hit,
+			// no retry, no fallback (#5491).
+			serr := relayAnthropicStream(r, onEvent)
+			var ib *UpstreamInBandError
+			if errors.As(serr, &ib) {
+				if ib.Retryable() {
+					// Recorded exactly like a retryable non-200 so the shared backoff, the
+					// #1358 keepsake, and the exhaustion message all behave identically. An
+					// in-band frame carries no response header, hence the empty Header.
+					rs.noteRetryableStatus(ib.Status, []byte(ib.Message), http.Header{}, 400)
+					continue
+				}
+				// A request error no retry can fix: surface the honest status now, converted
+				// to the shape the gateway already knows how to render.
+				return ib.StatusError()
+			}
+			if serr != nil {
+				return serr
+			}
+			served = true
 			break
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
@@ -229,15 +267,25 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		}
 		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
-	if resp == nil {
+	if !served {
 		return rs.exhausted("planner: streaming failed after retries")
 	}
+	return nil
+}
+
+// relayAnthropicStream frames one 200 upstream response as Anthropic SSE and pumps it into
+// onEvent, owning the body. Split out of StreamAnthropicRaw so the read happens INSIDE the
+// retry loop: an in-band `error` frame that arrives before anything is relayed to the client
+// is a retryable attempt outcome, not a terminal one, and only a per-attempt read can hand it
+// back to the loop (#5491). Any error onEvent returns propagates unchanged — including the
+// *UpstreamInBandError the loop keys its re-send on.
+func relayAnthropicStream(resp *http.Response, onEvent func(AnthropicSSEEvent) error) error {
 	defer resp.Body.Close()
 	// The gateway only takes this path against the real Anthropic API, but guard anyway:
 	// an upstream that ignores stream and replies with one buffered JSON body cannot be
 	// framed as SSE, so surface that as unsupported BEFORE any event (the caller falls
 	// back to the buffered path) rather than emit a malformed stream.
-	if !upstreamStreamsSSE(resp) {
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "event-stream") {
 		return ErrStreamingUnsupported
 	}
 	// Wrap the body in an idle-read deadline so an upstream that opens the stream and then

@@ -196,21 +196,6 @@ func (p *anthropicPassthrough) flushHeldTools() {
 	}
 }
 
-// relayBlockEvent forwards one upstream content-block event under the CLIENT-side index
-// this relay assigned to that upstream block, and reports that index. The renumbering is
-// the whole point: held tool_use blocks never reach the client, so upstream indices are
-// not contiguous downstream and an event replayed with its upstream index would address
-// the wrong block. An upstream index with no client index is a held block — nothing is
-// relayed and ok is false.
-func (p *anthropicPassthrough) relayBlockEvent(event string, data json.RawMessage, upstreamIdx int) (clientIdx int, ok bool) {
-	oi, ok := p.passIdx[upstreamIdx]
-	if !ok {
-		return 0, false
-	}
-	relayWithIndex(p.send, event, data, oi)
-	return oi, true
-}
-
 // onEvent is the per-SSE-event relay callback handed to StreamAnthropicRaw. It opens the
 // client stream on message_start (after arming the inbound result floor once), holds and
 // renumbers content blocks, batches held tool_use blocks at message_delta, and forwards
@@ -306,7 +291,8 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			ta.args.WriteString(d.Delta.PartialJSON) // accumulate off-wire
 			return nil
 		}
-		if _, ok := p.relayBlockEvent("content_block_delta", ev.Data, d.Index); ok {
+		if oi, ok := p.passIdx[d.Index]; ok {
+			relayWithIndex(p.send, "content_block_delta", ev.Data, oi)
 			// Accumulate relayed assistant TEXT off-wire so a mid-stream worker death can
 			// replay exactly what the client already saw as a prefill turn (#3353). Only
 			// text_delta is captured — thinking deltas are not prefill-replayable.
@@ -325,7 +311,8 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		if _, held := p.toolBuf[d.Index]; held {
 			return nil // emitted (or dropped) as a batch at message_delta
 		}
-		if oi, ok := p.relayBlockEvent("content_block_stop", ev.Data, d.Index); ok {
+		if oi, ok := p.passIdx[d.Index]; ok {
+			relayWithIndex(p.send, "content_block_stop", ev.Data, oi)
 			if p.openClientBlock == oi {
 				p.openClientBlock = -1 // block closed cleanly; nothing dangling to close on death
 			}
@@ -364,10 +351,16 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			p.send("error", ev.Data)
 			return nil
 		}
-		p.s.logf("gateway: upstream error before stream start (messages)")
-		writeErr(p.w, http.StatusBadGateway, "upstream model error")
-		p.wroteError = true
-		return errPassthroughResponded
+		// An `error` frame BEFORE message_start: the upstream accepted the request with a 200
+		// and then refused in-band — the overload path Anthropic takes instead of an HTTP 529.
+		// Nothing has been relayed to the client yet, so this is NOT terminal: hand the frame
+		// back to StreamAnthropicRaw's retry loop, which re-sends a retryable one invisibly and,
+		// once the budget is spent, surfaces the upstream's OWN status/type (a 529 →
+		// overloaded_error) instead of the opaque 502 + server_error this used to write here —
+		// which both dropped the retry and stripped the signal a client needs to back off
+		// correctly (#5491). Writing nothing is what keeps that retry invisible.
+		p.s.logf("gateway: upstream error frame before stream start (messages); returning to the retry loop")
+		return agent.NewAnthropicInBandError(ev.Data)
 	}
 	return nil
 }
@@ -452,7 +445,12 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			// open — handled by the return false below.
 			var statusErr *agent.UpstreamStatusError
 			if errors.As(err, &statusErr) {
-				s.surfaceUpstreamStatus(w, err, "upstream model error (messages passthrough; surfaced, not re-tried via buffered)")
+				status, code, msg := upstreamErrorStatus(err)
+				if ra := upstreamRetryAfter(err); ra != "" {
+					w.Header().Set("Retry-After", ra)
+				}
+				s.logf("gateway: upstream model error (messages passthrough; surfaced, not re-tried via buffered): %v", err)
+				writeErrCode(w, status, code, msg)
 				return true
 			}
 			s.logf("gateway: anthropic passthrough stream did not open (%v); falling back to buffered", err)
