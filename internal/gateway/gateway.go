@@ -1763,6 +1763,15 @@ type Server struct {
 	// SetTokenRateGate. Guarded by admissionMu alongside admissionCtl.
 	tokenRateGate *TokenRateGate
 
+	// principalTokenRates is the optional PER-PRINCIPAL token allotment book (#5379,
+	// token_admission_principal.go) that composes ABOVE tokenRateGate on the IDENTITY
+	// axis: the authenticated keyset principal selects its own rolling-window budget,
+	// consulted BEFORE the shared provider gate, so one noisy tenant can no longer drink
+	// the whole provider window. nil (the default) leaves the single shared budget exactly
+	// as it was. Guarded by admissionMu alongside tokenRateGate; installed via
+	// SetPrincipalTokenRates.
+	principalTokenRates *PrincipalTokenRates
+
 	// spendGovernor is the optional control-plane SPEND CAP (#3273, epic #3256):
 	// per-scope (tenant/team/agent/session) token/dollar budgets folded from the usage
 	// the gateway already accumulates and evaluated at the served boundary, so a scope
@@ -2330,17 +2339,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		// A lone upstream needs no replica identity, but still honor a name=URL form
 		// (an operator may pin one) by dialing only the URL part.
 		_, dialURL := parseReplicaEntry(baseURLs[0])
-		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, dialURL, model, cfg.APIKey)
-		if err != nil {
-			return nil, err
-		}
-		p.APIKeyFunc = cfg.APIKeyFunc
-		p.AccountFailoverFunc = cfg.AccountFailoverFunc
-		p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
-		p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
-		p.ForceResponsesStream = cfg.ForceResponsesStream
-		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver)
-		return p, nil
+		return newConfiguredHTTPPlanner(cfg, model, dialURL)
 	}
 	replicas := make([]PlannerReplica, 0, len(baseURLs))
 	for _, base := range baseURLs {
@@ -2352,22 +2351,33 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		if name == "" {
 			name = deriveReplicaName(dialURL)
 		}
-		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, dialURL, model, cfg.APIKey)
+		p, err := newConfiguredHTTPPlanner(cfg, model, dialURL)
 		if err != nil {
 			return nil, err
 		}
-		p.APIKeyFunc = cfg.APIKeyFunc
-		p.AccountFailoverFunc = cfg.AccountFailoverFunc
-		p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
-		p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
-		p.ForceResponsesStream = cfg.ForceResponsesStream
-		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver)
 		replicas = append(replicas, PlannerReplica{
 			Name:    name,
 			Planner: p,
 		})
 	}
 	return NewReplicaRouter(model, replicas)
+}
+
+// newConfiguredHTTPPlanner dials one upstream and applies every Config-derived knob to
+// the resulting planner — the wiring newProxyPlanner performs once for a lone upstream
+// and once per replica, so a new Config field is threaded through in exactly one place.
+func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPlanner, error) {
+	p, err := agent.NewProviderHTTPPlanner(cfg.Provider, dialURL, model, cfg.APIKey)
+	if err != nil {
+		return nil, err
+	}
+	p.APIKeyFunc = cfg.APIKeyFunc
+	p.AccountFailoverFunc = cfg.AccountFailoverFunc
+	p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
+	p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
+	p.ForceResponsesStream = cfg.ForceResponsesStream
+	wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver)
+	return p, nil
 }
 
 func cloneConfigHeaders(in map[string]string) map[string]string {
