@@ -47,14 +47,37 @@ placeholders, not hosts you are expected to have — see
 
 ## Stand up the Mac side
 
-Two processes on the Mac, in this order. Both are prerequisites for every command
+**Pick a model that fits first.** Unified memory is the constraint — the model has to fit
+alongside everything else you are running. If you are unsure, start one tier smaller than you
+think: proving the loop with a small model is far faster to debug than fighting swap with a
+large one.
+
+| Your Mac | Start with | Notes |
+|---|---|---|
+| 16 GB | a 7B model at Q4 (~4–5 GB) | Comfortable; good for proving the loop end to end. |
+| 32 GB | a 14B model at Q4 (~9 GB) | The practical sweet spot for coding-shaped work. |
+| 48 GB+ | a 27B model at Q4 (~17 GB) | The reference deployment on this page. |
+
+**Get `fak` on the Mac** if it is not there yet — no Go toolchain needed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
+fak version
+```
+
+If that reports `fak: command not found`, the installer fell back to `~/.local/bin`, which is
+not on the default macOS PATH. Add it (zsh is the macOS default shell):
+`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh`.
+
+Then two processes on the Mac, in this order. Both are prerequisites for every command
 below.
 
 1. **A local model server** speaking the OpenAI API on loopback. Any of
    `llama-server` (llama.cpp), LM Studio, or Ollama works; you need its base URL
    (typically `http://127.0.0.1:8081/v1`) and the model id it serves. The reference
    deployment below uses `llama-server` with a Qwen3.6-27B GGUF, but nothing here is
-   specific to that model.
+   specific to that model. Give it a **32K-or-larger context window** — a coding agent's
+   system prompt and tool surface consume a large share of it before your first message.
 
 2. **`fak serve` in front of it**, bound to an address the driving machine can
    reach — `0.0.0.0`, not loopback, if you are driving from another machine:
@@ -306,6 +329,18 @@ fak console sessions `
 
 This is the repeatable check that the UI is pointed at the same always-on gateway
 instead of a one-off local process.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `fak: command not found` after install | The installer fell back to `~/.local/bin`, which is not on the default macOS PATH — see [Stand up the Mac side](#stand-up-the-mac-side). |
+| An SSH error naming a host you never configured | `FAK_GATEWAY_KEY` was empty, so the launcher tried to fetch the bearer from a remote gateway host over SSH. Export the key, or pass `--fetch-key=false` when the gateway is local. |
+| The preflight panel aborts the launch | The gateway is not reachable at `FAK_MAC_GATEWAY`. Check `curl -s $FAK_MAC_GATEWAY/healthz` — it is unauthenticated, so it answers without a bearer. |
+| Panel shows `planner(live)=mock` | You are pointed at a gateway with no real model behind it; responses would be scripted. Confirm `--base-url` on the `fak serve` side. |
+| `401` from `/metrics` or `/v1/models` | The bearer is missing. These are loopback-exempt from the gateway host itself but not from another machine — use `fak mac --metrics`, which reuses the key the launcher already loaded. |
+| First interactive turn seems hung | Expected on a large local model — prefill is slow and is not streamed. Run `fak mac --overlay` in a second pane to confirm it is progressing. |
+| `address already in use` on `fak serve` | Another process holds the port; pick a different `--addr`. |
 
 ## See also
 
