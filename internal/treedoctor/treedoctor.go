@@ -13,8 +13,8 @@
 // The doctrine treedoctor enforces is the one that session learned the hard way: in an
 // always-on tree you must NEVER delete a peer's live work. So treedoctor only ever reclaims
 // the things that are provably safe — a lockfile whose holder PID is dead; a renamed-aside
-// orphan lock residue file (its `.lock.orphan` name is by construction not an active lock,
-// so it never races a live git op) aged past the live window; a worktree whose HEAD is an
+// lock residue file (its name carries something AFTER the `.lock` an active git lock ends
+// in, so it never races a live git op) aged past the residue floor; a worktree whose HEAD is an
 // ancestor of the trunk (already merged) AND has not been touched recently; and an orphaned
 // per-worker isolation worktree (its dir carries WorkerWorktreeMarker, `fak-worker-wt-*`)
 // that is not live — disposable editing space whose only durable output already landed on
@@ -30,6 +30,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -54,10 +55,18 @@ type Options struct {
 	// Now is the reference time for the live-window check (injectable for tests). Zero =>
 	// time.Now() at call.
 	Now time.Time
+	// ResidueMinAge is the floor under which renamed-aside lock residue is never swept,
+	// independent of LiveWindow. Zero => DefaultResidueMinAge; negative disables the floor
+	// (the test seam) and leaves LiveWindow as the only gate.
+	ResidueMinAge time.Duration
 	// WIP carries the optional build/owner probes for the untracked-WIP inventory. Its zero
 	// value inventories age only (no build probe, owner undiscoverable) — still enough to
 	// classify live vs abandoned. Diagnose always runs the inventory; it is read-only.
 	WIP WIPOptions
+	// RefLock carries the thresholds and seams for the packed-refs.lock / AUTO_MERGE.lock
+	// diagnosis and the loose-ref pressure count. Its zero value is the production
+	// configuration (see reflocks.go).
+	RefLock RefLockOptions
 }
 
 // DefaultLiveWindow: a worktree touched within this long is assumed to belong to a live
@@ -96,17 +105,17 @@ type LockState struct {
 }
 
 // LockResidueState is a renamed-aside git lock file a lock-recovery mechanism left in the
-// git common dir (e.g. `HEAD.lock.orphan-recovered-<n>`, `packed-refs.lock.orphan-<n>`).
-// The `.lock.orphan` infix in its name is the load-bearing safety marker: an ACTIVE git
-// lock ends in exactly `.lock` (`HEAD.lock`, `packed-refs.lock`, `index.lock`, …), so a
-// name carrying `.lock.orphan` is provably NOT a lock git is currently holding — removing
-// it can never race a live transaction. Left unswept, this residue accumulates in the hot
-// shared `.git`. It is swept only once aged past the live window (a just-created one might
+// git common dir (e.g. `fak-commit.lock.stale-20260716-044444`, `index.lock.stale-<stamp>`).
+// The suffix AFTER `.lock` is the load-bearing safety marker: an ACTIVE git lock ends in
+// exactly `.lock` (`HEAD.lock`, `packed-refs.lock`, `index.lock`, …), so a name with
+// anything trailing that is provably NOT a lock git is currently holding — removing it can
+// never race a live transaction. Left unswept, this residue accumulates in the hot shared
+// `.git`. It is swept only once aged past the residue floor (a just-created one might
 // belong to an in-flight recovery, so it is reported but kept).
 type LockResidueState struct {
 	Path       string `json:"path"`
 	AgeSeconds int64  `json:"age_seconds"`
-	Sweepable  bool   `json:"sweepable"` // aged past the live window — safe to remove
+	Sweepable  bool   `json:"sweepable"` // aged past the residue floor — safe to remove
 }
 
 // WorktreeState classifies one worktree for the prune decision.
@@ -127,7 +136,11 @@ type WorktreeState struct {
 type Report struct {
 	Lock        LockState          `json:"lock"`
 	LockResidue []LockResidueState `json:"lock_residue,omitempty"`
-	Worktrees   []WorktreeState    `json:"worktrees"`
+	// RefLocks is the packed-refs.lock / AUTO_MERGE.lock diagnosis plus the loose-ref
+	// pressure that builds while ref packing is blocked (see reflocks.go). Report-only by
+	// default; Sweep reaps a stale ref lock only under apply.
+	RefLocks  RefLockReport   `json:"ref_locks"`
+	Worktrees []WorktreeState `json:"worktrees"`
 	// WIP is the untracked-source inventory: crashed-worker residue and unlanded WIP,
 	// classified for land-or-park. Read-only — Sweep never touches it (a load-bearing
 	// unlanded file is byte-indistinguishable from cruft, so acting on it is a human's call).
@@ -200,7 +213,8 @@ func Diagnose(ctx context.Context, run Runner, opts Options) Report {
 	}
 
 	rep := Report{Lock: diagnoseLock(opts.RepoRoot)}
-	rep.LockResidue = diagnoseLockResidue(opts.RepoRoot, window, now)
+	rep.LockResidue = diagnoseLockResidue(opts.RepoRoot, residueThreshold(window, opts.ResidueMinAge), now)
+	rep.RefLocks = diagnoseRefLocks(opts.RepoRoot, opts.RefLock, now)
 	rep.Worktrees = diagnoseWorktrees(ctx, run, opts.RepoRoot, trunk, window, now)
 	rep.WIP = diagnoseWIP(ctx, run, opts.RepoRoot, window, now, opts.WIP)
 	return rep
@@ -236,6 +250,14 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 		}
 	}
 
+	// Orphaned ref locks (packed-refs.lock / AUTO_MERGE.lock) and the loose-ref pressure
+	// they cause. Report-only unless apply; the reap bar is a frozen mtime PLUS the
+	// two-sample advancing witness, never age alone (see reflocks.go's header).
+	actions = append(actions, sweepRefLocks(rep.RefLocks, apply)...)
+
+	// Tracked separately from len(actions) so a report-only advisory (e.g. loose-ref
+	// pressure) can never make the sweep fire a `git worktree prune` it did not earn.
+	prunedWorktree := false
 	for _, w := range rep.Worktrees {
 		if !w.Prunable {
 			continue
@@ -254,12 +276,13 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 		if apply {
 			if _, _, err := run(ctx, opts.RepoRoot, "worktree", "remove", "--force", w.Path); err == nil {
 				actions = append(actions, "pruned "+kind+" "+w.Path)
+				prunedWorktree = true
 			}
 		} else {
 			actions = append(actions, "would prune "+kind+" "+w.Path)
 		}
 	}
-	if apply && len(actions) > 0 {
+	if apply && prunedWorktree {
 		_, _, _ = run(ctx, opts.RepoRoot, "worktree", "prune")
 	}
 	return rep, actions
@@ -276,33 +299,105 @@ func diagnoseLock(repoRoot string) LockState {
 	}
 }
 
-// lockResidueGlob matches the renamed-aside lock files a recovery mechanism leaves in the
-// git common dir. Its `*` never crosses a path separator, so only files directly in `.git`
-// are considered — the same depth git's own top-level locks live at.
-const lockResidueGlob = "*.lock.orphan*"
+// StaleAsideSuffix is the infix a lock-recovery step stamps onto a git lock file it moves
+// ASIDE instead of deleting: `<name>.lock` + StaleAsideSuffix + `<UTC stamp>`, e.g.
+// `fak-commit.lock.stale-20260716-044444`. It is exported, and paired with StaleAsideName
+// below, so a WRITER and this reaper share ONE spelling.
+//
+// That pairing is the point. This matcher shipped globbing `*.lock.orphan*` — a name
+// nothing in this repository has ever written. The reaper and the residue were never
+// connected by anything but a hand-copied literal, so the drift was invisible: the doctor
+// reported a clean `.git` while seven `fak-commit.lock.stale-*` files and a 1.16 MB
+// `index.lock.stale-20260716-044445` sat there for thirteen days, untouchable by
+// `fak tree-doctor --apply` (#5335). Deriving both ends from these constants is what stops
+// that class of drift from recurring.
+const StaleAsideSuffix = ".stale-"
 
-// diagnoseLockResidue lists orphan lock residue in <repoRoot>/.git, marking as Sweepable
-// each file aged past the live window. It never removes anything — Sweep does, and only for
-// the Sweepable ones. A missing/unglobbable dir yields an empty result (the fail-safe read).
-func diagnoseLockResidue(repoRoot string, window time.Duration, now time.Time) []LockResidueState {
-	matches, err := filepath.Glob(filepath.Join(repoRoot, ".git", lockResidueGlob))
-	if err != nil {
-		return nil
+// StaleAsideStampLayout is the UTC time layout in a stale-aside name (`20060102-150405`),
+// matching the residue the fleet has actually produced.
+const StaleAsideStampLayout = "20060102-150405"
+
+// StaleAsideName returns the path a recovery step must rename lockPath to when it moves a
+// lock aside rather than removing it, so the result is guaranteed to be swept later by
+// diagnoseLockResidue. Callers that build the name by hand are exactly how the matcher
+// drifted away from the residue in the first place.
+func StaleAsideName(lockPath string, at time.Time) string {
+	return lockPath + StaleAsideSuffix + at.UTC().Format(StaleAsideStampLayout)
+}
+
+// lockResidueGlobs match the renamed-aside lock files a recovery mechanism leaves in the
+// git common dir. Each `*` never crosses a path separator, so only files directly in
+// `.git` are considered — the same depth git's own top-level locks live at. Every pattern
+// keeps the same safety invariant: it requires something AFTER `.lock`, so an ACTIVE lock
+// name (`index.lock`, `packed-refs.lock`) can never match.
+//
+//   - the StaleAsideSuffix family is what this tree actually accumulates;
+//   - `*.lock.orphan*` is the legacy spelling this matcher shipped with. It is kept so an
+//     older tree still cleans up, but it has never matched anything this repo writes.
+var lockResidueGlobs = []string{
+	"*.lock" + StaleAsideSuffix + "*",
+	"*.lock.orphan*",
+}
+
+// DefaultResidueMinAge is the floor under which lock residue is NEVER swept, whatever
+// LiveWindow says. A rename-aside is instantaneous, so residue this young may belong to a
+// recovery still in flight — and unlike a worktree, residue costs only bytes to keep. The
+// floor is deliberately larger than DefaultLiveWindow so the residue sweep is strictly the
+// more conservative of the two.
+const DefaultResidueMinAge = 30 * time.Minute
+
+// residueThreshold is the age a residue file must reach before it may be swept: the larger
+// of the caller's live window and the residue floor, so neither knob can make the sweep
+// more aggressive than the other allows. A NEGATIVE ResidueMinAge disables the floor (the
+// test seam for exercising the age gate without a 30-minute fixture).
+func residueThreshold(window, minAge time.Duration) time.Duration {
+	if minAge == 0 {
+		minAge = DefaultResidueMinAge
 	}
+	if minAge > window {
+		return minAge
+	}
+	return window
+}
+
+// diagnoseLockResidue lists renamed-aside lock residue in <repoRoot>/.git, marking as
+// Sweepable each file aged past the residue threshold. It never removes anything — Sweep
+// does, and only for the Sweepable ones. A missing/unglobbable dir yields an empty result
+// (the fail-safe read). Results are de-duplicated (a name can satisfy more than one
+// pattern) and sorted, so the report and the actions are stable run to run.
+func diagnoseLockResidue(repoRoot string, threshold time.Duration, now time.Time) []LockResidueState {
+	gitDir := filepath.Join(repoRoot, ".git")
+	seen := map[string]bool{}
+	var paths []string
+	for _, glob := range lockResidueGlobs {
+		matches, err := filepath.Glob(filepath.Join(gitDir, glob))
+		if err != nil {
+			continue // a malformed pattern must not blind the other families
+		}
+		for _, p := range matches {
+			if !seen[p] {
+				seen[p] = true
+				paths = append(paths, p)
+			}
+		}
+	}
+	sort.Strings(paths)
+
 	var out []LockResidueState
-	for _, path := range matches {
+	for _, path := range paths {
 		info, serr := os.Stat(path)
 		if serr != nil || info.IsDir() {
 			continue
 		}
+		age := now.Sub(info.ModTime())
 		var ageSec int64
-		if age := now.Sub(info.ModTime()); age > 0 {
+		if age > 0 {
 			ageSec = int64(age / time.Second)
 		}
 		out = append(out, LockResidueState{
 			Path:       path,
 			AgeSeconds: ageSec,
-			Sweepable:  now.Sub(info.ModTime()) >= window,
+			Sweepable:  age >= threshold,
 		})
 	}
 	return out
