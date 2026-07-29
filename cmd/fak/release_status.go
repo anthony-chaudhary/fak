@@ -16,16 +16,17 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/releasestale"
 	"github.com/anthony-chaudhary/fak/internal/releasestatus"
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const releaseStatusSchema = "fleet-release-status/1"
 
-var (
-	releaseStatusSemverRE = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)$`)
-	releaseStatusStableRE = regexp.MustCompile(`^stable/.+`)
-)
+// The rolling-tag pattern is NOT redeclared here: releasestale.IsSemverTag owns it, so
+// this verb and the staleness fold can never disagree about which tags exist.
+var releaseStatusStableRE = regexp.MustCompile(`^stable/.+`)
 
 var releaseStatusRunJSON = releaseStatusRunPythonJSON
 var releaseStatusNow = func() time.Time { return time.Now().UTC() }
@@ -961,7 +962,7 @@ func releaseStatusSemverTags(root string, merged bool) []string {
 	tags := []string{}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if releaseStatusSemverRE.MatchString(line) {
+		if releasestale.IsSemverTag(line) {
 			tags = append(tags, line)
 		}
 	}
@@ -1107,21 +1108,11 @@ func releaseStatusFrontmatter(text string) map[string]string {
 	return out
 }
 
-func releaseStatusSemverTuple(s string) ([3]int, bool) {
-	m := releaseStatusSemverRE.FindStringSubmatch(strings.TrimSpace(s))
-	if m == nil {
-		return [3]int{}, false
-	}
-	var out [3]int
-	for i := 0; i < 3; i++ {
-		n, err := strconv.Atoi(m[i+1])
-		if err != nil {
-			return [3]int{}, false
-		}
-		out[i] = n
-	}
-	return out, true
-}
+// releaseStatusSemverTuple is releasestale.ParseSemver, which owns the one tag-ordering
+// rule for the fleet. This verb used to carry a byte-identical copy over a byte-identical
+// copy of the regex; the ready/cut gates here and the staleness fold there rank the SAME
+// tags, so two comparators was one drift away from two answers.
+func releaseStatusSemverTuple(s string) ([3]int, bool) { return releasestale.ParseSemver(s) }
 
 func releaseStatusMustSemverTuple(s string) [3]int {
 	v, _ := releaseStatusSemverTuple(s)
@@ -1264,10 +1255,7 @@ func releaseStatusShortSHA(s string) string {
 	return s
 }
 
-func releaseStatusTail(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= n {
-		return s
-	}
-	return s[len(s)-n:]
-}
+// releaseStatusTail clamps a git/gh transcript to its last n bytes for a "reason" field.
+// strmatch.Tail owns the one definition; internal/workerworktree carried a byte-identical
+// private copy for the same job (quote the END of a failing command's output).
+func releaseStatusTail(s string, n int) string { return strmatch.Tail(s, n) }

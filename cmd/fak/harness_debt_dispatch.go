@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -118,10 +119,9 @@ type hddSeenRecord struct {
 	IssueURL string `json:"issue_url,omitempty"`
 }
 
-type hddSeenCache struct {
-	Schema string                   `json:"schema"`
-	Seen   map[string]hddSeenRecord `json:"seen"`
-}
+// hddSeenCache is the harness-debt surface's instance of the shared debt-dispatch seen cache
+// (an alias, so the literals and field accesses below are unchanged).
+type hddSeenCache = dogfoodissues.SeenCache[hddSeenRecord]
 
 type hddIssue struct {
 	Number int    `json:"number"`
@@ -450,45 +450,17 @@ func hddIssueBody(s hddScaffold, key, verdictPath string) string {
 	return b.String()
 }
 
+// hddLoadSeen/hddSaveSeen are dogfoodissues.LoadSeen/SaveSeen under this surface's schema tag.
+// The debt-dispatch siblings named in this file's header all persist the same key->record
+// cache, and this leaf used to carry a byte-identical private copy of the read/write rules
+// (missing file and empty file both mean "nothing filed yet"; the schema tag and map are
+// defaulted on both sides). Only the schema tag and the record type are this surface's own.
 func hddLoadSeen(path string) (hddSeenCache, error) {
-	cache := hddSeenCache{Schema: hddSeenSchema, Seen: map[string]hddSeenRecord{}}
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return cache, nil
-	}
-	if err != nil {
-		return cache, err
-	}
-	if strings.TrimSpace(string(b)) == "" {
-		return cache, nil
-	}
-	if err := json.Unmarshal(b, &cache); err != nil {
-		return cache, err
-	}
-	if cache.Schema == "" {
-		cache.Schema = hddSeenSchema
-	}
-	if cache.Seen == nil {
-		cache.Seen = map[string]hddSeenRecord{}
-	}
-	return cache, nil
+	return dogfoodissues.LoadSeen[hddSeenRecord](path, hddSeenSchema)
 }
 
 func hddSaveSeen(path string, cache hddSeenCache) error {
-	if cache.Schema == "" {
-		cache.Schema = hddSeenSchema
-	}
-	if cache.Seen == nil {
-		cache.Seen = map[string]hddSeenRecord{}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(cache, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return dogfoodissues.SaveSeen(path, hddSeenSchema, cache)
 }
 
 func hddMarkSuccessful(cache *hddSeenCache, plan []hddPlanRow, synced []hddSyncRow, now time.Time) {

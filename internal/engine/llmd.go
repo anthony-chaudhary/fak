@@ -47,11 +47,11 @@ type LLMDConfig struct {
 // hyphen, while environment variables cannot.
 func EnvLLMDConfig() LLMDConfig {
 	return LLMDConfig{
-		BaseURL:    envFirst("FAK_LLMD_BASE_URL", "FAK_LLM_D_BASE_URL"),
-		Model:      envFirst("FAK_LLMD_MODEL", "FAK_LLM_D_MODEL"),
-		APIKey:     envFirst("FAK_LLMD_API_KEY", "FAK_LLM_D_API_KEY"),
-		WorkerID:   strmatch.FirstNonEmpty(envFirst("FAK_LLMD_WORKER_ID", "FAK_LLM_D_WORKER_ID"), LLMDEngineID),
-		MetricsURL: envFirst("FAK_LLMD_METRICS_URL", "FAK_LLM_D_METRICS_URL"),
+		BaseURL:    EnvFirst("FAK_LLMD_BASE_URL", "FAK_LLM_D_BASE_URL"),
+		Model:      EnvFirst("FAK_LLMD_MODEL", "FAK_LLM_D_MODEL"),
+		APIKey:     EnvFirst("FAK_LLMD_API_KEY", "FAK_LLM_D_API_KEY"),
+		WorkerID:   strmatch.FirstNonEmpty(EnvFirst("FAK_LLMD_WORKER_ID", "FAK_LLM_D_WORKER_ID"), LLMDEngineID),
+		MetricsURL: EnvFirst("FAK_LLMD_METRICS_URL", "FAK_LLM_D_METRICS_URL"),
 	}
 }
 
@@ -189,7 +189,14 @@ func ParseLLMDPrometheus(workerID, text string) ServingMetricsSnapshot {
 	return snap
 }
 
-func envFirst(keys ...string) string {
+// EnvFirst returns the value of the first named environment variable that holds
+// non-whitespace text, or "" when none does. The value is returned UNTRIMMED (an API key
+// with deliberate padding survives); only the emptiness test trims.
+//
+// Exported because the engine's env-key convention (a canonical FAK_LLMD_* name plus its
+// FAK_LLM_D_* alias) is read from outside the leaf too — `fak llmd-smoke` resolves the same
+// keys and used to carry a byte-identical private copy of this loop.
+func EnvFirst(keys ...string) string {
 	for _, key := range keys {
 		if v := os.Getenv(key); strings.TrimSpace(v) != "" {
 			return v

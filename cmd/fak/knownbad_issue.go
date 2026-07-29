@@ -16,11 +16,10 @@ package main
 
 import (
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
+	"github.com/anthony-chaudhary/fak/internal/guardcomplaint"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/knownbad"
 )
@@ -30,10 +29,11 @@ import (
 // queue.
 const knownBadIssueLabel = "known-bad"
 
-// knownBadOccurrencesRE reads the re-file count back out of an existing issue body so an
-// update can increment it — a signature that keeps re-correlating across nightruns is a
-// stronger, longer-lived blocker than a one-off, and the count makes that legible.
-var knownBadOccurrencesRE = regexp.MustCompile("(?m)^- occurrences: `?(\\d+)`?")
+// The re-file count is read back out of an existing issue body so an update can increment
+// it — a signature that keeps re-correlating across nightruns is a stronger, longer-lived
+// blocker than a one-off, and the count makes that legible. The `- occurrences:` line is
+// shared marker grammar across the dogfoodissues producers, so its reader (and its pattern)
+// live once, in guardcomplaint.OccurrencesOf, rather than being re-declared here.
 
 // knownBadIssueKey is the stable dedup key. The signature already folds (reason class, tree
 // globs, failure hash) into one content hash, so it uniquely identifies the shared failure;
@@ -53,19 +53,10 @@ func knownBadIssueTitle(rec knownbad.Record) string {
 	return fmt.Sprintf("known-bad [%s] shared across the fleet — %s", rec.ReasonClass, trees)
 }
 
-// knownBadOccurrencesOf reads the occurrence count from an existing body, or 0 when absent
-// or unparseable (so a malformed body restarts the count at 1 on the next file).
-func knownBadOccurrencesOf(body string) int {
-	m := knownBadOccurrencesRE.FindStringSubmatch(body)
-	if m == nil {
-		return 0
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
+// knownBadOccurrencesOf is guardcomplaint.OccurrencesOf: absent or unparseable reads as 0,
+// so a malformed body restarts the count at 1 on the next file. Both surfaces file through
+// the same internal/dogfoodissues plumbing and used to carry byte-identical private readers.
+func knownBadOccurrencesOf(body string) int { return guardcomplaint.OccurrencesOf(body) }
 
 // knownBadIssueBody renders the marker-stamped issue body. Line 1 is the dogfoodissues dedup
 // marker (so dogfoodissues.Sync's create-verification passes and a re-list matches this

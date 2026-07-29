@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/toolseq"
 	"github.com/anthony-chaudhary/fak/internal/tooltrend"
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
+	"github.com/anthony-chaudhary/fak/internal/trajhook"
 )
 
 // trajReportSchema stamps the combined session-analytics payload so a consumer can
@@ -98,13 +99,10 @@ func cmdTrajReport(args []string) {
 // sorting each trace's turns by Seq so a session reads in call order regardless of
 // how the corpus lines were ordered on disk.
 func groupByTrace(turns []trajectory.Turn) (order []string, byTrace map[string][]trajectory.Turn) {
-	byTrace = map[string][]trajectory.Turn{}
-	for _, t := range turns {
-		if _, seen := byTrace[t.TraceID]; !seen {
-			order = append(order, t.TraceID)
-		}
-		byTrace[t.TraceID] = append(byTrace[t.TraceID], t)
-	}
+	// The grouping half is trajhook.GroupByTrace (the #3096 refcount fold needs the same
+	// first-seen trace order); the Seq sort below stays here because the two callers differ
+	// on whether it may mutate the grouped slice — this one sorts in place, that one copies.
+	order, byTrace = trajhook.GroupByTrace(turns)
 	for id := range byTrace {
 		g := byTrace[id]
 		sort.SliceStable(g, func(i, j int) bool { return g[i].Seq < g[j].Seq })

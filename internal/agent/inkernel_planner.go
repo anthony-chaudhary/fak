@@ -697,7 +697,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if err != nil {
 		return nil, err
 	}
-	stops := inKernelStopIDs(p.tok, p.m.Cfg)
+	stops := StopIDs(p.tok, p.m.Cfg)
 
 	// emit runs per generated token: decode the piece, accumulate the text, and apply the
 	// per-request string-suffix Stop (orthogonal to the token-ID stops). Returning true

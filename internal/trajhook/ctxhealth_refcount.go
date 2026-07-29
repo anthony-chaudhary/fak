@@ -29,6 +29,33 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
+// GroupByTrace buckets a flat corpus into per-trace turn slices, returning the trace ids
+// in FIRST-SEEN order alongside the map. The order slice is the point: ranging a map is
+// nondeterministic, so any fold that walks traces needs a stable sequence, and first-seen
+// preserves the corpus's own narrative order for a reader.
+//
+// Turns inside each bucket keep their corpus-relative order; this does NOT sort them by
+// Seq. Callers that need call order sort their own bucket, because they differ on whether
+// the sort may mutate the grouped slice (`fak traj report` sorts in place; the refcount
+// fold sorts a copy). Grouping is the shared part; ordering is not.
+//
+// Exported because it is the shared preamble of every per-trace fold: this refcount
+// detector and `fak traj report` carried byte-identical private copies of the loop.
+//
+// An empty corpus yields a NIL order (the map is always non-nil). That is deliberate:
+// the report caller returned nil here before and only ever ranges it, so nil keeps every
+// existing caller byte-identical rather than trading one allocation for a behaviour change.
+func GroupByTrace(corpus []trajectory.Turn) (order []string, byTrace map[string][]trajectory.Turn) {
+	byTrace = map[string][]trajectory.Turn{}
+	for _, t := range corpus {
+		if _, seen := byTrace[t.TraceID]; !seen {
+			order = append(order, t.TraceID)
+		}
+		byTrace[t.TraceID] = append(byTrace[t.TraceID], t)
+	}
+	return order, byTrace
+}
+
 const (
 	// LabelUseAfterFree is the closed signal a shed-then-referenced span emits: the
 	// trim dropped a span a later turn still needed. It is this detector's own flag
@@ -74,15 +101,7 @@ type ShedSpanStat struct {
 // than once binds to its FIRST shed (the earliest point after which any reference
 // is use-after-free). A corpus that sheds nothing returns an empty slice.
 func ShedSpanRefcounts(corpus []trajectory.Turn) []ShedSpanStat {
-	// Group turns by trace, remembering first-seen trace order for stable output.
-	byTrace := map[string][]trajectory.Turn{}
-	order := []string{}
-	for _, t := range corpus {
-		if _, seen := byTrace[t.TraceID]; !seen {
-			order = append(order, t.TraceID)
-		}
-		byTrace[t.TraceID] = append(byTrace[t.TraceID], t)
-	}
+	order, byTrace := GroupByTrace(corpus)
 
 	var out []ShedSpanStat
 	for _, id := range order {

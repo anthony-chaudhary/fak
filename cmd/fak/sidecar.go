@@ -36,6 +36,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cadencereport"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/sidecar"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -313,12 +314,10 @@ func readJSONObject(path string) (map[string]any, error) {
 	return m, nil
 }
 
-func readRaw(path string) ([]byte, error) {
-	if path == "-" {
-		return io.ReadAll(os.Stdin)
-	}
-	return os.ReadFile(path)
-}
+// readRaw is pathutil.ReadFileOrStdin under the name this file's three loaders read best
+// with. The file-or-'-' convention has ONE definition (internal/pathutil); this used to be a
+// byte-identical private re-derivation of it.
+func readRaw(path string) ([]byte, error) { return pathutil.ReadFileOrStdin(path) }
 
 func asStr(v any) string {
 	if s, ok := v.(string); ok {

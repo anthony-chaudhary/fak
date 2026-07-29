@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -54,10 +54,10 @@ type SeenRecord struct {
 	IssueURL string `json:"issue_url,omitempty"`
 }
 
-type SeenCache struct {
-	Schema string                `json:"schema"`
-	Seen   map[string]SeenRecord `json:"seen"`
-}
+// SeenCache is the learning-debt surface's instance of the shared debt-dispatch seen cache.
+// It stays an alias rather than its own struct so every composite literal and field access
+// here (and in cmd/fak) is unchanged, while the format and defaulting live in one place.
+type SeenCache = dogfoodissues.SeenCache[SeenRecord]
 
 type Issue struct {
 	Number int    `json:"number"`
@@ -125,45 +125,16 @@ func LoadPayload(path string) (map[string]any, error) {
 	return m, nil
 }
 
+// LoadSeen reads this surface's seen cache, stamping SeenSchema on a missing/empty/untagged
+// file. The read rules (absent file and empty file both mean "nothing filed yet") are
+// dogfoodissues'; this leaf supplies only its own schema tag and record type.
 func LoadSeen(path string) (SeenCache, error) {
-	cache := SeenCache{Schema: SeenSchema, Seen: map[string]SeenRecord{}}
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return cache, nil
-	}
-	if err != nil {
-		return cache, err
-	}
-	if strings.TrimSpace(string(b)) == "" {
-		return cache, nil
-	}
-	if err := json.Unmarshal(b, &cache); err != nil {
-		return cache, err
-	}
-	if cache.Schema == "" {
-		cache.Schema = SeenSchema
-	}
-	if cache.Seen == nil {
-		cache.Seen = map[string]SeenRecord{}
-	}
-	return cache, nil
+	return dogfoodissues.LoadSeen[SeenRecord](path, SeenSchema)
 }
 
+// SaveSeen writes this surface's seen cache under SeenSchema.
 func SaveSeen(path string, cache SeenCache) error {
-	if cache.Schema == "" {
-		cache.Schema = SeenSchema
-	}
-	if cache.Seen == nil {
-		cache.Seen = map[string]SeenRecord{}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(cache, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return dogfoodissues.SaveSeen(path, SeenSchema, cache)
 }
 
 func ExtractDefects(payload map[string]any) []Defect {

@@ -376,7 +376,7 @@ func redactLaunchArg(arg, workspace string, account Account) string {
 	out = replaceLaunchSecret(out, account.Dir, "<account-dir>")
 	out = replaceLaunchSecret(out, account.Tag, "<account>")
 	if strings.Contains(out, "://") {
-		out = redactLaunchURL(out)
+		out = RedactLaunchURL(out)
 	}
 	if idx := strings.Index(out, "="); idx > 0 && isSensitiveKey(out[:idx]) {
 		return out[:idx+1] + "<redacted>"
@@ -398,7 +398,14 @@ func replaceLaunchSecret(s, secret, marker string) string {
 	return s
 }
 
-func redactLaunchURL(s string) string {
+// RedactLaunchURL strips the userinfo and query string from a launch-argument URL, leaving
+// scheme/host/path intact. A value that does not parse as an absolute URL is returned
+// unchanged (it was never a URL, so there is nothing to redact).
+//
+// Exported because `fak dispatch tick`'s broker-side redactor needs the SAME rule: the two
+// used to carry byte-identical copies, which is exactly how a redaction rule drifts and one
+// surface starts leaking a credential the other strips.
+func RedactLaunchURL(s string) string {
 	u, err := url.Parse(s)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return s

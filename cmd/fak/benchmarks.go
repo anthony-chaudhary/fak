@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/benchcatalog"
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -229,10 +230,7 @@ func nearest(q string) string {
 	return ""
 }
 
-func commonPrefix(a, b string) int {
-	n := 0
-	for n < len(a) && n < len(b) && a[n] == b[n] {
-		n++
-	}
-	return n
-}
+// commonPrefix ranks a candidate benchmark name by how many leading BYTES it shares
+// with the query. strmatch.CommonPrefixLen owns the one definition; internal/quality's
+// decode auditor carried a byte-identical private copy for its divergence offsets.
+func commonPrefix(a, b string) int { return strmatch.CommonPrefixLen(a, b) }

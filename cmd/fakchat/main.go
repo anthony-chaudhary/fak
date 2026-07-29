@@ -78,7 +78,7 @@ func main() {
 	m, quantLoaded, loadMS := loadModel(fl, cfg, hybrid, spin)
 
 	tok := loadTokenizer(fl, cfg)
-	stops := stopIDs(tok, cfg)
+	stops := agent.StopIDs(tok, cfg)
 
 	// ChatML prompt (Qwen / SmolLM2 family). Special tokens are parsed literally.
 	chat := "<|im_start|>system\n" + *fl.sys + "<|im_end|>\n" +
@@ -415,25 +415,10 @@ func loadLean(dir string, cfg model.Config) (*model.Model, error) {
 	return model.LoadSafetensorsQuant(filepath.Join(dir, "model.safetensors"), cfg)
 }
 
-// stopIDs collects the generation stop tokens: <|im_end|>, <|endoftext|>, and any
-// EOS ids the config declares.
-func stopIDs(tok *tokenizer.Tokenizer, cfg model.Config) map[int]bool {
-	stops := map[int]bool{}
-	for id, content := range tok.SpecialTokens() {
-		if content == "<|im_end|>" || content == "<|endoftext|>" {
-			stops[id] = true
-		}
-	}
-	if cfg.EOSTokenID > 0 {
-		stops[cfg.EOSTokenID] = true
-	}
-	for _, e := range cfg.EOSTokenIDs {
-		if e > 0 {
-			stops[e] = true
-		}
-	}
-	return stops
-}
+// The generation stop set (<|im_end|>, <|endoftext|>, and the config's EOS ids) is
+// agent.StopIDs — a property of the model, not of this REPL. This file used to carry a
+// byte-identical private copy of the in-kernel planner's, so the same checkpoint could
+// have stopped in two places.
 
 // printPhaseProfile dumps the FAK_QPROFILE=1 coarse phase split (which real phase ate the
 // run — recurrence vs projections vs attention) to stderr, top phases first. Opt-in only;

@@ -202,9 +202,16 @@ func qwenToolCallArgs(args string) string {
 	return args
 }
 
-// inKernelStopIDs mirrors cmd/fakchat.stopIDs: <|im_end|>, <|endoftext|>, and any
-// EOS ids the model config declares.
-func inKernelStopIDs(tok *tokenizer.Tokenizer, cfg model.Config) map[int]bool {
+// StopIDs collects the generation stop tokens for a ChatML-family model: the
+// <|im_end|> / <|endoftext|> special tokens the tokenizer declares, plus any EOS id
+// (singular or list) the model config declares. Ids <= 0 are treated as "unset" and
+// never become a stop, so a config that omits the field cannot halt decode at token 0.
+//
+// Exported because a stop set is a property of the MODEL, not of a caller: this
+// in-kernel planner and the cmd/fakchat REPL decode the same checkpoints, and each
+// previously carried a byte-identical private copy. A stop token that one of them
+// honoured and the other did not would end the SAME turn at two different places.
+func StopIDs(tok *tokenizer.Tokenizer, cfg model.Config) map[int]bool {
 	stops := map[int]bool{}
 	for id, content := range tok.SpecialTokens() {
 		if content == "<|im_end|>" || content == "<|endoftext|>" {

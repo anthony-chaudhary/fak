@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // These defaults are PUBLIC-SAFE PLACEHOLDERS, not a real host. fak is a public
@@ -728,14 +730,10 @@ func claudeMacOverlayLegend() string {
 	return b.String()
 }
 
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
+// firstNonEmpty is strmatch.FirstTrimmed under the name ~50 call sites in this binary
+// already read with. The "first value with non-whitespace text, returned TRIMMED" rule has
+// ONE definition (internal/strmatch); this used to re-derive it byte for byte.
+func firstNonEmpty(vals ...string) string { return strmatch.FirstTrimmed(vals...) }
 
 func blankDash(s string) string {
 	if strings.TrimSpace(s) == "" {

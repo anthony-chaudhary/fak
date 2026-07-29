@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -172,11 +174,7 @@ func productOf(row Account) string {
 	return AccountProduct(row.Account)
 }
 
-func capacityFirstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
+// capacityFirstNonEmpty is strmatch.FirstTrimmed: first value with non-whitespace text,
+// returned trimmed. Kept as a named local so capstate.go's cross-reference still resolves,
+// but the rule itself now has exactly one definition instead of a private copy here.
+func capacityFirstNonEmpty(vals ...string) string { return strmatch.FirstTrimmed(vals...) }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // uniReplacement is the UTF-8 encoding of U+FFFD, the replacement character a
@@ -169,14 +171,10 @@ func uniHexNibble(c byte) (byte, bool) {
 	return 0, false
 }
 
-// uniCommonPrefixLen returns the byte length of the longest common prefix.
-func uniCommonPrefixLen(a, b string) int {
-	n := 0
-	for n < len(a) && n < len(b) && a[n] == b[n] {
-		n++
-	}
-	return n
-}
+// uniCommonPrefixLen returns the byte length of the longest common prefix — the offset
+// of the first divergent byte, which is exactly what a decode audit reports. It is
+// strmatch.CommonPrefixLen; `fak benchmarks`' name matcher carried an identical copy.
+func uniCommonPrefixLen(a, b string) int { return strmatch.CommonPrefixLen(a, b) }
 
 // uniWindow returns a short slice of s starting at byte offset off — up to 16
 // bytes, trimmed back to a rune boundary — or "<end>" past the end: enough

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
@@ -225,17 +226,10 @@ func guardPreflightRemoteServe(baseURL string) error {
 // base-URL variable: Anthropic clients (Claude Code, the Anthropic SDKs) read
 // ANTHROPIC_BASE_URL; OpenAI-compatible clients read OPENAI_BASE_URL (gemini/xai are
 // proxied on the OpenAI-compatible surface here).
-func guardEnvVar(provider, override string) string {
-	if v := strings.TrimSpace(override); v != "" {
-		return v
-	}
-	switch provider {
-	case "anthropic":
-		return "ANTHROPIC_BASE_URL"
-	default:
-		return "OPENAI_BASE_URL"
-	}
-}
+// It is dropin.EnvVar: the drop-in leaf owns the provider→base-URL-variable mapping, and the
+// guard must inject the SAME variable the drop-in surface documents or a guarded child and an
+// unguarded one point at different places. This used to be a byte-identical private copy.
+func guardEnvVar(provider, override string) string { return dropin.EnvVar(provider, override) }
 
 // guardTimeoutFloorS is the generous HTTP write / planner timeout (in seconds) a
 // guarded session raises the gateway floors to, so a long frontier turn is never cut

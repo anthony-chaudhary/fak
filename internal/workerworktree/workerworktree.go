@@ -42,6 +42,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -420,7 +421,15 @@ func Reap(root, wtPath string, git GitRunner) Result {
 // when non-empty, scopes the commit to the worker's declared region — never an
 // add -A. verify (when non-nil) is a witness run in the worktree before anything
 // touches the trunk; a failed witness refuses the land. FAIL-OPEN on git errors.
-func countPathsOutsideTrees(changed, trees []string) int {
+// CountPathsOutsideTrees counts how many of `changed` fall outside every declared tree in
+// `trees`. Both sides are normalised to forward slashes and stripped of leading/trailing
+// separators first, and a tree matches a path exactly or as a "<tree>/" prefix; an empty
+// tree entry matches nothing (so a stray "" can never swallow the whole diff).
+//
+// Exported because the out-of-lane count is a LEASE-SCOPE verdict, and `fak dispatch tick`'s
+// witness sweep grades the same worker diffs with it. The two used to carry byte-identical
+// copies, which is how a land-time refusal and its post-hoc witness silently disagree.
+func CountPathsOutsideTrees(changed, trees []string) int {
 	outside := 0
 	for _, path := range changed {
 		path = strings.Trim(strings.ReplaceAll(path, "\\", "/"), "/")
@@ -457,7 +466,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	droppedOutOfLane := 0
 	if len(paths) > 0 {
 		if namesRC, names := run(git, wtPath, []string{"diff", "--name-only", diffRef}); namesRC == 0 {
-			droppedOutOfLane = countPathsOutsideTrees(strings.Fields(names), paths)
+			droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)
 		}
 	}
 	if verify != nil {
@@ -838,10 +847,7 @@ func Count(root string, git GitRunner) (int, []string) {
 	return len(ours), ours
 }
 
-func tail(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= n {
-		return s
-	}
-	return s[len(s)-n:]
-}
+// tail clamps a git/gh transcript to its last n bytes for a Result.Detail field —
+// the diagnosis is at the END of a failing command's output. strmatch.Tail owns the
+// one definition; `fak release status` carried a byte-identical private copy.
+func tail(s string, n int) string { return strmatch.Tail(s, n) }

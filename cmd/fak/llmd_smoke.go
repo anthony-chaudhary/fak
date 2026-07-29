@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -412,18 +411,13 @@ func llmdRawText(raw json.RawMessage) string {
 	return ""
 }
 
+// llmdEndpoint is engine.JoinEndpoint, which owns the one base-URL composition rule (the
+// vLLM adapter used a byte-identical private copy). The invalid-URL wording is passed in
+// rather than inherited: this one is the operator's CLI error and keeps its own text.
 func llmdEndpoint(baseURL, suffix string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil {
-		return "", err
-	}
-	if u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("invalid llm-d base URL %q", baseURL)
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + suffix
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String(), nil
+	return engine.JoinEndpoint(baseURL, suffix, func(b string) error {
+		return fmt.Errorf("invalid llm-d base URL %q", b)
+	})
 }
 
 func llmdResolveAPIKey(apiKeyEnv string) (string, error) {
@@ -444,14 +438,10 @@ func llmdApplyAuth(req *http.Request, apiKey string) {
 	}
 }
 
-func llmdEnvFirst(keys ...string) string {
-	for _, key := range keys {
-		if v := os.Getenv(key); strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
+// llmdEnvFirst is engine.EnvFirst — the SAME env-key resolution the llm-d driver itself uses,
+// so `fak llmd-smoke` can never read a different variable (or read it differently) from the
+// engine it is smoke-testing. It used to be a byte-identical private copy.
+func llmdEnvFirst(keys ...string) string { return engine.EnvFirst(keys...) }
 
 func writeLLMDSmokeJSON(w io.Writer, report llmdSmokeReport) {
 	raw, _ := json.MarshalIndent(report, "", "  ")

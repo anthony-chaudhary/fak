@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/issuecohort"
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/issuecontractrepair"
 )
@@ -327,17 +328,11 @@ func buildDecomposeRow(d issuecontract.IssueDraft, review issuecontract.Review, 
 	return row
 }
 
-// isDecomposeTarget mirrors issuecohort.isSplitTarget: a review is an epic to
-// split when it is flagged non-leaf or oversized, the two always-on structural
-// gates issuecontract raises for a unit that must decompose before dispatch.
-func isDecomposeTarget(review issuecontract.Review) bool {
-	for _, r := range review.Reasons {
-		if r == issuecontract.ReasonNotDispatchLeaf || r == issuecontract.ReasonOversizedSteps {
-			return true
-		}
-	}
-	return false
-}
+// isDecomposeTarget no longer MIRRORS issuecohort's rule — it IS that rule. A review is
+// an epic to split when it is flagged non-leaf or oversized, the two always-on structural
+// gates issuecontract raises for a unit that must decompose before dispatch; a mirrored
+// copy could have drifted a reason apart from the cohort planner that routes on it.
+func isDecomposeTarget(review issuecontract.Review) bool { return issuecohort.IsSplitTarget(review) }
 
 func decomposeReasons(review issuecontract.Review) []string {
 	var out []string

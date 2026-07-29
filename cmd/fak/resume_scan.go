@@ -343,12 +343,7 @@ func firstResetHint(rows []scanRow) string {
 	return ""
 }
 
-// resetHint extracts the human "resets ..." phrase from a refusal message, e.g.
-// "You've hit your session limit · resets 8pm (America/Los_Angeles)" -> "8pm (America/Los_Angeles)".
-func resetHint(msg string) string {
-	i := strings.Index(strings.ToLower(msg), "resets ")
-	if i < 0 {
-		return ""
-	}
-	return strings.TrimSpace(msg[i+len("resets "):])
-}
+// resetHint is resume.ResetHint — the leaf owns the refusal-string vocabulary this shell
+// classifies against, so the "resets ..." tail is extracted by the SAME parse the leaf uses
+// rather than a byte-identical private copy that could drift away from it.
+func resetHint(msg string) string { return resume.ResetHint(msg) }

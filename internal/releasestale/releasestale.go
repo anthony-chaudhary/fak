@@ -44,6 +44,16 @@ const Schema = "fak-release-staleness/1"
 // a clean semver tag, so that is the only thing whose lag matters here.
 var semverRe = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)$`)
 
+// IsSemverTag reports whether s names a plain rolling release tag — the filter every
+// `git tag` sweep applies before ranking. It trims first, like ParseSemver, because
+// its input is a raw line off git's stdout; both existing callers already trimmed, so
+// the trim widens nothing they can observe.
+//
+// It exists so the PATTERN has one owner too, not just the parser: `fak release status`
+// scanned tag lines through its own byte-identical copy of semverRe, and a tag the two
+// disagreed about would be ranked by one gate and invisible to the other.
+func IsSemverTag(s string) bool { return semverRe.MatchString(strings.TrimSpace(s)) }
+
 // Verdict is the publish-freshness judgment of the latest tag against HEAD.
 type Verdict int
 
@@ -242,15 +252,25 @@ func nextAction(p Payload) string {
 // versionAheadOfTag reports whether the VERSION marker is a higher semver than the latest
 // tag — i.e. a release commit bumped VERSION but the tag was never pushed.
 func versionAheadOfTag(version, tag string) bool {
-	vv, okv := parseSemver(version)
-	tv, okt := parseSemver(tag)
+	vv, okv := ParseSemver(version)
+	tv, okt := ParseSemver(tag)
 	if !okv || !okt {
 		return false
 	}
 	return less(tv, vv)
 }
 
-func parseSemver(s string) ([3]int, bool) {
+// ParseSemver splits a rolling release tag into its (major, minor, patch) tuple, and
+// reports whether s was one at all. Surrounding whitespace is trimmed first (tag lines
+// come off `git tag` one per line); anything that is not a bare vMAJOR.MINOR.PATCH — a
+// pre-release, a channel tag like stable/… , a numeric field too large for an int — is
+// not a semver tag and returns false, never a partially-filled tuple.
+//
+// Exported because tag ordering must be ONE rule fleet-wide: this staleness fold and
+// `fak release status` (whose ready/cut gates compare the same tags) previously carried
+// byte-identical private copies over byte-identical private regexes. Two comparators
+// could rank the same two tags differently; one cannot.
+func ParseSemver(s string) ([3]int, bool) {
 	m := semverRe.FindStringSubmatch(strings.TrimSpace(s))
 	if m == nil {
 		return [3]int{}, false
@@ -394,7 +414,7 @@ func latestSemverTag(ctx context.Context, run Runner, root string) string {
 	}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if semverRe.MatchString(line) {
+		if IsSemverTag(line) {
 			return line
 		}
 	}

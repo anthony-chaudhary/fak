@@ -32,6 +32,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // Repo-relative locations the generator reads and writes.
@@ -502,12 +504,9 @@ func firstSentence(s string) string {
 
 func hasKey(m map[string]any, k string) bool { _, ok := m[k]; return ok }
 
-func str(m map[string]any, k string) string {
-	if v, ok := m[k].(string); ok {
-		return v
-	}
-	return ""
-}
+// str is maputil.Str: read a decoded-JSON key as a string, "" when absent or not a string.
+// One definition of that rule (internal/maputil), not a copy per decoder.
+func str(m map[string]any, k string) string { return maputil.Str(m, k) }
 
 func num(m map[string]any, k string) (float64, bool) {
 	switch x := m[k].(type) {

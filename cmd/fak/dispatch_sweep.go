@@ -29,6 +29,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchsweep"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/seatpark"
 )
 
@@ -286,12 +287,9 @@ func tickResultFromJSON(m map[string]any) dispatchsweep.TickResult {
 	return tr
 }
 
-func jsonStr(m map[string]any, k string) string {
-	if v, ok := m[k].(string); ok {
-		return v
-	}
-	return ""
-}
+// jsonStr is maputil.Str: read a decoded-JSON key as a string, "" when absent or not a
+// string. One definition of that rule (internal/maputil), not a copy per decoder.
+func jsonStr(m map[string]any, k string) string { return maputil.Str(m, k) }
 
 func jsonBool(m map[string]any, k string) bool {
 	b, _ := m[k].(bool)

@@ -4,11 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
@@ -297,15 +297,10 @@ func launchBrokerRedactedCWD(cwd string) string {
 	return "<cwd>"
 }
 
-func launchBrokerRedactURL(s string) string {
-	u, err := url.Parse(s)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return s
-	}
-	u.User = nil
-	u.RawQuery = ""
-	return u.String()
-}
+// launchBrokerRedactURL is dispatchtick.RedactLaunchURL — the ONE launch-URL redaction rule,
+// shared with the tick's own argv redactor instead of re-derived here. A private copy is how
+// the two drift and one surface starts leaking a credential the other strips.
+func launchBrokerRedactURL(s string) string { return dispatchtick.RedactLaunchURL(s) }
 
 func launchBrokerSensitiveKey(s string) bool {
 	low := strings.ToLower(strings.TrimSpace(s))
