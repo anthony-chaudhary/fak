@@ -56,7 +56,7 @@ const (
 // concept.
 var verbTiers = map[string]VerbTier{
 	// ---- frontdoor: the product (ceiling gated by TestFrontdoorTierStaysSmall) ----
-	"ablate":      TierFrontdoor,
+	"ablate": TierFrontdoor,
 	// `agent` is the README's headline proof (`fak agent --offline`) and the first
 	// command a new evaluator is told to run, so it belongs in the visible front
 	// door rather than under `fak dev` (#5464).
