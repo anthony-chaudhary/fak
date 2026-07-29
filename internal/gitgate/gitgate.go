@@ -183,6 +183,45 @@ const pushForceRefspecLaw = neverAmendSharedLaw + " force-push refused: a `+<ref
 
 const pushDeleteRefspecLaw = "remote-ref delete refused: `git push origin :<branch>` (empty source refspec) deletes the remote ref exactly like push --delete/-d. Do not delete a remote branch from an agent."
 
+// massRemoteRefDeleteThreshold is the number of remote refs a single push may name
+// for deletion before the act stops being "retire this one stale ref" and becomes a
+// CONVERGE over a namespace — the class of act that wiped ~8400 lock/wip refs on
+// 2026-07-22 (#5360). 8 is a CHOSEN number, not a measured one: nothing was sampled
+// to derive it. It is picked to sit above any plausible hand-written cleanup (an
+// agent retiring its own lease names one ref, a small batch names a handful) and far
+// below a namespace sweep, so the two acts get different laws and different remedies.
+// Both sides of it still DENY — the threshold selects which law is cited, never
+// whether the push is admitted — so moving it can never open a hole.
+const massRemoteRefDeleteThreshold = 8
+
+// massRemoteRefDeleteLaw is cited when one push names >= massRemoteRefDeleteThreshold
+// remote refs for deletion. Spelled-out-one-refspec-at-a-time is the same catastrophe
+// as --prune/--mirror, just typed longhand, so it may not ride the singular
+// "delete a remote branch" law: that law's remedy is silent about the legitimate bulk
+// retirement, and a refusal that names no route is indistinguishable from having no
+// route (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md).
+func massRemoteRefDeleteLaw(n int) string {
+	return fmt.Sprintf("mass-remote-ref-delete refused: this push names %d remote refs for deletion in one act (threshold %d) — a namespace converge spelled one refspec at a time, the same catastrophe as `push --prune`/`--mirror` (#5360: an unattributed converge wiped ~8400 lock/wip refs, incl. peers' live lock leases and every WIP checkpoint). A bulk ref retirement is not an agent shell act: run it as a compiled fak verb that pushes through internal exec (the `fak sync push` shape), scoped to refs that verb has PROVEN expired, with FLEET_ALLOW_REF_PRUNE=1 for the pre-push hook. To retire ONE ref you own, name that one ref.", n, massRemoteRefDeleteThreshold)
+}
+
+// pushMirrorConfigLaw is the CONFIG spelling of the already-refused `push --mirror`
+// flag. `remote.<name>.mirror=true` makes a PLAIN `git push <remote>` behave exactly as
+// if --mirror were on the command line (git-config(1)), so the flag refusal alone is a
+// half-closed door: the same mass delete rides in with no hazardous flag on the argv.
+// Same durable-sibling shape as configHooksLaw / configSignLaw, and it must catch both
+// the per-invocation `git -c` override and the persistent `git config` write.
+const pushMirrorConfigLaw = "push-mirror refused: `remote.<name>.mirror=true` makes a PLAIN `git push <remote>` behave exactly as `git push --mirror` — it overwrites EVERY remote ref and deletes every remote ref absent from THIS clone, mass-deleting peers' branches, lock leases and WIP refs on a shared fleet remote (#5360). It is the unflagged spelling of a flag this gate already refuses. Leave it off and push specific refs by refspec; for local-tracking cleanup use `git fetch --prune`, which never touches the remote."
+
+// xargsPushLaw fires on a `git push` whose arguments are fed by `xargs`. This is the
+// FAIL-CLOSED rung of #5360: the refspecs arrive on a PIPE, so the set of remote refs
+// the push updates or DELETES is not in the argv at all — it cannot be bounded,
+// attributed, or shown to the operator afterwards. That is not a hypothetical shape:
+// ~8400 refspecs do not fit on one command line, so a converge of that size can only
+// reach git through a generator pipe, and `xargs git push origin --delete` launders a
+// spelling this gate refuses outright when written directly. Uncertainty in a
+// destructive path resolves toward REFUSING, never toward admitting.
+const xargsPushLaw = "unattributable-push refused: a `git push` fed by `xargs` takes its refspecs from a PIPE, so the set of remote refs it updates — and every ref it DELETES — is absent from the argv and cannot be bounded or attributed (#5360: an unattributed converge wiped ~8400 lock/wip refs; that many refspecs reach git only through a generator pipe, and `xargs git push --delete` launders a spelling this gate refuses when written directly). A destructive push whose ref set cannot be named fails CLOSED. Push refs you can name: one explicit refspec per `git push`. For a bulk retirement, run a compiled fak verb that pushes through internal exec (the `fak sync push` shape), scoped to refs it has PROVEN expired."
+
 // unscopedStashLaw fires on a whole-tree stash CREATE in the shared trunk. A bare
 // `git stash` (or `git stash push`/`save` with no pathspec) snapshots EVERY dirty
 // file — including a peer's in-flight WIP — then leaves it parked in a stash that
@@ -535,12 +574,19 @@ func (g *GitGate) classify(cmd string) (string, bool) {
 	// `&&`/`||`/`;`, newline already segment correctly in tokenizeSegments.)
 	for _, src := range unwrapShellSources(cmd) {
 		for _, seg := range tokenizeSegments(src) {
-			argv := gitArgv(seg)
-			if argv == nil {
-				continue // this segment's command word is not git
+			if argv := gitArgv(seg); argv != nil {
+				if law, ok := g.inspectGit(argv); ok {
+					return law, true
+				}
+				continue
 			}
-			if law, ok := g.inspectGit(argv); ok {
-				return law, true
+			// Not git in command position — but `xargs git ...` still RUNS git, with
+			// its operands supplied by a pipe. Same rules, plus the provenance bit that
+			// makes an unreadable push argv fail closed.
+			if argv := gitArgvViaXargs(seg); argv != nil {
+				if law, ok := g.inspectGitArgs(argv, true); ok {
+					return law, true
+				}
 			}
 		}
 	}
@@ -551,7 +597,12 @@ func (g *GitGate) classify(cmd string) (string, bool) {
 // program word): it skips the value-bearing global options to locate the
 // subcommand, catches a `-c core.hooksPath=...` skip-hooks override along the way,
 // then matches the subcommand's flags against the hazard table.
-func (g *GitGate) inspectGit(args []string) (string, bool) {
+func (g *GitGate) inspectGit(args []string) (string, bool) { return g.inspectGitArgs(args, false) }
+
+// inspectGitArgs is inspectGit with the provenance of the argv: viaXargs is true when
+// the git call was found behind an `xargs` (see gitArgvViaXargs), meaning its OPERANDS
+// arrive on stdin and are not in the argv the gate can read.
+func (g *GitGate) inspectGitArgs(args []string, viaXargs bool) (string, bool) {
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -569,8 +620,17 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 			// merely mentions the string — e.g. `-c core.editor='vim core.hooksPath'` — is
 			// not a hooks override and must not be refused.
 			if a == "-c" {
-				if key, _, _ := splitConfigKey(strings.ToLower(val)); key == "core.hookspath" {
+				key, cval, joined := splitConfigKey(strings.ToLower(val))
+				if key == "core.hookspath" {
 					return "skip-hooks refused: `git -c core.hooksPath=...` disables hooks for this invocation.", true
+				}
+				// `git -c remote.<n>.mirror=true push` is `push --mirror` with no flag on
+				// the argv. Decided HERE, before the value is consumed, because the
+				// no-`=` spelling (`git -c remote.origin.mirror push origin`, which git
+				// reads as true) otherwise swallows the `push` token as this option's
+				// value and blinds the whole subcommand scan below.
+				if isMirrorEnable(key, cval, joined) {
+					return pushMirrorConfigLaw, true
 				}
 			}
 			i += 2 // consume the option AND its value
@@ -615,6 +675,23 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 	// (empty src, non-empty dst) deletes it. Flags are skipped — the hazard table
 	// below owns them — and only `push` operands are hazardous refspecs.
 	if sub == "push" {
+		// FAIL CLOSED. Every other rule on this path decides from the argv; an
+		// xargs-fed push has no argv to decide from — its refspecs, including the
+		// deletions, are on a pipe. The gate therefore cannot show that the act is
+		// bounded, and "cannot show it is bounded" on a mass-delete-capable path must
+		// resolve to REFUSE, not to admit-with-a-warning: the 2026-07-22 converge was
+		// exactly an unattributed deletion set, and admitting it a second time because
+		// the evidence is missing would make the gate's silence mean consent.
+		if viaXargs {
+			return xargsPushLaw, true
+		}
+		// A converge spelled longhand — many `:ref` operands, or many refs after
+		// --delete — is the SAME act as --prune, so it is judged by its scale before
+		// the singular per-ref laws get to speak (both outcomes deny; this only picks
+		// the law and the remedy).
+		if n := countRemoteRefDeletes(rest); n >= massRemoteRefDeleteThreshold {
+			return massRemoteRefDeleteLaw(n), true
+		}
 		for _, t := range rest {
 			if strings.HasPrefix(t, "-") {
 				continue
@@ -676,6 +753,7 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 	// setting gpgsign back ON all fall through to defer.
 	if sub == "config" {
 		hasHooksPath, gpgSignOff, isReadOrUnset := false, false, false
+		mirrorOn := false
 		for i, t := range rest {
 			lt := strings.ToLower(t)
 			switch t {
@@ -700,6 +778,19 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 					gpgSignOff = true
 				}
 			}
+			// The persistent sibling of `git -c remote.<n>.mirror=true`: written into
+			// the config it arms EVERY later plain `git push <remote>` as a --mirror
+			// mass delete. A bare `git config remote.<n>.mirror` with no value is a
+			// READ, so an enable requires an actual value operand (or a joined one).
+			if isMirrorKey(key) {
+				v, has := val, joined
+				if !joined && i+1 < len(rest) {
+					v, has = strings.ToLower(rest[i+1]), true
+				}
+				if has && isMirrorEnable(key, v, true) {
+					mirrorOn = true
+				}
+			}
 		}
 		if !isReadOrUnset {
 			if hasHooksPath {
@@ -707,6 +798,9 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 			}
 			if gpgSignOff {
 				return configSignLaw, true
+			}
+			if mirrorOn {
+				return pushMirrorConfigLaw, true
 			}
 		}
 	}
@@ -815,6 +909,96 @@ func gitArgv(seg []string) []string {
 		return nil
 	}
 	return seg[i+1:]
+}
+
+// gitArgvViaXargs returns the argument tokens of a git invocation this segment runs
+// UNDER `xargs` (`... | xargs -n 200 git push origin`), or nil if the segment is not
+// an xargs-wrapped git call. gitArgv deliberately recognizes git only in command
+// position, which leaves `xargs git ...` invisible — and xargs is not a wrapper script
+// (the documented non-goal) but an argument-stream multiplier: it runs git itself,
+// with operands the argv does not contain. Recognizing it only WIDENS what the
+// existing rules can see, exactly like the unwrap pass; a mis-skipped xargs flag
+// yields nil (a miss), never a wrong deny.
+func gitArgvViaXargs(seg []string) []string {
+	i := skipEnvPrefix(seg)
+	if i >= len(seg) || programBasename(seg[i]) != "xargs" {
+		return nil
+	}
+	for i++; i < len(seg); {
+		t := seg[i]
+		if !strings.HasPrefix(t, "-") {
+			break
+		}
+		switch t {
+		case "-n", "-L", "-P", "-I", "-i", "-s", "-E", "-d", "-a":
+			i += 2 // xargs option AND its separate value
+		default:
+			i++ // a valueless flag, or a joined --max-args=200
+		}
+	}
+	if i >= len(seg) || !isGitProgram(seg[i]) {
+		return nil
+	}
+	return seg[i+1:]
+}
+
+// isMirrorKey reports whether a lowercased config key is `remote.<name>.mirror` — the
+// key that makes a plain push behave as `git push --mirror` (git-config(1)). The name
+// may itself contain dots (`remote.my.fleet.mirror`), so the match is on the prefix and
+// suffix with a non-empty name between, not on a fixed token count.
+func isMirrorKey(key string) bool {
+	const pre, suf = "remote.", ".mirror"
+	return strings.HasPrefix(key, pre) && strings.HasSuffix(key, suf) && len(key) > len(pre)+len(suf)
+}
+
+// isMirrorEnable reports whether a config token ENABLES remote.<name>.mirror. Only an
+// explicit git-false value (`=false`/`=off`/`=0`) is treated as harmless: git reads a
+// key given with no value at all as TRUE, and any other value on this key is a shape
+// the gate cannot read, so it fails closed rather than guessing in favor of a push that
+// deletes every remote ref absent locally.
+func isMirrorEnable(key, val string, joined bool) bool {
+	if !isMirrorKey(key) {
+		return false
+	}
+	return !(joined && isGitFalse(val))
+}
+
+// countRemoteRefDeletes counts how many remote refs one `git push` argv names for
+// DELETION: every `:<dst>` refspec (empty source = delete), plus, when --delete/-d is
+// present, every ref operand after the remote name. It is a count of the argv only —
+// what a push deletes IMPLICITLY (--prune/--mirror/remote.<n>.mirror) is unbounded and
+// is refused by its own rule rather than counted here.
+func countRemoteRefDeletes(rest []string) int {
+	deleteMode, operands, colonRefs := false, 0, 0
+	for i := 0; i < len(rest); i++ {
+		t := rest[i]
+		if t == "--" {
+			continue
+		}
+		if strings.HasPrefix(t, "-") {
+			if t == "--delete" || (isShortCluster(t) && clusterHas(t, 'd')) {
+				deleteMode = true
+				continue
+			}
+			// Value-taking push options whose value is a separate token and is NOT a
+			// ref — skip it so it is not miscounted as a deletion target.
+			switch t {
+			case "-o", "--push-option", "--repo", "--exec", "--receive-pack":
+				i++
+			}
+			continue
+		}
+		if strings.HasPrefix(t, ":") && len(t) > 1 {
+			colonRefs++
+			continue
+		}
+		operands++
+	}
+	if deleteMode && operands > 1 {
+		// The first bare operand is the remote; the rest are refs to delete.
+		return colonRefs + operands - 1
+	}
+	return colonRefs
 }
 
 // skipEnvPrefix returns the index of the first token in seg that is not a leading
