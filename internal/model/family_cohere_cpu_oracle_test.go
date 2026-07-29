@@ -55,9 +55,16 @@ package model
 //
 // The fixture is built with synthBuildRaw on Cohere's REAL checkpoint names (the
 // HF-standard Llama names minus post_attention_layernorm, plus the optional per-head
-// q_norm/k_norm) and loaded through newHFCheckpointModel — the constructor the HF-source
-// loaders (LoadSafetensors*, Load, the GPTQ path) funnel through — so the production side
-// sees the checkpoint exactly as a real Cohere download presents it. Every norm weight
+// q_norm/k_norm) and loaded through newHFCheckpointModel — the constructor the f32
+// HF-source loaders funnel through: LoadSafetensors and LoadSafetensorsDir
+// (safetensors.go) and Load (weights.go), the three call sites
+// cohere_loader_routing_test.go pins from the PUBLIC entry points, since this file
+// constructs its model directly and so witnesses the constructor but not the routing.
+// The GPTQ loader is NOT one of them: gptq.go still calls newModel, matching the KNOWN
+// RESIDUAL paragraph in cohere_rotary.go — a quantized checkpoint keeps q_proj/k_proj in
+// its own decoded store rather than in the f32 blob this pass rewrites, so it stays
+// mis-rotated and carries no witness. What the oracle below covers is therefore an
+// UNQUANTIZED Cohere download, seen exactly as HuggingFace presents it. Every norm weight
 // gets a distinct NON-UNIT gain so norm routing is numerically live rather than masked by
 // 1.0. nH*hd (32) deliberately differs from HiddenSize (24) so a projection-width /
 // hidden-width conflation cannot cancel, nKV != nH so a GQA grouping bug cannot cancel,
