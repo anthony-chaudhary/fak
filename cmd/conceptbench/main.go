@@ -183,6 +183,13 @@ type flags struct {
 	contract bool
 	budget   float64
 	issue    string
+	// affordanceHint is the operator's opt-in for the #5380 tier-gated affordance
+	// hint. It is OFF by default (gen/next: dogfood before default), so an
+	// un-flagged run's frame is byte-identical to today's. Turning it on enables
+	// the experiment; it does NOT choose which arms are treated — the weaker-tier
+	// condition lives in the registry's own per-id rating and is not overridable
+	// here, which is what keeps a frontier arm usable as the control.
+	affordanceHint bool
 }
 
 func run(argv []string) int {
@@ -197,6 +204,10 @@ func run(argv []string) int {
 	fs.BoolVar(&f.contract, "contract", false, "emit a pre-run official-run contract (models, concepts, task ids, budget) with result_claim_allowed:false and NO scores")
 	fs.Float64Var(&f.budget, "budget", 0, "fractional core budget for this run (0.75 = up to 75% of the machine's logical cores); 0 = unset; FAK_WORKERS/FAK_BUDGET still apply")
 	fs.StringVar(&f.issue, "issue", "#2740", "issue reference recorded in the contract artifact")
+	// No back-quoted words in this usage string: flag.PrintDefaults reads the first
+	// back-quoted name as the value placeholder, so a quoted trailer template would
+	// render as this bool flag's argument name.
+	fs.BoolVar(&f.affordanceHint, "affordance-hint", false, "opt in to the #5380 affordance-hint injection: append the concept's exact (fak <leaf>) trailer template, the offline subject check, and the report-not-yet rule to a WEAKER-TIER live arm's frame only (frontier and unrated arms are never touched)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}

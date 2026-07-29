@@ -129,11 +129,15 @@ type ModelArm interface {
 	Drive(task Task) (ArmTranscript, error)
 }
 
-// armEntry is one registered model id: the arm it resolves to and the
-// provenance source string the report will carry.
+// armEntry is one registered model id: the arm it resolves to, the provenance
+// source string the report will carry, and the model-strength band the #5380
+// affordance-hint injection reads (see affordance.go). Keeping the band on the
+// entry means the registry stays the ONE list of model identity — a second table
+// keyed by model id could drift away from this one silently.
 type armEntry struct {
 	kind   ArmKind
 	source string
+	tier   ArmTier
 }
 
 // Registry resolves a model id to a callable arm. Model-id matching is
@@ -156,23 +160,31 @@ func NewRegistry() *Registry {
 		transports: map[ArmKind]Transport{},
 		replay:     map[ArmKind]bool{},
 	}
-	for _, m := range []string{"claude-opus-5", "claude-opus-4-8", "fable", "claude-fable-5", "claude-sonnet-5", "claude-3-5-haiku"} {
-		r.register(m, ArmGateway, "internal/gateway")
+	// The strength band per id (#5380). claude-3-5-haiku is the small arm the
+	// replay findings actually measured falling off the commit_stamp concept; the
+	// rest of the gateway set is the frontier side of that contrast. The in-kernel
+	// serve set is the local single-workstation GGUF arm — the weak side of this
+	// repo's own local-model coding witness — so it rates small too.
+	for _, m := range []string{"claude-opus-5", "claude-opus-4-8", "fable", "claude-fable-5", "claude-sonnet-5"} {
+		r.register(m, ArmGateway, "internal/gateway", TierFrontier)
 	}
+	r.register("claude-3-5-haiku", ArmGateway, "internal/gateway", TierSmall)
 	for _, m := range []string{"qwen3.6", "smollm2", "glm-5.2"} {
-		r.register(m, ArmServe, "fak serve --gguf")
+		r.register(m, ArmServe, "fak serve --gguf", TierSmall)
 	}
 	return r
 }
 
-func (r *Registry) register(model string, kind ArmKind, source string) {
-	r.entries[strings.ToLower(strings.TrimSpace(model))] = armEntry{kind: kind, source: source}
+func (r *Registry) register(model string, kind ArmKind, source string, tier ArmTier) {
+	r.entries[strings.ToLower(strings.TrimSpace(model))] = armEntry{kind: kind, source: source, tier: tier}
 }
 
 // RegisterRaw registers an OpenAI-compatible model with no fak wrapping (the
-// LiveCodeBench #2104 raw path). endpoint becomes the provenance source.
+// LiveCodeBench #2104 raw path). endpoint becomes the provenance source. The
+// strength band is TierUnrated: the registry has no basis to rate an arbitrary
+// endpoint, and an unrated arm is never treated by the #5380 hint injection.
 func (r *Registry) RegisterRaw(model, endpoint string) {
-	r.register(model, ArmRaw, endpoint)
+	r.register(model, ArmRaw, endpoint, TierUnrated)
 }
 
 // Bind attaches the Transport for one arm kind. replay marks a recorded
