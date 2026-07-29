@@ -1,0 +1,12 @@
+{
+  "cache_after_evict": 5,
+  "demo": "kvmmu: ctxmmu's quarantine verdict, enforced as KV-cache eviction (the byte-gate drives the KV-gate)",
+  "gate_verdict_quarantine": true,
+  "maxabsdiff_evict_vs_never": "0.000e+00",
+  "maxabsdiff_poison_vs_never": "3.257e-01",
+  "model": "synthetic Llama (hidden 32, 2 layers, 4q/2kv heads, head_dim 8, vocab 48) — WIRING witness; numerics-vs-HF proven by internal/model oracle",
+  "poison_span_len": 4,
+  "prefix_len": 5,
+  "span_evicted": true,
+  "witness": "real ctxmmu decision on real poison bytes -> KVCache.Evict of the result's span; post-evict next-token distribution BIT-IDENTICAL to never-saw (max|delta|=0) AND poison-kept differs (>0); eviction is content-driven (benign same-span admitted); the span ledger renumbers after a middle evict"
+}

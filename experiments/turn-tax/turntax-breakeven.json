@@ -1,0 +1,272 @@
+{
+  "app_version": "dev",
+  "slice_id": "turntax-stochastic-base",
+  "base_workload_hash": "db039fd8d1e103dd",
+  "base_calls": 14,
+  "seed": 2055979230,
+  "trials": 200,
+  "real_world_hit_rate": 0.007,
+  "cost_model": {
+    "version": "fak.cost-model.v1",
+    "prompt_tokens_per_turn": 1200,
+    "completion_tokens_per_turn": 120,
+    "dollars_per_mtok_in": 3,
+    "dollars_per_mtok_out": 15,
+    "model_turn_latency_ms": 1500
+  },
+  "build_regimes": [
+    {
+      "name": "provider-ships",
+      "build_cost_usd": 0,
+      "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+    },
+    {
+      "name": "self-host-fork",
+      "build_cost_usd": 2800000,
+      "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+    }
+  ],
+  "generated_by": "fak/internal/turnbench (break-even)",
+  "points": [
+    {
+      "hit_rate": 0,
+      "turns_saved": {
+        "min": 0,
+        "p10": 0,
+        "p50": 0,
+        "p90": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "mean_turns_saved": 0,
+      "avg_calls": 14,
+      "tokens_saved_mean": 0,
+      "dollars_saved_mean": 0,
+      "latency_saved_sec_mean": 0,
+      "regimes": [
+        {
+          "name": "provider-ships",
+          "build_cost_usd": 0,
+          "sessions_to_break_even": 0,
+          "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+        },
+        {
+          "name": "self-host-fork",
+          "build_cost_usd": 2800000,
+          "sessions_to_break_even": -1,
+          "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+        }
+      ]
+    },
+    {
+      "hit_rate": 0.007,
+      "turns_saved": {
+        "min": 0,
+        "p10": 0,
+        "p50": 0,
+        "p90": 1,
+        "max": 2,
+        "mean": 0.325
+      },
+      "mean_turns_saved": 0.325,
+      "avg_calls": 14.335,
+      "tokens_saved_mean": 429,
+      "dollars_saved_mean": 0.001755,
+      "latency_saved_sec_mean": 0.4875,
+      "regimes": [
+        {
+          "name": "provider-ships",
+          "build_cost_usd": 0,
+          "sessions_to_break_even": 0,
+          "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+        },
+        {
+          "name": "self-host-fork",
+          "build_cost_usd": 2800000,
+          "sessions_to_break_even": 1595441596,
+          "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+        }
+      ]
+    },
+    {
+      "hit_rate": 0.02,
+      "turns_saved": {
+        "min": 0,
+        "p10": 0,
+        "p50": 1,
+        "p90": 2,
+        "max": 6,
+        "mean": 1.06
+      },
+      "mean_turns_saved": 1.06,
+      "avg_calls": 15.11,
+      "tokens_saved_mean": 1399.2,
+      "dollars_saved_mean": 0.005724000000000001,
+      "latency_saved_sec_mean": 1.59,
+      "regimes": [
+        {
+          "name": "provider-ships",
+          "build_cost_usd": 0,
+          "sessions_to_break_even": 0,
+          "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+        },
+        {
+          "name": "self-host-fork",
+          "build_cost_usd": 2800000,
+          "sessions_to_break_even": 489168414,
+          "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+        }
+      ]
+    },
+    {
+      "hit_rate": 0.05,
+      "turns_saved": {
+        "min": 0,
+        "p10": 1,
+        "p50": 3,
+        "p90": 5,
+        "max": 7,
+        "mean": 2.73
+      },
+      "mean_turns_saved": 2.73,
+      "avg_calls": 16.865,
+      "tokens_saved_mean": 3603.6,
+      "dollars_saved_mean": 0.014742,
+      "latency_saved_sec_mean": 4.095,
+      "regimes": [
+        {
+          "name": "provider-ships",
+          "build_cost_usd": 0,
+          "sessions_to_break_even": 0,
+          "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+        },
+        {
+          "name": "self-host-fork",
+          "build_cost_usd": 2800000,
+          "sessions_to_break_even": 189933524,
+          "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+        }
+      ]
+    },
+    {
+      "hit_rate": 0.1,
+      "turns_saved": {
+        "min": 1,
+        "p10": 3,
+        "p50": 5,
+        "p90": 8,
+        "max": 14,
+        "mean": 5.575
+      },
+      "mean_turns_saved": 5.575,
+      "avg_calls": 19.785,
+      "tokens_saved_mean": 7359,
+      "dollars_saved_mean": 0.030105000000000003,
+      "latency_saved_sec_mean": 8.3625,
+      "regimes": [
+        {
+          "name": "provider-ships",
+          "build_cost_usd": 0,
+          "sessions_to_break_even": 0,
+          "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+        },
+        {
+          "name": "self-host-fork",
+          "build_cost_usd": 2800000,
+          "sessions_to_break_even": 93007807,
+          "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+        }
+      ]
+    },
+    {
+      "hit_rate": 0.2,
+      "turns_saved": {
+        "min": 3,
+        "p10": 7,
+        "p50": 11,
+        "p90": 14,
+        "max": 19,
+        "mean": 10.61
+      },
+      "mean_turns_saved": 10.61,
+      "avg_calls": 25.075,
+      "tokens_saved_mean": 14005.199999999999,
+      "dollars_saved_mean": 0.057294,
+      "latency_saved_sec_mean": 15.915,
+      "regimes": [
+        {
+          "name": "provider-ships",
+          "build_cost_usd": 0,
+          "sessions_to_break_even": 0,
+          "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+        },
+        {
+          "name": "self-host-fork",
+          "build_cost_usd": 2800000,
+          "sessions_to_break_even": 48870737,
+          "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+        }
+      ]
+    },
+    {
+      "hit_rate": 0.3,
+      "turns_saved": {
+        "min": 7,
+        "p10": 12,
+        "p50": 17,
+        "p90": 20,
+        "max": 25,
+        "mean": 16.37
+      },
+      "mean_turns_saved": 16.37,
+      "avg_calls": 30.98,
+      "tokens_saved_mean": 21608.4,
+      "dollars_saved_mean": 0.088398,
+      "latency_saved_sec_mean": 24.555,
+      "regimes": [
+        {
+          "name": "provider-ships",
+          "build_cost_usd": 0,
+          "sessions_to_break_even": 0,
+          "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+        },
+        {
+          "name": "self-host-fork",
+          "build_cost_usd": 2800000,
+          "sessions_to_break_even": 31674925,
+          "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+        }
+      ]
+    },
+    {
+      "hit_rate": 0.5,
+      "turns_saved": {
+        "min": 17,
+        "p10": 22,
+        "p50": 28,
+        "p90": 32,
+        "max": 37,
+        "mean": 27.18
+      },
+      "mean_turns_saved": 27.18,
+      "avg_calls": 42.155,
+      "tokens_saved_mean": 35877.6,
+      "dollars_saved_mean": 0.146772,
+      "latency_saved_sec_mean": 40.77,
+      "regimes": [
+        {
+          "name": "provider-ships",
+          "build_cost_usd": 0,
+          "sessions_to_break_even": 0,
+          "note": "provider exposes in-tensor tool calling — ~$0 marginal, break-even on session one"
+        },
+        {
+          "name": "self-host-fork",
+          "build_cost_usd": 2800000,
+          "sessions_to_break_even": 19077209,
+          "note": "divergent KV-splice fork (~3 eng-yr) + format re-train + fork-maintenance — the honest ~$2.8M/3yr total, not the $200k knob"
+        }
+      ]
+    }
+  ]
+}

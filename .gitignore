@@ -636,6 +636,20 @@ gpucheck_wsl
 # ship-iff-cited gate (tools/public_evidence_manifest.py --check) can see them in CI.
 /experiments/turn-tax/*.json
 /experiments/kvmmu/*.json
+# ...and re-include the three that a PUBLISHED doc cites by name. The blanket ignore
+# above was cutting them out of the public tree while the docs went on pointing at them,
+# so ship-iff-cited failed in CI on every run: KV-QUARANTINE-BRIDGE-RESULTS.md even calls
+# kvmmu-report.json "committed" twice (its "every number is a go test line or a committed
+# ...field" framing, and the witness-table row), which was simply untrue. The quiet-status
+# rationale above does not apply to these three: each emitter rewrites its file
+# byte-identically (witnessed — hash unchanged across `go test ./internal/kvmmu/ -run
+# TestEmitReport` and `go test ./internal/turnbench/`), so they behave like the committed,
+# generated hero SVGs rather than like churning bench output. The turn-tax pair embeds
+# app_version, so a release bump does dirty them until regenerated — that is the ordinary
+# cost of a committed generated artifact, not the per-run churn this block guards against.
+!/experiments/turn-tax/turntax-breakeven.json
+!/experiments/turn-tax/turntax-stochastic.json
+!/experiments/kvmmu/kvmmu-report.json
 
 # --- scrub/adjudication session scratch (node-local; never commit) ----------------
 # .adjudicate/ holds one-off diffs + copies of the PRIVATE `fleet` repo's scrub
