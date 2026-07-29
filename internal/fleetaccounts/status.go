@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accountprobe"
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
@@ -193,13 +194,62 @@ func markUsageSoon(st *RuntimeStatus, thr map[string]any) {
 	}
 }
 
-// shouldConsultProbeLedger mirrors fleet_accounts._should_consult_probe_ledger for the
-// passed-registry case (the only shape the Go fold has: Annotate always receives a
-// loaded Registry): consult the ledger exactly when FLEET_REG_DIR names the registry
-// dir the prober writes under, so the Go reader and the Python writer agree on the dir
-// and callers without a prober keep the pure passive fold.
+// shouldConsultProbeLedger reports whether the probe-ledger rung may run at all: the
+// registry dir this process would actually READ must be able to derive a block verdict,
+// i.e. it must carry the probe_ledger.jsonl account_probe appends to. That is exactly
+// accountprobe.ResolveRegDir().BlocksDerivable(), so the rung is gated on the same
+// resolution FreshProbeFromLedger/deriveCapObservation then perform with an empty regDir.
+//
+// This used to gate on FLEET_REG_DIR merely being SET, on the reasoning that the env var
+// is what makes the Go reader and the Python writer agree on a dir. That reasoning does
+// not survive #5390: naming a dir is not the same as the dir holding a ledger, and the
+// resolver now knows the difference. Derivability is the wider and more honest test:
+//
+//   - FLEET_REG_DIR names a ledger-bearing dir -> consulted, exactly as before.
+//   - FLEET_REG_DIR unset, but a discovered registry (typically the per-user Fleet dir the
+//     prober writes under) carries the ledger -> consulted NOW, where before the rung never
+//     ran and a fresh probe verdict was invisible to the roster no matter how correct the
+//     resolver was. This is the #5439 finding.
+//   - FLEET_REG_DIR names a ledger-LESS dir -> NOT consulted, where before the rung ran
+//     over a ledger that was not there. Every read returned nothing, so the fold fell
+//     through to the carried block anyway; refusing to run says so instead of pretending
+//     to have looked.
+//   - Nothing anywhere -> not consulted, exactly as before, so a fresh checkout and CI keep
+//     the pure passive fold.
+//
+// The price is that the answer is a function of the filesystem rather than of one env var:
+// a caller (or a test) that wants a definite verdict must arrange the dirs, not just the
+// variable. Repeated calls over an unchanged filesystem are stable — ResolveRegDir consults
+// no clock — so this does not make the fold flap.
 func shouldConsultProbeLedger() bool {
-	return strings.TrimSpace(os.Getenv("FLEET_REG_DIR")) != ""
+	return accountprobe.ResolveRegDir().BlocksDerivable()
+}
+
+// markUnknownHealth downgrades the fold's status_source from the confident "registry" to
+// "registry-unknown" when an UNBLOCKED seat is being published out of a registry that
+// cannot derive a block at all (no probe ledger beside its sessions.json — see
+// accountprobe.RegChoice.BlocksDerivable, whose doc states the obligation this discharges:
+// a caller that would otherwise publish "no seats blocked" must publish nothing instead).
+//
+// Unknown-health is a THIRD state, and deliberately not a block. Converting absence into
+// blocked would strand every seat on a host whose prober has not run — and worse, it is
+// self-sealing: the roster is what routes the work that runs the probe, so a block imposed
+// for want of a probe forbids the very probe that would clear it. That deadlock is the
+// failure this repo already paid for once, so the seat stays offered (Available is
+// untouched) and only the CLAIM is weakened. A consumer that cannot tolerate an unproven
+// seat now has a name to switch on; one that does not care keeps today's behavior, since
+// every existing status_source consumer treats an unrecognized value exactly as it treats
+// "registry".
+//
+// A blocked seat keeps "registry": "blocked" is a positive derivation from the registry's
+// own throttle/auth rows, not a statement about probe evidence, so its provenance is not in
+// doubt. An empty registry keeps "none", which already says "nothing was consulted".
+func markUnknownHealth(st RuntimeStatus, blocksDerivable bool) RuntimeStatus {
+	if blocksDerivable || st.Blocked || st.StatusSource != "registry" {
+		return st
+	}
+	st.StatusSource = "registry-unknown"
+	return st
 }
 
 func normalizeThrottle(throttle map[string]any) map[string]map[string]any {
@@ -240,9 +290,10 @@ type RuntimeStatus struct {
 // account's availability. Synthetic _probe session rows already present in sessions.json
 // are honored first (the watchdog-folded path); absent those, a fresh active-probe
 // verdict from the probe LEDGER (account_probe writes probe_ledger.jsonl, never
-// sessions.json) overrides a carried block — consulted exactly when FLEET_REG_DIR names
-// the prober's registry dir (see shouldConsultProbeLedger), so callers without a prober
-// keep the pure passive fold.
+// sessions.json) overrides a carried block — consulted exactly when the registry this
+// process resolves to can derive a block at all (see shouldConsultProbeLedger), so callers
+// without a prober keep the pure passive fold. When it cannot, an unblocked seat is
+// published as unknown-health rather than as a proven-free one (see markUnknownHealth).
 // dir is the account's config home (the Account.Dir the caller already holds). It feeds the
 // identity fold that decides whether a carried weekly cap still belongs to the seat's
 // CURRENT login before a fresh OK is allowed to reopen it (see
@@ -511,7 +562,9 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 		st.BlockKind, st.hasBlockKind = kind, true
 		st.BlockReason = reason
 	}
-	return st
+	// Nothing above found a block. If the registry could not have derived one, say so
+	// rather than publishing a seat as proven-free on evidence that was never available.
+	return markUnknownHealth(st, consultLedger)
 }
 
 func registryEmpty(reg Registry) bool {

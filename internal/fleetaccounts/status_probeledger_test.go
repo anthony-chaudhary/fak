@@ -125,10 +125,17 @@ func TestLedgerBlockOverridesRegistry(t *testing.T) {
 	}
 }
 
+// TestLedgerIgnoredWithoutRegDir asserts what it always asserted — a ledger sitting in a dir
+// this process does not resolve to is not consulted, so the passive fold keeps the carried
+// throttle — but it can no longer say so by clearing FLEET_REG_DIR alone. Since #5439 the
+// rung is gated on whether the RESOLVED registry can derive a block, and with the env var
+// empty the resolver falls through to the discovered rungs; on a host that runs the prober
+// one of those carries a real ledger, and the test would then be measuring the operator's
+// laptop. pinRegistryRungs makes "nothing is derivable anywhere" a fact of the test.
 func TestLedgerIgnoredWithoutRegDir(t *testing.T) {
 	rd := t.TempDir()
-	t.Setenv("FLEET_REG_DIR", "")
 	writeProbeLedger(t, rd, probeLine(t, ".claude-a", "OK", time.Now(), ""))
+	pinRegistryRungs(t, "")
 	reg := Registry{Throttle: map[string]any{
 		".claude-a": map[string]any{"reset": futureResetStr(48 * time.Hour)},
 	}}
