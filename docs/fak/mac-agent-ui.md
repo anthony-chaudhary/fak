@@ -173,7 +173,7 @@ hand-build a `curl` with the header, `--metrics` reuses the bearer the launcher
 already loaded to fetch both surfaces and print them (the token is sent, never
 printed):
 
-```powershell
+```bash
 fak claude-mac-fak --metrics
 # == /debug/vars ==   (indented JSON diagnostics)
 # == /metrics ==      (Prometheus text, verbatim — pipe into promtool/grep)
@@ -185,7 +185,7 @@ fak claude-mac-fak --metrics
 **Live overlay** — run this in a second pane next to the session; it polls
 `/debug/vars` and prints one fak line per tick (Ctrl-C to stop):
 
-```powershell
+```bash
 fak mac --overlay
 # submits 1240  hits 1101 (88.8%)  engine 139  inflight 1  heap 412.0M  gor 47
 ```
@@ -270,38 +270,43 @@ New-Item -ItemType Directory -Force -Path $env:FAK_CLAUDE_CONFIG_DIR | Out-Null
 If the gateway was started without `--require-key-env`, skip `FAK_GATEWAY_KEY` and
 `FAK_MAC_SSH_HOST` entirely — there is no bearer to fetch.
 
+> **Driving from Windows?** Every block below is bash/zsh, because the usual place to
+> run them is the Mac itself. In PowerShell, read `$VAR` as `$env:VAR`, replace the
+> trailing `\` line continuations with backticks, and use `curl.exe` rather than the
+> `curl` alias.
+
 ## Verify the gateway
 
-```powershell
-curl.exe -sS -H "Authorization: Bearer $env:FAK_GATEWAY_KEY" "$env:FAK_MAC_GATEWAY/healthz"
-curl.exe -sS -H "Authorization: Bearer $env:FAK_GATEWAY_KEY" "$env:FAK_MAC_GATEWAY/v1/models"
+```bash
+curl -sS -H "Authorization: Bearer $FAK_GATEWAY_KEY" "$FAK_MAC_GATEWAY/healthz"
+curl -sS -H "Authorization: Bearer $FAK_GATEWAY_KEY" "$FAK_MAC_GATEWAY/v1/models"
 ```
 
 ## Dry-run the UI launch
 
-```powershell
-fak console agent `
-  --claude-config-dir $env:FAK_CLAUDE_CONFIG_DIR `
-  --gateway-url $env:FAK_MAC_GATEWAY `
-  --gateway-key-env FAK_GATEWAY_KEY `
-  --model $env:FAK_MAC_MODEL `
-  --prompt "Reply with exactly: OK" `
+```bash
+fak console agent \
+  --claude-config-dir "$FAK_CLAUDE_CONFIG_DIR" \
+  --gateway-url "$FAK_MAC_GATEWAY" \
+  --gateway-key-env FAK_GATEWAY_KEY \
+  --model "$FAK_MAC_MODEL" \
+  --prompt "Reply with exactly: OK" \
   --dry-run
 ```
 
 The dry-run should show `provider=existing-fak-gateway`, `auth=gateway-bearer`,
-`ANTHROPIC_BASE_URL=$env:FAK_MAC_GATEWAY`, a redacted `ANTHROPIC_API_KEY`,
+`ANTHROPIC_BASE_URL=$FAK_MAC_GATEWAY`, a redacted `ANTHROPIC_API_KEY`,
 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, and `API_TIMEOUT_MS=1800000`.
 
 ## Run a probe
 
-```powershell
-fak console agent `
-  --claude-config-dir $env:FAK_CLAUDE_CONFIG_DIR `
-  --gateway-url $env:FAK_MAC_GATEWAY `
-  --gateway-key-env FAK_GATEWAY_KEY `
-  --model $env:FAK_MAC_MODEL `
-  --prompt "Reply with exactly: OK" `
+```bash
+fak console agent \
+  --claude-config-dir "$FAK_CLAUDE_CONFIG_DIR" \
+  --gateway-url "$FAK_MAC_GATEWAY" \
+  --gateway-key-env FAK_GATEWAY_KEY \
+  --model "$FAK_MAC_MODEL" \
+  --prompt "Reply with exactly: OK" \
   -- --output-format json
 ```
 
@@ -311,20 +316,20 @@ A healthy run returns JSON with `"is_error": false`, `"result": "OK"`, and a low
 
 For an interactive session, omit `--prompt`:
 
-```powershell
-fak console agent `
-  --claude-config-dir $env:FAK_CLAUDE_CONFIG_DIR `
-  --gateway-url $env:FAK_MAC_GATEWAY `
-  --gateway-key-env FAK_GATEWAY_KEY `
-  --model $env:FAK_MAC_MODEL
+```bash
+fak console agent \
+  --claude-config-dir "$FAK_CLAUDE_CONFIG_DIR" \
+  --gateway-url "$FAK_MAC_GATEWAY" \
+  --gateway-key-env FAK_GATEWAY_KEY \
+  --model "$FAK_MAC_MODEL"
 ```
 
 ## Inspect served sessions
 
-```powershell
-fak console sessions `
-  --addr $env:FAK_MAC_GATEWAY `
-  --key $env:FAK_GATEWAY_KEY
+```bash
+fak console sessions \
+  --addr "$FAK_MAC_GATEWAY" \
+  --key "$FAK_GATEWAY_KEY"
 ```
 
 This is the repeatable check that the UI is pointed at the same always-on gateway
