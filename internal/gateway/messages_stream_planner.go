@@ -40,11 +40,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return true
 	}
 
-	model := req.Model
-	if model == "" {
-		model = s.model
-	}
-	id := "msg_fak_" + itoa(uint64(time.Now().UnixNano()))
+	model, id := s.anthropicTurnIdentity(req.Model)
 	var send func(string, any)
 	var sendMu sync.Mutex
 	sendLocked := func(event string, data any) {
@@ -151,18 +147,16 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
 	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began, req.Model)
 
-	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
-		if !started {
-			s.logf("gateway: upstream announced tool_calls but none parsed (messages stream conformance fail-closed); model=%s", s.model)
-			writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
-			return true
-		}
-		s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (messages); model=%s", s.model)
+	// Tool-call conformance fail-closed (the rule itself lives in
+	// failClosedOnUnparsedToolCalls). Mid-stream this surface ends the turn in the
+	// Anthropic dialect: close any open text block first, then an error event.
+	if s.failClosedOnUnparsedToolCalls(w, comp, started, "messages stream conformance fail-closed", "messages", func() {
 		closeText()
 		sendLocked("error", map[string]any{
 			"type":  "error",
 			"error": map[string]any{"type": "api_error", "message": "upstream tool-call format not recognized"},
 		})
+	}) {
 		return true
 	}
 
@@ -254,12 +248,7 @@ func (s *Server) streamPlannerUpstreamError(w http.ResponseWriter, err error, st
 	s.metrics.observeUpstreamError(err)
 	s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
 	if !started {
-		status, code, msg := upstreamErrorStatus(err)
-		if ra := upstreamRetryAfter(err); ra != "" {
-			w.Header().Set("Retry-After", ra)
-		}
-		s.logf("gateway: upstream model error (messages stream): %v", err)
-		writeErrCode(w, status, code, msg)
+		s.surfaceUpstreamStatus(w, err, "upstream model error (messages stream)")
 		return true
 	}
 	s.logf("gateway: upstream model error mid-stream (messages): %v", err)

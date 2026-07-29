@@ -34,6 +34,11 @@ func requestMemoryFitRows(plan []agent.RequestMemoryDemand, caps []agent.Request
 
 // fitWants sums positive demand bytes per scope. Shared by the model-load and
 // request-memory fit paths, which carry structurally identical demand rows.
+//
+// The saturating add and the fractional-headroom rule below are the same rules the
+// in-kernel planner applies to these same quantities, so they live once in
+// internal/agent (SaturatingAddBytes / ApplyByteHeadroom): the planner's budget and this
+// rendered fit view must not drift at the overflow ceiling or on a bogus headroom ratio.
 func fitWants[T any](plan []T, of func(T) (scope string, bytes int64)) map[string]int64 {
 	wants := map[string]int64{}
 	for _, row := range plan {
@@ -42,7 +47,7 @@ func fitWants[T any](plan []T, of func(T) (scope string, bytes int64)) map[strin
 			continue
 		}
 		scope = modelLoadScope(scope)
-		wants[scope] = addFitBytes(wants[scope], bytes)
+		wants[scope] = agent.SaturatingAddBytes(wants[scope], bytes)
 	}
 	return wants
 }
@@ -94,31 +99,10 @@ func memoryFitRows(wants map[string]int64, caps map[string]fitCapacity, headroom
 			if cap.freeKnown {
 				budget = cap.free
 			}
-			row.BudgetBytes = applyFitHeadroom(budget, headroom)
+			row.BudgetBytes = agent.ApplyByteHeadroom(budget, headroom)
 			row.MarginBytes = row.BudgetBytes - row.WantBytes
 		}
 		out = append(out, row)
 	}
 	return out
-}
-
-func addFitBytes(a, b int64) int64 {
-	const maxInt64 = int64(^uint64(0) >> 1)
-	if b <= 0 {
-		return a
-	}
-	if a > maxInt64-b {
-		return maxInt64
-	}
-	return a + b
-}
-
-func applyFitHeadroom(bytes int64, headroom float64) int64 {
-	if bytes <= 0 {
-		return 0
-	}
-	if headroom <= 0 || headroom >= 1 {
-		return bytes
-	}
-	return int64(float64(bytes) * (1 - headroom))
 }

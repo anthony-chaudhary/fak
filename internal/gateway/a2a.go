@@ -494,14 +494,18 @@ func (s *Server) handleA2AListTasks(w http.ResponseWriter, r *http.Request) {
 // handleA2ATask is the subtree handler for /a2a/v1/tasks/{id}.
 // GET /a2a/v1/tasks/{id} reads one task.
 // POST /a2a/v1/tasks/{id}/cancel cancels one task.
-// splitPathIDVerb parses a "{prefix}{id}[/{verb}]" request path into its leading
-// id segment and optional verb. It strips prefix, drops a trailing slash, splits on
-// "/", and trims whitespace from each of the first two segments. ok is false when no
-// non-empty id is present, so callers can emit their own resource-specific 400.
-func splitPathIDVerb(path, prefix string) (id, verb string, ok bool) {
-	rest := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/")
+// requirePathIDVerb is the routing rule every id-keyed subtree obeys: parse
+// "{prefix}{id}[/{verb}]" into its leading id segment and optional verb — stripping the
+// prefix, dropping a trailing slash, splitting on "/", trimming whitespace off each of the
+// first two segments — and refuse an id-less request with a 400 rather than routing on the
+// verb with an empty id. missing is the resource's own 400 text, so each subtree still
+// names the field IT wanted; ok false means the response is already written and the
+// handler must return without touching w.
+func requirePathIDVerb(w http.ResponseWriter, r *http.Request, prefix, missing string) (id, verb string, ok bool) {
+	rest := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/")
 	parts := strings.Split(rest, "/")
 	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		writeErr(w, http.StatusBadRequest, missing)
 		return "", "", false
 	}
 	id = strings.TrimSpace(parts[0])
@@ -513,9 +517,8 @@ func splitPathIDVerb(path, prefix string) (id, verb string, ok bool) {
 
 func (s *Server) handleA2ATask(w http.ResponseWriter, r *http.Request) {
 	// Extract path after /a2a/v1/tasks/
-	taskID, verb, ok := splitPathIDVerb(r.URL.Path, "/a2a/v1/tasks/")
+	taskID, verb, ok := requirePathIDVerb(w, r, "/a2a/v1/tasks/", "task_id required")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "task_id required")
 		return
 	}
 

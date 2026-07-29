@@ -84,6 +84,50 @@ func upstream4xxStatus(se *agent.UpstreamStatusError) (status int, code, msg str
 	}
 }
 
+// surfaceUpstreamStatus writes an upstream failure straight through to a client that has
+// not yet seen a byte: the distinct status + code the classifier maps the error to, plus
+// any Retry-After the provider supplied, so the client learns WHAT failed (a persistent
+// 429 stays a 429 carrying its reset) instead of reading a generic 502. Surfacing only —
+// the caller observes the metric, so a failure stays counted exactly once. note is the
+// caller's log phrase, kept per-surface because the same status means something different
+// on a relay that DECLINED to re-issue than on a planner turn that simply failed.
+func (s *Server) surfaceUpstreamStatus(w http.ResponseWriter, err error, note string) {
+	status, code, msg := upstreamErrorStatus(err)
+	if ra := upstreamRetryAfter(err); ra != "" {
+		w.Header().Set("Retry-After", ra)
+	}
+	s.logf("gateway: %s: %v", note, err)
+	writeErrCode(w, status, code, msg)
+}
+
+// failClosedOnUnparsedToolCalls is the streamed tool-call CONFORMANCE rule, written once
+// for every streamed surface. The upstream announced tool_calls but none survived parsing
+// plus the text-lift fallback; proceeding would skip adjudication on a call the model
+// intended to make — the exact silent no-op the buffered paths refuse. So the turn ends
+// here, and how it ends depends only on whether we still own the status line: nothing on
+// the wire yet means a clean 502, otherwise the headers are spent and the client gets a
+// terminal error frame instead, so its parser closes rather than reading a benign empty
+// stop on a skipped call. Reports whether it took the turn; false means the completion is
+// conformant and the caller proceeds.
+//
+// terminal writes that frame in the caller's own wire dialect (Anthropic SSE events vs
+// OpenAI data + [DONE]) and is only called in the mid-stream arm. preTag/midTag are the
+// caller's log parentheticals, kept per-surface so an operator grepping the log can still
+// tell which stream refused.
+func (s *Server) failClosedOnUnparsedToolCalls(w http.ResponseWriter, comp *agent.Completion, started bool, preTag, midTag string, terminal func()) bool {
+	if comp == nil || !comp.ToolCallsDropped || len(comp.Message.ToolCalls) > 0 {
+		return false
+	}
+	if !started {
+		s.logf("gateway: upstream announced tool_calls but none parsed (%s); model=%s", preTag, s.model)
+		writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
+		return true
+	}
+	s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (%s); model=%s", midTag, s.model)
+	terminal()
+	return true
+}
+
 // isUsageCapReason reports whether a LimitReason names a self-recovering ACCOUNT CAP — a
 // session/weekly/usage window that clears at its reset — as opposed to a plain rate throttle or
 // no limit. It is the gateway-message counterpart of the retry loop's cap classification: a 403/402

@@ -387,51 +387,43 @@ func (m *gatewayMetrics) writeRequestMemoryAggregateMetrics(b *strings.Builder) 
 	// so each family renders its label set once here. Building the labels in one place
 	// is what keeps the members of a family label-identical — a Prometheus consumer that
 	// joins plan_bytes_total against plan_observations_total needs exactly that.
-	planLabels := func(k requestMemoryMetricKey) string {
+	planLabels := func(row requestMemoryPlanSnapshot) string {
+		k := row.key
 		return fmt.Sprintf("backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"",
 			promQuote(k.backend), promQuote(k.class), promQuote(k.scope), promQuote(k.dtype))
 	}
-	tokenLabels := func(k requestMemoryTokenKey) string {
+	tokenLabels := func(row requestMemoryTokenSnapshot) string {
+		k := row.key
 		return fmt.Sprintf("backend=\"%s\",kind=\"%s\"", promQuote(k.backend), promQuote(k.kind))
 	}
-	fitLabels := func(k requestMemoryFitKey) string {
+	fitLabels := func(row requestMemoryFitSnapshot) string {
+		k := row.key
 		return fmt.Sprintf("backend=\"%s\",scope=\"%s\"", promQuote(k.backend), promQuote(k.scope))
 	}
 
-	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_observations_total", "Observed in-kernel request memory plan rows by backend, class, scope, and dtype.", "counter")
-	for _, row := range snap.plans {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_observations_total{%s} %d\n", planLabels(row.key), row.observations)
-	}
-	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_bytes_total", "Cumulative planned bytes observed for served in-kernel backend requests, by backend, class, scope, and dtype.", "counter")
-	for _, row := range snap.plans {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_bytes_total{%s} %d\n", planLabels(row.key), row.totalBytes)
-	}
-	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_high_water_bytes", "Largest single observed in-kernel request memory plan row, by backend, class, scope, and dtype.", "gauge")
-	for _, row := range snap.plans {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_high_water_bytes{%s} %d\n", planLabels(row.key), row.highWaterBytes)
-	}
-	writeHelpType(b, "fak_gateway_in_kernel_request_memory_tokens_total", "Cumulative prompt/max_new/planned token windows from observed in-kernel request memory plans.", "counter")
-	for _, row := range snap.tokens {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens_total{%s} %d\n", tokenLabels(row.key), row.total)
-	}
-	writeHelpType(b, "fak_gateway_in_kernel_request_memory_tokens_high_water", "Largest prompt/max_new/planned token window from an observed in-kernel request memory plan.", "gauge")
-	for _, row := range snap.tokens {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens_high_water{%s} %d\n", tokenLabels(row.key), row.highWater)
-	}
-	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_observations_total", "Observed in-kernel request memory fit rows by backend and scope.", "counter")
-	for _, row := range snap.fits {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_observations_total{%s} %d\n", fitLabels(row.key), row.observations)
-	}
-	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes", "Largest observed planned in-kernel request memory bytes by backend and scope.", "gauge")
-	for _, row := range snap.fits {
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes{%s} %d\n", fitLabels(row.key), row.wantHighWater)
-	}
+	writeKeyedFamily(b, "fak_gateway_in_kernel_request_memory_plan_observations_total", "Observed in-kernel request memory plan rows by backend, class, scope, and dtype.", "counter",
+		snap.plans, planLabels, func(r requestMemoryPlanSnapshot) any { return r.observations })
+	writeKeyedFamily(b, "fak_gateway_in_kernel_request_memory_plan_bytes_total", "Cumulative planned bytes observed for served in-kernel backend requests, by backend, class, scope, and dtype.", "counter",
+		snap.plans, planLabels, func(r requestMemoryPlanSnapshot) any { return r.totalBytes })
+	writeKeyedFamily(b, "fak_gateway_in_kernel_request_memory_plan_high_water_bytes", "Largest single observed in-kernel request memory plan row, by backend, class, scope, and dtype.", "gauge",
+		snap.plans, planLabels, func(r requestMemoryPlanSnapshot) any { return r.highWaterBytes })
+	writeKeyedFamily(b, "fak_gateway_in_kernel_request_memory_tokens_total", "Cumulative prompt/max_new/planned token windows from observed in-kernel request memory plans.", "counter",
+		snap.tokens, tokenLabels, func(r requestMemoryTokenSnapshot) any { return r.total })
+	writeKeyedFamily(b, "fak_gateway_in_kernel_request_memory_tokens_high_water", "Largest prompt/max_new/planned token window from an observed in-kernel request memory plan.", "gauge",
+		snap.tokens, tokenLabels, func(r requestMemoryTokenSnapshot) any { return r.highWater })
+	writeKeyedFamily(b, "fak_gateway_in_kernel_request_memory_fit_observations_total", "Observed in-kernel request memory fit rows by backend and scope.", "counter",
+		snap.fits, fitLabels, func(r requestMemoryFitSnapshot) any { return r.observations })
+	writeKeyedFamily(b, "fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes", "Largest observed planned in-kernel request memory bytes by backend and scope.", "gauge",
+		snap.fits, fitLabels, func(r requestMemoryFitSnapshot) any { return r.wantHighWater })
+	// The margin family is NOT a writeKeyedFamily call: a scope whose capacity is unknown
+	// has no margin at all, and publishing 0 for it would read as a measured zero headroom.
+	// Skipping the row is the distinction, so it keeps its own loop.
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes", "Smallest observed headroom-adjusted fit margin for known-capacity in-kernel requests, by backend and scope. Omitted for scopes whose capacity was unknown.", "gauge")
 	for _, row := range snap.fits {
 		if !row.marginKnown {
 			continue
 		}
-		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes{%s} %d\n", fitLabels(row.key), row.marginLowWater)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes{%s} %d\n", fitLabels(row), row.marginLowWater)
 	}
 }
 
@@ -1371,6 +1363,20 @@ func writeHelpType(b *strings.Builder, name, help, typ string) {
 func writeCounter(b *strings.Builder, name, help string, n int64) {
 	writeHelpType(b, name, help, "counter")
 	fmt.Fprintf(b, "%s %d\n", name, n)
+}
+
+// writeKeyedFamily renders one LABEL-KEYED metric family: the HELP/TYPE header once, then
+// one sample per row under the label set that family derives from the row. Header and
+// samples are emitted by the same call because that is what keeps the members of a family
+// label-identical — a consumer joining plan_bytes_total against plan_observations_total
+// needs the label sets to match exactly, and a family whose header and rows are written
+// apart is where they drift. value returns the sample as any so a uint64 counter is
+// rendered by %d unsigned, exactly as an untyped literal loop would.
+func writeKeyedFamily[R any](b *strings.Builder, name, help, typ string, rows []R, labels func(R) string, value func(R) any) {
+	writeHelpType(b, name, help, typ)
+	for _, row := range rows {
+		fmt.Fprintf(b, "%s{%s} %d\n", name, labels(row), value(row))
+	}
 }
 
 func writeHistogram(b *strings.Builder, name, baseLabels string, s latencySnapshot) {

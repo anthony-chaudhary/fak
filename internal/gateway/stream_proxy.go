@@ -136,23 +136,16 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
 	s.accountStreamedTurn(ctx, sessionTurn, comp, req.Messages, began, reqModel)
 
-	// Tool-call conformance fail-closed: the upstream announced tool_calls but none
-	// survived parsing + the text-lift fallback. Proceeding would skip adjudication on
-	// a call the model intended to make — the exact silent no-op the buffered path
-	// refuses (handleChatCompletions). Fail closed here too: a clean 502 if nothing has
-	// streamed, else a terminal error frame so the client never reads a benign empty
-	// stop on a skipped call.
-	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
-		if !started {
-			s.logf("gateway: upstream announced tool_calls but none parsed (stream conformance fail-closed); model=%s", s.model)
-			writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
-			return true
-		}
-		s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (conformance fail-closed); model=%s", s.model)
+	// Tool-call conformance fail-closed (the rule itself lives in
+	// failClosedOnUnparsedToolCalls; the buffered counterpart is handleChatCompletions).
+	// Mid-stream this surface ends the turn in the OpenAI dialect: a data frame carrying
+	// a server_error, then [DONE].
+	if s.failClosedOnUnparsedToolCalls(w, comp, started, "stream conformance fail-closed", "conformance fail-closed", func() {
 		_ = writeSSEData(w, map[string]any{
 			"error": map[string]any{"message": "upstream tool-call format not recognized", "type": "server_error"},
 		})
 		writeSSEDone(w, flusher)
+	}) {
 		return true
 	}
 

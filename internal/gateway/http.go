@@ -1169,9 +1169,8 @@ func (s *Server) ownsSessionLoop() bool {
 }
 
 func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
-	traceID, verb, ok := splitPathIDVerb(r.URL.Path, "/v1/fak/session/")
+	traceID, verb, ok := requirePathIDVerb(w, r, "/v1/fak/session/", "trace_id is required")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "trace_id is required")
 		return
 	}
 

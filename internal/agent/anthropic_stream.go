@@ -237,7 +237,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// an upstream that ignores stream and replies with one buffered JSON body cannot be
 	// framed as SSE, so surface that as unsupported BEFORE any event (the caller falls
 	// back to the buffered path) rather than emit a malformed stream.
-	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "event-stream") {
+	if !upstreamStreamsSSE(resp) {
 		return ErrStreamingUnsupported
 	}
 	// Wrap the body in an idle-read deadline so an upstream that opens the stream and then

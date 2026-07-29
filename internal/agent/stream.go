@@ -623,6 +623,20 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 	return resp, nil
 }
 
+// upstreamStreamsSSE reports whether an opened upstream response is actually framed as an
+// event stream. Some "OpenAI-compatible" servers — and any upstream that ignores
+// stream:true — answer with a single buffered JSON body, which no SSE parser can frame; a
+// caller must know that BEFORE it emits a first event. Only the FACT is shared: the two
+// streaming callers remedy it differently (the Anthropic passthrough surfaces
+// ErrStreamingUnsupported so the gateway falls back to its buffered path; the OpenAI
+// planner parses the buffered body in place and delivers it as one fragment). An ABSENT
+// Content-Type counts as a stream — some servers omit it on a genuine SSE response, and
+// refusing those would break upstreams that work today.
+func upstreamStreamsSSE(resp *http.Response) bool {
+	ct := resp.Header.Get("Content-Type")
+	return ct == "" || strings.Contains(ct, "event-stream")
+}
+
 func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	if !p.StreamingSupported() {
 		return nil, ErrStreamingUnsupported
@@ -648,7 +662,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// buffered JSON body. Detect that by content-type and fall back to the buffered
 	// parser — deliver the whole content as one fragment — so the client gets the
 	// correct (if not incremental) turn instead of an empty stream.
-	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "event-stream") {
+	if !upstreamStreamsSSE(resp) {
 		raw, rerr := io.ReadAll(resp.Body)
 		if rerr != nil {
 			return nil, fmt.Errorf("planner: %s: read body: %w", call.adapter.Provider(), rerr)

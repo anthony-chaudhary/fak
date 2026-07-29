@@ -83,10 +83,12 @@ func CompactAnthropicHistoryToView(raw []byte, planned []Message) ([]byte, Compa
 		return raw, CompactOutcome{Reason: CompactReasonUnderBudget} // nothing to elide
 	}
 
-	out, ok := spliceToView(raw, spans, pfxEnd, stubIdx, elems)
 	// Prove it: re-decode + protected-prefix byte-equality (shared with compaction/elision).
-	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
-		return raw, outcome
+	out, refusal, good := spliceProven(raw, spans, pfxEnd, func() ([]byte, bool) {
+		return spliceToView(raw, spans, pfxEnd, stubIdx, elems)
+	})
+	if !good {
+		return raw, refusal
 	}
 	shedTokens := 0
 	for _, i := range stubIdx {

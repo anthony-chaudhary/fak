@@ -331,16 +331,22 @@ func applyKVMemoryCapacity(stats *KVMemoryStats, total, free int64, known bool) 
 	}
 	budgetBase := total
 	if stats.CapacityFreeKnown {
-		budgetBase = addKVCapacityBytes(free, stats.ResidentBytes)
+		budgetBase = SaturatingAddBytes(free, stats.ResidentBytes)
 		if budgetBase > total {
 			budgetBase = total
 		}
 	}
-	stats.FitBudgetBytes = applyKVCapacityHeadroom(budgetBase, stats.HeadroomRatio)
+	stats.FitBudgetBytes = ApplyByteHeadroom(budgetBase, stats.HeadroomRatio)
 	stats.FitMarginBytes = stats.FitBudgetBytes - stats.ResidentBytes
 }
 
-func addKVCapacityBytes(a, b int64) int64 {
+// SaturatingAddBytes adds two byte counts without ever wrapping: a non-positive b is a
+// no-op, and a sum that would overflow int64 pins at maxInt64 instead. Device capacity
+// figures arrive from several backends and a wrapped negative total would read as "no
+// memory" and refuse a request that fits. Exported because the gateway's request-memory
+// fit view (internal/gateway/memory_fit.go) totals the SAME quantities this planner
+// reports and must saturate them identically, or the two views disagree at the ceiling.
+func SaturatingAddBytes(a, b int64) int64 {
 	const maxInt64 = int64(^uint64(0) >> 1)
 	if b <= 0 {
 		return a
@@ -351,7 +357,12 @@ func addKVCapacityBytes(a, b int64) int64 {
 	return a + b
 }
 
-func applyKVCapacityHeadroom(bytes int64, headroom float64) int64 {
+// ApplyByteHeadroom reserves a fraction of a byte budget: it returns bytes scaled down by
+// headroom, treating a non-positive budget as zero and an out-of-range headroom (<=0 or
+// >=1) as "reserve nothing" rather than as a clamp — a 0 budget must stay 0, and a bogus
+// ratio must never silently zero a real budget. Exported for the same reason as
+// SaturatingAddBytes: the gateway renders the headroom-adjusted view of these budgets.
+func ApplyByteHeadroom(bytes int64, headroom float64) int64 {
 	if bytes <= 0 {
 		return 0
 	}
@@ -935,7 +946,7 @@ func (p *InKernelPlanner) requestDevicePressureFit(plan compute.MemoryPlan) (req
 	if want <= 0 {
 		return requestPressureFit{}, false
 	}
-	budget := applyKVCapacityHeadroom(free, inKernelRequestDeviceHeadroom)
+	budget := ApplyByteHeadroom(free, inKernelRequestDeviceHeadroom)
 	return requestPressureFit{
 		scope:     compute.MemoryScopeDevice,
 		class:     primaryDemandClass(plan, compute.MemoryScopeDevice),

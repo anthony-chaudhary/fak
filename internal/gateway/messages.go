@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1507,17 +1506,23 @@ const (
 // nothing was redacted, so it composes with the held-out banner (which returns "" when
 // no result was held).
 func secretRedactedWarn(n int) string {
-	if n <= 0 {
-		return ""
+	return redactedSpanWarn(n, "credential-shaped", reasonSecretRedacted,
+		"the credential itself", "fail_closed secret posture")
+}
+
+// anthropicTurnIdentity stamps the two identity fields every served Anthropic turn
+// carries, under one rule for the buffered and streamed surfaces alike: the model is the
+// one the client asked for (Anthropic reflects the requested id back) falling back to the
+// gateway's configured model when the client omitted it, and the message id is minted
+// fresh per turn from the wall clock under the msg_fak_ prefix that marks a fak-served
+// message. Both surfaces must agree here — a client that pipelines a streamed and a
+// buffered turn would otherwise see two different models named for the same request.
+func (s *Server) anthropicTurnIdentity(reqModel string) (model, id string) {
+	model = reqModel
+	if model == "" {
+		model = s.model
 	}
-	span := "span"
-	if n > 1 {
-		span = "spans"
-	}
-	return "[fak] masked " + strconv.Itoa(n) + " credential-shaped " + span +
-		" in a tool result (SECRET_REDACTED) — the rest of the output is intact and in context. " +
-		"Warn-first default: your own output is not withheld, only the credential itself is masked. " +
-		"To hold the whole result instead, set the fail_closed secret posture."
+	return model, "msg_fak_" + itoa(uint64(time.Now().UnixNano()))
 }
 
 func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted, contextEvent bool, hcoh harnessCoherenceInputs) {
@@ -1549,11 +1554,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		})
 		return
 	}
-	model := req.Model
-	if model == "" {
-		model = s.model
-	}
-	id := "msg_fak_" + itoa(uint64(time.Now().UnixNano()))
+	model, id := s.anthropicTurnIdentity(req.Model)
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")

@@ -573,11 +573,13 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	// 4. Splice on ORIGINAL bytes. The prefix span [0, spans[pfxEnd].end) (or just the
 	//    array-open when pfxEnd<0) is copied verbatim; then the stub; then the kept
 	//    elements verbatim; then the verbatim tail from the array close onward.
-	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole, tombstone, restoreID, positiveResidue.Text, positiveResidue.RestoreID)
 	// 5. Prove it: the spliced body must still decode AND keep the protected prefix bytes
-	//    intact, or we ship identity rather than a broken/cache-busting body.
-	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
-		return raw, outcome
+	//    intact, or we ship identity rather than a broken/cache-busting body (spliceProven).
+	out, refusal, good := spliceProven(raw, spans, pfxEnd, func() ([]byte, bool) {
+		return spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole, tombstone, restoreID, positiveResidue.Text, positiveResidue.RestoreID)
+	})
+	if !good {
+		return raw, refusal
 	}
 	return out, CompactOutcome{
 		Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens,
@@ -878,6 +880,22 @@ func compactSpliceVerdict(raw, out []byte, ok bool, spans []elementSpan, pfxEnd 
 		return CompactOutcome{Reason: CompactReasonMalformedBody}, false
 	}
 	return CompactOutcome{}, true
+}
+
+// spliceProven binds a rewrite to its proof, which is the rule every compacting path here
+// obeys: run the splice, and hand back the rewritten body ONLY if compactSpliceVerdict
+// says it still re-decodes and left the protected prefix bytes untouched. Otherwise the
+// ORIGINAL body comes back with the verdict's identity reason — a compaction that cannot
+// prove itself ships nothing rather than a broken or cache-busting body. The two are bound
+// into one call so a future splicer cannot ship unproven by forgetting the check. good
+// false means "return (out, refusal) verbatim"; good true leaves the success outcome to
+// the caller, which alone knows what it dropped and shed.
+func spliceProven(raw []byte, spans []elementSpan, pfxEnd int, splice func() ([]byte, bool)) (out []byte, refusal CompactOutcome, good bool) {
+	spliced, ok := splice()
+	if outcome, proven := compactSpliceVerdict(raw, spliced, ok, spans, pfxEnd); !proven {
+		return raw, outcome, false
+	}
+	return spliced, CompactOutcome{}, true
 }
 
 // decodeArrayElements returns each messages[] element's raw bytes (json.RawMessage) and its

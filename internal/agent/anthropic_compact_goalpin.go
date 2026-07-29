@@ -161,9 +161,11 @@ func compactWithGoalPin(raw []byte, elems []json.RawMessage, spans []elementSpan
 	if headBurstGate(opts, elems, pfxEnd, keepStart, goalIdx, false) == headBurstRefuse {
 		return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
 	}
-	out, ok := spliceCompactedWithGoal(raw, spans, pfxEnd, keepStart, goalIdx, n, dropped, stubRole, goalBeforeStub)
-	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
-		return raw, outcome
+	out, refusal, good := spliceProven(raw, spans, pfxEnd, func() ([]byte, bool) {
+		return spliceCompactedWithGoal(raw, spans, pfxEnd, keepStart, goalIdx, n, dropped, stubRole, goalBeforeStub)
+	})
+	if !good {
+		return raw, refusal
 	}
 	return out, CompactOutcome{Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens}
 }
