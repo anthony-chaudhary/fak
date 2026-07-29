@@ -38,6 +38,21 @@ func (t *v4CollectiveExpertTransport) uploadRank(rank int, data []float32) (comp
 	return t.backend.Upload(host, compute.F32), nil
 }
 
+// placeRankPart uploads one rank's partial through uploadRank, records it in parts[rank]
+// and marks the slot allocated so the deferred Free reclaims it. `what` names the upload in
+// the error text ("upload" for a rank that actually had picks, "zero-fill upload" for the
+// padding rank), so both callers keep the exact message they printed when each carried its
+// own copy of this block.
+func (t *v4CollectiveExpertTransport) placeRankPart(parts []compute.Tensor, allocated []bool, rank int, partial []float32, what string) error {
+	up, err := t.uploadRank(rank, partial)
+	if err != nil {
+		return fmt.Errorf("%w: rank %d %s: %v", ErrV4ExpertPlacement, rank, what, err)
+	}
+	parts[rank] = up
+	allocated[rank] = true
+	return nil
+}
+
 func (t *v4CollectiveExpertTransport) Forward(dispatch map[int][]V4ExpertDispatch, evaluate func([]routePick) ([]float32, error)) ([]float32, int, error) {
 	if t == nil || t.backend == nil {
 		return nil, 0, fmt.Errorf("%w: nil collective transport", ErrV4ExpertPlacement)
@@ -74,12 +89,9 @@ func (t *v4CollectiveExpertTransport) Forward(dispatch map[int][]V4ExpertDispatc
 		} else if len(partial) != width {
 			return nil, 0, fmt.Errorf("%w: rank %d partial width %d, want %d", ErrV4ExpertPlacement, rank, len(partial), width)
 		}
-		up, err := t.uploadRank(rank, partial)
-		if err != nil {
-			return nil, 0, fmt.Errorf("%w: rank %d upload: %v", ErrV4ExpertPlacement, rank, err)
+		if err := t.placeRankPart(parts, allocated, rank, partial, "upload"); err != nil {
+			return nil, 0, err
 		}
-		parts[rank] = up
-		allocated[rank] = true
 		active++
 	}
 	if width <= 0 {
@@ -89,12 +101,9 @@ func (t *v4CollectiveExpertTransport) Forward(dispatch map[int][]V4ExpertDispatc
 		if allocated[rank] {
 			continue
 		}
-		up, err := t.uploadRank(rank, make([]float32, width))
-		if err != nil {
-			return nil, 0, fmt.Errorf("%w: rank %d zero-fill upload: %v", ErrV4ExpertPlacement, rank, err)
+		if err := t.placeRankPart(parts, allocated, rank, make([]float32, width), "zero-fill upload"); err != nil {
+			return nil, 0, err
 		}
-		parts[rank] = up
-		allocated[rank] = true
 	}
 	collective, ok := t.backend.(compute.CollectiveBackend)
 	if !ok {

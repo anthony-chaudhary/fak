@@ -206,6 +206,51 @@ func (m *Model) addBiasIfPresent(y []float32, name string) {
 	}
 }
 
+// fuseGatedMLPPanels finishes a batched gated MLP's gate/up panels IN PLACE: it adds the
+// optional gate/up projection biases and then fuses the config's activation into G,
+// G[i] = act(G[i], cfg) * U[i]. G and U are row-major [N,I]. For Llama act==silu, so this
+// is the ordinary SwiGLU; for Gemma it is the GeGLU. Five batched lanes carried their own
+// transcription of these two loops.
+//
+// withProjBias is NOT a tuning knob and NOT cosmetic: it RECORDS an existing divergence
+// between those lanes that this extraction deliberately refuses to paper over. The
+// rectangular-batch lanes (batch_prefill.go, f32 and Q8) add mlp.{gate,up,down}_proj.bias;
+// prefillBatched (prefill_batch.go), verifyForwardBatched (verify.go) and the batched f32
+// decode (batch_step.go) never did, and their gates have no bias term to keep a
+// bias-carrying model out. Each caller passes exactly the value its own copy implemented,
+// so no model's numerics move by a bit here. Making the lanes AGREE is a behaviour fix that
+// needs its own witness and its own commit — not a side effect of removing a clone.
+func (m *Model) fuseGatedMLPPanels(lp func(string) string, G, U []float32, N, I int, cfg Config, withProjBias bool) {
+	if withProjBias {
+		for row := 0; row < N; row++ {
+			m.addBiasIfPresent(G[row*I:(row+1)*I], lp("mlp.gate_proj.bias"))
+			m.addBiasIfPresent(U[row*I:(row+1)*I], lp("mlp.up_proj.bias"))
+		}
+	}
+	for i := range G {
+		G[i] = act(G[i], cfg) * U[i]
+	}
+}
+
+// batchedGatedMLP runs one layer's f32 gated MLP over N already-post-normed rows Xn2 [N,H]
+// and returns the [N,H] down projection: gate/up matMulBatch, fuseGatedMLPPanels, down
+// matMulBatch, then the optional down bias. Every arithmetic call and its order is the one
+// the four hand-copied lanes ran, and matMulBatch's reduction is in-order, so the bit-exact
+// f32 rungs still hold. lp is the caller's layer-name closure. See fuseGatedMLPPanels for
+// what withProjBias means and why it is not defaulted.
+func (m *Model) batchedGatedMLP(lp func(string) string, Xn2 []float32, N, H, I int, cfg Config, withProjBias bool) []float32 {
+	G := matMulBatch(m.tensor(lp("mlp.gate_proj.weight")), Xn2, I, H, N)
+	U := matMulBatch(m.tensor(lp("mlp.up_proj.weight")), Xn2, I, H, N)
+	m.fuseGatedMLPPanels(lp, G, U, N, I, cfg, withProjBias)
+	Down := matMulBatch(m.tensor(lp("mlp.down_proj.weight")), G, H, I, N)
+	if withProjBias {
+		for row := 0; row < N; row++ {
+			m.addBiasIfPresent(Down[row*H:(row+1)*H], lp("mlp.down_proj.bias"))
+		}
+	}
+	return Down
+}
+
 // applyProjBias applies q/k/v projection biases for layer l. With cfg.AttentionBias set
 // it adds all three (the historical Qwen2 path, unchanged); otherwise it adds only the
 // biases physically present. For Llama (no bias, flag off) it is a no-op.
@@ -438,6 +483,27 @@ func scaleEmbedInPlace(x []float32, cfg Config) {
 	}
 	for i := range x {
 		x[i] *= s
+	}
+}
+
+// embedRowsInto fills X — row-major [len(ids), H], and X may be a longer buffer whose
+// FIRST len(ids) rows are written — with each token's embedding row, then applies the
+// config's embedding scale in place (Gemma; a no-op for Llama). This is the embedding
+// lookup every batched lane opens with; it used to be transcribed per lane.
+func (m *Model) embedRowsInto(X []float32, ids []int, H int, cfg Config) {
+	embed := m.embedRows()
+	for row, id := range ids {
+		copy(X[row*H:(row+1)*H], embed[id*H:(id+1)*H])
+		scaleEmbedInPlace(X[row*H:(row+1)*H], cfg)
+	}
+}
+
+// embedRectRowsInto is embedRowsInto for a RECTANGULAR prompt batch: X is [B*P, H] and row
+// b*P+t carries prompts[b][t], the row layout the rect-prefill lanes index with. Each
+// prompt writes into its own row window, so the per-row work is identical to the flat case.
+func (m *Model) embedRectRowsInto(X []float32, prompts [][]int, P, H int, cfg Config) {
+	for b, p := range prompts {
+		m.embedRowsInto(X[b*P*H:], p, H, cfg)
 	}
 }
 

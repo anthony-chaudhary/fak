@@ -233,13 +233,9 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 				copy(Xn2[q*H:(q+1)*H], normCfg(X[q*H:(q+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
-		inter := cfg.IntermediateSize
-		G := matMulBatch(m.tensor(lp("mlp.gate_proj.weight")), Xn2, inter, H, P)
-		U := matMulBatch(m.tensor(lp("mlp.up_proj.weight")), Xn2, inter, H, P)
-		for i := range G {
-			G[i] = act(G[i], cfg) * U[i]
-		}
-		Down := matMulBatch(m.tensor(lp("mlp.down_proj.weight")), G, H, inter, P)
+		// withProjBias=false preserves this lane exactly: verifyForwardBatched shares
+		// prefillBatched's math, biases included (i.e. excluded) — see fuseGatedMLPPanels.
+		Down := m.batchedGatedMLP(lp, Xn2, P, H, cfg.IntermediateSize, cfg, false)
 		for i := range X {
 			X[i] += Down[i]
 		}

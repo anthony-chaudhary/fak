@@ -82,15 +82,8 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 	B, N := len(prompts), len(prompts)*P
 
 	baseB, caches, cosN, sinN := bs.rectPrefillGeometry(P)
-	embed := m.embedRows()
 	X := make([]float32, N*H)
-	for b, p := range prompts {
-		for t, id := range p {
-			row := b*P + t
-			copy(X[row*H:(row+1)*H], embed[id*H:(id+1)*H])
-			scaleEmbedInPlace(X[row*H:(row+1)*H], cfg) // Gemma; no-op for Llama
-		}
-	}
+	m.embedRectRowsInto(X, prompts, P, H, cfg)
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(s string) string { return layerName(l, s) }
@@ -159,20 +152,9 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 				copy(Xn2[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
-		I := cfg.IntermediateSize
-		G := matMulBatch(m.tensor(lp("mlp.gate_proj.weight")), Xn2, I, H, N)
-		U := matMulBatch(m.tensor(lp("mlp.up_proj.weight")), Xn2, I, H, N)
-		for row := 0; row < N; row++ {
-			m.addBiasIfPresent(G[row*I:(row+1)*I], lp("mlp.gate_proj.bias"))
-			m.addBiasIfPresent(U[row*I:(row+1)*I], lp("mlp.up_proj.bias"))
-		}
-		for i := range G {
-			G[i] = act(G[i], cfg) * U[i]
-		}
-		Down := matMulBatch(m.tensor(lp("mlp.down_proj.weight")), G, H, I, N)
-		for row := 0; row < N; row++ {
-			m.addBiasIfPresent(Down[row*H:(row+1)*H], lp("mlp.down_proj.bias"))
-		}
+		// withProjBias=true: this rect-batch lane has always applied the mlp gate/up/down
+		// biases. Its serial twins deliberately still do not — see fuseGatedMLPPanels.
+		Down := m.batchedGatedMLP(lp, Xn2, N, H, cfg.IntermediateSize, cfg, true)
 		for i := range X {
 			X[i] += Down[i]
 		}
@@ -191,11 +173,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		copy(Xnorm[b*H:(b+1)*H], m.finalNorm(X[row*H:(row+1)*H]))
 	}
 	Logits := matMulBatch(m.lmHead(), Xnorm, cfg.VocabSize, H, B)
-	out := splitLogits(Logits, B, cfg.VocabSize)
-	for b := range out {
-		logitScaleInPlace(out[b], cfg) // Cohere/Gemma2; no-op for Llama
-	}
-	return out
+	return splitScaledLogits(nil, Logits, B, cfg.VocabSize, cfg)
 }
 
 func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool) [][]float32 {
@@ -232,16 +210,9 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 			ropeRowInto(cosN[row], sinN[row], inv, baseB[b]+t)
 		}
 	}
-	embed := m.embedRows()
 	X := grow(pb.X, N*H)
 	pb.X = X
-	for b, p := range prompts {
-		for t, id := range p {
-			row := b*P + t
-			copy(X[row*H:(row+1)*H], embed[id*H:(id+1)*H])
-			scaleEmbedInPlace(X[row*H:(row+1)*H], cfg) // Gemma; no-op for Llama
-		}
-	}
+	m.embedRectRowsInto(X, prompts, P, H, cfg)
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(s string) string { return layerName(l, s) }
@@ -351,13 +322,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 			qgemm8Target{qt: ql.gateProj, Y: G},
 			qgemm8Target{qt: ql.upProj, Y: U},
 		)
-		for row := 0; row < N; row++ {
-			m.addBiasIfPresent(G[row*I:(row+1)*I], lp("mlp.gate_proj.bias"))
-			m.addBiasIfPresent(U[row*I:(row+1)*I], lp("mlp.up_proj.bias"))
-		}
-		for i := range G {
-			G[i] = act(G[i], cfg) * U[i]
-		}
+		m.fuseGatedMLPPanels(lp, G, U, N, I, cfg, true)
 		quantizeBatchPanelInto(bs.scratch, G, N, I)
 		Down := grow(pb.Down, N*H)
 		pb.Down = Down
@@ -387,11 +352,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 	}
 	quantizeBatchPanelInto(bs.scratch, Xnorm, B, H)
 	Logits := qGemm8(m.q8(m.headName()), bs.scratch)
-	out := splitLogits(Logits, B, cfg.VocabSize)
-	for b := range out {
-		logitScaleInPlace(out[b], cfg) // Cohere/Gemma2; no-op for Llama
-	}
-	return out
+	return splitScaledLogits(nil, Logits, B, cfg.VocabSize, cfg)
 }
 
 func (bs *BatchSession) rectPrefillGeometry(P int) ([]int, []*KVCache, [][]float32, [][]float32) {
@@ -419,10 +380,19 @@ func (bs *BatchSession) finishRectPrefillPositions(baseB []int, P int) {
 	}
 }
 
-func splitLogits(logits []float32, B, vocab int) [][]float32 {
-	out := make([][]float32, B)
-	for b := 0; b < B; b++ {
-		out[b] = logits[b*vocab : (b+1)*vocab]
+// splitScaledLogits slices the flat [B,vocab] batched logits into B ALIASING per-sequence
+// rows (no copy) and applies the config's logit scale to each (Cohere/Gemma2; no-op for
+// Llama). All four batched lanes — rect prefill f32/Q8 and batched decode f32/Q8 — end
+// with this same slice-then-scale tail, which used to be four copies of the loop. `rows`
+// lets the decode lanes hand in their reused row-header buffer instead of allocating; a
+// nil/short `rows` is allocated fresh, exactly as the allocating callers did.
+func splitScaledLogits(rows [][]float32, logits []float32, B, vocab int, cfg Config) [][]float32 {
+	if len(rows) < B {
+		rows = make([][]float32, B)
 	}
-	return out
+	for b := 0; b < B; b++ {
+		rows[b] = logits[b*vocab : (b+1)*vocab]
+		logitScaleInPlace(rows[b], cfg)
+	}
+	return rows
 }

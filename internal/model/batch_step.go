@@ -216,12 +216,8 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 	}
 
 	// embedding lookup: X is [B, H], one working hidden row per user.
-	embed := m.embedRows()
 	X := make([]float32, B*H)
-	for b, id := range ids {
-		copy(X[b*H:(b+1)*H], embed[id*H:(id+1)*H])
-		scaleEmbedInPlace(X[b*H:(b+1)*H], cfg) // Gemma; no-op for Llama
-	}
+	m.embedRowsInto(X, ids, H, cfg)
 	caches := growCaches(db.caches, B)
 	db.caches = caches
 	for b := 0; b < B; b++ {
@@ -281,13 +277,9 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		for b := 0; b < B; b++ {
 			copy(Xn2[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wPost, bPost, eps, cfg))
 		}
-		I := cfg.IntermediateSize
-		G := matMulBatch(m.tensor(lp("mlp.gate_proj.weight")), Xn2, I, H, B)
-		U := matMulBatch(m.tensor(lp("mlp.up_proj.weight")), Xn2, I, H, B)
-		for i := range G {
-			G[i] = act(G[i], cfg) * U[i]
-		}
-		Down := matMulBatch(m.tensor(lp("mlp.down_proj.weight")), G, H, I, B)
+		// withProjBias=false preserves this lane exactly: the batched f32 decode has never
+		// applied the mlp projection biases (see fuseGatedMLPPanels for the divergence).
+		Down := m.batchedGatedMLP(lp, Xn2, B, H, cfg.IntermediateSize, cfg, false)
 		for i := range X {
 			X[i] += Down[i]
 		}
@@ -305,11 +297,7 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 	// the 113 MB tied-embedding head streamed ONCE for all B users — the single biggest
 	// per-token weight, and so the single biggest batching beneficiary at decode.
 	Logits := matMulBatch(m.lmHead(), Xnorm, cfg.VocabSize, H, B)
-	out := make([][]float32, B)
-	for b := 0; b < B; b++ {
-		out[b] = Logits[b*cfg.VocabSize : (b+1)*cfg.VocabSize]
-		logitScaleInPlace(out[b], cfg) // Cohere/Gemma2; no-op for Llama
-	}
+	out := splitScaledLogits(nil, Logits, B, cfg.VocabSize, cfg)
 	bs.recordStepMACs(B) // B-proportional projection MAC count for this step (see LastStepMACs)
 	return out
 }
@@ -354,13 +342,9 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		ropeRowInto(cosB[b], sinB[b], inv, posB[b])
 	}
 
-	embed := m.embedRows()
 	X := grow(db.X, B*H)
 	db.X = X
-	for b, id := range ids {
-		copy(X[b*H:(b+1)*H], embed[id*H:(id+1)*H])
-		scaleEmbedInPlace(X[b*H:(b+1)*H], cfg) // Gemma; no-op for Llama
-	}
+	m.embedRowsInto(X, ids, H, cfg)
 	caches := growCaches(db.caches, B)
 	db.caches = caches
 	for b := 0; b < B; b++ {
@@ -479,12 +463,8 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 	Logits := grow(db.Logits, B*cfg.VocabSize)
 	db.Logits = Logits
 	bs.qgemmBatchTensorInto(m.q8Head(), Xnorm, B, H, Logits)
-	out := growLogitRows(db.out, B)
+	out := splitScaledLogits(growLogitRows(db.out, B), Logits, B, cfg.VocabSize, cfg)
 	db.out = out
-	for b := 0; b < B; b++ {
-		out[b] = Logits[b*cfg.VocabSize : (b+1)*cfg.VocabSize]
-		logitScaleInPlace(out[b], cfg) // Cohere/Gemma2; no-op for Llama
-	}
 	bs.recordStepMACs(B) // B-proportional projection MAC count for this step (see LastStepMACs)
 	return out
 }

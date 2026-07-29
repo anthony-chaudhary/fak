@@ -96,11 +96,7 @@ func (k backendKernel) mul(name string, x any, out, in int) []float32 {
 		panic("model: backendKernel " + name + " activation length mismatch")
 	}
 	if qt := s.M.kqw[name]; qt != nil {
-		if qt.out != out || qt.in != in {
-			panic("model: resident k-quant tensor shape mismatch: " + name +
-				" stored=[" + itoa(qt.out) + "," + itoa(qt.in) + "]" +
-				" requested=[" + itoa(out) + "," + itoa(in) + "]")
-		}
+		requireResidentShape("resident k-quant", name, qt.out, qt.in, out, in)
 		// A resident raw k-quant expert weight (Q5_K/Q6_K down_proj). A backend that can
 		// keep routed experts resident (cuda: fcuda_q5k/q6k_matmul_f32) stages it on the
 		// device via glmDsaWeightHAL below; every other backend keeps the host k-quant GEMV
@@ -242,6 +238,21 @@ func (s *Session) glmDsaWeightHAL(name string, out, in int) compute.Tensor {
 	panic("model: glmDsaWeightHAL missing resident weight " + name + " (no f32/q8/q4_k residency)")
 }
 
+// requireResidentShape panics when a resident quantized tensor's STORED [out,in] does not
+// match the shape the forward asked for. `store` labels which resident store was hit, so
+// each caller keeps the exact message it printed when it carried its own copy of this
+// check. The message prints stored-vs-requested so a residency/config-dim bug names its
+// operands (e.g. a MoE expert stored [moe_intermediate,H] but the forward asked
+// [intermediate,H] because expert_feed_forward_length was not read into
+// cfg.MoEIntermediateSize) — the bare tensor name alone can't distinguish those.
+func requireResidentShape(store, name string, storedOut, storedIn, out, in int) {
+	if storedOut != out || storedIn != in {
+		panic("model: " + store + " tensor shape mismatch: " + name +
+			" stored=[" + itoa(storedOut) + "," + itoa(storedIn) + "]" +
+			" requested=[" + itoa(out) + "," + itoa(in) + "]")
+	}
+}
+
 // residentMatRows reads a projection by name from any resident store (f32, Q8,
 // int4, Q4_K, k-quant, GPTQ), then adds the active LoRA delta for that projection
 // when an adapter set is loaded (#291). The base read is residentMatRowsBase; the
@@ -274,31 +285,15 @@ func (m *Model) residentMatRowsBase(name string, x []float32, out, in int) []flo
 		return q4MatRows(qt, x)
 	}
 	if qt := m.q4kw[name]; qt != nil {
-		if qt.out != out || qt.in != in {
-			// Print stored-vs-requested so a residency/config-dim bug names its operands
-			// (e.g. a MoE expert stored [moe_intermediate,H] but the forward asked
-			// [intermediate,H] because expert_feed_forward_length was not read into
-			// cfg.MoEIntermediateSize). The bare name alone can't distinguish those.
-			panic("model: resident Q4_K tensor shape mismatch: " + name +
-				" stored=[" + itoa(qt.out) + "," + itoa(qt.in) + "]" +
-				" requested=[" + itoa(out) + "," + itoa(in) + "]")
-		}
+		requireResidentShape("resident Q4_K", name, qt.out, qt.in, out, in)
 		return q4kMatRows(qt, x)
 	}
 	if qt := m.kqw[name]; qt != nil {
-		if qt.out != out || qt.in != in {
-			panic("model: resident k-quant tensor shape mismatch: " + name +
-				" stored=[" + itoa(qt.out) + "," + itoa(qt.in) + "]" +
-				" requested=[" + itoa(out) + "," + itoa(in) + "]")
-		}
+		requireResidentShape("resident k-quant", name, qt.out, qt.in, out, in)
 		return kQuantMatRows(qt, x)
 	}
 	if qt := m.q2w[name]; qt != nil {
-		if qt.out != out || qt.in != in {
-			panic("model: resident Q2_0 tensor shape mismatch: " + name +
-				" stored=[" + itoa(qt.out) + "," + itoa(qt.in) + "]" +
-				" requested=[" + itoa(out) + "," + itoa(in) + "]")
-		}
+		requireResidentShape("resident Q2_0", name, qt.out, qt.in, out, in)
 		return q2MatRows(qt, x)
 	}
 	if qt := m.gptqw[name]; qt != nil {

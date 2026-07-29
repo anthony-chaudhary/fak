@@ -288,6 +288,22 @@ func awqGroupQuantizeSearch(w []float32, out, in, groupSize int, calib, xcal []f
 	return bestT, bestSV, bestA
 }
 
+// newAWQGroupTensor allocates an EMPTY group-wise AWQ tensor for a [out, in] weight split
+// into nGroups = in/groupSize input groups: nibble-packed output-major codes [out, in/2]
+// plus one scale and one zero-point per (output row, group). Both producers — the quantizer
+// below and the AutoAWQ checkpoint loader in awq.go — began from this identical allocation.
+func newAWQGroupTensor(out, in, groupSize, nGroups int) *awqGroupTensor {
+	return &awqGroupTensor{
+		out:       out,
+		in:        in,
+		groupSize: groupSize,
+		nGroups:   nGroups,
+		codes:     make([]byte, out*(in/2)),
+		scales:    make([]float32, out*nGroups),
+		zeros:     make([]uint8, out*nGroups),
+	}
+}
+
 // awqGroupQuantize quantizes a row-major FP32 weight matrix w [out, in]
 // (w[o*in+i]) into the group-wise asymmetric AutoAWQ format. calib is the
 // per-input-channel salience (mean |activation|; nil for plain RTN) and alpha is
@@ -304,15 +320,7 @@ func awqGroupQuantize(w []float32, out, in, groupSize int, calib []float32, alph
 	nGroups := in / groupSize
 	scaleVec := awqActScale(calib, in, alpha)
 
-	qt := &awqGroupTensor{
-		out:       out,
-		in:        in,
-		groupSize: groupSize,
-		nGroups:   nGroups,
-		codes:     make([]byte, out*(in/2)),
-		scales:    make([]float32, out*nGroups),
-		zeros:     make([]uint8, out*nGroups),
-	}
+	qt := newAWQGroupTensor(out, in, groupSize, nGroups)
 	rowBytes := in / 2
 
 	for o := 0; o < out; o++ {

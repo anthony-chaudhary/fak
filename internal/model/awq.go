@@ -396,15 +396,7 @@ func loadAWQGroupSafetensors(sf *safetensorsFile, cfg Config) (*Model, error) {
 			return nil, fmt.Errorf("awq group: %s scales len %d != nGroups*out %d", base, len(scF32), nGroups*out)
 		}
 
-		qt := &awqGroupTensor{
-			out:       out,
-			in:        in,
-			groupSize: groupSize,
-			nGroups:   nGroups,
-			codes:     make([]byte, out*(in/2)),
-			scales:    make([]float32, out*nGroups),
-			zeros:     make([]uint8, out*nGroups),
-		}
+		qt := newAWQGroupTensor(out, in, groupSize, nGroups)
 		rowBytes := in / 2
 
 		// Transpose qweight [in][out/8] -> output-major nibble-packed codes [out][in/2].

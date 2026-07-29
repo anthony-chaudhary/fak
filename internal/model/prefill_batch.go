@@ -142,13 +142,9 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 				copy(Xn2[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wPost, bPost, eps, cfg))
 			}
 		})
-		I := cfg.IntermediateSize
-		G := matMulBatch(m.tensor(lp("mlp.gate_proj.weight")), Xn2, I, H, P)
-		U := matMulBatch(m.tensor(lp("mlp.up_proj.weight")), Xn2, I, H, P)
-		for i := range G {
-			G[i] = act(G[i], cfg) * U[i]
-		}
-		Down := matMulBatch(m.tensor(lp("mlp.down_proj.weight")), G, H, I, P)
+		// withProjBias=false preserves this lane exactly: prefillBatched has never applied the
+		// mlp projection biases (see fuseGatedMLPPanels for the divergence this preserves).
+		Down := m.batchedGatedMLP(lp, Xn2, P, H, cfg.IntermediateSize, cfg, false)
 		for i := range X {
 			X[i] += Down[i]
 		}
