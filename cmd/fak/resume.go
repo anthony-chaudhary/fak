@@ -438,7 +438,17 @@ var resumeProcRe = regexp.MustCompile(`(?i)claude(?:\.exe)?\b.*--resume\s+(\S+)`
 // cross-platform census procguard already ships (Windows CIM CommandLine; POSIX /proc or
 // ps), so there is one process-enumeration implementation, not a fork.
 func countLiveResumes() int {
-	procs, _ := procguard.CollectRelations()
+	procs, collectErr := procguard.CollectRelations()
+	if collectErr != "" {
+		// #5385: a census that did not RUN is not a quiet host. Dropping this error made the
+		// host-wide live ceiling silently inert wherever the collector could not read the
+		// platform's process table — observed on darwin reporting 0 while four `claude
+		// --resume` drivers were live, i.e. exactly AT the default ceiling, which therefore
+		// never fired. The count below is still the only number this function has, so it is
+		// still returned; what changes is that the operator now hears that it is not a
+		// measurement, the way `fak fleet` already surfaces collectErr.
+		fmt.Fprintf(os.Stderr, "fak resume: live-resume census failed (%s) — the host-wide live ceiling is NOT enforceable this run\n", collectErr)
+	}
 	n := 0
 	for _, p := range procs {
 		if resumeProcRe.MatchString(p.Cmdline) {
