@@ -58,7 +58,7 @@ Each trigger below is labeled with the source that named it.
 - **Agents are being reclassified as first-class non-human identities (NHI)**, and audit is
   not native to MCP/A2A — there is no tamper-evident event log at the agent-to-agent
   boundary. `[EXTERNAL — industry NHI framing; open standards-body gap, 2026]`
-- **One static binary, no deps, air-gapped is a regulated-industry lever**, sharpened by a
+- **One static binary, two `golang.org/x` deps, air-gapped is a regulated-industry lever**, sharpened by a
   `[EXTERNAL — 2026 supply-chain attack on the most-downloaded OSS LLM proxy]`.
 - **The AI-gateway market is consolidating up-stack to governance.** `[EXTERNAL — a major
   security vendor acquired a leading LLM gateway, Apr 2026]`. Gateway alone is table stakes;

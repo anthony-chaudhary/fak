@@ -36,7 +36,7 @@ go build -o fak ./cmd/fak
 ./fak help
 ```
 
-The binary is ~13 MB, static, and has zero external dependencies. It runs the same on a Raspberry Pi as on a datacenter GPU.
+The binary is ~13 MB, static, and pulls in two `golang.org/x` extended-standard-library modules and nothing else — no Python, no CUDA toolchain. It runs the same on a Raspberry Pi as on a datacenter GPU.
 
 ---
 

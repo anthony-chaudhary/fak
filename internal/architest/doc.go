@@ -41,5 +41,5 @@
 // The package has no runtime behavior and is intentionally NOT registered into the
 // kernel (internal/registrations) — it is an off-path test harness. It uses only
 // the standard library (go/parser, go/token) so it never adds a module dependency,
-// preserving the repo's zero-external-deps property that CI relies on.
+// holding the module's external set at the two golang.org/x modules go.mod pins.
 package architest

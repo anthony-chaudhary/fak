@@ -240,7 +240,8 @@ Act 2 honestly conceded the residual: fak's f32 decode trailed *quantized* llama
 pure-Go-scalar thesis. **This act chases it** — because the gap was never architectural,
 it was *bytes streamed* (decode is memory-bound at 0.50 flop/byte, so time ≈ weight-bytes
 ÷ bandwidth, and llama.cpp streams ~4× fewer of them at Q8_0). Matching that needs two
-things, both delivered here in pure Go (no cgo, no deps — the module stays stdlib-only):
+things, both delivered here in pure Go (no cgo, and no module beyond the two
+`golang.org/x` ones go.mod already pins):
 **(1)** quantize to Q8_0, the *same* 32-element-block int8 format llama.cpp's GGUF uses,
 and **(2)** a SIMD int8 kernel, because Go does not vectorize the int8 dot on its own.
 

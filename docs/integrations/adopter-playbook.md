@@ -21,8 +21,9 @@ local model in one command — see [`../../DOGFOOD-CLAUDE.md`](https://github.co
 This playbook is the **bare-serve** path an external adopter follows by hand, without
 that launcher.
 
-> **One binary, every shape.** `fak` is a single static Go binary (zero external
-> dependencies, no `go.sum`, no Python, no CUDA toolchain). The same artifact serves
+> **One binary, every shape.** `fak` is a single static Go binary (two `golang.org/x`
+> extended-standard-library modules in a 4-line `go.sum`, no Python, no CUDA toolchain).
+> The same artifact serves
 > the HTTP gateway, the stdio MCP server, and the offline CI check — you add flags,
 > not components.
 >

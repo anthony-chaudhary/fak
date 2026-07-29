@@ -67,7 +67,7 @@ fak is *not* a faster token engine — vLLM/SGLang win raw throughput. And the r
 **Post 6/8** — *the one-binary contrast*
 `[VISUAL: visuals/31-machine-facts.png]`
 
-What you actually deploy: one ~13MB static Go binary. Zero deps, no go.sum.
+What you actually deploy: one ~13MB static Go binary. Two golang.org/x deps, a 4-line go.sum.
 
 The contrast vs a multi-GB Python/CUDA multi-process stack is **operational surface**, not tok/s. No IPC, no sidecar, no second model — the gate is on the same call path as the tool call.
 
@@ -196,7 +196,7 @@ Confirmed. `search_kb` → ALLOW is correct. But the DENY reason is the crux: th
 
 The honest, reproducible split is: `refund_payment` → `DENY (DEFAULT_DENY)`. The ledger's `POLICY_BLOCK` phrasing reflects a configured-policy demo, not the keyless default-deny path the copy tells skeptics to run. Copy that tells a skeptic to run a command must print what the command actually prints.
 
-Let me confirm the one remaining unverified ledger-vs-draft delta: the `~13MB` container size and "zero deps / no go.sum" — both are in the ledger verbatim, so they're safe. I have enough to produce the corrected asset.
+Let me confirm the one remaining unverified ledger-vs-draft delta: the `~13MB` container size and "two golang.org/x deps / 4-line go.sum" — both are in the ledger verbatim, so they're safe. I have enough to produce the corrected asset.
 
 ## Problems found and fixes
 
@@ -214,7 +214,7 @@ Ledger: tuned gain is "~1.5–4x, the conservative headline number is 4.1x." Wri
 
 **P5 — "8-rung ladder" / `deletioncert -selfcheck` — VERIFIED, no change.** The 8-rung count is real, and `go run ./cmd/deletioncert -selfcheck` is a real flag. Kept.
 
-Everything else (max|Δ|=0, no mid-run eviction in shipped engines, two gates, detector ~100% evadable, 8.8→9.7x naive paired with tuned, ~13MB / zero-deps / no go.sum, 0/29 novel, self-host + read-heavy fence, not-a-token-engine fence, no projections, no simulated power) traces to the ledger and survives unchanged. All tagged visuals exist on disk.
+Everything else (max|Δ|=0, no mid-run eviction in shipped engines, two gates, detector ~100% evadable, 8.8→9.7x naive paired with tuned, ~13MB / two-golang.org/x-deps / 4-line go.sum, 0/29 novel, self-host + read-heavy fence, not-a-token-engine fence, no projections, no simulated power) traces to the ledger and survives unchanged. All tagged visuals exist on disk.
 
 ---
 
@@ -229,7 +229,7 @@ The draft was **not** clean — it shipped a proof command that the binary refus
 - **Truncated winner line (P3):** quoted the actual `--explain` terminal string `=> [7] adjudicator.Adjudicator DENY DEFAULT_DENY by=monitor <- winner` instead of the draft's paraphrase.
 - **Tuned-gain band (P4):** rewrote "~1.5–4.1x" → "~1.5–4x (conservative headline: 4.1x)" in Post 5 and Bluesky, so 4.1x reads as the conservative single number the ledger names, not the max of a spread.
 
-Every remaining number traces to the ledger: max|Δ|=0 (bit-exact eviction, vs HF oracle, self-signed v1 cert / self-reported EvictedCount fenced); no-mid-run-eviction in vLLM/SGLang/OpenAI/Anthropic; two independent gates + ~100%-evadable-by-design detector; 8.8x→9.7x naive **always** paired with the tuned ~1.5–4x; ~13MB / zero-deps / no go.sum framed as operational surface not tok/s; 0/29 novel; self-host + read-heavy and not-a-token-engine fences intact; 643 WebVoyager tasks. No ~60x / agent-city projections and no simulated power/dollar numbers appear. All tagged visuals confirmed on disk (`social-preview.png` 46KB, plus `45-`, `46-`, `48-`, `39-`, `31-`, `29-`, `agent-kernel-video.gif`). `deletioncert -selfcheck` and the 8-rung count verified against the binary.
+Every remaining number traces to the ledger: max|Δ|=0 (bit-exact eviction, vs HF oracle, self-signed v1 cert / self-reported EvictedCount fenced); no-mid-run-eviction in vLLM/SGLang/OpenAI/Anthropic; two independent gates + ~100%-evadable-by-design detector; 8.8x→9.7x naive **always** paired with the tuned ~1.5–4x; ~13MB / two-golang.org/x-deps / 4-line go.sum framed as operational surface not tok/s; 0/29 novel; self-host + read-heavy and not-a-token-engine fences intact; 643 WebVoyager tasks. No ~60x / agent-city projections and no simulated power/dollar numbers appear. All tagged visuals confirmed on disk (`social-preview.png` 46KB, plus `45-`, `46-`, `48-`, `39-`, `31-`, `29-`, `agent-kernel-video.gif`). `deletioncert -selfcheck` and the 8-rung count verified against the binary.
 
 ### Fanrun thread (added 2026-06-27) — fact-check
 

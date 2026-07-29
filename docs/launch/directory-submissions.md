@@ -91,7 +91,7 @@ project `DOS` was already submitted ([cline/mcp-marketplace#1794](https://github
 - **Logo:** a **400×400 PNG** attached to the issue. *This is the one missing asset — the repo has wide diagrams (`visuals/*.png`) and a 1200×630 `visuals/social-preview.png`, but no square icon. Make/crop a 400×400 fak icon and drag it onto the issue (GitHub issue image upload is web-UI only).* 
 - **Reason for addition (paste):**
   ```
-  fak is the Fused Agent Kernel: one static Go binary you put in front of an agent over MCP. Its server (fak serve --stdio) exposes fak_adjudicate / fak_syscall / fak_admit so Cline can get a kernel verdict for a proposed tool call before running it, run one through the kernel, or hold distrusted tool results out of context. It also keeps long sessions cache-efficient, supports per-call routing, and emits an auditable verdict trail. Apache-2.0, zero deps.
+  fak is the Fused Agent Kernel: one static Go binary you put in front of an agent over MCP. Its server (fak serve --stdio) exposes fak_adjudicate / fak_syscall / fak_admit so Cline can get a kernel verdict for a proposed tool call before running it, run one through the kernel, or hold distrusted tool results out of context. It also keeps long sessions cache-efficient, supports per-call routing, and emits an auditable verdict trail. Apache-2.0, two golang.org/x deps.
   ```
 - **README-install confirmation (required checkbox):** TRUE. The repo README + [`examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) give a README-alone install (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest`, then `fak serve --stdio` / a project `.mcp.json`). Test it with Cline first, then tick the box.
 

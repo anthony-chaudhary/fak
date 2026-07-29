@@ -2,8 +2,9 @@
 
 `fak` is the Fused Agent Kernel — one static Go binary you
 put in front of your model so every tool call is adjudicated before it runs. It has
-**zero external dependencies** (standard library only — there is no `go.sum`, no Python,
-no CUDA toolchain), so "install" really is just *get the binary onto the box*. This page
+an external dependency set of **two `golang.org/x` extended-standard-library modules**
+(`x/term`, and `x/sys` indirectly through it), pinned by a 4-line `go.sum` — no Python,
+no CUDA toolchain — so "install" really is just *get the binary onto the box*. This page
 is for an **external adopter**: you want `fak` on your machine or in your production
 image **without cloning the monorepo**.
 

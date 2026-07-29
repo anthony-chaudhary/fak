@@ -20,7 +20,8 @@ number cross-checked against the tree and carries a provenance label._
 
 ## The one-paragraph version
 
-fak is one ~13 MB dependency-free Go binary that drops in front of any agent (Claude Code,
+fak is one ~13 MB static Go binary — two `golang.org/x` modules, no Python, no CUDA
+toolchain — that drops in front of any agent (Claude Code,
 OpenAI, MCP) and turns every tool call into a permission check. Its load-bearing guarantee
 is **structural**: a dangerous lever that isn't on the allow-list cannot be called no matter
 what the model is told — refusal by construction, not by classifier. On its own AgentDojo-style

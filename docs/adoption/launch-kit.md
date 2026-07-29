@@ -53,7 +53,7 @@ The first is the primary; it matches the vetted asset in
 
 ## The hook (one paragraph)
 
-> One ~13 MB static Go binary (Apache-2.0, no external deps, no `go.sum`) sits between an AI
+> One ~13 MB static Go binary (Apache-2.0, two `golang.org/x` modules) sits between an AI
 > agent and its tools. On the same in-process call path — no sidecar, no second model — it
 > does two things: a **default-deny capability gate** the model can't talk past (an
 > irreversible action is refused *by structure*; the lever was never wired, so there's nothing
@@ -158,7 +158,7 @@ Every row below is grounded in the repo; nothing here is aspirational unless it 
 
 - An **agent kernel / reference-monitor**: an in-process, default-deny tool-call gate fused
   with an addressable, bit-exact KV cache. ([README](../../README.md), [AGENTS.md](../../AGENTS.md))
-- **One static Go binary, Apache-2.0**, no external Go deps, drop-in in front of an agent you
+- **One static Go binary, Apache-2.0**, two `golang.org/x` modules, drop-in in front of an agent you
   already run by repointing one base URL (Claude Code, Codex, Cursor, any OpenAI / Anthropic /
   MCP client). ([README](../../README.md))
 - A **security boundary that doesn't depend on catching an attack** — the capability lock plus

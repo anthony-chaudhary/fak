@@ -75,7 +75,7 @@ Everything else — the `8.8–9.7× vs naive`, `~1.5–4.1× vs tuned`, `~13MB`
 
 | | |
 |---|---|
-| **VO** | "One static Go binary, about thirteen megabytes, zero dependencies, Apache-2.0. Drops in front of Claude Code or Cursor with no agent-side changes. Every number traces to a commit. Repo and live demos in the description — run the proof yourself, offline, in about a minute." |
+| **VO** | "One static Go binary, about thirteen megabytes, two extended-standard-library dependencies, Apache-2.0. Drops in front of Claude Code or Cursor with no agent-side changes. Every number traces to a commit. Repo and live demos in the description — run the proof yourself, offline, in about a minute." |
 | **ON-SCREEN TEXT** | `github.com/anthony-chaudhary/fak` <br> `go run ./cmd/fak agent --offline` <br> live demos → anthony-chaudhary.github.io/fak/demos.html |
 | **B-ROLL** | Terminal re-running the offline proof: injection-in-context YES→no, destructive-op YES→no, task still completed. |
 

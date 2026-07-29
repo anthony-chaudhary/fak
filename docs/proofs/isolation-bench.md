@@ -163,7 +163,7 @@ The result JSON is committed under `docs/proofs/isolation-bench-result.json` for
 - **Self-run, not independently verified**: The benchmark is reproducible but not third-party-certified.
 - **Structural floor, not leaderboard rank**: There is no incumbent benchmark; this establishes the metric, it does not compete on one.
 - **WITNESSED capability**: All primitives (MockL3Backend, AdmitL3SharedPage) are fak-authored and fak-controlled.
-- **Zero external deps**: Model-free, GPU-free, key-free, network-free. Runs entirely in-process.
+- **No external inputs**: Model-free, GPU-free, key-free, network-free. Runs entirely in-process.
 
 ## Contact
 

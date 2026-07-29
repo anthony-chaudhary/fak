@@ -37,7 +37,7 @@ The whole integration is **one command**: `fak guard` injects the gateway base U
 the Claude Code child for you, proxies your existing subscription byte-for-byte, and
 adjudicates every tool call. Copy-paste:
 
-**1. Get the binary** — one static Go binary, no runtime, no dependencies:
+**1. Get the binary** — one static Go binary, no runtime to install, two `golang.org/x` modules:
 
 ```bash
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest

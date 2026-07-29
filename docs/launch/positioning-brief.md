@@ -17,7 +17,7 @@ I have everything I need to synthesize this. The three takes converge sharply, t
 *Honest fence:* This is self-described and SHIPPED. The two gates (capability lock + result quarantine) are the floor; the detector is explicitly *not*. Keep the "by design" — it's the credibility, not a caveat. Don't say "unbreakable"; say "attacker must beat two independent gates."
 
 **BACKUP B (operational, for selfhosted/golang/Primeagen):**
-> "An agent kernel in one ~13MB static Go binary. No go.sum, zero deps. The default-deny gate runs in-process on the same call path as the tool call — no IPC, no sidecar, no second model."
+> "An agent kernel in one ~13MB static Go binary. Two golang.org/x deps, a 4-line go.sum. The default-deny gate runs in-process on the same call path as the tool call — no IPC, no sidecar, no second model."
 
 *Honest fence:* The contrast is *operational surface* vs a multi-GB Python/CUDA stack — NOT tok/s. fak is not a faster token engine and doesn't try to be; vLLM/SGLang/llama.cpp win raw throughput. Say that first, before anyone catches it.
 
@@ -42,7 +42,7 @@ I have everything I need to synthesize this. The three takes converge sharply, t
 | **r/LocalLLaMA** (PRIMARY) | mechanism-titled mid-run KV eviction, `max|Δ|=0` | deletion-proof GIF embedded + Colab one click away; you first-comment the oracle-parity table (cos=1.000000) AND the tuned 4.1x |
 | **r/AI_Agents** | "treat the tool call like a syscall; the lever was never wired up" | copy-pasteable 60s `preflight refund_payment → DENY` |
 | **r/selfhosted** | operational contrast: one static binary as agent gateway vs Python/CUDA stack (NOT benchmarks) | deployment specifics; repo link goes in the *weekly thread*, not standalone |
-| **r/golang** | pure-Go transformer verified per-layer against HF (cos=1.000000), CUDA decode at llama.cpp parity, no go.sum | engineering story; security thesis only in comments |
+| **r/golang** | pure-Go transformer verified per-layer against HF (cos=1.000000), CUDA decode at llama.cpp parity, a 4-line go.sum | engineering story; security thesis only in comments |
 | **r/netsec** | the two-gate containment architecture; why detection-as-floor is the wrong abstraction | hosted writeup (not bare repo), "disclosure: I wrote this," explicit threat model |
 | **r/MachineLearning** | reproducibility: byte-identical across 4 GPU backends / 4 OSes, every number → commit | weekend `[P]` post; method first, NOT the speedup |
 | **Show HN** | "treat the model as untrusted, the tool call as a syscall" (mechanism surprise, NOT "security") | 60s `preflight → DENY`; your own first comment is the prosecution |
@@ -51,7 +51,7 @@ I have everything I need to synthesize this. The three takes converge sharply, t
 | **YouTube — Fireship** | hand him a pre-cut 100s script: one thesis + DENY frame + 4.1x | — |
 | **YouTube — LiveOverflow/Hammond/IppSec** | a "break my quarantine gate" CTF challenge repo (attacker controls the tool result, win = fire the destructive call) | — |
 | **YouTube — Cole Medin/Berman** | "drop fak in front of your existing Claude Code/Cursor agent, no code changes" 90s demo | — |
-| **YouTube — Primeagen** | "13MB Go static binary, no go.sum, vs multi-GB Python/CUDA stack" + the 0/29-novel honesty | — |
+| **YouTube — Primeagen** | "13MB Go static binary, two golang.org/x deps, vs multi-GB Python/CUDA stack" + the 0/29-novel honesty | — |
 
 ---
 

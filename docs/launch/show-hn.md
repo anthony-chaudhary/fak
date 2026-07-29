@@ -8,7 +8,7 @@ Show HN: fak – Treat the LLM as untrusted and the tool call like a syscall (Go
 
 ## Body comment (post immediately as author)
 
-I built fak: one ~13MB static Go binary (Apache-2.0, no deps, no go.sum) that sits between an AI agent and its tools. It does two things in-process, on the same call path as the tool call — no IPC, no sidecar, no second model:
+I built fak: one ~13MB static Go binary (Apache-2.0, two golang.org/x deps, 4-line go.sum) that sits between an AI agent and its tools. It does two things in-process, on the same call path as the tool call — no IPC, no sidecar, no second model:
 
 1. A **default-deny capability gate** the model can't talk past. Irreversible actions are refused *by structure* — the lever was never wired up, so there's nothing to jailbreak toward.
 2. **Addressable, bit-exact KV cache** that lets you reach into the *middle* of a kept model run, cut out a poisoned tool result, and leave the cache bit-for-bit identical to a run that never saw it (checked at max|Δ|=0, not one number differs).

@@ -398,8 +398,9 @@ async function streamChat(prompt: string) {
 
 ## Go
 
-The fak-native surface is plain JSON over `net/http` — no SDK, no dependencies (matching the
-repo's zero-dependency posture). These mirror the wire DTOs in `fak/internal/gateway/wire.go`.
+The fak-native surface is plain JSON over `net/http` — no SDK and no module beyond the
+standard library (matching the repo's own posture: two `golang.org/x` modules and nothing
+else). These mirror the wire DTOs in `fak/internal/gateway/wire.go`.
 
 ### 1. Standard library — adjudicate with context cancellation
 

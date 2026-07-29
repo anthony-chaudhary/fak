@@ -17,8 +17,9 @@ FROM golang:1.26 AS build
 ARG APP_VERSION=docker
 ENV CGO_ENABLED=0 GOTOOLCHAIN=auto
 WORKDIR /src
-# Copy the module (the Go module is the repo root) and build it. Zero external
-# deps means there is no go.sum step to cache.
+# Copy the module (the Go module is the repo root) and build it. The dependency set
+# is two golang.org/x modules pinned by a 4-line go.sum, so the fetch is small enough
+# that there is no separate download-cache stage.
 COPY . .
 # Build through the one canonical release recipe (scripts/build.sh, #3709); this
 # stage's ENV (CGO_ENABLED=0, GOTOOLCHAIN=auto) passes through to it unchanged.

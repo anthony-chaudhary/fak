@@ -96,7 +96,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "Why one Go binary instead of a Python serving stack like vLLM or SGLang?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Because serving an agent safely is a whole stack, not just a token engine, and most of that stack is governance rather than throughput. A model server (vLLM, SGLang) gives you fast tokens. To run a governed agent fleet you then assemble several pieces around it: a gateway and a capability/policy layer, a result-screening layer and an audit pipeline, and an MCP bridge plus a reverse proxy for auth. Those engines are Python on a CUDA/PyTorch stack and multi-process by design. Their production container is multi-GB because it bundles CUDA + PyTorch (pip/uv into an existing env is the lighter path), and vLLM's own security docs direct you to front it with a reverse proxy for auth and endpoint allow-listing. Its --api-key covers only the /v1 routes. fak collapses the governance + gateway half of that stack into one static Go binary with zero external dependencies (standard library only: there is no go.sum, no Python, no CUDA toolchain). That one binary does a lot at once. It speaks the OpenAI and Anthropic wires plus MCP, enforces a reviewable capability floor, quarantines tool results, emits a trace-correlated audit log, and exposes Prometheus metrics. It runs on a laptop …"
+        "text": "Because serving an agent safely is a whole stack, not just a token engine, and most of that stack is governance rather than throughput. A model server (vLLM, SGLang) gives you fast tokens. To run a governed agent fleet you then assemble several pieces around it: a gateway and a capability/policy layer, a result-screening layer and an audit pipeline, and an MCP bridge plus a reverse proxy for auth. Those engines are Python on a CUDA/PyTorch stack and multi-process by design. Their production container is multi-GB because it bundles CUDA + PyTorch (pip/uv into an existing env is the lighter path), and vLLM's own security docs direct you to front it with a reverse proxy for auth and endpoint allow-listing. Its --api-key covers only the /v1 routes. fak collapses the governance + gateway half of that stack into one static Go binary whose whole external dependency set is two golang.org/x extended-standard-library modules (pinned by a 4-line go.sum: no Python, no CUDA toolchain). That one binary does a lot at once. It speaks the OpenAI and Anthropic wires plus MCP, enforces a reviewable capability floor, quarantines tool results, emits a trace-correlated audit log, and exposes Prometheus metrics. It runs on a laptop …"
       }
     },
     {
@@ -1296,7 +1296,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "Should I run fak under a process supervisor like systemd?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes — fak serve is a single static binary with no external dependencies, which makes it a clean fit for systemd, a container runtime, or any supervisor that restarts a process on exit. Because the floor reloads from its manifest on every startup and policy-load errors are fatal, a supervised restart re-establishes the same gate deterministically rather than drifting open. The binary binds its listener synchronously before marking itself ready, so a bind failure surfaces immediately instead of leaving a half-started service. Pass the secret and the policy by environment and flag (--require-key-env, --policy) so the unit file carries configuration, not secrets in the command line."
+        "text": "Yes — fak serve is a single static binary with a two-module golang.org/x dependency set, which makes it a clean fit for systemd, a container runtime, or any supervisor that restarts a process on exit. Because the floor reloads from its manifest on every startup and policy-load errors are fatal, a supervised restart re-establishes the same gate deterministically rather than drifting open. The binary binds its listener synchronously before marking itself ready, so a bind failure surfaces immediately instead of leaving a half-started service. Pass the secret and the policy by environment and flag (--require-key-env, --policy) so the unit file carries configuration, not secrets in the command line."
       }
     },
     {
@@ -1889,8 +1889,9 @@ to front it with a reverse proxy for auth and endpoint allow-listing. Its `--api
 covers only the `/v1` routes.
 
 `fak` collapses the **governance + gateway half** of that stack into **one static Go
-binary with zero external dependencies** (standard library only: there is no `go.sum`, no
-Python, no CUDA toolchain). That one binary does a lot at once. It speaks the OpenAI and
+binary whose whole external dependency set is two `golang.org/x` extended-standard-library
+modules** (pinned by a 4-line `go.sum`: no Python, no CUDA toolchain). That one binary does
+a lot at once. It speaks the OpenAI and
 Anthropic wires plus MCP, enforces a reviewable capability floor, quarantines tool results,
 emits a trace-correlated audit log, and exposes Prometheus metrics. It runs on a laptop CPU
 with no key, model, or network.
@@ -2641,7 +2642,7 @@ On restart the capability floor reloads from its manifest on disk, so a crash ne
 
 ## Should I run fak under a process supervisor like systemd?
 
-Yes — `fak serve` is a single static binary with no external dependencies, which makes it a clean fit for systemd, a container runtime, or any supervisor that restarts a process on exit. Because the floor reloads from its manifest on every startup and policy-load errors are fatal, a supervised restart re-establishes the same gate deterministically rather than drifting open. The binary binds its listener synchronously before marking itself ready, so a bind failure surfaces immediately instead of leaving a half-started service. Pass the secret and the policy by environment and flag (`--require-key-env`, `--policy`) so the unit file carries configuration, not secrets in the command line.
+Yes — `fak serve` is a single static binary with a two-module `golang.org/x` dependency set, which makes it a clean fit for systemd, a container runtime, or any supervisor that restarts a process on exit. Because the floor reloads from its manifest on every startup and policy-load errors are fatal, a supervised restart re-establishes the same gate deterministically rather than drifting open. The binary binds its listener synchronously before marking itself ready, so a bind failure surfaces immediately instead of leaving a half-started service. Pass the secret and the policy by environment and flag (`--require-key-env`, `--policy`) so the unit file carries configuration, not secrets in the command line.
 
 ## Are the /metrics and /debug/vars endpoints exposed without authentication?
 

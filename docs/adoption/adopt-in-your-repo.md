@@ -48,7 +48,7 @@ The single change is where one client points.
 
 ### 1. Get the binary (about 2 minutes)
 
-One static Go binary, no external dependencies:
+One static Go binary — two `golang.org/x` modules, no Python, no CUDA toolchain:
 
 ```
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest

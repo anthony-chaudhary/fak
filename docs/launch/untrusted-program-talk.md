@@ -199,8 +199,8 @@ measured.
 ### Slide 7 — One binary is the whole surface (the deployment close)
 
 fak fronts a real token engine (vLLM / SGLang / llama.cpp / a cloud provider); it
-does not replace one. What it collapses into one ~13 MB static Go binary (zero
-external deps, no `go.sum`) is the *other half of the stack*: the OpenAI /
+does not replace one. What it collapses into one ~13 MB static Go binary (two
+`golang.org/x` deps in a 4-line `go.sum`) is the *other half of the stack*: the OpenAI /
 Anthropic / MCP gateway, the capability floor, result quarantine, audit, and auth
 — the parts a serving engine explicitly leaves to "the caller's responsibility."
 
@@ -263,7 +263,7 @@ layer today; self-signed v1 cert / self-reported `EvictedCount`.
 **Arc:** serving an agent safely is a *stack*, not a component (the engine gives
 you one band; the rest you bolt on) → fak is that rest-of-stack collapsed into one
 static Go binary → the laptop story and the fleet story are the same artifact.
-**Carry the number:** ~13 MB binary, zero deps, no `go.sum`; the
+**Carry the number:** ~13 MB binary, two `golang.org/x` deps, a 4-line `go.sum`; the
 vLLM/SGLang-vs-fak operational-surface table (lifted from the explainer).
 **Fence hard:** not a faster token engine (vLLM/SGLang win tok/s); reuse is
 self-host only; in-binary model is a correctness reference, not a production
@@ -302,7 +302,7 @@ are AI-marketing venues — they grade mechanisms.
 | **DEF CON / Black Hat (briefings)** + **OffSecLive / sectorless CTF tracks** | The "lever was never wired up — refuses by structure" is a CTF-shaped claim; binary-exploitation audiences cover *boundaries*, not tutorials. | A "break my quarantine gate" framing: attacker controls the tool result, win = fire the destructive call. (See the LiveOverflow/Hammond/IppSec row in `positioning-brief.md`.) | Security (universal); the evadable-by-design admission is the credibility here. |
 | **Simon Willison's "lethal trifecta" orbit** (guest essay / talk at an AI-eng meetup) | The dominant 2026 AI-security vocabulary; fak is the rare project that *closes* the trifecta by structure. | "Private data + untrusted content + exfiltration path = guaranteed exploit; two structural gates close it without detection." (See `landscape-research.md` "lethal trifecta" note.) | Security (universal). |
 | **Papers We Love / reading-group meetups** (local chapters) | Idea-first, mechanism-curious; loves a falsifiable claim + a reproduce-in-an-afternoon proof. | The 0/29-novel honesty posture + the `max|Δ|=0` eviction reproduced live from a clean checkout. | The assembly thesis + the KV witness. |
-| **Local Go / infrastructure meetups** (Go NYC, Berlin Go, etc.) | "Zero deps, no `go.sum`, one static binary, the policy is a file not a code edit" is a Go-engineering story. | The `Register*` extension seam (policy rungs as a chain, like LSM hooks) + the operational-surface contrast. | Operational surface + engineering craftsmanship. |
+| **Local Go / infrastructure meetups** (Go NYC, Berlin Go, etc.) | "Two `golang.org/x` deps in a 4-line `go.sum`, one static binary, the policy is a file not a code edit" is a Go-engineering story. | The `Register*` extension seam (policy rungs as a chain, like LSM hooks) + the operational-surface contrast. | Operational surface + engineering craftsmanship. |
 | **Dev.to / Hashnode / Lobsters (long-form essay)** | The durable, search-indexed surface; the asset that keeps delivering for months. | The Lobsters essay angle already drafted in [`lobsters-and-blog.md`](lobsters-and-blog.md) — *extend* it with the talk's KV and 0/29 sections rather than write fresh. | All four halves, fences intact. |
 
 **The one rule across all of them (from [`landscape-research.md`](landscape-research.md)):**
@@ -347,7 +347,7 @@ cited as measured; no projection appears without its label.
 - **In-process ~2.4 µs vs ~6.9 ms (~2,800×) boundary tax:**
   [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) "Pure-kernel latency"
   (commit `bcad56e`); subsystem sentinel, not a fleet-speed headline.
-- **~13 MB static binary / zero deps / no `go.sum`:**
+- **~13 MB static binary / two `golang.org/x` deps / 4-line `go.sum`:**
   [`docs/explainers/one-binary-one-surface.md`](../explainers/one-binary-one-surface.md);
   [`go.mod`](https://github.com/anthony-chaudhary/fak/blob/main/go.mod).
 - **Fences carried verbatim from the kit:** reuse self-host-only / read-heavy /

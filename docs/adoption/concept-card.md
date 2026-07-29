@@ -50,8 +50,8 @@ tool *results* are held out of context by structure, not by a classifier.
 → [the quarantine arm of the syscall-flow diagram](diagrams/syscall-flow.svg)
 
 **5. One static Go binary, drop-in.** Repoint one base URL; the same ~13 MB binary a dev
-runs on a laptop is what a platform team hardens for a fleet — no external deps, no
-`go.sum`, no sidecar.
+runs on a laptop is what a platform team hardens for a fleet — two `golang.org/x`
+modules in a 4-line `go.sum`, no sidecar.
 → [single-binary diagram](diagrams/single-binary.svg)
 
 ## Install (one line)

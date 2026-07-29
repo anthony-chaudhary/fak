@@ -61,7 +61,7 @@ Read top to bottom. Lines beginning `$` are what was typed; the next line is the
 captured output; lines beginning `#` are annotation, not part of the run.
 
 ```console
-# Step 1/3 — build the one static Go binary (Go 1.26+, no go.sum, no deps).
+# Step 1/3 — build the one static Go binary (Go 1.26+, two golang.org/x modules).
 $ go build -o fak ./cmd/fak
 $ ls -lh fak
 -rwxr-xr-x  1 you  staff   44M  fak
@@ -84,7 +84,8 @@ verdict=ALLOW reason=NONE by=monitor
 ## What just happened
 
 - **One binary, zero setup.** `go build -o fak ./cmd/fak` produces a single static
-  artifact — no `go.sum`, no Python, no CUDA. That one binary is the whole boundary.
+  artifact — two `golang.org/x` modules in a 4-line `go.sum`, no Python, no CUDA. That one
+  binary is the whole boundary.
 - **The verdict is structural, not a guess.** `refund_payment` is denied because it is not
   on the allow-list — the floor fails closed. There is no classifier to fool and no model
   to prompt; the same `DENY` comes back offline, every time.

@@ -25,7 +25,7 @@ Repo (Apache-2.0): github.com/anthony-chaudhary/fak — disclosure, I wrote it.
 
 ## r/golang
 
-**Title:** A pure-Go transformer verified per-layer against HuggingFace (cos=1.000000), CUDA decode at llama.cpp parity, shipped as one ~13MB static binary with no go.sum
+**Title:** A pure-Go transformer verified per-layer against HuggingFace (cos=1.000000), CUDA decode at llama.cpp parity, shipped as one ~13MB static binary with a 4-line go.sum
 
 **Body:**
 
@@ -35,7 +35,7 @@ The Go bits that might interest this sub:
 - In-kernel SmolLM2-135M forward pass, every layer proven against a HuggingFace oracle: per-layer cos=1.000000, final-logits max|Δ|≈4.4e-5, KV-decode token-for-token identical.
 - CUDA decode hits parity with llama.cpp Q8_0 (~120 tok/s on an RTX 4070).
 - Deterministic results reproduce byte-for-byte across 4 GPU backends (Metal/Vulkan/CUDA Ada/CUDA Ampere), 2 CPU ISAs, and 4 OSes.
-- Ships as one ~13MB static binary. No go.sum, zero deps.
+- Ships as one ~13MB static binary. Two golang.org/x deps in a 4-line go.sum.
 
 Honest framing: this is not a faster token engine — vLLM/SGLang/llama.cpp win raw throughput, and I don't pretend otherwise. The win here is operational surface (one binary vs a multi-GB Python/CUDA multi-process stack) and verifiability, not tok/s.
 
@@ -43,7 +43,7 @@ It's also a default-deny capability gate for agent tool calls, but that's a comm
 
 Repo (Apache-2.0): github.com/anthony-chaudhary/fak — I wrote it.
 
-*Sub rule note: r/golang tolerates show-and-tell when it's genuinely Go-engineering-forward and you disclose authorship. Keep the security thesis out of the title and body; let it come up in comments. The cos=1.000000 / no-go.sum angle is what earns the post.*
+*Sub rule note: r/golang tolerates show-and-tell when it's genuinely Go-engineering-forward and you disclose authorship. Keep the security thesis out of the title and body; let it come up in comments. The cos=1.000000 / two-module-dependency-set angle is what earns the post.*
 
 ---
 
@@ -155,7 +155,7 @@ I have everything needed. Here is my assessment.
 
 **2. r/LLMDevs — "naive baseline is a strawman nobody runs."** The ledger's instruction is *"ALWAYS show the tuned-baseline number, NEVER lead with naive-only,"* and the fence calls naive the wrong thing to lead with — it does not authorize calling it a "strawman nobody runs." That editorializes past the ledger and actually undercuts credibility (plenty of naive agent loops do re-prefill). Soften to "a baseline that does no prefix reuse," which is what the ledger supports.
 
-**3. r/golang title — "no go.sum" stated as a bare feature; fine, but "zero deps" needs the engine fence nearby, which it has.** This one is clean. No change.
+**3. r/golang title — the 4-line-go.sum line stated as a bare feature; fine, but the two-module dependency count needs the engine fence nearby, which it has.** This one is clean. No change.
 
 **4. r/programming — `cmd/deletioncert -selfcheck` "~1s" timing.** The command exists and the flag is real (verified in cmd/deletioncert/main.go), but the "~1s" runtime is not in the ledger. The ledger's offline proof timings are "60-second proof" / "~1s" only for the `preflight` path, not deletioncert. Drop the unverified "~1s" and say "runs offline, no key/model/GPU" — the runtime claim isn't ledger-backed.
 
@@ -183,4 +183,4 @@ What I changed:
 
 6. **r/netsec, r/LLMDevs, r/AI_Agents: expanded the abbreviated `preflight ... refund_payment` into the real invocation** (`--policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"`) so a skeptic who copies it gets the documented DENY/ALLOW rather than a usage error. Verified against README.md:126-132 and AGENTS.md:53-54; the example policy file exists.
 
-Every remaining number traces to the ledger/repo: max|Δ|=0 mid-run eviction, ed25519 self-signed-v1 / EvictedCount-self-reported fence, cos=1.000000 + max|Δ|≈4.4e-5 (CLAIMS.md:73), ~120 tok/s RTX 4070 = llama.cpp Q8_0 (CLAIMS.md:114), 4-platform byte-determinism, ~13MB static binary / no go.sum / zero deps, two-gate containment, ~100%-evadable-by-design detector, 0/29 prior-art, OpenAI+Anthropic+MCP gateway, self-host + read-heavy / ~1%-write-flip fence, "not a faster token engine," kernel≠hardware-isolation note, 4.1x-vs-tuned headline (BENCHMARK-AUTHORITY.md:24,205), 8.8x–9.7x WebVoyager / 643 tasks (docs/webbench-real-measurements-summary.md:26-29), demos URL, and the `deletioncert -selfcheck` / `agent --offline` / `preflight` commands (all present in cmd/ and the example policy file).
+Every remaining number traces to the ledger/repo: max|Δ|=0 mid-run eviction, ed25519 self-signed-v1 / EvictedCount-self-reported fence, cos=1.000000 + max|Δ|≈4.4e-5 (CLAIMS.md:73), ~120 tok/s RTX 4070 = llama.cpp Q8_0 (CLAIMS.md:114), 4-platform byte-determinism, ~13MB static binary / two golang.org/x deps / 4-line go.sum, two-gate containment, ~100%-evadable-by-design detector, 0/29 prior-art, OpenAI+Anthropic+MCP gateway, self-host + read-heavy / ~1%-write-flip fence, "not a faster token engine," kernel≠hardware-isolation note, 4.1x-vs-tuned headline (BENCHMARK-AUTHORITY.md:24,205), 8.8x–9.7x WebVoyager / 643 tasks (docs/webbench-real-measurements-summary.md:26-29), demos URL, and the `deletioncert -selfcheck` / `agent --offline` / `preflight` commands (all present in cmd/ and the example policy file).

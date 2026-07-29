@@ -102,7 +102,7 @@ adoption, and simulated work is labeled simulated.
 - **Hook:** "Repoint one base URL. The laptop binary is the fleet binary — you add
   flags, not components."
 - **Body:** Gateway, capability gate, result quarantine, and audit surface in a
-  single static Go binary with no external dependencies. `fak guard -- claude`
+  single static Go binary — two `golang.org/x` modules, no Python. `fak guard -- claude`
   wraps the agent you already run; 41 of 47 surveyed harnesses repoint with one base
   URL.
 - **Diagram:** the where-the-binary-sits figure — [adoption visuals](../adoption-visuals.md).

@@ -24,7 +24,8 @@ fak's residency story is a direct consequence of four properties it already ship
 these are new for this doc — they are the same properties described in the
 [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) and [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt), read through a residency lens.
 
-1. **Self-host-first.** `fak` is one static Go binary with zero external dependencies. Put
+1. **Self-host-first.** `fak` is one static Go binary whose whole external dependency set
+   is two `golang.org/x` extended-standard-library modules. Put
    it in front of a **local** model (`fak guard --gguf …`, or `fak serve` fronting Ollama /
    vLLM / SGLang / llama.cpp on your own hardware) or a **domestic provider**, and the
    inference path never leaves infrastructure you control. Same artifact on a laptop and in

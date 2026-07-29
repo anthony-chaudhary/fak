@@ -15,7 +15,8 @@ date: 2026-07-03
 
 # fak install paths: which one command do I run?
 
-fak is one static Go binary with no external dependencies. There is no wrong way
+fak is one static Go binary that pulls in two `golang.org/x` modules and nothing
+else — no Python, no CUDA toolchain. There is no wrong way
 to get it, but there is a fastest way for each situation. Find your row, run the
 one command, done. Every command here is the same one the
 [getting-started guide](../../GETTING-STARTED.md) documents; this page just

@@ -35,7 +35,7 @@ forked or internal vLLM endpoint breaks a witness instead of passing silent revi
    an optional priority field (when `FAK_VLLM_PRIORITY_SCHEDULING` advertises the
    V1 priority scheduler) are derived from the fak turn identity, never secret.
 2. **KV-cache-events stream.** vLLM publishes `BlockStored` / `BlockRemoved` /
-   `AllBlocksCleared` events over ZMQ/msgpack. fak is dependency-free, so the
+   `AllBlocksCleared` events over ZMQ/msgpack. fak takes no ZMQ or msgpack module, so the
    transport decoder lives outside this leaf and hands the adapter decoded
    `VLLMKVEventBatch` values at the `VLLMKVEventSource` seam
    (`VLLMJSONKVEventSource` is the stdlib NDJSON bridge used by tests).

@@ -100,7 +100,7 @@ where a single Go binary has a real, structural advantage.
 | Dimension | vLLM / SGLang (the token engine) | `fak` (the governed-serving surface) |
 |---|---|---|
 | **What it is** | A token-serving inference *engine* — prompts → tokens, as fast as possible. | A governed-serving *control surface* — an OpenAI/Anthropic/MCP gateway that adjudicates the tool calls a model proposes. Explicitly **not** a faster token engine; it fronts one. |
-| **Implementation / runtime** | Python (SGLang's router adds Rust), on a PyTorch + CUDA/ROCm stack with compiled GPU kernels. | A single static Go binary — no Python, no PyTorch, no CUDA toolchain. **Zero external dependencies** (standard library only; there is no `go.sum`). |
+| **Implementation / runtime** | Python (SGLang's router adds Rust), on a PyTorch + CUDA/ROCm stack with compiled GPU kernels. | A single static Go binary — no Python, no PyTorch, no CUDA toolchain. Its whole external dependency set is **two `golang.org/x` extended-standard-library modules**, pinned by a 4-line `go.sum`. |
 | **Process topology** | Multi-process by design: API server + engine-core(s) + per-GPU worker(s) over ZMQ, Ray for multi-node (vLLM); FastAPI server + runtime + a separate Rust router, plus optional prefill/decode-disaggregation processes (SGLang). | One process. The gateway *is* the adjudication kernel. The token engine it fronts is a separate, swappable process (or it owns a small reference model in-binary). |
 | **Install / stand-up** | `pip`/`uv` into a fresh CUDA-matched PyTorch env, or a multi-GB Docker image (~8–12 GB compressed in current tags, bundling CUDA + PyTorch by design). Multi-node adds Ray or a router + RDMA transfer engine. | `go install …/cmd/fak@latest`, a single signed binary download, or a `distroless/static` image that is the base **plus one ~13 MB binary** — no shell, no package manager, no libc, runs nonroot. |
 | **Hardware** | Built for GPUs (CUDA by default; CPU / ROCm / XPU / TPU backends exist as alternative paths). | No GPU required to run the kernel or gateway — it runs on a laptop CPU. GPU compute for its in-binary reference model is an opt-in build tag, off by default. |
@@ -164,7 +164,7 @@ smuggle in claims the rest of the repo is careful not to make:
   capability gating, tool-result quarantine, or audit-by-default. Those are external
   layers you assemble, and `fak` is that layer as one binary.
 
-→ Every operational fact above is verifiable: [`go.mod`](https://github.com/anthony-chaudhary/fak/blob/main/go.mod) (zero deps),
+→ Every operational fact above is verifiable: [`go.mod`](https://github.com/anthony-chaudhary/fak/blob/main/go.mod) (two `golang.org/x` modules),
 [`INSTALL.md`](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md) (static targets, distroless image), the gateway routes in
 [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#3-tier-1--put-fak-in-front-of-a-real-model-the-practical-serving-path),
 and the claim tags in [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
