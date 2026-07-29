@@ -4,8 +4,8 @@ package main
 
 import (
 	"os/exec"
-	"syscall"
-	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/dispatchaudit"
 )
 
 func configureDispatchSpawn(cmd *exec.Cmd) {
@@ -28,31 +28,7 @@ func configureDispatchSpawn(cmd *exec.Cmd) {
 // GetExitCodeProcess: STILL_ACTIVE (259) means running. Any error resolving the
 // pid is treated as "not alive" — a pid we cannot confirm live must not keep a
 // worker slot or lock wedged.
-func dispatchPIDAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	const (
-		processQueryLimitedInformation = 0x1000
-		stillActive                    = 259
-	)
-	h, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
-	if err != nil || h == 0 {
-		return false
-	}
-	defer syscall.CloseHandle(h)
-
-	var code uint32
-	r, _, _ := procDispatchGetExitCodeProcess.Call(uintptr(h), uintptr(unsafe.Pointer(&code)))
-	if r == 0 {
-		// Could not read the exit code; conservatively treat the open handle as
-		// "alive" rather than free a slot we are unsure about.
-		return true
-	}
-	return code == stillActive
-}
-
-var (
-	modDispatchKernel32            = syscall.NewLazyDLL("kernel32.dll")
-	procDispatchGetExitCodeProcess = modDispatchKernel32.NewProc("GetExitCodeProcess")
-)
+// It is dispatchaudit.ProcessAlive: that package owns the syscall pair (and the
+// zombie/unreadable-exit-code judgement), and this file used to carry a byte-identical
+// private copy of it down to its own lazy kernel32 handle.
+func dispatchPIDAlive(pid int) bool { return dispatchaudit.ProcessAlive(pid) }

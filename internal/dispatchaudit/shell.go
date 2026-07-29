@@ -48,7 +48,7 @@ var (
 	reProviderErr = regexp.MustCompile(`(?i)stream error|AI_APICallError|APICallError|provider.{0,12}error|429|503`)
 )
 
-var pidAlive = processAlive
+var pidAlive = ProcessAlive
 
 // logBaseRE matches the run id + timestamp at the tail of a resolve log name so
 // the .backend sidecar can be paired by prefix.
