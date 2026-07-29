@@ -155,6 +155,12 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	if derived, ok := deriveCommitMessageStamp(message, paths, root); ok {
 		message = derived
 	}
+	// COMMIT_MSG advisory: the derivation above already auto-healed the deterministic subject
+	// defects; anything still ungradeable lands as an immutable ABSTAIN at the commit-audit
+	// witness. Name it HERE — the message is final but nothing has touched git yet, so the
+	// warning prints whether or not a later gate refuses. It is advisory ONLY: it returns no
+	// value, has no block mode, and never changes the exit code (commit_msg_advisory.go).
+	renderCommitMsgAdvisory(stderr, message, paths, root)
 	review := commitReviewOptions(*reviewModel, firstNonEmpty(*reviewObjective, os.Getenv("FAK_GOAL_OBJECTIVE"), firstCommitLine(message)), *reviewEndpoint, *reviewAPIKeyEnv, *reviewMinModels)
 
 	// --require-issue pre-lints the message before touching git: a real commit on the shared trunk
