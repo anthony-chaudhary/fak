@@ -104,6 +104,7 @@ type serveFlags struct {
 	invalidation                 *string
 	requireKeyEnv                *string
 	keyPrincipal                 repeatedStringFlag
+	unsafeUnauthedBind           *bool
 	routeManifest                *string
 	routeAccounts                *string
 	ggufPath                     *string
@@ -169,6 +170,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.invalidation = fs.String("invalidation", "global", "vDSO tier-2 invalidation granularity for the live fleet: global|namespace|resource")
 	sf.requireKeyEnv = fs.String("require-key-env", "", "env var holding a bearer token to REQUIRE on every request (default: no auth)")
 	fs.Var(&sf.keyPrincipal, "key-principal", "bind an ADDITIONAL api key to an org/project PRINCIPAL as PRINCIPAL=ENV_VAR, so N corporate keys authenticate against one `fak serve` and every turn is attributed to the tenant that made it (#5332). The value names the env var HOLDING that tenant's key, never the key itself — the raw secret never lands in a unit file, a plist, or shell history, and gateway.New hashes it to a SHA-256 digest and drops the plaintext at construction. Repeat for N tenants (--key-principal acme=ACME_KEY --key-principal beta=BETA_KEY); binding one principal to several env vars is key ROTATION and is allowed. A matching inbound key (x-api-key or Authorization: Bearer) both AUTHENTICATES the caller and stamps its principal onto the access log and /v1/fak/events, joinable by X-Trace-Id. ADDITIVE to --require-key-env: that single bearer still authenticates the anonymous single-tenant caller and an empty keyset leaves that path byte-for-byte unchanged. Fails startup LOUD on a malformed spec, an unset/empty env var, or two tenants sharing a key — a keyset that silently forgot a binding looks armed and is not.")
+	sf.unsafeUnauthedBind = fs.Bool(serveUnsafeBindFlag, false, "proceed with a bind that is reachable from OFF THIS HOST even though no inbound token door is configured (#5373, a child of #3279). Default false: `fak serve --addr 0.0.0.0:8080` with neither --require-key-env nor --key-principal is REFUSED at startup with the "+serveBindRefusalToken+" reason, because every request such a listener serves is unauthenticated and the internet-wide scan #3279 cites found 175,108 local-model servers in exactly that shape. Loopback binds (the 127.0.0.1:8080 default, localhost, ::1) are never affected, nor is --stdio, nor is an off-host bind that DOES name a token door — so this flag is only ever needed for the deliberate case: an isolated lab segment, or a host firewall doing the work instead. Passing it prints a loud stderr warning every boot; it is named to be impossible to set by accident and is not a substitute for --require-key-env.")
 	sf.routeManifest = fs.String("route-manifest", "", "model-routing policy to install: each fak_syscall call is classified into a modelroute.Subject and a single-model (PICK) plan binds abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the real route (#601). Empty (default) leaves Engine unset → the kernel default engine, byte-for-byte the pre-routing behavior. A malformed manifest fails startup loud (a mis-routed model is a security boundary, never a silent default). The installed file is HOT-RELOADED: an edit is picked up without a restart and swapped atomically (a request classifies against the whole old or whole new policy, never a torn read); a malformed edit is rejected and the last-good policy stays installed (#842).")
 	sf.routeAccounts = fs.String("route-accounts", "", "model-ACCOUNT roster (fak-accounts/v1) to install ALONGSIDE --route-manifest (#2528): after the manifest PICKs an abstract model id, the roster BINDS it to a concrete provider account + upstream wire model, and the account-resolved EngineRoute (openai:acct/model, local:acct/model) — not the bare plan-member string — is written to abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the ACCOUNT-resolved route and an ensemble member each binds independently. A route to a provider with no registered adapter fails LOUD at dispatch (no silent fallback to the default engine). Credentials are env-var NAMES in the roster, never secrets. Empty (default) leaves the plan-member string as the route, byte-for-byte the pre-#2528 behavior. A malformed roster fails startup loud. Preflight it no-spend first with `fak api-host acceptance --from-model-accounts FILE`.")
 	sf.ggufPath = fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
@@ -238,6 +240,16 @@ func cmdServe(argv []string) {
 	// value. Emit a loud, one-line advisory when no dos.toml is found upward from cwd, but
 	// fail OPEN — serve anyway (an operator may deliberately run outside a fak workspace).
 	warnIfNotFakWorkspace(os.Stderr)
+
+	// Bind-safety default (#5373, a child of #3279): refuse to boot a listener that is
+	// reachable from off this host while no inbound token door is configured. Placed
+	// HERE — after the --policy-check/--plan-json dry-run exits, before the capability
+	// floor and every expensive stage — so an operator learns the address is refused in
+	// milliseconds rather than after a multi-minute weight load. It reads only parsed
+	// flags and binds nothing (serve_bind_safety.go).
+	if !admitServeBind(sf, os.Stderr) {
+		os.Exit(2)
+	}
 
 	// Install the capability floor fail-loud: a bad manifest aborts startup rather
 	// than silently falling back to a more permissive default. Time it as the first
