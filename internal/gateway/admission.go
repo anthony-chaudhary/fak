@@ -562,11 +562,34 @@ func (s *Server) writeAdmissionMetrics(b *strings.Builder) {
 	c.WriteMetrics(b)
 }
 
-// beginServedAdmission is the served request's admission boundary: the scheduler slot
-// (admissionCtl, #35) first — a queued request must not hold provider token budget while
-// it waits — then the provider token window (tokenRateGate, #2019); a token shed releases
-// the just-acquired slot. With neither gate attached it is inert (nil lease, nil error)
-// and the request path is byte-for-byte historical.
+// admitStreamedTurn is beginServedAdmission plus the refusal both streaming surfaces own
+// identically: a refused admission is logged with the surface's own `lane` word, answered on w as
+// an upstream error, and reported ok=false — the caller's cue to stop and return "response
+// owned". On ok=true the caller MUST defer the returned lease's Release, exactly as it would with
+// beginServedAdmission directly; the lease is nil-safe when no admission control is attached.
+func (s *Server) admitStreamedTurn(ctx context.Context, w http.ResponseWriter, lane string, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, maxTokens int) (*AdmissionLease, bool) {
+	lease, err := s.beginServedAdmission(ctx, turn, messages, tools, maxTokens)
+	if err != nil {
+		s.logf("gateway: scheduler admission refused (%s): %v", lane, err)
+		s.writeUpstreamErr(w, err)
+		return nil, false
+	}
+	return lease, true
+}
+
+// beginServedAdmission is the served request's admission boundary, narrowest budget last:
+// the scheduler slot (admissionCtl, #35) first — a queued request must not hold token
+// budget while it waits — then the caller's OWN per-principal allotment
+// (principalTokenRates, #5379), then the shared provider token window (tokenRateGate,
+// #2019). A shed at any stage frees everything the earlier stages granted. With no gate
+// attached it is inert (nil lease, nil error) and the request path is byte-for-byte
+// historical.
+//
+// The per-principal allotment is checked BEFORE the shared provider window on purpose: a
+// tenant already over its own cap must be shed without first reserving — and briefly
+// holding — a slice of the budget every other tenant is competing for. The reverse order
+// would let a tenant that is going to be refused anyway still push the shared window
+// toward saturation.
 func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, maxTokens int) (*AdmissionLease, error) {
 	if s == nil {
 		return nil, nil
@@ -574,8 +597,9 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	s.admissionMu.RLock()
 	c := s.admissionCtl
 	g := s.tokenRateGate
+	b := s.principalTokenRates
 	s.admissionMu.RUnlock()
-	if c == nil && g == nil {
+	if c == nil && g == nil && b == nil {
 		return nil, nil
 	}
 	var lease *AdmissionLease
@@ -590,12 +614,32 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 			return nil, err
 		}
 	}
-	if g != nil {
-		res, err := g.Admit(estimateServedTokenUsage(messages, tools, maxTokens))
+	estimate := estimateServedTokenUsage(messages, tools, maxTokens)
+	var res *TokenReservation
+	if b != nil {
+		var err error
+		// principalFromContext is "" for an unidentified caller; the book charges those to
+		// its single shared allotment rather than to a fresh (bypassable) one.
+		res, err = b.Admit(principalFromContext(ctx), estimate)
 		if err != nil {
-			lease.Release() // nil-safe: free the scheduler slot the token window refused to feed
+			lease.Release() // nil-safe: free the scheduler slot this tenant's cap refused to feed
 			return nil, err
 		}
+	}
+	if g != nil {
+		shared, err := g.Admit(estimate)
+		if err != nil {
+			// The provider window refused, so the provider is never called: cancel (charge
+			// nothing) rather than Release (charge the estimate) the allotment this tenant
+			// held for one instant — a neighbour's saturation must not spend its budget.
+			res.cancel()
+			lease.Release()
+			return nil, err
+		}
+		shared.linked = res // settle/release the allotment in lockstep with the shared window
+		res = shared
+	}
+	if res != nil {
 		if lease == nil {
 			lease = &AdmissionLease{}
 		}

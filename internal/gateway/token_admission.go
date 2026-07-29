@@ -22,11 +22,19 @@ package gateway
 // the provider may have consumed the input, and over-counting only under-admits — the
 // safe direction for the no-429-storm acceptance.
 //
-// HONEST FENCE — what this is NOT (yet). One gate = ONE provider budget (one
-// account/seat). The per-seat pool (M20) and the slot scheduler (M6) compose ABOVE
-// this: a host wires one gate per seat and picks the seat first. Inert by default — no
-// gate attached (SetTokenRateGate) leaves the request path byte-for-byte historical,
-// the same inject-after-New posture as SetAdmissionController.
+// HONEST FENCE — what this is NOT. One gate = ONE provider budget (one account/seat).
+// The per-seat pool (M20) and the slot scheduler (M6) compose ABOVE this: a host wires
+// one gate per seat and picks the seat first. Inert by default — no gate attached
+// (SetTokenRateGate) leaves the request path byte-for-byte historical, the same
+// inject-after-New posture as SetAdmissionController.
+//
+// That ABOVE layer now exists for the IDENTITY axis: token_admission_principal.go
+// (#5379) keys a book of these gates by the authenticated keyset principal and consults
+// the caller's own allotment BEFORE this shared provider budget, so one noisy tenant can
+// no longer drink the whole window. It is built by composition — an allotment IS one of
+// these gates — so nothing here changed meaning; this file gained only the seams that
+// layer needs (subject, idle, cancel, linked) and every one of them is inert unless a
+// book sets it.
 
 import (
 	"fmt"
@@ -64,6 +72,10 @@ type TokenRateGate struct {
 	settled     ratelimit.TokenUsage            // provider-confirmed usage this window
 	reserved    map[uint64]ratelimit.TokenUsage // in-flight admission estimates
 	seq         uint64
+	// subject names WHOSE budget this gate holds in a refusal ("" ⇒ the host-level
+	// provider budget, the historical wording). Set only by the per-principal book
+	// (#5379) so a 429 says which allotment fired. Immutable after construction.
+	subject string
 }
 
 // NewTokenRateGate builds a gate under the given policy.
@@ -84,6 +96,11 @@ type TokenReservation struct {
 	id       uint64
 	estimate ratelimit.TokenUsage
 	once     sync.Once
+	// linked is a SECOND reservation settled/released in lockstep with this one — the
+	// per-principal allotment a served request holds alongside its shared provider-budget
+	// reservation (#5379). nil (the default) for every historical caller, and nil-safe,
+	// so one lease still carries exactly one *TokenReservation.
+	linked *TokenReservation
 }
 
 // Settle replaces the reservation's admission-time estimate with the provider's real
@@ -92,7 +109,10 @@ func (r *TokenReservation) Settle(actual ratelimit.TokenUsage) {
 	if r == nil || r.gate == nil {
 		return
 	}
-	r.once.Do(func() { r.gate.settle(r.id, actual) })
+	r.once.Do(func() {
+		r.gate.settle(r.id, actual)
+		r.linked.Settle(actual)
+	})
 }
 
 // Release settles the original ESTIMATE if no real usage was ever reported (planner
@@ -102,7 +122,23 @@ func (r *TokenReservation) Release() {
 	if r == nil || r.gate == nil {
 		return
 	}
-	r.once.Do(func() { r.gate.settle(r.id, r.estimate) })
+	r.once.Do(func() {
+		r.gate.settle(r.id, r.estimate)
+		r.linked.Release()
+	})
+}
+
+// cancel drops the reservation charging the window NOTHING — the admission a request
+// never got to use because a LATER gate in the same admission boundary refused it, so the
+// provider was never called at all. Deliberately distinct from Release: Release is
+// conservative because the provider MAY have consumed the input, whereas here it provably
+// did not, and charging a tenant's own allotment for the shared provider budget's
+// saturation would let a busy neighbour starve them twice over. Idempotent and nil-safe.
+func (r *TokenReservation) cancel() {
+	if r == nil || r.gate == nil {
+		return
+	}
+	r.once.Do(func() { r.gate.settle(r.id, ratelimit.TokenUsage{}) })
 }
 
 // Admit checks one call's estimated footprint against the window's remaining budget and,
@@ -118,7 +154,7 @@ func (g *TokenRateGate) Admit(estimate ratelimit.TokenUsage) (*TokenReservation,
 	defer g.mu.Unlock()
 	g.rollWindowLocked()
 	if d := g.policy.Caps.Decide(g.loadLocked(), estimate); !d.Admit {
-		return nil, &AdmissionError{Verdict: VerdictShed, Reason: tokenShedReason(d, g.policy.Window)}
+		return nil, &AdmissionError{Verdict: VerdictShed, Reason: tokenShedReason(g.subject, d, g.policy.Window)}
 	}
 	g.seq++
 	g.reserved[g.seq] = estimate
@@ -180,10 +216,30 @@ func (g *TokenRateGate) loadLocked() ratelimit.TokenLoad {
 }
 
 // tokenShedReason renders the refusing cap's arithmetic so a client/operator learns
-// which provider ceiling fired and by how much — the backoff hint on the 429.
-func tokenShedReason(d ratelimit.TokenAdmission, window time.Duration) string {
-	return fmt.Sprintf("provider token budget: cap %s used %d + requested %d exceeds limit %d per %s",
-		d.Cap, d.Used, d.Requested, d.Limit, window)
+// which ceiling fired and by how much — the backoff hint on the 429. An empty subject is
+// the host-level provider budget and keeps the historical wording byte-for-byte; a
+// per-principal allotment (#5379) passes its own subject so the refusal names the tenant
+// whose cap fired rather than blaming the shared provider window.
+func tokenShedReason(subject string, d ratelimit.TokenAdmission, window time.Duration) string {
+	if subject == "" {
+		subject = "provider"
+	}
+	return fmt.Sprintf("%s token budget: cap %s used %d + requested %d exceeds limit %d per %s",
+		subject, d.Cap, d.Used, d.Requested, d.Limit, window)
+}
+
+// idle reports whether the gate holds no in-flight reservation AND its accounting window
+// has already elapsed. Those are exactly the conditions under which DROPPING the gate
+// forgives no budget: the next roll would zero its settled usage anyway, and no call is
+// outstanding against it. That is what makes the per-principal book's idle sweep (#5379)
+// a pure memory reclaim rather than a way to launder a spent window.
+func (g *TokenRateGate) idle() bool {
+	if g == nil {
+		return true
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.reserved) == 0 && g.now().Sub(g.windowStart) >= g.policy.Window
 }
 
 // tokenUsageFromAgent folds a completion's provider-reported usage into the normalized
