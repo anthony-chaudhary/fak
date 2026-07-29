@@ -43,7 +43,7 @@ Everything below is the route map — choose the job you have now.
 | Run a shared or durable endpoint | [Server quickstart](docs/fak/server-quickstart.md) | Start `fak serve`, then call its health and model endpoints. |
 | Integrate a client or agent | [Integration guides](docs/integrations/) | Select the guide for your client and follow its smallest working path. |
 | Operate or deploy fak | [Deployment chooser](docs/deployment.md) | Choose local, fleet, cloud, or air-gapped operation by requirements, then follow its health check. |
-| Contribute code or docs | [Contributing guide](CONTRIBUTING.md) | Read the repository workflow, then choose a scoped issue. |
+| Contribute code or docs | [Contributing guide](CONTRIBUTING.md) | No write access? Follow [fork and open a pull request](CONTRIBUTING.md#fork-and-open-a-pull-request). Maintainers: read the shared-checkout workflow, then choose a scoped issue. |
 | Find documentation by job or lifecycle | [Documentation index](INDEX.md) | Choose an evaluator, builder, operator, contributor, or research route before entering the detailed map. |
 
 ## Builder routes
