@@ -101,12 +101,19 @@ trunk — set the version explicitly. `internal/appversion.Current()` resolves i
 any of these pins the answer:
 
 1. `FAK_APP_VERSION=0.31.0` in the environment (highest precedence; the simplest **pin to v0.31.0**).
-2. The `VERSION` file on the checked-out tree (pin by staying on a tag).
-3. A release build's `-ldflags "-X …/internal/appversion.BuildVersion=0.31.0"`.
+2. A release build's `-ldflags "-X …/internal/appversion.BuildVersion=0.31.0"`.
+3. The release tag Go records inside the binary: `go install github.com/anthony-chaudhary/fak/cmd/fak@v0.31.0`
+   reports `0.31.0` wherever that binary runs, with no environment or checkout needed.
+4. A `VERSION` file found by walking up from the **executable's own directory** (pin by running
+   a binary that lives in a checkout held on a tag).
 
-The environment pin wins over the `VERSION` file, so a fleet host can run a pinned version
-without checking out a different tree. Clearing `FAK_APP_VERSION` lets the `VERSION` file win
-again.
+The environment pin wins over every build-time source, so a fleet host can run a pinned version
+without rebuilding or checking out a different tree. Clearing `FAK_APP_VERSION` lets the build
+stamp win again.
+
+Note what is *not* in that list: the process working directory. `Current()` never reads `VERSION`
+from the cwd, so launching an old `fak` from inside a newer checkout does not make it claim the
+newer version — see `internal/appversion/appversion.go`.
 
 ## 5. Revert measured state (baselines + the keep/revert ladder)
 
