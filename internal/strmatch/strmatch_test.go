@@ -72,3 +72,43 @@ func TestDashIfBlankPreservesNonblankValue(t *testing.T) {
 		t.Fatalf("DashIfBlank(nonblank) = %q, want original value", got)
 	}
 }
+
+func TestTailKeepsTrimmedEndAndWholeShortValue(t *testing.T) {
+	if got := Tail("  abcdefgh  ", 3); got != "fgh" {
+		t.Fatalf("Tail(long) = %q, want the last 3 bytes of the trimmed value", got)
+	}
+	// "at most n" is inclusive, and the value comes back TRIMMED even when it is
+	// short enough to be returned whole -- both copies this replaced trimmed first
+	// and callers quote the result straight into a report line.
+	if got := Tail("  abc  ", 3); got != "abc" {
+		t.Fatalf("Tail(exactly n) = %q, want the whole trimmed value", got)
+	}
+	if got := Tail("  ab  ", 3); got != "ab" {
+		t.Fatalf("Tail(shorter than n) = %q, want the whole trimmed value", got)
+	}
+	if got := Tail("  ab  ", 0); got != "" {
+		t.Fatalf("Tail(n=0) = %q, want empty", got)
+	}
+}
+
+func TestCommonPrefixLenCountsBytesAndBothBounds(t *testing.T) {
+	if got := CommonPrefixLen("abcdef", "abcxyz"); got != 3 {
+		t.Fatalf("CommonPrefixLen(diverging) = %d, want 3", got)
+	}
+	// Equal strings and a proper prefix each run the loop to a LENGTH bound rather
+	// than a byte mismatch; an off-by-one in either bound only shows up here.
+	if got := CommonPrefixLen("abc", "abc"); got != 3 {
+		t.Fatalf("CommonPrefixLen(equal) = %d, want 3", got)
+	}
+	if got := CommonPrefixLen("ab", "abcd"); got != 2 {
+		t.Fatalf("CommonPrefixLen(prefix) = %d, want 2", got)
+	}
+	if got := CommonPrefixLen("", "abc"); got != 0 {
+		t.Fatalf("CommonPrefixLen(empty) = %d, want 0", got)
+	}
+	// BYTE semantics, deliberately: two strings whose first rune differs only in its
+	// trailing byte still agree on the leading byte, so the answer is 1, not 0.
+	if got := CommonPrefixLen("\xc3\xa9", "\xc3\xa8"); got != 1 {
+		t.Fatalf("CommonPrefixLen(shared lead byte) = %d, want 1 byte", got)
+	}
+}
