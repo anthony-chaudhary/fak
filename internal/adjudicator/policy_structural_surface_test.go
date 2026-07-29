@@ -18,9 +18,13 @@ import (
 // The list is package-level because two tests need the same answer to "does this
 // rule tell a use from a MENTION": the parity test above, and the remedy test that
 // holds these rules to a stricter standard for exactly that reason.
+//
+// The disk/device verbs are no longer here. They were the two longest-standing
+// entries — the POSIX raw-device rule and the PowerShell volume rule — and both are
+// now decided structurally (device_op.go, #5429), so they have moved into the
+// families list below. What they DENY is unchanged; only the mention stopped being
+// reported as a use.
 var shippedUndecidedRules = []struct{ marker, why string }{
-	{"mkfs", "disk-formatting verbs; a quoted mention is still refused"},
-	{"Format-Volume", "PowerShell disk verbs: they destroy a filesystem outright, so the raw regex IS the whole truth and operator-only is the right posture"},
 	{"Clear-Content", "split out of the disk rule, which claimed a file truncation was a 'disk/volume operation' and sent the caller to an operator with nothing to approve. Still denied — an in-place truncation has no preview and no undo — but its remedy now names the in-tree routes that were always admitted. A containment decider (empty a file under the working tree or a scratchpad root, deny outside) is the obvious next step and needs a new dispatch call site"},
 	{`os\.system`, "the execute_code surface, which is not a shell command line"},
 	{`:\(\)`, "fork bomb; prose describes the shape well enough that the remedy needs no literal, which is why its fix text now omits one"},
@@ -84,6 +88,7 @@ func TestEveryShippedStructuralRuleIsRecognised(t *testing.T) {
 		{"terraform_destroy", isTerraformDestroyArgRule, []string{terraformDestroyDenyRegex, terraformDestroyDenyRegexCI}},
 		{"shell_dialect", isShellDialectArgRule, []string{defaultShellDialectDenyRegex}},
 		{"out_of_tree_write", isOutOfTreeWriteArgRule, []string{ootDashORegex, ootOutputRegex, ootRedirectRegex, ootCopyVerbRegex}},
+		{"device_op", isDeviceOpArgRule, []string{defaultDeviceOpDenyRegex, defaultPSDiskOpDenyRegex}},
 	}
 
 	undecided := shippedUndecidedRules
@@ -199,7 +204,8 @@ func TestEveryShippedDenyRuleNamesARemedy(t *testing.T) {
 		pr := &ArgPredicate{Tool: r.Tool, Arg: r.Arg, Re: re}
 		decided := isRmRfArgRule(pr) || isRCEPipeArgRule(pr) || isSudoArgRule(pr) ||
 			isRunAsArgRule(pr) || isTerraformDestroyArgRule(pr) ||
-			isShellDialectArgRule(pr) || isOutOfTreeWriteArgRule(pr)
+			isShellDialectArgRule(pr) || isOutOfTreeWriteArgRule(pr) ||
+			isDeviceOpArgRule(pr)
 		if !decided {
 			t.Errorf("tool %q arg %q: the fix text for %q MATCHES its own deny_regex, and this rule has NO structural decider — the match IS the verdict, so quoting this refusal re-trips the rule that produced it:\n  fix: %s",
 				r.Tool, r.Arg, r.DenyRegex, r.Fix)
@@ -241,6 +247,14 @@ func TestEveryShippedDenyRuleNamesARemedy(t *testing.T) {
 // is reported as an attempted "disk/device operation", so an agent that never went
 // near a device is told it tried to destroy one.
 //
+// Those two rules have since been DECIDED (device_op.go, #5429), which is the real
+// cure rather than the disclosure, so they no longer fall under this test — the
+// assertions below now cover the remaining raw-regex rules. Their shipped fix text
+// still carries the "no structural decider ... CANNOT tell a use from a MENTION"
+// disclosure, which is now stale prose in cmd/fak/guard-default-policy.json; it
+// under-promises rather than over-promises, so it is safe but wants a follow-up edit
+// landed in the same change as the decider.
+//
 // So this asserts both halves of an honest raw-regex remedy:
 //
 //	NEGATIVE — it must not route the caller through printing or echoing the
@@ -248,9 +262,9 @@ func TestEveryShippedDenyRuleNamesARemedy(t *testing.T) {
 //	POSITIVE — it must SAY that it cannot tell a use from a mention, because that
 //	is the fact the caller needs in order to pick a route that works.
 //
-// Neither half asks the rule to be more permissive. mkfs, dd, Format-Volume,
-// Clear-Disk, Initialize-Disk and Clear-Content stay denied on every surface they
-// ship on; only the remedy stops lying about the way out.
+// Neither half asks the rule to be more permissive. Every verb these rules name —
+// the in-place truncation cmdlet included — stays denied on every surface it ships
+// on; only the remedy stops lying about the way out.
 func TestUndecidedRuleRemediesAreNotSelfRefuting(t *testing.T) {
 	b, err := os.ReadFile("../../cmd/fak/guard-default-policy.json")
 	if err != nil {

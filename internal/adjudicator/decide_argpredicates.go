@@ -237,6 +237,44 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 				}
 				continue
 			}
+			// The DISK/DEVICE VERB family (#5429) — the POSIX raw-device rule and its
+			// PowerShell volume/disk sibling — is decided STRUCTURALLY for the same
+			// reason as the six families above (seven branches: the POSIX and the
+			// Windows elevation rules are one family decided in two). Both were RAW
+			// pattern matches with no decider, so the match WAS the verdict: naming
+			// one of these verbs anywhere on a shell command line was refused, and
+			// the refusal then reported a documentation edit as an attempted device
+			// operation. A quoted grep pattern over the policy file that ships the
+			// rule, a commit message explaining why the rule exists, and a here-doc
+			// body writing that explanation into a doc were all POLICY_BLOCKs — and
+			// under `fak guard -- claude` a POLICY_BLOCK reads as an agent-chosen
+			// end_turn, so the caller never got a second look.
+			// commandPerformsDeviceOperation resolves each segment's command word
+			// under BOTH POSIX and PowerShell lexing, checks redirect targets for a
+			// raw block device, and admits a mention only against an inert-head
+			// ALLOW-LIST — an evaluator, a launcher, an unresolvable command word or
+			// an unparseable quote all keep the deny. Gated on the raw match and
+			// purely SUBTRACTIVE, so it never introduces a new deny; a real device
+			// operation stays refused on every surface it ships on.
+			if isDeviceOpArgRule(pr) {
+				if present {
+					canon, ok := canonicalizeArgValue(val)
+					if !ok {
+						return argMalformed(pr), true, notes
+					}
+					if pr.Re != nil && pr.Re.MatchString(canon) {
+						if commandPerformsDeviceOperation(val) || commandPerformsDeviceOperation(canon) {
+							if pr.Advisory {
+								note(pr, "device_op")
+								continue
+							}
+							return argDeny(pr, "device_op"), true, notes
+						}
+						// quoted mention only: the raw regex was a false positive
+					}
+				}
+				continue
+			}
 			// Every OTHER deny_regex rule matches the CANONICAL form (#2407): the raw
 			// arg string alone let a backslash, dot-segment, env-alias, or quote-style
 			// spelling of the same value slip a rule written against its canonical
