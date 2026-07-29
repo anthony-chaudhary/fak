@@ -179,7 +179,7 @@ func Build(candidates []issuecontract.Candidate, opt Options) Plan {
 				},
 				normPaths: normalizePaths(review.Paths),
 			})
-		case isSplitTarget(review):
+		case IsSplitTarget(review):
 			plan.Subdividable++
 			budget := childIssueBudget(review.ExpectedSteps)
 			plan.ChildIssueTotal += budget
@@ -397,9 +397,17 @@ func normPath(p string) string {
 	return strings.Trim(p, "/")
 }
 
-// isSplitTarget reports whether a non-OK review is best handled by decomposition
-// (an epic/non-leaf or an oversized-step leaf) rather than scope/route repair.
-func isSplitTarget(review issuecontract.Review) bool {
+// IsSplitTarget reports whether a non-OK review is best handled by decomposition
+// (an epic/non-leaf or an oversized-step leaf) rather than scope/route repair. The
+// two triggering reasons are the always-on STRUCTURAL gates issuecontract raises for
+// a unit that must be broken up before dispatch; every other reason is repairable in
+// place, so it is not a split target.
+//
+// Exported because "is this an epic to split?" must have ONE answer: the cohort planner
+// here and `fak issue decompose` both route on it, and the cmd side carried a
+// byte-identical private copy openly labelled a mirror. A reason added to one list and
+// not the other would have made the planner and the verb disagree about the same issue.
+func IsSplitTarget(review issuecontract.Review) bool {
 	for _, r := range review.Reasons {
 		if r == issuecontract.ReasonNotDispatchLeaf || r == issuecontract.ReasonOversizedSteps {
 			return true

@@ -278,3 +278,20 @@ func hasReason(reasons []string, want string) bool {
 	}
 	return false
 }
+
+func TestIsSplitTargetCoversBothSplitReasons(t *testing.T) {
+	// BOTH reasons make an issue a split target. `fak issue decompose` used to carry
+	// its own copy of this predicate, so a test that only exercised one reason would
+	// let the two surfaces drift into disagreeing about what "too big" means.
+	for _, reason := range []string{issuecontract.ReasonNotDispatchLeaf, issuecontract.ReasonOversizedSteps} {
+		if !IsSplitTarget(issuecontract.Review{Reasons: []string{reason}}) {
+			t.Fatalf("IsSplitTarget(%q) = false, want true", reason)
+		}
+	}
+	if IsSplitTarget(issuecontract.Review{Reasons: []string{"missing-witness"}}) {
+		t.Fatalf("IsSplitTarget(unrelated reason) = true, want false")
+	}
+	if IsSplitTarget(issuecontract.Review{}) {
+		t.Fatalf("IsSplitTarget(no reasons) = true, want false")
+	}
+}
