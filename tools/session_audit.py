@@ -581,6 +581,37 @@ def _looks_like_typed_prompt(s):
         return False
     return True
 
+def _token_economics(tok):
+    """The session's token economics: total ingested context, the I:O ratio, and
+    the cache-read and cache-create shares of that context.
+
+    #3069: the cache-CREATE share of all ingested context — the burst counterpart
+    to cache_hit_frac, sharing its EXACT denominator (read + create + input) so the
+    three shares sum to 1. A session that re-writes its cached suffix mid-run carries
+    a high cc_share even while its flattering cache_hit_frac stays high; this is the
+    signal the read-share lens is blind to.
+    """
+    total_in = tok["input"] + tok["cache_read"] + tok["cache_create"]
+    io_ratio = total_in / tok["output"] if tok["output"] else None
+    cache_hit = tok["cache_read"] / (tok["cache_read"] + tok["cache_create"] + tok["input"]) \
+                if (tok["cache_read"] + tok["cache_create"] + tok["input"]) else None
+    cc_share = tok["cache_create"] / (tok["cache_read"] + tok["cache_create"] + tok["input"]) \
+               if (tok["cache_read"] + tok["cache_create"] + tok["input"]) else None
+    return total_in, io_ratio, cache_hit, cc_share
+
+def _wall_seconds(ts_min, ts_max):
+    """Wall-clock seconds between the first and last record, or None when the
+    transcript carries no usable timestamps."""
+    wall = None
+    if ts_min and ts_max:
+        try:
+            a = datetime.datetime.fromisoformat(ts_min.replace("Z", "+00:00"))
+            b = datetime.datetime.fromisoformat(ts_max.replace("Z", "+00:00"))
+            wall = (b - a).total_seconds()
+        except Exception:
+            pass
+    return wall
+
 def analyze(path):
     rec_types = collections.Counter()
     models = collections.Counter()
@@ -746,25 +777,8 @@ def analyze(path):
             elif _looks_like_typed_prompt(content) and not r.get("isMeta"):
                 prompts.append((ts, content.strip()[:400]))
 
-    total_in = tok["input"] + tok["cache_read"] + tok["cache_create"]
-    io_ratio = total_in / tok["output"] if tok["output"] else None
-    cache_hit = tok["cache_read"] / (tok["cache_read"] + tok["cache_create"] + tok["input"]) \
-                if (tok["cache_read"] + tok["cache_create"] + tok["input"]) else None
-    # #3069: the cache-CREATE share of all ingested context — the burst counterpart
-    # to cache_hit_frac, sharing its EXACT denominator (read + create + input) so the
-    # three shares sum to 1. A session that re-writes its cached suffix mid-run carries
-    # a high cc_share even while its flattering cache_hit_frac stays high; this is the
-    # signal the read-share lens is blind to.
-    cc_share = tok["cache_create"] / (tok["cache_read"] + tok["cache_create"] + tok["input"]) \
-               if (tok["cache_read"] + tok["cache_create"] + tok["input"]) else None
-    wall = None
-    if ts_min and ts_max:
-        try:
-            a = datetime.datetime.fromisoformat(ts_min.replace("Z", "+00:00"))
-            b = datetime.datetime.fromisoformat(ts_max.replace("Z", "+00:00"))
-            wall = (b - a).total_seconds()
-        except Exception:
-            pass
+    total_in, io_ratio, cache_hit, cc_share = _token_economics(tok)
+    wall = _wall_seconds(ts_min, ts_max)
     ro = sum(v for k, v in tools.items() if k in READ_ONLY_TOOLS)
     behavior = lens.summary()
     behavior["stall_gaps"] = stall_gaps
@@ -1005,9 +1019,9 @@ def _subagent_note(summary):
             f"(about +${summary.get('cost_usd', 0.0):,.2f} / "
             f"+{fmt_int(tokens.get('output', 0))} output tok).")
 
-def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
-              include_subagents=False, max_sessions=None, excluded_subagents=None):
-    S = [s for s in sessions if "error" not in s]
+def _report_header(S, agg, ns_prefix, since_days, include_subagents, max_sessions,
+                   excluded_subagents):
+    """Title, generation stamp and the one-line statement of what was in scope."""
     L = []
     L.append("# Session-Transcript Audit — active scope\n")
     L.append(f"**Generated:** {datetime.datetime.now().isoformat(timespec='seconds')}  ")
@@ -1016,6 +1030,11 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
     note = _subagent_note(excluded_subagents)
     if note:
         L.append(note)
+    return L
+
+def _scope_totals(agg):
+    """EXACT token totals for the scope, with the cache read/create split and cost."""
+    L = []
     t = agg["totals"]
     L.append("## Scope totals (EXACT token counts)\n")
     L.append(f"- **Output tokens (the actual work generated):** {fmt_int(t['output'])}")
@@ -1061,8 +1080,11 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
         L.append(f"- **Non-billed `<synthetic>` turns (harness-injected, $0):** {fmt_int(nb.get('turns',0))} "
                  f"({fmt_int(nb.get('output',0))} output tok)")
     L.append("")
+    return L
 
-    # Per-tier share — the headline mix KPI that makes "opus-heavy vs haiku-heavy" explicit.
+def _model_mix_table(agg):
+    """The headline mix KPI that makes "opus-heavy vs haiku-heavy" explicit: per-tier share."""
+    L = []
     L.append("## Model-mix KPI (tier shares)\n")
     L.append("| Tier | Output tok | Output share | Est. cost | Cost share |")
     L.append("|---|---:|---:|---:|---:|")
@@ -1077,8 +1099,12 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
         L.append(f"| {tier} | {fmt_int(c.get('output',0))} | {fmt_pct(out_share)} | "
                  f"${tier_cost:,.2f} | {fmt_pct(cost_share)} |")
     L.append("")
+    return L
 
-    # Per billing bucket — the answer to "is this Claude or Gemini money?". NEVER summed.
+def _billing_bucket_table(agg):
+    """Per billing bucket — the answer to "is this Claude or Gemini money?". NEVER summed."""
+    L = []
+    buckets = agg.get("per_bucket", {})
     L.append("## Cost by billing bucket (provider) — never sum across these\n")
     L.append("| Billing bucket | Turns | Output tok | Cache-read tok | Est. cost | Priced? |")
     L.append("|---|---:|---:|---:|---:|:--:|")
@@ -1090,8 +1116,11 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
         L.append(f"| {b} | {fmt_int(c.get('turns',0))} | {fmt_int(c.get('output',0))} | "
                  f"{fmt_int(c.get('cache_read',0))} | {cost_cell} | {'✓' if priced else ''} |")
     L.append("")
+    return L
 
-    # Per-model tiers — so a blended cost can be read as opus-heavy vs haiku-heavy.
+def _per_model_table(agg):
+    """Per-model tiers — so a blended cost can be read as opus-heavy vs haiku-heavy."""
+    L = []
     L.append("## Per-model breakdown (token-exact; cost Anthropic-assumed)\n")
     L.append("| Model | Bucket | Turns | Output tok | Cache-read tok | Est. cost |")
     L.append("|---|---|---:|---:|---:|---:|")
@@ -1101,7 +1130,11 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
         L.append(f"| {m} | {provider_bucket(m)} | {fmt_int(c.get('turns',0))} | {fmt_int(c.get('output',0))} | "
                  f"{fmt_int(c.get('cache_read',0))} | {cost_cell} |")
     L.append("")
+    return L
 
+def _namespace_rollup(agg):
+    """Sessions, output, opus share, cache reads, tool calls and cost per namespace."""
+    L = []
     L.append("## Per-namespace rollup\n")
     L.append("| Namespace | Sessions | Output tok | Opus output share | Cache-read tok | Tool calls | Top model (by output) | Est. cost |")
     L.append("|---|---:|---:|---:|---:|---:|---|---:|")
@@ -1112,7 +1145,11 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
                  f"{fmt_int(v['cache_read'])} | "
                  f"{fmt_int(v['tool_use'])} | {top_model.get(ns, '?')} | ${agg['per_namespace_cost'][ns]:,.2f} |")
     L.append("")
+    return L
 
+def _distributions(agg):
+    """Per-session spread of tool calls, output, I:O ratio and cache-hit fraction."""
+    L = []
     d = agg["dist"]
     L.append("## Distributions (per session)\n")
     L.append(f"- **Tool calls/session:** median {d['calls_per_session']['median']}, "
@@ -1123,152 +1160,188 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
     L.append(f"- **Cache-hit fraction/session:** median {d['cache_hit_frac']['median']}, "
              f"p10 {d['cache_hit_frac']['p10']}, p90 {d['cache_hit_frac']['p90']}")
     L.append(f"- **Read-only tool fraction/session:** median {d['read_only_frac']['median']}\n")
+    return L
 
+def _tool_mix_table(agg):
+    """The 25 most-used client tools and whether each one is read-only."""
+    L = []
     L.append("## Global tool mix\n")
     L.append("| Tool | Calls | Read-only? |")
     L.append("|---|---:|:--:|")
     for name, n in list(agg["tool_mix"].items())[:25]:
         L.append(f"| {name} | {fmt_int(n)} | {'✓' if name in READ_ONLY_TOOLS else ''} |")
     L.append("")
+    return L
 
-    # Behavioral lens (#2365) — the stuck/churn half the token lens can't see.
+def _tool_error_table(beh):
+    """Call and error counts for the busiest tools, plus every tool that errored at all."""
+    L = []
+    L.append("## Behavioral lens — stuck/churn detectors\n")
+    pt = beh.get("per_tool", {})
+    with_calls = sorted((t for t in pt if pt[t]["calls"]),
+                        key=lambda t: -pt[t]["calls"])
+    show = with_calls[:12] + [t for t in pt
+                              if pt[t]["errors"] and t not in with_calls[:12]]
+    L.append("| Tool | Calls | Errors | Error rate |")
+    L.append("|---|---:|---:|---:|")
+    for t in show:
+        v = pt[t]
+        L.append(f"| {t} | {fmt_int(v['calls'])} | {fmt_int(v['errors'])} | "
+                 f"{fmt_pct(v['error_rate'])} |")
+    return L
+
+def _churn_counters(beh):
+    """Timeout kills, no-TTY hangs, shell error rate, sleep polls and edit/write churn."""
+    L = []
+    churn = beh.get("edit_churn", {})
+    L.append("")
+    L.append(f"- **Timeout kills (shell result matched exit-143 / \"timed out\"):** "
+             f"{fmt_int(beh.get('timeout_kills', 0))}")
+    # #2365 d3 — the editor/pager-no-TTY wedge, keyed on the repo-guard's exact
+    # INTERACTIVE_HANG emission (fixed at the guard for headless children).
+    L.append(f"- **Interactive-editor/pager hangs (no-TTY wedge, INTERACTIVE_HANG):** "
+             f"{fmt_int(beh.get('interactive_hangs', 0))}")
+    # #2365 finding 2 — the raw shell error rate is a mix; the genuine rate strips
+    # guard refusals (the floor working) and now-fixed hangs.
+    se = beh.get("shell_errors") or {}
+    if se.get("shell_calls"):
+        cls = se.get("classes", {})
+        breakdown = " · ".join(f"{k} {v}" for k, v in cls.items()) or "—"
+        L.append(f"- **Shell error rate (Bash+PowerShell):** raw "
+                 f"{fmt_pct(se.get('raw_rate'))} ({fmt_int(se.get('raw_errors', 0))}"
+                 f"/{fmt_int(se['shell_calls'])}) → **genuine "
+                 f"{fmt_pct(se.get('genuine_rate'))}** "
+                 f"({fmt_int(se.get('genuine_errors', 0))}, after dropping guard "
+                 f"refusals + fixed hangs)")
+        L.append(f"  - **by cause:** {breakdown}")
+    L.append(f"- **Foreground sleep-polls (`sleep`/`Start-Sleep` command prefix):** "
+             f"{fmt_int(beh.get('sleep_polls', 0))}")
+    nrc = beh.get("not_read_classes", {})
+    L.append(f"- **Edit/Write churn (wasted mutation calls):** "
+             f"{fmt_int(beh.get('wasted_mutation_calls', 0))}  "
+             f"(not-read {fmt_int(churn.get('not_read', 0))} · "
+             f"stale-read {fmt_int(churn.get('stale_read', 0))})")
+    # #2375 d1 — only true-never-read is agent misbehavior; the other two are
+    # a --resume read-state reset and a guard-caught duplicate write.
+    L.append(f"  - **not-read sub-classes:** post-resume "
+             f"{fmt_int(nrc.get('post_resume', 0))} · self-duplicate "
+             f"{fmt_int(nrc.get('self_duplicate', 0))} · **true-never-read "
+             f"{fmt_int(nrc.get('true_never_read', 0))}** (the real defect)")
+    # #3942 — name the offenders for the one sub-class that IS misbehavior,
+    # so a reader can jump straight to the session + file that never got Read.
+    nr = beh.get("never_read_sessions") or []
+    if nr:
+        L.append("")
+        L.append("| Session | NS | × | Never-read file(s) |")
+        L.append("|---|---|---:|---|")
+        for r in nr:
+            files = ", ".join(p for p in (r.get("paths") or []) if p) or "—"
+            files = files.replace("|", "\\|")[:100]
+            L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | {files} |")
+    return L
+
+def _loop_detector_tables(beh):
+    """Stall gaps plus the four repeat-work loops: verbatim retry, failure class, file rewrite, successful call."""
+    L = []
+    L.append(f"- **Sessions with a ≥{STALL_GAP_S//60}-min zero-record stall "
+             f"(harness/API dead time):** {fmt_int(beh.get('stall_sessions', 0))}"
+             + (f"  (longest gap {beh.get('max_gap_s', 0)/60:.0f} min)"
+                if beh.get("stall_sessions") else ""))
+    rep = beh.get("repeat_failure_sessions") or []
+    L.append(f"- **Sessions with a VERBATIM retry loop "
+             f"(≥{REPEAT_FAILURE_MIN}× same tool+args+error):** {len(rep)}"
+             + (" — worst below" if rep else ""))
+    if rep:
+        L.append("")
+        L.append("| Session | NS | Tool | × | Failure signature |")
+        L.append("|---|---|---|---:|---|")
+        for r in rep:
+            sig = r["sig"][:80].replace("|", "\\|")
+            L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
+                     f"{r['count']} | {sig} |")
+    mass = beh.get("failure_mass_sessions") or []
+    L.append(f"- **Sessions with a recurring failure CLASS "
+             f"(≥{REPEAT_FAILURE_MIN}× same tool+error, args vary):** {len(mass)}"
+             + (" — worst below" if mass else ""))
+    if mass:
+        L.append("")
+        L.append("| Session | NS | Tool | × | Failure class |")
+        L.append("|---|---|---|---:|---|")
+        for r in mass:
+            sig = r["sig"][:80].replace("|", "\\|")
+            L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
+                     f"{r['count']} | {sig} |")
+    fc = beh.get("file_churn_sessions") or []
+    L.append(f"- **Sessions with a REWRITE loop (≥{FILE_CHURN_MIN} mutations "
+             f"of one file, revisiting the same regions or reverting amid "
+             f"region reuse):** {len(fc)}"
+             + (" — worst below" if fc else ""))
+    if fc:
+        L.append("")
+        L.append("| Session | NS | × | Regions | Reverts | File |")
+        L.append("|---|---|---:|---:|---:|---|")
+        for r in fc:
+            fp = r["file"].replace("|", "\\|")
+            L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | "
+                     f"{r.get('distinct_regions', '—')} | {r.get('reverts', '—')} | {fp} |")
+    sl = beh.get("success_loop_sessions") or []
+    L.append(f"- **Sessions with a SUCCESSFUL-call loop (≥{SUCCESS_LOOP_MIN}× "
+             f"identical successful Read/Glob/Grep/shell call — read-loop / "
+             f"glob-storm / output-poll):** {len(sl)}"
+             + (" — worst below" if sl else ""))
+    if sl:
+        L.append("")
+        L.append("| Session | NS | Tool | × | Target |")
+        L.append("|---|---|---|---:|---|")
+        for r in sl:
+            tgt = (r.get("target") or "")[:80].replace("|", "\\|")
+            L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
+                     f"{r['count']} | {tgt} |")
+    return L
+
+def _cache_burst_tables(beh):
+    """Suffix-cache invalidations and the long sessions whose cache-CREATE bursts they drive."""
+    L = []
+    # #3069 — the suffix-cache reset burst: per-turn cache_read snapping back to a
+    # floor is a mid-session cache-CREATE re-write the read-share lens hides.
+    sr = beh.get("suffix_resets", 0)
+    floor = beh.get("suffix_reset_floor")
+    L.append(f"- **Suffix-cache invalidations (per-turn cache_read snap-back "
+             f">{fmt_int(SUFFIX_RESET_DROP_MIN)} tok — a mid-session cache-CREATE "
+             f"burst):** {fmt_int(sr)}"
+             + (f"  (modal reset floor ≈ {fmt_int(floor)} tok)" if floor else ""))
+    bs = beh.get("burst_sessions") or []
+    L.append(f"- **High-burst long sessions (≥{BURST_LONG_SESSION_MIN} turns with "
+             f"≥1 suffix-cache reset — the cache-CREATE thrash the heaviest-by-output "
+             f"table hides):** {len(bs)}"
+             + (" — worst below" if bs else ""))
+    if bs:
+        L.append("")
+        L.append("| Session | NS | Turns | Cache-create tok | cc-share | Resets | Reset floor | Est.$ |")
+        L.append("|---|---|---:|---:|---:|---:|---:|---:|")
+        for r in bs:
+            fl = fmt_int(r["reset_floor"]) if r.get("reset_floor") is not None else "—"
+            L.append(f"| {r['session'][:8]} | {r['ns']} | {r['turns']} | "
+                     f"{fmt_int(r['cache_create'])} | {fmt_pct(r.get('cc_share'))} | "
+                     f"{r['suffix_resets']} | {fl} | ${r['cost_usd']:.2f} |")
+    return L
+
+def _behavior_lens(agg):
+    """The stuck/churn half of the picture the token lens cannot see (#2365)."""
     beh = agg.get("behavior") or {}
-    if beh:
-        L.append("## Behavioral lens — stuck/churn detectors\n")
-        pt = beh.get("per_tool", {})
-        with_calls = sorted((t for t in pt if pt[t]["calls"]),
-                            key=lambda t: -pt[t]["calls"])
-        show = with_calls[:12] + [t for t in pt
-                                  if pt[t]["errors"] and t not in with_calls[:12]]
-        L.append("| Tool | Calls | Errors | Error rate |")
-        L.append("|---|---:|---:|---:|")
-        for t in show:
-            v = pt[t]
-            L.append(f"| {t} | {fmt_int(v['calls'])} | {fmt_int(v['errors'])} | "
-                     f"{fmt_pct(v['error_rate'])} |")
-        churn = beh.get("edit_churn", {})
-        L.append("")
-        L.append(f"- **Timeout kills (shell result matched exit-143 / \"timed out\"):** "
-                 f"{fmt_int(beh.get('timeout_kills', 0))}")
-        # #2365 d3 — the editor/pager-no-TTY wedge, keyed on the repo-guard's exact
-        # INTERACTIVE_HANG emission (fixed at the guard for headless children).
-        L.append(f"- **Interactive-editor/pager hangs (no-TTY wedge, INTERACTIVE_HANG):** "
-                 f"{fmt_int(beh.get('interactive_hangs', 0))}")
-        # #2365 finding 2 — the raw shell error rate is a mix; the genuine rate strips
-        # guard refusals (the floor working) and now-fixed hangs.
-        se = beh.get("shell_errors") or {}
-        if se.get("shell_calls"):
-            cls = se.get("classes", {})
-            breakdown = " · ".join(f"{k} {v}" for k, v in cls.items()) or "—"
-            L.append(f"- **Shell error rate (Bash+PowerShell):** raw "
-                     f"{fmt_pct(se.get('raw_rate'))} ({fmt_int(se.get('raw_errors', 0))}"
-                     f"/{fmt_int(se['shell_calls'])}) → **genuine "
-                     f"{fmt_pct(se.get('genuine_rate'))}** "
-                     f"({fmt_int(se.get('genuine_errors', 0))}, after dropping guard "
-                     f"refusals + fixed hangs)")
-            L.append(f"  - **by cause:** {breakdown}")
-        L.append(f"- **Foreground sleep-polls (`sleep`/`Start-Sleep` command prefix):** "
-                 f"{fmt_int(beh.get('sleep_polls', 0))}")
-        nrc = beh.get("not_read_classes", {})
-        L.append(f"- **Edit/Write churn (wasted mutation calls):** "
-                 f"{fmt_int(beh.get('wasted_mutation_calls', 0))}  "
-                 f"(not-read {fmt_int(churn.get('not_read', 0))} · "
-                 f"stale-read {fmt_int(churn.get('stale_read', 0))})")
-        # #2375 d1 — only true-never-read is agent misbehavior; the other two are
-        # a --resume read-state reset and a guard-caught duplicate write.
-        L.append(f"  - **not-read sub-classes:** post-resume "
-                 f"{fmt_int(nrc.get('post_resume', 0))} · self-duplicate "
-                 f"{fmt_int(nrc.get('self_duplicate', 0))} · **true-never-read "
-                 f"{fmt_int(nrc.get('true_never_read', 0))}** (the real defect)")
-        # #3942 — name the offenders for the one sub-class that IS misbehavior,
-        # so a reader can jump straight to the session + file that never got Read.
-        nr = beh.get("never_read_sessions") or []
-        if nr:
-            L.append("")
-            L.append("| Session | NS | × | Never-read file(s) |")
-            L.append("|---|---|---:|---|")
-            for r in nr:
-                files = ", ".join(p for p in (r.get("paths") or []) if p) or "—"
-                files = files.replace("|", "\\|")[:100]
-                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | {files} |")
-        L.append(f"- **Sessions with a ≥{STALL_GAP_S//60}-min zero-record stall "
-                 f"(harness/API dead time):** {fmt_int(beh.get('stall_sessions', 0))}"
-                 + (f"  (longest gap {beh.get('max_gap_s', 0)/60:.0f} min)"
-                    if beh.get("stall_sessions") else ""))
-        rep = beh.get("repeat_failure_sessions") or []
-        L.append(f"- **Sessions with a VERBATIM retry loop "
-                 f"(≥{REPEAT_FAILURE_MIN}× same tool+args+error):** {len(rep)}"
-                 + (" — worst below" if rep else ""))
-        if rep:
-            L.append("")
-            L.append("| Session | NS | Tool | × | Failure signature |")
-            L.append("|---|---|---|---:|---|")
-            for r in rep:
-                sig = r["sig"][:80].replace("|", "\\|")
-                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
-                         f"{r['count']} | {sig} |")
-        mass = beh.get("failure_mass_sessions") or []
-        L.append(f"- **Sessions with a recurring failure CLASS "
-                 f"(≥{REPEAT_FAILURE_MIN}× same tool+error, args vary):** {len(mass)}"
-                 + (" — worst below" if mass else ""))
-        if mass:
-            L.append("")
-            L.append("| Session | NS | Tool | × | Failure class |")
-            L.append("|---|---|---|---:|---|")
-            for r in mass:
-                sig = r["sig"][:80].replace("|", "\\|")
-                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
-                         f"{r['count']} | {sig} |")
-        fc = beh.get("file_churn_sessions") or []
-        L.append(f"- **Sessions with a REWRITE loop (≥{FILE_CHURN_MIN} mutations "
-                 f"of one file, revisiting the same regions or reverting amid "
-                 f"region reuse):** {len(fc)}"
-                 + (" — worst below" if fc else ""))
-        if fc:
-            L.append("")
-            L.append("| Session | NS | × | Regions | Reverts | File |")
-            L.append("|---|---|---:|---:|---:|---|")
-            for r in fc:
-                fp = r["file"].replace("|", "\\|")
-                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | "
-                         f"{r.get('distinct_regions', '—')} | {r.get('reverts', '—')} | {fp} |")
-        sl = beh.get("success_loop_sessions") or []
-        L.append(f"- **Sessions with a SUCCESSFUL-call loop (≥{SUCCESS_LOOP_MIN}× "
-                 f"identical successful Read/Glob/Grep/shell call — read-loop / "
-                 f"glob-storm / output-poll):** {len(sl)}"
-                 + (" — worst below" if sl else ""))
-        if sl:
-            L.append("")
-            L.append("| Session | NS | Tool | × | Target |")
-            L.append("|---|---|---|---:|---|")
-            for r in sl:
-                tgt = (r.get("target") or "")[:80].replace("|", "\\|")
-                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
-                         f"{r['count']} | {tgt} |")
-        # #3069 — the suffix-cache reset burst: per-turn cache_read snapping back to a
-        # floor is a mid-session cache-CREATE re-write the read-share lens hides.
-        sr = beh.get("suffix_resets", 0)
-        floor = beh.get("suffix_reset_floor")
-        L.append(f"- **Suffix-cache invalidations (per-turn cache_read snap-back "
-                 f">{fmt_int(SUFFIX_RESET_DROP_MIN)} tok — a mid-session cache-CREATE "
-                 f"burst):** {fmt_int(sr)}"
-                 + (f"  (modal reset floor ≈ {fmt_int(floor)} tok)" if floor else ""))
-        bs = beh.get("burst_sessions") or []
-        L.append(f"- **High-burst long sessions (≥{BURST_LONG_SESSION_MIN} turns with "
-                 f"≥1 suffix-cache reset — the cache-CREATE thrash the heaviest-by-output "
-                 f"table hides):** {len(bs)}"
-                 + (" — worst below" if bs else ""))
-        if bs:
-            L.append("")
-            L.append("| Session | NS | Turns | Cache-create tok | cc-share | Resets | Reset floor | Est.$ |")
-            L.append("|---|---|---:|---:|---:|---:|---:|---:|")
-            for r in bs:
-                fl = fmt_int(r["reset_floor"]) if r.get("reset_floor") is not None else "—"
-                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['turns']} | "
-                         f"{fmt_int(r['cache_create'])} | {fmt_pct(r.get('cc_share'))} | "
-                         f"{r['suffix_resets']} | {fl} | ${r['cost_usd']:.2f} |")
-        L.append("")
+    if not beh:
+        return []
+    L = []
+    L.extend(_tool_error_table(beh))
+    L.extend(_churn_counters(beh))
+    L.extend(_loop_detector_tables(beh))
+    L.extend(_cache_burst_tables(beh))
+    L.append("")
+    return L
 
+def _top_sessions_table(S):
+    """The 15 sessions that generated the most output, with their cost shape."""
+    L = []
     L.append("## Top 15 sessions by output tokens\n")
     L.append("| Session | NS | Turns | Tool calls | Output tok | I:O | Cache-hit | cc-share | Est.$ |")
     L.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
@@ -1280,6 +1353,22 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
         L.append(f"| {s['session'][:8]} | {ns} | {s['assistant_turns']} | {s['n_tool_use']} | "
                  f"{fmt_int(s['tokens']['output'])} | {io} | {ch} | {cc} | ${s['cost_usd']:.2f} |")
     L.append("")
+    return L
+
+def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
+              include_subagents=False, max_sessions=None, excluded_subagents=None):
+    S = [s for s in sessions if "error" not in s]
+    L = _report_header(S, agg, ns_prefix, since_days, include_subagents,
+                       max_sessions, excluded_subagents)
+    L.extend(_scope_totals(agg))
+    L.extend(_model_mix_table(agg))
+    L.extend(_billing_bucket_table(agg))
+    L.extend(_per_model_table(agg))
+    L.extend(_namespace_rollup(agg))
+    L.extend(_distributions(agg))
+    L.extend(_tool_mix_table(agg))
+    L.extend(_behavior_lens(agg))
+    L.extend(_top_sessions_table(S))
     return "\n".join(L)
 
 def cmd_discover(a):

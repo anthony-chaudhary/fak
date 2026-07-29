@@ -929,10 +929,8 @@ def step(
     }
 
 
-def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
-    p = paths(args.out_dir, args.serving_out_dir, args.swe_run_dir)
-    run_contract = args.run_contract or default_run_contract_path(args.out_dir)
-
+def _run_contract_step(args: argparse.Namespace, run_contract: Path) -> dict[str, Any]:
+    """The contract-only rung: records the raw-vLLM vs fak-gateway run contract."""
     contract_cmd = [
         args.python, "tools/glm52_vllm_agentic_battery.py",
         "--model", args.model,
@@ -950,7 +948,21 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
     ]
     if args.require_gpu_name:
         contract_cmd += ["--require-gpu-name", args.require_gpu_name]
+    return step(
+        step_id="raw_fak_run_contract",
+        kind="run-contract",
+        description="Record the raw-vLLM vs fak-gateway same-model run contract.",
+        argv=contract_cmd,
+        primary_artifact=run_contract,
+        artifacts=[run_contract],
+        check="run_contract",
+        notes="Contract only; result_claim_allowed=false until the live artifacts pass.",
+    )
 
+
+def _live_readiness_steps(args: argparse.Namespace,
+                          p: dict[str, Path]) -> list[dict[str, Any]]:
+    """The fail-closed node-readiness rung that runs before anything live."""
     preflight = [
         args.python, "tools/glm52_serve_preflight.py",
         "--engine", "vllm",
@@ -959,76 +971,7 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
         "--out", slash(p["preflight_json"]),
         "--markdown", slash(p["preflight_md"]),
     ]
-
-    serve_shell = (
-        ': "${{GLM52_TOOL_CALL_PARSER:?set GLM52_TOOL_CALL_PARSER to the vLLM parser name}}" && '
-        'ENGINE=vllm SERVED_NAME={served} PORT=8000 '
-        'ENGINE_ARGS="--enable-auto-tool-choice --tool-call-parser ${{GLM52_TOOL_CALL_PARSER}}" '
-        'bash tools/glm52_sglang_vllm_serve.sh'
-    ).format(served=shlex.quote(args.served_model_name))
-
-    serving = [
-        args.python, "tools/glm52_serving_witness.py",
-        "--base-url", args.base_url,
-        "--model", args.served_model_name,
-        "--engine-cache-engine", "vllm",
-        "--context-length", str(args.context_length),
-        "--out", slash(p["serving_json"]),
-        "--markdown", slash(p["serving_md"]),
-    ]
-
-    tax = [
-        args.python, "tools/vllm_tax_witness.py",
-        "--base-url", args.base_url,
-        "--model", args.served_model_name,
-        "--count", str(args.tax_count),
-        "--record",
-        "--out", slash(p["tax_json"]),
-        "--markdown", slash(p["tax_md"]),
-    ]
-
-    swe_compare = [
-        args.python, "tools/dgx_swebench_compare.py",
-        "--engine", "vllm",
-        "--model", args.model,
-        "--served-model-name", args.served_model_name,
-        "--raw-base-url", args.base_url,
-        "--verified-count", str(args.verified_count),
-        "--skip-engine-serve",
-        "--require-tool-calls",
-        "--require-grade",
-        "--run-dir", slash(args.swe_run_dir),
-    ]
-    if args.require_gpu_name:
-        swe_compare += ["--require-gpu-name", args.require_gpu_name]
-    swe_compare_preflight = swe_compare + ["--preflight-only"]
-
-    swe_floor = [
-        args.go, "run", "./cmd/fak", "swebench", "compare",
-        "--workers", "1,2,4,8",
-        "--limit", str(args.verified_count),
-        "--with-adjudication",
-        "--out", slash(p["swe_floor_json"]),
-        "--md", slash(p["swe_floor_md"]),
-    ]
-    if args.swebench_dataset:
-        swe_floor += ["--dataset", args.swebench_dataset]
-    if args.swebench_difficulty:
-        swe_floor += ["--difficulty", args.swebench_difficulty]
-
-    steps: list[dict[str, Any]] = []
-    if args.run_contract:
-        steps.append(step(
-            step_id="raw_fak_run_contract",
-            kind="run-contract",
-            description="Record the raw-vLLM vs fak-gateway same-model run contract.",
-            argv=contract_cmd,
-            primary_artifact=run_contract,
-            artifacts=[run_contract],
-            check="run_contract",
-            notes="Contract only; result_claim_allowed=false until the live artifacts pass.",
-        ))
-    steps += [
+    return [
         step(
             step_id="preflight",
             kind="live-readiness",
@@ -1039,6 +982,37 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
             check="preflight",
             notes="Readiness only; no resolve-rate or speed number comes from this rung.",
         ),
+    ]
+
+
+def _live_serving_steps(args: argparse.Namespace,
+                        p: dict[str, Path]) -> list[dict[str, Any]]:
+    """The live-serving rungs: start raw vLLM, then witness serving and gateway tax."""
+    serve_shell = (
+        ': "${{GLM52_TOOL_CALL_PARSER:?set GLM52_TOOL_CALL_PARSER to the vLLM parser name}}" && '
+        'ENGINE=vllm SERVED_NAME={served} PORT=8000 '
+        'ENGINE_ARGS="--enable-auto-tool-choice --tool-call-parser ${{GLM52_TOOL_CALL_PARSER}}" '
+        'bash tools/glm52_sglang_vllm_serve.sh'
+    ).format(served=shlex.quote(args.served_model_name))
+    serving = [
+        args.python, "tools/glm52_serving_witness.py",
+        "--base-url", args.base_url,
+        "--model", args.served_model_name,
+        "--engine-cache-engine", "vllm",
+        "--context-length", str(args.context_length),
+        "--out", slash(p["serving_json"]),
+        "--markdown", slash(p["serving_md"]),
+    ]
+    tax = [
+        args.python, "tools/vllm_tax_witness.py",
+        "--base-url", args.base_url,
+        "--model", args.served_model_name,
+        "--count", str(args.tax_count),
+        "--record",
+        "--out", slash(p["tax_json"]),
+        "--markdown", slash(p["tax_md"]),
+    ]
+    return [
         {
             "id": "serve_raw_vllm",
             "kind": "manual-live-serving",
@@ -1071,6 +1045,28 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
             check="tax_witness",
             notes="Tax >= 1 is expected; this is a cost witness, not a fak speed win.",
         ),
+    ]
+
+
+def _live_agentic_steps(args: argparse.Namespace,
+                        p: dict[str, Path]) -> list[dict[str, Any]]:
+    """The live-agentic rungs: the SWE-bench preflight and the 20-task compare."""
+    swe_compare = [
+        args.python, "tools/dgx_swebench_compare.py",
+        "--engine", "vllm",
+        "--model", args.model,
+        "--served-model-name", args.served_model_name,
+        "--raw-base-url", args.base_url,
+        "--verified-count", str(args.verified_count),
+        "--skip-engine-serve",
+        "--require-tool-calls",
+        "--require-grade",
+        "--run-dir", slash(args.swe_run_dir),
+    ]
+    if args.require_gpu_name:
+        swe_compare += ["--require-gpu-name", args.require_gpu_name]
+    swe_compare_preflight = swe_compare + ["--preflight-only"]
+    return [
         step(
             step_id="swebench_compare_preflight",
             kind="live-agentic-preflight",
@@ -1096,6 +1092,25 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
             check="swebench_compare",
             notes="Completion/resolve claims require official harness grading for both arms.",
         ),
+    ]
+
+
+def _native_floor_steps(args: argparse.Namespace,
+                        p: dict[str, Path]) -> list[dict[str, Any]]:
+    """The fak-native deterministic floors: no rung here is a raw-engine comparison."""
+    swe_floor = [
+        args.go, "run", "./cmd/fak", "swebench", "compare",
+        "--workers", "1,2,4,8",
+        "--limit", str(args.verified_count),
+        "--with-adjudication",
+        "--out", slash(p["swe_floor_json"]),
+        "--md", slash(p["swe_floor_md"]),
+    ]
+    if args.swebench_dataset:
+        swe_floor += ["--dataset", args.swebench_dataset]
+    if args.swebench_difficulty:
+        swe_floor += ["--difficulty", args.swebench_difficulty]
+    return [
         step(
             step_id="swebench_floor_20",
             kind="fak-native-floor",
@@ -1153,6 +1168,18 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
             notes="Hardware-independent hit-rate evidence; live tok/s needs a separate serving run.",
         ),
     ]
+
+
+def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
+    p = paths(args.out_dir, args.serving_out_dir, args.swe_run_dir)
+    run_contract = args.run_contract or default_run_contract_path(args.out_dir)
+    steps: list[dict[str, Any]] = []
+    if args.run_contract:
+        steps.append(_run_contract_step(args, run_contract))
+    steps += _live_readiness_steps(args, p)
+    steps += _live_serving_steps(args, p)
+    steps += _live_agentic_steps(args, p)
+    steps += _native_floor_steps(args, p)
     return steps
 
 

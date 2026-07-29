@@ -3260,39 +3260,10 @@ def backlog_rates(progress_records: list[dict[str, Any]], *, now_ts: float,
     return base
 
 
-def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
-                  closure: dict, max_workers: int, fast: bool,
-                  silent: list[dict[str, Any]] | None = None,
-                  weekly_cap: dict[str, Any] | None = None,
-                  throughput: dict[str, Any] | None = None,
-                  backend_health: list[dict[str, Any]] | None = None,
-                  backend_stub_rate: list[dict[str, Any]] | None = None,
-                  hook_failures: list[dict[str, Any]] | None = None,
-                  guard: dict[str, Any] | None = None,
-                  run_status: list[dict[str, Any]] | None = None,
-                  merge: dict[str, Any] | None = None,
-                  leases: dict[str, Any] | None = None,
-                  worker_leases: dict[str, Any] | None = None,
-                  seat_inventory: dict[str, Any] | None = None,
-                  lab_readiness: dict[str, Any] | None = None,
-                  resolve_ticks: dict[str, Any] | None = None,
-                  resolver_preflight: dict[str, Any] | None = None,
-                  low_yield: dict[str, Any] | None = None,
-                  ships: dict[str, Any] | None = None,
-                  watch: dict[str, Any] | None = None,
-                  backlog_rate: dict[str, Any] | None = None,
-                  spawn_causes: dict[str, Any] | None = None,
-                  seat_streaks: list[dict[str, Any]] | None = None,
-                  fleet_decline: dict[str, Any] | None = None,
-                  route_health: dict[str, Any] | None = None) -> dict[str, Any]:
-    # --- dispatcher liveness / capacity ---
-    cap = _int(pre.get("cap"))
-    live = _int(pre.get("live"))
-    host_safe = bool((pre.get("host") or {}).get("safe"))
-    acct = pre.get("account") or {}
-    pre_verdict = pre.get("verdict")
-
-    # --- backlog --- (counts is the router's authoritative routed/unrouted fold)
+def _backlog_block(backlog: dict[str, Any]) -> dict[str, Any]:
+    """The card's backlog block: open/routed/unrouted counts and the per-lane
+    fold. `counts` is the router's authoritative routed/unrouted fold; a
+    skipped or errored gh fold reports `na` instead of a false zero."""
     lanes = (backlog.get("lanes") or {}) if isinstance(backlog, dict) else {}
     bcounts = (backlog.get("counts") or {}) if isinstance(backlog, dict) else {}
     lane_counts: dict[str, int] = {}
@@ -3303,22 +3274,93 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     routed = _int(bcounts.get("routed"))
     unrouted = _int(bcounts.get("unrouted"))
     backlog_na = "_skipped" in backlog or ("_error" in backlog and not lanes)
+    return {
+        "na": backlog_na,
+        "open_issues": None if backlog_na else open_issues,
+        "routed": None if backlog_na else routed,
+        "by_lane": None if backlog_na else lane_counts,
+        "unrouted": None if backlog_na else unrouted,
+    }
 
-    # --- closure honesty ---
+
+def _closure_block(closure: dict[str, Any]) -> dict[str, Any]:
+    """The card's closure-honesty block: the strict diff-witnessed closure rate,
+    the DATA-crediting honest rate, and the bucket counts behind them."""
     counts = closure.get("counts") or {}
     closure_rate = closure.get("closure_rate")
     honest_close_rate = closure.get("honest_close_rate")
     closure_na = "_skipped" in closure or ("_error" in closure and closure_rate is None)
     open_witnessed = _int(counts.get("OPEN_WITNESSED"), 0)
+    return {
+        "na": closure_na,
+        "closure_rate": closure_rate,
+        "honest_close_rate": honest_close_rate,
+        "counts": counts or None,
+        "open_witnessed_closable": None if closure_na else open_witnessed,
+    }
 
-    # --- throughput (closed/hour vs target) ---
-    throughput = throughput or {}
-    tp_na = "_skipped" in throughput or "_error" in throughput or not throughput.get("schema")
 
-    # --- overall verdict ---
-    # Healthy = host clean AND (can grow OR already at a healthy target). A flagged
-    # host or an un-runnable safety check is the only thing that fails the card —
-    # "no account free" / "at cap" are normal steady states, not breakage.
+def _throughput_block(throughput: dict[str, Any], *, tp_na: bool) -> dict[str, Any]:
+    """The card's throughput block: completed-per-hour against target over the
+    primary window, plus the per-window gh and loop-attributed series."""
+    return {
+        "na": tp_na,
+        "verdict": None if tp_na else throughput.get("verdict"),
+        "target_per_hour": None if tp_na else throughput.get("target_per_hour"),
+        "primary_window_hours": None if tp_na else throughput.get("primary_window_hours"),
+        "completed_rate_per_hour": None if tp_na else throughput.get("completed_rate_per_hour"),
+        "raw_rate_per_hour": None if tp_na else throughput.get("raw_rate_per_hour"),
+        "per_window": None if tp_na else (throughput.get("gh") or {}).get("per_window"),
+        "loop_per_window": None if tp_na else (throughput.get("loop") or {}).get("per_window"),
+        "last_loop_close_age_min": None if tp_na else (throughput.get("loop") or {}).get("last_loop_close_age_min"),
+    }
+
+
+def _supervisor_block(sup: dict[str, Any]) -> dict[str, Any]:
+    """The card's supervisor block: the supervise verdict and how many of the
+    targeted always-on plans are actually alive."""
+    return {
+        "verdict": sup.get("verdict"),
+        "target": (sup.get("supervise") or {}).get("target"),
+        "alive": (sup.get("supervise") or {}).get("alive"),
+        "plans": sup.get("plans"),
+    }
+
+
+def _spawn_causes_block(spawn_causes: dict[str, Any],
+                        spawn_alarm: dict[str, Any]) -> dict[str, Any]:
+    """The card's spawn-cause block: the trailing SPAWN_FAILED cause mix (#4590)
+    and the stale_cred drain alarm derived from it."""
+    return {
+        "na": not bool(spawn_causes.get("schema")),
+        "schema": spawn_causes.get("schema"),
+        "spawns": spawn_causes.get("spawns"),
+        "spawn_failed": spawn_causes.get("spawn_failed"),
+        "rate": spawn_causes.get("rate"),
+        "by_cause": spawn_causes.get("by_cause") or {},
+        "stale_cred_alarm": spawn_alarm,
+    }
+
+
+def _git_block(merge: dict[str, Any]) -> dict[str, Any]:
+    """The card's git block: whether the checkout is parked mid-merge and the
+    next action that clears it."""
+    return {
+        "merge_in_progress": bool(merge.get("merge_in_progress")),
+        "merge_head": merge.get("merge_head"),
+        "next_action": merge.get("next_action"),
+    }
+
+
+def _dispatch_base_verdict(*, pre: dict, cap: int | None, live: int | None,
+                           host_safe: bool, acct: dict[str, Any],
+                           weekly_cap: dict[str, Any] | None,
+                           merge: dict[str, Any]) -> tuple[bool, str, list[str]]:
+    """The card's verdict before any drain alarm: (ok, verdict, reasons).
+    Healthy = host clean AND (can grow OR already at a healthy target). A flagged
+    host or an un-runnable safety check is the only thing that fails the card —
+    "no account free" / "at cap" are normal steady states, not breakage."""
+    pre_verdict = pre.get("verdict")
     reasons: list[str] = []
     if not host_safe:
         ok = False
@@ -3355,41 +3397,74 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                    f"{weekly_cap.get('reset_text') or '?'} (holding spawn until "
                    f"{weekly_cap.get('until')}); the t2 glm/docs pool is unaffected"]
 
-    merge = merge or {}
     if merge.get("merge_in_progress"):
         ok = False
         verdict = "MERGE_IN_PROGRESS"
         reasons.insert(0, merge.get("next_action") or
                        "wait for MERGE_HEAD to clear before starting worker edits")
+    return ok, verdict, reasons
 
+
+def _apply_red_alarm(alarm: dict[str, Any], *, ok: bool, verdict: str,
+                     reasons: list[str], red_verdict: str,
+                     default_reason: str = "") -> tuple[bool, str]:
+    """Fold one red-alarm record into the card verdict. A red alarm flips a
+    healthy verdict to `red_verdict`; an already-failing verdict (host flagged /
+    merge in progress) is the more urgent one and is kept, with only the reason
+    added. The alarm's reason always leads the reason list."""
+    if not alarm.get("red"):
+        return ok, verdict
+    if ok:
+        ok = False
+        verdict = red_verdict
+    reasons.insert(0, str(alarm.get("reason") or default_reason))
+    return ok, verdict
+
+
+def _watchdog_reasons(wd: dict[str, Any]) -> list[str]:
+    """Whether the always-on dispatch watchdog is registered on this host."""
+    reasons: list[str] = []
     if wd.get("installed") is False:
         reasons.append("always-on watchdog NOT installed (register_dos_dispatch_watchdog.ps1)")
     elif wd.get("installed"):
         reasons.append(f"always-on watchdog installed ({wd.get('status') or 'scheduled'})")
+    return reasons
 
-    silent = silent or []
+
+def _silent_worker_reasons(silent: list[dict[str, Any]]) -> list[str]:
+    """The workers that exited producing nothing — inspect or re-scope."""
+    reasons: list[str] = []
     if silent:
         nums = ", ".join(f"#{w['issue']}" for w in silent[:6])
         reasons.append(f"{len(silent)} worker(s) exited producing nothing ({nums}) — inspect or re-scope")
-    backend_health = backend_health or []
+    return reasons
+
+
+def _backend_health_reasons(backend_health: list[dict[str, Any]],
+                            backend_stub_rate: list[dict[str, Any]]) -> list[str]:
+    """Backends held dead (lane reallocated) and backends whose recent logs are
+    majority stub. Informational: a healthy backend covers the freed lane."""
+    reasons: list[str] = []
     if backend_health:
         names = ", ".join(f"{b.get('product')}->{b.get('abandoned_lane') or '?'}"
                           for b in backend_health[:4])
         reasons.append(f"{len(backend_health)} backend(s) held dead, lane reallocated "
                        f"({names}) — a healthy backend is covering; auto-restores on recovery")
-    backend_stub_rate = backend_stub_rate or []
     majority_stub = [r for r in backend_stub_rate if r.get("majority_stub")]
     if majority_stub:
         names = ", ".join(f"{r.get('product')} {r.get('stub')}/{r.get('total')} stub"
                           for r in majority_stub[:4])
         reasons.append(f"backend stub-rate majority-stub over recent logs ({names}) — inspect backend output")
+    return reasons
 
-    # Hook-layer binding: a backend whose every recent session logs hook failures is
-    # running UNHOOKED by the guard layer (productive but unguarded by the hook
-    # backstop). Information, not breakage — like the stub-rate signal it adds a
-    # reason but never flips ok (the commit-path / OFF_TRUNK guard is the backstop).
-    hook_failures = hook_failures or []
-    unhooked = [r for r in hook_failures if r.get("all_sessions_unhooked")]
+
+def _hook_health_reasons(unhooked: list[dict[str, Any]]) -> list[str]:
+    """The guard-layer hook binding.
+    Hook-layer binding: a backend whose every recent session logs hook failures is
+    running UNHOOKED by the guard layer (productive but unguarded by the hook
+    backstop). Information, not breakage — like the stub-rate signal it adds a
+    reason but never flips ok (the commit-path / OFF_TRUNK guard is the backstop)."""
+    reasons: list[str] = []
     if unhooked:
         names = ", ".join(f"{r.get('product')} {r.get('hook_failures')} fail/"
                           f"{r.get('sessions')} sess "
@@ -3399,12 +3474,16 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"guard hook layer UNBOUND on {len(unhooked)} backend(s) ({names}) — "
             f"productive but running unhooked; the commit-path/OFF_TRUNK guard is the "
             f"backstop (#1277)")
+    return reasons
 
-    # Guard coverage: the witnessed proof the dispatch path ran THROUGH `fak guard`
-    # (per-session decision journals), and the kernel's decision mix. Informational —
-    # it adds a reason but never flips ok. A present-but-empty trail is its own signal
-    # (workers booted under guard but proposed no adjudicated tool call).
-    guard = guard or {}
+
+def _guard_reasons(guard: dict[str, Any]) -> list[str]:
+    """The kernel decisions recorded on the dispatch path.
+    Guard coverage: the witnessed proof the dispatch path ran THROUGH `fak guard`
+    (per-session decision journals), and the kernel's decision mix. Informational —
+    it adds a reason but never flips ok. A present-but-empty trail is its own signal
+    (workers booted under guard but proposed no adjudicated tool call)."""
+    reasons: list[str] = []
     g_sessions = _int(guard.get("sessions"), 0) or 0
     g_rows = _int(guard.get("rows"), 0) or 0
     g_child_crashes = _int((guard.get("by_kind") or {}).get("CHILD_CRASH"), 0) or 0
@@ -3426,14 +3505,13 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"fak guard ran {g_sessions} dispatch session(s) but recorded 0 decisions "
             f"({guard.get('empty_sessions', 0)} empty) — workers booted under guard "
             f"but proposed no adjudicated tool call")
+    return reasons
 
-    # Spawn-failed cause mix (#4590): surface the trailing SPAWN_FAILED cause mix on
-    # the DEFAULT card (previously reachable only via the --spawn-causes sub-flag),
-    # and REDDEN when the stale_cred (permanent-auth) rate crosses the drain
-    # threshold — the needs_login-seat drain signature. This is the one spawn signal
-    # that FLIPS ok: a dead seat bleeding the fleet is breakage, not a steady state.
-    spawn_causes = spawn_causes or {}
-    spawn_alarm = spawn_stale_cred_alarm(spawn_causes)
+
+def _spawn_cause_reasons(spawn_causes: dict[str, Any]) -> list[str]:
+    """The trailing SPAWN_FAILED cause mix (#4590), worst cause first. The
+    stale_cred drain that REDDENS the card is a separate alarm fold."""
+    reasons: list[str] = []
     if spawn_causes.get("schema"):
         sc_by_cause = spawn_causes.get("by_cause") or {}
         sc_failed = _int(spawn_causes.get("spawn_failed"), 0) or 0
@@ -3446,40 +3524,12 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             reasons.append(
                 f"spawn-failed mix: {sc_failed}/{_int(spawn_causes.get('spawns'), 0)} spawns "
                 f"early-exited (rate {spawn_causes.get('rate')}) [{mix}] (#4590)")
-    if spawn_alarm["red"]:
-        # Flip a healthy verdict to red; leave an already-failing verdict (host
-        # flagged / merge in progress) as the more urgent one, only adding the reason.
-        if ok:
-            ok = False
-            verdict = "SPAWN_STALE_CRED_DRAIN"
-        reasons.insert(0, spawn_alarm["reason"])
+    return reasons
 
-    # Seat-keyed spawn-failure streak (#4591): the #4590 rate alarm above needs
-    # a high AGGREGATE stale_cred fraction; a single dead seat in a big pool
-    # stays under it while still burning one issue per tick. Join the per-SEAT
-    # consecutive-fail run-length the dispatcher persists with the seat
-    # inventory's auth_failed hold and the stale_cred cause mix, and flip the
-    # verdict the moment ANY one seat hits the threshold — the exact drain the
-    # target-keyed streak could never see.
-    seat_alarm = seat_spawn_fail_alarm(seat_streaks, seat_inventory or {},
-                                       spawn_causes)
-    if seat_alarm["red"]:
-        if ok:
-            ok = False
-            verdict = "SEAT_SPAWN_FAIL_STREAK"
-        reasons.insert(0, seat_alarm["reason"])
 
-    # Net-worker-decline alarm (#4591, part 2): `live` stepping strictly down
-    # for M consecutive fleet-status-history appends is a fleet DRAINING —
-    # whatever each individual tick verdict said. Degrades silently when the
-    # ledger is absent/unreadable (fail-open `_error`).
-    fleet_decline = fleet_decline or {}
-    if fleet_decline.get("red"):
-        if ok:
-            ok = False
-            verdict = "NET_WORKER_DECLINE"
-        reasons.insert(0, str(fleet_decline.get("reason") or "net worker decline"))
-
+def _throughput_reasons(throughput: dict[str, Any], *, tp_na: bool) -> list[str]:
+    """Completed-per-hour against target over the primary analysis window."""
+    reasons: list[str] = []
     if not tp_na:
         tp_verdict = throughput.get("verdict")
         tp_rate = throughput.get("completed_rate_per_hour")
@@ -3491,10 +3541,14 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         else:
             reasons.append(f"throughput {tp_verdict} ({tp_rate}/h completed over the {win}h analysis window, "
                            f"target {tp_target}/h)")
+    return reasons
 
-    run_status = run_status or []
+
+def _run_status_fold(run_status: list[dict[str, Any]]) -> tuple[dict[str, int], int, list[str]]:
+    """Fold the `dos status` digests into (liveness counts, read errors, reasons)."""
     status_counts: dict[str, int] = {}
     status_errors = 0
+    reasons: list[str] = []
     for digest in run_status:
         if digest.get("_error"):
             status_errors += 1
@@ -3506,8 +3560,12 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             reasons.append(f"dos status digest read had {status_errors} error(s); inspect run_status")
         else:
             reasons.append(f"run truth from dos status digest for {len(run_status)} RID(s)")
+    return status_counts, status_errors, reasons
 
-    leases = leases or {}
+
+def _lease_reasons(leases: dict[str, Any]) -> list[str]:
+    """Active lane leases and which routed candidate issues they block."""
+    reasons: list[str] = []
     if leases.get("read_error"):
         reasons.append(f"lease read unavailable: {leases.get('read_error')}")
     elif leases.get("active_count"):
@@ -3531,7 +3589,12 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                 f"current candidate issue(s){suffix}")
         else:
             reasons.append(f"{leases.get('active_count')} active lane lease(s), none blocking current candidates")
-    worker_leases = worker_leases or {}
+    return reasons
+
+
+def _worker_lease_reasons(worker_leases: dict[str, Any]) -> list[str]:
+    """The worker/lease cross-check: clean pairs, orphan processes, orphan leases."""
+    reasons: list[str] = []
     if worker_leases.get("available") is False:
         reasons.append(f"worker/lease cross-check unavailable: {worker_leases.get('error')}")
     elif worker_leases:
@@ -3550,23 +3613,28 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         active_worker_line = _active_worker_summary(worker_leases)
         if active_worker_line:
             reasons.append(active_worker_line)
+    return reasons
 
-    # Seat inventory (#1799): available/busy/cooling/unavailable counts across the
-    # explicit account seat pool, so an operator sees WHY a seat is held without
-    # digging through fleet_accounts directly. Informational only — never flips ok.
-    seat_inventory = seat_inventory or {}
+
+def _seat_inventory_reasons(seat_inventory: dict[str, Any]) -> list[str]:
+    """The account seat pool.
+    Seat inventory (#1799): available/busy/cooling/unavailable counts across the
+    explicit account seat pool, so an operator sees WHY a seat is held without
+    digging through fleet_accounts directly. Informational only — never flips ok."""
+    reasons: list[str] = []
     if seat_inventory.get("_error"):
         reasons.append(f"seat inventory unavailable: {seat_inventory.get('_error')}")
     elif seat_inventory.get("schema"):
         reasons.append(_seat_inventory_summary_line(seat_inventory))
+    return reasons
 
-    resolver_preflight = resolver_preflight or {}
-    resolver_preflight_line = _resolver_preflight_summary(resolver_preflight)
-    if resolver_preflight_line:
-        reasons.append(resolver_preflight_line)
-    preflight_launch_blocker = _current_preflight_launch_blocker(pre_verdict, resolver_preflight)
 
-    resolve_ticks = resolve_ticks or {}
+def _resolver_tick_reasons(resolve_ticks: dict[str, Any],
+                           preflight_launch_blocker: dict[str, Any] | None,) -> list[str]:
+    """The selected resolver tick: stale, launch-ready, held by the current
+    preflight, held by its own launch gate, or simply not spawning — plus
+    any tick artifact that could not be read."""
+    reasons: list[str] = []
     latest_tick = resolve_ticks.get("selected") or resolve_ticks.get("latest") or {}
     if latest_tick:
         tick_age = _age_text(latest_tick.get("age_min"))
@@ -3605,12 +3673,16 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                 f"{tick_verdict}; next action: {action}; age {tick_age}")
     if resolve_ticks.get("errors"):
         reasons.append(f"{len(resolve_ticks.get('errors') or [])} resolver tick artifact read error(s)")
+    return reasons
 
-    # Low-yield lanes (#2062): lanes whose recent sessions spent >= the turn floor
-    # yet closed nothing on their own tree. Informational — a reason line, never a
-    # flip of ok. This is the per-lane feedback pick_lane lacked (silent_workers only
-    # sees the empty-log case).
-    low_yield = low_yield or {}
+
+def _low_yield_reasons(low_yield: dict[str, Any]) -> list[str]:
+    """The lanes that spent turns without closing anything.
+    Low-yield lanes (#2062): lanes whose recent sessions spent >= the turn floor
+    yet closed nothing on their own tree. Informational — a reason line, never a
+    flip of ok. This is the per-lane feedback pick_lane lacked (silent_workers only
+    sees the empty-log case)."""
+    reasons: list[str] = []
     low_yield_flagged = [r for r in (low_yield.get("lanes") or [])
                          if r.get("verdict") == "LOW_YIELD"]
     if low_yield_flagged:
@@ -3621,11 +3693,15 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"{len(low_yield_flagged)} low-yield lane(s) over the last "
             f"{low_yield.get('lookback_min')}m ({names}) — turns spent with zero "
             f"ancestry-closes; pick_lane should re-scope or exclude (#2062)")
+    return reasons
 
-    # Ships-per-worker (#2065): best-effort (fak-worker) trailer attribution over the
-    # recent window. Informational — a reason line, never a flip of ok; the trailer is
-    # agent-emitted, so this is an attribution aid, not a witness.
-    ships = ships or {}
+
+def _ships_reasons(ships: dict[str, Any]) -> list[str]:
+    """Ship attribution by worker trailer.
+    Ships-per-worker (#2065): best-effort (fak-worker) trailer attribution over the
+    recent window. Informational — a reason line, never a flip of ok; the trailer is
+    agent-emitted, so this is an attribution aid, not a witness."""
+    reasons: list[str] = []
     ships_workers = ships.get("workers") or []
     if ships.get("attributed_ships"):
         top = ", ".join(f"{w.get('worker')}={w.get('ships')}" for w in ships_workers[:4])
@@ -3635,11 +3711,15 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"{ships.get('attributed_ships')} ship(s) attributed to "
             f"{ships.get('worker_count')} worker(s) via (fak-worker) trailer ({top})"
             f"{unk_bit} — best-effort aid, not a witness (#2065)")
+    return reasons
 
-    # Backlog arrival-vs-service rate (#2634): surface a numeric BACKLOG_OUTPACED
-    # so an operator reads the supply/demand trend without hand-diffing counters.
-    # Informational — a reason line, never a flip of ok (this is the meter).
-    backlog_rate = backlog_rate or {}
+
+def _backlog_rate_reasons(backlog_rate: dict[str, Any]) -> list[str]:
+    """Backlog arrival versus service rate.
+    Backlog arrival-vs-service rate (#2634): surface a numeric BACKLOG_OUTPACED
+    so an operator reads the supply/demand trend without hand-diffing counters.
+    Informational — a reason line, never a flip of ok (this is the meter)."""
+    reasons: list[str] = []
     if backlog_rate.get("backlog_outpaced"):
         reasons.append(
             f"backlog OUTPACED: arrival {backlog_rate.get('arrival_rate_per_hour')}/h > "
@@ -3647,10 +3727,13 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"{backlog_rate.get('consecutive_outpaced_windows')} consecutive "
             f"{backlog_rate.get('window_hours')}h window(s) — healthy but supply-bound, "
             f"not stalled; do not hand-launch (#2634)")
+    return reasons
 
-    lab_readiness = lab_readiness or {}
-    if lab_readiness.get("schema") and not lab_readiness.get("commands"):
-        lab_readiness = {**lab_readiness, "commands": _lab_readiness_commands()}
+
+def _lab_readiness_reasons(lab_readiness: dict[str, Any]) -> list[str]:
+    """Whether the lab-readiness link admits lab-backed dispatch, and if not,
+    the next action that would publish it."""
+    reasons: list[str] = []
     if lab_readiness.get("schema"):
         link = _lab_link_label(lab_readiness)
         action = lab_readiness.get("next_action") or "publish-lab-readiness"
@@ -3658,13 +3741,13 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             reasons.append(f"lab readiness: {link} — lab-backed dispatch may be admitted")
         else:
             reasons.append(f"lab readiness: {link}; next action: {action}; no lab-backed dispatch")
+    return reasons
 
-    limiter = _dispatch_limiter(pre, backlog, closure, leases)
-    utilization = utilization_state(
-        live=live, cap=cap, host_safe=host_safe, pre_verdict=pre_verdict,
-        resolver=resolve_ticks, resolver_preflight=resolver_preflight,
-        lab_readiness=lab_readiness,
-        weekly_cap=weekly_cap, merge=merge)
+
+def _utilization_reasons(utilization: dict[str, Any]) -> list[str]:
+    """Free worker slots and the next action for every actionable utilization
+    state (headroom, account/host blocked, edit held)."""
+    reasons: list[str] = []
     if utilization.get("state") in (
             "HEADROOM_LAUNCH_READY", "HEADROOM_REPAIR_READY", "HEADROOM_HELD", "HEADROOM_STALE_PLAN",
             "ACCOUNT_CAPPED", "ACCOUNT_BLOCKED", "HOST_BLOCKED", "EDIT_HELD"):
@@ -3673,6 +3756,133 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         reasons.append(
             f"utilization: {utilization.get('state')} "
             f"({(utilization.get('worker_slots') or {}).get('headroom')} free slot(s)){suffix}")
+    return reasons
+
+
+def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
+                  closure: dict, max_workers: int, fast: bool,
+                  silent: list[dict[str, Any]] | None = None,
+                  weekly_cap: dict[str, Any] | None = None,
+                  throughput: dict[str, Any] | None = None,
+                  backend_health: list[dict[str, Any]] | None = None,
+                  backend_stub_rate: list[dict[str, Any]] | None = None,
+                  hook_failures: list[dict[str, Any]] | None = None,
+                  guard: dict[str, Any] | None = None,
+                  run_status: list[dict[str, Any]] | None = None,
+                  merge: dict[str, Any] | None = None,
+                  leases: dict[str, Any] | None = None,
+                  worker_leases: dict[str, Any] | None = None,
+                  seat_inventory: dict[str, Any] | None = None,
+                  lab_readiness: dict[str, Any] | None = None,
+                  resolve_ticks: dict[str, Any] | None = None,
+                  resolver_preflight: dict[str, Any] | None = None,
+                  low_yield: dict[str, Any] | None = None,
+                  ships: dict[str, Any] | None = None,
+                  watch: dict[str, Any] | None = None,
+                  backlog_rate: dict[str, Any] | None = None,
+                  spawn_causes: dict[str, Any] | None = None,
+                  seat_streaks: list[dict[str, Any]] | None = None,
+                  fleet_decline: dict[str, Any] | None = None,
+                  route_health: dict[str, Any] | None = None) -> dict[str, Any]:
+    # --- dispatcher liveness / capacity ---
+    cap = _int(pre.get("cap"))
+    live = _int(pre.get("live"))
+    host_safe = bool((pre.get("host") or {}).get("safe"))
+    acct = pre.get("account") or {}
+    pre_verdict = pre.get("verdict")
+
+    # --- throughput (closed/hour vs target) ---
+    throughput = throughput or {}
+    tp_na = "_skipped" in throughput or "_error" in throughput or not throughput.get("schema")
+
+    merge = merge or {}
+    ok, verdict, reasons = _dispatch_base_verdict(
+        pre=pre, cap=cap, live=live, host_safe=host_safe, acct=acct,
+        weekly_cap=weekly_cap, merge=merge)
+
+    reasons += _watchdog_reasons(wd)
+    silent = silent or []
+    reasons += _silent_worker_reasons(silent)
+    backend_health = backend_health or []
+    backend_stub_rate = backend_stub_rate or []
+    reasons += _backend_health_reasons(backend_health, backend_stub_rate)
+    hook_failures = hook_failures or []
+    unhooked = [r for r in hook_failures if r.get("all_sessions_unhooked")]
+    reasons += _hook_health_reasons(unhooked)
+    guard = guard or {}
+    reasons += _guard_reasons(guard)
+
+    # Spawn-failed cause mix (#4590): surface the trailing SPAWN_FAILED cause mix on
+    # the DEFAULT card (previously reachable only via the --spawn-causes sub-flag),
+    # and REDDEN when the stale_cred (permanent-auth) rate crosses the drain
+    # threshold — the needs_login-seat drain signature. This is the one spawn signal
+    # that FLIPS ok: a dead seat bleeding the fleet is breakage, not a steady state.
+    spawn_causes = spawn_causes or {}
+    spawn_alarm = spawn_stale_cred_alarm(spawn_causes)
+    reasons += _spawn_cause_reasons(spawn_causes)
+    ok, verdict = _apply_red_alarm(
+        spawn_alarm, ok=ok, verdict=verdict, reasons=reasons,
+        red_verdict="SPAWN_STALE_CRED_DRAIN")
+
+    # Seat-keyed spawn-failure streak (#4591): the #4590 rate alarm above needs
+    # a high AGGREGATE stale_cred fraction; a single dead seat in a big pool
+    # stays under it while still burning one issue per tick. Join the per-SEAT
+    # consecutive-fail run-length the dispatcher persists with the seat
+    # inventory's auth_failed hold and the stale_cred cause mix, and flip the
+    # verdict the moment ANY one seat hits the threshold — the exact drain the
+    # target-keyed streak could never see.
+    seat_alarm = seat_spawn_fail_alarm(seat_streaks, seat_inventory or {},
+                                       spawn_causes)
+    ok, verdict = _apply_red_alarm(
+        seat_alarm, ok=ok, verdict=verdict, reasons=reasons,
+        red_verdict="SEAT_SPAWN_FAIL_STREAK")
+
+    # Net-worker-decline alarm (#4591, part 2): `live` stepping strictly down
+    # for M consecutive fleet-status-history appends is a fleet DRAINING —
+    # whatever each individual tick verdict said. Degrades silently when the
+    # ledger is absent/unreadable (fail-open `_error`).
+    fleet_decline = fleet_decline or {}
+    ok, verdict = _apply_red_alarm(
+        fleet_decline, ok=ok, verdict=verdict, reasons=reasons,
+        red_verdict="NET_WORKER_DECLINE", default_reason="net worker decline")
+
+    reasons += _throughput_reasons(throughput, tp_na=tp_na)
+    run_status = run_status or []
+    status_counts, status_errors, status_reasons = _run_status_fold(run_status)
+    reasons += status_reasons
+    leases = leases or {}
+    reasons += _lease_reasons(leases)
+    worker_leases = worker_leases or {}
+    reasons += _worker_lease_reasons(worker_leases)
+    seat_inventory = seat_inventory or {}
+    reasons += _seat_inventory_reasons(seat_inventory)
+
+    resolver_preflight = resolver_preflight or {}
+    resolver_preflight_line = _resolver_preflight_summary(resolver_preflight)
+    if resolver_preflight_line:
+        reasons.append(resolver_preflight_line)
+    preflight_launch_blocker = _current_preflight_launch_blocker(pre_verdict, resolver_preflight)
+    resolve_ticks = resolve_ticks or {}
+    reasons += _resolver_tick_reasons(resolve_ticks, preflight_launch_blocker)
+
+    low_yield = low_yield or {}
+    reasons += _low_yield_reasons(low_yield)
+    ships = ships or {}
+    reasons += _ships_reasons(ships)
+    backlog_rate = backlog_rate or {}
+    reasons += _backlog_rate_reasons(backlog_rate)
+    lab_readiness = lab_readiness or {}
+    if lab_readiness.get("schema") and not lab_readiness.get("commands"):
+        lab_readiness = {**lab_readiness, "commands": _lab_readiness_commands()}
+    reasons += _lab_readiness_reasons(lab_readiness)
+
+    limiter = _dispatch_limiter(pre, backlog, closure, leases)
+    utilization = utilization_state(
+        live=live, cap=cap, host_safe=host_safe, pre_verdict=pre_verdict,
+        resolver=resolve_ticks, resolver_preflight=resolver_preflight,
+        lab_readiness=lab_readiness,
+        weekly_cap=weekly_cap, merge=merge)
+    reasons += _utilization_reasons(utilization)
 
     return {
         "schema": SCHEMA,
@@ -3691,48 +3901,13 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "account": {k: acct.get(k) for k in ("tag", "tier", "model", "available")},
             "watchdog": wd,
         },
-        "supervisor": {
-            "verdict": sup.get("verdict"),
-            "target": (sup.get("supervise") or {}).get("target"),
-            "alive": (sup.get("supervise") or {}).get("alive"),
-            "plans": sup.get("plans"),
-        },
-        "backlog": {
-            "na": backlog_na,
-            "open_issues": None if backlog_na else open_issues,
-            "routed": None if backlog_na else routed,
-            "by_lane": None if backlog_na else lane_counts,
-            "unrouted": None if backlog_na else unrouted,
-        },
-        "closure": {
-            "na": closure_na,
-            "closure_rate": closure_rate,
-            "honest_close_rate": honest_close_rate,
-            "counts": counts or None,
-            "open_witnessed_closable": None if closure_na else open_witnessed,
-        },
-        "throughput": {
-            "na": tp_na,
-            "verdict": None if tp_na else throughput.get("verdict"),
-            "target_per_hour": None if tp_na else throughput.get("target_per_hour"),
-            "primary_window_hours": None if tp_na else throughput.get("primary_window_hours"),
-            "completed_rate_per_hour": None if tp_na else throughput.get("completed_rate_per_hour"),
-            "raw_rate_per_hour": None if tp_na else throughput.get("raw_rate_per_hour"),
-            "per_window": None if tp_na else (throughput.get("gh") or {}).get("per_window"),
-            "loop_per_window": None if tp_na else (throughput.get("loop") or {}).get("per_window"),
-            "last_loop_close_age_min": None if tp_na else (throughput.get("loop") or {}).get("last_loop_close_age_min"),
-        },
+        "supervisor": _supervisor_block(sup),
+        "backlog": _backlog_block(backlog),
+        "closure": _closure_block(closure),
+        "throughput": _throughput_block(throughput, tp_na=tp_na),
         "watch_decision": watch or {},
         "backlog_rate": backlog_rate or {},
-        "spawn_causes": {
-            "na": not bool(spawn_causes.get("schema")),
-            "schema": spawn_causes.get("schema"),
-            "spawns": spawn_causes.get("spawns"),
-            "spawn_failed": spawn_causes.get("spawn_failed"),
-            "rate": spawn_causes.get("rate"),
-            "by_cause": spawn_causes.get("by_cause") or {},
-            "stale_cred_alarm": spawn_alarm,
-        },
+        "spawn_causes": _spawn_causes_block(spawn_causes, spawn_alarm),
         "seat_streaks": {
             "rows": seat_streaks or [],
             "alarm": seat_alarm,
@@ -3769,11 +3944,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "ships_per_worker": ships or {},
         "lab_readiness": lab_readiness or {},
         "utilization": utilization,
-        "git": {
-            "merge_in_progress": bool(merge.get("merge_in_progress")),
-            "merge_head": merge.get("merge_head"),
-            "next_action": merge.get("next_action"),
-        },
+        "git": _git_block(merge),
         "fast": fast,
     }
 
@@ -3853,14 +4024,13 @@ def _worker_lease_bucket_bits(rows: list[dict[str, Any]], *, key: str,
     return bits
 
 
-def render(p: dict[str, Any]) -> str:
+def _card_header_lines(p: dict[str, Any]) -> list[str]:
+    """The card's top block: workers, limiter, switcher, watchdog, supervisor."""
     d = p.get("dispatcher") or {}
     s = p.get("supervisor") or {}
-    b = p.get("backlog") or {}
-    c = p.get("closure") or {}
     a = d.get("account") or {}
     wd = d.get("watchdog") or {}
-    lines = [
+    return [
         f"╔═ DISPATCHER: {p.get('verdict')} ({'ok' if p.get('ok') else 'ACTION'})",
         f"║ workers   : {_workers_live_clause(d)}  "
         f"host={'clean' if d.get('host_safe') else 'FLAGGED'}",
@@ -3876,6 +4046,11 @@ def render(p: dict[str, Any]) -> str:
         f"plans={(s.get('plans') or {}).get('total_plans')} "
         f"units={(s.get('plans') or {}).get('total_units')}",
     ]
+
+
+def _card_capacity_lines(p: dict[str, Any]) -> list[str]:
+    """Seat inventory and the lab-readiness gate."""
+    lines: list[str] = []
     seat_line = _seat_inventory_summary_line(p.get("seat_inventory") or {})
     if seat_line:
         lines.append("║ seats     : " + seat_line.removeprefix("seat inventory: "))
@@ -3888,6 +4063,13 @@ def render(p: dict[str, Any]) -> str:
             cmd = (lab.get("commands") or {}).get("mark_clear")
             if cmd:
                 lines.append(f"║ lab cmd   : {cmd}")
+    return lines
+
+
+def _card_planner_lines(p: dict[str, Any]) -> list[str]:
+    """The resolver tick: plan, launch command, seat cap/pick, spawn-fail streak."""
+    lines: list[str] = []
+    d = p.get("dispatcher") or {}
     preflight_blocker = _current_preflight_launch_blocker(
         d.get("preflight_verdict"), p.get("resolver_preflight") or {})
     resolver = p.get("resolver") or {}
@@ -3925,6 +4107,12 @@ def render(p: dict[str, Any]) -> str:
             cause_bit = f", cause={latest_tick.get('cause')}" if latest_tick.get("cause") else ""
             seat_bit = f", seat-streak {seat_streak_n} (#4591)" if seat_streak_n else ""
             lines.append(f"║ spawn-fail: streak {streak}{seat_bit}{cause_bit} (#4589)")
+    return lines
+
+
+def _card_gate_lines(p: dict[str, Any]) -> list[str]:
+    """The plan-admission gate and the worker-slot utilization row."""
+    lines: list[str] = []
     resolver_pre = p.get("resolver_preflight") or {}
     if resolver_pre.get("schema"):
         seat = resolver_pre.get("seat") or {}
@@ -3945,6 +4133,14 @@ def render(p: dict[str, Any]) -> str:
             f"║ use       : {util.get('state')} "
             f"slots={slots.get('live')}/{slots.get('cap')} "
             f"free={slots.get('headroom')} next={actions}")
+    return lines
+
+
+def _card_flow_lines(p: dict[str, Any]) -> list[str]:
+    """Backlog, closure and completion-rate rows."""
+    lines: list[str] = []
+    b = p.get("backlog") or {}
+    c = p.get("closure") or {}
     if b.get("na"):
         lines.append("║ backlog   : n/a (--fast or gh timeout)")
     else:
@@ -3967,6 +4163,12 @@ def render(p: dict[str, Any]) -> str:
         lines.append(
             f"║ rate      : {tp.get('verdict')}  {tp.get('completed_rate_per_hour')}/h completed "
             f"over the {tp.get('primary_window_hours')}h analysis window (target {tp.get('target_per_hour')}/h)")
+    return lines
+
+
+def _card_watch_lines(p: dict[str, Any]) -> list[str]:
+    """The watch decision and the arrival-vs-service supply rows."""
+    lines: list[str] = []
     watch = p.get("watch_decision") or {}
     if watch.get("schema"):
         cite = watch.get("cited") or {}
@@ -3989,6 +4191,12 @@ def render(p: dict[str, Any]) -> str:
             f"{br.get('service_rate_per_hour')}/h over {br.get('span_hours')}h "
             f"({br.get('consecutive_outpaced_windows')}/{br.get('k_consecutive')} "
             f"consecutive @ {br.get('window_hours'):g}h)")
+    return lines
+
+
+def _card_route_lines(p: dict[str, Any]) -> list[str]:
+    """Route health: how many routes are probed, suppressed and rechecking."""
+    lines: list[str] = []
     rh = p.get("route_health") or {}
     if rh.get("probed"):
         flagged = [r for r in (rh.get("routes") or []) if r.get("suppressed")]
@@ -4003,6 +4211,12 @@ def render(p: dict[str, Any]) -> str:
         for r in flagged[:2]:
             if r.get("recheck"):
                 lines.append(f"║ recheck   : {r.get('recheck')}")
+    return lines
+
+
+def _card_yield_lines(p: dict[str, Any]) -> list[str]:
+    """What the workers produced: silent workers, spawn causes, low yield, ships, drought."""
+    lines: list[str] = []
     w = p.get("workers") or {}
     sc = w.get("silent_count") or 0
     if sc:
@@ -4042,6 +4256,12 @@ def render(p: dict[str, Any]) -> str:
         lines.append(
             f"║ DROUGHT   : 0 fleet commits in {cd.get('hours')}h while ARMED — the "
             f"loop is shipping nothing; check spawn/preflight/backlog")
+    return lines
+
+
+def _card_health_lines(p: dict[str, Any]) -> list[str]:
+    """Backend, hook, guard and run-status health rows."""
+    lines: list[str] = []
     bh = p.get("backend_health") or {}
     flagged_rates = [r for r in (bh.get("stub_rate") or []) if r.get("majority_stub")]
     if flagged_rates:
@@ -4073,6 +4293,12 @@ def render(p: dict[str, Any]) -> str:
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
         lines.append(f"║ run truth : dos status {rs.get('count')} RID(s), errors={rs.get('errors')} [{bits}]")
+    return lines
+
+
+def _card_lease_lines(p: dict[str, Any]) -> list[str]:
+    """Lease inventory, the worker/lease reconciliation and the live-worker row."""
+    lines: list[str] = []
     leases = p.get("leases") or {}
     if leases.get("read_error"):
         lines.append(f"║ leases    : unavailable ({leases.get('read_error')})")
@@ -4102,6 +4328,20 @@ def render(p: dict[str, Any]) -> str:
         active_worker_line = _active_worker_summary(wl)
         if active_worker_line:
             lines.append("║ live work : " + active_worker_line.removeprefix("active resolver worker(s): "))
+    return lines
+
+
+def render(p: dict[str, Any]) -> str:
+    lines = _card_header_lines(p)
+    lines += _card_capacity_lines(p)
+    lines += _card_planner_lines(p)
+    lines += _card_gate_lines(p)
+    lines += _card_flow_lines(p)
+    lines += _card_watch_lines(p)
+    lines += _card_route_lines(p)
+    lines += _card_yield_lines(p)
+    lines += _card_health_lines(p)
+    lines += _card_lease_lines(p)
     git = p.get("git") or {}
     if git.get("merge_in_progress"):
         lines.append(f"║ git       : MERGE_HEAD present — {git.get('next_action')}")
@@ -4109,22 +4349,13 @@ def render(p: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_md(payload: dict[str, Any], *, date: str) -> str:
-    """The committed, human-readable status surface: which issues are synced to
-    which lanes, how closure is progressing, and any worker that produced nothing.
-
-    This is the plan-doc-equivalent for a plan-empty repo whose backlog is GitHub
-    issues — an operator opens ONE file instead of grepping gitignored runtime.
-    Date is git-derived by the caller (deterministic; the renderer takes no clock).
-    """
+def _md_summary_bullets(payload: dict[str, Any], *, date: str) -> list[str]:
+    """The Jekyll front matter, the dated title, and the dispatcher/worker/
+    limiter/switcher/watchdog/supervisor summary bullets that open the doc."""
     d = payload.get("dispatcher") or {}
     s = payload.get("supervisor") or {}
-    b = payload.get("backlog") or {}
-    c = payload.get("closure") or {}
-    w = payload.get("workers") or {}
     a = d.get("account") or {}
     wd = d.get("watchdog") or {}
-
     out = [
         # Jekyll front matter so the published status page keeps a stable <title> +
         # meta description (jekyll-seo-tag reads these). Without it, every --md regen
@@ -4157,6 +4388,13 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         f"- **supervisor**: `{s.get('verdict')}` "
         f"(alive {s.get('alive')}/{s.get('target')})",
     ]
+    return out
+
+
+def _md_capacity_bullets(payload: dict[str, Any]) -> list[str]:
+    """Seat-inventory and lab-readiness bullets, including the publish command a
+    held lab gate needs."""
+    out: list[str] = []
     seat_line = _seat_inventory_summary_line(payload.get("seat_inventory") or {})
     if seat_line:
         out.append(f"- **seat inventory**: {seat_line.removeprefix('seat inventory: ')}")
@@ -4170,6 +4408,15 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             cmd = (lab.get("commands") or {}).get("mark_clear")
             if cmd:
                 out.append(f"- **lab publish command**: `{cmd}`")
+    return out
+
+
+def _md_resolver_bullets(payload: dict[str, Any]) -> list[str]:
+    """The selected resolver tick: its state (held if a preflight blocker outranks
+    launch-ready), the approved live command, the adaptive seat cap and pick,
+    the spawn-fail streak, and the product-preflight summary."""
+    out: list[str] = []
+    d = payload.get("dispatcher") or {}
     preflight_blocker = _current_preflight_launch_blocker(
         d.get("preflight_verdict"), payload.get("resolver_preflight") or {})
     resolver = payload.get("resolver") or {}
@@ -4207,6 +4454,13 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     resolver_pre_line = _resolver_preflight_summary(resolver_pre)
     if resolver_pre_line:
         out.append(f"- **resolver product preflight**: {resolver_pre_line.removeprefix('selected resolver preflight: ')}")
+    return out
+
+
+def _md_utilization_bullets(payload: dict[str, Any]) -> list[str]:
+    """Worker-slot utilization and the capacity reconcile line."""
+    out: list[str] = []
+    resolver_pre = payload.get("resolver_preflight") or {}
     util = payload.get("utilization") or {}
     if util.get("schema"):
         slots = util.get("worker_slots") or {}
@@ -4218,6 +4472,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     recon = _capacity_reconcile(resolver_pre, payload.get("dispatcher") or {})
     if recon:
         out.append(recon)
+    return out
+
+
+def _md_run_state_bullets(payload: dict[str, Any]) -> list[str]:
+    """Where run truth came from and whether git is parked mid-merge."""
+    out: list[str] = []
     rs = payload.get("run_status") or {}
     if rs.get("count"):
         out.append(f"- **run status source**: `dos status` digests for {rs.get('count')} RID(s), "
@@ -4225,6 +4485,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     git = payload.get("git") or {}
     if git.get("merge_in_progress"):
         out.append(f"- **git wait state**: `MERGE_HEAD` present — {git.get('next_action')}")
+    return out
+
+
+def _md_lease_bullets(payload: dict[str, Any]) -> list[str]:
+    """Lane-lease counts and the worker/lease cross-check summary bullets."""
+    out: list[str] = []
     leases = payload.get("leases") or {}
     if leases.get("read_error"):
         out.append(f"- **lane leases**: unavailable (`{leases.get('read_error')}`)")
@@ -4241,6 +4507,13 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         active_worker_line = _active_worker_summary(wl)
         if active_worker_line:
             out.append(f"- **active resolver workers**: {active_worker_line.removeprefix('active resolver worker(s): ')}")
+    return out
+
+
+def _md_backlog_section(payload: dict[str, Any]) -> list[str]:
+    """`## Backlog by lane` — open issues routed to each lane."""
+    out: list[str] = []
+    b = payload.get("backlog") or {}
     out += [
         "",
         "## Backlog by lane (issue → lane sync)",
@@ -4259,7 +4532,13 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         by_lane = b.get("by_lane") or {}
         for lane, n in sorted(by_lane.items(), key=lambda kv: (-kv[1], kv[0])):
             out.append(f"| {lane} | {n} |")
+    return out
 
+
+def _md_closure_section(payload: dict[str, Any]) -> list[str]:
+    """`## Closure honesty` — the strict diff-witnessed closure rate and its buckets."""
+    out: list[str] = []
+    c = payload.get("closure") or {}
     out += ["", "## Closure honesty", ""]
     if c.get("na"):
         out.append("_Closure audit n/a this run (gh/dos fold skipped or timed out)._")
@@ -4279,7 +4558,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             f"| CLAIMED_CLOSED | {cnt.get('CLAIMED_CLOSED', 0)} |",
             f"| OPEN_WITNESSED (closable now) | {c.get('open_witnessed_closable')} |",
         ]
+    return out
 
+
+def _md_throughput_section(payload: dict[str, Any]) -> list[str]:
+    """`## Throughput` — closed/completed issues per hour per trailing window."""
+    out: list[str] = []
     tp = payload.get("throughput") or {}
     out += ["", "## Throughput (closed issues per hour)", ""]
     if tp.get("na"):
@@ -4311,7 +4595,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 + (f"{last} min ago." if last is not None else "**none on record**.")
                 + " A gh-rate far above the loop-rate means humans/peers are draining "
                 "the backlog, not the dispatcher."]
+    return out
 
+
+def _md_watch_section(payload: dict[str, Any]) -> list[str]:
+    """`## Watch decision` — why a trailing window ended in no action."""
+    out: list[str] = []
     watch = payload.get("watch_decision") or {}
     if watch.get("schema"):
         cite = watch.get("cited") or {}
@@ -4333,7 +4622,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 f"(status={sched.get('status') or '-'})",
                 "- follow-up tickets from this watch: "
                 + (", ".join(f"#{n}" for n in fu) if fu else "none listed")]
+    return out
 
+
+def _md_lease_section(payload: dict[str, Any]) -> list[str]:
+    """`## Active lane leases` — which leases are held and which block candidates."""
+    out: list[str] = []
     leases = payload.get("leases") or {}
     out += ["", "## Active lane leases", ""]
     if leases.get("read_error"):
@@ -4369,7 +4663,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 f"{_age_text(row.get('age_min'))} | {row.get('ttl_seconds')}s | "
                 f"{_lease_liveness_text(row)} | {_lease_block_text(row)} | "
                 f"`{holder}` | {tree} |")
+    return out
 
+
+def _md_worker_lease_section(payload: dict[str, Any]) -> list[str]:
+    """`## Worker / lease cross-check` — clean matches, orphan processes, orphan leases."""
+    out: list[str] = []
     wl = payload.get("worker_lease_check") or {}
     out += ["", "## Worker / lease cross-check", ""]
     if wl.get("available") is False:
@@ -4428,7 +4727,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 lease = row.get("lease") or {}
                 out.append(f"| `{lease.get('id')}` | {lease.get('lane') or '—'} | "
                            f"`{lease.get('holder') or '—'}` | {row.get('reason')} |")
+    return out
 
+
+def _md_backend_health_section(payload: dict[str, Any]) -> list[str]:
+    """`## Backend health / reallocation` — backends held dead and their stub rate."""
+    out: list[str] = []
     bh = payload.get("backend_health") or {}
     dead = bh.get("dead") or []
     stub_rates = bh.get("stub_rate") or []
@@ -4471,7 +4775,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(f"| {row.get('product')} | {row.get('lookback_min')}m | "
                        f"{row.get('total')} | {row.get('productive')} | {row.get('stub')} | "
                        f"{rate} | {verdict} | {evidence} |")
+    return out
 
+
+def _md_hook_health_section(payload: dict[str, Any]) -> list[str]:
+    """`## Hook health` — which backends ran unhooked by the guard layer."""
+    out: list[str] = []
     hh = payload.get("hook_health") or {}
     hook_rows = hh.get("by_backend") or []
     out += ["", "## Hook health (guard-layer binding)", ""]
@@ -4505,7 +4814,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(f"| {row.get('product')} | {row.get('lookback_min')}m | "
                        f"{row.get('sessions')} | {row.get('sessions_with_hook_failures')} | "
                        f"{rate} | {row.get('hook_failures')} | {verdict} | {evidence} |")
+    return out
 
+
+def _md_guard_section(payload: dict[str, Any]) -> list[str]:
+    """`## Guard coverage` — the kernel decisions recorded on the dispatch path."""
+    out: list[str] = []
     gd = payload.get("guard") or {}
     out += ["", "## Guard coverage (kernel decisions on the dispatch path)", ""]
     if not gd.get("dir_present"):
@@ -4541,7 +4855,13 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         if evidence:
             out += ["", "Recent journals: "
                     + ", ".join(f"`{name}`" for name in evidence) + "."]
+    return out
 
+
+def _md_silent_worker_section(payload: dict[str, Any]) -> list[str]:
+    """`## Workers that produced nothing` — spawns at or below the real-turn floor."""
+    out: list[str] = []
+    w = payload.get("workers") or {}
     sc = w.get("silent_count") or 0
     out += ["", "## Workers that produced nothing", ""]
     if not sc:
@@ -4561,7 +4881,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         for sw in (w.get("silent") or []):
             out.append(f"| #{sw.get('issue')} | {sw.get('stamp')} | {sw.get('kind') or '—'} | "
                        f"{sw.get('size') if sw.get('size') is not None else '—'} | `{sw.get('log')}` |")
+    return out
 
+
+def _md_low_yield_section(payload: dict[str, Any]) -> list[str]:
+    """`## Low-yield lanes` — turns spent versus ancestry closes, per lane."""
+    out: list[str] = []
     ly = payload.get("low_yield") or {}
     ly_lanes = ly.get("lanes") or []
     out += ["", "## Low-yield lanes (turns spent vs ancestry closes)", ""]
@@ -4598,7 +4923,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(
                 f"| {r.get('lane')} | {r.get('sessions')} | {r.get('turns')} | "
                 f"{r.get('max_session_turns')} | {closes_txt} | {verdict} | {tree} | {evidence} |")
+    return out
 
+
+def _md_ships_section(payload: dict[str, Any]) -> list[str]:
+    """`## Ships per worker` — best-effort `(fak-worker <id>)` trailer attribution."""
+    out: list[str] = []
     spw = payload.get("ships_per_worker") or {}
     out += ["", "## Ships per worker (best-effort attribution)", ""]
     spw_workers = spw.get("workers") or []
@@ -4626,7 +4956,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(f"| `{w.get('worker')}` | {w.get('ships')} |")
         if unk:
             out.append(f"| _unattributed_ | {unk} |")
+    return out
 
+
+def _md_contract_repair_section(payload: dict[str, Any]) -> list[str]:
+    """`## Issue-contract repair flow` — the read-only repair pass a held issue needs."""
+    out: list[str] = []
     out += ["", "## Issue-contract repair flow", ""]
     out += [
         "When `fak issue contract` / `fak dispatch route --json` hold an issue "
@@ -4647,7 +4982,36 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         "floor, then dispatch proceeds through the normal picker — no gate "
         "bypass needed.",
     ]
+    return out
 
+
+def render_md(payload: dict[str, Any], *, date: str) -> str:
+    """The committed, human-readable status surface: which issues are synced to
+    which lanes, how closure is progressing, and any worker that produced nothing.
+
+    This is the plan-doc-equivalent for a plan-empty repo whose backlog is GitHub
+    issues — an operator opens ONE file instead of grepping gitignored runtime.
+    Date is git-derived by the caller (deterministic; the renderer takes no clock).
+    """
+    out = _md_summary_bullets(payload, date=date)
+    out += _md_capacity_bullets(payload)
+    out += _md_resolver_bullets(payload)
+    out += _md_utilization_bullets(payload)
+    out += _md_run_state_bullets(payload)
+    out += _md_lease_bullets(payload)
+    out += _md_backlog_section(payload)
+    out += _md_closure_section(payload)
+    out += _md_throughput_section(payload)
+    out += _md_watch_section(payload)
+    out += _md_lease_section(payload)
+    out += _md_worker_lease_section(payload)
+    out += _md_backend_health_section(payload)
+    out += _md_hook_health_section(payload)
+    out += _md_guard_section(payload)
+    out += _md_silent_worker_section(payload)
+    out += _md_low_yield_section(payload)
+    out += _md_ships_section(payload)
+    out += _md_contract_repair_section(payload)
     out += ["", "---", "", "Reasons: " + "; ".join(payload.get("reasons") or [])]
     return "\n".join(out) + "\n"
 

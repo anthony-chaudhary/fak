@@ -535,13 +535,9 @@ def check_openai_hosted_live_pilot(root: Path, checks: list[dict[str, Any]]) -> 
     )
 
 
-def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
-    checks: list[dict[str, Any]] = []
-    codex = read_json(root, CODEX_DOS_AUDIT, checks)
-    claude = read_json(root, CLAUDE_HISTORICAL, checks)
-    prereq = read_json(root, OPENAI_PREREQ_JSON, checks)
-    blockers: list[dict[str, Any]] = []
-
+def _workspace_stopfailure_blockers(codex: dict[str, Any],
+                                    blockers: list[dict[str, Any]]) -> None:
+    """Workspace StopFailure blockers: live wall, review debt, reset, stale markers."""
     codex_summary = codex.get("summary") if isinstance(codex.get("summary"), dict) else {}
     workspace_stop = codex.get("workspace_stop_failures") if isinstance(codex.get("workspace_stop_failures"), dict) else {}
     active_consecutive = safe_int(codex_summary.get("workspace_stop_failure_active_consecutive_total"))
@@ -673,6 +669,11 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
             next_action="Decide whether stale nonzero consecutive markers need a success reset, archival, or a hook fix so old breaker state does not masquerade as live blockage.",
         )
 
+
+def _codex_hook_blockers(codex: dict[str, Any],
+                         blockers: list[dict[str, Any]]) -> None:
+    """Codex hook blockers: opaque host shell, and git writes that predate the gate."""
+    codex_summary = codex.get("summary") if isinstance(codex.get("summary"), dict) else {}
     action = codex.get("actionability") if isinstance(codex.get("actionability"), dict) else {}
     shell_shapes = action.get("post_repair_shell_shape_counts") if isinstance(action.get("post_repair_shell_shape_counts"), dict) else {}
     shell_families = action.get("post_repair_shell_family_counts") if isinstance(action.get("post_repair_shell_family_counts"), dict) else {}
@@ -715,6 +716,10 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
             next_action="Keep structured git gates in place; this is not current actionability unless git_write reappears after the gate proof timestamp.",
         )
 
+
+def _claude_friction_blocker(claude: dict[str, Any],
+                             blockers: list[dict[str, Any]]) -> None:
+    """The all-account operational-friction blocker the Claude transcript shape raises."""
     claude_shape = claude.get("transcript_shape") if isinstance(claude.get("transcript_shape"), dict) else {}
     claude_tags = claude_shape.get("evidence_tag_counts") if isinstance(claude_shape.get("evidence_tag_counts"), dict) else {}
     claude_remediation = claude_shape.get("remediation_session_counts") if isinstance(claude_shape.get("remediation_session_counts"), dict) else {}
@@ -742,6 +747,10 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
             next_action="Work the Claude remediation buckets: clear hook/API-wall feedback and permission interruptions first, then reduce tool-error loops, large results, and shell-heavy sessions.",
         )
 
+
+def _openai_prereq_blocker(prereq: dict[str, Any],
+                           blockers: list[dict[str, Any]]) -> None:
+    """The external-prerequisite blocker the hosted-OpenAI prereq report raises."""
     prereq_blockers = [str(item) for item in (prereq.get("blockers") or [])]
     if "openai-agents distribution is not installed" in prereq_blockers:
         add_blocker(
@@ -759,6 +768,17 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
             next_action="Install the OpenAI Agents SDK only when the hosted Agents path is the target; Codex-login hosted pilot already passes without it.",
         )
 
+
+def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    codex = read_json(root, CODEX_DOS_AUDIT, checks)
+    claude = read_json(root, CLAUDE_HISTORICAL, checks)
+    prereq = read_json(root, OPENAI_PREREQ_JSON, checks)
+    blockers: list[dict[str, Any]] = []
+    _workspace_stopfailure_blockers(codex, blockers)
+    _codex_hook_blockers(codex, blockers)
+    _claude_friction_blocker(claude, blockers)
+    _openai_prereq_blocker(prereq, blockers)
     blockers.sort(key=lambda row: (safe_int(row.get("rank")), str(row.get("code") or "")))
     return blockers
 

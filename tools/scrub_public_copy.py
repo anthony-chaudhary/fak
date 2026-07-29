@@ -1138,7 +1138,8 @@ def audit_tree(root: str, as_json: bool = False) -> int:
     return 0 if ok else 1
 
 
-def main() -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """The scrubber's CLI: one in-place export scrub plus four read-only audits."""
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--export-dir",
@@ -1182,22 +1183,11 @@ def main() -> int:
         default=".",
         help="repo root for --audit-staged / --audit-range / --audit-tree (default: cwd)",
     )
-    args = ap.parse_args()
+    return ap
 
-    if args.audit_staged:
-        return audit_staged(os.path.abspath(args.root))
-    if args.audit_message:
-        return audit_message(os.path.abspath(args.root), args.audit_message)
-    if args.audit_range:
-        return audit_range(os.path.abspath(args.root), args.audit_range)
-    if args.audit_tree:
-        return audit_tree(os.path.abspath(args.root), as_json=args.json)
 
-    export_dir = args.export_dir
-    if not os.path.isdir(export_dir):
-        print(f"ERROR: export dir not found: {export_dir}", file=sys.stderr)
-        return 2
-
+def _delete_private_paths(export_dir: str):
+    """Remove the never-publish paths and globs; return (files, dirs) removed."""
     deleted_files, deleted_dirs = [], []
     for rel in DELETE_PATHS:
         abs_path = os.path.join(export_dir, rel)
@@ -1213,7 +1203,56 @@ def main() -> int:
             if os.path.isfile(match):
                 deleted_files.append(os.path.relpath(match, export_dir))
                 os.remove(match)
+    return deleted_files, deleted_dirs
 
+
+def _scrub_file_text(name: str, original: str):
+    """Apply every replacement rule to one file's text.
+
+    Returns (scrubbed_text, {rule description: hit count}).
+    """
+    changed = original
+    file_touches = {}
+    for needle, replacement, desc in REPLACEMENTS:
+        if needle in changed:
+            n = changed.count(needle)
+            changed = changed.replace(needle, replacement)
+            file_touches[desc] = file_touches.get(desc, 0) + n
+    for needle, replacement in CASE_INSENSITIVE_REPLACEMENTS:
+        pat = re.compile(re.escape(needle), re.IGNORECASE)
+        hits = pat.findall(changed)
+        if hits:
+            changed = pat.sub(replacement, changed)
+            desc = f"{needle} -> {replacement} (case-insensitive)"
+            file_touches[desc] = file_touches.get(desc, 0) + len(hits)
+    for pat, replacement, desc in REGEX_REPLACEMENTS:
+        hits = pat.findall(changed)
+        if hits:
+            changed = pat.sub(replacement, changed)
+            file_touches[desc] = file_touches.get(desc, 0) + len(hits)
+    # Code-aware bare-token pass for markdown PROSE: the CASE_INSENSITIVE
+    # rules above soften the SKU/machine forms ("8x A100-SXM4-40GB", "A100
+    # DGX") but deliberately leave BARE "DGX"/"A100" (a blind string-replace
+    # would corrupt FAK_DGX_REQ_, cmd/dgxbridge, etc.). scrub_hardware_names
+    # rewrites those safely -- word-bounded, skipping code/links/paths, and
+    # guarding competitor A100 citations -- so an exported doc is fully
+    # de-identified, not just softened. .md only (its tested domain).
+    if name.endswith(".md"):
+        scrubbed = scrub_hardware_names.transform(changed)
+        if scrubbed != changed:
+            file_touches["lab GPU hardware (scrub_hardware_names)"] = (
+                file_touches.get("lab GPU hardware (scrub_hardware_names)", 0) + 1
+            )
+            changed = scrubbed
+    return changed, file_touches
+
+
+def _scrub_text_contents(export_dir: str) -> dict:
+    """Rewrite every text file in the export in place.
+
+    Returns {relative path: {rule description: hit count}} for the files that
+    actually changed, which is what the summary counts.
+    """
     touched = {}
     for dirpath, _d, filenames in os.walk(export_dir):
         for name in filenames:
@@ -1223,44 +1262,20 @@ def main() -> int:
             original, enc = read_text(full)
             if original is None:
                 continue
-            changed = original
-            file_touches = {}
-            for needle, replacement, desc in REPLACEMENTS:
-                if needle in changed:
-                    n = changed.count(needle)
-                    changed = changed.replace(needle, replacement)
-                    file_touches[desc] = file_touches.get(desc, 0) + n
-            for needle, replacement in CASE_INSENSITIVE_REPLACEMENTS:
-                pat = re.compile(re.escape(needle), re.IGNORECASE)
-                hits = pat.findall(changed)
-                if hits:
-                    changed = pat.sub(replacement, changed)
-                    desc = f"{needle} -> {replacement} (case-insensitive)"
-                    file_touches[desc] = file_touches.get(desc, 0) + len(hits)
-            for pat, replacement, desc in REGEX_REPLACEMENTS:
-                hits = pat.findall(changed)
-                if hits:
-                    changed = pat.sub(replacement, changed)
-                    file_touches[desc] = file_touches.get(desc, 0) + len(hits)
-            # Code-aware bare-token pass for markdown PROSE: the CASE_INSENSITIVE
-            # rules above soften the SKU/machine forms ("8x A100-SXM4-40GB", "A100
-            # DGX") but deliberately leave BARE "DGX"/"A100" (a blind string-replace
-            # would corrupt FAK_DGX_REQ_, cmd/dgxbridge, etc.). scrub_hardware_names
-            # rewrites those safely -- word-bounded, skipping code/links/paths, and
-            # guarding competitor A100 citations -- so an exported doc is fully
-            # de-identified, not just softened. .md only (its tested domain).
-            if name.endswith(".md"):
-                scrubbed = scrub_hardware_names.transform(changed)
-                if scrubbed != changed:
-                    file_touches["lab GPU hardware (scrub_hardware_names)"] = (
-                        file_touches.get("lab GPU hardware (scrub_hardware_names)", 0) + 1
-                    )
-                    changed = scrubbed
+            changed, file_touches = _scrub_file_text(name, original)
             if changed != original:
                 with open(full, "w", encoding=enc) as f:
                     f.write(changed)
                 touched[os.path.relpath(full, export_dir)] = file_touches
+    return touched
 
+
+def _rename_private_alias_paths(export_dir: str):
+    """Rename files/dirs whose NAME carries a private alias.
+
+    Returns the (old, new) pairs, or None if a rename would collide -- the
+    caller must fail the scrub in that case.
+    """
     # Derived private aliases can occur in path components as well as content.
     # Rewrite files and directories bottom-up so the post-export path audit is
     # fail-closed without leaving an alias in an otherwise-clean artifact name.
@@ -1276,18 +1291,17 @@ def main() -> int:
             new_path = os.path.join(dirpath, new_name)
             if os.path.exists(new_path):
                 print(f"ERROR: scrubbed path collision: {old_path} -> {new_path}", file=sys.stderr)
-                return 1
+                return None
             os.rename(old_path, new_path)
             regex_renamed_paths.append(
                 (os.path.relpath(old_path, export_dir).replace(os.sep, "/"),
                  os.path.relpath(new_path, export_dir).replace(os.sep, "/"))
             )
+    return regex_renamed_paths
 
-    # Strip PRIVATE_MACHINE_PREFIXES (DGX) runs from the aggregate catalog.json.
-    # DELETE_GLOBS already removed the run dirs; this removes their surviving
-    # metadata from the committed catalog so DGX results stay private by default.
-    catalog_dropped = _strip_private_machines_from_catalog(export_dir)
 
+def _rename_owner_named_dirs(export_dir: str):
+    """Rename owner-named directories deepest-first; return the (old, new) pairs."""
     # Rename owner-named directories bottom-up (deepest first) so a renamed
     # parent does not invalidate its children's paths. Content replacement
     # above already rewrote any in-file references to the new label.
@@ -1305,7 +1319,12 @@ def main() -> int:
                     (os.path.relpath(dirpath, export_dir).replace(os.sep, "/"),
                      os.path.relpath(new_path, export_dir).replace(os.sep, "/"))
                 )
+    return renamed_dirs
 
+
+def _print_scrub_summary(renamed_dirs, regex_renamed_paths, deleted_dirs,
+                         deleted_files, catalog_dropped, touched) -> None:
+    """Print what the scrub renamed, deleted and rewrote."""
     print("=" * 72)
     print("PUBLIC-COPY SCRUB SUMMARY")
     print("=" * 72)
@@ -1334,6 +1353,9 @@ def main() -> int:
     for desc, total in sorted(by_desc.items()):
         print(f"  - {total:4d}x  {desc}")
 
+
+def _post_scrub_audit(export_dir: str) -> int:
+    """Re-audit the scrubbed export; print and count every surviving needle hit."""
     print("\n" + "=" * 72)
     print("POST-SCRUB AUDIT (any hit below is a MISS)")
     print("=" * 72)
@@ -1383,6 +1405,40 @@ def main() -> int:
                     misses += 1
     if misses == 0:
         print("  (clean)")
+    return misses
+
+
+def main() -> int:
+    args = _build_arg_parser().parse_args()
+
+    if args.audit_staged:
+        return audit_staged(os.path.abspath(args.root))
+    if args.audit_message:
+        return audit_message(os.path.abspath(args.root), args.audit_message)
+    if args.audit_range:
+        return audit_range(os.path.abspath(args.root), args.audit_range)
+    if args.audit_tree:
+        return audit_tree(os.path.abspath(args.root), as_json=args.json)
+
+    export_dir = args.export_dir
+    if not os.path.isdir(export_dir):
+        print(f"ERROR: export dir not found: {export_dir}", file=sys.stderr)
+        return 2
+
+    deleted_files, deleted_dirs = _delete_private_paths(export_dir)
+    touched = _scrub_text_contents(export_dir)
+    regex_renamed_paths = _rename_private_alias_paths(export_dir)
+    if regex_renamed_paths is None:
+        return 1
+    # Strip PRIVATE_MACHINE_PREFIXES (DGX) runs from the aggregate catalog.json.
+    # DELETE_GLOBS already removed the run dirs; this removes their surviving
+    # metadata from the committed catalog so DGX results stay private by default.
+    catalog_dropped = _strip_private_machines_from_catalog(export_dir)
+    renamed_dirs = _rename_owner_named_dirs(export_dir)
+
+    _print_scrub_summary(renamed_dirs, regex_renamed_paths, deleted_dirs,
+                         deleted_files, catalog_dropped, touched)
+    misses = _post_scrub_audit(export_dir)
     return 0 if misses == 0 else 1
 
 

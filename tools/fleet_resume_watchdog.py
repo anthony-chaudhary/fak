@@ -696,13 +696,13 @@ def resume_blocked(sid: str, history: list[dict]) -> tuple[bool, str]:
     return True, "already resumed once (resume took)"
 
 
-def main() -> int:
-    os.makedirs(LOG_DIR, exist_ok=True)
+def refresh_registry_plan() -> list[dict]:
+    """Refresh the registry in a child, then read back the resume plan it wrote.
 
-    # 1. refresh registry + plan (extract in advance). On a live tick, also ACTIVELY
-    # probe blocked accounts so a silently-recovered account (re-login / access
-    # re-enabled / throttle expired) re-enters the pool instead of riding a stale
-    # carried verdict -- parity with fleet_resume_watchdog.ps1.
+    On a live tick also ACTIVELY probe blocked accounts so a silently-recovered
+    account (re-login / access re-enabled / throttle expired) re-enters the pool
+    instead of riding a stale carried verdict -- parity with the .ps1 watchdog.
+    """
     probe_mode = resolve_probe_mode(PROBE_MODE, LIVE)
     reg_argv = [PYTHON, os.path.join(HERE, "fleet_sessions.py"), "registry",
                 "--window", str(WINDOW_H)]
@@ -719,18 +719,15 @@ def main() -> int:
         check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env=refresh_env,
     )
-    plan = (load_json(os.path.join(REG_DIR, "resume_plan.json"), {}) or {}).get("plan", []) or []
-    mode = "LIVE" if LIVE else "DRY-RUN"
-    # Effective per-tick launch cap. Continuous-drain (#3587) lifts it to the DRAIN_MAX backstop on
-    # a live tick so the source governor + spacing (not the cron) bound recovery; a fail-open
-    # governor reverts it to MAX_PER_TICK mid-tick (see the launch loop below).
-    drain_cap = tick_launch_cap(LIVE)
-    drain_note = f" drain=continuous(<={drain_cap})" if (LIVE and DRAIN_CONTINUOUS) else ""
-    note(f"TICK {mode} plan={len(plan)} window={WINDOW_H}h cap={MAX_PER_TICK}{drain_note}")
+    return (load_json(os.path.join(REG_DIR, "resume_plan.json"), {}) or {}).get("plan", []) or []
 
-    # defense-in-depth: the set of account dir-basenames policy still treats as
-    # workers. fleet_sessions.py already excludes non-workers when it writes the
-    # plan, but a stale plan file could predate the policy -- re-check here too.
+
+def offered_worker_accounts() -> set:
+    """Account dir-basenames policy still treats as workers.
+
+    Defense in depth: fleet_sessions.py already excludes non-workers when it writes
+    the plan, but a stale plan file could predate the policy -- re-check here too.
+    """
     worker_accts = set()
     try:
         acct_doc = json.loads(
@@ -745,10 +742,15 @@ def main() -> int:
                 worker_accts.add(a.get("account"))
     except Exception:
         pass
+    return worker_accts
 
-    # durable resume ledger -- grouped per session so the gate can reason about the
-    # OUTCOME and attempt count of prior resumes, not merely their existence.
-    ledger_path = os.path.join(REG_DIR, "resume_ledger.jsonl")
+
+def load_resume_history(ledger_path: str) -> dict[str, list[dict]]:
+    """Compact then read the durable resume ledger, grouped per session.
+
+    Grouping is what lets the gate reason about the OUTCOME and attempt count of
+    prior resumes rather than merely their existence.
+    """
     compacted = compact_ledger(ledger_path)
     if compacted:
         note(f"  ledger compacted: dropped {compacted} row(s) older than "
@@ -762,23 +764,159 @@ def main() -> int:
                     history.setdefault(rec0["session"], []).append(rec0)
                 except Exception:
                     pass
+    return history
 
-    launched = 0
-    gate_fail_open_warned = False
-    # Resolve the managed-cache posture ONCE per tick (the env is tick-constant) and warn ONCE.
-    # A configured posture fronts each resumed child with its own `fak guard` (#2178 parity);
-    # the default leaves the bare `claude --resume` untouched. A posture that cannot be applied
-    # (fak not on PATH) falls back to a direct launch LOUDLY rather than silently dropping it.
+
+def tick_resume_posture() -> list[str]:
+    """Resolve the managed-cache posture ONCE per tick (the env is tick-constant).
+
+    A configured posture fronts each resumed child with its own `fak guard` (#2178
+    parity); the default leaves the bare `claude --resume` untouched. A posture that
+    cannot be applied (fak not on PATH) falls back to a direct launch LOUDLY rather
+    than silently dropping it.
+    """
     resume_posture_args, posture_warn = managed_cache_posture_args()
     if posture_warn:
         note(f"  WARN managed-cache: {posture_warn}")
     if resume_posture_args and not FAK_EXE:
         note("  WARN managed-cache posture configured but `fak` is not on PATH -- "
              "resuming children directly (passive, no posture banner)")
-        resume_posture_args = []
-    elif resume_posture_args:
+        return []
+    if resume_posture_args:
         note("  managed-cache posture -> fronting resumed children with "
              f"`fak guard {' '.join(resume_posture_args)} --`")
+    return resume_posture_args
+
+
+def plan_skip_reason(p: dict, sid: str, worker_accts: set, history: dict) -> str:
+    """Why this plan entry must not be resumed this tick, or "" if it may be.
+
+    Never resume the session this watchdog is running INSIDE: a live operator session
+    can momentarily carry a STOPPED_APIERR marker from a transient 529 mid-conversation,
+    and a self-resume would race two `claude` processes on the same transcript.
+    """
+    if SELF_SID and sid == SELF_SID:
+        return "this is the live session running the watchdog (self-resume guard)"
+    if worker_accts and p.get("account") not in worker_accts:
+        return f"account {p.get('account')} is not an offered worker (policy/tombstoned)"
+    blocked, why = resume_blocked(sid, history.get(sid, []))
+    if blocked:
+        return why
+    return ""
+
+
+def record_deferred_row(ledger_path: str, p: dict, sid: str, admit_reason: str) -> None:
+    """Record a phase="deferred" ledger row so a DEFER is not counted as launch pressure."""
+    with open(ledger_path, "a") as fh:
+        fh.write(json.dumps({
+            "ts": now_iso(), "session": sid, "account": p.get("account"),
+            "resume_account": p.get("resume_account"),
+            "phase": "deferred", "cause": "source_concurrency_gate",
+            "reason": admit_reason,
+        }) + "\n")
+
+
+def resume_child_env(resume_cfg: str) -> dict:
+    """Environment for a resumed child: its own seat, and none of the parent's API wiring.
+
+    A tick run from INSIDE a guarded/Claude session (an operator's manual FAK_LIVE=1
+    run) carries that session's model-API wiring: ANTHROPIC_API_KEY plus
+    ANTHROPIC_BASE_URL point at the parent's loopback fak-guard gateway, and env auth
+    takes precedence over the seat's OAuth login. A child inheriting them routes every
+    request through the parent's proxy (wrong seat) and dies with the parent -- the
+    whole-wave-crashes-at-one-instant signature (2026-07-01). Scheduled-task ticks never
+    carry these, so stripping them is a no-op there.
+    """
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = resume_cfg
+    env.pop("JOB_SUPERVISED_WORKER", None)
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+              "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION"):
+        env.pop(k, None)
+    return env
+
+
+def spawn_resume_child(argv: list[str], out_path: str, wd: str, env: dict):
+    """Spawn the detached resume, logging to `out_path`.
+
+    start_new_session is POSIX-only (silently ignored on Windows), so on Windows give
+    the resumed session a HIDDEN console (CREATE_NO_WINDOW) -- otherwise it and every
+    git/gh/fak/shell tool it spawns flashes a visible console window.
+    """
+    spawn_kw = {}
+    if os.name == "nt":
+        spawn_kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+    else:
+        spawn_kw["start_new_session"] = True
+    with open(out_path, "ab") as so, open(out_path + ".err", "ab") as se:
+        return subprocess.Popen(argv, cwd=wd, env=env, stdout=so, stderr=se, **spawn_kw)
+
+
+def record_launch_row(ledger_path: str, p: dict, sid: str, proc, history: dict) -> int:
+    """Record the launch BEFORE anything else and return this session's attempt number.
+
+    A crash can't double-LAUNCH in this tick. But the gate keys on OUTCOME, not mere
+    presence: phase="launched" marks an attempt whose result is unknown until the next
+    tick reads the transcript. A resume that dies recoverably (limit/transient) stays
+    eligible up to MAX_ATTEMPTS instead of being burned on launch; a clean finish /
+    auth wall blocks it as before.
+    """
+    attempt = len([h for h in history.get(sid, []) if is_resume_attempt_record(h)]) + 1
+    rec = {"ts": now_iso(), "session": sid, "account": p.get("account"),
+           "resume_account": p.get("resume_account"), "rehomed": bool(p.get("rehomed")),
+           "project": p.get("project"), "pid": proc.pid, "cause": p.get("disp"),
+           "phase": "launched", "attempt": attempt}
+    with open(ledger_path, "a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+    history.setdefault(sid, []).append(rec)
+    return attempt
+
+
+def alert_auth_blocked_accounts() -> None:
+    """Toast once per true login-blocked account blocker (throttles are not auth walls)."""
+    notified_path = os.path.join(REG_DIR, "_notified.json")
+    notified = load_json(notified_path, {}) or {}
+    registry = load_json(os.path.join(REG_DIR, "sessions.json"), {}) or {}
+    changed = False
+    for a in (registry.get("accounts", []) or []):
+        if not a.get("blocked") or a.get("throttled") or a.get("block_kind") != "auth":
+            continue
+        key = f"auth-account:{a.get('account')}:{a.get('block_reason')}"
+        if key in notified:
+            continue
+        acct = a.get("tag") or (a.get("account", "") or "").replace(".claude-", "").replace(".claude", "")
+        reason = a.get("block_reason") or "auth/login required"
+        sessions = int(a.get("auth_blocked_sessions") or 0)
+        session_text = f" / {sessions} stopped session(s)" if sessions else ""
+        toast("Account needs re-login", f"{acct} : {reason}{session_text}", "warn")
+        note(f"  ALERT auth-blocked acct={acct} reason={reason} (notified)")
+        notified[key] = True
+        changed = True
+    if changed:
+        with open(notified_path, "w") as fh:
+            json.dump(notified, fh)
+
+
+def main() -> int:
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+    # 1. refresh registry + plan (extract in advance).
+    plan = refresh_registry_plan()
+    mode = "LIVE" if LIVE else "DRY-RUN"
+    # Effective per-tick launch cap. Continuous-drain (#3587) lifts it to the DRAIN_MAX backstop on
+    # a live tick so the source governor + spacing (not the cron) bound recovery; a fail-open
+    # governor reverts it to MAX_PER_TICK mid-tick (see the launch loop below).
+    drain_cap = tick_launch_cap(LIVE)
+    drain_note = f" drain=continuous(<={drain_cap})" if (LIVE and DRAIN_CONTINUOUS) else ""
+    note(f"TICK {mode} plan={len(plan)} window={WINDOW_H}h cap={MAX_PER_TICK}{drain_note}")
+
+    worker_accts = offered_worker_accounts()
+    ledger_path = os.path.join(REG_DIR, "resume_ledger.jsonl")
+    history = load_resume_history(ledger_path)
+
+    launched = 0
+    gate_fail_open_warned = False
+    resume_posture_args = tick_resume_posture()
     for idx, p in enumerate(plan):
         if launched >= drain_cap:
             note(f"  per-tick cap reached ({drain_cap})")
@@ -786,21 +924,9 @@ def main() -> int:
         sid = p.get("session", "")
         sid8 = sid[:8]
         acct = (p.get("account", "") or "").replace(".claude-", "").replace(".claude", "") or "default"
-        # Never resume the session this watchdog is running INSIDE. A live operator
-        # session (e.g. one driving a /goal) can momentarily carry a STOPPED_APIERR
-        # marker from a transient 529 mid-conversation; if it is also `autonomous`
-        # the classifier flags it AUTO_RESUME, and a self-resume races two `claude`
-        # processes on the same transcript. CLAUDE_CODE_SESSION_ID is the running
-        # session's own id -- skip it unconditionally.
-        if SELF_SID and sid == SELF_SID:
-            note(f"  SKIP {sid8} -- this is the live session running the watchdog (self-resume guard)")
-            continue
-        if worker_accts and p.get("account") not in worker_accts:
-            note(f"  SKIP {sid8} -- account {p.get('account')} is not an offered worker (policy/tombstoned)")
-            continue
-        blocked, why = resume_blocked(sid, history.get(sid, []))
-        if blocked:
-            note(f"  SKIP {sid8} -- {why}")
+        skip = plan_skip_reason(p, sid, worker_accts, history)
+        if skip:
+            note(f"  SKIP {sid8} -- {skip}")
             continue
         if not LIVE:
             note(f"  WOULD RESUME {sid8} acct={acct} proj={p.get('project')}")
@@ -839,13 +965,7 @@ def main() -> int:
                 break
         if not admit_ok:
             note(f"  DEFER {sid8} acct={acct} -- per-source gate: {admit_reason}")
-            with open(ledger_path, "a") as fh:
-                fh.write(json.dumps({
-                    "ts": now_iso(), "session": sid, "account": p.get("account"),
-                    "resume_account": p.get("resume_account"),
-                    "phase": "deferred", "cause": "source_concurrency_gate",
-                    "reason": admit_reason,
-                }) + "\n")
+            record_deferred_row(ledger_path, p, sid, admit_reason)
             # Continuous-drain (#3587): the governor is host-wide, so a DEFER means the box is
             # saturated -- END the drain this tick rather than spinning the rest of the plan into a
             # deferred-row storm onto capped seats. The tick-quantized default keeps the old
@@ -855,7 +975,6 @@ def main() -> int:
                 break
             continue
 
-        env = dict(os.environ)
         resume_cfg = p.get("resume_config_dir") or p.get("config_dir", "")
         # re-home: copy the transcript into the target account first, else
         # `claude --resume` won't find it under the new CLAUDE_CONFIG_DIR.
@@ -866,53 +985,14 @@ def main() -> int:
                 continue
             note(f"  RE-HOME {sid8} {p.get('account')} -> {p.get('resume_account')} "
                  f"(transcript copied; resuming on healthy account)")
-        env["CLAUDE_CONFIG_DIR"] = resume_cfg
-        env.pop("JOB_SUPERVISED_WORKER", None)
-        # A tick run from INSIDE a guarded/Claude session (an operator's manual
-        # FAK_LIVE=1 run) carries that session's model-API wiring: ANTHROPIC_API_KEY
-        # plus ANTHROPIC_BASE_URL point at the parent's loopback fak-guard gateway,
-        # and env auth takes precedence over the seat's OAuth login. A resumed child
-        # inheriting them routes every request through the parent session's proxy
-        # (wrong seat; account routing nullified) and dies with the parent -- the
-        # whole-wave-crashes-at-one-instant signature (2026-07-01). Strip the wiring
-        # so the child authenticates with its own CLAUDE_CONFIG_DIR seat. Scheduled
-        # -task ticks never carry these, so this is a no-op there.
-        for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
-                  "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION"):
-            env.pop(k, None)
+        env = resume_child_env(resume_cfg)
         pruned = prune_resume_logs(LOG_DIR)
         if pruned:
             note(f"  pruned {pruned} expired resume log(s) (>{LOG_RETAIN_DAYS:g}d)")
         out = os.path.join(LOG_DIR, f"resume-{sid8}-{int(time.time())}.log")
         wd = p.get("cwd") if p.get("cwd") and os.path.isdir(p.get("cwd")) else FLEET_DIR
-        spawn_kw = {}
-        if os.name == "nt":
-            # start_new_session is POSIX-only (silently ignored on Windows). Give the
-            # resumed session a HIDDEN console (CREATE_NO_WINDOW) so neither it nor the
-            # git/gh/fak/shell tools it spawns flashes a visible console window.
-            spawn_kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
-        else:
-            spawn_kw["start_new_session"] = True
-        with open(out, "ab") as so, open(out + ".err", "ab") as se:
-            proc = subprocess.Popen(
-                resume_child_argv(sid, resume_posture_args),
-                cwd=wd, env=env, stdout=so, stderr=se,
-                **spawn_kw,
-            )
-        # Record the launch BEFORE anything else -- a crash can't double-LAUNCH in
-        # this tick. But the gate keys on OUTCOME, not mere presence: phase="launched"
-        # marks an attempt whose result is unknown until the next tick reads the
-        # transcript (resume_blocked -> last_resume_outcome). A resume that dies
-        # recoverably (limit/transient) stays eligible up to MAX_ATTEMPTS instead of
-        # being burned on launch; a clean finish / auth wall blocks it as before.
-        attempt = len([h for h in history.get(sid, []) if is_resume_attempt_record(h)]) + 1
-        rec = {"ts": now_iso(), "session": sid, "account": p.get("account"),
-               "resume_account": p.get("resume_account"), "rehomed": bool(p.get("rehomed")),
-               "project": p.get("project"), "pid": proc.pid, "cause": p.get("disp"),
-               "phase": "launched", "attempt": attempt}
-        with open(ledger_path, "a") as fh:
-            fh.write(json.dumps(rec) + "\n")
-        history.setdefault(sid, []).append(rec)
+        proc = spawn_resume_child(resume_child_argv(sid, resume_posture_args), out, wd, env)
+        attempt = record_launch_row(ledger_path, p, sid, proc, history)
         launched += 1
         note(f"  RESUMED {sid8} acct={acct} pid={proc.pid} "
              f"(attempt {attempt}/{MAX_ATTEMPTS}; re-eligible only if it fails recoverably)")
@@ -926,27 +1006,7 @@ def main() -> int:
             time.sleep(LAUNCH_SPACING_SEC)
 
     # 2. alert on true login-blocked accounts -- once per account blocker.
-    notified_path = os.path.join(REG_DIR, "_notified.json")
-    notified = load_json(notified_path, {}) or {}
-    registry = load_json(os.path.join(REG_DIR, "sessions.json"), {}) or {}
-    changed = False
-    for a in (registry.get("accounts", []) or []):
-        if not a.get("blocked") or a.get("throttled") or a.get("block_kind") != "auth":
-            continue
-        key = f"auth-account:{a.get('account')}:{a.get('block_reason')}"
-        if key in notified:
-            continue
-        acct = a.get("tag") or (a.get("account", "") or "").replace(".claude-", "").replace(".claude", "")
-        reason = a.get("block_reason") or "auth/login required"
-        sessions = int(a.get("auth_blocked_sessions") or 0)
-        session_text = f" / {sessions} stopped session(s)" if sessions else ""
-        toast("Account needs re-login", f"{acct} : {reason}{session_text}", "warn")
-        note(f"  ALERT auth-blocked acct={acct} reason={reason} (notified)")
-        notified[key] = True
-        changed = True
-    if changed:
-        with open(notified_path, "w") as fh:
-            json.dump(notified, fh)
+    alert_auth_blocked_accounts()
 
     note(f"  done: launched={launched} sessions_in_ledger={len(history)}")
     return 0

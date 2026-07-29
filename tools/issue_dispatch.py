@@ -1309,36 +1309,25 @@ def _write_wave_artifacts(runs_dir: Path, payload: dict[str, Any]) -> None:
         pass
 
 
-def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
-                  refresh: bool = True, warm_floor: bool | None = None,
-                  stagger_s: float | None = None) -> dict[str, Any]:
-    """One WAVE tick: spawn up to ``max_workers`` workers across pairwise
-    tree-disjoint lanes in a single tick, each on its own seat, never exceeding the
-    dispatch_preflight cap.
+def _wave_launch_knobs(warm_floor: bool | None,
+                       stagger_s: float | None) -> tuple[bool, float]:
+    """Resolve the #3610 launch-cache knobs from their env defaults.
 
-    The wave size is ``min(free_seats, free_lanes, preflight_headroom)`` discovered
-    ONLINE: candidate lanes are taken richest-first; each is PRICED against the wave's
-    already-admitted leases via ``dos arbitrate`` (a colliding lane is skipped BEFORE
-    any agent launches); each admitted lane draws the next distinct seat; and
-    ``dispatch_preflight`` is re-checked per spawn so the live population provably
-    never exceeds the cap. A wave sidecar records ``{wave_id, size, lanes, seats}``.
-
-    #3610: ``warm_floor`` primes the shared ~35.8k floor prefix with ONE pre-request
-    before any member spawns, and ``stagger_s`` spaces consecutive member launches so
-    workers 2..N re-enter that warm prefix as a cache READ. Both default to their env
-    knobs (``FLEET_WARM_FLOOR`` / ``FLEET_LAUNCH_STAGGER_S``) and are off/zero unset,
-    so an unconfigured wave launches exactly as it does today."""
+    Both stay off/zero when neither the argument nor the env knob is set, so an
+    unconfigured wave launches exactly as it did before #3610.
+    """
     env = os.environ
     if warm_floor is None:
         warm_floor = _env_flag(env, WARM_FLOOR_ENV)
     if stagger_s is None:
         stagger_s = _env_float(env, LAUNCH_STAGGER_ENV, 0.0)
-    stagger_s = max(0.0, float(stagger_s))
-    reg = refresh_registry(root) if refresh else {"ok": None, "skipped": True}
-    first_preflight: dict[str, Any] | None = preflight(
-        root, max_workers=max_workers, work_kind=work_kind)
-    budget = wave_admission_budget(first_preflight, max_workers)
-    seats = allocate_seats(root, int(budget["requested_seats"]), work_kind)
+    return bool(warm_floor), max(0.0, float(stagger_s))
+
+
+def _wave_seat_lanes(root: Path, requested: int,
+                     work_kind: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Allocate the wave's seats, minus any seat whose ACCOUNT is already busy."""
+    seats = allocate_seats(root, requested, work_kind)
     seat_lanes = seats.get("lanes") or []
     # Cross-tick ACCOUNT de-confliction (#2060): the seat allocation is re-derived each
     # tick and is blind to a PRIOR tick's still-live worker, so with one seat free it
@@ -1349,56 +1338,24 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     busy_acct = busy_accounts(root / RUNS_DIRNAME)
     if busy_acct:
         seat_lanes = [s for s in seat_lanes if s.get("config_dir") not in busy_acct]
-    free_seats = len(seat_lanes)
-    wave_id = seats.get("wave_id") or "wave-unallocated"
+    return seats, seat_lanes
 
-    cand = lane_candidates(root)
-    candidates = cand.get("candidates") or []
+
+def _wave_busy_lanes(root: Path) -> tuple[set[str], dict[str, Any], set[str]]:
+    """Lanes a PRIOR tick still holds, from both sources: markers and lease refs."""
     # Lanes a prior tick's worker still holds: skipped here so a wave never re-stacks
     # a lane already in flight (the within-tick arbiter only de-conflicts THIS wave's
     # own picks; busy_lanes carries the de-confliction ACROSS ticks).
     marker_busy = busy_lanes(root / RUNS_DIRNAME)
     lease_busy = lease_ref_busy_lanes(root)
     lease_busy_set = set(lease_busy.get("lanes") or set())
-    busy = marker_busy | lease_busy_set
+    return marker_busy, lease_busy, lease_busy_set
 
-    leases: list[dict[str, Any]] = []   # accumulating disjoint-tree leases (priced)
-    warm_record: dict[str, Any] | None = None   # #3610 once-per-wave warm latch
-    staggered = 0                               # #3610 count of delayed launches
-    members: list[dict[str, Any]] = []
-    skipped_busy: list[str] = []
-    baseline_live: int | None = None
-    cap_seen: int | None = None
-    refusal: str | None = None
-    last_preflight: dict[str, Any] | None = preflight_public(first_preflight)
-    preflight_hint: dict[str, Any] | None = None
-    if first_preflight.get("verdict") != "SPAWN_OK":
-        refusal = first_preflight.get("verdict") or "REFUSE"
-        preflight_hint = preflight_refusal_hint(first_preflight)
 
-    payload: dict[str, Any] = {
-        "schema": WAVE_SCHEMA,
-        "workspace": str(root),
-        "live": live,
-        "max_workers": max_workers,
-        "wave_id": wave_id,
-        "registry_refresh": reg,
-        "admission_budget": budget,
-        "free_seats": free_seats,
-        "seats": {"granted": seats.get("granted"), "requested": seats.get("requested"),
-                  "shortfall": seats.get("shortfall"), "wave_id": seats.get("wave_id"),
-                  "tags": [s.get("tag") for s in seat_lanes], "error": seats.get("error")},
-        "candidate_lanes": [c["lane"] for c in candidates],
-        "busy_lanes": sorted(busy),
-        "busy_lane_sources": {
-            "inflight_markers": sorted(marker_busy),
-            "lease_refs": sorted(lease_busy_set),
-        },
-        "self_modify_held": cand.get("self_modify_held") or [],
-        "router_error": cand.get("router_error"),
-    }
-    if lease_busy.get("error"):
-        payload["lease_busy_error"] = lease_busy.get("error")
+def _attach_wave_guard_surface(payload: dict[str, Any], root: Path,
+                               cand: dict[str, Any],
+                               candidates: list[dict[str, Any]]) -> None:
+    """Attach the build-integrity and self-modify-hold surfaces to the tick record."""
     # Build-integrity gate (UNGATED, same rationale as evaluate): a local marker read the
     # wave already did via busy_lanes/busy_accounts, no shell-out, so it rides every wave.
     payload["guarded_worker_in_flight"] = guarded_worker_in_flight(root / RUNS_DIRNAME)
@@ -1416,6 +1373,34 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     else:
         clear_held_ticks(root / RUNS_DIRNAME)
 
+
+def _admit_wave_members(root: Path, *, candidates: list[dict[str, Any]],
+                        busy: set[str], seat_lanes: list[dict[str, Any]],
+                        free_seats: int, seats: dict[str, Any], wave_id: str,
+                        max_workers: int, work_kind: str, live: bool,
+                        first_preflight: dict[str, Any],
+                        warm_floor: bool, stagger_s: float) -> dict[str, Any]:
+    """Admit candidate lanes into the wave, richest-first, one distinct seat each.
+
+    Each lane is re-checked against ``dispatch_preflight``, held to the in-tick cap
+    accounting, and PRICED against the leases this wave already admitted before any
+    agent launches; the walk stops at the first refusal. Returns the tick's admission
+    record: the members (spawned when ``live``), the lanes skipped as cross-tick busy,
+    the refusal that stopped the walk, and the launch-cache posture.
+    """
+    leases: list[dict[str, Any]] = []   # accumulating disjoint-tree leases (priced)
+    warm_record: dict[str, Any] | None = None   # #3610 once-per-wave warm latch
+    staggered = 0                               # #3610 count of delayed launches
+    members: list[dict[str, Any]] = []
+    skipped_busy: list[str] = []
+    baseline_live: int | None = None
+    cap_seen: int | None = None
+    refusal: str | None = None
+    last_preflight: dict[str, Any] | None = preflight_public(first_preflight)
+    preflight_hint: dict[str, Any] | None = None
+    if first_preflight.get("verdict") != "SPAWN_OK":
+        refusal = first_preflight.get("verdict") or "REFUSE"
+        preflight_hint = preflight_refusal_hint(first_preflight)
     if not refusal:
         preflight_seed = first_preflight
         for c in candidates:
@@ -1477,7 +1462,6 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
                 # use. `warm_record is None` is the once-per-wave latch.
                 if warm_floor and warm_record is None:
                     warm_record = warm_floor_prefix(root, live=True)
-                    payload["warm_floor"] = warm_record
                 # Space consecutive launches inside the cache TTL. `members` is appended
                 # AFTER the spawn, so a truthy `members` means at least one member is
                 # already out: the delay lands BETWEEN spawns, never before the first.
@@ -1489,23 +1473,16 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
                     int(seats.get("shortfall") or 0))
             members.append(member)
             leases.append({"lane": c["lane"], "lane_kind": "cluster", "tree": dec["tree"]})
+    return {"members": members, "skipped_busy": skipped_busy, "refusal": refusal,
+            "preflight_hint": preflight_hint, "last_preflight": last_preflight,
+            "cap": cap_seen, "warm_record": warm_record, "staggered": staggered}
 
-    size = len(members)
-    lanes_used = [m["lane"] for m in members]
-    seats_used = [(m["account"] or {}).get("tag") for m in members]
-    payload.update({"size": size, "lanes": lanes_used, "members": members,
-                    "seats_used": seats_used, "cap": cap_seen, "refusal": refusal,
-                    "skipped_busy": skipped_busy})
-    # #3610: the launch-cache posture is always reported (even off/zero) so an auditor
-    # reads the knob's live value from the tick record instead of inferring it.
-    payload["launch_cache"] = {"warm_floor": bool(warm_floor),
-                               "stagger_s": stagger_s,
-                               "staggered_spawns": staggered}
-    if last_preflight:
-        payload["last_preflight"] = last_preflight
-    if preflight_hint:
-        payload["preflight_hint"] = preflight_hint
 
+def _apply_wave_verdict(payload: dict[str, Any], root: Path, cand: dict[str, Any], *,
+                        size: int, lanes_used: list[str], wave_id: str, live: bool,
+                        refusal: str | None, candidates: list[dict[str, Any]],
+                        free_seats: int, seats: dict[str, Any]) -> None:
+    """Stamp the tick's terminal verdict: what the wave did, or why it did nothing."""
     if size > 0:
         payload.update({
             "ok": True,
@@ -1540,6 +1517,97 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
                         "action": "refused",
                         "reason": (f"no worker spawned (stopped on {refusal})" if refusal
                                    else "no candidate lane was admissible (all collided)")})
+
+
+def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
+                  refresh: bool = True, warm_floor: bool | None = None,
+                  stagger_s: float | None = None) -> dict[str, Any]:
+    """One WAVE tick: spawn up to ``max_workers`` workers across pairwise
+    tree-disjoint lanes in a single tick, each on its own seat, never exceeding the
+    dispatch_preflight cap.
+
+    The wave size is ``min(free_seats, free_lanes, preflight_headroom)`` discovered
+    ONLINE: candidate lanes are taken richest-first; each is PRICED against the wave's
+    already-admitted leases via ``dos arbitrate`` (a colliding lane is skipped BEFORE
+    any agent launches); each admitted lane draws the next distinct seat; and
+    ``dispatch_preflight`` is re-checked per spawn so the live population provably
+    never exceeds the cap. A wave sidecar records ``{wave_id, size, lanes, seats}``.
+
+    #3610: ``warm_floor`` primes the shared ~35.8k floor prefix with ONE pre-request
+    before any member spawns, and ``stagger_s`` spaces consecutive member launches so
+    workers 2..N re-enter that warm prefix as a cache READ. Both default to their env
+    knobs (``FLEET_WARM_FLOOR`` / ``FLEET_LAUNCH_STAGGER_S``) and are off/zero unset,
+    so an unconfigured wave launches exactly as it does today."""
+    warm_floor, stagger_s = _wave_launch_knobs(warm_floor, stagger_s)
+    reg = refresh_registry(root) if refresh else {"ok": None, "skipped": True}
+    first_preflight: dict[str, Any] | None = preflight(
+        root, max_workers=max_workers, work_kind=work_kind)
+    budget = wave_admission_budget(first_preflight, max_workers)
+    seats, seat_lanes = _wave_seat_lanes(root, int(budget["requested_seats"]),
+                                         work_kind)
+    free_seats = len(seat_lanes)
+    wave_id = seats.get("wave_id") or "wave-unallocated"
+
+    cand = lane_candidates(root)
+    candidates = cand.get("candidates") or []
+    marker_busy, lease_busy, lease_busy_set = _wave_busy_lanes(root)
+    busy = marker_busy | lease_busy_set
+
+    payload: dict[str, Any] = {
+        "schema": WAVE_SCHEMA,
+        "workspace": str(root),
+        "live": live,
+        "max_workers": max_workers,
+        "wave_id": wave_id,
+        "registry_refresh": reg,
+        "admission_budget": budget,
+        "free_seats": free_seats,
+        "seats": {"granted": seats.get("granted"), "requested": seats.get("requested"),
+                  "shortfall": seats.get("shortfall"), "wave_id": seats.get("wave_id"),
+                  "tags": [s.get("tag") for s in seat_lanes], "error": seats.get("error")},
+        "candidate_lanes": [c["lane"] for c in candidates],
+        "busy_lanes": sorted(busy),
+        "busy_lane_sources": {
+            "inflight_markers": sorted(marker_busy),
+            "lease_refs": sorted(lease_busy_set),
+        },
+        "self_modify_held": cand.get("self_modify_held") or [],
+        "router_error": cand.get("router_error"),
+    }
+    if lease_busy.get("error"):
+        payload["lease_busy_error"] = lease_busy.get("error")
+    _attach_wave_guard_surface(payload, root, cand, candidates)
+
+    admitted = _admit_wave_members(
+        root, candidates=candidates, busy=busy, seat_lanes=seat_lanes,
+        free_seats=free_seats, seats=seats, wave_id=wave_id,
+        max_workers=max_workers, work_kind=work_kind, live=live,
+        first_preflight=first_preflight, warm_floor=warm_floor,
+        stagger_s=stagger_s)
+    members = admitted["members"]
+    refusal = admitted["refusal"]
+    if admitted["warm_record"] is not None:
+        payload["warm_floor"] = admitted["warm_record"]
+
+    size = len(members)
+    lanes_used = [m["lane"] for m in members]
+    seats_used = [(m["account"] or {}).get("tag") for m in members]
+    payload.update({"size": size, "lanes": lanes_used, "members": members,
+                    "seats_used": seats_used, "cap": admitted["cap"],
+                    "refusal": refusal, "skipped_busy": admitted["skipped_busy"]})
+    # #3610: the launch-cache posture is always reported (even off/zero) so an auditor
+    # reads the knob's live value from the tick record instead of inferring it.
+    payload["launch_cache"] = {"warm_floor": bool(warm_floor),
+                               "stagger_s": stagger_s,
+                               "staggered_spawns": admitted["staggered"]}
+    if admitted["last_preflight"]:
+        payload["last_preflight"] = admitted["last_preflight"]
+    if admitted["preflight_hint"]:
+        payload["preflight_hint"] = admitted["preflight_hint"]
+
+    _apply_wave_verdict(payload, root, cand, size=size, lanes_used=lanes_used,
+                        wave_id=wave_id, live=live, refusal=refusal,
+                        candidates=candidates, free_seats=free_seats, seats=seats)
     return payload
 
 

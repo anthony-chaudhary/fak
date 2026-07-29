@@ -4671,286 +4671,343 @@ def fleet_text(doc: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def print_doc(doc: dict[str, Any], as_json: bool) -> None:
-    if as_json:
-        print(json.dumps(doc, indent=2))
-    else:
-        if doc.get("schema") == SETUP_SCHEMA:
-            for step in doc["steps"]:
-                state = str(step.get("state") or "step").upper()
-                display = step.get("display") or "(no command)"
-                print(f"{state} {step['id']}: {display}")
-                print(f"  {step['why']}")
-                if step.get("detail"):
-                    print(f"  {step['detail']}")
-        elif doc.get("schema") == "fleet-control-pane.doctor/1":
-            print(f"doctor: {'OK' if doc['ok'] else 'ACTION'}")
-            for c in doc["checks"]:
-                print(f"  {'OK' if c['ok'] else 'MISS'}  {c['name']}: {c['detail']}")
-        elif doc.get("schema") == TICK_SCHEMA:
-            print(f"tick: {'OK' if doc['ok'] else 'ACTION'} dry_run={doc['dry_run']} live_resume={doc['live_resume']}")
-            for action in doc.get("actions", []):
-                state = "SKIP" if action.get("skipped") else ("OK" if action.get("ok") else "FAIL")
-                detail = action.get("reason") or f"rc={action.get('returncode')}"
-                print(f"  {state}  {action.get('name')}: {detail}")
-            print(pane_text(doc["status"]))
-            if doc.get("written"):
-                print(f"written: {doc['written']['json']} ; {doc['written']['text']} ; {doc['written']['machine']}")
-        elif doc.get("schema") == RECOVER_SCHEMA:
-            print(f"recover: {'OK' if doc.get('ok') else 'ACTION'} apply={doc.get('apply')}")
-            resume_plan = doc.get("resume_plan") or {}
-            plan_path = resume_plan.get("display_path") or resume_plan.get("path") or "resume_plan.json"
-            if resume_plan:
-                if resume_plan.get("exists"):
-                    print(f"resume-plan: {resume_plan.get('count', 0)} eligible session(s) from {plan_path}")
-                    if resume_plan.get("reason"):
-                        print(f"  {resume_plan['reason']}")
-                    for session in resume_plan.get("sessions") or []:
-                        sid = session.get("session_short") or session.get("session") or "unknown"
-                        account = session.get("account") or "unknown-account"
-                        project = session.get("project") or session.get("cwd") or "unknown-project"
-                        print(f"  session={sid} account={account} project={project}")
-                        if session.get("resume_cmd"):
-                            print(f"       {session['resume_cmd']}")
-                    if resume_plan.get("omitted"):
-                        print(f"  ... {resume_plan['omitted']} more")
-                else:
-                    print(f"resume-plan: missing ({plan_path})")
-            for action in doc.get("actions", []):
-                state = "SKIP" if action.get("skipped") else ("OK" if action.get("ok") else "FAIL")
-                detail = action.get("reason") or f"rc={action.get('returncode')}"
-                print(f"  {state}  {action.get('name')}: {detail}")
-                if action.get("command"):
-                    print(f"       {action.get('command')}")
-            if doc.get("status"):
-                print(pane_text(doc["status"]))
-            if doc.get("written"):
-                print(f"written: {doc['written']['json']} ; {doc['written']['text']} ; {doc['written']['machine']}")
-        elif doc.get("schema") == SUPERVISOR_SCHEMA:
-            before = doc.get("before") or {}
-            payload = before.get("payload") or {}
-            proc = payload.get("process") or {}
-            state = "ACTION" if doc.get("needs_action") else ("OK" if doc.get("ok") else "ERROR")
-            print(f"supervisor: {state} verdict={payload.get('verdict')} alive={proc.get('alive')} pid={proc.get('pid')} restart={doc.get('restart')} apply={doc.get('apply')}")
-            diagnose = payload.get("diagnose") or {}
-            if diagnose:
-                print(f"diagnose: {diagnose.get('health')} {diagnose.get('primary_action') or diagnose.get('primary_cause') or ''}".rstrip())
-            if before.get("reason"):
-                print(f"reason: {before.get('reason')}")
-            for action in doc.get("actions", []):
-                state = "SKIP" if action.get("skipped") else ("OK" if action.get("ok") else "FAIL")
-                detail = action.get("reason") or f"rc={action.get('returncode')}"
-                print(f"  {state}  {action.get('name')}: {detail}")
-                if action.get("command"):
-                    print(f"       {action.get('command')}")
-        elif doc.get("schema") == FLEET_SCHEMA:
-            print(fleet_text(doc))
-        elif doc.get("schema") == COMMIT_SCHEMA:
-            print(f"commit: {'OK' if doc.get('ok') else 'REFUSE'} applied={doc.get('applied')}")
-            if doc.get("commit"):
-                print(f"commit_sha: {doc['commit']}")
-            if doc.get("reason"):
-                print(f"reason: {doc['reason']}")
-            if doc.get("paths"):
-                print("paths:")
-                for path in doc["paths"]:
-                    print(f"  - {path}")
-            dirty_groups = doc.get("dirty_groups") or {}
-            if dirty_groups.get("requested"):
-                print("dirty groups:")
-                for group in dirty_groups.get("requested") or []:
-                    print(f"  - {group}")
-                if dirty_groups.get("available") and not dirty_groups.get("ok"):
-                    print("available dirty groups:")
-                    for group in dirty_groups["available"]:
-                        print(f"  - {group}")
-            if doc.get("commands"):
-                print("commands:")
-                for command in doc["commands"]:
-                    print(f"  {command}")
-            if doc.get("foreign_staged"):
-                print("foreign staged:")
-                for path in doc["foreign_staged"]:
-                    print(f"  - {path}")
-        elif doc.get("schema") == SYNC_SCHEMA:
-            state = doc.get("state")
-            print(f"sync: {'OK' if doc.get('ok') else 'REFUSE'} state={state} apply={doc.get('apply')} fetch={doc.get('fetch')}")
-            if doc.get("branch"):
-                print(f"branch: {doc.get('branch')} remote={doc.get('remote')}")
-            if doc.get("reason"):
-                print(f"reason: {doc.get('reason')}")
-            info = doc.get("info") or {}
-            if info.get("target_ref"):
-                print(f"target: {info.get('target_ref')}")
-            if info.get("write_count") is not None:
-                print(f"write_set: {info.get('write_count')} path(s) divergent={len(info.get('divergent') or [])}")
-            if info.get("new_head"):
-                print(f"new_head: {info.get('new_head')}")
-            if doc.get("commands"):
-                print("commands:")
-                for command in doc["commands"]:
-                    print(f"  {command}")
-        elif doc.get("schema") == PUBLISH_SCHEMA:
-            print(f"publish: {'OK' if doc.get('ok') else 'REFUSE'} state={doc.get('state')} applied={doc.get('applied')} fetch={doc.get('fetch')}")
-            if doc.get("branch"):
-                print(f"branch: {doc.get('branch')} remote={doc.get('remote')}")
-            if doc.get("reason"):
-                print(f"reason: {doc.get('reason')}")
-            ahead = doc.get("ahead_commits") or {}
-            if ahead.get("count"):
-                suffix = "" if ahead.get("shown") == ahead.get("count") else f" (showing {ahead.get('shown')})"
-                print(f"ahead_commits: {ahead.get('count')} vs {ahead.get('target')}{suffix}")
-                for commit in ahead.get("commits", []):
-                    print(f"  {commit.get('short')} {commit.get('subject')}")
-            if doc.get("commands"):
-                print("commands:")
-                for command in doc["commands"]:
-                    print(f"  {command}")
-        elif doc.get("schema") == BOOTSTRAP_SCHEMA:
-            print(f"bootstrap: {'OK' if doc.get('ok') else 'ACTION'} apply={doc.get('apply')} live_resume={doc.get('live_resume')}")
-            for action in doc.get("actions", []):
-                if action.get("skipped"):
-                    state = "SKIP"
-                else:
-                    state = "OK" if action.get("ok") else "FAIL"
-                print(f"  {state}  {action.get('id')}: {action.get('detail')}")
-                if action.get("command"):
-                    print(f"       {action.get('command')}")
-        elif doc.get("schema") == LOOP_CONFIG_SCHEMA:
-            print(f"loop-add: {'OK' if doc.get('ok') else 'REFUSE'} apply={doc.get('apply')} changed={doc.get('changed')}")
-            print(f"loop: {doc.get('loop')}")
-            print(f"scope: {doc.get('scope') or 'local'}")
-            print(f"config: {doc.get('config_path') or doc.get('local_config')}")
-            if doc.get("reason"):
-                print(f"reason: {doc.get('reason')}")
-            spec = doc.get("spec") or {}
-            if spec.get("status_cmd"):
-                print(f"status_cmd: {display_command(list(spec.get('status_cmd') or []))}")
-            if spec.get("recover_cmd"):
-                print(f"recover_cmd: {display_command(list(spec.get('recover_cmd') or []))}")
-            if doc.get("command") and not doc.get("apply"):
-                print("commands:")
-                print(f"  {doc['command']}")
-            if doc.get("followup_commands"):
-                print("next:")
-                for command in doc["followup_commands"]:
-                    print(f"  {command}")
-        elif doc.get("schema") == LOOP_LIST_SCHEMA:
-            print(
-                f"loops: {'OK' if doc.get('ok') else 'ACTION'} "
-                f"count={doc.get('count', 0)} enabled={doc.get('enabled', 0)} "
-                f"disabled={doc.get('disabled', 0)} blocked={doc.get('blocked', 0)}"
-            )
-            for loop in doc.get("loops") or []:
-                if not loop.get("enabled"):
-                    state = "DISABLED"
-                else:
-                    state = "OK" if loop.get("ready") else "ACTION"
-                suffix = " overridden" if loop.get("overridden") else ""
-                print(f"- {loop.get('name')}: {state} source={loop.get('source')}{suffix}")
-                if not loop.get("enabled"):
-                    print("  readiness: skipped because loop is disabled")
-                    continue
-                status_ready = loop.get("status_ready") or {}
-                print(f"  status: {'OK' if status_ready.get('ok') else 'MISS'} {status_ready.get('detail') or ''}".rstrip())
-                recover_cmd = loop.get("recover_cmd") or []
-                if loop.get("auto_recover") or recover_cmd:
-                    recover_ready = loop.get("recover_ready") or {}
-                    print(f"  recover: {'OK' if recover_ready.get('ok') else 'MISS'} {recover_ready.get('detail') or ''}".rstrip())
-            if doc.get("commands"):
-                print("commands:")
-                for command in doc["commands"]:
-                    print(f"  {command}")
-        elif doc.get("schema") == LOOP_CHECK_SCHEMA:
-            print(
-                f"loop-check: {doc.get('verdict')} loop={doc.get('loop')} "
-                f"recover={doc.get('recover')} apply={doc.get('apply')}"
-            )
-            if doc.get("reason"):
-                print(f"reason: {doc['reason']}")
-            check = doc.get("check") or {}
-            if check:
-                if check.get("cmd"):
-                    print(f"status_cmd: {display_command(list(check.get('cmd') or []))}")
-                detail = check.get("detail") or check.get("reason") or ""
-                print(f"status: {check.get('state', 'UNKNOWN')} {detail}".rstrip())
-                if check.get("returncode") is not None:
-                    print(f"returncode: {check.get('returncode')}")
-            recovery = doc.get("recovery") or {}
-            if recovery:
-                if recovery.get("command"):
-                    print(f"recover_cmd: {recovery.get('command')}")
-                state = "SKIP" if recovery.get("skipped") else ("OK" if recovery.get("ok") else "FAIL")
-                detail = recovery.get("reason") or f"rc={recovery.get('returncode')}"
-                print(f"recover: {state} {detail}")
-            if doc.get("available"):
-                print("available loops:")
-                for loop in doc["available"]:
-                    print(f"  - {loop}")
-        elif doc.get("schema") == LOOP_AUDIT_SCHEMA:
-            counts = doc.get("counts") or {}
-            print(
-                f"loop-audit: {'OK' if doc.get('ok') else 'BROKEN'} "
-                f"total={counts.get('total', 0)} healthy={counts.get('healthy', 0)} "
-                f"action={counts.get('action', 0)} broken={counts.get('broken', 0)}"
-            )
-            label = {"healthy": "HEALTHY", "action": "ACTION ", "broken": "BROKEN "}
-            for loop in doc.get("loops") or []:
-                tag = label.get(loop.get("bucket"), loop.get("bucket", "?"))
-                detail = loop.get("detail") or loop.get("state") or ""
-                print(f"  {tag} {loop.get('name')}: {detail}".rstrip())
-            if doc.get("missing"):
-                print("requested but not enabled: " + ", ".join(doc["missing"]))
-        elif doc.get("schema") == LOOP_SCAFFOLD_SCHEMA:
-            print(
-                f"loop-scaffold: {'OK' if doc.get('ok') else 'REFUSE'} "
-                f"apply={doc.get('apply')} loop={doc.get('loop') or '(none)'} "
-                f"enabled={doc.get('enabled')}"
-            )
-            if doc.get("reason"):
-                print(f"reason: {doc['reason']}")
-            if doc.get("files"):
-                print("files:")
-                for file in doc["files"]:
-                    marker = "exists" if file.get("exists") else "new"
-                    print(f"  - {file.get('role')}: {file.get('path')} ({marker})")
-            if doc.get("commands"):
-                print("commands:")
-                for command in doc["commands"]:
-                    print(f"  {command}")
-            if doc.get("followup_commands"):
-                print("next:")
-                for command in doc["followup_commands"]:
-                    print(f"  {command}")
-        elif doc.get("schema") == LOOP_SET_SCHEMA:
-            print(
-                f"loop-set: {'OK' if doc.get('ok') else 'REFUSE'} "
-                f"apply={doc.get('apply')} changed={doc.get('changed')} "
-                f"loop={doc.get('loop') or '(none)'} scope={doc.get('scope')}"
-            )
-            print(f"config: {doc.get('config_path') or doc.get('local_config')}")
-            if doc.get("reason"):
-                print(f"reason: {doc['reason']}")
-            spec = doc.get("spec") or {}
-            if spec:
-                print(
-                    f"settings: enabled={spec.get('enabled', True) is not False} "
-                    f"auto_recover={bool(spec.get('auto_recover'))}"
-                )
-            if doc.get("commands"):
-                print("commands:")
-                for command in doc["commands"]:
-                    print(f"  {command}")
-            if doc.get("followup_commands"):
-                print("next:")
-                for command in doc["followup_commands"]:
-                    print(f"  {command}")
-            if doc.get("available") and not doc.get("ok"):
-                print("available loops:")
-                for loop in doc["available"]:
-                    print(f"  - {loop}")
+def _print_setup_plan(doc: dict[str, Any]) -> None:
+    for step in doc["steps"]:
+        state = str(step.get("state") or "step").upper()
+        display = step.get("display") or "(no command)"
+        print(f"{state} {step['id']}: {display}")
+        print(f"  {step['why']}")
+        if step.get("detail"):
+            print(f"  {step['detail']}")
+
+
+def _print_doctor(doc: dict[str, Any]) -> None:
+    print(f"doctor: {'OK' if doc['ok'] else 'ACTION'}")
+    for c in doc["checks"]:
+        print(f"  {'OK' if c['ok'] else 'MISS'}  {c['name']}: {c['detail']}")
+
+
+def _print_tick(doc: dict[str, Any]) -> None:
+    print(f"tick: {'OK' if doc['ok'] else 'ACTION'} dry_run={doc['dry_run']} live_resume={doc['live_resume']}")
+    for action in doc.get("actions", []):
+        state = "SKIP" if action.get("skipped") else ("OK" if action.get("ok") else "FAIL")
+        detail = action.get("reason") or f"rc={action.get('returncode')}"
+        print(f"  {state}  {action.get('name')}: {detail}")
+    print(pane_text(doc["status"]))
+    if doc.get("written"):
+        print(f"written: {doc['written']['json']} ; {doc['written']['text']} ; {doc['written']['machine']}")
+
+
+def _print_recover(doc: dict[str, Any]) -> None:
+    print(f"recover: {'OK' if doc.get('ok') else 'ACTION'} apply={doc.get('apply')}")
+    resume_plan = doc.get("resume_plan") or {}
+    plan_path = resume_plan.get("display_path") or resume_plan.get("path") or "resume_plan.json"
+    if resume_plan:
+        if resume_plan.get("exists"):
+            print(f"resume-plan: {resume_plan.get('count', 0)} eligible session(s) from {plan_path}")
+            if resume_plan.get("reason"):
+                print(f"  {resume_plan['reason']}")
+            for session in resume_plan.get("sessions") or []:
+                sid = session.get("session_short") or session.get("session") or "unknown"
+                account = session.get("account") or "unknown-account"
+                project = session.get("project") or session.get("cwd") or "unknown-project"
+                print(f"  session={sid} account={account} project={project}")
+                if session.get("resume_cmd"):
+                    print(f"       {session['resume_cmd']}")
+            if resume_plan.get("omitted"):
+                print(f"  ... {resume_plan['omitted']} more")
         else:
-            print(json.dumps(doc, indent=2))
+            print(f"resume-plan: missing ({plan_path})")
+    for action in doc.get("actions", []):
+        state = "SKIP" if action.get("skipped") else ("OK" if action.get("ok") else "FAIL")
+        detail = action.get("reason") or f"rc={action.get('returncode')}"
+        print(f"  {state}  {action.get('name')}: {detail}")
+        if action.get("command"):
+            print(f"       {action.get('command')}")
+    if doc.get("status"):
+        print(pane_text(doc["status"]))
+    if doc.get("written"):
+        print(f"written: {doc['written']['json']} ; {doc['written']['text']} ; {doc['written']['machine']}")
+
+
+def _print_supervisor(doc: dict[str, Any]) -> None:
+    before = doc.get("before") or {}
+    payload = before.get("payload") or {}
+    proc = payload.get("process") or {}
+    state = "ACTION" if doc.get("needs_action") else ("OK" if doc.get("ok") else "ERROR")
+    print(f"supervisor: {state} verdict={payload.get('verdict')} alive={proc.get('alive')} pid={proc.get('pid')} restart={doc.get('restart')} apply={doc.get('apply')}")
+    diagnose = payload.get("diagnose") or {}
+    if diagnose:
+        print(f"diagnose: {diagnose.get('health')} {diagnose.get('primary_action') or diagnose.get('primary_cause') or ''}".rstrip())
+    if before.get("reason"):
+        print(f"reason: {before.get('reason')}")
+    for action in doc.get("actions", []):
+        state = "SKIP" if action.get("skipped") else ("OK" if action.get("ok") else "FAIL")
+        detail = action.get("reason") or f"rc={action.get('returncode')}"
+        print(f"  {state}  {action.get('name')}: {detail}")
+        if action.get("command"):
+            print(f"       {action.get('command')}")
+
+
+def _print_fleet(doc: dict[str, Any]) -> None:
+    print(fleet_text(doc))
+
+
+def _print_commit(doc: dict[str, Any]) -> None:
+    print(f"commit: {'OK' if doc.get('ok') else 'REFUSE'} applied={doc.get('applied')}")
+    if doc.get("commit"):
+        print(f"commit_sha: {doc['commit']}")
+    if doc.get("reason"):
+        print(f"reason: {doc['reason']}")
+    if doc.get("paths"):
+        print("paths:")
+        for path in doc["paths"]:
+            print(f"  - {path}")
+    dirty_groups = doc.get("dirty_groups") or {}
+    if dirty_groups.get("requested"):
+        print("dirty groups:")
+        for group in dirty_groups.get("requested") or []:
+            print(f"  - {group}")
+        if dirty_groups.get("available") and not dirty_groups.get("ok"):
+            print("available dirty groups:")
+            for group in dirty_groups["available"]:
+                print(f"  - {group}")
+    if doc.get("commands"):
+        print("commands:")
+        for command in doc["commands"]:
+            print(f"  {command}")
+    if doc.get("foreign_staged"):
+        print("foreign staged:")
+        for path in doc["foreign_staged"]:
+            print(f"  - {path}")
+
+
+def _print_sync(doc: dict[str, Any]) -> None:
+    state = doc.get("state")
+    print(f"sync: {'OK' if doc.get('ok') else 'REFUSE'} state={state} apply={doc.get('apply')} fetch={doc.get('fetch')}")
+    if doc.get("branch"):
+        print(f"branch: {doc.get('branch')} remote={doc.get('remote')}")
+    if doc.get("reason"):
+        print(f"reason: {doc.get('reason')}")
+    info = doc.get("info") or {}
+    if info.get("target_ref"):
+        print(f"target: {info.get('target_ref')}")
+    if info.get("write_count") is not None:
+        print(f"write_set: {info.get('write_count')} path(s) divergent={len(info.get('divergent') or [])}")
+    if info.get("new_head"):
+        print(f"new_head: {info.get('new_head')}")
+    if doc.get("commands"):
+        print("commands:")
+        for command in doc["commands"]:
+            print(f"  {command}")
+
+
+def _print_publish(doc: dict[str, Any]) -> None:
+    print(f"publish: {'OK' if doc.get('ok') else 'REFUSE'} state={doc.get('state')} applied={doc.get('applied')} fetch={doc.get('fetch')}")
+    if doc.get("branch"):
+        print(f"branch: {doc.get('branch')} remote={doc.get('remote')}")
+    if doc.get("reason"):
+        print(f"reason: {doc.get('reason')}")
+    ahead = doc.get("ahead_commits") or {}
+    if ahead.get("count"):
+        suffix = "" if ahead.get("shown") == ahead.get("count") else f" (showing {ahead.get('shown')})"
+        print(f"ahead_commits: {ahead.get('count')} vs {ahead.get('target')}{suffix}")
+        for commit in ahead.get("commits", []):
+            print(f"  {commit.get('short')} {commit.get('subject')}")
+    if doc.get("commands"):
+        print("commands:")
+        for command in doc["commands"]:
+            print(f"  {command}")
+
+
+def _print_bootstrap(doc: dict[str, Any]) -> None:
+    print(f"bootstrap: {'OK' if doc.get('ok') else 'ACTION'} apply={doc.get('apply')} live_resume={doc.get('live_resume')}")
+    for action in doc.get("actions", []):
+        if action.get("skipped"):
+            state = "SKIP"
+        else:
+            state = "OK" if action.get("ok") else "FAIL"
+        print(f"  {state}  {action.get('id')}: {action.get('detail')}")
+        if action.get("command"):
+            print(f"       {action.get('command')}")
+
+
+def _print_loop_config(doc: dict[str, Any]) -> None:
+    print(f"loop-add: {'OK' if doc.get('ok') else 'REFUSE'} apply={doc.get('apply')} changed={doc.get('changed')}")
+    print(f"loop: {doc.get('loop')}")
+    print(f"scope: {doc.get('scope') or 'local'}")
+    print(f"config: {doc.get('config_path') or doc.get('local_config')}")
+    if doc.get("reason"):
+        print(f"reason: {doc.get('reason')}")
+    spec = doc.get("spec") or {}
+    if spec.get("status_cmd"):
+        print(f"status_cmd: {display_command(list(spec.get('status_cmd') or []))}")
+    if spec.get("recover_cmd"):
+        print(f"recover_cmd: {display_command(list(spec.get('recover_cmd') or []))}")
+    if doc.get("command") and not doc.get("apply"):
+        print("commands:")
+        print(f"  {doc['command']}")
+    if doc.get("followup_commands"):
+        print("next:")
+        for command in doc["followup_commands"]:
+            print(f"  {command}")
+
+
+def _print_loop_list(doc: dict[str, Any]) -> None:
+    print(
+        f"loops: {'OK' if doc.get('ok') else 'ACTION'} "
+        f"count={doc.get('count', 0)} enabled={doc.get('enabled', 0)} "
+        f"disabled={doc.get('disabled', 0)} blocked={doc.get('blocked', 0)}"
+    )
+    for loop in doc.get("loops") or []:
+        if not loop.get("enabled"):
+            state = "DISABLED"
+        else:
+            state = "OK" if loop.get("ready") else "ACTION"
+        suffix = " overridden" if loop.get("overridden") else ""
+        print(f"- {loop.get('name')}: {state} source={loop.get('source')}{suffix}")
+        if not loop.get("enabled"):
+            print("  readiness: skipped because loop is disabled")
+            continue
+        status_ready = loop.get("status_ready") or {}
+        print(f"  status: {'OK' if status_ready.get('ok') else 'MISS'} {status_ready.get('detail') or ''}".rstrip())
+        recover_cmd = loop.get("recover_cmd") or []
+        if loop.get("auto_recover") or recover_cmd:
+            recover_ready = loop.get("recover_ready") or {}
+            print(f"  recover: {'OK' if recover_ready.get('ok') else 'MISS'} {recover_ready.get('detail') or ''}".rstrip())
+    if doc.get("commands"):
+        print("commands:")
+        for command in doc["commands"]:
+            print(f"  {command}")
+
+
+def _print_loop_check(doc: dict[str, Any]) -> None:
+    print(
+        f"loop-check: {doc.get('verdict')} loop={doc.get('loop')} "
+        f"recover={doc.get('recover')} apply={doc.get('apply')}"
+    )
+    if doc.get("reason"):
+        print(f"reason: {doc['reason']}")
+    check = doc.get("check") or {}
+    if check:
+        if check.get("cmd"):
+            print(f"status_cmd: {display_command(list(check.get('cmd') or []))}")
+        detail = check.get("detail") or check.get("reason") or ""
+        print(f"status: {check.get('state', 'UNKNOWN')} {detail}".rstrip())
+        if check.get("returncode") is not None:
+            print(f"returncode: {check.get('returncode')}")
+    recovery = doc.get("recovery") or {}
+    if recovery:
+        if recovery.get("command"):
+            print(f"recover_cmd: {recovery.get('command')}")
+        state = "SKIP" if recovery.get("skipped") else ("OK" if recovery.get("ok") else "FAIL")
+        detail = recovery.get("reason") or f"rc={recovery.get('returncode')}"
+        print(f"recover: {state} {detail}")
+    if doc.get("available"):
+        print("available loops:")
+        for loop in doc["available"]:
+            print(f"  - {loop}")
+
+
+def _print_loop_audit(doc: dict[str, Any]) -> None:
+    counts = doc.get("counts") or {}
+    print(
+        f"loop-audit: {'OK' if doc.get('ok') else 'BROKEN'} "
+        f"total={counts.get('total', 0)} healthy={counts.get('healthy', 0)} "
+        f"action={counts.get('action', 0)} broken={counts.get('broken', 0)}"
+    )
+    label = {"healthy": "HEALTHY", "action": "ACTION ", "broken": "BROKEN "}
+    for loop in doc.get("loops") or []:
+        tag = label.get(loop.get("bucket"), loop.get("bucket", "?"))
+        detail = loop.get("detail") or loop.get("state") or ""
+        print(f"  {tag} {loop.get('name')}: {detail}".rstrip())
+    if doc.get("missing"):
+        print("requested but not enabled: " + ", ".join(doc["missing"]))
+
+
+def _print_loop_scaffold(doc: dict[str, Any]) -> None:
+    print(
+        f"loop-scaffold: {'OK' if doc.get('ok') else 'REFUSE'} "
+        f"apply={doc.get('apply')} loop={doc.get('loop') or '(none)'} "
+        f"enabled={doc.get('enabled')}"
+    )
+    if doc.get("reason"):
+        print(f"reason: {doc['reason']}")
+    if doc.get("files"):
+        print("files:")
+        for file in doc["files"]:
+            marker = "exists" if file.get("exists") else "new"
+            print(f"  - {file.get('role')}: {file.get('path')} ({marker})")
+    if doc.get("commands"):
+        print("commands:")
+        for command in doc["commands"]:
+            print(f"  {command}")
+    if doc.get("followup_commands"):
+        print("next:")
+        for command in doc["followup_commands"]:
+            print(f"  {command}")
+
+
+def _print_loop_set(doc: dict[str, Any]) -> None:
+    print(
+        f"loop-set: {'OK' if doc.get('ok') else 'REFUSE'} "
+        f"apply={doc.get('apply')} changed={doc.get('changed')} "
+        f"loop={doc.get('loop') or '(none)'} scope={doc.get('scope')}"
+    )
+    print(f"config: {doc.get('config_path') or doc.get('local_config')}")
+    if doc.get("reason"):
+        print(f"reason: {doc['reason']}")
+    spec = doc.get("spec") or {}
+    if spec:
+        print(
+            f"settings: enabled={spec.get('enabled', True) is not False} "
+            f"auto_recover={bool(spec.get('auto_recover'))}"
+        )
+    if doc.get("commands"):
+        print("commands:")
+        for command in doc["commands"]:
+            print(f"  {command}")
+    if doc.get("followup_commands"):
+        print("next:")
+        for command in doc["followup_commands"]:
+            print(f"  {command}")
+    if doc.get("available") and not doc.get("ok"):
+        print("available loops:")
+        for loop in doc["available"]:
+            print(f"  - {loop}")
+
+
+# One printer per document schema. print_doc is a pure lookup in this table, so
+# a new subcommand's human-readable form is a printer plus one row here instead
+# of another branch on a 16-deep if/elif chain.
+_DOC_PRINTERS = {
+    SETUP_SCHEMA: _print_setup_plan,
+    "fleet-control-pane.doctor/1": _print_doctor,
+    TICK_SCHEMA: _print_tick,
+    RECOVER_SCHEMA: _print_recover,
+    SUPERVISOR_SCHEMA: _print_supervisor,
+    FLEET_SCHEMA: _print_fleet,
+    COMMIT_SCHEMA: _print_commit,
+    SYNC_SCHEMA: _print_sync,
+    PUBLISH_SCHEMA: _print_publish,
+    BOOTSTRAP_SCHEMA: _print_bootstrap,
+    LOOP_CONFIG_SCHEMA: _print_loop_config,
+    LOOP_LIST_SCHEMA: _print_loop_list,
+    LOOP_CHECK_SCHEMA: _print_loop_check,
+    LOOP_AUDIT_SCHEMA: _print_loop_audit,
+    LOOP_SCAFFOLD_SCHEMA: _print_loop_scaffold,
+    LOOP_SET_SCHEMA: _print_loop_set,
+}
+
+
+def print_doc(doc: dict[str, Any], as_json: bool) -> None:
+    """Print one plan/report document: JSON when asked, else the schema's own
+    human-readable form, falling back to JSON for a schema without a printer."""
+    printer = None if as_json else _DOC_PRINTERS.get(doc.get("schema"))
+    if printer is None:
+        print(json.dumps(doc, indent=2))
+        return
+    printer(doc)
 
 
 def add_config_override_args(parser: argparse.ArgumentParser) -> None:
@@ -4975,7 +5032,7 @@ def config_overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="One control pane for fleet agent loops.")
     parser.add_argument("--root", default=None, help="repo root (default: discovered from VERSION)")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -5117,22 +5174,13 @@ def main(argv: list[str] | None = None) -> int:
     p_loop.add_argument("--disabled", action="store_true", help="write the loop entry disabled")
     p_loop.add_argument("--apply", action="store_true", help="write local config; default is dry-run")
     p_loop.add_argument("--json", action="store_true")
+    return parser
 
-    args = parser.parse_args(argv)
-    root = repo_root(Path(args.root)) if args.root else repo_root()
 
-    if args.cmd == "init":
-        base_config = load_config(root)
-        overrides = config_overrides_from_args(args)
-        base_config = apply_runtime_overrides(base_config, root, overrides)
-        result = init_config(root, force=args.force, overrides=overrides, base_config=base_config)
-        if args.json:
-            print(json.dumps(result, indent=2))
-        else:
-            print(("wrote " if result["written"] else "kept ") + result["path"])
-        return 0
-
-    config = load_config(root)
+def _run_loop_command(args: argparse.Namespace, config: dict[str, Any],
+                      parser: argparse.ArgumentParser) -> int | None:
+    """Run the loop-* family of subcommands and return its exit code, or None
+    when args.cmd is not one of them."""
     if args.cmd == "loop-add":
         try:
             status_cmd = parse_command_arg(args.status_cmd)
@@ -5211,6 +5259,70 @@ def main(argv: list[str] | None = None) -> int:
         )
         print_doc(doc, args.json)
         return 0 if doc.get("ok") else 1
+    return None
+
+
+def _run_commit_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    paths = list(args.path or [])
+    dirty_selection = None
+    if args.dirty_group:
+        dirty_selection = dirty_group_selection(config, list(args.dirty_group))
+        if not dirty_selection.get("ok"):
+            doc = {
+                "schema": COMMIT_SCHEMA,
+                "generated_utc": iso_now(),
+                "ok": False,
+                "applied": False,
+                "reason": "unknown dirty group(s): " + ", ".join(dirty_selection.get("missing") or []),
+                "dirty_groups": dirty_selection,
+            }
+            print_doc(doc, args.json)
+            return 1
+        paths.extend(dirty_selection.get("paths") or [])
+    if args.pane_files:
+        paths.extend(PANE_SOURCE_PATHS)
+    try:
+        doc = commit_plan(
+            config,
+            paths=paths,
+            message=args.message,
+            apply=args.apply,
+            allow_dir=args.allow_dir,
+        )
+        if dirty_selection is not None:
+            doc["dirty_groups"] = dirty_selection
+    except ValueError as exc:
+        doc = {
+            "schema": COMMIT_SCHEMA,
+            "generated_utc": iso_now(),
+            "ok": False,
+            "applied": False,
+            "reason": str(exc),
+        }
+    print_doc(doc, args.json)
+    return 0 if doc.get("ok") else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    root = repo_root(Path(args.root)) if args.root else repo_root()
+
+    if args.cmd == "init":
+        base_config = load_config(root)
+        overrides = config_overrides_from_args(args)
+        base_config = apply_runtime_overrides(base_config, root, overrides)
+        result = init_config(root, force=args.force, overrides=overrides, base_config=base_config)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(("wrote " if result["written"] else "kept ") + result["path"])
+        return 0
+
+    config = load_config(root)
+    loop_rc = _run_loop_command(args, config, parser)
+    if loop_rc is not None:
+        return loop_rc
     if args.cmd == "bootstrap":
         overrides = config_overrides_from_args(args)
         config = apply_runtime_overrides(config, root, overrides)
@@ -5271,44 +5383,7 @@ def main(argv: list[str] | None = None) -> int:
         print_doc(doc, args.json)
         return 0 if doc.get("ok") else 1
     if args.cmd == "commit":
-        paths = list(args.path or [])
-        dirty_selection = None
-        if args.dirty_group:
-            dirty_selection = dirty_group_selection(config, list(args.dirty_group))
-            if not dirty_selection.get("ok"):
-                doc = {
-                    "schema": COMMIT_SCHEMA,
-                    "generated_utc": iso_now(),
-                    "ok": False,
-                    "applied": False,
-                    "reason": "unknown dirty group(s): " + ", ".join(dirty_selection.get("missing") or []),
-                    "dirty_groups": dirty_selection,
-                }
-                print_doc(doc, args.json)
-                return 1
-            paths.extend(dirty_selection.get("paths") or [])
-        if args.pane_files:
-            paths.extend(PANE_SOURCE_PATHS)
-        try:
-            doc = commit_plan(
-                config,
-                paths=paths,
-                message=args.message,
-                apply=args.apply,
-                allow_dir=args.allow_dir,
-            )
-            if dirty_selection is not None:
-                doc["dirty_groups"] = dirty_selection
-        except ValueError as exc:
-            doc = {
-                "schema": COMMIT_SCHEMA,
-                "generated_utc": iso_now(),
-                "ok": False,
-                "applied": False,
-                "reason": str(exc),
-            }
-        print_doc(doc, args.json)
-        return 0 if doc.get("ok") else 1
+        return _run_commit_command(args, config)
     if args.cmd == "bootstrap":
         doc = bootstrap(
             config,

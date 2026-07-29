@@ -1055,33 +1055,28 @@ def slack_next_actions(
     }
 
 
-def check_rows(
-    *,
-    prep_doc: Path,
-    readiness_doc: Path,
+def watcher_evidence(
     watches: Sequence[dict[str, Any]],
-    node_report_summaries: Sequence[dict[str, Any]],
-    surface_smokes: Sequence[dict[str, Any]],
-    dgx_runs: Sequence[dict[str, Any]],
     target_next_actions: Sequence[dict[str, Any]],
-    packets: dict[str, Any],
-    slack: dict[str, Any],
-) -> list[dict[str, str]]:
+) -> tuple[int, str]:
+    """Count target action nodes still demanding an operator and describe the watch corpus."""
     raw_watch_action = any(
         watch.get("summary", {}).get("action_required") is True
         for watch in watches
         if isinstance(watch.get("summary"), dict)
     )
     target_action_count = len([row for row in target_next_actions if row.get("primary_action")])
-    watcher_evidence = f"{len(watches)} watch report(s) parsed; {target_action_count} unsuppressed target action node(s)"
+    evidence = f"{len(watches)} watch report(s) parsed; {target_action_count} unsuppressed target action node(s)"
     if raw_watch_action and target_action_count == 0 and watches:
-        watcher_evidence += "; historical watch actions cleared by target evidence"
-    any_watch_pass = any(
-        node.get("status") == "PASS"
-        for watch in watches
-        for node in watch.get("nodes", [])
-        if isinstance(node, dict)
-    )
+        evidence += "; historical watch actions cleared by target evidence"
+    return target_action_count, evidence
+
+
+def target_preflight_evidence(
+    watches: Sequence[dict[str, Any]],
+    node_report_summaries: Sequence[dict[str, Any]],
+) -> tuple[bool, str]:
+    """Find the first imported node report whose latest standalone preflight actually passed."""
     passing_watch_preflight = next(
         (
             watch
@@ -1117,22 +1112,18 @@ def check_rows(
         )
     else:
         preflight_evidence = "no imported target node preflight report has status PREFLIGHT_OK"
+    proven = bool(passing_watch_preflight or passing_report_preflight)
+    return proven, preflight_evidence
+
+
+def local_surface_evidence(surface_smokes: Sequence[dict[str, Any]]) -> tuple[bool, str]:
+    """Locate a local (non-endpoint) qwen3.6 surface smoke where every surface passed."""
     local_surface_pass = next(
         (
             smoke for smoke in surface_smokes
             if smoke.get("passed") is True
             and smoke.get("qwen36_model") is True
             and not smoke.get("endpoint")
-        ),
-        None,
-    )
-    target_surface_pass = next(
-        (
-            smoke for smoke in surface_smokes
-            if smoke.get("passed") is True
-            and smoke.get("qwen36_model") is True
-            and isinstance(smoke.get("endpoint"), dict)
-            and bool(smoke.get("endpoint"))
         ),
         None,
     )
@@ -1144,30 +1135,43 @@ def check_rows(
         ),
         "",
     )
+    return bool(local_surface_pass), surface_evidence
+
+
+def target_surface_evidence(
+    watches: Sequence[dict[str, Any]],
+    surface_smokes: Sequence[dict[str, Any]],
+) -> tuple[bool, str]:
+    """Prefer a watched target node that passed; otherwise an imported target surface smoke."""
+    any_watch_pass = any(
+        node.get("status") == "PASS"
+        for watch in watches
+        for node in watch.get("nodes", [])
+        if isinstance(node, dict)
+    )
+    target_surface_pass = next(
+        (
+            smoke for smoke in surface_smokes
+            if smoke.get("passed") is True
+            and smoke.get("qwen36_model") is True
+            and isinstance(smoke.get("endpoint"), dict)
+            and bool(smoke.get("endpoint"))
+        ),
+        None,
+    )
     if any_watch_pass:
         target_smoke_evidence = "at least one watched target node passed"
     elif target_surface_pass:
         target_smoke_evidence = str(target_surface_pass.get("path", ""))
     else:
         target_smoke_evidence = "no parsed watch node or target surface-smoke artifact has PASS status"
+    return bool(any_watch_pass or target_surface_pass), target_smoke_evidence
+
+
+def dgx_gate_evidence(dgx_runs: Sequence[dict[str, Any]]) -> tuple[bool, str]:
+    """Report the first DGX run that cleared both gates, else why the latest one did not."""
     passing_dgx_run = next((run for run in dgx_runs if run.get("status") == "PASS"), None)
     latest_dgx_run = dgx_runs[0] if dgx_runs else None
-    handoff_dgx_run = next(
-        (
-            run for run in dgx_runs
-            if isinstance(run.get("handoff"), dict)
-            and run["handoff"].get("complete") is True
-        ),
-        None,
-    )
-    latest_remote_probe_run = next(
-        (
-            run for run in dgx_runs
-            if isinstance(run.get("remote_probe"), dict)
-            and run["remote_probe"].get("status") != "MISSING"
-        ),
-        None,
-    )
     if passing_dgx_run:
         dgx_evidence = f"{passing_dgx_run.get('path', '')} passed GATE.json and RUN_GATE.json"
     elif latest_dgx_run:
@@ -1177,6 +1181,19 @@ def check_rows(
         ).rstrip(": ")
     else:
         dgx_evidence = "no DGX run directory with DGX_RUN.json was parsed"
+    return bool(passing_dgx_run), dgx_evidence
+
+
+def dgx_handoff_evidence(dgx_runs: Sequence[dict[str, Any]]) -> tuple[bool, str]:
+    """Report the first DGX run carrying a complete handoff archive, script, and readme."""
+    handoff_dgx_run = next(
+        (
+            run for run in dgx_runs
+            if isinstance(run.get("handoff"), dict)
+            and run["handoff"].get("complete") is True
+        ),
+        None,
+    )
     if handoff_dgx_run and isinstance(handoff_dgx_run.get("handoff"), dict):
         handoff_evidence = (
             f"{handoff_dgx_run['handoff'].get('archive', '')}; "
@@ -1185,6 +1202,19 @@ def check_rows(
         )
     else:
         handoff_evidence = "no DGX run has handoff/fleet-*.tgz plus RUN_ON_DGX.sh and DGX_HANDOFF.md"
+    return bool(handoff_dgx_run), handoff_evidence
+
+
+def dgx_remote_probe_evidence(dgx_runs: Sequence[dict[str, Any]]) -> tuple[str, str]:
+    """Grade the newest REMOTE_PROBE artifact: only a resolved DNS or SSH pass clears it."""
+    latest_remote_probe_run = next(
+        (
+            run for run in dgx_runs
+            if isinstance(run.get("remote_probe"), dict)
+            and run["remote_probe"].get("status") != "MISSING"
+        ),
+        None,
+    )
     if latest_remote_probe_run and isinstance(latest_remote_probe_run.get("remote_probe"), dict):
         probe = latest_remote_probe_run["remote_probe"]
         remote_probe_evidence = (
@@ -1196,6 +1226,28 @@ def check_rows(
     else:
         remote_probe_evidence = "no REMOTE_PROBE*.json artifact was parsed"
         remote_probe_status = "WARN"
+    return remote_probe_status, remote_probe_evidence
+
+
+def check_rows(
+    *,
+    prep_doc: Path,
+    readiness_doc: Path,
+    watches: Sequence[dict[str, Any]],
+    node_report_summaries: Sequence[dict[str, Any]],
+    surface_smokes: Sequence[dict[str, Any]],
+    dgx_runs: Sequence[dict[str, Any]],
+    target_next_actions: Sequence[dict[str, Any]],
+    packets: dict[str, Any],
+    slack: dict[str, Any],
+) -> list[dict[str, str]]:
+    target_action_count, watcher_note = watcher_evidence(watches, target_next_actions)
+    preflight_proven, preflight_note = target_preflight_evidence(watches, node_report_summaries)
+    local_surface_proven, local_surface_note = local_surface_evidence(surface_smokes)
+    target_surface_proven, target_surface_note = target_surface_evidence(watches, surface_smokes)
+    dgx_gate_proven, dgx_gate_note = dgx_gate_evidence(dgx_runs)
+    handoff_proven, handoff_note = dgx_handoff_evidence(dgx_runs)
+    remote_probe_status, remote_probe_note = dgx_remote_probe_evidence(dgx_runs)
     rows = [
         {
             "name": "Operator prep doc",
@@ -1220,22 +1272,22 @@ def check_rows(
         {
             "name": "Watcher evidence",
             "status": "ACTION_REQUIRED" if target_action_count > 0 else ("PASS" if watches else "FAIL"),
-            "evidence": watcher_evidence,
+            "evidence": watcher_note,
         },
         {
             "name": "Target standalone preflight",
-            "status": "PASS" if passing_watch_preflight or passing_report_preflight else "UNPROVEN",
-            "evidence": preflight_evidence,
+            "status": "PASS" if preflight_proven else "UNPROVEN",
+            "evidence": preflight_note,
         },
         {
             "name": "Local standalone endpoint smoke",
-            "status": "PASS" if local_surface_pass else "UNPROVEN",
-            "evidence": surface_evidence or "no parsed surface-smoke artifact has all surfaces PASS",
+            "status": "PASS" if local_surface_proven else "UNPROVEN",
+            "evidence": local_surface_note or "no parsed surface-smoke artifact has all surfaces PASS",
         },
         {
             "name": "Target standalone endpoint smoke",
-            "status": "PASS" if any_watch_pass or target_surface_pass else "UNPROVEN",
-            "evidence": target_smoke_evidence,
+            "status": "PASS" if target_surface_proven else "UNPROVEN",
+            "evidence": target_surface_note,
         },
         {
             "name": "Slack helper checkout",
@@ -1274,13 +1326,13 @@ def check_rows(
         },
         {
             "name": "DGX handoff bundle",
-            "status": "PASS" if handoff_dgx_run else "WARN",
-            "evidence": handoff_evidence,
+            "status": "PASS" if handoff_proven else "WARN",
+            "evidence": handoff_note,
         },
         {
             "name": "DGX remote probe",
             "status": remote_probe_status,
-            "evidence": remote_probe_evidence,
+            "evidence": remote_probe_note,
         },
         {
             "name": "Slack control thread",
@@ -1289,8 +1341,8 @@ def check_rows(
         },
         {
             "name": "Live DGX run",
-            "status": "PASS" if passing_dgx_run else "UNPROVEN",
-            "evidence": dgx_evidence,
+            "status": "PASS" if dgx_gate_proven else "UNPROVEN",
+            "evidence": dgx_gate_note,
         },
     ]
     return rows
@@ -1450,9 +1502,9 @@ def table_cell(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ").strip()
 
 
-def render_markdown(report: dict[str, Any]) -> str:
-    summary = report.get("summary", {})
-    lines = [
+def readiness_summary_lines(report: dict[str, Any], summary: dict[str, Any]) -> list[str]:
+    """Document title, generation stamp, and one bullet per readiness counter."""
+    return [
         "# Qwen3.6 DGX/standalone readiness",
         "",
         f"Generated: `{report.get('generated_at', '')}`",
@@ -1478,6 +1530,12 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Slack live probe: `{summary.get('slack_live_probe_status')}`",
         f"- Slack local demo: `{summary.get('slack_local_demo_ok')}`",
         f"- Unproven external gates: `{', '.join(summary.get('unproven_external_gates', []))}`",
+    ]
+
+
+def check_table_lines(report: dict[str, Any]) -> list[str]:
+    """One table row per readiness check, carrying its status and evidence."""
+    lines = [
         "",
         "## Checks",
         "",
@@ -1486,7 +1544,12 @@ def render_markdown(report: dict[str, Any]) -> str:
     ]
     for row in report.get("checks", []):
         lines.append(f"| {table_cell(row.get('name', ''))} | {table_cell(row.get('status', ''))} | {table_cell(row.get('evidence', ''))} |")
-    lines.extend(["", "## Standalone Install Benches", ""])
+    return lines
+
+
+def install_bench_lines(report: dict[str, Any]) -> list[str]:
+    """Standalone packet profiles with their bootstrap/install/start command set."""
+    lines = ["", "## Standalone Install Benches", ""]
     packets = report.get("packet_artifacts") if isinstance(report.get("packet_artifacts"), dict) else {}
     profile_rows = packets.get("profile_matrix") if isinstance(packets.get("profile_matrix"), list) else []
     if not profile_rows:
@@ -1514,7 +1577,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"```{shell}")
             lines.extend(str(command) for command in receive)
             lines.append("```")
-    lines.extend(["", "## Watch Reports", ""])
+    return lines
+
+
+def watch_report_lines(report: dict[str, Any]) -> list[str]:
+    """Parsed watch reports, suppressing nodes already cleared by target smoke evidence."""
+    lines = ["", "## Watch Reports", ""]
     watches = report.get("watch_reports", [])
     cleared_target_nodes = set(
         str(node) for node in report.get("target_surface_pass_nodes", [])
@@ -1542,7 +1610,12 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"profile `{latest_preflight.get('profile', '')}`; "
                 f"base_url `{latest_preflight.get('base_url', '')}`"
             )
-    lines.extend(["", "## Node Reports", ""])
+    return lines
+
+
+def node_report_lines(report: dict[str, Any]) -> list[str]:
+    """Extracted node-report directories and the latest preflight each recorded."""
+    lines = ["", "## Node Reports", ""]
     node_reports_rows = report.get("node_reports", []) if isinstance(report.get("node_reports"), list) else []
     if not node_reports_rows:
         lines.append("No extracted node-report directories were parsed.")
@@ -1554,7 +1627,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"profile `{latest_preflight.get('profile', '')}`, "
             f"base_url `{latest_preflight.get('base_url', '')}`"
         )
-    lines.extend(["", "## Target Next Actions", ""])
+    return lines
+
+
+def target_action_lines(report: dict[str, Any]) -> list[str]:
+    """The one required action per target node, with copy-pasteable command blocks."""
+    lines = ["", "## Target Next Actions", ""]
     target_actions = report.get("target_next_actions", [])
     if not target_actions:
         lines.append("No target next actions were found in parsed watch reports.")
@@ -1606,7 +1684,12 @@ def render_markdown(report: dict[str, Any]) -> str:
         optional = row.get("optional_actions") if isinstance(row.get("optional_actions"), list) else []
         for action in optional:
             lines.append(f"  - Optional `{action.get('kind', '')}`: {action.get('detail', '')}")
-    lines.extend(["", "## Surface Smokes", ""])
+    return lines
+
+
+def surface_smoke_lines(report: dict[str, Any]) -> list[str]:
+    """Surface-smoke artifacts and the per-surface status each one recorded."""
+    lines = ["", "## Surface Smokes", ""]
     surface_smokes = report.get("surface_smokes", [])
     if not surface_smokes:
         lines.append("No surface-smoke artifacts were parsed.")
@@ -1622,7 +1705,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             if surface.get("decode_tps") is not None:
                 perf = f", decode_tps `{surface.get('decode_tps')}`"
             lines.append(f"  - `{surface.get('surface', '')}`: `{surface.get('status', '')}`{perf}")
-    lines.extend(["", "## DGX Runs", ""])
+    return lines
+
+
+def dgx_run_lines(report: dict[str, Any]) -> list[str]:
+    """DGX run directories: gate verdicts, packet shas, handoff bundles, remote probes."""
+    lines = ["", "## DGX Runs", ""]
     dgx_runs = report.get("dgx_runs", [])
     if not dgx_runs:
         lines.append("No DGX run directories with `DGX_RUN.json` were parsed.")
@@ -1666,9 +1754,14 @@ def render_markdown(report: dict[str, Any]) -> str:
         failures = run.get("failures") if isinstance(run.get("failures"), list) else []
         for failure in failures[:5]:
             lines.append(f"  - Gate gap: {failure}")
+    return lines
+
+
+def slack_control_lines(report: dict[str, Any]) -> list[str]:
+    """Slack control-plane state plus the host commands that would advance it."""
     slack = report.get("slack_control", {})
     slack_actions = report.get("slack_next_actions") if isinstance(report.get("slack_next_actions"), dict) else {}
-    lines.extend([
+    lines = [
         "",
         "## Slack Control",
         "",
@@ -1677,7 +1770,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Dry-run requested: `{slack.get('dry_run_requested')}`",
         f"- Local demo requested: `{slack.get('local_demo_requested')}`",
         f"- Live probe requested: `{slack.get('live_probe_requested')}`",
-    ])
+    ]
     if isinstance(slack.get("dry_run"), dict):
         dry = slack["dry_run"]
         lines.append(f"- Dry-run ok: `{dry.get('ok')}` exit `{dry.get('exit_code')}`")
@@ -1734,14 +1827,33 @@ def render_markdown(report: dict[str, Any]) -> str:
         lines.extend(["", "After install:", "", "```bash"])
         lines.extend(str(command) for command in live_probe_commands)
         lines.append("```")
-    lines.extend([
+    return lines
+
+
+def external_gate_lines(summary: dict[str, Any]) -> list[str]:
+    """The external gates this report cannot close from locally parsed evidence."""
+    return [
         "",
         "## External Gates",
         "",
         f"Remaining external gates: `{', '.join(summary.get('unproven_external_gates', [])) or 'none'}`. "
         "Imported target or DGX evidence is required only for the corresponding unproven target surface.",
         "",
-    ])
+    ]
+
+
+def render_markdown(report: dict[str, Any]) -> str:
+    summary = report.get("summary", {})
+    lines = readiness_summary_lines(report, summary)
+    lines.extend(check_table_lines(report))
+    lines.extend(install_bench_lines(report))
+    lines.extend(watch_report_lines(report))
+    lines.extend(node_report_lines(report))
+    lines.extend(target_action_lines(report))
+    lines.extend(surface_smoke_lines(report))
+    lines.extend(dgx_run_lines(report))
+    lines.extend(slack_control_lines(report))
+    lines.extend(external_gate_lines(summary))
     return "\n".join(lines)
 
 
