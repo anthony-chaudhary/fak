@@ -108,10 +108,8 @@ def capability(id: str, claim: str, checks: dict[str, bool], evidence: dict[str,
     }
 
 
-def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
-    root = root or ROOT
-    app_ver = fleet_version.app_version(root)
-    paths = paths or DEFAULT_PATHS
+def load_artifacts(root: Path, paths: dict[str, str]) -> tuple[dict[str, dict[str, Any] | None], dict[str, str]]:
+    """Read every certificate input artifact, recording read failures and schema mismatches as typed errors."""
     loaded: dict[str, dict[str, Any] | None] = {}
     errors: dict[str, str] = {}
     for key, rel_path in paths.items():
@@ -123,24 +121,17 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             expected_schema = EXPECTED_ARTIFACT_SCHEMAS[key]
             if data.get("schema") != expected_schema:
                 errors[f"{key}_schema"] = f"{key} artifact schema is not {expected_schema}"
+    return loaded, errors
 
+
+def bridge_wire_capabilities(loaded: dict[str, dict[str, Any] | None]) -> list[dict[str, Any]]:
+    """Capabilities covering the host-facing wire contracts: OpenAI-compatible conformance, host-profile drift, the client proxy boundary, and native provider transcripts."""
     matrix = loaded["matrix"]
     gate = loaded["gate"]
     contract = loaded["contract"]
-    acceptance = loaded["acceptance"]
-    roster = loaded["roster"]
-    external_state = loaded["external_state"]
+    provider_shapes = list((matrix or {}).get("summary", {}).get("provider_shapes_covered") or [])
 
-    matrix_summary = (matrix or {}).get("summary", {})
-    gate_summary = (gate or {}).get("summary", {})
-    contract_summary = (contract or {}).get("summary", {})
-    acceptance_summary = (acceptance or {}).get("summary", {})
-    roster_summary = (roster or {}).get("summary", {})
-    external_summary = (external_state or {}).get("summary", {})
-    provider_shapes = list(matrix_summary.get("provider_shapes_covered") or [])
-    non_claims = non_claim_ids(contract)
-
-    capabilities = [
+    return [
         capability(
             "openai_compatible_host_conformance",
             "Any host presenting the OpenAI-compatible chat-completions wire can sit behind FAK under compatible aliases, arbitrary base paths, opaque model ids, optional auth, ignored vendor extension fields, and stream=true client responses synthesized after adjudication.",
@@ -200,6 +191,15 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
                 "contract_class": "native_provider_transcript_adapters",
             },
         ),
+    ]
+
+
+def direct_kernel_capabilities(loaded: dict[str, dict[str, Any] | None]) -> list[dict[str, Any]]:
+    """Capabilities covering any-language clients that skip provider quirks and call the FAK/DOS kernel boundary over HTTP or MCP."""
+    gate = loaded["gate"]
+    contract = loaded["contract"]
+
+    return [
         capability(
             "direct_http_syscall_boundary",
             "Any-language clients can bypass provider quirks and call the FAK/DOS kernel boundary over native HTTP.",
@@ -218,6 +218,22 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             },
             {"gate_run": "direct_mcp_syscall", "contract_class": "direct_kernel_mcp_syscall"},
         ),
+    ]
+
+
+def host_inventory_capabilities(loaded: dict[str, dict[str, Any] | None]) -> list[dict[str, Any]]:
+    """Capabilities covering which concrete hosts the certificate speaks for: the target roster, candidate acceptance, committed live evidence, and residual external state."""
+    contract = loaded["contract"]
+    acceptance = loaded["acceptance"]
+    roster = loaded["roster"]
+    external_state = loaded["external_state"]
+
+    contract_summary = (contract or {}).get("summary", {})
+    acceptance_summary = (acceptance or {}).get("summary", {})
+    roster_summary = (roster or {}).get("summary", {})
+    external_summary = (external_state or {}).get("summary", {})
+
+    return [
         capability(
             "expanded_candidate_host_roster",
             "A broad no-spend roster of API-host target templates is syntactically valid, maps to supported bridge wire classes, and carries exact readiness/acceptance rerun commands.",
@@ -270,6 +286,61 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
         ),
     ]
 
+
+def qualification_rules(app_ver: str) -> list[dict[str, Any]]:
+    """The wire-contract predicates a host is judged against: which wires are supported, which are out of contract, and which stay external state."""
+    return [
+        {
+            "version": app_ver,
+            "id": "openai_compatible_wire",
+            "status": "SUPPORTED",
+            "rule": "Host exposes an OpenAI-compatible chat-completions wire; model id, base path, auth, and vendor extension fields may vary within that wire contract. Downstream stream=true is supported by emitting synthesized chunks after full adjudication, not by passing through raw upstream deltas.",
+        },
+        {
+            "version": app_ver,
+            "id": "covered_native_provider_wire",
+            "status": "SUPPORTED",
+            "rule": "Host uses one of the covered native provider transcript wires: anthropic, gemini, openai-compatible, or xai.",
+        },
+        {
+            "version": app_ver,
+            "id": "direct_kernel_wire",
+            "status": "SUPPORTED",
+            "rule": "Client calls the FAK/DOS boundary directly over HTTP or MCP.",
+        },
+        {
+            "version": app_ver,
+            "id": "unknown_wire",
+            "status": "OUT_OF_CONTRACT",
+            "rule": "A host with no compatible wire is not covered until a transcript adapter or direct syscall integration is added.",
+        },
+        {
+            "version": app_ver,
+            "id": "paid_or_keyed_remote_state",
+            "status": "EXTERNAL_STATE",
+            "rule": "Billing, credentials, rate limits, and edge-access restrictions must be resolved before live remote smoke runs can prove that host instance.",
+        },
+    ]
+
+
+def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
+    root = root or ROOT
+    app_ver = fleet_version.app_version(root)
+    paths = paths or DEFAULT_PATHS
+    loaded, errors = load_artifacts(root, paths)
+
+    matrix_summary = (loaded["matrix"] or {}).get("summary", {})
+    gate_summary = (loaded["gate"] or {}).get("summary", {})
+    contract = loaded["contract"]
+    contract_summary = (contract or {}).get("summary", {})
+    non_claims = non_claim_ids(contract)
+
+    capabilities = (
+        bridge_wire_capabilities(loaded)
+        + direct_kernel_capabilities(loaded)
+        + host_inventory_capabilities(loaded)
+    )
+
     failed = [item for item in capabilities if item["status"] != "PROVEN"]
     missing_non_claims = sorted(REQUIRED_NON_CLAIMS - non_claims)
     certificate_gate = (
@@ -294,38 +365,7 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             "artifact_errors": len(errors),
             "certificate_gate": certificate_gate,
         },
-        "qualification_rules": [
-            {
-                "version": app_ver,
-                "id": "openai_compatible_wire",
-                "status": "SUPPORTED",
-                "rule": "Host exposes an OpenAI-compatible chat-completions wire; model id, base path, auth, and vendor extension fields may vary within that wire contract. Downstream stream=true is supported by emitting synthesized chunks after full adjudication, not by passing through raw upstream deltas.",
-            },
-            {
-                "version": app_ver,
-                "id": "covered_native_provider_wire",
-                "status": "SUPPORTED",
-                "rule": "Host uses one of the covered native provider transcript wires: anthropic, gemini, openai-compatible, or xai.",
-            },
-            {
-                "version": app_ver,
-                "id": "direct_kernel_wire",
-                "status": "SUPPORTED",
-                "rule": "Client calls the FAK/DOS boundary directly over HTTP or MCP.",
-            },
-            {
-                "version": app_ver,
-                "id": "unknown_wire",
-                "status": "OUT_OF_CONTRACT",
-                "rule": "A host with no compatible wire is not covered until a transcript adapter or direct syscall integration is added.",
-            },
-            {
-                "version": app_ver,
-                "id": "paid_or_keyed_remote_state",
-                "status": "EXTERNAL_STATE",
-                "rule": "Billing, credentials, rate limits, and edge-access restrictions must be resolved before live remote smoke runs can prove that host instance.",
-            },
-        ],
+        "qualification_rules": qualification_rules(app_ver),
         "capabilities": capabilities,
         "non_claims": [
             fleet_version.versioned(item, app_ver)

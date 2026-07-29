@@ -209,10 +209,8 @@ def required_witness_detail(matrix: dict[str, Any], gate: dict[str, Any], id: st
     }
 
 
-def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
-    root = root or ROOT
-    app_ver = fleet_version.app_version(root)
-    paths = paths or DEFAULT_PATHS
+def load_artifacts(root: Path, paths: dict[str, str]) -> tuple[dict[str, dict[str, Any] | None], dict[str, str]]:
+    """Read every proof input artifact, recording read failures and schema mismatches as typed errors."""
     loaded: dict[str, dict[str, Any] | None] = {}
     errors: dict[str, str] = {}
     for key, rel_path in paths.items():
@@ -224,13 +222,18 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             expected_schema = EXPECTED_ARTIFACT_SCHEMAS.get(key)
             if expected_schema and data.get("schema") != expected_schema:
                 errors[f"{key}_schema"] = f"{key} artifact schema is not {expected_schema}"
+    return loaded, errors
 
+
+def conformance_witness_requirements(
+    loaded: dict[str, dict[str, Any] | None],
+    errors: dict[str, str],
+    paths: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Rows for the source witness matrix, the executed witness gate, and the two OpenAI-compatible conformance witnesses."""
     requirements: list[dict[str, Any]] = []
 
     matrix = loaded["matrix"]
-    roster = loaded["roster"]
-    acceptance = loaded["acceptance"]
-    roster_summary = (roster or {}).get("summary", {})
     if matrix is None:
         requirements.append(missing_row("source_witness_matrix", "Required source witnesses resolve.", errors["matrix"]))
     else:
@@ -292,6 +295,21 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             paths["gate"],
             profile_detail,
         ))
+
+    return requirements
+
+
+def host_roster_requirements(
+    loaded: dict[str, dict[str, Any] | None],
+    errors: dict[str, str],
+    paths: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Rows for committed live evidence, current /models readiness, candidate acceptance, the target roster, and its external state."""
+    requirements: list[dict[str, Any]] = []
+
+    roster = loaded["roster"]
+    acceptance = loaded["acceptance"]
+    roster_summary = (roster or {}).get("summary", {})
 
     live = loaded["live"]
     if live is None:
@@ -411,6 +429,19 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             s,
         ))
 
+    return requirements
+
+
+def contract_certificate_requirements(
+    loaded: dict[str, dict[str, Any] | None],
+    errors: dict[str, str],
+    paths: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Rows for the compatibility contract, the conformance certificate that bounds it, and per-target qualification against it."""
+    requirements: list[dict[str, Any]] = []
+
+    roster = loaded["roster"]
+
     contract = loaded["contract"]
     if contract is None:
         requirements.append(missing_row("compatibility_contract", "Compatible API-host classes are explicitly scoped and proven.", errors["contract"]))
@@ -486,6 +517,19 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             s,
         ))
 
+    return requirements
+
+
+def live_smoke_requirements(
+    loaded: dict[str, dict[str, Any] | None],
+    errors: dict[str, str],
+    paths: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Rows for the credential-conditioned live-smoke queue and the runner ledger that executes or fails it closed."""
+    requirements: list[dict[str, Any]] = []
+
+    roster = loaded["roster"]
+
     live_queue = loaded["live_queue"]
     if live_queue is None:
         requirements.append(missing_row(
@@ -540,6 +584,17 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             s,
         ))
 
+    return requirements
+
+
+def permission_benchmark_requirements(
+    loaded: dict[str, dict[str, Any] | None],
+    errors: dict[str, str],
+    paths: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Rows for the permission-system benchmark contrast and the external source audit that verifies its claims."""
+    requirements: list[dict[str, Any]] = []
+
     benchmark = loaded["benchmark"]
     if benchmark is None:
         requirements.append(missing_row("permission_system_benchmark", "Permission benchmark pins the FAK-vs-Claude contrast.", errors["benchmark"]))
@@ -585,17 +640,12 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             s,
         ))
 
-    if errors:
-        requirements.append(row(
-            "artifact_integrity",
-            "Proof rollup input artifacts are readable JSON objects with expected schemas.",
-            False,
-            "",
-            errors,
-        ))
+    return requirements
 
-    failed = [r for r in requirements if r["status"] != "PROVEN"]
-    residual_scope = [
+
+def residual_scope_rows(app_ver: str) -> list[dict[str, Any]]:
+    """The claims this rollup deliberately does not make even when every requirement is proven."""
+    return [
         {
             "version": app_ver,
             "id": "universal_any_api_host",
@@ -609,6 +659,31 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             "reason": "Additional live tool-calling runs for paid/keyed roster targets require billing/API-key/access state beyond this no-spend gate; the external-state audit, live-smoke queue, and runner ledger record the current typed blockers and exact retry evidence.",
         },
     ]
+
+
+def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
+    root = root or ROOT
+    app_ver = fleet_version.app_version(root)
+    paths = paths or DEFAULT_PATHS
+    loaded, errors = load_artifacts(root, paths)
+
+    requirements: list[dict[str, Any]] = []
+    requirements.extend(conformance_witness_requirements(loaded, errors, paths))
+    requirements.extend(host_roster_requirements(loaded, errors, paths))
+    requirements.extend(contract_certificate_requirements(loaded, errors, paths))
+    requirements.extend(live_smoke_requirements(loaded, errors, paths))
+    requirements.extend(permission_benchmark_requirements(loaded, errors, paths))
+
+    if errors:
+        requirements.append(row(
+            "artifact_integrity",
+            "Proof rollup input artifacts are readable JSON objects with expected schemas.",
+            False,
+            "",
+            errors,
+        ))
+
+    failed = [r for r in requirements if r["status"] != "PROVEN"]
     return {
         "schema": SCHEMA,
         "app_version": app_ver,
@@ -622,7 +697,7 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             "completion_scope": "BRIDGE_PROVEN_SCOPE_BOUNDED" if len(failed) == 0 else "INCOMPLETE",
         },
         "requirements": requirements,
-        "residual_scope": residual_scope,
+        "residual_scope": residual_scope_rows(app_ver),
         "artifacts": paths,
         "artifact_errors": errors,
     }

@@ -180,10 +180,8 @@ def audit_row(id: str, requirement: str, status: str, evidence: str, detail: dic
     }
 
 
-def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
-    root = root or ROOT
-    paths = paths or DEFAULT_PATHS
-    app_ver = fleet_version.app_version(root)
+def load_artifacts(root: Path, paths: dict[str, str]) -> tuple[dict[str, dict[str, Any] | None], dict[str, str]]:
+    """Read every goal-audit input artifact, recording read failures and schema mismatches as typed errors."""
     loaded: dict[str, dict[str, Any] | None] = {}
     errors: dict[str, str] = {}
     for key, rel in paths.items():
@@ -195,19 +193,14 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
             expected_schema = EXPECTED_ARTIFACT_SCHEMAS.get(key)
             if expected_schema and data.get("schema") != expected_schema:
                 errors[f"{key}_schema"] = f"{key} artifact schema is not {expected_schema}"
+    return loaded, errors
 
-    matrix = loaded["matrix"]
-    gate = loaded["gate"]
+
+def bridge_coverage_rows(loaded: dict[str, dict[str, Any] | None], paths: dict[str, str]) -> list[dict[str, Any]]:
+    """Rows for the headline bridge claim, the candidate-host acceptance workflow, and the no-spend target roster."""
     proof = loaded["proof"]
-    benchmark = loaded["benchmark"]
     acceptance = loaded["acceptance"]
     roster = loaded["roster"]
-    retry = loaded["retry"]
-    external_state = loaded["external_state"]
-    certificate = loaded["certificate"]
-    qualification = loaded["qualification"]
-    live_queue = loaded["live_queue"]
-    live_runner = loaded["live_runner"]
 
     rows: list[dict[str, Any]] = []
     proof_summary = (proof or {}).get("summary", {})
@@ -262,6 +255,18 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
         roster_summary,
     ))
 
+    return rows
+
+
+def conformance_rows(loaded: dict[str, dict[str, Any] | None], paths: dict[str, str]) -> list[dict[str, Any]]:
+    """Rows for host-agnostic conformance, the OpenAI-compatible host-profile drift corpus, and the certificate that bounds them."""
+    matrix = loaded["matrix"]
+    gate = loaded["gate"]
+    proof = loaded["proof"]
+    certificate = loaded["certificate"]
+
+    rows: list[dict[str, Any]] = []
+
     host_agnostic_ok, host_detail = host_agnostic_detail(matrix, gate)
     rows.append(audit_row(
         "host_agnostic_compatible_api_host",
@@ -295,6 +300,22 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
         paths["certificate"],
         cert_summary,
     ))
+
+    return rows
+
+
+def external_state_rows(loaded: dict[str, dict[str, Any] | None], paths: dict[str, str]) -> list[dict[str, Any]]:
+    """Rows for the blocked-host retry packet, the paid/keyed external-state audit, and the per-target qualification predicate."""
+    proof = loaded["proof"]
+    acceptance = loaded["acceptance"]
+    roster = loaded["roster"]
+    retry = loaded["retry"]
+    external_state = loaded["external_state"]
+    qualification = loaded["qualification"]
+
+    rows: list[dict[str, Any]] = []
+    acceptance_summary = (acceptance or {}).get("summary", {})
+    roster_summary = (roster or {}).get("summary", {})
 
     retry_summary = (retry or {}).get("summary", {})
     retry_ok = (
@@ -355,6 +376,19 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
         qualification_summary,
     ))
 
+    return rows
+
+
+def live_execution_rows(loaded: dict[str, dict[str, Any] | None], paths: dict[str, str]) -> list[dict[str, Any]]:
+    """Rows for the credential-conditioned live-smoke execution queue and the runner gate that drains it or fails closed."""
+    proof = loaded["proof"]
+    roster = loaded["roster"]
+    live_queue = loaded["live_queue"]
+    live_runner = loaded["live_runner"]
+
+    rows: list[dict[str, Any]] = []
+    roster_summary = (roster or {}).get("summary", {})
+
     live_queue_summary = (live_queue or {}).get("summary", {})
     queue_state_total = sum(int(live_queue_summary.get(key, 0) or 0) for key in [
         "complete",
@@ -401,6 +435,18 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
         live_runner_summary,
     ))
 
+    return rows
+
+
+def benchmark_rows(loaded: dict[str, dict[str, Any] | None], paths: dict[str, str]) -> list[dict[str, Any]]:
+    """Rows for the cross-system permission benchmark and the DOS-style proof spine that backs the bridge claim."""
+    proof = loaded["proof"]
+    benchmark = loaded["benchmark"]
+
+    rows: list[dict[str, Any]] = []
+    proof_summary = (proof or {}).get("summary", {})
+    proof_gate = proof_summary.get("proof_gate") is True
+
     systems = ["fak_dos_gateway", "claude_code_auto", "codex_workspace_sandbox", "github_copilot_cloud_agent", "manual_prompts", "bypass_permissions"]
     metrics = {system: metric(benchmark, system) for system in systems}
     benchmark_ok = (
@@ -432,6 +478,15 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
         {"proof_rows": dos_rows, "proof_summary": proof_summary},
     ))
 
+    return rows
+
+
+def residual_claim_rows(loaded: dict[str, dict[str, Any] | None], paths: dict[str, str]) -> list[dict[str, Any]]:
+    """Rows that carry the proof's own residual scope forward: universal host coverage and unfinished paid/keyed live runs."""
+    proof = loaded["proof"]
+
+    rows: list[dict[str, Any]] = []
+
     universal = proof_residual(proof, "universal_any_api_host")
     rows.append(audit_row(
         "universal_any_api_host",
@@ -449,6 +504,23 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
         paths["proof"],
         {"reason": external.get("reason", "External host state not resolved.")},
     ))
+
+    return rows
+
+
+def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
+    root = root or ROOT
+    paths = paths or DEFAULT_PATHS
+    app_ver = fleet_version.app_version(root)
+    loaded, errors = load_artifacts(root, paths)
+
+    rows: list[dict[str, Any]] = []
+    rows.extend(bridge_coverage_rows(loaded, paths))
+    rows.extend(conformance_rows(loaded, paths))
+    rows.extend(external_state_rows(loaded, paths))
+    rows.extend(live_execution_rows(loaded, paths))
+    rows.extend(benchmark_rows(loaded, paths))
+    rows.extend(residual_claim_rows(loaded, paths))
 
     if errors:
         rows.append(audit_row(
