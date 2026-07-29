@@ -97,12 +97,12 @@ func TestBodyMarkerRoundTripAndOccurrences(t *testing.T) {
 	if MarkerKey(body) != c.Key() {
 		t.Fatalf("marker key %q != complaint key %q", MarkerKey(body), c.Key())
 	}
-	if occurrencesOf(body) != 1 {
-		t.Fatalf("fresh body occurrences = %d, want 1", occurrencesOf(body))
+	if OccurrencesOf(body) != 1 {
+		t.Fatalf("fresh body occurrences = %d, want 1", OccurrencesOf(body))
 	}
 	body5 := c.Body(5)
-	if occurrencesOf(body5) != 5 {
-		t.Fatalf("occurrences read-back = %d, want 5", occurrencesOf(body5))
+	if OccurrencesOf(body5) != 5 {
+		t.Fatalf("occurrences read-back = %d, want 5", OccurrencesOf(body5))
 	}
 	if !strings.Contains(body, c.Rationale) {
 		t.Fatal("body must carry the agent's rationale verbatim")
@@ -154,8 +154,8 @@ func TestBuildPlanCreateThenUpdateEscalates(t *testing.T) {
 	if row2.Occurrences != 2 {
 		t.Fatalf("re-file occurrences = %d, want 2", row2.Occurrences)
 	}
-	if occurrencesOf(row2.Body) != 2 {
-		t.Fatalf("re-file body occurrences = %d, want 2", occurrencesOf(row2.Body))
+	if OccurrencesOf(row2.Body) != 2 {
+		t.Fatalf("re-file body occurrences = %d, want 2", OccurrencesOf(row2.Body))
 	}
 
 	// An unrelated existing issue must not match.

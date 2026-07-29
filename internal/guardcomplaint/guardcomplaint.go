@@ -438,9 +438,16 @@ func MarkerKey(body string) string {
 	return strings.TrimSpace(m[1])
 }
 
-// occurrencesOf reads the occurrence count back out of an existing complaint body, or 0
-// when absent/unparseable (so a malformed body restarts the count at 1 on the next file).
-func occurrencesOf(body string) int {
+// OccurrencesOf reads the occurrence count back out of an existing issue body, or 0 when
+// absent/unparseable (so a malformed body restarts the count at 1 on the next file). A
+// negative count reads as 0 too: the field is a tally, and a body claiming -3 is corrupt,
+// not evidence of anything.
+//
+// Exported because the `- occurrences:` line is shared MARKER GRAMMAR, not this package's
+// private field: every producer on the internal/dogfoodissues gh plumbing writes it, and
+// `fak knownbad correlate` carried a byte-identical private reader over a byte-identical
+// private regex. One writer of the line deserves one reader of it.
+func OccurrencesOf(body string) int {
 	m := occurrencesRE.FindStringSubmatch(body)
 	if m == nil {
 		return 0
@@ -474,7 +481,7 @@ func BuildPlan(c Complaint, existing []dogfoodissues.Issue) PlanRow {
 		n := issue.Number
 		row.Number = &n
 		row.State = issue.State
-		row.Occurrences = occurrencesOf(issue.Body) + 1
+		row.Occurrences = OccurrencesOf(issue.Body) + 1
 		break
 	}
 	row.Body = c.Body(row.Occurrences)

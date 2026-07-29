@@ -94,8 +94,8 @@ func TestWorkflowBodyFramingAndMarker(t *testing.T) {
 	if MarkerKey(body) != wf.Key() {
 		t.Fatalf("MarkerKey(workflow body) = %q, want %q", MarkerKey(body), wf.Key())
 	}
-	if occurrencesOf(body) != 3 {
-		t.Fatalf("occurrencesOf(workflow body) = %d, want 3", occurrencesOf(body))
+	if OccurrencesOf(body) != 3 {
+		t.Fatalf("OccurrencesOf(workflow body) = %d, want 3", OccurrencesOf(body))
 	}
 	for _, want := range []string{
 		"# Workflow friction (agent report)",
