@@ -66,6 +66,18 @@ func fixture(t *testing.T) (home, cfg, regPath string) {
 		`"auth":{},` +
 		`"sessions":[{"account":"opencode-glm","project":"work","disp":"LIVE","age_min":3}]}`
 	write(filepath.Join(reg, "sessions.json"), regBody)
+
+	// Pin the registry this fold RESOLVES to, and give it an empty probe ledger, so the
+	// fixture is hermetic. Without both lines shouldConsultProbeLedger falls through to
+	// accountprobe.ResolveRegDir()'s ambient discovery, which finds a real ledger-bearing
+	// Fleet dir on an operator's box and nothing at all in CI — so markUnknownHealth
+	// publishes an unblocked seat as status_source "registry" here and "registry-unknown"
+	// there, and the fold's verdict becomes a fact about whose machine ran it. The empty
+	// ledger is the same shape picker_parity_test.go pins for the same reason (#5439): a
+	// prober IS wired to this dir, it has simply recorded nothing about these accounts.
+	t.Setenv("FLEET_REG_DIR", reg)
+	write(filepath.Join(reg, "probe_ledger.jsonl"), "")
+
 	return home, cfg, filepath.Join(reg, "sessions.json")
 }
 
