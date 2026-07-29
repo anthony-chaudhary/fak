@@ -10,6 +10,7 @@ package main
 //
 //	fak milestone-scorecard            # render the scorecard snapshot
 //	fak milestone-scorecard --json     # the control-pane JSON (corpus.milestone_debt)
+//	fak milestone-scorecard --markdown # the committed snapshot body for the published page
 //	fak milestone-scorecard --check    # advisory gate: exit 0 clean / 1 with debt
 //	fak milestone-scorecard --ratchet  # REAL climb gate: red if matured/progress regress vs the pin
 //	fak milestone-scorecard --pin      # pin today's climb (matured_cells/progress) as the baseline
@@ -41,6 +42,7 @@ func runMilestoneScorecard(stdout, stderr io.Writer, argv []string) int {
 	repo := fs.String("repo", "", "owner/name for the `gh` roadmap queries (default: the current checkout's gh context)")
 	epicsFrom := fs.String("epics-from", "", "load the tracked-epic set from a JSON data file (default: the in-code TrackedEpics). A file carrying a pre-resolved `counts` block folds offline (no gh).")
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
+	asMarkdown := fs.Bool("markdown", false, "emit the committed snapshot body")
 	check := fs.Bool("check", false, "advisory gate: exit non-zero when milestone_debt > 0")
 	ratchet := fs.Bool("ratchet", false, "REAL climb gate: exit non-zero when matured_cells or milestone_progress regress vs docs/milestones/baseline.json")
 	pin := fs.Bool("pin", false, "pin today's climb KPIs (matured_cells/milestone_progress) as the baseline in docs/milestones/baseline.json")
@@ -91,6 +93,16 @@ func runMilestoneScorecard(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		return okExit(payload.OK)
+	}
+	// --markdown is the committed snapshot body for the published page, rendered by the
+	// SAME pkg/scorecard kernel helper every sibling card uses (scorecard.Markdown over a
+	// per-card MarkdownDoc). It sits between --json and --check so the surface order matches
+	// the family's compare > json > markdown > default chain. Like the shared emitScorecard
+	// helper's markdown branch, it exits 0: a snapshot render is document generation, not a
+	// gate, so a regen script is never reddened by the debt it is documenting.
+	if *asMarkdown {
+		fmt.Fprint(stdout, scorecard.Markdown(payload, milestonereport.ScorecardMarkdownDoc(payload)))
+		return 0
 	}
 	if *check {
 		fmt.Fprintln(stdout, scorecard.Render(payload, milestonereport.DebtKey))

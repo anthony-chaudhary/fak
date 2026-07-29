@@ -2,6 +2,7 @@ package productscorecard
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -297,6 +298,68 @@ func TestProductScorecardRenderersAndDocFolder(t *testing.T) {
 	files := RenderDocFolder(p, "2026-06-24")
 	if !strings.Contains(files["README.md"], "Product scorecard") || !strings.Contains(files["README.md"], "Standing at a glance") {
 		t.Fatalf("doc folder readme missing expected content")
+	}
+}
+
+// TestProductScorecardMarkdownSnapshotBody pins the `--markdown` committed snapshot
+// surface (the propagate_markdown convention every sibling card already carries).
+// `fak product-scorecard --markdown` emits RenderDocIndex — the SAME body --markdown-dir
+// writes as docs/product-scorecard/README.md — so the two can never drift, and the body
+// must be DERIVED from the payload (a canned markdown string would satisfy a shape check
+// but not these): the headline table cites the real product-debt, coverage fraction and
+// durable-product count, and the coverage-gap list names the real uncovered sections.
+func TestProductScorecardMarkdownSnapshotBody(t *testing.T) {
+	// testTree()'s catalog carries an uncovered "Tool vDSO" section, so this fold has
+	// real coverage debt to render.
+	p := BuildPayload(".", testData([]Row{testRow(nil)}), testTree(), "")
+	const stamp = "2026-06-24"
+	body := RenderDocIndex(p, stamp)
+
+	// The stdout snapshot IS the committed page: one renderer, no second copy to drift.
+	if got := RenderDocFolder(p, stamp)["README.md"]; got != body {
+		t.Fatalf("--markdown body and the --markdown-dir README.md must be the same render")
+	}
+
+	c := p.Corpus
+	cov := mapValue(c["coverage"])
+	for _, want := range []string{
+		"---\ntitle: \"fak product scorecard",
+		"description: \"Inward product-concept scorecard",
+		"# Product scorecard - durable, real, useful-today",
+		fmt.Sprintf("<!-- product-scorecard: %s ", stamp),
+		fmt.Sprintf("(%d/%d concept sections positioned)", intValue(cov["covered"]), intValue(cov["catalog_total"])),
+		fmt.Sprintf("| **Product-debt** | **%d** (honesty %d + coverage %d) |",
+			intValue(c["product_debt"]), intValue(c["honesty_defects"]), intValue(c["coverage_debt"])),
+		fmt.Sprintf("| Durable products | %d of %d concepts |", intValue(c["durable_products"]), intValue(c["rows"])),
+		"## Coverage gaps",
+		"- Tool vDSO",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("markdown snapshot missing %q:\n%s", want, body)
+		}
+	}
+
+	// Every folded KPI is tabulated with its own row, so the page cannot omit a dimension.
+	for _, k := range p.KPIs {
+		if !strings.Contains(body, "| `"+k.KPI+"` |") {
+			t.Fatalf("markdown snapshot missing a per-KPI row for %q:\n%s", k.KPI, body)
+		}
+	}
+
+	// The stamp is optional provenance, not boilerplate: without one, no stamp comment.
+	if strings.Contains(RenderDocIndex(p, ""), "<!-- product-scorecard:") {
+		t.Fatalf("an empty stamp must not emit a provenance comment")
+	}
+
+	// A fully-covered, zero-debt fold renders no coverage-gap list.
+	tree := testTree()
+	tree.Catalog = []Section{{Section: "Adjudication", Norm: "adjudication"}}
+	clean := RenderDocIndex(BuildPayload(".", testData([]Row{testRow(nil)}), tree, ""), stamp)
+	if !strings.Contains(clean, "| **Product-debt** | **0**") {
+		t.Fatalf("a clean fold must render product-debt 0:\n%s", clean)
+	}
+	if strings.Contains(clean, "## Coverage gaps") {
+		t.Fatalf("a clean fold must render no coverage-gap list:\n%s", clean)
 	}
 }
 

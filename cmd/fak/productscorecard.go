@@ -20,6 +20,7 @@ func runProductScorecard(stdout, stderr io.Writer, argv []string) int {
 	critical := fs.Bool("critical", false, "emit the most-critical-areas backlog")
 	gaps := fs.Bool("gaps", false, "emit the coverage backlog")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
+	asMarkdown := fs.Bool("markdown", false, "emit the committed snapshot body (the docs/product-scorecard/README.md page) to stdout")
 	markdownDir := fs.String("markdown-dir", "", "regenerate the doc folder")
 	dataPath := fs.String("data", "", "data directory (default: tools/product_scorecard.data)")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
@@ -95,6 +96,14 @@ func runProductScorecard(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak product-scorecard: encode json: %v\n", err)
 			return 1
 		}
+	// --markdown is the committed snapshot body for the published page: the SAME
+	// RenderDocIndex body --markdown-dir writes as README.md, emitted to stdout so the
+	// snapshot can be diffed or piped without writing a folder. Sharing one renderer is
+	// what keeps the flag and the published page from drifting. It sits directly after
+	// --json so the surface order matches the family's compare > json > markdown > default
+	// chain (see cmd/fak/conflationscore.go's emitScorecard).
+	case *asMarkdown:
+		fmt.Fprintln(stdout, productscorecard.RenderDocIndex(payload, *stamp))
 	case *chart:
 		fmt.Fprintln(stdout, productscorecard.RenderChart(payload))
 	case *critical:
