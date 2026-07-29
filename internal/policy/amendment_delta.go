@@ -10,7 +10,10 @@
 //	          admitted.
 //	Widen   — a loosening change (added allow, removed deny, loosened
 //	          posture, removed arg rule / secret pattern / block host). The
-//	          caller must hold its gated confirm channel open.
+//	          caller must hold its gated confirm channel open. It is ALSO where
+//	          any change whose direction cannot be proven lands (#5414): a
+//	          mislabelled widen silently loosens the floor, a mislabelled
+//	          tighten only costs a confirm, so uncertainty resolves to Widen.
 //	Frozen  — a change to a FROZEN knob, or to a field the registry does not
 //	          classify at all (fail closed: an unclassified surface is treated
 //	          as frozen, so a new Policy field cannot slip through the gate
@@ -200,6 +203,15 @@ func DiffAmendment(old, next adjudicator.Policy) AmendmentDelta {
 	for _, h := range added {
 		d.route(false, AmendmentChange{Field: "EgressBlockHosts", Label: "added_block_hosts", New: h})
 	}
+
+	// The eight rules above are the original analysis. #5414 supplies a
+	// directional rule for every REMAINING exported field, then sweeps whatever
+	// still has no rule into the gated bucket — see amendment_direction.go. The
+	// order matters only for the audit text; the sweep is a backstop, so it runs last
+	// and, because analyzedAmendmentFields covers everything the two rule layers
+	// handle, it emits nothing until a new Policy field lands.
+	diffRemainingKnobs(&d, old, next)
+	residualAmendmentChanges(&d, old, next, analyzedAmendmentFields)
 
 	return d
 }
