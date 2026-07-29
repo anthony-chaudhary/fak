@@ -32,6 +32,7 @@ Related routes, which this page does **not** restate:
 | Offline capability floor (`fak preflight`) + tamper-evident journal (`fak audit verify`) | **Shipped** |
 | Captured zero-network governed session, **mock-planner seam** | **Shipped** — witness below |
 | Generated SBOM ([`sbom/fak.spdx.json`](sbom/fak.spdx.json)) | **Shipped** |
+| SBOM/`go.mod` drift gate (`go test ./internal/architest -run TestSBOM`) | **Shipped** — see [Regenerate and verify](#regenerate-and-verify-this-sbom) |
 | Captured zero-network governed session, **`--gguf` model-backed seam** | **Not yet witnessed** — see [Not yet witnessed](#not-yet-witnessed) |
 | A *guard* that refuses an auth-less bind on a routable interface | **Not built** — the default is safe, the guard is not. See [Bind safety](#bind-safety-read-this-one) |
 
@@ -205,6 +206,24 @@ the source tree merely declares. If those three disagree with
 [`sbom/fak.spdx.json`](sbom/fak.spdx.json), the SBOM is stale — regenerate it against
 `go list -m all` and re-cut. A release that changes `go.mod` must re-cut the SBOM.
 
+**You no longer have to remember to run them.** `TestSBOMMatchesGoMod` in
+[`internal/architest/sbom_drift_test.go`](../internal/architest/sbom_drift_test.go) reds the
+trunk on every `go test ./...` when this SBOM and `go.mod` disagree, and names the module and
+the direction:
+
+- a module `go.mod` requires that the SBOM omits is the **blind spot** — bytes ship that a
+  reviewer reading this document never learns about;
+- a version the SBOM states that `go.mod` contradicts is worse than silence, because a
+  reviewer checks advisories against the version named here;
+- a module the SBOM lists that `go.mod` no longer requires is the **weaker** direction (no
+  unlisted bytes ship) but still a false claim in a regulated artifact, and it makes an
+  operator stage a module zip the build never asks for.
+
+It also catches a half-refreshed entry (`versionInfo` bumped, purl or proxy URL left behind),
+and fails closed on a `replace` directive, which this SPDX shape has no field to express. The
+gate covers the `require` set, direct and indirect; `exclude` and the toolchain directives are
+deliberately out of scope because they put no bytes in the artifact.
+
 ## Regulated-deployment checklist
 
 Work top to bottom; each line is checkable, not aspirational.
@@ -273,10 +292,13 @@ compute node ([`fleet-compute-nodes.md`](fleet-compute-nodes.md)), capture the
 - **Demotion / retirement evidence**: if epic #3256 re-scopes away from air-gap, or a
   supported distro/image path subsumes the single-binary kit, this kit demotes in favor
   of that path and the checklist moves with it.
-- **Invalidating assumption**: that the dependency set stays at two `golang.org/x`
-  modules. It is not a law — it went from zero to two without this page noticing, which
-  is precisely how the stale "zero deps" claim survived. Nothing automatically reds the
-  trunk when `go.mod` grows and the SBOM does not, so the SBOM here is only as fresh as
-  the last person who ran the three commands in
-  [Regenerate and verify](#regenerate-and-verify-this-sbom). A drift gate that fails CI
-  on SBOM/`go.mod` divergence is the fix, and it is not built.
+- **Invalidating assumption (retired, #5374)**: that the dependency set stays at two
+  `golang.org/x` modules. It is not a law — it went from zero to two without this page
+  noticing, which is precisely how the stale "zero deps" claim survived. The freshness of
+  the SBOM no longer rests on the last person who ran the three commands in
+  [Regenerate and verify](#regenerate-and-verify-this-sbom): `TestSBOMMatchesGoMod` in
+  `internal/architest` reds the trunk on SBOM/`go.mod` divergence and names the drifted
+  module. What the gate still does NOT check is `go.sum`'s `h1:` digests against the ones
+  quoted in each entry's `sourceInfo`, and it compares the declared `require` set rather
+  than `go version -m` on a built binary — so a linked-set surprise that `go.mod` does not
+  show would still get past it.
