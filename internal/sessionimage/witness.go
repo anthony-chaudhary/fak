@@ -28,9 +28,7 @@ package sessionimage
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -77,21 +75,8 @@ func writeWitness(path string, entries []WitnessEntry) error {
 // by LoadDir/verifyParts before this is reachable, so a returned entry is proven whole;
 // this re-reads them only to decode. A version mismatch fails closed.
 func (img *Image) Witness() ([]WitnessEntry, error) {
-	b, err := os.ReadFile(filepath.Join(img.Dir, WitnessFile))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var set WitnessSet
-	if err := json.Unmarshal(b, &set); err != nil {
-		return nil, fmt.Errorf("sessionimage: bad %s: %w", WitnessFile, err)
-	}
-	if set.Version != Version {
-		return nil, fmt.Errorf("sessionimage: witness version %q != %q", set.Version, Version)
-	}
-	return set.Entries, nil
+	return readImageSidecar(img.Dir, WitnessFile, "witness",
+		func(s WitnessSet) (string, []WitnessEntry) { return s.Version, s.Entries })
 }
 
 // VerifiedDone is the one-call "already-completed?" a restore asks before re-firing an

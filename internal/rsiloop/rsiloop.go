@@ -159,14 +159,26 @@ type Journal struct {
 // NewJournal opens (creating, appending) a JSONL journal at path. A path of "-" or
 // "" writes to stdout and is not closed.
 func NewJournal(path string) (*Journal, error) {
-	if path == "" || path == "-" {
-		return &Journal{w: nopWriteCloser{os.Stdout}}, nil
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	w, closer, err := openJSONLSink(path)
 	if err != nil {
 		return nil, err
 	}
-	return &Journal{w: f, closer: true}, nil
+	return &Journal{w: w, closer: closer}, nil
+}
+
+// openJSONLSink opens (creating, appending) a JSONL sink at path. A path of "-" or ""
+// hands back stdout wrapped so Close is a no-op. closer reports whether the returned
+// writer is OWNED by the caller and must be closed — the decision every rsiloop JSONL
+// ledger has to make the same way.
+func openJSONLSink(path string) (io.WriteCloser, bool, error) {
+	if path == "" || path == "-" {
+		return nopWriteCloser{os.Stdout}, false, nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, false, err
+	}
+	return f, true, nil
 }
 
 // Append writes one row as a single JSON line.

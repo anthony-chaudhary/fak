@@ -185,6 +185,60 @@ func ToolDescriptorsFromMaps(in []map[string]any) []ToolDescriptor {
 }
 
 func (c *Catalog) Query(req Request) (Response, error) {
+	return runQuery(req, queryPaths{
+		root:  c.root,
+		cards: c.Cards,
+		// Advisory currency rungs (#3163) for a SINGLE root: two independent axes are
+		// merged — supersession (a newer same-topic dated note supersedes an older one)
+		// and staleness (a card whose cited artifact was deleted since authoring).
+		// STALE wins when both apply: a removed artifact's supersession is moot.
+		rungs: func(all []FeatureCard) map[string]string {
+			rungs := freshnessByKey(all)
+			for k, v := range stalenessByKey(all, c.root) {
+				rungs[k] = v
+			}
+			return rungs
+		},
+		apply:   applyFreshness,
+		rungKey: cardKey,
+		detail:  c.detail,
+	})
+}
+
+// queryPaths names everything the single-root and the cross-repo query paths do
+// DIFFERENTLY. Everything else about a feature query — validating the request,
+// building the candidate set, ranking, the limit cut, the clarification plan and the
+// faulted-detail lookup — is identical, which is what runQuery is. MultiCatalog.Query's
+// own doc comment promises it "mirrors Catalog.Query so the single-root and multi-root
+// paths behave identically apart from the fan-out"; this makes that one body instead of
+// two that have to be kept in step by hand.
+type queryPaths struct {
+	// root is the Root stamped on the response — the catalog's own root, or the
+	// multi-catalog's primary.
+	root string
+	// cards returns the candidate set for a plane (one catalog's, or the Root-stamped
+	// union of every member's).
+	cards func(Plane) []FeatureCard
+	// rungs computes the advisory currency rungs over the FULL candidate set. The two
+	// paths merge the same two axes but at different scope: the single-root path resolves
+	// staleness against its one checkout, while the multi path scopes supersession and
+	// staleness per source root and returns root-qualified keys.
+	rungs func([]FeatureCard) map[string]string
+	// apply stamps the rungs onto the ranked cards, using the same key scheme as rungKey.
+	apply func([]FeatureCard, map[string]string)
+	// rungKey indexes one card into the rungs map: the bare cardKey on the single-root
+	// path, root-qualified on the multi path so two repos carrying a same-named card
+	// never cross-contaminate rungs.
+	rungKey func(FeatureCard) string
+	// detail builds the faulted detail from the card's OWNING catalog — the one member
+	// whose checkout the card's DetailRef resolves against.
+	detail func(FeatureCard, string) (Detail, error)
+}
+
+// runQuery is the shared body of Catalog.Query and MultiCatalog.Query. Freshness is
+// advisory throughout: it is stamped onto the ranked result and the faulted detail card,
+// and never re-orders or drops one.
+func runQuery(req Request, p queryPaths) (Response, error) {
 	q := strings.TrimSpace(req.Query)
 	if q == "" {
 		return Response{}, errors.New("feature query requires a non-empty query")
@@ -196,23 +250,14 @@ func (c *Catalog) Query(req Request) (Response, error) {
 	if plane == "" {
 		return Response{}, fmt.Errorf("unknown feature query plane %q (want dev, live, or all)", req.Plane)
 	}
-	all := c.Cards(plane)
+	all := p.cards(plane)
 	cards := rankCards(all, q)
 	if req.Limit > 0 && len(cards) > req.Limit {
 		cards = cards[:req.Limit]
 	}
-	// Advisory currency rungs (#3163): computed over the full candidate set,
-	// stamped onto the ranked result and the faulted detail card. Advisory only —
-	// this never re-orders or drops a card. Two independent axes are merged:
-	//   - supersession: a newer same-topic dated note supersedes an older one.
-	//   - staleness: a card whose cited artifact was deleted since authoring.
-	// STALE wins when both apply — a removed artifact's supersession is moot.
-	rungs := freshnessByKey(all)
-	for k, v := range stalenessByKey(all, c.root) {
-		rungs[k] = v
-	}
-	applyFreshness(cards, rungs)
-	resp := Response{Root: c.root, Query: q, Plane: plane, Cards: cards}
+	rungs := p.rungs(all)
+	p.apply(cards, rungs)
+	resp := Response{Root: p.root, Query: q, Plane: plane, Cards: cards}
 	if len(req.MissingContext) > 0 {
 		plan := MissingContextClarifications(req.MissingContext)
 		resp.Clarifications = &plan
@@ -222,10 +267,10 @@ func (c *Catalog) Query(req Request) (Response, error) {
 		if !ok {
 			return Response{}, fmt.Errorf("feature detail %q not found", req.Detail)
 		}
-		if r, ok := rungs[cardKey(card)]; ok {
+		if r, ok := rungs[p.rungKey(card)]; ok {
 			card.Freshness = r
 		}
-		d, err := c.detail(card, q)
+		d, err := p.detail(card, q)
 		if err != nil {
 			return Response{}, err
 		}

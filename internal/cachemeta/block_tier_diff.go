@@ -78,18 +78,8 @@ func DiffBlockStates(prev, cur map[string]BlockTierState) []BlockDelta {
 	// sort for a stable, replay-reproducible order.
 	seen := make(map[string]struct{}, len(prev)+len(cur))
 	hashes := make([]string, 0, len(prev)+len(cur))
-	for h := range prev {
-		if _, ok := seen[h]; !ok {
-			seen[h] = struct{}{}
-			hashes = append(hashes, h)
-		}
-	}
-	for h := range cur {
-		if _, ok := seen[h]; !ok {
-			seen[h] = struct{}{}
-			hashes = append(hashes, h)
-		}
-	}
+	hashes = appendUnseenHashes(hashes, seen, prev)
+	hashes = appendUnseenHashes(hashes, seen, cur)
 	sort.Strings(hashes)
 
 	out := make([]BlockDelta, 0, len(hashes))
@@ -137,4 +127,18 @@ func DiffBlockStates(prev, cur map[string]BlockTierState) []BlockDelta {
 		return nil
 	}
 	return out
+}
+
+// appendUnseenHashes appends every block hash of m that seen does not already carry,
+// marking it seen. DiffBlockStates runs it once over prev and once over cur to gather
+// their union so each hash yields exactly one event; the caller sorts afterwards, so
+// map iteration order does not reach the result.
+func appendUnseenHashes(hashes []string, seen map[string]struct{}, m map[string]BlockTierState) []string {
+	for h := range m {
+		if _, ok := seen[h]; !ok {
+			seen[h] = struct{}{}
+			hashes = append(hashes, h)
+		}
+	}
+	return hashes
 }

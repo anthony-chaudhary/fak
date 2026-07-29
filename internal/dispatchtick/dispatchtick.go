@@ -240,9 +240,7 @@ func BuildWorkerCommand(backend, prompt string, launch WorkerLaunch) ([]string, 
 		// non-empty so an unconfigured fleet is byte-identical to today (model==""), and
 		// emitted BEFORE the effort/ultracode and --fallback-model flags to match the
 		// interactive launcher's ordering (accounts_launch.go).
-		if strings.TrimSpace(launch.Model) != "" {
-			cmd = append(cmd, "--model", launch.Model)
-		}
+		cmd = appendModelFlag(cmd, "--model", launch.Model)
 		switch {
 		case launch.Ultracode:
 			cmd = append(cmd, "--settings", UltracodeSettingsArg)
@@ -258,19 +256,25 @@ func BuildWorkerCommand(backend, prompt string, launch WorkerLaunch) ([]string, 
 		// failures such as GLM quota walls to its logger, and without this flag #1275
 		// degrades into a banner-only no-op log.
 		cmd := []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions"}
-		if strings.TrimSpace(launch.Model) != "" {
-			cmd = append(cmd, "-m", launch.Model)
-		}
-		return append(cmd, OpencodePromptNotice), nil
+		return append(appendModelFlag(cmd, "-m", launch.Model), OpencodePromptNotice), nil
 	case "codex":
 		cmd := []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"}
-		if strings.TrimSpace(launch.Model) != "" {
-			cmd = append(cmd, "-m", launch.Model)
-		}
-		return append(cmd, "-"), nil
+		return append(appendModelFlag(cmd, "-m", launch.Model), "-"), nil
 	default:
 		return nil, fmt.Errorf("unknown backend %q; expected claude, opencode, or codex", backend)
 	}
+}
+
+// appendModelFlag appends the backend's model selector only when a model is actually
+// configured, so an unconfigured fleet emits argv byte-identical to the pre-Layer-4
+// shape (model==""). flag is the backend's own spelling of the selector — claude takes
+// `--model`, opencode and codex take `-m` — which is exactly why this is a parameter
+// rather than a constant.
+func appendModelFlag(cmd []string, flag, model string) []string {
+	if strings.TrimSpace(model) == "" {
+		return cmd
+	}
+	return append(cmd, flag, model)
 }
 
 // WorkerStdinPayload returns the prompt bytes that must be piped to, or staged for,

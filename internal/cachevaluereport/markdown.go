@@ -129,13 +129,7 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 	// Compaction lever health (#2039): surface the fire/starve/shed trend in the markdown
 	// P&L too, so an inert lever (fired>0, shed=0) is distinguishable from an idle one
 	// across both render paths, not only the terminal one.
-	var compactionBuckets []SavingsBucket
-	for _, b := range r.Track2 {
-		if b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction") {
-			compactionBuckets = append(compactionBuckets, b)
-		}
-	}
-	if len(compactionBuckets) > 0 {
+	if compactionBuckets := compactionLeverBuckets(r.Track2); len(compactionBuckets) > 0 {
 		fmt.Fprintf(&sb, "### Compaction lever health (fire/starve/shed trend)\n\n")
 		fmt.Fprintf(&sb, "| week | sessions | fired | bailed | anchor_starved | shed_tok | budget |\n|---|---|---|---|---|---|---|\n")
 		for _, b := range compactionBuckets {

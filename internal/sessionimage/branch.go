@@ -37,7 +37,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/recall"
@@ -125,13 +124,9 @@ func BranchDir(parentDir, branchDir string, opts BranchOptions) (Meta, error) {
 	// digests — content-addressed sharing is why the fork is cheap), then the fresh
 	// image.json: new id, parent_id link, inherited identity (with any override), and the
 	// migration-log entry that makes the fork an audited fact.
-	parts, err := indexParts(branchDir)
+	parts, now, err := indexPartsAndStamp(branchDir, opts.Now)
 	if err != nil {
 		return Meta{}, err
-	}
-	now := opts.Now
-	if now == 0 {
-		now = time.Now().Unix()
 	}
 	meta := Meta{
 		Version:     Version,

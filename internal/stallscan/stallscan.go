@@ -333,17 +333,11 @@ func Classify(s Sample, t Thresholds) Verdict {
 	// Scheduler/syscall thrash.
 	if t.ContextSwitchStall > 0 && s.ContextSwitchesPerSec >= t.ContextSwitchStall {
 		stall = true
-		if v.Cause == CauseNone {
-			v.Cause = CauseSchedThrash
-		}
-		v.Reasons = append(v.Reasons, fmt.Sprintf("%0.f context switches/sec (>= %0.f)", s.ContextSwitchesPerSec, t.ContextSwitchStall))
+		noteSchedThrash(&v, "context switches", s.ContextSwitchesPerSec, t.ContextSwitchStall)
 	}
 	if t.SysCallStall > 0 && s.SystemCallsPerSec >= t.SysCallStall {
 		stall = true
-		if v.Cause == CauseNone {
-			v.Cause = CauseSchedThrash
-		}
-		v.Reasons = append(v.Reasons, fmt.Sprintf("%0.f syscalls/sec (>= %0.f)", s.SystemCallsPerSec, t.SysCallStall))
+		noteSchedThrash(&v, "syscalls", s.SystemCallsPerSec, t.SysCallStall)
 	}
 
 	// Handle signals are WARNINGS, not freezes: append their reasons now so they
@@ -388,6 +382,18 @@ func Classify(s Sample, t Thresholds) Verdict {
 		}
 	}
 	return v
+}
+
+// noteSchedThrash records one scheduler/syscall-thrash trip on v: it claims
+// CauseSchedThrash only when nothing more specific already owns the attribution, then
+// appends the reason. `unit` carries each call site's own wording ("context switches"
+// / "syscalls") so the rendered reasons stay exactly what they were; the caller keeps
+// ownership of the `stall` flag because only it knows its own threshold gate.
+func noteSchedThrash(v *Verdict, unit string, rate, limit float64) {
+	if v.Cause == CauseNone {
+		v.Cause = CauseSchedThrash
+	}
+	v.Reasons = append(v.Reasons, fmt.Sprintf("%0.f %s/sec (>= %0.f)", rate, unit, limit))
 }
 
 // worstHandleHog returns the single process with the most open handles among

@@ -37,7 +37,6 @@ package agent
 // by a restorable marker), so it is off by default and gated on the same working-set guard.
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -101,32 +100,18 @@ func ElideStaleReadsWithOutcome(raw []byte) ([]byte, StaleElideOutcome) {
 	if len(raw) == 0 {
 		return raw, StaleElideOutcome{Reason: StaleReasonOff}
 	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return raw, StaleElideOutcome{Reason: StaleReasonNonJSON}
-	}
-	msgsRaw, ok := obj["messages"]
-	if !ok {
-		return raw, StaleElideOutcome{Reason: StaleReasonNoMsgsKey}
-	}
-	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
-	if !ok {
-		// Structural: `messages` is present but is not a decodable JSON array.
-		return raw, StaleElideOutcome{Reason: StaleReasonDecodeFailed}
-	}
-	if len(elems) < 2 {
-		return raw, StaleElideOutcome{Reason: StaleReasonTooFewMsgs}
-	}
-
-	// Protected-prefix anchor — the SAME rule as oversized elision (first cache_control breakpoint,
-	// deep detector), with the same system-only fallback. Require an anchor or we cannot know the
-	// cache boundary and must not touch the body.
-	pfxEnd := firstBreakpointForElide(elems)
-	if pfxEnd < 0 {
-		sysRaw, ok := obj["system"]
-		if !ok || !rawHasCacheControl(sysRaw) || bytes.Index(raw, sysRaw) >= spans[0].start {
-			return raw, StaleElideOutcome{Reason: StaleReasonNoBreakpoint}
-		}
+	// Decode + protected-prefix anchor — the SAME rule as oversized elision (first cache_control
+	// breakpoint, deep detector, same system-only fallback), so both passes run the one shared
+	// preamble; only the Reason words are this pass's own.
+	elems, spans, pfxEnd, reason := anchorElidableMessages(raw, elideAnchorReasons{
+		nonJSON:      StaleReasonNonJSON,
+		noMsgsKey:    StaleReasonNoMsgsKey,
+		decodeFailed: StaleReasonDecodeFailed,
+		tooFewMsgs:   StaleReasonTooFewMsgs,
+		noBreakpoint: StaleReasonNoBreakpoint,
+	})
+	if reason != "" {
+		return raw, StaleElideOutcome{Reason: reason}
 	}
 
 	// Classify the read/edit lifecycle across the WHOLE message list: staleness is a cross-turn
@@ -140,19 +125,15 @@ func ElideStaleReadsWithOutcome(raw []byte) ([]byte, StaleElideOutcome) {
 	// The eligible band: strictly after the protected prefix, before the recent working-set window,
 	// never a message with cache_control reachable by the shrinker. Rewriting here keeps the head
 	// prefix byte-identical (proven below); later breakpoints cascade-burst, as documented.
-	lastEligible := len(elems) - elideRecentKeepMsgs // exclusive
 	var edits []spliceEdit
 	var restores []StaleRestore
 	shed := 0
-	for i := pfxEnd + 1; i < lastEligible; i++ {
-		if i < 0 || messageHasCacheControlForElide(elems[i]) {
-			continue
-		}
-		es, rs, sh := idx.collectStaleReadEdits(spans[i].start, i, elems[i])
+	eachElidableMessage(elems, spans, pfxEnd, func(start, i int, elem json.RawMessage) {
+		es, rs, sh := idx.collectStaleReadEdits(start, i, elem)
 		edits = append(edits, es...)
 		restores = append(restores, rs...)
 		shed += sh
-	}
+	})
 	if len(edits) == 0 {
 		return raw, StaleElideOutcome{Reason: StaleReasonNoStaleReads}
 	}

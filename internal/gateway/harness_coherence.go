@@ -185,6 +185,23 @@ func (h *harnessCoherenceMetrics) evictColdestCoordLocked() {
 	delete(h.coords, victim)
 }
 
+// coordEntryLocked returns the trace's coord entry, admitting a new one — evicting the
+// coldest session first when the table is at maxCoherenceSessions — when the trace has
+// none. The caller must already hold h.mu. `fresh` supplies the new entry, which is the
+// only thing the two admission sites differ on: observe primes a configured coordinator,
+// the prefix guard primes a bare baseline entry.
+func (h *harnessCoherenceMetrics) coordEntryLocked(trace string, fresh func() *coordEntry) *coordEntry {
+	entry := h.coords[trace]
+	if entry == nil {
+		if len(h.coords) >= maxCoherenceSessions {
+			h.evictColdestCoordLocked()
+		}
+		entry = fresh()
+		h.coords[trace] = entry
+	}
+	return entry
+}
+
 func newHarnessCoherenceMetrics(ttl time.Duration) *harnessCoherenceMetrics {
 	if ttl <= 0 {
 		ttl = compactcohere.DefaultProviderCacheTTL
@@ -227,19 +244,14 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	entry := h.coords[trace]
-	if entry == nil {
-		if len(h.coords) >= maxCoherenceSessions {
-			h.evictColdestCoordLocked()
-		}
-		entry = &coordEntry{coord: compactcohere.NewConfig(compactcohere.Config{
+	entry := h.coordEntryLocked(trace, func() *coordEntry {
+		return &coordEntry{coord: compactcohere.NewConfig(compactcohere.Config{
 			TTL:                    h.ttl,
 			ResidentCeiling:        h.residentCeiling,
 			CeilingStreakToYield:   h.ceilingStreakToYield,
 			NonHoldRewritesToReset: h.nonHoldRewritesToReset,
 		})}
-		h.coords[trace] = entry
-	}
+	})
 	var idle time.Duration
 	if !entry.lastTurn.IsZero() {
 		idle = now.Sub(entry.lastTurn)
@@ -308,16 +320,9 @@ func (h *harnessCoherenceMetrics) observePrefixGuard(trace, digest string) {
 		h.prefixGuardUnknown++
 		return
 	}
-	entry := h.coords[trace]
-	if entry == nil {
-		// observe folds first, so this only happens on an eviction race; treat as a fresh
-		// baseline exactly like a first turn.
-		if len(h.coords) >= maxCoherenceSessions {
-			h.evictColdestCoordLocked()
-		}
-		entry = &coordEntry{}
-		h.coords[trace] = entry
-	}
+	// observe folds first, so a miss here only happens on an eviction race; treat it as
+	// a fresh baseline exactly like a first turn.
+	entry := h.coordEntryLocked(trace, func() *coordEntry { return &coordEntry{} })
 	switch entry.guardDigest {
 	case "":
 		// First anchored turn primes the baseline; the prefix is trivially self-consistent.

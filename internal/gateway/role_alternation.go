@@ -120,10 +120,7 @@ func CheckRoleAlternation(msgs []agent.Message) RoleAlternationVerdict {
 			}
 		case agent.RoleAssistant:
 			if i > 0 && msgs[i-1].Role == agent.RoleAssistant {
-				flaws = append(flaws, AlternationFlaw{
-					Kind: FlawSameRoleStacked, Index: i, Role: m.Role,
-					Detail: "assistant message at index " + strconv.Itoa(i) + " follows another assistant message",
-				})
+				flaws = append(flaws, sameRoleStackedFlaw(i, m.Role, "assistant"))
 			}
 			pending = len(m.ToolCalls)
 		case agent.RoleTool:
@@ -137,14 +134,21 @@ func CheckRoleAlternation(msgs []agent.Message) RoleAlternationVerdict {
 					Detail: "user message at index " + strconv.Itoa(i) + " is spliced into an open tool exchange (" + strconv.Itoa(pending) + " result(s) still owed)",
 				})
 			} else if i > 0 && msgs[i-1].Role == agent.RoleUser {
-				flaws = append(flaws, AlternationFlaw{
-					Kind: FlawSameRoleStacked, Index: i, Role: m.Role,
-					Detail: "user message at index " + strconv.Itoa(i) + " follows another user message",
-				})
+				flaws = append(flaws, sameRoleStackedFlaw(i, m.Role, "user"))
 			}
 		}
 	}
 	return RoleAlternationVerdict{OK: len(flaws) == 0, Flaws: flaws}
+}
+
+// sameRoleStackedFlaw builds the FlawSameRoleStacked entry the assistant and user arms
+// both raise when a message repeats the previous message's role. `noun` carries each
+// site's own wording ("assistant" / "user"), which is all the two Details differ on.
+func sameRoleStackedFlaw(i int, role, noun string) AlternationFlaw {
+	return AlternationFlaw{
+		Kind: FlawSameRoleStacked, Index: i, Role: role,
+		Detail: noun + " message at index " + strconv.Itoa(i) + " follows another " + noun + " message",
+	}
 }
 
 // RepairRoleAlternation attempts to make a mal-formed array well-formed without

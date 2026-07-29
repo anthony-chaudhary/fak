@@ -10,12 +10,7 @@ import "strings"
 // owns the schema via Snapshot.PrometheusText). Passing nil detaches it; the default
 // `fak serve` path never sets it and renders nothing. Safe on a nil Server.
 func (s *Server) SetHarnessMetricsProvider(fn func() string) {
-	if s == nil || s.metrics == nil {
-		return
-	}
-	s.metrics.servingMu.Lock()
-	s.metrics.harnessProvider = fn
-	s.metrics.servingMu.Unlock()
+	s.withMetricsLocked(func(m *gatewayMetrics) { m.harnessProvider = fn })
 }
 
 // writeHarnessMetrics appends the host-injected fak_harness_* family, if a provider is
@@ -23,16 +18,5 @@ func (s *Server) SetHarnessMetricsProvider(fn func() string) {
 // headers itself), so an empty string — a provider that has nothing to report — adds
 // nothing rather than an empty family block.
 func (m *gatewayMetrics) writeHarnessMetrics(b *strings.Builder) {
-	if m == nil {
-		return
-	}
-	m.servingMu.Lock()
-	fn := m.harnessProvider
-	m.servingMu.Unlock()
-	if fn == nil {
-		return
-	}
-	if text := fn(); text != "" {
-		b.WriteString(text)
-	}
+	m.writeProvidedFamily(b, func(m *gatewayMetrics) func() string { return m.harnessProvider })
 }

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"encoding/json"
 	"strings"
 )
@@ -152,30 +151,15 @@ func compactWithGoalPin(raw []byte, elems []json.RawMessage, spans []elementSpan
 	if shedTokens -= compactStubTokenCost(dropped, "", "", "", ""); shedTokens < 0 {
 		shedTokens = 0
 	}
-	// Head-anchored economics gate — identical to CompactAnthropicHistoryWithOptions.
-	if opts.Anchor == CompactAnchorHead && pfxEnd < 0 {
-		readMult, writeMult := opts.ReadMult, opts.WriteMult
-		if readMult <= 0 {
-			readMult = defaultCacheReadMult
-		}
-		if writeMult <= 0 {
-			writeMult = defaultCacheWriteMult
-		}
-		droppedCachedTokens, invalidatedSuffixTokens := headBurstEconomics(elems, pfxEnd+1, keepStart)
-		// The hoisted goal is re-inserted verbatim and re-read every future turn, so it is NOT part
-		// of the per-turn cached-read saving — exclude it from droppedCachedTokens (mirroring the
-		// shedTokens loop above), else the gate over-credits the saving and can fire a burst the true
-		// economics would reject. invalidatedSuffixTokens (the one-time penalty over [keepStart, …])
-		// is unaffected: the goal sits before keepStart.
-		if droppedCachedTokens -= estimateElementTokens(elems[goalIdx]); droppedCachedTokens < 0 {
-			droppedCachedTokens = 0
-		}
-		if opts.ColdCache {
-			invalidatedSuffixTokens = 0
-		}
-		if !CacheBurstPaysBackWithMargin(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult, opts.MinHorizonMargin) {
-			return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
-		}
+	// Head-anchored economics gate — the same headBurstGate CompactAnthropicHistoryWithOptions runs,
+	// with this path's two differences passed in rather than re-coded. excludeIdx=goalIdx because
+	// the hoisted goal is re-inserted verbatim and re-read every future turn, so it is NOT part of
+	// the per-turn cached-read saving (mirroring the shedTokens loop above); invalidatedSuffixTokens
+	// is unaffected, as the goal sits before keepStart. allowSolvencyOverride=false because this
+	// path has never granted the solvency-floor escape the main compactor grants — it refuses an
+	// unprofitable burst outright, and that behaviour is preserved verbatim here.
+	if headBurstGate(opts, elems, pfxEnd, keepStart, goalIdx, false) == headBurstRefuse {
+		return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
 	}
 	out, ok := spliceCompactedWithGoal(raw, spans, pfxEnd, keepStart, goalIdx, n, dropped, stubRole, goalBeforeStub)
 	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
@@ -200,17 +184,8 @@ func spliceCompactedWithGoal(raw []byte, spans []elementSpan, pfxEnd, keepStart,
 	}
 	goalBytes := raw[spans[goalIdx].start:spans[goalIdx].end]
 
-	prefixEnd := arrayContentStart(spans)
-	if pfxEnd >= 0 {
-		prefixEnd = spans[pfxEnd].end
-	}
-	keptFrom := spans[keepStart].start
-	bodyTail := raw[spans[n-1].end:]
-
-	var b bytes.Buffer
-	b.Grow(len(raw))
-	b.Write(raw[:prefixEnd]) // verbatim protected prefix (includes `[` when pfxEnd<0)
-	lead := pfxEnd >= 0      // a comma precedes the first hoisted element only if a protected element did
+	b, keptFrom, bodyTail := beginCompactSplice(raw, spans, pfxEnd, keepStart, n)
+	lead := pfxEnd >= 0 // a comma precedes the first hoisted element only if a protected element did
 	writeMiddle := func(p []byte) {
 		if lead {
 			b.WriteByte(',')

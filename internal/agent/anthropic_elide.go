@@ -107,55 +107,27 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	if threshold <= 0 || len(raw) == 0 {
 		return raw, ElideOutcome{Reason: ElideReasonOff}
 	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return raw, ElideOutcome{Reason: ElideReasonNonJSON}
-	}
-	msgsRaw, ok := obj["messages"]
-	if !ok {
-		return raw, ElideOutcome{Reason: ElideReasonNoMsgsKey}
-	}
-	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
-	if !ok {
-		// Structural: `messages` is present but is not a decodable JSON array.
-		return raw, ElideOutcome{Reason: ElideReasonDecodeFailed}
-	}
-	if len(elems) < 2 {
-		return raw, ElideOutcome{Reason: ElideReasonTooFewMsgs}
-	}
-
-	// Anchor the protected prefix on the FIRST cache_control breakpoint message, using the DEEP
-	// detector — one nesting level deeper than compaction's, because the shrinker descends into
-	// tool_result.content and must not anchor PAST a breakpoint nested there. Require a cache
-	// anchor or we cannot know the cache boundary and must not touch the body.
-	pfxEnd := firstBreakpointForElide(elems)
-	if pfxEnd < 0 {
-		// No message-level breakpoint. Fall back to a system-only cache anchor ONLY if `system`
-		// carries a breakpoint AND its bytes precede the messages array (so the array head is a
-		// sound protected-prefix end). If `system` sat AFTER messages on the wire, the
-		// system-anchored cached prefix would span the messages, and editing one could burst it —
-		// which we cannot prove safe, so bail. (Real clients send system before messages; this
-		// guard makes the byte order, not the convention, load-bearing.)
-		sysRaw, ok := obj["system"]
-		if !ok || !rawHasCacheControl(sysRaw) || bytes.Index(raw, sysRaw) >= spans[0].start {
-			return raw, ElideOutcome{Reason: ElideReasonNoBreakpoint}
-		}
+	elems, spans, pfxEnd, reason := anchorElidableMessages(raw, elideAnchorReasons{
+		nonJSON:      ElideReasonNonJSON,
+		noMsgsKey:    ElideReasonNoMsgsKey,
+		decodeFailed: ElideReasonDecodeFailed,
+		tooFewMsgs:   ElideReasonTooFewMsgs,
+		noBreakpoint: ElideReasonNoBreakpoint,
+	})
+	if reason != "" {
+		return raw, ElideOutcome{Reason: reason}
 	}
 
 	// The eligible band: strictly after the protected prefix, before the recent working-set
 	// window, and never a message with cache_control reachable by the shrinker. Editing here keeps
 	// the head prefix byte-identical (proven below); later breakpoints cascade-burst, as documented.
-	lastEligible := len(elems) - elideRecentKeepMsgs // exclusive
 	var edits []spliceEdit
 	shed := 0
-	for i := pfxEnd + 1; i < lastEligible; i++ {
-		if i < 0 || messageHasCacheControlForElide(elems[i]) {
-			continue
-		}
-		es, sh := collectResultElisionEdits(spans[i].start, elems[i], threshold)
+	lastEligible := eachElidableMessage(elems, spans, pfxEnd, func(start, _ int, elem json.RawMessage) {
+		es, sh := collectResultElisionEdits(start, elem, threshold)
 		edits = append(edits, es...)
 		shed += sh
-	}
+	})
 
 	// Cross-turn dedup (anthropic_elide_crossturn.go) is a distinct dedup LEVEL layered on the same
 	// splice transform: fold a later tool_result line-span that appeared verbatim in a strictly-
@@ -199,6 +171,77 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 		return raw, ElideOutcome{Reason: ElideReasonMalformedResult}
 	}
 	return out, ElideOutcome{Reason: ElideReasonNone, Elided: len(edits), ShedBytes: shed}
+}
+
+// elideAnchorReasons carries ONE elision pass's own Reason vocabulary into the shared preamble
+// below. The two passes (oversized head+tail here, stale-read in anthropic_elide_stale.go) run
+// byte-for-byte the same decode-and-anchor steps but each documents its own constant family, so
+// the preamble is told which words to speak rather than borrowing one pass's constants for both.
+type elideAnchorReasons struct {
+	nonJSON      string // body is not a JSON object
+	noMsgsKey    string // no "messages" key
+	decodeFailed string // "messages" present but not a decodable JSON array
+	tooFewMsgs   string // < 2 messages — nothing to scan
+	noBreakpoint string // no usable cache anchor, so no provable protected prefix
+}
+
+// anchorElidableMessages runs the preamble BOTH elision passes share: decode the request object,
+// decode `messages` into elements plus absolute byte spans, and resolve the protected-prefix end
+// from the FIRST cache_control breakpoint message using the DEEP detector — one nesting level
+// deeper than compaction's, because the shrinker descends into tool_result.content and must not
+// anchor PAST a breakpoint nested there.
+//
+// With no message-level breakpoint it falls back to a system-only cache anchor ONLY if `system`
+// carries a breakpoint AND its bytes precede the messages array (so the array head is a sound
+// protected-prefix end). If `system` sat AFTER messages on the wire, the system-anchored cached
+// prefix would span the messages and editing one could burst it — which we cannot prove safe, so
+// it bails. (Real clients send system before messages; this guard makes the byte order, not the
+// convention, load-bearing.)
+//
+// A non-empty returned reason means the body must be returned unchanged and the other results are
+// unusable; the word is taken verbatim from the caller's own vocabulary. An empty reason means
+// elems/spans/pfxEnd are good, with pfxEnd < 0 marking the system-only anchor.
+func anchorElidableMessages(raw []byte, reasons elideAnchorReasons) (elems []json.RawMessage, spans []elementSpan, pfxEnd int, reason string) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, nil, -1, reasons.nonJSON
+	}
+	msgsRaw, ok := obj["messages"]
+	if !ok {
+		return nil, nil, -1, reasons.noMsgsKey
+	}
+	elems, spans, ok = decodeArrayElements(raw, msgsRaw)
+	if !ok {
+		return nil, nil, -1, reasons.decodeFailed
+	}
+	if len(elems) < 2 {
+		return nil, nil, -1, reasons.tooFewMsgs
+	}
+	pfxEnd = firstBreakpointForElide(elems)
+	if pfxEnd < 0 {
+		sysRaw, ok := obj["system"]
+		if !ok || !rawHasCacheControl(sysRaw) || bytes.Index(raw, sysRaw) >= spans[0].start {
+			return nil, nil, -1, reasons.noBreakpoint
+		}
+	}
+	return elems, spans, pfxEnd, ""
+}
+
+// eachElidableMessage walks the eligible band both elision passes rewrite — strictly after the
+// protected prefix, before the recent working-set window, and never a message carrying
+// cache_control reachable by the shrinker — calling visit with the message's absolute start
+// offset, its index, and its bytes. It returns lastEligible (exclusive) because the oversized
+// pass hands that same bound to the cross-turn dedup level afterwards. What the two passes
+// differ on is only what visit collects, so that stays the caller's.
+func eachElidableMessage(elems []json.RawMessage, spans []elementSpan, pfxEnd int, visit func(start, i int, elem json.RawMessage)) (lastEligible int) {
+	lastEligible = len(elems) - elideRecentKeepMsgs // exclusive
+	for i := pfxEnd + 1; i < lastEligible; i++ {
+		if i < 0 || messageHasCacheControlForElide(elems[i]) {
+			continue
+		}
+		visit(spans[i].start, i, elems[i])
+	}
+	return lastEligible
 }
 
 // messageHasCacheControlForElide reports whether a message carries a cache_control breakpoint at

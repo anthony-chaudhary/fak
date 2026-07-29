@@ -151,60 +151,67 @@ func (v *VDSO) NodeEpochs() int {
 // a bump of any of them strands the entry. Global => ["*"]; Namespace => ["*","ns"];
 // Resource => ["*","ns","ns:entity"] (or ["*","ns"] when the entity is not nameable).
 func (v *VDSO) readChain(c *abi.ToolCall, args []byte) []string {
+	ns, ent, direct, done := v.scopeNodes(c, args, v.fileReadChain)
+	if done {
+		return direct
+	}
+	if ent == "" {
+		return []string{rootTag, ns} // namespace mode, or a resource-mode row that is not nameable: bind the class
+	}
+	return []string{rootTag, ns, ns + ":" + ent}
+}
+
+// scopeNodes resolves the (namespace, entity) a call scopes to under the configured granularity.
+// It is the SAME extraction the read and the write side each run, which is exactly what makes a
+// write bump the node a prior read bound — if the two sides resolved names differently, a write
+// would not invalidate the read it changed.
+//
+// perPath is the caller's own file-shaped scope (fileReadChain / fileWriteTags for #795). It is
+// tried BEFORE the tool-NAME namespace lookup because file tools carry no nsKeyword; without it a
+// file-shaped read would bind only the root and be flushed by every unrelated write.
+//
+// done=true means the resolution short-circuited and `direct` is the final answer — Global
+// granularity, a per-path hit, or a tool whose class is unknown (root-only: any write invalidates
+// it / a full flush). Otherwise ns is the class and ent is the finest name, empty under Namespace
+// granularity or when the row is not nameable. What the helper deliberately does NOT decide is how
+// to RENDER those names: the read side binds the whole root->leaf chain so a bump of any node
+// strands the entry, while the write side names the single finest node it can conservatively
+// claim. That asymmetry is the callers'.
+func (v *VDSO) scopeNodes(c *abi.ToolCall, args []byte, perPath func([]byte) []string) (ns, ent string, direct []string, done bool) {
 	g := v.GranularityOf()
 	if g == Global {
-		return []string{rootTag}
+		return "", "", []string{rootTag}, true
 	}
-	// Per-path scope (#795): a file-shaped read (Read/Glob/Grep carrying a file_path)
-	// binds its filesystem path's generation, so a later Edit/Write to that exact path —
-	// and nothing else — strands it. Tried before the tool-NAME namespace lookup because
-	// file tools carry no nsKeyword; without this they'd bind only the root and be flushed
-	// by every unrelated write.
-	if chain := v.fileReadChain(args); chain != nil {
-		return chain
+	if tags := perPath(args); tags != nil {
+		return "", "", tags, true
 	}
-	ns := namespaceOf(c.Tool)
+	ns = namespaceOf(c.Tool)
 	if ns == "" {
-		return []string{rootTag} // unknown class: root-only (any write invalidates it)
+		return "", "", []string{rootTag}, true
 	}
 	if g == Namespace {
-		return []string{rootTag, ns}
+		return ns, "", nil, false
 	}
-	if ent := entityOf(ns, args); ent != "" {
-		return []string{rootTag, ns, ns + ":" + ent}
-	}
-	return []string{rootTag, ns} // resource mode but row not nameable: bind the class
+	return ns, entityOf(ns, args), nil, false
 }
 
 // writeTags returns the node(s) a write-shaped completion must bump. It names the
 // SINGLE finest node the write can conservatively claim — the same (namespace,
 // entity) extraction reads use — falling back UP the chain (entity -> namespace ->
 // root) whenever the finer name is unavailable, which only ever over-invalidates.
+// Per-path scope (#795) on this side means an Edit/Write to a named file bumps exactly that path's
+// generation ("files:<path>"), the leaf a prior file-shaped read bound — stranding only that file's
+// reads and leaving every other file's cached reads warm. A write that names no single path (Bash)
+// falls through to the namespace/root flush, which over-invalidates soundly.
 func (v *VDSO) writeTags(c *abi.ToolCall, args []byte) []string {
-	g := v.GranularityOf()
-	if g == Global {
-		return []string{rootTag}
+	ns, ent, direct, done := v.scopeNodes(c, args, v.fileWriteTags)
+	if done {
+		return direct
 	}
-	// Per-path scope (#795): an Edit/Write to a named file bumps exactly that path's
-	// generation ("files:<path>"), the leaf a prior file-shaped read bound — stranding
-	// only that file's reads and leaving every other file's cached reads warm. Tried
-	// before the namespace lookup for the same reason as the read side (file tools carry
-	// no nsKeyword). A write that names no single path (Bash) falls through to the
-	// namespace/root flush, which over-invalidates soundly.
-	if tags := v.fileWriteTags(args); tags != nil {
-		return tags
+	if ent == "" {
+		return []string{ns} // namespace mode, or a resource-mode row that is not nameable: bump the whole class
 	}
-	ns := namespaceOf(c.Tool)
-	if ns == "" {
-		return []string{rootTag} // unknown write: fall all the way back to a full flush
-	}
-	if g == Namespace {
-		return []string{ns}
-	}
-	if ent := entityOf(ns, args); ent != "" {
-		return []string{ns + ":" + ent}
-	}
-	return []string{ns} // resource mode but row not nameable: bump the whole class
+	return []string{ns + ":" + ent}
 }
 
 // nsKeywords maps each resource class to the tool-name substrings that denote it.

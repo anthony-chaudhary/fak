@@ -251,19 +251,23 @@ func Gaps(root string) []Gap {
 }
 
 func recoveryDetail(s Scanned) string {
-	if !s.Present {
-		return "subsystem package " + s.Dir + " is absent from the tree"
-	}
-	return "no durable resumable-state signature found in " + s.Dir +
-		" (expected one of: " + strings.Join(s.RecoveryTokens, ", ") + ")"
+	return missingSurfaceDetail(s, "durable resumable-state signature", s.RecoveryTokens)
 }
 
 func statusDetail(s Scanned) string {
+	return missingSurfaceDetail(s, "witnessed-status surface", s.StatusTokens)
+}
+
+// missingSurfaceDetail renders the "package absent" / "no <surface> found, expected
+// one of ..." explanation the crash_recovery and status KPIs both emit. `surface` and
+// `tokens` carry each caller's own wording and token list, so recoveryDetail's and
+// statusDetail's strings stay exactly what they were.
+func missingSurfaceDetail(s Scanned, surface string, tokens []string) string {
 	if !s.Present {
 		return "subsystem package " + s.Dir + " is absent from the tree"
 	}
-	return "no witnessed-status surface found in " + s.Dir +
-		" (expected one of: " + strings.Join(s.StatusTokens, ", ") + ")"
+	return "no " + surface + " found in " + s.Dir +
+		" (expected one of: " + strings.Join(tokens, ", ") + ")"
 }
 
 // Build folds the scan into the shared control-pane Payload. Three KPIs -- crash_recovery,

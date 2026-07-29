@@ -563,20 +563,10 @@ func cacheEffectsForArm(arm metrics.Arm, c FeatureConfig, engineID string) []Cac
 func cacheEffectForFeature(feature string, on bool, arm metrics.Arm, c FeatureConfig, engineID string) (CacheEffect, bool) {
 	switch feature {
 	case FeatureVDSO:
-		e := CacheEffect{
-			Feature:    feature,
-			Owner:      "fak",
-			Plane:      "kernel_tool_cache",
-			Component:  "vdso",
-			Dependency: "in_process",
-			Fidelity:   "lossless",
-			Evidence:   "witnessed",
-		}
+		e := fakCacheEffect(feature, "kernel_tool_cache", "vdso", "in_process", "lossless", "witnessed")
 		switch {
 		case !on:
-			e.Status = "inactive"
-			e.Fidelity = "no-op"
-			e.Reason = "vDSO disabled for this arm"
+			e = disabledArm(e, "vDSO disabled for this arm")
 		case arm.VDSOHits > 0:
 			e.Status = "active"
 			e.Reason = fmt.Sprintf("served %d repeated tool call(s) from the in-kernel vDSO fast path", arm.VDSOHits)
@@ -586,41 +576,15 @@ func cacheEffectForFeature(feature string, on bool, arm metrics.Arm, c FeatureCo
 		}
 		return e, true
 	case FeatureRadix:
-		e := CacheEffect{
-			Feature:    feature,
-			Owner:      "fak",
-			Plane:      "local_kv",
-			Component:  "inkernel_radix",
-			Dependency: "subprocess_env",
-			Fidelity:   "lossless",
-			Evidence:   "configured",
-		}
+		e := fakCacheEffect(feature, "local_kv", "inkernel_radix", "subprocess_env", "lossless", "configured")
 		return configuredCacheEffect(e, on, engineID, "in-kernel RadixAttention prefix reuse requires engine=inkernel"), true
 	case FeatureCtxplanSeam:
-		e := CacheEffect{
-			Feature:    feature,
-			Owner:      "fak",
-			Plane:      "context_view",
-			Component:  "ctxplan_seam",
-			Dependency: "subprocess_env",
-			Fidelity:   "recoverable",
-			Evidence:   "configured",
-		}
+		e := fakCacheEffect(feature, "context_view", "ctxplan_seam", "subprocess_env", "recoverable", "configured")
 		return configuredCacheEffect(e, on, engineID, "ctxplan cache-safe materialized views require engine=inkernel"), true
 	case FeatureCompressor:
-		e := CacheEffect{
-			Feature:    feature,
-			Owner:      "fak",
-			Plane:      "context_compression",
-			Component:  "headroom_compressor",
-			Dependency: "subprocess_env_or_external_sidecar",
-			Fidelity:   "recoverable",
-			Evidence:   "simulated",
-		}
+		e := fakCacheEffect(feature, "context_compression", "headroom_compressor", "subprocess_env_or_external_sidecar", "recoverable", "simulated")
 		if !on {
-			e.Status = "inactive"
-			e.Fidelity = "no-op"
-			e.Reason = "compressor disabled for this arm"
+			e = disabledArm(e, "compressor disabled for this arm")
 		} else if mechanismSavingsForArm(arm, c).FakCompactionShedTokens > 0 {
 			e.Status = "active"
 			e.Reason = "mock ablation models fak-authored compaction shed tokens; use fak headroom bench/status for plugin-specific native/headroom evidence"
@@ -638,23 +602,12 @@ func cacheEffectForFeature(feature string, on bool, arm metrics.Arm, c FeatureCo
 	case FeatureUncachedTrim:
 		return wireCacheEffect(feature, on, "uncached_trim", "lossy", "sheds or rewrites uncached context; prefix integrity covers only the guarded cacheable prefix"), true
 	case FeatureNegframeReframe:
-		e := CacheEffect{
-			Feature:    feature,
-			Owner:      "fak",
-			Plane:      "context_view",
-			Component:  "negframe_reframe",
-			Dependency: "subprocess_env",
-			Fidelity:   "lossless",
-			Evidence:   "configured",
-		}
+		e := fakCacheEffect(feature, "context_view", "negframe_reframe", "subprocess_env", "lossless", "configured")
 		// Default-on: the ON arm is the reframed treatment, the OFF arm restores the raw
 		// negative-framed injection #3546 measures against. The reframe is token-superset-safe
 		// and idempotent, so it rewrites voice without dropping a load-bearing contract token.
 		if !on {
-			e.Status = "inactive"
-			e.Fidelity = "no-op"
-			e.Reason = "negframe reframe disabled for this arm; fak injects raw negative-framed prose (the #3546 control arm)"
-			return e, true
+			return disabledArm(e, "negframe reframe disabled for this arm; fak injects raw negative-framed prose (the #3546 control arm)"), true
 		}
 		e.Status = "active"
 		e.Reason = "fak-authored injected prose is routed through the emit-time positive-voice reframe; changes model-visible prefix bytes, so an arm flip breaks prefix reuse by design"
@@ -664,12 +617,38 @@ func cacheEffectForFeature(feature string, on bool, arm metrics.Arm, c FeatureCo
 	}
 }
 
+// fakCacheEffect stamps the fak-owned descriptor header every arm of cacheEffectForFeature
+// shares: the feature it describes plus Owner "fak", with the four fields that actually vary
+// by feature passed in. Status and Reason are deliberately NOT set here — they are the
+// verdict each arm computes from `on` and the trace, which is the only part that differs.
+// wireCacheEffect is the fixed-plane specialization for the provider-wire arms; this is the
+// general form for arms that name their own plane, dependency and evidence.
+func fakCacheEffect(feature, plane, component, dependency, fidelity, evidence string) CacheEffect {
+	return CacheEffect{
+		Feature:    feature,
+		Owner:      "fak",
+		Plane:      plane,
+		Component:  component,
+		Dependency: dependency,
+		Fidelity:   fidelity,
+		Evidence:   evidence,
+	}
+}
+
+// disabledArm stamps the OFF-arm verdict every feature shares: a disabled feature contributes
+// nothing, so its Fidelity is downgraded to "no-op" rather than left at the enabled claim the
+// descriptor header carries. The reason stays a parameter because each feature names its own
+// control arm in its own words.
+func disabledArm(e CacheEffect, reason string) CacheEffect {
+	e.Status = "inactive"
+	e.Fidelity = "no-op"
+	e.Reason = reason
+	return e
+}
+
 func configuredCacheEffect(e CacheEffect, on bool, engineID, engineReason string) CacheEffect {
 	if !on {
-		e.Status = "inactive"
-		e.Fidelity = "no-op"
-		e.Reason = e.Component + " disabled for this arm"
-		return e
+		return disabledArm(e, e.Component+" disabled for this arm")
 	}
 	if !strings.EqualFold(strings.TrimSpace(engineID), "inkernel") {
 		e.Status = "no-op"
@@ -682,20 +661,9 @@ func configuredCacheEffect(e CacheEffect, on bool, engineID, engineReason string
 }
 
 func wireCacheEffect(feature string, on bool, component, fidelity, reason string) CacheEffect {
-	e := CacheEffect{
-		Feature:    feature,
-		Owner:      "fak",
-		Plane:      "provider_prompt_cache_control",
-		Component:  component,
-		Dependency: "subprocess_env_and_provider",
-		Fidelity:   fidelity,
-		Evidence:   "simulated",
-	}
+	e := fakCacheEffect(feature, "provider_prompt_cache_control", component, "subprocess_env_and_provider", fidelity, "simulated")
 	if !on {
-		e.Status = "inactive"
-		e.Fidelity = "no-op"
-		e.Reason = component + " disabled for this arm"
-		return e
+		return disabledArm(e, component+" disabled for this arm")
 	}
 	e.Status = "active"
 	e.Reason = reason + "; mock ablation reports token-equivalent effects separately from provider-observed counters"

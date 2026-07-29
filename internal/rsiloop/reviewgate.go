@@ -402,11 +402,7 @@ func (l *ReviewLedger) isResolved(decisionSeq int) bool {
 // append records the row in memory and, if file-backed, durably appends it as one
 // JSON line so the ledger survives a restart (the CuratorLedger discipline).
 func (l *ReviewLedger) append(r ReviewRow) error {
-	if err := appendLedgerLine(l.path, r); err != nil {
-		return err
-	}
-	l.rows = append(l.rows, r)
-	return nil
+	return appendLedgerRow(l.path, &l.rows, r)
 }
 
 // --- trace signals (session novelty / unseen tool sequences / error density) ---

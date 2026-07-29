@@ -44,20 +44,9 @@ func (g Ghost) Version() string {
 // the continuity rule tracked separately (sibling #2476) and is out of scope for
 // this tombstone listing.
 func Ghosts(ctx context.Context, dir string, run Runner) ([]Ghost, error) {
-	if run == nil {
-		run = RealRunner
-	}
-	lsArgs := append([]string{"ls-files", "-z", "--"}, trackedRoots...)
-	lsOut, err := run(ctx, dir, lsArgs...)
-	if err != nil {
-		return nil, err
-	}
-	live := liveModules(lsOut)
-	// Same --no-merges rev semantics as Snapshot (#2475): a merge commit carries
-	// no authored module work, so it must not count toward a ghost's final rev
-	// nor be mistaken for its deletion commit.
-	logArgs := append([]string{"log", "--no-merges", "--pretty=format:%x1e%h%x09%cI", "--name-only", "--"}, trackedRoots...)
-	logOut, err := run(ctx, dir, logArgs...)
+	// The unbounded ("" rev) walk, identical to Snapshot's — including the --no-merges
+	// rev semantics, which liveAndLog now owns for all three passes.
+	live, logOut, err := liveAndLog(ctx, dir, gitRunner(run), "")
 	if err != nil {
 		return nil, err
 	}

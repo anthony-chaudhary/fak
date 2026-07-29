@@ -107,10 +107,8 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 
 	opts := s.plannerSampleOpts(req, sessionTurn)
-	lease, err := s.beginServedAdmission(r.Context(), sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
-	if err != nil {
-		s.logf("gateway: scheduler admission refused (messages stream): %v", err)
-		s.writeUpstreamErr(w, err)
+	lease, ok := s.admitStreamedTurn(r.Context(), w, "messages stream", sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
+	if !ok {
 		return true
 	}
 	defer lease.Release()

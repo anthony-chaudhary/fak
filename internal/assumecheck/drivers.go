@@ -139,17 +139,10 @@ func (d *GitAncestryDriver) Gather(ctx context.Context, t Target) Evidence {
 		return ev
 	}
 	_, code, err := d.run(ctx, resolveDir(t.Dir, d.dir), "cat-file", "-e", ref+"^{commit}")
-	switch {
-	case err != nil:
-		ev.Detail = "git could not run: " + err.Error()
-		return ev
-	case code == 1:
-		ev.Witnessed = true
-		ev.Detail = fmt.Sprintf("ref %s does not resolve to a commit", ref)
-		return ev
-	case code != 0:
-		ev.Detail = fmt.Sprintf("git cat-file exited %d for ref %s", code, ref)
-		return ev
+	if out, done := gitStepOutcome(ev, code, err,
+		fmt.Sprintf("ref %s does not resolve to a commit", ref),
+		func(code int) string { return fmt.Sprintf("git cat-file exited %d for ref %s", code, ref) }); done {
+		return out
 	}
 	full := ref
 	if out, rpCode, rpErr := d.run(ctx, resolveDir(t.Dir, d.dir), "rev-parse", "--verify", ref+"^{commit}"); rpErr == nil && rpCode == 0 {
@@ -158,17 +151,10 @@ func (d *GitAncestryDriver) Gather(ctx context.Context, t Target) Evidence {
 		}
 	}
 	_, code, err = d.run(ctx, resolveDir(t.Dir, d.dir), "merge-base", "--is-ancestor", full, "HEAD")
-	switch {
-	case err != nil:
-		ev.Detail = "git could not run: " + err.Error()
-		return ev
-	case code == 1:
-		ev.Witnessed = true
-		ev.Detail = fmt.Sprintf("commit %s resolves but is not reachable from HEAD", shortSHA(full))
-		return ev
-	case code != 0:
-		ev.Detail = fmt.Sprintf("git merge-base exited %d for %s", code, shortSHA(full))
-		return ev
+	if out, done := gitStepOutcome(ev, code, err,
+		fmt.Sprintf("commit %s resolves but is not reachable from HEAD", shortSHA(full)),
+		func(code int) string { return fmt.Sprintf("git merge-base exited %d for %s", code, shortSHA(full)) }); done {
+		return out
 	}
 	if revertSHA, reverted := d.revertedBy(ctx, resolveDir(t.Dir, d.dir), full); reverted {
 		ev.Witnessed = true
@@ -179,6 +165,28 @@ func (d *GitAncestryDriver) Gather(ctx context.Context, t Target) Evidence {
 	ev.Holds = true
 	ev.Detail = fmt.Sprintf("commit %s resolves, is reachable from HEAD, and is not reverted", shortSHA(full))
 	return ev
+}
+
+// gitStepOutcome triages one git probe the way every rung of the ancestry witness does:
+// a run failure is INCONCLUSIVE (not witnessed), exit 1 is a witnessed NEGATIVE — the
+// probe ran and answered "no" — and any other non-zero exit is inconclusive. done=true
+// means the returned Evidence is final and the caller should stop; false means the rung
+// passed and the caller continues. `negative` and `oddExit` carry each rung's own
+// wording, which is all the two call sites differ on.
+func gitStepOutcome(ev Evidence, code int, err error, negative string, oddExit func(code int) string) (Evidence, bool) {
+	switch {
+	case err != nil:
+		ev.Detail = "git could not run: " + err.Error()
+		return ev, true
+	case code == 1:
+		ev.Witnessed = true
+		ev.Detail = negative
+		return ev, true
+	case code != 0:
+		ev.Detail = oddExit(code)
+		return ev, true
+	}
+	return ev, false
 }
 
 // revertedBy scans fullSHA..HEAD for a `git revert` trailer naming fullSHA —

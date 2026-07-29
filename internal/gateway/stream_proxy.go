@@ -94,10 +94,8 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		agent.WithLogitBias(req.LogitBias),
 		agent.WithGuidedDecode(req.GuidedDecodeFields()),
 	}
-	lease, err := s.beginServedAdmission(ctx, sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
-	if err != nil {
-		s.logf("gateway: scheduler admission refused (stream): %v", err)
-		s.writeUpstreamErr(w, err)
+	lease, ok := s.admitStreamedTurn(ctx, w, "stream", sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
+	if !ok {
 		return true
 	}
 	defer lease.Release()

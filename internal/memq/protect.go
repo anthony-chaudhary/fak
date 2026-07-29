@@ -47,13 +47,7 @@ func applyProtectedBudget(work []Cell, cap int64, recentN int) (kept, dropped []
 			order = append(order, i)
 		}
 	}
-	sort.SliceStable(order, func(a, b int) bool {
-		ca, cb := work[order[a]], work[order[b]]
-		if ca.Step != cb.Step {
-			return ca.Step > cb.Step // most recent first
-		}
-		return ca.ID < cb.ID // the rankLess tie-break, total and deterministic
-	})
+	sortMostRecentFirst(order, work)
 	keep := make([]bool, len(work))
 	used := int64(0)
 	for _, i := range order {
@@ -107,13 +101,7 @@ func protectedSet(work []Cell, recentN int) []bool {
 	for i := range order {
 		order[i] = i
 	}
-	sort.SliceStable(order, func(a, b int) bool {
-		ca, cb := work[order[a]], work[order[b]]
-		if ca.Step != cb.Step {
-			return ca.Step > cb.Step
-		}
-		return ca.ID < cb.ID
-	})
+	sortMostRecentFirst(order, work)
 	if recentN > len(order) {
 		recentN = len(order)
 	}
@@ -121,4 +109,19 @@ func protectedSet(work []Cell, recentN int) []bool {
 		prot[i] = true
 	}
 	return prot
+}
+
+// sortMostRecentFirst orders working-set INDICES into the degrade order both floor passes rank
+// by: most recent first (descending Step), ties broken on ascending ID. The tie-break is the
+// rankLess one, which makes the order total and therefore deterministic — two runs over the same
+// working set always spend the cap on the same cells. The sort is stable, so equal (Step, ID)
+// cells — which cannot occur while IDs are unique — would keep their working-set order.
+func sortMostRecentFirst(order []int, work []Cell) {
+	sort.SliceStable(order, func(a, b int) bool {
+		ca, cb := work[order[a]], work[order[b]]
+		if ca.Step != cb.Step {
+			return ca.Step > cb.Step
+		}
+		return ca.ID < cb.ID
+	})
 }

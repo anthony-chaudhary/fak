@@ -114,7 +114,7 @@ func (s *Scheduler) Acquire(ctx context.Context, priority int) (release func(), 
 	// Slow path: park. The waiter blocks on its own channel — no CPU until a
 	// Release (or Close) signals it.
 	s.seq++
-	w := &waiter{priority: priority, seq: s.seq, ready: make(chan struct{}), index: -1}
+	w := &waiter{parkedWaiter{priority: priority, seq: s.seq, ready: make(chan struct{}), index: -1}}
 	heap.Push(&s.waiters, w)
 	s.mu.Unlock()
 
@@ -199,10 +199,13 @@ func (s *Scheduler) Waiting() int {
 	return s.waiters.Len()
 }
 
-// waiter is one parked Acquire. ready is closed under s.mu to wake it; granted
-// distinguishes a slot grant from a Close drain. index is its position in the
-// heap (-1 once popped/removed), maintained by waiterHeap.Swap.
-type waiter struct {
+// parkedWaiter is the bookkeeping every parked caller in this package carries,
+// whatever it is parked ON: ready is closed under the owning mutex to wake it;
+// granted distinguishes a real grant from a Close drain; index is its position in
+// the heap (-1 once popped/removed), maintained by waiterHeapOf.Swap. The slot
+// scheduler's waiter and the budget queue's budgetWaiter both embed it, which is
+// what lets them share one heap implementation.
+type parkedWaiter struct {
 	priority int
 	seq      uint64
 	ready    chan struct{}
@@ -210,41 +213,60 @@ type waiter struct {
 	index    int
 }
 
-// waiterHeap orders parked callers by priority (higher first), ties broken by
-// arrival sequence (lower first = FIFO), so a slot always goes to the most
-// urgent waiter and equal-priority waiters never starve.
-type waiterHeap []*waiter
+// node exposes the shared bookkeeping to waiterHeapOf, which cannot reach an
+// embedded field through a type parameter.
+func (w *parkedWaiter) node() *parkedWaiter { return w }
 
-func (h waiterHeap) Len() int { return len(h) }
+// waiterNode is what waiterHeapOf orders: anything carrying a parkedWaiter.
+type waiterNode interface{ node() *parkedWaiter }
 
-func (h waiterHeap) Less(i, j int) bool {
-	if h[i].priority != h[j].priority {
-		return h[i].priority > h[j].priority
+// waiterHeapOf orders parked callers by priority (higher first), ties broken by
+// arrival sequence (lower first = FIFO), so capacity always goes to the most urgent
+// waiter and equal-priority waiters never starve. One implementation serves both
+// queues; they differ only in what else their element carries (the budget queue's
+// element also carries the admit's cost).
+type waiterHeapOf[T waiterNode] []T
+
+func (h waiterHeapOf[T]) Len() int { return len(h) }
+
+func (h waiterHeapOf[T]) Less(i, j int) bool {
+	a, b := h[i].node(), h[j].node()
+	if a.priority != b.priority {
+		return a.priority > b.priority
 	}
-	return h[i].seq < h[j].seq
+	return a.seq < b.seq
 }
 
-func (h waiterHeap) Swap(i, j int) {
+func (h waiterHeapOf[T]) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
-	h[i].index = i
-	h[j].index = j
+	h[i].node().index = i
+	h[j].node().index = j
 }
 
-func (h *waiterHeap) Push(x any) {
-	w := x.(*waiter)
-	w.index = len(*h)
+func (h *waiterHeapOf[T]) Push(x any) {
+	w := x.(T)
+	w.node().index = len(*h)
 	*h = append(*h, w)
 }
 
-func (h *waiterHeap) Pop() any {
+func (h *waiterHeapOf[T]) Pop() any {
 	old := *h
 	n := len(old)
 	w := old[n-1]
-	old[n-1] = nil // don't hold the popped waiter alive via the backing array.
-	w.index = -1
+	var zero T
+	old[n-1] = zero // don't hold the popped waiter alive via the backing array.
+	w.node().index = -1
 	*h = old[:n-1]
 	return w
 }
+
+// waiter is one parked Acquire.
+type waiter struct {
+	parkedWaiter
+}
+
+// waiterHeap is the slot scheduler's parked-caller queue.
+type waiterHeap = waiterHeapOf[*waiter]
 
 // priorityKey carries a per-call slot priority through a context.
 type priorityKey struct{}

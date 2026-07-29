@@ -248,14 +248,11 @@ type LoopVariantArchive struct {
 // NewLoopVariantArchive opens a kept-variant archive at path. A path of "-" or ""
 // writes JSONL to stdout and is not closed.
 func NewLoopVariantArchive(path string) (*LoopVariantArchive, error) {
-	if path == "" || path == "-" {
-		return &LoopVariantArchive{w: nopWriteCloser{os.Stdout}}, nil
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	w, closer, err := openJSONLSink(path)
 	if err != nil {
 		return nil, err
 	}
-	return &LoopVariantArchive{w: f, closer: true}, nil
+	return &LoopVariantArchive{w: w, closer: closer}, nil
 }
 
 // Append writes one kept variant as a single JSON line. The archive is a stepping-
