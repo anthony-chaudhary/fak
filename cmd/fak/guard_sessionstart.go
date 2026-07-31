@@ -290,22 +290,13 @@ func writeGuardSessionStartSettings(path, fakBin string, managed bool, traceID s
 // mergeGuardSessionStartIntoSettings adds (or replaces) the SessionStart hook in an existing
 // guard settings file, preserving every other key (PreCompact/Stop/toolproc hooks).
 func mergeGuardSessionStartIntoSettings(path, fakBin string, managed bool, traceID string) error {
-	raw, err := os.ReadFile(path)
+	settings, err := readGuardHookSettings(path)
 	if err != nil {
 		return err
-	}
-	var settings guardPreCompactClaudeSettings
-	if err := json.Unmarshal(raw, &settings); err != nil {
-		return fmt.Errorf("parse existing hook settings %s: %w", path, err)
 	}
 	if settings.Hooks == nil {
 		settings.Hooks = map[string][]guardPreCompactClaudeMatcher{}
 	}
 	settings.Hooks["SessionStart"] = guardSessionStartMatchers(fakBin, managed, traceID)
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return writeGuardSettingsFileAtomic(path, data)
+	return writeGuardHookSettings(path, settings)
 }

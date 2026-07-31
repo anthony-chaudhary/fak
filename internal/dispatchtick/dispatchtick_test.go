@@ -213,6 +213,53 @@ func TestGuardedLaunchCommand(t *testing.T) {
 	}
 }
 
+// TestGuardedLaunchCommandHoistsUltracodeSettings pins the clobber fix: Claude Code's --settings
+// is LAST-WINS, not merged, and guard inserts its own hook-settings FILE right after the child's
+// argv[0]. So an ultracode worker carrying an inline `--settings {"ultracode":true}` LATER on the
+// same argv silently discarded guard's whole hook stack. The posture must instead ride the guard
+// segment as `--effort ultracode`, leaving exactly ONE --settings on the child.
+func TestGuardedLaunchCommandHoistsUltracodeSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  []string
+	}{
+		{"space-separated", []string{"claude", "-p", "--model", WorkerModelOpus, "--settings", UltracodeSettingsArg}},
+		{"equals form", []string{"claude", "-p", "--model", WorkerModelOpus, "--settings=" + UltracodeSettingsArg}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, guarded := GuardedLaunchCommand(tc.raw, "fak", "docs", "claude", "/repo", "")
+			if !guarded {
+				t.Fatalf("claude command must be guarded: %#v", got)
+			}
+			joined := strings.Join(got, " ")
+			if strings.Contains(joined, UltracodeSettingsArg) {
+				t.Fatalf("inline ultracode --settings must not survive on the child argv (it clobbers guard's hook settings): %#v", got)
+			}
+			if !strings.Contains(joined, GuardEffortFlag+" "+GuardEffortUltracode+" --") {
+				t.Fatalf("posture must ride the guard segment as `%s %s` before `--`: %#v", GuardEffortFlag, GuardEffortUltracode, got)
+			}
+			// The rest of the child argv is untouched.
+			if !strings.HasSuffix(joined, "-- claude -p --model "+WorkerModelOpus) {
+				t.Fatalf("child argv beyond the hoisted posture must be unchanged: %#v", got)
+			}
+		})
+	}
+
+	// A worker with no ultracode profile gains no posture flag: it picks up guard's own headless
+	// default (xhigh), which is what an unattended agent session should run at.
+	got, _ := GuardedLaunchCommand([]string{"claude", "-p", "--effort", EffortXHigh}, "fak", "docs", "claude", "/repo", "")
+	if strings.Contains(strings.Join(got, " "), GuardEffortFlag+" "+GuardEffortUltracode) {
+		t.Fatalf("a non-ultracode worker must not be handed the ultracode posture: %#v", got)
+	}
+
+	// A DIFFERENT inline settings payload is not ours to move.
+	other := `{"theme":"dark"}`
+	got, _ = GuardedLaunchCommand([]string{"claude", "-p", "--settings", other}, "fak", "docs", "claude", "/repo", "")
+	if !strings.Contains(strings.Join(got, " "), "--settings "+other) {
+		t.Fatalf("a non-ultracode inline --settings must be left exactly where the caller put it: %#v", got)
+	}
+}
+
 func TestLaunchCommandShapeRedactsSensitiveFields(t *testing.T) {
 	raw := []string{
 		`C:\private\fak\fak.exe`, "guard",

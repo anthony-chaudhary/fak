@@ -328,11 +328,63 @@ func GuardAuditPath(workspace, lane, backend string) string {
 	return filepath.Join(workspace, RunsDirName, name)
 }
 
+// Guard's reasoning-posture vocabulary, mirrored BY VALUE (not import — this leaf stays pure)
+// the same way UltracodeSettingsArg mirrors the interactive launcher's constant. A drift-guard
+// test keeps the two equal.
+const (
+	// GuardEffortFlag is the `fak guard` flag that carries the child's default reasoning
+	// posture. Guard owns the single --settings file, so ultracode must be relayed through
+	// this flag rather than handed to the child as a second --settings.
+	GuardEffortFlag = "--effort"
+	// GuardEffortUltracode is the posture value naming ultracode.
+	GuardEffortUltracode = "ultracode"
+)
+
+// hoistUltracodeSettings moves an inline `--settings {"ultracode":true}` OFF the child argv and
+// reports that the guard segment must carry `--effort ultracode` instead.
+//
+// This is a correctness fix, not a style preference. Claude Code's --settings is LAST-WINS, not
+// merged: with two --settings occurrences the keys of the earlier one are dropped wholesale.
+// `fak guard` puts its own hook-settings FILE on the child argv (the deny-all auto-continue Stop
+// hook, the task-handoff gate, the toolproc journal, the SessionStart affordance, the PreCompact
+// coherence gate), and it inserts that file right after the child's argv[0] — i.e. BEFORE this
+// inline payload. So an ultracode worker's inline `--settings` silently discarded guard's ENTIRE
+// hook stack, on exactly the highest-tier fleet workers. Relaying the posture as a guard flag
+// keeps one --settings on the argv; guard merges the ultracode key into that same file.
+//
+// It returns a copy; the input is never mutated. Both spellings are handled
+// (`--settings <json>` and `--settings=<json>`), and only a payload naming ultracode is hoisted —
+// any other inline settings JSON is left exactly where the caller put it.
+func hoistUltracodeSettings(command []string) (child []string, ultracode bool) {
+	out := make([]string, 0, len(command))
+	for i := 0; i < len(command); i++ {
+		arg := command[i]
+		if arg == "--settings" && i+1 < len(command) && command[i+1] == UltracodeSettingsArg {
+			ultracode = true
+			i++ // skip the payload too
+			continue
+		}
+		if arg == "--settings="+UltracodeSettingsArg {
+			ultracode = true
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out, ultracode
+}
+
 // GuardedLaunchCommand returns command fronted by `fak guard` when a fak binary is available.
+//
+// An ultracode child has its inline --settings hoisted to the guard segment as
+// `--effort ultracode` (see hoistUltracodeSettings) so the worker keeps guard's hook stack. A
+// worker with no ultracode profile is left alone and picks up guard's own attendance default,
+// which for a headless `-p` child is xhigh — strong per-message reasoning without the
+// multi-agent orchestration tax no one is watching.
 func GuardedLaunchCommand(command []string, fakBin, lane, backend, workspace, baseURL string) ([]string, bool) {
 	if len(command) == 0 || strings.TrimSpace(fakBin) == "" {
 		return append([]string(nil), command...), false
 	}
+	command, ultracode := hoistUltracodeSettings(command)
 	args := []string{fakBin, "guard", "--provider", GuardProvider(backend)}
 	if backend != "claude" {
 		if strings.TrimSpace(baseURL) == "" {
@@ -344,7 +396,13 @@ func GuardedLaunchCommand(command []string, fakBin, lane, backend, workspace, ba
 	// ~9.9k-token full-registry schema floor to the allowlist a single-issue worker uses; the
 	// rest page in via the still-exposed fak_tools_search. The guard honors FAK_GUARD_EXPOSE_PROFILE
 	// as the fleet opt-out (=full/off restores the whole registry).
-	args = append(args, "--audit", GuardAuditPath(workspace, lane, backend), "--expose-profile", "headless", "--")
+	args = append(args, "--audit", GuardAuditPath(workspace, lane, backend), "--expose-profile", "headless")
+	if ultracode {
+		// The tier profile asked for ultracode explicitly (tier/T0 or tier/ultra), so pin it
+		// rather than leaving guard's headless default (xhigh) to decide.
+		args = append(args, GuardEffortFlag, GuardEffortUltracode)
+	}
+	args = append(args, "--")
 	args = append(args, command...)
 	return args, true
 }

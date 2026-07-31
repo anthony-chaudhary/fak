@@ -1112,25 +1112,16 @@ func writeGuardStopHookSettings(path, fakBin string) error {
 // mergeGuardStopHookIntoSettings adds (or replaces) the Stop hook in an existing guard settings
 // file, preserving every other key (e.g. the PreCompact hook), so a single --settings carries both.
 func mergeGuardStopHookIntoSettings(path, fakBin string) error {
-	raw, err := os.ReadFile(path)
+	settings, err := readGuardHookSettings(path)
 	if err != nil {
 		return err
-	}
-	var settings guardPreCompactClaudeSettings
-	if err := json.Unmarshal(raw, &settings); err != nil {
-		return fmt.Errorf("parse existing hook settings %s: %w", path, err)
 	}
 	if settings.Hooks == nil {
 		settings.Hooks = map[string][]guardPreCompactClaudeMatcher{}
 	}
 	settings.Hooks["Stop"] = guardStopHookMatchers(fakBin)
 	settings.Hooks["PreToolUse"] = guardCommitGateMatchers(fakBin)
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return writeGuardSettingsFileAtomic(path, data)
+	return writeGuardHookSettings(path, settings)
 }
 
 type guardStopHookSignals struct {

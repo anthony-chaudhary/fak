@@ -1,21 +1,17 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 )
 
-func readGuardHookSettings(t *testing.T, path string) guardPreCompactClaudeSettings {
+// mustReadGuardHookSettings is the fail-the-test wrapper around the production reader, so the
+// suite exercises the same parse the installers use instead of keeping a second copy of it.
+func mustReadGuardHookSettings(t *testing.T, path string) guardPreCompactClaudeSettings {
 	t.Helper()
-	raw, err := os.ReadFile(path)
+	s, err := readGuardHookSettings(path)
 	if err != nil {
 		t.Fatalf("read settings: %v", err)
-	}
-	var s guardPreCompactClaudeSettings
-	if err := json.Unmarshal(raw, &s); err != nil {
-		t.Fatalf("parse settings: %v", err)
 	}
 	return s
 }
@@ -75,7 +71,7 @@ func TestInstallGuardToolprocHooksFresh(t *testing.T) {
 	if len(env) != 1 || env[0][0] != guardToolprocEnvMode || env[0][1] != guardToolprocModeObserve {
 		t.Fatalf("env = %v", env)
 	}
-	s := readGuardHookSettings(t, install.SettingsPath)
+	s := mustReadGuardHookSettings(t, install.SettingsPath)
 	assertToolprocEvent(t, s, "PreToolUse", "pre", journal)
 	assertToolprocEvent(t, s, "PostToolUse", "post", journal)
 	assertToolprocEvent(t, s, "SessionEnd", "stop", journal)
@@ -104,7 +100,7 @@ func TestInstallGuardToolprocHooksMergesAndPreserves(t *testing.T) {
 	if len(command) != len(commandIn) {
 		t.Fatalf("command = %v, want unchanged (no second --settings)", command)
 	}
-	s := readGuardHookSettings(t, existing)
+	s := mustReadGuardHookSettings(t, existing)
 	if _, ok := s.Hooks["Stop"]; !ok {
 		t.Fatal("merge dropped the pre-existing Stop hook")
 	}
@@ -116,7 +112,7 @@ func TestInstallGuardToolprocHooksMergesAndPreserves(t *testing.T) {
 	if _, _, _, err := installGuardToolprocHooksAt(command, "observe", existing, "fak", "", journal); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
-	s = readGuardHookSettings(t, existing)
+	s = mustReadGuardHookSettings(t, existing)
 	assertToolprocEvent(t, s, "PreToolUse", "pre", journal)
 }
 

@@ -188,16 +188,29 @@ func guardToolprocSetHooks(settings *guardPreCompactClaudeSettings, fakBin, jour
 // events in an existing guard settings file, preserving every other key (the
 // PreCompact and Stop hooks), so a single --settings carries all of them.
 func mergeGuardToolprocIntoSettings(path, fakBin, journalPath string) error {
-	raw, err := os.ReadFile(path)
+	settings, err := readGuardHookSettings(path)
 	if err != nil {
 		return err
 	}
-	var settings guardPreCompactClaudeSettings
-	if err := json.Unmarshal(raw, &settings); err != nil {
-		return fmt.Errorf("parse existing hook settings %s: %w", path, err)
-	}
 	guardToolprocSetHooks(&settings, fakBin, journalPath)
 	return writeGuardHookSettings(path, settings)
+}
+
+// readGuardHookSettings parses an existing guard settings file into the shared settings struct.
+// Every merge-into-an-existing-file installer needs exactly this preamble — SessionStart, Stop,
+// toolproc, and the reasoning posture all merge their own key into ONE file so a single
+// --settings carries the whole stack (Claude's --settings is last-wins, not merged) — so the
+// read lives here beside writeGuardHookSettings rather than four times over.
+func readGuardHookSettings(path string) (guardPreCompactClaudeSettings, error) {
+	var settings guardPreCompactClaudeSettings
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return settings, err
+	}
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return settings, fmt.Errorf("parse existing hook settings %s: %w", path, err)
+	}
+	return settings, nil
 }
 
 func writeGuardHookSettings(path string, settings guardPreCompactClaudeSettings) error {

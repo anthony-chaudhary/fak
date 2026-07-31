@@ -142,6 +142,7 @@ func cmdGuard(argv []string) {
 	taskHandoffLive := fs.Bool("task-handoff-live", false, "after a valid handoff with next_steps, the Stop hook runs fak task handoff --live before allowing the clean stop")
 	operatorDirected := fs.String("operator-directed", guardOperatorDirectedModeWarn, "Claude Code Stop hook that catches a HEADLESS turn ending by asking a human (\"do you want me to push?\", \"waiting for your approval\") — a question no one is there to answer, so the work stalls: off|shadow|warn|enforce. WARN by default (soak: prints the choicetriage remediation, allows the stop); enforce BLOCKS a resolvable ask and feeds the remediation back so the agent acts, while routing a HUMAN_RESIDUAL wall as a typed escalation. Auto-OFF for an attended interactive child the operator did not gate explicitly (a human can always ask); never blocks an interactive session.")
 	splitMode := fs.String("split", "auto", "the default-launch UI: open a 20% `fak info` pane BESIDE the 80% interactive agent pane so the live cache/token economy + the kernel floor's safety counters stay on screen (a bare `fak guard -- claude` hands the whole terminal to Claude, hiding fak). auto|on|off. AUTO (default): enable ONLY for an attended interactive launch inside a splittable terminal context (tmux; Windows Terminal via $WT_SESSION; on macOS, iTerm2 gets an inline split and Apple Terminal — which has no split panes — a companion fak-info window, both via osascript); no-op for headless/piped/CI/plain-terminal launches (zero behavior change there). on forces it (prints a recipe if no host is found); off disables. The pane polls THIS guard's own loopback gateway (auth-exempt on loopback); the bearer is never placed on a pane command line.")
+	effortMode := fs.String("effort", guardEffortModeAuto, "the DEFAULT reasoning posture handed to a Claude child, decided by attendance: auto|ultracode|xhigh|off. AUTO (default): an attended interactive child gets ULTRACODE (xhigh reasoning + dynamic multi-agent workflow orchestration — a human is waiting on the hard question), while a headless `-p` fleet worker gets XHIGH (strong per-message reasoning without the orchestration wall-clock/spend tax nobody is watching). ultracode|xhigh force one posture; off leaves the seat's own default alone. A child that already pinned its own `--effort` (or an inline --settings naming ultracode) is left untouched. FAK_GUARD_EFFORT sets it without editing an argv. Claude children only; ultracode is MERGED into guard's single --settings file because Claude's --settings is last-wins, not merged.")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a \"bottom\" strip or a \"right\" column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: refresh interval for the fak-info pane")
 	splitDryRun := fs.Bool("split-dry-run", false, "preview the --split 80/20 plan (resolved multiplexer, geometry, and the exact `fak info` pane command) and EXIT, without bringing up the gateway, spawning a pane, or launching the agent. Use it to see what --split will do before handing the terminal to the agent.")
@@ -1230,11 +1231,32 @@ func cmdGuard(argv []string) {
 	sessionStartManaged := guardSessionStartManaged(command)
 	// Thread the guard trace id into the hook argv so the running SessionStart hook holds both
 	// ids and can record the A1 uuid<->trace identity join (#4112/#4113).
-	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
+	var sessionStartInstall guardSessionStartInstall
+	command, sessionStartInstall, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: Claude SessionStart hook setup failed: %v\n", err)
 		os.Exit(1)
+	}
+	// The DEFAULT reasoning posture, decided by attendance (guard_effort.go): an attended
+	// interactive child gets ultracode, a headless `-p` fleet worker gets xhigh. It runs LAST
+	// of the settings writers so the ultracode key is merged into whatever file the hook
+	// installers above ended up with — a later hook merge would round-trip the struct and, but
+	// for the field living on guardPreCompactClaudeSettings, drop the key. Same
+	// guardChildInteractive signal the task-handoff and operator-directed gates key on.
+	effortSettings := sessionStartSettings
+	if p := strings.TrimSpace(sessionStartInstall.SettingsPath); p != "" {
+		effortSettings = p
+	}
+	var effortInstall guardEffortInstall
+	command, effortInstall, err = installGuardEffortPosture(command, guardEffortEffectiveMode(*effortMode, guardSetFlags["effort"], os.Getenv), effortSettings)
+	if err != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "fak guard: reasoning posture setup failed: %v\n", err)
+		os.Exit(1)
+	}
+	if !*quiet {
+		fmt.Fprintf(os.Stderr, "fak guard: reasoning posture = %s\n", guardEffortWord(effortInstall, guardChildInteractive(command)))
 	}
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the

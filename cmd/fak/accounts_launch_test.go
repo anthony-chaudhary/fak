@@ -24,17 +24,17 @@ func TestBuildLaunchArgv(t *testing.T) {
 		{
 			name: "guard on, skip-perms on (the default)",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true},
-			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions"},
+			want: []string{fakBin, "guard", "--effort", "off", "--", "claude", "--dangerously-skip-permissions"},
 		},
 		{
 			name: "guard on, skip-perms on, with passthrough",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, passthrough: []string{"--resume", "abc"}},
-			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--resume", "abc"},
+			want: []string{fakBin, "guard", "--effort", "off", "--", "claude", "--dangerously-skip-permissions", "--resume", "abc"},
 		},
 		{
 			name: "guard on, skip-perms off (Claude prompts)",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: false},
-			want: []string{fakBin, "guard", "--", "claude"},
+			want: []string{fakBin, "guard", "--effort", "off", "--", "claude"},
 		},
 		{
 			name: "guard off, skip-perms on (direct, no kernel hop)",
@@ -72,43 +72,46 @@ func TestBuildLaunchArgv(t *testing.T) {
 			want: []string{fakBin, "guard", "--", "opencode"},
 		},
 		{
-			// Ultracode injects the session-only --settings for Claude, after the bypass flag
-			// and before any passthrough — parity with the `f` shortcut's workflow-on default.
-			name: "claude ultracode on adds --settings after the bypass flag",
+			// Under guard, ultracode is RELAYED as the guard flag `--effort ultracode` rather
+			// than an inline child --settings: Claude's --settings is last-wins, so a second
+			// occurrence would discard guard's whole hook-settings file. Guard merges the key
+			// into that one file instead (guard_effort.go).
+			name: "claude ultracode on relays the guard --effort posture, not an inline --settings",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, ultracode: true},
-			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--settings", `{"ultracode":true}`},
+			want: []string{fakBin, "guard", "--effort", "ultracode", "--", "claude", "--dangerously-skip-permissions"},
 		},
 		{
-			name: "claude ultracode on with passthrough keeps --settings before passthrough",
+			name: "claude ultracode on with passthrough keeps the posture on the guard argv",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, ultracode: true, passthrough: []string{"-p", "hi"}},
-			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--settings", `{"ultracode":true}`, "-p", "hi"},
+			want: []string{fakBin, "guard", "--effort", "ultracode", "--", "claude", "--dangerously-skip-permissions", "-p", "hi"},
 		},
 		{
-			// Ultracode is Claude-specific; --settings is never handed to a non-Claude agent.
-			name: "codex ultracode on gets no --settings",
+			// Ultracode is Claude-specific; neither the inline --settings nor the relayed
+			// guard --effort posture is handed to a non-Claude agent.
+			name: "codex ultracode on gets no --settings and no --effort relay",
 			opts: launchOpts{command: "codex", useGuard: true, skipPermissions: true, ultracode: true},
 			want: []string{fakBin, "guard", "--", "codex", "--dangerously-bypass-approvals-and-sandbox"},
 		},
 		{
 			// The default model is pinned via --model for a Claude launch, after the
-			// bypass flag and before ultracode's --settings — so a switched seat starts on
-			// the configured default regardless of its own saved default.
+			// bypass flag — so a switched seat starts on the configured default regardless
+			// of its own saved default. The reasoning posture rides the guard argv instead.
 			name: "claude default model adds --model after the bypass flag",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, model: defaultLaunchModel},
-			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel},
+			want: []string{fakBin, "guard", "--effort", "off", "--", "claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel},
 		},
 		{
-			// --model precedes --settings, and both precede any passthrough — so a caller's own
-			// `-- --model x` still comes later.
-			name: "claude model + ultracode order: --model then --settings then passthrough",
+			// --model precedes any passthrough — so a caller's own `-- --model x` still comes
+			// later — while the ultracode posture rides the guard segment before `--`.
+			name: "claude model + ultracode order: posture on guard argv, --model then passthrough",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, ultracode: true, model: defaultLaunchModel, passthrough: []string{"--model", "sonnet"}},
-			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel, "--settings", `{"ultracode":true}`, "--model", "sonnet"},
+			want: []string{fakBin, "guard", "--effort", "ultracode", "--", "claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel, "--model", "sonnet"},
 		},
 		{
 			// An empty model opts out: the seat's own saved default stands (no --model emitted).
 			name: "claude empty model omits --model",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, model: ""},
-			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions"},
+			want: []string{fakBin, "guard", "--effort", "off", "--", "claude", "--dangerously-skip-permissions"},
 		},
 		{
 			// --model is Claude-specific: a Claude model id is never handed to a non-Claude agent.
@@ -121,7 +124,7 @@ func TestBuildLaunchArgv(t *testing.T) {
 			// `--` so guard parses them and the agent never sees them.
 			name: "claude managed-cache posture rides the guard argv before --",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, guardCacheArgs: []string{"--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on"}},
-			want: []string{fakBin, "guard", "--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on", "--", "claude", "--dangerously-skip-permissions"},
+			want: []string{fakBin, "guard", "--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on", "--effort", "off", "--", "claude", "--dangerously-skip-permissions"},
 		},
 		{
 			// With guard OFF there is no guard process to carry the posture, so the flags are
@@ -217,9 +220,9 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 		}
 	}
 	// stdout echoes the scriptable command: it must be the guard wrap, carrying the on-by-default
-	// managed-cache posture before `--`.
+	// managed-cache posture AND the relayed ultracode posture before `--`.
 	gotOut := strings.TrimSpace(out.String())
-	if !strings.Contains(gotOut, "guard --managed-cache on -- claude --dangerously-skip-permissions") {
+	if !strings.Contains(gotOut, "guard --managed-cache on --effort ultracode -- claude --dangerously-skip-permissions") {
 		t.Fatalf("dry-run stdout command = %q", gotOut)
 	}
 	if strings.Contains(gotErr, seat) {
@@ -281,11 +284,15 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 		t.Fatalf("argv not a guard wrap: %#v", gotArgv)
 	}
 	joined := strings.Join(gotArgv, " ")
-	if !strings.Contains(joined, "guard --managed-cache on --") {
-		t.Fatalf("argv missing on-by-default managed-cache posture before --: %#v", gotArgv)
+	if !strings.Contains(joined, "guard --managed-cache on --effort ultracode --") {
+		t.Fatalf("argv missing on-by-default managed-cache + ultracode posture before --: %#v", gotArgv)
 	}
-	// The default posture is --ultracode=auto, which an unclassified launch resolves to OFF
-	// (#5016), so a bare launch carries no ultracode --settings.
+	// The default posture is --ultracode=auto, and an unclassified launch is a USER-INITIATED
+	// one, so it resolves to ON — relayed to guard as `--effort ultracode` on the guard segment
+	// above, never as an inline child --settings (which would clobber guard's hook file).
+	if strings.Contains(joined, ultracodeSettingsArg) {
+		t.Fatalf("guarded launch must not carry an inline ultracode --settings (it clobbers guard's hook settings): %q", joined)
+	}
 	wantTail := "claude --dangerously-skip-permissions --model " + defaultLaunchModel + " --resume xyz"
 	if !strings.HasSuffix(joined, wantTail) {
 		t.Fatalf("argv tail wrong: %q", joined)
@@ -404,8 +411,8 @@ func TestRunAccountsLaunchFallsBackWhenDefaultOpusUnavailable(t *testing.T) {
 	t.Cleanup(func() { accountsLaunchRun = orig })
 
 	// --ultracode=on is explicit here: the point of this test is that the posture RIDES the
-	// fallback hop, and the default (auto -> off for an unclassified launch, #5016) would emit no
-	// --settings to check.
+	// fallback hop. It is relayed as the guard flag `--effort ultracode`, not an inline
+	// --settings, so that is what the fallback argv must still carry.
 	var out, errb bytes.Buffer
 	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--ultracode=on", "--registry", regPath, "--home", home})
 	if rc != 0 {
@@ -418,7 +425,7 @@ func TestRunAccountsLaunchFallsBackWhenDefaultOpusUnavailable(t *testing.T) {
 	if !strings.Contains(first, "--model "+defaultLaunchModel) {
 		t.Fatalf("primary launch did not use default Opus model: %q", first)
 	}
-	for _, want := range []string{"--model " + defaultLaunchFallbackFirst(), "--settings " + ultracodeSettingsArg} {
+	for _, want := range []string{"--model " + defaultLaunchFallbackFirst(), "--effort " + guardEffortModeUltracode} {
 		if !strings.Contains(second, want) {
 			t.Fatalf("fallback launch missing %q:\n%s", want, second)
 		}
@@ -792,16 +799,20 @@ func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("launch --guard=false rc=%d stderr=%s", rc, errb.String())
 	}
-	// Default --ultracode=auto + an unclassified launch => no ultracode --settings (#5016).
-	want := []string{"claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel}
+	// Default --ultracode=auto + an unclassified (user-initiated) launch => ultracode ON. With
+	// guard OFF there is no guard process to relay the posture to and no hook-settings file to
+	// clobber, so the INLINE --settings is the correct — and only — carrier here.
+	want := []string{"claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel, "--settings", ultracodeSettingsArg}
 	if !reflect.DeepEqual(gotArgv, want) {
 		t.Fatalf("direct launch argv = %#v, want %#v", gotArgv, want)
 	}
 }
 
-// TestResolveUltracodePosture pins the posture x work-class table #5016 documents: an explicit
-// on/off always wins, and `auto` earns ultracode ONLY for rigor-class work — grind and the
-// unclassified/interactive case stay OFF for latency.
+// TestResolveUltracodePosture pins the posture x work-class table: an explicit on/off always
+// wins, and `auto` earns ultracode for everything EXCEPT grind — including the unclassified
+// case, which is the interactive launcher's own row (a human at a keyboard is user-initiated
+// work, and user-initiated work is what the orchestration tax is for). Unattended work does not
+// arrive here; it comes through the headless dispatch path, where guard resolves xhigh.
 func TestResolveUltracodePosture(t *testing.T) {
 	cases := []struct {
 		posture string
@@ -809,12 +820,13 @@ func TestResolveUltracodePosture(t *testing.T) {
 		want    bool
 		wantErr bool
 	}{
-		// auto routes per work class.
+		// auto routes per work class: only GRIND opts out.
 		{"auto", ultracodeKindRigor, true, false},
 		{"auto", ultracodeKindGrind, false, false},
-		{"auto", ultracodeKindUnknown, false, false},
+		{"auto", ultracodeKindUnknown, true, false},
 		{"", ultracodeKindRigor, true, false}, // empty normalizes to auto
-		{"", ultracodeKindUnknown, false, false},
+		{"", ultracodeKindUnknown, true, false},
+		{"Auto", ultracodeKindUnknown, true, false},
 		// An explicit posture wins over the work class in BOTH directions.
 		{"on", ultracodeKindUnknown, true, false},
 		{"on", ultracodeKindGrind, true, false},
@@ -843,22 +855,23 @@ func TestResolveUltracodePosture(t *testing.T) {
 	}
 }
 
-// TestRunAccountsLaunchUltracodePosture pins #5016: --ultracode is a three-value posture
-// auto|on|off (default auto), and the ultracode --settings arg is emitted ONLY when the posture
-// resolves ON. A bare launch carries no work class, so auto resolves to the conservative OFF —
-// replacing the blanket default-on that made every seat pay the orchestration tax.
+// TestRunAccountsLaunchUltracodePosture pins the launcher's end-to-end posture contract:
+// --ultracode is a three-value posture auto|on|off (default auto), it is RELAYED to guard as
+// `--effort ultracode|off` (never as an inline child --settings, which would clobber guard's
+// hook-settings file), and a bare user-initiated launch defaults ON. The relay is pinned in BOTH
+// directions so an explicit --ultracode=off still beats guard's own attendance default.
 func TestRunAccountsLaunchUltracodePosture(t *testing.T) {
 	cases := []struct {
 		name    string
 		args    []string
 		wantArg bool
 	}{
-		{"default (auto) + unclassified launch omits ultracode", nil, false},
-		{"explicit auto + unclassified launch omits ultracode", []string{"--ultracode=auto"}, false},
+		{"default (auto) + user-initiated launch gets ultracode", nil, true},
+		{"explicit auto + user-initiated launch gets ultracode", []string{"--ultracode=auto"}, true},
 		{"explicit on forces ultracode", []string{"--ultracode=on"}, true},
-		{"explicit off omits ultracode", []string{"--ultracode=off"}, false},
+		{"explicit off pins the posture off", []string{"--ultracode=off"}, false},
 		{"legacy bool true still forces ultracode", []string{"--ultracode=true"}, true},
-		{"legacy bool false still omits ultracode", []string{"--ultracode=false"}, false},
+		{"legacy bool false still pins the posture off", []string{"--ultracode=false"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -881,8 +894,16 @@ func TestRunAccountsLaunchUltracodePosture(t *testing.T) {
 				t.Fatalf("launch rc=%d stderr=%s", rc, errb.String())
 			}
 			joined := strings.Join(gotArgv, " ")
-			if got := strings.Contains(joined, ultracodeSettingsArg); got != tc.wantArg {
-				t.Fatalf("ultracode --settings present = %v, want %v\nargv: %s", got, tc.wantArg, joined)
+			wantRelay := "--effort " + guardPreCompactModeOff
+			if tc.wantArg {
+				wantRelay = "--effort " + guardEffortModeUltracode
+			}
+			if !strings.Contains(joined, wantRelay) {
+				t.Fatalf("guard posture relay %q missing\nargv: %s", wantRelay, joined)
+			}
+			// The inline form is the clobbering one and must never appear on a GUARDED argv.
+			if strings.Contains(joined, ultracodeSettingsArg) {
+				t.Fatalf("guarded launch must not carry an inline ultracode --settings\nargv: %s", joined)
 			}
 		})
 	}

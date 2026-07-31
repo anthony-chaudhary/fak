@@ -87,7 +87,7 @@ var guardFlagGroups = []guardFlagGroup{
 	{"Session lifecycle hooks (Claude Code)", []string{
 		"precompact-hook", "deny-all-continue", "deny-all-max", "deny-all-warn",
 		"deny-all-final", "same-stop", "toolproc-hooks", "task-handoff", "task-handoff-file",
-		"task-handoff-repo", "task-handoff-live", "operator-directed",
+		"task-handoff-repo", "task-handoff-live", "operator-directed", "effort",
 	}},
 	{"Budgets, resets & session governance", []string{
 		"context-budget-tokens", "max-duration", "budget-envelope",

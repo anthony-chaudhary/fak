@@ -53,6 +53,19 @@ type guardPreCompactInstall struct {
 
 type guardPreCompactClaudeSettings struct {
 	Hooks map[string][]guardPreCompactClaudeMatcher `json:"hooks"`
+	// Ultracode carries the reasoning posture guard_effort.go merges in (xhigh reasoning
+	// PLUS dynamic multi-agent workflow orchestration). It lives on THIS struct — not in a
+	// second --settings arg — because Claude Code's --settings is last-wins rather than
+	// merged, so a second occurrence would discard the whole hook stack above. A pointer
+	// with omitempty keeps the key absent (not `false`) when no posture was resolved, so a
+	// hook-only settings file stays byte-identical to before. Every installer round-trips
+	// this struct, so the field must live here or a later hook merge would drop the key.
+	Ultracode *bool `json:"ultracode,omitempty"`
+	// EffortLevel is the settings-file spelling of the per-message reasoning knob. Guard
+	// emits xhigh via the child's own `--effort` flag today, so this stays unset; it is
+	// declared for the same round-trip-preservation reason as Ultracode — an operator's
+	// pre-existing effortLevel in a merged-into file must survive a hook install.
+	EffortLevel string `json:"effortLevel,omitempty"`
 }
 
 type guardPreCompactClaudeMatcher struct {

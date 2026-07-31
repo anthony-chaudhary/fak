@@ -77,8 +77,8 @@ const (
 )
 
 // resolveUltracodePosture folds the --ultracode knob and the work class into the single boolean
-// buildLaunchArgv needs: whether to emit --settings '{"ultracode":true}'. This is the
-// posture→ultracode table (#5016) that replaced a blanket default-on bool:
+// buildLaunchArgv needs: whether this launch runs in ultracode. This is the posture→ultracode
+// table (#5016), re-keyed on ATTENDANCE:
 //
 //	posture  work kind  ultracode  why
 //	-------  ---------  ---------  -------------------------------------------------------
@@ -86,13 +86,21 @@ const (
 //	off      (any)      OFF        operator disabled it; an explicit posture always wins
 //	auto     rigor      ON         verified-before-relayed work earns the orchestration tax
 //	auto     grind      OFF        mechanical work never recovers the wall-clock cost
-//	auto     unknown    OFF        conservative: unclassifiable work probably needs no rigor
+//	auto     unknown    ON         a USER-INITIATED launch: a human is waiting on the answer
 //
-// `auto` is the default. The interactive launcher has no work class to hand in, so a bare
-// `fak accounts launch` resolves auto→unknown→OFF: lean and fast by default, with --ultracode=on
-// as the operator's explicit opt-in. `true`/`false` stay accepted as on/off aliases so a script
-// written against the old bool flag keeps working. An unrecognized posture is a loud error rather
-// than a silent default — the same fail-on-bad-mode discipline normalizeManagedCacheMode uses.
+// `auto` is the default, and the unknown row is the interactive launcher's own row — this
+// launcher has no work class to hand in because it is a human at a keyboard typing
+// `fak accounts launch`. That is exactly the case that SHOULD pay the orchestration tax: the
+// question is usually the hard one the operator could not answer themselves, and the
+// wall-clock is time they already agreed to spend by asking. The conservative-OFF this row
+// used to hold was reasoning about UNATTENDED work, and unattended work does not come through
+// here — it comes through the headless dispatch path, where `fak guard` resolves the same
+// attendance axis to xhigh instead (guard_effort.go). So: user-initiated ⇒ ultracode,
+// agent session ⇒ xhigh, one axis, decided at each of the two launch surfaces.
+//
+// `true`/`false` stay accepted as on/off aliases so a script written against the old bool flag
+// keeps working. An unrecognized posture is a loud error rather than a silent default — the
+// same fail-on-bad-mode discipline normalizeManagedCacheMode uses.
 func resolveUltracodePosture(posture string, kind ultracodeWorkKind) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(posture)) {
 	case "on", "true":
@@ -100,7 +108,7 @@ func resolveUltracodePosture(posture string, kind ultracodeWorkKind) (bool, erro
 	case "off", "false":
 		return false, nil
 	case "", "auto":
-		return kind == ultracodeKindRigor, nil
+		return kind != ultracodeKindGrind, nil
 	default:
 		return false, fmt.Errorf("invalid --ultracode %q: want auto|on|off", posture)
 	}
@@ -197,11 +205,17 @@ func buildLaunchArgv(fakBin string, o launchOpts) []string {
 			agentCmd = append(agentCmd, "--model", o.model)
 		}
 	}
-	// Ultracode (workflow mode) is Claude-only and session-only: emit --settings for a Claude
-	// launch so a fak launch defaults to the same workflow-on posture the `f` shortcut sets.
+	// Ultracode (workflow mode) is Claude-only and session-only. It rides an INLINE --settings
+	// only on an UNGUARDED launch. Under `fak guard` it must instead be relayed as the guard
+	// flag `--effort ultracode` (below), because Claude Code's --settings is LAST-WINS rather
+	// than merged: guard puts its own hook-settings FILE on the child argv, and an inline
+	// `--settings '{"ultracode":true}'` sitting later on that argv silently discards the whole
+	// file — the deny-all auto-continue Stop hook, the task-handoff gate, the toolproc journal,
+	// the SessionStart affordance and the PreCompact coherence gate all vanish. Relaying
+	// through guard keeps exactly ONE --settings on the argv, with ultracode merged into it.
 	// Gated on the agent being Claude exactly as launchSkipPermsFlag gates, since --settings is
 	// a Claude-specific flag; other agents get nothing.
-	if o.ultracode {
+	if o.ultracode && !o.useGuard {
 		switch guardAgentBaseName(o.command) {
 		case "claude", "claude-code":
 			agentCmd = append(agentCmd, "--settings", ultracodeSettingsArg)
@@ -217,6 +231,20 @@ func buildLaunchArgv(fakBin string, o launchOpts) []string {
 	// keeps the argv byte-identical to a launch that never configured a posture.
 	argv := []string{fakBin, "guard"}
 	argv = append(argv, o.guardCacheArgs...)
+	// Relay the RESOLVED ultracode posture to guard, which owns the single --settings file and
+	// merges the key into it. It is pinned in BOTH directions so the launcher's explicit answer
+	// always wins over guard's own attendance default: on ⇒ `ultracode`, off ⇒ `off` (leave the
+	// seat's own reasoning default alone), never left to `auto`. Claude-only, matching the
+	// inline form above — guard's posture installer no-ops on a non-Claude child anyway, but
+	// keeping the argv identical for other agents means no behavior change there at all.
+	switch guardAgentBaseName(o.command) {
+	case "claude", "claude-code":
+		mode := guardPreCompactModeOff
+		if o.ultracode {
+			mode = guardEffortModeUltracode
+		}
+		argv = append(argv, "--effort", mode)
+	}
 	argv = append(argv, "--")
 	return append(argv, agentCmd...)
 }
