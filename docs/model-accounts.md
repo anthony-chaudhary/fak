@@ -109,6 +109,80 @@ tick/wave`, `fak accounts launch`, `fak accounts next`, and `fak guard` auth war
 can gate on `can_serve` and surface the closed login status instead of re-deriving readiness from
 raw credential files.
 
+## A seat on a third-party Anthropic-compatible endpoint
+
+Claude is also sold through other people's gateways — a cloud vendor's serving endpoint, a
+cloud marketplace, a company-internal proxy. Those speak the Anthropic wire protocol but
+authenticate *their* tenant credential, serve *their* model namespace, and live at *their*
+host. A seat can name all three, so a vendor endpoint becomes an ordinary member of the
+switcher rather than a shell script off to the side:
+
+```
+fak accounts add --name vendor --suffix '' \
+  --reserved \
+  --api-key-env ANTHROPIC_AUTH_TOKEN \
+  --base-url 'https://gateway.example.com/serving-endpoints/anthropic' \
+  --seat-env 'ANTHROPIC_MODEL=vendor-claude-sonnet-5' \
+  --seat-env 'ANTHROPIC_DEFAULT_SONNET_MODEL=vendor-claude-sonnet-5' \
+  --seat-env 'CLAUDE_CODE_USE_GATEWAY=1'
+```
+
+Two new authored fields carry it. `base_url` (`--base-url`) is the endpoint; its presence is
+what makes a seat third-party, and code asks `Home.ThirdParty()` rather than pattern-matching
+a hostname. `extra_env` (repeatable `--seat-env KEY=VALUE`) is the non-secret environment the
+launched agent needs — the model ids, the gateway toggles, any vendor header. Non-secret is
+**enforced**, not requested: `ValidateExtraEnv` refuses a credential-shaped name at both write
+and launch time, so a registry — a plaintext file, often in a shared tree — cannot become the
+place someone parks a token. The credential itself stays a reference (`--api-key-env`), exactly
+as `cred_env` does one layer up.
+
+### Reserved: usable on request, never on rotation
+
+`--reserved` is the answer to "register it, but never let anything pick it for me." A reserved
+seat is excluded from the rotation pool (`RotationPolicy.AvoidReserved` defaults on) while
+staying fully resolvable by name, so `fak accounts resolve vendor` and `fak accounts launch
+--name vendor` work while `fak accounts next` will not wander onto it. `fak accounts rotation
+--json` shows both halves at once — an empty `pool`, and the seat under `excluded` with reason
+`reserved`, `login: ready`, `can_serve: true`. Metered or per-token billing is the usual reason
+to want this: the seat is there for the one job that asked for it.
+
+### Why a vendor seat launches with `--guard=false`
+
+`fak guard` fronts its child with its **own** `ANTHROPIC_BASE_URL` pointing at guard's loopback
+gateway, and proxies upstream with the credential guard holds. Under guard a vendor seat's
+endpoint is therefore not unused — it is *replaced*, and the traffic bills a different account
+than the operator named. Nothing looks wrong from the outside: the agent starts and answers.
+So a guarded launch of a `base_url` seat is **refused**, with the endpoint and the escape flag
+in the message. Reach the vendor directly with `--guard=false`, accepting the trade the flag
+already implies: no kernel adjudication, no vCache hop.
+
+Three further adjustments happen on that path, each because the default is a first-party
+assumption that is wrong here:
+
+- **Inherited first-party credentials are dropped.** A `fak guard` session exports its own
+  `ANTHROPIC_API_KEY` into every child, so a vendor seat launched from one would carry a
+  first-party key next to the vendor endpoint and could present the wrong tenant's token.
+  Overriding the endpoint alone is not enough. The variable the seat itself names is kept, and
+  the launch says on stderr which ones it dropped.
+- **The seat's own credential is declared to the spawn broker's secret floor.** The always-on
+  floor strips any variable whose name contains `TOKEN`, which is precisely the bearer variable
+  a third-party gateway authenticates. Without a declaration the `--api-key-env` *reference*
+  reaches the child's argv while the value does not, and the launch reports "Not logged in"
+  against a configuration that is entirely correct. The declaration is narrow: only the
+  variable this launch already references, exempt for this one hop, and the floor runs again at
+  the child's own spawns, so nothing becomes inheritable.
+- **No first-party model is pinned.** `fak accounts launch` normally pins a first-party default
+  `--model` with a fallback chain behind it; against a vendor namespace those name models that
+  do not exist there, turning one clean failure into a walk through several. An unset `--model`
+  therefore defers to the seat's own `$ANTHROPIC_MODEL`. An explicit `--model` still wins.
+
+Headless is then just the seat plus a prompt, and the result comes back attributed to the
+vendor's model with `provider: gateway`:
+
+```
+fak accounts launch --name vendor --guard=false -- -p 'ping' --output-format json
+```
+
 ## Mix and match at any level
 
 There is no per-aspect special case. The routing decision produces model ids for the

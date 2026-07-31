@@ -66,14 +66,30 @@ func capabilityDeclarations(spec string) (map[string]modelroute.WorkTier, error)
 // SPELLINGS of a model that is already in the pool under its real id, and admitting them
 // would let the same hardware appear twice on a rung.
 //
+// A binding to a MANUAL-ONLY account is excluded too, for a different reason: this pool is
+// what Place and the escalation walk choose from on their own, and a reserved account is
+// by definition one that may only be spent when a caller NAMES it. Filtering here rather
+// than inside Place keeps the reservation true for every consumer of the pool at once —
+// placement, escalation, and any later automatic picker — since none of them can select a
+// candidate that was never offered.
+//
 // A model with no declared capability enters the pool UNMEASURED at the strictest tier.
 // Both halves matter: unmeasured keeps it off every cheap rung, and T0 means that even on
 // the top rung it is admitted on the strength of the rung, not of an invented grade.
 func placementCandidates(r modelroute.Roster, declared map[string]modelroute.WorkTier) []modelroute.Candidate {
+	reserved := make(map[string]bool, len(r.Accounts))
+	for _, a := range r.Accounts {
+		if a.ManualOnly {
+			reserved[a.ID] = true
+		}
+	}
 	seen := map[string]bool{}
 	var out []modelroute.Candidate
 	for _, b := range r.Bindings {
 		if b.CompatibilityOnly || b.DeprecatedAliasFor != "" || b.Model == "" || seen[b.Model] {
+			continue
+		}
+		if reserved[b.Account] {
 			continue
 		}
 		seen[b.Model] = true

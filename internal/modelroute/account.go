@@ -201,6 +201,33 @@ func KindBaseURL(k ProviderKind) string {
 // instead of silently landing in the manifest.
 var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// The auth schemes an Account may declare. These MIRROR internal/agent's
+// AnthropicAuthScheme values as plain strings rather than importing them, the same
+// deliberate stdlib-purity trade this file already makes for provider kinds (see the
+// note above KindOpenAI): internal/agent imports modelroute, so importing back would
+// cycle. TestAuthSchemeMirrorsAgent (in internal/agent, which can see both) pins the
+// two lists together so a rename cannot drift them apart silently.
+const (
+	// AuthSchemeDefault leaves the provider adapter's own credential handling alone.
+	AuthSchemeDefault = ""
+	// AuthSchemeBearer presents the credential as `Authorization: Bearer <token>`.
+	AuthSchemeBearer = "bearer"
+	// AuthSchemeAPIKey presents the credential as the Anthropic-wire `x-api-key` header.
+	AuthSchemeAPIKey = "x-api-key"
+)
+
+// validAuthScheme reports whether s is a scheme some adapter understands. Kept as a
+// closed set so a typo ("Bearer", "token") fails Validate loudly instead of silently
+// falling back to the shape sniff whose 401 the operator was trying to fix.
+func validAuthScheme(s string) bool {
+	switch s {
+	case AuthSchemeDefault, AuthSchemeBearer, AuthSchemeAPIKey:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account is the switcher unit: a named credential set for one provider. ID is the
 // handle a Binding references. Kind is the wire (and the SOLE locality signal). BaseURL
 // overrides the kind's public default (REQUIRED, and loopback-only, for a local
@@ -229,6 +256,37 @@ type Account struct {
 	// keyset. It scopes WHICH accounts a tenant may reach; it is NOT an authority
 	// grant and says nothing about whether a turn may consume user consent.
 	Principals []string `json:"principals,omitempty"`
+	// ManualOnly withholds this account from every AUTOMATIC selection pool while
+	// leaving it fully reachable by an EXPLICIT, named request.
+	//
+	// WHY IT EXISTS. Registering an account is currently the same act as volunteering
+	// it: once a binding names it, the placement/escalation walk (cmd/fak's
+	// placementCandidates → Roster.Place) may pick it on its own, and Roster.Default
+	// makes it the silent fallback for any unbound id. That is right for a pool of
+	// interchangeable seats and WRONG for an account a human wants held in reserve — a
+	// separately-billed vendor endpoint, a low-quota tenant credential, a metered
+	// gateway — where every call should be one somebody asked for. Without this flag the
+	// only way to keep such an account out of the automatic pool is to leave it out of
+	// the roster, which also makes it unreachable: the registry cannot express
+	// "available, never volunteered".
+	//
+	// It is a supply property of the CREDENTIAL, so it lives on the account rather than
+	// on each binding: marking it once covers every model bound to it, and a new binding
+	// cannot forget it. It is NOT an authorization control — it says nothing about WHO
+	// may dispatch (that is Principals) and it does not stop a caller who names the
+	// account. It only removes the account from pools that choose on their own.
+	ManualOnly bool `json:"manual_only,omitempty"`
+	// AuthScheme overrides how this account's credential is presented on the wire, for
+	// the case where the credential's SHAPE is not a reliable discriminator. It is the
+	// roster-level spelling of agent.AnthropicAuthScheme ("", "bearer", "x-api-key"):
+	// empty keeps the provider adapter's own default, which for the Anthropic wire
+	// sniffs sk-ant-oat => bearer / else x-api-key. A THIRD-PARTY Anthropic-COMPATIBLE
+	// endpoint authenticates its own tenant token — a prefix fak cannot know — and
+	// generally accepts it only as a bearer, so the sniff sends x-api-key and the call
+	// 401s with the base URL, model and body all correct. Declaring the scheme here
+	// keeps that a CONFIG fact (the CONFIG_NOT_ENV ratchet, #2863) rather than a new
+	// environment variable. Validate refuses a value no adapter understands.
+	AuthScheme string `json:"auth_scheme,omitempty"`
 }
 
 // Binding maps ONE routed model id (a Plan member's Model, or a Plan's Scout) to the
@@ -283,6 +341,15 @@ type Target struct {
 	// the dispatch boundary so Admits can adjudicate it there (#5332). Empty =>
 	// unrestricted, exactly as on the Account.
 	Principals []string `json:"principals,omitempty"`
+	// ManualOnly reports that the resolving account is held in reserve: reachable only
+	// because this resolution NAMED it, never volunteered by an automatic pool. It rides
+	// on the Target so the dispatch layer and the ledger can record that a reserved
+	// credential was spent by explicit request — the audit question a reserved account
+	// exists to answer.
+	ManualOnly bool `json:"manual_only,omitempty"`
+	// AuthScheme carries the account's credential-presentation override to the planner
+	// build, where it becomes agent.AnthropicAuthScheme. Empty => the adapter default.
+	AuthScheme string `json:"auth_scheme,omitempty"`
 }
 
 // Admits reports whether the given tenant ISOLATION principal may dispatch through
@@ -417,6 +484,8 @@ func (r Roster) Resolve(modelID string) (Target, error) {
 		TokensPerMinute:   a.TokensPerMinute,
 		TokensPerDay:      a.TokensPerDay,
 		Principals:        a.Principals,
+		ManualOnly:        a.ManualOnly,
+		AuthScheme:        a.AuthScheme,
 	}, nil
 }
 
@@ -465,7 +534,9 @@ func (r Roster) ResolveDecision(d Decision) (ResolvedPlan, error) { return r.Res
 //   - each binding: a non-empty, delimiter-free model bound to a real account, unique
 //     per model id, with an upstream that may carry provider namespace slashes but
 //     not the route's kind delimiter or whitespace;
-//   - a Default (when set) naming a real account.
+//   - a Default (when set) naming a real account, and NOT a manual_only one (that
+//     would make a reserved account the silent fallback for every unbound id);
+//   - each account's auth_scheme, when set, one an adapter understands.
 //
 // A misconfigured switch must fail here, never fall through to an arbitrary account,
 // egress a "local" route off-box, or leak a secret.
@@ -490,6 +561,10 @@ func (r Roster) Validate() error {
 		seen[a.ID] = true
 		if !knownKind(a.Kind) {
 			return fmt.Errorf("modelroute: account %q has unknown kind %q", a.ID, a.Kind)
+		}
+		if !validAuthScheme(a.AuthScheme) {
+			return fmt.Errorf("modelroute: account %q has unknown auth_scheme %q (want %q, %q, or omitted)",
+				a.ID, a.AuthScheme, AuthSchemeBearer, AuthSchemeAPIKey)
 		}
 		if a.ContextTokens < 0 {
 			return fmt.Errorf("modelroute: account %q context_tokens must be non-negative", a.ID)
@@ -574,6 +649,16 @@ func (r Roster) Validate() error {
 	}
 	if r.Default != "" && !seen[r.Default] {
 		return fmt.Errorf("modelroute: default account %q is not a defined account", r.Default)
+	}
+	// A ManualOnly account as the Default is a contradiction that would defeat the flag
+	// entirely: Resolve sends EVERY unbound model id to the Default, so a reserved
+	// credential named there would serve the widest automatic path in the roster —
+	// silently, and for ids nobody wrote down. Refuse it here rather than let the
+	// reservation read as honored while it is being spent.
+	if r.Default != "" {
+		if a, ok := r.account(r.Default); ok && a.ManualOnly {
+			return fmt.Errorf("modelroute: default account %q is manual_only; a reserved account cannot be the fallback for unbound model ids", r.Default)
+		}
 	}
 	if err := validateSpawnClasses(r.SpawnClasses); err != nil {
 		return err

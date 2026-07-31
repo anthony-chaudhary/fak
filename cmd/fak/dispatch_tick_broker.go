@@ -120,7 +120,24 @@ func denyLaunchBrokerGrant(a launchBrokerAttempt, reason string) launchBrokerGra
 }
 
 func newLaunchBrokerAttempt(surface, backend string, argv []string, env map[string]string, cwd string) launchBrokerAttempt {
-	sanitized, stripped := sanitizeLaunchEnv(env)
+	return newLaunchBrokerAttemptDeclaring(surface, backend, argv, env, cwd, nil)
+}
+
+// newLaunchBrokerAttemptDeclaring is newLaunchBrokerAttempt for a surface that can
+// name the credential variable its child is configured to authenticate with (an
+// account seat's --api-key-env, say). Those NAMES are handed to the secret floor as
+// a keep-set so the child receives the credential the operator pointed it at, while
+// every other ambient secret is still held out. The declaration is deliberately a
+// separate entry point rather than a variadic on the shared constructor: exempting
+// anything from the floor is a security decision, so it should be visible at the
+// call site, and the surfaces that declare nothing keep the strict default by
+// construction rather than by remembering to pass nil.
+//
+// No audit field is needed for the exemption: a declared credential that survives
+// changes the env shape the EnvDigest is computed over, so a declaring launch is
+// already distinguishable in the metadata from a strict one.
+func newLaunchBrokerAttemptDeclaring(surface, backend string, argv []string, env map[string]string, cwd string, declared []string) launchBrokerAttempt {
+	sanitized, stripped := sanitizeLaunchEnvExcept(env, declared)
 	a := launchBrokerAttempt{
 		Surface: strings.TrimSpace(surface),
 		Backend: strings.TrimSpace(backend),
@@ -324,8 +341,8 @@ func launchBrokerDigest(parts []string) string {
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// sanitizeLaunchEnv applies the always-on #2358 secret floor to a brokered
-// child's inherited environment: policy.StripInheritedSecrets removes every
+// sanitizeLaunchEnvExcept applies the always-on #2358 secret floor to a brokered
+// child's inherited environment: policy.StripInheritedSecretsExcept removes every
 // credential-bearing ambient variable (the exfiltration path a spawned worker
 // could otherwise carry to a subagent or descendant) while leaving PATH, the OS
 // floor, and the non-secret DISPATCH_/FLEET_/CLAUDE_CONFIG_DIR config the worker
@@ -334,11 +351,17 @@ func launchBrokerDigest(parts []string) string {
 // hand into one floor every launch surface shares. It returns the surviving env
 // as a fresh map plus the sorted NAMES stripped (never the values) for the
 // audit metadata, so an operator can inspect which secrets the boundary held out.
-func sanitizeLaunchEnv(env map[string]string) (map[string]string, []string) {
+//
+// declared is the caller's keep-set of credential variable NAMES, described on
+// policy.StripInheritedSecretsExcept: the variables this particular child is
+// configured to authenticate with, which the floor passes instead of treating as
+// incidental inheritance. A caller that declares nothing (nil) gets the strict
+// historical floor exactly.
+func sanitizeLaunchEnvExcept(env map[string]string, declared []string) (map[string]string, []string) {
 	if len(env) == 0 {
 		return copyStringMap(env), nil
 	}
-	kept, stripped := policy.StripInheritedSecrets(envSliceFromMap(env))
+	kept, stripped := policy.StripInheritedSecretsExcept(envSliceFromMap(env), declared)
 	sort.Strings(stripped)
 	return envMap(kept), stripped
 }
