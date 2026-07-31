@@ -502,6 +502,14 @@ type HTTPPlanner struct {
 	// as the token. Dynamic headers override ExtraHeaders on matching names. nil leaves the
 	// static/no-extra-header path unchanged.
 	ExtraHeadersFunc func() map[string]string
+	// AnthropicAuthScheme declares how the Anthropic wire presents this planner's
+	// credential. The zero value (AnthropicAuthAuto) sniffs the token shape, which is
+	// correct for first-party api.anthropic.com and is byte-for-byte the pre-field
+	// behavior. Set AnthropicAuthBearer when BaseURL points at a THIRD-PARTY
+	// Anthropic-compatible endpoint whose tenant credential is not an sk-ant-* token and
+	// is accepted only as a bearer — otherwise the sniff sends x-api-key and the call
+	// 401s. Ignored for every non-Anthropic provider.
+	AnthropicAuthScheme AnthropicAuthScheme
 	// ForceResponsesStream asks a Responses upstream for SSE even when the caller used the
 	// buffered Complete path. Codex's ChatGPT-subscription backend requires stream=true;
 	// ordinary OpenAI API-key Responses traffic leaves this false.
@@ -1339,6 +1347,12 @@ func isDigits(s string) bool {
 func (p *HTTPPlanner) transcriptAdapter() (TranscriptAdapter, error) {
 	if p.Adapter != nil {
 		return p.Adapter, nil
+	}
+	// An explicitly declared Anthropic auth scheme has to reach the adapter, which is
+	// the only place the credential is turned into a header. An empty scheme falls
+	// through to the generic constructor, so the default path is unchanged.
+	if p.Provider == ProviderAnthropic && p.AnthropicAuthScheme != AnthropicAuthAuto {
+		return NewAnthropicTranscriptAdapter(p.AnthropicAuthScheme), nil
 	}
 	return NewTranscriptAdapter(p.Provider)
 }
