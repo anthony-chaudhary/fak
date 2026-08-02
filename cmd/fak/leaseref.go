@@ -114,15 +114,37 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       the source that makes a peer's lease (fetched into the local ref store)
       visible at admission. Pipe it: dos arbitrate ... --leases "$(fak leaseref live)".
 
-  fak leaseref liveness [--session ME] [--dir DIR]
+  fak leaseref liveness [--session ME] [--summary] [--dir DIR]
       Classify each LIVE lease by its OWNING SESSION's liveness (#2164):
       self | peer-live | peer-dead | peer-unknown, keyed on the session descriptor
       heartbeat at refs/fak/locks/session-<id> — never the ephemeral acquiring pid.
-      Emits [{...record, liveness, reclaimable, evidence}, ...]. FAIL-CLOSED:
+      Emits the JSON ARRAY [{...record, node, liveness, reclaimable, evidence,
+      evidence_kind}, ...]. evidence_kind is the machine-routable companion to the
+      evidence sentence — no-session-binding | self-session | no-descriptor |
+      terminal-stopped | heartbeat-lapsed | heartbeating — so a loop that wants to
+      REPAIR picks a remedy without pattern-matching prose. FAIL-CLOSED:
       only a POSITIVELY dead session (lapsed heartbeat or terminal STOPPED) is
       reclaimable; a heartbeating peer's lane is never stolen, and a lease with no
       session binding (or no descriptor) is peer-unknown, not reclaimable.
       --session ME tags your own leases self.
+      THE ARRAY IS THE DEFAULT and its rows keep their old keys, because the array
+      is a live contract (tools/issue_dispatch.py's cross-machine lane gate iterates
+      it and fails OPEN on any other top-level shape). The AGGREGATE (#5485) rides
+      two compatible channels instead: a one-line liveness_coverage banner on
+      STDERR on every default run, and --summary, which emits
+      {schema, summary, leases} on stdout — summary = {total, by_class,
+      by_evidence_kind, positive_evidence, liveness_coverage}, both histograms
+      zero-filled over their closed vocabularies.
+      HOW TO READ liveness_coverage: it is the fraction of live leases whose class
+      rests on an OBSERVED input rather than on an absence. 0.0 with total > 0 is
+      the case the field exists for — every row is an absence of evidence, which is
+      far more often a WIRING DEFECT IN THIS OBSERVER (nothing on the write path
+      publishes what the classification consumes, so every downstream verdict is
+      uninformative) than a fleet that genuinely went unclassifiable at once.
+      by_evidence_kind then names the remedy: all no-session-binding means acquirers
+      are not passing --session, all no-descriptor means 'fak leaseref
+      session-publish' is down. An EMPTY live set also reports 0.0 and is NOT that
+      signal — read total first.
 
   fak leaseref session-publish --session S [--host H] [--state RUNNING] [--ttl SEC] [--dir DIR]
       Publish/refresh a lightweight session descriptor at refs/fak/locks/session-S
@@ -245,15 +267,48 @@ func runLeaserefLive(stdout, stderr io.Writer, argv []string) int {
 	return emitLeaserefJSON(stdout, stderr, leases, "live")
 }
 
+// leaserefLivenessSchema names the --summary envelope, in the same
+// fak.<verb>.<vN> shape as the audit verb's control-pane schema.
+const leaserefLivenessSchema = "fak.leaseref-liveness.v1"
+
+// leaserefLivenessReport is the OPT-IN (--summary) shape: the aggregate beside the very
+// rows it was folded from, so a reader never has to run the verb twice or trust that two
+// invocations saw the same ref namespace.
+type leaserefLivenessReport struct {
+	Schema  string                     `json:"schema"`
+	Summary leaseref.LivenessSummary   `json:"summary"`
+	Leases  []leaseref.ClassifiedLease `json:"leases"`
+}
+
 // runLeaserefLiveness is the #2164 witness: each LIVE lease tagged by its owning
 // session's liveness (self | peer-live | peer-dead | peer-unknown), keyed on the session
 // descriptor heartbeat — never the ephemeral acquiring pid. reclaimable is true ONLY on
 // peer-dead (a positively-dead session); everything else fails closed.
+//
+// #5485 wires the AGGREGATE (leaseref.SummarizeLiveness) onto this verb, and the shape
+// choice is load-bearing. The per-row array has a blind spot the rows themselves cannot
+// close: when nothing on the write path publishes the input this classification consumes,
+// every row comes back peer-unknown and the output is a complete, well-formed,
+// correctly-computed array in which every row is an ABSENCE of evidence — indistinguishable
+// from a healthy read, though one is a fleet state and the other is a wiring defect in THIS
+// observer that silently invalidates every verdict downstream. liveness_coverage is the
+// field that tells them apart.
+//
+// It is NOT promoted to a top-level object by default, because the array is a live
+// contract: tools/issue_dispatch.py's lease_ref_busy_lanes runs exactly this verb,
+// json.loads its stdout and rejects any non-list with "unexpected leaseref liveness shape"
+// — returning an EMPTY busy-lane set. That failure is silent and fails OPEN: the wave
+// planner would stop seeing cross-machine leases and schedule onto lanes a live peer holds.
+// A diagnostic must never be able to cause a lane collision, so the aggregate takes two
+// channels that cannot: --summary (opt-in, stdout, the full envelope) and, on the default
+// path where stdout is spoken for, a one-line banner on STDERR — which callers capture
+// separately and, in issue_dispatch.py's case, read only on a non-zero exit.
 func runLeaserefLiveness(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak leaseref liveness", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
 	session := fs.String("session", "", "this agent's own session id (its leases classify 'self')")
+	summary := fs.Bool("summary", false, "emit {schema, summary, leases} instead of the bare row array")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -264,7 +319,53 @@ func runLeaserefLiveness(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref liveness: %v\n", err)
 		return 1
 	}
-	return emitLeaserefJSON(stdout, stderr, rows, "liveness")
+	// One fold over the rows just classified — never a second read of the ref namespace,
+	// so the aggregate can never disagree with the rows printed beside it.
+	sum := leaseref.SummarizeLiveness(rows)
+	if *summary {
+		return emitLeaserefJSON(stdout, stderr, leaserefLivenessReport{
+			Schema:  leaserefLivenessSchema,
+			Summary: sum,
+			Leases:  rows,
+		}, "liveness")
+	}
+	code := emitLeaserefJSON(stdout, stderr, rows, "liveness")
+	fmt.Fprintln(stderr, leaserefCoverageBanner(sum))
+	return code
+}
+
+// leaserefCoverageBanner renders the one-line stderr companion to the default array: the
+// coverage number, and — in the one case that matters — what it means and who fixes it.
+//
+// It is a pure function of the summary so a test can assert the sentence without a repo,
+// and it says the remedy rather than only the ratio because the two absence kinds route to
+// DIFFERENT owners: no-session-binding is the acquirer (waiting never helps), no-descriptor
+// is the publisher. An empty live set is called out explicitly, since its 0.0 is an
+// undefined ratio reported as the zero value and NOT the wiring signal.
+func leaserefCoverageBanner(s leaseref.LivenessSummary) string {
+	const prefix = "fak leaseref liveness: "
+	if s.Total == 0 {
+		return prefix + "0 live lease(s); liveness_coverage is undefined for an empty live set (reported 0.0) and is NOT the wiring signal. --summary emits the aggregate as JSON."
+	}
+	head := fmt.Sprintf("%sliveness_coverage=%.2f (%d/%d live lease(s) classified on OBSERVED evidence); --summary emits the aggregate as JSON",
+		prefix, s.Coverage, s.PositiveEvidence, s.Total)
+	if s.PositiveEvidence > 0 {
+		return head + "."
+	}
+	var remedies []string
+	if n := s.ByEvidenceKind[leaseref.EvidenceNoBinding]; n > 0 {
+		remedies = append(remedies, fmt.Sprintf("%d %s (the ACQUIRER never bound a session — pass --session at acquire; waiting never helps)",
+			n, leaseref.EvidenceNoBinding))
+	}
+	if n := s.ByEvidenceKind[leaseref.EvidenceNoDescriptor]; n > 0 {
+		remedies = append(remedies, fmt.Sprintf("%d %s (the PUBLISHER is absent or died — start/repair `fak leaseref session-publish`)",
+			n, leaseref.EvidenceNoDescriptor))
+	}
+	warn := head + ". WARNING: every live lease rests on an ABSENCE of evidence — far more often a WIRING DEFECT IN THIS OBSERVER, which leaves every verdict above uninformative, than a fleet that genuinely went unclassifiable at once"
+	if len(remedies) > 0 {
+		warn += "; by_evidence_kind: " + strings.Join(remedies, ", ")
+	}
+	return warn + "."
 }
 
 func runLeaserefSessionPublish(stdout, stderr io.Writer, argv []string) int {
