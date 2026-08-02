@@ -62,7 +62,7 @@ func TestKQuantMatRowsMatchesDequantRef(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		kind kQuantKind
-	}{{"Q5_K", kindQ5K}, {"Q6_K", kindQ6K}, {"IQ3_XXS", kindIQ3XXS}, {"IQ4_XS", kindIQ4XS}, {"Q8_0", kindQ8_0}} {
+	}{{"Q5_K", kindQ5K}, {"Q6_K", kindQ6K}, {"IQ3_XXS", kindIQ3XXS}, {"IQ4_XS", kindIQ4XS}, {"Q8_0", kindQ8_0}, {"Q4_0", kindQ4_0}} {
 		t.Run(tc.name, func(t *testing.T) {
 			nblk := in / tc.kind.blockWeights()
 			bb := tc.kind.blockBytes()
@@ -225,6 +225,30 @@ func TestKQuantDequantGolden(t *testing.T) {
 			}
 		}
 	})
+	// Q4_0 pins the ggml nibble INTERLEAVE, which is the only way this format can be ported
+	// wrong while still looking plausible. d=2, every code byte 0xA1: the LOW nibble (1) is
+	// element j, so elements 0..15 = (1-8)*2 = -14; the HIGH nibble (0xA=10) is element j+16,
+	// so elements 16..31 = (10-8)*2 = +4. The re-quantized int4 store packs consecutive
+	// elements into the low then high nibble of the SAME byte, which would instead produce
+	// -14,+4,-14,+4,... — so that mis-port cannot pass this block.
+	t.Run("Q4_0", func(t *testing.T) {
+		blk := make([]byte, q4_0BlockBytes)
+		binary.LittleEndian.PutUint16(blk[0:], f16Two()) // d=2
+		for i := 0; i < q4_0BlockWeights/2; i++ {
+			blk[2+i] = 0xA1
+		}
+		dst := make([]float32, q4_0BlockWeights)
+		q4_0DequantBlock(dst, blk)
+		for i := 0; i < q4_0BlockWeights/2; i++ {
+			if dst[i] != -14 {
+				t.Fatalf("Q4_0[%d]=%v, want -14 (low nibble 1 is element j: d=2, code 1-8=-7)", i, dst[i])
+			}
+			if dst[i+q4_0BlockWeights/2] != 4 {
+				t.Fatalf("Q4_0[%d]=%v, want 4 (high nibble 0xA is element j+16: d=2, code 10-8=2)",
+					i+q4_0BlockWeights/2, dst[i+q4_0BlockWeights/2])
+			}
+		}
+	})
 	t.Run("Q8_0", func(t *testing.T) {
 		blk := make([]byte, q8_0BlockBytes)
 		binary.LittleEndian.PutUint16(blk[0:], f16Two()) // d=2
@@ -331,6 +355,7 @@ func TestResidentMatRowsDispatchesIQAndQ8RawExperts(t *testing.T) {
 		{"IQ3_XXS", kindIQ3XXS, (*QuantBuilder).AddResidentIQ3XXS},
 		{"IQ4_XS", kindIQ4XS, (*QuantBuilder).AddResidentIQ4XS},
 		{"Q8_0", kindQ8_0, (*QuantBuilder).AddResidentQ8_0},
+		{"Q4_0", kindQ4_0, (*QuantBuilder).AddResidentQ4_0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			nblk := in / tc.kind.blockWeights()

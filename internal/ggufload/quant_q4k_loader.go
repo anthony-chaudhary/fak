@@ -325,6 +325,14 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		// path (it refuses the normalize-sensitive q/k/qkv/linear_attn projections), so skipping
 		// normalizeCanonicalTensorData here is safe for exactly the identity weights (ffn_down,
 		// o_proj, lm_head) it admits. The expert k-quants take the batched resident path above.
+		// This is also the arm a NATIVE Q4_0 checkpoint takes (#5497), since the type test is the
+		// shared geometry table: such a checkpoint is published BECAUSE it is the small artifact,
+		// and the dequant→Q8 route left it resident at Q8_0 density — larger than the file it came
+		// from — having held the f32 expansion and the Q8 result live at once, so the load PEAK,
+		// not merely the steady state, is what broke the fit. Routing it here rather than through
+		// its own branch is deliberate: Q4_0 then inherits the same two safety gates as its
+		// siblings, so a backend that disables dense raw residency, or the GLM device layout
+		// below, still sends it down the proven path instead of leaving it unreachable at decode.
 		// EXCEPTION — glm_moe_dsa: its device serve (glmDsaWeightHAL) uploads every DENSE weight
 		// from the f32/q8/q4kw stores and has no kqw kernels, so a dense weight held here panics
 		// the first request ("got resident raw expert-quant weight ... on the device path" — the
@@ -441,6 +449,15 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				}
 			case TensorQ2_0:
 				if err := builder.AddResidentQ2(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorQ4_0:
+				// Must be an explicit arm: the default below is the Q4_K super-block wrapper, and
+				// a 32-weight/18-byte Q4_0 payload handed to it fails the 256-weight/144-byte
+				// geometry check. This switch is the single funnel every resident route lands in,
+				// so naming Q4_0 here is what keeps the dense arm and the batched-expert arm from
+				// half-applying the format.
+				if err := builder.AddResidentQ4_0(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
 			default: // TensorQ4_K
