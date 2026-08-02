@@ -36,13 +36,18 @@ import (
 // runs N tasks.
 //
 // Guardrails, in order of what can go wrong:
-//   - Off by default. Until a caller arms dispatchHostProbeShellReuse every
-//     probe takes the historical one-shot path byte for byte.
 //   - Fail-open. A spawn error, a protocol error, or a task timeout falls back
 //     to the one-shot path, so the reuse spine can never wedge a tick; the rack
 //     retires the broken shell rather than handing it to the next probe.
 //   - Bounded. Capacity 1 and a max-idle retirement, so at most one extra
-//     console exists and it does not linger between ticks.
+//     console exists, and the tick closes it on the way out (the deferred
+//     teardown evaluateDispatchTick arms it with) so no console outlives the
+//     tick that opened it.
+//   - Reversible without a build. The spine is ON by default where the ConPTY
+//     cost exists -- Windows -- and off on every other GOOS, where the probes
+//     never reach PowerShell at all; `fak dispatch tick
+//     --host-probe-shell-reuse=false` puts every probe back on the historical
+//     one-shot path byte for byte.
 
 const (
 	// dispatchHostProbeKey is the single reuse domain: all host probes are the
@@ -91,9 +96,11 @@ var (
 // caller WRITES, deliberately not an os.LookupEnv: internal/envconfiglint's
 // CONFIG_NOT_ENV rule reserves the environment for secrets and puts behavioral
 // settings on a config surface `--help` can name, and the dispatch tick already
-// publishes its other settings to package seams the same way. Default false
-// keeps every probe on the historical one-shot spawn, so nothing changes until
-// something opts in.
+// publishes its other settings to package seams the same way. The process-wide
+// default stays false, so a caller that never declares anything (another verb
+// sharing dispatchRunHostProbe, a helper, a test) keeps the historical one-shot
+// spawn; the dispatch tick publishes its own resolved setting here on the way
+// in, via dispatchArmHostProbeShellReuse.
 var dispatchHostProbeShellReuse bool
 
 // setDispatchHostProbeShellReuse arms or disarms the spine under the same mutex
@@ -109,6 +116,44 @@ func dispatchHostProbeShellEnabled() bool {
 	dispatchHostProbeMu.Lock()
 	defer dispatchHostProbeMu.Unlock()
 	return dispatchHostProbeShellReuse
+}
+
+// dispatchHostProbeShellReuseForOS is the spine's default posture for a GOOS,
+// split out from runtime.GOOS so the rule itself is testable on any host.
+// Windows is the only GOOS whose probes go through PowerShell at all, and the
+// only one that pays the ConPTY/conhost cost per spawn (#3153), so it is the
+// only one where reuse has anything to collapse. Everywhere else the probes are
+// `ps` one-shots and the rack would add a moving part for zero dividend.
+func dispatchHostProbeShellReuseForOS(goos string) bool { return goos == "windows" }
+
+// dispatchHostProbeShellReuseDefault is that posture for THIS host. It is what
+// the tick's --host-probe-shell-reuse flag defaults to, so `--help` names the
+// setting and prints the default the operator will actually get.
+func dispatchHostProbeShellReuseDefault() bool {
+	return dispatchHostProbeShellReuseForOS(runtime.GOOS)
+}
+
+// dispatchResolveHostProbeShellReuse folds a tick's DECLARED setting against the
+// host default. nil means the caller declared nothing -- a programmatic tick
+// (wave / sweep / garden) that never fills the field -- and takes the host
+// default, so the fleet paths that never parse a flag still get the dividend.
+// A non-nil declaration always wins, which is what makes
+// `--host-probe-shell-reuse=false` a real off switch on Windows.
+func dispatchResolveHostProbeShellReuse(declared *bool) bool {
+	if declared != nil {
+		return *declared
+	}
+	return dispatchHostProbeShellReuseDefault()
+}
+
+// dispatchArmHostProbeShellReuse publishes one tick's resolved setting into the
+// seam and hands back the teardown that tick must defer. Arming and teardown are
+// one call on purpose: the spine's whole failure mode is a warm console that
+// outlives the tick that opened it, and a caller that cannot take the arm
+// without also being handed the closer cannot leak the rack by forgetting half.
+func dispatchArmHostProbeShellReuse(declared *bool) func() {
+	setDispatchHostProbeShellReuse(dispatchResolveHostProbeShellReuse(declared))
+	return dispatchCloseHostProbeShells
 }
 
 // dispatchHostProbeRackHandle returns the process-wide probe rack, building it

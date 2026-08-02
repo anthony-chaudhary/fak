@@ -96,9 +96,21 @@ type dispatchTickOptions struct {
 	PlacementEvidence bool
 	RungPlacement     bool
 	AccountsRoster    string
-	Account           *dispatchtick.Account
-	Membership        *dispatchtick.Membership
-	DiscoverySnapshot *runsSnapshot
+	// HostProbeShellReuse declares the #3405 host-probe shell-reuse spine for this tick:
+	// route every Windows host probe of the tick (process scan, free RAM, worker rows, codex
+	// rows) through ONE warm racked PowerShell instead of one `powershell` process -- and one
+	// ConPTY/conhost -- per probe. It is the tick's own config surface
+	// (--host-probe-shell-reuse), not an environment read, for the same CONFIG_NOT_ENV reason
+	// as the placement settings above. It is a *bool rather than a bool because the two
+	// undeclared postures differ: nil means the caller declared nothing and takes the HOST
+	// default (on for Windows, where the ConPTY cost is; off for every other GOOS, whose
+	// probes never reach PowerShell), so a programmatic tick (wave / sweep / garden) that
+	// fills no field still gets the dividend, while an explicit false is a real off switch
+	// that puts every probe back on the historical one-shot spawn.
+	HostProbeShellReuse *bool
+	Account             *dispatchtick.Account
+	Membership          *dispatchtick.Membership
+	DiscoverySnapshot   *runsSnapshot
 }
 
 type dispatchLanePick struct {
@@ -255,6 +267,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	placementEvidence := fs.Bool("placement-evidence", false, "record #5416 placement evidence: write the .workclass/.zone sidecars beside each worker log and append the witness sweep's graded turn outcomes to the runs-directory journal (default off: no extra sidecars, no extra payload keys, no journal)")
 	rungPlacement := fs.Bool("rung-placement", false, "arm the automatic placement ladder: grade the account roster's bound models from the turn journal and start an UNPINNED worker on the cheapest rung the evidence supports, and re-dispatch an underpowered attempt one rung up (default off; also requires $FLEET_DISPATCH_RUNG_ACCOUNTS to declare which accounts this backend can dial)")
 	accountsRoster := fs.String("accounts-roster", "", "model-account roster consulted for placement zone ATTRIBUTION and grading only, never for dispatch (default: tools/model-accounts.json when it exists; with no roster nothing is attributed rather than defaulted to a rung)")
+	hostProbeShellReuse := fs.Bool("host-probe-shell-reuse", dispatchHostProbeShellReuseDefault(), "run this tick's Windows host probes (process scan, free RAM, worker rows, codex rows) on ONE warm racked PowerShell instead of one process -- and one ConPTY/conhost -- per probe (#3405/#3153); defaults on for Windows and off for every other GOOS, whose probes never reach PowerShell; =false puts every probe back on the historical one-shot spawn")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 
 	accountTag := fs.String("account-tag", "", "internal: forced account tag (used by dispatch wave)")
@@ -344,6 +357,13 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		RungPlacement:           *rungPlacement,
 		AccountsRoster:          strings.TrimSpace(*accountsRoster),
 	}
+	// The CLI always DECLARES the shell-reuse setting, because the flag's own default is
+	// already the host default -- so a bare `fak dispatch tick` and a programmatic tick that
+	// leaves the field nil resolve to the same posture, and an explicit
+	// --host-probe-shell-reuse=false survives as a real declaration rather than reading as
+	// "undeclared". Copied out of the flag set so opts owns the value.
+	reuseHostProbeShell := *hostProbeShellReuse
+	opts.HostProbeShellReuse = &reuseHostProbeShell
 	if *accountTag != "" || *accountTier != "" || *accountModel != "" || *accountDir != "" {
 		opts.Account = &dispatchtick.Account{
 			Tag:   *accountTag,
@@ -709,6 +729,16 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	dispatchRungPlacement = opts.RungPlacement
 	dispatchAccountsRoster = opts.AccountsRoster
 
+	// #3405: publish this tick's host-probe shell-reuse setting into the probe seam BEFORE
+	// preflight, which is what actually runs the probes. Without this call the whole reuse
+	// spine is inert code -- landed, tested, and never reached -- so every Windows tick keeps
+	// paying one `powershell` process, and one ConPTY/conhost, per probe (#3153). The arm
+	// hands back the teardown, deferred here rather than folded into `finish` so that the
+	// early error returns above the funnel cannot leak a warm console either: no console
+	// outlives the tick that opened it.
+	closeHostProbeShells := dispatchArmHostProbeShellReuse(opts.HostProbeShellReuse)
+	defer closeHostProbeShells()
+
 	// Per-phase wall-clock attribution (observability): a slow tick is otherwise a
 	// black box -- the dominant cost (the ~40s fleet_sessions.py registry scan) and
 	// the per-tick subprocess fan-out (preflight PowerShell probes, router gh/dos
@@ -813,6 +843,22 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		}
 		timings["total"] = time.Since(t0).Milliseconds()
 		p["timings_ms"] = timings
+		// #3405: report the reuse dividend for the tick that earned it, read here (inside the
+		// funnel) while the rack is still alive -- the deferred teardown drops it on the way
+		// out. tasks_run is the no-reuse cost this tick would have paid (one process per
+		// probe, the before), cold_spawns is what it actually paid (the after), and
+		// spawns_avoided is the difference: the ConPTY/conhost creations that did not happen.
+		// A tick that ran no warm task at all -- the spine off, or any non-Windows GOOS, whose
+		// probes never touch PowerShell -- adds no key, so those payloads stay byte-identical.
+		if st := dispatchHostProbeRackStats(); st.TasksRun > 0 {
+			p["host_probe_shells"] = map[string]any{
+				"cold_spawns":       st.ColdSpawns,
+				"warm_reuses":       st.WarmReuses,
+				"tasks_run":         st.TasksRun,
+				"unhealthy_retired": st.UnhealthyRetired,
+				"spawns_avoided":    st.SpawnsAvoided(),
+			}
+		}
 		if opts.RecordLoop {
 			p["loop_ledger"] = recordDispatchTickLoop(root, opts.LoopLedger, p)
 		}
