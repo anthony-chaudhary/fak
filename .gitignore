@@ -817,3 +817,10 @@ docs/dispatch-status.md
 # dot-dir so `go build`/`go test` skip it). Regenerable, never source — same class as
 # /.probe/ above.
 /.mcwitness/
+
+# `Microsoft/Windows/PowerShell/` — pwsh's ModuleAnalysisCache. A detached `pwsh` started
+# without LOCALAPPDATA in its environment falls back to the working directory, so a
+# background script launched from the clone root drops the cache here instead of under
+# AppData. Machine-generated, never source, and it reads as a no-lane path in the
+# `fak sync push` dirty-worktree report until it is ignored.
+/Microsoft/
