@@ -33,6 +33,13 @@ import (
 // upstream request.
 var errPassthroughResponded = errors.New("gateway: anthropic passthrough response already written")
 
+// errUpstreamInBandRefusal is returned from the event callback when the upstream refused the
+// turn IN-BAND before message_start with an `error` frame this build cannot classify into a
+// status. It is deliberately NOT an *agent.UpstreamStatusError: nothing definite is known
+// about the refusal, so the caller's pre-start arm treats it like any other unclassified
+// non-start and falls back to the buffered path instead of surfacing an invented status.
+var errUpstreamInBandRefusal = errors.New("gateway: upstream refused the stream in-band before message_start")
+
 // sseToolAccum buffers one upstream tool_use content block while its input streams in,
 // so the full call can be reconstructed and adjudicated before the client sees it.
 type sseToolAccum struct {
@@ -364,10 +371,18 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			p.send("error", ev.Data)
 			return nil
 		}
-		p.s.logf("gateway: upstream error before stream start (messages)")
-		writeErr(p.w, http.StatusBadGateway, "upstream model error")
-		p.wroteError = true
-		return errPassthroughResponded
+		// Pre-start: the client still has nothing, so the response is STILL OURS to choose —
+		// which is exactly what writing a hardcoded 502 here used to throw away (#5491). The
+		// classified in-band refusals (overloaded_error, rate_limit_error, …) never reach
+		// this arm at all: StreamAnthropicRaw intercepts them before message_start, retries
+		// the transient ones invisibly, and surfaces the rest as a real *UpstreamStatusError
+		// carrying the upstream's own status. What is left here is a frame this build cannot
+		// classify, and the honest answer for it is the SAME door every other pre-start
+		// failure takes — the caller's default arm, which counts the failure and falls back
+		// to the buffered path — rather than a terminal 502 that also cut off the fallback by
+		// setting wroteError.
+		p.s.logf("gateway: unclassified upstream error frame before stream start (messages)")
+		return errUpstreamInBandRefusal
 	}
 	return nil
 }

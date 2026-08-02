@@ -47,7 +47,13 @@ type AnthropicSSEEvent struct {
 // 408/5xx transient) is RETRIED here with backoff+jitter+Retry-After — BEFORE any onEvent
 // call, where the retry is invisible to the client — exactly as Complete/CompleteStream
 // do, so a real Anthropic 429/529 window no longer collapses the flagship stream to the
-// slower buffered fallback on the first hit. A connection or non-retryable status failure
+// slower buffered fallback on the first hit. Anthropic refuses a streamed turn two ways,
+// and the SECOND way wears a 200: HTTP 200 + text/event-stream, then an SSE `error` frame
+// as the first event, before any message_start. That in-band refusal is the same condition
+// in different clothing, so it is classified back onto its equivalent status
+// (anthropicInBandErrorStatus) and takes the SAME arms — a transient one re-sends under the
+// same budget, a request error surfaces at once with its real status (#5491). A connection
+// or non-retryable status failure
 // (or a retryable one that survived every attempt) surfaces BEFORE any onEvent call, so the
 // caller can still fall back to the buffered path having sent the client nothing AND
 // without a second generation having been billed (a non-200 produced no tokens). Once
@@ -116,7 +122,6 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	accountFailoverPending := false
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
-	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Surface the retry BEFORE the otherwise-invisible backoff sleep (the same hook the
@@ -159,8 +164,29 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 				notifyAccountFailover(p, AccountFailoverRecovered, attempt)
 				accountFailoverPending = false
 			}
-			resp = r
-			break
+			// The stream is framed INSIDE the loop because a 200 is not yet an acceptance
+			// (#5491): Anthropic refuses a streamed turn two ways, and the second one is an
+			// HTTP 200 + text/event-stream carrying an SSE `error` frame as its FIRST event,
+			// before any message_start. That in-band refusal is exactly as transient as the
+			// HTTP 529 the arm below already retries, and it has emitted nothing to the
+			// caller, so it belongs on the same invisible retry — not outside the loop where
+			// it used to become an un-retried, un-counted 502.
+			refusalStatus, refusalFrame, serr := p.relayAnthropicStream(r, onEvent)
+			if refusalStatus == 0 {
+				return serr // a relayed turn (nil), or a real read/stall/unsupported failure
+			}
+			if !retryableStatus(refusalStatus) {
+				// A request error the upstream merely chose to report in-band (an
+				// invalid_request_error / authentication_error): surface the status it maps
+				// to immediately, exactly as the same status on the wire would be — no retry
+				// burst, and no 502 costume over a 400.
+				return &UpstreamStatusError{Status: refusalStatus, Body: truncate(refusalFrame, 400), RetryAfter: r.Header.Get("Retry-After")}
+			}
+			// Transient in-band refusal: note it as the triggering status (so the backoff, the
+			// RetryNotify line, and the exhausted error all read the same as the HTTP-status
+			// path) and re-send.
+			rs.noteRetryableStatus(refusalStatus, refusalFrame, r.Header, 400)
+			continue
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
@@ -229,16 +255,40 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		}
 		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
-	if resp == nil {
-		return rs.exhausted("planner: streaming failed after retries")
-	}
+	return rs.exhausted("planner: streaming failed after retries")
+}
+
+// errAnthropicInBandRefusal stops the SSE parse the moment an in-band pre-start refusal is
+// recognized. It never escapes relayAnthropicStream — the refusal is reported through that
+// method's status/frame returns instead — so no caller ever has to match on it.
+var errAnthropicInBandRefusal = errors.New("agent: anthropic refused the stream in-band before message_start")
+
+// relayAnthropicStream frames ONE accepted (HTTP 200) upstream response into onEvent calls
+// and closes its body. It is the post-acceptance half of StreamAnthropicRaw, kept as its own
+// method so the retry loop can call it per attempt.
+//
+// The three outcomes are disjoint:
+//
+//   - (0, nil, nil) — the turn was relayed to a clean end.
+//   - (0, nil, err) — a real failure the caller cannot retry away: the wire cannot be framed
+//     as SSE (ErrStreamingUnsupported), the upstream went silent (UpstreamStalledError), the
+//     read failed, or onEvent itself asked to stop.
+//   - (status, frame, nil) — the upstream answered 200 + text/event-stream and then refused
+//     IN-BAND with an SSE `error` frame BEFORE any message_start (#5491). Nothing was handed
+//     to onEvent, so the caller still owns the response: it re-sends a transient refusal under
+//     the normal backoff and surfaces a request error with the status this maps to.
+//
+// The pre-start window is bounded by message_start deliberately: that frame is what opens the
+// caller's own client stream, so an `error` frame arriving after it is a MID-stream failure the
+// caller must forward, and it is passed through to onEvent untouched exactly as before.
+func (p *HTTPPlanner) relayAnthropicStream(resp *http.Response, onEvent func(AnthropicSSEEvent) error) (refusalStatus int, refusalFrame []byte, err error) {
 	defer resp.Body.Close()
 	// The gateway only takes this path against the real Anthropic API, but guard anyway:
 	// an upstream that ignores stream and replies with one buffered JSON body cannot be
 	// framed as SSE, so surface that as unsupported BEFORE any event (the caller falls
 	// back to the buffered path) rather than emit a malformed stream.
 	if !upstreamStreamsSSE(resp) {
-		return ErrStreamingUnsupported
+		return 0, nil, ErrStreamingUnsupported
 	}
 	// Wrap the body in an idle-read deadline so an upstream that opens the stream and then
 	// goes silent (a transient overload / "API issue") fails in ≤streamStallTimeout()
@@ -253,20 +303,81 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// producing no content trips in ≤streamProgressTimeout() instead of riding the ceiling.
 	sr := newStallReader(resp.Body, streamStallTimeout(), streamProgressTimeout())
 	defer sr.Close()
+	started := false
+	var frame []byte
 	onProgressingEvent := func(ev AnthropicSSEEvent) error {
+		if ev.Event == "message_start" {
+			started = true
+		}
+		if !started && ev.Event == "error" {
+			if status, ok := anthropicInBandErrorStatus(ev.Data); ok {
+				refusalStatus, frame = status, append([]byte(nil), ev.Data...)
+				return errAnthropicInBandRefusal
+			}
+			// An `error` frame whose type this build does not recognize cannot be mapped to
+			// a status, so it is NOT claimed as a classified refusal — it falls through to
+			// onEvent, whose pre-start handling still owns it.
+		}
 		if anthropicFrameAdvancesTurn(ev) {
 			sr.noteProgress()
 		}
 		return onEvent(ev)
 	}
-	if err := parseAnthropicSSE(sr, onProgressingEvent); err != nil {
-		if errors.Is(err, ErrUpstreamStalled) {
-			kind, window := sr.stallCause()
-			return &UpstreamStalledError{Idle: window, Kind: kind, Err: err}
+	if perr := parseAnthropicSSE(sr, onProgressingEvent); perr != nil {
+		if refusalStatus != 0 && errors.Is(perr, errAnthropicInBandRefusal) {
+			return refusalStatus, frame, nil
 		}
-		return err
+		if errors.Is(perr, ErrUpstreamStalled) {
+			kind, window := sr.stallCause()
+			return 0, nil, &UpstreamStalledError{Idle: window, Kind: kind, Err: perr}
+		}
+		return 0, nil, perr
 	}
-	return nil
+	return 0, nil, nil
+}
+
+// anthropicInBandErrorStatus maps an Anthropic in-band SSE `error` frame — the
+// {"type":"error","error":{"type":…}} payload the API sends on a 200 when it decides to
+// refuse a turn after the headers are already out — to the HTTP status the SAME refusal
+// carries when the API reports it on the wire instead. The two are the same conditions
+// reported two ways (which is why #5491 was intermittent), so mapping the in-band form back
+// onto its status is what lets ONE classification serve both: retryableStatus decides the
+// retry, and the gateway's upstreamErrorStatus/errType ladder gives the client the upstream's
+// own type (a 529 reads as overloaded_error) rather than a flattened 502/server_error.
+//
+// ok is false for any type this build does not recognize: an unknown refusal is left to the
+// caller's own pre-start handling rather than guessed into a status that might silently make
+// it retryable.
+func anthropicInBandErrorStatus(data []byte) (status int, ok bool) {
+	var frame struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(data, &frame) != nil {
+		return 0, false
+	}
+	switch strings.ToLower(strings.TrimSpace(frame.Error.Type)) {
+	case "invalid_request_error":
+		return http.StatusBadRequest, true
+	case "authentication_error":
+		return http.StatusUnauthorized, true
+	case "permission_error":
+		return http.StatusForbidden, true
+	case "not_found_error":
+		return http.StatusNotFound, true
+	case "request_too_large":
+		return http.StatusRequestEntityTooLarge, true
+	case "timeout_error":
+		return http.StatusRequestTimeout, true
+	case "rate_limit_error":
+		return http.StatusTooManyRequests, true
+	case "api_error":
+		return http.StatusInternalServerError, true
+	case "overloaded_error":
+		return statusOverloaded, true
+	}
+	return 0, false
 }
 
 // parseAnthropicSSE reads an Anthropic Messages SSE body and invokes onEvent once per
