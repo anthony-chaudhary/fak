@@ -272,6 +272,21 @@ type KVConfig struct {
 	HeadDim    int
 	RopeTheta  float64
 	Precision  KVPrecision
+	// WindowPerLayer is the OPTIONAL per-layer sliding-attention bound (one entry per
+	// layer, in layer order) for an interleaved local/global checkpoint. A positive
+	// entry caps how many positions that layer can ever attend to — and therefore how
+	// many it must keep resident; a NON-POSITIVE entry (and any layer past the end of
+	// the slice) means full attention, the same "no window" spelling
+	// kvbudget.LayerProfile.Window uses, so a projection can hand the two the identical
+	// slice. Nil (the zero value) is the uniform case: EstimateKVStoreBytes then takes
+	// its untouched NumLayers x tokens expression and is byte-identical to before this
+	// field existed, exactly as Precision's zero value is.
+	//
+	// This is PLANNING geometry only — no KVStore implementation reads it, so setting it
+	// never changes what a backend allocates, only what the planner charges. It is
+	// therefore only safe to populate when the cache genuinely drops aged-out positions
+	// on a windowed layer; see model.Config.ContextSizeConfig for the gate that decides.
+	WindowPerLayer []int
 }
 
 // KVStore is the interface the kernel-owned attention cache lives behind — the one
