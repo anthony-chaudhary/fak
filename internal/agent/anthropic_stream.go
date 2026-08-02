@@ -246,11 +246,23 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// Client.Timeout fires. A healthy stream's `ping`/keepalive/delta frames keep resetting
 	// the window, so only true silence trips it. Surface the trip as the typed
 	// UpstreamStalledError the gateway logs distinctly from a normal read failure.
-	sr := newStallReader(resp.Body, streamStallTimeout())
+	//
+	// The second, longer deadline covers the case the byte one cannot see (#5486): re-arm it
+	// ONLY on a frame that advances the turn. A `ping` still re-arms the byte window (it IS
+	// bytes) but deliberately not this one, so an upstream warm enough to keep pinging while
+	// producing no content trips in ≤streamProgressTimeout() instead of riding the ceiling.
+	sr := newStallReader(resp.Body, streamStallTimeout(), streamProgressTimeout())
 	defer sr.Close()
-	if err := parseAnthropicSSE(sr, onEvent); err != nil {
+	onProgressingEvent := func(ev AnthropicSSEEvent) error {
+		if anthropicFrameAdvancesTurn(ev) {
+			sr.noteProgress()
+		}
+		return onEvent(ev)
+	}
+	if err := parseAnthropicSSE(sr, onProgressingEvent); err != nil {
 		if errors.Is(err, ErrUpstreamStalled) {
-			return &UpstreamStalledError{Idle: streamStallTimeout(), Err: err}
+			kind, window := sr.stallCause()
+			return &UpstreamStalledError{Idle: window, Kind: kind, Err: err}
 		}
 		return err
 	}

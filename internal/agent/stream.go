@@ -698,7 +698,10 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// overload / "API issue") fails in ≤streamStallTimeout() rather than blocking the
 	// scanner on resp.Body.Read until the whole-request Client.Timeout (600s under guard)
 	// fires. A healthy stream's steady deltas reset the window; only true silence trips it.
-	sr := newStallReader(resp.Body, streamStallTimeout())
+	// The second window (streamProgressTimeout) catches the upstream that stays WARM without
+	// advancing — keepalive comments and empty-delta chunks re-arm the byte deadline but are
+	// not progress, so only a real delta below calls sr.noteProgress (#5486).
+	sr := newStallReader(resp.Body, streamStallTimeout(), streamProgressTimeout())
 	defer sr.Close()
 	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the
@@ -723,6 +726,9 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue // tolerate a keep-alive or non-JSON heartbeat line
+		}
+		if openAIChunkAdvancesTurn(chunk) {
+			sr.noteProgress() // real content/tool/finish — the TURN moved, not just the socket
 		}
 		if chunk.Model != "" {
 			model = chunk.Model
@@ -766,7 +772,8 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	}
 	if err := sc.Err(); err != nil {
 		if errors.Is(err, ErrUpstreamStalled) {
-			return nil, &UpstreamStalledError{Idle: streamStallTimeout(), Err: err}
+			kind, window := sr.stallCause()
+			return nil, &UpstreamStalledError{Idle: window, Kind: kind, Err: err}
 		}
 		return nil, fmt.Errorf("planner: %s: stream read: %w", call.adapter.Provider(), err)
 	}
