@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -308,24 +307,11 @@ func TestRelayHandoffRotateClose(t *testing.T) {
 
 	// Step 13: shell to the REAL dos binary and assert the real commit-audit verdict on
 	// the commit the closing leg wrote — the same witness #1462 uses, now exercised
-	// from the successor leg after a rotation.
-	auditOut, err := exec.Command(dosPath, "commit-audit", sha, "--workspace", repo, "--json").CombinedOutput()
-	if err != nil {
-		t.Fatalf("dos commit-audit: %v\n%s", err, auditOut)
-	}
-	var audits []struct {
-		Verdict string `json:"verdict"`
-		Witness string `json:"witness"`
-	}
-	if err := json.Unmarshal(auditOut, &audits); err != nil {
-		t.Fatalf("bad dos commit-audit json: %v\n%s", err, auditOut)
-	}
-	if len(audits) != 1 {
-		t.Fatalf("dos commit-audit rows = %d, want 1: %s", len(audits), auditOut)
-	}
-	if audits[0].Verdict != "OK" || audits[0].Witness != "diff-witnessed" {
-		t.Fatalf("dos commit-audit verdict = %+v, want OK/diff-witnessed", audits[0])
-	}
+	// from the successor leg after a rotation. requireDosCommitAuditOK
+	// (handoff_chain_smoke_test.go) proves the commit is non-empty with git first, so an
+	// "EMPTY" verdict is attributable to dos's own capped read (#5519), not to the
+	// closing leg's fixture commit.
+	requireDosCommitAuditOK(t, dosPath, repo, sha, filepath.ToSlash(target))
 
 	// Step 14: build an issue_closure_audit fixture referencing the REAL sha + subject
 	// computed by the closing leg, then dry-run tools/issue_resolve_witnessed.py —
@@ -348,37 +334,5 @@ func TestRelayHandoffRotateClose(t *testing.T) {
 	if err := os.WriteFile(fixturePath, fixtureBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repoRoot, err := repoRootFromCwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	scriptPath := filepath.Join(repoRoot, "tools", "issue_resolve_witnessed.py")
-	var out bytes.Buffer
-	cmd := exec.Command(pythonPath, scriptPath,
-		"--workspace", repo,
-		"--audit-json", fixturePath,
-		"--no-require-pushed",
-		"--json",
-	)
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("issue_resolve_witnessed.py: %v\n%s", err, out.String())
-	}
-	var report struct {
-		Verdict string           `json:"verdict"`
-		Results []map[string]any `json:"results"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
-		t.Fatalf("bad issue_resolve_witnessed.py json: %v\n%s", err, out.String())
-	}
-	if len(report.Results) != 1 {
-		t.Fatalf("results = %d, want 1: %s", len(report.Results), out.String())
-	}
-	if action, _ := report.Results[0]["action"].(string); action != "would_close" {
-		t.Fatalf("action = %v, want would_close: %+v", report.Results[0]["action"], report.Results[0])
-	}
-	if ok, _ := report.Results[0]["witness_ok"].(bool); !ok {
-		t.Fatalf("witness_ok = %v, want true: %+v", report.Results[0]["witness_ok"], report.Results[0])
-	}
+	requireWouldCloseWitness(t, pythonPath, repo, fixturePath)
 }
