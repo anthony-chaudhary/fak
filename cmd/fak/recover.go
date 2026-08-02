@@ -223,13 +223,18 @@ func recoveryPlans(trunk string) map[string]recoveryPlan {
 		},
 		"COLLISION_RISK": {
 			Reason:     "COLLISION_RISK",
-			Summary:    "wait for the live lease or choose a disjoint lane/region",
+			Summary:    "checkpoint finished work, or wait for the live lease, or choose a disjoint lane/region",
 			Executable: false,
 			Steps: []recoveryStep{
+				{Argv: []string{"fak", "wip", "checkpoint"}, Summary: "park an already-finished delta durably so the lane can be released"},
 				{Argv: []string{"dos", "top"}, Summary: "inspect live leases and workers"},
 				{Argv: []string{"dos", "arbitrate"}, Summary: "retry arbitration with a disjoint region"},
 			},
-			Notes: []string{"do not bypass the lease; repartition or wait"},
+			Notes: []string{
+				"do not bypass the lease; repartition, park, or wait",
+				"the other two routes assume the work is not written yet: waiting leaves a finished delta dirty in a shared checkout where a peer's broad `git add` sweeps it (see `fak wip sweep-guard`), and an already-written change cannot be re-aimed at a disjoint lane",
+				"if the change is already written and green, checkpoint it first, then land it with `fak wip land` once the lane frees",
+			},
 		},
 		"OUT_OF_TREE_WRITE": {
 			Reason:     "OUT_OF_TREE_WRITE",
