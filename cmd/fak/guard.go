@@ -1170,7 +1170,13 @@ func cmdGuard(argv []string) {
 	}
 	handoffFile := strings.TrimSpace(*taskHandoffFile)
 	if handoffMode != guardPreCompactModeOff && handoffFile == "" {
-		dir, err := os.MkdirTemp("", "fak-guard-handoff-*")
+		// Allocate through the shared creation seam so the dir carries this guard's PID
+		// (#5527). "handoff" was already listed in guardTempDirHooks, but this call site
+		// used a raw os.MkdirTemp whose name had no <pid> segment, so guardTempDirOwner
+		// refused to claim it and the reaper buried none of them. Lifetime is unchanged:
+		// the child reads this file for its whole run, so there is no setup-time defer to
+		// remove it — a LATER guard's dead-owner sweep is what reclaims it.
+		dir, err := guardSessionTempDir("handoff")
 		if err != nil {
 			abortChildWiring(cancel, "task handoff setup", err, 1)
 		}
@@ -1199,7 +1205,8 @@ func cmdGuard(argv []string) {
 		toolprocSettings = preCompactInstall.SettingsPath
 	}
 	var toolprocHookEnv [][2]string
-	command, toolprocHookEnv, _, err = installGuardToolprocHooks(command, *toolprocHooks, toolprocSettings)
+	var toolprocInstall guardToolprocInstall
+	command, toolprocHookEnv, toolprocInstall, err = installGuardToolprocHooks(command, *toolprocHooks, toolprocSettings)
 	if err != nil {
 		abortChildWiring(cancel, "toolproc hook setup", err, 1)
 	}
@@ -1209,13 +1216,7 @@ func cmdGuard(argv []string) {
 	// Code's deferred-tool wall instead of running as a generic coder. Merged into the SAME
 	// --settings file the hooks above wrote. On by default; FAK_GUARD_AFFORDANCE_MODE=off opts
 	// out for a lean harness.
-	sessionStartSettings := toolprocSettings
-	if sessionStartSettings == "" {
-		sessionStartSettings = stopHookInstall.SettingsPath
-	}
-	if sessionStartSettings == "" {
-		sessionStartSettings = preCompactInstall.SettingsPath
-	}
+	sessionStartSettings := guardSharedHookSettingsPath(toolprocInstall, stopHookInstall, preCompactInstall)
 	// A headless/fleet worker (a `-p` child, not an attended TUI) is admitted onto the
 	// long-horizon MANAGED posture: its SessionStart injection carries the persistence +
 	// managed-context rule (#3512), where keep-going-past-a-long-window matters most and no
@@ -1363,4 +1364,29 @@ func abortChildWiring(cancel context.CancelFunc, what string, err error, code in
 	cancel()
 	fmt.Fprintf(os.Stderr, "fak guard: %s failed: %v\n", what, err)
 	os.Exit(code)
+}
+
+// guardSharedHookSettingsPath resolves the ONE `--settings` file every guard hook installer
+// converges on. The installers run in a fixed order (PreCompact, Stop, toolproc, SessionStart):
+// the first one enabled creates the file and injects `--settings`, and each later one
+// read-modify-writes that same file instead of writing a second.
+//
+// Convergence therefore has to be resolved from what the earlier installers CREATED — which is
+// what their install records report — not from what they were OFFERED. SessionStart used to be
+// handed toolproc's INPUT path, so with PreCompact and Stop both off it saw an empty path even
+// though toolproc had just created a file: it wrote a SECOND settings file and appended a second
+// `--settings`. Claude resolves `--settings` last-wins, so the fold in appendClaudeSettingsArg
+// (#5510) strips the earlier occurrence and refuses its `hooks` key with SETTINGS_HOOKS_DROPPED
+// — the argv still carries exactly one `--settings`, but the child starts with toolproc's three
+// observation hooks missing (#5526).
+//
+// Records are consulted newest-installer-first: an installer that MERGED records the file it
+// merged into, so the latest non-empty SettingsPath always names the converged file.
+func guardSharedHookSettingsPath(toolproc guardToolprocInstall, stop guardStopHookInstall, preCompact guardPreCompactInstall) string {
+	for _, path := range []string{toolproc.SettingsPath, stop.SettingsPath, preCompact.SettingsPath} {
+		if strings.TrimSpace(path) != "" {
+			return path
+		}
+	}
+	return ""
 }
