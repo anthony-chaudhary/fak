@@ -246,6 +246,32 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	if n := guardApplyDenyOverlay(&rt, denyOverlay); n > 0 {
 		floorSource += fmt.Sprintf(" + repo-local deny overlay (%d tool(s); fak guard deny --list)", n)
 	}
+	// Union the SELF-authored tighten overlay (#5181, epic #5170 Track F) — the one
+	// amendment channel the WRAPPED AGENT itself may write. Unlike the two operator
+	// overlays above it is not trusted on arrival: it is admitted only through the
+	// amendment gate (guard_self_tighten.go), which classifies base -> base∪overlay
+	// via policy.DiffAmendment and admits a no-op or tighten-only delta only. It runs
+	// AFTER both operator overlays so the agent tightens the floor an operator actually
+	// configured, and BEFORE protectGuardPolicyConfig so its own file is deliberately
+	// left OUT of SelfModifyGlobs — the agent must be able to write it, which is why it
+	// does not live under the self-modify-protected .fak/guard/ (see the overlay file).
+	//
+	// A malformed overlay REFUSES the overlay wholesale and leaves the base floor
+	// standing (byte-identical to the pre-#5181 launch) rather than os.Exit(2)ing like
+	// the operator overlays do: this file is agent-writable, so a fatal path would hand
+	// the wrapped agent a launch-denial lever over its own operator. Either way the
+	// refusal is loud on stderr and recorded in the floor-source provenance.
+	selfTightenPath := guardSelfTightenOverlayPath()
+	selfTighten, selfTightenErr := loadGuardSelfTightenOverlay(selfTightenPath)
+	if selfTightenErr != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: %v (self-tighten overlay REFUSED; base floor stands)\n", selfTightenErr)
+		floorSource += "; agent self-tighten overlay REFUSED (unreadable)"
+	} else if admit, class, reason, n := guardApplySelfTightenOverlay(&rt, selfTighten); !admit {
+		fmt.Fprintf(os.Stderr, "fak guard: self-tighten overlay %s refused (%s): %s\n", selfTightenPath, class, reason)
+		floorSource += guardSelfTightenFloorNote(selfTightenPath, admit, class, reason, n)
+	} else {
+		floorSource += guardSelfTightenFloorNote(selfTightenPath, admit, class, reason, n)
+	}
 	// The adjudicator runs in this parent process. Declare the narrow Claude
 	// scratch tree here so structural write/delete gates can prove containment;
 	// never widen this default to the whole OS temp directory. Whatever is
