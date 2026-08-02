@@ -57,29 +57,33 @@ func cmdGuard(argv []string) {
 		cmdGuardDeny(argv[1:])
 		return
 	}
-	// `fak guard policy <verb>` is the read-only FLOOR REPORT surface (#5424, epic
-	// #5170 Track A): `explain` groups the effective floor by amendment class, `diff`
-	// reports the widen-drift from the shipped floor with a CI-gateable exit code.
-	// Peeled like `allow`/`deny` — a bare leading verb is unambiguous because a real
-	// wrap always names the agent after `--`, so the wrapped program's own `policy`
-	// argument can never sit here. This peel is the ONLY registration of those verbs
-	// (guard_policy.go holds the table); removing it makes them unreachable rather
-	// than quietly reachable by some other path. Note the exact-match: the flag
-	// spelling `--policy FILE` is untouched.
-	if len(argv) > 0 && argv[0] == "policy" {
-		os.Exit(runGuardPolicy(os.Stdout, os.Stderr, argv[1:]))
-	}
-	// `fak guard compile` performs one authoring-time model extraction and emits
-	// a review-only policy diff. Runtime policy enforcement remains model-free.
-	if len(argv) > 0 && argv[0] == "compile" {
-		os.Exit(runGuardCompile(os.Stdout, os.Stderr, argv[1:]))
-	}
-	// `fak guard restart-audit` is the read-only restart-chain scanner (#3057):
-	// joins RESTART_HOP journal rows against carryover seed files and backfills
-	// the orphans. Peeled like `allow` — a bare leading verb, never a program to
-	// wrap — and returns without binding a gateway.
-	if len(argv) > 0 && argv[0] == "restart-audit" {
-		os.Exit(runGuardRestartAudit(os.Stdout, os.Stderr, argv[1:]))
+	// The read-only `fak guard <verb>` report surfaces, peeled like `allow`/`deny` before the
+	// wrap-a-command flag parse. All three obey ONE argv contract — an exact-match bare leading
+	// verb (unambiguous because a real wrap always names the agent after `--`, so the wrapped
+	// program's own `policy`/`compile` argument can never sit here, and the flag spelling
+	// `--policy FILE` is untouched), the rest of argv handed to the handler, and the handler's
+	// code as the exit status without ever binding a gateway. One table so a verb added here
+	// cannot quietly acquire a different contract from its siblings. These rows are also the
+	// ONLY registration of these verbs: dropping a row makes it unreachable rather than
+	// reachable by some other path.
+	for _, peel := range []struct {
+		verb string
+		run  func(stdout, stderr io.Writer, argv []string) int
+	}{
+		// `policy` is the FLOOR REPORT surface (#5424, epic #5170 Track A): `explain` groups the
+		// effective floor by amendment class, `diff` reports the widen-drift from the shipped
+		// floor with a CI-gateable exit code (guard_policy.go holds the verb table).
+		{"policy", runGuardPolicy},
+		// `compile` performs one authoring-time model extraction and emits a review-only policy
+		// diff. Runtime policy enforcement remains model-free.
+		{"compile", runGuardCompile},
+		// `restart-audit` is the read-only restart-chain scanner (#3057): joins RESTART_HOP
+		// journal rows against carryover seed files and backfills the orphans.
+		{"restart-audit", runGuardRestartAudit},
+	} {
+		if len(argv) > 0 && argv[0] == peel.verb {
+			os.Exit(peel.run(os.Stdout, os.Stderr, argv[1:]))
+		}
 	}
 	// `fak guard sessions [id]` is the read-only registry browser. Peel it before the
 	// wrap-a-command parser so the handler is reachable from the public command tree.
@@ -1146,9 +1150,7 @@ func cmdGuard(argv []string) {
 	installersStarted := time.Now()
 	command, preCompactEnv, preCompactInstall, err = installGuardPreCompactHook(command, *preCompactHook, gwURL)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Claude PreCompact hook setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "Claude PreCompact hook setup", err, 1)
 	}
 	injected = append(injected, preCompactEnv...)
 	// Install the deny-all auto-continue Stop hook, MERGING it into the SAME --settings file the
@@ -1164,17 +1166,13 @@ func cmdGuard(argv []string) {
 		guardTaskHandoffEffectiveMode(*taskHandoffMode, guardSetFlags["task-handoff"], guardChildInteractive(command), *probeMode),
 	)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: task handoff setup failed: %v\n", err)
-		os.Exit(2)
+		abortChildWiring(cancel, "task handoff setup", err, 2)
 	}
 	handoffFile := strings.TrimSpace(*taskHandoffFile)
 	if handoffMode != guardPreCompactModeOff && handoffFile == "" {
 		dir, err := os.MkdirTemp("", "fak-guard-handoff-*")
 		if err != nil {
-			cancel()
-			fmt.Fprintf(os.Stderr, "fak guard: task handoff setup failed: %v\n", err)
-			os.Exit(1)
+			abortChildWiring(cancel, "task handoff setup", err, 1)
 		}
 		handoffFile = filepath.Join(dir, "task-handoff.json")
 	}
@@ -1189,9 +1187,7 @@ func cmdGuard(argv []string) {
 	var stopHookEnv [][2]string
 	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax, *denyAllSameStop, operatorDirectedMode, handoffCfg)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "Claude Stop hook setup", err, 1)
 	}
 	injected = append(injected, stopHookEnv...)
 	// Seam 4 of the tool process table: observation hooks (PreToolUse/PostToolUse/
@@ -1205,9 +1201,7 @@ func cmdGuard(argv []string) {
 	var toolprocHookEnv [][2]string
 	command, toolprocHookEnv, _, err = installGuardToolprocHooks(command, *toolprocHooks, toolprocSettings)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: toolproc hook setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "toolproc hook setup", err, 1)
 	}
 	injected = append(injected, toolprocHookEnv...)
 	// Discoverability affordance (#3092): a SessionStart hook that injects a one-line hint
@@ -1232,9 +1226,7 @@ func cmdGuard(argv []string) {
 	// ids and can record the A1 uuid<->trace identity join (#4112/#4113).
 	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Claude SessionStart hook setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "Claude SessionStart hook setup", err, 1)
 	}
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
@@ -1257,9 +1249,7 @@ func cmdGuard(argv []string) {
 	// provider at the gateway. Pi-only; no-ops for every other child. See guard_pi.go.
 	command, piInstall, err := installGuardPiExtension(command, *piExtension, gwURL)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Pi extension setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "Pi extension setup", err, 1)
 	}
 	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
 	// Headless workers: make editor/pager-opening git forms (a `git commit` with no message
@@ -1361,4 +1351,16 @@ func cmdGuard(argv []string) {
 		return
 	}
 	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+}
+
+// abortChildWiring aborts a launch whose child wiring could not be completed. By the time the
+// hook/extension installers run the gateway is already up, so every one of these failures has
+// to end the same way: tear the gateway's context down FIRST, then say which setup died, then
+// exit. Routing them through one abort is what keeps a half-wired child from ever being
+// spawned against a gateway that outlives the failure. what names the setup in the message
+// ("Claude Stop hook setup", "Pi extension setup", ...) and code is its exit status.
+func abortChildWiring(cancel context.CancelFunc, what string, err error, code int) {
+	cancel()
+	fmt.Fprintf(os.Stderr, "fak guard: %s failed: %v\n", what, err)
+	os.Exit(code)
 }

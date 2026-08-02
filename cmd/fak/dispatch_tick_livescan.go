@@ -240,8 +240,11 @@ func resolveWitnessFiles(runsDir string) []string {
 	return matches
 }
 
-func issueFromResolveLog(name string) (int, bool) {
-	m := dispatchResolveLogRE.FindStringSubmatch(name)
+// issueFromResolveArtifact reads the issue number re captures out of a resolve artifact's
+// basename. ok is false when the name does not match at all, and when the captured text is
+// not a number -- the one extraction rule both named accessors below apply.
+func issueFromResolveArtifact(re *regexp.Regexp, name string) (int, bool) {
+	m := re.FindStringSubmatch(name)
 	if m == nil {
 		return 0, false
 	}
@@ -249,16 +252,15 @@ func issueFromResolveLog(name string) (int, bool) {
 	return n, err == nil
 }
 
+func issueFromResolveLog(name string) (int, bool) {
+	return issueFromResolveArtifact(dispatchResolveLogRE, name)
+}
+
 // issueFromResolveAttempt extracts the issue number from a resolve attempt artifact's
 // basename -- a .log OR a .witness -- via the extension-agnostic dispatchResolveAttemptRE,
 // so the cooldown scan keys off either artifact the same way Python's _LOG_ISSUE_RE does.
 func issueFromResolveAttempt(name string) (int, bool) {
-	m := dispatchResolveAttemptRE.FindStringSubmatch(name)
-	if m == nil {
-		return 0, false
-	}
-	n, err := strconv.Atoi(m[1])
-	return n, err == nil
+	return issueFromResolveArtifact(dispatchResolveAttemptRE, name)
 }
 
 // laneHeaderReadCapBytes bounds how much of a worker log laneFromSpawnHeader reads.

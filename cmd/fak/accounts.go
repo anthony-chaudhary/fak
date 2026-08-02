@@ -417,20 +417,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		// every active seat resolving to the named account bucket in one audited pass, so a
 		// duplicate seat identity_mismatched onto the account can't leave it live after the
 		// canonical seat is removed.
-		if *rmByAccount != "" {
-			return runAccountsRemoveByAccount(stdout, stderr, removeParams{
-				byAccount:    *rmByAccount,
-				rehomeTo:     *rmRehome,
-				reason:       *rmReason,
-				archive:      *rmArchive,
-				registryPath: *registryPath,
-				dosView:      *dosView,
-				jobView:      *jobView,
-				noSync:       *addNoSync,
-			})
-		}
-		return runAccountsRemove(stdout, stderr, removeParams{
-			name:         *addName,
+		//
+		// Both retirement forms apply the SAME removal policy — rehome target, audit reason,
+		// archive choice, registry and the two generated views — and differ only in the
+		// selector that picks what to retire, so the policy is built once here and each form
+		// sets just its own selector. That is what keeps a by-account retirement from ever
+		// tombstoning under different policy than the by-seat one.
+		rm := removeParams{
 			rehomeTo:     *rmRehome,
 			reason:       *rmReason,
 			archive:      *rmArchive,
@@ -438,7 +431,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			dosView:      *dosView,
 			jobView:      *jobView,
 			noSync:       *addNoSync,
-		})
+		}
+		if *rmByAccount != "" {
+			rm.byAccount = *rmByAccount
+			return runAccountsRemoveByAccount(stdout, stderr, rm)
+		}
+		rm.name = *addName
+		return runAccountsRemove(stdout, stderr, rm)
 
 	case "restore":
 		// Reverse the reversible half of `remove --archive`: bring the .DELETED config dir

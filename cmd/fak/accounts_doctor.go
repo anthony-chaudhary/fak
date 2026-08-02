@@ -358,6 +358,20 @@ func hydrateSourceRank(obs accounts.LoginObservation) int {
 	return 2
 }
 
+// backupAndCopyCredential snapshots whatever the target already holds under name into
+// backupDir and only then copies the source's file over it, so a hydrate is always
+// reversible. The source keeps its own copy. Both credential shapes a seat can carry
+// (.credentials.json and .oauth-token) are installed by this one back-up-then-overwrite
+// rule; which files a hydrate touches still differs by shape (a .credentials.json hydrate
+// additionally retires the target's stale .oauth-token), but no shape can ever be
+// overwritten without being snapshotted first.
+func backupAndCopyCredential(sourceDir, targetDir, backupDir, name, stamp string) error {
+	if err := backupIfExists(targetDir, backupDir, name, stamp); err != nil {
+		return err
+	}
+	return copyFile(filepath.Join(sourceDir, name), filepath.Join(targetDir, name))
+}
+
 func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (string, error) {
 	target, ok := homeByName(reg, targetName)
 	if !ok {
@@ -383,10 +397,7 @@ func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (
 	stamp := time.Now().UTC().Format("20060102T150405Z")
 	copiedCred := ""
 	if fileExists(filepath.Join(source.Dir, ".credentials.json")) {
-		if err := backupIfExists(target.Dir, backupDir, ".credentials.json", stamp); err != nil {
-			return "", err
-		}
-		if err := copyFile(filepath.Join(source.Dir, ".credentials.json"), filepath.Join(target.Dir, ".credentials.json")); err != nil {
+		if err := backupAndCopyCredential(source.Dir, target.Dir, backupDir, ".credentials.json", stamp); err != nil {
 			return "", err
 		}
 		if err := backupIfExists(target.Dir, backupDir, ".oauth-token", stamp); err != nil {
@@ -395,10 +406,7 @@ func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (
 		_ = os.Remove(filepath.Join(target.Dir, ".oauth-token"))
 		copiedCred = ".credentials.json"
 	} else if fileExists(filepath.Join(source.Dir, ".oauth-token")) {
-		if err := backupIfExists(target.Dir, backupDir, ".oauth-token", stamp); err != nil {
-			return "", err
-		}
-		if err := copyFile(filepath.Join(source.Dir, ".oauth-token"), filepath.Join(target.Dir, ".oauth-token")); err != nil {
+		if err := backupAndCopyCredential(source.Dir, target.Dir, backupDir, ".oauth-token", stamp); err != nil {
 			return "", err
 		}
 		copiedCred = ".oauth-token"

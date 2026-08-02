@@ -214,9 +214,8 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		// instead of minting a fresh setup-token. The source is already an enrolled, twin-clean
 		// login, so the credential is proven by being live; we still twin-check a copied
 		// .oauth-token, since that is the exact surface GateTokenWrite guards.
-		src, err := resolveSourceSeat(p.homeDir, p.from, reg)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		src, srcOK := resolveAdoptSource(stderr, p, reg)
+		if !srcOK {
 			return 1
 		}
 		if sameDir(src, dir) {
@@ -423,10 +422,9 @@ func dryRunAddPlan(stdout, stderr io.Writer, p addParams, reg accounts.Registry,
 		fmt.Fprintf(stdout, "  credential:    would record the env-var REFERENCE $%s (kind=api_key; the key itself is never stored)\n", env)
 		fmt.Fprintf(stdout, "  identity:      would derive from the key reference (offline; no OAuth profile probe)\n")
 	} else if p.adopt {
-		src, err := resolveSourceSeat(p.homeDir, p.from, reg)
-		if err != nil {
-			// A missing/invalid source is a read-only refusal that must fire under --dry-run too.
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		// A missing/invalid source is a read-only refusal that must fire under --dry-run too.
+		src, srcOK := resolveAdoptSource(stderr, p, reg)
+		if !srcOK {
 			return 1
 		}
 		fmt.Fprintf(stdout, "  credential:    would ADOPT the login bundle from %s\n", src)
@@ -742,6 +740,52 @@ func loadRegistryOrErr(stderr io.Writer, registryPath string) (accounts.Registry
 	return reg, true
 }
 
+// resolveAdoptSource resolves the seat an `--adopt` enroll copies its login bundle FROM, and
+// refuses a missing or invalid source. The dry run and the real run have to agree about what
+// "the source" is and refuse the same source for the same reason — a --dry-run that happily
+// resolved a source the real run then rejected would print a plan nobody can execute — so both
+// ask here. ok=false means the refusal has already been printed and the caller must exit 1.
+func resolveAdoptSource(stderr io.Writer, p addParams, reg accounts.Registry) (string, bool) {
+	src, err := resolveSourceSeat(p.homeDir, p.from, reg)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return "", false
+	}
+	return src, true
+}
+
+// resolveRehomeTarget picks the seat a removal falls FORWARD to and resolves it. Both removal
+// forms choose it the same way — the explicit --rehome-to, else the registry's anchor seat —
+// and refuse the same two ways: no target at all, and a target the registry cannot resolve.
+// Sharing that is what stops one form from tombstoning against a rehome the other form would
+// have rejected. self names the seat being retired when the caller has exactly one (the
+// --name form), which is excluded from the anchor fallback and refused as an explicit target;
+// the account form passes "" because it retires a whole bucket and catches rehome-into-retired
+// by identity, which no name comparison could see. ok=false means the refusal has already been
+// printed and the caller must exit 1.
+func resolveRehomeTarget(stderr io.Writer, reg accounts.Registry, rehomeTo, self string) (string, accounts.Home, bool) {
+	rehome := rehomeTo
+	if rehome == "" {
+		if def, ok := reg.Default(); ok && (self == "" || def.Name != self) {
+			rehome = def.Name
+		}
+	}
+	if rehome == "" {
+		fmt.Fprintln(stderr, "fak accounts: no --rehome-to and no default seat to fall forward to; pass --rehome-to <seat>")
+		return "", accounts.Home{}, false
+	}
+	if self != "" && rehome == self {
+		fmt.Fprintf(stderr, "fak accounts: cannot rehome %q to itself\n", self)
+		return "", accounts.Home{}, false
+	}
+	live, _, err := reg.Resolve(rehome)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: invalid rehome target %q: %v\n", rehome, err)
+		return "", accounts.Home{}, false
+	}
+	return rehome, live, true
+}
+
 // syncViewsUnlessNoSync re-syncs the dos/job views unless noSync is set, returning the
 // nonzero exit code to propagate on a sync failure (0 otherwise). It folds the
 // `if !noSync { syncViews … }` tail the registry-mutating subcommands share.
@@ -791,23 +835,8 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		return 1
 	}
 	// Resolve the rehome target: the flag, else the registry's default seat.
-	rehome := p.rehomeTo
-	if rehome == "" {
-		if def, ok := reg.Default(); ok && def.Name != p.name {
-			rehome = def.Name
-		}
-	}
-	if rehome == "" {
-		fmt.Fprintln(stderr, "fak accounts: no --rehome-to and no default seat to fall forward to; pass --rehome-to <seat>")
-		return 1
-	}
-	if rehome == p.name {
-		fmt.Fprintf(stderr, "fak accounts: cannot rehome %q to itself\n", p.name)
-		return 1
-	}
-	liveRehome, _, err := reg.Resolve(rehome)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: invalid rehome target %q: %v\n", rehome, err)
+	rehome, liveRehome, ok := resolveRehomeTarget(stderr, reg, p.rehomeTo, p.name)
+	if !ok {
 		return 1
 	}
 	if liveRehome.Name == p.name {
@@ -983,20 +1012,11 @@ func runAccountsRemoveByAccount(stdout, stderr io.Writer, p removeParams) int {
 		return 1
 	}
 
-	// Resolve the rehome target: the flag, else the registry's anchor seat.
-	rehome := p.rehomeTo
-	if rehome == "" {
-		if def, ok := reg.Default(); ok {
-			rehome = def.Name
-		}
-	}
-	if rehome == "" {
-		fmt.Fprintln(stderr, "fak accounts: no --rehome-to and no default seat to fall forward to; pass --rehome-to <seat>")
-		return 1
-	}
-	liveRehome, _, err := reg.Resolve(rehome)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: invalid rehome target %q: %v\n", rehome, err)
+	// Resolve the rehome target: the flag, else the registry's anchor seat. No seat to exclude
+	// here — the account form retires a whole bucket, and rehoming INTO that bucket is caught
+	// by the identity check below, which a name comparison could not see anyway.
+	rehome, liveRehome, ok := resolveRehomeTarget(stderr, reg, p.rehomeTo, "")
+	if !ok {
 		return 1
 	}
 	// Refuse rehoming INTO the account being retired: the live target must not itself resolve to

@@ -154,12 +154,7 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 	if err != nil {
 		return nil, fmt.Errorf("read live leases: %w", err)
 	}
-	dec := regionadmit.Decide(regionadmit.Request{
-		Actor:  h.holder,
-		Lane:   h.lane,
-		Tree:   h.tree,
-		SelfID: h.id,
-	}, regionLeases(live), h.tax)
+	dec := h.decide(live)
 	if !dec.Admit {
 		return &loopDriveRegionRefusal{Reason: dec.Reason, Detail: dec.Detail}, nil
 	}
@@ -193,12 +188,7 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		h.release()
 		return nil, fmt.Errorf("reverify region lease %s: %w", h.id, err)
 	}
-	dec = regionadmit.Decide(regionadmit.Request{
-		Actor:  h.holder,
-		Lane:   h.lane,
-		Tree:   h.tree,
-		SelfID: h.id,
-	}, regionLeases(live), h.tax)
+	dec = h.decide(live)
 	if !dec.Admit {
 		h.release()
 		return &loopDriveRegionRefusal{
@@ -211,6 +201,21 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 	// already know must be rolled back.
 	syncLoopDriveTickLeaseRefs(h.store, true)
 	return nil, nil
+}
+
+// decide asks the region-admission kernel whether THIS hold may take its region against a
+// live lease set. The pre-acquire admission and the post-acquire reverify ask the very same
+// question — same actor, lane and tree, and the hold's own id as SelfID so it is never
+// treated as conflicting with itself — differing only in WHEN the lease set was read. Asking
+// it in one place is what makes the reverify a true re-run of the admission it confirms,
+// rather than a second, independently drifting judgement.
+func (h *loopDriveRegionHold) decide(live []leaseref.Record) regionadmit.Decision {
+	return regionadmit.Decide(regionadmit.Request{
+		Actor:  h.holder,
+		Lane:   h.lane,
+		Tree:   h.tree,
+		SelfID: h.id,
+	}, regionLeases(live), h.tax)
 }
 
 // renewOnce renews the held lease, retrying a single LEASE_CONTENDED (a lost

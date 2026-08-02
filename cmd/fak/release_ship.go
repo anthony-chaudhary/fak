@@ -297,7 +297,7 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	result.SourceSHA = result.BaseSHA
 	if opts.requireCI && !opts.skipCI {
 		result.SourceCI = releaseShipSourceCI(&result, root, opts, result.SourceSHA)
-		if !releaseShipCIOK(result.SourceCI) && opts.execute {
+		if !releaseShipPayloadOK(result.SourceCI) && opts.execute {
 			result.fail("source_ci_unconfirmed", jsonTail(result.SourceCI))
 			return finishReleaseShip(result)
 		}
@@ -305,7 +305,7 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	if releaseShipNeedsTargetAncestry(opts) {
 		result.TargetAncestry = releaseShipTargetAncestry(&result, root, opts, result.SourceSHA)
 		result.TargetSHA = stringFromAny(result.TargetAncestry["target_sha"])
-		if !releaseShipTargetAncestryOK(result.TargetAncestry) {
+		if !releaseShipPayloadOK(result.TargetAncestry) {
 			result.fail("target_non_fast_forward", jsonTail(result.TargetAncestry))
 			return finishReleaseShip(result)
 		}
@@ -1004,7 +1004,7 @@ func releaseShipRebaseCutOntoTrunk(result *releaseShipResult, root, wt string, e
 	// sometimes defers the release to the next run; that is the correct behavior.
 	if opts.requireCI && !opts.skipCI {
 		result.SourceCI = releaseShipSourceCI(result, root, opts, newBase)
-		if !releaseShipCIOK(result.SourceCI) {
+		if !releaseShipPayloadOK(result.SourceCI) {
 			return map[string]any{"ok": false, "reason": "retry_source_ci_unconfirmed", "old_base": oldBase, "new_base": newBase, "detail": jsonTail(result.SourceCI)}
 		}
 	}
@@ -1344,7 +1344,12 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 	}
 }
 
-func releaseShipCIOK(payload map[string]any) bool {
+// releaseShipPayloadOK reads the "ok" verdict out of a release-ship gate payload. An absent
+// payload is NOT ok: a gate that never ran must never read as a gate that passed -- which is
+// the whole reason these two gates need a reader of their own rather than a bare
+// payload["ok"] assertion. The source-CI and the target-ancestry gates publish the same
+// shaped map and both can be skipped, so one reader serves both.
+func releaseShipPayloadOK(payload map[string]any) bool {
 	if payload == nil {
 		return false
 	}
@@ -1399,14 +1404,6 @@ func releaseShipTargetAncestry(result *releaseShipResult, root string, opts rele
 		payload["tail"] = tail(out)
 	}
 	return payload
-}
-
-func releaseShipTargetAncestryOK(payload map[string]any) bool {
-	if payload == nil {
-		return false
-	}
-	ok, _ := payload["ok"].(bool)
-	return ok
 }
 
 func cleanupReleaseShipWorktree(root, wt string) map[string]any {

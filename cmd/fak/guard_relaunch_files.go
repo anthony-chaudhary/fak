@@ -83,15 +83,19 @@ func (s guardRelaunchFiles) ensure() error {
 			return fmt.Errorf("restore generated child config %q: %w", file.path, err)
 		}
 		tmpPath := tmp.Name()
-		if err := tmp.Chmod(file.mode); err != nil {
+		// Any failure while the temp file is still open must close AND unlink it before
+		// reporting, so a half-restored config never survives to be picked up as real. stage
+		// names the step that failed, which is all that differs between the two exits below.
+		abortRestore := func(stage string, err error) error {
 			_ = tmp.Close()
 			_ = os.Remove(tmpPath)
-			return fmt.Errorf("restore generated child config mode %q: %w", file.path, err)
+			return fmt.Errorf("restore generated child config %s %q: %w", stage, file.path, err)
+		}
+		if err := tmp.Chmod(file.mode); err != nil {
+			return abortRestore("mode", err)
 		}
 		if _, err := tmp.Write(file.data); err != nil {
-			_ = tmp.Close()
-			_ = os.Remove(tmpPath)
-			return fmt.Errorf("restore generated child config bytes %q: %w", file.path, err)
+			return abortRestore("bytes", err)
 		}
 		if err := tmp.Close(); err != nil {
 			_ = os.Remove(tmpPath)

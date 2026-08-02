@@ -146,11 +146,7 @@ func renderLeftoversReport(rep headlesslint.LeftoversReport, transcriptPath stri
 		var b strings.Builder
 		fmt.Fprintf(&b, "fak headless-lint --leftovers: %s — %d leftover(s) narrated and the issues-filed count is UNKNOWN.\n", rep.Verdict, rep.Narrated)
 		fmt.Fprintf(&b, "  no usable tool-use evidence at %q — unknown is not zero, so this is neither a pass nor a refusal.\n", transcriptPath)
-		fmt.Fprintf(&b, "  doctrine: %q\n\n", rep.Doctrine)
-		for _, h := range rep.Hits {
-			fmt.Fprintf(&b, "  line %-4d %q\n", h.Line, h.Match)
-		}
-		fmt.Fprintf(&b, "\n  instead: %s\n", rep.Resolve)
+		appendLeftoversEvidence(&b, rep)
 		return b.String()
 	case !rep.Refused():
 		// A clean report can still carry an unknown count (nothing was narrated, so the
@@ -168,12 +164,20 @@ func renderLeftoversReport(rep headlesslint.LeftoversReport, transcriptPath stri
 	if rep.IssuesFiledClaimed != nil && *rep.IssuesFiledClaimed > count {
 		fmt.Fprintf(&b, "  the run claimed %d filed; its transcript evidences %d. The evidence is what counts.\n", *rep.IssuesFiledClaimed, count)
 	}
-	fmt.Fprintf(&b, "  doctrine: %q\n\n", rep.Doctrine)
-	for _, h := range rep.Hits {
-		fmt.Fprintf(&b, "  line %-4d %q\n", h.Line, h.Match)
-	}
-	fmt.Fprintf(&b, "\n  instead: %s\n", rep.Resolve)
+	appendLeftoversEvidence(&b, rep)
 	return b.String()
+}
+
+// appendLeftoversEvidence writes the shared evidence tail of a leftovers report: the
+// doctrine being applied, every matched transcript line, and the remedy. The undecided and
+// the refusing reports open differently but must close with the SAME evidence, so an
+// operator reading either one sees the same lines and the same instruction.
+func appendLeftoversEvidence(b *strings.Builder, rep headlesslint.LeftoversReport) {
+	fmt.Fprintf(b, "  doctrine: %q\n\n", rep.Doctrine)
+	for _, h := range rep.Hits {
+		fmt.Fprintf(b, "  line %-4d %q\n", h.Line, h.Match)
+	}
+	fmt.Fprintf(b, "\n  instead: %s\n", rep.Resolve)
 }
 
 // readHeadlessSource resolves the text to scan: --file (or "-" for stdin), then

@@ -93,8 +93,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	if *report != "" {
 		rep, err := ablate.LoadReport(*report)
 		if err != nil {
-			fmt.Fprintln(stderr, "fak ablate:", err)
-			return 1
+			return ablateFail(stderr, err)
 		}
 		if flagWasSet(fs, "baseline") {
 			rep.Baseline = *baseline
@@ -103,8 +102,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		// deltas apples-to-apples; apply it to a loaded report too, so a tampered or
 		// mismatched artifact fails loud rather than rendering misleading deltas.
 		if err := rep.Validate(); err != nil {
-			fmt.Fprintln(stderr, "fak ablate:", err)
-			return 1
+			return ablateFail(stderr, err)
 		}
 		return emitAblation(stdout, stderr, rep, *out, *asJSON, tiers)
 	}
@@ -130,8 +128,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		}
 		sessionTrace, cas, sessionEngineID, err := guardtrace.LoadSessionTrace(*fromSession)
 		if err != nil {
-			fmt.Fprintln(stderr, "fak ablate:", err)
-			return 1
+			return ablateFail(stderr, err)
 		}
 		abi.RegisterEngine(sessionEngineID, enginepkg.NewCassetteEngine(cas))
 		t = sessionTrace
@@ -145,8 +142,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		var err error
 		t, err = bench.LoadTrace(path)
 		if err != nil {
-			fmt.Fprintln(stderr, "fak ablate:", err)
-			return 1
+			return ablateFail(stderr, err)
 		}
 	}
 
@@ -204,8 +200,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		}
 		rep, dropped, err := ablate.SweepViaSubprocess(ctx(), bin, t, engineID, engineModel, configs, *baseline, ablateArmRunner)
 		if err != nil {
-			fmt.Fprintln(stderr, "fak ablate:", err)
-			return 1
+			return ablateFail(stderr, err)
 		}
 		// A dropped child is a logged hole with a reason, never a silent gap.
 		for _, d := range dropped {
@@ -216,10 +211,21 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 
 	rep, err := ablate.Sweep(ctx(), t, engineID, engineModel, configs, *baseline)
 	if err != nil {
-		fmt.Fprintln(stderr, "fak ablate:", err)
-		return 1
+		return ablateFail(stderr, err)
 	}
 	return emitAblation(stdout, stderr, rep, *out, *asJSON, tiers)
+}
+
+// ablateFail reports one `fak ablate` runtime failure and yields its exit code. A report that
+// will not load or will not validate, a session/bench trace that will not load, a sweep that
+// errored -- all of them are the same kind of event to an operator (the sweep did not happen),
+// so they are surfaced under the same prefix and exit 1 alike. The exit-2 sites above are the
+// argument-validation refusals (a bad --models ladder, a bad sweep plan, a flag pair that
+// cannot both hold); several print in this same bare form, so the exit code -- not the
+// wording -- is what separates "you asked for the impossible" from "the sweep broke".
+func ablateFail(stderr io.Writer, err error) int {
+	fmt.Fprintln(stderr, "fak ablate:", err)
+	return 1
 }
 
 func runAblatePlan(t *bench.Trace, engineID, engineModel string, configs []ablate.FeatureConfig, baseline string) (*ablate.Report, error) {

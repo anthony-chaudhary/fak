@@ -64,13 +64,7 @@ func guardInfoStartupHeader(base, laneTag string, interval time.Duration, width 
 	// carried it has long since scrolled off. Reuses the banner's predicate and stamp source
 	// (guardBuildStampUnattested over guardBannerBuildStamp); attested builds return "" and the pane
 	// stays uncluttered.
-	if note := guardInfoStalenessNote(guardBannerBuildStamp()); note != "" {
-		if width > 0 {
-			note = trimTUI(note, width)
-		}
-		b.WriteString(note)
-		b.WriteByte('\n')
-	}
+	appendGuardInfoNote(&b, guardInfoStalenessNote(guardBannerBuildStamp()), width)
 	// The ATTESTED-but-behind twin: guardInfoStalenessNote above fires only for an UNSTAMPED
 	// binary (staleness UNVERIFIABLE); this fires for a STAMPED binary that git ancestry proves is
 	// behind (Skewed) or off (Diverged) origin/main — the pane-persistent twin of the banner's
@@ -78,15 +72,24 @@ func guardInfoStartupHeader(base, laneTag string, interval time.Duration, width 
 	// pane re-reads a cached verdict every frame and git never runs on the render path. The two
 	// notes are mutually exclusive per binary — an unstamped build is never classified Skewed — so
 	// emitting both unconditionally cannot double-warn.
-	if note := guardInfoSkewNote(guardBuildSkewAssessment()); note != "" {
-		if width > 0 {
-			note = trimTUI(note, width)
-		}
-		b.WriteString(note)
-		b.WriteByte('\n')
-	}
+	appendGuardInfoNote(&b, guardInfoSkewNote(guardBuildSkewAssessment()), width)
 	b.WriteString(guardInfoLegend())
 	return b.String()
+}
+
+// appendGuardInfoNote emits one optional pane note on its own line, trimmed to the pane
+// width when a width is known. An empty note writes NOTHING -- not even the newline -- so a
+// build with nothing to warn about leaves the pane uncluttered. Both staleness tells above
+// are emitted through this one rule, so neither can pick up a different trim or spacing.
+func appendGuardInfoNote(b *strings.Builder, note string, width int) {
+	if note == "" {
+		return
+	}
+	if width > 0 {
+		note = trimTUI(note, width)
+	}
+	b.WriteString(note)
+	b.WriteByte('\n')
 }
 
 // guardInfoActiveLaneTag resolves the pane's active-lane tell live: one modver.Snapshot for the

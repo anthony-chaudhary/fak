@@ -506,20 +506,29 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	stopMetricsSnapshot := startGatewayUsageSnapshotLoop(ctx, rt.srv, *sf.metricsSnapshot, "serve", rt.t0)
 	defer stopMetricsSnapshot()
 
+	// Everything a finished serve must leave behind, whichever transport served it. The stdio
+	// and HTTP exits below record the SAME four things and differ only in the transport word
+	// they record it under, so the sequence lives here once: a new observation added for one
+	// exit cannot be missing from the other, and a run that ends over stdio cannot silently
+	// leave less evidence than one that ends over HTTP.
+	persistServeExitObservations := func(transport string) {
+		// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
+		persistCacheValueObservations(rt.srv, "serve", transport, *sf.provider)
+		if *sf.dojoMode {
+			_ = persistLiveDojoEpisode("serve", rt.srv)
+		}
+		// Append the full served-turn counter-family snapshot (#1610).
+		persistGatewayUsageObservation(rt.srv, "serve", transport, time.Since(rt.t0))
+		dumpServeSessions(serveSessions, *sf.sessionStatePath) // #629: persist drive state for the next cold resume
+	}
+
 	if *sf.stdio {
 		// MCP over stdio: stdout carries the protocol; the log package writes to
 		// stderr, so diagnostics never corrupt the frames.
 		if err := rt.srv.ServeStdio(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
 			must(err)
 		}
-		// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
-		persistCacheValueObservations(rt.srv, "serve", "stdio", *sf.provider)
-		if *sf.dojoMode {
-			_ = persistLiveDojoEpisode("serve", rt.srv)
-		}
-		// Append the full served-turn counter-family snapshot (#1610).
-		persistGatewayUsageObservation(rt.srv, "serve", "stdio", time.Since(rt.t0))
-		dumpServeSessions(serveSessions, *sf.sessionStatePath) // #629: persist drive state for the next cold resume
+		persistServeExitObservations("stdio")
 		return
 	}
 	if *sf.addr == "" {
@@ -542,12 +551,5 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	if err := rt.srv.ListenAndServe(ctx, *sf.addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		must(err)
 	}
-	// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
-	persistCacheValueObservations(rt.srv, "serve", "http", *sf.provider)
-	if *sf.dojoMode {
-		_ = persistLiveDojoEpisode("serve", rt.srv)
-	}
-	// Append the full served-turn counter-family snapshot (#1610).
-	persistGatewayUsageObservation(rt.srv, "serve", "http", time.Since(rt.t0))
-	dumpServeSessions(serveSessions, *sf.sessionStatePath) // #629: persist drive state for the next cold resume
+	persistServeExitObservations("http")
 }

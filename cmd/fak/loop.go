@@ -230,16 +230,25 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		baseMetrics["guard_enabled"] = 0
 	}
-	if err := appendLoopRunEvent(*ledger, loopmgr.Event{
-		LoopID:       *loopID,
-		RunID:        *runID,
-		Kind:         loopmgr.EventFire,
-		Source:       *source,
-		Principal:    *principal,
-		Summary:      "loop run requested",
-		EvidenceRefs: baseEvidence,
-		Metrics:      cloneLoopMetrics(baseMetrics),
-	}); err != nil {
+	// Every ledger event appended HERE identifies the SAME run: one loop id, one run id, one
+	// trigger source, one principal, one evidence set. Stamping that identity in one place
+	// means a refusal, a guard-unavailable end and a normal admit cannot disagree about whose
+	// run they belong to; each caller below supplies only what makes its event distinct. (The
+	// child's own START/END pair is stamped from the same values by loopRunChildCtx, which
+	// carries them across into loopRunChild.)
+	loopEvent := func(ev loopmgr.Event) loopmgr.Event {
+		ev.LoopID = *loopID
+		ev.RunID = *runID
+		ev.Source = *source
+		ev.Principal = *principal
+		ev.EvidenceRefs = baseEvidence
+		return ev
+	}
+	if err := appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
+		Kind:    loopmgr.EventFire,
+		Summary: "loop run requested",
+		Metrics: cloneLoopMetrics(baseMetrics),
+	})); err != nil {
 		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
 		return 1
 	}
@@ -252,36 +261,23 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 			m := cloneLoopMetrics(baseMetrics)
 			m["violations"] = int64(len(violations))
 			summary := repoguard.RenderReason(violations)
-			if err := appendLoopRunEvent(*ledger, loopmgr.Event{
-				LoopID:       *loopID,
-				RunID:        *runID,
-				Kind:         loopmgr.EventAdmit,
-				Source:       *source,
-				Principal:    *principal,
-				Status:       loopmgr.StatusRefused,
-				Reason:       repoguard.Reason,
-				Summary:      summary,
-				EvidenceRefs: baseEvidence,
-				Metrics:      m,
-			}); err != nil {
+			if err := appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
+				Kind:    loopmgr.EventAdmit,
+				Status:  loopmgr.StatusRefused,
+				Reason:  repoguard.Reason,
+				Summary: summary,
+				Metrics: m,
+			})); err != nil {
 				fmt.Fprintf(stderr, "fak loop run: %v\n", err)
 				return 1
 			}
 			fmt.Fprintf(stderr, "fak loop run: containment refused command: %s\n", summary)
-			if *asJSON {
-				rep := map[string]any{
-					"schema":      "fak.loop-run-report.v1",
-					"ledger_path": *ledger,
-					"loop_id":     *loopID,
-					"run_id":      *runID,
-					"status":      "refused",
-					"reason":      repoguard.Reason,
-					"exit_code":   3,
-				}
-				if err := writeIndentedJSON(stdout, rep); err != nil {
-					fmt.Fprintf(stderr, "fak loop run: encode json: %v\n", err)
-					return 1
-				}
+			if *asJSON && !writeLoopRunReport(stdout, stderr, *ledger, *loopID, *runID, map[string]any{
+				"status":    "refused",
+				"reason":    repoguard.Reason,
+				"exit_code": 3,
+			}) {
+				return 1
 			}
 			return 3
 		}
@@ -289,18 +285,13 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		if err != nil {
 			m := cloneLoopMetrics(baseMetrics)
 			m["exit_code"] = 127
-			_ = appendLoopRunEvent(*ledger, loopmgr.Event{
-				LoopID:       *loopID,
-				RunID:        *runID,
-				Kind:         loopmgr.EventEnd,
-				Source:       *source,
-				Principal:    *principal,
-				Status:       loopmgr.StatusFailed,
-				Reason:       "GUARD_UNAVAILABLE",
-				Summary:      err.Error(),
-				EvidenceRefs: baseEvidence,
-				Metrics:      m,
-			})
+			_ = appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
+				Kind:    loopmgr.EventEnd,
+				Status:  loopmgr.StatusFailed,
+				Reason:  "GUARD_UNAVAILABLE",
+				Summary: err.Error(),
+				Metrics: m,
+			}))
 			fmt.Fprintf(stderr, "fak loop run: resolve fak guard binary: %v\n", err)
 			return 127
 		}
@@ -310,18 +301,13 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		admitSummary = "--no-guard disabled fak guard containment"
 		fmt.Fprintln(stderr, "fak loop run: WARNING --no-guard disables fak guard containment for this run")
 	}
-	if err := appendLoopRunEvent(*ledger, loopmgr.Event{
-		LoopID:       *loopID,
-		RunID:        *runID,
-		Kind:         loopmgr.EventAdmit,
-		Source:       *source,
-		Principal:    *principal,
-		Status:       loopmgr.StatusAdmitted,
-		Reason:       admitReason,
-		Summary:      admitSummary,
-		EvidenceRefs: baseEvidence,
-		Metrics:      cloneLoopMetrics(baseMetrics),
-	}); err != nil {
+	if err := appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
+		Kind:    loopmgr.EventAdmit,
+		Status:  loopmgr.StatusAdmitted,
+		Reason:  admitReason,
+		Summary: admitSummary,
+		Metrics: cloneLoopMetrics(baseMetrics),
+	})); err != nil {
 		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
 		return 1
 	}
@@ -366,22 +352,39 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		})
 
 	if *asJSON {
-		rep := map[string]any{
-			"schema":      "fak.loop-run-report.v1",
-			"ledger_path": *ledger,
-			"loop_id":     *loopID,
-			"run_id":      *runID,
+		if !writeLoopRunReport(stdout, stderr, *ledger, *loopID, *runID, map[string]any{
 			"exit_code":   exitCode,
 			"duration_ms": durationMS,
-		}
-		if err := writeIndentedJSON(stdout, rep); err != nil {
-			fmt.Fprintf(stderr, "fak loop run: encode json: %v\n", err)
+		}) {
 			return 1
 		}
 	} else {
 		fmt.Fprintf(stdout, "loop run %s exit=%d ledger=%s\n", *runID, exitCode, *ledger)
 	}
 	return exitCode
+}
+
+// writeLoopRunReport emits one `fak loop run --json` report. Every report -- the containment
+// refusal's and the completed run's alike -- names the same four things: the report schema,
+// the ledger it was recorded in, and the loop/run it describes. Those live here so a refusal
+// can never publish a differently identified report than a run that finished; outcome carries
+// only the fields that differ (status/reason, or exit code and duration). It returns false
+// when the encode failed and the caller must exit 1 instead of reporting success.
+func writeLoopRunReport(stdout, stderr io.Writer, ledger, loopID, runID string, outcome map[string]any) bool {
+	rep := map[string]any{
+		"schema":      "fak.loop-run-report.v1",
+		"ledger_path": ledger,
+		"loop_id":     loopID,
+		"run_id":      runID,
+	}
+	for k, v := range outcome {
+		rep[k] = v
+	}
+	if err := writeIndentedJSON(stdout, rep); err != nil {
+		fmt.Fprintf(stderr, "fak loop run: encode json: %v\n", err)
+		return false
+	}
+	return true
 }
 
 // loopRunChildCtx carries the ledger identity + base evidence/metrics threaded through the

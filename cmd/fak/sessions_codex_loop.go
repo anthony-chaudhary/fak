@@ -219,23 +219,11 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		}
 		gateCode, ok := codexLoopFailOnRecentExitCode(r, *failOn)
 		if !ok {
-			fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, action, or unguarded)\n", *failOn)
-			return 2
+			return codexLoopInvalidFailOn(stderr, *failOn)
 		}
-		if *asJSON {
-			if code := encodeJSONOrFail(stdout, stderr, r, "fak sessions codex-loop"); code != 0 {
-				return code
-			}
-			if gateCode != 0 {
-				fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), r.Verdict, codexLoopRecentGateReason(r, *failOn))
-			}
-			return gateCode
-		}
-		fmt.Fprint(stdout, renderCodexLoopRecentReport(r))
-		if gateCode != 0 {
-			fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), r.Verdict, codexLoopRecentGateReason(r, *failOn))
-		}
-		return gateCode
+		return finishCodexLoopReport(stdout, stderr, *asJSON, r,
+			func() string { return renderCodexLoopRecentReport(r) },
+			gateCode, *failOn, r.Verdict, codexLoopRecentGateReason(r, *failOn))
 	}
 	if strings.TrimSpace(*path) != "" && strings.TrimSpace(*sessionID) != "" {
 		fmt.Fprintln(stderr, "fak sessions codex-loop: use only one of --path or --session")
@@ -263,21 +251,39 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	d.GuardWitnessed = codexGuardWitnessExists(*codexHome, d.SessionID)
 	gateCode, ok := codexLoopFailOnDiagnosisExitCode(d, *failOn)
 	if !ok {
-		fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, action, or unguarded)\n", *failOn)
-		return 2
+		return codexLoopInvalidFailOn(stderr, *failOn)
 	}
-	if *asJSON {
-		if code := encodeJSONOrFail(stdout, stderr, d, "fak sessions codex-loop"); code != 0 {
+	return finishCodexLoopReport(stdout, stderr, *asJSON, d,
+		func() string { return renderCodexLoopDiagnosis(d) },
+		gateCode, *failOn, d.Verdict, codexLoopDiagnosisGateReason(d, *failOn))
+}
+
+// codexLoopInvalidFailOn refuses an unrecognized --fail-on spelling. The --recent fold and
+// the single-session diagnosis accept the same four gate levels, so they name the same four
+// in the same usage line and exit 2 alike: a gate the command cannot understand must never
+// quietly degrade into "none" on one path and refuse on the other.
+func codexLoopInvalidFailOn(stderr io.Writer, failOn string) int {
+	fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, action, or unguarded)\n", failOn)
+	return 2
+}
+
+// finishCodexLoopReport publishes one codex-loop report and returns the command's exit code.
+// The --recent fold and the single-session diagnosis publish identically: the payload as JSON
+// or as rendered text on stdout, and then -- whenever the --fail-on gate refused -- the typed
+// REFUSE line on stderr naming the gate, the verdict and the reason. Publishing through one
+// path is what stops a refusal from being announced on the text surface and swallowed on the
+// JSON one (or the reverse). render is a thunk so the JSON form never pays to build a text
+// report it discards.
+func finishCodexLoopReport(stdout, stderr io.Writer, asJSON bool, payload any, render func() string, gateCode int, failOn, verdict, reason string) int {
+	if asJSON {
+		if code := encodeJSONOrFail(stdout, stderr, payload, "fak sessions codex-loop"); code != 0 {
 			return code
 		}
-		if gateCode != 0 {
-			fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, codexLoopDiagnosisGateReason(d, *failOn))
-		}
-		return gateCode
+	} else {
+		fmt.Fprint(stdout, render())
 	}
-	fmt.Fprint(stdout, renderCodexLoopDiagnosis(d))
 	if gateCode != 0 {
-		fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, codexLoopDiagnosisGateReason(d, *failOn))
+		fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(failOn), verdict, reason)
 	}
 	return gateCode
 }
