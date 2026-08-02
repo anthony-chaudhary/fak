@@ -482,7 +482,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	waitEPFanout, ok := s.startEPFanoutFollowers(w, r)
+	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteChatCompletions)
 	if !ok {
 		return
 	}

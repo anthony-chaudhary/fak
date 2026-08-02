@@ -27,6 +27,23 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	// Release the EP follower ranks BEFORE this rank enters the decode, exactly as the
+	// chat wire does, and onto THIS wire's own route (#5523). completeServed below
+	// blocks for the whole multi-rank decode, and rank-local expert parallelism makes
+	// progress only if every rank runs the same forward pass — so a legacy request that
+	// never started its followers leaves the front rank alone in a collective the other
+	// ranks were never released into. Placement matches handleChatCompletions: after the
+	// method check, before anything reads the body (the helper reads and restores it).
+	//
+	// Inert on a single-rank serve, which is why this went unnoticed: with
+	// FAK_EP_FANOUT_ADDRS unset there are no follower URLs and this is a no-op. The
+	// consequence on real multi-rank hardware — hang, timeout, or a silently degraded
+	// single-rank answer — is inferred from the AllReduce contract, not measured.
+	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteCompletions)
+	if !ok {
+		return
+	}
+	defer waitEPFanout()
 	var req CompletionRequest
 	if !decodeRequestBody(w, r, &req) {
 		return
