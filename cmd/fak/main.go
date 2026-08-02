@@ -1036,6 +1036,9 @@ func cmdAgent(argv []string) {
 		_ = os.WriteFile(*logOut, agent.RenderTrace(trace), 0o644)
 	}
 	agent.PrintReport(os.Stdout, res, trace, *out)
+	// The summary above names the file; this names the DIRECTORY it went to, so
+	// the first-run proof never leaves an unfindable artifact behind (#5473).
+	announceAgentReport(os.Stderr, *out)
 }
 
 func loadAgentRouteOptions(path string) (*modelroute.Manifest, []agent.RunOption, error) {
