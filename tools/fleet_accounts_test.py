@@ -1627,6 +1627,131 @@ class ProbeLedgerConsultTest(unittest.TestCase):
         self.assertNotIn("usage_soon_reset", status)
 
 
+class LedgerGateGradeTest(unittest.TestCase):
+    """#5439's Python half: the probe-ledger rung is gated on what the resolved registry can
+    DERIVE, not on FLEET_REG_DIR merely being SET, and a registry that can derive nothing
+    publishes unknown-health instead of a proven-free seat.
+
+    Mirror of internal/fleetaccounts/status_ledgergate_test.go. The Go twin has to pin every
+    rung accountprobe.ResolveRegDir surveys (LOCALAPPDATA, TMP, ...) so its verdict is not a
+    fact about the operator's laptop; account_probe.reg_dir resolves only FLEET_REG_DIR else
+    the clone-root tools/_registry, so naming the env var pins it outright here -- except in
+    the one case that deliberately leaves it unset, which patches the resolver instead."""
+
+    ACCT = ".claude-gate5439"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        fleet_accounts._PROBE_LEDGER_CACHE.update(key=None, by_account={}, ages={}, obs={})
+        self.addCleanup(lambda: fleet_accounts._PROBE_LEDGER_CACHE.update(
+            key=None, by_account={}, ages={}, obs={}))
+
+    def _reg_dir(self, name: str, *, ledger: str | None) -> Path:
+        """A registry dir carrying sessions.json, and probe_ledger.jsonl iff `ledger` is not
+        None (`""` = a wired prober that has recorded nothing)."""
+        d = self.root / name
+        d.mkdir()
+        (d / "sessions.json").write_text("{}", encoding="utf-8")
+        if ledger is not None:
+            (d / "probe_ledger.jsonl").write_text(ledger, encoding="utf-8")
+        return d
+
+    def _live_registry(self) -> dict:
+        return {"generated_utc": dt.datetime.now(dt.timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"),
+                "throttle": {},
+                "sessions": [{"account": self.ACCT, "project": "work", "disp": "LIVE"}]}
+
+    def _capped_registry(self) -> dict:
+        return {"generated_utc": "2026-06-17T00:00:00+00:00",
+                "throttle": {self.ACCT: {"reset": "Dec 31, 11pm (America/Los_Angeles)"}},
+                "sessions": []}
+
+    def test_gate_grades_derivability_not_the_env_var(self) -> None:
+        bearing = self._reg_dir("bearing", ledger="")
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        reg = self._live_registry()
+        for d, want in ((bearing, True), (ledger_less, False)):
+            with self.subTest(dir=d.name):
+                with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(d)}, clear=False):
+                    self.assertIs(fleet_accounts._registry_blocks_derivable(), want)
+                    self.assertIs(
+                        fleet_accounts._should_consult_probe_ledger(reg, None), want,
+                        "the rung must follow derivability, not FLEET_REG_DIR being set")
+
+    def test_explicit_probe_ledger_argument_still_wins(self) -> None:
+        # The caller affordance the Go twin has no equivalent of: an explicit override
+        # outranks the filesystem, so every hermetic caller keeps its pinned verdict.
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        reg = self._live_registry()
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(ledger_less)}, clear=False):
+            self.assertTrue(fleet_accounts._should_consult_probe_ledger(reg, True))
+            self.assertFalse(fleet_accounts._should_consult_probe_ledger(reg, False))
+
+    def test_ledger_rung_runs_when_derivable_without_reg_dir(self) -> None:
+        # The acceptance line: the rung runs whenever blocks are DERIVABLE, whether or not
+        # FLEET_REG_DIR is set. Under the old env-var gate the rung never ran here, so a fresh
+        # OK probe stayed invisible and the carried throttle won.
+        import account_probe
+        ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5)).isoformat()
+        bearing = self._reg_dir("bearing", ledger=json.dumps(
+            {"ts": ts, "account": self.ACCT, "tag": "gate", "status": "OK"}) + "\n")
+        with mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch.object(account_probe, "reg_dir", lambda: str(bearing)):
+            os.environ.pop("FLEET_REG_DIR", None)
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._capped_registry())
+        self.assertTrue(status["available"],
+                        "a derivable registry's fresh ledger OK must clear the carried"
+                        " throttle even with FLEET_REG_DIR unset")
+        self.assertEqual(status["status_source"], "probe-ledger")
+
+    def test_ledger_rung_skipped_when_reg_dir_cannot_derive_blocks(self) -> None:
+        # The one case whose verdict the change FLIPS: FLEET_REG_DIR is set, so the old gate
+        # turned the rung on, but it names a dir with no ledger beside its sessions.json.
+        # Nothing is lost by refusing -- every read under that dir returned nothing anyway.
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(ledger_less)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._capped_registry())
+        self.assertFalse(status["available"])
+        self.assertTrue(status["throttled"])
+        # A blocked seat keeps the confident source: "blocked" was derived from the registry's
+        # own throttle row, so its provenance is not in doubt.
+        self.assertEqual(status["status_source"], "registry")
+
+    def test_underivable_registry_publishes_unknown_health(self) -> None:
+        # The second acceptance line. Both halves asserted on purpose: the seat stays OFFERED
+        # and only the CLAIM is weakened. Converting absence into a block would be
+        # self-sealing -- the roster routes the work that runs the prober.
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(ledger_less)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._live_registry())
+        self.assertTrue(status["available"], "unknown health must not strand the seat")
+        self.assertFalse(status["blocked"])
+        self.assertEqual(status["status_source"], "registry-unknown")
+
+    def test_derivable_registry_keeps_registry_status_source(self) -> None:
+        # The control that keeps the new state from being a blanket rename.
+        bearing = self._reg_dir("bearing", ledger="")
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(bearing)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._live_registry())
+        self.assertTrue(status["available"])
+        self.assertEqual(status["status_source"], "registry")
+
+    def test_empty_registry_keeps_none_status_source(self) -> None:
+        # The boundary on the other side: "none" already says nothing was consulted, and is
+        # the more precise of the two statements, so unknown-health must not overwrite it.
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(ledger_less)}, clear=False):
+            status = fleet_accounts.runtime_status(self.ACCT, registry={})
+        self.assertEqual(status["status_source"], "none")
+
+
 def _future_reset_str(minutes: float) -> str:
     """A DATED reset string `minutes` from now, in a format _reset_is_future parses (mirror of
     Go futureResetStr's "Jan 2, 3:04pm"). Negative minutes => a provably-passed daily reset."""

@@ -1210,12 +1210,63 @@ def _apply_throttle_status(status: dict, throttle_info: dict) -> dict:
     return status
 
 
+def _registry_blocks_derivable() -> bool:
+    """Whether the registry dir THIS process reads can derive a seat BLOCK at all.
+
+    Mirror of accountprobe.RegChoice.BlocksDerivable, graded the way statRegSite grades a
+    site: a dir carries a derivable block verdict exactly when ``probe_ledger.jsonl`` is
+    present in it. That file is the ONLY place a block can come from -- account_probe appends
+    its OK/LIMIT/AUTH lines there and nothing folds them into the watchdog's sessions.json --
+    so a dir holding sessions.json with no ledger beside it reports "nothing blocked" when it
+    means "cannot tell". Reporting the first as the second is the shape of #5390.
+
+    The dir is account_probe.probe_ledger_path()'s, i.e. exactly the one
+    _probe_ledger_snapshot would then read, so the gate and the read never disagree about
+    which registry the answer is about."""
+    try:
+        import account_probe  # lazy: account_probe imports fleet_accounts, not vice-versa
+    except ImportError:
+        return False
+    try:
+        return os.path.isfile(account_probe.probe_ledger_path())
+    except OSError:
+        return False
+
+
 def _should_consult_probe_ledger(registry: dict | None, probe_ledger: bool | None) -> bool:
+    """Whether the probe-ledger rung may run at all (mirror of Go shouldConsultProbeLedger).
+
+    The predicate is DERIVABILITY: the registry dir this process would actually read must
+    carry the probe ledger. It used to be ``bool(os.environ.get("FLEET_REG_DIR"))``, on the
+    reasoning that the env var is what makes the Python writer and the Go reader agree on a
+    dir. That reasoning does not survive #5390 -- naming a dir is not the same as the dir
+    holding a ledger -- and the Go twin migrated off it in #5439; this is the Python half of
+    the same fix, so the two surfaces answer one question the same way:
+
+      - FLEET_REG_DIR names a ledger-bearing dir -> consulted, exactly as before.
+      - FLEET_REG_DIR unset but the resolved dir (tools/_registry) carries the ledger ->
+        consulted NOW, where before the rung never ran and a fresh probe verdict stayed
+        invisible to the roster no matter how correctly the dir resolved.
+      - FLEET_REG_DIR names a ledger-LESS dir -> NOT consulted, where before the rung ran
+        over a ledger that was not there. Every read returned nothing, so the fold fell
+        through to the carried block anyway; refusing to run says so instead of pretending
+        to have looked. This is the one case whose verdict the change FLIPS.
+      - Nothing anywhere -> not consulted, exactly as before, so a fresh checkout and CI keep
+        the pure passive fold.
+
+    The price is that the answer is a function of the filesystem rather than of one env var:
+    a caller (or a test) wanting a definite verdict must arrange the dir, not just the
+    variable. Repeated calls over an unchanged filesystem are stable -- no clock is consulted.
+
+    The two rungs ABOVE the predicate are caller affordances the Go twin has no equivalent of
+    (its callers cannot override the resolution): an explicit ``probe_ledger`` wins outright,
+    and ``registry is None`` means the live front door already decided to read the live
+    registry. Only the fall-through is the ported decision."""
     if probe_ledger is not None:
         return probe_ledger
     if registry is None:
         return True
-    return bool(os.environ.get("FLEET_REG_DIR"))
+    return _registry_blocks_derivable()
 
 
 def _mark_usage_soon(status: dict, throttle_info: dict | None) -> None:
@@ -1238,6 +1289,30 @@ def _mark_usage_soon(status: dict, throttle_info: dict | None) -> None:
     reset = throttle_info.get("reset")
     if reset:
         status["usage_soon_reset"] = reset
+
+
+def _mark_unknown_health(status: dict, blocks_derivable: bool) -> dict:
+    """Weaken an UNBLOCKED seat's ``status_source`` from the confident ``registry`` to
+    ``registry-unknown`` when the registry it was published out of cannot derive a block at
+    all (mirror of Go markUnknownHealth; see _registry_blocks_derivable).
+
+    Unknown-health is a THIRD state, and deliberately NOT a block. Converting absence into
+    blocked would strand every seat on a host whose prober has not run -- and worse, it is
+    self-sealing: the roster is what routes the work that runs the probe, so a block imposed
+    for want of a probe forbids the very probe that would clear it. So the seat stays offered
+    (``available`` is untouched) and only the CLAIM is weakened. A consumer that cannot
+    tolerate an unproven seat now has a name to switch on; one that does not care keeps
+    today's behavior, since every existing status_source consumer treats an unrecognized
+    value exactly as it treats ``registry``.
+
+    A BLOCKED seat keeps ``registry``: blocked is a positive derivation from the registry's
+    own throttle/auth rows, not a statement about probe evidence, so its provenance is not in
+    doubt. An empty registry keeps ``none``, which already says nothing was consulted."""
+    if blocks_derivable or status.get("blocked") \
+            or status.get("status_source") != "registry":
+        return status
+    status["status_source"] = "registry-unknown"
+    return status
 
 
 def runtime_status(account: str, registry: dict | None = None,
@@ -1425,7 +1500,9 @@ def runtime_status(account: str, registry: dict | None = None,
             "block_kind": kind,
             "block_reason": reason,
         })
-    return status
+    # Nothing above found a block. If the registry could not have derived one, say so rather
+    # than publishing a seat as proven-free on evidence that was never available (#5439).
+    return _mark_unknown_health(status, consult_ledger)
 
 
 def annotate_accounts(rows: list[dict], registry: dict | None = None,

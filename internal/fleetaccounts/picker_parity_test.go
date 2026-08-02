@@ -125,14 +125,18 @@ func writePickerParityFixture(t *testing.T) (home, cfg, sessions string) {
 
 	// An EMPTY probe ledger beside sessions.json, so the fixture's registry is a complete
 	// one: a prober is wired here, it has simply recorded nothing about these accounts.
-	// Without it the dir grades blocks-unknown (accountprobe.RegHealthBlocksUnknown) and the
-	// two surfaces legitimately disagree — the Go fold publishes an unblocked seat as
-	// status_source=registry-unknown (see markUnknownHealth), while the legacy picker, whose
-	// _should_consult_probe_ledger still gates on FLEET_REG_DIR being merely SET, publishes
-	// registry. That divergence is REAL and is tracked as the Python half of #5439; it is
-	// deliberately not absorbed into parityValueExempt, because doing so would stop this gate
-	// comparing status_source at all. Naming the prober's dir and giving it no ledger was
-	// always an inconsistent fixture; this line makes the on-disk state match the claim the
+	// Both surfaces now grade the dir the same way — Go through
+	// accountprobe.ResolveRegDir().BlocksDerivable(), and the legacy picker through
+	// _registry_blocks_derivable(), which the Python half of #5439 substituted for the old
+	// "FLEET_REG_DIR is merely SET" test. Drop this line and they still agree, but they agree
+	// on blocks-unknown: the dir grades accountprobe.RegHealthBlocksUnknown, and both folds
+	// publish an unblocked seat as status_source=registry-unknown (see markUnknownHealth and
+	// its Python mirror _mark_unknown_health). That is a different state than this fixture is
+	// built to compare. The divergence this comment used to record — Go publishing
+	// registry-unknown while the picker published registry — is closed; it was never absorbed
+	// into parityValueExempt, because doing so would have stopped this gate comparing
+	// status_source at all. Naming the prober's dir and giving it no ledger was always an
+	// inconsistent fixture; this line makes the on-disk state match the claim the
 	// FLEET_REG_DIR above was already making.
 	write(filepath.Join(regDir, "probe_ledger.jsonl"), "")
 
