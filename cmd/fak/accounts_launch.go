@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -406,6 +407,14 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	launchArgv := grant.Argv
 	launchEnv := envSliceFromMap(grant.Env)
 
+	// #5503 (diagnosability half): never hand a child an argv that references a variable the
+	// same launch has already removed from that child's environment. See
+	// launchStrippedAPIKeyEnvRefusal — this REFUSES, it never re-admits the stripped variable.
+	if refusal := launchStrippedAPIKeyEnvRefusal(launchArgv, grant); refusal != "" {
+		fmt.Fprint(stderr, refusal)
+		return 2
+	}
+
 	if p.dryRun {
 		fmt.Fprintln(stderr, "  (dry-run — not launching)")
 		// Also echo the launch command to stdout so it is scriptable (eval/wrappers).
@@ -478,6 +487,76 @@ func launchSeatAPIKeyEnv(home accounts.Home) string {
 		}
 	}
 	return strings.TrimSpace(os.Getenv(fleetGuardAPIKeyEnvEnv))
+}
+
+// launchGuardAPIKeyEnvRef returns the env-var NAME the guard argv's `--api-key-env` references,
+// or "" when the launch names none. Only the GUARD half of the argv is scanned — everything
+// after the `--` separator belongs to the wrapped agent, and a passthrough flag that happens to
+// spell `--api-key-env` is the child's own concern, not this launch's contradiction.
+func launchGuardAPIKeyEnvRef(argv []string) string {
+	for i, arg := range argv {
+		if arg == "--" {
+			return ""
+		}
+		switch {
+		case arg == "--api-key-env" || arg == "-api-key-env":
+			if i+1 < len(argv) {
+				return strings.TrimSpace(argv[i+1])
+			}
+		case strings.HasPrefix(arg, "--api-key-env="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "--api-key-env="))
+		case strings.HasPrefix(arg, "-api-key-env="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "-api-key-env="))
+		}
+	}
+	return ""
+}
+
+// launchStrippedAPIKeyEnvRefusal names the one contradiction a launch can build against itself
+// (#5503): the argv references `--api-key-env NAME`, and the SAME launch has already removed
+// NAME from the environment it is about to hand that child. An api-key seat carries its own
+// env-var reference (launchSeatAPIKeyEnv), the shaper splices it into the guard argv, and then
+// the always-on #2358 inherited-secret floor — policy.StripInheritedSecrets, applied to every
+// brokered spawn by sanitizeLaunchEnv — drops NAME because it is credential-shaped. Both halves
+// are working as designed; only their COMPOSITION is broken, and nothing downstream can see it:
+// the guard child reads an empty NAME and reports it as "set but that env var is empty — export
+// it", which misdiagnoses an operator who did export it, and on the passthrough wires it goes
+// unremarked entirely.
+//
+// The parent is the only place that can tell the difference, because it alone saw the variable
+// present BEFORE the floor swept it — that is exactly what grant.Metadata.StrippedSecretEnv
+// records (NAMES only, never values). So the refusal fires only on the stripped terminal: a
+// variable the operator simply never exported keeps its existing handling (the seat-servability
+// gate for an api-key seat, guard's own empty-named-key gate for the fleet knob), and the
+// passthrough wires are not newly refused.
+//
+// This permits nothing. It relaxes no floor, re-admits no variable, and reveals no value — it
+// only converts a silent/misattributed downstream failure into a named refusal at the boundary
+// that caused it. Returns "" when there is nothing to refuse; otherwise a ready-to-print block.
+func launchStrippedAPIKeyEnvRefusal(argv []string, grant launchBrokerGrant) string {
+	name := launchGuardAPIKeyEnvRef(argv)
+	if name == "" {
+		return ""
+	}
+	if strings.TrimSpace(grant.Env[name]) != "" {
+		return "" // the child can read it — nothing contradictory about this launch
+	}
+	if !slices.Contains(grant.Metadata.StrippedSecretEnv, name) {
+		return "" // never present to begin with; not this floor's doing, so do not blame it
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak accounts launch: refusing to launch — this launch would hand the child "+
+		"`--api-key-env %s` while removing %s from that child's environment, so the agent would "+
+		"start with no upstream key.\n", name, name)
+	fmt.Fprintf(&b, "  cause: the always-on #2358 inherited-secret floor (policy.StripInheritedSecrets, "+
+		"applied to every brokered spawn) stripped %s on the way to the child because the variable is "+
+		"credential-shaped — its NAME matches a secret marker (TOKEN/SECRET/PASSWORD/CREDENTIAL/COOKIE/…) "+
+		"or its VALUE is secret-shaped under a name the floor does not spare. %s IS set in this shell; "+
+		"the floor is why the child cannot see it.\n", name, name)
+	fmt.Fprintf(&b, "  fix: hold the key in a variable the floor spares and re-point the seat at it — "+
+		"`fak accounts add --name <seat> --api-key-env ANTHROPIC_API_KEY` (or OPENAI_API_KEY) — and export "+
+		"the key under THAT name. fak records and prints the NAME only, never the key.\n")
+	return b.String()
 }
 
 // printAccountsLaunchPlan renders the human-readable launch plan summary to stderr: the resolved
