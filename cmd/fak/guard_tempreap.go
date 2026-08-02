@@ -52,8 +52,20 @@ const guardTempDirPrefix = "fak-guard-"
 // It allocates through this same seam and so belongs to the same reaped family —
 // omitting it would trade the old unbounded pile of loose fak-guard-replay-*.jsonl
 // files for an unbounded pile of dirs.
+//
+// "lifecycle" is the second non-hook token: startGuardLifecycleServer reserves a
+// dir to hold the per-session lifecycle IPC socket the external hooks dial (#5527).
+// It allocated through guardSessionTempDir from the start — so its dirs already
+// carried the owning PID — but the token was missing here, so guardTempDirOwner
+// rejected every one of them and the reaper never claimed a single dir. The happy
+// path still cleans up (guardLifecycleServer.Close removes the dir), which is why
+// this hid for so long: only a KILLED guard leaves residue, and kill-residue is
+// exactly what this reaper exists to bury. A closed set is only single-source-of-
+// truth if every caller of guardSessionTempDir appears in it; the convention test
+// in guard_tempdir_convention_test.go now enforces that in both directions.
 var guardTempDirHooks = map[string]bool{
 	"handoff":      true,
+	"lifecycle":    true,
 	"mcp":          true,
 	"pi":           true,
 	"precompact":   true,
