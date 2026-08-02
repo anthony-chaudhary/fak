@@ -292,7 +292,27 @@ func guardReplayAuditPlan(auditPath string, noAudit bool) (path string, optedOut
 	if p != "" {
 		return p, false, true
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("fak-guard-replay-%d.jsonl", time.Now().UnixNano())), false, false
+	// The GENERATED default must be unique per PROCESS, not per instant (#5524). Deriving it
+	// from time.Now().UnixNano() alone was not: the wall clock is backed by a coarse system
+	// timer, so two back-to-back calls read the SAME nanosecond value (measured on Windows)
+	// and two `fak guard replay` runs starting inside one tick resolved to one path. Nothing
+	// then failed loudly — journal.Open uses O_CREATE|O_WRONLY|O_APPEND, so the loser
+	// INTERLEAVED its hash-chained rows into the winner's file. The damage surfaced one layer
+	// away as `journal: sequence gap: seq=1 want 3`, an integrity complaint against the
+	// trace, while every per-call verdict still printed ✓ — pass-alone/fail-together, the
+	// signature that gets misfiled as flake.
+	//
+	// guardSessionTempDir reserves a "fak-guard-replay-<pid>-<random>" dir via os.MkdirTemp,
+	// which is ATOMIC (O_EXCL + retry) rather than merely improbable, and stamps the owning
+	// PID so guardReapStaleTempDirs buries it once this process exits — strictly tidier than
+	// the unbounded pile of loose per-run .jsonl files the clock-only name left behind.
+	if dir, err := guardSessionTempDir("replay"); err == nil {
+		return filepath.Join(dir, "audit.jsonl"), false, false
+	}
+	// Temp root not writable for a fresh dir: fall back to a PID-qualified name, so at least
+	// concurrent processes cannot collide. Two plans inside ONE process can still repeat here,
+	// which is sound because a replay asks for exactly one and journal.Enable is idempotent.
+	return filepath.Join(os.TempDir(), fmt.Sprintf("fak-guard-replay-%d-%d.jsonl", os.Getpid(), time.Now().UnixNano())), false, false
 }
 
 func sameReplayAuditPath(a, b string) bool {

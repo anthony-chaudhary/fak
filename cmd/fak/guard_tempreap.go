@@ -46,11 +46,18 @@ const guardTempDirPrefix = "fak-guard-"
 // swept here. A new hook dir MUST add its token here or the reaper will not
 // recognize (and so never reap) it — the same single-source-of-truth coupling
 // BuildDirName/pidFromBuildDir keep between creator and reaper.
+//
+// "replay" is the one token that is not a Claude-Code hook: it is a `fak guard
+// replay` run reserving the dir that holds its default audit journal (#5524).
+// It allocates through this same seam and so belongs to the same reaped family —
+// omitting it would trade the old unbounded pile of loose fak-guard-replay-*.jsonl
+// files for an unbounded pile of dirs.
 var guardTempDirHooks = map[string]bool{
 	"handoff":      true,
 	"mcp":          true,
 	"pi":           true,
 	"precompact":   true,
+	"replay":       true,
 	"seedprompt":   true,
 	"sessionstart": true,
 	"stophook":     true,
