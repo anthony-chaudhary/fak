@@ -443,8 +443,14 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
 
 A guard refusal names a token from a **closed vocabulary** — declared as `[reasons.*]`
 blocks in [`dos.toml`](dos.toml), each with a `summary` + a `fix` you can look up live
-with `dos check-reason <TOKEN>`. When you hit one, recover by the action below; don't
-route around the guard (that just trips the next one).
+with `dos check-reason <TOKEN>`. Eleven of those tokens also carry a **recovery plan built
+into the binary**: `fak recover <TOKEN>` prints the concrete commands for that token —
+dry-run by default, `--execute` runs only the steps the plan marks safe, and a manual-only
+plan refuses `--execute` with exit 3 rather than guessing. `fak recover --list` shows which
+tokens it knows and whether each is `executable` or `manual`; the token argument is
+case- and separator-insensitive, so `fak recover off-trunk` resolves to `OFF_TRUNK`. When
+you hit one, recover by the action below; don't route around the guard (that just trips the
+next one).
 
 | Token | What tripped it | Recover by |
 |---|---|---|

@@ -347,6 +347,12 @@ Otherwise, continue to [Where to go next](#where-to-go-next).
 | `fak run`: `no such file testdata/...` | Run from inside `fak/` (traces resolve relative to the working dir), or pass an absolute `--trace`. |
 | `address already in use` on `fak serve` | Pick another `--addr` port. |
 
+That table is **build-time**. If the build succeeded but your first *run* misbehaved —
+`fak: command not found`, canned replies because `--base-url` was empty, an upstream `401`,
+a tool call refused by the default-deny floor, or the serve port already taken — go to
+[**It didn't work: the five most likely fak first-run failures**](docs/adoption/troubleshooting-first-run.md),
+which gives each one a symptom, a cause, and a one-line fix.
+
 Tier 2's own symptoms (`fetch-model.sh` needing Python, or offline) are on
 [the Tier 2 page](docs/fak/in-kernel-model.md#troubleshooting).
 
