@@ -458,10 +458,28 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		return 0
 	}
 	// Snapshot and close before diagnosis. An injected/slow/panicking diagnose path
-	// must never retain a Windows file handle after the outer budget allows the turn.
-	d, diagnoseErr := diagnose(fh, resolved)
-	d.GuardWitnessed = codexGuardWitnessExists(*codexHome, sessionID)
+	// must never retain a Windows file handle after the outer budget allows the turn:
+	// handing fh straight to diagnose leaks the handle on exactly those two paths (a
+	// panic skips the close, and a diagnose slower than the budget still holds it long
+	// after sessionsCodexLoopHook has returned 0), and Windows refuses to unlink a file
+	// with a live handle, so the stranded handle wedges whoever rotates or deletes the
+	// transcript next. A deferred close would only cover the panic; closing here covers
+	// both, because the handle is already gone before diagnose is entered.
+	//
+	// The snapshot is bounded by the same codexLoopLaunchMaxBytes ceiling the launch
+	// scan uses, which is also probeCodexLoopProvider's max scanner token: any
+	// session_meta record the streaming read could have parsed as the leading record
+	// still fits. A transcript whose session_meta lies past that bound reports an empty
+	// model_provider, which codexLoopDiagnosisUnguarded treats as "not unguarded" — the
+	// same fail-open answer every other unreadable-transcript path here gives.
+	snapshot, readErr := io.ReadAll(io.LimitReader(fh, codexLoopLaunchMaxBytes))
 	closeErr := fh.Close()
+	if readErr != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: read %s: %v (allowing turn; recovery: verify the transcript is readable and relaunch with `fak codex`)\n", resolved, readErr)
+		return 0
+	}
+	d, diagnoseErr := diagnose(bytes.NewReader(snapshot), resolved)
+	d.GuardWitnessed = codexGuardWitnessExists(*codexHome, sessionID)
 	if diagnoseErr != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn; recovery: inspect the rollout JSONL and relaunch with `fak codex`)\n", diagnoseErr)
 		return 0
