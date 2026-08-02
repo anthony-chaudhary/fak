@@ -13,12 +13,19 @@ import (
 
 func conceptAdmissionFixture(t *testing.T, line string, treatment string, headHas bool) *StagedDiff {
 	t.Helper()
+	return conceptAdmissionFixtureRoots(t, line, treatment, headHas, "cache")
+}
+
+// conceptAdmissionFixtureRoots is conceptAdmissionFixture with the family's roots chosen by
+// the caller, so a case can exercise a root other than the default "cache" one.
+func conceptAdmissionFixtureRoots(t *testing.T, line string, treatment string, headHas bool, roots ...string) *StagedDiff {
+	t.Helper()
 	root := t.TempDir()
 	data := filepath.Join(root, "tools", "concept_disambiguation_scorecard.data")
 	if err := os.MkdirAll(data, 0755); err != nil {
 		t.Fatal(err)
 	}
-	meta := map[string]any{"families": []map[string]any{{"id": "cache", "roots": []string{"cache"}, "ignore": []string{}}}}
+	meta := map[string]any{"families": []map[string]any{{"id": "cache", "roots": roots, "ignore": []string{}}}}
 	if treatment == "classify" {
 		meta["families"].([]map[string]any)[0]["ignore"] = []string{"CacheBurst"}
 	}
@@ -107,6 +114,99 @@ func TestConceptAdmissionRenameOrExistingUseIsNotAddition(t *testing.T) {
 	got, err := gateConceptAdmission(conceptAdmissionFixture(t, "const CacheBurst = 1", "", true))
 	if err != nil || len(got) != 0 {
 		t.Fatalf("existing/renamed token falsely admitted: %+v %v", got, err)
+	}
+}
+
+// conceptFindingToken pulls the token= value back out of an admission diagnostic so a
+// test can assert on the exact identifier the gate would make the author classify.
+func conceptFindingToken(detail string) string {
+	_, rest, ok := strings.Cut(detail, "token=")
+	if !ok {
+		return ""
+	}
+	tok, _, _ := strings.Cut(rest, " ")
+	return tok
+}
+
+// A Go escape is one character of the compiled string, so its letter belongs to the escape
+// and never to the identifier that follows: "DRIFT\tSESSION" holds SESSION, not tSESSION.
+// Tokenizing the raw source text glued the two together and blocked the commit on a symbol
+// that exists nowhere in the tree (#5529).
+func TestConceptAdmissionDoesNotGlueStringEscapeOntoNextWord(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		line  string
+		glued string // the invented token the extractor used to report
+		real  string // the identifier that is actually in the literal
+	}{
+		{"tab", `	fmt.Fprintln(stdout, "DRIFT\tAGE_H\tSESSION\tLEAVES")`, "tSESSION", "SESSION"},
+		{"newline", `	fmt.Fprintf(stdout, "header\nSlotBudget\n")`, "nSlotBudget", "SlotBudget"},
+		{"carriage return", `	fmt.Fprintf(stdout, "header\rSlotLease")`, "rSlotLease", "SlotLease"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := gateConceptAdmission(conceptAdmissionFixtureRoots(t, tc.line, "", false, "session", "slot"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var tokens []string
+			for _, f := range got {
+				tok := conceptFindingToken(f.Detail)
+				tokens = append(tokens, tok)
+				// A token that reappears in the source only with a backslash welded to its
+				// front was manufactured by the extractor, not written by the author.
+				if strings.Contains(tc.line, `\`+tok) {
+					t.Errorf("token %q absorbed the Go escape ahead of it in %s", tok, tc.line)
+				}
+			}
+			for _, tok := range tokens {
+				if tok == tc.glued {
+					t.Errorf("gate reports invented token %q", tc.glued)
+				}
+			}
+			// The identifier inside the literal must still be discovered: dropping string
+			// literals wholesale would silence the artifact and the real symbol together.
+			found := false
+			for _, tok := range tokens {
+				if tok == tc.real {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("real identifier %q no longer discovered; tokens=%v", tc.real, tokens)
+			}
+		})
+	}
+}
+
+// Backslashes in comments and raw strings are ordinary characters, not escapes, so the
+// words around them must survive intact -- blanking a would-be escape there would eat the
+// leading letter of a real identifier (Users -> sers) and lose it from the corpus.
+func TestConceptAdmissionKeepsLiteralBackslashWordsInCommentsAndRawStrings(t *testing.T) {
+	for _, tc := range []struct{ name, line string }{
+		{"comment", `	// checkpoints land under C:\Users\Public\SessionSlot on Windows`},
+		{"raw string", "	root := `C:\\Users\\Public\\SessionSlot`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := gateConceptAdmission(conceptAdmissionFixtureRoots(t, tc.line, "", false, "session", "user"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var tokens []string
+			for _, f := range got {
+				tokens = append(tokens, conceptFindingToken(f.Detail))
+			}
+			for _, want := range []string{"Users", "SessionSlot"} {
+				found := false
+				for _, tok := range tokens {
+					if tok == want {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("word %q around a literal backslash was lost; tokens=%v", want, tokens)
+				}
+			}
+		})
 	}
 }
 

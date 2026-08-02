@@ -11,6 +11,109 @@ import (
 
 var conceptIdentRE = regexp.MustCompile(`[A-Za-z][A-Za-z0-9_]*`)
 
+// conceptSimpleEscapes are the one-letter Go escapes, plus the three that quote a
+// delimiter. Each stands for a single character of the compiled string, so its letter
+// belongs to the escape and never to the identifier that follows it.
+const conceptSimpleEscapes = `abfnrtv\'"`
+
+// conceptEscapeLen reports the length of the Go escape sequence at the head of s, or 0
+// when the backslash starts no valid escape and is therefore an ordinary character.
+func conceptEscapeLen(s string) int {
+	hex := func(i, n int) int {
+		if len(s) < i+n {
+			return 0
+		}
+		for _, c := range []byte(s[i : i+n]) {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				return 0
+			}
+		}
+		return i + n
+	}
+	if len(s) < 2 || s[0] != '\\' {
+		return 0
+	}
+	switch c := s[1]; {
+	case strings.IndexByte(conceptSimpleEscapes, c) >= 0:
+		return 2
+	case c >= '0' && c <= '7':
+		if n := hex(1, 3); n > 0 && s[2] <= '7' && s[3] <= '7' {
+			return n
+		}
+	case c == 'x':
+		return hex(2, 2)
+	case c == 'u':
+		return hex(2, 4)
+	case c == 'U':
+		return hex(2, 8)
+	}
+	return 0
+}
+
+// conceptScannableLine blanks every Go escape sequence inside an interpreted string or
+// rune literal so the identifier after an escape is tokenized on its own. Reading the raw
+// source text instead welds the escape's letter onto the next word: an ordinary header
+// literal joining the columns DRIFT, AGE_H, SESSION and LEAVES with tab escapes yielded a
+// token spelling a stray leading "t" in front of the column name, a symbol that exists
+// nowhere in the tree, and the gate then blocked the commit until someone classified it
+// (#5529). The artifact is spelled out only in the regression test, never here: a comment
+// quoting it verbatim would re-mint it, since a backslash in a comment is a literal
+// character rather than an escape. That is also why raw strings and comments are left
+// exactly as the extractor has always read them -- eating a would-be escape there would
+// swallow the first letter of a real word (Users -> sers).
+func conceptScannableLine(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	const (
+		code = iota
+		interpreted
+		runeLit
+		rawLit
+		block
+	)
+	b, state := []byte(s), code
+	for i := 0; i < len(b); i++ {
+		switch state {
+		case code:
+			switch {
+			case b[i] == '"':
+				state = interpreted
+			case b[i] == '\'':
+				state = runeLit
+			case b[i] == '`':
+				state = rawLit
+			case b[i] == '/' && i+1 < len(b) && b[i+1] == '/':
+				return string(b) // the rest of the line is a comment
+			case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
+				state, i = block, i+1
+			}
+		case rawLit:
+			if b[i] == '`' {
+				state = code
+			}
+		case block:
+			if b[i] == '*' && i+1 < len(b) && b[i+1] == '/' {
+				state, i = code, i+1
+			}
+		case interpreted, runeLit:
+			if b[i] == '"' && state == interpreted || b[i] == '\'' && state == runeLit {
+				state = code
+				continue
+			}
+			n := conceptEscapeLen(s[i:])
+			if n == 0 {
+				continue
+			}
+			for j := i; j < i+n; j++ {
+				b[j] = ' '
+			}
+			i += n - 1
+		}
+	}
+	return string(b)
+}
+
 type admissionMeta struct {
 	Families []struct {
 		ID      string   `json:"id"`
@@ -102,7 +205,7 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 			continue
 		}
 		for _, line := range lines {
-			for _, raw := range conceptIdentRE.FindAllString(line.Text, -1) {
+			for _, raw := range conceptIdentRE.FindAllString(conceptScannableLine(line.Text), -1) {
 				tok := admissionToken(raw)
 				if tok == "" {
 					continue
