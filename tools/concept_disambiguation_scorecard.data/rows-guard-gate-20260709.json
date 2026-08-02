@@ -559,8 +559,9 @@
    "definition": "The cmd/fak/guard_stophook.go struct recording what installGuardStopHook did (Applied/Mode/WarnAt/FinalAt/Max/SameStop/StopsLedger/Reason) when wiring the deny-all-continue Stop hook into a child's settings.",
    "distinction": "It is the RESULT RECORD for the Stop-hook install, not guardStopHook, the deny-all continue hook mechanism itself, and not guardPreCompactInstall/guardMCPInstall, its sibling install records for other hooks.",
    "distinct_from": [
-    "x2-guard-gate-stophook",
-    "guard-gate-guardprecompactinstall"
+     "x2-guard-gate-stophook",
+     "guard-gate-guardprecompactinstall",
+     "t5526-guard-shared-hook-settings-path"
    ],
    "aliases": [
     "guardStopHookInstall"
@@ -707,8 +708,9 @@
    "definition": "The cmd/fak/guard_precompact.go helper that writes a Claude Code settings.json atomically (sibling temp file plus rename), shared by the PreCompact, Stop-hook, and MCP hook installers.",
    "distinction": "It is the shared LOW-LEVEL ATOMIC FILE WRITE primitive, not any one hook's install record (guardPreCompactInstall/guardStopHookInstall/guardMCPInstall) that calls it.",
    "distinct_from": [
-    "guard-gate-guardprecompactinstall",
-    "guard-gate-guardstophookinstall"
+     "guard-gate-guardprecompactinstall",
+     "guard-gate-guardstophookinstall",
+     "t5526-guard-shared-hook-settings-path"
    ],
    "aliases": [
     "writeGuardSettingsFileAtomic"

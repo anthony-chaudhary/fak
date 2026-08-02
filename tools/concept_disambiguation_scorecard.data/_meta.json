@@ -506,6 +506,76 @@
           "category": "incidental",
           "reason": "an ordinary English verb in a file-header comment describing that walk/run forward to the standing shells; not a guard-gate concept",
           "token": "DELEGATE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Not a Go symbol: the environment-variable NAME string that redirects where the positioned self-tighten overlay file (guardSelfTightenOverlay) is read from, used for tests and non-repo launches. A path knob for an already-positioned concept, not a distinct guard/gate concept of its own.",
+          "token": "FAK_GUARD_SELF_TIGHTEN_OVERLAY"
+        },
+        {
+          "category": "incidental",
+          "reason": "The unexported Go const that merely holds that env-var name string. A name binding for the positioned self-tighten overlay path override, not a distinct guard/gate concept - the same category as guardStopHookOperatorQuestionEnvMode, already ignored here.",
+          "token": "guardSelfTightenOverlayEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "The schema version tag string const for the positioned self-tighten overlay; the loader compares the file version against it and the writer stamps it. A wire-format label, not a distinct guard/gate concept.",
+          "token": "guardSelfTightenOverlayVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Path resolver for the positioned self-tighten overlay file: the env override when set, otherwise repo-local .fak/agent/self-tighten.json. File plumbing for the guard launch, not a distinct guard/gate decision concept.",
+          "token": "guardSelfTightenOverlayPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Reader/validator for the positioned self-tighten overlay file: a missing file is a valid empty view, and a malformed or wrong-version one returns an error the caller turns into a wholesale refusal. It yields an error, never an amendment verdict - the strict-decode barrier it applies is described in the guardSelfTightenOverlay schema row. Same shape as readGuardStopsLedger, the overlay-file plumbing this family already ignores.",
+          "token": "loadGuardSelfTightenOverlay"
+        },
+        {
+          "category": "incidental",
+          "reason": "Normalize-and-write half of the same overlay-file round-trip, delegating the durable write to the existing writeGuardAllowOverlayAtomic primitive. File plumbing for the positioned self-tighten overlay, not a distinct guard/gate concept.",
+          "token": "saveGuardSelfTightenOverlay"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure copy-on-write builder of the union of the installed floor with the overlay, plus a count of the elements it would add. It authors no verdict - the gate re-derives the tighten/widen direction from the delta rather than trusting it - so it is construction plumbing under the positioned apply and admit rows.",
+          "token": "guardSelfTightenProposal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private slice-union helper used only by that proposal builder: copy the base, append the members not already present, return the copy and the count. A list primitive, not a distinct guard/gate concept.",
+          "token": "guardSelfTightenUnion"
+        },
+        {
+          "category": "incidental",
+          "reason": "One-line string formatter for the floor-source provenance the guard launch banner carries about the self-tighten overlay. It renders an already-decided verdict for humans and decides nothing itself, so it is presentation plumbing on the positioned apply path.",
+          "token": "guardSelfTightenFloorNote"
+        },
+        {
+          "category": "incidental",
+          "reason": "Not a symbol in this file: a test function name quoted in prose in a non-test header comment, pointing readers at the witness that the overlay path stays writable by the wrapped agent. The test itself lives in a _test.go file, which this gate excludes by construction, and a prose pointer to a witness names no guard/gate concept.",
+          "token": "TestGuardSelfTightenOverlayPathIsAgentWritable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported single-call-site string builder in cmd/fak/guard_split.go: it joins the overlay argv with either the self-closing tail or the bare '; exit' it replaced, and hands the result to Apple Terminal's do script. It carries no policy, authority or floor meaning - it is the shape of one shell line for one platform's terminal app.",
+          "token": "guardSplitAppleTerminalCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported env-var reader resolving the #5482 escape hatch (closing is the default; the variable opts out). Mechanism for a window-lifetime preference, not a concept the codebase reasons about - the analogous overlay env readers in this family are already ignored as plumbing.",
+          "token": "guardSplitAppleCloseOnExit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported const holding the literal shell tail appended to the companion window's command line so Terminal closes that window on a clean exit. It is a platform-specific string constant, not a distinction; its own header comment records that the close itself is unwitnessed without a Mac operator.",
+          "token": "guardSplitAppleCloseTail"
+        },
+        {
+          "category": "incidental",
+          "reason": "Not a Go symbol at all. This is the FILENAME guard_split_close_test.go quoted in a prose comment in a non-test header, naming which test witnesses the generated command line. The extractor read a snake_case filename as an identifier. Same shape as the test-name-in-prose token classified incidental for the #5411 self-tighten set.",
+          "token": "guard_split_close_test"
         }
       ],
       "exclude": [
@@ -525,8 +595,10 @@
         "DELEGATE",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
+        "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
         "GATED_UNWITNESSED",
         "GateFlipped",
+        "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
@@ -563,6 +635,15 @@
         "guardOperatorQuestionEscalationSlackText",
         "guardOperatorQuestionNormalizedOrWarn",
         "guardOperatorQuestionOptionLabels",
+        "guardSelfTightenFloorNote",
+        "guardSelfTightenOverlayEnv",
+        "guardSelfTightenOverlayPath",
+        "guardSelfTightenOverlayVersion",
+        "guardSelfTightenProposal",
+        "guardSelfTightenUnion",
+        "guardSplitAppleCloseOnExit",
+        "guardSplitAppleCloseTail",
+        "guardSplitAppleTerminalCommand",
         "guardStopHookOperatorQuestionEnvMode",
         "guardWindowsArgvPreflight",
         "guardWindowsCommandLineUnits",
@@ -570,6 +651,7 @@
         "guard_bypass",
         "guard_operator_question",
         "guard_output_style",
+        "guard_split_close_test",
         "guardarbitrateflagvalue",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
@@ -590,12 +672,14 @@
         "guardwireretryhop",
         "installguardmcpregistration",
         "loadCacheValueGateBaseline",
+        "loadGuardSelfTightenOverlay",
         "newguardlaunchnonce",
         "normalizeGuardOperatorQuestionMode",
         "readguardstopsledger",
         "readguardstoptranscript",
         "runCacheValueGateScore",
         "runGuardOperatorQuestionGate",
+        "saveGuardSelfTightenOverlay",
         "summarizeguardstops",
         "ungated",
         "unguarded"
@@ -689,6 +773,11 @@
           "category": "incidental",
           "reason": "the stage's wire Name string, mirroring sessionRegistryRecoveryStage; a report label, not a concept",
           "token": "session_registry_recovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "not a symbol: the token extractor split the tab-separated header literal DRIFT/AGE_H/SESSION/LEAVES at its tab escape and glued the escape letter onto the column name SESSION",
+          "token": "tSESSION"
         }
       ],
       "id": "session-runtime",
@@ -724,6 +813,7 @@
         "slots",
         "slotting",
         "stopDispHandoffSessionGiveUp",
+        "tSESSION",
         "topsessions",
         "totalslots",
         "tuisessionrow"
@@ -1424,6 +1514,11 @@
           "category": "incidental",
           "reason": "Private single-call-site text formatter for one verb (fak wip blocked); it materializes no new concept — the vocabulary it prints (LAND/WAIT/IDLE/ACTIVE) is owned and defined by internal/wipattr.BlockState, and this function only lays those rows out as a table.",
           "token": "wipBlockedRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported single-call-site printer for the wip reconcile --reclaim listing; it renders rows but carries no domain meaning of its own — the positioned concepts are Reclaimable and ReclaimRow in internal/wiprecon",
+          "token": "wipReclaimRender"
         }
       ],
       "id": "render-materialize",
@@ -1454,7 +1549,8 @@
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
         "tuioverviewsavingsrender",
-        "wipBlockedRender"
+        "wipBlockedRender",
+        "wipReclaimRender"
       ],
       "min_files": 2,
       "name": "Render / materialize family",

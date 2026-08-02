@@ -2022,3 +2022,31 @@ The operator-configured exclude / include_only gate that drops a discovered acco
 The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier.
 
 **Distinct from:** Not the manifest validator and not the envelope verifier it dispatches to, and not the policy document itself: it is the CLI-level router that decides which checker owns the file, keyed on the payload's schema shape rather than on its filename or extension.
+
+
+### guardSelfTightenOverlay (self-tighten overlay schema)
+
+cmd/fak/guard_self_tighten_overlay.go: the on-disk schema of the overlay the WRAPPED AGENT may author for itself (.fak/agent/self-tighten.json) - a ratchet-only subset of the policy manifest carrying only Deny, BlockHosts and SelfModifyGlobs, each of which can only narrow the floor. It declares no allow / allow_prefix / posture field and is decoded with DisallowUnknownFields, so a forged widening cannot even be spelled: it fails to decode and the overlay is refused wholesale rather than partially applied (#5181, epic #5170 Track F).
+
+**Distinct from:** The AGENT-authored tighten-only overlay schema, the one amendment channel the wrapped agent may write for itself - NOT guardAllowOverlay (operator-authored, widen-only allow lists) and NOT guardDenyOverlay (operator-authored, tighten-only but trusted on arrival). Being agent-authored is exactly why it alone is admitted through the amendment gate instead of being unioned into the floor on sight, and why it deliberately does not live under the self-modify-protected .fak/guard/ tree the operator overlays use.
+
+
+### guardAdmitSelfTightenProposal
+
+cmd/fak/guard_self_tighten_overlay.go: the admit-and-install step for an agent-authored tighten proposal. It routes the pair (installed floor, proposed floor) through admitSelfTightenOverlay and replaces policy.Runtime.Adjudicator with the proposal ONLY on an admit verdict, refusing with AmendmentFrozenViolation when there is no runtime to amend. A refusal returns the class and reason and leaves the live floor untouched, so a proposal is installed wholesale or not at all (#5411).
+
+**Distinct from:** The INSTALLER that holds the authority to replace the live floor - NOT admitSelfTightenOverlay (guardselftighten), which is a pure classifier that judges a delta and mutates nothing. This is the single place an agent-authored proposal reaches the running adjudicator, and adding it is what turned that classifier from unreachable code into an armed gate. It also differs from guardApplyDenyOverlay, which mutates a runtime with no verdict at all because its overlay is operator-authored and trusted. It deliberately takes an already-built proposal rather than the overlay, so the delta barrier can be exercised with a widening the schema barrier could never spell.
+
+
+### guardApplySelfTightenOverlay
+
+cmd/fak/guard_self_tighten_overlay.go: the launch-boundary entry point loadGuardCapabilityFloor calls to fold the agent's self-tighten overlay into the capability floor. It builds the union of the installed floor with the overlay, submits that proposal to the amendment gate, and returns the verdict, the amendment class and the count of elements added so the floor-source provenance can record them. An empty overlay short-circuits to a no-op admit without building a proposal, so the ordinary launch stays byte-identical to the pre-overlay floor.
+
+**Distinct from:** The launch-boundary COMPOSITION - union, then gate, then provenance - which owns no verdict of its own: guardAdmitSelfTightenProposal holds the admit decision and the sole write to the live runtime, and this only sequences and reports it. It also differs from guardApplyDenyOverlay, which applies an operator-authored overlay straight onto the runtime with no gate. Its scope is the launch boundary only: mid-session reload paths do not call it, so a running session's behaviour is unchanged.
+
+
+### guardSharedHookSettingsPath
+
+The cmd/fak/guard.go resolver that answers which single --settings file every guard hook installer must name, so SessionStart, toolproc, Stop and PreCompact converge on one payload instead of each passing the path it was handed.
+
+**Distinct from:** It RESOLVES WHICH FILE the installers share; it does not write one. writeGuardSettingsFileAtomic performs the write, and guardStopHookInstall / the PreCompact analogue are per-hook RESULT RECORDS of an install that has already chosen its path. The distinction is load-bearing rather than cosmetic: #5510 showed that when a caller's payload names a different settings file, Claude's last-wins --settings silently discards guard's entire hook stack, so the identity of this one path is what keeps the stack armed.
