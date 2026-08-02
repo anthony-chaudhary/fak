@@ -32,6 +32,7 @@ New dated notes go under [`docs/notes/`](docs/notes/) and get a line in **Notes 
 - [README](README.md) — what fak is and why, in one read.
 - [START-HERE](START-HERE.md) — run a local model behind the gate in ten minutes.
 - [Getting started](GETTING-STARTED.md) — choose install, deterministic proof, or production setup with prerequisites and a first check.
+- [Tier 2: run the fused in-kernel model](docs/fak/in-kernel-model.md) — the kernel-developer continuation of Getting started, split out of it so the newcomer route reads end to end: the deterministic synthetic checkpoint over `/v1/fak/syscall`, the one-command SmolLM2-135M HuggingFace export, the Qwen3.6-27B GGUF smoke through `cmd/fakchat`, in-kernel chat through `fak serve --gguf` on both the OpenAI and Anthropic wires, and the honest caveat on why this is a correctness/reference path rather than a production chat server.
 - [AGENTS](AGENTS.md) — orientation for coding agents (build, test, the hard rules).
 - [Security policy](SECURITY.md) — evaluate the current capability floor, its policy configuration, scoped evidence, and private reporting route.
 - [Benchmark authority](BENCHMARK-AUTHORITY.md) — select a scoped result, compare its tuned baseline, and follow the committed artifact and reproduce route.

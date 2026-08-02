@@ -103,22 +103,37 @@ from an old planning note when a current issue or authority disagrees.
 > [What your PR needs to pass](#what-your-pr-needs-to-pass) — and can skip to
 > [Licensing](#licensing--read-this-before-your-first-pr).
 
-1. Work from the repository root on `main`; this repository does not use contributor
-   feature branches. Install the repository hooks with
-   `python tools/install_trunk_guard.py` if `git config --get core.hooksPath` does not
-   report `tools/githooks`.
-2. Compile without writing an in-tree binary: `fak buildcheck --vet`. If no usable `fak`
-   binary exists yet, use a unique temporary output (`go build -o <temp-path> ./cmd/fak`),
-   then use that binary for subsequent checks.
-3. Run the proof matched to the change. `make test-fast` is the optional short feedback
-   gate; **`make ci` is the required pre-commit green gate** for build, vet, tests, and
-   claims lint. On native Windows, run
+1. **Maintainers and in-repo agents only — once per clone.** Work from the repository root
+   on `main`; this repository does not use contributor feature branches. Install the
+   repository hooks with `python tools/install_trunk_guard.py` if
+   `git config --get core.hooksPath` does not report `tools/githooks`. The guard polices
+   direct commits to *this* shared `main`; it has no role in a fork, so skip it entirely if
+   you are opening a pull request.
+2. **Everyone — the compile check.** Compile without writing an in-tree binary:
+   `fak buildcheck --vet`. It exists because this checkout is shared and a peer's untracked
+   Go files would otherwise change the answer; from a fork, plain
+   `go build ./... && go vet ./...` is the same check. If no usable `fak` binary exists yet,
+   use a unique temporary output (`go build -o <temp-path> ./cmd/fak`), then use that binary
+   for subsequent checks.
+3. **Everyone runs *a* proof; only direct-to-`main` work runs the full one.** Run the proof
+   matched to the change. `make test-fast` is the optional short feedback gate (the ~2-second
+   smoke tier: build, vet, and `go test -short ./...`, skipping the weight-backed model
+   witnesses); **`make ci` is the required pre-commit green gate** for build, vet, tests, and
+   claims lint. **Budget for it:** `make ci` chains 20 targets, including the full
+   `go test ./...` over the weight-backed model oracle that CI itself budgets at
+   `-timeout=25m` — so plan on **tens of minutes**, not a pause. Keep `make test-affected`
+   (a 30-second budget over the changed packages and their importers) as the inner loop and
+   save `make ci` for the commit itself. From a fork you do not run it at all: the tests for
+   the package you touched are enough, and CI runs the full gate on the PR — see
+   [What your PR needs to pass](#what-your-pr-needs-to-pass). On native Windows, run
    tests through `./test.ps1` under WSL because host application control blocks newly
    compiled test executables. Build and vet remain native-safe.
-4. After the explicit-path commit and before push, run `fak ci-preflight` as the
+4. **Maintainers and in-repo agents only — direct-to-`main`.** After the explicit-path commit
+   and before push, run `fak ci-preflight` as the
    **required committed-tip gate** in a clean temporary checkout, independent of the
    peer-dirty working tree. Thus "green" means both gates in order: `make ci` before the
-   commit and `fak ci-preflight` after it.
+   commit and `fak ci-preflight` after it. A forked PR has no push-to-`main` step, so this
+   gate does not apply to it.
 
 Build-profile details and platform commands live in
 [`docs/dev-tooling.md`](docs/dev-tooling.md). `AGENTS.md` is the machine-oriented authority
