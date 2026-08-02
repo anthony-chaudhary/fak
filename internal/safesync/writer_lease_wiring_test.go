@@ -154,8 +154,8 @@ func TestManagedCommitRefusedWhileSyncApplyHoldsWriterLease(t *testing.T) {
 	if !strings.Contains(midRes.Detail, "sync-apply") {
 		t.Fatalf("refusal Detail %q does not name the holding owner sync-apply", midRes.Detail)
 	}
-	if code, ok := safecommit.RefusalExitCode(midRes.Reason); !ok || code != safecommit.ExitPreCommitRefusal {
-		t.Fatalf("WRITER_LEASE_HELD classifies as (%d, %v), want the retryable pre-commit exit %d", code, ok, safecommit.ExitPreCommitRefusal)
+	if code, ok := safecommit.RefusalExitCode(midRes.Reason); !ok || code != safecommit.ExitLockBusy {
+		t.Fatalf("WRITER_LEASE_HELD classifies as (%d, %v), want the retryable contention exit %d", code, ok, safecommit.ExitLockBusy)
 	}
 
 	// The window is closed: the identical managed commit now lands cleanly, proving the

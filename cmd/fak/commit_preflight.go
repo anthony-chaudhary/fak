@@ -78,8 +78,9 @@ func renderCommitPreflight(w io.Writer, rep safecommit.PathPreflightReport) {
 }
 
 // commitPreflightExit maps a report to the process exit code. An untracked/unmatched pathspec
-// (or a not-a-repo) is a PRE-commit refusal (exit 3, "blocked — fix and retry"); an empty
-// pathspec set is a usage error (exit 2).
+// (or a not-a-repo) is a refusal on the merits (exit 4, "no — fix the pathspec; re-running the
+// identical preflight is refused again"), never the retryable contention exit 3 (#5505 W4); an
+// empty pathspec set is a usage error (exit 2).
 func commitPreflightExit(rep safecommit.PathPreflightReport) int {
 	switch rep.Reason {
 	case "":
@@ -87,6 +88,6 @@ func commitPreflightExit(rep safecommit.PathPreflightReport) int {
 	case safecommit.ReasonNoPath:
 		return 2
 	default: // PATH_UNTRACKED, PATH_UNMATCHED, NOT_A_REPO
-		return 3
+		return safecommit.ExitRefused
 	}
 }

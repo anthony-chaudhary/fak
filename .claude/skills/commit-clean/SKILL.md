@@ -82,10 +82,17 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 
 ## Exit codes
 
+Nothing-landed is **two** outcomes, not one, and they need different responses (#5505 W4).
+Exit 3 is the only code you may retry on a loop.
+
 - **0** — success: committed, verified, (pushed if asked).
 - **2** — usage error.
-- **3** — a PRE-commit refusal: nothing landed, safe to retry or replan. Reasons: `OFF_TRUNK`, `MERGE_IN_PROGRESS`, `NOTHING_STAGED`, `LOCK_BUSY`, `WINDOW_FULL`, `WRITER_LEASE_HELD`, `STALE_BASE_DELETION`, `STALE_UNTRACKED`, `SPURIOUS_STAGED_DELETION`, `CACHED_REMOVE_WORKTREE_PRESENT`, `PRESTAGED_PATH_OVERLAP`, `CORE_SELF_MODIFY`, `REVIEW_REFUTED`.
+- **3** — CONTENTION: you never got as far as a verdict, because another writer held the lane. Nothing landed and the answer may differ next tick — **retry with backoff**. Reasons: `LOCK_BUSY`, `WINDOW_FULL`, `WRITER_LEASE_HELD`.
+- **4** — REFUSED on the merits: nothing landed either, but re-running the identical command cannot change the answer — **fix the named cause or replan; never sit in a retry loop**. Reasons: `OFF_TRUNK`, `MERGE_IN_PROGRESS`, `NOTHING_STAGED`, `STALE_BASE_DELETION`, `STALE_UNTRACKED`, `SPURIOUS_STAGED_DELETION`, `CACHED_REMOVE_WORKTREE_PRESENT`, `PRESTAGED_PATH_OVERLAP`, `CORE_SELF_MODIFY`, `REVIEW_REFUTED`. Also `NOT_A_REPO`, a `--require-issue` or `--build-check` pre-lint refusal, and `fak commit preflight` / `fak sweep --apply` refusals.
 - **1** — a POST-attempt failure: the commit ran but its result is bad — halt and have a human review. Reasons: `PATHSPEC_RACE`, `MESSAGE_RACE`, `SYMLINK_ESCAPE`, `HOOK_REFUSED`, `PUSH_REJECTED`.
+
+Before the split both nothing-landed classes returned 3, so a lander that (correctly) read
+3 as "retry me" spent its whole backoff budget on refusals that could never clear.
 
 ## Steps
 
