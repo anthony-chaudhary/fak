@@ -148,6 +148,38 @@ type Counters struct {
 	// Deny-all stops (WITNESSED) — turns where every proposed tool call was refused.
 	DenyAllStops uint64 `json:"deny_all_stops"`
 
+	// UpstreamErrorKinds is the per-KIND breakdown of upstream/planner turn failures
+	// (#5487), keyed by the closed vocabulary the gateway's single classifier
+	// (gateway.upstreamErrorKind) already returns: "stalled", "oom", "unreachable",
+	// "rate_limited", "auth", "forbidden", "overloaded", "status_4xx", "status_5xx",
+	// "transport", "other". It is OBSERVED at the upstream boundary and relayed — a
+	// nonzero count here is not a fak fault.
+	//
+	// It exists because the kind was previously process-local ONLY: it fed the in-memory
+	// /metrics counter and the `fak-turn … FAILED` stderr line, both of which die with
+	// the process. Under `fak guard` the gateway is a per-invocation process, so once the
+	// wrapped command exited a stall left NO trace anywhere — the one thing the
+	// idle-deadline detector exists to tell you.
+	//
+	// Note the row did not merely COARSEN an upstream failure, it dropped it. Errored
+	// above is a different population: it counts kernel ADJUDICATION error verdicts (see
+	// gateway.AdjudicationSummary.Errored), not upstream turn failures, so it was never
+	// even a lossy proxy for this. Nothing in a pre-#5487 row moves when a turn fails
+	// upstream.
+	//
+	// Carrying the classifier's own string-keyed map (rather than one scalar per kind,
+	// the way DenyAllStops is shaped) means a future kind needs no new field and no
+	// schema bump.
+	//
+	// omitempty, and that is load-bearing for the same reason it is on the self-hosted
+	// split above: a row written before this field existed omits it, and ABSENT must
+	// read NOT INSTRUMENTED, never "zero upstream failures". A session that DID measure
+	// and hit no upstream error also writes nothing here, so this field alone cannot
+	// separate the two — that distinction is a follow-on, not something a reader should
+	// assume today. Keeping it omitempty also leaves every pre-field row byte-identical
+	// and its RowKey unchanged (the key hashes this struct's JSON).
+	UpstreamErrorKinds map[string]uint64 `json:"upstream_error_kinds,omitempty"`
+
 	// Managed-cache 1h TTL upgrade (WITNESSED, epic #1844 C6): outcomes of fak's own
 	// stable-prefix cache_control TTL splice on the outbound Anthropic wire, mirrored
 	// from the in-process fak_gateway_cache_ttl_upgrade_total family so a managed-cache

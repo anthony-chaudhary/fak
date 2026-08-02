@@ -557,6 +557,17 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 
 		DenyAllStops: adj.DenyAllStops,
 
+		// WHY turns failed upstream (#5487) — carried off the in-memory /metrics surface
+		// and into the durable row, which is the only record that survives a
+		// per-invocation `fak guard` process. Note adj.Errored above does NOT cover this:
+		// it counts kernel adjudication ERROR verdicts, a different population, so before
+		// this line a stalled turn moved nothing at all in the row. Sourced from the FULL
+		// snapshot on purpose — RotationEvidenceSnapshot and TransientWireErrorSnapshot
+		// are deliberately narrower and would both drop "stalled". Deliberately nil when
+		// the session hit no upstream error, so the omitempty field stays ABSENT (not
+		// instrumented) instead of asserting a measured zero.
+		UpstreamErrorKinds: srv.UpstreamErrorKindsSnapshot(),
+
 		CacheTTLUpgradesUpgraded: adj.CacheTTLUpgraded,
 		CacheTTLUpgradeReasons:   adj.CacheTTLUpgradeReasons,
 
