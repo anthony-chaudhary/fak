@@ -145,15 +145,15 @@ func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(
 			// place). That never orphans the gateway — the agent still launches inline in
 			// THIS window; the companion only polls the loopback gateway URL. `do script`
 			// focuses the new window, so the script re-fronts the agent window (index 1)
-			// to keep the cursor where the operator types. The trailing `; exit` lets the
-			// window close itself when the overlay ends (with the default close-on-clean-
-			// exit profile) instead of lingering as a dead shell.
+			// to keep the cursor where the operator types. The typed command line carries
+			// its own close, so the window does not outlive the overlay process (#5482 —
+			// guardSplitAppleTerminalCommand).
 			plan.Host = "terminal-app"
 			plan.Geometry = "agent (this window) / fak info (companion Terminal window)"
 			plan.Spawn = []string{"osascript",
 				"-e", `tell application "Terminal"`,
 				"-e", `set agentWindow to front window`,
-				"-e", `do script "` + appleScriptQuote(shellJoin(overlayCmd)+"; exit") + `"`,
+				"-e", `do script "` + appleScriptQuote(guardSplitAppleTerminalCommand(overlayCmd, guardSplitAppleCloseOnExit(getenv))) + `"`,
 				"-e", `set index of agentWindow to 1`,
 				"-e", `end tell`,
 			}
@@ -186,6 +186,73 @@ func macSplitTerminalApp(goos string, getenv func(string) string) string {
 		return "terminal-app"
 	}
 	return ""
+}
+
+// guardSplitAppleCloseTail is the tail appended to the companion window's command line so the
+// WINDOW closes when the overlay ends (#5482).
+//
+// What it replaces was a bare `; exit` whose comment claimed the window would then close itself
+// "with the default close-on-clean-exit profile". There is no such default: Apple Terminal's
+// stock Basic profile ships `When the shell exits: Don't close the window`. So the overlay
+// process exited on time (the #2340 --max-idle backstop), the shell exited, and the window
+// stayed parked on `[Process completed]` — one dead window per guarded session, accumulating
+// monotonically (an attended Terminal reached ~100 of them across two days, ~84% of its
+// windows). #2340 made the PROCESS exit; on this host the window is not the process, so process
+// exit is necessary but not sufficient and the close has to be explicit.
+//
+// Four properties the shape is chosen for:
+//
+//   - It cannot mis-target. The spawn script above does resolve `front window` — but only to
+//     re-front the AGENT window in the same breath as `do script`. The CLOSE runs minutes to
+//     hours later, when the front window is whatever the operator has since focused; closing
+//     that would destroy a live terminal, which is far worse than leaking a dead one. So the
+//     close selects by the overlay's OWN tty, read inside the overlay's own shell. `every window
+//     whose ...` is a filter, so no match (the operator already closed it) is a silent no-op
+//     rather than an error.
+//   - It preserves a crash. The close is gated on the overlay exiting 0, so a real failure keeps
+//     its window — and the only copy of the diagnostic — on screen. Both routine ends exit 0
+//     (info.go: the "gateway closed — guarded session ended" close and the --max-idle backstop),
+//     as does an in-band Ctrl-C/q quit, which is an operator saying "done with this overlay". A
+//     flag error, a failed fetch, or an uncaught signal is non-zero, and stays parked.
+//   - It is inert to quoting. The tty goes to osascript as a run-handler ARGUMENT, never
+//     interpolated into AppleScript source, so nothing a device path (or an overlay argument
+//     further up the line) could contain can open a second AppleScript statement.
+//   - It degrades to the old behavior. The overlay command still LEADS the line, so a shell that
+//     cannot parse the tail still runs the dashboard; and `exit` still runs on both paths, so a
+//     close that fails leaves exactly the pre-#5482 dead window, never a live shell nobody reaps.
+//
+// The nohup + `&` + `exit` ordering is deliberate on both counts: zsh (the macOS login shell)
+// HUPs background jobs as it exits, so the closer must be immune to that; and the shell wants to
+// be GONE when Terminal handles the close, because the profile default ("Ask before closing: if
+// there are processes other than the login shell and ...") can otherwise raise a confirmation
+// dialog for a window that still has a process on its tty.
+//
+// NOT VERIFIED END TO END: this was written without a Mac. guard_split_close_test.go witnesses
+// the generated command line — that Terminal then closes that window, silently, is unwitnessed
+// and wants a Mac operator (#5482).
+const guardSplitAppleCloseTail = `__fak_rc=$?; if [ "$__fak_rc" = 0 ]; then nohup /usr/bin/osascript -e 'on run {overlayTTY}' -e 'tell application "Terminal" to close (every window whose tty of tab 1 is overlayTTY)' -e 'end run' "$(tty)" >/dev/null 2>&1 & fi; exit $__fak_rc`
+
+// guardSplitAppleTerminalCommand builds the single shell line Apple Terminal's `do script` types
+// into the companion window: the overlay command, then either the self-closing tail (#5482, the
+// default) or the bare `; exit` it replaced.
+func guardSplitAppleTerminalCommand(overlayCmd []string, closeOnExit bool) string {
+	if !closeOnExit {
+		return shellJoin(overlayCmd) + "; exit"
+	}
+	return shellJoin(overlayCmd) + "; " + guardSplitAppleCloseTail
+}
+
+// guardSplitAppleCloseOnExit resolves the #5482 escape hatch. Closing is the DEFAULT — the whole
+// point is that auto-close stops depending on a profile setting the operator never chose —
+// and FAK_SPLIT_CLOSE_ON_EXIT=0|off|false|no restores the lingering `[Process completed]` window
+// for an operator who wants to read one post mortem. It reads the same injected getenv the rest
+// of the plan builder does, so the knob stays inside the pure plan and is covered by its tests.
+func guardSplitAppleCloseOnExit(getenv func(string) string) bool {
+	switch strings.TrimSpace(strings.ToLower(getenv("FAK_SPLIT_CLOSE_ON_EXIT"))) {
+	case "0", "off", "false", "no":
+		return false
+	}
+	return true
 }
 
 // appleScriptQuote escapes s for embedding inside a double-quoted AppleScript string
