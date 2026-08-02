@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +18,11 @@ import (
 // is strictly simpler than the chat handler: no tool-call adjudication, no
 // conformance fail-close. The response carries the legacy `text_completion` object
 // with a bare `text` field per choice.
+//
+// With stream:true it takes the same EARLY-preamble split #5399 gave the chat wire
+// (#5514): the 200, the SSE headers and an opening chunk go out BEFORE the decode, and a
+// failure after that point rides an in-band SSE error event. Only the frame shape stays
+// legacy — see completionStreamWriter.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -78,6 +82,30 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		writeSessionRefusal(w, sessionTurn.state)
 		return
 	}
+	// #5514 (the legacy half of #5399): completeServed below blocks for the WHOLE decode,
+	// and this handler used to write its first byte only after that returned —
+	// writeCompletionStream is what set the SSE headers and the 200. So a stream:true
+	// legacy-completions request served by a Complete-only planner (every in-kernel serve:
+	// agent.InKernelPlanner is not an agent.StreamingPlanner) emitted no status line, no
+	// headers and no SSE byte for the entire multi-rank decode, exactly the stall #5399
+	// removed from the chat wire. Open the stream NOW instead, through the SAME shared
+	// preamble the chat route uses — only the frame shape differs (text_completion with a
+	// bare `text`, never a chat-shaped delta).
+	//
+	// Placement is load-bearing, as on the chat route: every PRE-decode refusal — the
+	// method/body/sampling 400s and writeSessionRefusal — is already behind us and kept its
+	// real HTTP status. The upstream error below is the only thing left that can fail, and
+	// it now has to report in-band; see sseStreamWriter.fail.
+	var stream *completionStreamWriter
+	if req.Stream {
+		stream = newCompletionStreamWriter(w, reqModel)
+		if err := stream.open(); err != nil {
+			// The client is already gone; do not spend a decode on a socket nobody reads.
+			s.logf("gateway: client vanished before the streamed preamble landed: %v", err)
+			return
+		}
+	}
+
 	began := time.Now()
 	comp, err := s.completeServed(ctx, sessionTurn, messages, nil,
 		agent.WithModel(req.Model), // no-op when the client omitted model
@@ -88,6 +116,16 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		s.logf("gateway: upstream model error: %v", err)
+		if stream != nil {
+			// The 200 + SSE headers went out before the decode, so the status line is spent:
+			// report the SAME classified failure in-band as an SSE error event + [DONE]
+			// rather than truncating the stream. plannerErrorStatus carries the identical
+			// metric/observation side effects writeUpstreamErr would have run, and msg is the
+			// same client-facing string (never the upstream's raw body).
+			status, code, msg := s.plannerErrorStatus(err)
+			stream.fail(status, code, msg)
+			return
+		}
 		s.writeUpstreamErr(w, err)
 		return
 	}
@@ -100,6 +138,17 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if respModel == "" {
 		respModel = reqModel
 	}
+	if stream != nil && respModel != stream.model {
+		// The streamed wire announced `model` in the preamble, before the upstream could
+		// report what it served, and OpenAI keeps that field CONSTANT for the life of a
+		// stream — so the #82 served-model echo cannot ride this path without the chunks
+		// contradicting each other mid-stream. Keep the announced (request) model and make
+		// the divergence operator-visible instead of silently flipping the field. The
+		// non-streaming JSON response still echoes the served model truthfully. Same rule,
+		// same reason, as the chat wire (#5399).
+		s.logf("gateway: streamed turn announced model %q in its preamble; upstream served %q (constant-model SSE, #5514)", stream.model, respModel)
+		respModel = stream.model
+	}
 	s.logInferenceTurn(reqTrace, "openai_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
 
 	resp := CompletionResponse{
@@ -110,8 +159,8 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		Choices: []CompletionChoice{{Index: 0, Text: comp.Message.Content, FinishReason: &finish}},
 		Usage:   comp.Usage,
 	}
-	if req.Stream {
-		writeCompletionStream(w, resp)
+	if stream != nil {
+		writeCompletionStream(stream, resp)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -158,40 +207,67 @@ func normalizePrompt(raw json.RawMessage) string {
 	return ""
 }
 
-// writeCompletionStream synthesizes the legacy SSE stream for `stream: true` on
-// /v1/completions, after the whole turn has completed. It mirrors
-// writeChatCompletionStream but each chunk carries a `text` fragment (the legacy
-// text-completion delta) instead of a chat `delta`; concatenating the text
-// fragments reproduces the completion byte-for-byte. The final chunk carries the
-// finish_reason + usage, followed by the `data: [DONE]` terminator.
-func writeCompletionStream(w http.ResponseWriter, resp CompletionResponse) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+// completionStreamWriter owns the client half of one stream:true LEGACY completion. It
+// embeds the shared sseStreamWriter — the same preamble machinery #5399 gave the chat
+// wire (stream identity, SSE headers, idempotent open-and-flush, in-band failure) — and
+// adds only what is genuinely legacy-specific: a `text_completion` chunk carrying a bare
+// `text` per choice. The two wires cannot share a frame builder without breaking one of
+// them; they can and now do share the timing, which is what #5514 is about.
+type completionStreamWriter struct {
+	sseStreamWriter
+}
 
-	choice := resp.Choices[0]
-	chunk := func(text string, finish *string, usage *agent.Usage) CompletionStreamResponse {
-		return CompletionStreamResponse{
-			ID:      resp.ID,
-			Object:  "text_completion",
-			Created: resp.Created,
-			Model:   resp.Model,
-			Choices: []CompletionStreamChoice{{Index: choice.Index, Text: text, FinishReason: finish}},
-			Usage:   usage,
-		}
+// newCompletionStreamWriter mints the stream identity at REQUEST time, under the legacy
+// `cmpl-` id namespace, because the opening chunk leaves before the turn exists and every
+// later chunk has to agree with it. model is the request model (constant for the life of
+// the stream; see the handler).
+func newCompletionStreamWriter(w http.ResponseWriter, model string) *completionStreamWriter {
+	return &completionStreamWriter{sseStreamWriter: newSSEStreamWriter(w, "cmpl-fak-", model)}
+}
+
+// chunk builds one legacy `text_completion` SSE chunk carrying this stream's identity.
+// Index is 0 because the gateway normalizes every served turn to a single choice.
+func (p *completionStreamWriter) chunk(text string, finish *string, usage *agent.Usage) CompletionStreamResponse {
+	return CompletionStreamResponse{
+		ID:      p.id,
+		Object:  "text_completion",
+		Created: p.created,
+		Model:   p.model,
+		Choices: []CompletionStreamChoice{{Index: 0, Text: text, FinishReason: finish}},
+		Usage:   usage,
 	}
+}
 
+// open puts the 200, the SSE headers and an EMPTY-text opening chunk on the wire before
+// the decode starts. The empty chunk is the legacy wire's answer to "what can the
+// preamble say before any model byte exists": it is schema-identical to every other
+// chunk on this stream (text_completion, index 0, finish_reason null) and this wire
+// already ends with an empty-text chunk, so a client that concatenates `text` across
+// chunks is byte-unaffected — while a client watching for liveness gets a real SSE frame,
+// not just headers a proxy might still be buffering. The chat wire's opening ROLE delta
+// has no legacy counterpart, and inventing one would emit chat-shaped frames on a
+// text-completion socket.
+func (p *completionStreamWriter) open() error {
+	return p.openWith(p.chunk("", nil, nil))
+}
+
+// writeCompletionStream emits the completed turn onto an ALREADY-OPENED legacy SSE
+// stream: the incremental `text` fragments, then the terminal finish_reason + usage
+// chunk, then [DONE]. The opening chunk left in open(), before the decode — that split is
+// the whole point of #5514. segmentContent preserves every byte, so concatenating the
+// text fragments reproduces the completion exactly.
+func writeCompletionStream(p *completionStreamWriter, resp CompletionResponse) {
+	if err := p.open(); err != nil {
+		return
+	}
+	choice := resp.Choices[0]
 	for _, seg := range segmentContent(choice.Text) {
-		if err := writeSSEData(w, chunk(seg, nil, nil)); err != nil {
+		if err := writeSSEData(p.w, p.chunk(seg, nil, nil)); err != nil {
 			return
 		}
 	}
-	if err := writeSSEData(w, chunk("", choice.FinishReason, &resp.Usage)); err != nil {
+	if err := writeSSEData(p.w, p.chunk("", choice.FinishReason, &resp.Usage)); err != nil {
 		return
 	}
-	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
+	writeSSEDone(p.w, p.flusher)
 }

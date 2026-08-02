@@ -39,24 +39,27 @@ package gateway
 //     field never changes mid-stream). The #82 served-model echo therefore stays on
 //     the non-streaming JSON response, where it can still be truthful; when the two
 //     diverge the gateway LOGS it rather than silently flipping the field mid-stream.
+//
+// The wire-INDEPENDENT mechanics behind open()/fail() — the stream identity, the SSE
+// headers, the flush, the in-band error envelope — moved to sse_stream_preamble.go when
+// the legacy /v1/completions wire adopted the same timing (#5514). chatStreamWriter now
+// embeds that writer and supplies only chat's own frames; the behavior above is
+// unchanged.
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // chatStreamWriter owns the client half of one stream:true chat completion served by
 // the buffered path. It is created (and opened) before the decode and finished after
-// it, so the id/created/model a client sees are stable across every chunk.
+// it, so the id/created/model a client sees are stable across every chunk. Everything
+// wire-INDEPENDENT — that identity, the SSE headers, the idempotent open-and-flush, the
+// in-band failure path — lives in the embedded sseStreamWriter, which the legacy
+// text-completion wire shares (#5514); only the chunk shape below is chat's own.
 type chatStreamWriter struct {
-	w       http.ResponseWriter
-	flusher http.Flusher
-	id      string
-	created int64
-	model   string
-	opened  bool
+	sseStreamWriter
 }
 
 // newChatStreamWriter mints the stream identity (id + created) at REQUEST time rather
@@ -64,15 +67,7 @@ type chatStreamWriter struct {
 // exists and every later chunk has to agree with it. model is the request model (see
 // the file comment on the #82 seam).
 func newChatStreamWriter(w http.ResponseWriter, model string) *chatStreamWriter {
-	f, _ := w.(http.Flusher)
-	now := time.Now()
-	return &chatStreamWriter{
-		w:       w,
-		flusher: f,
-		id:      "chatcmpl-fak-" + itoa(uint64(now.UnixNano())),
-		created: now.Unix(),
-		model:   model,
-	}
+	return &chatStreamWriter{sseStreamWriter: newSSEStreamWriter(w, "chatcmpl-fak-", model)}
 }
 
 // chunk builds one OpenAI `chat.completion.chunk` carrying this stream's identity.
@@ -88,42 +83,17 @@ func (p *chatStreamWriter) chunk(d ChatDelta, finish *string, usage *agent.Usage
 	}
 }
 
-// open writes the status line, the SSE headers, and the opening role chunk, then
-// FLUSHES so the bytes actually leave the socket instead of sitting in the response
-// buffer until the handler returns. It is idempotent, and it must be called only once
-// every pre-decode refusal has been passed: after it returns, the HTTP status is
-// spent and errors can only be reported in-band (see fail).
+// open writes the status line, the SSE headers, and the opening ROLE chunk — chat's
+// own opening frame — through the shared preamble, which flushes so the bytes actually
+// leave the socket instead of sitting in the response buffer until the handler returns.
+// It is idempotent, and it must be called only once every pre-decode refusal has been
+// passed: after it returns, the HTTP status is spent and errors can only be reported
+// in-band (see sseStreamWriter.fail).
 //
 // It returns the write error when the client has already gone away, so the caller can
 // abandon the turn instead of decoding for a socket nobody is reading.
 func (p *chatStreamWriter) open() error {
-	if p.opened {
-		return nil
-	}
-	p.opened = true
-	h := p.w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("X-Accel-Buffering", "no")
-	p.w.WriteHeader(http.StatusOK)
-	return writeSSEData(p.w, p.chunk(ChatDelta{Role: agent.RoleAssistant}, nil, nil))
-}
-
-// fail terminates an OPENED stream on a failure the buffered path would otherwise
-// have answered with a real HTTP status. The 200 is already on the wire, so the
-// classified status/code/message ride an OpenAI-shaped SSE error event, followed by
-// [DONE] so the client's SSE parser ends cleanly rather than hanging on a truncated
-// stream. msg is the same client-facing string writeErrCode would have sent — the
-// upstream's raw body never crosses this boundary.
-func (p *chatStreamWriter) fail(status int, code, msg string) {
-	var codeVal any
-	if code != "" {
-		codeVal = code
-	}
-	_ = writeSSEData(p.w, map[string]any{
-		"error": map[string]any{"message": msg, "type": errType(status), "code": codeVal, "param": nil},
-	})
-	writeSSEDone(p.w, p.flusher)
+	return p.openWith(p.chunk(ChatDelta{Role: agent.RoleAssistant}, nil, nil))
 }
 
 // writeChatCompletionStream emits the buffered, adjudicated turn onto an ALREADY-OPENED
