@@ -201,6 +201,23 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	// Release the EP follower ranks BEFORE this rank enters the decode, onto THIS wire's
+	// own route (#5528). Same placement and same reasoning as the chat, legacy and
+	// Anthropic wires: after the method check, before anything reads the body.
+	//
+	// ONE release covers the whole HTTP turn, including the #5212 denial-recovery sample
+	// below. That second completeServed is a second forward pass, but it is not a second
+	// inbound request: the follower rank serves the SAME mirrored body through THIS SAME
+	// handler, so it reaches the same denial-only verdict and runs its own recovery sample
+	// locally. Fanning out again around the recovery would release the ranks into a decode
+	// they are already running.
+	//
+	// Inert on a single-rank serve (FAK_EP_FANOUT_ADDRS unset yields no follower URLs).
+	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteResponses)
+	if !ok {
+		return
+	}
+	defer waitEPFanout()
 	var req ResponsesRequest
 	if !decodeRequestBody(w, r, &req) {
 		return

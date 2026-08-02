@@ -122,6 +122,23 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	// Release the EP follower ranks BEFORE this rank enters the decode, onto THIS wire's
+	// own route (#5528). Everything below — the passthrough turn, the planner turn, and
+	// both streaming arms — blocks for the whole multi-rank decode, and rank-local expert
+	// parallelism makes progress only if every rank runs the same forward pass. Without
+	// this, an Anthropic request left the front rank alone in a collective the other ranks
+	// were never released into. Placement matches the chat and legacy wires: after the
+	// method check, before anything reads the body (the helper reads and restores it).
+	//
+	// Inert on a single-rank serve — with FAK_EP_FANOUT_ADDRS unset there are no follower
+	// URLs and this is a no-op, which is why the gap survived. The consequence on real
+	// multi-rank hardware (hang, timeout, or a silently degraded single-rank answer) is
+	// inferred from the AllReduce contract, not measured.
+	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteMessages)
+	if !ok {
+		return
+	}
+	defer waitEPFanout()
 	req, ok := s.readAnthropicMessagesRequest(w, r)
 	if !ok {
 		return

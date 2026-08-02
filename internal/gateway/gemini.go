@@ -110,6 +110,23 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusNotFound, "unknown Gemini method "+method)
 		return
 	}
+	// Release the EP follower ranks BEFORE this rank enters the decode (#5528). Placed
+	// after the route/method validation — a request that is about to 404 has no decode to
+	// release anyone into — and before the body read, which the helper performs and
+	// restores.
+	//
+	// The follower route is a CONSTANT, and deliberately not this request's own path:
+	// /v1beta/models/{model}:{method} carries two client-chosen segments, and no byte of a
+	// follower URL may be client-supplied (#5523). epRouteGeminiGenerateContent documents
+	// both consequences — a sentinel model segment, and the buffered method for the
+	// streaming arm too.
+	//
+	// Inert on a single-rank serve (FAK_EP_FANOUT_ADDRS unset yields no follower URLs).
+	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteGeminiGenerateContent)
+	if !ok {
+		return
+	}
+	defer waitEPFanout()
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 	raw := make([]byte, 0, 4096)
 	buf := make([]byte, 32*1024)
