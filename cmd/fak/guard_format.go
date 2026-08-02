@@ -87,6 +87,14 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 	if line := formatCacheAttribution(cacheSavings); line != "" {
 		b.WriteString(line)
 	}
+	// The dollar dual of the token-equiv attribution above, printed UNCONDITIONALLY for
+	// any session that served tokens — no --budget-envelope required (#5483). Guard has
+	// always priced its turns; it just never told anyone, and never said which of the
+	// tree's four Opus-class rate cards it used. Reads the process-wide basis the spend
+	// meter armed; the rendering itself is pure (formatGuardSessionCost).
+	if line := formatGuardSessionCost(sum, guardServedCostBasis()); line != "" {
+		b.WriteString(line)
+	}
 	if line := formatFakSliceDiagnostic(sum); line != "" {
 		b.WriteString(line)
 	}

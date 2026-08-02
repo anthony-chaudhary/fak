@@ -51,12 +51,20 @@ const (
 // servedSpend is the process-wide pricing state the served-session spend meter
 // reads. ok=false is dollar-blind: servedTurnSpendMicroCents returns 0 and a
 // configured spend budget is never debited a guessed cost.
+//
+// provider/context are retained alongside the resolved price because they are the
+// INPUTS the card was chosen from, and a dollar figure whose card is unnamed is
+// unfalsifiable (#5483): the exit-summary basis stamp reports the raw context the
+// meter was armed with, not just the card it landed on, so a reader can tell an
+// Opus-row price that was asked for from one that was defaulted into.
 var servedSpend struct {
-	mu     sync.RWMutex
-	armed  bool
-	ok     bool
-	p      gateway.CachePricing
-	source string
+	mu       sync.RWMutex
+	armed    bool
+	ok       bool
+	p        gateway.CachePricing
+	source   string
+	provider string
+	context  string
 }
 
 // armServedSpendPricing resolves and installs the served-session spend pricing
@@ -70,7 +78,21 @@ func armServedSpendPricing(provider, context string) (string, bool) {
 	defer servedSpend.mu.Unlock()
 	servedSpend.armed = true
 	servedSpend.p, servedSpend.source, servedSpend.ok = p, source, ok
+	servedSpend.provider, servedSpend.context = provider, context
 	return source, ok
+}
+
+// servedSpendPricingBasis reports the pricing the meter is currently armed with —
+// the read half of armServedSpendPricing, whose (source, ok) return both guard call
+// sites discard. It is what makes an operator-facing dollar figure falsifiable: the
+// card that produced it, the provider/context pair it was resolved from, and whether
+// a price was resolved at all. armed=false means no host path ever armed the meter,
+// which is reported apart from "armed and dollar-blind" — the first is unmeasured,
+// the second is a measured absence of price.
+func servedSpendPricingBasis() (p gateway.CachePricing, source, provider, context string, armed, ok bool) {
+	servedSpend.mu.RLock()
+	defer servedSpend.mu.RUnlock()
+	return servedSpend.p, servedSpend.source, servedSpend.provider, servedSpend.context, servedSpend.armed, servedSpend.ok
 }
 
 // guardSpendPricingContext picks the served-spend pricing context for a guard
