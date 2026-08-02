@@ -286,8 +286,8 @@ func canonicalGGUFArch(arch string) string {
 
 // applyMoEExpertCounts reads the three shared MoE expert-axis GGUF scalars — expert count,
 // experts-used-per-token, and expert FFN length — into cfg, writing each only when present and
-// positive so a generic value is never clobbered by a zero. Shared by the Qwen3-MoE and
-// GLM-MoE-DSA config appliers.
+// positive so a generic value is never clobbered by a zero. Shared by the Qwen3-MoE,
+// GLM-MoE-DSA, and Gemma 4 config appliers.
 func applyMoEExpertCounts(f *File, p string, cfg *model.Config) {
 	if v := intValueOrZero(f, p+glmKeyExpertCount); v > 0 {
 		cfg.NumExperts = v
@@ -314,10 +314,21 @@ func applyQwen3MoEConfig(f *File, p string, cfg *model.Config) {
 // windows, encoded as GGUF arrays. The norm weights are baked (+1) at convert time and
 // consumed with plain RMSNorm, so NormGain1p stays false (the safetensors path, which
 // reads raw HF weights, is the one that sets it true).
+//
+// The family also ships in a sparse Mixture-of-Experts shape (HF text_config
+// enable_moe_block / num_experts / top_k_experts / moe_intermediate_size — e.g.
+// gemma-4-26B-A4B, 128 experts, top-8), so the shared expert-axis scalars are read here
+// exactly as the Qwen3-MoE and GLM-MoE-DSA appliers read them (issue #5494). Without that
+// read a genuine MoE gemma4 checkpoint resolved with NumExperts == 0 and was silently
+// treated as dense — the estimator sized it without the expert FFN (where most of a
+// 26B/A4B model's parameters live) and no expert-aware lever had an axis to dispatch on.
+// applyMoEExpertCounts writes each field only when the key is present AND positive, so a
+// DENSE gemma4 header (no expert_count) still resolves to NumExperts == 0 unchanged.
 func applyGemma4Config(f *File, p string, cfg *model.Config) error {
 	cfg.ActGeluTanh = true
 	cfg.BlockTopology = model.SandwichNorm
 	cfg.NormGain1p = false
+	applyMoEExpertCounts(f, p, cfg)
 	if cfg.HiddenSize > 0 {
 		cfg.EmbedScale = math.Sqrt(float64(cfg.HiddenSize))
 	}
