@@ -427,6 +427,10 @@ func TestTUIGardenJSONOutputFromFixture(t *testing.T) {
 }
 
 func TestTUIGuardHumanOutputFromFixtures(t *testing.T) {
+	// Clear NO_COLOR so the "auto wrote no ANSI" assertion below proves the branch it
+	// means to: default --color auto off a non-TTY sink. An ambient NO_COLOR would
+	// short-circuit tuiColorEnabled before the TTY check and pass the test vacuously.
+	t.Setenv("NO_COLOR", "")
 	paths := writeTUIGuardFixtures(t)
 	var stdout, stderr bytes.Buffer
 	code := runTUI(&stdout, &stderr, []string{
@@ -451,6 +455,13 @@ func TestTUIGuardHumanOutputFromFixtures(t *testing.T) {
 }
 
 func TestTUIGuardHumanOutputColorAlways(t *testing.T) {
+	// Pin the color opt-out this assertion depends on. tuiColorEnabled reads
+	// NO_COLOR and lets it beat --color always (TestTUIGuardHumanOutputNoColorWins
+	// is that contract), so without this the test inherits the ambient environment
+	// and fails on any host that exports NO_COLOR. Empty counts as unset: the
+	// production reader tests os.Getenv(...) == "", and t.Setenv restores the prior
+	// value at test end, which keeps the sibling tests in this package unaffected.
+	t.Setenv("NO_COLOR", "")
 	paths := writeTUIGuardFixtures(t)
 	var stdout, stderr bytes.Buffer
 	code := runTUI(&stdout, &stderr, []string{
@@ -519,6 +530,10 @@ func TestTUIGuardRejectsBadColorMode(t *testing.T) {
 }
 
 func TestTUIGuardJSONOutputFromFixtures(t *testing.T) {
+	// Clear NO_COLOR: the second leg below runs --json WITH --color always and asserts
+	// the JSON carries no render decoration. Under an ambient NO_COLOR color is never
+	// enabled at all, so that leg would pass without ever exercising the case it pins.
+	t.Setenv("NO_COLOR", "")
 	paths := writeTUIGuardFixtures(t)
 	var stdout, stderr bytes.Buffer
 	code := runTUI(&stdout, &stderr, []string{
