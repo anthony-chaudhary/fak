@@ -6,7 +6,7 @@
 
 **fak turns a tool-using agent into a managed agent.**
 
-The agent keeps its interface and model. A fak kernel manages its model traffic and cache reuse, its context lifetime, and its capabilities and recovery.
+The agent keeps its interface and model. A fak *kernel* — a management plane for one model session, not an OS kernel and not a GPU compute kernel — manages its model traffic and cache reuse, its context lifetime, and its capabilities and recovery. That pairing is what this page means by a *managed agent*: the agent you already run, with those four things owned outside it.
 
 > **TL;DR:** install one binary and run `fak agent --offline`. The managed agent still finishes its task while the kernel blocks a poisoned tool result and a destructive operation. No API key, model download, or GPU needed.
 
@@ -29,6 +29,8 @@ fak agent --offline
 (Go 1.26+ users can substitute `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`. Run it from any directory — no clone needed.) The run leaves one file behind: it writes `agent-report.json` into the directory you start it from and prints that full path when it finishes. Pass `--out PATH` to put it somewhere else.
 
 Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
+
+The full report counts four kernel events beneath those rows: `in-syscall repairs` (a malformed tool call the kernel repaired in place instead of spending a retry turn), `vDSO dedup hits` (a repeated call answered from the kernel's own cache with no engine round-trip), `adjudicator denies` (a call the policy refused before it ran), and `MMU quarantines` (a tool result held out of the model's context). The [glossary](docs/glossary.md) defines these and the rest of the project's vocabulary.
 
 Next action: run it and check those three rows. For the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md). To stand up a running, server-side governed agent in under 10 minutes, follow the [governed-agent quickstart](docs/fak/governed-agent-quickstart.md). That path is offline and gives you a default-deny floor, an audit journal, and a visible DENY.
 
@@ -64,12 +66,12 @@ For architecture, current evidence, and development workflow, start at [START-HE
 
 ## What the managed agent gains
 
-- **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system. That coordination is on by default and does not change the model's output. It keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses KV directly when it owns inference. That is ~4.1× less work than a tuned warm-cache stack, and up to 6.95× on larger models.
-- **Long runs keep moving.** Sessions compact their own history (up to ~107K tokens per trim) and can resume after a crash instead of dying at the context limit.
-- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor. That verdict takes 362 ns in process, with no policy model or network hop. Tool results carry provenance too, so poisoned content read from an untrusted source is stopped before the model acts on it.
-- **Big local models are first-class.** The kernel loads GGUF weights itself and serves OpenAI, Anthropic, and MCP clients directly. Mixture-of-experts models use only a few of the model's expert blocks per token. For those, the kernel pages just the needed expert weights in from SSD and stripes weight reads across sources by measured bandwidth. The whole model does not have to sit in RAM. Quantized (e.g. Q4) inference and grammar-constrained structured output are built in.
+- **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system. That coordination is on by default and does not change the model's output. It keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses KV directly when it owns inference. That is ~4.1× less work than a tuned warm-cache stack — the comparison is compute time against a baseline that already keeps per-agent KV warm, not against a re-send-everything loop, and in the measured run (Apple M3 Pro) a 50-turn × 5-agent Qwen2.5-1.5B Q8 session finishes in ~19 minutes where the tuned baseline needs ~78. Prefix reuse scored on its own, against full re-prefill, climbs 4.58× → 6.95× up a 135M → 1.5B model ladder.
+- **Long runs keep moving.** Sessions compact their own history — up to ~107K tokens of aged middle-turn context dropped per compaction fire, measured on a real `fak guard -- claude` session held to a 48K resident-context budget — and can resume after a crash instead of dying at the context limit.
+- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM (run it, but rewritten into a safe form), or REQUIRE_WITNESS (hold it until an outside check confirms what it claims to do — and deny if nothing does) against a reviewable *capability floor*: the policy file listing which tools the session may use at all, so anything absent from it is denied before it runs. That verdict is an in-process function call: 362 ns per decision (measured on an M3 Pro; 560–605 ns once argument predicates run), with no policy model and no network hop. For scale, the same class of check costs milliseconds once it has to leave the process: fak's own out-of-process guard hook tail measures ~85 ms mean / ~175 ms p99. Tool results carry provenance too — where the bytes came from and whether that source is trusted — so poisoned content read from an untrusted source is stopped at *result admission*, before the model acts on it.
+- **Big local models are first-class.** The kernel loads GGUF weights itself and serves OpenAI, Anthropic, and MCP clients directly. Mixture-of-experts models use only a few of the model's expert blocks per token. For those, the kernel pages just the needed expert weights in from SSD and stripes weight reads across sources by measured bandwidth. The whole model does not have to sit in RAM. Quantized (e.g. Q4) inference and grammar-constrained structured output — the decoder is held to your schema, so a reply cannot come back as malformed JSON — are built in.
 
-Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims ledger](CLAIMS.md).
+Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims ledger](CLAIMS.md). Every number above names its workload, hardware, and baseline in those two documents. Unfamiliar word: [glossary](docs/glossary.md).
 
 <p align="center">
   <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token-economics summary for real fak guard sessions, separating provider prompt-cache rebates from fak-authored compaction savings and comparing fak with a tuned warm-cache baseline." width="900">
@@ -156,7 +158,7 @@ Either way, `fak version` confirms it. Manual archive downloads, containers, bui
 - Use it: [tutorial](docs/fak/tutorial.md) · [integration guides](docs/integrations/) · [examples](examples/README.md)
 - Show it off: [Claude Code on your own Mac's local model](docs/fak/mac-agent-ui.md) via `fak mac`; slow first turn and single-stream, observable end to end
 - Operate it: [serving](docs/serving/README.md) · [observability](docs/fak/observability.md) · [deployment](docs/fak/deployment-guide.md)
-- Understand it: [performance outcomes and proofs](docs/performance.md) · [managed cache](docs/explainers/what-is-managed-cache.md) · [external system architecture](docs/architecture.md) · [concepts and story](docs/concepts-and-story.md)
+- Understand it: [performance outcomes and proofs](docs/performance.md) · [glossary](docs/glossary.md) · [managed cache](docs/explainers/what-is-managed-cache.md) · [external system architecture](docs/architecture.md) · [concepts and story](docs/concepts-and-story.md)
 - Verify it: [benchmark route](docs/benchmark-methodology.md) · [current benchmark authority](BENCHMARK-AUTHORITY.md) · [claims ledger](CLAIMS.md) · [reproduction packet](docs/repro-packet.md)
 - Build it: [contributing](CONTRIBUTING.md) (no write access? [fork and open a PR](CONTRIBUTING.md#fork-and-open-a-pull-request)) · [security](SECURITY.md) · [documentation home by audience](docs/index.md) · [front-page overflow](docs/README-legacy.md)
 

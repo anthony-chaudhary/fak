@@ -80,10 +80,12 @@ Deployment support depends on the selected backend and environment. Each quickst
 
 ## Deeper maps
 
+- **Words this project coined or overloaded:** [`docs/glossary.md`](docs/glossary.md) pins down kernel, context, adjudicator, vDSO, context-MMU, and the capability floor / result admission pair.
 - **Machines and coding agents:** [`llms.txt`](llms.txt) maps tasks to authoritative files.
 - **All documentation:** [`INDEX.md`](INDEX.md) is the curated repository-wide index.
 - **Repository agents:** [`AGENTS.md`](AGENTS.md) contains build, proof, commit, and shared-tree rules.
 - **Claims:** [`CLAIMS.md`](CLAIMS.md) records shipped, simulated, and stub status.
 - **Project evolution:** [`docs/notes/`](docs/notes/) preserves dated research, decisions, and historical context.
+- **Participation:** the [Code of Conduct](.github/CODE_OF_CONDUCT.md) governs issues, pull requests, and reviews, and names the route for reporting a problem.
 
 If you are still deciding, use the default: [run the one-minute offline proof](docs/repro-packet.md).
