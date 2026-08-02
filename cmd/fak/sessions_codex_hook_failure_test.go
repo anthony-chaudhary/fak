@@ -39,6 +39,11 @@ func TestCodexLoopHookFailureRecoveryMessages(t *testing.T) {
 }
 
 func TestCodexLoopHookDiagnoseFailureAllowsWithRecovery(t *testing.T) {
+	// Both ambient opt-outs must be neutralized: either one returns 0 with an EMPTY
+	// stderr before diagnose is ever called, so the recovery-string assertion below
+	// would fail on any box running under `fak guard`.
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "")
 	home, sessionID := writeCodexHookSession(t, "openai")
 	var stdout, stderr bytes.Buffer
 	code := sessionsCodexLoopHookUnbounded(&stdout, &stderr, strings.NewReader(`{"session_id":"`+sessionID+`"}`), []string{"--codex-home", home}, func(io.Reader, string) (codexLoopDiagnosis, error) {
@@ -50,6 +55,10 @@ func TestCodexLoopHookDiagnoseFailureAllowsWithRecovery(t *testing.T) {
 }
 
 func TestCodexLoopHookEncodeErrorNamesRecovery(t *testing.T) {
+	// Same neutralizers: an ambient opt-out returns 0 without ever reaching the
+	// encoder, so the injected write failure this test needs would never fire.
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "")
 	home, sessionID := writeCodexHookSession(t, "openai")
 	var stderr bytes.Buffer
 	code := sessionsCodexLoopHookUnbounded(failingCodexHookWriter{}, &stderr, strings.NewReader(`{"session_id":"`+sessionID+`"}`), []string{"--codex-home", home}, probeCodexLoopProvider)

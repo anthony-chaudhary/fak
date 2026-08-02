@@ -23,6 +23,11 @@ type codexProjectCommandHook struct {
 
 func TestCodexLoopHookBlocksActiveDirectContinuation(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
+	// An ambient FAK_GUARD_ACTIVE (set inside every `fak guard` session, so on any
+	// developer box but not on a bare CI runner) short-circuits the hook to
+	// allow-silently and leaves stdout empty. Neutralize it or the block assertion
+	// below dies on "unexpected end of JSON input" locally while passing in CI.
+	t.Setenv(guardActiveEnv, "")
 	home, sessionID := writeCodexHookSession(t, "openai")
 	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit","turn_id":"turn-next"}`
 
