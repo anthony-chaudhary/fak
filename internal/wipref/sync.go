@@ -196,6 +196,12 @@ type SyncResult struct {
 	Replicated  int `json:"replicated"`
 	StaleRemote int `json:"stale_remote"`
 	LocalOnly   int `json:"local_only"`
+	// SyncedAt / Source are the mirror stamp this sync left behind (mirrorstamp.go,
+	// #5556): the unix second it completed and whether it FETCHed the remote's whole
+	// namespace or only PUSHed this clone's. Both are zero on a sync that failed before
+	// stamping, which is what makes a ledger entry's silence here readable.
+	SyncedAt int64  `json:"synced_at,omitempty"`
+	Source   string `json:"source,omitempty"`
 }
 
 // MirrorIndex folds mirrored ref records into the session->object lookup the

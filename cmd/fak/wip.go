@@ -112,6 +112,11 @@ func wipUsage(w io.Writer) {
       from this clone's mirror of the remote — a LOCAL ref read, never a network probe,
       so status still answers at a boundary where the network is what failed. It is a
       last-known claim as of your last 'fak wip sync', not a live interrogation.
+      The report therefore also carries the mirror's PROVENANCE: NEVER_SYNCED / FRESH /
+      STALE, when the last sync ran and whether it FETCHed the remote's whole namespace
+      or only PUSHed this clone's. Read that line before reading anything absent from
+      the mirror as absent from the remote — a clone that has never fetched, or fetched
+      last Tuesday, reports the same emptiness as a peer that genuinely holds nothing.
 
   fak wip sync [-C <repo>] [--remote R] [--push-only|--fetch-only] [--json]
       REPLICATE the refs/fak/wip/* namespace to a remote (default origin): push this
@@ -129,6 +134,10 @@ func wipUsage(w io.Writer) {
       The FETCH lands in refs/fak/remotewip/<remote>/*, deliberately NOT in the live
       namespace: every wip verb that reads refs/fak/wip/* is tree-relative and one of
       them ('reap') deletes, so a peer host's checkpoints must never join that set.
+      A completed sync stamps refs/fak/checkpointsync/<remote> with the time and the
+      direction, so a later reader can date this clone's picture of the remote instead
+      of mistaking an unfetched mirror for an empty one. The stamp is local-only — the
+      push refspec cannot carry it — and a sync that fails leaves none.
 
   fak wip restore <session> [-C <repo>] [--apply]
       Print the checkpointed delta as an apply-able diff (default) or, with --apply,
@@ -711,6 +720,9 @@ func runWipStatus(stdout, stderr io.Writer, argv []string) int {
 			s.Session, shortWipSHA(s.StartSHA), len(s.Leaves), s.AgeSeconds, s.Buildable, s.Replication)
 	}
 	fmt.Fprintln(stdout, wipReplicationSummary(report.Replicated, report.StaleRemote, report.LocalOnly))
+	if report.Mirror != nil {
+		fmt.Fprintln(stdout, wipMirrorLine(*report.Mirror))
+	}
 	return 0
 }
 
@@ -725,6 +737,12 @@ func wipStatus(ctx context.Context, repo string, nowUnix int64) (wipref.StatusRe
 // wipStatusFor is wipStatus plus the replication verdict: it reads the live checkpoint
 // refs AND this clone's mirror of remote, then folds the two together. Both reads are
 // local — see wipMirrorIndex for why status must not touch the network.
+//
+// It also attaches the mirror's PROVENANCE (#5556). The three replication counts are only
+// as good as the mirror they were graded against, and a mirror nobody has refreshed
+// grades everything LOCAL_ONLY — which is the safe answer for durability but says nothing
+// about WHY. The attached view carries the last sync's time and direction so a reader can
+// tell "the remote does not have it" from "this clone has not looked".
 func wipStatusFor(ctx context.Context, repo, remote string, nowUnix int64) (wipref.StatusReport, error) {
 	recs, err := wipListRecords(ctx, repo)
 	if err != nil {
@@ -734,7 +752,13 @@ func wipStatusFor(ctx context.Context, repo, remote string, nowUnix int64) (wipr
 	if err != nil {
 		return wipref.StatusReport{}, err
 	}
-	return wipref.FoldWithMirror(recs, mirror, nowUnix), nil
+	rep := wipref.FoldWithMirror(recs, mirror, nowUnix)
+	view, err := wipMirrorView(ctx, repo, remote, len(mirror), nowUnix, 0)
+	if err != nil {
+		return wipref.StatusReport{}, err
+	}
+	rep.Mirror = &view
+	return rep, nil
 }
 
 // wipListRecords reads every live checkpoint ref and decodes its stamp from the

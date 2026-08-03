@@ -138,6 +138,14 @@ type StatusReport struct {
 	Replicated  int `json:"replicated"`
 	StaleRemote int `json:"stale_remote"`
 	LocalOnly   int `json:"local_only"`
+	// Mirror is the PROVENANCE of the evidence the three counts above were graded
+	// against: when this clone last synced the remote's mirror, by which direction, and
+	// whether an empty mirror may be read as absence at all (mirrorstamp.go, #5556). nil
+	// when the caller graded against no mirror. It is deliberately a sibling of the
+	// census rather than folded into it — the counts describe CHECKPOINTS, this field
+	// describes how much this clone actually knows about the remote it counted them
+	// against, and conflating the two is how staleness gets presented as absence.
+	Mirror *MirrorView `json:"mirror,omitempty"`
 }
 
 // Fold projects the live ref records into a sorted StatusReport, computing each

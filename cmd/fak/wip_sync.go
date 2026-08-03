@@ -125,10 +125,104 @@ func wipSync(ctx context.Context, repo, remote string, doPush, doFetch bool) (wi
 	if err != nil {
 		return res, err
 	}
-	rep := wipref.FoldWithMirror(local, mirror, time.Now().Unix())
+	now := time.Now().Unix()
+
+	// Stamp the mirror LAST, and only on a sync that got all the way here. The stamp is
+	// what a later reader trusts when it decides whether an empty mirror means "the remote
+	// has nothing" or "nobody here has looked", so it must date a COMPLETED sync: a push
+	// that succeeded followed by a fetch that failed already returned above, leaving the
+	// mirror refs the push justified but no stamp, which reads as NEVER_SYNCED — the safe
+	// direction. A fetch outranks a push as the source because only the fetch surveyed the
+	// remote's whole namespace; a --push-only sync stamps PUSH and is honest that it
+	// published without asking what else is there.
+	src := wipref.MirrorFromPush
+	if doFetch {
+		src = wipref.MirrorFromFetch
+	}
+	if err := wipWriteMirrorStamp(ctx, repo, remote, src, len(mirror), now); err != nil {
+		return res, err
+	}
+	res.SyncedAt, res.Source = now, string(src)
+
+	rep := wipref.FoldWithMirror(local, mirror, now)
 	res.Mirrored = len(mirror)
 	res.Replicated, res.StaleRemote, res.LocalOnly = rep.Replicated, rep.StaleRemote, rep.LocalOnly
 	return res, nil
+}
+
+// wipWriteMirrorStamp records WHEN this clone last completed a sync with remote and BY
+// WHICH direction, as a blob under refs/fak/checkpointsync/<segment>. Two plumbing spawns
+// (hash-object then update-ref), once per sync, never once per ref — the same O(1)-in-refs
+// discipline wipWriteMirror holds. The stamp is a ref rather than a config key so it takes
+// git's per-ref lock instead of the repo-wide config lock, which on this shared checkout is
+// contended by every peer at once.
+func wipWriteMirrorStamp(ctx context.Context, repo, remote string, src wipref.MirrorSource, refs int, nowUnix int64) error {
+	body, err := wipref.EncodeMirrorStamp(wipref.MirrorStamp{
+		Remote: remote, Source: src, SyncedAt: nowUnix, Refs: refs,
+	})
+	if err != nil {
+		return fmt.Errorf("encode the %s mirror stamp: %w", remote, err)
+	}
+	obj, errStr, code, err := gitWipStdin(ctx, repo, body, "hash-object", "-w", "--stdin")
+	if err != nil {
+		return fmt.Errorf("git not executable: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("write the %s mirror stamp: hash-object exited %d: %s", remote, code, strings.TrimSpace(errStr))
+	}
+	_, errStr, code, err = gitWip(ctx, repo, nil, "update-ref", wipref.MirrorStampRef(remote), strings.TrimSpace(obj))
+	if err != nil {
+		return fmt.Errorf("git not executable: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("point %s at the %s mirror stamp: update-ref exited %d: %s",
+			wipref.MirrorStampRef(remote), remote, code, strings.TrimSpace(errStr))
+	}
+	return nil
+}
+
+// wipReadMirrorStamp reads back one remote's mirror stamp. A MISSING stamp ref is not an
+// error — it is the answer NEVER_SYNCED, which every clone gives until its first sync
+// completes — so this returns ok=false rather than failing a status that has nothing to
+// apologize for. Only an unreadable git is an error.
+func wipReadMirrorStamp(ctx context.Context, repo, remote string) (wipref.MirrorStamp, bool, error) {
+	ref := wipref.MirrorStampRef(remote)
+	out, errStr, code, err := gitWip(ctx, repo, nil, "for-each-ref", "--format=%(objectname)", ref)
+	if err != nil {
+		return wipref.MirrorStamp{}, false, fmt.Errorf("git for-each-ref: %w", err)
+	}
+	if code != 0 {
+		return wipref.MirrorStamp{}, false, fmt.Errorf("git for-each-ref exited %d: %s", code, strings.TrimSpace(errStr))
+	}
+	obj := strings.TrimSpace(out)
+	if obj == "" {
+		return wipref.MirrorStamp{}, false, nil
+	}
+	body, errStr, code, err := gitWip(ctx, repo, nil, "cat-file", "blob", obj)
+	if err != nil {
+		return wipref.MirrorStamp{}, false, fmt.Errorf("git cat-file: %w", err)
+	}
+	if code != 0 {
+		// The ref resolved but its object did not read back — a gc'd or corrupt stamp.
+		// That is missing evidence, not a broken repo, so it degrades to NEVER_SYNCED
+		// rather than taking down a status call that can still grade replication.
+		_ = errStr
+		return wipref.MirrorStamp{}, false, nil
+	}
+	st, ok := wipref.DecodeMirrorStamp(body)
+	return st, ok, nil
+}
+
+// wipMirrorView is the provenance row `fak wip status` attaches to its report: the stamp
+// for remote, graded against now under the caller's tolerance (0 adopts
+// wipref.DefaultMirrorMaxAgeSeconds), carrying the live mirror ref count so a reader has
+// the count and the licence to interpret it in one place.
+func wipMirrorView(ctx context.Context, repo, remote string, mirrored int, nowUnix, maxAgeSeconds int64) (wipref.MirrorView, error) {
+	st, ok, err := wipReadMirrorStamp(ctx, repo, remote)
+	if err != nil {
+		return wipref.MirrorView{}, err
+	}
+	return wipref.ClassifyMirror(remote, st, ok, mirrored, nowUnix, maxAgeSeconds), nil
 }
 
 // wipSyncDirection runs one transport direction (git <verb> <remote> <refspec>) and
@@ -220,6 +314,31 @@ func wipListMirrorRecords(ctx context.Context, repo, remote string) ([]wipref.Re
 		recs = append(recs, wipref.RefRecord{Ref: ref, Object: obj})
 	}
 	return recs, nil
+}
+
+// wipMirrorLine renders one remote's mirror provenance for PLAIN output — the freshness
+// verdict, how long ago and by what direction the last sync ran, how many refs the mirror
+// holds, and (only when the count cannot be read as a fact) the caveat that says so.
+//
+// It exists for the same reason wipReplicationSummary does. A JSON-only empty_is_absence
+// would leave the human-facing report free to render "0" with the qualification one flag
+// away, which is exactly how a clone that has not fetched since Tuesday ends up reporting
+// a peer as having no work.
+func wipMirrorLine(v wipref.MirrorView) string {
+	line := fmt.Sprintf("mirror of %s: %s", v.Remote, v.Freshness)
+	if v.AgeSeconds >= 0 {
+		dir := strings.ToLower(string(v.Source))
+		if dir == "" {
+			dir = "sync"
+		}
+		line += fmt.Sprintf(" (last %s %ds ago, %d ref(s) mirrored)", dir, v.AgeSeconds, v.Mirrored)
+	} else {
+		line += fmt.Sprintf(" (%d ref(s) mirrored)", v.Mirrored)
+	}
+	if c := wipref.MirrorCaveat(v); c != "" {
+		line += "\n  " + c
+	}
+	return line
 }
 
 // wipReplicationSummary is the one line that makes the distinction legible in plain
