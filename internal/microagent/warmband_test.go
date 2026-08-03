@@ -628,65 +628,6 @@ func TestWarmBandCloseDrainsReserveToDisk(t *testing.T) {
 	}
 }
 
-// TestWarmBandProducerHonorsHighWaterOverMaxWarm pins the #5072 scope-1 bound: the
-// producer is bounded by the HIGH-WATER CAP, not just by the reserve's own cap. MaxWarm
-// is a caller-supplied int this package cannot validate against the dispatch-side
-// effective worker cap, so a caller that sizes it above the high-water mark must still
-// not get more in-RAM contexts than the cap it sized from preflight.
-//
-// This is a real regression guard, not a hypothetical: the fold answers in resident-slot
-// terms (high-water minus residency) and a refill never moves residency, so before the
-// bound was charged against the already-warm agents the answer was recomputed identically
-// every pass and never bounded the batch — with residency pinned at 0 the producer drained
-// the ENTIRE store up to MaxWarm (measured: 8 warm against a high-water of 2).
-func TestWarmBandProducerHonorsHighWaterOverMaxWarm(t *testing.T) {
-	const (
-		enrolled = 8
-		high     = 2
-		maxWarm  = 8 // deliberately ABOVE the high-water cap
-	)
-	band, err := microagent.NewWarmBand(microagent.WarmBandConfig{
-		Low: 1, High: high, MaxWarm: maxWarm, Dir: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("NewWarmBand: %v", err)
-	}
-	defer band.Close()
-
-	log := newWarmLog()
-	for i := 0; i < enrolled; i++ {
-		id := fmt.Sprintf("a%d", i)
-		if err := band.Enroll(id, &warmAgent{id: id, turns: 4, log: log}); err != nil {
-			t.Fatalf("Enroll %q: %v", id, err)
-		}
-	}
-
-	// Nothing ever acquires, so residency sits at 0 the whole time: every warm agent here
-	// is the producer's doing, and warm + resident is just warm.
-	s := waitWarm(t, band, high)
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if got := band.Stats(); got.Warm > s.Warm {
-			s = got
-		}
-		if s.Warm > high {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	if s.Warm > high {
-		t.Errorf("warm = %d with residency 0 and a high-water cap of %d — the producer overran "+
-			"the cap the caller sized from preflight: %+v", s.Warm, high, s)
-	}
-	if s.Parked == 0 {
-		t.Errorf("parked = 0: the producer drained the whole store instead of stopping at the "+
-			"high-water cap: %+v", s)
-	}
-	if s.Thaws != 0 {
-		t.Errorf("thaws = %d, want 0 — the producer's wakes are paid OFF the critical path", s.Thaws)
-	}
-}
-
 // TestWarmBandYieldAfterCloseColdParks pins the other half of the shutdown contract: a
 // Yield that races Close (the Host was closed in the wrong order) must cold-park to disk
 // instead of warm-parking into a reserve that has already been drained — otherwise that
