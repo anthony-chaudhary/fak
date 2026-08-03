@@ -108,3 +108,71 @@ func TestSessionFromPrefixRefusesGemma4(t *testing.T) {
 
 	m.SessionFromPrefix(prime.Cache)
 }
+
+// TestNewBatchFromPrefixRefusesGemma4 closes the one construction site the #5548 fix left
+// ungated. SessionFromPrefix is not the only way to build a session from a cached prefix:
+// NewBatchFromPrefixReserve assembles Session structs by hand (batch.go), so it never asked
+// the predicate and inherited the exact defect the ticket named — one rung further out,
+// because it fans the empty prefix across every lane at once.
+//
+// The batch path is the cross-agent reuse lever: prefill a shared system prompt ONCE, clone
+// it into n agents. For gemma4 that clone carries nothing, so all n lanes decode as if the
+// shared prefix did not exist. Nothing downstream notices, for the same reason nothing
+// noticed on the radix path: the empty cache is a well-formed zero-length prefix, and
+// StepBatch's serial fallback happily routes each lane to the recompute Step over a history
+// holding only that lane's own generated tokens.
+//
+// It refuses instead of carrying gemma4Hist for the reason c11aedade already settled: the
+// gemma4 forward is cacheless, so a "reused" batch would recompute every lane's prefix
+// anyway — there is no prefill saving to preserve, and reporting one would misstate the
+// cross-agent lever this constructor exists to measure.
+func TestNewBatchFromPrefixRefusesGemma4(t *testing.T) {
+	m := NewSyntheticGemma4(tinyGemma4ReuseCfg())
+	shared := []int{5, 12, 30, 7, 21, 9}
+
+	base := m.NewSession()
+	base.Prefill(shared)
+
+	const lanes = 3
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("NewBatchFromPrefix accepted a gemma4 cache: it returned %d lanes each "+
+				"believing they hold the %d-token shared prefix while carrying 0 of it, so every "+
+				"lane decodes as if the shared prompt did not exist", lanes, len(shared))
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("NewBatchFromPrefix panicked with %T, want a string naming the architecture", r)
+		}
+		if !strings.Contains(msg, "gemma4") {
+			t.Errorf("refusal must name the architecture so an operator can act on it, got %q", msg)
+		}
+		t.Logf("NewBatchFromPrefix refusal: %s", msg)
+	}()
+
+	m.NewBatchFromPrefix(base.Cache, lanes)
+}
+
+// TestNewBatchFromPrefixStaysOpenForCachedArches keeps the batch refusal as narrow as the
+// session one: the cross-agent prefix-clone lever must still work for every architecture
+// whose K/V rows really are its whole state.
+func TestNewBatchFromPrefixStaysOpenForCachedArches(t *testing.T) {
+	m := NewSynthetic(Config{
+		HiddenSize: 32, IntermediateSize: 64, VocabSize: 41, NumLayers: 2,
+		NumHeads: 4, HeadDim: 8, NumKVHeads: 4, RMSNormEps: 1e-6, RopeTheta: 1e4,
+		EOSTokenID: -1,
+	})
+	base := m.NewSession()
+	base.Prefill([]int{5, 12, 30, 7, 21, 9})
+
+	bs := m.NewBatchFromPrefix(base.Cache, 3)
+	if bs.N() != 3 {
+		t.Fatalf("batch has %d lanes, want 3", bs.N())
+	}
+	for i, s := range bs.Seqs {
+		if got := s.Cache.Len(); got != base.Cache.Len() {
+			t.Errorf("lane %d cloned %d prefix rows, want %d", i, got, base.Cache.Len())
+		}
+	}
+}
