@@ -126,6 +126,7 @@ policy refusal. This is what lets a refusal cost a non-Go agent zero extra model
 | POST | [`/v1/fak/revoke`](#post-v1fakrevoke) | fak-native | Refute a world-state witness |
 | POST | [`/v1/fak/context/change`](#post-v1fakcontextchange) | fak-native | Tombstone a recall page |
 | POST | [`/v1/fak/policy/reload`](#post-v1fakpolicyreload) | fak-native | Hot-reload the policy manifest |
+| POST | [`/v1/fak/route/reload`](#post-v1fakroutereload) | fak-native | Force-reload the model-routing manifest |
 | POST | [`/v1/fak/trace/reset`](#post-v1faktracereset) | fak-native | Clear a session's IFC taint mark |
 | GET | [`/v1/fak/session/{id}`](#v1faksession--live-session-control) | fak-native | Observe a session's live drive state |
 | POST | [`/v1/fak/session/{id}/{verb}`](#v1faksession--live-session-control) | fak-native | Control a session (run/budget/pace/priority) |
@@ -442,6 +443,33 @@ plus the same delta. Initial `--policy` installation is not subject to this hot-
 |---|---|
 | `404` | Policy reload is not configured for this deployment. |
 | `400` | The reload failed (the error message is included). |
+
+### `POST /v1/fak/route/reload`
+
+Forces a reload of the `fak serve --route-manifest` model-routing manifest in-place (no
+request body) — the route-plane twin of `/v1/fak/policy/reload`.
+
+`fak serve` already follows the manifest with a background poll loop, but its change gate
+is size + mtime-nanos. An edit that preserves both — a same-length change inside the
+filesystem's timestamp granularity (NFSv3 ~1s, FAT 2s, some container and network mounts),
+or a deploy tool that restores mtime — is invisible to the poller. This POST bypasses that
+gate and compares content, so such an edit applies without restarting the server. It drives
+the same watcher the poll loop uses, so both triggers share one last-good baseline, one
+atomic swap, and one reload/reject counter pair.
+
+**Response** (`RouteReloadResponse`): `{ "reloaded": true, "source": "<path>", "changed":
+true, "reloads": 1, "rejects": 0 }`. A byte-identical manifest is a `200` no-op with
+`reloaded: false`.
+
+A malformed manifest is **rejected**: the last-good routing policy stays live and the call
+returns `400` rather than silently degrading the routing surface. Both outcomes are logged
+and journalled as `CONFIG_SWAP` rows, so an operator can confirm which bytes became
+authoritative.
+
+| Status | When |
+|---|---|
+| `404` | No `--route-manifest` is installed, so there is nothing to reload. |
+| `400` | The manifest failed to parse or validate (the error is included); last-good kept. |
 
 ### `POST /v1/fak/trace/reset`
 
