@@ -1182,6 +1182,12 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	// it back into WitnessRecord.Model (and Layer-2 downgrade can read what the slot ran on).
 	// Written only when the model was un-blanked — a seat-default worker leaves no sidecar.
 	writeDispatchModelSidecar(spawned.Log, launch.Model)
+	// #4324: persist the fencing token this lane lease was acquired under, so the async
+	// witness sweep — a LATER tick process that never saw the acquire — can prove the
+	// lease is still this worker's and hand the lane back the moment the worker exits
+	// normally, instead of stranding it for the whole TTL. Nothing is written for a
+	// refused/fail-open acquire or a zero generation; such a lease keeps its TTL.
+	writeDispatchLeaseFenceSidecar(spawned.Log, lease)
 	// #5416 tracks E+F: persist the work class and placement rung resolved at prepare time
 	// beside the log, so the witness sweep reads what was true AT LAUNCH rather than
 	// re-deriving a present-tense answer about a finished slot. No-op when either could not

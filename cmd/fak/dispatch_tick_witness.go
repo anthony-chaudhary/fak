@@ -278,6 +278,22 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			// runs-dir archive copy.
 			row["reverted"] = reverted
 		}
+		// #4324 release-on-exit: this worker is provably finished and the sweep has
+		// stopped writing under its lease (the land+reap and the stranded-revert rung
+		// both ran above), so a NORMAL exit hands the lane back NOW through the fenced
+		// CAS delete instead of stranding it for the ~40-min TTL and refusing peers
+		// against a holder that no longer exists. Live sweeps only — a dry-run never
+		// mutates a ref. An abnormal exit (an unclassifiable crash, or stranded edits)
+		// deliberately keeps its lease: TTL expiry plus the dead-holder reclaim is the
+		// correct path when a lane may be mid-write. Fail-open: the outcome is recorded
+		// on the graded row and never propagated.
+		if live && dispatchWorkerExitReleasesLease(rec, len(reverted)) {
+			if id, outcome := dispatchLeaseReleaser(root, stem); id != "" {
+				row["lease_released"] = id
+			} else {
+				row["lease_release_refused"] = outcome
+			}
+		}
 		audited = append(audited, row)
 		buckets[rec.Claim] = append(buckets[rec.Claim], row)
 		if live {

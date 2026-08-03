@@ -74,6 +74,18 @@ func TestDispatchTickMicroBackendEnrollsIntoHostNotDetachedSpawn(t *testing.T) {
 	if lease["refused"] == true {
 		t.Fatalf("lease = %#v, want not refused (no peer holds the lane)", lease)
 	}
+
+	// #4324: the enrolled path is the acquire site that never detaches, so nothing will
+	// ever witness it — the hand-back has to happen HERE or the lane strands for its whole
+	// TTL. This pins the call site is wired at all (a deleted call leaves the key absent),
+	// and pins the fail-open answer for THIS fixture: a bare temp workspace is not a git
+	// repo, so the acquire fail-opened with no fencing token and the retirement must
+	// release NOTHING rather than blind-delete whatever the lease id names. The
+	// re-acquirable-immediately acceptance for a REAL acquired lease lives in
+	// TestDispatchInProcessLaneLeaseRelease.
+	if got["lease_release"] != "no_lease_id" {
+		t.Fatalf("lease_release = %v, want no_lease_id (a fail-open acquire carries no fencing token)", got["lease_release"])
+	}
 }
 
 // TestDispatchTickMicroBackendDryRunWouldEnroll pins the dry-run peer of the live path:

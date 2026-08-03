@@ -115,6 +115,17 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 		return dispatchHostEnrollFailed(runsDir, opts, payload, finish, fmt.Sprintf("microagent %q for issue #%d did not retire done (done=%v drain_err=%v)", plan.AgentID, target, done, drainErr))
 	}
 
+	// #4324 release-on-exit, in-process twin. The microagent retired DONE after a clean
+	// drain, so the work this lane lease fenced is finished inside this very process and
+	// nothing more will be written under it — but unlike a detached worker there is no
+	// witness sweep that will ever grade this slot, so without an explicit hand-back the
+	// lease strands for its full TTL every single time and refuses peers against a holder
+	// that has already returned. The fenced CAS delete is the same one the witness sweep
+	// uses. Only THIS path releases: every dispatchHostEnrollFailed return above (host
+	// construct fault, refused spawn, drain error or a microagent that did not retire
+	// done) is an abnormal exit whose lane may be mid-step, and those correctly keep the
+	// lease until TTL expiry. Fail-open — the outcome is surfaced, never propagated.
+	payload["lease_release"] = releaseInProcessLaneLease(root, lease)
 	payload["ok"] = true
 	payload["action"] = "enrolled"
 	payload["verdict"] = "ENROLLED"
