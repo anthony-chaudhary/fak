@@ -33,10 +33,24 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 
+	floorBegan := time.Now()
 	resultAdmissions, err := s.admitInboundResults(r.Context(), req.Messages, req.Tools, reqTrace)
 	if err != nil {
 		s.logf("gateway: result-floor error (messages stream): %v", err)
 		writeErr(w, http.StatusBadGateway, "upstream model error")
+		// The client now has its terminal 502, but "the client was told" and "the operator
+		// was told" are different questions and only the first used to be satisfied here:
+		// the s.logf above reaches the --log stream, OFF by default, so a turn refused by
+		// the result floor on THIS route was invisible on /metrics and printed no FAILED
+		// line. That is the under-count nobody notices, because the number is too SMALL.
+		// #5525 closed the identical hole on the streaming passthrough's terminal switch;
+		// this is the same cure on the planner-live arm, reusing the same two observers.
+		// Unlike over there, no sentinel stands between the failure and the observation:
+		// this IS the producer, so `err` is already the REAL cause and lands in its own
+		// kind rather than the coarse `other` bucket. Nothing else on this path observes,
+		// so the failure is counted exactly once. The response is not touched again.
+		s.metrics.observeUpstreamError(err)
+		s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(floorBegan))
 		return true
 	}
 
