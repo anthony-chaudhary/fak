@@ -19,6 +19,11 @@ package main
 //	leak 2  the task-handoff dir in cmdGuard used a raw os.MkdirTemp, so its
 //	        token "handoff" WAS in the set but the name had no <pid> — rung 2
 //	        failed, and no handoff dir was ever claimed either.
+//	leak 3  installGuardStopHook repeated leak 2 at a third call site: "stophook"
+//	        was in the set, but its raw os.MkdirTemp emitted no <pid> either. It
+//	        was outside #5527's scope fence, so it landed behind the waiver below
+//	        instead of being fixed — and #5535 then cured it and cleared the
+//	        waiver, which is the rot-avoidance loop working end to end.
 //
 // A test that hardcoded today's call sites would have caught neither, and would
 // miss tomorrow's. So this file DISCOVERS the call sites by parsing the package
@@ -42,9 +47,10 @@ package main
 //     long as it is written correctly, and fails in both when it is not;
 //   - every failure message names the offending FILE and LINE plus the exact
 //     cure, so whoever hits it can act without knowing this ticket; and
-//   - the one waiver below is keyed by file AND token and is self-policing, so a
-//     lane that fixes the waived site is told to delete the waiver in the same
-//     commit — the divergence announces itself instead of rotting.
+//   - the waiver list below is keyed by file AND token and is self-policing, so a
+//     lane that fixes a waived site is told to delete the waiver in the same
+//     commit — the divergence announces itself instead of rotting. It is empty
+//     today, so property A currently admits no exception at all.
 //
 // The scan covers non-test .go files only: test files deliberately construct
 // malformed names as fixtures (guard_tempreap_test.go builds pid-less and
@@ -63,23 +69,21 @@ import (
 
 // guardTempDirRawWaiver lists raw os.MkdirTemp call sites that name a REAPED
 // token and are known-open rather than sanctioned. It exists so this test can
-// land as a ratchet against NEW breakage without silently absorbing the one site
-// #5527's scope fence put out of reach.
+// land as a ratchet against NEW breakage without silently absorbing a site some
+// ticket's scope fence put out of reach.
 //
-// installGuardStopHook allocates its settings dir with a raw
-// os.MkdirTemp("", "fak-guard-stophook-*") while "stophook" is in
-// guardTempDirHooks — the same defect as leak 2, at a third call site, and it
-// needs the same one-line cure (route through guardSessionTempDir("stophook")).
-// It is rare in practice, not merely theoretical: the raw call runs only when no
-// earlier installer already wrote a settings file to merge into, so it fires far
-// less often than the handoff path did.
+// IT IS EMPTY, AND EMPTY IS THE INVARIANT. Its one entry waived leak 3 —
+// installGuardStopHook's raw os.MkdirTemp("", "fak-guard-stophook-*") — which
+// #5535 has now routed through guardSessionTempDir("stophook"), so the entry was
+// deleted with the fix exactly as the stale-waiver check below demands. With no
+// entries left, property A admits no exception: a FOURTH raw fak-guard-* site
+// naming a reaped token fails this test the day it is written, and re-opening the
+// escape hatch means adding a line here that a reviewer can see.
 //
 // Keyed by file base name -> token. Removing a waiver is the LAST step of fixing
 // its site; the stale-waiver check below fails if a waived site is gone, so the
 // list cannot rot into a permanent blind spot.
-var guardTempDirRawWaiver = map[string]string{
-	"guard_stophook.go": "stophook",
-}
+var guardTempDirRawWaiver = map[string]string{}
 
 // guardTempDirSite is one discovered temp-dir creation call site.
 type guardTempDirSite struct {
@@ -336,5 +340,57 @@ func TestGuardPidlessHandoffDirIsNotClaimed(t *testing.T) {
 	if !ok || hook != "handoff" || pid != os.Getpid() {
 		t.Fatalf("guardTempDirOwner(%q) = (%q, %d, %v), want (\"handoff\", %d, true)",
 			filepath.Base(dir), hook, pid, ok, os.Getpid())
+	}
+}
+
+// TestGuardStopHookTempDirIsReaped is leak 3's behavioural witness (#5535). It
+// drives the PRODUCTION allocator rather than the seam: installGuardStopHook owns
+// the os.MkdirTemp call, and the only way into its temp-dir branch is the config
+// the leak lived in — a claude child with no settings file from an earlier
+// installer to merge into (i.e. PreCompact off), which is why the raw call fired
+// rarely enough to survive a disk census.
+//
+// Rarity is not safety here. Unlike the lifecycle server there is no Close() that
+// removes this dir on the happy path — nothing in the guard removes it at all — so
+// the dead-owner sweep is the family's ONLY bound, and a pid-less name disables
+// that sweep permanently. That is precisely what the raw call produced:
+// "fak-guard-stophook-<random>", which guardTempDirOwner must refuse.
+func TestGuardStopHookTempDirIsReaped(t *testing.T) {
+	root := guardTempDirRedirectTemp(t)
+
+	// existingSettingsPath "" selects the allocating branch; a claude command is
+	// required or the installer no-ops (non-claude-child) before reaching it.
+	_, _, install, err := installGuardStopHook(
+		[]string{"claude", "-p", "hi"}, guardPreCompactModeEnforce,
+		"http://127.0.0.1:4567", "", 3, 7, 9, 6, guardOperatorDirectedModeWarn)
+	if err != nil {
+		t.Fatalf("installGuardStopHook: %v", err)
+	}
+	if !install.Applied || install.SettingsPath == "" {
+		t.Fatalf("stop hook did not write its own settings file: %+v", install)
+	}
+	dir := filepath.Dir(install.SettingsPath)
+	if parent := filepath.Dir(dir); parent != filepath.Clean(root) {
+		t.Fatalf("settings dir %q sits outside the redirected temp root %q", dir, root)
+	}
+	base := filepath.Base(dir)
+
+	// Rung 1 + rung 2: the parser claims the token AND recovers this process's PID.
+	hook, pid, ok := guardTempDirOwner(base)
+	if !ok || hook != "stophook" || pid != os.Getpid() {
+		t.Fatalf("guardTempDirOwner(%q) = (%q, %d, %v), want (\"stophook\", %d, true) — "+
+			"installGuardStopHook must allocate via guardSessionTempDir(\"stophook\") so the "+
+			"name carries a <pid> the reaper can test for liveness before removing it",
+			base, hook, pid, ok, os.Getpid())
+	}
+
+	// And the sweep actually removes it once the owner reads as dead. selfPID 0 is
+	// never a real owner, so nothing is excluded as "this process's own dir".
+	reaped := guardReapStaleTempDirs(root, 0, func(int) bool { return false })
+	if len(reaped) != 1 || reaped[0] != dir {
+		t.Fatalf("reaped = %v, want exactly [%s]", reaped, dir)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("expected %s removed, stat err = %v", base, err)
 	}
 }

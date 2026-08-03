@@ -973,7 +973,15 @@ func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath st
 	}
 	dir := ""
 	if strings.TrimSpace(existingSettingsPath) == "" {
-		dir, err = os.MkdirTemp("", "fak-guard-stophook-*")
+		// Allocate through the creation seam so the name carries this guard's PID
+		// (fak-guard-stophook-<pid>-*). A raw os.MkdirTemp here produced a pid-less
+		// name that guardTempDirOwner refuses, so guardReapStaleTempDirs could never
+		// claim the dir even though "stophook" is already in the reaped hook set —
+		// the same defect as #5527's task-handoff leak, at a third call site (#5535).
+		// Nothing removes this dir on the happy path either (there is no Close() to
+		// lean on, unlike the lifecycle server), so the dead-owner sweep is the only
+		// bound this family has. See guard_tempreap.go.
+		dir, err = guardSessionTempDir("stophook")
 		if err != nil {
 			return command, nil, guardStopHookInstall{}, err
 		}
