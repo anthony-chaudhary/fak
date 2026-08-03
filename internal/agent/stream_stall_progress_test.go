@@ -72,7 +72,6 @@ data: {"type":"content_block_start","index":0,"content_block":{"type":"text","te
 // and must report the no-progress cause rather than claiming the upstream went silent.
 func TestStreamAnthropicRawStallTripsOnPingOnlyUpstream(t *testing.T) {
 	t.Setenv("FAK_STREAM_STALL_TIMEOUT_S", "5")
-	t.Setenv("FAK_STREAM_PROGRESS_TIMEOUT_S", "6")
 	const ping = "event: ping\ndata: {\"type\":\"ping\"}\n\n"
 	srv := keepaliveOnlySSEServer(t, "text/event-stream", anthropicWarmPrefix, ping, time.Second)
 
@@ -80,6 +79,7 @@ func TestStreamAnthropicRawStallTripsOnPingOnlyUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProviderHTTPPlanner: %v", err)
 	}
+	p.StreamProgressTimeout = 6 * time.Second // the config surface, not an env var
 	rawBody := []byte(`{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 
 	var pings int
@@ -131,7 +131,6 @@ func TestStreamAnthropicRawStallTripsOnPingOnlyUpstream(t *testing.T) {
 // only the progress deadline can end it.
 func TestCompleteStreamTripsOnKeepaliveOnlyUpstream(t *testing.T) {
 	t.Setenv("FAK_STREAM_STALL_TIMEOUT_S", "5")
-	t.Setenv("FAK_STREAM_PROGRESS_TIMEOUT_S", "6")
 	const prefix = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n"
 	const keepalive = ": keepalive\n\n" +
@@ -139,6 +138,7 @@ func TestCompleteStreamTripsOnKeepaliveOnlyUpstream(t *testing.T) {
 	srv := keepaliveOnlySSEServer(t, "text/event-stream", prefix, keepalive, time.Second)
 
 	p := NewHTTPPlanner(srv.URL, "m", "")
+	p.StreamProgressTimeout = 6 * time.Second // the config surface, not an env var
 	done := make(chan error, 1)
 	go func() {
 		_, err := p.CompleteStream(context.Background(), func(string) error { return nil },
@@ -167,7 +167,6 @@ func TestCompleteStreamTripsOnKeepaliveOnlyUpstream(t *testing.T) {
 // progress window would pass the trip test above.
 func TestStreamProgressDeadlineSurvivesSlowProgress(t *testing.T) {
 	t.Setenv("FAK_STREAM_STALL_TIMEOUT_S", "5")
-	t.Setenv("FAK_STREAM_PROGRESS_TIMEOUT_S", "6")
 	frames := []string{
 		"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n",
 		"data: {\"choices\":[{\"delta\":{\"content\":\"a\"},\"finish_reason\":null}]}\n\n",
@@ -180,6 +179,7 @@ func TestStreamProgressDeadlineSurvivesSlowProgress(t *testing.T) {
 	srv := steadySSEServer(t, "text/event-stream", frames, 2*time.Second)
 
 	p := NewHTTPPlanner(srv.URL, "m", "")
+	p.StreamProgressTimeout = 6 * time.Second // the config surface, not an env var
 	comp, err := p.CompleteStream(context.Background(), func(string) error { return nil },
 		[]Message{{Role: RoleUser, Content: "hi"}}, nil)
 	if err != nil {
@@ -245,28 +245,37 @@ func TestOpenAIChunkAdvancesTurn(t *testing.T) {
 	}
 }
 
-// TestStreamProgressTimeoutClamp pins the env parse + clamp band and the explicit off
-// switch — the one escape hatch for an operator whose provider legitimately prefills longer
-// than the window.
-func TestStreamProgressTimeoutClamp(t *testing.T) {
+// TestStreamProgressWindowResolvesTheConfigField pins the CONFIG-SURFACE resolver: the band
+// a configured window must land in, the zero-means-default rule every unconfigured planner
+// takes, and the explicit off switch — the one escape hatch for an operator whose provider
+// legitimately prefills longer than the window. The knob is a planner field, never an env
+// var: a behavioral deadline is configuration, not a credential (CONFIG_NOT_ENV).
+func TestStreamProgressWindowResolvesTheConfigField(t *testing.T) {
 	cases := []struct {
-		env  string
+		name string
+		set  time.Duration
 		want time.Duration
 	}{
-		{"", 300 * time.Second},
-		{"4", 300 * time.Second},   // below the 5s floor -> default
-		{"5", 5 * time.Second},     // floor
-		{"600", 600 * time.Second}, // ceiling
-		{"601", 300 * time.Second}, // above the ceiling -> default
-		{"x", 300 * time.Second},   // unparseable -> default
-		{"0", 0},                   // explicit off
-		{" OFF ", 0},               // explicit off, tolerant of case/space
+		{"unset", 0, DefaultStreamProgressTimeout},
+		{"below the floor", 4 * time.Second, DefaultStreamProgressTimeout},
+		{"floor", streamProgressMinWindow, 5 * time.Second},
+		{"ceiling", streamProgressMaxWindow, 600 * time.Second},
+		{"above the ceiling", 601 * time.Second, DefaultStreamProgressTimeout},
+		{"explicit off", -1, 0},
 	}
 	for _, c := range cases {
-		t.Setenv("FAK_STREAM_PROGRESS_TIMEOUT_S", c.env)
-		if got := streamProgressTimeout(); got != c.want {
-			t.Errorf("streamProgressTimeout() with env %q = %s, want %s", c.env, got, c.want)
+		p := &HTTPPlanner{StreamProgressTimeout: c.set}
+		if got := p.streamProgressWindow(); got != c.want {
+			t.Errorf("%s: streamProgressWindow() with StreamProgressTimeout=%s = %s, want %s", c.name, c.set, got, c.want)
 		}
+	}
+	// The default is the documented 300s, and an unconfigured planner really does take it —
+	// the behavior b66a2dba5 shipped, preserved across the move off the environment.
+	if DefaultStreamProgressTimeout != 300*time.Second {
+		t.Errorf("DefaultStreamProgressTimeout = %s, want 300s", DefaultStreamProgressTimeout)
+	}
+	if got := NewHTTPPlanner("http://x", "m", "").streamProgressWindow(); got != 300*time.Second {
+		t.Errorf("an unconfigured planner's progress window = %s, want the 300s default", got)
 	}
 }
 

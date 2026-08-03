@@ -25,8 +25,9 @@ package agent
 // stallReader carries TWO deadlines answering two different questions:
 //
 //   - LIVENESS (bytes) — the idle timer above. `ping` re-arms it, and should.
-//   - PROGRESS (content) — a second, longer timer (streamProgressTimeout) armed when the body
-//     is wrapped and re-armed ONLY through noteProgress, which the SSE decode loops call for a
+//   - PROGRESS (content) — a second, longer timer (the planner's StreamProgressTimeout config
+//     field, resolved by streamProgressWindow) armed when the body is wrapped and re-armed
+//     ONLY through noteProgress, which the SSE decode loops call for a
 //     frame that advances the TURN (content_block_start/delta, message_delta, a finish reason,
 //     a tool-call fragment) and deliberately NOT for `ping`/keepalive frames.
 //
@@ -240,20 +241,43 @@ func streamStallTimeout() time.Duration {
 	return envClampedTimeout("FAK_STREAM_STALL_TIMEOUT_S", 60*time.Second, 5, 600)
 }
 
-// streamProgressTimeout is the CONTENT-progress deadline: how long a stream may stay warm
-// (keepalives arriving, so the idle deadline above never fires) without a single frame that
-// advances the turn. 300s unless FAK_STREAM_PROGRESS_TIMEOUT_S overrides it in the same
-// [5s, 600s] band; the literal "0"/"off" disables it, the one escape hatch an operator has
-// if a provider's prefill legitimately outlasts the window. The default sits well above the
-// worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking
-// pause (thinking streams content_block_deltas, which count as progress), yet under the 600s
-// whole-request ceiling `fak guard` sets — a window past that ceiling could never fire.
-func streamProgressTimeout() time.Duration {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_STREAM_PROGRESS_TIMEOUT_S"))) {
-	case "0", "off":
+// DefaultStreamProgressTimeout is the CONTENT-progress deadline a planner uses when its
+// HTTPPlanner.StreamProgressTimeout config field is left at zero. It is the SINGLE SOURCE OF
+// TRUTH for that default — the DefaultCtxViewBudget idiom — so a front door that grows a
+// flag for the window defaults it to this constant rather than a bare literal and the two
+// can never drift. 300s sits well above the worst prefill-to-first-token gap on a large
+// cached prompt and above any extended-thinking pause (thinking streams content_block_deltas,
+// which count as progress), yet under the 600s whole-request ceiling `fak guard` sets — a
+// window past that ceiling could never fire.
+//
+// This deliberately is NOT an environment read. A behavioral deadline is configuration, not a
+// credential, so it lives on the config surface (internal/envconfiglint's CONFIG_NOT_ENV
+// rule); the environment is for declared secrets.
+const DefaultStreamProgressTimeout = 300 * time.Second
+
+// streamProgressMinWindow / streamProgressMaxWindow bound a configured content-progress
+// deadline. Below the floor the window would undercut the idle deadline and mislabel a plain
+// dead socket; above the ceiling it outlasts the 600s whole-request timeout and could never
+// fire. A configured value outside the band is not honored — the default is used instead.
+const (
+	streamProgressMinWindow = 5 * time.Second
+	streamProgressMaxWindow = 600 * time.Second
+)
+
+// streamProgressWindow resolves the planner's configured content-progress deadline into the
+// window newStallReader arms. Zero (unconfigured) is DefaultStreamProgressTimeout; a NEGATIVE
+// value is the explicit off switch and disables the deadline; an out-of-band positive value
+// falls back to the default rather than being clamped, so a typo'd window never silently
+// becomes a different real deadline.
+func (p *HTTPPlanner) streamProgressWindow() time.Duration {
+	switch {
+	case p.StreamProgressTimeout < 0:
 		return 0
+	case p.StreamProgressTimeout >= streamProgressMinWindow && p.StreamProgressTimeout <= streamProgressMaxWindow:
+		return p.StreamProgressTimeout
+	default:
+		return DefaultStreamProgressTimeout
 	}
-	return envClampedTimeout("FAK_STREAM_PROGRESS_TIMEOUT_S", 300*time.Second, 5, 600)
 }
 
 // anthropicFrameAdvancesTurn reports whether an Anthropic SSE frame moved the TURN forward

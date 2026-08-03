@@ -698,10 +698,11 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// overload / "API issue") fails in ≤streamStallTimeout() rather than blocking the
 	// scanner on resp.Body.Read until the whole-request Client.Timeout (600s under guard)
 	// fires. A healthy stream's steady deltas reset the window; only true silence trips it.
-	// The second window (streamProgressTimeout) catches the upstream that stays WARM without
-	// advancing — keepalive comments and empty-delta chunks re-arm the byte deadline but are
-	// not progress, so only a real delta below calls sr.noteProgress (#5486).
-	sr := newStallReader(resp.Body, streamStallTimeout(), streamProgressTimeout())
+	// The second window (the planner's StreamProgressTimeout config field) catches the
+	// upstream that stays WARM without advancing — keepalive comments and empty-delta chunks
+	// re-arm the byte deadline but are not progress, so only a real delta below calls
+	// sr.noteProgress (#5486).
+	sr := newStallReader(resp.Body, streamStallTimeout(), p.streamProgressWindow())
 	defer sr.Close()
 	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the

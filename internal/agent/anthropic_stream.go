@@ -300,8 +300,9 @@ func (p *HTTPPlanner) relayAnthropicStream(resp *http.Response, onEvent func(Ant
 	// The second, longer deadline covers the case the byte one cannot see (#5486): re-arm it
 	// ONLY on a frame that advances the turn. A `ping` still re-arms the byte window (it IS
 	// bytes) but deliberately not this one, so an upstream warm enough to keep pinging while
-	// producing no content trips in ≤streamProgressTimeout() instead of riding the ceiling.
-	sr := newStallReader(resp.Body, streamStallTimeout(), streamProgressTimeout())
+	// producing no content trips in ≤the planner's configured progress window instead of
+	// riding the ceiling.
+	sr := newStallReader(resp.Body, streamStallTimeout(), p.streamProgressWindow())
 	defer sr.Close()
 	started := false
 	var frame []byte
