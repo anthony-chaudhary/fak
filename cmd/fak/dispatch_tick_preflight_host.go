@@ -445,38 +445,49 @@ func dispatchScanProcessesWindows() ([]dispatchtick.ProcInfo, error) {
 	return procs, nil
 }
 
+// dispatchScanProcessesPOSIX reads the preflight's process census through procguard rather
+// than shelling out to `ps` here (#5537).
+//
+// What this used to be, and why both halves were wrong: one hard-coded
+// `ps -eo pid=,nlwp=,rss=,comm=` for every POSIX host, read with .Output() and
+// `return nil, err`. `nlwp` is a procps-ng extension; BSD `ps` has no thread-count keyword
+// at all and rejects the whole invocation rather than dropping that column, so on macOS
+// this probe returned an error every tick, dispatchProbeProcessesNative folded it into
+// collect_error, and the procguard dimension was skipped on every dispatch. Discarding
+// stdout on a non-zero exit is the second half: a `ps` that printed a usable table and then
+// exited 1 read as total failure.
+//
+// procguard.CollectProcesses is the one enumeration implementation that already fixed both
+// per GOOS (psCensusSpec / runTool / censusError, #5385). Keeping a second copy of the
+// invocation here is what let this site rot behind the fix.
 func dispatchScanProcessesPOSIX() ([]dispatchtick.ProcInfo, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ps", "-eo", "pid=,nlwp=,rss=,comm=")
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
+	procs, collectErr := procguard.CollectProcesses()
+	if collectErr != "" {
+		return nil, errors.New(collectErr)
 	}
-	procs := []dispatchtick.ProcInfo{}
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 4 {
-			continue
-		}
-		pid, perr := strconv.Atoi(fields[0])
-		threads, terr := strconv.Atoi(fields[1])
-		rssKB, rerr := strconv.Atoi(fields[2])
-		if perr != nil {
-			continue
-		}
-		name := strings.Join(fields[3:], " ")
-		proc := dispatchtick.ProcInfo{PID: pid, Name: name}
-		if terr == nil {
-			proc.Threads = dispatchtick.IntPtr(threads)
-		}
-		if rerr == nil {
-			proc.WorkingSetMB = dispatchtick.IntPtr(rssKB / 1024)
-		}
-		procs = append(procs, proc)
+	return dispatchProcInfoFromProcguard(procs), nil
+}
+
+// dispatchProcInfoFromProcguard projects a procguard census onto the preflight's ProcInfo.
+//
+// The one rule with teeth here is that an ABSENT dimension stays nil. procguard types "this
+// host's `ps` dialect has no keyword for that column" as psNoColumn and leaves the field
+// nil; EvaluateProcGuard skips a nil dimension as unread, whereas a 0 would be a
+// measurement — the claim that a process has zero threads, which would put every macOS
+// process permanently under the thread ceiling and silently disable the dimension this
+// guard exists for. So the pointers are carried across as they are and never defaulted.
+func dispatchProcInfoFromProcguard(procs []procguard.Proc) []dispatchtick.ProcInfo {
+	out := make([]dispatchtick.ProcInfo, 0, len(procs))
+	for _, p := range procs {
+		out = append(out, dispatchtick.ProcInfo{
+			PID:          p.PID,
+			Name:         p.Name,
+			Threads:      p.Threads,
+			Handles:      p.Handles,
+			WorkingSetMB: p.WSMB,
+		})
 	}
-	return procs, nil
+	return out
 }
 
 var dispatchBuildHostResources = dispatchPreflightHostResourcesFromProcesses
@@ -508,8 +519,7 @@ const dispatchFreeRAMScript = "$os=Get-CimInstance Win32_OperatingSystem; [int64
 
 func dispatchFreeRAM() *int {
 	if runtime.GOOS != "windows" {
-		free, _ := dispatchRAMAndThreadsPOSIX()
-		return free
+		return dispatchFreeRAMPOSIX()
 	}
 	out, err := dispatchRunHostProbe(dispatchFreeRAMScript, 20*time.Second, false)
 	if err != nil {
@@ -523,7 +533,27 @@ func dispatchFreeRAM() *int {
 	return &mb
 }
 
-func dispatchRAMAndThreadsPOSIX() (*int, *int) {
+// dispatchFreeRAMPOSIX reads free physical memory (MB) on a POSIX host.
+//
+// It used to be dispatchRAMAndThreadsPOSIX and also ran `ps -eo nlwp=`, summing the column
+// into a host-wide thread total. That second scan is gone, for two independent reasons
+// either of which is sufficient (#5537):
+//
+//   - `nlwp` is a procps-ng extension. BSD `ps` has no thread-count keyword whatsoever
+//     (see psCensusSpec in internal/procguard), so on macOS the invocation could only ever
+//     fail — there is no darwin argv that answers this question, which is exactly why
+//     procguard types the BSD thread column as absent rather than guessing a substitute.
+//   - The total was already dead on arrival. The sole caller took `free, _ :=` and dropped
+//     it; dispatchPreflightHostResourcesFromProcesses derives TotalThreads by summing the
+//     per-process census it is handed, which now carries the per-GOOS-correct thread column
+//     and leaves it nil where the dialect has no keyword.
+//
+// So a POSIX tick paid for a second `ps` spawn whose answer nobody read and which could not
+// be answered on half the supported hosts. Removing it changes no reported value.
+//
+// Note what this function still does NOT do: /proc/meminfo is Linux-only, so free RAM is
+// nil on darwin. That is a pre-existing gap, reported as unknown rather than as zero.
+func dispatchFreeRAMPOSIX() *int {
 	var freeRAM *int
 	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
 		for _, line := range strings.Split(string(b), "\n") {
@@ -539,26 +569,7 @@ func dispatchRAMAndThreadsPOSIX() (*int, *int) {
 			}
 		}
 	}
-	var threads *int
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ps", "-eo", "nlwp=")
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.Output()
-	if err == nil {
-		total := 0
-		seen := false
-		for _, tok := range strings.Fields(string(out)) {
-			if n, err := strconv.Atoi(tok); err == nil {
-				total += n
-				seen = true
-			}
-		}
-		if seen {
-			threads = &total
-		}
-	}
-	return freeRAM, threads
+	return freeRAM
 }
 
 func dispatchProductWorkerCount(root, product string) int {

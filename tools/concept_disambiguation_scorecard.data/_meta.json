@@ -576,6 +576,11 @@
           "category": "incidental",
           "reason": "Not a Go symbol at all. This is the FILENAME guard_split_close_test.go quoted in a prose comment in a non-test header, naming which test witnesses the generated command line. The extractor read a snake_case filename as an identifier. Same shape as the test-name-in-prose token classified incidental for the #5411 self-tighten set.",
           "token": "guard_split_close_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "a pure projection from procguard.Proc onto dispatchtick.ProcInfo, extracted from its caller only so the mapping is unit-testable without scanning real host processes; it introduces no new concept, the enumeration concept is procguard.CollectProcesses which is already positioned",
+          "token": "dispatchProcInfoFromProcguard"
         }
       ],
       "exclude": [
@@ -601,6 +606,7 @@
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
+        "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
