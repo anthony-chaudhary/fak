@@ -225,12 +225,14 @@ func releaseDispatchLaneLeaseFenced(root, stem string) (string, string) {
 	return releaseLaneLeaseFenced(root, id, fence)
 }
 
-// releaseInProcessLaneLease is the SAME fenced release for the acquire site that never
-// detaches: the host-enroll path (dispatch_tick_hostenroll.go) takes the identical lane
-// lease, runs its microagent to completion in THIS process, and returns — so no witness
-// sweep will ever grade it and the lease strands for the whole TTL every single time.
-// Here the fencing token needs no sidecar at all: the acquire result is still in hand,
-// so the token is read straight off it. Returns the outcome word for the payload.
+// releaseInProcessLaneLease is the SAME fenced release for every acquire site that no
+// witness sweep will ever grade — the host-enroll path (dispatch_tick_hostenroll.go),
+// which takes the identical lane lease, runs its microagent to completion in THIS process
+// and returns, and the spawn-failure exits of dispatchTickLiveSpawn (see
+// releaseAbandonedLaneLease). Both strand the lease for the whole TTL every single time
+// without an explicit hand-back. Here the fencing token needs no sidecar at all: the
+// acquire result is still in hand, so the token is read straight off it. Returns the
+// outcome word for the payload.
 func releaseInProcessLaneLease(root string, lease map[string]any) string {
 	id := strings.TrimSpace(dispatchMapString(lease, "id"))
 	if acquired, _ := lease["acquired"].(bool); !acquired || id == "" {
@@ -245,6 +247,44 @@ func releaseInProcessLaneLease(root string, lease map[string]any) string {
 	}
 	_, outcome := releaseLaneLeaseFenced(root, id, fence)
 	return outcome
+}
+
+// releaseAbandonedLaneLease hands a lane lease back at a dispatchTickLiveSpawn exit that
+// leaves NO worker running under it (#5565). That tick acquires the lane as its first
+// statement and then has five ways out before any worker is live: the spawn broker refuses
+// the launch, the worker argv cannot be built, the worker env cannot be built, the spawner
+// itself errors, or the post-spawn probe catches the process exiting immediately. Every one
+// of them returned with the lane still leased.
+//
+// WHY NOTHING ELSE WOULD FREE THEM. The #4324 witness sweep is the only other releaser and
+// it is keyed on a spawned worker's log stem, so the first FOUR leave no slot for it to walk
+// at all — those lanes were unreachable by any releaser and stayed pinned for
+// WorkerTimeoutS + LeaseTTLMarginS (~40 min) having done no work, refusing peers against a
+// holder that already returned. The FIFTH does leave a slot, and writeDispatchLeaseFenceSidecar
+// has already run for it, so a sweep can in principle reach it — but only through
+// dispatchWorkerExitReleasesLease, which releases a no-commit exit solely when
+// ClassifyNoCommitReason found a terminal signature in the log tail. The commonest early
+// exit is the SILENT one ("exited immediately and produced an empty log"), whose tail carries
+// only the spawn header: it classifies NoCommitUnknown, the crash bucket, which deliberately
+// KEEPS the lease. So that lane strands as well, and even the classifiable variants had to
+// wait for a LATER tick's sweep to be freed.
+//
+// WHY IT IS SAFE AT ALL FIVE. No writer exists to fence: four never started a process, and
+// the early-exit rung fires only once the spawn probe has proven the pid is NOT alive.
+//
+// The fence is #4324's and it is what makes this safe to do without a sidecar round trip:
+// the token is read straight off the acquire result, a ZERO generation is refused outright
+// (dispatchLeaseFenceReleasable — ReleaseFenced skips its generation comparison when either
+// side is 0, which would degrade the fence to a holder-string match, and holders collide),
+// and ReleaseFenced's CAS re-checks holder AND generation, so a lane a janitor already
+// reclaimed and re-issued reads STALE_LEASE and is left to the peer that now owns it.
+//
+// FAIL-OPEN: every non-OK outcome degrades to exactly the pre-#5565 behaviour — the lease
+// keeps its TTL — and records its reason on the payload under the same `lease_release` key
+// the host-enroll release already writes. Nothing is propagated, so a failed hand-back can
+// never fail the tick.
+func releaseAbandonedLaneLease(root string, lease, payload map[string]any) {
+	payload["lease_release"] = releaseInProcessLaneLease(root, lease)
 }
 
 // releaseLaneLeaseFenced is the shared fenced delete both release sites end in: present

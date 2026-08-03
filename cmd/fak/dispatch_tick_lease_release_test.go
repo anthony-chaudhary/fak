@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -227,6 +228,250 @@ func TestDispatchInProcessLaneLeaseRelease(t *testing.T) {
 			t.Fatalf("zero-generation release = %q, want no_fence_token", got)
 		}
 	})
+}
+
+// dispatchSpawnerFunc is dispatchIssueWorkerSpawner's signature, aliased so the
+// spawn-failure cases below can hand one in without restating fourteen parameters.
+type dispatchSpawnerFunc = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error)
+
+// dispatchSpawnFailureTick drives the REAL dispatchTickLiveSpawn — the function that
+// acquires the lane lease — with the broker and the spawner stubbed to reproduce one
+// failure edge. backend is a parameter so the argv-build refusal can be reached too. The
+// lease is taken with a 1200+600 = 1800s TTL and the clock is never advanced, so nothing
+// below can pass by waiting: only an explicit hand-back can free the lane.
+func dispatchSpawnFailureTick(t *testing.T, root, backend string, broker func(launchBrokerAttempt) launchBrokerGrant, spawner dispatchSpawnerFunc) (map[string]any, error) {
+	t.Helper()
+	t.Setenv("FLEET_DOGFOOD_GUARD", "0")   // no `fak guard` wrapper: the argv is not what is under test
+	t.Setenv("FLEET_WORKER_WORKTREE", "0") // #3168 isolation off: no worktree to prepare or reap
+	oldBroker, oldSpawner := launchSpawnBroker, dispatchIssueWorkerSpawner
+	launchSpawnBroker = broker
+	dispatchIssueWorkerSpawner = spawner
+	t.Cleanup(func() { launchSpawnBroker = oldBroker; dispatchIssueWorkerSpawner = oldSpawner })
+
+	opts := dispatchTickOptions{Backend: backend, Live: true, WorkerTimeoutS: 1200}
+	pick := dispatchLanePick{Lane: "gateway", Tree: []string{"internal/gateway/**"}}
+	return dispatchTickLiveSpawn(root, filepath.Join(root, dispatchtick.RunsDirName), opts, pick,
+		"resolve-gateway", dispatchtick.Account{Tag: "seat-a"}, dispatchtick.WorkerLaunch{}, 5565,
+		map[string]any{"prompt": "resolve #5565"}, map[string]any{},
+		func(p map[string]any) map[string]any { return p })
+}
+
+// dispatchDenyingBroker refuses every launch, reproducing the SPAWN_BROKER_DENIED edge.
+func dispatchDenyingBroker(a launchBrokerAttempt) launchBrokerGrant {
+	return denyLaunchBrokerGrant(a, "unit-test-deny")
+}
+
+// dispatchAllowingBroker admits every launch, so the edge under test is the spawner's.
+func dispatchAllowingBroker(a launchBrokerAttempt) launchBrokerGrant {
+	return allowLaunchBrokerGrant(a, "unit-test-allow")
+}
+
+// dispatchLaneIsFree asserts the gateway lane is re-acquirable by a peer RIGHT NOW — the
+// acceptance shape of #5565, and the only thing that distinguishes a real hand-back from a
+// payload key that merely says one happened.
+func dispatchLaneIsFree(t *testing.T, root string) {
+	t.Helper()
+	if _, ok := dispatchLiveLease(t, root); ok {
+		t.Errorf("the abandoned lane lease is still on refs/fak/locks/ after the failed spawn")
+	}
+	t.Setenv("FAK_LEASE_OWNER", "peer-after-spawn-failure")
+	back := acquireDispatchLaneLease(root, "resolve-gateway-next", "gateway", []string{"internal/gateway/**"}, 1800, "")
+	if acquired, _ := back["acquired"].(bool); !acquired {
+		t.Fatalf("a lane no worker ever ran in must be re-acquirable within seconds, got %+v", back)
+	}
+}
+
+// TestDispatchSpawnFailureReleasesLaneLease is #5565: dispatchTickLiveSpawn acquires the
+// lane lease as its first statement and then has several ways out before any worker is
+// live. Each one used to return with the lane still leased for the full ~40-min TTL, and
+// the ones that never produce a log stem are unreachable by the #4324 witness sweep — the
+// only other releaser — so nothing could ever free them.
+func TestDispatchSpawnFailureReleasesLaneLease(t *testing.T) {
+	// The broker refused the launch: no process, no log stem, no fence sidecar.
+	t.Run("broker_denied_hands_the_lane_back", func(t *testing.T) {
+		root := initRegionTestRepo(t)
+		t.Setenv("FAK_LEASE_OWNER", "tick-that-was-denied")
+		got, err := dispatchSpawnFailureTick(t, root, "claude", dispatchDenyingBroker, nil)
+		if err != nil {
+			t.Fatalf("a denied launch is a payload, not an error: %v", err)
+		}
+		if got["verdict"] != "SPAWN_BROKER_DENIED" {
+			t.Fatalf("verdict = %v, want SPAWN_BROKER_DENIED", got["verdict"])
+		}
+		if got["lease_release"] != "released" {
+			t.Fatalf("lease_release = %v, want released", got["lease_release"])
+		}
+		dispatchLaneIsFree(t, root)
+	})
+
+	// The spawner itself errored: same shape, the other sidecar-less path.
+	t.Run("spawner_error_hands_the_lane_back", func(t *testing.T) {
+		root := initRegionTestRepo(t)
+		t.Setenv("FAK_LEASE_OWNER", "tick-whose-spawner-failed")
+		got, err := dispatchSpawnFailureTick(t, root, "claude", dispatchAllowingBroker,
+			func([]string, map[string]string, string, string, int, string, string, string, []string, dispatchtick.Account, *dispatchtick.Membership, string, string, float64) (dispatchSpawnResult, error) {
+				return dispatchSpawnResult{}, errors.New("exec: worker binary not found")
+			})
+		if err != nil {
+			t.Fatalf("a spawn fault is a SPAWN_FAILED payload, not an error: %v", err)
+		}
+		if got["verdict"] != "SPAWN_FAILED" || got["lease_release"] != "released" {
+			t.Fatalf("verdict/lease_release = %v/%v, want SPAWN_FAILED/released", got["verdict"], got["lease_release"])
+		}
+		dispatchLaneIsFree(t, root)
+	})
+
+	// The spawned process exited immediately. This slot DOES get a fence sidecar, so a
+	// witness sweep could in principle reach it — but only through
+	// dispatchWorkerExitReleasesLease, and the SILENT early exit's log tail carries no
+	// terminal signature, so it grades NoCommitUnknown (the crash bucket) and the sweep
+	// deliberately keeps the lease. The tick must therefore free it here.
+	t.Run("early_exit_hands_the_lane_back", func(t *testing.T) {
+		root := initRegionTestRepo(t)
+		runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+		stem := filepath.Join(runsDir, "resolve-5565-20260802-050505")
+		t.Setenv("FAK_LEASE_OWNER", "tick-whose-worker-died-at-once")
+		got, err := dispatchSpawnFailureTick(t, root, "claude", dispatchAllowingBroker,
+			func([]string, map[string]string, string, string, int, string, string, string, []string, dispatchtick.Account, *dispatchtick.Membership, string, string, float64) (dispatchSpawnResult, error) {
+				if err := os.MkdirAll(runsDir, 0o755); err != nil {
+					return dispatchSpawnResult{}, err
+				}
+				if err := os.WriteFile(stem+".log", []byte("# fak-spawn issue=5565 lane=gateway\n"), 0o644); err != nil {
+					return dispatchSpawnResult{}, err
+				}
+				return dispatchSpawnResult{PID: deadDispatchPID, Log: stem + ".log", Issue: 5565, Lane: "gateway", Backend: "claude",
+					EarlyExit: map[string]any{"alive": false, "silent": true, "wait_s": 0.4}}, nil
+			})
+		if err != nil {
+			t.Fatalf("an early exit is a SPAWN_FAILED payload, not an error: %v", err)
+		}
+		if got["verdict"] != "SPAWN_FAILED" || got["lease_release"] != "released" {
+			t.Fatalf("verdict/lease_release = %v/%v, want SPAWN_FAILED/released", got["verdict"], got["lease_release"])
+		}
+		// The premise of this case: the sweep's own token WAS written for this slot, and
+		// the sweep still would not have freed it (an empty tail grades unknown).
+		if _, ok := readDispatchLeaseFence(stem); !ok {
+			t.Errorf("the early-exit slot must still carry its #4324 fence sidecar")
+		}
+		if dispatchWorkerExitReleasesLease(dispatchtick.WitnessRecord{
+			Claim: dispatchtick.ClaimNoCommit, Reason: dispatchtick.ClassifyNoCommitReason("# fak-spawn issue=5565 lane=gateway\n", 36)}, 0) {
+			t.Errorf("a silent early exit must still grade as the crash bucket the sweep keeps")
+		}
+		dispatchLaneIsFree(t, root)
+	})
+
+	// THE DANGEROUS HALF, the same one #4324 guards: a janitor reclaimed and re-issued
+	// this lane between the acquire and the failure. The broker stub is the injection
+	// point because it runs after the acquire and before the release. The reclaimer
+	// deliberately carries the SAME holder string (one box, one FAK_LEASE_OWNER), so the
+	// generation is the ONLY thing standing between this release and freeing a lane a
+	// different live worker owns.
+	t.Run("fence_refuses_a_reclaimed_lane", func(t *testing.T) {
+		root := initRegionTestRepo(t)
+		t.Setenv("FAK_LEASE_OWNER", "tick-that-was-denied")
+		var reissued leaseref.Record
+		got, err := dispatchSpawnFailureTick(t, root, "claude", func(a launchBrokerAttempt) launchBrokerGrant {
+			rec, v, aerr := leaseref.NewInDir(root).AcquireFenced(context.Background(), leaseref.Record{
+				ID: "resolve-gateway", Holder: dispatchLeaseHolder(),
+				TreeGlobs: []string{"internal/gateway/**"}, TTLSeconds: 1800,
+			}, time.Now().Add(2*time.Hour))
+			if aerr != nil || !v.OK {
+				t.Fatalf("reclaim setup: %+v %v", v, aerr)
+			}
+			reissued = rec
+			return denyLaunchBrokerGrant(a, "unit-test-deny")
+		}, nil)
+		if err != nil {
+			t.Fatalf("live spawn: %v", err)
+		}
+		if got["lease_release"] != "stale_lease" {
+			t.Fatalf("lease_release = %v, want stale_lease — the tick must not free a reclaimed lane", got["lease_release"])
+		}
+		live, ok := dispatchLiveLease(t, root)
+		if !ok {
+			t.Fatalf("the RECLAIMED lease was deleted by a stale release — the peer's lane is now unfenced")
+		}
+		if live.Generation != reissued.Generation {
+			t.Fatalf("live lease generation = %d, want the reclaimer's %d", live.Generation, reissued.Generation)
+		}
+	})
+
+	// The argv-build refusal returns (nil, err) rather than a payload, and it too sits
+	// after the acquire. The error must still propagate AND the lane must still be freed.
+	t.Run("argv_build_refusal_hands_the_lane_back", func(t *testing.T) {
+		root := initRegionTestRepo(t)
+		t.Setenv("FAK_LEASE_OWNER", "tick-with-an-unknown-backend")
+		if _, err := dispatchSpawnFailureTick(t, root, "no-such-backend", dispatchAllowingBroker, nil); err == nil {
+			t.Fatalf("an unknown backend must still fail the tick")
+		}
+		dispatchLaneIsFree(t, root)
+	})
+
+	// A failed hand-back never fails the tick: with no git repo the acquire fails open
+	// (nothing was leased), so the release is a recorded no-op, not a blind delete.
+	t.Run("failopen_acquire_records_a_noop_and_never_fails_the_tick", func(t *testing.T) {
+		root := t.TempDir()
+		t.Chdir(root)
+		got, err := dispatchSpawnFailureTick(t, root, "claude", dispatchDenyingBroker, nil)
+		if err != nil {
+			t.Fatalf("a fail-open acquire must not fail the tick: %v", err)
+		}
+		if got["lease_release"] != "no_lease_id" {
+			t.Fatalf("lease_release = %v, want no_lease_id", got["lease_release"])
+		}
+	})
+}
+
+// TestDispatchLeaseZeroGenerationIsLoadBearing is the anti-vacuity witness for the one
+// invariant the release path may not lose. leaseref.ReleaseFenced states it plainly:
+// "presenting a non-zero generation ADDITIONALLY requires it to match the live lease's" —
+// it skips the comparison entirely when either side is 0, leaving only the holder-string
+// check, and holders DO collide (a reused daemon presents the same host:pid, and one box
+// under one FAK_LEASE_OWNER presents one string for every tick). This case runs the
+// mutant directly: the SAME reclaimed lane that the guarded release refuses is FREED when
+// a zero-generation token reaches the fenced delete. Nothing here is a call shape the
+// product makes — dispatchLeaseFenceReleasable stands between every release site and this
+// outcome — it exists so a future edit that drops the generation cannot pass silently.
+func TestDispatchLeaseZeroGenerationIsLoadBearing(t *testing.T) {
+	reclaimed := func(t *testing.T) (string, string) {
+		t.Helper()
+		root := initRegionTestRepo(t)
+		t.Setenv("FAK_LEASE_OWNER", "one-box-one-owner-string")
+		lease := acquireDispatchLaneLease(root, "resolve-gateway", "gateway", []string{"internal/gateway/**"}, 1800, "")
+		if acquired, _ := lease["acquired"].(bool); !acquired {
+			t.Fatalf("fixture could not acquire: %+v", lease)
+		}
+		// The janitor reclaim: a DIFFERENT live worker now owns the lane, at a bumped
+		// generation but — deliberately — under the identical holder string.
+		if _, v, err := leaseref.NewInDir(root).AcquireFenced(context.Background(), leaseref.Record{
+			ID: "resolve-gateway", Holder: dispatchMapString(lease, "holder"),
+			TreeGlobs: []string{"internal/gateway/**"}, TTLSeconds: 1800,
+		}, time.Now().Add(2*time.Hour)); err != nil || !v.OK {
+			t.Fatalf("reclaim setup: %+v %v", v, err)
+		}
+		return root, dispatchMapString(lease, "holder")
+	}
+
+	// The guard in place: refused, the peer keeps its lane.
+	root, holder := reclaimed(t)
+	if got := releaseInProcessLaneLease(root, map[string]any{
+		"acquired": true, "id": "resolve-gateway", "holder": holder, "generation": int64(1),
+	}); got != "stale_lease" {
+		t.Fatalf("guarded release = %q, want stale_lease", got)
+	}
+	if _, ok := dispatchLiveLease(t, root); !ok {
+		t.Fatalf("the guarded release freed the reclaimer's lane")
+	}
+
+	// The mutant: the same release with the generation dropped to zero frees the lane the
+	// peer now owns — two writers in one lane. This MUST keep failing to be a guard.
+	mutantRoot, mutantHolder := reclaimed(t)
+	if _, outcome := releaseLaneLeaseFenced(mutantRoot, "resolve-gateway", dispatchLeaseFence{Holder: mutantHolder}); outcome != "released" {
+		t.Fatalf("zero-generation release = %q; if this no longer frees a reclaimed lane the fence has a second line of defence and this test should be re-derived, not deleted", outcome)
+	}
+	if _, ok := dispatchLiveLease(t, mutantRoot); ok {
+		t.Fatalf("zero-generation release left the lease standing; see above")
+	}
 }
 
 // TestDispatchWorkerExitReleasesLease pins the normal-exit vocabulary directly: which

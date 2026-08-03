@@ -1109,6 +1109,11 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	prompt := dispatchMapString(promptRec, "prompt")
 	command, err := dispatchtick.BuildWorkerCommand(opts.Backend, prompt, launch)
 	if err != nil {
+		// #5565: the lane is leased from the statement above, and this return leaves no
+		// worker and no slot behind — nothing a witness sweep could ever grade. Hand the
+		// lane back under the acquire's own fencing token instead of pinning it for the
+		// full TTL. Fail-open, so an unreleasable lease still returns the build error.
+		releaseAbandonedLaneLease(root, lease, payload)
 		return nil, err
 	}
 	launchCommand, guarded := guardedDispatchCommand(root, pick.Lane, opts.Backend, command)
@@ -1117,6 +1122,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	}
 	env, err := dispatchWorkerEnv(opts.Backend, pick.Lane, root, runsDir, account, opts.Goal, opts.GoalProfile)
 	if err != nil {
+		releaseAbandonedLaneLease(root, lease, payload) // #5565, as above: no worker, no slot, no releaser.
 		return nil, err
 	}
 	env["FLEET_RESOLVE_ISSUE"] = strconv.Itoa(target)
@@ -1136,6 +1142,12 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		payload["action"] = "broker_denied"
 		payload["verdict"] = "SPAWN_BROKER_DENIED"
 		payload["reason"] = "spawn broker denied dispatch worker launch: " + grant.Reason
+		// #5565: a refused launch never started a process, so the lane it holds fences
+		// nothing. It also leaves no log stem, which makes it unreachable by the #4324
+		// witness-sweep releaser — without this hand-back it stays pinned for the whole
+		// ~40-min TTL having done no work. Released BEFORE the record so the outcome is
+		// in the payload the ledger reads.
+		releaseAbandonedLaneLease(root, lease, payload)
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -1168,6 +1180,10 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		payload["action"] = "spawn_failed"
 		payload["verdict"] = "SPAWN_FAILED"
 		payload["reason"] = err.Error()
+		// #5565: the spawner failed before any process existed (and so before any log
+		// stem or fence sidecar was written), the second of the two paths no releaser
+		// could ever reach. Hand the lane back now.
+		releaseAbandonedLaneLease(root, lease, payload)
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -1198,6 +1214,15 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		payload["action"] = "spawn_failed"
 		payload["verdict"] = "SPAWN_FAILED"
 		payload["reason"] = reason
+		// #5565: this rung fires only once the probe has proven the pid is NOT alive, so
+		// the lane fences a process that is already gone. Unlike the two returns above
+		// this slot DOES carry a fence sidecar, but the sweep would free it only for a
+		// log tail ClassifyNoCommitReason can name — and the commonest early exit is the
+		// silent, empty-log one, which grades NoCommitUnknown and is deliberately kept as
+		// the crash bucket. Releasing here does not weaken that sweep: it reaches the
+		// already-absent ref as ReleaseFenced's idempotent OK, and a lane re-acquired in
+		// the meantime has advanced its generation, so the sweep's stale token refuses.
+		releaseAbandonedLaneLease(root, lease, payload)
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
