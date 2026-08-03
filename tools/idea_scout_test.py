@@ -677,5 +677,179 @@ class FiledStampDurabilityTest(unittest.TestCase):
         self.assertGreater(cfg["scout_scan_limit"], cfg["issue_scan_limit"])
 
 
+# ============================================================================
+# The SHARED corpus (#5547).
+#
+# internal/ideascout/testdata/dedup_corpus.json is read by BOTH scouts: the
+# classes below and internal/ideascout/ideascout_test.go. It is the mechanical
+# replacement for the prose "Two implementations, one contract" table in
+# docs/idea-scout.md — the tie that let the SAME dedup defect be fixed twice,
+# once per implementation (cfe66c656 here for #5543, then 00f270957d2a in Go for
+# #5544). A rung that changes in tools/idea_scout.py and not in
+# internal/ideascout (or the other way round) now reds a test instead of aging
+# into a re-filed issue.
+#
+# The file lives under the Go package's testdata/ because Go excludes testdata
+# from builds and vet, while tools/*.json in this directory are scout CONFIG
+# files (--config) and a corpus dropped here would read as one.
+# ============================================================================
+
+CORPUS_PATH = ROOT / "internal" / "ideascout" / "testdata" / "dedup_corpus.json"
+
+
+def load_corpus() -> dict:
+    corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+    assert corpus["schema"] == "fak/idea-scout-dedup-corpus@1", corpus["schema"]
+    return corpus
+
+
+CORPUS = load_corpus()
+
+
+class SharedDedupCorpusTest(unittest.TestCase):
+    """Every per-rung verdict in the shared corpus, asserted against
+    ``is_duplicate``. internal/ideascout/ideascout_test.go asserts the SAME
+    verdicts from the SAME file."""
+
+    def _index(self):
+        # The corpus's index_build_rule: the durable stamps come from the
+        # label-targeted filing history, unioned with any stamp still visible in
+        # the recency window; the soft rungs see the window and nothing else.
+        stamped = M.stamp_index(CORPUS["scout_issues"])
+        win_stamped, title_sets, bodies = M.existing_issue_index(
+            CORPUS["window_issues"])
+        return stamped | win_stamped, title_sets, bodies
+
+    def test_every_rung_case(self) -> None:
+        stamped, title_sets, bodies = self._index()
+        for case in CORPUS["dedup_cases"]:
+            with self.subTest(case=case["name"]):
+                got = M.is_duplicate(case["candidate"], CORPUS["seen"], stamped,
+                                     title_sets, bodies, CORPUS["dup_jaccard"])
+                self.assertEqual(
+                    got, case["want"] or None,
+                    f"shared corpus {case['name']}: {case['why']} "
+                    f"(internal/ideascout/ideascout_test.go asserts the same "
+                    f"verdict from the same file — a rung that moves in only one "
+                    f"implementation must red here)")
+
+    def test_window_only_counterfactual(self) -> None:
+        # With the durable rung removed (no scout index) and the seen-cache gone,
+        # every case must come back NEW. That is the exact state #5543 was found
+        # in, and it is what keeps the filed-stamp cases above from passing for
+        # some unrelated reason.
+        win_stamped, title_sets, bodies = M.existing_issue_index(
+            CORPUS["window_issues"])
+        for case in CORPUS["window_only_cases"]:
+            with self.subTest(case=case["name"]):
+                got = M.is_duplicate(case["candidate"], {}, win_stamped,
+                                     title_sets, bodies, CORPUS["dup_jaccard"])
+                self.assertEqual(
+                    got, case["want"] or None,
+                    f"the corpus no longer exercises the defect: {case['why']}")
+
+    def test_rung_vocabulary_matches_the_planner(self) -> None:
+        # The rung VOCABULARY is part of the contract too: renaming, adding or
+        # dropping a rung on one side only is exactly the drift this corpus
+        # exists to catch, and per-case verdicts alone would not see it.
+        _, stats, _ = M.plan_issues([], {}, {}, set(), [], "",
+                                    dict(M.DEFAULTS), "2026-08-02", NOW)
+        self.assertEqual(sorted(stats), sorted(CORPUS["skip_stat_keys"]))
+        exercised = {c["want"] for c in CORPUS["dedup_cases"] if c["want"]}
+        self.assertEqual(exercised, set(CORPUS["rungs"]))
+        for rung in CORPUS["rungs"]:
+            self.assertIn(rung, stats)
+
+
+class SharedRunCorpusTest(unittest.TestCase):
+    """Replay each shared run case end to end through main(), with every
+    network/gh boundary stubbed. Hermetic and DRY-RUN: create_issue raises if it
+    is ever reached, so no path here can file anything.
+
+    The stubs model GitHub the way the two dedup corpora actually see it:
+    fetch_existing_issues TRUNCATES the newest-first tracker to the caller's
+    limit (a recency window), while fetch_scout_issues answers a query targeted
+    at the idea-scout label and so returns the scout's whole filing history
+    however old. internal/ideascout/ideascout_test.go stubs the Go Fetcher the
+    same way."""
+
+    def setUp(self) -> None:
+        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+                      M.fetch_existing_issues, M.fetch_scout_issues,
+                      M.create_issue, M.ensure_scout_label)
+
+    def tearDown(self) -> None:
+        (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+         M.fetch_existing_issues, M.fetch_scout_issues,
+         M.create_issue, M.ensure_scout_label) = self._orig
+
+    def _wire(self, case: dict) -> None:
+        M.fetch_arxiv = lambda *a, **k: ""
+        M.fetch_github = lambda *a, **k: [dict(r) for r in case["repos"]]
+        M.fetch_github_fresh = lambda *a, **k: []
+        M.ensure_scout_label = lambda: None
+
+        def _no_filing(*a, **k):
+            raise AssertionError("corpus replay is dry-run: nothing may ever be filed")
+        M.create_issue = _no_filing
+
+        window = list(case["window_issues"])
+        scout = list(case["scout_issues"])
+        window_error = case.get("window_error", "")
+        scout_error = case.get("scout_error", "")
+
+        def _window(limit, *a, **k):
+            if window_error:
+                raise RuntimeError(window_error)
+            return window[:limit] if limit >= 0 else list(window)
+
+        def _scout(limit, *a, **k):
+            if scout_error:
+                raise RuntimeError(scout_error)
+            return scout[:limit] if limit >= 0 else list(scout)
+        M.fetch_existing_issues = _window
+        M.fetch_scout_issues = _scout
+
+    def test_every_run_case(self) -> None:
+        for case in CORPUS["runs"]:
+            with self.subTest(case=case["name"]):
+                self._replay(case)
+
+    def _replay(self, case: dict) -> None:
+        self._wire(case)
+        expect = case["expect"]
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            cfg_path = ws / "corpus_config.json"
+            cfg_path.write_text(json.dumps(case["config"]), encoding="utf-8")
+            if case.get("seen"):
+                M.save_seen(ws, dict(case["seen"]))
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = M.main(["--workspace", str(ws), "--config", str(cfg_path),
+                             "--json"])
+            stdout, stderr = out.getvalue(), err.getvalue()
+
+            if expect["refuse"]:
+                self.assertEqual(rc, 2, f"{case['name']} must REFUSE: {case['why']}")
+                for want in expect.get("refuse_contains", []):
+                    self.assertIn(want, stderr, case["name"])
+                return
+
+            self.assertEqual(rc, 0, f"{case['name']}: {stderr}")
+            payload = json.loads(stdout)
+            self.assertEqual([p["source_id"] for p in payload["planned"]],
+                             expect["planned"], f"{case['name']}: {case['why']}")
+            for rung, n in expect["skipped"].items():
+                self.assertEqual(payload["skipped"][rung], n,
+                                 f"{case['name']} skipped[{rung}]: {payload['skipped']}")
+            self.assertEqual(payload["dropped"], expect["dropped"], case["name"])
+            got_index = {k: payload["dedup_index"][k] for k in expect["dedup_index"]}
+            self.assertEqual(got_index, expect["dedup_index"], case["name"])
+            if not case.get("seen"):
+                self.assertFalse(M.cache_path(ws).exists(),
+                                 f"{case['name']} is dry-run and must write no cache")
+
+
 if __name__ == "__main__":
     unittest.main()

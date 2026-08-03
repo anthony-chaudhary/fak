@@ -210,12 +210,20 @@ type RunOptions struct {
 	// ScoutIssues is the fixture stand-in for the label-targeted filed-issue index
 	// (rung 2). When a fixture run leaves it nil, Existing serves as the whole
 	// corpus — a replay has no window to be truncated by, so the two collapse.
-	ScoutIssues   []ExistingIssue
-	UseFixtures   bool
-	Today         string
-	Now           time.Time
-	Fetcher       Fetcher
-	AllowIssueGap bool
+	ScoutIssues []ExistingIssue
+	UseFixtures bool
+	Today       string
+	Now         time.Time
+	Fetcher     Fetcher
+	// NOTE: there is deliberately no knob here that waives a dedup refusal.
+	// RunOptions used to carry `AllowIssueGap bool`, set by no caller anywhere in
+	// the repo and read in exactly one place — to turn OFF the refusal that fires
+	// when the window fetch fails with no seen-cache to fall back on. Its only
+	// reachable effect was to weaken a guarantee, it had no counterpart in
+	// tools/idea_scout.py, and a knob present on one implementation and not the
+	// other is precisely the drift that made the same defect need two fixes
+	// (#5543 then #5544). Removed for #5547; the refusal is unconditional in both
+	// implementations and testdata/dedup_corpus.json pins it that way.
 }
 
 func DefaultConfig() Config {
@@ -886,8 +894,8 @@ func Run(opts RunOptions) (RunResult, error) {
 		// exactly the population being deduped. This is what makes "filed once, never
 		// filed again" true without trusting the git-ignored local cache. It is
 		// MANDATORY: a partial index is indistinguishable from "this source is new"
-		// and re-files an already-triaged source, so it cannot be waived by
-		// AllowIssueGap or covered by a populated seen-cache.
+		// and re-files an already-triaged source, so it cannot be waived by any
+		// option or covered by a populated seen-cache.
 		scoutLimit := cfg.ScoutScanLimit
 		if scoutLimit <= 0 {
 			scoutLimit = DefaultConfig().ScoutScanLimit
@@ -912,7 +920,7 @@ func Run(opts RunOptions) (RunResult, error) {
 		issues, err = fetcher.FetchExistingIssues(cfg.IssueScanLimit)
 		if err != nil {
 			errorsOut = append(errorsOut, "issues: "+err.Error())
-			if len(seen) == 0 && !opts.AllowIssueGap {
+			if len(seen) == 0 {
 				return RunResult{}, fmt.Errorf("refuse: cannot fetch existing issues and no seen-cache to fall back on (%w)", err)
 			}
 			issues = nil

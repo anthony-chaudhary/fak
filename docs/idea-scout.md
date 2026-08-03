@@ -100,6 +100,28 @@ and both the failed scan and the saturated scan **refuse with exit 2**. The
 `filed-stamp` rung is reported separately from `issue-body` in both, so a windowed
 guess never reads like the guarantee.
 
+**The tie is mechanical, not prose (#5547).** This table used to be the *only*
+thing holding the two implementations together — which is exactly why the same
+defect had to be fixed twice, once per implementation (`cfe66c656` for the Python,
+then `00f270957d2a` for the Go). One shared fixture corpus,
+[`internal/ideascout/testdata/dedup_corpus.json`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ideascout/testdata/dedup_corpus.json),
+now pins the whole contract — the same candidate set, the same existing-issue set,
+the same expected verdict per rung, the same refusals — and **both** suites read
+it: `internal/ideascout/ideascout_test.go` (`TestSharedCorpus*`) and
+`tools/idea_scout_test.py` (`SharedDedupCorpusTest` / `SharedRunCorpusTest`). A
+rung that moves in one implementation and not the other reds a test instead of
+aging into a duplicate issue. The corpus carries its own vacuity guard
+(`window_only_cases`: with the durable rung and the cache removed, every case must
+come back *new*) and its own rung-vocabulary check, so a renamed or dropped rung
+is caught as well as a changed verdict.
+
+Neither implementation carries a knob that waives a dedup refusal. The Go side
+briefly had one — `RunOptions.AllowIssueGap`, set by no caller and readable only
+to turn the "window fetch failed and there is no seen-cache" refusal *off* — with
+no counterpart in the Python. It was removed for #5547: a knob present on one
+implementation and not the other is the same drift, and its only reachable effect
+was to weaken a guarantee.
+
 ## Run it
 
 ```bash

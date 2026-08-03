@@ -1,9 +1,12 @@
 package ideascout
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -609,6 +612,336 @@ func TestWindowFetchRefusalIsUnchanged(t *testing.T) {
 	}
 	if result.Skipped["filed-stamp"] != 1 {
 		t.Fatalf("the durable rung must still gate when the window is gone: skipped=%#v", result.Skipped)
+	}
+}
+
+// ============================================================================
+// The SHARED corpus (#5547).
+//
+// testdata/dedup_corpus.json is read by BOTH scouts: these tests and
+// tools/idea_scout_test.py. It is the mechanical replacement for the prose
+// "Two implementations, one contract" table in docs/idea-scout.md — the tie
+// that let the SAME dedup defect be fixed twice, once per implementation
+// (cfe66c656 Python/#5543, then 00f270957d2a Go/#5544). A rung that changes
+// here and not in tools/idea_scout.py (or the other way round) now reds a test
+// instead of aging into a re-filed issue.
+// ============================================================================
+
+const corpusPath = "testdata/dedup_corpus.json"
+
+type corpusIssue struct {
+	Number int    `json:"number"`
+	State  string `json:"state"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+}
+
+type corpusCandidate struct {
+	SourceID string `json:"source_id"`
+	URL      string `json:"url"`
+	Title    string `json:"title"`
+}
+
+type corpusCase struct {
+	Name      string          `json:"name"`
+	Candidate corpusCandidate `json:"candidate"`
+	Want      string          `json:"want"`
+	Why       string          `json:"why"`
+}
+
+type corpusDedupIndex struct {
+	FiledIssuesScanned  int  `json:"filed_issues_scanned"`
+	FiledStamps         int  `json:"filed_stamps"`
+	ScoutIndexComplete  bool `json:"scout_index_complete"`
+	WindowIssuesScanned int  `json:"window_issues_scanned"`
+}
+
+type corpusExpect struct {
+	Refuse         bool             `json:"refuse"`
+	RefuseContains []string         `json:"refuse_contains"`
+	Planned        []string         `json:"planned"`
+	Skipped        map[string]int   `json:"skipped"`
+	Dropped        []DroppedSource  `json:"dropped"`
+	DedupIndex     corpusDedupIndex `json:"dedup_index"`
+}
+
+type corpusRun struct {
+	Name         string                `json:"name"`
+	Config       json.RawMessage       `json:"config"`
+	Repos        []GitHubRepo          `json:"repos"`
+	WindowIssues []corpusIssue         `json:"window_issues"`
+	ScoutIssues  []corpusIssue         `json:"scout_issues"`
+	WindowError  string                `json:"window_error"`
+	ScoutError   string                `json:"scout_error"`
+	Seen         map[string]SeenRecord `json:"seen"`
+	Expect       corpusExpect          `json:"expect"`
+	Why          string                `json:"why"`
+}
+
+type dedupCorpus struct {
+	Schema          string                `json:"schema"`
+	Rungs           []string              `json:"rungs"`
+	SkipStatKeys    []string              `json:"skip_stat_keys"`
+	DupJaccard      float64               `json:"dup_jaccard"`
+	Seen            map[string]SeenRecord `json:"seen"`
+	WindowIssues    []corpusIssue         `json:"window_issues"`
+	ScoutIssues     []corpusIssue         `json:"scout_issues"`
+	DedupCases      []corpusCase          `json:"dedup_cases"`
+	WindowOnlyCases []corpusCase          `json:"window_only_cases"`
+	Runs            []corpusRun           `json:"runs"`
+}
+
+func loadCorpus(t *testing.T) dedupCorpus {
+	t.Helper()
+	raw, err := os.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("read shared corpus %s (tools/idea_scout_test.py reads the same file): %v", corpusPath, err)
+	}
+	var c dedupCorpus
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("parse shared corpus: %v", err)
+	}
+	if c.Schema != "fak/idea-scout-dedup-corpus@1" {
+		t.Fatalf("corpus schema = %q, want fak/idea-scout-dedup-corpus@1", c.Schema)
+	}
+	if len(c.DedupCases) == 0 || len(c.WindowOnlyCases) == 0 || len(c.Runs) == 0 {
+		t.Fatalf("corpus is empty in at least one section: %d dedup, %d window-only, %d runs",
+			len(c.DedupCases), len(c.WindowOnlyCases), len(c.Runs))
+	}
+	return c
+}
+
+func existingIssues(in []corpusIssue) []ExistingIssue {
+	out := make([]ExistingIssue, 0, len(in))
+	for _, iss := range in {
+		out = append(out, ExistingIssue{Number: iss.Number, Title: iss.Title, Body: iss.Body})
+	}
+	return out
+}
+
+func corpusCand(c corpusCandidate) Candidate {
+	return Candidate{SourceID: c.SourceID, URL: c.URL, Title: c.Title}
+}
+
+// index applies the corpus's index_build_rule: the durable stamps come from the
+// label-targeted filing history, unioned with any stamp still visible in the
+// recency window; the soft rungs see the window and nothing else.
+func (c dedupCorpus) index() (map[string]struct{}, []map[string]struct{}, string) {
+	stamped := StampIndex(existingIssues(c.ScoutIssues))
+	winStamped, titleSets, bodies := ExistingIssueIndex(existingIssues(c.WindowIssues))
+	for sid := range winStamped {
+		stamped[sid] = struct{}{}
+	}
+	return stamped, titleSets, bodies
+}
+
+func TestSharedCorpusDedupRungs(t *testing.T) {
+	c := loadCorpus(t)
+	stamped, titleSets, bodies := c.index()
+	for _, tc := range c.DedupCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got := IsDuplicate(corpusCand(tc.Candidate), c.Seen, stamped, titleSets, bodies, c.DupJaccard)
+			if got != tc.Want {
+				t.Fatalf("shared corpus %q: rung = %q, want %q\n  candidate: %+v\n  why: %s\n  (tools/idea_scout_test.py asserts the SAME verdict from the SAME file — a rung that moves in only one implementation must red here)",
+					tc.Name, got, tc.Want, tc.Candidate, tc.Why)
+			}
+		})
+	}
+}
+
+// The counterfactual half of the corpus: with the durable rung removed (no scout
+// index) and the seen-cache gone, every case must come back NEW. That is the
+// exact state #5543 was found in, and it is what keeps the filed-stamp cases
+// above from passing for some unrelated reason.
+func TestSharedCorpusWindowOnlyCounterfactual(t *testing.T) {
+	c := loadCorpus(t)
+	winStamped, titleSets, bodies := ExistingIssueIndex(existingIssues(c.WindowIssues))
+	for _, tc := range c.WindowOnlyCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got := IsDuplicate(corpusCand(tc.Candidate), nil, winStamped, titleSets, bodies, c.DupJaccard)
+			if got != tc.Want {
+				t.Fatalf("shared corpus window-only %q: rung = %q, want %q — the corpus no longer exercises the defect\n  why: %s", tc.Name, got, tc.Want, tc.Why)
+			}
+		})
+	}
+}
+
+// The rung VOCABULARY is part of the contract too: renaming, adding or dropping a
+// rung on one side only is exactly the drift this corpus exists to catch, and a
+// per-case verdict check alone would not see it.
+func TestSharedCorpusRungVocabulary(t *testing.T) {
+	c := loadCorpus(t)
+
+	_, stats, _ := PlanIssues(nil, nil, nil, nil, nil, "", DefaultConfig(), "2026-08-02", time.Time{})
+	var gotKeys []string
+	for k := range stats {
+		gotKeys = append(gotKeys, k)
+	}
+	wantKeys := append([]string(nil), c.SkipStatKeys...)
+	sort.Strings(gotKeys)
+	sort.Strings(wantKeys)
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("planner skip-stat keys = %v, corpus skip_stat_keys = %v", gotKeys, wantKeys)
+	}
+
+	declared := map[string]bool{}
+	for _, r := range c.Rungs {
+		declared[r] = true
+	}
+	exercised := map[string]bool{}
+	for _, tc := range c.DedupCases {
+		if tc.Want == "" {
+			continue
+		}
+		if !declared[tc.Want] {
+			t.Fatalf("case %q expects rung %q, which the corpus does not declare in `rungs`", tc.Name, tc.Want)
+		}
+		exercised[tc.Want] = true
+	}
+	for _, r := range c.Rungs {
+		if !exercised[r] {
+			t.Fatalf("declared rung %q has no case in the shared corpus", r)
+		}
+		if _, ok := stats[r]; !ok {
+			t.Fatalf("declared rung %q is not a planner skip-stat key: %v", r, stats)
+		}
+	}
+}
+
+// corpusFetcher replays one run case. It models GitHub the way the two dedup
+// corpora actually see it: FetchExistingIssues TRUNCATES the newest-first tracker
+// to the caller's limit (a recency window), while FetchScoutIssues answers a query
+// targeted at the idea-scout label and so returns the scout's whole filing history
+// however old. tools/idea_scout_test.py stubs the Python fetchers identically.
+type corpusFetcher struct {
+	repos     []GitHubRepo
+	window    []ExistingIssue
+	scout     []ExistingIssue
+	windowErr error
+	scoutErr  error
+}
+
+func (f corpusFetcher) FetchArxiv(string, int) (string, error)             { return "", nil }
+func (f corpusFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)      { return f.repos, nil }
+func (f corpusFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return nil, nil }
+func (f corpusFetcher) FetchHackerNews(string, int) (string, error)        { return "", nil }
+func (f corpusFetcher) FetchReddit(string, int) (string, error)            { return "", nil }
+func (f corpusFetcher) EnsureLabels() error                                { return nil }
+func (f corpusFetcher) AddToProject(string, string, string) error          { return nil }
+
+func (f corpusFetcher) CreateIssue(IssuePlan, string) (string, error) {
+	return "", errors.New("corpus replay is dry-run: nothing may ever be filed")
+}
+
+func (f corpusFetcher) FetchExistingIssues(limit int) ([]ExistingIssue, error) {
+	if f.windowErr != nil {
+		return nil, f.windowErr
+	}
+	if limit >= 0 && len(f.window) > limit {
+		return f.window[:limit], nil
+	}
+	return f.window, nil
+}
+
+func (f corpusFetcher) FetchScoutIssues(limit int) ([]ExistingIssue, error) {
+	if f.scoutErr != nil {
+		return nil, f.scoutErr
+	}
+	if limit >= 0 && len(f.scout) > limit {
+		return f.scout[:limit], nil
+	}
+	return f.scout, nil
+}
+
+func TestSharedCorpusRuns(t *testing.T) {
+	c := loadCorpus(t)
+	for _, rc := range c.Runs {
+		t.Run(rc.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "config.json")
+			if err := os.WriteFile(cfgPath, rc.Config, 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			if len(rc.Seen) > 0 {
+				if err := SaveSeen(dir, rc.Seen); err != nil {
+					t.Fatalf("SaveSeen: %v", err)
+				}
+			}
+			fetcher := corpusFetcher{
+				repos:  rc.Repos,
+				window: existingIssues(rc.WindowIssues),
+				scout:  existingIssues(rc.ScoutIssues),
+			}
+			if rc.WindowError != "" {
+				fetcher.windowErr = errors.New(rc.WindowError)
+			}
+			if rc.ScoutError != "" {
+				fetcher.scoutErr = errors.New(rc.ScoutError)
+			}
+
+			result, err := Run(RunOptions{
+				Workspace:  dir,
+				ConfigPath: cfgPath,
+				Fetcher:    fetcher,
+				Today:      "2026-08-02",
+				Now:        time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+			})
+
+			if rc.Expect.Refuse {
+				if err == nil {
+					t.Fatalf("shared corpus run %q must REFUSE, got result %#v\n  why: %s", rc.Name, result, rc.Why)
+				}
+				for _, want := range rc.Expect.RefuseContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("shared corpus run %q refusal %q missing %q", rc.Name, err.Error(), want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("shared corpus run %q: %v\n  why: %s", rc.Name, err, rc.Why)
+			}
+
+			var planned []string
+			for _, p := range result.Planned {
+				planned = append(planned, p.SourceID)
+			}
+			want := rc.Expect.Planned
+			if len(planned) == 0 && len(want) == 0 {
+				planned, want = nil, nil
+			}
+			if !reflect.DeepEqual(planned, want) {
+				t.Fatalf("shared corpus run %q: planned = %v, want %v\n  why: %s", rc.Name, planned, rc.Expect.Planned, rc.Why)
+			}
+			for rung, n := range rc.Expect.Skipped {
+				if result.Skipped[rung] != n {
+					t.Fatalf("shared corpus run %q: skipped[%q] = %d, want %d (all: %#v)", rc.Name, rung, result.Skipped[rung], n, result.Skipped)
+				}
+			}
+			gotDropped := result.Dropped
+			if len(gotDropped) == 0 {
+				gotDropped = nil
+			}
+			wantDropped := rc.Expect.Dropped
+			if len(wantDropped) == 0 {
+				wantDropped = nil
+			}
+			if !reflect.DeepEqual(gotDropped, wantDropped) {
+				t.Fatalf("shared corpus run %q: dropped attribution = %#v, want %#v", rc.Name, gotDropped, wantDropped)
+			}
+			got := corpusDedupIndex{
+				FiledIssuesScanned:  result.DedupIndex.FiledIssuesScanned,
+				FiledStamps:         result.DedupIndex.FiledStamps,
+				ScoutIndexComplete:  result.DedupIndex.ScoutIndexComplete,
+				WindowIssuesScanned: result.DedupIndex.WindowIssuesScanned,
+			}
+			if got != rc.Expect.DedupIndex {
+				t.Fatalf("shared corpus run %q: dedup_index = %+v, want %+v", rc.Name, got, rc.Expect.DedupIndex)
+			}
+			if _, err := os.Stat(CachePath(dir)); len(rc.Seen) == 0 && !os.IsNotExist(err) {
+				t.Fatalf("shared corpus run %q is dry-run and must not write the seen cache (stat err=%v)", rc.Name, err)
+			}
+		})
 	}
 }
 

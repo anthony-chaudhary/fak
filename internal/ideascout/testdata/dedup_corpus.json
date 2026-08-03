@@ -1,0 +1,301 @@
+{
+  "schema": "fak/idea-scout-dedup-corpus@1",
+  "purpose": "ONE corpus, read by BOTH scout implementations, pinning the never-file-twice contract rung by rung. tools/idea_scout.py and internal/ideascout implement the same four-rung dedup contract; before this file they were tied together by prose alone (docs/idea-scout.md, 'Two implementations, one contract'), which is why the SAME defect had to be fixed twice: cfe66c656 (Python, #5543) then 00f270957d2a (Go, #5544). Every case below is asserted by internal/ideascout/ideascout_test.go AND by tools/idea_scout_test.py, so a rung that changes in one implementation and not the other reds a test instead of aging into a re-filed issue (#5547).",
+
+  "readers": [
+    "internal/ideascout/ideascout_test.go :: TestSharedDedupCorpus* (loads testdata/dedup_corpus.json)",
+    "tools/idea_scout_test.py :: SharedDedupCorpusTest / SharedRunCorpusTest (loads internal/ideascout/testdata/dedup_corpus.json)"
+  ],
+
+  "rungs": ["seen-cache", "filed-stamp", "issue-body", "title-near"],
+  "rung_notes": {
+    "seen-cache": "node-local .idea-scout/seen.json fast path; git-ignored, may be lost, never the guarantee",
+    "filed-stamp": "the DURABLE rung: the <!-- idea-scout-source: ... --> stamp read back out of the scout's own label-targeted filing history. A source filed once is never filed again.",
+    "issue-body": "best-effort: the candidate URL appears verbatim in some issue body inside the RECENCY WINDOW",
+    "title-near": "best-effort: Jaccard token overlap >= dup_jaccard with an issue title inside the RECENCY WINDOW"
+  },
+  "rung_order": "seen-cache, then filed-stamp, then issue-body, then title-near. The order is load-bearing: filed-stamp must be reported ahead of issue-body so a windowed guess is never mistaken for the guarantee in the run report.",
+
+  "skip_stat_keys": ["seen-cache", "filed-stamp", "issue-body", "title-near", "below-min", "within-run-dup"],
+
+  "index_build_rule": "stamped = stamp_index(scout_issues) UNION stamp_index(window_issues); (title_sets, bodies_joined) = existing_issue_index(window_issues). The union is deliberate: a filed issue whose label a human stripped is still ours and its stamp is still proof we filed that source. The window contributes NOTHING to the durable rung beyond that union.",
+
+  "dup_jaccard": 0.55,
+
+  "seen": {
+    "arxiv:2606.01234": {"filed_at": "2026-01-01"},
+    "github:acme/seen-repo": {"filed_at": "2026-02-02"},
+    "github:acme/agent-firewall": {"filed_at": "2026-03-03"}
+  },
+
+  "window_issues": [
+    {
+      "number": 5540,
+      "state": "open",
+      "title": "Prompt injection defense for agent tool calls",
+      "body": "Opened by hand after reading https://example.test/human-writeup - no scout stamp anywhere in this body."
+    },
+    {
+      "number": 5539,
+      "state": "open",
+      "title": "flake in the gateway suite",
+      "body": "unrelated to the scout; mentions https://github.com/acme/dual-hit in passing."
+    }
+  ],
+
+  "scout_issues": [
+    {
+      "number": 528,
+      "state": "closed",
+      "title": "idea-scout: fu351/Doberman-Core",
+      "body": "> Auto-filed by the daily idea-scout.\n\n**Source:** https://github.com/fu351/Doberman-Core\n<!-- idea-scout-source: github:fu351/doberman-core -->"
+    },
+    {
+      "number": 4200,
+      "state": "closed",
+      "title": "idea-scout: acme/agent-firewall",
+      "body": "**Source:** https://github.com/acme/agent-firewall\n<!-- idea-scout-source: github:acme/agent-firewall -->"
+    },
+    {
+      "number": 4300,
+      "state": "open",
+      "title": "idea-scout: acme/dual-hit",
+      "body": "**Source:** https://github.com/acme/dual-hit\n<!-- idea-scout-source: github:acme/dual-hit -->"
+    }
+  ],
+
+  "dedup_cases": [
+    {
+      "name": "seen-cache-exact",
+      "candidate": {"source_id": "arxiv:2606.01234", "url": "https://arxiv.org/abs/2606.01234", "title": "Defending LLM agents"},
+      "want": "seen-cache",
+      "why": "the node-local fast path answers first when the id matches verbatim"
+    },
+    {
+      "name": "seen-cache-case-folded",
+      "candidate": {"source_id": "github:Acme/Seen-Repo", "url": "https://github.com/Acme/Seen-Repo", "title": "acme seen repo"},
+      "want": "seen-cache",
+      "why": "GitHub hands back whichever casing it likes; the cache key is compared lower-folded too"
+    },
+    {
+      "name": "seen-cache-precedes-filed-stamp",
+      "candidate": {"source_id": "github:acme/agent-firewall", "url": "https://github.com/acme/agent-firewall", "title": "acme agent firewall"},
+      "want": "seen-cache",
+      "why": "in BOTH the cache and the filing history: rung 1 is reported, pinning the rung order"
+    },
+    {
+      "name": "filed-stamp-aged-below-window",
+      "candidate": {"source_id": "github:fu351/doberman-core", "url": "https://github.com/fu351/Doberman-Core", "title": "fu351/Doberman-Core"},
+      "want": "filed-stamp",
+      "why": "#5543/#5544 in one row: the filing (#528) is CLOSED and far below the recency window, and no seen-cache entry exists. Only the label-targeted filing history can catch it. See window_only_cases for the counterfactual."
+    },
+    {
+      "name": "filed-stamp-case-folded",
+      "candidate": {"source_id": "github:FU351/Doberman-Core", "url": "https://github.com/FU351/Doberman-Core", "title": "fu351/Doberman-Core"},
+      "want": "filed-stamp",
+      "why": "Acme/Repo vs acme/repo: case is folded on BOTH sides (stamp index and candidate id) or a casing flip re-files"
+    },
+    {
+      "name": "filed-stamp-precedes-issue-body",
+      "candidate": {"source_id": "github:acme/dual-hit", "url": "https://github.com/acme/dual-hit", "title": "acme dual hit"},
+      "want": "filed-stamp",
+      "why": "stamped AND its URL sits in a window issue body. The DURABLE rung must be the one named, or the run report makes a windowed guess look like the guarantee."
+    },
+    {
+      "name": "issue-body-url",
+      "candidate": {"source_id": "arxiv:2607.11111", "url": "https://example.test/human-writeup", "title": "Quarantining untrusted tool output"},
+      "want": "issue-body",
+      "why": "a human already wrote this URL up in a window issue; not stamped, so rung 3 is the one that fires"
+    },
+    {
+      "name": "issue-body-precedes-title-near",
+      "candidate": {"source_id": "arxiv:2607.22222", "url": "https://example.test/human-writeup", "title": "Prompt injection defense for agent tool calls at scale"},
+      "want": "issue-body",
+      "why": "matches rungs 3 AND 4; rung 3 is reported"
+    },
+    {
+      "name": "title-near-above-jaccard",
+      "candidate": {"source_id": "arxiv:2607.33333", "url": "https://example.test/fresh-paper", "title": "Prompt injection defense for agent tool calls at scale"},
+      "want": "title-near",
+      "why": "7 of 8 tokens shared with issue #5540 => Jaccard 0.875 >= 0.55"
+    },
+    {
+      "name": "title-just-below-jaccard",
+      "candidate": {"source_id": "arxiv:2607.44444", "url": "https://example.test/bench", "title": "Prompt injection benchmarks"},
+      "want": "",
+      "why": "2 shared tokens of 8 in the union => Jaccard 0.25 < 0.55. Pins the THRESHOLD, not merely 'any overlap'."
+    },
+    {
+      "name": "genuinely-new",
+      "candidate": {"source_id": "github:brandnew/agent-policy-gateway", "url": "https://github.com/brandnew/agent-policy-gateway", "title": "brandnew/agent-policy-gateway"},
+      "want": "",
+      "why": "the control. Without it the contract is satisfiable by 'refuse everything'."
+    }
+  ],
+
+  "window_only_cases_rule": "stamped = stamp_index(window_issues) ONLY (no scout index) and seen = {}. This is exactly the state the tracker was in when #5543 happened: the git-ignored cache was lost on a node and the filing had aged out of the 800-issue window. Every case here MUST come back new - that is what proves the dedup_cases above are not passing for some other reason.",
+  "window_only_cases": [
+    {
+      "name": "aged-filing-is-invisible-to-the-window",
+      "candidate": {"source_id": "github:fu351/doberman-core", "url": "https://github.com/fu351/Doberman-Core", "title": "fu351/Doberman-Core"},
+      "want": "",
+      "why": "if this ever starts coming back as a duplicate, the filed-stamp case above is vacuous"
+    },
+    {
+      "name": "seen-cache-loss-is-not-covered-by-the-window",
+      "candidate": {"source_id": "arxiv:2606.01234", "url": "https://arxiv.org/abs/2606.01234", "title": "Defending LLM agents"},
+      "want": "",
+      "why": "the cache is a fast path only; losing it must not be masked by the window either"
+    }
+  ],
+
+  "run_rule": "Each run case is replayed end to end through the real entry point (Run for Go, main() for Python) with every network/gh boundary stubbed. window_issues is the tracker newest-first and the stub TRUNCATES it to thresholds.issue_scan_limit - a recency window. scout_issues answers the label-targeted query and is returned whole however old. A non-empty window_error / scout_error makes that fetch fail.",
+  "runs": [
+    {
+      "name": "aged-filing-below-the-window-is-still-blocked",
+      "config": {
+        "topics": [{"key": "t", "github": "agent tool", "terms": ["agent", "tool", "guardrail", "policy", "gateway"], "area": "trust-floor"}],
+        "thresholds": {"min_score": 1, "max_issues": 3, "issue_scan_limit": 2, "scout_scan_limit": 50}
+      },
+      "repos": [
+        {"fullName": "fu351/Doberman-Core", "description": "an agent tool guardrail policy gateway", "url": "https://github.com/fu351/Doberman-Core", "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go"}
+      ],
+      "window_issues": [
+        {"number": 5540, "title": "flake in the gateway suite", "body": "unrelated"},
+        {"number": 5539, "title": "release ship pins a stale base", "body": "unrelated"},
+        {"number": 5538, "title": "docs freshness stamp drifted", "body": "unrelated"},
+        {"number": 5537, "title": "lease reaper leaves orphans", "body": "unrelated"},
+        {"number": 5536, "title": "push gate rejects a tiered leaf", "body": "unrelated"},
+        {"number": 528, "title": "idea-scout: fu351/Doberman-Core", "body": "auto-filed long ago\n<!-- idea-scout-source: github:fu351/doberman-core -->"}
+      ],
+      "scout_issues": [
+        {"number": 528, "state": "closed", "title": "idea-scout: fu351/Doberman-Core", "body": "auto-filed long ago\n<!-- idea-scout-source: github:fu351/doberman-core -->"}
+      ],
+      "seen": {},
+      "expect": {
+        "refuse": false,
+        "planned": [],
+        "skipped": {"seen-cache": 0, "filed-stamp": 1, "issue-body": 0, "title-near": 0, "below-min": 0, "within-run-dup": 0},
+        "dropped": [{"source_id": "github:fu351/doberman-core", "rung": "filed-stamp"}],
+        "dedup_index": {"filed_issues_scanned": 1, "filed_stamps": 1, "scout_index_complete": true, "window_issues_scanned": 2}
+      },
+      "why": "the filing is the 6th of 6 in a 2-issue window, so the windowed rungs cannot see it. Only the durable rung can, and the run report must attribute the drop to it by name."
+    },
+    {
+      "name": "unfiled-source-is-still-admitted",
+      "config": {
+        "topics": [{"key": "t", "github": "agent tool", "terms": ["agent", "tool", "guardrail", "policy", "gateway"], "area": "trust-floor"}],
+        "thresholds": {"min_score": 1, "max_issues": 3, "issue_scan_limit": 2, "scout_scan_limit": 50}
+      },
+      "repos": [
+        {"fullName": "brandnew/agent-policy-gateway", "description": "an agent tool guardrail policy gateway", "url": "https://github.com/brandnew/agent-policy-gateway", "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go"}
+      ],
+      "window_issues": [
+        {"number": 5540, "title": "flake in the gateway suite", "body": "unrelated"},
+        {"number": 5539, "title": "release ship pins a stale base", "body": "unrelated"},
+        {"number": 528, "title": "idea-scout: fu351/Doberman-Core", "body": "auto-filed long ago\n<!-- idea-scout-source: github:fu351/doberman-core -->"}
+      ],
+      "scout_issues": [
+        {"number": 528, "state": "closed", "title": "idea-scout: fu351/Doberman-Core", "body": "auto-filed long ago\n<!-- idea-scout-source: github:fu351/doberman-core -->"}
+      ],
+      "seen": {},
+      "expect": {
+        "refuse": false,
+        "planned": ["github:brandnew/agent-policy-gateway"],
+        "skipped": {"seen-cache": 0, "filed-stamp": 0, "issue-body": 0, "title-near": 0, "below-min": 0, "within-run-dup": 0},
+        "dropped": [],
+        "dedup_index": {"filed_issues_scanned": 1, "filed_stamps": 1, "scout_index_complete": true, "window_issues_scanned": 2}
+      },
+      "why": "the control run. A guarantee that also blocks new sources is just a broken scout."
+    },
+    {
+      "name": "saturated-scout-index-refuses",
+      "config": {
+        "topics": [{"key": "t", "github": "agent tool", "terms": ["agent", "tool", "guardrail", "policy", "gateway"], "area": "trust-floor"}],
+        "thresholds": {"min_score": 1, "scout_scan_limit": 2}
+      },
+      "repos": [
+        {"fullName": "fu351/Doberman-Core", "description": "an agent tool guardrail policy gateway", "url": "https://github.com/fu351/Doberman-Core", "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go"}
+      ],
+      "window_issues": [
+        {"number": 5540, "title": "flake in the gateway suite", "body": "unrelated"}
+      ],
+      "scout_issues": [
+        {"number": 528, "title": "idea-scout: o/one", "body": "<!-- idea-scout-source: github:o/one -->"},
+        {"number": 529, "title": "idea-scout: o/two", "body": "<!-- idea-scout-source: github:o/two -->"}
+      ],
+      "seen": {},
+      "expect": {
+        "refuse": true,
+        "refuse_contains": ["saturated", "scout_scan_limit=2"]
+      },
+      "why": "a scan that comes back at exactly the limit is ambiguous between complete and truncated, and a truncated index is indistinguishable from 'this source is new'. Growth must surface as a loud stop - silent degradation is what caused #5543."
+    },
+    {
+      "name": "scout-index-failure-refuses-despite-a-populated-seen-cache",
+      "config": {
+        "topics": [{"key": "t", "github": "agent tool", "terms": ["agent", "tool", "guardrail", "policy", "gateway"], "area": "trust-floor"}],
+        "thresholds": {"min_score": 1, "scout_scan_limit": 50}
+      },
+      "repos": [
+        {"fullName": "fu351/Doberman-Core", "description": "an agent tool guardrail policy gateway", "url": "https://github.com/fu351/Doberman-Core", "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go"}
+      ],
+      "window_issues": [
+        {"number": 5540, "title": "flake in the gateway suite", "body": "unrelated"}
+      ],
+      "scout_issues": [],
+      "scout_error": "gh: label query failed",
+      "seen": {"github:something": {"filed_at": "2026-01-01"}},
+      "expect": {
+        "refuse": true,
+        "refuse_contains": ["cannot build the filed-issue index"]
+      },
+      "why": "the durable rung is MANDATORY. A populated seen-cache must not buy a pass: that local, git-ignored file is exactly what proved unreliable."
+    },
+    {
+      "name": "window-failure-without-a-seen-cache-refuses",
+      "config": {
+        "topics": [{"key": "t", "github": "agent tool", "terms": ["agent", "tool", "guardrail", "policy", "gateway"], "area": "trust-floor"}],
+        "thresholds": {"min_score": 1, "scout_scan_limit": 50}
+      },
+      "repos": [
+        {"fullName": "fu351/Doberman-Core", "description": "an agent tool guardrail policy gateway", "url": "https://github.com/fu351/Doberman-Core", "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go"}
+      ],
+      "window_issues": [],
+      "window_error": "gh: rate limited",
+      "scout_issues": [
+        {"number": 528, "state": "closed", "title": "idea-scout: fu351/Doberman-Core", "body": "auto-filed long ago\n<!-- idea-scout-source: github:fu351/doberman-core -->"}
+      ],
+      "seen": {},
+      "expect": {
+        "refuse": true,
+        "refuse_contains": ["cannot fetch existing issues and no seen-cache"]
+      },
+      "why": "the pre-existing window refusal is NOT relaxed on the back of the durable rung. Both implementations refuse unconditionally here - there is no knob on either side that waives it (the Go-only RunOptions.AllowIssueGap, which had no caller and could only turn this refusal off, was removed for #5547)."
+    },
+    {
+      "name": "window-failure-with-a-seen-cache-degrades-and-the-durable-rung-still-gates",
+      "config": {
+        "topics": [{"key": "t", "github": "agent tool", "terms": ["agent", "tool", "guardrail", "policy", "gateway"], "area": "trust-floor"}],
+        "thresholds": {"min_score": 1, "scout_scan_limit": 50}
+      },
+      "repos": [
+        {"fullName": "fu351/Doberman-Core", "description": "an agent tool guardrail policy gateway", "url": "https://github.com/fu351/Doberman-Core", "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go"}
+      ],
+      "window_issues": [],
+      "window_error": "gh: rate limited",
+      "scout_issues": [
+        {"number": 528, "state": "closed", "title": "idea-scout: fu351/Doberman-Core", "body": "auto-filed long ago\n<!-- idea-scout-source: github:fu351/doberman-core -->"}
+      ],
+      "seen": {"github:o/other": {"filed_at": "2026-01-01"}},
+      "expect": {
+        "refuse": false,
+        "planned": [],
+        "skipped": {"seen-cache": 0, "filed-stamp": 1, "issue-body": 0, "title-near": 0, "below-min": 0, "within-run-dup": 0},
+        "dropped": [{"source_id": "github:fu351/doberman-core", "rung": "filed-stamp"}],
+        "dedup_index": {"filed_issues_scanned": 1, "filed_stamps": 1, "scout_index_complete": true, "window_issues_scanned": 0}
+      },
+      "why": "with the soft rungs gone entirely the guarantee still holds, because it never rested on them."
+    }
+  ]
+}
