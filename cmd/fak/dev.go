@@ -1,7 +1,7 @@
 package main
 
 // dev.go — `fak dev`, C2 of epic #2228 (#2231): the namespace verb of the DEV
-// tier. Most of fak's ~170 verbs are internal dev/fleet tooling, not product;
+// tier. Most of fak's ~270 verbs are internal dev/fleet tooling, not product;
 // `fak dev <verb>` is their canonical spelling, and this file is the whole
 // namespace:
 //
@@ -112,6 +112,12 @@ func printDevListing(w io.Writer) {
 	verbs := devTierVerbs()
 	fmt.Fprintf(w, "fak dev — internal dev/fleet tooling, %d verbs. usage: fak dev <verb> [args...]\n", len(verbs))
 	fmt.Fprintln(w, "(runs the verb exactly as its bare spelling; the product front door is 'fak help')")
+	// The adopter line (#5465): someone who installed fak to front a model reaches this
+	// listing and reasonably asks what these are and whether they are safe to ship. Answer
+	// it here rather than making them find INSTALL.md. Column 0 on purpose — dev_test.go's
+	// set check parses only the indented verb rows.
+	fmt.Fprintln(w, "these develop the fak repository itself and are inert for an adopter: a verb runs")
+	fmt.Fprintln(w, "only when you type it. INSTALL.md 'What's in the binary' has the full answer.")
 	fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, v := range verbs {
