@@ -28,29 +28,47 @@ func TestUpstreamErrorKindsSnapshot_CarriesStalledOffTheProcess(t *testing.T) {
 		t.Fatalf("fresh snapshot = %v, want nil (absent must read NOT INSTRUMENTED, not zero failures)", got)
 	}
 
-	// Two stalls plus one of every neighbouring kind, folded through the SAME observe path
-	// production uses.
-	s.metrics.observeUpstreamError(&agent.UpstreamStalledError{Idle: 90 * time.Second})
-	s.metrics.observeUpstreamError(fmt.Errorf("planner: %w", &agent.UpstreamStalledError{Idle: 90 * time.Second}))
-	s.metrics.observeUpstreamError(&agent.UpstreamStatusError{Status: http.StatusTooManyRequests})
-	s.metrics.observeUpstreamError(&agent.UpstreamUnreachableError{Err: errors.New("dial")})
-	s.metrics.observeUpstreamError(fmt.Errorf("planner: streaming failed after retries: %w", &net.OpError{Op: "read", Err: syscall.ECONNRESET}))
-	s.metrics.observeUpstreamError(http.ErrHandlerTimeout)
+	// Two stalls (one bare, one wrapped) plus one of every neighbouring kind. Each row names
+	// the kind upstreamErrorKind (metrics.go:504) must mint for that error, so the expected
+	// tally below is DERIVED from this fixture rather than frozen at today's total: adding a
+	// row here moves the expectation with it, and a row whose classification silently changes
+	// still fails.
+	observed := []struct {
+		err  error
+		kind string
+	}{
+		{&agent.UpstreamStalledError{Idle: 90 * time.Second}, "stalled"},
+		{fmt.Errorf("planner: %w", &agent.UpstreamStalledError{Idle: 90 * time.Second}), "stalled"},
+		{&agent.UpstreamStatusError{Status: http.StatusTooManyRequests}, "rate_limited"},
+		{&agent.UpstreamUnreachableError{Err: errors.New("dial")}, "unreachable"},
+		{fmt.Errorf("planner: streaming failed after retries: %w", &net.OpError{Op: "read", Err: syscall.ECONNRESET}), "transport"},
+		{http.ErrHandlerTimeout, "other"},
+	}
+	// Folded through the SAME observe path production uses.
+	want := map[string]uint64{}
+	for _, o := range observed {
+		s.metrics.observeUpstreamError(o.err)
+		want[o.kind]++
+	}
 
 	snap := s.UpstreamErrorKindsSnapshot()
-	if snap["stalled"] != 2 {
-		t.Fatalf("snapshot[stalled] = %d, want 2 — the stall must leave the process as its OWN kind", snap["stalled"])
+	if snap["stalled"] != want["stalled"] {
+		t.Fatalf("snapshot[stalled] = %d, want %d — the stall must leave the process as its OWN kind, wrapped or bare", snap["stalled"], want["stalled"])
 	}
-	// Every neighbouring kind survives too, and "other" stays at exactly 1 — the single
-	// genuinely unclassifiable error. A 3 there would mean the stalls had been swept into
-	// the coarse bucket, which is the failure mode this whole kind ladder exists to avoid.
-	for kind, want := range map[string]uint64{"rate_limited": 1, "unreachable": 1, "transport": 1, "other": 1} {
-		if snap[kind] != want {
-			t.Fatalf("snapshot[%s] = %d, want %d — every kind must survive distinctly, not just the stall", kind, snap[kind], want)
+	// Every neighbouring kind survives distinctly, and the tally is EXACT in both
+	// directions: every kind the fixture fed in is present at its own count (nothing
+	// merged — "other" reading 3 would mean the stalls had been swept into the coarse
+	// bucket, the failure mode this whole kind ladder exists to avoid), and the snapshot
+	// carries no key the fixture never observed (nothing invented).
+	for kind, n := range want {
+		if snap[kind] != n {
+			t.Fatalf("snapshot[%s] = %d, want %d — every observed kind must survive distinctly, not just the stall", kind, snap[kind], n)
 		}
 	}
-	if len(snap) != 5 {
-		t.Fatalf("snapshot = %v, want exactly the 5 observed kinds (nothing invented or merged)", snap)
+	for kind, n := range snap {
+		if _, ok := want[kind]; !ok {
+			t.Fatalf("snapshot invented the kind %q = %d, which nothing in the fixture observed: snapshot = %v", kind, n, snap)
+		}
 	}
 
 	// The snapshot is a COPY: mutating it must not corrupt the live counter.

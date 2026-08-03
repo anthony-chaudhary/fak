@@ -43,11 +43,30 @@ const kvPerTokenPerLayerF32 = 2 * 512 * 3 * 4 // = 12288
 // issue quotes is the ~16K figure.
 func TestContextSizeConfigChargesPerLayerWindow(t *testing.T) {
 	t.Setenv("FAK_HYBRID_KV", "1")
-	kv := gemma4ShapedConfig().ContextSizeConfig().KV
+	cfg := gemma4ShapedConfig()
+	kv := cfg.ContextSizeConfig().KV
 
-	if len(kv.WindowPerLayer) != 30 {
-		t.Fatalf("WindowPerLayer = %v (len %d), want 30 entries: the corrected KVCacheShape is not reaching compute.KVConfig",
-			kv.WindowPerLayer, len(kv.WindowPerLayer))
+	// The projection must carry a window entry for EVERY layer the estimator iterates:
+	// windowCappedPositions loops l < cfg.NumLayers and reads any layer past the end of
+	// WindowPerLayer as full attention (compute/capacity.go:135-141), so a slice shorter than
+	// NumLayers silently re-charges the tail at the uniform rate — the exact bug this test
+	// exists to catch, at any layer count.
+	if len(kv.WindowPerLayer) != kv.NumLayers {
+		t.Fatalf("WindowPerLayer = %v (len %d), want one entry per layer (NumLayers = %d): the corrected KVCacheShape is not reaching compute.KVConfig",
+			kv.WindowPerLayer, len(kv.WindowPerLayer), kv.NumLayers)
+	}
+	// And each entry is the SOURCE cadence with kvWindowPerLayer's normalization applied
+	// (kvbudget_shape.go:122-127): a positive window verbatim, the loader's -1
+	// full-attention sentinel flattened to the non-positive "no window" spelling
+	// WindowPerLayer reads.
+	for l, got := range kv.WindowPerLayer {
+		wantWindow := cfg.Window[l]
+		if wantWindow < 0 {
+			wantWindow = 0 // the -1 full-attention sentinel is not a one-token bound
+		}
+		if got != wantWindow {
+			t.Fatalf("WindowPerLayer[%d] = %d, want %d (source cadence Config.Window[%d] = %d)", l, got, wantWindow, l, cfg.Window[l])
+		}
 	}
 
 	const uniformSlots = 30 * gemma4WindowedCtx           // 491520

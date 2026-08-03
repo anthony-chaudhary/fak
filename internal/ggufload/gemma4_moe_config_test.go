@@ -49,8 +49,9 @@ func TestApplyGemma4ConfigReadsMoEExpertAxes(t *testing.T) {
 	md[p+glmKeyExpertUsedCount] = Value{Type: TypeUint32, Value: uint32(8)}
 	md[p+glmKeyExpertFFNLength] = Value{Type: TypeUint32, Value: uint32(704)}
 
+	f := &File{Metadata: md}
 	cfg := model.Config{NumLayers: 30}
-	if err := applyGemma4Config(&File{Metadata: md}, p, &cfg); err != nil {
+	if err := applyGemma4Config(f, p, &cfg); err != nil {
 		t.Fatalf("applyGemma4Config: %v", err)
 	}
 	if cfg.NumExperts != 128 {
@@ -65,9 +66,27 @@ func TestApplyGemma4ConfigReadsMoEExpertAxes(t *testing.T) {
 	if !cfg.IsMoE() {
 		t.Fatal("cfg.IsMoE() = false for a 128-expert gemma4 header: the checkpoint is still configured dense")
 	}
-	// The fix must not disturb the per-layer geometry the applier already derived.
-	if len(cfg.LayerTypes) != 30 || cfg.LayerTypes[29] != "full_attention" || cfg.LayerTypes[0] != "sliding_attention" {
-		t.Fatalf("per-layer geometry regressed: len=%d [0]=%q [29]=%q", len(cfg.LayerTypes), cfg.LayerTypes[0], cfg.LayerTypes[29])
+	// The fix must not disturb the per-layer geometry the applier already derived. That
+	// geometry is a RELATION, not a size: gguf_config.go:385 sizes every per-layer slice by
+	// cfg.NumLayers, and the loop below it spells layer l "sliding_attention" exactly when the
+	// header's sliding_window_pattern[l] is true. So the expectation is read back off the same
+	// metadata the applier read — one entry per DECLARED layer, each entry the type that
+	// layer's pattern bit asks for — which holds at any layer count, not just this fixture's.
+	pattern, ok := f.BoolArray(p + "attention.sliding_window_pattern")
+	if !ok || len(pattern) < cfg.NumLayers {
+		t.Fatalf("fixture is not self-describing: sliding_window_pattern present=%v len=%d, want >= NumLayers %d", ok, len(pattern), cfg.NumLayers)
+	}
+	if len(cfg.LayerTypes) != cfg.NumLayers {
+		t.Fatalf("per-layer geometry regressed: len(LayerTypes) = %d, want one entry per declared layer (NumLayers = %d)", len(cfg.LayerTypes), cfg.NumLayers)
+	}
+	for l, got := range cfg.LayerTypes {
+		wantType := "full_attention"
+		if pattern[l] { // true == sliding / local, gguf_config.go:393
+			wantType = "sliding_attention"
+		}
+		if got != wantType {
+			t.Fatalf("LayerTypes[%d] = %q, want %q: the header's sliding_window_pattern[%d]=%v is not reaching the per-layer geometry", l, got, wantType, l, pattern[l])
+		}
 	}
 }
 
