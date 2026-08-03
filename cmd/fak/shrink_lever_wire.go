@@ -1,4 +1,5 @@
-// shrink_lever_wire.go — the `fak serve` prompt-shrink-lever WIRE admission rule (#5493).
+// shrink_lever_wire.go — the prompt-shrink-lever WIRE admission rule for the two commands
+// that bind a gateway: `fak serve` (#5493) and `fak guard` (#5538).
 //
 // The three largest prompt-shrink levers this gateway ships are all gated, inside the
 // gateway, on the Anthropic passthrough decision (Server.anthropicPassthroughFor):
@@ -31,6 +32,18 @@
 // PRIVACY FENCE: the messages name the PROVIDER and the wire class only. They never echo
 // --base-url, because an operator-supplied upstream URL can carry an embedded credential
 // and can name a host that has no business in a log line.
+//
+// GUARD IS NOT SERVE, and the difference is load-bearing (#5538). Serve's --provider and
+// --base-url flags ARE its wire, so serve can classify straight off the parsed FlagSet.
+// Guard's are not: an empty --base-url there means "the provider's public API" rather than
+// serve's mock, --provider is auto-detected from the wrapped agent's name when unset
+// (claude→anthropic, codex→openai-responses), and --local / --remote-serve REWRITE both
+// behind the operator's back. Classifying guard off its raw flags would read the flagship
+// `fak guard -- claude` as the mock planner and refuse it — a false refusal of the one wire
+// that runs all three levers. So the guard entry point takes the RESOLVED provider and base
+// URL (guard_upstream_posture.go) and feeds them to the SAME classifier; only the operator-
+// facing command name and the "move to the wire that runs these levers" remedy differ, and
+// those are carried by shrinkLeverCommand rather than a forked second rule.
 package main
 
 import (
@@ -46,6 +59,36 @@ import (
 // prompt-shrink lever cannot run on the configured wire, so an operator (or a log scrape)
 // can match it by token rather than by prose that may be reworded.
 const shrinkLeverInertToken = "SHRINK_LEVER_INERT_ON_WIRE"
+
+// shrinkLeverCommand carries the ONLY two things that differ between the `fak serve` and
+// `fak guard` admissions: how the process names itself in the message, and what "move to the
+// wire that runs these levers" concretely means there. Everything else — the classifier, the
+// severity split, the lever table, the privacy fence — is shared, so a fix to the rule lands
+// on both commands at once instead of drifting between two copies.
+type shrinkLeverCommand struct {
+	// Name is the operator-facing command, e.g. "fak guard".
+	Name string
+	// ToWire is the imperative that reaches the passthrough on THIS command. It is a verb
+	// phrase, spliced after "Either " in the refusal and "To exercise them, " in the notice.
+	ToWire string
+}
+
+var (
+	// shrinkLeverServeCommand — `fak serve` IS the wire, so its remedy is the flag pair
+	// that selects it.
+	shrinkLeverServeCommand = shrinkLeverCommand{
+		Name:   "fak serve",
+		ToWire: "serve the Anthropic Messages wire (--provider anthropic with a single --base-url)",
+	}
+	// shrinkLeverGuardCommand — `fak guard` reaches the passthrough by DEFAULT when it wraps
+	// an Anthropic-wire agent, so its remedy names the default launch and the three flags
+	// that steer off it (--local forces provider=openai, --remote-serve forces the
+	// OpenAI-compatible wire, and a bare --gguf makes the in-kernel planner the upstream).
+	shrinkLeverGuardCommand = shrinkLeverCommand{
+		Name:   "fak guard",
+		ToWire: "wrap an Anthropic-wire agent (the default `fak guard -- claude`, or --provider anthropic) with no --local, no --remote-serve and no upstream-replacing --gguf",
+	}
+)
 
 // The wire classes this rule distinguishes. They mirror, from flags alone, the planner
 // switch gateway.New makes and the passthrough predicate that reads its result: only a
@@ -174,34 +217,39 @@ type shrinkLever struct {
 	Explicit bool
 }
 
-// serveShrinkLevers reads the three levers out of the parsed serve flags, marking each one
-// Explicit when the operator actually named it on the command line. fs.Visit walks only the
-// flags Parse SET, which is exactly the distinction between "the operator asked for this"
-// and "this is the shipped default".
+// shrinkLevers builds the three-lever table from EFFECTIVE values plus the set of flag names
+// the operator actually typed. `named` must come from flag.FlagSet.Visit, which walks only
+// the flags Parse SET — exactly the distinction between "the operator asked for this" and
+// "this is the shipped default". Both commands register the same three flag names, so one
+// table serves both.
 //
 // The order is fixed (compaction, stale-read elision, cold-tool defer) so every rendered
 // message is deterministic without a sort.
-func serveShrinkLevers(fs *flag.FlagSet, sf *serveFlags) []shrinkLever {
-	named := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { named[f.Name] = true })
-	levers := []shrinkLever{
+func shrinkLevers(named map[string]bool, compactHistoryBudget int, elideStaleReads, deferColdTools bool) []shrinkLever {
+	return []shrinkLever{
 		{
 			Flag: "--compact-history-budget", Token: "compact_history_budget",
 			Gate: "gateway.compactAnthropicRawWithReason", Off: "--compact-history-budget 0",
-			On: *sf.compactHistoryBudget > 0, Explicit: named["compact-history-budget"],
+			On: compactHistoryBudget > 0, Explicit: named["compact-history-budget"],
 		},
 		{
 			Flag: "--elide-stale-reads", Token: "elide_stale_reads",
 			Gate: "gateway.maybeElideStaleReads", Off: "--elide-stale-reads=false",
-			On: *sf.elideStaleReads, Explicit: named["elide-stale-reads"],
+			On: elideStaleReads, Explicit: named["elide-stale-reads"],
 		},
 		{
 			Flag: "--defer-cold-tools", Token: "defer_cold_tools",
 			Gate: "gateway.maybeDeferColdTools", Off: "--defer-cold-tools=false",
-			On: *sf.deferColdTools, Explicit: named["defer-cold-tools"],
+			On: deferColdTools, Explicit: named["defer-cold-tools"],
 		},
 	}
-	return levers
+}
+
+// serveShrinkLevers reads the three levers out of the parsed serve flags.
+func serveShrinkLevers(fs *flag.FlagSet, sf *serveFlags) []shrinkLever {
+	named := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { named[f.Name] = true })
+	return shrinkLevers(named, *sf.compactHistoryBudget, *sf.elideStaleReads, *sf.deferColdTools)
 }
 
 // inertShrinkLevers returns the levers that are ON yet cannot fire on this wire, in the
@@ -265,32 +313,32 @@ func shrinkLeverOffForms(levers []shrinkLever) string {
 // shrinkLeverRefusal is the operator-facing refusal for levers that were EXPLICITLY enabled
 // on a wire that cannot run them, or "" when there are none. Pure: it renders text and
 // decides nothing else.
-func shrinkLeverRefusal(wire, provider string, explicit []shrinkLever) string {
+func shrinkLeverRefusal(cmd shrinkLeverCommand, wire, provider string, explicit []shrinkLever) string {
 	if len(explicit) == 0 {
 		return ""
 	}
 	return fmt.Sprintf(
-		"fak serve: %s — refusing to start: %d prompt-shrink lever(s) were explicitly enabled but cannot run on this wire, which is %s.%s\n"+
+		"%s: %s — refusing to start: %d prompt-shrink lever(s) were explicitly enabled but cannot run on this wire, which is %s.%s\n"+
 			"Every one of them is gated on the Anthropic passthrough inside the gateway, so on this wire the prompt is forwarded UNSHRUNK and the lever is a no-op. "+
-			"Either serve the Anthropic Messages wire (--provider anthropic with a single --base-url), or state the lever is off (%s) so this run cannot be quoted as a lever result it never produced.",
-		shrinkLeverInertToken, len(explicit), shrinkWireDescription(wire, provider),
-		shrinkLeverLines(explicit), shrinkLeverOffForms(explicit))
+			"Either %s, or state the lever is off (%s) so this run cannot be quoted as a lever result it never produced.",
+		cmd.Name, shrinkLeverInertToken, len(explicit), shrinkWireDescription(wire, provider),
+		shrinkLeverLines(explicit), cmd.ToWire, shrinkLeverOffForms(explicit))
 }
 
 // shrinkLeverNotice is the loud, named advisory for levers that are inert only because they
 // ship default-on, or "" when there are none. It does not block the boot: those levers were
 // not this operator's stated intent, and refusing would take down every ordinary
 // non-Anthropic serve.
-func shrinkLeverNotice(wire, provider string, defaults []shrinkLever) string {
+func shrinkLeverNotice(cmd shrinkLeverCommand, wire, provider string, defaults []shrinkLever) string {
 	if len(defaults) == 0 {
 		return ""
 	}
 	return fmt.Sprintf(
-		"fak serve: %s — NOTICE: %d prompt-shrink lever(s) are on by default and inert on this wire, which is %s.%s\n"+
+		"%s: %s — NOTICE: %d prompt-shrink lever(s) are on by default and inert on this wire, which is %s.%s\n"+
 			"Serving continues; nothing is broken. But an A/B on this wire measures ~0 saving from these levers, and that number is a verdict on an unwired lever, not on the kernel. "+
-			"To exercise them, serve the Anthropic Messages wire (--provider anthropic with a single --base-url).",
-		shrinkLeverInertToken, len(defaults), shrinkWireDescription(wire, provider),
-		shrinkLeverLines(defaults))
+			"To exercise them, %s.",
+		cmd.Name, shrinkLeverInertToken, len(defaults), shrinkWireDescription(wire, provider),
+		shrinkLeverLines(defaults), cmd.ToWire)
 }
 
 // admitServeShrinkLevers applies the wire rule to the parsed serve flags, writing the
@@ -299,13 +347,58 @@ func shrinkLeverNotice(wire, provider string, defaults []shrinkLever) string {
 // to run before every expensive startup stage.
 func admitServeShrinkLevers(fs *flag.FlagSet, sf *serveFlags, stderr io.Writer) bool {
 	wire := classifyShrinkWire(*sf.provider, *sf.baseURL, sf.replicaBaseURLs.Values(), *sf.ggufPath)
-	inert := inertShrinkLevers(wire, serveShrinkLevers(fs, sf))
-	if refusal := shrinkLeverRefusal(wire, *sf.provider, explicitShrinkLevers(inert)); refusal != "" {
+	return admitShrinkLevers(shrinkLeverServeCommand, wire, *sf.provider, serveShrinkLevers(fs, sf), stderr)
+}
+
+// guardShrinkLeverInputs is the RESOLVED guard boot state this rule reads (#5538). Every
+// field is what the gateway will actually be built with, NOT the raw flag — see the "guard
+// is not serve" note in the file header for why the raw flags cannot be used here:
+//
+//   - Provider / BaseURL are guardUpstreamPosture.up / .resolvedBase, i.e. AFTER the
+//     agent-name auto-detect, the --local rewrite to provider=openai, the --remote-serve
+//     force to the OpenAI-compatible wire, and the public-API base-URL default. They are
+//     exactly the values handed to gateway.Config.Provider / .BaseURL, which is what the
+//     passthrough predicate ends up reading.
+//   - GGUFPath non-empty means weights are loaded; with an empty BaseURL that is the pure
+//     in-kernel upstream, and with a base URL it is the dual planner (whose proxy side is
+//     still the passthrough), which classifyShrinkWire already orders correctly.
+//   - CompactHistoryBudget is the value AFTER resolveGuardCompactBudget, so the number the
+//     rule judges is the number gateway.Config carries.
+//   - SetFlags is guard's own fs.Visit map, so "the operator typed it" means the same thing
+//     on both commands.
+type guardShrinkLeverInputs struct {
+	SetFlags             map[string]bool
+	Provider             string
+	BaseURL              string
+	GGUFPath             string
+	CompactHistoryBudget int
+	ElideStaleReads      bool
+	DeferColdTools       bool
+}
+
+// admitGuardShrinkLevers applies the same wire rule to a resolved `fak guard` launch,
+// writing the refusal or the notice to stderr and returning false when the caller must NOT
+// continue to boot. Guard has no replica-fleet flag, so the replica dimension is empty here;
+// the class stays reachable from serve and is left in the shared classifier rather than
+// special-cased out.
+func admitGuardShrinkLevers(in guardShrinkLeverInputs, stderr io.Writer) bool {
+	wire := classifyShrinkWire(in.Provider, in.BaseURL, nil, in.GGUFPath)
+	levers := shrinkLevers(in.SetFlags, in.CompactHistoryBudget, in.ElideStaleReads, in.DeferColdTools)
+	return admitShrinkLevers(shrinkLeverGuardCommand, wire, in.Provider, levers, stderr)
+}
+
+// admitShrinkLevers is the shared severity split both commands run: an EXPLICITLY enabled
+// lever that cannot fire on this wire refuses the boot by name, and a merely default-on one
+// gets the named notice. Pure apart from the write to stderr — no dial, no listener, no
+// weight load — so it is cheap enough to run before every expensive startup stage.
+func admitShrinkLevers(cmd shrinkLeverCommand, wire, provider string, levers []shrinkLever, stderr io.Writer) bool {
+	inert := inertShrinkLevers(wire, levers)
+	if refusal := shrinkLeverRefusal(cmd, wire, provider, explicitShrinkLevers(inert)); refusal != "" {
 		fmt.Fprintln(stderr, refusal)
 		return false
 	}
 	if shrinkWireNoticeWarranted(wire) {
-		if notice := shrinkLeverNotice(wire, *sf.provider, defaultShrinkLevers(inert)); notice != "" {
+		if notice := shrinkLeverNotice(cmd, wire, provider, defaultShrinkLevers(inert)); notice != "" {
 			fmt.Fprintln(stderr, notice)
 		}
 	}

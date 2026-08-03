@@ -104,6 +104,18 @@ func cmdGuard(argv []string) {
 		return
 	}
 	t0 := time.Now()
+	// --core-lock-all (#5423, epic #5170 Track C) is the session-wide RATCHET posture:
+	// for the life of this launch no channel — operator allow/deny overlay reload, the
+	// allow watcher, POST /v1/fak/policy/reload, or a self-authored overlay — may WIDEN
+	// the capability floor; only tighten-only and no-op amendments are installed. It is
+	// PEELED here rather than registered on the FlagSet below because fs is
+	// flag.ExitOnError: the posture has to be recorded before any parse, and the peel
+	// keeps the flag off the wrapped child's argv (see guardLaunchCoreLockAll). Recorded
+	// before the verb peels' successors and long before the gateway binds, so every
+	// amendment site that reads guardCoreLockAllActive() sees the final value.
+	var guardCoreLock bool
+	guardCoreLock, argv = guardLaunchCoreLockAll(argv)
+	setGuardCoreLockAll(guardCoreLock)
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	rotateMode := fs.String("rotate", "", "account rotation: auto|off|<seat> (default auto headless, off interactive)")
 	verbFlagUsage(fs, "guard")
@@ -554,6 +566,36 @@ func cmdGuard(argv []string) {
 	accountFailoverFunc := posture.accountFailoverFunc
 	guardActiveAccountDir, guardWalledAccounts := posture.activeAccountDir, posture.walledAccounts
 	guardAccountRehome := posture.accountRehome
+
+	// Prompt-shrink lever WIRE admission (#5538, the `fak guard` sibling of #5493):
+	// --compact-history-budget, --elide-stale-reads and --defer-cold-tools are each gated,
+	// inside the gateway, on the Anthropic passthrough (Server.anthropicPassthroughFor), so
+	// on any other upstream wire all three stand down to identity — and all three ship
+	// default-ON, which makes silently-inert the DEFAULT experience for a self-hosted guard
+	// (--local forces provider=openai; --remote-serve forces the OpenAI-compatible wire; a
+	// bare --gguf makes the in-kernel planner the upstream). Refuse by name when the operator
+	// EXPLICITLY enabled one here, and name the default-on ones that are merely inert, so
+	// "enabled but inert" is never silent and a ~0-saving A/B on this wire cannot be read as
+	// a verdict on the kernel.
+	//
+	// Placed HERE — not beside the flag parse, where serve.go puts its twin — because guard's
+	// raw --provider/--base-url are not its wire: they are auto-detected from the agent name
+	// and rewritten by --local/--remote-serve, and an empty --base-url means the provider's
+	// public API rather than serve's mock. Only the just-resolved posture (up, resolvedBase)
+	// names the wire the gateway will actually build. Still ahead of every expensive stage:
+	// the GGUF resolve/download and weight load are below, and nothing has bound yet
+	// (shrink_lever_wire.go).
+	if !admitGuardShrinkLevers(guardShrinkLeverInputs{
+		SetFlags:             guardSetFlags,
+		Provider:             up,
+		BaseURL:              resolvedBase,
+		GGUFPath:             *ggufPath,
+		CompactHistoryBudget: *compactHistoryBudget,
+		ElideStaleReads:      *elideStaleReads,
+		DeferColdTools:       *deferColdTools,
+	}, os.Stderr) {
+		os.Exit(2)
+	}
 
 	// Managed-cache posture (epic #1844 C6): decide from the JUST-resolved upstream whether
 	// this session actively manages the provider prompt-cache (the stable-prefix 1h TTL

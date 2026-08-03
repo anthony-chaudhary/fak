@@ -1,19 +1,25 @@
 package main
 
-// shrink_lever_wire_test.go — the #5493 witness: the three biggest prompt-shrink levers are
-// gated on the Anthropic passthrough inside the gateway, so on any other upstream wire they
-// are identity by construction. These cases pin that a non-passthrough `fak serve` with a
-// lever enabled produces either a NAMED refusal or a NAMED notice — never the silent
-// identity the ticket calls a false null.
+// shrink_lever_wire_test.go — the #5493 (`fak serve`) and #5538 (`fak guard`) witness: the
+// three biggest prompt-shrink levers are gated on the Anthropic passthrough inside the
+// gateway, so on any other upstream wire they are identity by construction. These cases pin
+// that a non-passthrough launch of EITHER command with a lever enabled produces a NAMED
+// refusal or a NAMED notice — never the silent identity the ticket calls a false null.
 //
-// Every admission case drives the REAL parsed `fak serve` flag surface (newServeFlagSet +
-// Parse + admitServeShrinkLevers), so a lever that is declared but never read, or a check
-// that is written but never wired, fails here. Nothing binds a socket or dials an upstream.
+// The serve cases drive the REAL parsed `fak serve` flag surface (newServeFlagSet + Parse +
+// admitServeShrinkLevers), so a lever that is declared but never read, or a check that is
+// written but never wired, fails here. Guard registers its flags inline in cmdGuard (which
+// spawns a child), so the guard cases drive the resolved-posture entry point directly and
+// TestGuardBootWiresTheShrinkLeverAdmission carries the wiring half. Nothing binds a socket
+// or dials an upstream.
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
 // TestClassifyShrinkWireMatrix pins the flag→wire classification against gateway.New's own
@@ -104,7 +110,7 @@ func TestInertShrinkLeversSelectsOnlyEnabledLeversOffTheWire(t *testing.T) {
 // definition of done requires: a typed token, the lever by name, the wire it is inert on,
 // and the exact argument that resolves it. An empty explicit set renders nothing.
 func TestShrinkLeverRefusalCarriesTokenLeverWireAndRemedy(t *testing.T) {
-	if got := shrinkLeverRefusal(shrinkWireForeignProxy, "openai", nil); got != "" {
+	if got := shrinkLeverRefusal(shrinkLeverServeCommand, shrinkWireForeignProxy, "openai", nil); got != "" {
 		t.Errorf("no explicitly enabled lever must render no refusal, got %q", got)
 	}
 	explicit := []shrinkLever{{
@@ -112,8 +118,9 @@ func TestShrinkLeverRefusalCarriesTokenLeverWireAndRemedy(t *testing.T) {
 		Gate: "gateway.maybeDeferColdTools", Off: "--defer-cold-tools=false",
 		On: true, Explicit: true,
 	}}
-	got := shrinkLeverRefusal(shrinkWireForeignProxy, "openai", explicit)
+	got := shrinkLeverRefusal(shrinkLeverServeCommand, shrinkWireForeignProxy, "openai", explicit)
 	for _, want := range []string{
+		"fak serve:",                  // the command that is refusing
 		shrinkLeverInertToken,         // the typed, scrapeable reason
 		"--defer-cold-tools",          // the lever, by its operator-facing name
 		"defer_cold_tools",            // the lever, by its stable token
@@ -138,10 +145,10 @@ func TestShrinkLeverRefusalCarriesTokenLeverWireAndRemedy(t *testing.T) {
 // that prevents the ticket's second-order harm: a ~0-saving A/B on this wire is a verdict
 // on an unwired lever, not on the kernel.
 func TestShrinkLeverNoticeNamesTheFalseNull(t *testing.T) {
-	if got := shrinkLeverNotice(shrinkWireInKernel, "openai", nil); got != "" {
+	if got := shrinkLeverNotice(shrinkLeverServeCommand, shrinkWireInKernel, "openai", nil); got != "" {
 		t.Errorf("no default-on inert lever must render no notice, got %q", got)
 	}
-	got := shrinkLeverNotice(shrinkWireInKernel, "openai", []shrinkLever{{
+	got := shrinkLeverNotice(shrinkLeverServeCommand, shrinkWireInKernel, "openai", []shrinkLever{{
 		Flag: "--compact-history-budget", Token: "compact_history_budget",
 		Gate: "gateway.compactAnthropicRawWithReason", Off: "--compact-history-budget 0", On: true,
 	}})
@@ -300,5 +307,298 @@ func TestServeShrinkLeversReadsExplicitnessFromTheParsedFlags(t *testing.T) {
 		if strings.TrimSpace(l.Off) == "" || strings.TrimSpace(l.Gate) == "" || strings.TrimSpace(l.Flag) == "" {
 			t.Errorf("lever %q must carry Flag, Gate and Off, got %+v", token, l)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------
+// #5538 — the `fak guard` sibling. Guard sets the same three gateway.Config fields
+// (guard.go: CompactHistoryBudget, ElideStaleReads, DeferColdTools) and reaches a
+// non-passthrough wire at least as easily as serve does (--local forces provider=openai,
+// --remote-serve forces the OpenAI-compatible wire, a bare --gguf makes the in-kernel
+// planner the upstream), so the same admission has to run there.
+// ---------------------------------------------------------------------------------------
+
+// guardDefaultShrinkLeverBoot returns the lever half of a `fak guard` launch on which the
+// operator typed NONE of the three flags — i.e. the shipped defaults, taken from the gateway
+// constants guard registers them from, with the compaction budget passed through guard's own
+// resolveGuardCompactBudget so the number under test is the number gateway.Config carries.
+func guardDefaultShrinkLeverBoot() guardShrinkLeverInputs {
+	return guardShrinkLeverInputs{
+		SetFlags:             map[string]bool{},
+		CompactHistoryBudget: resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false),
+		ElideStaleReads:      gateway.DefaultElideStaleReads,
+		DeferColdTools:       gateway.DefaultDeferColdTools,
+	}
+}
+
+// TestGuardShipsAllThreeLeversOnByDefault pins the premise the whole guard admission rests
+// on: on a launch where the operator typed nothing, all three levers are ON. That is what
+// makes "silently inert" the DEFAULT experience for a self-hosted guard rather than an edge
+// case — if any of these three ever flipped default-off, the urgency of this rule changes and
+// this test is the place that says so.
+func TestGuardShipsAllThreeLeversOnByDefault(t *testing.T) {
+	in := guardDefaultShrinkLeverBoot()
+	levers := shrinkLevers(in.SetFlags, in.CompactHistoryBudget, in.ElideStaleReads, in.DeferColdTools)
+	if len(levers) != 3 {
+		t.Fatalf("three levers expected, got %d: %v", len(levers), levers)
+	}
+	for _, l := range levers {
+		if !l.On {
+			t.Errorf("%s ships default-ON for `fak guard`; got On=false (%+v)", l.Flag, l)
+		}
+		if l.Explicit {
+			t.Errorf("%s was not typed by the operator, so it must not read as Explicit (%+v)", l.Flag, l)
+		}
+	}
+}
+
+// TestShrinkLeverCommandRemediesAreCommandCorrect pins the one thing that legitimately
+// differs between the two admissions. A remedy is the operator's only exit from a refusal, so
+// naming serve's flag pair inside a guard message (or vice versa) would send them to a flag
+// combination that does not reach the passthrough on the command they actually ran.
+func TestShrinkLeverCommandRemediesAreCommandCorrect(t *testing.T) {
+	for _, c := range []struct {
+		cmd     shrinkLeverCommand
+		wantAll []string
+	}{
+		{shrinkLeverServeCommand, []string{"fak serve", "--provider anthropic", "--base-url"}},
+		// Guard reaches the passthrough by DEFAULT, so its remedy has to name the default
+		// launch AND the three flags that steer off it — not serve's --provider/--base-url pair.
+		{shrinkLeverGuardCommand, []string{"fak guard", "fak guard -- claude", "--provider anthropic", "--local", "--remote-serve", "--gguf"}},
+	} {
+		if strings.TrimSpace(c.cmd.Name) == "" || strings.TrimSpace(c.cmd.ToWire) == "" {
+			t.Fatalf("%+v: a command must carry both a Name and a ToWire remedy", c.cmd)
+		}
+		joined := c.cmd.Name + " " + c.cmd.ToWire
+		for _, want := range c.wantAll {
+			if !strings.Contains(joined, want) {
+				t.Errorf("%s remedy must name %q; got %q", c.cmd.Name, want, c.cmd.ToWire)
+			}
+		}
+		// PRIVACY FENCE: a remedy is rendered into every refusal and notice, so it must be
+		// flag vocabulary only — never a host or URL.
+		if strings.Contains(c.cmd.ToWire, "http") {
+			t.Errorf("%s remedy must not carry a URL; got %q", c.cmd.Name, c.cmd.ToWire)
+		}
+	}
+	if shrinkLeverServeCommand.ToWire == shrinkLeverGuardCommand.ToWire {
+		t.Error("the two commands reach the passthrough differently; identical remedies mean one of them is wrong")
+	}
+}
+
+// TestGuardRawFlagsWouldMisclassifyTheFlagshipWire is the crux of why the guard entry point
+// takes RESOLVED values rather than the parsed FlagSet serve uses. Read off guard's raw flags,
+// the flagship `fak guard -- claude` — no --provider, no --base-url, no --gguf — looks exactly
+// like serve's mock planner, and an operator who typed `--defer-cold-tools` on it would be
+// refused on the ONE wire that runs all three levers. Read off the resolved posture (guard's
+// own resolveGuardProvider + guardDefaultBaseURL), it is the Anthropic passthrough and admits
+// in silence. If someone later "simplifies" the guard call site back to raw flags, this fails.
+func TestGuardRawFlagsWouldMisclassifyTheFlagshipWire(t *testing.T) {
+	// As TYPED: every wire-deciding flag empty.
+	if raw := classifyShrinkWire("", "", nil, ""); raw != shrinkWireMock {
+		t.Fatalf("guard's raw flags for `fak guard -- claude` classify as %q; this test's premise assumed %q", raw, shrinkWireMock)
+	}
+	// As RESOLVED by guard itself.
+	provider, autodetected := resolveGuardProvider("", "claude")
+	if provider != "anthropic" || !autodetected {
+		t.Fatalf("resolveGuardProvider(\"\", \"claude\") = (%q, %v), want (\"anthropic\", true)", provider, autodetected)
+	}
+	base := guardDefaultBaseURL(provider)
+	if strings.TrimSpace(base) == "" {
+		t.Fatalf("guardDefaultBaseURL(%q) is empty; the flagship guard upstream must resolve to the public API", provider)
+	}
+	if got := classifyShrinkWire(provider, base, nil, ""); got != shrinkWireAnthropicPassthrough {
+		t.Fatalf("resolved `fak guard -- claude` = %q, want %q", got, shrinkWireAnthropicPassthrough)
+	}
+
+	// The false refusal the resolved reading avoids, demonstrated end to end.
+	typed := guardDefaultShrinkLeverBoot()
+	typed.SetFlags = map[string]bool{"defer-cold-tools": true}
+	rawRead := typed
+	var rawErr bytes.Buffer
+	if admitGuardShrinkLevers(rawRead, &rawErr) {
+		t.Fatalf("premise check: reading guard's RAW empty flags must refuse a typed --defer-cold-tools (that is the bug this test fences), stderr: %s", rawErr.String())
+	}
+	resolved := typed
+	resolved.Provider, resolved.BaseURL = provider, base
+	var resolvedErr bytes.Buffer
+	if !admitGuardShrinkLevers(resolved, &resolvedErr) {
+		t.Errorf("the flagship `fak guard -- claude` with a typed --defer-cold-tools must ADMIT; got a refusal: %s", resolvedErr.String())
+	}
+	if resolvedErr.Len() != 0 {
+		t.Errorf("the passthrough wire runs every lever, so it must stay silent; got: %s", resolvedErr.String())
+	}
+}
+
+// TestAdmitGuardShrinkLeversOnResolvedGuardBoot is the guard-side end-to-end witness the
+// ticket asks for: a non-passthrough guard wire with an EXPLICITLY typed lever refuses, and a
+// default-only lever produces a named notice rather than silence.
+//
+// Provider/BaseURL are the RESOLVED pair guard hands to gateway.Config — see the case comments
+// for which guard flag combination produces each. Nothing here dials, binds, or loads weights.
+func TestAdmitGuardShrinkLeversOnResolvedGuardBoot(t *testing.T) {
+	const anthropicBase = "https://api.anthropic.example" // stand-in for the resolved public API
+	const localBase = "http://127.0.0.1:11434/v1"         // stand-in for a detected local server
+	cases := []struct {
+		name      string
+		provider  string
+		baseURL   string
+		gguf      string
+		typed     []string // flag names the operator named on the command line
+		off       []string // flag names the operator explicitly turned OFF
+		wantAdmit bool
+		wantAll   []string
+		wantNone  []string
+	}{
+		{
+			name:     "`fak guard -- claude` runs every lever and says nothing",
+			provider: "anthropic", baseURL: anthropicBase,
+			wantAdmit: true,
+		},
+		{
+			name:     "`fak guard --local -- codex` names all three default-on levers instead of going silent",
+			provider: "openai", baseURL: localBase,
+			wantAdmit: true,
+			wantAll: []string{
+				"fak guard:", shrinkLeverInertToken, "NOTICE", "3 prompt-shrink lever(s)",
+				"--compact-history-budget", "--elide-stale-reads", "--defer-cold-tools",
+				"non-Anthropic proxy", "--provider openai", "unwired lever", "fak guard -- claude",
+			},
+			wantNone: []string{"refusing to start"},
+		},
+		{
+			name:     "a typed --defer-cold-tools on a local server is refused by name",
+			provider: "openai", baseURL: localBase, typed: []string{"defer-cold-tools"},
+			wantAdmit: false,
+			wantAll: []string{
+				"fak guard:", shrinkLeverInertToken, "refusing to start",
+				"--defer-cold-tools", "defer_cold_tools", "gateway.maybeDeferColdTools",
+				"--defer-cold-tools=false", "fak guard -- claude",
+			},
+		},
+		{
+			name:     "a typed --compact-history-budget on the --remote-serve OpenAI wire is refused by name",
+			provider: "openai", baseURL: "http://lab-box.invalid:8080/v1", typed: []string{"compact-history-budget"},
+			wantAdmit: false,
+			wantAll: []string{
+				shrinkLeverInertToken, "refusing to start",
+				"--compact-history-budget", "compact_history_budget", "--compact-history-budget 0",
+			},
+		},
+		{
+			name:     "`fak guard -- codex` auto-detects the Responses wire, which is still not the passthrough",
+			provider: "openai-responses", baseURL: "https://api.openai.example/v1",
+			wantAdmit: true,
+			wantAll:   []string{shrinkLeverInertToken, "NOTICE", "--provider openai-responses"},
+			wantNone:  []string{"refusing to start"},
+		},
+		{
+			name:     "a bare --gguf makes the in-kernel planner the upstream and is named too",
+			provider: "anthropic", baseURL: "", gguf: "/models/m.gguf",
+			wantAdmit: true,
+			wantAll:   []string{shrinkLeverInertToken, "NOTICE", "in-kernel planner"},
+			wantNone:  []string{"refusing to start"},
+		},
+		{
+			name:     "a typed --elide-stale-reads on the in-kernel upstream is refused by name",
+			provider: "anthropic", baseURL: "", gguf: "/models/m.gguf", typed: []string{"elide-stale-reads"},
+			wantAdmit: false,
+			wantAll: []string{
+				shrinkLeverInertToken, "refusing to start",
+				"--elide-stale-reads", "elide_stale_reads", "gateway.maybeElideStaleReads", "--elide-stale-reads=false",
+			},
+		},
+		{
+			name:     "--gguf ALONGSIDE an anthropic upstream keeps the passthrough on the proxy side",
+			provider: "anthropic", baseURL: anthropicBase, gguf: "/models/m.gguf",
+			typed:     []string{"defer-cold-tools"},
+			wantAdmit: true,
+		},
+		{
+			name:     "stating every lever off on a local server admits in silence",
+			provider: "openai", baseURL: localBase,
+			typed:     []string{"compact-history-budget", "elide-stale-reads", "defer-cold-tools"},
+			off:       []string{"compact-history-budget", "elide-stale-reads", "defer-cold-tools"},
+			wantAdmit: true,
+		},
+		{
+			name:     "an unparseable --provider defers to gateway.New's own refusal",
+			provider: "not-a-provider", baseURL: localBase, typed: []string{"defer-cold-tools"},
+			wantAdmit: true,
+		},
+	}
+	for _, c := range cases {
+		in := guardDefaultShrinkLeverBoot()
+		in.Provider, in.BaseURL, in.GGUFPath = c.provider, c.baseURL, c.gguf
+		for _, name := range c.typed {
+			in.SetFlags[name] = true
+		}
+		for _, name := range c.off {
+			switch name {
+			case "compact-history-budget":
+				in.CompactHistoryBudget = 0
+			case "elide-stale-reads":
+				in.ElideStaleReads = false
+			case "defer-cold-tools":
+				in.DeferColdTools = false
+			}
+		}
+		var stderr bytes.Buffer
+		got := admitGuardShrinkLevers(in, &stderr)
+		if got != c.wantAdmit {
+			t.Errorf("%s: admitGuardShrinkLevers = %v, want %v (stderr: %s)", c.name, got, c.wantAdmit, stderr.String())
+		}
+		if len(c.wantAll) == 0 && stderr.Len() != 0 {
+			t.Errorf("%s: admitGuardShrinkLevers must stay quiet, wrote: %s", c.name, stderr.String())
+		}
+		for _, want := range c.wantAll {
+			if !strings.Contains(stderr.String(), want) {
+				t.Errorf("%s: stderr must contain %q, got: %s", c.name, want, stderr.String())
+			}
+		}
+		for _, none := range c.wantNone {
+			if strings.Contains(stderr.String(), none) {
+				t.Errorf("%s: stderr must NOT contain %q, got: %s", c.name, none, stderr.String())
+			}
+		}
+		// PRIVACY FENCE, guard side: an upstream base URL can carry an embedded credential
+		// and can name a host that has no business in a log line, so no message may echo it.
+		if c.baseURL != "" && strings.Contains(stderr.String(), c.baseURL) {
+			t.Errorf("%s: message must not echo the upstream base URL, got: %s", c.name, stderr.String())
+		}
+	}
+}
+
+// TestGuardBootWiresTheShrinkLeverAdmission is the WIRING witness. The rule above is pure, so
+// nothing in it can tell whether cmdGuard ever calls it — a check that is written but never
+// wired would leave every case green and the defect shipped. Serve gets this for free (its
+// test drives newServeFlagSet + admitServeShrinkLevers); guard registers its flags inline in
+// cmdGuard, which spawns a child process, so the call site is asserted at the source instead.
+//
+// It also pins the ORDERING that makes the admission cheap: it must run before the in-kernel
+// weight load, so an operator with a typed-but-inert lever is refused in milliseconds rather
+// than after a multi-GB pull.
+func TestGuardBootWiresTheShrinkLeverAdmission(t *testing.T) {
+	src, err := os.ReadFile("guard.go")
+	if err != nil {
+		t.Fatalf("read guard.go: %v", err)
+	}
+	text := string(src)
+	call := strings.Index(text, "admitGuardShrinkLevers(guardShrinkLeverInputs{")
+	if call < 0 {
+		t.Fatal("cmdGuard must call admitGuardShrinkLevers — the three levers are set in gateway.Config here (#5538)")
+	}
+	// The three fields the admission exists to police must still be the ones guard sets.
+	for _, field := range []string{"CompactHistoryBudget: *compactHistoryBudget", "ElideStaleReads:", "DeferColdTools: *deferColdTools"} {
+		if !strings.Contains(text, field) {
+			t.Errorf("guard.go no longer sets %q; the shrink-lever admission may be policing the wrong fields", field)
+		}
+	}
+	load := strings.Index(text, "loadServeInKernelModel(")
+	if load < 0 {
+		t.Fatal("guard.go must still load the in-kernel model; the ordering assertion below has lost its anchor")
+	}
+	if call > load {
+		t.Errorf("the shrink-lever admission (offset %d) must run BEFORE the in-kernel weight load (offset %d) so a refusal costs milliseconds, not a multi-GB pull", call, load)
 	}
 }

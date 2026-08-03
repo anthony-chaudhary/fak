@@ -581,6 +581,56 @@
           "category": "incidental",
           "reason": "a pure projection from procguard.Proc onto dispatchtick.ProcInfo, extracted from its caller only so the mapping is unit-testable without scanning real host processes; it introduces no new concept, the enumeration concept is procguard.CollectProcesses which is already positioned",
           "token": "dispatchProcInfoFromProcguard"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "admitGuardShrinkLevers"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardCoreLock"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardCoreLockAllActive"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardCoreLockAllAdmitAmendment"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardCoreLockAllState"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardLaunchCoreLockAll"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardShrinkLeverInputs"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "printGuardLaunchPostures"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "setGuardCoreLockAll"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "shrinkLeverGuardCommand"
         }
       ],
       "exclude": [
@@ -604,6 +654,7 @@
         "GATED_UNWITNESSED",
         "GateFlipped",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
+        "admitGuardShrinkLevers",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
         "dispatchProcInfoFromProcguard",
@@ -621,6 +672,10 @@
         "gatew",
         "gating",
         "guardClaudeCommandIndex",
+        "guardCoreLock",
+        "guardCoreLockAllActive",
+        "guardCoreLockAllAdmitAmendment",
+        "guardCoreLockAllState",
         "guardEquivalentRestartLimit",
         "guardEquivalentRestartStatus",
         "guardEquivalentRestarts",
@@ -634,6 +689,7 @@
         "guardKeychainAccessToken",
         "guardKeychainCred",
         "guardKeychainSupported",
+        "guardLaunchCoreLockAll",
         "guardOAuthKeychainSource",
         "guardOAuthKeychainSourceName",
         "guardOperatorQuestionEscalationSink",
@@ -647,6 +703,7 @@
         "guardSelfTightenOverlayVersion",
         "guardSelfTightenProposal",
         "guardSelfTightenUnion",
+        "guardShrinkLeverInputs",
         "guardSplitAppleCloseOnExit",
         "guardSplitAppleCloseTail",
         "guardSplitAppleTerminalCommand",
@@ -681,11 +738,14 @@
         "loadGuardSelfTightenOverlay",
         "newguardlaunchnonce",
         "normalizeGuardOperatorQuestionMode",
+        "printGuardLaunchPostures",
         "readguardstopsledger",
         "readguardstoptranscript",
         "runCacheValueGateScore",
         "runGuardOperatorQuestionGate",
         "saveGuardSelfTightenOverlay",
+        "setGuardCoreLockAll",
+        "shrinkLeverGuardCommand",
         "summarizeguardstops",
         "ungated",
         "unguarded"
@@ -1114,6 +1174,11 @@
           "category": "incidental",
           "reason": "A pure string-builder renderer in the guard exit-summary grammar, named by the format\u003cSection\u003e convention its dozen siblings share. It introduces no vocabulary: its meaning is wholly given by the concepts it prints, PolicyKnob and AmendGatedWiden, both positioned. Positioning the renderer would book concept coverage for a formatting helper and would need re-deciding for every sibling section.",
           "token": "formatAmendmentPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "printGuardLaunchPostures"
         }
       ],
       "exclude": [
@@ -1137,7 +1202,8 @@
         "policyErr",
         "policyblocks",
         "policylabel",
-        "postures"
+        "postures",
+        "printGuardLaunchPostures"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",

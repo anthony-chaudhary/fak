@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **20** (clarity 0 + coverage 20) |
+| **Disambiguation-debt (drive to 0)** | **24** (clarity 0 + coverage 24) |
 | **Crystal-clear concepts (and climbing)** | **407** crystal of 2120 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2295 / 2315** (99.1% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2295 / 2319** (99.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 190 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **60** of 2792 indexed names |
 | As of |  (fak ) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2120 concepts - score 99.4/100 (grade A) - disambiguation-debt 20
+concept-disambiguation chart - 2120 concepts - score 99.4/100 (grade A) - disambiguation-debt 24
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 407
@@ -62,7 +62,8 @@ clarity mix by family (each cell = one concept):
   witness-proof    **************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ############################ 385/389
+  guard-gate       ############################ 385/390
+  policy-capability ###########################. 153/157
   session-runtime  ###########################. 213/217
   loop             ###########################. 77/80
   render-materialize ############################ 177/180
@@ -70,7 +71,6 @@ coverage by family (positioned / discovered):
   plan             ############################ 319/321
   score-debt       ###########################. 85/87
   decision         ###########################. 52/53
-  policy-capability ############################ 153/154
   support-maturity ###########################. 44/45
   attention        ############################ 74/74
   context-ctx      ############################ 200/200
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 139/139
 
-namespace coverage  [################################] 99.1%  (2295/2315 confusable tokens positioned)
+namespace coverage  [################################] 99.0%  (2295/2319 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -2409,7 +2409,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 385 | 389 | 4 |
+| guard-gate | 385 | 390 | 5 |
+| policy-capability | 153 | 157 | 4 |
 | session-runtime | 213 | 217 | 4 |
 | loop | 77 | 80 | 3 |
 | render-materialize | 177 | 180 | 3 |
@@ -2417,7 +2418,6 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | plan | 319 | 321 | 2 |
 | score-debt | 85 | 87 | 2 |
 | decision | 52 | 53 | 1 |
-| policy-capability | 153 | 154 | 1 |
 | support-maturity | 44 | 45 | 1 |
 | attention | 74 | 74 | 0 |
 | context-ctx | 200 | 200 | 0 |

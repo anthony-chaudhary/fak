@@ -285,6 +285,14 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 		declaredScratch = filepath.Join(os.TempDir(), "claude")
 	}
 	_ = os.Setenv("FAK_GUARD_SCRATCHPAD_ROOTS", guardScratchpadRootsValue(declaredScratch))
+	// The core-lock-all posture (#5423) is NOT applied to this assembly — the launch
+	// floor is what the posture clamps, not an amendment to it, so gating here would
+	// refuse the session its own first floor. It is announced in the provenance so the
+	// banner states the posture the operator is running under, and every LIVE amendment
+	// site below (guardReloadDefaultFloor, applyPolicyRuntimeLocked) enforces it.
+	if guardCoreLockAllActive() {
+		floorSource += "; --core-lock-all ACTIVE (session is ratchet-tighten-only: no channel may widen this floor)"
+	}
 	policyDigest = guardEffectivePolicyDigest(policyBytes, allowOverlay, denyOverlay)
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, policyPath)...)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
@@ -322,6 +330,19 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
 	}
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath)...)
+	// CORE-LOCK-ALL (#5423). This is the reload path an ordinary `fak guard -- claude`
+	// actually takes — the allow watcher and POST /v1/fak/policy/reload both land here —
+	// and it had NO widening gate of its own: an edit to the operator allow overlay was
+	// installed live, unconditionally. Under --core-lock-all that is exactly the move the
+	// posture exists to refuse, so the re-derived floor is classified against the LIVE one
+	// and a widening is refused BEFORE SetPolicy, leaving the last-good floor standing.
+	// The refusal is an error (not a warning) so the watcher reports "rejected; keeping
+	// last-good floor" and the reload route answers non-2xx rather than silently no-oping.
+	if admit, reason := guardCoreLockAllAdmitAmendment(adjudicator.Default.PolicySnapshot(), rt.Adjudicator); !admit {
+		err := fmt.Errorf("guard floor reload refused: %s", reason)
+		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, "built-in guard floor", guardPolicyDigest(guardDefaultPolicyJSON), journal.ConfigSwapRejected, err.Error())
+		return policy.Runtime{}, "", err
+	}
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	// Audit parity with the --policy reload path (reloadPolicy): the security boundary was

@@ -205,6 +205,27 @@ func printGuardAllGrouped(w io.Writer, fs *flag.FlagSet) {
 	}
 }
 
+// printGuardLaunchPostures renders the launch switches that are PEELED off argv
+// in cmdGuard instead of being registered on the FlagSet, so fs.VisitAll can
+// never see them and printGuardAllGrouped can never render them. Without this
+// section they would be undiscoverable from `fak guard -h -all` — the same
+// problem the footer already solves for `-all` itself.
+//
+// It goes in the `-h -all` reference and NOT the curated overview on purpose:
+// the overview is held to a 20-line budget (TestGuardHelpOverviewStaysCompact),
+// which exists so this help does not grow back into a wall, and a posture an
+// operator opts into deliberately belongs in the full reference.
+func printGuardLaunchPostures(w io.Writer) {
+	fmt.Fprintln(w, "\nLaunch postures (peeled from argv before the flag parse, so they are not in the count below):")
+	fmt.Fprintln(w, "  --core-lock-all")
+	fmt.Fprintln(w, "        session-wide RATCHET (#5423): for the life of this launch NO channel may WIDEN the")
+	fmt.Fprintln(w, "        capability floor — not an operator allow/deny overlay edit picked up by the watcher,")
+	fmt.Fprintln(w, "        not POST /v1/fak/policy/reload, not a --policy file swap, and not")
+	fmt.Fprintln(w, "        FAK_POLICY_RELOAD_ALLOW_WIDEN=1, which this posture outranks. Tighten-only and")
+	fmt.Fprintln(w, "        no-op amendments still apply normally, so the floor can only ever get stricter.")
+	fmt.Fprintln(w, "        Pass it before the `--`; an occurrence after it belongs to the wrapped agent.")
+}
+
 // guardFlagCount counts every flag registered on fs, for the "N flags in
 // this build" footer — so the footer can never drift from the real set.
 func guardFlagCount(fs *flag.FlagSet) int {
@@ -230,6 +251,7 @@ func printGuardUsage(w io.Writer, fs *flag.FlagSet, all bool) {
 	fmt.Fprintln(w, "       fak guard allow <tool> | policy explain|diff   # operator subcommands, out-of-band (-h on each)")
 	if all {
 		printGuardAllGrouped(w, fs)
+		printGuardLaunchPostures(w)
 		fmt.Fprintf(w, "\n%d flags in this build, grouped above. docs/fak/api-reference.md has the deep dive.\n", guardFlagCount(fs))
 		return
 	}
