@@ -4,6 +4,74 @@ package ideascout
 // applying each lane's own admission floor and recording per-lane fetch errors
 // instead of failing the run.
 
+import "strings"
+
+// sourceLane declares one gathering lane: the label it stamps on per-lane fetch
+// errors, the topic-config key that arms it, and the human name the run report
+// prints. Two lanes may share a topic key — `github` and `github-fresh` run the
+// same query on different sorts.
+type sourceLane struct {
+	label    string
+	topicKey string
+	display  string
+}
+
+// sourceLanes is the scout's SOURCE VOCABULARY, written down once. Three things
+// read it, so a lane cannot be half-added: LoadConfig refuses a topic key that is
+// not here (#5549 — a key no lane reads used to gather zero and report success),
+// RenderHuman names the lanes it walked, and
+// testdata/source_corpus.json pins this list against tools/idea_scout.py's
+// SOURCE_LANES so a lane that grows on one implementation and not the other reds
+// a test instead of silently gathering nothing on the scheduled path.
+//
+// GatherCandidates below still spells each lane out longhand — the lanes are not
+// uniform enough to fold into a table without obscuring them — but a lane that
+// appears there and not here is unreachable (its topic key would be refused at
+// config load), and a lane here with no body is caught by the corpus's
+// per-key gather cases.
+var sourceLanes = []sourceLane{
+	{label: "arxiv", topicKey: "arxiv", display: "arXiv"},
+	{label: "github", topicKey: "github", display: "GitHub"},
+	{label: "github-fresh", topicKey: "github", display: "GitHub"},
+	{label: "hn", topicKey: "hn", display: "Hacker News"},
+	{label: "reddit", topicKey: "reddit", display: "Reddit"},
+}
+
+// topicMetaKeys are the topic-config keys that name no source lane: the topic's
+// own identity, its relevance terms, and the area label filed issues hang under.
+var topicMetaKeys = []string{"key", "terms", "area"}
+
+// sourceTopicKeys is the set of topic-config keys that arm a lane, in declaration
+// order and de-duplicated (`github` arms two lanes).
+func sourceTopicKeys() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, lane := range sourceLanes {
+		if lane.topicKey == "" || seen[lane.topicKey] {
+			continue
+		}
+		seen[lane.topicKey] = true
+		out = append(out, lane.topicKey)
+	}
+	return out
+}
+
+// sourceDisplayList renders the lane vocabulary the way the run report says it:
+// "arXiv + GitHub + Hacker News + Reddit". Derived, not spelled out, so the
+// report cannot claim a lane the gatherer does not walk.
+func sourceDisplayList() string {
+	var out []string
+	seen := map[string]bool{}
+	for _, lane := range sourceLanes {
+		if seen[lane.display] {
+			continue
+		}
+		seen[lane.display] = true
+		out = append(out, lane.display)
+	}
+	return strings.Join(out, " + ")
+}
+
 func GatherCandidates(fetcher Fetcher, topics []Topic, cfg Config, errorsOut *[]string) []Candidate {
 	var cands []Candidate
 	for _, topic := range topics {

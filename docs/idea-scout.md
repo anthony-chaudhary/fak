@@ -30,9 +30,9 @@ revisits.
 
 | Stage | What it does |
 |---|---|
-| 0. **Topics** | A baked-in `DEFAULT_TOPICS` table maps fak's domain onto concrete queries: each topic carries an arXiv API query, a GitHub repo query, the relevance terms that earn score, and the GitHub **area label** to file under. Override the whole set with `--config` (see [`tools/idea_scout_topics.example.json`](https://github.com/anthony-chaudhary/fak/blob/main/tools/idea_scout_topics.example.json)). |
-| 1. **Gather** | For every topic, fetch arXiv (the keyless Atom export API) and GitHub (`gh search repos` on the same authed CLI the dispatch loop uses). A failing source or topic is logged and skipped — one dead query never sinks the run. |
-| 2. **Score** | A **transparent integer** relevance score: term hits in the title weigh more than the abstract, fresh arXiv papers and well-starred / recently-pushed repos earn bonuses. The reasons are surfaced on every candidate, so the ranking is auditable — never a black box (the same discipline as [`issue_triage.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_triage.py)). |
+| 0. **Topics** | A baked-in `DEFAULT_TOPICS` table maps fak's domain onto concrete queries: each topic carries an arXiv API query, a GitHub repo query, a Hacker News query, a Reddit query, the relevance terms that earn score, and the GitHub **area label** to file under. A topic may arm any subset; a key no lane reads is **refused** at load (exit 2) rather than silently ignored. Override the whole set with `--config` (see [`tools/idea_scout_topics.example.json`](https://github.com/anthony-chaudhary/fak/blob/main/tools/idea_scout_topics.example.json)). |
+| 1. **Gather** | For every topic, walk five lanes in order: **arXiv** (the keyless Atom export API), **GitHub** (`gh search repos` on the same authed CLI the dispatch loop uses), **github-fresh** (the same query sorted by most-recently-updated, with a low star floor so young repos enter the pool), **Hacker News** (the keyless Algolia search API) and **Reddit** (the public `search.json` endpoint). The star-scored lanes floor on `min_stars`/`fresh_min_stars`, the points-scored social lanes on `min_points`. A failing source or topic is logged as `lane[topic]: …` and skipped — one dead query never sinks the run. |
+| 2. **Score** | A **transparent integer** relevance score: term hits in the title weigh more than the abstract; fresh arXiv papers, well-starred / recently-pushed repos, and high-scoring HN/Reddit posts earn bonuses (the points bonus is capped, so a front-page story cannot outweigh relevance). The reasons are surfaced on every candidate, so the ranking is auditable — never a black box (the same discipline as [`issue_triage.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_triage.py)). |
 | 3. **Dedup** | Four rungs gate every candidate (below). The durable one is a label-targeted scan of every issue the scout has ever filed; if it cannot be built completely the run refuses rather than file blind. |
 | 4. **Cap** | Top-scored first, keep at most `--max-issues` (default **3**). Even a pathological day cannot storm the tracker. |
 | 5. **File** | `--live` only: ensure the `idea-scout` label exists, `gh issue create` each kept candidate (labels `idea-scout`, `research`, + the topic's area), and record it in the seen-cache. Dry-run prints the plan and writes nothing. |
@@ -85,7 +85,8 @@ The run report makes this auditable — `--json` carries a `dedup_index` block w
 
 ### Two implementations, one contract
 
-There are two scouts, and they must not drift apart on this rung:
+There are two scouts, and they must not drift apart — on this rung or on any
+other stage of the pipeline:
 
 | Surface | Who runs it | Where |
 |---|---|---|
@@ -114,6 +115,24 @@ aging into a duplicate issue. The corpus carries its own vacuity guard
 (`window_only_cases`: with the durable rung and the cache removed, every case must
 come back *new*) and its own rung-vocabulary check, so a renamed or dropped rung
 is caught as well as a changed verdict.
+
+**The same tie, one stage earlier (#5549).** Dedup was not the only place the two
+could drift, and the drift had already happened where nothing was watching: the
+`hn` and `reddit` lanes existed **only in the Go scout**. A topic naming them ran
+fine on the scheduled Python path — it gathered zero candidates from those keys,
+recorded zero errors and exited 0. Nothing failed; the lanes were simply never
+read, which is strictly worse than a crash because a scheduled job's success is
+what nobody looks at. Both lanes now exist on both sides, an unknown topic or
+threshold key **refuses by name** instead of being dropped, and a second shared
+fixture corpus,
+[`internal/ideascout/testdata/source_corpus.json`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ideascout/testdata/source_corpus.json),
+pins the gather contract the way `dedup_corpus.json` pins the dedup one: the lane
+vocabulary and its order, the admissible topic/threshold keys, what each parser
+folds the *same wire bytes* into field by field, the points bonus and its cap, and
+— the non-vacuity guard — that every declared key actually **admits** a candidate
+at gather time, so a lane cannot be declared and left unread. Both suites read it:
+`internal/ideascout/ideascout_test.go` (`TestSharedSourceCorpus*`) and
+`tools/idea_scout_test.py` (`SharedSourceCorpusTest`).
 
 Neither implementation carries a knob that waives a dedup refusal. The Go side
 briefly had one — `RunOptions.AllowIssueGap`, set by no caller and readable only
@@ -148,7 +167,9 @@ fak idea-scout --candidates cands.json --issues window.json --scout-issues filed
 Exit codes: `0` ran clean · `2` infra error (gh missing / not authed / not a repo,
 every source failed with no cache to fall back on, or the filed-issue index could
 not be built completely — it **refuses** rather than risk a blind spam run or a
-re-file).
+re-file) or a `--config` that names a topic/threshold key no lane or knob reads
+(the refusal names the key: a setting that appears to take and does not is the
+silent failure #5549 was filed for).
 
 ## The daily task (the "keep current" loop)
 

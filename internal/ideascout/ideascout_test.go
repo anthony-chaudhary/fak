@@ -945,6 +945,415 @@ func TestSharedCorpusRuns(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// The SHARED SOURCE corpus (#5549).
+//
+// testdata/source_corpus.json is read by BOTH scouts: the tests below and
+// tools/idea_scout_test.py's SharedSourceCorpusTest. It is the gather-stage
+// sibling of dedup_corpus.json — #5547 made the DEDUP contract mechanical after
+// the same defect had to be fixed twice; this makes the GATHER contract
+// mechanical after `hn` and `reddit` turned out to exist only in Go, so a topic
+// naming them on the scheduled Python path gathered nothing and reported success.
+// ============================================================================
+
+const sourceCorpusPath = "testdata/source_corpus.json"
+
+type sourceParseCase struct {
+	Name    string           `json:"name"`
+	Lane    string           `json:"lane"`
+	Topic   string           `json:"topic"`
+	Payload string           `json:"payload"`
+	Want    []map[string]any `json:"want"`
+	Why     string           `json:"why"`
+}
+
+type sourceConfigCase struct {
+	Name           string          `json:"name"`
+	Topic          json.RawMessage `json:"topic"`
+	Refuse         bool            `json:"refuse"`
+	RefuseContains []string        `json:"refuse_contains"`
+	Why            string          `json:"why"`
+}
+
+type sourceScoreCase struct {
+	Name               string    `json:"name"`
+	Candidate          Candidate `json:"candidate"`
+	Terms              []string  `json:"terms"`
+	WantScore          int       `json:"want_score"`
+	WantReasonContains string    `json:"want_reason_contains"`
+	Why                string    `json:"why"`
+}
+
+type sourceGatherCase struct {
+	Name              string          `json:"name"`
+	Topic             Topic           `json:"topic"`
+	MinPoints         int             `json:"min_points"`
+	HNPayload         string          `json:"hn_payload"`
+	RedditPayload     string          `json:"reddit_payload"`
+	HNError           string          `json:"hn_error"`
+	RedditError       string          `json:"reddit_error"`
+	WantSourceIDs     []string        `json:"want_source_ids"`
+	WantErrorsContain []string        `json:"want_errors_contain"`
+	Why               string          `json:"why"`
+	TopicRaw          json.RawMessage `json:"-"`
+}
+
+type sourceCorpus struct {
+	Schema        string             `json:"schema"`
+	TopicKeys     []string           `json:"topic_keys"`
+	MetaKeys      []string           `json:"meta_keys"`
+	Lanes         []string           `json:"lanes"`
+	DisplayList   string             `json:"display_list"`
+	ThresholdKeys []string           `json:"threshold_keys"`
+	ConfigCases   []sourceConfigCase `json:"config_cases"`
+	ParseCases    []sourceParseCase  `json:"parse_cases"`
+	ScoreCases    []sourceScoreCase  `json:"score_cases"`
+	GatherCases   []sourceGatherCase `json:"gather_cases"`
+}
+
+func loadSourceCorpus(t *testing.T) sourceCorpus {
+	t.Helper()
+	raw, err := os.ReadFile(sourceCorpusPath)
+	if err != nil {
+		t.Fatalf("read shared source corpus %s (tools/idea_scout_test.py reads the same file): %v", sourceCorpusPath, err)
+	}
+	var c sourceCorpus
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("parse shared source corpus: %v", err)
+	}
+	if c.Schema != "fak/idea-scout-source-corpus@1" {
+		t.Fatalf("corpus schema = %q, want fak/idea-scout-source-corpus@1", c.Schema)
+	}
+	if len(c.ConfigCases) == 0 || len(c.ParseCases) == 0 || len(c.GatherCases) == 0 || len(c.ScoreCases) == 0 {
+		t.Fatalf("source corpus is empty in at least one section: %d config, %d parse, %d score, %d gather",
+			len(c.ConfigCases), len(c.ParseCases), len(c.ScoreCases), len(c.GatherCases))
+	}
+	return c
+}
+
+// TestSharedSourceCorpusVocabulary pins the SOURCE VOCABULARY itself: the lanes
+// that exist, the topic keys that arm them, and the thresholds a config may set.
+// tools/idea_scout_test.py asserts the same three lists against its own
+// SOURCE_LANES / TOPIC_META_KEYS / DEFAULTS, so a lane or knob that grows on one
+// implementation and not the other reds here instead of silently gathering
+// nothing on the path that runs.
+func TestSharedSourceCorpusVocabulary(t *testing.T) {
+	c := loadSourceCorpus(t)
+
+	var laneLabels []string
+	for _, lane := range sourceLanes {
+		laneLabels = append(laneLabels, lane.label)
+	}
+	if !reflect.DeepEqual(laneLabels, c.Lanes) {
+		t.Fatalf("gather lane labels = %v, corpus lanes = %v\n  (tools/idea_scout.py's SOURCE_LANES must carry the identical list)", laneLabels, c.Lanes)
+	}
+	if got := sourceTopicKeys(); !reflect.DeepEqual(got, c.TopicKeys) {
+		t.Fatalf("source topic keys = %v, corpus topic_keys = %v", got, c.TopicKeys)
+	}
+	if !reflect.DeepEqual(topicMetaKeys, c.MetaKeys) {
+		t.Fatalf("topic meta keys = %v, corpus meta_keys = %v", topicMetaKeys, c.MetaKeys)
+	}
+	if got := sourceDisplayList(); got != c.DisplayList {
+		t.Fatalf("source display list = %q, corpus display_list = %q", got, c.DisplayList)
+	}
+
+	gotThresholds := append([]string(nil), thresholdKeys()...)
+	wantThresholds := append([]string(nil), c.ThresholdKeys...)
+	sort.Strings(gotThresholds)
+	sort.Strings(wantThresholds)
+	if !reflect.DeepEqual(gotThresholds, wantThresholds) {
+		t.Fatalf("Config threshold keys = %v, corpus threshold_keys = %v\n  (this list caught hn_per_topic/reddit_per_topic/min_points being Go-only knobs)", gotThresholds, wantThresholds)
+	}
+
+	// Every declared lane must name a topic key that is itself declared, so the
+	// two vocabularies cannot drift from each other inside one implementation.
+	declaredKeys := map[string]bool{}
+	for _, k := range c.TopicKeys {
+		declaredKeys[k] = true
+	}
+	for _, lane := range sourceLanes {
+		if !declaredKeys[lane.topicKey] {
+			t.Fatalf("lane %q is armed by topic key %q, which the corpus does not declare", lane.label, lane.topicKey)
+		}
+	}
+}
+
+// TestSharedSourceCorpusConfigCases is the loud-refusal half of #5549: a config
+// naming a lane the running implementation cannot serve must FAIL rather than
+// gather zero and report success.
+func TestSharedSourceCorpusConfigCases(t *testing.T) {
+	c := loadSourceCorpus(t)
+	for _, tc := range c.ConfigCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.json")
+			doc := "{\"topics\":[" + string(tc.Topic) + "]}"
+			if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, _, err := LoadConfig(path)
+			if tc.Refuse {
+				if err == nil {
+					t.Fatalf("config case %q must REFUSE and did not\n  why: %s", tc.Name, tc.Why)
+				}
+				for _, want := range tc.RefuseContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("config case %q refusal %q missing %q", tc.Name, err.Error(), want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("config case %q must be ACCEPTED: %v\n  why: %s", tc.Name, err, tc.Why)
+			}
+		})
+	}
+}
+
+// TestSharedSourceCorpusParseCases folds the SAME wire bytes tools/idea_scout.py
+// folds and asserts the SAME candidates come out, field by field.
+func TestSharedSourceCorpusParseCases(t *testing.T) {
+	c := loadSourceCorpus(t)
+	for _, tc := range c.ParseCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			var got []Candidate
+			switch tc.Lane {
+			case "hn":
+				got = ParseHackerNewsJSON(tc.Payload, tc.Topic)
+			case "reddit":
+				got = ParseRedditJSON(tc.Payload, tc.Topic)
+			default:
+				t.Fatalf("parse case %q names lane %q, which has no parser here", tc.Name, tc.Lane)
+			}
+			if len(got) != len(tc.Want) {
+				t.Fatalf("parse case %q: got %d candidates, want %d\n  got: %+v\n  why: %s", tc.Name, len(got), len(tc.Want), got, tc.Why)
+			}
+			for i, want := range tc.Want {
+				assertCandidateFields(t, tc.Name, i, got[i], want, tc.Why)
+			}
+		})
+	}
+}
+
+// assertCandidateFields compares a parsed candidate against the corpus's expected
+// object one field at a time. `extra` is compared as a whole map (through a JSON
+// round-trip so both sides are float64-normalised), so an extra key present on
+// one implementation only is caught rather than ignored.
+func assertCandidateFields(t *testing.T, caseName string, i int, got Candidate, want map[string]any, why string) {
+	t.Helper()
+	gotFields := map[string]any{
+		"source":    got.Source,
+		"source_id": got.SourceID,
+		"url":       got.URL,
+		"title":     got.Title,
+		"summary":   got.Summary,
+		"published": got.Published,
+		"topic":     got.Topic,
+	}
+	for key, wantVal := range want {
+		if key == "extra" {
+			continue
+		}
+		gotVal, ok := gotFields[key]
+		if !ok {
+			t.Fatalf("parse case %q candidate %d: corpus names field %q, which the Go candidate has no counterpart for", caseName, i, key)
+		}
+		if gotVal != wantVal {
+			t.Fatalf("parse case %q candidate %d: %s = %#v, want %#v\n  why: %s\n  (tools/idea_scout_test.py folds the same bytes and asserts the same value)", caseName, i, key, gotVal, wantVal, why)
+		}
+	}
+	wantExtra, ok := want["extra"]
+	if !ok {
+		return
+	}
+	gotExtra := normaliseJSON(t, got.Extra)
+	if !reflect.DeepEqual(gotExtra, normaliseJSON(t, wantExtra)) {
+		t.Fatalf("parse case %q candidate %d: extra = %#v, want %#v\n  why: %s", caseName, i, gotExtra, normaliseJSON(t, wantExtra), why)
+	}
+}
+
+// normaliseJSON round-trips a value through JSON so numbers on both sides land as
+// float64 and the comparison is about content, not Go's int/float distinction.
+func normaliseJSON(t *testing.T, v any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal for comparison: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal for comparison: %v", err)
+	}
+	return out
+}
+
+// TestSharedSourceCorpusScoreCases pins the `points` bonus. It was a Go-only
+// branch: the same HN story scored 30 here and 10 in Python, so a story that
+// cleared min_score on one path could never clear it on the other.
+func TestSharedSourceCorpusScoreCases(t *testing.T) {
+	c := loadSourceCorpus(t)
+	now := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	for _, tc := range c.ScoreCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			score, reasons := ScoreCandidate(tc.Candidate, Topic{Key: "probe", Terms: tc.Terms}, DefaultConfig(), now)
+			if score != tc.WantScore {
+				t.Fatalf("score case %q: score = %d, want %d (reasons=%v)\n  why: %s", tc.Name, score, tc.WantScore, reasons, tc.Why)
+			}
+			joined := strings.Join(reasons, "; ")
+			if tc.WantReasonContains == "" {
+				if strings.Contains(joined, "points") {
+					t.Fatalf("score case %q: reasons %q claim a points bonus that was not earned", tc.Name, joined)
+				}
+				return
+			}
+			if !strings.Contains(joined, tc.WantReasonContains) {
+				t.Fatalf("score case %q: reasons %q missing %q", tc.Name, joined, tc.WantReasonContains)
+			}
+		})
+	}
+}
+
+// sourceProbeFetcher serves one gather case: the two points lanes from fixture
+// bytes, every other lane empty. tools/idea_scout_test.py stubs the Python
+// fetchers identically.
+type sourceProbeFetcher struct {
+	hn        string
+	reddit    string
+	hnErr     error
+	redditErr error
+	corpusFetcher
+}
+
+func (f sourceProbeFetcher) FetchHackerNews(string, int) (string, error) {
+	return f.hn, f.hnErr
+}
+
+func (f sourceProbeFetcher) FetchReddit(string, int) (string, error) {
+	return f.reddit, f.redditErr
+}
+
+// TestSharedSourceCorpusGatherCases is the BEHAVIOURAL half of the vocabulary
+// claim: for each declared topic key, a topic naming only that key must actually
+// gather its lane. A key that is admissible at config load and unread at gather
+// time is exactly the #5549 defect, and a vocabulary list alone would not see it.
+func TestSharedSourceCorpusGatherCases(t *testing.T) {
+	c := loadSourceCorpus(t)
+	for _, tc := range c.GatherCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			fetcher := sourceProbeFetcher{hn: tc.HNPayload, reddit: tc.RedditPayload}
+			if tc.HNError != "" {
+				fetcher.hnErr = errors.New(tc.HNError)
+			}
+			if tc.RedditError != "" {
+				fetcher.redditErr = errors.New(tc.RedditError)
+			}
+			cfg := DefaultConfig()
+			cfg.MinPoints = tc.MinPoints
+			var errorsOut []string
+			cands := GatherCandidates(fetcher, []Topic{tc.Topic}, cfg, &errorsOut)
+
+			var gotIDs []string
+			for _, cand := range cands {
+				gotIDs = append(gotIDs, cand.SourceID)
+			}
+			want := tc.WantSourceIDs
+			if len(gotIDs) == 0 && len(want) == 0 {
+				gotIDs, want = nil, nil
+			}
+			if !reflect.DeepEqual(gotIDs, want) {
+				t.Fatalf("gather case %q: source_ids = %v, want %v\n  why: %s\n  (tools/idea_scout_test.py runs the same case through gather_candidates)", tc.Name, gotIDs, tc.WantSourceIDs, tc.Why)
+			}
+			for _, wantErr := range tc.WantErrorsContain {
+				if !strings.Contains(strings.Join(errorsOut, "; "), wantErr) {
+					t.Fatalf("gather case %q: errors %v missing %q", tc.Name, errorsOut, wantErr)
+				}
+			}
+			if len(tc.WantErrorsContain) == 0 && len(errorsOut) > 0 {
+				t.Fatalf("gather case %q recorded unexpected errors: %v", tc.Name, errorsOut)
+			}
+		})
+	}
+}
+
+// TestSourceCorpusCoversEveryDeclaredTopicKey keeps the gather cases honest: a
+// lane added to the vocabulary with no case proving it actually gathers would let
+// the #5549 defect back in under a green suite.
+func TestSourceCorpusCoversEveryDeclaredTopicKey(t *testing.T) {
+	c := loadSourceCorpus(t)
+	covered := map[string]bool{}
+	for _, tc := range c.GatherCases {
+		for _, key := range sourceTopicKeys() {
+			if topicNamesKey(tc.Topic, key) && len(tc.WantSourceIDs) > 0 {
+				covered[key] = true
+			}
+		}
+	}
+	// arxiv and github are covered by the run corpus and the fresh-lane tests;
+	// the points lanes are the ones this corpus exists for.
+	for _, key := range []string{"hn", "reddit"} {
+		if !covered[key] {
+			t.Fatalf("declared topic key %q has no gather case that admits a candidate — the corpus would not notice the lane going missing", key)
+		}
+	}
+}
+
+// TestEveryDeclaredThresholdIsActuallyRead welds the threshold vocabulary to the
+// code that CONSUMES it, which is the same weld the gather cases make for source
+// lanes. thresholdKeys() is reflected off Config's JSON tags, so a knob becomes
+// admissible the moment the field exists — but applyThresholds reads a hand-written
+// switch, and a key that is admissible at load and unread at apply is exactly the
+// #5549 defect on the threshold half: the setting appears to take and does not.
+// Without this, adding a Config field and updating the corpus list is enough to
+// ship a silently-ignored knob.
+func TestEveryDeclaredThresholdIsActuallyRead(t *testing.T) {
+	rt := reflect.TypeOf(Config{})
+	for _, key := range thresholdKeys() {
+		t.Run(key, func(t *testing.T) {
+			idx := -1
+			for i := 0; i < rt.NumField(); i++ {
+				if name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ","); name == key {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				t.Fatalf("threshold %q is declared but has no Config field", key)
+			}
+			cfg := DefaultConfig()
+			var probe any
+			switch cur := reflect.ValueOf(cfg).Field(idx); cur.Kind() {
+			case reflect.Int:
+				probe = int(cur.Int()) + 7
+			case reflect.Float64:
+				probe = cur.Float() + 0.125
+			case reflect.String:
+				probe = "probe-" + key
+			default:
+				t.Fatalf("threshold %q has unhandled kind %s — teach this test before adding it", key, cur.Kind())
+			}
+			applyThresholds(&cfg, map[string]any{key: probe})
+			if got := reflect.ValueOf(cfg).Field(idx).Interface(); got != probe {
+				t.Fatalf("applyThresholds ignored declared threshold %q: Config.%s = %v, want %v — the key is admissible at load and unread at apply, which is the silent no-op this corpus exists to refuse",
+					key, rt.Field(idx).Name, got, probe)
+			}
+		})
+	}
+}
+
+func topicNamesKey(t Topic, key string) bool {
+	switch key {
+	case "arxiv":
+		return t.Arxiv != ""
+	case "github":
+		return t.GitHub != ""
+	case "hn":
+		return t.HN != ""
+	case "reddit":
+		return t.Reddit != ""
+	}
+	return false
+}
+
 func hasLabel(labels []string, want string) bool {
 	for _, got := range labels {
 		if got == want {

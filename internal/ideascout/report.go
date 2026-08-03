@@ -50,7 +50,7 @@ func readJSONFile(path string, out any) error {
 
 func RenderHuman(w io.Writer, result RunResult, cfg Config) {
 	fmt.Fprintf(w, "idea-scout %s - %s\n", result.Date, result.Mode)
-	fmt.Fprintf(w, "  gathered %d candidates from %d topics x (arXiv + GitHub + Hacker News + Reddit)\n", result.CandidatesGathered, result.Topics)
+	fmt.Fprintf(w, "  gathered %d candidates from %d topics x (%s)\n", result.CandidatesGathered, result.Topics, sourceDisplayList())
 	fmt.Fprintf(w, "  dedup index: %d source stamps from %d filed issue(s) (label-targeted, complete) + %d recent issue(s) for the near-dup rungs\n",
 		result.DedupIndex.FiledStamps, result.DedupIndex.FiledIssuesScanned, result.DedupIndex.WindowIssuesScanned)
 	var parts []string

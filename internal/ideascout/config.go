@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -50,15 +52,38 @@ func LoadConfig(path string) ([]Topic, Config, error) {
 		if err != nil {
 			return nil, Config{}, err
 		}
+		// Topics are decoded twice on purpose: once as raw objects so an
+		// unrecognised key can be REFUSED by name, then as Topic. encoding/json
+		// drops unknown fields silently, which is exactly the failure #5549
+		// records — a topic naming a lane the implementation does not serve
+		// gathered zero candidates and reported a normal success.
 		var doc struct {
-			Topics     []Topic        `json:"topics"`
-			Thresholds map[string]any `json:"thresholds"`
+			Topics     []json.RawMessage `json:"topics"`
+			Thresholds map[string]any    `json:"thresholds"`
 		}
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			return nil, Config{}, err
 		}
+		if err := checkThresholdKeys(doc.Thresholds); err != nil {
+			return nil, Config{}, err
+		}
 		if len(doc.Topics) > 0 {
-			topics = doc.Topics
+			decoded := make([]Topic, 0, len(doc.Topics))
+			for i, rawTopic := range doc.Topics {
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(rawTopic, &fields); err != nil {
+					return nil, Config{}, fmt.Errorf("topic[%d] is not a JSON object: %v", i, err)
+				}
+				var t Topic
+				if err := json.Unmarshal(rawTopic, &t); err != nil {
+					return nil, Config{}, err
+				}
+				if err := checkTopicKeys(i, t.Key, fields); err != nil {
+					return nil, Config{}, err
+				}
+				decoded = append(decoded, t)
+			}
+			topics = decoded
 		}
 		applyThresholds(&cfg, doc.Thresholds)
 	}
@@ -69,11 +94,101 @@ func LoadConfig(path string) ([]Topic, Config, error) {
 		if len(t.Terms) == 0 {
 			return nil, Config{}, fmt.Errorf("topic %q missing non-empty 'terms' list", t.Key)
 		}
-		if strings.TrimSpace(t.Arxiv) == "" && strings.TrimSpace(t.GitHub) == "" && strings.TrimSpace(t.HN) == "" && strings.TrimSpace(t.Reddit) == "" {
-			return nil, Config{}, fmt.Errorf("topic %q must set at least one of 'arxiv', 'github', 'hn', 'reddit'", t.Key)
+		if !topicNamesASource(t) {
+			return nil, Config{}, fmt.Errorf("topic %q must set at least one source: %s",
+				t.Key, quotedList(sourceTopicKeys()))
 		}
 	}
 	return topics, cfg, nil
+}
+
+func topicNamesASource(t Topic) bool {
+	for _, v := range []string{t.Arxiv, t.GitHub, t.HN, t.Reddit} {
+		if strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// checkTopicKeys refuses a topic key no lane reads. A key that is merely ignored
+// is the #5549 defect: the run gathers nothing from it and still exits 0, so the
+// operator learns the lane is missing only by reading both implementations side
+// by side. Refusing by name is the loud alternative.
+func checkTopicKeys(index int, key string, fields map[string]json.RawMessage) error {
+	known := map[string]bool{}
+	for _, k := range topicMetaKeys {
+		known[k] = true
+	}
+	for _, k := range sourceTopicKeys() {
+		known[k] = true
+	}
+	var unknown []string
+	for k := range fields {
+		if !known[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	name := key
+	if strings.TrimSpace(name) == "" {
+		name = fmt.Sprintf("[%d]", index)
+	}
+	return fmt.Errorf("topic %q names unknown key(s) %s: no source lane reads them, so they would gather nothing silently. Known source keys: %s; other topic keys: %s",
+		name, quotedList(unknown), quotedList(sourceTopicKeys()), quotedList(topicMetaKeys))
+}
+
+// checkThresholdKeys refuses a threshold no knob reads, for the same reason
+// checkTopicKeys refuses an unknown topic key: `min_points` set against an
+// implementation that has no points floor is a setting that appears to take and
+// does not.
+func checkThresholdKeys(values map[string]any) error {
+	known := map[string]bool{}
+	for _, k := range thresholdKeys() {
+		known[k] = true
+	}
+	var unknown []string
+	for k := range values {
+		if !known[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	return fmt.Errorf("thresholds name unknown key(s) %s: no knob reads them. Known thresholds: %s",
+		quotedList(unknown), quotedList(thresholdKeys()))
+}
+
+// thresholdKeys is derived from Config's own JSON tags rather than written out,
+// so a knob added to the struct is admissible the moment it exists and the
+// vocabulary cannot drift from the type it describes.
+func thresholdKeys() []string {
+	var out []string
+	rt := reflect.TypeOf(Config{})
+	for i := 0; i < rt.NumField(); i++ {
+		tag := rt.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func quotedList(items []string) string {
+	quoted := make([]string, 0, len(items))
+	for _, it := range items {
+		quoted = append(quoted, strconv.Quote(it))
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func ResultConfig(path string, maxIssues, minScore *int, milestone, project, projectOwner *string) (Config, error) {
