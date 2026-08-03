@@ -134,11 +134,29 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// URLs and this is a no-op, which is why the gap survived. The consequence on real
 	// multi-rank hardware (hang, timeout, or a silently degraded single-rank answer) is
 	// inferred from the AllReduce contract, not measured.
-	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteMessages)
-	if !ok {
-		return
+	//
+	// NOT under `serve --native` (#5532). The bridge's unit is one inbound body == one
+	// forward pass, which holds for the proxy turn below but NOT for the native branch: a
+	// follower rank is another process running the same binary with the same config, so a
+	// mirrored body reaches the same s.native branch and runs the WHOLE owned loop — its own
+	// N forward passes and its own tool dispatches through the kernel. Measured, not
+	// inferred: with one follower configured a two-turn native request drove 4 forward passes
+	// and 2 tool-result turns instead of 2 and 1. That is the exact property
+	// epFanoutExemptRoutes already refuses to mirror on /v1/fak/agent/sessions
+	// (epExemptOwnedLoop, #5528), and the same judgement applies here: a duplicated REAL tool
+	// side effect per rank is unrecoverable, while a leader alone in a collective is loud.
+	// So the owned-loop arm is left uncovered by the request mirror on purpose. Covering it
+	// wants the in-loop rank barrier that already exists — model.EPDecodeCoordinator /
+	// model.RunEPFollower (#4835), announced from Session.Prefill and Session.Step — which
+	// still has no serve wiring; until that lands, a native multi-rank serve enters its
+	// collectives on rank 0 alone.
+	if !s.native {
+		waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteMessages)
+		if !ok {
+			return
+		}
+		defer waitEPFanout()
 	}
-	defer waitEPFanout()
 	req, ok := s.readAnthropicMessagesRequest(w, r)
 	if !ok {
 		return

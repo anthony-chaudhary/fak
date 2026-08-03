@@ -144,10 +144,32 @@ const (
 	// turns 2..N are transcripts synthesized server-side AFTER tool calls with real side
 	// effects. Mirroring the inbound body would reproduce only turn 1 and then let the ranks
 	// diverge — and would have every follower rank execute the tool calls a second time.
-	// Covering this needs a rank barrier inside the loop, not a request mirror; that is a
-	// follow-on to #5528, not something this gate can honestly claim.
-	epExemptOwnedLoop = "runs fak's own multi-turn governed loop: N forward passes and real tool side effects from one inbound body, which a request mirror cannot reproduce without diverging the ranks (needs an in-loop rank barrier; #5528 follow-on)"
+	// Covering this needs a rank barrier inside the loop, not a request mirror.
+	//
+	// #5532 settled what that barrier is, and it is not something to invent: it ALREADY
+	// exists as model.EPDecodeCoordinator / model.RunEPFollower (#4835), announced from
+	// Session.Prefill and Session.Step. That unit is FINER than a turn and therefore
+	// route-agnostic — an owned loop that decodes through those two entry points keeps every
+	// rank in step for free, and a follower parked in RunEPFollower never tokenizes, never
+	// samples and structurally cannot execute a tool. What is missing is the serve wiring
+	// that installs it (it has no non-test caller today), not a primitive. So this exemption
+	// is not provisional pending a new design: an owned-loop route is exempt from the
+	// REQUEST-MIRROR bridge permanently, and the follow-on work is #4835's wiring.
+	epExemptOwnedLoop = "runs fak's own multi-turn governed loop: N forward passes and real tool side effects from one inbound body, which a request mirror cannot reproduce without diverging the ranks; the in-loop barrier that covers it already exists as model.EPDecodeCoordinator/RunEPFollower (#4835) and only lacks serve wiring (#5532)"
 )
+
+// The classification above is by ROUTE PATTERN, and one pattern is MODE-SENSITIVE: under
+// `fak serve --native` the /v1/messages handler branches into serveNativeMessages, which
+// drives agent.RunArm(fak=true) — the same owned governed loop epExemptOwnedLoop describes,
+// on a pattern classified COVERED. #5532 measured the consequence: with one follower rank
+// configured, a two-turn native request drove 4 forward passes and 2 tool-result turns
+// across the ranks instead of 2 and 1, i.e. the follower re-ran the whole loop and dispatched
+// the tool a second time. handleAnthropicMessages therefore skips the fanout when s.native
+// is set, and TestNativeMessagesFanoutDoesNotDuplicateTheOwnedLoop
+// (ep_owned_loop_fanout_test.go) pins that. The probes below construct a NON-native server,
+// so what they classify as covered is the proxy arm, which is the arm the mirror is sound for.
+// The residual is stated plainly: a native multi-rank serve enters its collectives on rank 0
+// alone until #4835's coordinator is wired into the serve path.
 
 // epFanoutExemptRoutes names every served route that does NOT release follower ranks,
 // with the reason. Being on this list is a claim, and the claim is checkable: each reason
