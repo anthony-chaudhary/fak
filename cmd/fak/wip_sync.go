@@ -56,6 +56,12 @@ func runWipSync(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "synced with %s: pushed=%v fetched=%v (%d published, %d mirrored)\n",
 		res.Remote, res.Pushed, res.Fetched, res.Published, res.Mirrored)
+	if res.PushSkippedEmpty {
+		// pushed=false here is a NO-OP, not a failure, and the plain reader has no exit
+		// code in front of them. Say which one it is rather than leave the honest false
+		// looking like the failure it replaced a lie with.
+		fmt.Fprintln(stdout, "  push skipped: this clone holds no checkpoints, so there was nothing to publish (not a failure).")
+	}
 	fmt.Fprintln(stdout, wipReplicationSummary(res.Replicated, res.StaleRemote, res.LocalOnly))
 	return 0
 }
@@ -82,14 +88,20 @@ func wipSync(ctx context.Context, repo, remote string, doPush, doFetch bool) (wi
 
 	if doPush {
 		res.PushRefspec = wipref.PushRefspec
-		// An EMPTY namespace short-circuits. leaseref/sync.go states that "a wildcard
-		// refspec matching ZERO refs is a successful no-op in git" — that holds for
-		// fetch, but NOT for push: git 2.x answers a zero-match push refspec with
-		// "No refs in common and none specified; doing nothing." and exit 1, so a
-		// clone that has never checkpointed would see its sync fail for having nothing
+		// An EMPTY namespace short-circuits, on an asymmetry both substrates now record:
+		// internal/leaseref/sync.go's syncRefspec doc ("ZERO MATCHES ARE NOT SYMMETRIC",
+		// #5550) for the lease namespace, and wipref.PushRefspec for this one. A zero-match
+		// wildcard refspec really is a clean no-op on the FETCH side; on the PUSH side git
+		// 2.x can answer "No refs in common and none specified; doing nothing." with exit 1,
+		// so a clone that has never checkpointed would see its sync fail for having nothing
 		// to say. Skipping the subprocess is both correct and cheaper.
+		//
+		// The skip may not call itself a push (#5567). Pushed stays FALSE — no subprocess
+		// started, so this result may not claim one — and PushSkippedEmpty carries the
+		// no-op, the same shape leaseref.SyncResult chose, so a ledger reading either
+		// substrate can tell "published my checkpoints" from "had none to publish".
 		if len(local) == 0 {
-			res.Pushed = true
+			res.PushSkippedEmpty = true
 		} else {
 			// A failed push STOPS the sync: nothing local has changed yet, so the
 			// operator gets one unambiguous failure and a mirror that still describes

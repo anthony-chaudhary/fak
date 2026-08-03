@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,11 @@ func TestWipSyncPushOnlyReportsReplicated(t *testing.T) {
 	}
 	if !res.Pushed || res.Fetched {
 		t.Fatalf("push-only sync: pushed=%v fetched=%v, want true/false", res.Pushed, res.Fetched)
+	}
+	// The other half of #5567: a clone that DID publish must not borrow the empty-skip
+	// excuse. Pushed=true is only ever earned by a push subprocess that exited 0.
+	if res.PushSkippedEmpty {
+		t.Fatalf("a clone holding a checkpoint must PUSH it, not report an empty skip: %+v", res)
 	}
 
 	// The remote really holds it — the claim is not self-reported.
@@ -203,15 +209,21 @@ func TestWipSyncFetchNeverRepopulatesLiveNamespace(t *testing.T) {
 }
 
 // TestWipSyncEmptyNamespaceIsACleanNoOp: syncing a clone that has never checkpointed
-// must exit 0 rather than erroring on an empty namespace.
+// must exit 0 rather than erroring on an empty namespace — and must say so HONESTLY.
 //
-// This one is a REGRESSION FENCE around a claim that turns out to be half true.
-// internal/leaseref/sync.go:53-55 documents "a wildcard refspec matching ZERO refs is a
-// successful no-op in git, so syncing an empty namespace is clean on both sides". It is
-// clean on the FETCH side. On the PUSH side git answers "No refs in common and none
-// specified; doing nothing." with exit 1, which this test caught the first time it ran
-// (git version recorded in the ticket). wipSync therefore short-circuits an empty push
-// instead of relying on the claim.
+// This one is a REGRESSION FENCE around an asymmetry both substrates now document:
+// internal/leaseref/sync.go's syncRefspec comment ("ZERO MATCHES ARE NOT SYMMETRIC",
+// #5550) for the lease namespace, and internal/wipref.PushRefspec for this one. A
+// zero-match wildcard refspec is a clean no-op on the FETCH side; on the PUSH side git
+// answers "No refs in common and none specified; doing nothing." with exit 1, which this
+// test caught the first time it ran (git version recorded in the ticket). wipSync
+// therefore short-circuits an empty push instead of handing git the refspec.
+//
+// What the skip may NOT do is call itself a push (#5567). Pushed stays false — no
+// subprocess started — and PushSkippedEmpty carries the no-op, matching
+// leaseref.SyncResult so a ledger reading either substrate can tell "published my
+// checkpoints" from "had none to publish". The fetch still runs: that is the whole point
+// of not erroring.
 func TestWipSyncEmptyNamespaceIsACleanNoOp(t *testing.T) {
 	ctx := context.Background()
 	dir, _ := wipTestRepo(t)
@@ -221,11 +233,70 @@ func TestWipSyncEmptyNamespaceIsACleanNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync of an empty namespace: %v", err)
 	}
-	if !res.Pushed || !res.Fetched {
-		t.Fatalf("pushed=%v fetched=%v, want both true", res.Pushed, res.Fetched)
+	if res.Pushed {
+		t.Errorf("Pushed must stay honest — no push subprocess ran: %+v", res)
+	}
+	if !res.PushSkippedEmpty {
+		t.Errorf("want PushSkippedEmpty to record the no-op, got %+v", res)
+	}
+	if !res.Fetched {
+		t.Errorf("Fetched=false: a clone with nothing to send must still import its peers': %+v", res)
 	}
 	if res.Published != 0 || res.Mirrored != 0 {
 		t.Errorf("published=%d mirrored=%d, want 0/0", res.Published, res.Mirrored)
+	}
+}
+
+// TestWipSyncEmptyNamespacePushOnlyReportsTheSkip pins the same honesty on the
+// direction where nothing else can stand in for it. With --push-only there is no fetch
+// to have happened either, so (Pushed=false, PushSkippedEmpty=true) is the ONLY thing
+// separating "this clone had no checkpoints" from "the push failed" — and the two must
+// not look alike, because one is exit 0 and the other is exit 1.
+//
+// It also pins the surface a ledger actually reads: `--json` must carry pushed:false
+// alongside push_skipped_empty:true, and the plain line must name the no-op rather than
+// leave a bare pushed=false reading like the failure it replaced a lie with.
+func TestWipSyncEmptyNamespacePushOnlyReportsTheSkip(t *testing.T) {
+	ctx := context.Background()
+	dir, _ := wipTestRepo(t)
+	bare := wipSyncTestRemote(t, dir)
+
+	res, err := wipSync(ctx, dir, "origin", true, false)
+	if err != nil {
+		t.Fatalf("push-only sync of an empty namespace: %v", err)
+	}
+	if res.Pushed || res.Fetched || !res.PushSkippedEmpty {
+		t.Fatalf("pushed=%v fetched=%v skipped=%v, want false/false/true", res.Pushed, res.Fetched, res.PushSkippedEmpty)
+	}
+	// Nothing was published, and the evidence is the remote itself rather than the field.
+	if remote := wipSyncRefsIn(t, bare, "refs/fak/wip"); len(remote) != 0 {
+		t.Errorf("a skipped push put refs on the remote: %v", remote)
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runWipSync(&out, &errb, []string{"-C", dir, "--push-only", "--json"}); rc != 0 {
+		t.Fatalf("wip sync --json rc=%d: %s", rc, errb.String())
+	}
+	var got wipref.SyncResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode --json: %v (raw: %s)", err, out.String())
+	}
+	if got.Pushed || !got.PushSkippedEmpty {
+		t.Errorf("--json reported pushed=%v push_skipped_empty=%v, want false/true", got.Pushed, got.PushSkippedEmpty)
+	}
+	if !strings.Contains(out.String(), `"push_skipped_empty": true`) {
+		t.Errorf("--json omitted the push_skipped_empty key:\n%s", out.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if rc := runWipSync(&out, &errb, []string{"-C", dir, "--push-only"}); rc != 0 {
+		t.Fatalf("wip sync (plain) rc=%d: %s", rc, errb.String())
+	}
+	for _, want := range []string{"pushed=false", "nothing to publish", "not a failure"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("plain output missing %q:\n%s", want, out.String())
+		}
 	}
 }
 
@@ -267,6 +338,11 @@ func TestWipSyncFailedPushStopsBeforeFetch(t *testing.T) {
 	}
 	if res.Pushed || res.Fetched {
 		t.Errorf("pushed=%v fetched=%v, want both false", res.Pushed, res.Fetched)
+	}
+	// The empty-namespace skip must never become a blanket forgiveness of a push exit 1:
+	// this namespace is NOT empty, so the failure is real and must not be excused (#5567).
+	if res.PushSkippedEmpty {
+		t.Errorf("a real push failure was recorded as an empty skip: %+v", res)
 	}
 	if !strings.Contains(err.Error(), "sync stopped before fetch") {
 		t.Errorf("error %q does not carry the stop-before-fetch rationale", err)

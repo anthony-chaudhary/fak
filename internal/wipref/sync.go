@@ -186,6 +186,17 @@ type SyncResult struct {
 	Fetched      bool   `json:"fetched"`
 	PushRefspec  string `json:"push_refspec,omitempty"`
 	FetchRefspec string `json:"fetch_refspec,omitempty"`
+	// PushSkippedEmpty reports that the push direction was ASKED FOR and had NOTHING TO
+	// SEND: this clone holds zero refs under refs/fak/wip/, so no git push ran (see
+	// PushRefspec for why handing git a zero-match push refspec is the thing being
+	// avoided). Pushed stays FALSE, because no push subprocess started and this struct may
+	// not claim one; the pair (Pushed=false, PushSkippedEmpty=true) is the honest shape of
+	// a clean no-op and is not a failure — the sync returns a nil error and goes on to
+	// fetch. Kept as its own field rather than folded into Pushed precisely so a ledger can
+	// tell "published my checkpoints" from "had none to publish", and named to match
+	// leaseref.SyncResult's field of the same shape so the two sibling substrates agree on
+	// what Pushed means (#5567).
+	PushSkippedEmpty bool `json:"push_skipped_empty,omitempty"`
 	// Published is how many local checkpoint refs the push covered — the count whose
 	// mirror entries the successful push justifies writing.
 	Published int `json:"published"`
