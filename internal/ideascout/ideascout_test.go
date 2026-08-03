@@ -3,6 +3,7 @@ package ideascout
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1361,4 +1362,215 @@ func hasLabel(labels []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// ============================================================================
+// The durable rung's two ENDPOINTS.
+//
+// #5544 routed the never-file-twice guarantee onto `gh issue list --label
+// idea-scout`. That query is a COMPLETE COVER for the deduped population only if
+// both ends of the loop hold:
+//
+//	WRITE end — every issue the scout files carries ScoutLabel and the
+//	            `<!-- idea-scout-source: … -->` stamp, else the index cannot see it.
+//	READ  end — the query really is label-targeted over --state all, else it is a
+//	            recency window again under a new name.
+//
+// tools/idea_scout.py welds both on the Python side (test_render_stamps_source_and_labels
+// pins the label list render_issue emits; test_scout_index_query_is_label_targeted_not_windowed
+// pins the argv). Neither was welded here, so the Go port — the path
+// .claude/skills/question-loop/SKILL.md points agents at — could lose either end
+// under a fully green suite. The failure would be SELF-MASKING in exactly the way
+// #5544 describes: the recency window keeps catching recent filings, so nothing
+// reds until they age out and get re-filed.
+//
+// The dedup corpus cannot cover this. It hand-writes issue bodies on the read side,
+// so it pins StampIndex against a fixture rather than against what RenderIssue
+// actually produces, and it never exercises the label filter at all.
+// ============================================================================
+
+// argAfter returns the value following `flag` in a gh argv.
+func argAfter(argv []string, flag string) (string, bool) {
+	for i, a := range argv {
+		if a == flag && i+1 < len(argv) {
+			return argv[i+1], true
+		}
+	}
+	return "", false
+}
+
+// TestScoutIndexQueryIsLabelTargeted is the READ end. It patches the shell-out seam
+// and reads back the argv LiveFetcher.FetchScoutIssues would actually send, so the
+// property under test is the wiring rather than a helper's contract in isolation.
+func TestScoutIndexQueryIsLabelTargeted(t *testing.T) {
+	var sent [][]string
+	orig := ghJSONFn
+	t.Cleanup(func() { ghJSONFn = orig })
+	ghJSONFn = func(args []string, _ time.Duration, _ any) error {
+		sent = append(sent, args)
+		return nil
+	}
+
+	if _, err := (LiveFetcher{}).FetchScoutIssues(5000); err != nil {
+		t.Fatalf("FetchScoutIssues: %v", err)
+	}
+	if _, err := (LiveFetcher{}).FetchExistingIssues(800); err != nil {
+		t.Fatalf("FetchExistingIssues: %v", err)
+	}
+	if len(sent) != 2 {
+		t.Fatalf("expected one argv per fetch, got %d: %v", len(sent), sent)
+	}
+	scout, window := sent[0], sent[1]
+
+	label, ok := argAfter(scout, "--label")
+	if !ok || label != ScoutLabel {
+		t.Fatalf("the filed-issue index query is not label-targeted: %v\n  without `--label %s` it is a bare recency listing, so the durable rung's coverage tracks the tracker's growth again and an aged-out filing gets re-filed (#5544)", scout, ScoutLabel)
+	}
+	if state, ok := argAfter(scout, "--state"); !ok || state != "all" {
+		t.Fatalf("the filed-issue index query does not cover closed issues: %v\n  a triaged-and-CLOSED filing is exactly the one that comes back as a duplicate", scout)
+	}
+	if limit, ok := argAfter(scout, "--limit"); !ok || limit != "5000" {
+		t.Fatalf("the filed-issue index query did not carry the caller's scout_scan_limit: %v", scout)
+	}
+
+	// The contrast is the point: the soft window must stay UNfiltered. Narrowing it
+	// to the scout's own label would quietly delete the "did a human already write
+	// this up lately" rung while every count still looked plausible.
+	if _, ok := argAfter(window, "--label"); ok {
+		t.Fatalf("the rung 3/4 window query grew a label filter: %v\n  it is meant to be the broad listing over everyone's issues", window)
+	}
+	if limit, ok := argAfter(window, "--limit"); !ok || limit != "800" {
+		t.Fatalf("the window query did not carry the caller's issue_scan_limit: %v", window)
+	}
+}
+
+// recordedIssue is what CreateIssue was actually asked to file. The LABELS decide
+// whether the label-targeted index will ever see the issue again; the BODY carries
+// the stamp that index is built from.
+type recordedIssue struct {
+	title  string
+	body   string
+	labels []string
+}
+
+// recordingFetcher closes the loop the durable rung depends on: run 1 files through
+// CreateIssue, run 2 reads the SAME issues back through FetchScoutIssues — which
+// applies the label filter server-side the way GitHub does, so an issue the scout
+// filed WITHOUT ScoutLabel is invisible to the index no matter what its body says.
+type recordingFetcher struct {
+	repos  []GitHubRepo
+	window []ExistingIssue
+	filed  []recordedIssue
+}
+
+func (f *recordingFetcher) FetchArxiv(string, int) (string, error)             { return "", nil }
+func (f *recordingFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)      { return f.repos, nil }
+func (f *recordingFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return nil, nil }
+func (f *recordingFetcher) FetchHackerNews(string, int) (string, error)        { return "", nil }
+func (f *recordingFetcher) FetchReddit(string, int) (string, error)            { return "", nil }
+func (f *recordingFetcher) EnsureLabels() error                                { return nil }
+func (f *recordingFetcher) AddToProject(string, string, string) error          { return nil }
+
+func (f *recordingFetcher) FetchExistingIssues(limit int) ([]ExistingIssue, error) {
+	if limit >= 0 && len(f.window) > limit {
+		return f.window[:limit], nil
+	}
+	return f.window, nil
+}
+
+func (f *recordingFetcher) FetchScoutIssues(limit int) ([]ExistingIssue, error) {
+	var out []ExistingIssue
+	for i, iss := range f.filed {
+		if !hasLabel(iss.labels, ScoutLabel) {
+			continue // `--label idea-scout` is a SERVER-side filter: gh never sends it
+		}
+		out = append(out, ExistingIssue{Number: 900 + i, Title: iss.title, Body: iss.body})
+	}
+	if limit >= 0 && len(out) > limit {
+		return out[:limit], nil
+	}
+	return out, nil
+}
+
+func (f *recordingFetcher) CreateIssue(issue IssuePlan, _ string) (string, error) {
+	f.filed = append(f.filed, recordedIssue{
+		title:  issue.Title,
+		body:   issue.Body,
+		labels: append([]string(nil), issue.Labels...),
+	})
+	return fmt.Sprintf("https://github.com/o/r/issues/%d", 900+len(f.filed)), nil
+}
+
+// TestFiledIssueRoundTripsBackIntoTheDurableRung is the WRITE end, proven end to
+// end: file a source, then scout the same source again from a workspace with NO
+// seen-cache and a window that does not contain the filing. Only the durable rung
+// can catch the second run, and it must — that is the whole never-file-twice claim,
+// exercised through what RenderIssue really emits rather than a hand-written fixture.
+func TestFiledIssueRoundTripsBackIntoTheDurableRung(t *testing.T) {
+	fetcher := &recordingFetcher{repos: []GitHubRepo{agedCandidateRepo()}, window: unrelatedRecentIssues()}
+	now := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	const thresholds = `"min_score": 1, "max_issues": 3, "scout_scan_limit": 50`
+
+	// ---- Run 1: file it for real, against the recorder. ----------------------
+	first := t.TempDir()
+	r1, err := Run(RunOptions{
+		Workspace:  first,
+		ConfigPath: writeScoutConfig(t, first, thresholds),
+		Fetcher:    fetcher,
+		Live:       true,
+		Today:      "2026-08-02",
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if len(r1.Filed) != 1 || len(fetcher.filed) != 1 {
+		t.Fatalf("first run should file exactly the one candidate: filed=%#v recorded=%d", r1.Filed, len(fetcher.filed))
+	}
+
+	// The label the index query filters on must be ON the issue the scout files.
+	// Drop it and `gh issue list --label idea-scout` stops returning new filings
+	// while the recency window masks the loss until they age out.
+	if got := fetcher.filed[0].labels; !hasLabel(got, ScoutLabel) {
+		t.Fatalf("the filed issue does not carry %q, so the label-targeted filing index can never see it and the never-file-twice guarantee is void: labels=%v", ScoutLabel, got)
+	}
+	// The stamp must survive its own reader: RenderIssue writes the marker and
+	// StampIndex parses it back. A corpus that hand-writes both ends cannot see the
+	// two drift apart.
+	stampedBack := StampIndex([]ExistingIssue{{Title: fetcher.filed[0].title, Body: fetcher.filed[0].body}})
+	if _, ok := stampedBack["github:o/aged"]; !ok {
+		t.Fatalf("the stamp RenderIssue wrote is not the stamp StampIndex reads back: index=%v\n  body:\n%s", stampedBack, fetcher.filed[0].body)
+	}
+
+	// ---- Run 2: fresh workspace (no seen.json), same source, window unchanged.
+	// The filing is NOT in the window, so nothing but the durable rung can catch it.
+	second := t.TempDir()
+	if _, err := os.Stat(CachePath(second)); !os.IsNotExist(err) {
+		t.Fatalf("the second workspace must start with no seen-cache, stat err=%v", err)
+	}
+	r2, err := Run(RunOptions{
+		Workspace:  second,
+		ConfigPath: writeScoutConfig(t, second, thresholds),
+		Fetcher:    fetcher,
+		Today:      "2026-08-03",
+		Now:        now.AddDate(0, 0, 1),
+	})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if len(r2.Planned) != 0 {
+		t.Fatalf("re-filed a source this same scout already filed: %#v", r2.Planned)
+	}
+	if r2.Skipped["filed-stamp"] != 1 {
+		t.Fatalf("the durable rung did not catch the scout's own filing: skipped=%#v", r2.Skipped)
+	}
+	if r2.Skipped["seen-cache"] != 0 || r2.Skipped["issue-body"] != 0 || r2.Skipped["title-near"] != 0 {
+		t.Fatalf("a rung other than filed-stamp caught it, so this proves nothing about the label-targeted index: skipped=%#v", r2.Skipped)
+	}
+	if idx := r2.DedupIndex; idx.FiledIssuesScanned != 1 || idx.FiledStamps != 1 || !idx.ScoutIndexComplete {
+		t.Fatalf("the dedup index did not read back the one filing: %#v", idx)
+	}
+	if len(fetcher.filed) != 1 {
+		t.Fatalf("the dry-run second pass filed something: %#v", fetcher.filed)
+	}
 }
