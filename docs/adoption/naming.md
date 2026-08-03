@@ -115,5 +115,5 @@ established primitives into one in-process gate — a 29-claim prior-art audit s
 
 ```
 test -f docs/adoption/naming.md                      # this artifact exists
-python tools/seo_aeo_scorecard.py                    # new doc does not red the SEO scorecard
+fak score seo                                        # new doc does not red the SEO scorecard
 ```

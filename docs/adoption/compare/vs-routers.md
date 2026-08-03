@@ -159,5 +159,5 @@ claim.
 
 ```
 test -f docs/adoption/compare/vs-routers.md          # this artifact exists
-python tools/seo_aeo_scorecard.py                    # new doc does not red the SEO scorecard
+fak score seo                                        # new doc does not red the SEO scorecard
 ```

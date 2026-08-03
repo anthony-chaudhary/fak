@@ -164,7 +164,7 @@ func TestCensusSuppressesTemplateFamily(t *testing.T) {
 		"parallel adoption workstreams under a single shared template so each " +
 		"sub-issue reads the same skeleton with only its facet name changed.\n" +
 		"## In scope\n" +
-		"Advance this facet against the shared scorecard in tools/seo_aeo_scorecard.py " +
+		"Advance this facet against the shared scorecard behind `fak score seo` " +
 		"and report progress on the epic's shared dashboard for the gardener to track.\n" +
 		"## Done condition\n" +
 		"The facet clears the shared scorecard bar and the epic dashboard reflects it.\n"

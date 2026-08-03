@@ -111,13 +111,15 @@ func Markdown(p Payload, stamp string) string {
 	out = append(out, "# SEO / AEO scorecard (PRIVATE)", "")
 	out = append(out, "> **Private — do not publish.** Discoverability scores are go-to-market "+
 		"positioning (the same strategic class as the ICP memo). The measuring "+
-		"TOOL is public (`tools/seo_aeo_scorecard.py`); these SCORES live only in "+
+		"TOOL is public (`fak score seo`); these SCORES live only in "+
 		"the private repo. The public `.gitignore` blocks this file from a public commit.", "")
 	if stamp != "" {
-		out = append(out, fmt.Sprintf("<!-- seo-aeo-scorecard: %s · scope=%s · process: tools/seo_aeo_scorecard.py -->", stamp, scope), "")
+		out = append(out, fmt.Sprintf("<!-- seo-aeo-scorecard: %s · scope=%s · process: fak score seo -->", stamp, scope), "")
 	}
-	out = append(out, fmt.Sprintf("> Scope: **%s**. Regenerate + transfer: "+
-		"`python tools/seo_aeo_scorecard.py --scope %s --transfer --stamp DATE`", scope, scope), "")
+	out = append(out, fmt.Sprintf("> Scope: **%s**. Regenerate: "+
+		"`fak score seo --scope %s --markdown --stamp DATE`, writing the output to "+
+		"SEO-AEO-SCORECARD.md in the private repo. There is no `--transfer` flag: the "+
+		"private-archive copy is a manual step.", scope, scope), "")
 	out = append(out, "Headline metric is **seo-debt**: the count of concrete, re-derivable "+
 		"discoverability defects (a page with no meta description, a missing "+
 		"JSON-LD type, a stale `llms-full.txt`, a dead link). Drive it toward zero.", "")

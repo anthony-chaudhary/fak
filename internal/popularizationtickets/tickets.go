@@ -151,7 +151,7 @@ Any other popularization ticket's deliverable; kernel/engineering changes; marke
 %s
 
 ## Witness
-The acceptance artifact exists and is checkable: the named file/command is present and correct; `+"`python tools/seo_aeo_scorecard.py`"+` does not regress for any new `+"`docs/*.md`"+`; the ship commit passes `+"`dos commit-audit`"+`.
+The acceptance artifact exists and is checkable: the named file/command is present and correct; `+"`fak score seo`"+` does not regress for any new `+"`docs/*.md`"+`; the ship commit passes `+"`dos commit-audit`"+`.
 
 ## Acceptance gate
 %s

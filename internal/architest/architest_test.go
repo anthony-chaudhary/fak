@@ -446,7 +446,7 @@ var tier = map[string]int{
 	"projectreport":         1, // the ProjectsV2 board control-pane fold: a pure fold of board item × {Status,Generation,Priority} into the same schema/ok/verdict/finding envelope milestonereport uses, with a fail-closed UNMEASURED verdict for an unreadable board. The `gh` read lives in cmd/fak; this leaf is stdlib-only, imports nothing internal, off the hot path.
 	"projectcompletion":     2, // weighted production-scope aggregation over canonical issuecontract metadata; imports issuecontract only, off the hot path.
 	"catchupscore":          1, // the dev-system CATCH-UP control-pane scorecard (`fak score catchup`): folds intake/measurement/index/trunk/loops into a 0..1 caught-up fraction + an unbounded catchup_backlog headline. Pure fold, stdlib-only, imports nothing internal, off the hot path.
-	"seoaeoscore":           1, // seo/aeo discoverability scorecard (Go port of tools/seo_aeo_scorecard.py): front-matter/JSON-LD/llms.txt + crawlable-link audit over the git-tracked doc surface; stdlib-only, imports nothing internal, off the hot path.
+	"seoaeoscore":           1, // seo/aeo discoverability scorecard (Go port of the former tools/seo_aeo_scorecard.py): front-matter/JSON-LD/llms.txt + crawlable-link audit over the git-tracked doc surface; stdlib-only, imports nothing internal, off the hot path.
 	"zaitask":               4,
 	"macfit":                2,
 	"roofline":              1, // pure-Go GLM-5.2 roofline dashboard fold (#3090): folds committed benchmark run artifacts × transcribed ceiling estimates into one current-vs-80%target-vs-ceiling table; stdlib-only, imports nothing internal, laptop-composable (no GPU), off the hot path.

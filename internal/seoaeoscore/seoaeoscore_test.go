@@ -1,6 +1,6 @@
 package seoaeoscore
 
-// Golden-parity port of tools/seo_aeo_scorecard_test.py. Every case here mirrors a Python
+// Golden-parity port of the former tools/seo_aeo_scorecard_test.py. Every case here mirrors a Python
 // test one-for-one: the pure per-KPI checks + front-matter parser + grader + site-level fold
 // on fixture strings (mostly no disk), then a tolerant live smoke that Build folds the real
 // published surfaces. The two Python cases that drive gen_structured_data (gsd) directly are

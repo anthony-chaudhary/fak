@@ -1,4 +1,4 @@
-// Package seoaeoscore is the Go port of tools/seo_aeo_scorecard.py: the SEO/AEO
+// Package seoaeoscore is the Go port of the former tools/seo_aeo_scorecard.py: the SEO/AEO
 // discoverability measuring stick that makes "more discoverable" provable.
 //
 // tools/docs_scorecard.py answers "are the docs CORRECT for a reader who already found

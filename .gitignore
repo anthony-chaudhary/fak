@@ -433,8 +433,9 @@ fak/.bench-baseline.json
 
 # SEO/AEO scorecard SCORES — strategic discoverability/positioning data, the same
 # go-to-market class as the ICP memo above. The measuring TOOL is public
-# (tools/seo_aeo_scorecard.py); the SCORES go to the PRIVATE repo only
-# (`python tools/seo_aeo_scorecard.py --transfer` -> ../fleet/.seo-archive/fak/).
+# (`fak score seo` over internal/seoaeoscore); the SCORES go to the PRIVATE repo
+# only (copy the `--markdown` output to ../fleet/.seo-archive/fak/ by hand -- the
+# Go port has no `--transfer`).
 # These globs are the public-side guard: a locally-generated report or baseline can
 # never land in this public tree by accident.
 /SEO-AEO-SCORECARD.md
