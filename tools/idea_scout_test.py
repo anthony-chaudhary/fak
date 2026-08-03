@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Hermetic tests for tools/idea_scout.py.
 
-NOTHING live runs: arXiv/GitHub fetches and `gh` are never called. The pure
-logic — Atom/JSON parsing, the transparent relevance score, the three dedup
-rungs, issue rendering, and the score→dedup→threshold→CAP planner — is exercised
-directly with fixtures, plus a real tmp-dir round-trip of the seen-cache.
+NOTHING live runs: arXiv/GitHub fetches and `gh` are never called — every fetcher
+main() can reach, INCLUDING the fresh GitHub lane, is stubbed. The pure logic —
+Atom/JSON parsing, the transparent relevance score, the four dedup rungs, issue
+rendering, and the score→dedup→threshold→CAP planner — is exercised directly with
+fixtures, plus a real tmp-dir round-trip of the seen-cache.
+
+``FiledStampDurabilityTest`` carries the #5543 regression: a source filed once is
+never filed again even with the local cache gone and the original issue outside
+the recency window.
 """
 from __future__ import annotations
 
@@ -178,14 +183,39 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(
             M.is_duplicate(cand, seen, set(), [], "", 0.55), "seen-cache")
 
-    def test_issue_body_source_stamp_rung(self) -> None:
+    def test_filed_stamp_rung(self) -> None:
+        # The source_id stamp is rung 2 and is reported under its OWN name: it is
+        # the complete filing history, not the windowed URL sighting of rung 3.
         issues = [{"number": 1, "title": "old",
                    "body": "stuff\n<!-- idea-scout-source: arxiv:2606.01234 -->"}]
         stamped, tsets, bodies = self._index(issues)
         cand = {"source_id": "arxiv:2606.01234",
                 "url": "https://arxiv.org/abs/2606.01234", "title": "X"}
         self.assertEqual(
-            M.is_duplicate(cand, {}, stamped, tsets, bodies, 0.55), "issue-body")
+            M.is_duplicate(cand, {}, stamped, tsets, bodies, 0.55), "filed-stamp")
+
+    def test_filed_stamp_rung_folds_case(self) -> None:
+        # GitHub hands back whichever casing it likes; an un-folded compare would
+        # let `Acme/Repo` slip past a stamp reading `acme/repo`.
+        stamped = M.stamp_index(
+            [{"body": "<!-- idea-scout-source: github:acme/agent-firewall -->"}])
+        self.assertEqual(stamped, {"github:acme/agent-firewall"})
+        cand = {"source_id": "github:Acme/Agent-Firewall",
+                "url": "https://github.com/Acme/Agent-Firewall", "title": "X"}
+        self.assertEqual(
+            M.is_duplicate(cand, {}, stamped, [], "", 0.55), "filed-stamp")
+
+    def test_closed_issue_stamp_still_blocks(self) -> None:
+        # The regression #5543 was built on: a source whose issue was triaged and
+        # CLOSED came back as a fresh needs-triage ticket. A stamp is a stamp
+        # regardless of state — the index is fetched with `--state all`.
+        stamped = M.stamp_index(
+            [{"body": "closed long ago\n"
+                      "<!-- idea-scout-source: github:fu351/doberman-core -->"}])
+        cand = {"source_id": "github:fu351/doberman-core",
+                "url": "https://github.com/fu351/Doberman-Core", "title": "X"}
+        self.assertEqual(
+            M.is_duplicate(cand, {}, stamped, [], "", 0.55), "filed-stamp")
 
     def test_issue_body_url_rung(self) -> None:
         issues = [{"number": 2, "title": "manual",
@@ -272,7 +302,7 @@ class PlanTest(unittest.TestCase):
         # make one clearly top-scored via extra stars
         cands[3]["source"] = "github"
         cands[3]["extra"] = {"stars": 3000, "pushed_at": "2026-06-20T00:00:00Z"}
-        to_file, stats = M.plan_issues(
+        to_file, stats, dropped = M.plan_issues(
             cands, self._topics(), {}, set(), [], "", cfg, "2026-06-22", NOW)
         self.assertEqual(len(to_file), 2)  # capped
         self.assertEqual(to_file[0]["source_id"], "arxiv:3")  # highest score first
@@ -283,7 +313,7 @@ class PlanTest(unittest.TestCase):
         cands = [{"source": "arxiv", "source_id": "arxiv:x", "url": "u",
                   "title": "agent guardrail", "summary": "", "published": "",
                   "topic": TOPIC["key"], "extra": {}}]
-        to_file, stats = M.plan_issues(
+        to_file, stats, dropped = M.plan_issues(
             cands, self._topics(), {}, set(), [], "", cfg, "2026-06-22", NOW)
         self.assertEqual(to_file, [])
         self.assertEqual(stats["below-min"], 1)
@@ -294,7 +324,7 @@ class PlanTest(unittest.TestCase):
                 "title": "agent guardrail policy", "summary": "",
                 "published": "2026-06-10T00:00:00Z", "topic": TOPIC["key"],
                 "extra": {}}
-        to_file, stats = M.plan_issues(
+        to_file, stats, dropped = M.plan_issues(
             [cand, dict(cand)], self._topics(), {}, set(), [], "", cfg,
             "2026-06-22", NOW)
         self.assertEqual(len(to_file), 1)
@@ -306,7 +336,7 @@ class PlanTest(unittest.TestCase):
                 "title": "agent guardrail policy", "summary": "",
                 "published": "2026-06-10T00:00:00Z", "topic": TOPIC["key"],
                 "extra": {}}
-        to_file, stats = M.plan_issues(
+        to_file, stats, dropped = M.plan_issues(
             [cand], self._topics(), {"arxiv:known": {}}, set(), [], "", cfg,
             "2026-06-22", NOW)
         self.assertEqual(to_file, [])
@@ -414,18 +444,28 @@ class MainHermeticTest(unittest.TestCase):
     caches; the cap is never exceeded."""
 
     def setUp(self) -> None:
-        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_existing_issues,
+        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+                      M.fetch_existing_issues, M.fetch_scout_issues,
                       M.create_issue, M.ensure_scout_label)
 
     def tearDown(self) -> None:
-        (M.fetch_arxiv, M.fetch_github, M.fetch_existing_issues,
+        (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+         M.fetch_existing_issues, M.fetch_scout_issues,
          M.create_issue, M.ensure_scout_label) = self._orig
 
     def _stub(self, *, arxiv: str = "", github_items=None, existing=None,
-              created_urls=None):
+              filed=None, created_urls=None):
         M.fetch_arxiv = lambda *a, **k: arxiv
         M.fetch_github = lambda *a, **k: list(github_items or [])
+        # The fresh lane must be stubbed too or main() reaches the real
+        # `gh search repos`: the suite is meant to be hermetic, and a live lane
+        # silently injects today's real GitHub results into every fixture.
+        M.fetch_github_fresh = lambda *a, **k: []
         M.fetch_existing_issues = lambda *a, **k: list(existing or [])
+        # `filed` is the label-targeted rung-2 corpus: every issue the scout has
+        # EVER filed, deliberately disjoint from the recency window above so a
+        # test can prove the guarantee does not come from the window.
+        M.fetch_scout_issues = lambda *a, **k: list(filed or [])
         M.ensure_scout_label = lambda: None
         calls: list = []
 
@@ -498,6 +538,143 @@ class MainHermeticTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             rc, _ = self._run(["--workspace", d])
             self.assertEqual(rc, 2)  # refuse rather than risk a blind run
+
+
+class FiledStampDurabilityTest(unittest.TestCase):
+    """#5543: a source filed once must never be filed again — with NO local cache
+    and with the original issue far outside the recency window.
+
+    The bug was that the only two non-local rungs were a git-ignored cache and a
+    fixed-size scan of the most recent `issue_scan_limit` issues. Once the tracker
+    outgrew that window, an old filed issue became invisible and its source was
+    re-filed. These tests pin the replacement: the guarantee comes from a
+    label-targeted index of the scout's own filing history, so an EMPTY window and
+    an EMPTY cache still block a re-file."""
+
+    # The real re-file from the ticket: #528 filed it, triage closed it, and months
+    # later #5298 filed it again because #528 had fallen out of the 800-window.
+    OLD_FILED = [{"number": 528, "title": "idea-scout: fu351/Doberman-Core",
+                  "body": "auto-filed long ago\n"
+                          "<!-- idea-scout-source: github:fu351/doberman-core -->"}]
+    REPO = {"fullName": "fu351/Doberman-Core",
+            "description": "an agent tool guardrail policy capability gateway",
+            "url": "https://github.com/fu351/Doberman-Core",
+            "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z",
+            "createdAt": "2025-01-01T00:00:00Z", "language": "Go"}
+
+    def setUp(self) -> None:
+        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+                      M.fetch_existing_issues, M.fetch_scout_issues,
+                      M.create_issue, M.ensure_scout_label)
+        M.fetch_arxiv = lambda *a, **k: ""
+        M.fetch_github_fresh = lambda *a, **k: []   # hermetic: no live fresh lane
+        M.ensure_scout_label = lambda: None
+        self.created: list = []
+
+        def _create(issue, *, milestone=""):
+            self.created.append(issue)
+            return "https://github.com/x/y/issues/1"
+        M.create_issue = _create
+
+    def tearDown(self) -> None:
+        (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+         M.fetch_existing_issues, M.fetch_scout_issues,
+         M.create_issue, M.ensure_scout_label) = self._orig
+
+    def _run(self, argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = M.main(argv)
+        return rc, buf.getvalue()
+
+    def test_old_filed_source_blocked_with_empty_cache_and_empty_window(self) -> None:
+        M.fetch_github = lambda *a, **k: [dict(self.REPO)]
+        M.fetch_existing_issues = lambda *a, **k: []   # window has aged it out
+        M.fetch_scout_issues = lambda *a, **k: list(self.OLD_FILED)
+        with tempfile.TemporaryDirectory() as d:       # no seen.json at all
+            rc, out = self._run(["--workspace", d, "--live", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(self.created, [], "re-filed an already-filed source")
+        self.assertEqual(payload["planned"], [])
+        self.assertEqual(payload["skipped"]["filed-stamp"], 1)
+        self.assertTrue(payload["dedup_index"]["scout_index_complete"])
+
+    def test_control_unfiled_source_is_still_admitted(self) -> None:
+        # Same wiring, a source that is genuinely absent from the filing history:
+        # it MUST still be planned. Otherwise the fix is just "refuse everything".
+        novel = dict(self.REPO, fullName="brandnew/agent-policy-gateway",
+                     url="https://github.com/brandnew/agent-policy-gateway")
+        M.fetch_github = lambda *a, **k: [novel]
+        M.fetch_existing_issues = lambda *a, **k: []
+        M.fetch_scout_issues = lambda *a, **k: list(self.OLD_FILED)
+        with tempfile.TemporaryDirectory() as d:
+            rc, out = self._run(["--workspace", d, "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual([p["source_id"] for p in payload["planned"]],
+                         ["github:brandnew/agent-policy-gateway"])
+        self.assertEqual(payload["skipped"]["filed-stamp"], 0)
+
+    def test_refuse_when_scout_index_unavailable(self) -> None:
+        # The durable rung is mandatory. A populated seen-cache must NOT buy a pass:
+        # that local file is exactly what proved unreliable.
+        M.fetch_github = lambda *a, **k: [dict(self.REPO)]
+        M.fetch_existing_issues = lambda *a, **k: []
+
+        def _boom(*a, **k):
+            raise RuntimeError("gh: label query failed")
+        M.fetch_scout_issues = _boom
+        with tempfile.TemporaryDirectory() as d:
+            M.save_seen(Path(d), {"github:something": {"filed_at": "2026-01-01"}})
+            rc, _ = self._run(["--workspace", d, "--live"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(self.created, [])
+
+    def test_refuse_when_scout_index_saturates_its_limit(self) -> None:
+        # A scan that returns exactly the limit is ambiguous — complete, or
+        # truncated? Refuse. This is the tripwire the 800-window never had: it
+        # degraded silently instead, which is how #5543 happened.
+        M.fetch_github = lambda *a, **k: [dict(self.REPO)]
+        M.fetch_existing_issues = lambda *a, **k: []
+        saturating = [{"number": i, "title": f"idea-scout: r{i}",
+                       "body": f"<!-- idea-scout-source: github:acme/r{i} -->"}
+                      for i in range(4)]
+        cfg_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(cfg_dir.cleanup)
+        cfg_path = Path(cfg_dir.name) / "cfg.json"
+        cfg_path.write_text(json.dumps({"thresholds": {"scout_scan_limit": 4}}),
+                            encoding="utf-8")
+        M.fetch_scout_issues = lambda *a, **k: list(saturating)
+        with tempfile.TemporaryDirectory() as d:
+            rc, _ = self._run(["--workspace", d, "--live",
+                               "--config", str(cfg_path)])
+        self.assertEqual(rc, 2)
+        self.assertEqual(self.created, [])
+
+    def test_scout_index_query_is_label_targeted_not_windowed(self) -> None:
+        # The whole point: the query is scoped to the population being deduped.
+        # If this ever reverts to a bare recency listing the guarantee dies again.
+        seen_args: list = []
+        orig = M.gh_json
+        try:
+            M.gh_json = lambda args, **kw: seen_args.append(args) or []
+            M.fetch_scout_issues(5000)
+        finally:
+            M.gh_json = orig
+        argv = seen_args[0]
+        self.assertIn("--label", argv)
+        self.assertEqual(argv[argv.index("--label") + 1], M.SCOUT_LABEL)
+        # closed issues are the ones that get re-filed, so they must be in scope
+        self.assertEqual(argv[argv.index("--state") + 1], "all")
+
+    def test_scout_scan_limit_is_a_distinct_knob_from_the_window(self) -> None:
+        # Guards against the rejected "just raise issue_scan_limit" fix: the
+        # durable rung must not be governed by the recency window's size.
+        _, cfg = M.load_config(None)
+        self.assertIn("scout_scan_limit", cfg)
+        self.assertNotEqual(cfg["scout_scan_limit"], cfg["issue_scan_limit"])
+        self.assertGreater(cfg["scout_scan_limit"], cfg["issue_scan_limit"])
 
 
 if __name__ == "__main__":

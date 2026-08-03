@@ -24,6 +24,7 @@
     "github_per_topic": 6,
     "min_stars": 25,
     "dup_jaccard": 0.55,
-    "issue_scan_limit": 800
+    "issue_scan_limit": 800,
+    "scout_scan_limit": 5000
   }
 }

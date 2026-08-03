@@ -18,15 +18,33 @@ human can triage. Sources, both keyless-or-already-authed (no new secret):
                repos surface instead of only incumbents. fresh_per_topic: 0 disables it.
 
 The hard part of an UNATTENDED issue filer is not fetching — it is NOT spamming.
-Three dedup rungs gate every candidate before it can become an issue:
+Four dedup rungs gate every candidate before it can become an issue:
 
-  1. seen-cache   .idea-scout/seen.json — a persistent {source_id: record} of every
-                  candidate ever FILED (or explicitly skipped). A source filed once
-                  is never filed again, even years later. This is the durable rung.
-  2. issue-body   the candidate's source URL / source_id stamped in any existing
-                  issue body ⇒ already filed (survives a lost cache).
-  3. title-near   token-overlap (Jaccard) with any existing issue title ⇒ a near-dup
-                  a human already opened by hand.
+  1. seen-cache   .idea-scout/seen.json — a node-local {source_id: record} of every
+                  candidate this machine FILED. A pure fast path: the cache is
+                  git-ignored, so it can be lost, and losing it must not (and no
+                  longer does) cost the guarantee. Rung 2 is what makes the promise.
+  2. filed-stamp  the candidate's source_id read back out of the
+                  `<!-- idea-scout-source: … -->` stamp on EVERY issue the scout has
+                  ever filed. THE DURABLE RUNG: a source filed once is never filed
+                  again, even years later. The index is built from a query TARGETED
+                  at the `idea-scout` label (`gh issue list --label idea-scout`), not
+                  from a fixed-size window of recent issues — so its completeness is
+                  a function of how many issues the SCOUT has filed (capped at
+                  --max-issues/day) and never of how fast the tracker as a whole
+                  grows. GitHub is the replicated store; nothing local is trusted.
+  3. issue-body   the candidate's source URL appears verbatim in some existing issue
+                  body ⇒ a human already opened it by hand. Best-effort: scanned over
+                  a recent-issue window (`issue_scan_limit`), so it is a bonus catch,
+                  never the guarantee.
+  4. title-near   token-overlap (Jaccard) with any existing issue title ⇒ a near-dup
+                  a human already opened by hand. Best-effort, same window as rung 3.
+
+Rung 2 is MANDATORY: if its index cannot be built — `gh` failed, or the label scan
+came back saturated at `scout_scan_limit` and may therefore be truncated — the run
+REFUSES (exit 2) instead of filing blind. A dedup index that silently degrades as
+the tracker grows is exactly how already-triaged sources get re-filed, so growth has
+to trip a loud refusal, not a quiet re-file.
 
 And a hard CAP: at most --max-issues per run (default 3), top-scored first, so even
 a pathological day cannot storm the tracker. Relevance is a TRANSPARENT integer
@@ -159,7 +177,16 @@ DEFAULTS = {
     "fresh_min_stars": 3,  # fresh-lane star floor: admits young repos the min_stars floor would drop
     "fresh_window_days": 45,  # pushed within this window earns the strong "actively updated" bonus
     "dup_jaccard": 0.55,  # title token-overlap to call a near-duplicate
-    "issue_scan_limit": 800,  # existing issues fetched for the dedup index
+    # Rung 3/4 only (URL-in-body + title-Jaccard vs HUMAN-opened issues): a recency
+    # window over the whole tracker. Deliberately NOT the anti-re-file guarantee —
+    # that is scout_scan_limit below, because this one shrinks in coverage every time
+    # the tracker gets busier.
+    "issue_scan_limit": 800,  # recent issues fetched for the soft near-dup rungs
+    # Rung 2, the durable one: every issue carrying the `idea-scout` LABEL, i.e. the
+    # scout's own filing history. Bounded by max_issues/day (≤3), not by tracker
+    # growth, so one number covers years. Saturating it is a REFUSAL, never a
+    # silent truncation — see the scout-index gate in main().
+    "scout_scan_limit": 5000,  # cap on the label-targeted filed-issue index
     "milestone": "",      # assign filed issues to this milestone title (empty = none)
     "project": "",        # ProjectsV2 number to add filed issues to (empty = none)
     "project_owner": "",  # owner login for --project (empty = repo owner / viewer)
@@ -344,33 +371,53 @@ def parse_github_repos(items: list[dict[str, Any]], topic_key: str,
     return out
 
 
+_STAMP_RE = re.compile(r"idea-scout-source:\s*([^\s>]+)")
+
+
+def stamp_index(issues: list[dict[str, Any]]) -> set[str]:
+    """Every `idea-scout-source:` stamp carried by `issues`, lower-cased.
+
+    This is rung 2's whole payload. Case is folded on BOTH sides (here and in
+    ``is_duplicate``) because GitHub repo names are case-insensitive while the
+    search API hands back whichever casing it feels like — an un-folded compare
+    lets `Acme/Repo` slip past a stamp that reads `acme/repo`."""
+    out: set[str] = set()
+    for iss in issues:
+        for m in _STAMP_RE.findall(iss.get("body") or ""):
+            out.add(m.strip().lower())
+    return out
+
+
 def existing_issue_index(issues: list[dict[str, Any]],
                          ) -> tuple[set[str], list[set[str]], str]:
-    """Build the dedup index from existing issues: every URL/source_id already
+    """Build the dedup index from existing issues: every source_id already
     stamped in a body, and the title token-sets for near-dup detection. Returns
-    (stamped_strings, title_token_sets, joined_bodies_lower)."""
-    stamped: set[str] = set()
+    (stamped_source_ids, title_token_sets, joined_bodies_lower)."""
     title_sets: list[set[str]] = []
     bodies: list[str] = []
     for iss in issues:
-        body = (iss.get("body") or "")
-        bodies.append(body.lower())
+        bodies.append((iss.get("body") or "").lower())
         title_sets.append(tokenize(iss.get("title") or ""))
-        for m in re.findall(r"idea-scout-source:\s*([^\s>]+)", body):
-            stamped.add(m.strip())
-    return stamped, title_sets, "\n".join(bodies)
+    return stamp_index(issues), title_sets, "\n".join(bodies)
 
 
 def is_duplicate(cand: dict[str, Any], seen: dict[str, Any],
                  stamped: set[str], title_sets: list[set[str]],
                  bodies_joined: str, dup_jaccard: float) -> str | None:
-    """Return the dedup rung that fires ('seen-cache' / 'issue-body' / 'title-near'),
-    or None if the candidate is genuinely new."""
+    """Return the dedup rung that fires ('seen-cache' / 'filed-stamp' /
+    'issue-body' / 'title-near'), or None if the candidate is genuinely new.
+
+    'filed-stamp' and 'issue-body' are reported separately on purpose: the first
+    is the durable, complete filing history (rung 2) and the second is a
+    best-effort URL sighting inside a recency window (rung 3). Collapsing them
+    would make a windowed guess indistinguishable from the guarantee in the
+    run report."""
     sid = cand["source_id"]
-    if sid in seen:
+    sid_l = sid.lower()
+    if sid in seen or sid_l in seen:
         return "seen-cache"
-    if sid in stamped:
-        return "issue-body"
+    if sid_l in stamped:
+        return "filed-stamp"
     url = cand["url"].lower()
     if url and url in bodies_joined:
         return "issue-body"
@@ -443,18 +490,24 @@ def plan_issues(candidates: list[dict[str, Any]], topics_by_key: dict[str, dict]
                 seen: dict[str, Any], stamped: set[str],
                 title_sets: list[set[str]], bodies_joined: str,
                 cfg: dict[str, Any], today: str, now: dt.datetime,
-                ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Score → dedup → threshold → CAP. Returns (issues_to_file, skip_stats).
+                ) -> tuple[list[dict[str, Any]], dict[str, int],
+                           list[dict[str, str]]]:
+    """Score → dedup → threshold → CAP. Returns (issues_to_file, skip_stats,
+    dropped). `dropped` names the rung that stopped each individual source_id —
+    aggregate counts alone cannot answer "was THIS already-triaged source caught,
+    and by which rung", which is the only question that matters after a re-file.
     Deterministic: candidates are de-duplicated by source_id within the run and
     sorted by (score desc, source_id) before the cap so the plan is stable."""
-    stats = {"seen-cache": 0, "issue-body": 0, "title-near": 0,
+    stats = {"seen-cache": 0, "filed-stamp": 0, "issue-body": 0, "title-near": 0,
              "below-min": 0, "within-run-dup": 0}
+    dropped: list[dict[str, str]] = []
     scored: list[dict[str, Any]] = []
     run_seen: set[str] = set()
     for cand in candidates:
         sid = cand["source_id"]
         if sid in run_seen:
             stats["within-run-dup"] += 1
+            dropped.append({"source_id": sid, "rung": "within-run-dup"})
             continue
         run_seen.add(sid)
         topic = topics_by_key.get(cand["topic"], {"key": cand["topic"], "terms": []})
@@ -462,15 +515,18 @@ def plan_issues(candidates: list[dict[str, Any]], topics_by_key: dict[str, dict]
                             cfg["dup_jaccard"])
         if rung:
             stats[rung] += 1
+            dropped.append({"source_id": sid, "rung": rung})
             continue
         score, reasons = score_candidate(cand, topic, cfg, now)
         if score < cfg["min_score"]:
             stats["below-min"] += 1
+            dropped.append({"source_id": sid, "rung": "below-min"})
             continue
         scored.append(render_issue(cand, score, reasons, topic, today))
 
     scored.sort(key=lambda r: (-r["score"], r["source_id"]))
-    return scored[: cfg["max_issues"]], stats
+    dropped.sort(key=lambda d: (d["rung"], d["source_id"]))
+    return scored[: cfg["max_issues"]], stats, dropped
 
 
 # ============================================================================
@@ -525,10 +581,31 @@ def fetch_github_fresh(query: str, limit: int) -> list[dict[str, Any]]:
 
 
 def fetch_existing_issues(limit: int) -> list[dict[str, Any]]:
+    """Rung 3/4 corpus: the `limit` most recent issues, whoever opened them. A
+    RECENCY WINDOW — it answers "did a human already write this up lately", and
+    that is all it is allowed to answer."""
     return gh_json([
         "issue", "list", "--state", "all", "--limit", str(limit),
         "--json", "number,title,body",
     ])
+
+
+def fetch_scout_issues(limit: int) -> list[dict[str, Any]]:
+    """Rung 2 corpus: every issue the scout has EVER filed, open or closed.
+
+    TARGETED, not windowed. `--label idea-scout` is a server-side filter, so the
+    result set is the scout's own filing history — it does not thin out because
+    unrelated issues were opened this week, which is precisely how the recency
+    window in ``fetch_existing_issues`` lost the guarantee. Every filed issue
+    carries the label (``render_issue`` always emits SCOUT_LABEL) and the
+    matching `<!-- idea-scout-source: … -->` stamp, so label ⊇ stamped-by-us.
+
+    `--state all` is load-bearing: a source whose issue was triaged and CLOSED is
+    the exact case that must not come back."""
+    return gh_json([
+        "issue", "list", "--state", "all", "--label", SCOUT_LABEL,
+        "--limit", str(limit), "--json", "number,title,body",
+    ], timeout=180)
 
 
 def ensure_scout_label() -> None:
@@ -744,27 +821,61 @@ def main(argv: list[str] | None = None) -> int:
     errors: list[str] = []
     candidates = gather_candidates(topics, cfg, errors)
 
-    # The existing-issue dedup index is mandatory: with no way to know what is
-    # already filed, --live could re-storm the tracker. If gh fails AND there is
-    # no cache, refuse rather than risk a spam run.
     seen = load_seen(workspace)
+
+    # ---- Rung 2, the durable one --------------------------------------------
+    # The scout's OWN filing history, pulled by label so the query is targeted at
+    # exactly the population being deduped. This is what makes "filed once, never
+    # filed again" true without trusting the git-ignored local cache. It is
+    # MANDATORY: if it cannot be built completely we refuse, because a partial
+    # index is indistinguishable from "this source is new" and re-files an
+    # already-triaged source.
+    scout_limit = int(cfg["scout_scan_limit"])
+    try:
+        scout_issues = fetch_scout_issues(scout_limit)
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"scout-index: {e}")
+        print(f"refuse: cannot build the filed-issue index (`gh issue list --label "
+              f"{SCOUT_LABEL}`); filing now could re-file an already-triaged "
+              f"source ({e})", file=sys.stderr)
+        return 2
+    if len(scout_issues) >= scout_limit:
+        # Saturation is ambiguous — gh returns exactly `limit` both when that is
+        # all there is and when it truncated. Refuse loudly rather than let the
+        # guarantee rot silently the way the 800-issue window did.
+        print(f"refuse: the filed-issue index came back saturated at "
+              f"scout_scan_limit={scout_limit}, so it may be truncated and a "
+              f"previously-filed source could be re-filed. Raise "
+              f"`thresholds.scout_scan_limit` (--config) above the number of "
+              f"issues the scout has ever filed.", file=sys.stderr)
+        return 2
+    stamped = stamp_index(scout_issues)
+
+    # ---- Rungs 3/4: the soft, windowed corpus of everything else -------------
+    # Human-opened issues that reference the same URL, or carry a near-identical
+    # title. Nice to have, never the guarantee. The pre-existing refusal is kept
+    # as-is (nothing here is relaxed on the back of rung 2): degrading these rungs
+    # onto a bare local cache is still a worse run than no run.
+    window_scanned = 0
     try:
         issues = fetch_existing_issues(cfg["issue_scan_limit"])
-        stamped, title_sets, bodies_joined = existing_issue_index(issues)
+        win_stamped, title_sets, bodies_joined = existing_issue_index(issues)
+        stamped |= win_stamped  # catches a filed issue whose label a human stripped
+        window_scanned = len(issues)
     except Exception as e:  # noqa: BLE001
         errors.append(f"issues: {e}")
         if not seen:
             print(f"refuse: cannot fetch existing issues and no seen-cache to fall "
                   f"back on ({e})", file=sys.stderr)
             return 2
-        stamped, title_sets, bodies_joined = set(), [], ""
+        title_sets, bodies_joined = [], ""
 
     if not candidates and errors:
         print("refuse: every source failed:\n  " + "\n  ".join(errors),
               file=sys.stderr)
         return 2
 
-    to_file, skip_stats = plan_issues(
+    to_file, skip_stats, dropped = plan_issues(
         candidates, topics_by_key, seen, stamped, title_sets, bodies_joined,
         cfg, today, now)
 
@@ -789,7 +900,22 @@ def main(argv: list[str] | None = None) -> int:
     result = {
         "schema": SCHEMA, "date": today, "mode": "live" if args.live else "dry-run",
         "candidates_gathered": len(candidates),
+        # Make the durable rung's coverage auditable in the run record: a reader
+        # can see the filed-issue index was COMPLETE (label-targeted, unsaturated)
+        # rather than having to trust that it was.
+        "dedup_index": {
+            "filed_issues_scanned": len(scout_issues),
+            "filed_stamps": len(stamped),
+            "scout_scan_limit": scout_limit,
+            "scout_index_complete": True,
+            "window_issues_scanned": window_scanned,
+            "issue_scan_limit": cfg["issue_scan_limit"],
+        },
         "skipped": skip_stats,
+        # Per-source attribution, not just counts: which rung stopped which
+        # source_id. Lets an auditor re-run the dry-run and check by name that a
+        # known-already-triaged source is being caught, and by which rung.
+        "dropped": dropped,
         "planned": [
             {"title": i["title"], "labels": i["labels"], "url": i["url"],
              "source_id": i["source_id"], "score": i["score"], "topic": i["topic"]}
@@ -807,6 +933,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"idea-scout {today} — {result['mode']}")
     print(f"  gathered {len(candidates)} candidates from "
           f"{len(topics)} topics × (arXiv + GitHub)")
+    print(f"  dedup index: {len(stamped)} source stamps from "
+          f"{len(scout_issues)} filed issue(s) (label-targeted, complete) "
+          f"+ {window_scanned} recent issue(s) for the near-dup rungs")
     sk = ", ".join(f"{k}={v}" for k, v in skip_stats.items() if v) or "none"
     print(f"  deduped/dropped: {sk}")
     if not to_file:

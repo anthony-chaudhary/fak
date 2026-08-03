@@ -147,6 +147,7 @@
     "fresh_min_stars": 3,
     "fresh_window_days": 45,
     "dup_jaccard": 0.55,
-    "issue_scan_limit": 800
+    "issue_scan_limit": 800,
+    "scout_scan_limit": 5000
   }
 }
