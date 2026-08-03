@@ -212,25 +212,237 @@ shown in the preflight panel comes from `--grafana-url` / `FAK_MAC_GRAFANA`.
 ## Mac service prerequisites
 
 This section is the **reference deployment** — the always-on LaunchAgent setup this
-page was written against. Treat it as a worked example to adapt, not a checklist you
-must match: the service names, model, and paths are ours. What generalizes is the
-sizing, because the always-on Mac services must be big enough for a real Claude Code
-first turn:
+page was written against, in the order you have to build it: the model server first,
+then the gateway in front of it, then load and verify. Treat it as a worked example to
+adapt, not a checklist you must match: the service names, model, and paths are ours.
+What generalizes is the sizing, because the always-on Mac services must be big enough
+for a real Claude Code first turn.
 
-- `com.fak.qwen36-kernel` runs `llama-server` with a 32K-or-larger context
-  window, the `qwen3.6-27b` alias, Metal enabled, and the OpenAI-compatible API
-  on loopback for the public gateway to proxy.
-- `com.fak.serve-gateway` exports `FAK_PLANNER_TIMEOUT_S=1800` and
-  `FAK_HTTP_WRITE_TIMEOUT_S=1800`.
-- `~/.local/bin/fak-mac-serve-gateway` exports
-  `FAK_PROVIDER_EXTRA_BODY_JSON='{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'`.
+Two units and no third artifact:
 
-For Qwen3.6, the preflight panel should show `request tuning: provider extra body
-set (keys: chat_template_kwargs, top_k)`. If it prints a Qwen3.6 tuning warning,
-restart the gateway with the `FAK_PROVIDER_EXTRA_BODY_JSON` value above before
-running the Claude Code probe.
+| Unit | What it runs | Where its contents come from |
+|---|---|---|
+| `com.fak.qwen36-kernel` | `llama-server` on loopback, 32K context, all layers on the GPU, serving the id `qwen3.6-27b` | the command line `tools/qwen36_node_server.py --profile mac` computes |
+| `com.fak.serve-gateway` | `fak serve` in front of it, with the long-turn timeouts and the Qwen3.6 request tuning in `EnvironmentVariables` | the launchd keys in `tools/com.fak.serve-gateway.plist` |
 
-Reload launchd after changing either LaunchAgent:
+**Provenance, so you can check every line below.** The `llama-server` argv comes from
+`tools/qwen36_node_server.py`; every launchd key comes from
+`tools/com.fak.serve-gateway.plist`; the fill-and-load recipe is the one
+`tools/install-mac-node.sh` uses for its own templates; `tools/fak-serve-caffeinate.sh`
+is the sleep-prevention wrapper, unchanged. These are templates written against those
+in-repo sources, not units this page re-ran on a Mac for you — after loading, believe
+`launchctl list` and the log files rather than this page.
+
+> **Label collision — settle this before you install.** `com.fak.serve-gateway` is also
+> the label `fak node install` and `tools/install-mac-node.sh` use, for a **different**
+> gateway: `fak serve --provider anthropic --base-url https://api.anthropic.com`, the
+> adjudication proxy described in
+> [Always-On Dogfood Server](always-on-dogfood-server.md). Neither installer can produce
+> the local-model unit this page needs — both pin the Anthropic upstream, and
+> `fak node install --help` offers only `--addr`, `--port`, `--remote`, `--key-env`,
+> `--rotate-key`, and `--uninstall`, with no way to set `--base-url`, `--model`, or the
+> environment variables below. One label means one loaded unit, so pick one: run
+> `fak node install --uninstall` (or `./tools/install-mac-node.sh --uninstall`) first, or
+> change both the `Label` value and the filename below and use that name for the rest of
+> this section.
+
+### 1. Let the repo compute the model-server command line
+
+Do not hand-write the `llama-server` invocation — `tools/qwen36_node_server.py` already
+encodes it. `--preflight` inspects the host and prints the exact command as JSON without
+starting anything:
+
+```bash
+python3 tools/qwen36_node_server.py --preflight --profile mac --bind localhost \
+  --extra-arg "--alias qwen3.6-27b"
+```
+
+Its `mac` profile is `--ctx-size 32768 --n-gpu-layers 99` — that is where this page's
+"32K context, all layers on the GPU" sizing comes from — with
+`lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M` as the default model and `8131` as the
+default port. `--extra-arg "--alias qwen3.6-27b"` pins the id `/v1/models` reports so the
+gateway's `--model` and the upstream agree on one name; `tools/glm52_serve.sh` pins
+`--alias` for exactly that reason. The `command_line` field of that JSON is:
+
+```text
+llama-server -hf lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
+  --host 127.0.0.1 --port 8131 --ctx-size 32768 --n-gpu-layers 99 --alias qwen3.6-27b
+```
+
+Drop `--preflight` to run it in the foreground and prove the model loads before you make
+it a service. The JSON also reports the resolved `llama_server` path, which the plist
+needs. Note the port: this reference deployment serves on `8131`, so the gateway's
+`--base-url` below is `http://127.0.0.1:8131/v1`, not the generic `8081` named earlier on
+this page — match whichever you actually run.
+
+### 2. Create `com.fak.qwen36-kernel`
+
+Run this from the repository root. It writes the same argv as above into a LaunchAgent.
+The unquoted heredoc resolves the host-specific values inline — the same substitution
+`tools/install-mac-node.sh` performs with `sed` over its `__PLACEHOLDER__` templates,
+done in one step because there is no template file to fill here. Nothing else in the
+block expands, so what you read is what lands on disk:
+
+```bash
+REPO="$(pwd)"; LOGDIR="$REPO/tools/_watchdog"
+mkdir -p "$LOGDIR" ~/Library/LaunchAgents
+
+cat > ~/Library/LaunchAgents/com.fak.qwen36-kernel.plist <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.fak.qwen36-kernel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>$(command -v llama-server)</string>
+      <string>-hf</string><string>lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M</string>
+      <string>--host</string><string>127.0.0.1</string>
+      <string>--port</string><string>8131</string>
+      <string>--ctx-size</string><string>32768</string>
+      <string>--n-gpu-layers</string><string>99</string>
+      <string>--alias</string><string>qwen3.6-27b</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$REPO</string>
+
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$LOGDIR/launchd_qwen36_kernel.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOGDIR/launchd_qwen36_kernel.err</string>
+  </dict>
+</plist>
+PLIST
+```
+
+**Ours vs. yours.** The model id, the alias, and port `8131` are ours — change them
+together and the gateway's `--model` and `--base-url` in step 3 must follow. The
+`llama-server` path and `$REPO` are resolved from your machine. `KeepAlive` and
+`RunAtLoad` are the 24/7 daemon pair `tools/com.fak.serve-gateway.plist` uses; the
+explicit `StandardOutPath` / `StandardErrorPath` are what make step 4's `tail` possible.
+
+### 3. Create `com.fak.serve-gateway`
+
+Same shell, same variables. This is `tools/com.fak.serve-gateway.plist` with the upstream
+repointed at the local model server and the long-turn settings added to the
+`EnvironmentVariables` dict that template already uses for `FAK_AUDIT_JOURNAL`:
+
+```bash
+cat > ~/Library/LaunchAgents/com.fak.serve-gateway.plist <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.fak.serve-gateway</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>$REPO/tools/fak-serve-caffeinate.sh</string>
+      <string>$(command -v fak)</string>
+      <string>serve</string>
+      <string>--addr</string><string>127.0.0.1:8080</string>
+      <string>--base-url</string><string>http://127.0.0.1:8131/v1</string>
+      <string>--model</string><string>qwen3.6-27b</string>
+      <string>--policy</string><string>$REPO/examples/dev-agent-policy.json</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>FAK_AUDIT_JOURNAL</key>
+      <string>$LOGDIR/serve_audit.jsonl</string>
+      <key>FAK_PLANNER_TIMEOUT_S</key>
+      <string>1800</string>
+      <key>FAK_HTTP_WRITE_TIMEOUT_S</key>
+      <string>1800</string>
+      <key>FAK_PROVIDER_EXTRA_BODY_JSON</key>
+      <string>{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>$REPO</string>
+
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$LOGDIR/launchd_serve.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOGDIR/launchd_serve.err</string>
+  </dict>
+</plist>
+PLIST
+```
+
+`tools/fak-serve-caffeinate.sh` is the first `ProgramArguments` entry for two reasons its
+own header explains: it holds macOS idle- and system-sleep assertions while the gateway
+runs, and it `exec`s `fak serve` so launchd's direct child stays the real process — which
+is what keeps `KeepAlive` tracking the right PID and the two log paths non-empty.
+
+**There is no `fak-mac-serve-gateway` wrapper script.** Earlier revisions of this page
+named `~/.local/bin/fak-mac-serve-gateway` as the thing that exports
+`FAK_PROVIDER_EXTRA_BODY_JSON`; no such script exists in this repo and none is needed,
+because launchd's `EnvironmentVariables` dict sets it directly, above. If you have a
+wrapper of your own in the `ProgramArguments` chain, either place works — pick one so
+there is a single source for the value.
+
+**Driving from another machine** needs a non-loopback bind and a bearer, which
+`tools/install-mac-node.sh --bind-all` handles by appending two `ProgramArguments`
+strings and one environment entry. The equivalent by hand, before you load the unit:
+
+```bash
+KEY="$(openssl rand -hex 32)"          # same generator install-mac-node.sh uses
+printf '%s' "$KEY" > ~/.fak-gateway-key && chmod 600 ~/.fak-gateway-key
+```
+
+Then change `--addr` to `0.0.0.0:8080`, append `--require-key-env` and
+`FAK_GATEWAY_KEY` to `ProgramArguments`, and add a `FAK_GATEWAY_KEY` key to
+`EnvironmentVariables` with `$KEY` as its value. Two consumers, one secret: the gateway
+reads it from the launchd environment, and `fak mac` reads `~/.fak-gateway-key` over SSH
+when the client's `FAK_GATEWAY_KEY` is empty. Nothing in the repo creates
+`~/.fak-gateway-key` for you — that `printf` is the step that makes the SSH fetch in
+[One-time shell setup](#one-time-shell-setup) resolve. Both that file and the plist under
+`~/Library/LaunchAgents` now hold the bearer, so treat both as secrets. Never leave a
+non-loopback `--addr` without `--require-key-env`: that is an unauthenticated kernel
+reachable off-host, and both `fak guard` and `fak serve` warn about it.
+
+### 4. Load, then verify
+
+```bash
+launchctl load -w ~/Library/LaunchAgents/com.fak.qwen36-kernel.plist
+launchctl load -w ~/Library/LaunchAgents/com.fak.serve-gateway.plist
+
+launchctl list | grep com.fak                 # both labels present
+curl -sf http://127.0.0.1:8131/v1/models      # the model server, id qwen3.6-27b
+curl -sf http://127.0.0.1:8080/healthz        # the gateway in front of it
+```
+
+A 27B model takes a while to load on first start; if `/v1/models` is not answering yet,
+watch it come up:
+
+```bash
+tail -f tools/_watchdog/launchd_qwen36_kernel.log
+tail -f tools/_watchdog/launchd_serve.log
+```
+
+For Qwen3.6, the preflight panel should then show `request tuning: provider extra body
+set (keys: chat_template_kwargs, top_k)`. If it prints a Qwen3.6 tuning warning, the
+`FAK_PROVIDER_EXTRA_BODY_JSON` entry did not reach the gateway process — fix it in the
+plist and reload before running the Claude Code probe.
+
+### 5. Reload after editing either unit
+
+`launchctl load -w` / `unload -w` is the pair `tools/install-mac-node.sh` and
+`fak node install` use, and it is the one to use if you created the units with the
+`load -w` lines above. The bootstrap-domain form does the same job:
 
 ```bash
 launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.fak.qwen36-kernel.plist 2>/dev/null || true
@@ -353,3 +565,7 @@ instead of a one-off local process.
   gateway this UI targets is stood up, measured, and kill-switched.
 - [Server quickstart](server-quickstart.md) — starting your own `fak serve` endpoint
   from scratch if you don't have an always-on gateway yet.
+- [Qwen3.6 Claude dogfood playbook](../qwen36-claude-dogfood-playbook.md) — the
+  model-server layer on its own: bringing a Qwen3.6 endpoint up by hand, checking
+  `/v1/models` and `/v1/chat/completions`, and where the `FAK_PROVIDER_EXTRA_BODY_JSON`
+  tuning comes from.
