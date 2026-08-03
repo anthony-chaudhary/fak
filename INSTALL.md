@@ -213,7 +213,10 @@ Whichever verb you run, the one thing `fak` writes unprompted is a local usage j
 `<user-config-dir>/fak/` (`usage.jsonl` plus the `usage.salt` it hashes with): verb name,
 the *number* of arguments, a salted digest of the argument vector, exit code, duration,
 version, hostname, pid — never argument values, and never off the machine. Set
-`FAK_USAGE_LOG=off` to disable it.
+`FAK_USAGE_LOG=off` to disable it. The full account — why `off` is the only spelling that
+disables it, the `FAK_USAGE_LOG_PATH` override, what each row contains, and the fact that
+nothing rotates the file — lives in
+[the durable-artifacts inventory](docs/observability/durable-artifacts.md#the-cli-usage-journal-is-on-by-default).
 
 ### Is a slimmer artifact planned?
 

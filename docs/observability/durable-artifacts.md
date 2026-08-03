@@ -43,6 +43,8 @@ Two facts to internalize up front, both surfaced by the mapping and easy to get 
 | `FLEET_POLICY_PATH` / `FLEET_POLICY_DIR` | `accounts_policy.json` (read-only) | `<repo>/tools/_registry/accounts_policy.json` |
 | `FAK_AUDIT_JOURNAL` | guard decision journal (boot-time enable) | `--audit PATH` flag, else `.dispatch-runs/guard-audit/...` |
 | `FAK_SESSION_JOURNAL` | session crash-journal | `UserConfigDir/fak/session-journal.jsonl` → `.fak/session-journal.jsonl` |
+| `FAK_USAGE_LOG` | CLI-invocation usage journal — **on by default**; the single value `off` disables recording entirely (see [§4](#the-cli-usage-journal-is-on-by-default)) | on unless set to `off` |
+| `FAK_USAGE_LOG_PATH` | usage-journal destination | `UserConfigDir/fak/usage.jsonl` → `.fak/usage.jsonl` |
 | `FAK_TOOLPROC_JOURNAL` / `FAK_REPO_GUARD_TOOLPROC_JOURNAL` | toolproc journal | `.fak/toolproc/journal.jsonl` |
 | `FAK_REPO_GUARD_DECISIONS` | repoguard decision journal | `.fak/repoguard/decisions.jsonl` |
 | `FAK_GUARD_TRAJCTL_LEDGER` | trajectory-control ledger | `docs/nightrun/trajctl.jsonl` (`off` disables) |
@@ -175,6 +177,9 @@ table). Fleet-shared or crash-recovery; never committed.
 
 | Artifact | Path | Format | Writer | Purpose |
 |---|---|---|---|---|
+| **CLI usage journal** | `UserConfigDir/fak/usage.jsonl` (`FAK_USAGE_LOG_PATH`) → `.fak/usage.jsonl` | hash-chained JSONL append, 0600 in a 0700 dir | `internal/usagelog/usagelog.go:177` | **on by default** — one row per top-level `fak <verb>` invocation; see below |
+| Usage-journal redaction salt | `UserConfigDir/fak/usage.salt` | 32 random bytes, 0600 | `internal/usagelog/usagelog.go:477` | salts the `args_digest` so a repeated command is countable but never disclosed |
+| Usage-journal append lock | `<usage.jsonl>.lock` | `flock` advisory sidecar | `internal/usagelog/usagelog.go:229` | serializes concurrent `fak` processes onto one chain (#2608) |
 | Accounts runtime registry | `<regDir>/sessions.json` | single-JSON, **atomic** (tmp+rename) | `internal/accounts/accounts.go:1123` | canonical seat/home/session registry |
 | Account cooldown store | `<stateDir>/account-cooldown.json` | single-JSON, atomic | `internal/accounts/cooldown.go:134` | per-account usage/429 cooldown windows |
 | Per-seat account homes | `<home>/.claude-<name>/{.oauth-token,.claude.json,.credentials.json}` | token (0600) + JSON | `accounts_add.go:260`/`:1255`, `credbackup.go:253` | isolated per-seat Claude credential homes |
@@ -188,6 +193,72 @@ table). Fleet-shared or crash-recovery; never committed.
 | Probe ledger | `<regDir>/probe_ledger.jsonl` | JSONL | **python fleet probe** (Go reads via `accountprobe.ReadLedger`) | account reachability probes |
 | Fleet fold/janitor ledger | `--ledger` value (no default) | JSONL append | `cmd/fak/fleet.go:566` | folded worker rows / janitor decisions (`fak fleet fold\|sweep\|replace --write`) |
 | Fleet sweep sample-state | `--state` value (no default) | single-JSON overwrite | `cmd/fak/fleet.go:720` | prev-sample line/CPU deltas |
+
+### The CLI usage journal is on by default
+
+Everything else on this page is written by a subsystem you chose to run. The usage journal
+is the one artifact you get by installing the binary: whichever verb you invoke, `fak`
+appends one row recording that it ran. It is worth stating plainly what that costs you.
+
+- **On by default; `off` is the only spelling that turns it off.** `usagelog.Enabled()`
+  (`internal/usagelog/usagelog.go:449`) returns true unless `FAK_USAGE_LOG` is set to `off`.
+  The comparison is trimmed and case-insensitive, so `off`, `OFF`, and `" Off "` all work —
+  but **no other falsy value does**: `0`, `false`, `no`, and the empty string all leave it
+  **on**. When it is off the recorder returns before touching the disk
+  (`cmd/fak/usagelog_record.go:83`), so neither the journal, the salt, nor the lock sidecar
+  is created.
+
+  ```sh
+  export FAK_USAGE_LOG=off            # no usage rows, no files
+  export FAK_USAGE_LOG_PATH=/tmp/fak-usage.jsonl   # keep recording, elsewhere
+  ```
+
+- **Where it lands.** `UserConfigDir/fak/usage.jsonl` (`usagelog.DefaultPath()`,
+  `usagelog.go:458`), falling back to `.fak/usage.jsonl` under the process working directory
+  if no user config dir resolves. `FAK_USAGE_LOG_PATH=<file>` relocates it
+  (`usageLogPath`, `cmd/fak/usagelog_record.go:51`). The parent dir is created 0700 and the
+  file 0600 (`usagelog.go:141`/`:148`).
+
+- **What a row contains — and what it deliberately does not.** Schema `fak-usage-log/1`:
+  sequence, timestamp, verb, the *count* of arguments, a salted sha256 `args_digest`, exit
+  code, duration, `fak` version, hostname, pid, and the two chain hashes (`Row`,
+  `usagelog.go:82`). **Raw argv is never written.** The digest commits to the arguments
+  without disclosing them (`Digest`, `usagelog.go:316`), so paths, `-m` commit messages, and
+  credential values in argv cannot be recovered from the file. The salt is 32 random bytes
+  created on first use (`LoadOrCreateSalt`, `usagelog.go:477`); it is derived from
+  `DefaultPath()` rather than from the `FAK_USAGE_LOG_PATH` override, so relocating the
+  journal still leaves `usage.salt` in the user config dir.
+
+- **Local only.** `internal/usagelog` is stdlib plus `internal/flock` — it imports no
+  network package, and nothing in the tree uploads, forwards, or phones home with the
+  journal. Every reader is on the same machine: `fak usage` (`cmd/fak/usagecmd.go:42`),
+  `fak audit usage` (`cmd/fak/audit_usage.go:72`), and `fak audit verify <path>`, which
+  dispatches on the schema tag to `usagelog.Verify` (`cmd/fak/audit.go:104`).
+
+- **What is not recorded.** The `hook` verb is excluded outright — it is spawned in a tight
+  per-sample benchmark loop, and logging it would distort the latency it exists to measure
+  (`usageLogExcluded`, `cmd/fak/usagelog_record.go:39`). Rows are otherwise appended from
+  `main()`'s return paths (`main.go:60`/`:628`/`:631`), the dispatch preamble and its panic
+  boundary (`main_preamble.go:28`/`:47`/`:53`), the `fak guard` wrapper's exit
+  (`recordGuardUsage`, `usagelog_record.go:61`), and the commit/sweep/sync front doors
+  (`runObservedGitOperation`, `gitop_usage.go:11`). A verb handler that calls `os.Exit` deep
+  in its own error path terminates without running deferred functions and is therefore not
+  recorded at all, so `fak usage`'s error counts under-report non-zero exits. That gap is
+  known and written down at `cmd/fak/usagelog_record.go:18-30`; verb popularity and timing
+  remain the parts of the fold to trust.
+
+- **Nothing rotates or bounds it.** Unlike the decision journal (§2.1, sealed `.cut-<seq>`
+  segments) and the gateway-usage ledger (`fak nightrun cut --apply`), `internal/usagelog`
+  has no cut, rotate, or prune path anywhere in the tree — the file grows for as long as the
+  install lives. Deleting it is safe for the tooling, since a missing journal reads as the
+  empty journal (`ReadRows`, `usagelog.go:372`) and the next invocation starts a fresh chain
+  at seq 1 — but the discarded history is then no longer attestable by `fak audit verify`.
+
+- **Best-effort, never load-bearing.** Each of the three ways the recorder can fail — an
+  unreadable/unwritable salt, an unopenable journal, and an append that loses the
+  cross-process lock (`ErrJournalBusy`) — is swallowed silently and the row is dropped
+  (`recordUsage`, `cmd/fak/usagelog_record.go:78`). A meta-observability write is not
+  permitted to change or mask the exit code of the verb you actually ran.
 
 ### A session with no recorded driver pid is not reclaimable, and no pass will backfill it
 
