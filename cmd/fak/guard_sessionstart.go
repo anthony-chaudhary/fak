@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/negframe"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/sessionsteer"
 )
@@ -144,13 +145,137 @@ func recordGuardSessionStartIdentity(traceID string) {
 	if uuid == "" || traceID == "" {
 		return // a half row is not a join; FoldIdentity would skip it anyway
 	}
+	path := resume.IdentityLedgerPath(resolveSweepRegDir(""))
 	row := resume.IdentityRow{
 		TS:    time.Now().UTC().Format(time.RFC3339),
 		UUID:  uuid,
 		Trace: traceID,
 		Via:   "guard-sessionstart",
 	}
-	_ = appendJSONL(resume.IdentityLedgerPath(resolveSweepRegDir("")), row)
+	// The join row goes down FIRST, carrying no pid, because it is the fact the resume
+	// watchdog depends on (#4112) and the driver witness below reads the host process table —
+	// on a loaded host that census is a second of wall clock. Folding the witness into this
+	// row would put that second in front of the write, so a hook killed mid-census would lose
+	// a join it used to record. Ordering keeps the older guarantee strictly ahead of the newer
+	// one.
+	_ = appendJSONL(path, row)
+
+	// The driver process this hook is running under, when it can be WITNESSED (0 when it
+	// cannot). This is the only moment on the host where the transcript UUID is known and the
+	// process owning it is provably alive, so it is the only place a first-generation
+	// `claude -p …` worker can be bound to a process at all (#5542). It rides a SECOND append
+	// rather than the row above: the store is append-only and both folds are last-write-wins,
+	// so a later row carrying the same (uuid, trace) re-states the join unchanged while adding
+	// the pid FoldIdentityDriverPIDs is looking for. An unwitnessed start appends nothing, so
+	// a host that can never witness a driver pays no extra row at all.
+	if pid := witnessGuardSessionStartDriverPID(); pid > 0 {
+		row.TS = time.Now().UTC().Format(time.RFC3339)
+		row.PID = pid
+		_ = appendJSONL(path, row)
+	}
+}
+
+// --- driver-pid witness (#5542) -------------------------------------------------------- //
+//
+// `fak resume stopped` will only move a mid-tool row off DEFER when it can decide whether the
+// driver that owned the transcript is still running, and the only handle it has on that is a
+// pid something durably RECORDED for the session. Before this, the sole producer was the
+// resume watchdog's launch ledger — which records a pid only for sessions it itself resumed —
+// so every first-generation worker resolved to "no recorded driver pid" and deferred forever.
+//
+// The rule that keeps this honest is the same one the consumer lives by: a recorded pid is a
+// CLAIM about which process owns the transcript, and a WRONG pid is strictly worse than none.
+// A pid belonging to a short-lived wrapper below the driver would manufacture a false `gone`
+// the moment that wrapper exits, and a resume fired on that verdict would land on a transcript
+// its original driver is still writing. So this records nothing it did not witness: it walks
+// the hook's own ancestor chain in ONE process-table snapshot and takes the nearest ancestor
+// whose process IMAGE is the agent driver itself, judged by the same audited image-vs-product
+// predicate the dispatch preflight uses (dispatchProcessImageMatchesProduct). A command-line
+// substring would not do — `fak guard -- claude …`, the wrapper one level ABOVE the driver on
+// this host, contains the word "claude" while being a different program.
+//
+// Everything that is not that witness records 0, which the store's doc contract defines as NOT
+// RECORDED: an unreadable or empty census, a chain that leaves the snapshot, a ppid cycle, a
+// driver whose image the platform names something else (a node-wrapped `claude` is not
+// witnessed here, and no marker for one exists in this repo to key on), or a walk that runs
+// past its hop bound. Each of those leaves the consumer exactly where it is today — deferring
+// — which is the fail-safe, not a regression.
+
+// guardSessionStartProcRelations enumerates the host's processes through the same audited
+// cross-platform census the rest of the fleet reads (`fak ps`, the resume watchdog, the
+// stopped-triage liveness probe). Injectable so a test can stage an ancestor chain without
+// spawning one, matching the seam shape in resume_stopped_liveness.go.
+var guardSessionStartProcRelations = procguard.CollectRelations
+
+// guardSessionStartParentPID reports the pid that spawned this hook — the entry point of the
+// ancestor walk. Injectable for the same reason.
+var guardSessionStartParentPID = os.Getppid
+
+const (
+	// guardSessionStartAncestorHops bounds the ancestor walk. The driver is the hook's direct
+	// parent on a host that spawns hooks without a shell, and one or two hops up on one that
+	// does; a bound keeps a recycled ppid on a long chain from walking somewhere unrelated.
+	guardSessionStartAncestorHops = 8
+	// guardSessionStartWitnessBudget caps how long the census may take before the hook gives up
+	// and records no pid. The POSIX collector shells out to `ps` under a 30s timeout of its own,
+	// and a SessionStart hook must never wedge a start — so a slow host loses the witness (and
+	// defers, as today) rather than stalling the session.
+	guardSessionStartWitnessBudget = 3 * time.Second
+)
+
+// witnessGuardSessionStartDriverPID returns the pid of the driver process this hook is running
+// under, or 0 when none could be witnessed within the budget. Never errors and never blocks
+// past the budget: the identity row is written either way, carrying a pid only when one was
+// actually observed.
+func witnessGuardSessionStartDriverPID() int {
+	done := make(chan int, 1) // buffered: a late census must not block its own goroutine
+	go func() {
+		procs, errStr := guardSessionStartProcRelations()
+		if errStr != "" || len(procs) == 0 {
+			done <- 0 // no census is no witness (the #5385 empty-table shape)
+			return
+		}
+		done <- guardSessionStartDriverPIDIn(guardSessionStartParentPID(), procs)
+	}()
+	select {
+	case pid := <-done:
+		return pid
+	case <-time.After(guardSessionStartWitnessBudget):
+		return 0
+	}
+}
+
+// guardSessionStartDriverPIDIn is the pure half: walk up from startPID through the snapshot's
+// ppid links and return the first ancestor whose process image is the agent driver. Returns 0
+// when the chain leaves the snapshot, revisits a pid (a recycled ppid can close a cycle), runs
+// out of parents, or exceeds the hop bound — every one of which is "not witnessed", not "gone".
+func guardSessionStartDriverPIDIn(startPID int, procs []procguard.Proc) int {
+	byPID := make(map[int]procguard.Proc, len(procs))
+	for _, p := range procs {
+		if p.PID > 0 {
+			byPID[p.PID] = p
+		}
+	}
+	seen := make(map[int]bool, guardSessionStartAncestorHops)
+	pid := startPID
+	for hop := 0; hop < guardSessionStartAncestorHops; hop++ {
+		if pid <= 0 || seen[pid] {
+			return 0
+		}
+		seen[pid] = true
+		p, ok := byPID[pid]
+		if !ok {
+			return 0 // the chain leaves the table: nothing further can be witnessed
+		}
+		if dispatchProcessImageMatchesProduct(p.Name, "claude") {
+			return p.PID
+		}
+		if p.PPID == nil {
+			return 0 // the platform did not surrender a parent for this row
+		}
+		pid = *p.PPID
+	}
+	return 0
 }
 
 // normalizeGuardSessionStartMode maps the env/flag knob to on|off. Default (empty) is ON —

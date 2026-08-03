@@ -103,7 +103,7 @@ Each row carries TWO independent axes (#3800):
 	// Driver-liveness evidence for the mid-tool branch (#5440). Taken once, lazily, from the
 	// host process table plus the durable launch record; see resume_stopped_liveness.go for
 	// why only positive evidence ever produces a non-empty value.
-	drivers := &stoppedDriverProbe{ledgerPath: defaultResumeLedger()}
+	drivers := newStoppedDriverProbe()
 	livenessWhy := map[string]string{}
 
 	var rows []stopped.Row
@@ -169,6 +169,10 @@ Each row carries TWO independent axes (#3800):
 				"cmdline_not_examined": df.cmdlineUnread,
 				"scan_error":           df.scanErr,
 				"recorded_driver_pids": len(df.launchPIDs),
+				// How many of those pids came from the session-start identity store rather than
+				// the launch ledger — the first-generation population that had no handle on a
+				// process at all before #5542.
+				"identity_driver_pids": df.identityPIDs,
 				"summary":              df.summary(),
 				"reasons":              livenessWhy,
 			},

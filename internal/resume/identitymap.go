@@ -48,6 +48,19 @@ type IdentityRow struct {
 	// Trace is the gateway / guard --session-id trace id — the operator control
 	// plane key and the other endpoint of the join.
 	Trace string `json:"trace"`
+	// PID is the DRIVER process the producer witnessed running this transcript at
+	// session start — the one moment the transcript UUID is known AND the process
+	// owning it is provably alive. It exists so a driver's later ABSENCE from the host
+	// process table is decidable for a FIRST-GENERATION session too: a `claude -p …`
+	// worker carries no session id on its argv, so nothing else on the host binds the
+	// transcript to a process (#5542).
+	//
+	// Zero (the omitempty wire form: the field simply absent) means NOT RECORDED, and
+	// must never be read as "gone". Every row written before this field existed decodes
+	// with PID == 0, and a producer that could not WITNESS which process it belongs to
+	// records 0 rather than a guess — so a reader treats 0 as "no evidence at all",
+	// exactly as it treats a session with no row.
+	PID int `json:"pid,omitempty"`
 	// Handle is the optional human-facing session handle recorded with the row.
 	Handle string `json:"handle,omitempty"`
 	// Account is the optional worker account the session ran under (provenance).
@@ -77,6 +90,34 @@ func FoldIdentity(rows []IdentityRow) (traceByUUID, uuidByTrace map[string]strin
 		uuidByTrace[trace] = uuid
 	}
 	return traceByUUID, uuidByTrace
+}
+
+// FoldIdentityDriverPIDs folds the append-only rows into the third question this store
+// can answer: "which process was witnessed driving this transcript?" — uuid -> the LAST
+// recorded driver pid. Last row per uuid wins, on the same append-only-order rule
+// FoldIdentity applies, so a transcript observed again (a compact re-fires SessionStart)
+// picks up its newest witness.
+//
+// Two deliberate asymmetries with FoldIdentity:
+//
+//   - a row with PID <= 0 contributes NOTHING and does not clobber a prior recorded pid.
+//     Absence is "not recorded", never "gone" — a legacy row written before the field
+//     existed decodes with PID == 0 and must leave any earlier witness standing.
+//   - the Trace endpoint is NOT required. FoldIdentity skips a half row because a JOIN
+//     needs both endpoints; the fact folded here is (transcript, driver pid), which a row
+//     missing the gateway trace still carries truthfully.
+//
+// Pure and total: no clock, no I/O, nil input yields an empty (non-nil) map.
+func FoldIdentityDriverPIDs(rows []IdentityRow) map[string]int {
+	out := make(map[string]int, len(rows))
+	for _, r := range rows {
+		uuid := strings.TrimSpace(r.UUID)
+		if uuid == "" || r.PID <= 0 {
+			continue // no transcript to key on, or no witness to record
+		}
+		out[strings.ToLower(uuid)] = r.PID
+	}
+	return out
 }
 
 // IdentityLedgerPath is the durable, GC-immune identity store under the SAME regDir

@@ -8,8 +8,20 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/negframe"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 )
+
+// stageGuardSessionStartWitness points the driver-pid witness (#5542) at a staged process table
+// and a staged parent pid, so a test asserts on an ancestor chain it built rather than on the
+// host's real process tree — and never pays for (or is flaked by) the real census.
+func stageGuardSessionStartWitness(t *testing.T, parentPID int, procs []procguard.Proc) {
+	t.Helper()
+	prevProcs, prevPPID := guardSessionStartProcRelations, guardSessionStartParentPID
+	t.Cleanup(func() { guardSessionStartProcRelations, guardSessionStartParentPID = prevProcs, prevPPID })
+	guardSessionStartProcRelations = func() ([]procguard.Proc, string) { return procs, "" }
+	guardSessionStartParentPID = func() int { return parentPID }
+}
 
 // TestGuardSessionStartEmitsAffordance asserts the #3092 affordance: the SessionStart hook
 // emits a valid additionalContext envelope naming the fak entry verbs.
@@ -51,6 +63,11 @@ func TestGuardSessionStartIdentity(t *testing.T) {
 	const uuid = "11111111-2222-3333-4444-555555555555"
 	const trace = "trace-abc"
 	t.Setenv("CLAUDE_CODE_SESSION_ID", uuid)
+	// The hook runs as a child of the driver it is recording; stage that chain explicitly.
+	stageGuardSessionStartWitness(t, 4242, []procguard.Proc{
+		{PID: 4242, Name: "fak", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart --trace " + trace},
+		{PID: 9001, Name: "claude", Cmdline: "claude -p do the work"},
+	})
 
 	var out, errb bytes.Buffer
 	if code := runGuardSessionStart(&out, &errb, []string{"--mode", "on", "--trace", trace}); code != 0 {
@@ -65,13 +82,200 @@ func TestGuardSessionStartIdentity(t *testing.T) {
 		t.Fatalf("uuidByTrace[%q] = %q, want %q", trace, got, uuid)
 	}
 
-	// Exactly one row on a fresh start.
+	// Two rows on a fresh start where a driver WAS witnessed, and the order is the contract:
+	// the uuid<->trace join lands first carrying no pid, the pid follows in a second append.
+	// The witness reads the host process table, which costs about a second of wall clock on a
+	// loaded host; folding it into the join row would put that second in front of the write and
+	// a hook killed mid-census would lose a join it used to record (#4112). So the older
+	// durability guarantee stays strictly ahead of the newer pid one, and this asserts the
+	// ordering rather than the count — the count is just what the ordering implies.
 	raw, err := os.ReadFile(resume.IdentityLedgerPath(regDir))
 	if err != nil {
 		t.Fatalf("read identity store: %v", err)
 	}
-	if n := len(strings.Split(strings.TrimSpace(string(raw)), "\n")); n != 1 {
-		t.Fatalf("want exactly one join row, got %d:\n%s", n, raw)
+	rows := resume.LoadIdentityRows(regDir)
+	if len(rows) != 2 {
+		t.Fatalf("want the join row then the pid row, got %d:\n%s", len(rows), raw)
+	}
+	if rows[0].PID != 0 {
+		t.Fatalf("the FIRST row carries pid %d — the join must not wait behind the census\n%s", rows[0].PID, raw)
+	}
+	if rows[0].UUID != uuid || rows[0].Trace != trace {
+		t.Fatalf("the first row is not a complete join: %+v", rows[0])
+	}
+	if rows[1].PID != 9001 {
+		t.Fatalf("the second row carries pid %d, want 9001\n%s", rows[1].PID, raw)
+	}
+
+	// #5542: the row also carries the DRIVER pid the hook witnessed. Without it a
+	// first-generation `claude -p …` worker has no recorded pid anywhere on the host, so
+	// `fak resume stopped` can never decide its liveness and defers it forever.
+	if got := resume.FoldIdentityDriverPIDs(resume.LoadIdentityRows(regDir))[uuid]; got != 9001 {
+		t.Fatalf("recorded driver pid = %d, want 9001 (the witnessed driver ancestor)\n%s", got, raw)
+	}
+}
+
+// TestGuardSessionStartIdentityRecordsNoUnwitnessedPID pins the other half of the contract: a
+// hook that cannot WITNESS which process it belongs to records no pid at all. Absence reads as
+// "not recorded" downstream, which defers — a guess would read as a driver whose exit could
+// later be mistaken for the death of the real one.
+func TestGuardSessionStartIdentityRecordsNoUnwitnessedPID(t *testing.T) {
+	const uuid = "22222222-3333-4444-5555-666666666666"
+	for _, c := range []struct {
+		name   string
+		parent int
+		procs  []procguard.Proc
+	}{
+		{
+			name:   "no driver anywhere in the chain",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(700), Cmdline: "fak guard-sessionstart"},
+				{PID: 700, Name: "sh", Cmdline: "/bin/sh -c make ci"},
+			},
+		},
+		{
+			// A wrapper that NAMES claude on its command line is not a claude process. Recording
+			// it would bind the transcript to a program that outlives (or predeceases) the driver.
+			name:   "a wrapper naming claude is not the driver",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(15696), Cmdline: "fak guard-sessionstart"},
+				{PID: 15696, Name: "fak", Cmdline: "fak guard -- claude --dangerously-skip-permissions"},
+			},
+		},
+		{
+			name:   "an unobtainable census witnesses nothing",
+			parent: 4242,
+			procs:  nil,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			regDir := t.TempDir()
+			t.Setenv("FLEET_REG_DIR", regDir)
+			t.Setenv("CLAUDE_CODE_SESSION_ID", uuid)
+			stageGuardSessionStartWitness(t, c.parent, c.procs)
+
+			var out, errb bytes.Buffer
+			if code := runGuardSessionStart(&out, &errb, []string{"--mode", "on", "--trace", "trace-abc"}); code != 0 {
+				t.Fatalf("exit = %d, want 0 (SessionStart must never wedge a start)", code)
+			}
+			rows := resume.LoadIdentityRows(regDir)
+			if len(rows) != 1 {
+				t.Fatalf("want exactly one identity row, got %d: %+v", len(rows), rows)
+			}
+			if rows[0].PID != 0 {
+				t.Fatalf("recorded pid = %d, want 0 (nothing was witnessed)", rows[0].PID)
+			}
+			// The join itself must still land: no witness costs the pid, never the row.
+			if traceByUUID, _ := resume.LoadIdentity(regDir); traceByUUID[uuid] != "trace-abc" {
+				t.Fatalf("the uuid<->trace join was lost when no pid could be witnessed: %+v", rows[0])
+			}
+		})
+	}
+}
+
+// TestGuardSessionStartDriverPIDInWalk pins the walk itself. The hook is a child of the driver
+// on a host that spawns hooks without a shell and a grandchild on one that does, so the rule is
+// "nearest ancestor whose process IMAGE is the driver" — not a fixed depth, and never a
+// command-line substring. Every shape it cannot witness returns 0 ("not recorded").
+func TestGuardSessionStartDriverPIDInWalk(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		parent int
+		procs  []procguard.Proc
+		want   int
+	}{
+		{
+			name:   "the direct parent is the driver",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart"},
+				{PID: 9001, Name: "claude", PPID: procguard.IntPtr(15696), Cmdline: "claude -p do the work"},
+				{PID: 15696, Name: "fak", Cmdline: "fak guard -- claude"},
+			},
+			want: 9001,
+		},
+		{
+			name:   "a shell between the hook and the driver is walked through",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(700), Cmdline: "fak guard-sessionstart"},
+				{PID: 700, Name: "sh", PPID: procguard.IntPtr(9001), Cmdline: "/bin/sh -c fak guard-sessionstart"},
+				{PID: 9001, Name: "claude", Cmdline: "claude -p do the work"},
+			},
+			want: 9001,
+		},
+		{
+			name:   "the NEAREST driver ancestor wins over an outer one",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart"},
+				{PID: 9001, Name: "claude", PPID: procguard.IntPtr(9002), Cmdline: "claude -p inner"},
+				{PID: 9002, Name: "claude", Cmdline: "claude -p outer"},
+			},
+			want: 9001,
+		},
+		{
+			name:   "a chain that leaves the snapshot witnesses nothing",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart"},
+			},
+			want: 0,
+		},
+		{
+			name:   "a row with no parent ends the walk",
+			parent: 4242,
+			procs:  []procguard.Proc{{PID: 4242, Name: "fak", Cmdline: "fak guard-sessionstart"}},
+			want:   0,
+		},
+		{
+			// A recycled ppid can close a loop; the walk must terminate rather than spin.
+			name:   "a ppid cycle terminates without a witness",
+			parent: 1,
+			procs: []procguard.Proc{
+				{PID: 1, Name: "a", PPID: procguard.IntPtr(2)},
+				{PID: 2, Name: "b", PPID: procguard.IntPtr(1)},
+			},
+			want: 0,
+		},
+		{
+			name:   "a zero parent pid witnesses nothing",
+			parent: 0,
+			procs:  []procguard.Proc{{PID: 9001, Name: "claude", Cmdline: "claude -p do the work"}},
+			want:   0,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := guardSessionStartDriverPIDIn(c.parent, c.procs); got != c.want {
+				t.Fatalf("guardSessionStartDriverPIDIn(%d) = %d, want %d", c.parent, got, c.want)
+			}
+		})
+	}
+}
+
+// TestGuardSessionStartDriverPIDInHopBound pins the bound: a chain longer than the hop budget
+// stops rather than walking off into whatever a recycled ppid points at.
+func TestGuardSessionStartDriverPIDInHopBound(t *testing.T) {
+	var procs []procguard.Proc
+	// pids 1..N, each the child of the next; the driver sits one hop PAST the bound.
+	driver := guardSessionStartAncestorHops + 1
+	for pid := 1; pid <= driver; pid++ {
+		p := procguard.Proc{PID: pid, Name: "fak", Cmdline: "fak guard-sessionstart"}
+		if pid < driver {
+			p.PPID = procguard.IntPtr(pid + 1)
+		} else {
+			p.Name, p.Cmdline = "claude", "claude -p do the work"
+		}
+		procs = append(procs, p)
+	}
+	if got := guardSessionStartDriverPIDIn(1, procs); got != 0 {
+		t.Fatalf("a driver beyond the hop bound was recorded as %d, want 0 (not witnessed)", got)
+	}
+	// One hop closer and it IS reachable — the bound is what stopped the walk, not the rule.
+	if got := guardSessionStartDriverPIDIn(2, procs); got != driver {
+		t.Fatalf("driver within the hop bound = %d, want %d", got, driver)
 	}
 }
 
