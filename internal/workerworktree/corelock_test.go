@@ -6,6 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	// The gate this file exercises (internal/corelockgate) resolves witness claims
+	// through a factory that internal/witness registers from its init. Production
+	// binaries link witness anyway (cmd/fak reaches it through safecommit), but this
+	// test binary links only workerworktree's own dependency closure — and
+	// workerworktree is a tier-1 foundation leaf that MUST NOT import witness(2) in
+	// non-test code. So the driver is linked here, in the test, exactly the way a
+	// registration-seam driver always is. Without it the gate would fail CLOSED and
+	// the witnessed-land cases below would refuse: that is the correct posture, not
+	// the behaviour under test.
+	_ "github.com/anthony-chaudhary/fak/internal/witness"
 )
 
 // The core-lock land gate (#5392). Every test here drives the REAL gate through

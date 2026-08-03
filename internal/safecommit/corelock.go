@@ -2,86 +2,56 @@ package safecommit
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/corelockaudit"
-	"github.com/anthony-chaudhary/fak/internal/corelocks"
+	"github.com/anthony-chaudhary/fak/internal/corelockgate"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
-// CoreLockCheck is one hard-self core-lock decision request: the changed pathset
-// to classify, the maintenance witness claim offered to clear it, the evidence
-// seams the resolver reads, and the caller-specific remedy named in the refusal.
+// THE CHECK ITSELF LIVES ONE LAYER DOWN, in internal/corelockgate (#5392).
 //
-// It exists so EVERY commit path that must honour the lock asks the SAME question
-// of the SAME classifier with the SAME witness semantics. `fak commit` asks
-// through Options (checkCoreLockHardSelf); the sanctioned detached worker-worktree
-// land asks directly (internal/workerworktree, #5392) — that path is the one
-// CLAUDE.md blesses for build isolation and it used to reach the trunk with no
-// core-lock question asked at all. Only Remedy differs between the two callers,
-// because only the way to SUPPLY the witness differs between the two commands;
-// the locked path set and the confirm/refute/abstain semantics are shared.
-type CoreLockCheck struct {
-	// Dir is the repo the witness resolver reads its evidence from.
-	Dir string
-	// Run is the git seam the default resolver runs through. Nil uses the real
-	// git binary (realRunner), so a caller with no injected runner still gets a
-	// real, independently-checked witness.
-	Run Runner
-	// Resolver overrides the default git-backed witness resolver (tests, or an
-	// alternate evidence source). Nil builds the real one over Run/Dir.
-	Resolver abi.WitnessResolver
-	// Changed is the changed repo-relative pathset to classify.
-	Changed []string
-	// Witness is the maintenance witness claim offered to clear a hard-self
-	// pathset. Empty means none was offered, which is a refusal.
-	Witness string
-	// Remedy is the caller's own "how to supply that witness" sentence, quoted in
-	// the refusal detail. Empty falls back to the `fak commit` remedy.
-	Remedy string
-}
+// It was born here because `fak commit` was the only path that could ask it. The
+// sanctioned detached worker-worktree land (internal/workerworktree) must ask the
+// SAME question — `fak commit` refuses a detached HEAD, so that lander had no
+// core-lock question of its own — but it is a foundation (tier-1) leaf and may not
+// import this mechanism (tier-2) package: internal/architest's TestNoUpwardImports
+// refuses the upward edge, and duplicating the classifier would give the fleet two
+// policies wearing one name. So the shared question was pushed DOWN to a foundation
+// leaf that both callers import, and what remains here is the re-export the existing
+// `fak commit` callers bind to. Behaviour is unchanged; ownership moved.
+
+// CoreLockCheck is one hard-self core-lock decision request. It is a true Go type
+// ALIAS of corelockgate.CoreLockCheck (not a distinct wrapper type), so every
+// existing struct literal, field name, and call site keeps compiling and both
+// callers really do pass the SAME type into the SAME check.
+type CoreLockCheck = corelockgate.CoreLockCheck
 
 // CheckCoreLockHardSelf reports the hard-self core-lock refusal for a changed
-// pathset, or ("", false) when the set raises no hard-self lock or when the
-// offered witness resolves CONFIRMED. It performs no staging and no writes, so a
-// caller can run it before anything touches an index, a worktree, or HEAD.
+// pathset, or ("", false) when the set raises no hard-self lock or when the offered
+// witness resolves CONFIRMED. It performs no staging and no writes, so a caller can
+// run it before anything touches an index, a worktree, or HEAD.
 //
-// FAIL-CLOSED on the lock, fail-open on the taxonomy: a missing, refuted, or
-// merely abstaining witness keeps the refusal (an abstain is not clearance), while
-// an unreadable/malformed taxonomy classifies nothing and therefore refuses
-// nothing — the same posture the `fak commit` path has always had.
+// FAIL-CLOSED on the lock, fail-open on the taxonomy: a missing, refuted, merely
+// abstaining, or unresolvable witness keeps the refusal (an abstain is not
+// clearance), while an unreadable/malformed taxonomy classifies nothing and
+// therefore refuses nothing.
+//
+// The only thing this wrapper adds to corelockgate's check is safecommit's own
+// default git seam: a caller here that injects no Runner still gets realRunner —
+// the same merged-stderr, GIT_OPTIONAL_LOCKS=0 seam the rest of the commit path
+// runs through — rather than the resolver's plain one.
 func CheckCoreLockHardSelf(ctx context.Context, c CoreLockCheck) (detail string, fired bool) {
-	f, ok := coreLockHardSelfFinding(c.Changed)
-	if !ok {
-		return "", false
+	if c.Run == nil {
+		c.Run = corelockgate.Runner(realRunner)
 	}
-	claim := strings.TrimSpace(c.Witness)
-	if claim == "" {
-		return coreLockHardSelfDetail(f, "missing maintenance witness", c.Remedy), true
-	}
-	resolver := c.Resolver
-	if resolver == nil {
-		run := c.Run
-		if run == nil {
-			run = realRunner
-		}
-		resolver = witness.NewWithRunner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
-			return run(ctx, dir, args...)
-		}, c.Dir)
-	}
-	outcome := resolver.Resolve(ctx, nil, claim)
-	if outcome == abi.WitnessConfirmed {
-		return "", false
-	}
-	return coreLockHardSelfDetail(f, fmt.Sprintf("maintenance witness %q resolved %s", claim, coreLockWitnessOutcome(outcome)), c.Remedy), true
+	return corelockgate.CheckCoreLockHardSelf(ctx, c)
 }
 
 // CoreLockRemedyCommit is the `fak commit` way to supply the maintenance witness.
 // It is the default remedy, so a caller that names none still prints a real cure.
-const CoreLockRemedyCommit = "Use a privileged maintenance path, or rerun fak commit with --core-lock-maintenance-witness <claim> after independent read-back confirms the edit."
+const CoreLockRemedyCommit = corelockgate.CoreLockRemedyCommit
 
 // checkCoreLockHardSelf refuses a hard-self pathset unless the caller supplies a
 // maintenance witness claim that the resolver independently confirms. This gate
@@ -90,7 +60,7 @@ const CoreLockRemedyCommit = "Use a privileged maintenance path, or rerun fak co
 func checkCoreLockHardSelf(ctx context.Context, run Runner, opts Options, changedPaths []string) (detail string, fired bool) {
 	return CheckCoreLockHardSelf(ctx, CoreLockCheck{
 		Dir:      opts.Dir,
-		Run:      run,
+		Run:      corelockgate.Runner(run),
 		Resolver: opts.CoreLockWitnessResolver,
 		Changed:  changedPaths,
 		Witness:  opts.CoreLockMaintenanceWitness,
@@ -98,41 +68,11 @@ func checkCoreLockHardSelf(ctx context.Context, run Runner, opts Options, change
 	})
 }
 
+// coreLockHardSelfFinding is the commit path's binding to the shared classifier: it
+// is what tells CommitWith WHICH paths the lock named, so the accepted commit can
+// record them on the maintenance decision.
 func coreLockHardSelfFinding(paths []string) (corelockaudit.Finding, bool) {
-	tax, err := corelocks.LoadFixture()
-	if err != nil {
-		return corelockaudit.Finding{}, false
-	}
-	rep := corelockaudit.Audit(tax, paths)
-	for _, f := range rep.Findings {
-		if f.Class == corelocks.ClassHardSelf && f.ReasonToken == corelocks.ReasonCoreSelfModify {
-			return f, true
-		}
-	}
-	return corelockaudit.Finding{}, false
-}
-
-func coreLockHardSelfDetail(f corelockaudit.Finding, cause, remedy string) string {
-	paths := append([]string(nil), f.Paths...)
-	sort.Strings(paths)
-	if strings.TrimSpace(remedy) == "" {
-		remedy = CoreLockRemedyCommit
-	}
-	return fmt.Sprintf(
-		"hard-self core-lock path(s) require an external maintenance witness before this change may land; %s. %s Paths: %s",
-		cause, remedy, strings.Join(paths, ", "),
-	)
-}
-
-func coreLockWitnessOutcome(outcome abi.WitnessOutcome) string {
-	switch outcome {
-	case abi.WitnessConfirmed:
-		return "confirmed"
-	case abi.WitnessRefuted:
-		return "refuted"
-	default:
-		return "abstain"
-	}
+	return corelockgate.HardSelfFinding(paths)
 }
 
 // statusChangedPaths extracts repo paths from `git status --porcelain -- <paths>`

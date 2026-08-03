@@ -56,6 +56,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/corelockgate"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -320,4 +321,20 @@ func init() {
 	// verdict; this turns a claimed effect into a corroborated (or refused) one.
 	abi.RegisterWitnessResolver("dos_verify", Default)
 	abi.RegisterCapability("witness.dos_verify")
+
+	// The hard-self core-lock gate (internal/corelockgate, #5392) resolves its
+	// maintenance-witness claims through THIS resolver, but it is a foundation
+	// (tier-1) leaf and may not import witness (tier 2). So the edge is inverted:
+	// the gate declares the factory shape and we supply the real, git-evidence
+	// implementation here, in the same init that registers the abi resolver above.
+	// A nil runner means the caller injected no git seam, so the resolver opens the
+	// real one. With this registration absent the gate refuses every claim it cannot
+	// corroborate — fail-closed, never fail-open.
+	corelockgate.RegisterResolverFactory(func(run corelockgate.Runner, dir string) abi.WitnessResolver {
+		r := Runner(run)
+		if run == nil {
+			r = gitRunner
+		}
+		return NewWithRunner(r, dir)
+	})
 }

@@ -5,7 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/safecommit"
+	"github.com/anthony-chaudhary/fak/internal/corelockgate"
+	"github.com/anthony-chaudhary/fak/internal/corelocks"
 )
 
 // THE HOLE THIS CLOSES (#5392)
@@ -24,16 +25,24 @@ import (
 // with `git commit-tree` + `update-ref`, plumbing that runs no git hook at all.
 // The question has to be asked HERE, in the lander, before anything is applied.
 //
-// The check itself is NOT re-implemented here. safecommit.CheckCoreLockHardSelf is
-// the single owner of the classification and of the confirm/refute/abstain witness
-// semantics, so the two paths cannot drift into two policies; this file only
+// The check itself is NOT re-implemented here. corelockgate.CheckCoreLockHardSelf
+// is the single owner of the classification and of the confirm/refute/abstain
+// witness semantics, so the two paths cannot drift into two policies; this file only
 // decides WHEN Land asks and WHERE the witness claim comes from.
+//
+// That shared check used to live in internal/safecommit, and this file imported it
+// from there. safecommit is tier-2 mechanism and this lander is a tier-1 foundation
+// leaf, so the import was an upward edge the layered-DAG gate refuses
+// (internal/architest, TestNoUpwardImports). The cure was to push the shared check
+// DOWN into internal/corelockgate(1) — never to duplicate it here, and never to
+// relax the tier table.
 
 // ReasonCoreSelfModify is the structured refusal token Land stamps on Result.Reason
-// when an unwitnessed hard-self core-lock pathset tries to land. It is the same
-// token safecommit.ReasonCoreSelfModify emits on the `fak commit` path, so an
-// operator (and a log grep) sees ONE reason class for one policy across both paths.
-const ReasonCoreSelfModify = safecommit.ReasonCoreSelfModify
+// when an unwitnessed hard-self core-lock pathset tries to land. It is read straight
+// off the corelocks taxonomy that DECLARES the class, which is the same token
+// safecommit.ReasonCoreSelfModify emits on the `fak commit` path, so an operator
+// (and a log grep) sees ONE reason class for one policy across both paths.
+const ReasonCoreSelfModify = corelocks.ReasonCoreSelfModify
 
 // CoreLockWitnessTrailer is the commit-message trailer that carries a maintenance
 // witness claim into a land, e.g.
@@ -102,7 +111,7 @@ func coreLockLandGate(root, nameOnly, diff, msgFile string, cfg landConfig, git 
 	if claim == "" {
 		claim = coreLockWitnessFromMsgFile(msgFile)
 	}
-	detail, fired := safecommit.CheckCoreLockHardSelf(context.Background(), safecommit.CoreLockCheck{
+	detail, fired := corelockgate.CheckCoreLockHardSelf(context.Background(), corelockgate.CoreLockCheck{
 		Dir:     root,
 		Run:     witnessGitRunner(git),
 		Changed: changed,
@@ -118,12 +127,12 @@ func coreLockLandGate(root, nameOnly, diff, msgFile string, cfg landConfig, git 
 	}, true
 }
 
-// witnessGitRunner adapts this package's GitRunner to the safecommit/witness
+// witnessGitRunner adapts this package's GitRunner to the corelockgate/witness
 // runner contract, so the witness resolves its evidence through whatever git seam
 // the caller injected (the real binary in production, the fake in a test) instead
 // of opening a second, unmockable one. A non-zero git exit is a code, never an
 // err — the same contract both sides already use.
-func witnessGitRunner(git GitRunner) safecommit.Runner {
+func witnessGitRunner(git GitRunner) corelockgate.Runner {
 	return func(_ context.Context, dir string, args ...string) (string, int, error) {
 		rc, out := run(git, dir, args)
 		return out, rc, nil
