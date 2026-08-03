@@ -111,8 +111,11 @@ refusing. Each gate additionally honors a `ModeEnv` to soften it and a one-shot
 paths.
 
 The `Fail mode` column is the mode taken when the gate's own `Check` returns an
-error. It is `fail-open` for every entry, structurally: `cmd/fak/hooks.go:139`
-skips a gate whose check errored and runs the rest. See FINDING 1.
+error. It is `fail-open` for every entry, structurally: `cmd/fak/hooks.go:355`
+skips a gate whose check errored and runs the rest. Since #5299 that skip is
+reported rather than silent — the gate is named on stderr and carried in the
+`--json` output as `skipped_gates`/`skipped_count` — but it is still a skip, and
+the fail-open posture recorded below is unchanged. See FINDING 1.
 
 The table below is machine-read by the CI gate; the fenced region is parsed and
 cross-checked against the live registry in code.
@@ -159,18 +162,35 @@ so: none of them decides whether a tool call runs.
 
 ## Findings
 
-Per this issue's scope, findings are *recorded*, not fixed here.
+Per this issue's scope, findings are *recorded*, not fixed here. Fixes that
+landed later under their own issues are noted inline, so this stays a live
+ledger rather than a snapshot that quietly goes stale.
 
-**FINDING 1 — a pre-commit gate that errors is skipped silently.**
-`cmd/fak/hooks.go:139-143` continues past any gate whose `Check` returns an
-error. The skip is deliberate and contractual (`internal/hooks/hooks.go:36-39`,
-`ErrCouldNotRun`: "fail-open, never a block"), and the rationale is sound — a
-broken checker must not wedge every commit on a shared trunk. The defect is not
-the fail-open, it is the **silence**: no stderr line, no counter, and no
-distinction in the exit code between "17 gates ran clean" and "PUBLIC_LEAK
-errored and the other 16 ran clean". An operator cannot tell a green commit from
-a degraded one. The smallest fix is observability, not enforcement: emit the
-skipped gate's name and count it.
+**FINDING 1 — a pre-commit gate that errors is skipped silently. RESOLVED (#5299).**
+At the time of this audit `cmd/fak/hooks.go` continued past any gate whose
+`Check` returned an error. The skip is deliberate and contractual
+(`internal/hooks/hooks.go:36-39`, `ErrCouldNotRun`: "fail-open, never a block"),
+and the rationale is sound — a broken checker must not wedge every commit on a
+shared trunk. The defect was not the fail-open, it was the **silence**: no
+stderr line, no counter, and no distinction in the exit code between "17 gates
+ran clean" and "PUBLIC_LEAK errored and the other 16 ran clean". An operator
+could not tell a green commit from a degraded one. The smallest fix is
+observability, not enforcement: emit the skipped gate's name and count it.
+
+**Resolution.** #5299 did that and no more. `cmd/fak/hooks.go:355-369` names the
+gate on stderr and appends it to a ledger surfaced in `--json` as
+`skipped_gates`/`skipped_count`. Both keys are emitted on a clean run too, as
+`[]` and `0`, so a consumer can never read an absent key as "nothing was
+skipped". The fail-open posture is unchanged and is now pinned by test — every
+witness asserts the exit code stays 0, and a mutant that flips could-not-run to
+blocking reds them. One deliberate restraint: the gate's error VALUE is never
+rendered, only a fixed classification literal, because `PUBLIC_LEAK` and
+`SECRET_SHAPE` scan the staged diff and their error text can carry the very
+material they matched. Witness:
+
+```
+go test ./cmd/fak/ -count=1 -run 'PreCommit|EnabledGateNames'
+```
 
 **FINDING 2 — the PreToolUse hook swallows malformed input as "allow".**
 `cmd/repoguard/main.go` fails open on any internal error, including a payload
@@ -179,8 +199,9 @@ classes: the first argues for fail-open, the second is attacker-influenceable
 input. Worth separating, though the hook is a heuristic floor and not a sandbox
 by its own documentation.
 
-Both findings are recorded here rather than fixed, per this issue's stated
-out-of-scope boundary.
+Both findings were recorded here rather than fixed, per #2865's stated
+out-of-scope boundary. FINDING 1 has since been fixed under its own issue
+(#5299) and is marked resolved above; FINDING 2 remains open.
 
 ## The CI gate
 
