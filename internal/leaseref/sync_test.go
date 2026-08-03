@@ -31,6 +31,9 @@ func (r *syncRec) run(ctx context.Context, dir string, args ...string) (string, 
 	if r.err != nil {
 		return "", -1, r.err
 	}
+	if args[0] == "for-each-ref" {
+		return refPrefix + "seed\n", r.code[args[0]], nil
+	}
 	return "", r.code[args[0]], nil
 }
 
@@ -53,6 +56,7 @@ func TestSyncPushThenFetchExactArgv(t *testing.T) {
 		t.Fatalf("refspec = %q, want %q", res.Refspec, wantRefspec)
 	}
 	want := [][]string{
+		{"for-each-ref", "--format=%(refname)", refPrefix},
 		{"push", "origin", wantRefspec},
 		{"fetch", "origin", wantRefspec},
 	}
@@ -87,8 +91,12 @@ func TestSyncSingleDirection(t *testing.T) {
 			if res.Pushed != tc.wantPushed || res.Fetched != tc.wantFetched {
 				t.Fatalf("got %+v, want pushed=%v fetched=%v", res, tc.wantPushed, tc.wantFetched)
 			}
-			if len(rec.calls) != 1 || rec.calls[0][0] != tc.wantVerb {
-				t.Fatalf("calls = %v, want exactly one %q", rec.calls, tc.wantVerb)
+			wantCalls := 1
+			if tc.push {
+				wantCalls = 2
+			}
+			if len(rec.calls) != wantCalls || rec.calls[len(rec.calls)-1][0] != tc.wantVerb {
+				t.Fatalf("calls = %v, want %q as the final call", rec.calls, tc.wantVerb)
 			}
 		})
 	}
@@ -106,8 +114,8 @@ func TestSyncPushFailureStopsBeforeFetch(t *testing.T) {
 	if res.Pushed || res.Fetched {
 		t.Fatalf("nothing should be marked done after a failed push, got %+v", res)
 	}
-	if len(rec.calls) != 1 || rec.calls[0][0] != "push" {
-		t.Fatalf("calls = %v, want the push only — a failed push must not be followed by a force-fetch", rec.calls)
+	if len(rec.calls) != 2 || rec.calls[0][0] != "for-each-ref" || rec.calls[1][0] != "push" {
+		t.Fatalf("calls = %v, want the ref probe then push only — a failed push must not be followed by a force-fetch", rec.calls)
 	}
 }
 
@@ -213,6 +221,51 @@ func TestSyncQuarantinesMalformedLooseRefAndFetches(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(common, "fak", "quarantine", "malformed-lock-refs", "*", "session-bad"))
 	if err != nil || len(matches) != 1 {
 		t.Fatalf("quarantine matches=%v err=%v", matches, err)
+	}
+}
+
+// An empty lease namespace is normal for a fresh clone. Git treats a wildcard
+// push with no matching source refs as an error, so Sync must skip that push
+// rather than turn an otherwise clean convergence tick into a transport failure.
+func TestSyncPushOnlyEmptyNamespaceIsCleanNoOp(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	local := filepath.Join(root, "local")
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit(root, "init", "--bare", remote)
+	runGit(root, "init", local)
+	runGit(local, "config", "user.name", "fak-test")
+	runGit(local, "config", "user.email", "fak-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(local, "README"), []byte("seed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(local, "add", "README")
+	runGit(local, "commit", "-m", "seed")
+	runGit(local, "remote", "add", "origin", remote)
+	runGit(local, "push", "origin", "HEAD:main")
+
+	got, err := NewInDir(local).Sync(ctx, "origin", true, false)
+	if err != nil {
+		t.Fatalf("empty lease namespace must be a clean no-op: %v", err)
+	}
+	if got.Pushed {
+		t.Fatalf("empty lease namespace should skip the git push, got %+v", got)
+	}
+	if refs := runGit(local, "for-each-ref", "--format=%(refname)", refPrefix); refs != "" {
+		t.Fatalf("empty lease namespace changed locally: %q", refs)
 	}
 }
 

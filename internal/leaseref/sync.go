@@ -51,8 +51,8 @@ import (
 // syncRefspec is the one refspec sync ever uses, on both the push and the fetch side:
 // the whole lock namespace, forced (lease refs point at blobs — no ancestry, so any
 // update of an existing ref needs the force), confined to refs/fak/locks/* at both
-// ends. A wildcard refspec matching ZERO refs is a successful no-op in git, so syncing
-// an empty namespace is clean on both sides.
+// ends. Git treats an empty wildcard FETCH as a clean no-op, but an empty wildcard
+// PUSH exits 1, so Sync probes the local namespace before issuing a push.
 const syncRefspec = "+" + refPrefix + "*:" + refPrefix + "*"
 
 // SyncResult reports what one Sync call actually did — which directions ran and the
@@ -99,12 +99,21 @@ func (s *Store) Sync(ctx context.Context, remote string, doPush, doFetch bool) (
 		return res, err
 	}
 	if doPush {
-		// Stop here: force-fetching over unpublished local state would regress the
-		// very leases this clone just wrote (the ordering rationale in the file doc).
-		if err := s.runSyncDirection(ctx, "push", remote, " — sync stopped before fetch (never force-fetch over unpublished local leases)"); err != nil {
+		hasRefs, err := s.localRefsExist(ctx)
+		if err != nil {
 			return res, err
 		}
-		res.Pushed = true
+		// A fresh clone has no lease refs. Git reports an empty wildcard
+		// push as a transport failure, so skip that push and let a fetch
+		// (if requested) proceed.
+		if hasRefs {
+			// Stop here: force-fetching over unpublished local state would regress the
+			// very leases this clone just wrote (the ordering rationale in the file doc).
+			if err := s.runSyncDirection(ctx, "push", remote, " — sync stopped before fetch (never force-fetch over unpublished local leases)"); err != nil {
+				return res, err
+			}
+			res.Pushed = true
+		}
 	}
 	if doFetch {
 		if err := s.runSyncDirection(ctx, "fetch", remote, ""); err != nil {
@@ -113,6 +122,27 @@ func (s *Store) Sync(ctx context.Context, remote string, doPush, doFetch bool) (
 		res.Fetched = true
 	}
 	return res, nil
+}
+
+// localRefsExist reports whether this clone has any refs in the lease namespace.
+// It checks only ref names: reading every record would add unnecessary object-
+// database work to each ambient sync tick. A non-zero for-each-ref exit is a real
+// git/store failure, while an empty successful listing is the expected fresh-clone
+// state.
+func (s *Store) localRefsExist(ctx context.Context) (bool, error) {
+	out, code, err := s.run(ctx, s.dir, "for-each-ref", "--format=%(refname)", refPrefix)
+	if err != nil {
+		return false, fmt.Errorf("leaseref: git not executable: %w", err)
+	}
+	if code != 0 {
+		return false, fmt.Errorf("leaseref: git for-each-ref %s exited %d", refPrefix, code)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) != "" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // runSyncDirection runs one sync direction (git verb remote syncRefspec) and
