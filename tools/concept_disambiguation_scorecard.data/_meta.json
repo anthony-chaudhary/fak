@@ -631,6 +631,11 @@
           "category": "incidental",
           "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
           "token": "shrinkLeverGuardCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "coreLockLandGate"
         }
       ],
       "exclude": [
@@ -657,6 +662,7 @@
         "admitGuardShrinkLevers",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
+        "coreLockLandGate",
         "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
@@ -1044,11 +1050,37 @@
           "category": "incidental",
           "reason": "unexported implementation helper picking the slot's own log path (else its commit sha) as a replay-stable evidence id — a keying detail of the producer, not an operator-facing witness-proof concept",
           "token": "witnessOutcomeID"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "coreLockWitnessFromMessage"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "coreLockWitnessFromMsgFile"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "CoreLockWitnessTrailer"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "WithCoreLockWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "witnessGitRunner"
         }
       ],
       "id": "witness-proof",
       "ignore": [
         "ClaimUnwitnessedCount",
+        "CoreLockWitnessTrailer",
         "FairnessWitnessed",
         "GATED_UNWITNESSED",
         "GradedVerdictUnwitnessed",
@@ -1057,9 +1089,12 @@
         "HonestyWrongWitness",
         "TurnOutcomesFromWitness",
         "VerdictUnwitnessed",
+        "WithCoreLockWitness",
         "WitnessEvidenceOptions",
         "WitnessEvidenceStats",
         "WitnessMove",
+        "coreLockWitnessFromMessage",
+        "coreLockWitnessFromMsgFile",
         "dispatchWitnessArchiveStranded",
         "dispatchWitnessDirtyFile",
         "dispatchWitnessDirtyPaths",
@@ -1081,6 +1116,7 @@
         "revocations",
         "want_witness",
         "withdefaultoriginwitnesses",
+        "witnessGitRunner",
         "witnessOutcomeID",
         "witnessScriptedFold",
         "witnessStrandedArchiveSuffix",

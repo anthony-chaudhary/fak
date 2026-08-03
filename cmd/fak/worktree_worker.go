@@ -50,8 +50,13 @@ fak worktree <subcommand>
                    Create ONE worker's DETACHED worktree pinned at trunk HEAD
                    (or --base-sha). Prints {ok, path, base_sha, reused, env, ...}.
       land --worktree D [--base-sha S] [--msg-file F] [--paths p ...] [--verify go-build]
+           [--core-lock-maintenance-witness CLAIM]
                    Apply the worktree's diff-since-base onto the trunk as one
                    signed-off commit. Prints {ok, applied, committed, ...}.
+                   A diff touching a hard-self core-locked path is REFUSED with
+                   CORE_SELF_MODIFY unless the witness claim (flag, or a
+                   Core-lock-maintenance-witness: trailer in the commit message)
+                   resolves CONFIRMED — the same lock fak commit enforces.
       reap --worktree D
                    Force-remove ONE finished worker worktree. Prints {ok, removed, ...}.
       reap --all-cold [--apply] [--age-floor-min N] [--even-if-unlanded]
@@ -155,6 +160,13 @@ func worktreeWorkerLand(argv []string) {
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
 	verify := fs.String("verify", "off", "pre-land witness run IN the worktree: off | go-build")
 	root := fs.String("root", "", "repo root the change lands on (default: discover from cwd)")
+	// Same flag name and same semantics as `fak commit --core-lock-maintenance-witness`
+	// (#5392): the claim is RESOLVED against independent evidence, and only a CONFIRMED
+	// resolution clears a hard-self core-lock pathset. Without it the land is refused
+	// with CORE_SELF_MODIFY. A worker that has no CLI to pass a flag through carries the
+	// same claim as a workerworktree.CoreLockWitnessTrailer line in its commit message.
+	coreLockWitness := fs.String("core-lock-maintenance-witness", "",
+		"independent witness claim that clears a hard-self core-lock land (same claim vocabulary as fak commit)")
 	var paths repeatedString
 	fs.Var(&paths, "paths", "path to scope the commit to (repeatable); omit to commit the whole applied diff")
 	fs.Parse(argv)
@@ -176,7 +188,8 @@ func worktreeWorkerLand(argv []string) {
 		os.Exit(2)
 	}
 
-	res := workerworktree.Land(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil)
+	res := workerworktree.Land(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil,
+		workerworktree.WithCoreLockWitness(*coreLockWitness))
 	worktreeWorkerEmit(res)
 	if !res.OK {
 		os.Exit(1)

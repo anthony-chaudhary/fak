@@ -421,6 +421,12 @@ func Reap(root, wtPath string, git GitRunner) Result {
 // when non-empty, scopes the commit to the worker's declared region — never an
 // add -A. verify (when non-nil) is a witness run in the worktree before anything
 // touches the trunk; a failed witness refuses the land. FAIL-OPEN on git errors.
+//
+// ONE exception to fail-open: the hard-self core lock (#5392, corelock.go). A diff
+// touching a core-locked kernel path is REFUSED unless a maintenance witness
+// resolves CONFIRMED — supplied by the WithCoreLockWitness option or by the
+// CoreLockWitnessTrailer in the commit message. That gate runs before any apply, so
+// a refused land leaves the trunk exactly as it found it.
 // CountPathsOutsideTrees counts how many of `changed` fall outside every declared tree in
 // `trees`. Both sides are normalised to forward slashes and stripped of leading/trailing
 // separators first, and a tree matches a path exactly or as a "<tree>/" prefix; an empty
@@ -448,7 +454,8 @@ func CountPathsOutsideTrees(changed, trees []string) int {
 	return outside
 }
 
-func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner) Result {
+func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) Result {
+	cfg := newLandConfig(opts)
 	diffRef := baseSHA
 	if diffRef == "" {
 		diffRef = "HEAD"
@@ -463,11 +470,18 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		return Result{OK: true, Applied: false, Committed: false,
 			Reason: "no net diff in worktree vs " + diffRef + " to land"}
 	}
+	// The landing pathset, read ONCE: it feeds both the out-of-lane ledger and the
+	// hard-self core-lock gate below, so the two can never disagree about what this
+	// land actually carries. An unreadable name list leaves it empty — the ledger
+	// then counts 0 exactly as before, and the gate falls back to the captured
+	// diff's own headers rather than treating "unreadable" as "nothing locked".
+	namesRC, names := run(git, wtPath, []string{"diff", "--name-only", diffRef})
+	if namesRC != 0 {
+		names = ""
+	}
 	droppedOutOfLane := 0
-	if len(paths) > 0 {
-		if namesRC, names := run(git, wtPath, []string{"diff", "--name-only", diffRef}); namesRC == 0 {
-			droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)
-		}
+	if len(paths) > 0 && names != "" {
+		droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)
 	}
 	if verify != nil {
 		if ok, detail := verify(wtPath); !ok {
@@ -483,6 +497,20 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 			Reason: "could not resolve commit message: " + err.Error()}
 	}
 	defer cleanup()
+
+	// HARD-SELF CORE LOCK (#5392). The last gate before anything touches the trunk:
+	// a diff carrying a core-locked kernel path (internal/adjudicator/**,
+	// internal/abi/**, internal/corelocks/**) lands only with a maintenance witness
+	// that resolves CONFIRMED — supplied by WithCoreLockWitness (the CLI flag) or by
+	// the CoreLockWitnessTrailer in the commit message. This runs HERE, in the
+	// lander, because the sanctioned worktree cannot use `fak commit` (OFF_TRUNK on a
+	// detached HEAD) and the default isolated path commits through commit-tree, which
+	// runs no git hook. Refusing here leaves the trunk index, worktree and HEAD
+	// untouched; the worker's diff stays in its worktree.
+	if refusal, fired := coreLockLandGate(root, names, diff, msgFile, cfg, git); fired {
+		refusal.DroppedOutOfLane = droppedOutOfLane
+		return refusal
+	}
 
 	// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
 	// index so the shared index is never a sweep target. handled=false means it could
