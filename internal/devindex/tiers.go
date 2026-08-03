@@ -199,6 +199,7 @@ var verbTiers = map[string]VerbTier{
 	"host-relaunch-broker":          TierDev,
 	"hwgate-lint":                   TierDev,
 	"hygiene":                       TierDev,
+	"idea-scout":                    TierDev,
 	"idempotency":                   TierDev,
 	"index":                         TierDev,
 	"init":                          TierDev,

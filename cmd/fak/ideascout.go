@@ -17,7 +17,15 @@ func runIdeaScout(stdout, stderr io.Writer, argv []string) int {
 	configPath := fs.String("config", "", "JSON file overriding topics/thresholds")
 	maxIssues := fs.Int("max-issues", 0, "hard cap on issues filed")
 	minScore := fs.Int("min-score", 0, "drop candidates below this")
-	live := fs.Bool("live", false, "actually create issues and record them in the seen-cache")
+	// BLAST RADIUS. --live is the only flag here with an effect outside this process:
+	// it runs `gh issue create` against the CURRENT repo's REAL GitHub tracker, once per
+	// kept candidate (up to --max-issues, default from the config thresholds), labels each
+	// `idea-scout`+`research`, creates the `idea-scout` label if absent, optionally files
+	// them into --milestone / --project, and records each filed source ID in
+	// <workspace>/.idea-scout/seen.json. Those issues are public and are not rolled back
+	// on a later error. Everything else -- the default dry-run, --json, and the
+	// --candidates/--issues/--scout-issues fixture replay -- reads only and writes nothing.
+	live := fs.Bool("live", false, "FILE REAL GITHUB ISSUES: run gh issue create for each kept candidate in the current repo (up to --max-issues) and record them in the seen-cache. Omit it and the run is a dry-run that mutates nothing")
 	asJSON := fs.Bool("json", false, "emit machine-readable output")
 	milestone := fs.String("milestone", "", "assign filed issues to this milestone title")
 	project := fs.String("project", "", "ProjectsV2 number to add filed issues to")

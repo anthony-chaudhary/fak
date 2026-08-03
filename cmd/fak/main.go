@@ -544,6 +544,17 @@ func main() {
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
+	case "idea-scout":
+		// The research-to-issue feeder as a verb (cmd/fak/ideascout.go over
+		// internal/ideascout). It shipped with a full Go port of tools/idea_scout.py, a
+		// doc page (docs/idea-scout.md) naming `fak idea-scout` as the AGENT-facing half
+		// of the two-implementation contract, and two .claude/skills/question-loop lines
+		// pointing agents at it -- but never a dispatch arm, so the advertised verb
+		// answered "unknown verb" and the Go port was exercised only by its own unit test
+		// (#5546). The `cmdIdeaScout` wrapper it was authored with was later swept as dead
+		// code (#1419): the caller it was missing was THIS arm, not the wrapper.
+		// Dry-run is the default; --live is what files real issues (see ideaScoutUsage).
+		os.Exit(runIdeaScout(os.Stdout, os.Stderr, os.Args[2:]))
 	case "issue":
 		cmdIssue(os.Args[2:])
 	case "complain":
