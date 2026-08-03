@@ -51,6 +51,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipAutoCheckpoint(stdout, stderr, argv[1:])
 	case "status":
 		return runWipStatus(stdout, stderr, argv[1:])
+	case "sync":
+		return runWipSync(stdout, stderr, argv[1:])
 	case "restore":
 		return runWipRestore(stdout, stderr, argv[1:])
 	case "land":
@@ -100,8 +102,33 @@ func wipUsage(w io.Writer) {
       missing session, or a clean tree) so it can never break the boundary it fires
       at; pass --strict to surface a capture failure as exit 1.
 
-  fak wip status [-C <repo>] [--json]
-      List the live working-tree checkpoints (one per session), sorted by session.
+  fak wip status [-C <repo>] [--remote R] [--json]
+      List the live working-tree checkpoints (one per session), sorted by session, each
+      graded REPLICATED / STALE_REMOTE / LOCAL_ONLY against the remote (default origin).
+      That column is the difference between the two failures a checkpoint can face:
+      LOCAL_ONLY survives THIS SESSION dying (what autocheckpoint protects against) and
+      does NOT survive this checkout or machine going away; STALE_REMOTE means an older
+      checkpoint made it off-machine but the current delta did not. The verdict is read
+      from this clone's mirror of the remote — a LOCAL ref read, never a network probe,
+      so status still answers at a boundary where the network is what failed. It is a
+      last-known claim as of your last 'fak wip sync', not a live interrogation.
+
+  fak wip sync [-C <repo>] [--remote R] [--push-only|--fetch-only] [--json]
+      REPLICATE the refs/fak/wip/* namespace to a remote (default origin): push this
+      clone's checkpoints, then refresh the read-only mirror the status column reads.
+      OPT-IN by design and never run for you — a checkpoint is a TREE-WIDE capture of a
+      dirty working tree, so publishing it off-machine is a privacy and bandwidth
+      decision you make deliberately. --push-only publishes without downloading a peer
+      host's captured trees; --fetch-only imports theirs without publishing yours.
+      Push runs FIRST and a failed push STOPS the sync, so a sync that errors has
+      changed nothing locally. Both refspecs are FORCED (a checkpoint commit is parented
+      on HEAD, never on the previous checkpoint, so two checkpoints of one session are
+      siblings and a plain update is rejected) and confined to the checkpoint namespaces
+      — no branch, HEAD, or tag ever moves. Deletions do not ride a refspec: a landed or
+      reaped checkpoint converges on peers via their own 'fak wip reap', never a prune.
+      The FETCH lands in refs/fak/remotewip/<remote>/*, deliberately NOT in the live
+      namespace: every wip verb that reads refs/fak/wip/* is tree-relative and one of
+      them ('reap') deletes, so a peer host's checkpoints must never join that set.
 
   fak wip restore <session> [-C <repo>] [--apply]
       Print the checkpointed delta as an apply-able diff (default) or, with --apply,
@@ -661,12 +688,13 @@ func runWipStatus(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "wip")
 	repo := fs.String("C", "", "run in this git repo (default: cwd)")
+	remote := fs.String("remote", "origin", "grade replication against this remote's mirror (a local ref read, never a network probe)")
 	asJSON := fs.Bool("json", false, "emit the status report as JSON")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
 
-	report, err := wipStatus(context.Background(), *repo, time.Now().Unix())
+	report, err := wipStatusFor(context.Background(), *repo, *remote, time.Now().Unix())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak wip status: %v\n", err)
 		return 1
@@ -679,20 +707,34 @@ func runWipStatus(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	for _, s := range report.Sessions {
-		fmt.Fprintf(stdout, "%s\t%s\t%d leaves\tage=%ds\tbuildable=%v\n",
-			s.Session, shortWipSHA(s.StartSHA), len(s.Leaves), s.AgeSeconds, s.Buildable)
+		fmt.Fprintf(stdout, "%s\t%s\t%d leaves\tage=%ds\tbuildable=%v\t%s\n",
+			s.Session, shortWipSHA(s.StartSHA), len(s.Leaves), s.AgeSeconds, s.Buildable, s.Replication)
 	}
+	fmt.Fprintln(stdout, wipReplicationSummary(report.Replicated, report.StaleRemote, report.LocalOnly))
 	return 0
 }
 
 // wipStatus reads every live checkpoint ref and hands the records to the pure fold,
-// computing each checkpoint's age against nowUnix.
+// computing each checkpoint's age against nowUnix. Kept as the no-remote entry point
+// for callers with no replication question to ask; it grades every row against the
+// default remote's mirror, exactly as `fak wip status` does with no --remote.
 func wipStatus(ctx context.Context, repo string, nowUnix int64) (wipref.StatusReport, error) {
+	return wipStatusFor(ctx, repo, "origin", nowUnix)
+}
+
+// wipStatusFor is wipStatus plus the replication verdict: it reads the live checkpoint
+// refs AND this clone's mirror of remote, then folds the two together. Both reads are
+// local — see wipMirrorIndex for why status must not touch the network.
+func wipStatusFor(ctx context.Context, repo, remote string, nowUnix int64) (wipref.StatusReport, error) {
 	recs, err := wipListRecords(ctx, repo)
 	if err != nil {
 		return wipref.StatusReport{}, err
 	}
-	return wipref.Fold(recs, nowUnix), nil
+	mirror, err := wipMirrorIndex(ctx, repo, remote)
+	if err != nil {
+		return wipref.StatusReport{}, err
+	}
+	return wipref.FoldWithMirror(recs, mirror, nowUnix), nil
 }
 
 // wipListRecords reads every live checkpoint ref and decodes its stamp from the

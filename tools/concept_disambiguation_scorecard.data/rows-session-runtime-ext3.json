@@ -135,7 +135,7 @@
       "kind": "symbol",
       "definition": "SessionFromRef recovers the bare session id from a fully-qualified checkpoint ref by stripping the refs/fak/locks/ namespace prefix.",
       "distinction": "PARSES the session id OUT of a ref - not SessionRef (which BUILDS the fully-qualified ref by prepending the namespace).",
-      "distinct_from": ["x-session-runtime-sessionref"],
+      "distinct_from": ["x-session-runtime-sessionref", "x-session-runtime-sessionfrommirrorref"],
       "aliases": [],
       "grounding": "SessionFromRef",
       "grounding_kind": "symbol",
@@ -151,7 +151,7 @@
       "kind": "symbol",
       "definition": "SessionRef builds the fully-qualified checkpoint ref a session's checkpoint lives at by prepending the refs/fak/locks/ namespace to the session id.",
       "distinction": "BUILDS the fully-qualified ref FROM a session id - not SessionFromRef (which parses the session id back out of a ref).",
-      "distinct_from": ["x-session-runtime-sessionfromref", "sessionkey", "x-goal25-session-runtime-issessionref", "x-session-runtime-sessionread", "x-session-runtime-sessionrow"],
+      "distinct_from": ["x-session-runtime-sessionfromref", "sessionkey", "x-goal25-session-runtime-issessionref", "x-session-runtime-sessionread", "x-session-runtime-sessionrow", "x-session-runtime-mirrorsessionref"],
       "aliases": [],
       "grounding": "SessionRef",
       "grounding_kind": "symbol",
@@ -238,6 +238,44 @@
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-session-runtime-mirrorsessionref",
+      "canonical": "MirrorSessionRef",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "MirrorSessionRef builds the ref one session's REMOTELY-MIRRORED checkpoint is recorded at locally, under refs/fak/remotewip/\u003cremote\u003e/, so a clone can answer \"is this session's work off the machine\" from a local ref read.",
+      "distinction": "Builds a ref in the per-remote MIRROR namespace (evidence of what a push put on a remote) - not SessionRef, which builds the ref in this clone's own live checkpoint namespace.",
+      "distinct_from": [
+        "x-session-runtime-sessionref"
+      ],
+      "aliases": [],
+      "grounding": "MirrorSessionRef",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-session-runtime-sessionfrommirrorref",
+      "canonical": "SessionFromMirrorRef",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "SessionFromMirrorRef recovers the bare session id from a MIRRORED checkpoint ref by stripping the per-remote refs/fak/remotewip/\u003cremote\u003e/ prefix; a ref outside that namespace is returned unchanged.",
+      "distinction": "Parses the session id out of a ref in the per-remote MIRROR namespace - not SessionFromRef, which parses it out of this clone's own live checkpoint namespace.",
+      "distinct_from": [
+        "x-session-runtime-sessionfromref"
+      ],
+      "aliases": [],
+      "grounding": "SessionFromMirrorRef",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
       "gaps": []
     }
   ]

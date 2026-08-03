@@ -14,7 +14,6 @@ package wipref
 
 import (
 	"encoding/json"
-	"sort"
 	"strings"
 )
 
@@ -119,6 +118,14 @@ type SessionStatus struct {
 	Leaves     []string `json:"leaves"`
 	Buildable  bool     `json:"buildable"`
 	AgeSeconds int64    `json:"age_seconds"`
+	// Replication answers the question "checkpointed" alone could not: whether this
+	// delta is protected against the SESSION dying (any checkpoint is) or against the
+	// MACHINE going away (only a replicated one is). One of LOCAL_ONLY / STALE_REMOTE /
+	// REPLICATED — see the Replication constants in sync.go (#5479).
+	Replication string `json:"replication"`
+	// RemoteObject is the object the mirror holds for this session, when it holds one.
+	// Equal to Object under REPLICATED; the older checkpoint under STALE_REMOTE.
+	RemoteObject string `json:"remote_object,omitempty"`
 }
 
 // StatusReport is the deterministic fold of every live checkpoint, sorted by
@@ -126,6 +133,11 @@ type SessionStatus struct {
 type StatusReport struct {
 	Count    int             `json:"count"`
 	Sessions []SessionStatus `json:"sessions"`
+	// The replication census over Sessions — the summary a caller prints instead of
+	// re-counting the rows. Sums to Count.
+	Replicated  int `json:"replicated"`
+	StaleRemote int `json:"stale_remote"`
+	LocalOnly   int `json:"local_only"`
 }
 
 // Fold projects the live ref records into a sorted StatusReport, computing each
@@ -133,30 +145,11 @@ type StatusReport struct {
 // of (records, now), which is what makes the status path unit-testable. A record
 // whose stamp lost its session id is labelled from its ref name; a negative age
 // (clock skew / a future stamp) is clamped to 0.
+//
+// Fold reads NO replication evidence, so every row comes back LOCAL_ONLY — the honest
+// verdict for a caller that did not consult a remote's mirror, and the safe direction
+// for a column that must never overstate durability. A caller holding a mirror index
+// calls FoldWithMirror (sync.go) instead.
 func Fold(recs []RefRecord, nowUnix int64) StatusReport {
-	out := make([]SessionStatus, 0, len(recs))
-	for _, r := range recs {
-		sess := r.Stamp.SessionID
-		if sess == "" {
-			sess = SessionFromRef(r.Ref)
-		}
-		age := nowUnix - r.Stamp.CheckpointedAt
-		if age < 0 {
-			age = 0
-		}
-		leaves := r.Stamp.Leaves
-		if leaves == nil {
-			leaves = []string{}
-		}
-		out = append(out, SessionStatus{
-			Session:    sess,
-			Object:     r.Object,
-			StartSHA:   r.Stamp.StartSHA,
-			Leaves:     leaves,
-			Buildable:  r.Stamp.Buildable,
-			AgeSeconds: age,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Session < out[j].Session })
-	return StatusReport{Count: len(out), Sessions: out}
+	return FoldWithMirror(recs, nil, nowUnix)
 }
