@@ -233,18 +233,37 @@ is the sleep-prevention wrapper, unchanged. These are templates written against 
 in-repo sources, not units this page re-ran on a Mac for you — after loading, believe
 `launchctl list` and the log files rather than this page.
 
-> **Label collision — settle this before you install.** `com.fak.serve-gateway` is also
-> the label `fak node install` and `tools/install-mac-node.sh` use, for a **different**
-> gateway: `fak serve --provider anthropic --base-url https://api.anthropic.com`, the
-> adjudication proxy described in
-> [Always-On Dogfood Server](always-on-dogfood-server.md). Neither installer can produce
-> the local-model unit this page needs — both pin the Anthropic upstream, and
-> `fak node install --help` offers only `--addr`, `--port`, `--remote`, `--key-env`,
-> `--rotate-key`, and `--uninstall`, with no way to set `--base-url`, `--model`, or the
-> environment variables below. One label means one loaded unit, so pick one: run
-> `fak node install --uninstall` (or `./tools/install-mac-node.sh --uninstall`) first, or
-> change both the `Label` value and the filename below and use that name for the rest of
-> this section.
+> **One gateway per host — and the installer builds either one.** `com.fak.serve-gateway`
+> is the single label `fak node install` owns, the same one `tools/install-mac-node.sh`
+> uses for the Anthropic adjudication proxy in
+> [Always-On Dogfood Server](always-on-dogfood-server.md). The installer takes the
+> upstream now, so the gateway half of this section is one command
+> (`fak node install --help` shows both invocations):
+>
+> ```bash
+> fak node install --base-url http://127.0.0.1:8131/v1 --model qwen3.6-27b \
+>   --env FAK_PLANNER_TIMEOUT_S=1800 --env FAK_HTTP_WRITE_TIMEOUT_S=1800 \
+>   --env 'FAK_PROVIDER_EXTRA_BODY_JSON={"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'
+> ```
+>
+> A `--base-url` that is not Anthropic's selects the OpenAI-compatible wire by default,
+> which is the arm that forwards no caller credential upstream; `--provider anthropic`
+> against some other remote host is refused outright, because on that wire the gateway
+> forwards the *caller's* Anthropic key to whatever `--base-url` names. Values passed to
+> `--env` are written into the unit and never echoed back — only their names are.
+>
+> One label still means one loaded gateway. That is the intended shape, not a hazard to
+> work around: re-running install re-renders this unit under the same label (it unloads
+> the old one first), so switching between the Anthropic proxy and the local-model
+> gateway needs no `--uninstall` step, and `fak node install --uninstall` and
+> `fak node status` keep naming exactly the unit that exists.
+> `tools/install-mac-node.sh` still installs the Anthropic unit only.
+>
+> Step 3 below stays as the by-hand equivalent, because it is not byte-identical: it runs
+> the gateway against `$REPO/examples/dev-agent-policy.json` with `WorkingDirectory=$REPO`,
+> whereas the installer writes and uses its own `~/.config/fak/node-policy.json` and logs
+> under `~/.config/fak/logs`. Read it as the annotated version of what that command
+> renders.
 
 ### 1. Let the repo compute the model-server command line
 
@@ -330,9 +349,14 @@ explicit `StandardOutPath` / `StandardErrorPath` are what make step 4's `tail` p
 
 ### 3. Create `com.fak.serve-gateway`
 
-Same shell, same variables. This is `tools/com.fak.serve-gateway.plist` with the upstream
-repointed at the local model server and the long-turn settings added to the
-`EnvironmentVariables` dict that template already uses for `FAK_AUDIT_JOURNAL`:
+`fak node install --base-url http://127.0.0.1:8131/v1 --model qwen3.6-27b` plus the three
+`--env` entries below renders and loads this unit for you, and is the supported path; the
+rest of this step is what it writes, spelled out, for when you want the repo's example
+policy or a different `WorkingDirectory`.
+
+By hand, then: same shell, same variables. This is `tools/com.fak.serve-gateway.plist`
+with the upstream repointed at the local model server and the long-turn settings added to
+the `EnvironmentVariables` dict that template already uses for `FAK_AUDIT_JOURNAL`:
 
 ```bash
 cat > ~/Library/LaunchAgents/com.fak.serve-gateway.plist <<PLIST
