@@ -143,9 +143,9 @@ for shared-tree recovery, proof capture, and guarded commit mechanics.
 
 | Dimension | Current contract |
 |---|---|
-| Mode | Source contribution in the shared `main` checkout; installed-binary operation belongs to the operator route. |
+| Mode | Two source-contribution routes: a forked pull request, which needs no write access, and direct commits in the shared `main` checkout. Installed-binary operation belongs to the operator route. |
 | Generation | This page is the current `gen/now` contributor front door. Historical release notes and planning records do not override it. |
-| Lifecycle | Choose an issue → implement one coherent change → capture matched proof → run the full gate → commit explicit paths → push `main`. |
+| Lifecycle | **From a fork:** choose an issue → branch on your fork → implement one coherent change → run the checks for what you touched → `git commit -s` → open a pull request. **In the shared checkout:** choose an issue → implement one coherent change → capture matched proof → run the full gate → commit explicit paths → push `main`. |
 | Support | Contributor setup, architecture choice, tests, commit rules, and issue reporting are covered here; product use and production recovery are routed elsewhere. |
 
 ## Licensing — read this before your first PR
@@ -186,6 +186,14 @@ kernel), in addition to the CLA grant to Netra.
 
 ## Development workflow
 
+> **Mixed audience — check the marker on each bullet.** Four of the eight below are
+> shared-checkout mechanics a forked pull request never performs: the setup route, the
+> work-directly-on-`main` trunk rule, explicit-path commits, and the verification trailer.
+> The other four apply to anyone touching this code, fork included — the two documentation
+> scorecards, the leaf-extension path, and the Windows note about running tests under WSL.
+> If you are contributing from a fork, your required checks end at
+> [What your PR needs to pass](#what-your-pr-needs-to-pass); read the rest for context only.
+
 - **Start from the setup route above.** For a subsystem optimization, continue through
   [`EXTENDING.md`](EXTENDING.md); for an existing package, run its focused tests before
   the repository-wide gate.
@@ -196,8 +204,8 @@ kernel), in addition to the CLA grant to Netra.
   strawman-led headlines, orphans). It is read-only; a non-zero exit is a work-list, not a
   block. Regenerate the scorecard snapshot with `--markdown` after a docs pass. This is the whole-corpus analogue of
   `tools/readme_freshness_audit.py`, which checks the front page.
-- **Touching the docs site or the FAQ? Keep discoverability honest.** `python
-  tools/seo_aeo_scorecard.py --scope core` grades the published Pages surfaces on six
+- **Touching the docs site or the FAQ? Keep discoverability honest.** `fak score seo
+  --scope core` grades the published Pages surfaces on six
   SEO/AEO KPIs (title, description, headings, links, links_crawlable, answerability)
   plus site-level checks (sitemap, canonical, JSON-LD, `llms-full.txt`, citation_links)
   and counts *seo-debt*. Beyond the presence checks (is the meta/link/JSON-LD there?)
@@ -209,8 +217,10 @@ kernel), in addition to the CLA grant to Netra.
   If you
   changed the FAQ or `_config.yml`, re-run `python tools/gen_structured_data.py` to
   regenerate the JSON-LD (CI hard-gates that it is in sync). The discoverability
-  **scores** are strategic and live in the private repo (`--transfer`); the tool and the
-  read-only work-list are public.
+  **scores** are strategic and live in the private repo; the verb and the
+  read-only work-list are public. (This check was a `tools/seo_aeo_scorecard.py` script
+  before it was ported to the `fak score seo` verb; the script is gone, so an older
+  instruction naming it will fail.)
 - **Tests run through WSL, not native Windows** — from the repository root, `.\test.ps1`
   (whole suite) or `.\test.ps1 ./internal/<pkg>/`. `go build` / `go vet` work natively; only test
   *execution* is blocked on the Windows host. See the Windows note in
@@ -282,6 +292,18 @@ guard:
   is exactly the contribution that pays back.
 
 Pick one, read the entry doc it points to, and ship it small and by explicit path.
+
+> **Maintainers — keep the queue stocked.** The `good first issue` label is the front door
+> this page advertises twice — here and in
+> [Choose the route for your change](#choose-the-route-for-your-change) — and
+> `.github/PULL_REQUEST_TEMPLATE.md` welcomes first PRs into the same funnel, so an empty
+> queue is a dead link that returns no error. Check it with
+> `gh issue list --label "good first issue" --state open` during triage
+> and top it up from the *product* backlog, not only from documentation epics — a queue
+> stocked entirely out of one meta-epic drains the moment that epic closes. An issue is ready
+> for the label when its body names the file to touch, the expected result, and how to verify,
+> and a contributor can finish it with a fork and a pull request — no shared checkout, no
+> fleet tooling.
 
 ## Reporting issues
 
