@@ -73,10 +73,19 @@ type Config struct {
 	FreshWindowDays int     `json:"fresh_window_days"` // pushed within this window earns the strong "actively updated" bonus
 	MinPoints       int     `json:"min_points"`
 	DupJaccard      float64 `json:"dup_jaccard"`
-	IssueScanLimit  int     `json:"issue_scan_limit"`
-	Milestone       string  `json:"milestone,omitempty"`
-	Project         string  `json:"project,omitempty"`
-	ProjectOwner    string  `json:"project_owner,omitempty"`
+	// IssueScanLimit feeds the SOFT rungs only (issue-body + title-near, i.e. "did a
+	// human already write this up lately"): a recency window over the whole tracker,
+	// whose coverage shrinks every time the tracker gets busier. Deliberately NOT the
+	// anti-re-file guarantee — that is ScoutScanLimit below.
+	IssueScanLimit int `json:"issue_scan_limit"`
+	// ScoutScanLimit bounds the DURABLE rung: every issue carrying the idea-scout
+	// label, i.e. the scout's own filing history. Bounded by MaxIssues/day (<=3), not
+	// by tracker growth, so one number covers years. Saturating it is a REFUSAL, never
+	// a silent truncation — see the scout-index gate in Run.
+	ScoutScanLimit int    `json:"scout_scan_limit"`
+	Milestone      string `json:"milestone,omitempty"`
+	Project        string `json:"project,omitempty"`
+	ProjectOwner   string `json:"project_owner,omitempty"`
 }
 
 type Candidate struct {
@@ -114,17 +123,41 @@ type SeenRecord struct {
 }
 
 type RunResult struct {
-	Schema             string         `json:"schema"`
-	Date               string         `json:"date"`
-	Mode               string         `json:"mode"`
-	CandidatesGathered int            `json:"candidates_gathered"`
-	Skipped            map[string]int `json:"skipped"`
-	Planned            []IssuePlan    `json:"planned"`
-	Filed              []FiledIssue   `json:"filed"`
-	Errors             []string       `json:"errors"`
-	SourceDigest       string         `json:"source_digest,omitempty"`
-	Topics             int            `json:"topics"`
-	Thresholds         map[string]any `json:"thresholds,omitempty"`
+	Schema             string          `json:"schema"`
+	Date               string          `json:"date"`
+	Mode               string          `json:"mode"`
+	CandidatesGathered int             `json:"candidates_gathered"`
+	DedupIndex         DedupIndex      `json:"dedup_index"`
+	Skipped            map[string]int  `json:"skipped"`
+	Dropped            []DroppedSource `json:"dropped,omitempty"`
+	Planned            []IssuePlan     `json:"planned"`
+	Filed              []FiledIssue    `json:"filed"`
+	Errors             []string        `json:"errors"`
+	SourceDigest       string          `json:"source_digest,omitempty"`
+	Topics             int             `json:"topics"`
+	Thresholds         map[string]any  `json:"thresholds,omitempty"`
+}
+
+// DedupIndex makes the durable rung's coverage auditable in the run record: a
+// reader can SEE that the filed-issue index was label-targeted and unsaturated
+// rather than having to trust that it was. ScoutIndexComplete is only ever true
+// because the incomplete case refuses (Run returns an error) instead of reporting.
+type DedupIndex struct {
+	FiledIssuesScanned  int  `json:"filed_issues_scanned"`
+	FiledStamps         int  `json:"filed_stamps"`
+	ScoutScanLimit      int  `json:"scout_scan_limit"`
+	ScoutIndexComplete  bool `json:"scout_index_complete"`
+	WindowIssuesScanned int  `json:"window_issues_scanned"`
+	IssueScanLimit      int  `json:"issue_scan_limit"`
+}
+
+// DroppedSource is per-source dedup attribution: which rung stopped which
+// source_id. Aggregate counts alone cannot answer "was THIS already-triaged
+// source caught, and by which rung", which is the only question that matters
+// after a re-file.
+type DroppedSource struct {
+	SourceID string `json:"source_id"`
+	Rung     string `json:"rung"`
 }
 
 type FiledIssue struct {
@@ -151,23 +184,33 @@ type Fetcher interface {
 	FetchHackerNews(query string, limit int) (string, error)
 	FetchReddit(query string, limit int) (string, error)
 	FetchExistingIssues(limit int) ([]ExistingIssue, error)
+	// FetchScoutIssues returns every issue the scout has ever filed, open or
+	// closed, identified by its label rather than by recency. It is a separate
+	// method from FetchExistingIssues precisely because the two corpora answer
+	// different questions: this one is the never-file-twice guarantee, that one
+	// is a best-effort look at what humans opened lately.
+	FetchScoutIssues(limit int) ([]ExistingIssue, error)
 	EnsureLabels() error
 	CreateIssue(issue IssuePlan, milestone string) (string, error)
 	AddToProject(issueURL, number, owner string) error
 }
 
 type RunOptions struct {
-	Workspace     string
-	ConfigPath    string
-	MaxIssues     *int
-	MinScore      *int
-	Live          bool
-	JSON          bool
-	Milestone     *string
-	Project       *string
-	ProjectOwner  *string
-	Candidates    []Candidate
-	Existing      []ExistingIssue
+	Workspace    string
+	ConfigPath   string
+	MaxIssues    *int
+	MinScore     *int
+	Live         bool
+	JSON         bool
+	Milestone    *string
+	Project      *string
+	ProjectOwner *string
+	Candidates   []Candidate
+	Existing     []ExistingIssue
+	// ScoutIssues is the fixture stand-in for the label-targeted filed-issue index
+	// (rung 2). When a fixture run leaves it nil, Existing serves as the whole
+	// corpus — a replay has no window to be truncated by, so the two collapse.
+	ScoutIssues   []ExistingIssue
 	UseFixtures   bool
 	Today         string
 	Now           time.Time
@@ -191,6 +234,7 @@ func DefaultConfig() Config {
 		MinPoints:       10,
 		DupJaccard:      0.55,
 		IssueScanLimit:  800,
+		ScoutScanLimit:  5000,
 	}
 }
 
@@ -324,30 +368,52 @@ func ScoreCandidate(c Candidate, topic Topic, cfg Config, now time.Time) (int, [
 	return score, reasons
 }
 
-func ExistingIssueIndex(issues []ExistingIssue) (map[string]struct{}, []map[string]struct{}, string) {
-	stamped := map[string]struct{}{}
-	titleSets := make([]map[string]struct{}, 0, len(issues))
-	bodies := make([]string, 0, len(issues))
-	re := regexp.MustCompile(`idea-scout-source:\s*([^\s>]+)`)
+var stampRE = regexp.MustCompile(`idea-scout-source:\s*([^\s>]+)`)
+
+// StampIndex is rung 2's whole payload: every `idea-scout-source:` stamp carried
+// by issues, lower-cased. Case is folded on BOTH sides (here and in IsDuplicate)
+// because GitHub repo names are case-insensitive while the search API hands back
+// whichever casing it feels like — an un-folded compare lets `Acme/Repo` slip
+// past a stamp that reads `acme/repo`.
+func StampIndex(issues []ExistingIssue) map[string]struct{} {
+	out := map[string]struct{}{}
 	for _, iss := range issues {
-		body := iss.Body
-		bodies = append(bodies, strings.ToLower(body))
-		titleSets = append(titleSets, Tokenize(iss.Title))
-		for _, m := range re.FindAllStringSubmatch(body, -1) {
+		for _, m := range stampRE.FindAllStringSubmatch(iss.Body, -1) {
 			if len(m) > 1 {
-				stamped[strings.TrimSpace(m[1])] = struct{}{}
+				out[strings.ToLower(strings.TrimSpace(m[1]))] = struct{}{}
 			}
 		}
 	}
-	return stamped, titleSets, strings.Join(bodies, "\n")
+	return out
 }
 
+func ExistingIssueIndex(issues []ExistingIssue) (map[string]struct{}, []map[string]struct{}, string) {
+	titleSets := make([]map[string]struct{}, 0, len(issues))
+	bodies := make([]string, 0, len(issues))
+	for _, iss := range issues {
+		bodies = append(bodies, strings.ToLower(iss.Body))
+		titleSets = append(titleSets, Tokenize(iss.Title))
+	}
+	return StampIndex(issues), titleSets, strings.Join(bodies, "\n")
+}
+
+// IsDuplicate names the rung that fires ("seen-cache" / "filed-stamp" /
+// "issue-body" / "title-near"), or "" if the candidate is genuinely new.
+//
+// "filed-stamp" and "issue-body" are reported separately on purpose: the first is
+// the durable, complete filing history (rung 2) and the second is a best-effort
+// URL sighting inside a recency window (rung 3). Collapsing them would make a
+// windowed guess indistinguishable from the guarantee in the run report.
 func IsDuplicate(c Candidate, seen map[string]SeenRecord, stamped map[string]struct{}, titleSets []map[string]struct{}, bodiesJoined string, dupJaccard float64) string {
+	sidLower := strings.ToLower(c.SourceID)
 	if _, ok := seen[c.SourceID]; ok {
 		return "seen-cache"
 	}
-	if _, ok := stamped[c.SourceID]; ok {
-		return "issue-body"
+	if _, ok := seen[sidLower]; ok {
+		return "seen-cache"
+	}
+	if _, ok := stamped[sidLower]; ok {
+		return "filed-stamp"
 	}
 	if u := strings.ToLower(c.URL); u != "" && strings.Contains(bodiesJoined, u) {
 		return "issue-body"
@@ -428,13 +494,19 @@ func RenderIssue(c Candidate, score int, reasons []string, topic Topic, today st
 	return IssuePlan{Title: title, Body: body, Labels: labels, SourceID: c.SourceID, URL: c.URL, Score: score, Topic: topic.Key}
 }
 
-func PlanIssues(candidates []Candidate, topicsByKey map[string]Topic, seen map[string]SeenRecord, stamped map[string]struct{}, titleSets []map[string]struct{}, bodiesJoined string, cfg Config, today string, now time.Time) ([]IssuePlan, map[string]int) {
-	stats := map[string]int{"seen-cache": 0, "issue-body": 0, "title-near": 0, "below-min": 0, "within-run-dup": 0}
+// PlanIssues runs score → dedup → threshold → CAP. It returns the issues to file,
+// the per-rung counts, and `dropped`, which names the rung that stopped each
+// individual source_id so an auditor can re-run a dry-run and check BY NAME that a
+// known-already-triaged source is being caught, and by which rung.
+func PlanIssues(candidates []Candidate, topicsByKey map[string]Topic, seen map[string]SeenRecord, stamped map[string]struct{}, titleSets []map[string]struct{}, bodiesJoined string, cfg Config, today string, now time.Time) ([]IssuePlan, map[string]int, []DroppedSource) {
+	stats := map[string]int{"seen-cache": 0, "filed-stamp": 0, "issue-body": 0, "title-near": 0, "below-min": 0, "within-run-dup": 0}
 	var scored []IssuePlan
+	var dropped []DroppedSource
 	runSeen := map[string]struct{}{}
 	for _, cand := range candidates {
 		if _, ok := runSeen[cand.SourceID]; ok {
 			stats["within-run-dup"]++
+			dropped = append(dropped, DroppedSource{SourceID: cand.SourceID, Rung: "within-run-dup"})
 			continue
 		}
 		runSeen[cand.SourceID] = struct{}{}
@@ -444,11 +516,13 @@ func PlanIssues(candidates []Candidate, topicsByKey map[string]Topic, seen map[s
 		}
 		if rung := IsDuplicate(cand, seen, stamped, titleSets, bodiesJoined, cfg.DupJaccard); rung != "" {
 			stats[rung]++
+			dropped = append(dropped, DroppedSource{SourceID: cand.SourceID, Rung: rung})
 			continue
 		}
 		score, reasons := ScoreCandidate(cand, topic, cfg, now)
 		if score < cfg.MinScore {
 			stats["below-min"]++
+			dropped = append(dropped, DroppedSource{SourceID: cand.SourceID, Rung: "below-min"})
 			continue
 		}
 		scored = append(scored, RenderIssue(cand, score, reasons, topic, today))
@@ -459,10 +533,16 @@ func PlanIssues(candidates []Candidate, topicsByKey map[string]Topic, seen map[s
 		}
 		return scored[i].SourceID < scored[j].SourceID
 	})
+	sort.Slice(dropped, func(i, j int) bool {
+		if dropped[i].Rung != dropped[j].Rung {
+			return dropped[i].Rung < dropped[j].Rung
+		}
+		return dropped[i].SourceID < dropped[j].SourceID
+	})
 	if cfg.MaxIssues >= 0 && len(scored) > cfg.MaxIssues {
 		scored = scored[:cfg.MaxIssues]
 	}
-	return scored, stats
+	return scored, stats, dropped
 }
 
 func ParseArxivAtom(xmlText, topicKey string) []Candidate {
@@ -800,6 +880,35 @@ func Run(opts RunOptions) (RunResult, error) {
 			errorsOut = append(errorsOut, "seen-cache: "+loadErr.Error())
 			seen = map[string]SeenRecord{}
 		}
+
+		// ---- Rung 2, the durable one -------------------------------------------
+		// The scout's OWN filing history, pulled by label so the query is targeted at
+		// exactly the population being deduped. This is what makes "filed once, never
+		// filed again" true without trusting the git-ignored local cache. It is
+		// MANDATORY: a partial index is indistinguishable from "this source is new"
+		// and re-files an already-triaged source, so it cannot be waived by
+		// AllowIssueGap or covered by a populated seen-cache.
+		scoutLimit := cfg.ScoutScanLimit
+		if scoutLimit <= 0 {
+			scoutLimit = DefaultConfig().ScoutScanLimit
+		}
+		scoutIssues, scoutErr := fetcher.FetchScoutIssues(scoutLimit)
+		if scoutErr != nil {
+			return RunResult{}, fmt.Errorf("refuse: cannot build the filed-issue index (gh issue list --label %s); filing now could re-file an already-triaged source (%w)", ScoutLabel, scoutErr)
+		}
+		if len(scoutIssues) >= scoutLimit {
+			// Saturation is ambiguous — gh returns exactly `limit` both when that is
+			// all there is and when it truncated. Refuse loudly rather than let the
+			// guarantee rot silently the way the 800-issue window did.
+			return RunResult{}, fmt.Errorf("refuse: the filed-issue index came back saturated at scout_scan_limit=%d, so it may be truncated and a previously-filed source could be re-filed; raise thresholds.scout_scan_limit (--config) above the number of issues the scout has ever filed", scoutLimit)
+		}
+
+		// ---- Rungs 3/4: the soft, windowed corpus of everything else -------------
+		// Human-opened issues referencing the same URL, or carrying a near-identical
+		// title. Nice to have, never the guarantee. The pre-existing refusal is kept
+		// exactly as it was — nothing here is relaxed on the back of rung 2, because
+		// degrading these rungs onto a bare local cache is still a worse run than no
+		// run.
 		issues, err = fetcher.FetchExistingIssues(cfg.IssueScanLimit)
 		if err != nil {
 			errorsOut = append(errorsOut, "issues: "+err.Error())
@@ -808,33 +917,48 @@ func Run(opts RunOptions) (RunResult, error) {
 			}
 			issues = nil
 		}
-		return finishRun(finishInput{Workspace: workspace, Topics: topicsByKey, Config: cfg, Today: today, Now: now, Candidates: candidates, Issues: issues, Errors: errorsOut, Live: opts.Live, Fetcher: fetcher, Seen: seen})
+		return finishRun(finishInput{Workspace: workspace, Topics: topicsByKey, Config: cfg, Today: today, Now: now, Candidates: candidates, Issues: issues, ScoutIssues: scoutIssues, ScoutScanLimit: scoutLimit, Errors: errorsOut, Live: opts.Live, Fetcher: fetcher, Seen: seen})
 	}
 	seen, err := LoadSeen(workspace)
 	if err != nil {
 		errorsOut = append(errorsOut, "seen-cache: "+err.Error())
 		seen = map[string]SeenRecord{}
 	}
-	return finishRun(finishInput{Workspace: workspace, Topics: topicsByKey, Config: cfg, Today: today, Now: now, Candidates: candidates, Issues: issues, Errors: errorsOut, Live: opts.Live, Fetcher: opts.Fetcher, Seen: seen})
+	// Fixture replay: no network, so nothing can have been truncated. When the
+	// caller did not separate the two corpora, the supplied issues stand in for
+	// both — the same stamps still gate the durable rung.
+	scoutIssues := opts.ScoutIssues
+	if scoutIssues == nil {
+		scoutIssues = issues
+	}
+	return finishRun(finishInput{Workspace: workspace, Topics: topicsByKey, Config: cfg, Today: today, Now: now, Candidates: candidates, Issues: issues, ScoutIssues: scoutIssues, ScoutScanLimit: cfg.ScoutScanLimit, Errors: errorsOut, Live: opts.Live, Fetcher: opts.Fetcher, Seen: seen})
 }
 
 type finishInput struct {
-	Workspace  string
-	Topics     map[string]Topic
-	Config     Config
-	Today      string
-	Now        time.Time
-	Candidates []Candidate
-	Issues     []ExistingIssue
-	Errors     []string
-	Live       bool
-	Fetcher    Fetcher
-	Seen       map[string]SeenRecord
+	Workspace      string
+	Topics         map[string]Topic
+	Config         Config
+	Today          string
+	Now            time.Time
+	Candidates     []Candidate
+	Issues         []ExistingIssue
+	ScoutIssues    []ExistingIssue
+	ScoutScanLimit int
+	Errors         []string
+	Live           bool
+	Fetcher        Fetcher
+	Seen           map[string]SeenRecord
 }
 
 func finishRun(in finishInput) (RunResult, error) {
-	stamped, titleSets, bodiesJoined := ExistingIssueIndex(in.Issues)
-	toFile, skipStats := PlanIssues(in.Candidates, in.Topics, in.Seen, stamped, titleSets, bodiesJoined, in.Config, in.Today, in.Now)
+	stamped := StampIndex(in.ScoutIssues)
+	winStamped, titleSets, bodiesJoined := ExistingIssueIndex(in.Issues)
+	// Union, not replacement: a filed issue whose label a human stripped is still
+	// ours, and its stamp is still proof we filed that source.
+	for sid := range winStamped {
+		stamped[sid] = struct{}{}
+	}
+	toFile, skipStats, dropped := PlanIssues(in.Candidates, in.Topics, in.Seen, stamped, titleSets, bodiesJoined, in.Config, in.Today, in.Now)
 	var filed []FiledIssue
 	if in.Live && len(toFile) > 0 {
 		if in.Fetcher == nil {
@@ -868,12 +992,21 @@ func finishRun(in finishInput) (RunResult, error) {
 		Date:               in.Today,
 		Mode:               mode(in.Live),
 		CandidatesGathered: len(in.Candidates),
-		Skipped:            skipStats,
-		Planned:            publicPlans(toFile),
-		Filed:              filed,
-		Errors:             in.Errors,
-		SourceDigest:       candidateDigest(in.Candidates),
-		Topics:             len(in.Topics),
+		DedupIndex: DedupIndex{
+			FiledIssuesScanned:  len(in.ScoutIssues),
+			FiledStamps:         len(stamped),
+			ScoutScanLimit:      in.ScoutScanLimit,
+			ScoutIndexComplete:  true,
+			WindowIssuesScanned: len(in.Issues),
+			IssueScanLimit:      in.Config.IssueScanLimit,
+		},
+		Skipped:      skipStats,
+		Dropped:      dropped,
+		Planned:      publicPlans(toFile),
+		Filed:        filed,
+		Errors:       in.Errors,
+		SourceDigest: candidateDigest(in.Candidates),
+		Topics:       len(in.Topics),
 		Thresholds: map[string]any{
 			"max_issues":  in.Config.MaxIssues,
 			"min_score":   in.Config.MinScore,
@@ -1008,7 +1141,7 @@ func (f LiveFetcher) FetchArxiv(query string, maxResults int) (string, error) {
 
 func (f LiveFetcher) FetchGitHub(query string, limit int) ([]GitHubRepo, error) {
 	var out []GitHubRepo
-	err := ghJSON([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "stars", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, &out)
+	err := ghJSON([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "stars", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, 60*time.Second, &out)
 	return out, err
 }
 
@@ -1018,7 +1151,7 @@ func (f LiveFetcher) FetchGitHub(query string, limit int) ([]GitHubRepo, error) 
 // repos surface where the stars sort would bury them under incumbents.
 func (f LiveFetcher) FetchGitHubFresh(query string, limit int) ([]GitHubRepo, error) {
 	var out []GitHubRepo
-	err := ghJSON([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "updated", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, &out)
+	err := ghJSON([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "updated", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, 60*time.Second, &out)
 	return out, err
 }
 
@@ -1082,9 +1215,32 @@ func (f LiveFetcher) FetchReddit(query string, limit int) (string, error) {
 	return string(b), nil
 }
 
+// FetchExistingIssues is the rung 3/4 corpus: the `limit` most recent issues,
+// whoever opened them. A RECENCY WINDOW — it answers "did a human already write
+// this up lately", and that is all it is allowed to answer.
 func (f LiveFetcher) FetchExistingIssues(limit int) ([]ExistingIssue, error) {
 	var out []ExistingIssue
-	err := ghJSON([]string{"issue", "list", "--state", "all", "--limit", strconv.Itoa(limit), "--json", "number,title,body"}, &out)
+	err := ghJSON([]string{"issue", "list", "--state", "all", "--limit", strconv.Itoa(limit), "--json", "number,title,body"}, 60*time.Second, &out)
+	return out, err
+}
+
+// FetchScoutIssues is the rung 2 corpus: every issue the scout has EVER filed,
+// open or closed.
+//
+// TARGETED, not windowed. `--label idea-scout` is a server-side filter, so the
+// result set is the scout's own filing history — it does not thin out because
+// unrelated issues were opened this week, which is precisely how the recency
+// window in FetchExistingIssues lost the guarantee. Every filed issue carries the
+// label (RenderIssue always emits ScoutLabel) and the matching
+// `<!-- idea-scout-source: … -->` stamp, so label ⊇ stamped-by-us.
+//
+// `--state all` is load-bearing: a source whose issue was triaged and CLOSED is
+// the exact case that must not come back. The longer deadline is deliberate — a
+// years-deep index is a bigger page walk than the 60s window fetch, and a timeout
+// here refuses the whole run.
+func (f LiveFetcher) FetchScoutIssues(limit int) ([]ExistingIssue, error) {
+	var out []ExistingIssue
+	err := ghJSON([]string{"issue", "list", "--state", "all", "--label", ScoutLabel, "--limit", strconv.Itoa(limit), "--json", "number,title,body"}, 180*time.Second, &out)
 	return out, err
 }
 
@@ -1138,8 +1294,8 @@ func (f LiveFetcher) AddToProject(issueURL, number, owner string) error {
 	return err
 }
 
-func ghJSON(args []string, out any) error {
-	stdout, _, err := runGH(args, 60*time.Second)
+func ghJSON(args []string, timeout time.Duration, out any) error {
+	stdout, _, err := runGH(args, timeout)
 	if err != nil {
 		return err
 	}
@@ -1205,6 +1361,8 @@ func readJSONFile(path string, out any) error {
 func RenderHuman(w io.Writer, result RunResult, cfg Config) {
 	fmt.Fprintf(w, "idea-scout %s - %s\n", result.Date, result.Mode)
 	fmt.Fprintf(w, "  gathered %d candidates from %d topics x (arXiv + GitHub + Hacker News + Reddit)\n", result.CandidatesGathered, result.Topics)
+	fmt.Fprintf(w, "  dedup index: %d source stamps from %d filed issue(s) (label-targeted, complete) + %d recent issue(s) for the near-dup rungs\n",
+		result.DedupIndex.FiledStamps, result.DedupIndex.FiledIssuesScanned, result.DedupIndex.WindowIssuesScanned)
 	var parts []string
 	keys := make([]string, 0, len(result.Skipped))
 	for k := range result.Skipped {
@@ -1432,6 +1590,8 @@ func applyThresholds(cfg *Config, values map[string]any) {
 			cfg.DupJaccard = anyFloat(v, cfg.DupJaccard)
 		case "issue_scan_limit":
 			cfg.IssueScanLimit = anyInt(v, cfg.IssueScanLimit)
+		case "scout_scan_limit":
+			cfg.ScoutScanLimit = anyInt(v, cfg.ScoutScanLimit)
 		case "milestone":
 			cfg.Milestone, _ = v.(string)
 		case "project":

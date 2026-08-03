@@ -24,6 +24,7 @@ func runIdeaScout(stdout, stderr io.Writer, argv []string) int {
 	projectOwner := fs.String("project-owner", "", "owner login for --project")
 	candidatesPath := fs.String("candidates", "", "fixture candidates JSON; skips live source fetching")
 	issuesPath := fs.String("issues", "", "fixture existing issues JSON used with --candidates")
+	scoutIssuesPath := fs.String("scout-issues", "", "fixture idea-scout-labelled issues JSON: the durable filed-stamp index (defaults to --issues)")
 	today := fs.String("today", "", "override the report date (YYYY-MM-DD), primarily for tests")
 	fs.Usage = func() { fmt.Fprint(stderr, ideaScoutUsage) }
 	if !parseFlags(fs, argv) {
@@ -61,6 +62,14 @@ func runIdeaScout(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 		opts.Existing = issues
+	}
+	if *scoutIssuesPath != "" {
+		scoutIssues, err := ideascout.ReadExistingIssues(*scoutIssuesPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak idea-scout: read --scout-issues: %v\n", err)
+			return 2
+		}
+		opts.ScoutIssues = scoutIssues
 	}
 
 	result, err := ideascout.Run(opts)
@@ -105,12 +114,21 @@ const ideaScoutUsage = `fak idea-scout - surface related arXiv/GitHub/Hacker New
 usage:
   fak idea-scout [--json] [--workspace DIR] [--config FILE]
                  [--max-issues N] [--min-score N]
-                 [--candidates FILE] [--issues FILE]
+                 [--candidates FILE] [--issues FILE] [--scout-issues FILE]
                  [--live] [--milestone TITLE] [--project N] [--project-owner OWNER]
 
 Dry-run is the default and mutates nothing. --live creates issues through gh issue
 create and records filed source IDs in .idea-scout/seen.json. --candidates supplies
 fixture candidates and skips live arXiv/GitHub/Hacker News/Reddit fetching for tests or replay.
+
+Never filing the same source twice rests on the filed-stamp rung: the source ID
+stamped into every issue the scout has ever filed, read back through a query
+TARGETED at the idea-scout label rather than a window of recent issues. That index
+is mandatory - if gh cannot build it, or it comes back saturated at
+thresholds.scout_scan_limit (so it may be truncated), the run REFUSES with exit 2
+rather than risk re-filing an already-triaged source. The seen-cache and the
+issue_scan_limit recent-issue window are a fast path and a bonus catch; neither
+carries the guarantee, and losing the cache does not weaken it.
 
 Sources per topic (any subset): arxiv query, github search, hn (Hacker News Algolia
 query) and reddit (Reddit search, sort=new) — the community feeds are newest-first,

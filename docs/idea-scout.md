@@ -12,7 +12,7 @@ The fak idea-scout is a research-to-issue feeder that, once a day, searches arXi
 > half: once a day it searches the outside world — arXiv papers and GitHub repos —
 > for work adjacent to what `fak` is (an agent kernel that adjudicates tool calls
 > and reuses cross-turn setup work), then files the genuinely-new, genuinely-relevant
-> hits as triage-ready GitHub issues. Deduped three ways and hard-capped, so an
+> hits as triage-ready GitHub issues. Deduped four ways and hard-capped, so an
 > unattended daily run can never storm the tracker. **Dry-run by default**; `--live`
 > is the explicit opt-in to actually creating issues.
 
@@ -80,7 +80,25 @@ index. Same refusal if `gh` fails outright. Silent degradation is what caused th
 bug, so growth has to surface as a loud stop.
 
 The run report makes this auditable — `--json` carries a `dedup_index` block with
-`filed_issues_scanned`, `filed_stamps`, and `scout_index_complete`.
+`filed_issues_scanned`, `filed_stamps`, and `scout_index_complete`, plus a
+`dropped` list naming which rung stopped which `source_id`.
+
+### Two implementations, one contract
+
+There are two scouts, and they must not drift apart on this rung:
+
+| Surface | Who runs it | Where |
+|---|---|---|
+| `python tools/idea_scout.py` | the daily Scheduled Task ([`loops-inventory.md`](loops-inventory.md)) | `tools/idea_scout.py` |
+| `fak idea-scout` | agents and humans — [`question-loop`](../.claude/skills/question-loop/SKILL.md) points here for mining external sources | `internal/ideascout` + `cmd/fak/ideascout.go` |
+
+The Go port carried the original windowed defect after the Python was fixed
+(#5544), which meant the *agent-invoked* path could still re-file an aged-out
+source. It now enforces the identical contract: `FetchScoutIssues` is the
+label-targeted query, `thresholds.scout_scan_limit` is the saturation tripwire,
+and both the failed scan and the saturated scan **refuse with exit 2**. The
+`filed-stamp` rung is reported separately from `issue-body` in both, so a windowed
+guess never reads like the guarantee.
 
 ## Run it
 
@@ -96,11 +114,19 @@ python tools/idea_scout.py --max-issues 3 --live
 
 # narrow/replace the topic set and tune the knobs
 python tools/idea_scout.py --config tools/idea_scout_topics.example.json
+
+# the Go verb — same rungs, same refusals (this is what the skills point at)
+fak idea-scout --json
+fak idea-scout --max-issues 3 --live
+
+# replay a fixture: --issues is the recency window, --scout-issues the filed index
+fak idea-scout --candidates cands.json --issues window.json --scout-issues filed.json
 ```
 
 Exit codes: `0` ran clean · `2` infra error (gh missing / not authed / not a repo,
-or every source failed with no cache to fall back on — it **refuses** rather than
-risk a blind spam run).
+every source failed with no cache to fall back on, or the filed-issue index could
+not be built completely — it **refuses** rather than risk a blind spam run or a
+re-file).
 
 ## The daily task (the "keep current" loop)
 
