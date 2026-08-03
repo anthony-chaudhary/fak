@@ -220,6 +220,28 @@ func TestSummarizeTrunkRedFoldsAndOrders(t *testing.T) {
 	}
 }
 
+// trunkRedProbeResolving is a synthetic probe that proves EXACTLY the named bases fixed
+// and says nothing about any other class — the shape a correct production probe has.
+func trunkRedProbeResolving(bases ...string) func(trunkRedBreak) trunkRedVerdict {
+	set := map[string]struct{}{}
+	for _, b := range bases {
+		set[b] = struct{}{}
+	}
+	return func(b trunkRedBreak) trunkRedVerdict {
+		if _, ok := set[b.BaseSha]; ok {
+			return trunkRedVerdict{Status: trunkRedStatusResolved}
+		}
+		return trunkRedUnprovable("not in the fixture's resolved set")
+	}
+}
+
+// trunkRedProbeAlwaysResolved is the ADVERSARY: a probe that claims every break it is
+// shown is fixed. The fold's structural guard, not the probe, is what must keep the
+// unprovable classes surfaced against it.
+func trunkRedProbeAlwaysResolved() func(trunkRedBreak) trunkRedVerdict {
+	return func(trunkRedBreak) trunkRedVerdict { return trunkRedVerdict{Status: trunkRedStatusResolved} }
+}
+
 // trunkRedTestLedger marshals synthetic records into JSONL content, so the
 // resolve-filter tests never depend on the live ledger or the writer path.
 func trunkRedTestLedger(t *testing.T, recs ...trunkRedRecord) string {
@@ -258,7 +280,7 @@ func TestSummarizeTrunkRedResolveFilter(t *testing.T) {
 
 	cases := []struct {
 		name                string
-		resolved            func(trunkRedBreak) bool
+		probe               func(trunkRedBreak) trunkRedVerdict
 		wantPkgs            []string
 		wantTotal           int
 		wantResolvedClasses int
@@ -266,32 +288,32 @@ func TestSummarizeTrunkRedResolveFilter(t *testing.T) {
 	}{
 		{
 			name:                "resolved base folds out, unresolved surfaces",
-			resolved:            func(b trunkRedBreak) bool { return b.BaseSha == "deadbase" },
+			probe:               trunkRedProbeResolving("deadbase"),
 			wantPkgs:            []string{"pkg/live", "pkg/unknown"},
 			wantTotal:           2,
 			wantResolvedClasses: 1,
 			wantResolvedRows:    2,
 		},
 		{
-			name:     "nil resolver keeps everything",
-			resolved: nil,
+			name:     "nil probe keeps everything",
+			probe:    nil,
 			wantPkgs: []string{"pkg/dead", "pkg/live", "pkg/unknown"},
-			// All 4 rows stay live.
+			// All 4 rows stay surfaced.
 			wantTotal: 4,
 		},
 		{
-			// The production resolver maps EVERY git error / missing origin/main
-			// to false — the erroring/unknown case must KEEP the class.
-			name:      "erroring resolver (always unknown) keeps every class",
-			resolved:  func(trunkRedBreak) bool { return false },
+			// The production probe maps EVERY git error / missing origin/main to
+			// unprovable — the erroring/unknown case must KEEP the class.
+			name:      "erroring probe (always unprovable) keeps every class",
+			probe:     func(trunkRedBreak) trunkRedVerdict { return trunkRedUnprovable("git said nothing") },
 			wantPkgs:  []string{"pkg/dead", "pkg/live", "pkg/unknown"},
 			wantTotal: 4,
 		},
 		{
 			// KEEP-SIDE invariant: an empty base can never be PROVABLY resolved,
-			// even against a resolver that claims everything is.
-			name:                "empty base survives an always-true resolver",
-			resolved:            func(trunkRedBreak) bool { return true },
+			// even against a probe that claims everything is.
+			name:                "empty base survives an always-resolved probe",
+			probe:               trunkRedProbeAlwaysResolved(),
 			wantPkgs:            []string{"pkg/unknown"},
 			wantTotal:           1,
 			wantResolvedClasses: 2,
@@ -300,7 +322,7 @@ func TestSummarizeTrunkRedResolveFilter(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sum := summarizeTrunkRed(content, tc.resolved)
+			sum := summarizeTrunkRed(content, tc.probe)
 			if got := classPkgs(sum); strings.Join(got, "|") != strings.Join(tc.wantPkgs, "|") {
 				t.Fatalf("surfaced classes = %v, want %v", got, tc.wantPkgs)
 			}
@@ -327,7 +349,7 @@ func TestRenderTrunkRedResolvedNote(t *testing.T) {
 	)
 
 	t.Run("live view notes the folded-out classes", func(t *testing.T) {
-		sum := summarizeTrunkRed(content, func(b trunkRedBreak) bool { return b.BaseSha == "deadbase" })
+		sum := summarizeTrunkRed(content, trunkRedProbeResolving("deadbase"))
 		out := renderTrunkRed(sum)
 		if !strings.Contains(out, "pkg/live") || strings.Contains(out, "pkg/dead") {
 			t.Fatalf("live view must show pkg/live and fold pkg/dead out:\n%s", out)
@@ -338,7 +360,7 @@ func TestRenderTrunkRedResolvedNote(t *testing.T) {
 	})
 
 	t.Run("all-resolved view is not the empty view", func(t *testing.T) {
-		sum := summarizeTrunkRed(content, func(trunkRedBreak) bool { return true })
+		sum := summarizeTrunkRed(content, trunkRedProbeAlwaysResolved())
 		out := renderTrunkRed(sum)
 		if strings.Contains(out, "no pre-existing trunk-red admissions recorded") {
 			t.Fatalf("an all-resolved ledger is not an empty ledger:\n%s", out)
@@ -349,30 +371,206 @@ func TestRenderTrunkRedResolvedNote(t *testing.T) {
 	})
 }
 
-func TestTrunkRedGitResolverKeepSide(t *testing.T) {
+// TestTrunkRedGitProbeKeepSide pins that the production probe proves NOTHING — neither a
+// drop nor a liveness claim — from any input it cannot check, and that it always names
+// which witness was missing.
+func TestTrunkRedGitProbeKeepSide(t *testing.T) {
 	brk := trunkRedBreak{
 		BaseSha:    "abc123",
 		FirstBreak: "someSymbol",
 		Packages:   []string{"github.com/anthony-chaudhary/fak/cmd/fak"},
 	}
-	// No repo root / empty base / empty symbol: never provably resolved, no git shelled.
-	if trunkRedGitResolver("")(brk) {
-		t.Fatalf("an empty root must never prove a break resolved")
-	}
-	noBase := brk
+	noBase, noSym, qualified := brk, brk, brk
 	noBase.BaseSha = ""
-	if trunkRedGitResolver(t.TempDir())(noBase) {
-		t.Fatalf("an empty base must never prove resolved")
-	}
-	noSym := brk
 	noSym.FirstBreak = ""
-	if trunkRedGitResolver(t.TempDir())(noSym) {
-		t.Fatalf("an empty first-break symbol must never prove resolved")
+	qualified.FirstBreak = "metrics.AnchorRefusalMonitor"
+
+	cases := []struct {
+		name       string
+		root       string
+		brk        trunkRedBreak
+		wantReason string
+	}{
+		{"no repo root", "", brk, trunkRedReasonNoRoot},
+		{"no base sha", t.TempDir(), noBase, trunkRedReasonNoBase},
+		{"no first-break symbol", t.TempDir(), noSym, trunkRedReasonNoSymbol},
+		{"qualified symbol names another package", t.TempDir(), qualified, trunkRedReasonQualifiedSymbol},
+		// A non-repo dir has no go.mod, so no package maps into a module here.
+		{"unmappable packages", t.TempDir(), brk, trunkRedReasonOutOfModule},
 	}
-	// A non-repo dir has no go.mod and makes every git call error: KEEP (false).
-	if trunkRedGitResolver(t.TempDir())(brk) {
-		t.Fatalf("git errors must report NOT resolved (keep-side)")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := trunkRedGitProbe(tc.root)(tc.brk)
+			if got.Status != trunkRedStatusUnprovable {
+				t.Fatalf("status = %q, want unprovable — nothing here is checkable", got.Status)
+			}
+			if got.Reason != tc.wantReason {
+				t.Fatalf("reason = %q, want %q", got.Reason, tc.wantReason)
+			}
+		})
 	}
+}
+
+// TestTrunkRedSymbolStateAtHead witnesses the four-valued HEAD read against a REAL git
+// repo built in a temp dir, so every state is produced by git rather than asserted. The
+// grouped-declaration case is the one that matters most: a `const (...)` member is a real
+// declaration the column-0 pattern cannot see, so it must read as UNKNOWN — never as the
+// positive "still undeclared" proof that would let the view call a fixed break live.
+func TestTrunkRedSymbolStateAtHead(t *testing.T) {
+	root := t.TempDir()
+	runGitFixture(t, root, "init", "-q", ".")
+	runGitFixture(t, root, "config", "user.email", "fixture@example.test")
+	runGitFixture(t, root, "config", "user.name", "Fixture")
+	if err := os.MkdirAll(filepath.Join(root, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	src := strings.Join([]string{
+		"package pkg",
+		"",
+		"func declaredAtTopLevel() int { return groupedMember }",
+		"",
+		"const (",
+		"\tgroupedMember = 1",
+		")",
+		"",
+		"func caller() int { return referencedButUndeclared() + declaredAtTopLevel() }",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(root, "pkg", "a.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitFixture(t, root, "add", "pkg/a.go")
+	runGitFixture(t, root, "commit", "-q", "-m", "fixture")
+
+	dirs := []string{"pkg"}
+	cases := []struct {
+		name string
+		sym  string
+		want trunkRedSymbolState
+	}{
+		{"package-level declaration", "declaredAtTopLevel", trunkRedSymbolDeclared},
+		{"referenced but declared nowhere", "referencedButUndeclared", trunkRedSymbolUndeclared},
+		{"neither declared nor referenced", "notInThisTreeAtAll", trunkRedSymbolAbsent},
+		// The keep-side heart of the four-valued read.
+		{"a grouped const member is NOT a proof of absence", "groupedMember", trunkRedSymbolUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := trunkRedSymbolStateAtHead(root, dirs, tc.sym); got != tc.want {
+				t.Fatalf("state(%q) = %v, want %v", tc.sym, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("only a real declaration reads as defined", func(t *testing.T) {
+		if !trunkRedSymbolDefinedAtHead(root, dirs, "declaredAtTopLevel") {
+			t.Fatalf("a package-level func must read as defined")
+		}
+		for _, sym := range []string{"referencedButUndeclared", "notInThisTreeAtAll", "groupedMember"} {
+			if trunkRedSymbolDefinedAtHead(root, dirs, sym) {
+				t.Fatalf("%q is not a proven package-level declaration here", sym)
+			}
+		}
+	})
+
+	t.Run("git failures are not evidence of absence", func(t *testing.T) {
+		// A directory with no git repo at all: every grep fails outright, and the
+		// difference between "git could not answer" and "no match" is the whole reason
+		// the read is four-valued.
+		if got := trunkRedSymbolStateAtHead(t.TempDir(), dirs, "declaredAtTopLevel"); got != trunkRedSymbolUnknown {
+			t.Fatalf("a failing git must read as UNKNOWN, got %v", got)
+		}
+		if _, ok := trunkRedGrepAtHead(t.TempDir(), dirs, "-F", "-e", "x"); ok {
+			t.Fatalf("a failing git must report that it could not answer")
+		}
+		if hit, ok := trunkRedGrepAtHead(root, dirs, "-F", "-e", "nothingMatchesThis"); hit || !ok {
+			t.Fatalf("a clean no-match must be (hit=false, ok=true); got hit=%v ok=%v", hit, ok)
+		}
+	})
+}
+
+// TestTrunkRedGitProbeGradesAgainstAFixtureRepo drives the WHOLE probe against a real
+// repo with a real remote trunk, so the three grades are produced end to end rather than
+// stubbed: one class whose symbol came back (resolved, folded out), one whose symbol is
+// still referenced and declared nowhere (proven still undefined at HEAD), and one whose
+// base the trunk has not moved past (unprovable, surfaced).
+func TestTrunkRedGitProbeGradesAgainstAFixtureRepo(t *testing.T) {
+	upstream := t.TempDir()
+	runGitFixture(t, upstream, "init", "-q", "--bare", ".")
+
+	root := t.TempDir()
+	runGitFixture(t, root, "init", "-q", "-b", "main", ".")
+	runGitFixture(t, root, "config", "user.email", "fixture@example.test")
+	runGitFixture(t, root, "config", "user.name", "Fixture")
+	runGitFixture(t, root, "remote", "add", "origin", upstream)
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/m\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeFixturePkg := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, "pkg", "a.go"), []byte(body), 0o644); err != nil {
+			t.Fatalf("write pkg: %v", err)
+		}
+	}
+	// The BASE commit: wasFixed is referenced and undeclared (that is the recorded red),
+	// and so is stillBroken.
+	writeFixturePkg("package pkg\n\nfunc caller() int { return wasFixed() + stillBroken() }\n")
+	runGitFixture(t, root, "add", ".")
+	runGitFixture(t, root, "commit", "-q", "-m", "base")
+	baseOut, err := gitOut(root, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse base: %v", err)
+	}
+	base := strings.TrimSpace(baseOut)
+
+	// HEAD: wasFixed is declared again; stillBroken is still referenced and declared
+	// nowhere.
+	writeFixturePkg("package pkg\n\nfunc wasFixed() int { return 1 }\n\nfunc caller() int { return wasFixed() + stillBroken() }\n")
+	runGitFixture(t, root, "add", ".")
+	runGitFixture(t, root, "commit", "-q", "-m", "repair")
+	runGitFixture(t, root, "push", "-q", "origin", "main")
+
+	pkgs := []string{"example.com/m/pkg"}
+	probe := trunkRedGitProbe(root)
+
+	t.Run("symbol came back and the trunk moved past the base: RESOLVED", func(t *testing.T) {
+		got := probe(trunkRedBreak{BaseSha: base, FirstBreak: "wasFixed", Packages: pkgs})
+		if got.Status != trunkRedStatusResolved {
+			t.Fatalf("status = %q (%s), want resolved", got.Status, got.Reason)
+		}
+	})
+
+	t.Run("symbol still referenced and declared nowhere: LIVE", func(t *testing.T) {
+		got := probe(trunkRedBreak{BaseSha: base, FirstBreak: "stillBroken", Packages: pkgs})
+		if got.Status != trunkRedStatusLive {
+			t.Fatalf("status = %q (%s), want still-undefined-at-head", got.Status, got.Reason)
+		}
+	})
+
+	t.Run("the trunk has not moved past the tip itself: UNPROVABLE", func(t *testing.T) {
+		tipOut, err := gitOut(root, "rev-parse", "--verify", "origin/main")
+		if err != nil {
+			t.Fatalf("rev-parse tip: %v", err)
+		}
+		got := trunkRedGitProbe(root)(trunkRedBreak{
+			BaseSha:    strings.TrimSpace(tipOut),
+			FirstBreak: "wasFixed",
+			Packages:   pkgs,
+		})
+		if got.Status != trunkRedStatusUnprovable || got.Reason != trunkRedReasonBaseNotMergedPast {
+			t.Fatalf("status = %q reason = %q, want unprovable/%q", got.Status, got.Reason, trunkRedReasonBaseNotMergedPast)
+		}
+	})
+
+	t.Run("a symbol HEAD no longer even mentions is not a proven repair", func(t *testing.T) {
+		got := probe(trunkRedBreak{BaseSha: base, FirstBreak: "goneEntirely", Packages: pkgs})
+		if got.Status != trunkRedStatusUnprovable || got.Reason != trunkRedReasonSymbolAbsent {
+			t.Fatalf("status = %q reason = %q, want unprovable/%q", got.Status, got.Reason, trunkRedReasonSymbolAbsent)
+		}
+	})
 }
 
 func TestRunTrunkRedReaderPaths(t *testing.T) {
@@ -453,36 +651,41 @@ func TestSummarizeTrunkRedKeepsUnprovableClasses(t *testing.T) {
 		t.Fatalf("read synthetic ledger: %v", err)
 	}
 
-	// "resolvedbase" is the ONLY thing this predicate is willing to prove. It is
-	// deliberately also always-true for the no-base / no-symbol rows' bases, so those
-	// classes survive only because the FOLD refuses to ask about them.
-	resolveOnlyTheFixed := func(b trunkRedBreak) bool { return b.BaseSha != "livebase" }
+	// "resolvedbase" is the ONLY thing this probe is willing to prove. It is deliberately
+	// also resolve-true for the no-base / no-symbol rows' bases, so those classes survive
+	// only because the FOLD refuses to ask about them.
+	resolveOnlyTheFixed := func(b trunkRedBreak) trunkRedVerdict {
+		if b.BaseSha == "livebase" {
+			return trunkRedUnprovable("the fixture keeps this one")
+		}
+		return trunkRedVerdict{Status: trunkRedStatusResolved}
+	}
 
 	cases := []struct {
 		name     string
-		resolved func(trunkRedBreak) bool
+		probe    func(trunkRedBreak) trunkRedVerdict
 		wantLive []string // first_break of every class that must SURFACE
 	}{
 		{
 			name:     "only the provably-resolved class folds out",
-			resolved: resolveOnlyTheFixed,
+			probe:    resolveOnlyTheFixed,
 			wantLive: []string{"noBaseToDate", "stillBroken", ""},
 		},
 		{
-			name:     "a resolver that errors on everything keeps every class",
-			resolved: func(trunkRedBreak) bool { return false },
+			name:     "a probe that errors on everything keeps every class",
+			probe:    func(trunkRedBreak) trunkRedVerdict { return trunkRedUnprovable("git errored") },
 			wantLive: []string{"noBaseToDate", "stillBroken", "wasFixed", ""},
 		},
 		{
-			name:     "a nil resolver keeps every class",
-			resolved: nil,
+			name:     "a nil probe keeps every class",
+			probe:    nil,
 			wantLive: []string{"noBaseToDate", "stillBroken", "wasFixed", ""},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sum := summarizeTrunkRed(read, tc.resolved)
+			sum := summarizeTrunkRed(read, tc.probe)
 			var live []string
 			for _, c := range sum.Classes {
 				live = append(live, c.FirstBreak)
@@ -506,17 +709,122 @@ func TestSummarizeTrunkRedKeepsUnprovableClasses(t *testing.T) {
 		}
 	})
 
-	// The keep-side guard has to hold against a predicate that claims EVERYTHING is
-	// resolved. Only the two classes carrying both a base and a symbol may go.
-	t.Run("an always-true resolver cannot drop an unprovable class", func(t *testing.T) {
-		sum := summarizeTrunkRed(read, func(trunkRedBreak) bool { return true })
+	// The keep-side guard has to hold against a probe that claims EVERYTHING is resolved.
+	// Only the two classes carrying both a base and a symbol may go.
+	t.Run("an always-resolved probe cannot drop an unprovable class", func(t *testing.T) {
+		sum := summarizeTrunkRed(read, trunkRedProbeAlwaysResolved())
 		var live []string
 		for _, c := range sum.Classes {
 			live = append(live, c.FirstBreak)
 		}
 		sort.Strings(live)
 		if strings.Join(live, "|") != "|noBaseToDate" {
-			t.Fatalf("no-base and no-symbol classes must survive an always-true resolver; got %v", live)
+			t.Fatalf("no-base and no-symbol classes must survive an always-resolved probe; got %v", live)
+		}
+	})
+
+	// Surfacing is not the same as asserting. Every class the fold could not prove must
+	// carry a NAMED reason, and a probe that answers unprovable without one must be given
+	// one — an unexplained line in this view is the wall of undifferentiated "shared
+	// breaks" the whole resolve path exists to stop printing.
+	t.Run("every surfaced class carries a named reason", func(t *testing.T) {
+		for _, probe := range []func(trunkRedBreak) trunkRedVerdict{
+			nil,
+			resolveOnlyTheFixed,
+			trunkRedProbeAlwaysResolved(),
+			func(trunkRedBreak) trunkRedVerdict { return trunkRedVerdict{Status: trunkRedStatusUnprovable} },
+		} {
+			sum := summarizeTrunkRed(read, probe)
+			if len(sum.Classes) == 0 {
+				t.Fatalf("fixture must always surface something")
+			}
+			for _, c := range sum.Classes {
+				if c.Status != trunkRedStatusUnprovable {
+					t.Fatalf("class %q: no synthetic probe here proves a break live; got status %q", c.Class, c.Status)
+				}
+				if strings.TrimSpace(c.KeepReason) == "" {
+					t.Fatalf("class %q surfaced with no reason", c.Class)
+				}
+				if !strings.Contains(trunkRedStatusLabel(c), c.KeepReason) {
+					t.Fatalf("class %q label %q must show its reason %q", c.Class, trunkRedStatusLabel(c), c.KeepReason)
+				}
+			}
+		}
+	})
+
+	// The grade must be usable as an ordering: a class PROVEN still undefined at HEAD is
+	// the only one a reader can act on without re-deriving the evidence, so it goes first
+	// even when a bigger unprovable class would otherwise outrank it on session spread.
+	t.Run("a proven-live class outranks a larger unprovable one", func(t *testing.T) {
+		probe := func(b trunkRedBreak) trunkRedVerdict {
+			if b.FirstBreak == "stillBroken" {
+				return trunkRedVerdict{Status: trunkRedStatusLive}
+			}
+			return trunkRedUnprovable("fixture keeps the rest")
+		}
+		sum := summarizeTrunkRed(read, probe)
+		if len(sum.Classes) == 0 || sum.Classes[0].FirstBreak != "stillBroken" {
+			t.Fatalf("the proven-live class must sort first; got %+v", sum.Classes)
+		}
+		if sum.Classes[0].Status != trunkRedStatusLive || sum.Classes[0].KeepReason != "" {
+			t.Fatalf("a proven-live class carries no keep reason; got %+v", sum.Classes[0])
+		}
+		if sum.LiveClasses != 1 || sum.LiveRows != 1 {
+			t.Fatalf("want 1 live class / 1 live row; got %d / %d", sum.LiveClasses, sum.LiveRows)
+		}
+		if sum.UnprovableClasses+sum.LiveClasses != len(sum.Classes) {
+			t.Fatalf("every surfaced class must be graded exactly once; got live=%d unprovable=%d of %d",
+				sum.LiveClasses, sum.UnprovableClasses, len(sum.Classes))
+		}
+		if sum.UnprovableRows+sum.LiveRows != sum.Total {
+			t.Fatalf("every surfaced row must be graded exactly once; got live=%d unprovable=%d of %d",
+				sum.LiveRows, sum.UnprovableRows, sum.Total)
+		}
+	})
+}
+
+// TestRenderTrunkRedNeverAssertsAnUncheckedClassIsRed is the anti-regression witness for
+// the mistake this view kept making: printing "Each break below is ALREADY red on the
+// trunk" over a list nothing had checked against HEAD. A class the fold could not prove
+// must render as unprovable WITH its reason, and the blanket claim must appear only over
+// classes that earned it.
+func TestRenderTrunkRedNeverAssertsAnUncheckedClassIsRed(t *testing.T) {
+	content := trunkRedTestLedger(t,
+		trunkRedRecord{Gate: "commit", BaseSha: "b1", Packages: []string{"pkg/unknowable"}, FirstBreak: "Sym", Session: "s1"},
+	)
+
+	t.Run("an unprovable-only view makes no liveness claim", func(t *testing.T) {
+		sum := summarizeTrunkRed(content, func(trunkRedBreak) trunkRedVerdict {
+			return trunkRedUnprovable(trunkRedReasonOutOfModule)
+		})
+		out := renderTrunkRed(sum)
+		if !strings.Contains(out, "unprovable: "+trunkRedReasonOutOfModule) {
+			t.Fatalf("the reason must be on the class line:\n%s", out)
+		}
+		if strings.Contains(out, "still undefined at HEAD]") {
+			t.Fatalf("nothing here was proven still undefined:\n%s", out)
+		}
+		if strings.Contains(out, "actually biting") {
+			t.Fatalf("the live-break banner must not print with zero live classes:\n%s", out)
+		}
+		if !strings.Contains(out, "0 still undefined at HEAD, 1 unprovable") {
+			t.Fatalf("the headline must split proven from unprovable:\n%s", out)
+		}
+	})
+
+	t.Run("a proven-live view says so, and says why", func(t *testing.T) {
+		sum := summarizeTrunkRed(content, func(trunkRedBreak) trunkRedVerdict {
+			return trunkRedVerdict{Status: trunkRedStatusLive}
+		})
+		out := renderTrunkRed(sum)
+		if !strings.Contains(out, "[still undefined at HEAD] pkg/unknowable") {
+			t.Fatalf("a proven class must be labelled as such:\n%s", out)
+		}
+		if !strings.Contains(out, "1 still undefined at HEAD, 0 unprovable") {
+			t.Fatalf("the headline must count the proven class:\n%s", out)
+		}
+		if strings.Contains(out, "unprovable]") {
+			t.Fatalf("no unprovable banner belongs in an all-proven view:\n%s", out)
 		}
 	})
 }
@@ -597,13 +905,13 @@ func TestTrunkRedSymbolDefinedAtHead(t *testing.T) {
 	}
 }
 
-// TestTrunkRedGitResolverSecondConjunct is the witness that ancestry ALONE cannot drop a
+// TestTrunkRedGitProbeSecondConjunct is the witness that ancestry ALONE cannot drop a
 // class. Both breaks below share one base sha that really is a strict ancestor of the
 // remote trunk, so conjunct 1 is constant and true for both; the ONLY difference is
 // whether the first-break symbol is defined at HEAD. Deleting conjunct 2 reds the second
 // assertion, which is the whole point of this issue: a base becomes an ancestor the
 // moment any unrelated peer commit lands, so ancestry alone would fold out a live break.
-func TestTrunkRedGitResolverSecondConjunct(t *testing.T) {
+func TestTrunkRedGitProbeSecondConjunct(t *testing.T) {
 	root := repoRoot()
 	if strings.TrimSpace(root) == "" {
 		t.Skip("no repo root resolvable; this witness needs real git")
@@ -618,20 +926,22 @@ func TestTrunkRedGitResolverSecondConjunct(t *testing.T) {
 		t.Skipf("%s is not a strict ancestor of the remote trunk here", base)
 	}
 
-	resolve := trunkRedGitResolver(root)
+	probe := trunkRedGitProbe(root)
 	pkgs := []string{"github.com/anthony-chaudhary/fak/cmd/fak"}
 
 	fixed := trunkRedBreak{BaseSha: base, FirstBreak: "summarizeTrunkRed", Packages: pkgs}
-	if !resolve(fixed) {
-		t.Fatalf("both conjuncts hold (ancestor base + symbol defined at HEAD): must resolve")
+	if got := probe(fixed); got.Status != trunkRedStatusResolved {
+		t.Fatalf("both conjuncts hold (ancestor base + symbol defined at HEAD): must resolve; got %q (%s)", got.Status, got.Reason)
 	}
 	stillBroken := trunkRedBreak{BaseSha: base, FirstBreak: "trunkRedSymbolThatIsDefinedNowhere5356", Packages: pkgs}
-	if resolve(stillBroken) {
+	if got := probe(stillBroken); got.Status == trunkRedStatusResolved {
 		t.Fatalf("ancestry alone must NOT resolve a break whose symbol is still undefined at HEAD")
 	}
-	// A synthetic package path leaves nothing to search: unresolvable, so kept.
+	// A synthetic package path leaves nothing to search: unresolvable, so kept — and the
+	// view has to SAY that is why, not imply the break is live.
 	foreign := trunkRedBreak{BaseSha: base, FirstBreak: "summarizeTrunkRed", Packages: []string{"buildcheck.test/p"}}
-	if resolve(foreign) {
-		t.Fatalf("a break in an out-of-module package must never be provably resolved")
+	got := probe(foreign)
+	if got.Status != trunkRedStatusUnprovable || got.Reason != trunkRedReasonOutOfModule {
+		t.Fatalf("an out-of-module break must be unprovable/%q; got %q (%s)", trunkRedReasonOutOfModule, got.Status, got.Reason)
 	}
 }
