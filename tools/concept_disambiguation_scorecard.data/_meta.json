@@ -850,6 +850,11 @@
           "category": "incidental",
           "reason": "not a symbol: the token extractor split the tab-separated header literal DRIFT/AGE_H/SESSION/LEAVES at its tab escape and glued the escape letter onto the column name SESSION",
           "token": "tSESSION"
+        },
+        {
+          "category": "incidental",
+          "reason": "An internal helper that lists peer checkpoint refs under refs/fak/wip; a git-read detail of the existing checkpoint concept, not a distinct position.",
+          "token": "wipPeerCheckpointSessions"
         }
       ],
       "id": "session-runtime",
@@ -888,7 +893,8 @@
         "tSESSION",
         "topsessions",
         "totalslots",
-        "tuisessionrow"
+        "tuisessionrow",
+        "wipPeerCheckpointSessions"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -1768,6 +1774,16 @@
           "category": "incidental",
           "reason": "A row of measured data in the taskvc reboot-survival inventory, not a term in the audit's vocabulary. inventory.go is a census RECORD: each entry names one live Windows Scheduled Task and the installer basename that recreates it, as observed on this fleet on 2026-07-26. Its meaning is entirely given by the pair it forms, and the roster changes whenever a loop is added or retired. Positioning these would book concept coverage for the contents of a data table rather than for the audit's actual vocabulary (ORPHAN, INSTALLER_NAME_DRIFT, DeclaredTaskNames, Verify), and would go stale on the next fleet change without any concept having moved.",
           "token": "register_bench_plan_doc"
+        },
+        {
+          "category": "incidental",
+          "reason": "The options-taking variant of the existing wipLand verb; it carries no new concept, only the parameter object for the land scope declaration already positioned as wip land.",
+          "token": "wipLandWith"
+        },
+        {
+          "category": "incidental",
+          "reason": "The parameter struct for wipLandWith; a Go options-carrier for the already-positioned land verb, holding no distinction of its own.",
+          "token": "wipLandOptions"
         }
       ],
       "exclude": [
@@ -1813,7 +1829,9 @@
         "planting",
         "plants",
         "register_bench_plan_doc",
-        "runAblatePlan"
+        "runAblatePlan",
+        "wipLandOptions",
+        "wipLandWith"
       ],
       "min_files": 2,
       "name": "Plan family",

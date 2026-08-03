@@ -30,10 +30,22 @@ const stampMarker = "fak-wip: "
 
 // Stamp is the metadata a checkpoint records in its commit message. It is the
 // portable identity of the checkpoint, independent of the object's git internals.
+//
+// Leaves and Scope answer two DIFFERENT questions and must not be conflated.
+// Leaves is descriptive — the directories the CAPTURE happened to sweep up, which
+// on a shared working tree includes every concurrently-dirty peer. Scope is a
+// CLAIM: the paths the capturing session declared it owns. A capture is tree-wide
+// by design (that width is what makes it lossless for crash recovery), so the ref's
+// session key names the capturer, never the author; Scope is the only field that
+// carries authorship, and it is why a stamped checkpoint can be landed safely by a
+// LATER process — a fleet host recovering a crashed session cannot otherwise know
+// what the dead session owned. An empty Scope means "nothing declared", not
+// "everything claimed" (#5539).
 type Stamp struct {
 	SessionID      string   `json:"session_id"`
 	StartSHA       string   `json:"start_sha"`
 	Leaves         []string `json:"leaves,omitempty"`
+	Scope          []string `json:"scope,omitempty"`
 	Buildable      bool     `json:"buildable"`
 	CheckpointedAt int64    `json:"checkpointed_at"`
 }

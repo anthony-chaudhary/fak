@@ -84,10 +84,14 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 func wipUsage(w io.Writer) {
 	fmt.Fprint(w, `fak wip — working-tree checkpoint/restore over refs/fak/wip/* (#3872)
 
-  fak wip checkpoint [--session <id>] [-C <repo>] [--buildable=<bool>] [--json]
+  fak wip checkpoint [--session <id>] [-C <repo>] [--path <p>]... [--buildable=<bool>] [--json]
       Snapshot the current tracked working-tree delta into a gc-safe object under
       refs/fak/wip/<session>, WITHOUT touching the index, working tree, or a branch.
       Session defaults to $CLAUDE_CODE_SESSION_ID, else $FAK_SESSION_ID.
+      The capture is deliberately TREE-WIDE (a shared tree's peer edits included) so a
+      crashed session loses nothing. --path does NOT narrow it: it records what THIS
+      session claims, in the stamp, so a later 'fak wip land' — possibly run by a fleet
+      host that cannot ask the dead session — commits only those paths.
 
   fak wip autocheckpoint [--reason compaction|stop|doomloop|manual] [--session <id>] [-C <repo>] [--strict] [--json]
       Best-effort capture of the session's WIP at a risky boundary (#3877): the
@@ -103,12 +107,17 @@ func wipUsage(w io.Writer) {
       Print the checkpointed delta as an apply-able diff (default) or, with --apply,
       re-materialize it onto the current working tree.
 
-  fak wip land [<session>] [-C <repo>] [-m <subject>] [--push] [--json]
+  fak wip land [<session>] [-C <repo>] [-m <subject>] [--path <p>]... [--all] [--push] [--json]
       Turn a session's checkpoint into a real commit: materialize its delta into the
       working tree (refusing, never clobbering, if the tree has diverged), then commit
-      EXACTLY the delta's file set through safecommit (explicit pathspec, vetted so the
+      EXACTLY the declared file set through safecommit (explicit pathspec, vetted so the
       bare-commit guard stands down). The default subject is shaped to grade the dos
       commit-audit OK; -m overrides it. Session defaults to $CLAUDE_CODE_SESSION_ID.
+      Because the capture is tree-wide, land REFUSES (exit 3, TREE_WIDE_SNAPSHOT) to
+      commit an undeclared snapshot while another session holds a live checkpoint — that
+      would land a peer's work under your name. Declare your paths with --path (which
+      narrows both the commit and the patch applied), rely on the scope the checkpoint
+      stamped, or take the whole snapshot deliberately with --all.
 
   fak wip fence <file> [--feature <slug>] | --all-untracked [-C <repo>]
       Prepend //go:build wip_<slug> (+ blank line) so a not-yet-compiling untracked .go
@@ -245,6 +254,7 @@ type wipCheckpointResult struct {
 	Object     string   `json:"object,omitempty"`
 	StartSHA   string   `json:"start_sha"`
 	Leaves     []string `json:"leaves"`
+	Scope      []string `json:"scope,omitempty"` // the paths this session CLAIMS of the tree-wide capture (#5539)
 	Buildable  bool     `json:"buildable"`
 	Clean      bool     `json:"clean"`
 	Superseded bool     `json:"superseded,omitempty"` // a newer concurrent checkpoint won the ref (#3873)
@@ -257,6 +267,10 @@ func runWipCheckpoint(stdout, stderr io.Writer, argv []string) int {
 	session := fs.String("session", "", "session id to checkpoint under (default: $CLAUDE_CODE_SESSION_ID, else $FAK_SESSION_ID)")
 	repo := fs.String("C", "", "run in this git repo (default: cwd)")
 	buildable := fs.Bool("buildable", true, "record the checkpoint as buildable (advisory stamp field)")
+	var scope pathList
+	// No backticks in this usage string: flag.UnquoteUsage reads the first backticked
+	// span as the flag's VALUE NAME, so `fak wip land` would render as the argument name.
+	fs.Var(&scope, "path", "a repo-relative path this session CLAIMS of the (still tree-wide) capture (repeatable); recorded in the stamp so a later 'fak wip land' commits only these")
 	asJSON := fs.Bool("json", false, "emit the checkpoint result as JSON")
 	if code, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return code
@@ -275,7 +289,7 @@ func runWipCheckpoint(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	res, err := wipCheckpoint(context.Background(), *repo, sess, *buildable, time.Now().Unix())
+	res, err := wipCheckpointScoped(context.Background(), *repo, sess, *buildable, time.Now().Unix(), scope)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak wip checkpoint: %v\n", err)
 		return 1
@@ -294,6 +308,11 @@ func runWipCheckpoint(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "checkpointed session %s at %s (%d leaves) -> %s\n",
 		sess, shortWipSHA(res.StartSHA), len(res.Leaves), shortWipSHA(res.Object))
+	// Echo the claim back: a --path that silently recorded nothing would look identical
+	// to one that recorded the scope, and the scope is what a later land obeys.
+	if len(res.Scope) > 0 {
+		fmt.Fprintf(stdout, "  claimed scope (what `fak wip land` will commit): %s\n", strings.Join(res.Scope, ", "))
+	}
 	return 0
 }
 
@@ -394,7 +413,15 @@ func runWipAutoCheckpoint(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-// wipCheckpoint captures the working-tree delta — tracked modifications AND
+// wipCheckpoint captures the tree-wide delta with NO declared scope — the original
+// signature, kept for every caller that has no claim to record. See wipCheckpointScoped
+// for what a declared scope buys and why it is the LAND side, not the capture side,
+// that needs it.
+func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, nowUnix int64) (wipCheckpointResult, error) {
+	return wipCheckpointScoped(ctx, repo, session, buildable, nowUnix, nil)
+}
+
+// wipCheckpointScoped captures the working-tree delta — tracked modifications AND
 // untracked non-ignored files (#4336) — into a stamped commit and anchors it at
 // refs/fak/wip/<session>. It uses a THROWAWAY index (GIT_INDEX_FILE) seeded from
 // HEAD, so `git add -A` stages the delta there without ever touching the real
@@ -403,8 +430,16 @@ func runWipAutoCheckpoint(stdout, stderr io.Writer, argv []string) int {
 // the snapshot. The clean verdict is decided on the tree written AFTER untracked
 // staging: a tree identical to HEAD's means a clean tree — reported, no ref
 // written — so a pure-untracked WIP is never misreported as clean.
-func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, nowUnix int64) (wipCheckpointResult, error) {
+//
+// scope does NOT narrow the capture: on a shared working tree the snapshot must stay
+// tree-wide or a crashed session's undeclared edits become unrecoverable, which is
+// strictly worse than storing too much. What scope narrows is the LAND — it is recorded
+// in the stamp (wipref.Stamp.Scope) so a LATER process, a fleet host recovering a session
+// that can no longer be asked what it owned, commits only what that session claimed, with
+// no flags of its own (#5539). A nil/empty scope declares nothing.
+func wipCheckpointScoped(ctx context.Context, repo, session string, buildable bool, nowUnix int64, scope []string) (wipCheckpointResult, error) {
 	res := wipCheckpointResult{Session: session, Ref: wipref.SessionRef(session), Buildable: buildable, Leaves: []string{}}
+	res.Scope = wipNormalizeScope(scope)
 
 	head, err := gitWipOut(ctx, repo, nil, "rev-parse", "HEAD")
 	if err != nil {
@@ -446,10 +481,16 @@ func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, no
 	// CheckpointedAt stamp), so an unchanged tree would non-deterministically mint a duplicate
 	// ref whenever the two runs straddle a second boundary. If the current checkpoint already
 	// captured this exact tree, keep it — an unchanged tree never needs a new checkpoint.
+	// The one thing that reopens the debounce is a CHANGED CLAIM: the stamped scope is
+	// what a later land reads, so re-declaring it over an unchanged tree must actually
+	// rewrite the stamp rather than be absorbed as "nothing changed" (#5539).
 	if curOID, has, cerr := wipCurrentOID(ctx, repo, res.Ref); cerr == nil && has {
 		if curTree, terr := gitWipOut(ctx, repo, nil, "rev-parse", curOID+"^{tree}"); terr == nil && curTree == tree {
-			res.Object, res.Superseded = curOID, true
-			return res, nil
+			cur, rerr := wipRecordAt(ctx, repo, res.Ref, curOID)
+			if rerr == nil && wipSameScope(cur.Stamp.Scope, res.Scope) {
+				res.Object, res.Superseded = curOID, true
+				return res, nil
+			}
 		}
 	}
 
@@ -463,6 +504,7 @@ func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, no
 		SessionID:      session,
 		StartSHA:       head,
 		Leaves:         res.Leaves,
+		Scope:          res.Scope,
 		Buildable:      buildable,
 		CheckpointedAt: nowUnix,
 	})
@@ -480,6 +522,7 @@ func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, no
 			SessionID:      session,
 			StartSHA:       head,
 			Leaves:         res.Leaves,
+			Scope:          res.Scope,
 			Buildable:      buildable,
 			CheckpointedAt: nowUnix,
 		},
@@ -1100,6 +1143,7 @@ type wipLandResult struct {
 	Session      string   `json:"session"`
 	Object       string   `json:"object,omitempty"`       // the checkpoint commit landed
 	Files        []string `json:"files,omitempty"`        // the exact pathspec committed
+	Excluded     []string `json:"excluded,omitempty"`     // in the snapshot, deliberately NOT landed (#5539)
 	Materialized string   `json:"materialized,omitempty"` // applied | present | empty | conflict
 	Subject      string   `json:"subject,omitempty"`      // the commit subject used
 	SHA          string   `json:"committed_sha,omitempty"`
@@ -1117,9 +1161,16 @@ func runWipLand(stdout, stderr io.Writer, argv []string) int {
 	session := fs.String("session", "", "session id to land (default: $CLAUDE_CODE_SESSION_ID, else $FAK_SESSION_ID)")
 	message := fs.String("m", "", "commit subject (default: an audit-OK recovery subject naming the leaf + session)")
 	push := fs.Bool("push", false, "push after a verified commit")
+	var paths pathList
+	fs.Var(&paths, "path", "a repo-relative path to land (repeatable); narrows BOTH the pathspec committed and the patch materialized, leaving the rest of the snapshot alone")
+	all := fs.Bool("all", false, "land the WHOLE snapshot, a concurrent peer's captured edits included — the declared escape from the TREE_WIDE_SNAPSHOT refusal")
 	asJSON := fs.Bool("json", false, "emit the land result as JSON")
 	if code, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return code
+	}
+	if *all && len(paths) > 0 {
+		fmt.Fprintln(stderr, "fak wip land: --all and --path are mutually exclusive (--all takes the whole snapshot; --path declares a subset)")
+		return 2
 	}
 	// Session: an optional positional wins, else --session, else the env default the
 	// checkpoint verb uses — so `fak wip land` with no args lands your own checkpoint.
@@ -1143,7 +1194,12 @@ func runWipLand(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	res, code, err := wipLand(context.Background(), *repo, sess, strings.TrimSpace(*message), *push)
+	res, code, err := wipLandWith(context.Background(), *repo, sess, wipLandOptions{
+		Message: strings.TrimSpace(*message),
+		Push:    *push,
+		Paths:   paths,
+		All:     *all,
+	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak wip land: %v\n", err)
 	}
@@ -1157,6 +1213,10 @@ func runWipLand(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "landed %s: checkpoint %s (%d file(s)) committed %s [%s]\n",
 			sess, res.Object, len(res.Files), res.SHA, res.Grade)
 		fmt.Fprintf(stdout, "  subject: %s\n", res.Subject)
+		if len(res.Excluded) > 0 {
+			fmt.Fprintf(stdout, "  excluded %d captured file(s) outside the declared scope: %s\n",
+				len(res.Excluded), strings.Join(res.Excluded, ", "))
+		}
 		fmt.Fprintln(stdout, "  the delta is now in HEAD; `fak wip reap` will clear the checkpoint ref.")
 		return 0
 	}
@@ -1167,7 +1227,14 @@ func runWipLand(stdout, stderr io.Writer, argv []string) int {
 	return code
 }
 
-// wipLand turns a session's checkpoint into a real commit. It resolves the checkpoint,
+// wipLand lands a session's checkpoint with no declared scope — the original signature,
+// kept for callers that have no paths to declare. It is a thin wrapper over wipLandWith,
+// so those callers still get the #5539 refusal when the snapshot is unattributable.
+func wipLand(ctx context.Context, repo, session, message string, push bool) (wipLandResult, int, error) {
+	return wipLandWith(ctx, repo, session, wipLandOptions{Message: message, Push: push})
+}
+
+// wipLandWith turns a session's checkpoint into a real commit. It resolves the checkpoint,
 // materializes its delta into the WORKING TREE ONLY (never the index — so safecommit's
 // prestaged-overlap guard stays clean) when the delta is not already present, and
 // REFUSES rather than clobbering when the tree has diverged (a peer edited the same
@@ -1176,9 +1243,19 @@ func runWipLand(stdout, stderr io.Writer, argv []string) int {
 // sets FAK_SAFECOMMIT_VETTED so the BARE_COMMIT_SWEEP gate stands down and which verifies
 // only those paths landed (PATHSPEC_RACE). The default subject is shaped to grade the dos
 // commit-audit OK (a _CODE_VERBS word leads, no whole-word no-claim marker, source is
-// touched → diff-witnessed). Returns (result, exitCode, err): exit 0 committed/empty,
-// 3 a checkable refusal (diverged tree), 1 a runtime error or a safecommit refusal.
-func wipLand(ctx context.Context, repo, session, message string, push bool) (wipLandResult, int, error) {
+// touched → diff-witnessed).
+//
+// Because the CAPTURE is tree-wide (wipCheckpointScoped), the object routinely holds a
+// concurrent peer's edits, and land is the one verb that turns that snapshot into an
+// irreversible act. So land resolves a SCOPE first (wipResolveLandScope) and commits only
+// the files in it, refusing outright when the snapshot is unattributable. The scope also
+// narrows the patch materialized, not just the pathspec committed — otherwise a `--path`
+// land would still write a peer's hunks into the working tree.
+//
+// Returns (result, exitCode, err): exit 0 committed/empty, 3 a checkable refusal
+// (TREE_WIDE_SNAPSHOT, SCOPE_MATCHED_NOTHING, TREE_DIVERGED), 1 a runtime error or a
+// safecommit refusal.
+func wipLandWith(ctx context.Context, repo, session string, opts wipLandOptions) (wipLandResult, int, error) {
 	res := wipLandResult{Session: session}
 
 	ref := wipref.SessionRef(session)
@@ -1192,20 +1269,38 @@ func wipLand(ctx context.Context, repo, session, message string, push bool) (wip
 	}
 	res.Object = obj
 
-	files, err := wipDeltaFiles(ctx, repo, obj)
+	captured, err := wipDeltaFiles(ctx, repo, obj)
 	if err != nil {
 		return res, 1, err
 	}
-	res.Files = files
+	res.Files = captured
+	if len(captured) == 0 {
+		res.Materialized = "empty"
+		res.Reason = "EMPTY_DELTA"
+		return res, 0, nil // an empty checkpoint is a clean no-op, not an error
+	}
 
-	patch, _, dcode, err := gitWip(ctx, repo, nil, "diff", obj+"^1", obj)
+	// Decide WHAT may land before anything is materialized, so a refusal leaves the
+	// working tree exactly as it found it.
+	files, excluded, reason, err := wipResolveLandScope(ctx, repo, session, ref, obj, captured, opts)
+	if reason != "" {
+		res.Files, res.Excluded, res.Reason = nil, captured, reason
+		return res, 3, err
+	}
+	if err != nil {
+		return res, 1, err
+	}
+	res.Files, res.Excluded = files, excluded
+
+	diffArgs := append([]string{"diff", obj + "^1", obj, "--"}, files...)
+	patch, _, dcode, err := gitWip(ctx, repo, nil, diffArgs...)
 	if err != nil {
 		return res, 1, fmt.Errorf("git diff: %w", err)
 	}
 	if dcode != 0 {
 		return res, 1, fmt.Errorf("git diff exited %d", dcode)
 	}
-	if strings.TrimSpace(patch) == "" || len(files) == 0 {
+	if strings.TrimSpace(patch) == "" {
 		res.Materialized = "empty"
 		res.Reason = "EMPTY_DELTA"
 		return res, 0, nil // an empty checkpoint is a clean no-op, not an error
@@ -1227,7 +1322,7 @@ func wipLand(ctx context.Context, repo, session, message string, push bool) (wip
 		return res, 3, fmt.Errorf("working tree diverges from the %q checkpoint delta — re-checkpoint then land, or resolve with `fak wip reconcile`", session)
 	}
 
-	subject := message
+	subject := opts.Message
 	if subject == "" {
 		subject = wipLandSubject(session, files)
 	}
@@ -1238,7 +1333,7 @@ func wipLand(ctx context.Context, repo, session, message string, push bool) (wip
 		Paths:   files,
 		Message: subject,
 		SignOff: true,
-		Push:    push,
+		Push:    opts.Push,
 		// Scope the advisory commit lock to the TARGET repo, not the process cwd:
 		// safecommit's default lock path is derived from the current working directory,
 		// so a land invoked with -C on a different repo (a fleet host landing a crashed
