@@ -2,7 +2,9 @@
 """Hermetic tests for tools/proc_resource_guard.py (no real process scan)."""
 from __future__ import annotations
 
+import ast
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -697,6 +699,293 @@ class CpuReapConfirmTests(unittest.TestCase):
             self.assertEqual(self.mod.load_cpu_streaks(p), {"7:S": 3})
             (p / self.mod.CPU_STREAK_LEDGER).write_text("{not json", encoding="utf-8")
             self.assertEqual(self.mod.load_cpu_streaks(p), {})  # corrupt -> empty, no raise
+
+
+# --------------------------------------------------------------------------- #
+# `ps` dialect gate (#5541)
+# --------------------------------------------------------------------------- #
+# The Python half of internal/architest/ps_dialect_test.go. THAT gate is an AST gate
+# over Go source and structurally cannot see Python, which is why three Python `ps`
+# call sites still shipped the pre-#5385 argv verbatim long after the Go half was
+# fixed. Repairing them by hand repairs today; this is what stops the fourth copy.
+#
+# The defect being gated is NOT "the keyword is unportable". It is that an
+# UNMEASURABLE dimension came back indistinguishable from a measured zero: a `ps` that
+# rejects one requested keyword rejects the whole invocation, the collector returned
+# rows=[] paired with an EMPTY error string, and the guard printed scanned=0 / ok=true
+# / "no runaway or orphaned process; no action" for a host it had not measured at all.
+
+# Keywords procps-ng defines and BSD `ps` does not, with the reason each has no
+# portable spelling. Kept in step with ps_dialect_test.go's procpsOnlyKeywords.
+PROCPS_ONLY_KEYWORDS = {
+    "nlwp": "thread count; BSD ps has no thread-count keyword at all",
+    "etimes": "elapsed seconds; BSD spells it etime, FORMATTED [[dd-]hh:]mm:ss",
+    "cputimes": "cumulative CPU seconds; BSD spells it time, likewise formatted",
+}
+
+# Files allowed to hand `ps` a procps-only keyword ALONGSIDE portable ones. An entry
+# is EARNED by a test that pins the non-procps behaviour, exactly as internal/procguard
+# earns its exemption in the Go gate; a bare entry with nothing pinning it is how this
+# gate would rot into a rubber stamp.
+PS_DIALECT_AWARE = {
+    "proc_resource_guard.py":
+        "branches on platform.system(): PsDialectSpecTests pins the BSD argv "
+        "keyword-for-keyword and PsCensusErrorTests pins that a rejected `ps` reports "
+        "a named error instead of a clean host",
+}
+
+_PS_COLUMN_TOKEN = re.compile(r"^[a-z_]+=$")
+
+
+def ps_column_literals(source: str) -> list[dict]:
+    """Every `ps -o` column-list string literal in a Python source that names a
+    procps-ng-only keyword.
+
+    String LITERALS only (walked with ast), so a `#` comment discussing the two
+    dialects is not a finding -- a gate that argues with prose gets switched off.
+
+    ``fragment`` marks a literal that starts or ends with a comma: a piece of a
+    concatenated argv whose remaining columns live in a sibling literal. Such a piece
+    can never be judged "a lone column" on its own, which is what stops the rule below
+    being evaded by splitting one argv across two strings.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        # A peer's file caught mid-edit is not this gate's business.
+        return []
+    hits: list[dict] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        raw = node.value
+        tokens = [t for t in raw.split(",") if t]
+        if not tokens or not all(_PS_COLUMN_TOKEN.match(t) for t in tokens):
+            continue
+        columns = [t[:-1] for t in tokens]
+        procps = sorted(c for c in columns if c in PROCPS_ONLY_KEYWORDS)
+        if not procps:
+            continue
+        fragment = raw.startswith(",") or raw.endswith(",")
+        hits.append({
+            "literal": raw,
+            "line": node.lineno,
+            "columns": columns,
+            "procps_only": procps,
+            "fragment": fragment,
+            # A lone, complete column list loses ONLY the dimension its keyword names
+            # when a `ps` rejects it. Mixed with portable columns, that same rejection
+            # takes the portable readings down too and turns a one-dimension gap into
+            # a whole-census silent zero -- the actual bug.
+            "lone": (not fragment) and len(columns) == 1,
+        })
+    return hits
+
+
+class PsDialectSourceGateTests(unittest.TestCase):
+    def test_no_tools_script_mixes_a_procps_only_keyword_with_portable_columns(self):
+        offenders = []
+        for path in sorted((ROOT / "tools").glob("*.py")):
+            try:
+                source = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if path.name in PS_DIALECT_AWARE:
+                continue
+            for hit in ps_column_literals(source):
+                if hit["lone"]:
+                    continue
+                offenders.append("%s:%d %r names %s" % (
+                    path.name, hit["line"], hit["literal"], ",".join(hit["procps_only"])))
+        self.assertEqual(offenders, [], "\n".join([
+            "a `ps` argv mixes a procps-ng-only keyword with portable columns:",
+            *offenders,
+            "cure: branch the argv on platform.system() the way",
+            "tools/proc_resource_guard.py::_ps_census_spec does, leave the column the",
+            "other dialect lacks as PS_NO_COLUMN (None, never 0), and add the file to",
+            "PS_DIALECT_AWARE with the test that pins its non-procps behaviour.",
+        ]))
+
+    def test_every_dialect_aware_entry_still_has_something_to_excuse(self):
+        # An allowlist that outlives the call site it excuses is how the next copy gets
+        # waved through.
+        for name in PS_DIALECT_AWARE:
+            hits = ps_column_literals((ROOT / "tools" / name).read_text(encoding="utf-8"))
+            self.assertTrue(
+                any(not h["lone"] for h in hits),
+                "%s no longer mixes a procps-only keyword with portable columns; drop "
+                "its PS_DIALECT_AWARE entry" % name)
+
+    def test_detector_catches_a_mixed_argv_and_clears_a_portable_one(self):
+        # Non-vacuity for the detector itself. The offending column list is ASSEMBLED at
+        # runtime so this test file does not itself contain the literal it hunts for.
+        mixed = "pid=," + "nlwp" + "=,rss=,comm="
+        hits = ps_column_literals('ARGS = ["ps", "-eo", %r]' % mixed)
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["procps_only"], ["nlwp"])
+        self.assertFalse(hits[0]["lone"])
+        # The BSD spelling of the same census is clean.
+        self.assertEqual(ps_column_literals('ARGS = ["ps", "-eo", "pid=,rss=,time=,comm="]'), [])
+
+    def test_detector_treats_a_lone_column_and_a_concatenated_piece_differently(self):
+        lone = ps_column_literals('ARGS = ["ps", "-eo", %r]' % ("nlwp" + "="))
+        self.assertTrue(lone[0]["lone"])  # only the thread dimension can be lost
+        piece = ps_column_literals('ARGS = ["ps", "-eo", "pid=,ppid=," + %r + "comm="]'
+                                   % ("etimes" + "=,"))
+        self.assertTrue(piece and not piece[0]["lone"])  # a fragment is never "lone"
+
+
+class PsDialectSpecTests(unittest.TestCase):
+    """The BSD argv must name no keyword BSD `ps` cannot answer, and the Linux argv
+    must keep the one that matters. Reverting _ps_census_spec to a single unconditional
+    procps argv fails the first of these; "fixing" BSD by dropping nlwp everywhere
+    fails the second."""
+
+    def setUp(self):
+        self.mod = load()
+
+    def _args(self, spec):
+        return " ".join(spec["args"])
+
+    def test_module_keyword_list_matches_the_gate(self):
+        # The module names the same three keywords the gate hunts for. A list that
+        # drifts from the gate's is a gate that has stopped seeing what the code does.
+        self.assertEqual(sorted(self.mod.PS_PROCPS_ONLY_KEYWORDS),
+                         sorted(PROCPS_ONLY_KEYWORDS))
+
+    def test_bsd_census_argv_names_no_procps_only_keyword(self):
+        args = self._args(self.mod._ps_census_spec("Darwin"))
+        for keyword, why in PROCPS_ONLY_KEYWORDS.items():
+            self.assertNotIn(keyword, args, "BSD census argv names %s -- %s" % (keyword, why))
+
+    def test_bsd_relations_argv_names_no_procps_only_keyword(self):
+        args = self._args(self.mod._ps_relations_spec("Darwin"))
+        for keyword, why in PROCPS_ONLY_KEYWORDS.items():
+            self.assertNotIn(keyword, args, "BSD relations argv names %s -- %s" % (keyword, why))
+
+    def test_linux_census_argv_keeps_the_thread_keyword(self):
+        # The control. Fixing BSD by blinding Linux would disable the thread dimension
+        # this guard exists for (the incident was one process at ~129,427 threads).
+        self.assertIn("nlwp", self._args(self.mod._ps_census_spec("Linux")))
+        self.assertIn("etimes", self._args(self.mod._ps_relations_spec("Linux")))
+
+    def test_unwitnessed_platform_keeps_the_invocation_known_to_work(self):
+        # Only Darwin was actually witnessed rejecting the keywords; an unwitnessed
+        # POSIX name keeps the procps argv, and _census_error is what stops such a host
+        # reading as an empty machine in the meantime.
+        self.assertFalse(self.mod._ps_bsd("Linux"))
+        self.assertTrue(self.mod._ps_bsd("Darwin"))
+
+    def test_bsd_row_leaves_threads_unmeasured_not_zero(self):
+        # BSD census table: pid rss time comm.
+        rows = self.mod._parse_posix_ps("  1 2048 01:23 launchd\n",
+                                        self.mod._ps_census_spec("Darwin"))
+        self.assertEqual(rows[0]["pid"], 1)
+        self.assertEqual(rows[0]["ws_mb"], 2)
+        self.assertIsNone(rows[0]["threads"])       # named absent ...
+        self.assertNotEqual(rows[0]["threads"], 0)  # ... never a measurement of zero
+        self.assertEqual(rows[0]["cpu_s"], 83.0)    # mm:ss read as seconds, not dropped
+
+    def test_bsd_relations_age_is_parsed_not_zeroed(self):
+        rows = self.mod._parse_posix_ps_relations(
+            "20044 100 2-03:04:05 python python -m dos_mcp.server\n",
+            self.mod._ps_relations_spec("Darwin"))
+        self.assertEqual(rows[0]["age_sec"], 2 * 86400 + 3 * 3600 + 4 * 60 + 5)
+        self.assertIn("dos_mcp.server", rows[0]["cmdline"])
+
+    def test_unreadable_duration_column_is_absent_not_zero(self):
+        # A `-` placeholder, a leaked header, an unexpected dialect. Zero age means
+        # "started this instant" and zero CPU means "never ran"; both are claims.
+        for bad in ("-", "", "  ", "nan", "1e9", "1:2:3:4", "-5"):
+            self.assertIsNone(self.mod._parse_ps_duration(bad), repr(bad))
+        self.assertEqual(self.mod._parse_ps_duration("8123"), 8123.0)  # procps: bare seconds
+
+
+class PsCensusErrorTests(unittest.TestCase):
+    """A `ps` that yielded nothing must be reported as NO CENSUS, never as a quiet host.
+
+    The witnessed shape (a real non-procps `ps`, the MSYS2 build shipped with Git for
+    Windows, which does not implement -o at all):
+
+        $ ps -eo pid=,nlwp=,rss=,cputimes=,comm=
+        ps: unknown option -- o          # on stderr
+        ; exit 1, stdout empty
+
+    Before #5541 that reached the payload as rows=[] with collect_error="", so ok was
+    True, scanned was 0 and next_action was "no runaway or orphaned process; no
+    action". Reverting _census_error to an unconditional "" fails every test here.
+    """
+
+    REJECTED = ("", "exit status 1: ps: unknown option -- o")
+
+    def setUp(self):
+        self.mod = load()
+
+    def _with_tool(self, stdout, error, fn, *args):
+        original = self.mod._run_tool
+        self.mod._run_tool = lambda *_a, **_k: (stdout, error)
+        try:
+            return fn(*args)
+        finally:
+            self.mod._run_tool = original
+
+    def test_rejected_census_is_a_named_error_not_a_clean_host(self):
+        rows, err = self._with_tool(*self.REJECTED, self.mod._collect_posix, "Linux")
+        self.assertEqual(rows, [])
+        self.assertTrue(err, "a `ps` that produced no census must say so")
+        self.assertIn("unknown option", err)  # the sentence that names the bug on sight
+
+    def test_rejected_relations_is_a_named_error_not_a_quiet_host(self):
+        rows, err = self._with_tool(*self.REJECTED, self.mod._collect_posix_relations, "Linux")
+        self.assertEqual(rows, [])
+        self.assertTrue(err)
+
+    def test_payload_from_a_rejected_census_is_not_ok(self):
+        _rows, err = self._with_tool(*self.REJECTED, self.mod._collect_posix, "Linux")
+        payload = self.mod.build_payload(
+            [], max_threads=2000, max_handles=0, max_ws_mb=0, max_cpu_pct=0,
+            cpu_reap_confirm=1, cpu_streaks_prev={}, protected_pids=frozenset(),
+            allow_names=frozenset(), enact=False, killer=lambda pid: (True, ""),
+            collect_error=err, orphan_rows=[],
+        )
+        self.assertFalse(payload["ok"])
+        self.assertIsNotNone(payload["collect_error"])
+        self.assertIn("scan failed", payload["next_action"])
+
+    def test_a_ps_that_printed_rows_then_failed_is_still_a_census(self):
+        # The opposite direction, and it matters just as much: ok is computed as
+        # `not collect_error`, so keeping the error here would turn a host whose census
+        # WORKED into a permanent ACTION.
+        rows, err = self._with_tool(
+            "  38264 129427 9474048 8123 llama-cli\n", "exit status 1: some moan",
+            self.mod._collect_posix, "Linux")
+        self.assertEqual(err, "")
+        self.assertEqual(rows[0]["threads"], 129427)
+
+    def test_a_usage_message_on_stdout_does_not_count_as_a_census(self):
+        # Some tools print their complaint on stdout. Those lines must not become
+        # phantom rows, or they would suppress the very error that explains the
+        # empty result.
+        rows, err = self._with_tool(
+            "usage: ps [-AaCcEefhjlMmrSTvwXx] [-O fmt | -o fmt]\n",
+            "exit status 1: bad usage", self.mod._collect_posix, "Linux")
+        self.assertEqual(rows, [])
+        self.assertTrue(err)
+
+    def test_a_working_ps_reports_no_error(self):
+        # The green control: nothing above is achieved by calling every scan broken.
+        rows, err = self._with_tool(
+            "  38264 129427 9474048 8123 llama-cli\n      4   613    14336 0 systemd\n",
+            "", self.mod._collect_posix, "Linux")
+        self.assertEqual(err, "")
+        self.assertEqual([r["pid"] for r in rows], [38264, 4])
+
+    def test_missing_ps_binary_is_reported_not_swallowed(self):
+        # _run_tool's own failure path, exercised for real: a program that does not
+        # exist must come back as a named error, not an empty successful scan.
+        out, err = self.mod._run_tool(30, "fak-no-such-census-tool-5541", "-eo")
+        self.assertEqual(out, "")
+        self.assertTrue(err)
 
 
 if __name__ == "__main__":

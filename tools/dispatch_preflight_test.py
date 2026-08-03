@@ -1557,5 +1557,83 @@ class WeeklyCapCooldownTest(unittest.TestCase):
         self.assertIn("1h7m0s", text)
 
 
+class _FakeCompleted:
+    """Stand-in for subprocess.CompletedProcess with just the fields the probe reads."""
+
+    def __init__(self, stdout: str = "", stderr: str = "", returncode: int = 0) -> None:
+        self.stdout, self.stderr, self.returncode = stdout, stderr, returncode
+
+
+class PosixThreadProbeDialectTests(unittest.TestCase):
+    """#5541 -- the POSIX thread probe hands `ps` the keyword `nlwp`, which only
+    procps-ng knows. That is deliberately NOT treated as the defect the process guard's
+    census had, and these tests are the record of why.
+
+    Two things make this site safe where tools/proc_resource_guard.py's census was not:
+
+      * `nlwp` is the SOLE column of the argv. A `ps` that rejects the keyword destroys
+        exactly the dimension that keyword names and nothing else. The census argv
+        mixed it with pid/rss/comm, so one unknown keyword took the entire scan down
+        and the guard then reported a measured-clean host.
+      * nothing parses out of that failure, so the probe returns None -- an ABSENT
+        reading -- and host_capacity() skips the dimension instead of charging it as
+        "0 threads in use", which would fabricate the whole thread budget as headroom.
+
+    BSD `ps` has no thread-count keyword AT ALL, so there is no portable spelling to
+    branch to: "unmeasured" is the correct answer on such a host. These tests pin that
+    it is the answer actually produced, and they are what earns this file the `lone
+    column` allowance in the `ps`-dialect gate in tools/proc_resource_guard_test.py.
+    """
+
+    # A real non-procps `ps` rejecting the invocation: empty stdout, non-zero exit,
+    # the diagnostic on stderr. Witnessed verbatim from the MSYS2 `ps` shipped with
+    # Git for Windows, which does not implement -o at all.
+    REJECTED = _FakeCompleted(stdout="", stderr="ps: unknown option -- o\n", returncode=1)
+
+    def test_rejected_ps_leaves_the_thread_reading_absent_not_zero(self) -> None:
+        mod = load()
+        with mock.patch.object(mod.subprocess, "run", return_value=self.REJECTED):
+            _ram, threads = mod._ram_and_threads_posix()
+        self.assertIsNone(threads)          # a named absent measurement ...
+        self.assertNotEqual(threads, 0)     # ... and specifically not a measured zero
+
+    def test_absent_thread_reading_is_skipped_not_charged_as_headroom(self) -> None:
+        mod = load()
+        absent = mod.host_capacity(cores=16, free_ram_mb=32000, total_threads=None)
+        measured_zero = mod.host_capacity(cores=16, free_ram_mb=32000, total_threads=0)
+        # Unmeasured drops the dimension; a measured zero is a real reading and keeps it.
+        self.assertNotIn("threads", absent["components"])
+        self.assertIn("threads", measured_zero["components"])
+        self.assertIsNone(absent["total_threads"])
+
+    def test_working_ps_still_sums_every_thread_count(self) -> None:
+        # The green control: the assertions above are not achieved by calling the probe
+        # broken on every host.
+        mod = load()
+        working = _FakeCompleted(stdout="  613\n  328\n   90\n", returncode=0)
+        with mock.patch.object(mod.subprocess, "run", return_value=working):
+            _ram, threads = mod._ram_and_threads_posix()
+        self.assertEqual(threads, 613 + 328 + 90)
+
+    def test_thread_probe_argv_asks_for_exactly_one_column(self) -> None:
+        # The property that makes the lone procps-only keyword tolerable here. If a
+        # portable column is ever added alongside it, this fails and the site has to be
+        # dialect-branched like tools/proc_resource_guard.py::_ps_census_spec.
+        mod = load()
+        seen: list[list[str]] = []
+
+        def record(cmd, *_a, **_k):
+            seen.append(list(cmd))
+            return self.REJECTED
+
+        with mock.patch.object(mod.subprocess, "run", side_effect=record):
+            mod._ram_and_threads_posix()
+        self.assertEqual(len(seen), 1)
+        columns = [c for c in seen[0][-1].split(",") if c]
+        self.assertEqual(len(columns), 1, "argv %r asks for more than the one column "
+                                          "procps-only `nlwp` can lose on its own" % (seen[0],))
+        self.assertTrue(columns[0].startswith("nlwp"))
+
+
 if __name__ == "__main__":
     unittest.main()
