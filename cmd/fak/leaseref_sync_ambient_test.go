@@ -7,6 +7,8 @@ package main
 // region hold actually drives it at the before-decide / after-write boundaries.
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +72,103 @@ func TestAmbientLeaseRefSyncDegradesNonFatalWithoutOrigin(t *testing.T) {
 	report = ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", false)
 	if report.Outcome != loopdrive.LeaseRefSyncDegraded || report.Fatal {
 		t.Fatalf("fetch-only degrade = %+v, want nonfatal degraded", report)
+	}
+}
+
+// TestAmbientLeaseRefSyncGivesUpOnAStalledGitRunner is the #5564 witness: with a
+// git that never returns — an auth-stalled or black-holed remote, simulated
+// deterministically through internal/leaseref's injected-Runner seam rather than
+// against a real network — the ambient boundary must GIVE UP and report, not
+// block the tick that called it.
+//
+// It fails in two distinguishable ways on a regression, both of them loud. If
+// the call site goes back to an unexpirable context the runner's <-ctx.Done()
+// never fires and the select below fails the test in bounded time with the
+// diagnosis, instead of wedging the package suite until the go-test timeout —
+// which is exactly how this bug spent its career being misread as a flake. If
+// the deadline survives but moves to a per-step budget, the second transport
+// call arrives with a LIVE context and that assertion names it.
+func TestAmbientLeaseRefSyncGivesUpOnAStalledGitRunner(t *testing.T) {
+	restore := ambientLeaseRefSyncBudget
+	ambientLeaseRefSyncBudget = 200 * time.Millisecond
+	t.Cleanup(func() { ambientLeaseRefSyncBudget = restore })
+
+	type transportCall struct {
+		verb           string
+		hasDeadline    bool
+		expiredOnEntry bool
+	}
+	var calls []transportCall
+
+	// The stall. Only the two transport verbs hang; the local preamble git calls
+	// answer normally, so what is being witnessed is a wedged NETWORK git and not
+	// a store that cannot read its own ref database.
+	stalled := func(ctx context.Context, _ string, args ...string) (string, int, error) {
+		verb := ""
+		if len(args) != 0 {
+			verb = args[0]
+		}
+		switch verb {
+		case "push", "fetch":
+			_, hasDeadline := ctx.Deadline()
+			calls = append(calls, transportCall{verb: verb, hasDeadline: hasDeadline, expiredOnEntry: ctx.Err() != nil})
+			<-ctx.Done() // returns ONLY when the context does — never, if it cannot expire
+			return "", -1, ctx.Err()
+		case "for-each-ref":
+			// A non-empty local namespace, so the push direction is really attempted
+			// rather than short-circuited as PushSkippedEmpty (leaseref/sync.go).
+			return "refs/fak/locks/loop-region-loop\n", 0, nil
+		default:
+			return "", 0, nil
+		}
+	}
+	store := leaseref.NewWithRunner(stalled, t.TempDir())
+
+	// written=true plans BOTH steps (fetch-before-decide, push-after-write), which
+	// is what makes the one-budget-per-call property observable.
+	done := make(chan loopdrive.LeaseRefSyncReport, 1)
+	go func() {
+		done <- ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", true)
+	}()
+	var report loopdrive.LeaseRefSyncReport
+	select {
+	case report = <-done:
+	case <-time.After(30 * ambientLeaseRefSyncBudget):
+		t.Fatal("ambient lease-ref sync never returned against a stalled git: the sync context cannot expire, so a slow remote hangs the tick (#5564)")
+	}
+
+	if report.Outcome != loopdrive.LeaseRefSyncDegraded {
+		t.Fatalf("outcome = %q, want degraded — a give-up must be SURFACED, not swallowed: %+v", report.Outcome, report)
+	}
+	if report.Fatal {
+		t.Fatalf("a spent convergence budget must stay advisory, not fatal: %+v", report)
+	}
+	if report.Reason != loopdrive.ReasonLeaseRefSyncTransport {
+		t.Fatalf("reason = %q, want %q", report.Reason, loopdrive.ReasonLeaseRefSyncTransport)
+	}
+	if len(report.Failures) != 2 {
+		t.Fatalf("failures = %d, want both planned steps reported: %+v", len(report.Failures), report.Failures)
+	}
+	for _, f := range report.Failures {
+		if !strings.Contains(f, "budget") {
+			t.Errorf("failure %q does not name the deadline as the cause — the ledger reader would blame the remote", f)
+		}
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("transport calls = %+v, want one fetch then one push", calls)
+	}
+	if calls[0].verb != "fetch" || calls[1].verb != "push" {
+		t.Fatalf("transport order = %+v, want fetch-before-decide then push-after-write", calls)
+	}
+	if !calls[0].hasDeadline {
+		t.Error("the first transport call carried NO deadline: the ambient sync is back on an unexpirable context (#5564)")
+	}
+	if calls[0].expiredOnEntry {
+		t.Error("the first transport call started already expired: the budget is not being spent on real work")
+	}
+	if !calls[1].expiredOnEntry {
+		t.Error("the second transport call got a fresh live context: the budget is per-STEP, so the tick's exposure still multiplies by the plan's length")
 	}
 }
 
