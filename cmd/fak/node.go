@@ -7,10 +7,15 @@ package main
 // Subcommands:
 //
 //	fak node install [--remote] [--addr ADDR] [--port N] [--key-env VAR] [--uninstall]
+//	                 [--base-url URL] [--provider NAME] [--model ID] [--env NAME=VALUE]
 //	                           Install the fak serve gateway as a system service on this
 //	                           machine. macOS: launchd KeepAlive agent with caffeinate
 //	                           wrapper. Linux: systemd --user unit. Windows: an ONSTART
 //	                           Scheduled Task. Prints client env lines after install.
+//	                           --base-url/--provider/--model/--env select the UPSTREAM the
+//	                           installed unit proxies, so the SAME installer produces both
+//	                           the default Anthropic adjudication proxy and a local-model
+//	                           gateway (#5555) instead of only the former.
 //	fak node status            Show service state + gateway health (no flags).
 //	fak node use HOST[:PORT] [--key KEY] [--env] [--no-check]
 //	                           Write ~/.config/fak/node.json and print the two export
@@ -36,6 +41,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,10 +125,217 @@ var nodeDefaultPolicyJSON = []byte(`{
 }`)
 
 // nodeGatewayLabel is the launchd / systemd service name.
+//
+// ONE label, deliberately (#5555, shape 2). The label names "the fak serve gateway on
+// this host", and the installer — not a second hand-written artifact — is what decides
+// which UPSTREAM that one gateway proxies (--base-url / --provider / --model / --env).
+// The alternative shape, deriving a per-upstream label so two gateways can load at once,
+// was rejected: two gateways also contend for one port, one node-install.json install
+// record, and one client-side node.json, so coexistence is a much larger change than a
+// label suffix — and it would STILL need these upstream flags to be reachable at all.
+// Keeping one label means `--uninstall` and `status` continue to name exactly the unit
+// that exists, with no stale-label discovery path to get wrong.
 const nodeGatewayLabel = "com.fak.serve-gateway"
 
 // nodeWindowsTaskName is the Scheduled Task name the Windows install registers.
 const nodeWindowsTaskName = "FakServeGateway"
+
+// Upstream defaults for the installed unit. The historical install pinned these two
+// values into every rendered unit; they are now the DEFAULTS of --provider/--base-url
+// so the unchanged invocation renders byte-identical argv to what it always did.
+const (
+	nodeDefaultProvider    = "anthropic"
+	nodeDefaultUpstreamURL = "https://api.anthropic.com"
+	// nodeLocalWireProvider is the provider assumed when an operator repoints --base-url
+	// without naming a wire: an OpenAI-compatible /v1 endpoint, which is what llama-server,
+	// vLLM, LM Studio and Ollama all speak. Chosen as the default over "anthropic" because
+	// it is the CREDENTIAL-SAFE direction — see nodeResolveUpstream.
+	nodeLocalWireProvider = "openai"
+)
+
+// nodeUpstream is the resolved upstream the installed unit proxies: the wire, the base
+// URL, and the model id to advertise. It is the only part of the unit that differs
+// between the Anthropic adjudication proxy and a local-model gateway, which is why it
+// is a value threaded into the pure renderers rather than three template literals.
+type nodeUpstream struct {
+	Provider string
+	BaseURL  string
+	Model    string // empty ⇒ --model is omitted and `fak serve` keeps its own default
+}
+
+// nodeEnvVar is one extra EnvironmentVariables entry for the installed unit — the
+// launchd `EnvironmentVariables` dict, the systemd `Environment=` lines, or the Windows
+// runner's `set` lines. A local-model gateway needs these (long-turn timeouts, provider
+// extra-body tuning), and before #5555 there was no way to pass them.
+type nodeEnvVar struct{ Name, Value string }
+
+// nodeEnvFlag is the repeatable --env NAME=VALUE flag.
+//
+// String() reports the NAMES only and never a value: the flag package calls String() to
+// render defaults in `--help`, and an installer that echoed the value of every --env
+// would print whatever an operator passed there into terminal scrollback and CI logs.
+type nodeEnvFlag []nodeEnvVar
+
+func (f *nodeEnvFlag) String() string {
+	if f == nil || len(*f) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(*f))
+	for _, e := range *f {
+		names = append(names, e.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+func (f *nodeEnvFlag) Set(s string) error {
+	name, value, ok := strings.Cut(s, "=")
+	name = strings.TrimSpace(name)
+	if !ok || name == "" {
+		return fmt.Errorf("want NAME=VALUE (the name only is reported back; the value is never echoed)")
+	}
+	if !nodeValidEnvName(name) {
+		return fmt.Errorf("%q is not a valid environment variable name (want [A-Za-z_][A-Za-z0-9_]*)", name)
+	}
+	if name == "FAK_AUDIT_JOURNAL" {
+		return fmt.Errorf("FAK_AUDIT_JOURNAL is set by the installer itself; drop the --env entry")
+	}
+	for _, e := range *f {
+		if e.Name == name {
+			return fmt.Errorf("--env %s given twice", name)
+		}
+	}
+	*f = append(*f, nodeEnvVar{Name: name, Value: value})
+	return nil
+}
+
+// nodeValidEnvName reports whether s is a POSIX-shaped environment variable name. The
+// name lands verbatim in a plist key / a systemd Environment= line / a cmd `set`, so a
+// name carrying a quote, a newline, or an `=` would corrupt the unit rather than fail.
+func nodeValidEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_':
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// nodeResolveUpstream resolves --provider/--base-url/--model into the upstream the
+// rendered unit proxies, and is where this installer's CREDENTIAL EGRESS policy lives.
+//
+// What the installed unit actually carries, and where it can go:
+//
+//   - The gateway's own inbound bearer (--key-env, default FAK_GATEWAY_KEY) is a DOOR
+//     key. `fak serve` compares it to the inbound x-api-key / Bearer and never sends it
+//     anywhere. It is separable from — and is not — the upstream provider credential.
+//   - The upstream credential is NOT installed at all: the unit never passes
+//     `fak serve --api-key-env`, so the gateway holds no upstream key of its own. On the
+//     ANTHROPIC wire only, the gateway forwards the CALLER's inbound key upstream (the
+//     transparent hop: gateway.anthropicUpstreamCredential → anthropicInboundKey, reached
+//     only when the live planner's provider is anthropic). On every other wire the
+//     caller's credential is never forwarded; the request body still is.
+//
+// So `--base-url` is exactly a "point a credential-bearing unit at another host" flag on
+// the anthropic wire, and a "point the prompts at another host" flag everywhere else.
+// The bound this function enforces:
+//
+//  1. --base-url with no --provider defaults to the OpenAI-compatible wire, not anthropic
+//     — the direction in which no caller credential is forwarded.
+//  2. The anthropic wire may only be pointed at Anthropic itself or at LOOPBACK. A remote
+//     non-Anthropic host on the anthropic wire is REFUSED, because that combination sends
+//     the caller's Anthropic key to a host of the flag's choosing. Loopback stays allowed
+//     (a local anthropic-wire shim); the credential still never leaves the machine.
+//  3. Any other non-loopback upstream is allowed but WARNED, naming the host, because
+//     prompts and transcripts egress there — and warned again when the scheme is plain
+//     http, which puts them on the wire in the clear.
+//
+// It returns the resolved upstream plus operator-facing warnings; an error means refuse.
+func nodeResolveUpstream(providerFlag, baseURLFlag, modelFlag string) (nodeUpstream, []string, error) {
+	provider := strings.ToLower(strings.TrimSpace(providerFlag))
+	baseURL := strings.TrimSpace(baseURLFlag)
+	model := strings.TrimSpace(modelFlag)
+
+	if baseURL == "" {
+		baseURL = nodeDefaultUpstreamURL
+		if provider == "" {
+			provider = nodeDefaultProvider
+		}
+	} else if provider == "" {
+		// An operator who repointed the upstream without naming a wire gets the
+		// OpenAI-compatible one: it is what local model servers speak, and it is the
+		// arm that forwards no caller credential.
+		provider = nodeLocalWireProvider
+		if nodeIsAnthropicUpstream(baseURL) {
+			provider = nodeDefaultProvider
+		}
+	}
+
+	switch provider {
+	case "openai", "anthropic", "gemini", "xai":
+	default:
+		return nodeUpstream{}, nil, fmt.Errorf("--provider %q is not an upstream wire (want openai, anthropic, gemini, or xai)", provider)
+	}
+
+	host, scheme, err := nodeUpstreamHost(baseURL)
+	if err != nil {
+		return nodeUpstream{}, nil, fmt.Errorf("--base-url %q: %w", baseURL, err)
+	}
+	loopback := nodeHostIsLoopback(host)
+
+	if provider == nodeDefaultProvider && !loopback && !nodeIsAnthropicUpstream(baseURL) {
+		return nodeUpstream{}, nil, fmt.Errorf(
+			"refusing to install --provider anthropic against --base-url %q: on the anthropic wire this gateway forwards the CALLER's own API key upstream, so that host would receive it. Point --base-url at %s, keep it on loopback, or name the wire the other endpoint actually speaks (e.g. --provider openai for an OpenAI-compatible /v1 server)",
+			baseURL, nodeDefaultUpstreamURL)
+	}
+
+	var warns []string
+	if !loopback && !nodeIsAnthropicUpstream(baseURL) {
+		warns = append(warns, fmt.Sprintf("upstream %s is NOT on this machine — every prompt and tool transcript this gateway proxies is sent to that host", host))
+		if scheme == "http" {
+			warns = append(warns, fmt.Sprintf("upstream %s uses plain http — those prompts and transcripts cross the network unencrypted", baseURL))
+		}
+	}
+	return nodeUpstream{Provider: provider, BaseURL: baseURL, Model: model}, warns, nil
+}
+
+// nodeUpstreamHost extracts the host and scheme of an upstream base URL, rejecting the
+// shapes that would silently install a broken (or differently-targeted) unit: a missing
+// scheme, a non-http(s) scheme, or an empty host.
+func nodeUpstreamHost(baseURL string) (host, scheme string, err error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		// A bare "host:port" fails to parse here, so carry the same remedy the
+		// missing-scheme branch below gives rather than leaking a bare parser message.
+		return "", "", fmt.Errorf("want an absolute http:// or https:// URL (%v)", err)
+	}
+	scheme = strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", "", errors.New("want an absolute http:// or https:// URL")
+	}
+	if u.Hostname() == "" {
+		return "", "", errors.New("no host in URL")
+	}
+	return u.Hostname(), scheme, nil
+}
+
+// nodeIsAnthropicUpstream reports whether a base URL names Anthropic's own API — the one
+// destination the anthropic wire may forward a caller's key to off this machine.
+func nodeIsAnthropicUpstream(baseURL string) bool {
+	host, _, err := nodeUpstreamHost(baseURL)
+	if err != nil {
+		return false
+	}
+	host = strings.ToLower(host)
+	return host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com")
+}
 
 // nodeCfg is the on-disk config written by `fak node use`.
 type nodeCfg struct {
@@ -166,8 +379,29 @@ func nodeInstall(stdout, stderr io.Writer, argv []string) int {
 	keyEnv := fs.String("key-env", "FAK_GATEWAY_KEY", "env var name for the bearer key (only used with --remote or non-loopback --addr)")
 	uninstall := fs.Bool("uninstall", false, "remove the gateway service")
 	rotateKey := fs.Bool("rotate-key", false, "mint a fresh bearer key even if one is already persisted (off-host installs reuse the existing key by default so clients keep working)")
-	if !parseFlags(fs, argv) {
+	baseURL := fs.String("base-url", "", "UPSTREAM base URL the installed gateway proxies (default "+nodeDefaultUpstreamURL+"). A local-model gateway is --base-url http://127.0.0.1:8131/v1. On the anthropic wire this gateway forwards the CALLER's own key upstream, so an anthropic-wire --base-url is accepted only for Anthropic itself or a loopback address")
+	provider := fs.String("provider", "", "upstream wire: openai, anthropic, gemini, or xai (default anthropic; with a non-Anthropic --base-url the default is openai, the wire local model servers speak and the one that forwards no caller credential)")
+	model := fs.String("model", "", "model id the gateway advertises and asks the upstream for (e.g. qwen3.6-27b); empty keeps `fak serve`'s own default")
+	var envVars nodeEnvFlag
+	fs.Var(&envVars, "env", "extra environment entry for the installed unit as NAME=VALUE; repeat for N entries (e.g. --env FAK_PLANNER_TIMEOUT_S=1800). The NAME is echoed back, never the value — do not pass an upstream secret here; the unit reads its own bearer from --key-env")
+	fs.Usage = func() { nodeInstallUsage(stderr, fs) }
+	if code, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return code
+	}
+
+	upstream, upstreamWarns, err := nodeResolveUpstream(*provider, *baseURL, *model)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
 		return 2
+	}
+	for _, e := range envVars {
+		if e.Name == *keyEnv {
+			fmt.Fprintf(stderr, "fak node install: --env %s collides with --key-env %s, which the installer populates itself; drop one\n", e.Name, *keyEnv)
+			return 2
+		}
+	}
+	for _, w := range upstreamWarns {
+		fmt.Fprintf(stderr, "[fak node] WARNING: %s\n", w)
 	}
 
 	// Resolve and validate the bind address. parseNodeAddr decomposes --addr/--port with
@@ -194,6 +428,8 @@ func nodeInstall(stdout, stderr io.Writer, argv []string) int {
 		uninstall: *uninstall,
 		cfgDir:    cfgDir,
 		rotateKey: *rotateKey,
+		upstream:  upstream,
+		env:       envVars,
 	}
 	switch runtime.GOOS {
 	case "darwin":
@@ -218,7 +454,36 @@ type nodeInstallParams struct {
 	keyEnv    string // env var name carrying the bearer secret
 	uninstall bool
 	cfgDir    string
-	rotateKey bool // mint a fresh bearer even when one is already persisted (#4)
+	rotateKey bool         // mint a fresh bearer even when one is already persisted (#4)
+	upstream  nodeUpstream // which upstream the rendered unit proxies (#5555)
+	env       []nodeEnvVar // extra unit environment entries (#5555)
+}
+
+// nodeInstallUsage is `fak node install --help`. It prints the flag table and then the
+// two invocations the flags exist to make possible — the default Anthropic adjudication
+// proxy and a local-model gateway — because "one installer that can produce both" is the
+// property #5555 is about, and a help page that only lists flags does not show it.
+func nodeInstallUsage(stderr io.Writer, fs *flag.FlagSet) {
+	fmt.Fprintln(stderr, "usage: fak node install [flags]")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Install the fak serve gateway as an always-on service on this machine.")
+	fmt.Fprintln(stderr, "One unit, labelled "+nodeGatewayLabel+"; the flags below choose the upstream it proxies.")
+	fmt.Fprintln(stderr, "")
+	fs.PrintDefaults()
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "EXAMPLES")
+	fmt.Fprintln(stderr, "  # the Anthropic adjudication proxy (the default upstream)")
+	fmt.Fprintln(stderr, "  fak node install")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "  # a LOCAL-MODEL gateway in front of an OpenAI-compatible server on this host")
+	fmt.Fprintln(stderr, "  fak node install --base-url http://127.0.0.1:8131/v1 --model qwen3.6-27b \\")
+	fmt.Fprintln(stderr, "      --env FAK_PLANNER_TIMEOUT_S=1800 --env FAK_HTTP_WRITE_TIMEOUT_S=1800")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "  # off-host access over Tailscale (binds 0.0.0.0 and requires a bearer)")
+	fmt.Fprintln(stderr, "  fak node install --remote")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Re-running install replaces the unit under the same label, so switching upstreams")
+	fmt.Fprintln(stderr, "does not need --uninstall first. There is one gateway per host, not one per upstream.")
 }
 
 // parseNodeAddr resolves the gateway bind address from --addr and --port, returning the
@@ -296,49 +561,149 @@ const darwinPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>{{.Label}}</string>
+    <string>{{x .Label}}</string>
 
     <key>ProgramArguments</key>
     <array>
-      <string>{{.WrapperPath}}</string>
-      <string>{{.FakBin}}</string>
+      <string>{{x .WrapperPath}}</string>
+      <string>{{x .FakBin}}</string>
       <string>serve</string>
-      <string>--provider</string><string>anthropic</string>
-      <string>--base-url</string><string>https://api.anthropic.com</string>
-      <string>--addr</string><string>{{.Addr}}</string>
-      <string>--policy</string><string>{{.PolicyPath}}</string>
+      <string>--provider</string><string>{{x .Provider}}</string>
+      <string>--base-url</string><string>{{x .BaseURL}}</string>
+      {{- if .Model}}
+      <string>--model</string><string>{{x .Model}}</string>
+      {{- end}}
+      <string>--addr</string><string>{{x .Addr}}</string>
+      <string>--policy</string><string>{{x .PolicyPath}}</string>
       {{- if .RequireKeyEnv}}
       <string>--require-key-env</string>
-      <string>{{.RequireKeyEnv}}</string>
+      <string>{{x .RequireKeyEnv}}</string>
       {{- end}}
     </array>
 
     <key>EnvironmentVariables</key>
     <dict>
       <key>FAK_AUDIT_JOURNAL</key>
-      <string>{{.LogDir}}/serve_audit.jsonl</string>
+      <string>{{x .LogDir}}/serve_audit.jsonl</string>
+      {{- range .Env}}
+      <key>{{x .Name}}</key>
+      <string>{{x .Value}}</string>
+      {{- end}}
       {{- if .GatewayKey}}
-      <key>{{.RequireKeyEnv}}</key>
-      <string>{{.GatewayKey}}</string>
+      <key>{{x .RequireKeyEnv}}</key>
+      <string>{{x .GatewayKey}}</string>
       {{- end}}
     </dict>
 
     <key>WorkingDirectory</key>
-    <string>{{.LogDir}}</string>
+    <string>{{x .LogDir}}</string>
     <key>KeepAlive</key>
     <true/>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{{.LogDir}}/serve.log</string>
+    <string>{{x .LogDir}}/serve.log</string>
     <key>StandardErrorPath</key>
-    <string>{{.LogDir}}/serve.err</string>
+    <string>{{x .LogDir}}/serve.err</string>
   </dict>
 </plist>
 `
 
+// nodeUnitData is the complete input to every platform's unit renderer: the paths and
+// secrets the install resolved, plus the upstream selection and extra environment.
+// Bundling it makes the three renderers PURE functions of one value, which is what lets
+// both the default Anthropic unit and the local-model unit be pinned as fixtures on any
+// OS — the only cross-platform witness available for a launchd/systemd/schtasks artifact.
+type nodeUnitData struct {
+	Label, WrapperPath, FakBin, Addr, PolicyPath, LogDir string
+	RequireKeyEnv, GatewayKey                            string
+	Provider, BaseURL, Model                             string
+	Env                                                  []nodeEnvVar
+}
+
+// nodeUnitDataFor assembles the renderer input from the resolved install params. Pure:
+// every value is already resolved by the caller, so a test can build the same input
+// without touching the filesystem, launchd, or the network.
+func nodeUnitDataFor(in nodeInstallParams, label, wrapperPath, fakBin, policyPath, logDir, gatewayKey, requireKeyEnv string) nodeUnitData {
+	return nodeUnitData{
+		Label:         label,
+		WrapperPath:   wrapperPath,
+		FakBin:        fakBin,
+		Addr:          in.addr,
+		PolicyPath:    policyPath,
+		LogDir:        logDir,
+		RequireKeyEnv: requireKeyEnv,
+		GatewayKey:    gatewayKey,
+		Provider:      in.upstream.Provider,
+		BaseURL:       in.upstream.BaseURL,
+		Model:         in.upstream.Model,
+		Env:           in.env,
+	}
+}
+
+// nodeXMLEscape escapes a value for a plist <string> body. Applied to every interpolated
+// field: a repo path with an `&`, or an --env value carrying JSON with a `<`, would
+// otherwise produce a plist launchd refuses to parse rather than a loud install error.
+func nodeXMLEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;").Replace(s)
+}
+
+// nodeRenderDarwinPlist renders the launchd agent. Pure function of its input — no file,
+// no launchctl — so `fak node install`'s two headline outputs (the default Anthropic
+// adjudication proxy and a local-model gateway) can both be pinned as fixtures.
+func nodeRenderDarwinPlist(d nodeUnitData) (string, error) {
+	return nodeRenderUnit("plist", darwinPlistTemplate, d)
+}
+
+// nodeRenderLinuxUnit renders the systemd --user unit. Same purity contract as
+// nodeRenderDarwinPlist.
+func nodeRenderLinuxUnit(d nodeUnitData) (string, error) {
+	return nodeRenderUnit("unit", linuxUnitTemplate, d)
+}
+
+// nodeRenderWindowsRunner renders the .cmd the Scheduled Task launches. Same purity
+// contract as nodeRenderDarwinPlist.
+func nodeRenderWindowsRunner(d nodeUnitData) (string, error) {
+	return nodeRenderUnit("runner", nodeWindowsRunnerTemplate, d)
+}
+
+// nodeRenderUnit is the shared parse-and-execute behind the three renderers, carrying the
+// per-format escapers the templates call: `x` for plist XML, `sd` for a systemd quoted
+// Environment= value, and `cmdv` for a cmd.exe `set` value.
+func nodeRenderUnit(name, text string, d nodeUnitData) (string, error) {
+	tmpl, err := template.New(name).Funcs(template.FuncMap{
+		"x":    nodeXMLEscape,
+		"sd":   nodeSystemdEscape,
+		"cmdv": nodeCmdEscape,
+	}).Parse(text)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	if err := tmpl.Execute(&b, d); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// nodeSystemdEscape escapes a value for a double-quoted systemd `Environment="N=V"`
+// entry. systemd's own unit-file quoting recognises backslash escapes inside double
+// quotes, so a value containing a quote (JSON, which is exactly what the local-model
+// tuning entries carry) survives instead of truncating the assignment.
+func nodeSystemdEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
+}
+
+// nodeCmdEscape escapes a value for an UNQUOTED cmd.exe `set NAME=VALUE`. The unquoted
+// form is used for --env entries specifically because cmd offers no escape for a `"`
+// inside `set "NAME=VALUE"`, and JSON tuning values are full of quotes; unquoted, a `"`
+// is literal and only the shell metacharacters need a `^`.
+func nodeCmdEscape(s string) string {
+	return strings.NewReplacer("^", "^^", "&", "^&", "|", "^|", "<", "^<", ">", "^>").Replace(s)
+}
+
 func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
-	addr, uninstall, cfgDir := in.addr, in.uninstall, in.cfgDir
+	uninstall, cfgDir := in.uninstall, in.cfgDir
 	agentsDir := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents")
 	plistPath := filepath.Join(agentsDir, nodeGatewayLabel+".plist")
 
@@ -369,48 +734,35 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 		return 1
 	}
 
-	// Render the plist.
-	tmpl, err := template.New("plist").Parse(darwinPlistTemplate)
+	// Render the plist (pure), then write it. Rendering before any launchctl call means a
+	// template failure never leaves a half-written unit behind an unloaded service.
+	plist, err := nodeRenderDarwinPlist(nodeUnitDataFor(in, nodeGatewayLabel, wrapperPath, fakBin, policyPath, logDir, gatewayKey, requireKeyEnv))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak node install: parse plist template: %v\n", err)
-		return 1
-	}
-	plistData := struct {
-		Label, WrapperPath, FakBin, Addr, PolicyPath, LogDir string
-		RequireKeyEnv, GatewayKey                            string
-	}{
-		Label:         nodeGatewayLabel,
-		WrapperPath:   wrapperPath,
-		FakBin:        fakBin,
-		Addr:          addr,
-		PolicyPath:    policyPath,
-		LogDir:        logDir,
-		RequireKeyEnv: requireKeyEnv,
-		GatewayKey:    gatewayKey,
-	}
-
-	// Unload any existing unit before overwriting.
-	_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
-
-	pf, err := os.Create(plistPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak node install: create plist: %v\n", err)
-		return 1
-	}
-	if err := tmpl.Execute(pf, plistData); err != nil {
-		pf.Close()
 		fmt.Fprintf(stderr, "fak node install: render plist: %v\n", err)
 		return 1
 	}
-	pf.Close()
 
-	// Set ANTHROPIC_API_KEY in login env if provided.
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		_ = exec.Command("launchctl", "setenv", "ANTHROPIC_API_KEY", key).Run()
-		fmt.Fprintf(stdout, "[fak node] set ANTHROPIC_API_KEY in login environment\n")
-	} else {
-		fmt.Fprintf(stderr, "[fak node] WARNING: ANTHROPIC_API_KEY not set — set it with:\n")
-		fmt.Fprintf(stderr, "           launchctl setenv ANTHROPIC_API_KEY \"sk-ant-...\"\n")
+	// Unload any existing unit before overwriting. One label per host: switching upstreams
+	// re-renders THIS unit rather than adding a second one (#5555).
+	_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
+
+	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
+		fmt.Fprintf(stderr, "fak node install: write plist: %v\n", err)
+		return 1
+	}
+
+	// Set ANTHROPIC_API_KEY in login env if provided — ONLY for the Anthropic wire. A
+	// local-model unit has no use for it, and pushing an Anthropic credential into the
+	// login environment of a host installed to talk to a local model is gratuitous
+	// credential spread (#5555).
+	if in.upstream.Provider == nodeDefaultProvider {
+		if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+			_ = exec.Command("launchctl", "setenv", "ANTHROPIC_API_KEY", key).Run()
+			fmt.Fprintf(stdout, "[fak node] set ANTHROPIC_API_KEY in login environment\n")
+		} else {
+			fmt.Fprintf(stderr, "[fak node] WARNING: ANTHROPIC_API_KEY not set — set it with:\n")
+			fmt.Fprintf(stderr, "           launchctl setenv ANTHROPIC_API_KEY \"sk-ant-...\"\n")
+		}
 	}
 
 	// Load the unit.
@@ -434,6 +786,7 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 // returns 1 instead of printing the client lines as if it were up (#2); otherwise it prints
 // the client lines and returns 0.
 func nodeInstallFinalize(stdout, stderr io.Writer, in nodeInstallParams, gatewayKey, requireKeyEnv, logDir string) int {
+	nodePrintUnitSummary(stdout, in)
 	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
 	localPort := in.localPort
 	if !nodeWaitHealthy(stdout, "http://127.0.0.1:"+localPort) {
@@ -442,6 +795,36 @@ func nodeInstallFinalize(stdout, stderr io.Writer, in nodeInstallParams, gateway
 	}
 	nodePrintClientLines(stdout, stderr, in.offHost, gatewayKey, localPort)
 	return 0
+}
+
+// nodePrintUnitSummary reports which upstream the unit was installed against and which
+// extra environment entries it carries. Entries are reported by NAME ONLY — the values
+// live in the unit file, and echoing them would put whatever an operator passed to --env
+// into terminal scrollback and CI logs. Makes a re-install that switched upstreams
+// visible, since one label now serves both (#5555).
+func nodePrintUnitSummary(stdout io.Writer, in nodeInstallParams) {
+	fmt.Fprintf(stdout, "[fak node] upstream: %s\n", nodeUpstreamSummary(in.upstream))
+	if names := nodeEnvNames(in.env); names != "" {
+		fmt.Fprintf(stdout, "[fak node] unit env:  FAK_AUDIT_JOURNAL, %s (names only; values are in the unit file)\n", names)
+	}
+}
+
+// nodeUpstreamSummary is the one-line, secret-free description of the resolved upstream.
+func nodeUpstreamSummary(u nodeUpstream) string {
+	s := u.Provider + " " + u.BaseURL
+	if u.Model != "" {
+		s += " (model " + u.Model + ")"
+	}
+	return s
+}
+
+// nodeEnvNames joins the extra environment entry NAMES for display. Never the values.
+func nodeEnvNames(env []nodeEnvVar) string {
+	names := make([]string, 0, len(env))
+	for _, e := range env {
+		names = append(names, e.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // nodeInstallDirs is the shared head of every platform install path: it creates the
@@ -588,14 +971,17 @@ func nodePrintClientLines(stdout, stderr io.Writer, offHost bool, gatewayKey, lo
 // ── Linux (systemd --user) ────────────────────────────────────────────────────
 
 const linuxUnitTemplate = `[Unit]
-Description=fak serve gateway (always-on Anthropic proxy with tool adjudication)
+Description=fak serve gateway (always-on adjudicating proxy for {{.BaseURL}})
 After=network.target
 
 [Service]
-ExecStart={{.FakBin}} serve --provider anthropic --base-url https://api.anthropic.com --addr {{.Addr}} --policy {{.PolicyPath}}{{if .RequireKeyEnv}} --require-key-env {{.RequireKeyEnv}}{{end}}
+ExecStart={{.FakBin}} serve --provider {{.Provider}} --base-url {{.BaseURL}}{{if .Model}} --model {{.Model}}{{end}} --addr {{.Addr}} --policy {{.PolicyPath}}{{if .RequireKeyEnv}} --require-key-env {{.RequireKeyEnv}}{{end}}
 Restart=always
 RestartSec=3
 Environment=FAK_AUDIT_JOURNAL={{.LogDir}}/serve_audit.jsonl
+{{- range .Env}}
+Environment="{{.Name}}={{sd .Value}}"
+{{- end}}
 {{- if .GatewayKey}}
 Environment={{.RequireKeyEnv}}={{.GatewayKey}}
 {{- end}}
@@ -607,7 +993,7 @@ WantedBy=default.target
 `
 
 func nodeInstallLinux(stdout, stderr io.Writer, in nodeInstallParams) int {
-	addr, uninstall, cfgDir := in.addr, in.uninstall, in.cfgDir
+	uninstall, cfgDir := in.uninstall, in.cfgDir
 	unitDir := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user")
 	unitPath := filepath.Join(unitDir, "fak-serve-gateway.service")
 
@@ -629,18 +1015,15 @@ func nodeInstallLinux(stdout, stderr io.Writer, in nodeInstallParams) int {
 		return 1
 	}
 
-	tmpl, _ := template.New("unit").Parse(linuxUnitTemplate)
-	data := struct{ FakBin, Addr, PolicyPath, LogDir, RequireKeyEnv, GatewayKey string }{
-		FakBin: fakBin, Addr: addr, PolicyPath: policyPath, LogDir: logDir,
-		RequireKeyEnv: requireKeyEnv, GatewayKey: gatewayKey,
-	}
-	uf, err := os.Create(unitPath)
+	unit, err := nodeRenderLinuxUnit(nodeUnitDataFor(in, nodeGatewayLabel, "", fakBin, policyPath, logDir, gatewayKey, requireKeyEnv))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak node install: create unit: %v\n", err)
+		fmt.Fprintf(stderr, "fak node install: render unit: %v\n", err)
 		return 1
 	}
-	_ = tmpl.Execute(uf, data)
-	uf.Close()
+	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
+		fmt.Fprintf(stderr, "fak node install: write unit: %v\n", err)
+		return 1
+	}
 
 	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
 	if out, err := exec.Command("systemctl", "--user", "enable", "--now", "fak-serve-gateway").CombinedOutput(); err != nil {
@@ -664,10 +1047,13 @@ func nodeInstallLinux(stdout, stderr io.Writer, in nodeInstallParams) int {
 const nodeWindowsRunnerTemplate = `@echo off
 rem Written by: fak node install — regenerate with: fak node install
 set "FAK_AUDIT_JOURNAL={{.LogDir}}\serve_audit.jsonl"
+{{- range .Env}}
+set {{.Name}}={{cmdv .Value}}
+{{- end}}
 {{- if .GatewayKey}}
 set "{{.RequireKeyEnv}}={{.GatewayKey}}"
 {{- end}}
-"{{.FakBin}}" serve --provider anthropic --base-url https://api.anthropic.com --addr {{.Addr}} --policy "{{.PolicyPath}}"{{if .RequireKeyEnv}} --require-key-env {{.RequireKeyEnv}}{{end}} >> "{{.LogDir}}\serve.log" 2>> "{{.LogDir}}\serve.err"
+"{{.FakBin}}" serve --provider {{.Provider}} --base-url {{.BaseURL}}{{if .Model}} --model {{.Model}}{{end}} --addr {{.Addr}} --policy "{{.PolicyPath}}"{{if .RequireKeyEnv}} --require-key-env {{.RequireKeyEnv}}{{end}} >> "{{.LogDir}}\serve.log" 2>> "{{.LogDir}}\serve.err"
 `
 
 func nodeHelperCommand(name string, args ...string) *exec.Cmd {
@@ -677,7 +1063,7 @@ func nodeHelperCommand(name string, args ...string) *exec.Cmd {
 }
 
 func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
-	addr, uninstall, cfgDir := in.addr, in.uninstall, in.cfgDir
+	uninstall, cfgDir := in.uninstall, in.cfgDir
 	if uninstall {
 		_ = nodeHelperCommand("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
 		out, err := nodeHelperCommand("schtasks", "/Delete", "/TN", nodeWindowsTaskName, "/F").CombinedOutput()
@@ -702,26 +1088,15 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 
 	// Render the runner .cmd the task launches.
 	runnerPath := filepath.Join(cfgDir, "serve-runner.cmd")
-	tmpl, err := template.New("runner").Parse(nodeWindowsRunnerTemplate)
+	runner, err := nodeRenderWindowsRunner(nodeUnitDataFor(in, nodeGatewayLabel, "", fakBin, policyPath, logDir, gatewayKey, requireKeyEnv))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak node install: parse runner template: %v\n", err)
-		return 1
-	}
-	data := struct{ FakBin, Addr, PolicyPath, LogDir, RequireKeyEnv, GatewayKey string }{
-		FakBin: fakBin, Addr: addr, PolicyPath: policyPath, LogDir: logDir,
-		RequireKeyEnv: requireKeyEnv, GatewayKey: gatewayKey,
-	}
-	rf, err := os.Create(runnerPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak node install: create runner: %v\n", err)
-		return 1
-	}
-	if err := tmpl.Execute(rf, data); err != nil {
-		rf.Close()
 		fmt.Fprintf(stderr, "fak node install: render runner: %v\n", err)
 		return 1
 	}
-	rf.Close()
+	if err := os.WriteFile(runnerPath, []byte(runner), 0644); err != nil {
+		fmt.Fprintf(stderr, "fak node install: write runner: %v\n", err)
+		return 1
+	}
 
 	localPort := in.localPort
 
@@ -762,8 +1137,11 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 	fmt.Fprintf(stdout, "           runner:  %s\n", runnerPath)
 	fmt.Fprintf(stdout, "           log:     %s\\serve.log\n", logDir)
 
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key == "" {
-		fmt.Fprintf(stderr, "[fak node] WARNING: ANTHROPIC_API_KEY not set for the task's user — set it (e.g. setx ANTHROPIC_API_KEY \"sk-ant-...\") and re-run, or the gateway has no upstream credential\n")
+	// Only the Anthropic wire needs an Anthropic credential; a local-model unit does not.
+	if in.upstream.Provider == nodeDefaultProvider {
+		if key := os.Getenv("ANTHROPIC_API_KEY"); key == "" {
+			fmt.Fprintf(stderr, "[fak node] WARNING: ANTHROPIC_API_KEY not set for the task's user — set it (e.g. setx ANTHROPIC_API_KEY \"sk-ant-...\") and re-run, or the gateway has no upstream credential\n")
+		}
 	}
 
 	// Honest health gate (#2): on failure warn at the logs and return non-zero instead of
@@ -783,7 +1161,7 @@ func nodeWindowsTaskXML(runnerPath string) string {
 	return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>fak serve gateway (always-on Anthropic proxy with tool adjudication) — written by fak node install</Description>
+    <Description>fak serve gateway (always-on adjudicating proxy) — written by fak node install</Description>
   </RegistrationInfo>
   <Triggers>
     <BootTrigger><Enabled>true</Enabled></BootTrigger>

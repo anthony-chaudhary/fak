@@ -1,0 +1,59 @@
+=== launchd (macOS) ===
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Written by: fak node install — regenerate with: fak node install -->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.fak.serve-gateway</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/Users/youruser/.config/fak/serve-wrapper.sh</string>
+      <string>/Users/youruser/.local/bin/fak</string>
+      <string>serve</string>
+      <string>--provider</string><string>anthropic</string>
+      <string>--base-url</string><string>https://api.anthropic.com</string>
+      <string>--addr</string><string>127.0.0.1:8080</string>
+      <string>--policy</string><string>/Users/youruser/.config/fak/node-policy.json</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>FAK_AUDIT_JOURNAL</key>
+      <string>/Users/youruser/.config/fak/logs/serve_audit.jsonl</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/youruser/.config/fak/logs</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/youruser/.config/fak/logs/serve.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/youruser/.config/fak/logs/serve.err</string>
+  </dict>
+</plist>
+
+=== systemd --user (Linux) ===
+[Unit]
+Description=fak serve gateway (always-on adjudicating proxy for https://api.anthropic.com)
+After=network.target
+
+[Service]
+ExecStart=/Users/youruser/.local/bin/fak serve --provider anthropic --base-url https://api.anthropic.com --addr 127.0.0.1:8080 --policy /Users/youruser/.config/fak/node-policy.json
+Restart=always
+RestartSec=3
+Environment=FAK_AUDIT_JOURNAL=/Users/youruser/.config/fak/logs/serve_audit.jsonl
+StandardOutput=append:/Users/youruser/.config/fak/logs/serve.log
+StandardError=append:/Users/youruser/.config/fak/logs/serve.err
+
+[Install]
+WantedBy=default.target
+
+=== Scheduled Task runner (Windows) ===
+@echo off
+rem Written by: fak node install — regenerate with: fak node install
+set "FAK_AUDIT_JOURNAL=/Users/youruser/.config/fak/logs\serve_audit.jsonl"
+"/Users/youruser/.local/bin/fak" serve --provider anthropic --base-url https://api.anthropic.com --addr 127.0.0.1:8080 --policy "/Users/youruser/.config/fak/node-policy.json" >> "/Users/youruser/.config/fak/logs\serve.log" 2>> "/Users/youruser/.config/fak/logs\serve.err"
