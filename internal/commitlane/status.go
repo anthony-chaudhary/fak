@@ -122,11 +122,18 @@ type Report struct {
 	// alongside the recurring index.lock wedge (#5338). Observation only; nothing here
 	// removes a file.
 	NextIndexLocks []NextIndexLock `json:"next_index_locks,omitempty"`
-	Owner          *ProcessFact    `json:"owner,omitempty"`
-	Queue          []ProcessFact   `json:"queue,omitempty"`
-	LiveWriters    []ProcessFact   `json:"live_writers,omitempty"`
-	ProcessProbe   string          `json:"process_probe"`
-	Errors         []string        `json:"errors,omitempty"`
+	// IndexChurn is the no-op staged-deletion audit (#5339): paths the shared index has
+	// staged for DELETION whose working-tree file is still present and byte-identical to
+	// HEAD, i.e. `git rm --cached` residue with no commit effect. It is a hygiene finding,
+	// not a lane state — it never feeds finalize's verdict, and nothing here (or in the CLI
+	// renderer) executes the remedy it carries. Nil when the index is clean or the probe
+	// could not run. See stageddelete.go.
+	IndexChurn   *StagedDeletionAudit `json:"index_churn,omitempty"`
+	Owner        *ProcessFact         `json:"owner,omitempty"`
+	Queue        []ProcessFact        `json:"queue,omitempty"`
+	LiveWriters  []ProcessFact        `json:"live_writers,omitempty"`
+	ProcessProbe string               `json:"process_probe"`
+	Errors       []string             `json:"errors,omitempty"`
 }
 
 type CommitLock struct {
@@ -239,6 +246,14 @@ func Status(ctx context.Context, opts Options) (Report, error) {
 	rep.NextIndexLocks = nextIndex
 	if nerr != "" {
 		rep.Errors = append(rep.Errors, "next-index scan: "+nerr)
+	}
+	// The no-op staged-deletion audit (#5339). It costs exactly ONE extra git read on a
+	// clean index (the name-only diff comes back empty and the batched hash reads never
+	// run), and it fails open and silent, so a probe that cannot run adds no warning and
+	// no verdict change — the lane report must not grow noise because a hygiene check
+	// misfired.
+	if audit := ScanStagedDeletions(ctx, opts.Runner, opts.Stat, rep.RepoRoot); len(audit.Rows) > 0 {
+		rep.IndexChurn = &audit
 	}
 
 	procs, perr := opts.ProcessList(ctx)
