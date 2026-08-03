@@ -30,13 +30,34 @@ package model
 // prefix on each ingest, which is O(n^2) over a generation and is exactly what
 // `diagtok --cacheless` does today, promoted from a diagnostic flag into the Session API so a
 // serve path can reach it. Because it holds no K/V rows it leaves s.Cache untouched:
-// Cache.Len() stays 0, and eviction / prefix reuse are INERT rather than silently wrong. Both
-// of those become real when #5496 lands the cached path.
+// Cache.Len() stays 0.
+//
+// Eviction is therefore inert — there are no rows to drop. Prefix reuse is NOT, and saying so
+// was the #5548 defect: a reuser that CLONES s.Cache clones nothing, so the clone silently
+// omits gemma4Hist, which is the entire prefix. A planner that admitted that empty cache and
+// then prefilled only the divergent suffix against it served wrong logits with no error and no
+// panic. Reuse is fail-CLOSED here instead — KVPrefixReuseSupported below is the one predicate
+// every reuser must ask before treating a *KVCache as a complete session prefix — and becomes
+// available, correctly, when #5496 lands the cached per-layer-window path.
 //
 // Note this is NOT a decode-store change: it touches neither of the two q4 stores (the
 // GGUF-native Q4_K super-block with its ggml nibble interleave, nor the re-quantized int4
 // q4Tensor with consecutive elements per byte). It only chooses which forward runs; each
 // store keeps its own decoder, reached unchanged through residentMatRows.
+
+// KVPrefixReuseSupported reports whether a *KVCache is a COMPLETE prefix for a Session over
+// this Config — i.e. whether cloning the cache carries the whole of what the session already
+// ingested. It is true for every cached architecture, whose per-layer K/V rows are the entire
+// state, and false for the gemma4 recompute bridge, whose state is the token history
+// (gemma4Hist) and whose cache stays empty.
+//
+// It exists because "the cache is empty" is indistinguishable from "the cache is a valid
+// zero-length prefix" at every consumer: radixkv.truncatePrefix returns a non-nil zero-length
+// clone, a nil-guard passes, and the radix tree matches on TOKEN IDS rather than on KV depth.
+// So a reuser holding only a *KVCache cannot detect the difference and must ask the Config
+// (#5548). Splitting the rule out of the reuser keeps it from being re-derived — and re-missed
+// — at each of the several places that build a session from a cached prefix.
+func (c Config) KVPrefixReuseSupported() bool { return !c.isGemma4() }
 
 // gemma4SessionModeWired reports whether this Session's execution mode is one the gemma4
 // bridge actually runs. The bridge is the HOST resident path (residentKernel over whatever

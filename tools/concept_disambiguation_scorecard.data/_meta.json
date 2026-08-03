@@ -855,6 +855,11 @@
           "category": "incidental",
           "reason": "An internal helper that lists peer checkpoint refs under refs/fak/wip; a git-read detail of the existing checkpoint concept, not a distinct position.",
           "token": "wipPeerCheckpointSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "A FILENAME referenced in a doc comment (internal/ggufload's gemma4_session_test.go), not a symbol this package declares; the scanner picked it up out of prose.",
+          "token": "gemma4_session_test"
         }
       ],
       "id": "session-runtime",
@@ -868,6 +873,7 @@
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
         "enqueueGuardSessionThreadNotice",
+        "gemma4_session_test",
         "gen_session_effectiveness_svg",
         "guardsessiontempdir",
         "handoff_session_give_up",

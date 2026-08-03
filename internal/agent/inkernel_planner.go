@@ -208,6 +208,19 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 }
 
 func inKernelPlannerPrefixReuseSupported(m *model.Model, backend compute.Backend) bool {
+	// Fail closed for a RECOMPUTE session before the host/device split (#5548). The gemma4
+	// bridge keeps its prefix in the session's token history and leaves s.Cache empty, so the
+	// snapshot this planner admits (step 3 of generateReusedContextWithBias) carries none of
+	// it. Nothing downstream can notice: truncatePrefix returns a non-nil zero-length clone,
+	// the nil-guard passes, and the tree matches on token ids — so a partial hit would prefill
+	// only the divergent suffix against a session that never saw the prefix. Refusing here is
+	// also honest about the saving: `matched` feeds the reused-vs-prompt witness line and the
+	// KV-prefix KPI, and a recompute forward re-runs the whole prefix on every ingest, so any
+	// non-zero reuse it reported would be a saving it never realized. Reuse returns when #5496
+	// lands the cached path.
+	if m != nil && !m.Cfg.KVPrefixReuseSupported() {
+		return false
+	}
 	if backend == nil {
 		return true
 	}

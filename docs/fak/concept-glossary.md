@@ -2050,3 +2050,10 @@ cmd/fak/guard_self_tighten_overlay.go: the launch-boundary entry point loadGuard
 The cmd/fak/guard.go resolver that answers which single --settings file every guard hook installer must name, so SessionStart, toolproc, Stop and PreCompact converge on one payload instead of each passing the path it was handed.
 
 **Distinct from:** It RESOLVES WHICH FILE the installers share; it does not write one. writeGuardSettingsFileAtomic performs the write, and guardStopHookInstall / the PreCompact analogue are per-hook RESULT RECORDS of an install that has already chosen its path. The distinction is load-bearing rather than cosmetic: #5510 showed that when a caller's payload names a different settings file, Claude's last-wins --settings silently discards guard's entire hook stack, so the identity of this one path is what keeps the stack armed.
+
+
+### KVPrefixReuseSupported
+
+Config predicate reporting whether a *KVCache is a COMPLETE session prefix for this architecture — i.e. whether cloning the cache carries the whole of what the session already ingested. True for cached architectures whose per-layer K/V rows are the entire state; false for the gemma4 recompute bridge, whose state is the token history and whose cache stays empty.
+
+**Distinct from:** ExactSpanSupported asks whether an engine can EVICT an exact span from a cache it already holds; this asks whether the cache IS the state at all. A recompute architecture answers yes to neither, but for different reasons: eviction is inert because there are no rows, while prefix reuse is unsound because the rows were never where the prefix lived.

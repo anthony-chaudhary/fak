@@ -459,7 +459,8 @@
       "distinction": "It witnesses a CONCRETE evict capability of one engine/pool (an instance of support), distinct from the general support concept and from correctness, which would prove the eviction is bit-exact rather than merely available.",
       "distinct_from": [
         "support",
-        "correctness"
+        "correctness",
+        "kvprefixreusesupported"
       ],
       "aliases": [
         "supportsexactspan",

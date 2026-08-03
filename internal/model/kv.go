@@ -11,7 +11,19 @@ import (
 // prefix, so only the suffix needs prefilling (real prefix reuse). For
 // GLM-MoE-DSA the clone carries the DSA attention/index cache instead of the dense
 // GQA K/V rows.
+//
+// It refuses, by name, an architecture whose session state is NOT the KVCache (#5548). A
+// recompute session carries its prefix as a token history and leaves the cache empty, so
+// this clone would hand back a session that has ingested nothing while its caller believes
+// it holds the prefix — and then prefills only the suffix. Nothing downstream can catch
+// that: an empty cache is a well-formed zero-length prefix at every consumer. The refusal
+// is loud for the same reason requireGemma4Session's is: a wrong answer with no error is
+// the failure this whole family of guards exists to prevent.
 func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
+	if !m.Cfg.KVPrefixReuseSupported() {
+		panic("model: SessionFromPrefix is not available for architecture " + m.Cfg.archFamilyKey() +
+			": its session state is the token history, not the KV cache, so a cache clone carries no prefix")
+	}
 	return &Session{M: m, Cache: prefix.Clone()}
 }
 
