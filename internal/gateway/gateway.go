@@ -330,6 +330,21 @@ type Config struct {
 	// gateway's buffered/adjudicated client response. Used for Codex ChatGPT subscription
 	// upstreams, which reject non-streaming Responses requests.
 	ForceResponsesStream bool
+	// StreamProgressTimeout is the streaming CONTENT-progress deadline (#5486): how long a
+	// proxied stream may stay WARM — keepalives arriving, so the inter-byte deadline never
+	// fires — without one frame that advances the turn. It is carried verbatim onto every
+	// proxy planner (newConfiguredHTTPPlanner) and resolved there by
+	// agent.(*HTTPPlanner).streamProgressWindow, so this field uses that resolver's encoding
+	// exactly: ZERO (the unconfigured default every caller who never sets it gets) means
+	// agent.DefaultStreamProgressTimeout, a NEGATIVE value DISABLES the deadline — the escape
+	// hatch for a provider whose prefill legitimately outlasts the window — and a positive
+	// value outside [5s, 600s] falls back to the default rather than being clamped, so a
+	// typo'd window never silently becomes a different real deadline.
+	//
+	// `fak serve` feeds this from --stream-progress-timeout, which spells the off switch the
+	// way every other serve knob does (0), and translates that 0 into the negative encoding
+	// above; see cmd/fak/serve.go:serveStreamProgressTimeout.
+	StreamProgressTimeout time.Duration
 	// PinUpstreamCredential makes the gateway authenticate the upstream with its OWN
 	// configured APIKey and IGNORE the inbound client's credential — the subscription
 	// path, where fak holds the real OAuth token and the wrapped client only sends a
@@ -2376,6 +2391,10 @@ func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPla
 	p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
 	p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
 	p.ForceResponsesStream = cfg.ForceResponsesStream
+	// Passed through verbatim: Config.StreamProgressTimeout carries the planner field's own
+	// encoding (0 = the agent default, negative = disabled, out-of-band = the default), so a
+	// Config nobody configures leaves the planner at the 300s default byte-for-byte.
+	p.StreamProgressTimeout = cfg.StreamProgressTimeout
 	wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver)
 	return p, nil
 }

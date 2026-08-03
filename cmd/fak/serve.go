@@ -70,6 +70,30 @@ func debugStatsSink(on bool) func(string, ...any) {
 	}
 }
 
+// streamProgressTimeoutOff is the gateway.Config/HTTPPlanner encoding for "no
+// content-progress deadline at all": a NEGATIVE duration, which
+// agent.(*HTTPPlanner).streamProgressWindow resolves to a disabled window. It is deliberately
+// NOT the zero value — on that field zero means "unconfigured, take
+// agent.DefaultStreamProgressTimeout", so the operator's off switch cannot be passed through
+// as-is and has to be translated here.
+const streamProgressTimeoutOff = -1 * time.Second
+
+// serveStreamProgressTimeout maps --stream-progress-timeout onto that encoding.
+//
+// The flag spells "off" as 0 because that is what every other serve knob with an off switch
+// spells it as (--ctx-view-budget 0, --compact-history-budget 0, --elide-result-bytes 0,
+// --assume-session-turns 0, --metrics-snapshot 0): an operator who wants no deadline types a
+// zero, never a negative duration. The flag DEFAULTS to agent.DefaultStreamProgressTimeout
+// rather than 0, so a zero here is always something the operator typed — the ambiguity the
+// raw config field has (where 0 is the unconfigured state) does not exist at the front door.
+// Every other value rides through verbatim for streamProgressWindow to band-check.
+func serveStreamProgressTimeout(d time.Duration) time.Duration {
+	if d <= 0 {
+		return streamProgressTimeoutOff
+	}
+	return d
+}
+
 func configureServeToolEngines() {
 	// Serve exposes fak_read over MCP even when it is not running the demo agent loop.
 	// Register only the confined read miss engine; agent.Configure would also install
@@ -88,6 +112,7 @@ type serveFlags struct {
 	replicaBaseURLs              repeatedStringFlag
 	model                        *string
 	apiKeyEnv                    *string
+	streamProgressTimeout        *time.Duration
 	engineCacheEngine            *string
 	engineCacheBaseURL           *string
 	engineCacheAdminKeyEnv       *string
@@ -154,6 +179,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")
 	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
 	sf.apiKeyEnv = fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
+	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
 	sf.engineCacheBaseURL = fs.String("engine-cache-base-url", "", "serving-engine control/base URL for cache reset (default: --base-url when --engine-cache-engine is set)")
 	sf.engineCacheAdminKeyEnv = fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
@@ -458,6 +484,13 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		Native:         *sf.native,
 		NativeMaxTurns: *sf.nativeMaxTurns,
 		VDSOProxyFill:  *sf.vdsoProxyFill,
+		// Streaming CONTENT-progress deadline (#5486, --stream-progress-timeout): the
+		// window a warm-but-unadvancing proxied stream is given before the turn is ended.
+		// gateway.newConfiguredHTTPPlanner carries it onto every proxy planner, where
+		// agent.(*HTTPPlanner).streamProgressWindow band-checks it. The flag's 0 means OFF
+		// and is translated here into that resolver's negative encoding; every other value
+		// (including the 300s default) passes through untouched.
+		StreamProgressTimeout: serveStreamProgressTimeout(*sf.streamProgressTimeout),
 	})
 	must(err)
 	srv.SetModelLoadProfile(rt.loadProfile)
