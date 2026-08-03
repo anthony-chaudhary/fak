@@ -121,6 +121,7 @@ var verbTiers = map[string]VerbTier{
 	"cachevalue":                    TierDev,
 	"cadence":                       TierDev,
 	"callavoid":                     TierDev,
+	"capabilities":                  TierDev,
 	"chat":                          TierDev,
 	"chatops":                       TierDev,
 	"chatrelay":                     TierDev,

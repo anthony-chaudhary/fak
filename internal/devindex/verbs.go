@@ -101,6 +101,7 @@ var verbManifest = []Verb{
 	{Name: "cachevalue", Synopsis: "the cache-value rollup: realized agent-memory / KV-reuse savings", Lane: "cmd"},
 	{Name: "cadence", Synopsis: "consolidated regular-cadence report: scores, maturity, work-done, releases in one envelope", Lane: "cmd"},
 	{Name: "callavoid", Synopsis: "the call-avoidance report: identical-call dedup (vDSO) round-trips saved", Lane: "cmd"},
+	{Name: "capabilities", Synopsis: "the memory-forward toolbelt: memq drivers, index verbs, kernel shared-path verbs, ranked by intent", Lane: "cmd"},
 	{Name: "chat", Synopsis: "minimal chat client against a fak serve/guard gateway", Lane: "cmd"},
 	{Name: "chatops", Synopsis: "the inbound read-only Slack control door: answers help/ping/status/fleet behind a fail-closed admin allowlist", Lane: "cmd"},
 	{Name: "chatrelay", Synopsis: "the chat-relay Slack surface bridging a channel to a gateway", Lane: "cmd"},

@@ -538,6 +538,18 @@ func main() {
 		cmdNodeUsage(os.Args[2:])
 	case "callavoid":
 		cmdCallavoid(os.Args[2:])
+	case "capabilities":
+		// The memory-forward "what can I do?" surface (cmd/fak/capabilities.go over
+		// internal/selfquery, #1500 / epic #1494). It shipped with full flag parsing,
+		// a usage block, three passing unit tests, and its own guard-startup banner
+		// (guard_capabilities.go) telling the wrapped agent to run `fak capabilities
+		// [<intent>]` -- plus two .claude/skills lines (field-borrow, study-repo) and
+		// an INDEX.md mention doing the same -- but never a dispatch arm, so the
+		// advertised verb answered "unknown verb" while runCapabilities was exercised
+		// only by capabilities_test.go (#5558, the same defect class #5546 closed for
+		// `fak idea-scout`). No wrapper was ever authored or swept here: runCapabilities
+		// is called directly, same shape as the idea-scout fix.
+		os.Exit(runCapabilities(os.Stdout, os.Stderr, os.Args[2:]))
 	case "savings-vector":
 		cmdSavingsVector(os.Args[2:])
 	case "horizon-recovery":
