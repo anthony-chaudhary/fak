@@ -945,3 +945,173 @@ func TestTrunkRedGitProbeSecondConjunct(t *testing.T) {
 		t.Fatalf("an out-of-module break must be unprovable/%q; got %q (%s)", trunkRedReasonOutOfModule, got.Status, got.Reason)
 	}
 }
+
+// TestTrunkRedWitnessStampsGatedModule pins the WRITE-side half of provenance (#5540):
+// the row records the module of the repo the gate was actually run against, read from
+// that repo's own go.mod at the moment it is written.
+//
+// This is the fact that has to be captured at creation or not at all. `c1fbc87ed` routed
+// a gate's own throwaway-repo witness into the throwaway repo's ledger, which stopped the
+// bleeding, but the row it writes is still anonymous: on disk, a synthetic fixture break
+// and a real trunk break are the same shape. The 28 legacy `buildcheck.test/p` rows in the
+// real ledger are exactly that residue, and nothing but their package TEXT distinguishes
+// them — which is why the stamp goes on the writer rather than a matcher on the reader.
+func TestTrunkRedWitnessStampsGatedModule(t *testing.T) {
+	pinTrunkRedClock(t)
+	// No env override: the gated root alone decides both destination and provenance.
+	t.Setenv(trunkRedLedgerEnv, "")
+	t.Setenv(trunkRedModeEnv, "")
+	t.Setenv("FAK_SESSION_ID", "")
+	t.Setenv("CLAUDE_SESSION_ID", "")
+
+	readBack := func(t *testing.T, ledger string) trunkRedRecord {
+		t.Helper()
+		b, err := os.ReadFile(ledger)
+		if err != nil {
+			t.Fatalf("read ledger: %v", err)
+		}
+		line := strings.TrimSpace(string(b))
+		var rec trunkRedRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("unmarshal %q: %v", line, err)
+		}
+		return rec
+	}
+
+	t.Run("the gated repo's module is recorded", func(t *testing.T) {
+		gated := t.TempDir()
+		if err := os.WriteFile(filepath.Join(gated, "go.mod"), []byte("module buildcheck.test\n\ngo 1.22\n"), 0o644); err != nil {
+			t.Fatalf("write go.mod: %v", err)
+		}
+		var stderr bytes.Buffer
+		w := emitTrunkRedWitness(&stderr, gated, "commit", "base1", []string{"buildcheck.test/p"}, "neverDefined")
+		if !w.Witnessed {
+			t.Fatalf("expected a witness; stderr=%q", stderr.String())
+		}
+		rec := readBack(t, w.Ledger)
+		if rec.Module != "buildcheck.test" {
+			t.Fatalf("row must carry the GATED repo's module as provenance; got %q, want %q", rec.Module, "buildcheck.test")
+		}
+		// The stamp is additive: the schema must stay readable, or every already-written
+		// row in a real ledger would silently vanish from the fold.
+		if rec.Schema != trunkRedRecordSchema {
+			t.Fatalf("an additive field must not bump the schema; got %q want %q", rec.Schema, trunkRedRecordSchema)
+		}
+	})
+
+	t.Run("an unreadable go.mod records no provenance rather than a guess", func(t *testing.T) {
+		gated := t.TempDir() // no go.mod at all
+		var stderr bytes.Buffer
+		w := emitTrunkRedWitness(&stderr, gated, "commit", "base1", []string{"buildcheck.test/p"}, "neverDefined")
+		if !w.Witnessed {
+			t.Fatalf("expected a witness; stderr=%q", stderr.String())
+		}
+		// The package name says "buildcheck.test" plainly, and the writer still must not
+		// infer the module from it: an unknown provenance is recorded as unknown.
+		if rec := readBack(t, w.Ledger); rec.Module != "" {
+			t.Fatalf("no go.mod means unknown provenance, not an inferred one; got %q", rec.Module)
+		}
+	})
+}
+
+// TestTrunkRedForeignProvenanceIsStructuralNotTextual is the witness that the foreign
+// verdict is read off the writer's stamp and NOT pattern-matched out of the row's text
+// (#5540).
+//
+// The whole test rests on one deliberate choice: every break below names the SAME
+// in-module package, `example.com/m/p`. So `trunkRedPackageDirs` maps all of them, the
+// out-of-module inference cannot fire for any of them, and the only thing that differs
+// between the foreign row and the control row is the recorded module. A matcher on the
+// package string could not tell these apart at all — which is the point. If this test
+// passes while a heuristic-on-content implementation is in place, it is passing for the
+// wrong reason, so the fixture is built so that no such implementation can pass it.
+func TestTrunkRedForeignProvenanceIsStructuralNotTextual(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/m\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	// Guard the premise: the shared package really is mappable inside this module, so a
+	// foreign verdict below cannot be the out-of-module answer wearing a new name.
+	pkgs := []string{"example.com/m/p"}
+	if dirs := trunkRedPackageDirs(root, pkgs); len(dirs) == 0 {
+		t.Fatalf("fixture premise broken: %v must map inside example.com/m, else this test cannot isolate provenance", pkgs)
+	}
+
+	probe := trunkRedGitProbe(root)
+
+	t.Run("a row stamped with another module is graded foreign", func(t *testing.T) {
+		got := probe(trunkRedBreak{BaseSha: "base1", FirstBreak: "neverDefined", Packages: pkgs, Module: "buildcheck.test"})
+		if got.Status != trunkRedStatusUnprovable || got.Reason != trunkRedReasonForeignModule {
+			t.Fatalf("a row recorded against another module must be unprovable/%q; got %q (%s)", trunkRedReasonForeignModule, got.Status, got.Reason)
+		}
+	})
+
+	t.Run("control: an identically-worded row stamped with THIS module is not foreign", func(t *testing.T) {
+		got := probe(trunkRedBreak{BaseSha: "base2", FirstBreak: "neverDefined", Packages: pkgs, Module: "example.com/m"})
+		if got.Reason == trunkRedReasonForeignModule {
+			t.Fatalf("a row recorded against THIS module must never be graded foreign; got %q (%s)", got.Status, got.Reason)
+		}
+	})
+
+	t.Run("control: an unstamped legacy row is unknown provenance, never foreign", func(t *testing.T) {
+		got := probe(trunkRedBreak{BaseSha: "base3", FirstBreak: "neverDefined", Packages: pkgs, Module: ""})
+		if got.Reason == trunkRedReasonForeignModule {
+			t.Fatalf("an absent field is not evidence: a row predating the stamp must not read as foreign; got %q (%s)", got.Status, got.Reason)
+		}
+	})
+
+	// The provenance has to survive the fold, not just the probe: it travels row ->
+	// rollup -> break, and a class keeps its stamp even when older unstamped rows share it.
+	t.Run("provenance reaches the fold and drops nothing", func(t *testing.T) {
+		rows := []trunkRedRecord{
+			{Schema: trunkRedRecordSchema, Gate: "commit", BaseSha: "base1", Packages: pkgs, FirstBreak: "neverDefined", Module: "buildcheck.test"},
+			{Schema: trunkRedRecordSchema, Gate: "commit", BaseSha: "base2", Packages: pkgs, FirstBreak: "neverDefined", Module: "example.com/m"},
+			{Schema: trunkRedRecordSchema, Gate: "commit", BaseSha: "base3", Packages: pkgs, FirstBreak: "neverDefined"},
+		}
+		var content strings.Builder
+		for _, r := range rows {
+			b, err := json.Marshal(r)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			content.Write(b)
+			content.WriteString("\n")
+		}
+		sum := summarizeTrunkRed(content.String(), probe)
+
+		// Nothing is filtered away. A foreign row is SURFACED with its reason, exactly
+		// like every other unprovable class — suppressing it would be the metric
+		// laundering this change exists to avoid.
+		if sum.ResolvedRows != 0 {
+			t.Fatalf("provenance must not drop rows; %d row(s) folded out", sum.ResolvedRows)
+		}
+		if sum.Total != len(rows) || len(sum.Classes) != len(rows) {
+			t.Fatalf("all %d rows must stay surfaced as %d classes; got total=%d classes=%d", len(rows), len(rows), sum.Total, len(sum.Classes))
+		}
+
+		byBase := map[string]trunkRedClassRollup{}
+		for _, c := range sum.Classes {
+			byBase[c.BaseSha] = c
+		}
+		foreign, ok := byBase["base1"]
+		if !ok {
+			t.Fatalf("the foreign class disappeared from the fold: %+v", sum.Classes)
+		}
+		if foreign.Module != "buildcheck.test" {
+			t.Fatalf("the rollup must carry the recorded provenance; got %q", foreign.Module)
+		}
+		if foreign.KeepReason != trunkRedReasonForeignModule {
+			t.Fatalf("the foreign class must be surfaced with reason %q; got %q", trunkRedReasonForeignModule, foreign.KeepReason)
+		}
+		// And the reader SEES it: the reason has to reach the rendered line, or the fold
+		// knows something the operator does not.
+		if out := renderTrunkRed(sum); !strings.Contains(out, trunkRedReasonForeignModule) {
+			t.Fatalf("the rendered view must name the provenance reason:\n%s", out)
+		}
+		for _, base := range []string{"base2", "base3"} {
+			if c := byBase[base]; c.KeepReason == trunkRedReasonForeignModule {
+				t.Fatalf("class %s is not foreign but was graded %q", base, c.KeepReason)
+			}
+		}
+	})
+}

@@ -45,7 +45,11 @@ import (
 // `.fak/` gitignored runtime path so active gates never dirty tracked docs, and an
 // env override + mode-off switch.
 
-// trunkRedRecordSchema versions the row shape so a reader can evolve.
+// trunkRedRecordSchema versions the row shape so a reader can evolve. It stays at v1
+// across PURELY ADDITIVE optional fields (the `module` provenance stamp): the reader
+// filters rows by exact schema equality, so bumping it would make every already-written
+// row invisible — silently emptying the view instead of evolving it. A bump is for a
+// change that would make an old row MISREAD, which an absent optional field does not.
 const trunkRedRecordSchema = "fak.trunk-red.v1"
 
 // trunkRedNow is the injectable clock (mirrors prepushNow) so the recorder stays
@@ -63,6 +67,23 @@ type trunkRedRecord struct {
 	Packages   []string `json:"packages,omitempty"`    // the failing import paths (the shared break)
 	FirstBreak string   `json:"first_break,omitempty"` // first undefined symbol, when parseable
 	Session    string   `json:"session,omitempty"`     // best-effort session id, so distinct clones are countable
+	// Module is the PROVENANCE of the write: the Go module path of the repo this gate
+	// was actually run against, read from that repo's own go.mod at record time. It is
+	// what lets a reader tell a row recorded ABOUT this repo from one recorded about a
+	// different checkout — structurally, from a fact the writer knew, rather than by
+	// pattern-matching the row's package names downstream.
+	//
+	// The ledger is a FLEET ledger: `--ledger` / $FAK_TRUNK_RED_LEDGER deliberately let a
+	// gate file into a ledger that is not the gated repo's own, so foreign rows are a
+	// legitimate thing to hold, not something to refuse at write time. What was missing is
+	// that they arrived ANONYMOUS — a gate's own throwaway-repo fixture and a real trunk
+	// break were the same shape on disk, and only the fixture's package name told them
+	// apart. Naming the module at the point of creation is what makes that distinction a
+	// property of the row instead of a guess about its text.
+	//
+	// "" on any go.mod read failure, and on every row written before this field existed,
+	// which the reader must treat as UNKNOWN provenance — never as "foreign".
+	Module string `json:"module,omitempty"`
 }
 
 // trunkRedClass is the convergence key: the shared break's identity, independent of
@@ -188,6 +209,11 @@ func emitTrunkRedWitness(stderr io.Writer, root, gate, baseSha string, pkgs []st
 		Packages:   pkgs,
 		FirstBreak: strings.TrimSpace(firstBreak),
 		Session:    trunkRedSession(),
+		// Provenance, stamped from the repo actually being GATED — the one place in the
+		// system that knows it for certain. Resolved here rather than inferred later
+		// because after the row is on disk the only surviving clue is its package names,
+		// and reading provenance off those is exactly the guess this field replaces.
+		Module: trunkRedModulePath(root),
 	}
 	if err := appendTrunkRedRecord(ledger, rec); err != nil {
 		fmt.Fprintf(stderr, "fak: trunk-red witness append skipped (fail-open): %v\n", err)
@@ -315,6 +341,12 @@ const (
 	trunkRedReasonSymbolAbsent      = "HEAD neither declares nor references the symbol"
 	trunkRedReasonBaseNotMergedPast = "the remote trunk has not provably moved past the base"
 	trunkRedReasonUnnamedUnprovable = "the probe proved nothing and named no reason"
+	// trunkRedReasonForeignModule is the PROVENANCE verdict, and it is a stronger claim
+	// than trunkRedReasonOutOfModule: the row itself records that the gate which wrote it
+	// was run against a different module, so nothing about this repo's HEAD could confirm
+	// or clear it no matter what its packages are named. Out-of-module is INFERRED from
+	// the package strings after the fact; this is read off the writer's own stamp.
+	trunkRedReasonForeignModule = "the witness was recorded against a different module than this repo"
 )
 
 // trunkRedUnprovable is the surfaced-without-proof verdict.
@@ -341,6 +373,9 @@ type trunkRedClassRollup struct {
 	LastTs     string         `json:"last_ts,omitempty"`
 	Status     trunkRedStatus `json:"status,omitempty"`
 	KeepReason string         `json:"keep_reason,omitempty"` // set only when Status is unprovable
+	// Module is the provenance the member rows recorded: the module their gate ran
+	// against. "" means the rows predate the stamp — UNKNOWN provenance, not foreign.
+	Module string `json:"module,omitempty"`
 }
 
 // trunkRedSummary is the folded value view: the distinct shared breaks currently
@@ -402,6 +437,7 @@ func summarizeTrunkRed(content string, probe func(trunkRedBreak) trunkRedVerdict
 				BaseSha:    r.BaseSha,
 				Packages:   r.Packages,
 				FirstBreak: r.FirstBreak,
+				Module:     r.Module,
 			}
 			byClass[class] = roll
 			order = append(order, class)
@@ -411,6 +447,12 @@ func summarizeTrunkRed(content string, probe func(trunkRedBreak) trunkRedVerdict
 		roll.Rows++
 		if roll.FirstBreak == "" && r.FirstBreak != "" {
 			roll.FirstBreak = r.FirstBreak
+		}
+		// First non-empty wins, like FirstBreak: a class whose older rows predate the
+		// stamp still learns its provenance from a newer row, and an unstamped row never
+		// erases a stamped one.
+		if roll.Module == "" && r.Module != "" {
+			roll.Module = r.Module
 		}
 		if s := strings.TrimSpace(r.Session); s != "" {
 			sessionsByClass[class][s] = struct{}{}
@@ -488,6 +530,10 @@ type trunkRedBreak struct {
 	BaseSha    string
 	FirstBreak string
 	Packages   []string
+	// Module is the class's recorded provenance — the module the gate that wrote these
+	// rows was run against — or "" when the rows predate the stamp. A probe compares it
+	// to the module it is reading FOR; it never parses Packages to guess it.
+	Module string
 }
 
 // trunkRedClassVerdict is the keep-side guard rail the fold puts AROUND the probe. It
@@ -510,7 +556,7 @@ func trunkRedClassVerdict(roll trunkRedClassRollup, probe func(trunkRedBreak) tr
 	if sym == "" {
 		return trunkRedUnprovable(trunkRedReasonNoSymbol) // nothing to look up — KEEP
 	}
-	v := probe(trunkRedBreak{BaseSha: base, FirstBreak: sym, Packages: roll.Packages})
+	v := probe(trunkRedBreak{BaseSha: base, FirstBreak: sym, Packages: roll.Packages, Module: roll.Module})
 	switch v.Status {
 	case trunkRedStatusResolved, trunkRedStatusLive:
 		return trunkRedVerdict{Status: v.Status}
@@ -558,11 +604,30 @@ func trunkRedGitProbe(root string) func(trunkRedBreak) trunkRedVerdict {
 	root = strings.TrimSpace(root)
 	mergedPast := map[string]bool{}
 	stateAtHead := map[string]trunkRedSymbolState{}
+	// Resolved once for the whole fold: the module this probe is reading FOR.
+	readingModule := ""
+	if root != "" {
+		readingModule = strings.TrimSpace(trunkRedModulePath(root))
+	}
 	return func(b trunkRedBreak) trunkRedVerdict {
 		base := strings.TrimSpace(b.BaseSha)
 		sym := strings.TrimSpace(b.FirstBreak)
 		if root == "" {
 			return trunkRedUnprovable(trunkRedReasonNoRoot)
+		}
+		// PROVENANCE first, because it is the only fact here that comes from the writer
+		// rather than from re-deriving something about the row's text. A class whose rows
+		// record a different module was never about this repo, so no probe of this repo's
+		// HEAD can speak to it — and saying "recorded against a different module" is a
+		// materially better answer than the out-of-module inference below, which merely
+		// notices that the package strings do not map here.
+		//
+		// Both the empty cases keep the OLD answer on purpose: an unstamped row (every row
+		// written before the stamp existed) is UNKNOWN provenance, not foreign, and an
+		// unreadable local go.mod means we cannot compare at all. Neither may be upgraded
+		// into a foreign verdict — that would let a missing field masquerade as evidence.
+		if rowModule := strings.TrimSpace(b.Module); rowModule != "" && readingModule != "" && rowModule != readingModule {
+			return trunkRedUnprovable(trunkRedReasonForeignModule)
 		}
 		if base == "" {
 			return trunkRedUnprovable(trunkRedReasonNoBase)
