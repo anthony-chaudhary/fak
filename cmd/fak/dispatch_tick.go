@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/leasequeue"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/regionadmit"
@@ -1275,7 +1276,7 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 	req := regionadmit.Request{Actor: holder, Lane: lane, Tree: tree}
 	dec := regionadmit.Decide(req, regionLeases(live), tax)
 	if !dec.Admit {
-		return map[string]any{
+		refusal := map[string]any{
 			"acquired":  false,
 			"refused":   true,
 			"id":        id,
@@ -1288,6 +1289,34 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 			"lane_kind": leaseref.ArbiterLaneKind,
 			"mode":      laneMode,
 		}
+		// #5505: the tick's refusal takes a PLACE IN LINE instead of evaporating. Until now a
+		// LANE_LEASE_HELD tick recorded that it lost and nothing else, so the next tick re-raced
+		// from scratch and whoever polled first after a release won — a tick that had been
+		// refused for four hours had exactly the same odds as one that arrived 200ms ago. The
+		// ticket's id is stable across retries (actor+lane+resolved tree), so a returning tick
+		// REFRESHES its ticket and keeps the enqueue clock it earned.
+		//
+		// The same plane `fak loop region` mints on, through the same helper — one waiter list,
+		// so an operator's `fak loop region --lane X` and this tick queue in ONE line rather than
+		// two private ones. Class is `loop` because this IS the background dispatch driver; that
+		// is what keeps it from ranking ahead of a waiting operator.
+		//
+		// It runs AFTER the verdict and can only ADD a report key: the decision above and the
+		// refused:true the caller branches on (dispatchTickLiveSpawn's LANE_LEASE_HELD, the host
+		// enroll's) are already computed and are never read back from here. Every failure inside
+		// the helper is swallowed into a nil report, so an unwritable queue degrades the payload
+		// and never the decision.
+		//
+		// No `--no-queue` twin is wired here, unlike the loop-region verb: that flag exists for a
+		// PURE QUERY (an operator asking "may I?" who wants to leave no trace), and this function
+		// has no query-shaped caller — the dry-run WOULD_SPAWN/WOULD_ENROLL paths return before
+		// the acquire, and the scorecard's deliberate-collision probe runs against an isolated
+		// temp repo that is removed with its queue. Every caller that reaches here genuinely
+		// wants the region, so every caller genuinely wants its place in line.
+		if q := loopRegionEnqueue(root, req, tax, live, leasequeue.ClassLoop, now).payload(); q != nil {
+			refusal["queue"] = q
+		}
+		return refusal
 	}
 	// Record the tree the decision was MADE on: with an empty requested tree
 	// and a named lane, Decide admits on the lane's canonical taxonomy tree —
@@ -1303,6 +1332,11 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": err.Error(), "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
 	}
 	if verdict.OK {
+		// The waiter got in, so it gives up the place it was holding (#5505) — otherwise a tick
+		// that finally acquired would keep a reservation that ranks ahead of the peers still
+		// waiting behind it for the whole ticket TTL. Best-effort and silent, exactly like the
+		// enqueue: the acquisition already succeeded and nothing below re-reads the queue.
+		loopRegionDequeue(root, req, tax)
 		return map[string]any{"acquired": true, "refused": false, "id": id, "holder": holder, "generation": written.Generation, "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
 	}
 	return map[string]any{"acquired": false, "refused": true, "id": id, "holder": holder, "reason": string(verdict.Reason), "detail": verdict.Detail, "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
