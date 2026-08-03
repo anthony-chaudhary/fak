@@ -1752,6 +1752,106 @@ class LedgerGateGradeTest(unittest.TestCase):
         self.assertEqual(status["status_source"], "none")
 
 
+class SeatProbeCoverageTest(unittest.TestCase):
+    """#5391's Python half: a seat the prober has not spoken about lately is published as
+    unknown-health even though the registry it is published out of derives blocks perfectly
+    well for OTHER accounts.
+
+    #5439 (LedgerGateGradeTest above) grades per-REGISTRY. The host that filed #5391 shows why
+    that is not sufficient: probe_ledger.jsonl there was present, derivable and busy --
+    ``opencode-*`` rows current to the minute -- while several claude seats' newest rows were
+    8-9 days old. Every registry-level question answered "yes", and none of it was evidence
+    about those seats. Mirror of internal/fleetaccounts/status_seatcoverage_test.go; the two
+    surfaces must not disagree about one host, which is the #5390 failure in another costume.
+
+    Both halves are asserted on every case: the weakened claim must never become a block.
+    Converting absence into blocked is self-sealing -- the roster routes the work that runs the
+    prober -- and #5391 files itself as a coverage gap for exactly that reason."""
+
+    ACCT = ".claude-seat5391"
+    OTHER = "opencode-fixture"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        fleet_accounts._PROBE_LEDGER_CACHE.update(key=None, by_account={}, ages={}, obs={})
+        self.addCleanup(lambda: fleet_accounts._PROBE_LEDGER_CACHE.update(
+            key=None, by_account={}, ages={}, obs={}))
+
+    def _row(self, account: str, minutes_ago: float, status: str = "OK") -> str:
+        ts = (dt.datetime.now(dt.timezone.utc)
+              - dt.timedelta(minutes=minutes_ago)).isoformat()
+        return json.dumps({"ts": ts, "account": account, "tag": "seat", "status": status})
+
+    def _reg_dir(self, *rows: str) -> Path:
+        """A ledger-bearing registry dir carrying `rows` (none => a wired prober that has
+        recorded nothing)."""
+        d = self.root / "bearing"
+        d.mkdir(exist_ok=True)
+        (d / "sessions.json").write_text("{}", encoding="utf-8")
+        (d / "probe_ledger.jsonl").write_text(
+            "".join(r + "\n" for r in rows), encoding="utf-8")
+        return d
+
+    def _live_registry(self, throttle: dict | None = None) -> dict:
+        return {"generated_utc": dt.datetime.now(dt.timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"),
+                "throttle": throttle or {},
+                "sessions": [{"account": self.ACCT, "project": "work", "disp": "LIVE"}]}
+
+    def _status(self, reg_dir: Path, registry: dict) -> dict:
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(reg_dir)}, clear=False):
+            return fleet_accounts.runtime_status(self.ACCT, registry=registry)
+
+    def test_busy_ledger_with_no_row_for_seat_publishes_unknown_health(self) -> None:
+        # The acceptance line: "never probed" and "probed OK" must be distinguishable. The
+        # prober demonstrably ran two minutes ago and has simply never named this seat.
+        d = self._reg_dir(self._row(self.OTHER, 2))
+        status = self._status(d, self._live_registry())
+        self.assertTrue(status["available"], "unknown health must not strand the seat")
+        self.assertFalse(status["blocked"])
+        self.assertEqual(status["status_source"], "registry-unknown")
+
+    def test_eight_day_old_seat_row_publishes_unknown_health(self) -> None:
+        # The observed shape verbatim: one account current to the minute, this one last heard
+        # from eight days ago. A row that old is not evidence about now.
+        d = self._reg_dir(self._row(self.ACCT, 8 * 24 * 60), self._row(self.OTHER, 2))
+        status = self._status(d, self._live_registry())
+        self.assertTrue(status["available"])
+        self.assertFalse(status["blocked"])
+        self.assertEqual(status["status_source"], "registry-unknown")
+
+    def test_seat_row_inside_coverage_budget_keeps_registry_status_source(self) -> None:
+        # The control that keeps the new trigger from being a blanket rename. Two windows, and
+        # they are not the same window: a two-hour-old OK is past PROBE_LEDGER_FRESH_MIN (so
+        # the fold correctly falls through to the registry rung) and well inside
+        # SEAT_COVERAGE_MAX_AGE_MIN, so the claim published there is a confident one.
+        d = self._reg_dir(self._row(self.ACCT, 120))
+        status = self._status(d, self._live_registry())
+        self.assertTrue(status["available"])
+        self.assertEqual(status["status_source"], "registry")
+
+    def test_blocked_seat_keeps_registry_status_source(self) -> None:
+        # Ordering: "blocked" is a positive derivation from the registry's own throttle row,
+        # not a statement about probe evidence, so unknown-health has nothing to add.
+        d = self._reg_dir(self._row(self.OTHER, 2))
+        status = self._status(d, self._live_registry(
+            {self.ACCT: {"reset": "Dec 31, 11pm (America/Los_Angeles)"}}))
+        self.assertFalse(status["available"])
+        self.assertTrue(status["throttled"])
+        self.assertEqual(status["status_source"], "registry")
+
+    def test_empty_ledger_keeps_registry_status_source(self) -> None:
+        # The boundary #5439 drew and this change does not move: a ledger present but EMPTY
+        # leaves every seat unmeasured, yet the registry-level grade already describes that
+        # host and a seat-level downgrade would only restate it. Without the busy-ledger
+        # precondition this case would flip, so the assertion is load-bearing for it.
+        d = self._reg_dir()
+        status = self._status(d, self._live_registry())
+        self.assertEqual(status["status_source"], "registry")
+
+
 def _future_reset_str(minutes: float) -> str:
     """A DATED reset string `minutes` from now, in a format _reset_is_future parses (mirror of
     Go futureResetStr's "Jan 2, 3:04pm"). Negative minutes => a provably-passed daily reset."""

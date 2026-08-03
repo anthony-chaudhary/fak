@@ -159,6 +159,15 @@ ACCOUNT_CAP_RUNS_DIR = os.environ.get(
 # verdict only within this window. Matches account_probe's own anti-spam interval scale.
 PROBE_LEDGER_FRESH_MIN = float(os.environ.get("FLEET_PROBE_FRESH_MIN", "20"))
 
+# The probe-COVERAGE budget: how old a seat's newest ledger row may be before the ledger stops
+# counting as evidence about that seat at all. Distinct from PROBE_LEDGER_FRESH_MIN above,
+# which asks a different question -- "does this VERDICT still override the registry" -- on a
+# window sized for quota walls. This one asks "has this seat been MEASURED lately", and a seat
+# probed OK two hours ago is past the first window and comfortably inside this one.
+# accountprobe.SeatCoverageMaxAgeMin is the authority for the value and for why 1440 (24h) is
+# a chosen rather than a derived number; keep the two in step.
+SEAT_COVERAGE_MAX_AGE_MIN = 1440.0
+
 NIM_DEEPSEEK_V4_PRO_MODEL = "deepseek-ai/deepseek-v4-pro"
 NIM_KIMI_K26_MODEL = "moonshotai/kimi-k2.6"
 NIM_GLM52_MODEL = "z-ai/glm-5.2"
@@ -1291,10 +1300,51 @@ def _mark_usage_soon(status: dict, throttle_info: dict | None) -> None:
         status["usage_soon_reset"] = reset
 
 
-def _mark_unknown_health(status: dict, blocks_derivable: bool) -> dict:
+def _seat_probe_unmeasured(account: str) -> bool:
+    """Whether a BUSY probe ledger -- one carrying rows for at least one account -- holds no
+    current evidence about THIS seat: no row at all, or a newest row past
+    SEAT_COVERAGE_MAX_AGE_MIN (or one whose timestamp will not parse, which is the same thing
+    here, since an undatable row is not evidence about now).
+
+    Mirror of Go seatProbeUnmeasured, and the whole of #5391: on the host that filed it the
+    ledger was present, derivable and busy -- ``opencode-*`` rows current to the minute --
+    while several claude seats' newest rows were 8-9 days old. Every registry-level question
+    answered "yes, blocks are derivable here", and none of that was evidence about those seats.
+    They read available, and because a 403 burns no quota the headroom-weighted allocator
+    PREFERRED the one seat whose org had disabled access.
+
+    The "busy" precondition is deliberate and is why this does not re-open #5439's boundary. A
+    ledger that has recorded NOTHING is already described by the registry-level judgement, and
+    a seat-level downgrade there would only restate it. A ledger that has recorded rows for
+    OTHER accounts is the case where the registry-level answer is affirmatively misleading:
+    the prober demonstrably ran and demonstrably skipped this seat. Only the second moves.
+
+    Costs no extra ledger read -- _probe_ledger_snapshot is the memoized parse the fresh-probe
+    rung already paid for on this render."""
+    by_account, ages = _probe_ledger_snapshot()
+    if not by_account:
+        return False
+    if account not in by_account:
+        return True
+    age = ages.get(account)
+    return age is None or age > SEAT_COVERAGE_MAX_AGE_MIN
+
+
+def _mark_unknown_health(status: dict, blocks_derivable: bool,
+                         seat_unmeasured: bool = False) -> dict:
     """Weaken an UNBLOCKED seat's ``status_source`` from the confident ``registry`` to
-    ``registry-unknown`` when the registry it was published out of cannot derive a block at
-    all (mirror of Go markUnknownHealth; see _registry_blocks_derivable).
+    ``registry-unknown`` when it is being published on probe evidence that does not exist
+    (mirror of Go markUnknownHealth). Two disjoint absences reach the same verdict:
+
+      - ``blocks_derivable`` false -- the registry itself cannot derive a block at all (see
+        _registry_blocks_derivable).
+      - ``seat_unmeasured`` true -- the registry CAN derive blocks and its ledger is busy, but
+        that ledger holds no current row for this particular seat (see _seat_probe_unmeasured).
+        #5391: "never probed" and "probed OK" must not both read as a proven-free seat just
+        because the prober is healthy for some other account class.
+
+    The second is the narrower and later of the two, and it is what keeps the first from being
+    read as a sufficient test: a registry-wide grade cannot see a per-class coverage hole.
 
     Unknown-health is a THIRD state, and deliberately NOT a block. Converting absence into
     blocked would strand every seat on a host whose prober has not run -- and worse, it is
@@ -1308,8 +1358,9 @@ def _mark_unknown_health(status: dict, blocks_derivable: bool) -> dict:
     A BLOCKED seat keeps ``registry``: blocked is a positive derivation from the registry's
     own throttle/auth rows, not a statement about probe evidence, so its provenance is not in
     doubt. An empty registry keeps ``none``, which already says nothing was consulted."""
-    if blocks_derivable or status.get("blocked") \
-            or status.get("status_source") != "registry":
+    if status.get("blocked") or status.get("status_source") != "registry":
+        return status
+    if blocks_derivable and not seat_unmeasured:
         return status
     status["status_source"] = "registry-unknown"
     return status
@@ -1500,9 +1551,16 @@ def runtime_status(account: str, registry: dict | None = None,
             "block_kind": kind,
             "block_reason": reason,
         })
-    # Nothing above found a block. If the registry could not have derived one, say so rather
-    # than publishing a seat as proven-free on evidence that was never available (#5439).
-    return _mark_unknown_health(status, consult_ledger)
+    # Nothing above found a block. If the registry could not have derived one (#5439) -- or if
+    # the busy ledger it derives them from has no current row for THIS seat (#5391) -- say so
+    # rather than publishing a seat as proven-free on evidence that was never available. The
+    # seat grade is read only when it can still change the answer, so a blocked seat (whose
+    # provenance is not in doubt) and a ledger-less registry (already answered) skip it.
+    seat_unmeasured = False
+    if consult_ledger and not status.get("blocked") \
+            and status.get("status_source") == "registry":
+        seat_unmeasured = _seat_probe_unmeasured(account)
+    return _mark_unknown_health(status, consult_ledger, seat_unmeasured)
 
 
 def annotate_accounts(rows: list[dict], registry: dict | None = None,
