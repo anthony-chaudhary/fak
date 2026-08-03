@@ -1,6 +1,6 @@
 # Start here
 
-This page is the human route map for **fak**. Choose the job you have now; each route points to its current authority and one next action. For the product overview and first commands, use the [README](README.md).
+This page is the human route map for **fak**. Choose the job you have now; each route points to its current authority and one next action. For the product overview and first commands, use the [README](README.md); the repository's configured homepage is the published copy of [`docs/showcase.html`](docs/showcase.html), which the README audit keeps in step with the README.
 
 ## See one verdict in one command — no key, model, or GPU
 
