@@ -50,21 +50,24 @@ func conceptEscapeLen(s string) int {
 	return 0
 }
 
-// conceptScannableLine blanks every Go escape sequence inside an interpreted string or
-// rune literal so the identifier after an escape is tokenized on its own. Reading the raw
-// source text instead welds the escape's letter onto the next word: an ordinary header
-// literal joining the columns DRIFT, AGE_H, SESSION and LEAVES with tab escapes yielded a
-// token spelling a stray leading "t" in front of the column name, a symbol that exists
-// nowhere in the tree, and the gate then blocked the commit until someone classified it
-// (#5529). The artifact is spelled out only in the regression test, never here: a comment
-// quoting it verbatim would re-mint it, since a backslash in a comment is a literal
-// character rather than an escape. That is also why raw strings and comments are left
-// exactly as the extractor has always read them -- eating a would-be escape there would
+// conceptScanLine blanks every Go escape sequence inside an interpreted string or rune
+// literal so the identifier after an escape is tokenized on its own, and reports alongside
+// the text which bytes sit in CODE position -- outside every literal and every comment.
+//
+// Reading the raw source text instead welds the escape's letter onto the next word: an
+// ordinary header literal joining the columns DRIFT, AGE_H, SESSION and LEAVES with tab
+// escapes yielded a token spelling a stray leading "t" in front of the column name, a symbol
+// that exists nowhere in the tree, and the gate then blocked the commit until someone
+// classified it (#5529). The artifact is spelled out only in the regression test, never
+// here: a comment quoting it verbatim would re-mint it, since a backslash in a comment is a
+// literal character rather than an escape. That is also why raw strings and comments are
+// left exactly as the extractor has always read them -- eating a would-be escape there would
 // swallow the first letter of a real word (Users -> sers).
-func conceptScannableLine(s string) string {
-	if !strings.Contains(s, `\`) {
-		return s
-	}
+//
+// The code mask is what separates a declaration from a mention. Only a byte in code position
+// can begin a declaration, so the two reference shapes below are recognised in prose and in
+// literals, where nothing is ever declared, and left untouched in code (#5533).
+func conceptScanLine(s string) (string, []bool) {
 	const (
 		code = iota
 		interpreted
@@ -73,9 +76,11 @@ func conceptScannableLine(s string) string {
 		block
 	)
 	b, state := []byte(s), code
+	isCode := make([]bool, len(b))
 	for i := 0; i < len(b); i++ {
 		switch state {
 		case code:
+			isCode[i] = true
 			switch {
 			case b[i] == '"':
 				state = interpreted
@@ -84,7 +89,7 @@ func conceptScannableLine(s string) string {
 			case b[i] == '`':
 				state = rawLit
 			case b[i] == '/' && i+1 < len(b) && b[i+1] == '/':
-				return string(b) // the rest of the line is a comment
+				return string(b), isCode // the rest of the line is prose
 			case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
 				state, i = block, i+1
 			}
@@ -111,7 +116,52 @@ func conceptScannableLine(s string) string {
 			i += n - 1
 		}
 	}
-	return string(b)
+	return string(b), isCode
+}
+
+// conceptPathSuffixes are the extensions a repo path ends in. A run of identifier characters
+// immediately followed by a dot and one of these is the stem of a PATH: the tree holds a file
+// by that name, never a declaration by it. Reading such a stem as an introduced identifier
+// blocked commits on names declared nowhere in the tree, and the only ways past were to
+// position a concept that does not exist or to classify a non-symbol as incidental -- both of
+// which write a permanent corpus row and inflate the discovered-token denominator of the
+// figure the scorecard reports (#5533).
+var conceptPathSuffixes = map[string]bool{
+	"go": true, "json": true, "md": true, "ps1": true, "py": true,
+	"sh": true, "toml": true, "txt": true, "yaml": true, "yml": true,
+}
+
+// conceptTestNameRE matches the spelling Go REQUIRES of a test entry point. Such a function
+// is only ever run from a file the scan below refuses to admit in the first place, so a name
+// of this shape written in prose or inside a literal is a reference into a scope this gate
+// does not own -- not a symbol the quoting file introduces. Naming the test that witnesses
+// the code above it is good practice and used to cost a permanent corpus row (#5533). In code
+// position the name is left alone: a non-test file may legally declare a function so named.
+var conceptTestNameRE = regexp.MustCompile(`^(?:Test|Benchmark|Fuzz|Example)[A-Z]`)
+
+// conceptFileSuffixAt reports the extension beginning at i when text[i] is the dot of a path,
+// and "" when it is not one. Two deliberate narrowings keep a method call from reading as a
+// path: the run after the dot is taken whole, so a selector spelled x.gopher is not misread as
+// an extension plus a tail; and the match is CASE-SENSITIVE, because a repo path spells its
+// extension in lower case while an exported method is capitalised. Folding case would have
+// read `x.JSON()` -- and, worse, the errgroup idiom `g.Go(...)` -- as a file name and dropped
+// the receiver, which in code position is a symbol like any other.
+func conceptFileSuffixAt(text string, i int) string {
+	if i >= len(text) || text[i] != '.' {
+		return ""
+	}
+	j := i + 1
+	for j < len(text) {
+		c := text[j]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			break
+		}
+		j++
+	}
+	if ext := text[i+1 : j]; conceptPathSuffixes[ext] {
+		return ext
+	}
+	return ""
 }
 
 type admissionMeta struct {
@@ -205,7 +255,20 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 			continue
 		}
 		for _, line := range lines {
-			for _, raw := range conceptIdentRE.FindAllString(conceptScannableLine(line.Text), -1) {
+			text, isCode := conceptScanLine(line.Text)
+			for _, m := range conceptIdentRE.FindAllStringIndex(text, -1) {
+				raw := text[m[0]:m[1]]
+				inCode := m[0] < len(isCode) && isCode[m[0]]
+				// A path stem is not a symbol. In code position only ".go" can be trusted to
+				// be an extension: `go` is a reserved word, so `x.go` can never be a package
+				// or field selector, while `x.json` can be -- and suppressing that receiver
+				// would drop a real symbol.
+				if ext := conceptFileSuffixAt(text, m[1]); ext != "" && (!inCode || ext == "go") {
+					continue
+				}
+				if !inCode && conceptTestNameRE.MatchString(raw) {
+					continue
+				}
 				tok := admissionToken(raw)
 				if tok == "" {
 					continue
@@ -240,8 +303,16 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 					// glossary/scorecard files: on a shared trunk the bare command plans
 					// writes into peer-contended files, while a new rows-<leaf>.json is
 					// lane-local and clears this gate on its own (#5104).
-					cmd := fmt.Sprintf("fak concept position --id %s --canonical %q --family %s --definition TEXT --distinction TEXT --kind symbol --grounding %s --grounding-kind symbol --row-file rows-%s.json --distinct-from SIBLING_ID", tok, raw, f.id, raw, admissionLeaf(p))
-					detail := fmt.Sprintf("family=%s token=%s introduced at %s:%d is neither positioned nor classified; run `%s` (or `fak concept classify --family %s --token %s --category incidental --reason TEXT`)", f.id, raw, p, line.New, cmd, f.id, raw)
+					leaf := admissionLeaf(p)
+					cmd := fmt.Sprintf("fak concept position --id %s --canonical %q --family %s --definition TEXT --distinction TEXT --kind symbol --grounding %s --grounding-kind symbol --row-file rows-%s.json --distinct-from SIBLING_ID", tok, raw, f.id, raw, leaf)
+					// Both remedy commands write the corpus in the WORKTREE, and this gate reads
+					// the INDEX (the accessor above resolves the staged blob). `fak commit --path`
+					// stages only the paths it is handed, so running the command and re-committing
+					// the same code paths reports this finding again, byte for byte -- the cure
+					// looks applied and nothing changes. Name the corpus paths the commit has to
+					// carry, in full, so the printed remedy is sufficient on its own (#5534).
+					stage := fmt.Sprintf("--path tools/concept_disambiguation_scorecard.data/_meta.json --path tools/concept_disambiguation_scorecard.data/rows-%s.json", leaf)
+					detail := fmt.Sprintf("family=%s token=%s introduced at %s:%d is neither positioned nor classified; run `%s` (or `fak concept classify --family %s --token %s --category incidental --reason TEXT`), then add `%s` to the SAME `fak commit` -- this gate reads the git index, not the worktree, so a corpus write left unstaged reports this finding unchanged; landing the corpus as its own commit instead trips CONCEPT_FRESHNESS, whose generated markdown has to be regenerated from a clean-room export of the commit rather than from the dirty worktree", f.id, raw, p, line.New, cmd, f.id, raw, stage)
 					out = append(out, Finding{Gate: "CONCEPT_ADMISSION", File: p, Line: line.New, Detail: detail})
 				}
 			}

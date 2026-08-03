@@ -210,6 +210,227 @@ func TestConceptAdmissionKeepsLiteralBackslashWordsInCommentsAndRawStrings(t *te
 	}
 }
 
+// conceptFindingTokens lists the identifiers a run of the gate would make the author
+// position or classify, in report order.
+func conceptFindingTokens(fs []Finding) []string {
+	var tokens []string
+	for _, f := range fs {
+		tokens = append(tokens, conceptFindingToken(f.Detail))
+	}
+	return tokens
+}
+
+func conceptTokensContain(tokens []string, want string) bool {
+	for _, tok := range tokens {
+		if tok == want {
+			return true
+		}
+	}
+	return false
+}
+
+// A file name written in prose or in a literal is a path, not a symbol. The extractor used
+// to take the stem, drop the extension at the following dot, and offer the remainder as an
+// identifier the file introduces -- blocking the commit on a name that is declared nowhere
+// in the tree (#5533). The gate's own wording ("introduced at") is the claim that is false.
+func TestConceptAdmissionDoesNotReadAQuotedFileNameAsAnIntroducedSymbol(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		line     string
+		invented string // the path stem the extractor used to report as a symbol
+	}{
+		{"test file named in a header comment", `// NOT VERIFIED END TO END: guard_split_close_test.go witnesses the generated command line`, "guard_split_close_test"},
+		{"source file named in a header comment", `// the sibling rule lives in guard_relaunch_files.go`, "guard_relaunch_files"},
+		{"data file inside a string literal", `	b, _ := os.ReadFile("rows-gatekeeper.json")`, "gatekeeper"},
+		{"doc file named in a trailing comment", `	const x = 1 // the shape is written up in docs/notes/preflight-gateway.md`, "gateway"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := gateConceptAdmission(conceptAdmissionFixtureRoots(t, tc.line, "", false, "guard", "gate"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tokens := conceptFindingTokens(got)
+			if conceptTokensContain(tokens, tc.invented) {
+				t.Errorf("gate reports path stem %q as an introduced symbol; tokens=%v", tc.invented, tokens)
+			}
+		})
+	}
+}
+
+// The path rule keys off the dot and the extension that follows it, so it must not reach a
+// declaration that merely reads like a file stem, nor a selector in code position -- `x.json`
+// there is a field read, and suppressing its receiver would lose a real symbol.
+func TestConceptAdmissionStillReportsSymbolsThatOnlyLookLikeFileNames(t *testing.T) {
+	for _, tc := range []struct{ name, line, want string }{
+		{"declaration spelled like a stem", `const guardSplitCloseTest = 1`, "guardSplitCloseTest"},
+		{"selector in code position", `	raw := gatekeeperCfg.json`, "gatekeeperCfg"},
+		{"unknown extension is not an extension", `	const gateBurst = 1 // see gateBurst.notes for the rest`, "gateBurst"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := gateConceptAdmission(conceptAdmissionFixtureRoots(t, tc.line, "", false, "guard", "gate"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tokens := conceptFindingTokens(got)
+			if !conceptTokensContain(tokens, tc.want) {
+				t.Errorf("real symbol %q was suppressed by the path rule; tokens=%v", tc.want, tokens)
+			}
+		})
+	}
+}
+
+// A test entry point named in prose is a reference into the _test.go files this gate
+// deliberately never scans (see the _test.go skip in the scan loop), so the quoting file
+// cannot be the file that introduces it. Naming the test that witnesses the code above it
+// is good practice and used to cost a permanent corpus row (#5533, the #5411 set).
+func TestConceptAdmissionDoesNotReadATestEntryPointNamedInProseAsAnIntroducedSymbol(t *testing.T) {
+	for _, tc := range []struct{ name, line, invented string }{
+		{"test function in a header comment", `// TestGuardSelfTightenOverlayPathIsAgentWritable witnesses this end to end.`, "TestGuardSelfTightenOverlayPathIsAgentWritable"},
+		{"benchmark in a trailing comment", `	const x = 1 // BenchmarkGatewayDecode measures it`, "BenchmarkGatewayDecode"},
+		{"test name inside a command literal", `	args := []string{"-run", "TestGuardSplitClosesTheWindow"}`, "TestGuardSplitClosesTheWindow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := gateConceptAdmission(conceptAdmissionFixtureRoots(t, tc.line, "", false, "guard", "gate"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tokens := conceptFindingTokens(got)
+			if conceptTokensContain(tokens, tc.invented) {
+				t.Errorf("gate reports referenced test entry point %q as introduced here; tokens=%v", tc.invented, tokens)
+			}
+		})
+	}
+}
+
+// The test-entry-point rule is a statement about prose, not about the prefix: a non-test
+// file may legally declare a function whose name starts with Test, and a word that merely
+// begins with those letters is an ordinary identifier. Both must still be admitted.
+func TestConceptAdmissionStillReportsTestPrefixedSymbolsDeclaredInCode(t *testing.T) {
+	for _, tc := range []struct{ name, line, want string }{
+		{"declared in a non-test file", `func TestGuardHarness(t *testing.T) {`, "TestGuardHarness"},
+		{"prefix without the entry-point shape", `// the TestableGuard wrapper is documented here`, "TestableGuard"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := gateConceptAdmission(conceptAdmissionFixtureRoots(t, tc.line, "", false, "guard", "gate"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tokens := conceptFindingTokens(got)
+			if !conceptTokensContain(tokens, tc.want) {
+				t.Errorf("real symbol %q was suppressed by the test-entry-point rule; tokens=%v", tc.want, tokens)
+			}
+		})
+	}
+}
+
+// The printed remedy has to be sufficient on its own. `fak concept position` / `classify`
+// write the worktree corpus, this gate reads the index, and `fak commit --path` stages only
+// the paths it is given -- so a remedy that does not name the corpus files leaves the author
+// running the prescribed command and being refused identically (#5534).
+func TestConceptAdmissionRemedyNamesTheCorpusFilesTheCommitMustStage(t *testing.T) {
+	got, err := gateConceptAdmission(conceptAdmissionFixture(t, "const CacheBurst = 1", "", false))
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	detail := got[0].Detail
+	for _, want := range []string{
+		"--path tools/concept_disambiguation_scorecard.data/_meta.json",
+		"--path tools/concept_disambiguation_scorecard.data/rows-demo.json",
+		"index",
+	} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("remedy does not tell the author to stage the corpus (%q missing): %s", want, detail)
+		}
+	}
+}
+
+// The mechanism behind #5534, pinned: a classification that exists only in the worktree is
+// invisible to the gate, and staging the same file clears it. This is deliberate -- reading
+// the worktree would let a peer's dirty corpus decide another lane's commit -- so the test
+// asserts the refusal STAYS, and only the staged write clears it.
+func TestConceptAdmissionReadsTheIndexNotTheWorktreeCorpus(t *testing.T) {
+	root := t.TempDir()
+	gitFixture(t, root, "init")
+	gitFixture(t, root, "config", "user.email", "fixture@example.com")
+	gitFixture(t, root, "config", "user.name", "Fixture")
+	data := filepath.Join(root, "tools", "concept_disambiguation_scorecard.data")
+	if err := os.MkdirAll(data, 0755); err != nil {
+		t.Fatal(err)
+	}
+	meta := filepath.Join(data, "_meta.json")
+	if err := os.WriteFile(meta, []byte(`{"families":[{"id":"cache","roots":["cache"],"ignore":[]}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "rows-cache.json"), []byte(`{"rows":[{"id":"cache-a","family":"cache","grounding":"CacheA"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	demo := filepath.Join(root, "internal", "demo", "demo.go")
+	if err := os.MkdirAll(filepath.Dir(demo), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(demo, []byte("package demo\nconst CacheA = 1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitFixture(t, root, "add", ".")
+	gitFixture(t, root, "commit", "-m", "base")
+
+	// The author stages a new symbol and is refused.
+	if err := os.WriteFile(demo, []byte("package demo\nconst CacheA = 1\nconst CacheBurst = 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitFixture(t, root, "add", "internal/demo/demo.go")
+	admit := func(t *testing.T) []Finding {
+		t.Helper()
+		d, err := ReadStagedDiff(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := CheckConceptAdmission(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := admit(t); len(got) != 1 {
+		t.Fatalf("staged new symbol was not refused: %+v", got)
+	}
+
+	// The author runs the prescribed `fak concept classify`, which writes the WORKTREE.
+	if err := os.WriteFile(meta, []byte(`{"families":[{"id":"cache","roots":["cache"],"ignore":["CacheBurst"]}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := admit(t); len(got) != 1 {
+		t.Fatalf("worktree-only classification cleared the gate; the gate must read the index: %+v", got)
+	}
+
+	// Staging the corpus file -- what the remedy now tells the author to do -- clears it.
+	gitFixture(t, root, "add", "tools/concept_disambiguation_scorecard.data/_meta.json")
+	if got := admit(t); len(got) != 0 {
+		t.Fatalf("staged classification did not clear the gate: %+v", got)
+	}
+
+	// The other half of the remedy is a per-leaf rows shard that does not exist in HEAD.
+	// Same rule, and the same test: unstaged it is invisible, staged it clears.
+	if err := os.WriteFile(meta, []byte(`{"families":[{"id":"cache","roots":["cache"],"ignore":[]}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitFixture(t, root, "add", "tools/concept_disambiguation_scorecard.data/_meta.json")
+	if got := admit(t); len(got) != 1 {
+		t.Fatalf("withdrawing the classification did not restore the finding: %+v", got)
+	}
+	rows := filepath.Join(data, "rows-demo.json")
+	if err := os.WriteFile(rows, []byte(`{"rows":[{"id":"cache-burst","family":"cache","grounding":"CacheBurst"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := admit(t); len(got) != 1 {
+		t.Fatalf("unstaged new rows shard cleared the gate; the gate must read the index: %+v", got)
+	}
+	gitFixture(t, root, "add", "tools/concept_disambiguation_scorecard.data/rows-demo.json")
+	if got := admit(t); len(got) != 0 {
+		t.Fatalf("staged new rows shard did not clear the gate: %+v", got)
+	}
+}
+
 func TestConceptAdmissionRegisteredEarliestCommitGate(t *testing.T) {
 	for _, g := range PreCommitGates() {
 		if g.Name == "CONCEPT_ADMISSION" {
