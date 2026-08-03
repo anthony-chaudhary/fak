@@ -487,6 +487,82 @@ func TestWarmBandProducerRefillsBelowLowWater(t *testing.T) {
 	}
 }
 
+// TestWarmBandProducerStopsAtHighWater pins the #5072 honest tension as an executable
+// bound: the producer must never hold more contexts in RAM than the high-water cap the
+// caller sized from the dispatch-side effective worker cap, EVEN when MaxWarm is set
+// above it. MaxWarm is a plain caller-supplied int this package cannot validate, so the
+// producer — not the reserve — has to be the binding constraint.
+//
+// The invariant is warm + resident <= High, because a warm agent holds its whole in-RAM
+// context and therefore costs what a resident costs. Residency sits at 0 here, so the
+// whole cap is available to the reserve and the bound reduces to warm <= High.
+//
+// This is a REGRESSION witness. Before the fix, WarmRefill's answer was recomputed
+// identically on every pass (a refill never moves residency), so it never bounded the
+// batch and the producer drained the store all the way to MaxWarm: with these numbers it
+// warmed all 8 enrolled agents against a high-water cap of 2.
+func TestWarmBandProducerStopsAtHighWater(t *testing.T) {
+	const (
+		enrolled = 8
+		high     = 2
+		maxWarm  = 8 // deliberately ABOVE high: the producer must still stop at high
+	)
+	band, err := microagent.NewWarmBand(microagent.WarmBandConfig{
+		Low: 1, High: high, MaxWarm: maxWarm, Dir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewWarmBand: %v", err)
+	}
+	defer band.Close()
+
+	log := newWarmLog()
+	for i := 0; i < enrolled; i++ {
+		id := fmt.Sprintf("hw%d", i)
+		if err := band.Enroll(id, &warmAgent{id: id, turns: 4, log: log}); err != nil {
+			t.Fatalf("Enroll %q: %v", id, err)
+		}
+	}
+
+	// The producer must reach the cap (it is genuinely producing, not merely inert)...
+	waitWarm(t, band, high)
+	// ...and then STOP there. Every Enroll above kicked it, so an unbounded producer
+	// overshoots within milliseconds — the settle window catches it far more cheaply
+	// than it took to reach the cap in the first place.
+	peak := 0
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if w := band.Stats().Warm; w > peak {
+			peak = w
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if peak > high {
+		t.Errorf("warm peaked at %d with residency 0 and a high-water cap of %d — the producer "+
+			"pinned more in-RAM contexts than the effective cap allows", peak, high)
+	}
+	s := band.Stats()
+	if s.Warm != high {
+		t.Errorf("warm = %d, want exactly the high-water cap %d", s.Warm, high)
+	}
+	if s.Refills != high {
+		t.Errorf("refills = %d, want exactly %d — the producer must stop at the cap, not drain the store",
+			s.Refills, high)
+	}
+	if s.Parked != enrolled-high {
+		t.Errorf("parked = %d, want %d (the rest must stay frozen on disk)", s.Parked, enrolled-high)
+	}
+	if s.Thaws != 0 {
+		t.Errorf("thaws = %d, want 0 — nothing acquired, so no cold wake was on any critical path", s.Thaws)
+	}
+	// The bound must not have cost correctness: a still-parked agent still acquires.
+	if _, err := band.Acquire(context.Background(), fmt.Sprintf("hw%d", enrolled-1)); err != nil {
+		t.Fatalf("Acquire of an agent the bound left parked: %v", err)
+	}
+	if got := band.Stats().Thaws; got != 1 {
+		t.Errorf("thaws = %d after acquiring a parked agent, want exactly 1 cold wake", got)
+	}
+}
+
 // waitWarm blocks until the producer has warmed want agents into the reserve, failing
 // the test if it never gets there. It is the shared "the pre-warm has happened" gate.
 func waitWarm(t *testing.T, band *microagent.WarmBand, want int) microagent.WarmBandStats {
@@ -549,6 +625,65 @@ func TestWarmBandCloseDrainsReserveToDisk(t *testing.T) {
 	}
 	if _, err := band.Acquire(context.Background(), "a0"); err != microagent.ErrWarmBandClosed {
 		t.Errorf("Acquire after Close = %v, want ErrWarmBandClosed", err)
+	}
+}
+
+// TestWarmBandProducerHonorsHighWaterOverMaxWarm pins the #5072 scope-1 bound: the
+// producer is bounded by the HIGH-WATER CAP, not just by the reserve's own cap. MaxWarm
+// is a caller-supplied int this package cannot validate against the dispatch-side
+// effective worker cap, so a caller that sizes it above the high-water mark must still
+// not get more in-RAM contexts than the cap it sized from preflight.
+//
+// This is a real regression guard, not a hypothetical: the fold answers in resident-slot
+// terms (high-water minus residency) and a refill never moves residency, so before the
+// bound was charged against the already-warm agents the answer was recomputed identically
+// every pass and never bounded the batch — with residency pinned at 0 the producer drained
+// the ENTIRE store up to MaxWarm (measured: 8 warm against a high-water of 2).
+func TestWarmBandProducerHonorsHighWaterOverMaxWarm(t *testing.T) {
+	const (
+		enrolled = 8
+		high     = 2
+		maxWarm  = 8 // deliberately ABOVE the high-water cap
+	)
+	band, err := microagent.NewWarmBand(microagent.WarmBandConfig{
+		Low: 1, High: high, MaxWarm: maxWarm, Dir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewWarmBand: %v", err)
+	}
+	defer band.Close()
+
+	log := newWarmLog()
+	for i := 0; i < enrolled; i++ {
+		id := fmt.Sprintf("a%d", i)
+		if err := band.Enroll(id, &warmAgent{id: id, turns: 4, log: log}); err != nil {
+			t.Fatalf("Enroll %q: %v", id, err)
+		}
+	}
+
+	// Nothing ever acquires, so residency sits at 0 the whole time: every warm agent here
+	// is the producer's doing, and warm + resident is just warm.
+	s := waitWarm(t, band, high)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := band.Stats(); got.Warm > s.Warm {
+			s = got
+		}
+		if s.Warm > high {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if s.Warm > high {
+		t.Errorf("warm = %d with residency 0 and a high-water cap of %d — the producer overran "+
+			"the cap the caller sized from preflight: %+v", s.Warm, high, s)
+	}
+	if s.Parked == 0 {
+		t.Errorf("parked = 0: the producer drained the whole store instead of stopping at the "+
+			"high-water cap: %+v", s)
+	}
+	if s.Thaws != 0 {
+		t.Errorf("thaws = %d, want 0 — the producer's wakes are paid OFF the critical path", s.Thaws)
 	}
 }
 
