@@ -830,6 +830,12 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	// dry-run / nothing-held payloads stay byte-identical to before (#1396).
 	if opts.Live {
 		payload["witnessed_slots"] = witnessedSlots
+		// #2523: the spine-first fan-out default, wired at the ONE seam that knows a spine
+		// just shipped. Plan-only and fail-open (see dispatch_fanout.go); a turn that
+		// shipped nothing adds no key, so an idle payload is unchanged.
+		if fan := dispatchIssueFanout(root, runsDir, witnessRecords, time.Now()); fan != nil {
+			payload["issue_fanout"] = fan
+		}
 	}
 	if len(heldNoCommit) > 0 {
 		payload["held_no_commit"] = sortedSet(heldNoCommit)
@@ -1357,7 +1363,30 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 	if len(recTree) == 0 {
 		recTree = tree
 	}
-	rec := leaseref.Record{ID: id, TreeGlobs: recTree, Holder: holder, TTLSeconds: int64(ttlS)}
+	// Bind the lease to its OWNING SESSION (#5566). This is the WRITE side —
+	// leaseref.Record.SessionID on the record this tick is about to publish — and it is
+	// NOT the regionadmit.Request.SelfID decision twenty lines up. Do not fold the two:
+	// SelfID is compared against a LEASE id inside regionadmit.Decide and is deliberately
+	// left empty so a live lease on this lane refuses even when FAK_LEASE_OWNER pins the
+	// holder string (see the comment above `req`, and
+	// TestDispatchLaneLeaseSessionBindingKeepsSelfIDRefusal, which fails if a later change
+	// feeds this id into SelfID). SessionID is never read by Decide or by AcquireFenced;
+	// it is a field on the published blob that only the READ side (leaseref's liveness
+	// classification) consumes. Stamping it therefore cannot loosen any admission.
+	//
+	// What it fixes: leaseref.ClassifyLiveness's first branch is `SessionID == ""` ->
+	// peer-unknown / EvidenceNoBinding, which fails closed to not-reclaimable. Every lease
+	// this tick acquired landed in that branch, so a lane whose owner DIED without
+	// releasing could never be classified peer-dead and only the TTL ever freed it — and
+	// EvidenceNoBinding names the acquire call site (here) as the remedy. Bound, the same
+	// lane classifies peer-dead on a terminal STOPPED or a lapsed heartbeat, and peer-live
+	// while its owner heartbeats. This is the read-side complement of #5565's release: that
+	// one covers the owner that exited, this one the owner that died.
+	//
+	// A missing id degrades to exactly today's behaviour (empty -> EvidenceNoBinding), and a
+	// bound id with no descriptor is still peer-unknown, just under EvidenceNoDescriptor —
+	// a different remedy with a different owner (the publisher), never a false death.
+	rec := leaseref.Record{ID: id, TreeGlobs: recTree, Holder: holder, TTLSeconds: int64(ttlS), SessionID: dispatchLeaseSessionID()}
 	written, verdict, err := store.AcquireFenced(context.Background(), rec, now)
 	if err != nil {
 		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": err.Error(), "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
@@ -1385,4 +1414,62 @@ func dispatchLeaseHolder() string {
 		host = runtime.GOOS
 	}
 	return fmt.Sprintf("%s:%d", host, os.Getpid())
+}
+
+// dispatchLeaseSessionID resolves the session id the lane lease binds to (#5566) — the
+// descriptor at refs/fak/locks/session-<id> that leaseref's liveness classification looks
+// up. Distinct from dispatchLeaseHolder, which names WHO holds the lane for a human
+// reading the ledger; this names WHICH SESSION's heartbeat decides whether that holder is
+// still alive. A holder string is free-form and unresolvable; a session id addresses a ref.
+//
+// FAK_SESSION_ID first: under `fak guard` a child is launched with it set to the
+// continuation trace id (guard_child.go), and that trace id is exactly the id
+// registerServeSessionDurability publishes the descriptor UNDER (session_durable.go), so
+// it is the binding with a real publisher behind it. CLAUDE_CODE_SESSION_ID second,
+// because that is what the Python dispatcher (tools/issue_resolve_dispatch.py's
+// lease_session_id) binds when it takes the SAME resolve-<lane> lease id — the two
+// dispatchers then name the same session rather than two views of one lane. Both names are
+// already in internal/envconfiglint's baseline; FAK_LEASE_SESSION_ID, the Python's own
+// first choice, deliberately is not read here because introducing it in Go would be a NEW
+// env-var read the CONFIG_NOT_ENV ratchet refuses.
+//
+// A malformed value is SKIPPED rather than passed through. Binding is an improvement on a
+// best-effort path, so it must never be able to turn a working acquire into a failed one:
+// an unusable id degrades to the empty string, which is precisely the pre-#5566 behaviour
+// (peer-unknown / EvidenceNoBinding, not reclaimable). This mirrors the Python's posture —
+// "the lease gate must never fail only because a harness exported a malformed session id".
+func dispatchLeaseSessionID() string {
+	for _, name := range []string{"FAK_SESSION_ID", "CLAUDE_CODE_SESSION_ID"} {
+		if v := strings.TrimSpace(os.Getenv(name)); validDispatchLeaseSessionID(v) {
+			return v
+		}
+	}
+	return ""
+}
+
+// validDispatchLeaseSessionID mirrors leaseref's own validSessionID (both it and validID
+// are unexported, so the rule is restated rather than imported): one safe ref segment, and
+// no leading `session-` — that prefix is the namespace marker leaseref itself supplies, so
+// a caller carrying it would address session-session-<id>. Kept deliberately conservative:
+// an id that fails here binds nothing at all instead of publishing a record pointing at a
+// ref that cannot exist.
+func validDispatchLeaseSessionID(id string) bool {
+	if id == "" || len(id) > 200 {
+		return false
+	}
+	if strings.HasPrefix(id, "-") || strings.HasPrefix(id, ".") {
+		return false
+	}
+	if strings.HasPrefix(id, "session-") {
+		return false
+	}
+	for _, c := range []byte(id) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '-' || c == '_' || c == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }

@@ -1,0 +1,21 @@
+{
+  "counts": {
+    "success": 1,
+    "refused": 0,
+    "error": 0
+  },
+  "ledger": "issue-fanout.jsonl",
+  "no_leaf": 1,
+  "rows": [
+    {
+      "leaf": "issuefanout",
+      "spine_ref": "abc1234",
+      "issue": 2523,
+      "candidates": 15,
+      "outcome": "success"
+    }
+  ],
+  "schema": "fak.issue-fanout-turn.v1",
+  "ships": 2,
+  "unread_commits": 1
+}
