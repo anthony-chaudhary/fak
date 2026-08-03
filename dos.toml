@@ -312,6 +312,9 @@ concurrent = [
   "worktreewitness", "xenginekv", "xprobe",
   "leasequeue", # #5505: internal/leasequeue leaf -- see [lanes].concurrent note.
   "corelockgate", # #5392: internal/corelockgate leaf -- see [lanes].concurrent note.
+  "skilleffectiveness", # #5444: internal/skilleffectiveness leaf -- see [lanes].concurrent note.
+  "skillfootprint", # #5444: internal/skillfootprint leaf -- see [lanes].concurrent note.
+  "taskvc", # #3323: internal/taskvc leaf -- see [lanes].concurrent note.
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -996,6 +999,9 @@ xenginekv = ["internal/xenginekv/**"]
 xprobe = ["internal/xprobe/**"]
 leasequeue = ["internal/leasequeue/**"]
 corelockgate = ["internal/corelockgate/**"]
+skilleffectiveness = ["internal/skilleffectiveness/**"]
+skillfootprint = ["internal/skillfootprint/**"]
+taskvc = ["internal/taskvc/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
