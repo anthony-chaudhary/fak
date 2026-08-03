@@ -16,9 +16,19 @@ package main
 //
 // Exit 0 = admitted, 3 = refused (COLLISION_RISK with the conflicting lease
 // named), 1 = the lease store or taxonomy could not be read (an error, never a
-// silent admit), 2 = usage. It DECIDES only — holding a lease stays with
+// silent admit), 2 = usage. It still holds NOTHING — holding a lease stays with
 // `fak leaseref acquire`, and the same honest boundary applies: cross-machine
 // this is visibility after a fetch, not atomic acquisition.
+//
+// #5505: a refusal no longer EVAPORATES. It mints a waiter ticket
+// (internal/leasequeue) whose enqueue clock survives every retry, and reports
+// this caller's place in line, the blocker holding it there and a bounded poll
+// schedule — so repeated attempts are ordered by arrival instead of re-raced,
+// and a four-hour waiter no longer has the same odds as one that arrived 200ms
+// ago. The queue is best-effort and OFF the decision: the verdict and the exit
+// code are computed first and are never changed by it. `--no-queue` opts out
+// (a pure query that leaves no trace), and `--class interactive` declares an
+// operator so it does not queue behind a wall of background loops.
 
 import (
 	"context"
@@ -45,6 +55,8 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 	dir := fs.String("dir", "", "repo whose refs/fak/locks/* and dos.toml are read (default: cwd)")
 	readOnly := fs.Bool("read-only", false, "the act writes nothing (a provably empty footprint): admitted against every live lease, distinct from an absent region (unknown blast radius, which still collides)")
 	jsonOut := fs.Bool("json", false, "emit the decision as JSON")
+	class := fs.String("class", "", "priority class of this waiter: interactive (an operator) or loop (a background driver); unset ranks as a loop")
+	noQueue := fs.Bool("no-queue", false, "do not mint a waiter ticket on a refusal (a pure query that leaves no trace and takes no place in line)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -81,6 +93,18 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 	req := regionadmit.Request{Actor: who, Lane: strings.TrimSpace(*lane), Tree: tree, SelfID: strings.TrimSpace(*selfID), ReadOnly: *readOnly}
 	dec := regionadmit.Decide(req, regionLeases(live), tax)
 
+	// The waiter plane (#5505). It runs AFTER the verdict and can only add reporting: a refusal
+	// takes a place in line, an admit gives one up. Both are best-effort and silent on failure,
+	// so an unwritable queue degrades the report and never the decision or the exit code.
+	var queued *loopRegionQueueReport
+	if !*noQueue {
+		if dec.Admit {
+			loopRegionDequeue(taxRoot, req, tax)
+		} else {
+			queued = loopRegionEnqueue(taxRoot, req, tax, live, strings.TrimSpace(*class), time.Now())
+		}
+	}
+
 	if *jsonOut {
 		payload := map[string]any{
 			"schema":     "fak.loop-region.v1",
@@ -102,6 +126,9 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 					"tree":   append([]string(nil), dec.Conflict.Tree...),
 				}
 			}
+			if q := queued.payload(); q != nil {
+				payload["queue"] = q
+			}
 		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -114,6 +141,9 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 			who, regionLabel(req, tax), len(live))
 	} else {
 		fmt.Fprintf(stdout, "REFUSE %s: %s [%s] %s\n", who, dec.Reason, dec.Rung, dec.Detail)
+		if line := queued.line(); line != "" {
+			fmt.Fprintln(stdout, line)
+		}
 	}
 	if dec.Admit {
 		return 0

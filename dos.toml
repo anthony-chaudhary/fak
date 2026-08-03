@@ -310,6 +310,7 @@ concurrent = [
   "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
   "workerenvelope", "workerworktree", "workflow", "workflowaudit", "workflowlint", "worklog",
   "worktreewitness", "xenginekv", "xprobe",
+  "leasequeue", # #5505: internal/leasequeue leaf -- see [lanes].concurrent note.
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -433,6 +434,7 @@ autopick = [
   "clonescan", # #5059: internal/clonescan leaf -- see [lanes].concurrent note.
   "egresslist", # #5130: internal/egresslist leaf -- see [lanes].concurrent note.
   "egressrefresh", # #5130: internal/egressrefresh leaf -- see [lanes].concurrent note.
+  "leasequeue", # #5505: internal/leasequeue leaf -- see [lanes].concurrent note.
   # new-leaf:lane
 ]
 
@@ -991,6 +993,7 @@ worklog = ["internal/worklog/**"]
 worktreewitness = ["internal/worktreewitness/**"]
 xenginekv = ["internal/xenginekv/**"]
 xprobe = ["internal/xprobe/**"]
+leasequeue = ["internal/leasequeue/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
