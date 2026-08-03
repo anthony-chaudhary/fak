@@ -177,8 +177,20 @@ func TestGuardSessionStartIdentityRecordsNoUnwitnessedPID(t *testing.T) {
 
 // TestGuardSessionStartDriverPIDInWalk pins the walk itself. The hook is a child of the driver
 // on a host that spawns hooks without a shell and a grandchild on one that does, so the rule is
-// "nearest ancestor whose process IMAGE is the driver" — not a fixed depth, and never a
-// command-line substring. Every shape it cannot witness returns 0 ("not recorded").
+// "nearest ancestor that IS the driver" — not a fixed depth, and never a command-line substring.
+// Every shape it cannot witness returns 0 ("not recorded").
+//
+// Being the driver means either of two things, and the PAIR is the whole #5557 contract — a
+// test of only the positive direction would be worthless here:
+//
+//   - the process IMAGE is the driver (#5542's rule, unchanged); or
+//   - the image is `node` and its argv executes the driver's own ENTRYPOINT SCRIPT — the
+//     node-wrapped install that #5542 could not witness and therefore deferred forever.
+//
+// The second arm is the only command line this witness reads, so the negative cases below are
+// load-bearing: `fak guard -- claude …` (and its sharper twin, a `fak guard --` whose argv
+// carries the entrypoint token verbatim) must still fail to match, or a resume could be fired
+// against a wrapper's death while the driver it wraps is still writing the transcript.
 func TestGuardSessionStartDriverPIDInWalk(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -215,6 +227,90 @@ func TestGuardSessionStartDriverPIDInWalk(t *testing.T) {
 				{PID: 9002, Name: "claude", Cmdline: "claude -p outer"},
 			},
 			want: 9001,
+		},
+		{
+			// #5557, half one of the contract: a driver launched through a Node wrapper presents
+			// the image `node`, so the image rule alone never named it and the walk ran out of
+			// hops — a permanent defer for that whole install shape. The argv test admits it by
+			// its ENTRYPOINT SCRIPT (the npm package's cli.js), not by the word "claude".
+			name:   "a node-wrapped driver is witnessed through its entrypoint script",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart"},
+				{PID: 9001, Name: "node", Cmdline: "/usr/bin/node /home/worker/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js -p do the work"},
+			},
+			want: 9001,
+		},
+		{
+			// The same shape as Windows spells it: a `node.exe` image and a backslash argv.
+			name:   "a windows node-wrapped driver is witnessed through its entrypoint script",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak.exe", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart"},
+				// Deliberately rooted off a drive rather than a user home: an operator-home path
+				// shape in a fixture trips the SECRET_SHAPE commit gate, and nothing here needs
+				// one — what the case pins is the backslash argv and the npm package layout.
+				{PID: 9001, Name: `D:\tools\nodejs\node.exe`, Cmdline: `"D:\tools\nodejs\node.exe" D:\appdata\npm\node_modules\@anthropic-ai\claude-code\cli.js -p do the work`},
+			},
+			want: 9001,
+		},
+		{
+			// The local-install shape (`claude/cli.js`), which is also the driver command line
+			// the resume-liveness fixture in this package already models.
+			name:   "a node-wrapped driver in a claude dir is witnessed",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart"},
+				{PID: 9001, Name: "node", Cmdline: "node /opt/claude/cli.js -p do the work"},
+			},
+			want: 9001,
+		},
+		{
+			// #5557, half two — and the half that makes half one safe. The `fak guard --` wrapper
+			// sits one level ABOVE the driver on this host and names it on argv; recording it
+			// would bind the transcript to a program that outlives (or predeceases) the driver.
+			// Its IMAGE is `fak`, so it never reaches the argv test at all.
+			name:   "a fak guard wrapper naming claude on argv is not the driver",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(15696), Cmdline: "fak guard-sessionstart"},
+				{PID: 15696, Name: "fak", Cmdline: "fak guard -- claude --dangerously-skip-permissions -p do the work"},
+			},
+			want: 0,
+		},
+		{
+			// The sharpest form of the same negative: the wrapper's argv carries the ENTRYPOINT
+			// token verbatim, so only the `node` image gate can reject it. This is the case a
+			// cmdline-only rule would wrongly admit.
+			name:   "a fak guard wrapper naming the node entrypoint is not the driver",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(15696), Cmdline: "fak guard-sessionstart"},
+				{PID: 15696, Name: "fak", Cmdline: "fak guard -- node /home/worker/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js -p do the work"},
+			},
+			want: 0,
+		},
+		{
+			// A node process that merely MENTIONS a path under a claude config dir is some other
+			// program (an MCP server, a hook). It executes no driver entrypoint, so it is not it.
+			name:   "a node process merely naming a claude path is not the driver",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart"},
+				{PID: 9001, Name: "node", Cmdline: "node /srv/tools/mcp-server.js --settings /home/worker/.claude/settings.json"},
+			},
+			want: 0,
+		},
+		{
+			// The entrypoint is compared as a (dir, base) TOKEN pair, so a directory that merely
+			// ends in "claude" is a different token — a substring rule would admit this.
+			name:   "a node entrypoint under a lookalike directory is not the driver",
+			parent: 4242,
+			procs: []procguard.Proc{
+				{PID: 4242, Name: "fak", PPID: procguard.IntPtr(9001), Cmdline: "fak guard-sessionstart"},
+				{PID: 9001, Name: "node", Cmdline: "node /srv/notclaude/cli.js --serve"},
+			},
+			want: 0,
 		},
 		{
 			name:   "a chain that leaves the snapshot witnesses nothing",

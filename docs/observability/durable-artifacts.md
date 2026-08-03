@@ -180,6 +180,7 @@ table). Fleet-shared or crash-recovery; never committed.
 | Per-seat account homes | `<home>/.claude-<name>/{.oauth-token,.claude.json,.credentials.json}` | token (0600) + JSON | `accounts_add.go:260`/`:1255`, `credbackup.go:253` | isolated per-seat Claude credential homes |
 | Credential backups | atomic 0600 snapshots | JSON | `internal/accounts/credbackup.go:253` | pre-mutation credential restore points |
 | Resume/launch ledger | `<regDir>/resume_ledger.jsonl` | JSONL append | `cmd/fak/resume_watchdog_cli.go:764` | launch/phase rows; read by `fak resume status/self/why` + gateway history |
+| Session identity store | `<regDir>/resume_identity.jsonl` | JSONL append (never swept, no TTL) | `cmd/fak/guard_sessionstart.go:162`/`:175` | transcript-UUID ↔ gateway-trace join, plus the **driver pid** the SessionStart hook witnessed; read by `fak resume identity` and the `fak resume stopped` liveness probe |
 | Resume tick lock | `<regDir>/resume_watchdog.lock` | `O_CREATE|O_EXCL` (TTL 2m) | `internal/resume/ticklock.go:49` | single-flight mutual exclusion |
 | Watchdog autoheal state | `<autohealDir>/<id>.json` + `<id>.lock` + `autoheal.log` | single-JSON / lock / text | `watchdog_autoheal.go:661`/`:295` | restart backoff/debounce (`fak.watchdog-autoheal.v1`) |
 | Resume-watchdog logs | `<logDir>/{resume_watchdog.log, notifications.log, resume-<sid>-<unix>.log/.err, notified.json}` | text + JSON | `resume_watchdog_cli.go:886`/`:1040` | operational + per-spawn child output |
@@ -187,6 +188,30 @@ table). Fleet-shared or crash-recovery; never committed.
 | Probe ledger | `<regDir>/probe_ledger.jsonl` | JSONL | **python fleet probe** (Go reads via `accountprobe.ReadLedger`) | account reachability probes |
 | Fleet fold/janitor ledger | `--ledger` value (no default) | JSONL append | `cmd/fak/fleet.go:566` | folded worker rows / janitor decisions (`fak fleet fold\|sweep\|replace --write`) |
 | Fleet sweep sample-state | `--state` value (no default) | single-JSON overwrite | `cmd/fak/fleet.go:720` | prev-sample line/CPU deltas |
+
+### A session with no recorded driver pid is not reclaimable, and no pass will backfill it
+
+`fak resume stopped` only moves a mid-tool row off DEFER when it can decide whether the
+driver that owned the transcript is still running, and the only handle it has on that is a
+pid something durably **recorded**. There are exactly two writers: the launch ledger (for a
+session the resume watchdog itself resumed) and the SessionStart hook above (for a
+first-generation `claude -p …` worker, which carries no session id on its argv). If neither
+wrote one, the row stays `MIDTOOL_UNKNOWN` and defers — the fail-safe working, not a bug to
+wait out.
+
+**A session that is not running under `fak guard` will never gain one.** fak installs its
+hooks only into the `--settings` file `fak guard` appends to the wrapped agent's argv at
+launch; it reads `~/.claude/settings.json` (`fak guard allow --from-claude-settings`) but
+never writes hooks there. So a session started by hand has no SessionStart hook, no Stop
+hook, and no other in-process moment where fak could witness the driver. **There is no
+backfill: restart the session under `fak guard` if you want it reclaimable.** Waiting will
+not produce a recorded pid.
+
+A session that *is* under `fak guard` but predates the pid witness needs no new mechanism —
+the SessionStart matcher is deliberately empty (`guard_sessionstart.go:469`), so the hook
+re-fires on `clear` / `compact` / `resume` in the same driver process and appends a fresh pid
+row then; the fold takes the last row per transcript. Until that next SessionStart source
+event fires, it defers.
 
 ---
 

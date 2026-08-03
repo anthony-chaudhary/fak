@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -189,17 +190,24 @@ func recordGuardSessionStartIdentity(traceID string) {
 // the moment that wrapper exits, and a resume fired on that verdict would land on a transcript
 // its original driver is still writing. So this records nothing it did not witness: it walks
 // the hook's own ancestor chain in ONE process-table snapshot and takes the nearest ancestor
-// whose process IMAGE is the agent driver itself, judged by the same audited image-vs-product
-// predicate the dispatch preflight uses (dispatchProcessImageMatchesProduct). A command-line
-// substring would not do — `fak guard -- claude …`, the wrapper one level ABOVE the driver on
-// this host, contains the word "claude" while being a different program.
+// that IS the agent driver (guardSessionStartProcIsDriver) — primarily by process IMAGE,
+// judged by the same audited image-vs-product predicate the dispatch preflight uses
+// (dispatchProcessImageMatchesProduct). A bare command-line substring would not do —
+// `fak guard -- claude …`, the wrapper one level ABOVE the driver on this host, contains the
+// word "claude" while being a different program.
+//
+// The one install shape the image rule alone cannot name is a driver launched through a Node
+// wrapper: it presents the image `node`, so #5542 shipped without witnessing it and that whole
+// install deferred permanently (#5557). guardSessionStartNodeWrapsDriver admits exactly that
+// shape and nothing more — a `node` IMAGE whose argv executes the driver's own ENTRYPOINT
+// SCRIPT — which is why it cannot re-admit the wrapper the image rule exists to exclude: the
+// `fak guard --` wrapper's image is `fak`, so it never reaches the argv test at all.
 //
 // Everything that is not that witness records 0, which the store's doc contract defines as NOT
 // RECORDED: an unreadable or empty census, a chain that leaves the snapshot, a ppid cycle, a
-// driver whose image the platform names something else (a node-wrapped `claude` is not
-// witnessed here, and no marker for one exists in this repo to key on), or a walk that runs
-// past its hop bound. Each of those leaves the consumer exactly where it is today — deferring
-// — which is the fail-safe, not a regression.
+// driver the platform names something this file has no marker for, or a walk that runs past
+// its hop bound. Each of those leaves the consumer exactly where it is today — deferring —
+// which is the fail-safe, not a regression.
 
 // guardSessionStartProcRelations enumerates the host's processes through the same audited
 // cross-platform census the rest of the fleet reads (`fak ps`, the resume watchdog, the
@@ -267,7 +275,7 @@ func guardSessionStartDriverPIDIn(startPID int, procs []procguard.Proc) int {
 		if !ok {
 			return 0 // the chain leaves the table: nothing further can be witnessed
 		}
-		if dispatchProcessImageMatchesProduct(p.Name, "claude") {
+		if guardSessionStartProcIsDriver(p) {
 			return p.PID
 		}
 		if p.PPID == nil {
@@ -276,6 +284,76 @@ func guardSessionStartDriverPIDIn(startPID int, procs []procguard.Proc) int {
 		pid = *p.PPID
 	}
 	return 0
+}
+
+// guardSessionStartProcIsDriver decides whether ONE snapshot row is the agent driver this hook
+// is running under. Two arms, in strictly widening order of what they are allowed to read:
+//
+//  1. the process IMAGE is the driver (dispatchProcessImageMatchesProduct) — the #5542 rule,
+//     unchanged, and the only arm that ever fires for a natively-installed `claude`;
+//  2. the process image is `node` and its argv executes the driver's own entrypoint script —
+//     the #5557 arm, which is the ONLY place this file reads a command line.
+//
+// Anything else is not the driver, and the walk keeps climbing.
+func guardSessionStartProcIsDriver(p procguard.Proc) bool {
+	return dispatchProcessImageMatchesProduct(p.Name, "claude") ||
+		guardSessionStartNodeWrapsDriver(p.Name, p.Cmdline)
+}
+
+// guardSessionStartDriverEntrypointBases / …Dirs spell the driver's ENTRYPOINT SCRIPT as a
+// (directory, file) pair: a `cli.js` sitting DIRECTLY inside a `claude` or `claude-code`
+// directory. Both shapes the CLI is installed in present exactly that — the npm package
+// (`…/node_modules/@anthropic-ai/claude-code/cli.js`) and the local install
+// (`…/.claude/local/…/claude-code/cli.js`, and the `…/claude/cli.js` form the resume-liveness
+// fixture in this package already models). The pair is the point: matching the file name alone
+// would admit any project's `cli.js`, and matching the directory alone would admit every
+// process whose argv merely mentions a path under `~/.claude`.
+var (
+	guardSessionStartDriverEntrypointBases = []string{"cli.js", "cli.mjs", "cli.cjs"}
+	guardSessionStartDriverEntrypointDirs  = []string{"claude", "claude-code"}
+)
+
+// guardSessionStartNodeWrapsDriver reports whether a process whose IMAGE is `node` is in fact
+// the agent driver (#5557). This is the one command-line read in the whole witness, and the
+// two gates that keep it from re-admitting the wrapper the image rule exists to exclude are:
+//
+//   - the image stem must be `node`. `fak guard -- claude …` runs as the image `fak`, so it
+//     never reaches the argv test — the exact negative #5542 pinned, still failing to match
+//     even though its command line names the driver twice over;
+//   - the argv test demands an executed SCRIPT PATH, not the word "claude". A command line
+//     that merely NAMES the driver (a wrapper's tail, a `--settings` path under `~/.claude`,
+//     an MCP server started from a claude config dir) carries no `<claude|claude-code>/cli.js`
+//     token, so it does not match either.
+//
+// Token-wise rather than substring-wise for the same reason: a path is compared as a (dir,
+// base) pair split on the last separator, so a directory that merely ENDS in "claude" (say
+// `notclaude/cli.js`) is a different token and does not match. A node process that is
+// something else entirely fails both gates and the walk simply keeps climbing — or runs out of
+// hops and records nothing, which is the same honest "not witnessed" it recorded before.
+func guardSessionStartNodeWrapsDriver(name, cmdline string) bool {
+	if dispatchProcessNameStem(name) != "node" {
+		return false
+	}
+	// Backslashes fold to "/" so a Windows argv splits on the same separator a POSIX one does;
+	// lowercasing matches the stem predicate's own case rule.
+	for _, tok := range strings.Fields(strings.ToLower(strings.ReplaceAll(cmdline, `\`, "/"))) {
+		tok = strings.Trim(tok, `"'`)
+		slash := strings.LastIndex(tok, "/")
+		if slash < 0 {
+			continue // a bare `cli.js` names no package, so it identifies nothing
+		}
+		if !slices.Contains(guardSessionStartDriverEntrypointBases, tok[slash+1:]) {
+			continue
+		}
+		dir := tok[:slash]
+		if i := strings.LastIndex(dir, "/"); i >= 0 {
+			dir = dir[i+1:]
+		}
+		if slices.Contains(guardSessionStartDriverEntrypointDirs, dir) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeGuardSessionStartMode maps the env/flag knob to on|off. Default (empty) is ON —

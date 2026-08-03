@@ -636,6 +636,26 @@
           "category": "incidental",
           "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
           "token": "coreLockLandGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartProcIsDriver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartNodeWrapsDriver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartDriverEntrypointBases"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartDriverEntrypointDirs"
         }
       ],
       "exclude": [
@@ -709,6 +729,10 @@
         "guardSelfTightenOverlayVersion",
         "guardSelfTightenProposal",
         "guardSelfTightenUnion",
+        "guardSessionStartDriverEntrypointBases",
+        "guardSessionStartDriverEntrypointDirs",
+        "guardSessionStartNodeWrapsDriver",
+        "guardSessionStartProcIsDriver",
         "guardShrinkLeverInputs",
         "guardSplitAppleCloseOnExit",
         "guardSplitAppleCloseTail",
@@ -860,6 +884,26 @@
           "category": "incidental",
           "reason": "A FILENAME referenced in a doc comment (internal/ggufload's gemma4_session_test.go), not a symbol this package declares; the scanner picked it up out of prose.",
           "token": "gemma4_session_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartProcIsDriver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartNodeWrapsDriver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartDriverEntrypointBases"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartDriverEntrypointDirs"
         }
       ],
       "id": "session-runtime",
@@ -875,6 +919,10 @@
         "enqueueGuardSessionThreadNotice",
         "gemma4_session_test",
         "gen_session_effectiveness_svg",
+        "guardSessionStartDriverEntrypointBases",
+        "guardSessionStartDriverEntrypointDirs",
+        "guardSessionStartNodeWrapsDriver",
+        "guardSessionStartProcIsDriver",
         "guardsessiontempdir",
         "handoff_session_give_up",
         "interactivesession",
