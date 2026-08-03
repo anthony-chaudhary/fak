@@ -5,6 +5,11 @@ description: "A linear, prerequisite-based curriculum across every fak concept: 
 
 # The fak learning path
 
+*This page owns one job: teaching fak's ideas in prerequisite order. It is for a reader who
+wants to understand the system, not evaluate it ([README](README.md)), install it
+([GETTING-STARTED](GETTING-STARTED.md)), route a task ([START-HERE](START-HERE.md)), or look
+a page up by name ([INDEX](INDEX.md)). Nothing here is required to run fak.*
+
 fak is a lot of ideas stacked into one binary: an addressable KV cache that keeps long
 sessions cheap to hold warm, right-model-per-call routing, and a pure-Go in-kernel model —
 and, riding along on the same write-time checkpoint, a default-deny capability floor, a
@@ -27,11 +32,12 @@ reading them in the wrong order.
 
 > New to the project entirely? The fastest taste of the payoff is one offline pass that
 > prints the token/turn savings from the shared prefix — `go run ./cmd/fak agent --offline`
-> (see **FAK 104**); the same run also prints the safety A/B, and the 2-minute boundary
-> proof in [`README.md`](README.md#tool-call-controls) is the secondary, security-side view.
-> Either way, come back here and start at **FAK 101**. Just want to install and run?
-> [`START-HERE.md`](START-HERE.md) and [`GETTING-STARTED.md`](GETTING-STARTED.md) are the
-> install front doors; this page is the *concept* front door.
+> (see **FAK 104**); the same run also prints the safety A/B, which
+> [`README.md`](README.md#try-the-kernel-without-a-key-model-or-gpu) frames as the
+> security-side boundary proof. Either way, come back here and start at **FAK 101**. Just
+> want to install and run? [`GETTING-STARTED.md`](GETTING-STARTED.md) is the install-and-run
+> page and [`START-HERE.md`](START-HERE.md) routes a job you already have; this page is the
+> *concept* front door.
 
 ## How to read a course
 

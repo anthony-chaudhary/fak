@@ -1,8 +1,10 @@
 # INDEX — the full map of the fak repo
 
-**Audience:** readers who know the job they need to complete and want the current, versioned, research, or historical documentation route without reconstructing repository history.
+*This page owns one job: exhaustive lookup. It is for a reader who already knows a document, component, or artifact **by name**, or who needs a versioned, research, or historical route that the shorter front doors deliberately omit. It is a reference, not an on-ramp — if you are still deciding, read the [README](README.md); to install and run, use [Getting started](GETTING-STARTED.md); to route a job you already have to one authority, use [START-HERE](START-HERE.md).*
 
-This is the curated map of repository documentation. Start by job and lifecycle; the detailed subject map below remains the exhaustive route when you already know a component or artifact name.
+**Audience:** readers doing name-based or lifecycle-based lookup who want the current, versioned, research, or historical documentation route without reconstructing repository history.
+
+This is the complete map of repository documentation. The audience table below is a coarse first cut; the detailed subject map after it is the exhaustive route and the reason this page exists.
 
 ## Choose an audience route
 
@@ -30,10 +32,10 @@ New dated notes go under [`docs/notes/`](docs/notes/) and get a line in **Notes 
 ## Start here
 
 - [README](README.md) — what fak is and why, in one read.
-- [START-HERE](START-HERE.md) — run a local model behind the gate in ten minutes.
+- [START-HERE](START-HERE.md) — the job-to-authority route map: pick the task you have now and get one destination and one next action.
 - [Getting started](GETTING-STARTED.md) — choose install, deterministic proof, or production setup with prerequisites and a first check.
 - [Tier 2: run the fused in-kernel model](docs/fak/in-kernel-model.md) — the kernel-developer continuation of Getting started, split out of it so the newcomer route reads end to end: the deterministic synthetic checkpoint over `/v1/fak/syscall`, the one-command SmolLM2-135M HuggingFace export, the Qwen3.6-27B GGUF smoke through `cmd/fakchat`, in-kernel chat through `fak serve --gguf` on both the OpenAI and Anthropic wires, and the honest caveat on why this is a correctness/reference path rather than a production chat server.
-- [AGENTS](AGENTS.md) — orientation for coding agents (build, test, the hard rules).
+- [AGENTS](AGENTS.md) — orientation for coding agents (build, test, the hard rules). Written for automated contributors inside the maintainers' shared checkout; humans want [CONTRIBUTING](CONTRIBUTING.md).
 - [Security policy](SECURITY.md) — evaluate the current capability floor, its policy configuration, scoped evidence, and private reporting route.
 - [Benchmark authority](BENCHMARK-AUTHORITY.md) — select a scoped result, compare its tuned baseline, and follow the committed artifact and reproduce route.
 - [llms.txt](llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).

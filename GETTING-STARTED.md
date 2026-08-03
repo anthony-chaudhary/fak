@@ -1,5 +1,12 @@
 # Getting started with fak
 
+*This page owns one job: getting a working `fak` binary onto this machine and proving it
+runs. It is for a reader who has already decided to try fak and now needs commands and
+their checkable results — not the pitch ([README](README.md)), not a route map
+([START-HERE](START-HERE.md)), not a concept course ([LEARNING-PATH](LEARNING-PATH.md)).
+It is also the one root page that prints the verbatim `fak agent --offline` expected
+output; the others link here rather than repeating it.*
+
 **Audience:** new builders choosing an install, proof, or production onboarding path.
 
 Choose one path by the result you need. Each path names its prerequisite and first
@@ -145,8 +152,10 @@ working directory; pass `--out <path>` to put it elsewhere.
 ./fak agent --offline
 ```
 
-**Expected output** (abridged; the run is deterministic, so you should see the same
-verdict lines — full capture in [the tutorial](docs/fak/tutorial.md)):
+**Expected output** — this block is the one copy carried by a root page; [`README.md`](README.md)
+and [`START-HERE.md`](START-HERE.md) link here instead of reprinting it. It is abridged; the
+run is deterministic, so you should see the same verdict lines, and the full capture is in
+[the tutorial](docs/fak/tutorial.md):
 
 ```
 metric                        now(base)          fak

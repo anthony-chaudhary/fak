@@ -6,6 +6,8 @@
 
 **fak turns a tool-using agent into a managed agent.**
 
+*This page is the front door, and the only one aimed at a reader who has not decided yet: what fak is, whether it fits, and the first command to run. Every other root document is narrower — [`GETTING-STARTED.md`](GETTING-STARTED.md) installs it and owns the verbatim proof output, [`START-HERE.md`](START-HERE.md) routes a job you already have to its one authority, [`INDEX.md`](INDEX.md) is the exhaustive by-name map, [`LEARNING-PATH.md`](LEARNING-PATH.md) teaches the concepts in prerequisite order, and [`AGENTS.md`](AGENTS.md) is for automated contributors, not humans.*
+
 The agent keeps its interface and model. A fak *kernel* — a management plane for one model session, not an OS kernel and not a GPU compute kernel — manages its model traffic and cache reuse, its context lifetime, and its capabilities and recovery. That pairing is what this page means by a *managed agent*: the agent you already run, with those four things owned outside it.
 
 > **TL;DR:** install one binary and run `fak agent --offline`. The managed agent still finishes its task while the kernel blocks a poisoned tool result and a destructive operation. No API key, model download, or GPU needed.
@@ -29,6 +31,8 @@ fak agent --offline
 (Go 1.26+ users can substitute `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`. Run it from any directory — no clone needed.) The run leaves one file behind: it writes `agent-report.json` into the directory you start it from and prints that full path when it finishes. Pass `--out PATH` to put it somewhere else.
 
 Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
+
+The comment above is the short form. The verbatim expected output for this command is printed once among the root pages — in [Getting started § Tier 0](GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min) — and the complete unabridged capture is in the [tutorial](docs/fak/tutorial.md). Compare your run against one of those two rather than against a third copy.
 
 The full report counts four kernel events beneath those rows: `in-syscall repairs` (a malformed tool call the kernel repaired in place instead of spending a retry turn), `vDSO dedup hits` (a repeated call answered from the kernel's own cache with no engine round-trip), `adjudicator denies` (a call the policy refused before it ran), and `MMU quarantines` (a tool result held out of the model's context). The [glossary](docs/glossary.md) defines these and the rest of the project's vocabulary.
 

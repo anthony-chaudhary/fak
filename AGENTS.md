@@ -1,5 +1,11 @@
 # AGENTS.md — orientation for coding agents
 
+> **Not the human contributor guide.** This file is operating instructions for *automated*
+> contributors working inside the maintainers' shared checkout — trunk guards, lane leases,
+> commit trailers, and shared-tree rules that have no meaning outside it. If you are a human
+> evaluating or contributing to fak, read [`README.md`](README.md) for what fak is and
+> [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to contribute; nothing below is required of you.
+
 > You are an autonomous agent working in this repo. This file is the machine-read entry
 > point (the [agents.md](https://agents.md) convention). It is intentionally
 > command-dense and free of philosophy. For the *why*, read [`README.md`](README.md);
