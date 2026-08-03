@@ -22,10 +22,27 @@ type CapRef struct {
 
 // CapCard is the tiny queryable card: trigger clause + tags (layer-1 cost).
 // It is the cheap at-rest metadata the index stores.
+//
+// RESIDENCY SPLIT (#5560, epic #3229). Two of these fields hold the capability's
+// prose and they answer to OPPOSITE pressures, so they are deliberately separate:
+//
+//   - Intent is the RESIDENT slice — one short line saying when to load this
+//     capability. It is what CardBytes serializes and what a listing renders, so
+//     every byte of it is a token cost paid in every session, forever.
+//   - Trigger is the in-process RANKING key scoreCard matches intent terms
+//     against. It is never serialized into CardBytes and never rendered, so its
+//     bytes cost recall, not tokens: a resolver should keep it as rich as the
+//     source allows. Shrinking it measurably degrades top-1 selection — see
+//     TestShrinkingTheRankingKeyCostsSelectionQuality.
+//
+// The full prose neither field elides is always recoverable by faulting the body
+// (Resolver.Fault → Capability.Materialize). This is a residency split, not a
+// deletion.
 type CapCard struct {
 	Ref          CapRef           // The capability reference
 	Digest       string           // Content hash of the body (the ScaleMCP sync key)
-	Trigger      string           // The trigger clause (what the model matches)
+	Intent       string           // The RESIDENT one-line intent (what CardBytes carries)
+	Trigger      string           // The in-process ranking key (never serialized)
 	Tags         []string         // Tags for filtering/ranking
 	CardBytes    []byte           // The serialized card (opaque to the index)
 	RequiredCaps []abi.Capability // Required capabilities to use this capability

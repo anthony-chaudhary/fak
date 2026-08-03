@@ -49,20 +49,30 @@ type Entry struct {
 	Name      string `json:"name"`
 	Version   string `json:"version"`
 	Digest    string `json:"digest"`
-	CardBytes int    `json:"card_bytes"`        // fak's at-rest serialized card
-	DescBytes int    `json:"description_bytes"` // the resident description slice (#3234)
-	NameBytes int    `json:"name_bytes"`        // the name-only resident slice (#3612)
+	CardBytes   int `json:"card_bytes"`        // fak's at-rest serialized card
+	DescBytes   int `json:"description_bytes"` // the full description: the ranking key (#3234)
+	NameBytes   int `json:"name_bytes"`        // the name-only resident slice (#3612)
+	IntentBytes int `json:"intent_bytes"`      // the resident one-line intent slice (#5560)
 }
 
 // Floor is the whole-catalog resident floor: per-skill rows plus the totals — the
 // description floor (the `interactive` profile, #3234), the name-only floor (the
-// `headless` profile, #3612), and fak's own at-rest card floor.
+// `headless` profile, #3612), the one-line intent floor (#5560), and fak's own
+// at-rest card floor.
 type Floor struct {
-	Entries    []Entry
-	DescFloor  int // interactive resident floor: sum of description bytes (#3234)
-	NameFloor  int // headless resident floor: sum of name bytes only (#3612)
-	CardFloor  int
-	SkillCount int
+	Entries   []Entry
+	DescFloor int // interactive resident floor: sum of description bytes (#3234)
+	NameFloor int // headless resident floor: sum of name bytes only (#3612)
+	// IntentFloor is the sum of the resident one-line INTENT slices (#5560): what a
+	// card now carries at rest to decide whether to load a skill, after the residency
+	// split moved the full description out of CardBytes and into the in-process
+	// ranking key. DescFloor stays the gated number — see descbudget.go — because it
+	// is the frontmatter prose the #5444 ratchet exists to refuse the growth of, and
+	// pricing the ratchet on a DERIVED leading sentence would blind it to a
+	// description that doubled in its tail.
+	IntentFloor int
+	CardFloor   int
+	SkillCount  int
 }
 
 // SkillsDir is the skills directory under a repo root. It is the single place the
@@ -82,18 +92,21 @@ func Fold(cards []capindex.CapCard) Floor {
 	for _, c := range cards {
 		desc := len(c.Trigger)
 		name := len(c.Ref.Name)
+		intent := len(c.Intent)
 		cb := len(c.CardBytes)
 		fp.DescFloor += desc
 		fp.NameFloor += name
+		fp.IntentFloor += intent
 		fp.CardFloor += cb
 		fp.Entries = append(fp.Entries, Entry{
-			Kind:      string(c.Ref.Kind),
-			Name:      c.Ref.Name,
-			Version:   c.Ref.Version,
-			Digest:    c.Digest,
-			CardBytes: cb,
-			DescBytes: desc,
-			NameBytes: name,
+			Kind:        string(c.Ref.Kind),
+			Name:        c.Ref.Name,
+			Version:     c.Ref.Version,
+			Digest:      c.Digest,
+			CardBytes:   cb,
+			DescBytes:   desc,
+			NameBytes:   name,
+			IntentBytes: intent,
 		})
 	}
 	sort.Slice(fp.Entries, func(i, j int) bool {
