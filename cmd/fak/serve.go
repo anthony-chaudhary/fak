@@ -251,6 +251,19 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 
+	// Prompt-shrink lever WIRE admission (#5493): --compact-history-budget,
+	// --elide-stale-reads and --defer-cold-tools are each gated, inside the gateway, on
+	// the Anthropic passthrough, so on any other upstream wire all three stand down to
+	// identity. Refuse by name when the operator EXPLICITLY enabled one here, and name
+	// the default-on ones that are merely inert, so "enabled but inert" is never silent
+	// and a ~0-saving A/B on this wire cannot be read as a verdict on the kernel. Placed
+	// beside the bind rule for the same reason: it reads parsed flags only and binds
+	// nothing, so it answers in milliseconds rather than after a weight load
+	// (shrink_lever_wire.go).
+	if !admitServeShrinkLevers(fs, sf, os.Stderr) {
+		os.Exit(2)
+	}
+
 	// Install the capability floor fail-loud: a bad manifest aborts startup rather
 	// than silently falling back to a more permissive default. Time it as the first
 	// startup phase.

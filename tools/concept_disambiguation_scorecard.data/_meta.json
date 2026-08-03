@@ -1041,6 +1041,11 @@
           "category": "incidental",
           "reason": "kernelSession is a local unexported plumbing accessor that returns the *Session a matKernel (sessionQ4KKernel/backendKernel) wraps; not a domain concept, just a type-switch helper for the routed-expert capability gate.",
           "token": "kernelSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "The startup predicate that decides whether the self-hosted wire admits the three prompt-shrink levers. Not a distinct concept: it is a boolean over the already-positioned lever set, evaluated once at serve start, and it introduces no vocabulary a reader could confuse with a sibling -- the levers themselves carry the meaning.",
+          "token": "shrinkWireInKernel"
         }
       ],
       "id": "gateway-engine",
@@ -1054,7 +1059,8 @@
         "kernel32",
         "kernelSession",
         "kernels",
-        "kernelwiki"
+        "kernelwiki",
+        "shrinkWireInKernel"
       ],
       "min_files": 3,
       "name": "Gateway / engine family",
@@ -1851,11 +1857,47 @@
           "category": "incidental",
           "reason": "unexported package-main shell plumbing for the already-positioned tend-fleet meta-walk: a CLI-local router/fold/usage symbol, not a new domain concept",
           "token": "superloop_fleet"
+        },
+        {
+          "category": "incidental",
+          "reason": "The cmd-layer struct that renders the waiter-plane result for one \fak loop region invocation. Not a distinct concept: it is a report DTO over internal/leasequeue's Plan output, and it is deliberately nil-valued whenever the queue is unavailable so the report degrades and the admission decision never does.",
+          "token": "loopRegionQueueReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "The call-site helper that mints a waiter ticket after a refused region admission. Named for its file, not for a new idea; the concept is internal/leasequeue's Store.Mint, which this wraps with the cmd layer's arguments.",
+          "token": "loopRegionEnqueue"
+        },
+        {
+          "category": "incidental",
+          "reason": "The mirror of loopRegionEnqueue, dropping this actor's ticket once the region admits. Same rationale: a call-site wrapper over the leasequeue store, not a separate concept.",
+          "token": "loopRegionDequeue"
+        },
+        {
+          "category": "incidental",
+          "reason": "An adapter that projects the live lease set into the holder shape internal/leasequeue.Plan expects. Purely a shape conversion at the boundary between two existing concepts.",
+          "token": "loopRegionHolders"
+        },
+        {
+          "category": "incidental",
+          "reason": "The cmd-layer view of one waiter ticket. The ticket concept lives in internal/leasequeue; this is its local projection for rendering and carries no additional semantics.",
+          "token": "loopRegionTicket"
+        },
+        {
+          "category": "incidental",
+          "reason": "The dispatchaging class constant identifying loop-region waiters within the already-declared class taxonomy. It selects an existing weight rather than introducing a new class of thing.",
+          "token": "ClassLoop"
+        },
+        {
+          "category": "incidental",
+          "reason": "Not a symbol at all -- this is the filename loop_region.go extracted from source text by the admission tokenizer. Filed as the same false-positive class as #5533, where a filename or test name quoted in prose is read as an introduced symbol. Classified incidental because there is no concept here to position.",
+          "token": "loop_region"
         }
       ],
       "id": "loop",
       "ignore": [
         "BackgroundLoop",
+        "ClassLoop",
         "ClassPollingLoop",
         "FakMetaSuperloopNight100",
         "FleetScoutLoop",
@@ -1869,6 +1911,12 @@
         "fakbgloopup",
         "fakloopledger",
         "faklooprunid",
+        "loopRegionDequeue",
+        "loopRegionEnqueue",
+        "loopRegionHolders",
+        "loopRegionQueueReport",
+        "loopRegionTicket",
+        "loop_region",
         "loopconsumes",
         "loopdoneunwitnessed",
         "looped",
