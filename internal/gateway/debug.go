@@ -24,6 +24,13 @@ type debugVarsResponse struct {
 	VCache           *debugVCacheVars               `json:"vcache,omitempty"`
 	CacheAttribution *debugCacheAttributionVars     `json:"cache_attribution,omitempty"`
 	ManagedCache     *debugManagedCacheVars         `json:"managed_cache,omitempty"`
+	// ShrinkLevers is the #5493 prompt-shrink-lever posture: which of the three levers are
+	// configured ON, and which of those the wire this gateway actually built can run. It sits
+	// beside ManagedCache because it answers the same class of question for a different lever
+	// family — configured-vs-live — and because the three levers it covers are the ones whose
+	// silent inertness on a self-hosted wire would otherwise be read as a verdict on the
+	// kernel. Omitted when no lever is configured on. See shrink_lever_live.go.
+	ShrinkLevers *debugShrinkLeverVars `json:"shrink_levers,omitempty"`
 	VCacheFamilies   *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
 	VCacheGovernor   []vcacheGovernorDecisionRecord `json:"vcache_governor_journal,omitempty"`
 	VCacheGovQuality *vcacheGovernorQualityVars     `json:"vcache_governor_quality,omitempty"`
@@ -529,6 +536,8 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		VCache:           vcacheVarsFromSnapshot(infer),
 		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
 		ManagedCache:     managedCacheVars(s.cacheTTL1H, s.provider, m.adjudicationSummary()),
+		ShrinkLevers: shrinkLeverVars(s.anthropicPassthrough(), s.dualRoutesLocalModels(), s.provider,
+			s.compactHistoryBudget, s.elideStaleReads, s.deferColdTools),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
 		VCacheGovernor:   m.vcacheGovernorDecisionRecords(),
 		VCacheGovQuality: m.vcacheGovernorQualityVars(),

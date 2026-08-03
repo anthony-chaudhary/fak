@@ -53,12 +53,18 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
 )
 
 // shrinkLeverInertToken is the stable, structured reason `fak serve` names when a
 // prompt-shrink lever cannot run on the configured wire, so an operator (or a log scrape)
 // can match it by token rather than by prose that may be reworded.
-const shrinkLeverInertToken = "SHRINK_LEVER_INERT_ON_WIRE"
+//
+// It is the SAME token the live /debug/vars shrink_levers block raises as its Finding
+// (internal/gateway/shrink_lever_live.go), taken from the one definition in internal/guardvars
+// rather than re-spelled here: a scraper that watches boot stderr and a scraper that polls
+// /debug/vars must match the identical string, and two literals would let that quietly rot.
+const shrinkLeverInertToken = guardvars.FindingShrinkLeverInertOnWire
 
 // shrinkLeverCommand carries the ONLY two things that differ between the `fak serve` and
 // `fak guard` admissions: how the process names itself in the message, and what "move to the
@@ -228,17 +234,17 @@ type shrinkLever struct {
 func shrinkLevers(named map[string]bool, compactHistoryBudget int, elideStaleReads, deferColdTools bool) []shrinkLever {
 	return []shrinkLever{
 		{
-			Flag: "--compact-history-budget", Token: "compact_history_budget",
+			Flag: "--compact-history-budget", Token: guardvars.ShrinkLeverCompactHistoryBudget,
 			Gate: "gateway.compactAnthropicRawWithReason", Off: "--compact-history-budget 0",
 			On: compactHistoryBudget > 0, Explicit: named["compact-history-budget"],
 		},
 		{
-			Flag: "--elide-stale-reads", Token: "elide_stale_reads",
+			Flag: "--elide-stale-reads", Token: guardvars.ShrinkLeverElideStaleReads,
 			Gate: "gateway.maybeElideStaleReads", Off: "--elide-stale-reads=false",
 			On: elideStaleReads, Explicit: named["elide-stale-reads"],
 		},
 		{
-			Flag: "--defer-cold-tools", Token: "defer_cold_tools",
+			Flag: "--defer-cold-tools", Token: guardvars.ShrinkLeverDeferColdTools,
 			Gate: "gateway.maybeDeferColdTools", Off: "--defer-cold-tools=false",
 			On: deferColdTools, Explicit: named["defer-cold-tools"],
 		},
