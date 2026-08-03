@@ -256,6 +256,13 @@ type Session struct {
 	// decision across IndexShare layers while tokenHiddenGLMDsa walks the block stack.
 	glmDsaSharedTopK []int
 
+	// gemma4Hist is the token history of a gemma4 Session (gemma4_session.go, #5495). The
+	// dedicated gemma4 forward is cacheless, so this slice IS the session state: each
+	// Prefill/Step appends to it and re-runs the forward over the whole prefix. It is empty
+	// on every other architecture, and a gemma4 session leaves Cache untouched — the cached
+	// per-layer-window KV path is #5496.
+	gemma4Hist []int
+
 	// decodeScores reuses one attention-score buffer across heads AND decode steps. A
 	// single Session decodes serially and the per-step head loop is serial, so one buffer
 	// (fully overwritten each head) is bit-identical to a fresh make per head. This removes
@@ -632,6 +639,13 @@ func (s *Session) Prefill(ids []int) []float32 {
 		s.requireMiniMaxSession()
 		return s.head(s.tokenLoopHidden(s.tokenHiddenMiniMax, ids))
 	}
+	if s.M.Cfg.isGemma4() {
+		// #5495: the DEDICATED gemma4 forward, on whatever resident store the model loaded as
+		// (residentMatRows dispatches f32/Q8_0/Q4_K/int4/k-quant/GPTQ by name). It must precede
+		// every generic lane below — each of them assumes the scalar cfg.HeadDim, which is the
+		// wrong shape on this arch's local layers.
+		return s.prefillGemma4(ids)
+	}
 	if s.Q4 {
 		// Resident int4 prefill: the batched Q8 GEMM has no int4 twin yet, so prefill runs
 		// the shared per-token blockStep with the int4 kernel. Slower than batched but uses
@@ -728,6 +742,13 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		for _, id := range ids {
 			s.tokenHiddenMiniMax(id, s.Cache.Len())
 		}
+		return
+	}
+	if s.M.Cfg.isGemma4() {
+		// #5495. The dedicated gemma4 forward is cacheless, so advancing state IS appending to
+		// the history — there is no K/V to fill and nothing to discard. A later Prefill/Step
+		// recomputes over the full prefix, so this is exactly PrefillNoLogits's contract.
+		s.gemma4Ingest(ids)
 		return
 	}
 	if s.Q4 {
@@ -837,6 +858,9 @@ func (s *Session) Step(id int) []float32 {
 	if s.M.Cfg.isMiniMaxSparseAttn() {
 		s.requireMiniMaxSession()
 		return s.head(s.tokenHiddenMiniMax(id, s.Cache.Len()))
+	}
+	if s.M.Cfg.isGemma4() {
+		return s.stepGemma4(id) // #5495 — see Prefill
 	}
 	if s.Backend != nil {
 		s.ensureOpenBackendSession()

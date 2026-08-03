@@ -2,32 +2,40 @@ package model
 
 // arch_support_gemma4.go — the fail-closed refusal for a resident-quant CPU forward run
 // over a checkpoint whose per-layer attention geometry the generic uniform-geometry block
-// path cannot express (issue #4274).
+// path cannot express (issue #4274), and the predicate that decides it.
 //
 // Gemma-4 interleaves two attention regimes with DIFFERENT shapes per layer: local/sliding
 // layers use a small head_dim, global/full layers a large one (gemma4.go headDimForLayer).
-// That is the entire reason gemma4.go exists as a dedicated forward. The resident-quant path
-// (tokenHiddenQ -> blockStep -> composeBlock) never dispatches to isGemma4(): it runs the
-// shared block code, whose qk-norm band (tpApplyQKNormBand) passes the SCALAR cfg.HeadDim to
-// applyQKNormCfg. gemma4's q_norm/k_norm weight length is a per-layer head_dim that differs
-// from that scalar, so applyQKNormCfg's `len(w) != hd` guard panics deep in the band on the
-// first Prefill — a cryptic crash with no architecture named.
+// That is the entire reason gemma4.go exists as a dedicated forward. The generic block path
+// (tokenHiddenQ -> blockStep -> composeBlock) runs the shared block code, whose qk-norm band
+// passes the SCALAR cfg.HeadDim to applyQKNormCfg. A per-layer q_norm/k_norm weight length
+// differs from that scalar, so applyQKNormCfg's `len(w) != hd` guard panics deep in the band
+// on the first Prefill — a cryptic crash with no architecture named. This file replaces that
+// with a typed, inspectable refusal at the entry.
 //
-// Wiring the dedicated gemma4 forward onto the resident-quant path is real work that needs a
-// correctness witness (logit cosine vs a reference run) before it can be trusted. Until then
-// the honest behavior is to REFUSE BY NAME at the forward entry — a typed, inspectable error
-// an operator (or a preflight) can read — instead of crashing mid-request.
+// Since #5495 the refusal's REACHABLE domain is smaller: Session.Prefill / PrefillNoLogits /
+// Step now dispatch a gemma4 checkpoint to the dedicated forward (gemma4_session.go) before
+// any generic resident-quant lane, and that path feeds applyQKNormCfg the per-layer head_dim.
+// The refusal is KEPT, not deleted, because two populations still land on it: a
+// heterogeneous-head_dim architecture with NO dedicated forward at all, and a gemma4 session
+// whose execution mode the bridge does not wire (device / Metal / dynamic precision). Both
+// are genuinely unsupported, and a silent wrong answer there would be worse than a refusal.
 
-// ResidentQuantUnsupportedError is the typed refusal a resident-quant CPU forward raises when
-// the loaded checkpoint uses a per-layer attention head_dim the generic uniform-geometry block
-// path cannot serve (gemma4 — issue #4274). It carries the architecture family key and the
-// resident-quant format in play so the message names both.
+// ResidentQuantUnsupportedError is the typed refusal raised when a Session cannot run a
+// checkpoint whose per-layer attention head_dim the generic uniform-geometry block path
+// cannot serve (issues #4274, #5495). It carries the architecture family key, the
+// resident-quant format in play, and — when the blocker is an unwired execution mode rather
+// than the geometry itself — the name of that mode, so the message names the exact remedy.
 type ResidentQuantUnsupportedError struct {
 	// Arch is the checkpoint's architecture family key (cfg.archFamilyKey(), e.g. "gemma4").
 	Arch string
 	// Format is the resident-quant format in play ("Q4_K", "Q4", "Q8_0", "GPTQ"), or
 	// "resident-quant" when the exact flag is not known at the raise site.
 	Format string
+	// Mode names the unwired execution mode (e.g. "Metal prefill") when the architecture HAS
+	// a dedicated forward but this session mode has no twin of it. Empty when the blocker is
+	// the geometry itself — no dedicated forward exists for it.
+	Mode string
 }
 
 func (e *ResidentQuantUnsupportedError) Error() string {
@@ -39,11 +47,18 @@ func (e *ResidentQuantUnsupportedError) Error() string {
 	if format == "" {
 		format = "resident-quant"
 	}
-	return "model: unsupported " + format + " forward for architecture " + arch +
+	msg := "model: unsupported " + format + " forward for architecture " + arch +
 		": this checkpoint uses a per-layer attention head_dim (e.g. gemma4's local/global " +
 		"layers) that the generic uniform-geometry qk-norm band assumes is the scalar " +
-		"cfg.HeadDim; the dedicated gemma4 forward is not wired on the resident-quant path " +
-		"(issue #4274). Serve this architecture on the f32 (non-quant) forward."
+		"cfg.HeadDim (issue #4274)."
+	if e.Mode != "" {
+		return msg + " The dedicated gemma4 forward IS wired on the host resident path " +
+			"(issue #5495), but not for this session's " + e.Mode + " mode; drop that mode and " +
+			"serve on a CPU resident session."
+	}
+	return msg + " No dedicated forward is wired for this geometry on the resident-quant " +
+		"path (gemma4 has one since issue #5495; this architecture does not). Serve this " +
+		"architecture on the f32 (non-quant) forward."
 }
 
 // heterogeneousHeadDim reports whether the model uses a per-layer attention head_dim that
