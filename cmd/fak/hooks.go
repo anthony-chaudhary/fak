@@ -21,6 +21,13 @@ import (
 // once; it reads the staged diff once and runs every gate over it. Exit codes mirror the gate
 // contract so the shell wrapper can fall back to Python: 0 = clean/pass, 1 = a block gate fired,
 // 2 = could-not-run (the wrapper then runs the Python path — fail-open).
+//
+// Exit 0 does NOT by itself mean every gate ran. A single gate whose Check cannot reach its
+// evidence is skipped and the run still exits 0 (fail-open, deliberate: a broken checker must
+// never wedge every commit on a shared trunk). What tells the two apart is the skip ledger
+// (#5299): each skipped gate is named on stderr, and the count plus the names ride in the --json
+// payload as skipped_count / skipped_gates. Read that ledger — not the exit code — to know
+// whether a green commit was checked by the full gate set or a degraded one.
 
 func cmdHooks(argv []string) { os.Exit(runHooks(os.Stdout, os.Stderr, argv)) }
 
@@ -242,6 +249,40 @@ func checkWithinBudget(g hooks.Gate, d *hooks.StagedDiff, budget time.Duration) 
 	}
 }
 
+// preCommitGates is the gate set the pre-commit hook runs. It is indirected through a var —
+// the same seam idiom as commitFn / execCommand elsewhere in this package — ONLY so a test can
+// inject a gate with a known verdict (notably one that CANNOT run, which no real gate does on a
+// healthy fixture repo). Production always reads hooks.PreCommitGates().
+var preCommitGates = hooks.PreCommitGates
+
+// couldNotRunClass names the CLASS of a gate's could-not-run error for the operator report, and
+// deliberately never renders the error itself. Several gates scan for secret material
+// (PUBLIC_LEAK, SECRET_SHAPE) over the staged diff, so an error value they return could carry a
+// matched needle or a slice of that diff; printing it would leak through the very gate whose
+// failure is being announced. Both return values are fixed literals, so a skip report can name a
+// gate and a sentinel and nothing else.
+func couldNotRunClass(err error) string {
+	if errors.Is(err, hooks.ErrCouldNotRun) {
+		return "ErrCouldNotRun"
+	}
+	return "unclassified error"
+}
+
+// enabledGateNames returns the names of the gates in gs that this run WOULD have checked — the
+// ones an operator turned off (FLEET_<NAME>_GUARD=off) or escaped are deliberate intent, not a
+// degraded run, so they never count as skipped. Used to name the tail of gates a spent hook
+// budget drops (#5335) in the same skip ledger as a single could-not-run gate (#5299).
+func enabledGateNames(gs []hooks.Gate) []string {
+	var names []string
+	for _, g := range gs {
+		if mode, escaped := gateModeDefault(g.ModeEnv, g.EscapeEnv, g.DefaultMode); mode == "off" || escaped {
+			continue
+		}
+		names = append(names, g.Name)
+	}
+	return names
+}
+
 func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("hooks pre-commit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -285,11 +326,19 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 
 	budget := resolveCheckBudget()
 	var allFindings []hooks.Finding
+	// skipped names every enabled gate that produced NO verdict this run — one whose Check could
+	// not reach its evidence (#5299) or one a wall-clock budget cut off (#5335). The fail-open
+	// itself stands: a broken checker must never wedge every commit on a shared trunk. What
+	// #5299 adds is that the skip is VISIBLE, so an operator can tell "every gate ran clean"
+	// from "PUBLIC_LEAK never ran and the rest were clean" — two states this hook used to
+	// report identically, letting a persistently-broken SECURITY gate go unnoticed.
+	var skipped []string
 	blocked := false
-	for _, g := range hooks.PreCommitGates() {
+	gates := preCommitGates()
+	for i, g := range gates {
 		mode, escaped := gateModeDefault(g.ModeEnv, g.EscapeEnv, g.DefaultMode)
 		if mode == "off" || escaped {
-			continue
+			continue // operator intent, not a degraded run: never counted as skipped
 		}
 		// Charge every gate against the shared wall clock, so N slow gates cannot sum past the
 		// total the way N per-gate budgets could.
@@ -298,15 +347,24 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 			if !*asJSON {
 				fmt.Fprintf(stderr, "pre-commit: %s hook budget spent; remaining gates from %s skipped (fail-open, #5335)\n", totalBudget, g.Name)
 			}
+			// The whole TAIL from here on is unchecked, this gate included — count all of it,
+			// so the ledger never understates how degraded the run was.
+			skipped = append(skipped, enabledGateNames(gates[i:])...)
 			break
 		}
 		findings, gerr := checkWithinBudget(g, d, gateBudget)
 		if gerr != nil {
 			// A single gate that could-not-run — or ran past its wall-clock budget (#5335) — is
-			// skipped (fail-open); the other gates still run. A budget cut-off is reported so a
-			// wedged or deliberately-slow gate is visible, never a silent bypass of a real check.
-			if errors.Is(gerr, errCheckBudgetExceeded) && !*asJSON {
-				fmt.Fprintf(stderr, "pre-commit: gate %s exceeded its %s budget; skipped (fail-open, #5335)\n", g.Name, gateBudget)
+			// skipped (fail-open); the other gates still run. Either way the gate is NAMED and
+			// counted, so a wedged, broken, or deliberately-slow gate is visible rather than a
+			// silent bypass of a real check.
+			skipped = append(skipped, g.Name)
+			if !*asJSON {
+				if errors.Is(gerr, errCheckBudgetExceeded) {
+					fmt.Fprintf(stderr, "pre-commit: gate %s exceeded its %s budget; skipped (fail-open, #5335)\n", g.Name, gateBudget)
+				} else {
+					fmt.Fprintf(stderr, "pre-commit: gate %s could not run (%s); skipped (fail-open, #5299)\n", g.Name, couldNotRunClass(gerr))
+				}
 			}
 			continue
 		}
@@ -326,8 +384,16 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	// The count, once, at the end of the human report: the per-gate lines above scroll away in a
+	// noisy commit, and "how much of the gate set actually ran" is the one number that separates
+	// a clean commit from a degraded one.
+	if len(skipped) > 0 && !*asJSON {
+		fmt.Fprintf(stderr, "pre-commit: %d of %d gate(s) skipped (fail-open) — this commit ran a DEGRADED gate set: %s\n",
+			len(skipped), len(gates), strings.Join(skipped, ", "))
+	}
+
 	if *asJSON {
-		emitFindingsJSON(stdout, stderr, allFindings)
+		emitFindingsJSON(stdout, stderr, allFindings, skipped)
 	}
 	if blocked {
 		if !*asJSON {
@@ -488,11 +554,27 @@ func distinctFindingFiles(findings []hooks.Finding) []string {
 	return files
 }
 
-func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding) {
+// emitFindingsJSON writes the --json report: the findings, and the ledger of gates that never
+// delivered a verdict. skipped_gates / skipped_count are the machine-readable half of #5299 —
+// with the fail-open deliberately kept, and stderr silenced under --json, they are the ONLY way
+// a consumer can tell a run where every gate reached its evidence from one where a security
+// gate errored out. Both keys are always present (empty list, zero count on a full run) so a
+// reader never has to treat "absent" as "none". Only gate NAMES appear: a gate's error text can
+// carry the secret material it was scanning for, and never reaches this payload.
+func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding, skipped []string) {
 	if findings == nil {
 		findings = []hooks.Finding{}
 	}
-	if err := writeIndentedJSON(stdout, map[string]any{"findings": findings, "count": len(findings)}); err != nil {
+	if skipped == nil {
+		skipped = []string{}
+	}
+	payload := map[string]any{
+		"findings":      findings,
+		"count":         len(findings),
+		"skipped_gates": skipped,
+		"skipped_count": len(skipped),
+	}
+	if err := writeIndentedJSON(stdout, payload); err != nil {
 		fmt.Fprintf(stderr, "fak hooks: %v\n", err)
 	}
 }
