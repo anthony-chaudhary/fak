@@ -191,6 +191,42 @@ type Counters struct {
 	CacheTTLUpgradesUpgraded uint64            `json:"cache_ttl_upgrades_upgraded"`
 	CacheTTLUpgradeReasons   map[string]uint64 `json:"cache_ttl_upgrade_reasons,omitempty"`
 
+	// The two remaining managed-cache levers' INTENT (and the defer lever's EFFECT),
+	// #4349. The configured-but-inert diff loop (cachevaluereport.FoldConfiguredButInert,
+	// #3649) names three levers, but on a real fleet row it could only ever witness the
+	// TTL-upgrade pair above: the other two levers' intent was not in this struct at all,
+	// so a session that armed them and did nothing read exactly like a session that never
+	// armed them.
+	//
+	// ManagedCacheActive is the resolved managed-cache lever state (--managed-cache /
+	// gateway Config.CacheTTL1H), recorded independently of whether any head was
+	// eligible. It has to be its own field because the alternative — INFERRING intent
+	// from the WITNESSED KVPrefix* reuse above — is wrong in a specific, silent way: a
+	// provider-prompt-cache-only session legitimately reuses zero KV-prefix tokens, so
+	// that inference reads "lever off" and "lever on, paying off provider-side" as the
+	// same flat zero.
+	//
+	// DeferColdToolsArmed / DeferColdCount are the same intent/effect pair for the
+	// cold-tool-deferral lever (--defer-cold-tools, #3232): whether the lever was armed,
+	// and how many cold tool definitions were actually deferred — mirrored from
+	// gateway.AdjudicationSummary.DeferColdCount, i.e. the same count the in-process
+	// fak_gateway_tool_defer_cold_total exports. That whole counter family lived only on
+	// /metrics (#3233/#3536) and died with the process, so under `fak guard` (a
+	// per-invocation gateway) an armed-and-inert defer session previously left no durable
+	// trace anywhere.
+	//
+	// All three are omitempty, and as with the self-hosted split above that is
+	// load-bearing: a row written before these fields existed omits them, ABSENT must
+	// read NOT INSTRUMENTED rather than "the lever was off", and every pre-field row
+	// stays byte-identical with its RowKey unchanged (the key hashes this struct's JSON).
+	// The cost of that choice, stated plainly: a measured lever-OFF session serializes
+	// identically to an unmeasured row, so these fields witness the ARMED case only —
+	// separating measured-off from never-measured is a follow-on, not something a reader
+	// may assume today.
+	ManagedCacheActive  bool   `json:"managed_cache_active,omitempty"`
+	DeferColdToolsArmed bool   `json:"defer_cold_tools_armed,omitempty"`
+	DeferColdCount      uint64 `json:"defer_cold_count,omitempty"`
+
 	// ByReason is the deny/quarantine reason breakdown (gateway.AdjudicationSummary.ByReason).
 	ByReason map[string]uint64 `json:"by_reason,omitempty"`
 }

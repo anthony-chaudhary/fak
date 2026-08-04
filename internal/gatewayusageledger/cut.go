@@ -77,6 +77,19 @@ func sumCounters(dst *Counters, add Counters) error {
 			f.SetInt(f.Int() + a.Int())
 		case reflect.Uint64:
 			f.SetUint(f.Uint() + a.Uint())
+		case reflect.Bool:
+			// An INTENT flag (ManagedCacheActive / DeferColdToolsArmed, #4349) is not a
+			// quantity, so "sum" is logical OR: the folded window had the lever armed iff
+			// ANY row in it did. That is the direction the carryforward contract needs —
+			// OR cannot lose the evidence that a lever was on, whereas AND would erase an
+			// armed session the moment it folded beside a never-armed one, and the whole
+			// point of these flags is that an armed-and-inert session stays visible.
+			//
+			// The cost, stated: a carryforward's flag answers "was this lever EVER armed in
+			// the window", not "was it armed all window". A per-session question must be
+			// asked of an exit row (which is what cachevaluereport.FoldUsageRowsConfiguredButInert
+			// reads — it skips carryforward rows precisely because they are cross-session sums).
+			f.SetBool(f.Bool() || a.Bool())
 		case reflect.Map:
 			if a.Len() == 0 {
 				continue
