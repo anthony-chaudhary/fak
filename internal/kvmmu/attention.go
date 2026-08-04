@@ -221,6 +221,13 @@ type EvictedSpan struct {
 // targetPositions cache positions have been freed, or until no unpinned live spans
 // remain. Pinned spans are excluded from the candidate set entirely.
 func (c *Context) EvictColdest(targetPositions int) []EvictedSpan {
+	// #5123: grade this decision with the #3901 retained-mass gauge — captured before the
+	// selection (evict clears a dropped span's mass) and folded after it, so LastRetainedMass
+	// reports the fraction of the observed attention mass the survivors carried. Observability
+	// only: it does not participate in the ranking below or change what is evicted.
+	before, cost := c.liveMassLedger()
+	defer c.gradeRetention(before, cost)
+
 	if targetPositions <= 0 {
 		return nil
 	}
@@ -259,6 +266,11 @@ func (c *Context) EvictColdest(targetPositions int) []EvictedSpan {
 func (c *Context) EvictUnderBudget(budgetPositions int) []EvictedSpan {
 	over := c.kv.Len() - budgetPositions
 	if over <= 0 {
+		// Keeping everything is still a selection decision, and a decision the gauge can grade
+		// honestly: the survivors are every observed span, so it reads all of the mass at all of
+		// the tokens (#5123). Suppressing it here would leave a stale reading from an earlier one.
+		before, cost := c.liveMassLedger()
+		c.gradeRetention(before, cost)
 		return nil
 	}
 	return c.EvictColdest(over)

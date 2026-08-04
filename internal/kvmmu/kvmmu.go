@@ -224,6 +224,12 @@ type Context struct {
 	meta        []cachemeta.Entry
 	invalidated []cachemeta.Entry
 	external    []cachemeta.ExternalInvalidationDirective
+
+	// lastRetained is the #3901 retained-mass gauge for the most recent eviction/selection
+	// decision (#5123, evictgauge.go): how much of the observed attention mass the survivors
+	// carried. Observability only — written after a decision, never read by one. Zero (and so
+	// Available=false) until a decision has run.
+	lastRetained RetainedMassGauge
 }
 
 // New wires the kernel's full registered detector chain over a session's
@@ -501,6 +507,14 @@ func (c *Context) Compact(ctx context.Context, ids []string, summaryID, tool str
 // eliding an earlier span a survivor already attended to shrinks residency but is not
 // reported bit-exact (the live elider asserts the invariant only where it holds).
 func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
+	// #5123: grade this selection with the #3901 retained-mass gauge. Captured BEFORE the
+	// eviction (evict clears a dropped span's mass, which would shrink the denominator to the
+	// survivors) and folded after it, so LastRetainedMass reports how much of the observed
+	// attention mass the resident view kept. Observability only — it reads the ledger and
+	// changes nothing about which spans this evicts.
+	before, cost := c.liveMassLedger()
+	defer c.gradeRetention(before, cost)
+
 	elide := make(map[string]bool, len(plan.Elided))
 	for _, e := range plan.Elided {
 		if e.ID != "" {
