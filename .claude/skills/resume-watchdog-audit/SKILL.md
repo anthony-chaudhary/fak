@@ -141,6 +141,30 @@ A healthy post-crash run shows the peak depth **draining toward single digits** 
 large distinct-session witness count. A backlog that grows monotonically across ticks
 (`--monotonic-ticks`) is a resume storm, not recovery — also RED.
 
+Growth is not the only backlog RED. A backlog that merely **stays deep past the throttle
+reset** is the other one — `BOTTLENECK-MAP-2026-07-09.md` §7's "if `auto_resume` is still
+>= 20 with 0 throttled accounts, the cap is the real limiter." Nobody eyeballs that at
+every reset any more: `--status` folds it as a standing gate (#3582) and pages when depth
+holds above `--backlog-threshold` (default 20) for `--backlog-ticks` (default 3)
+consecutive ticks **and** the roster reports zero throttled seats. Deep-*and*-throttled is
+the transient account pressure §4 already expects to clear itself, so it deliberately does
+NOT page; it is the backlog that **outlives** the throttle that proves recovery capacity —
+not account pressure — is what binds. The gate fails closed on an unreadable roster,
+because "0 throttled" is also exactly what a roster you failed to read looks like.
+
+The page is deduped by signature in `$reg\_paged.json` — one occurrence-counted record per
+gate, refreshed rather than re-notified, so a gate that stays tripped never spams one page
+per tick. Read it to answer "has this been paging, and for how long?":
+
+```powershell
+Get-Content (Join-Path $reg '_paged.json') | ConvertFrom-Json | % { $_.PSObject.Properties } |
+  % { "{0}  x{1}  depth={2} > {3}  first={4}  last={5}" -f $_.Name, $_.Value.count, $_.Value.last_depth, $_.Value.threshold, $_.Value.first_seen, $_.Value.last_seen }
+```
+
+A record whose `count` keeps climbing while `last_depth` never falls is §7's signal that
+**recovery capacity**, not account throttling, needs raising — the evidence an operator
+(or the MaxPerTick auto-scaler) acts on.
+
 ## Layer 2b — triage each `launched_unproven` straggler
 
 For every session `--status` flags unproven, decide *stuck vs. just-not-witnessed-yet*
@@ -177,7 +201,7 @@ is itself standing:
 |---|---|
 | **GREEN** | newest ledger write < 15 min ago **and** no `launched_unproven` past threshold **and** backlog draining **and** `FleetResumeWatchdog` LastResult `0x0`. |
 | **AMBER** | one straggler unproven, or a single missed tick (< ~25 min silent), backlog flat. |
-| **RED** | no ledger write > 15 min (**stall**) **or** any task LastResult non-zero (e.g. `0x800710E0`) **or** ≥1 `launched_unproven` with a dead pid past threshold **or** monotonic backlog growth. |
+| **RED** | no ledger write > 15 min (**stall**) **or** any task LastResult non-zero (e.g. `0x800710E0`) **or** ≥1 `launched_unproven` with a dead pid past threshold **or** monotonic backlog growth **or** an open `resume_backlog_persists_after_reset` page in `_paged.json` (backlog outlived the throttle reset — recovery capacity is the limiter, #3582). |
 
 State the verdict as: layer (n²/n³), the artifact that decided it (mtime / exit code /
 transcript), and the one action. Do not soften a stall into "probably fine".
