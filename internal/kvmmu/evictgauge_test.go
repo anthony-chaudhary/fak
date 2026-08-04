@@ -217,6 +217,46 @@ func TestEvictionGaugeDoesNotChangeWhatIsEvicted(t *testing.T) {
 	}
 }
 
+// TestSessionReportCarriesTheRetentionCeiling witnesses the report surface of #5123: the
+// post-hoc session picture carries the #3901 gauge for the BEST topN keep, so an operator reading
+// a live decision's retained_mass_fraction has the bar it should be measured against. The ceiling
+// is the mass-maximizing set (TopKSpansByMass), so it must equal the hand-computed
+// top-k-mass / total.
+func TestSessionReportCarriesTheRetentionCeiling(t *testing.T) {
+	mass := map[string]float64{"a": 1, "b": 2, "c": 3, "d": 4}
+	cost := map[string]int{"a": 10, "b": 10, "c": 10, "d": 10}
+	acc := feedSynthetic(mass)
+
+	// topN=2: the best two-span keep is {c,d} — 7 of the 10 observed mass at 20 of the 40 tokens.
+	r := kvmmu.BuildSessionAttentionReport(acc, nil, cost, 2, 0)
+	g := r.RetainedCeiling
+	if !g.Available {
+		t.Fatal("ceiling unavailable with observed attention present")
+	}
+	if math.Abs(g.Fraction-0.7) > 1e-9 || math.Abs(g.TokenFraction-0.5) > 1e-9 {
+		t.Fatalf("ceiling %+v, want the top-2 keep: 0.7 of the mass at 0.5 of the tokens", g)
+	}
+	// No other 2-subset can beat it — that is what makes it a ceiling, not just a reading.
+	for _, other := range [][]string{{"a", "b"}, {"a", "c"}, {"a", "d"}, {"b", "c"}, {"b", "d"}} {
+		if f := kvmmu.RetainedMass(acc, other, cost).Fraction; f > g.Fraction+1e-12 {
+			t.Fatalf("keeping %v retained %.6f, above the reported ceiling %.6f", other, f, g.Fraction)
+		}
+	}
+
+	// topN <= 0 is "no bound" in this report, so the ceiling covers every observed span.
+	if all := kvmmu.BuildSessionAttentionReport(acc, nil, cost, 0, 0).RetainedCeiling; math.Abs(all.Fraction-1) > 1e-9 {
+		t.Fatalf("unbounded ceiling %+v, want all of the mass", all)
+	}
+
+	// Fail-closed with the gauge: no attention observed ⇒ no ceiling, not a spurious 1.0.
+	cold := feedSynthetic(map[string]float64{"a": 0, "b": 0})
+	if z := kvmmu.BuildSessionAttentionReport(cold, nil, cost, 2, 0).RetainedCeiling; z.Available || z.Fraction != 0 {
+		t.Fatalf("ceiling must fail closed with no observer, got %+v", z)
+	}
+	t.Logf("#5123 report witness: best 2-span keep retains %.4f of the mass at %.4f of the tokens",
+		g.Fraction, g.TokenFraction)
+}
+
 // TestEvictUnderBudgetGradesTheNoOpDecision covers the budget-facing form's keep-everything
 // branch: residency already within budget is still a selection decision, and retaining every span
 // retains all of the observed mass at all of the tokens.
