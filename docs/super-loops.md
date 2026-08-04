@@ -107,6 +107,88 @@ superloop walk: improve-quality — ACTION (superloop_debt)
   → worst-first: superloop "sweep-surfaces" — descend: `fak superloop walk sweep-surfaces`
 ```
 
+## What the walk reads on a loop member — three dimensions, not just liveness
+
+A loop member is scored on the **product** of three independent dimensions, because
+they compound: a loop can be *up* and still be doing nothing useful, and it can be
+doing useful work at its own grain while the work it emits rots.
+
+| dimension | doubles the product when | closed reason |
+| --- | --- | --- |
+| liveness | `stale` — slipping past its cadence (DARK is worse still: the `Dark` flag, tier 0) | — |
+| progress (#4956) | **SPINNING** — ticking on cadence with zero advanced verified progress | `RELAY_NO_PROGRESS` |
+| follow-on (#4957) | **ORPHANED** — it emitted work nobody advances | `RELAY_ORPHANED_FOLLOWON` |
+
+`FleetDebt` is that product minus one, so a clean live leaf folds to debt 0 and the
+ordinary worst-first sort ranks the fleet with no rival walker.
+
+### ORPHANED-FOLLOWON — emitted work nobody advances
+
+A tick emitted downstream work — a durable `relay.ArtifactIssue` pointer (`#1234`) or
+the issue an `a2achan.WorkerStatus` names — and **nobody advanced or closed it within
+a cadence window**. This is progress at the loop's own grain, zero progress at the
+fleet grain, and it is *distinct from SPINNING*: a member can be `advancing` and
+`orphaned` at the same time. Each axis drives its own action; the walk emits the
+`superloop_orphaned` finding and ranks the member into the debt band (tier 1) ahead of
+a clean live leaf, where before the follow-on verdict it read clean.
+
+The verdict is one of four values, and only one of them is debt:
+
+| verdict | meaning | weighs |
+| --- | --- | --- |
+| `""` | axis **unread** — gate off, or the member emitted nothing | nothing |
+| `advancing` | every resolved emission advanced within the window, or closed | nothing |
+| `orphaned` | ≥1 emitted issue is OPEN with no advance in the window | **debt** |
+| `unknown` | an emission was unreadable — **fail closed** | nothing |
+
+**It fails closed, deliberately.** Any single unresolvable emission collapses the
+*whole* member read to `unknown` — even alongside a positively-witnessed orphan — and
+`unknown` is surfaced on the status but gates nothing: no debt, no worklist item,
+`Satisfied` stays true. An orphan is never fabricated from an absence, the same
+asymmetry `relay.ReadVerifiedProgress` keeps for a missing ledger. Gate off is **not**
+"clean" — it is the axis unread. The verdict is assembled only from durable
+issue/artifact state; there is no field where a member asserts it.
+
+**It only witnesses.** The walk surfaces the orphan and hands you a redirect action
+naming the closed token; it never re-files or re-dispatches the emitted work — that
+goes through the member's own front door (#4958).
+
+### Turning it on — the dogfood path
+
+The live join costs one `gh issue view` per emitted ref, so the default walk stays
+offline and fast. The witness reads the axis only when the gate is set:
+
+```
+FAK_SUPERLOOP_FOLLOWON=1 fak superloop walk tend-fleet
+```
+
+- **Window** — the loop's own declared cadence, widened to a **24h floor**, so a
+  fast-ticking loop cannot fabricate an orphan from a window narrower than a work day.
+  The fail-closed direction here is to *under*-report orphans, never to slander live
+  work with a window that was too tight.
+- **Which refs** — today only the `dispatch` loop kind binds emitted refs, from its
+  latest durable tick row (the issues that tick witnessed as worked yet still open).
+  Every other loop leaves the axis unread rather than inventing an emission. Only the
+  *refs* come from the ledger; whether each one advanced is re-read from live issue
+  state, so no upbeat self-report can make the verdict read clean.
+
+**Promotion evidence** (what would move this from `gen/next` to on-by-default): a
+gated run where the orphan count tracks a real backlog — every flagged orphan is one
+an operator agrees is genuinely unowned, and no orphan is raised against work someone
+was actively carrying.
+
+**Demotion/retirement evidence**: if an armed run produces orphans the operator
+consistently judges wrong, or the dispatch tick ledger stops being the emission
+record, retire the axis to unread — do not loosen the window to hide the noise.
+
+**Invalidating assumption**: the witness treats *any* `updatedAt` movement as "someone
+advanced it". A bot relabel, a stale-bot nudge, or a drive-by comment all read as
+carried — so the witness under-reports orphans, and a repo with chatty automation
+could read clean while nothing real moves. If that breaks, the advance test has to
+move off `updatedAt` onto a durable progress witness. A second, narrower assumption:
+only the *latest* dispatch tick row is read, so an emission from an earlier tick that
+is still open falls out of the axis.
+
 ## What the walk reserves — the budget
 
 Each intent also declares a **generation budget**: a planned reservation across the
