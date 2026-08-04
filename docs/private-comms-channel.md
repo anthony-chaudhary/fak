@@ -51,7 +51,7 @@ problem. Read the class before acting.
 
 | Class | What it proves | Operator action |
 |---|---|---|
-| `READBACK_WEDGED: sentinel_missing` | The hub answered this session's tail request and the client parsed the reply, but the command's completion marker was not in it. The transport is healthy; the session's shell is wedged. | Restart the control bridge for that session on the server. This is the only class that warrants it, and it is server-side: an authorized operator must do it from the server console, because the boundary allows no inbound login. |
+| `READBACK_WEDGED: sentinel_missing` | The hub answered this session's tail request and the client parsed a reply, but the command's completion marker was not in *the reply this client assembled*. That is a claim about the client's view of the transcript, not proof about the shell — read the resolved cause below before acting. | Confirm your client is current first: a client that drops part of a long reply reports this about a perfectly healthy shell. Only when it persists on a current client is the session implicated, and then the fix is server-side — an authorized operator restarts that session's control bridge from the server console, because the boundary allows no inbound login. |
 | `HUB_UNRESPONSIVE: hub_timeout` | The poll itself deadlined or errored, so no reply was ever inspected. A slow or unreachable control transport. | Retry in a quieter window with a longer timeout. Do not restart anything; the session is not implicated. The transport oscillates, so a failure here is not durable. |
 | `HUB_UNRESPONSIVE: no_tail_reply` | Every poll succeeded and the hub answered nothing at all. | Check that the hub process is running and still joined to the control channel. Again a hub-side condition, not a session one. |
 | `HUB_UNRESPONSIVE: tail_reply_unrecognized` | The hub replied, but no reply matched the shape this client parses — client/hub protocol drift. | Update the client's reply parser in the private tree. Restarting sessions cannot fix a parser mismatch. |
@@ -60,12 +60,47 @@ Two consequences worth keeping. First, a spent probe budget never reports a wedg
 if the loop never polled, it cannot have observed a missing marker, and it says so.
 Second, the same session can produce different classes minutes apart — a short fail-fast
 probe can deadline (`hub_timeout`) while a full-budget check on the same session reaches
-the hub and reports `sentinel_missing`. That is not a contradiction; it means the shell is
-wedged *and* the transport is slow, and only the first needs an operator.
+the hub and reports `sentinel_missing`. That is not a contradiction: the two are
+independent conditions, and the second one means only that this client could not find the
+marker in what it assembled.
 
 Run the client's `selftest` verb before committing to a long command. It uses the full
 timeout instead of the short fail-fast probe budget, so it is the cheapest way to learn
 which class you are in.
+
+### What #5103 turned out to be
+
+The 2026-07-16 incident behind this table read `sentinel_missing` on every live session at
+once. Of the two candidate causes — a wedged session on the box, or client/hub parser drift
+— it was the second, with every shell healthy.
+
+The hub splits a long transcript tail across several control-channel messages at the
+transport's per-message size limit, and heads only the *first* of them with the tail
+header. The client demanded that header, so it discarded every later message — and because
+a tail is chronological, the completion markers for the command just sent sit in the
+*last* message, the header-less one. The client threw away the only evidence it was looking
+for and reported a wedged shell about a session that had run the command and exited zero.
+Retrying with a longer tail window made it strictly worse: a longer tail splits into more
+messages. Two smaller parse defects hid behind that one — an escape-stripping pattern that
+did not match the form the hub actually posts, and an event scanner that kept only the
+first physical line of a multi-line event.
+
+The fix is client-side: reassemble the messages oldest-first, stopping at any foreign post
+so one session can never read another's output. It lives in the private client and is
+tracked under #5112. The offline witness holds it down: the reassembly regression parses the
+verbatim pair of hub messages captured during the incident and finds both completion markers
+and their zero exit codes in the header-less one — the evidence the old client discarded. The
+live half is still owed. Step 3 below — a trivial fixed-token command through the normal run
+path — is the witness that closes this out, and it needs lab credentials, so it cannot be
+taken from a host that has none. Read the root cause as settled and the live restoration as
+claimed-but-unwitnessed until someone records that round-trip.
+
+Three things an operator should carry out of this. Restarting sessions could never have
+fixed it. `sessions` reporting every session `running` was correct rather than
+contradictory, so a clean enumeration alongside a failing readback is evidence about the
+client, not a puzzle. And a class whose evidence the client assembles is only ever as
+trustworthy as that assembly — which is why the `sentinel_missing` row now sends you to
+check the client before you touch a session.
 
 ## Prove a readback is restored
 
@@ -123,6 +158,17 @@ narrow — that one check failing, with every expected-reaped artifact reported 
 while the classification test passes. Until the guard probes whether the shell can work in
 the test directory rather than merely exist, read a lone prune failure on a Windows host as
 host noise. Any other failure, and the classification test above all, is a real regression.
+
+One real regression has a shape worth naming, because it reads like a test-fixture gap and is
+not one. When the client's default command-send path changes — sending a command as an
+attached file rather than as a message, say — the readback preflight can fail inside that new
+send step and surface as `READBACK_WEDGED: exec_error` naming an upload stage. That is the
+#5103 conflation returning by a new route: preflight dies before it classifies anything, so a
+transport-side failure carries the wedged-shell token and sends an operator to restart a
+healthy session. The signature is both `TestPreflightReports…` checks failing on that error
+while `TestClassifyReadbackSeparatesFailureClasses` still passes — the classifier is intact,
+the path into it is not. A change to how commands are sent is therefore a change to the class
+split, and it needs these tests re-run even when it looks unrelated to readback.
 
 Keep a captured transcript in the private repository whenever it names a host, node, or
 channel; a public note carries the outcome in generic terms only.
