@@ -187,7 +187,36 @@ carried — so the witness under-reports orphans, and a repo with chatty automat
 could read clean while nothing real moves. If that breaks, the advance test has to
 move off `updatedAt` onto a durable progress witness. A second, narrower assumption:
 only the *latest* dispatch tick row is read, so an emission from an earlier tick that
-is still open falls out of the axis.
+is still open falls out of the axis. A third, *witnessed* on the first armed run below:
+an operator-**gated** emission is indistinguishable from an unowned one.
+
+### First armed run — 2026-08-04
+
+The witness was armed against this host's live dispatch ledger and joined against live
+GitHub issue state. It fired, and it fired correctly at the mechanism grain:
+
+| | gate off | `FAK_SUPERLOOP_FOLLOWON=1` |
+| --- | --- | --- |
+| the `dispatch` member | clean, axis unread | `follow_on: orphaned` / `RELAY_ORPHANED_FOLLOWON` |
+| its debt | 0 | 1 |
+| walk total debt | 2 | 3, `orphaned: 1` |
+| worklist rank 1 | the `drain-throughput` container | **the `dispatch` loop**, chase/redirect |
+
+The latest tick emitted seven refs — #5497, #5495, #5493, #5254, #5170, #5106, #4835 —
+and every one resolved OPEN with its last `updatedAt` between 2026-07-17 and
+2026-07-30: 5 to 18 days outside the 24h window. Every ref was positively read, so
+nothing was fabricated from an absence, and a member that read clean before the verdict
+existed now ranks first as debt — the exact "emitted work nobody advances" the witness
+was built to stop hiding.
+
+**What this does not yet prove.** The run shows the mechanism fires, binds its closed
+token, and ranks; it does *not* show the count tracks **unowned** work. At least one
+flagged ref (#4835) is operator-*gated* — it waits on a hardware witness nobody can
+produce on demand — so it is parked, not orphaned. The witness separates "not recently
+touched" from "carried", but not **blocked** from **orphaned**, and a backlog of
+legitimately-parked work reads as orphan debt. The promotion bar above therefore stays
+open. The smallest next step toward it is a park/blocked signal the join can subtract
+before it judges, so a gated emission drops out of the count instead of inflating it.
 
 ## What the walk reserves — the budget
 
