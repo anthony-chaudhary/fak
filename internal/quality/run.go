@@ -53,6 +53,12 @@ type FailureBundle struct {
 	Engine          Trace       `json:"engine"`
 	Detail          string      `json:"detail"`
 	Scrubbed        bool        `json:"scrubbed"`
+	// Classification is the machine-readable half of first-failure localization
+	// (#4520): which layer of the serving path the bundle's own evidence points
+	// at, or an explicit abstention when it points nowhere. It is Classify's
+	// output, stamped here so a CI consumer routes on the artifact instead of
+	// re-deriving it from prose.
+	Classification *Classification `json:"classification,omitempty"`
 }
 
 // Result is the stable machine-readable outcome of one quality run (#4519): a
@@ -125,7 +131,9 @@ func RunCase(c QualityCase, ref, eng Runner, oracles []Oracle) (Result, error) {
 		},
 	}
 	if !pass && firstFail != nil {
-		res.FailureBundle = scrubFailureBundle(FailureBundle{
+		// Localize AFTER scrubbing: the reason quotes trace excerpts, so it must
+		// quote the redacted ones or the bundle would leak through its own summary.
+		bundle := scrubFailureBundle(FailureBundle{
 			CaseID:          c.ID,
 			Case:            c,
 			FailingOracle:   firstFail.Oracle,
@@ -135,6 +143,9 @@ func RunCase(c QualityCase, ref, eng Runner, oracles []Oracle) (Result, error) {
 			Engine:          engTrace,
 			Detail:          firstFail.Detail,
 		})
+		stage := classifyFailure(*bundle)
+		bundle.Classification = &stage
+		res.FailureBundle = bundle
 	}
 	return res, nil
 }
@@ -177,9 +188,11 @@ func oracleNames(os []Oracle) []string {
 
 // Explain renders a Result as human-readable first-failure localization (#4520):
 // on pass it states what was verified; on failure it names the first failing
-// oracle and, for a differential failure, the exact token index and the
-// reference-vs-engine tokens there. It is the `fak quality explain` body — the
-// bridge from a machine verdict to "here is where and how it first went wrong".
+// oracle, the exact token index and the reference-vs-engine tokens there, and the
+// STAGE of the serving path the bundle's evidence attributes that divergence to
+// (or an explicit abstention when the evidence attributes it nowhere — see
+// Classify). It is the `fak quality explain` body — the bridge from a machine
+// verdict to "here is where, and in which layer, it first went wrong".
 func Explain(r Result) string {
 	var b strings.Builder
 	if r.Pass {
@@ -194,6 +207,11 @@ func Explain(r Result) string {
 		fmt.Fprintf(&b, "  first failure: %s (%s)\n", fb.FailingOracle, fb.FailingKind)
 		if d := fb.FirstDivergence; d != nil {
 			fmt.Fprintf(&b, "  first divergence at token %d: reference %q, engine %q\n", d.Index, d.Reference, d.Engine)
+		}
+		if s := Classify(r); s.Abstained() {
+			fmt.Fprintf(&b, "  stage: %s (abstained) — %s\n", s.Stage, s.Reason)
+		} else {
+			fmt.Fprintf(&b, "  stage: %s — %s\n", s.Stage, s.Reason)
 		}
 		fmt.Fprintf(&b, "  detail: %s\n", fb.Detail)
 		fmt.Fprintf(&b, "  replay: quality case %s @ v%d, runner %s vs %s\n",

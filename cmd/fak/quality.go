@@ -14,7 +14,10 @@ import (
 // ladder (epic #4509): `fak quality run` executes one versioned case through a
 // reference path and an engine path and emits a machine-readable result with a
 // pass/fail verdict and a replayable failure bundle; `fak quality explain` renders
-// a result as first-failure localization (#4520).
+// a result as first-failure localization (#4520) — the failing oracle, the exact
+// divergent step, and the stage of the serving path the evidence attributes it to
+// (normalization, tokenization, logits, sampling, stops, cache, transport, rubric)
+// or an explicit abstention when the evidence names none of them.
 func cmdQuality(argv []string) {
 	if len(argv) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: fak quality <run|explain> [flags]")
@@ -39,7 +42,7 @@ func runQualityRun(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	casePath := fs.String("case", "", "path to a quality-case JSON (default: built-in demo case)")
 	enginePath := fs.String("engine-trace", "", "path to an engine Trace JSON to judge against the reference (default: demo engine)")
-	inject := fs.String("inject", "", "demo defect to inject into the engine path: decode|report (default: none/clean)")
+	inject := fs.String("inject", "", "demo defect to inject into the engine path: decode|stop|report (default: none/clean)")
 	asJSON := fs.Bool("json", false, "emit the machine-readable result JSON to stdout")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -102,7 +105,7 @@ func runQualityExplain(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak quality explain", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	resultPath := fs.String("result", "", "path to a result JSON emitted by `fak quality run --json` (default: run the demo)")
-	inject := fs.String("inject", "", "when running the demo, inject a defect: decode|report")
+	inject := fs.String("inject", "", "when running the demo, inject a defect: decode|stop|report")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
