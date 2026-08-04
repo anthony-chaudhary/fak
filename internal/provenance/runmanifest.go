@@ -87,12 +87,33 @@ type RunManifest struct {
 	// deterministic oracle, code/module revision, tolerance/baseline provenance.
 	Model     string `json:"model"`     // model id + weight hash, e.g. "glm-4.6@sha256:abcd"
 	Tokenizer string `json:"tokenizer"` // tokenizer id + hash
-	Backend   string `json:"backend"`   // engine / backend, e.g. "fak-engine" vs "llama.cpp"
-	Seed      int64  `json:"seed"`      // decode seed; 0 with a non-empty Oracle == deterministic-oracle mode
-	Oracle    string `json:"oracle"`    // deterministic oracle id (an alternative to a seed)
-	CodeRev   string `json:"code_rev"`  // code/module revision, prefer module@rev over a bare SHA
-	Baseline  string `json:"baseline"`  // baseline provenance the tolerance is measured against
-	Tolerance string `json:"tolerance"` // tolerance the comparison used, e.g. "rel<=1e-3"
+
+	// LoadProvenance is the model-load provenance digest (#4746, root incident
+	// #4273): the content address of the model.LoadProvenance artifact — model
+	// bytes, GGUF architecture/version, canonical manifest, loader revision, and
+	// every non-identity loader transform — that the run's in-memory tensors were
+	// produced under.
+	//
+	// It is recorded here because Model pins WHICH bytes were loaded and says
+	// nothing about what the loader DID to them, and the #4273 defect class is
+	// invisible in every other field this manifest records: the broken load and
+	// the fixed load agree on model id, tokenizer, backend, hardware, quant, and
+	// decode params, and differ only in loader SEMANTICS. Without this field two
+	// such runs fingerprint identically and Compare returns pass — a publication
+	// claim bound to nothing about the loader.
+	//
+	// The digest is produced by (*ggufload.File).LoadProvenance(scope).Digest()
+	// and is publish-safe by construction: the artifact it addresses cannot hold
+	// a prompt, a filesystem path, or a raw weight. Recording the DIGEST rather
+	// than the artifact also keeps this package stdlib-only — provenance never
+	// imports the loader, it just carries its content address.
+	LoadProvenance string `json:"load_provenance"`
+	Backend        string `json:"backend"`   // engine / backend, e.g. "fak-engine" vs "llama.cpp"
+	Seed           int64  `json:"seed"`      // decode seed; 0 with a non-empty Oracle == deterministic-oracle mode
+	Oracle         string `json:"oracle"`    // deterministic oracle id (an alternative to a seed)
+	CodeRev        string `json:"code_rev"`  // code/module revision, prefer module@rev over a bare SHA
+	Baseline       string `json:"baseline"`  // baseline provenance the tolerance is measured against
+	Tolerance      string `json:"tolerance"` // tolerance the comparison used, e.g. "rel<=1e-3"
 
 	// Scope: binary revision, hardware, decode parameters, cache state,
 	// output normalization, and environment.
@@ -125,6 +146,7 @@ func (m RunManifest) Normalize() RunManifest {
 	n.Case = strings.TrimSpace(m.Case)
 	n.Model = strings.TrimSpace(m.Model)
 	n.Tokenizer = strings.TrimSpace(m.Tokenizer)
+	n.LoadProvenance = strings.TrimSpace(m.LoadProvenance)
 	n.Backend = strings.TrimSpace(m.Backend)
 	n.Oracle = strings.TrimSpace(m.Oracle)
 	n.CodeRev = strings.TrimSpace(m.CodeRev)
@@ -247,6 +269,7 @@ func (m RunManifest) Validate() error {
 	for _, r := range []struct{ name, val string }{
 		{"case", n.Case},
 		{"model", n.Model},
+		{"load_provenance", n.LoadProvenance},
 		{"tokenizer", n.Tokenizer},
 		{"backend", n.Backend},
 		{"code_rev", n.CodeRev},
@@ -275,7 +298,32 @@ func (m RunManifest) Validate() error {
 		sort.Strings(missing)
 		return fmt.Errorf("inconclusive manifest: missing %s", strings.Join(missing, ", "))
 	}
+	// A present-but-unshaped load_provenance is worse than an absent one: it
+	// satisfies the presence check while addressing no artifact, so the manifest
+	// LOOKS bound to its loader semantics and proves nothing. Check the shape.
+	if !sha256Digest(n.LoadProvenance) {
+		return fmt.Errorf("inconclusive manifest: load_provenance %q is not a sha256:<hex> content address", n.LoadProvenance)
+	}
 	return nil
+}
+
+// sha256Digest reports whether s is a "sha256:<64 lowercase hex>" content
+// address — the form model.LoadProvenance.Digest emits.
+func sha256Digest(s string) bool {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(s, prefix) {
+		return false
+	}
+	hex := s[len(prefix):]
+	if len(hex) != 64 {
+		return false
+	}
+	for i := 0; i < len(hex); i++ {
+		if c := hex[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // Divergence is the first field at which a candidate run departs from its baseline
@@ -298,6 +346,11 @@ func (m RunManifest) fields() [][2]string {
 	pairs := [][2]string{
 		{"case", n.Case},
 		{"model", n.Model},
+		// load_provenance sits directly after model, ahead of every downstream
+		// flag: a loader-semantics difference invalidates the comparison of
+		// everything below it, so it must be the first divergence an operator
+		// reads rather than one they reach after chasing a decode param.
+		{"load_provenance", n.LoadProvenance},
 		{"tokenizer", n.Tokenizer},
 		{"backend", n.Backend},
 		{"seed", fmt.Sprintf("%d", n.Seed)},
