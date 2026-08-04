@@ -70,20 +70,44 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 	for _, tc := range calls {
 		tool := tc.Function.Name
 		argsDigest := guardrsi.ArgsDigest(tc.Function.Arguments)
-		// vDSO-eligible iff the tool name is read-only-shaped (the same readOnlyPrefix
-		// gate buildCall uses to stamp readOnlyHint+idempotentHint). A write-shaped tool
-		// is never probed; vdso.Lookup's own destructive gate is the backstop.
-		if !readOnlyPrefix(tool) {
-			pass = append(pass, tc)
-			continue
-		}
 		// Force-fresh escape hatch: a re-proposed read carrying the advertised _fak_fresh
 		// marker skips the cache probe and passes through to the client to actually run.
 		// Sound: this only ever turns a would-be served hit into a normal tool_use —
 		// byte-identical to a cache MISS, the already-tested fall-through. It can never
 		// create an effect or relax a gate; it only declines the optimization. The model
 		// reaches for this when the served age (below) says the cached read is too stale.
+		//
+		// It sits above BOTH probes so the affordance the served line advertises beats
+		// the toolproc reuse cache as well as the vDSO one. Hoisting it past the
+		// read-only name gate is behavior-preserving: a marker-carrying call that is not
+		// vDSO-eligible takes the same `pass` fall-through that gate would have given it.
 		if callRequestsFresh(tc.Function.Arguments) {
+			pass = append(pass, tc)
+			continue
+		}
+		// TOOLPROC REUSE PROBE (#5119) — the content-keyed twin of the vDSO name probe
+		// below, and the live caller internal/gateway/toolproc_reuse.go was written to
+		// have. It keys on the command CONTENT (`read:<path>@<digest>` / `query:<canon>`)
+		// rather than the tool NAME, so it reaches exactly the family readOnlyPrefix
+		// cannot match — native Read/Bash/Grep, where the name gate serves 0 for a
+		// structural reason (served_inline_guardtrace_test.go measures it).
+		//
+		// It runs BEFORE the vDSO probe because it is the stricter of the two where they
+		// overlap (a `read_file`-shaped name): it serves an immutable read only under a
+		// content digest witnessed RIGHT NOW, whereas a vDSO tier-2 hit may be stale by
+		// up to its max-age ceiling. Unarmed — the default — reuseServe is one lock-free
+		// map probe and a nil check, so the pre-#5119 path stays byte-identical.
+		if body, meta, ok := s.reuseServe(ctx, tool, tc.Function.Arguments); ok {
+			served = append(served, servedToolLine(tool, body, meta))
+			servedHits++
+			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: true,
+				Verdict: WireVerdict{Kind: "ALLOW", Reason: "SERVED_INLINE", By: ReuseServedByVerdict}})
+			continue
+		}
+		// vDSO-eligible iff the tool name is read-only-shaped (the same readOnlyPrefix
+		// gate buildCall uses to stamp readOnlyHint+idempotentHint). A write-shaped tool
+		// is never probed; vdso.Lookup's own destructive gate is the backstop.
+		if !readOnlyPrefix(tool) {
 			pass = append(pass, tc)
 			continue
 		}
