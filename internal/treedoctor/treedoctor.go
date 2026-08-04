@@ -67,6 +67,19 @@ type Options struct {
 	// diagnosis and the loose-ref pressure count. Its zero value is the production
 	// configuration (see reflocks.go).
 	RefLock RefLockOptions
+	// LocksOnly narrows Diagnose/Sweep to the LOCK half: the commit lock, the renamed-aside
+	// lock residue, and the ref locks. The worktree classification and the untracked-WIP
+	// inventory are skipped entirely — so Sweep's `git worktree remove` loop has nothing to
+	// iterate and CANNOT fire, and the two whole-tree walks those diagnoses cost are not paid.
+	//
+	// It exists for the UNATTENDED caller (`fak git-daily`, internal/gitdaily): every lock
+	// reap here is provably safe without a human — a dead holder PID, or a name that is
+	// structurally not a lock git can be holding — whereas a worktree prune weighs a
+	// merged/live judgement whose false positive destroys a peer's in-flight work. Keeping
+	// the unattended tick locks-only makes that blast radius a property of the CALL, not of
+	// a reviewer remembering which report fields Sweep acts on. The interactive
+	// `fak tree-doctor --apply` leaves it false and keeps the full sweep.
+	LocksOnly bool
 }
 
 // DefaultLiveWindow: a worktree touched within this long is assumed to belong to a live
@@ -215,6 +228,11 @@ func Diagnose(ctx context.Context, run Runner, opts Options) Report {
 	rep := Report{Lock: diagnoseLock(opts.RepoRoot)}
 	rep.LockResidue = diagnoseLockResidue(opts.RepoRoot, residueThreshold(window, opts.ResidueMinAge), now)
 	rep.RefLocks = diagnoseRefLocks(opts.RepoRoot, opts.RefLock, now)
+	if opts.LocksOnly {
+		// Locks-only: skip both whole-tree walks. Leaving Worktrees empty is also what
+		// keeps Sweep's prune loop from having anything to remove (see Options.LocksOnly).
+		return rep
+	}
 	rep.Worktrees = diagnoseWorktrees(ctx, run, opts.RepoRoot, trunk, window, now)
 	rep.WIP = diagnoseWIP(ctx, run, opts.RepoRoot, window, now, opts.WIP)
 	return rep

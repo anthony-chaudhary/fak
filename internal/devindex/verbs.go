@@ -162,6 +162,7 @@ var verbManifest = []Verb{
 	{Name: "frontierswe", Synopsis: "FrontierSWE long-horizon time-to-solution benchmark surface (describe/eval/compare)", Lane: "cmd"},
 	{Name: "fused", Synopsis: "the fused-kernel thesis in one turn: classify/explain/run a classical + a weight op through one deny floor", Lane: "cmd"},
 	{Name: "garden", Synopsis: "the issue-garden: triage and groom GitHub issues (kind/priority/area)", Lane: "cmd"},
+	{Name: "git-daily", Synopsis: "the scheduled daily git-hygiene tick: reap orphaned git locks, then consolidate the object DB; deduped per day", Lane: "gitgate"},
 	{Name: "git-maint", Synopsis: "lock-aware safe object-DB consolidation: build midx + commit-graph, fold loose objects, never prune", Lane: "gitgate"},
 	{Name: "glm52-prefill-sweep", Synopsis: "GLM-5.2 prefill-latency sweep: --dry-run prints the plan, --endpoint runs it and lands ledger artifacts", Lane: "cmd"},
 	{Name: "go", Synopsis: "go build/vet/test passthrough that masks peers' untracked-sibling poison via a buildcheck -overlay", Lane: "cmd"},

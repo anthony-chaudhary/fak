@@ -2160,6 +2160,7 @@ quickstart is [`docs/fak/neo-cloud-deploy.md`](docs/fak/neo-cloud-deploy.md).
 | `fak stallscan` | Reads the churn signals (soft-fault storm, scheduler/syscall thrash, spawn bursts) that reveal a low-usage machine stall. | `fak stallscan` |
 | `fak growthgate` | The standing-footprint twin of `stallscan`: classifies where the disk/IO went and emits a census + verdict. | `fak growthgate --json` |
 | `fak git-maint` | Guarded, lock-aware "consolidate-never-prune" object-DB maintenance (multi-pack-index / commit-graph) the destructive-git guard otherwise only defers. | `fak git-maint -h` |
+| `fak git-daily` | The scheduled daily tick that makes `git-maint` actually fold: reaps the orphaned locks the maintenance tiers correctly defer on, THEN consolidates; once-a-day deduped, so a coarse OS trigger is safe. | `fak git-daily --dry-run` |
 | `fak clean-bins` | Safe, idempotent, witnessed prune of the stray `go build` binaries dropped at the module root. | `fak clean-bins` |
 | `fak buildcheck` | Concurrency-safe compile check for a fleet editing one shared trunk; never drops a binary in the tree. | `fak buildcheck` |
 | `fak ci-preflight` | Answers "is the committed trunk tip CI-buildable and gofmt-clean, and if not which files" without trusting the working tree. | `fak ci-preflight -h` |

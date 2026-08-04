@@ -104,6 +104,10 @@ type Options struct {
 	// OwnerDeadIndexAge is the short frozen window that applies when the lock's creator is
 	// named and proven dead (default DefaultOwnerDeadIndexAge). See FrozenHint.
 	OwnerDeadIndexAge time.Duration
+	// LocksOnly skips the staged-deletion hygiene audit and limits Status to the commit,
+	// index, and next-index lock evidence. Unattended lock reapers use this mode so a
+	// daily lock preflight does not inspect unrelated staged work in the shared index.
+	LocksOnly bool
 }
 
 type Report struct {
@@ -252,8 +256,10 @@ func Status(ctx context.Context, opts Options) (Report, error) {
 	// run), and it fails open and silent, so a probe that cannot run adds no warning and
 	// no verdict change — the lane report must not grow noise because a hygiene check
 	// misfired.
-	if audit := ScanStagedDeletions(ctx, opts.Runner, opts.Stat, rep.RepoRoot); len(audit.Rows) > 0 {
-		rep.IndexChurn = &audit
+	if !opts.LocksOnly {
+		if audit := ScanStagedDeletions(ctx, opts.Runner, opts.Stat, rep.RepoRoot); len(audit.Rows) > 0 {
+			rep.IndexChurn = &audit
+		}
 	}
 
 	procs, perr := opts.ProcessList(ctx)

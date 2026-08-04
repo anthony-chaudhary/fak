@@ -230,6 +230,18 @@ func cronRenderSystemd(label string, descs cronDescs, interval time.Duration, ar
 // cronRenderTaskScheduler renders a PowerShell `Register-ScheduledTask` snippet.
 // args[0] is the executed binary (the task's -Execute); args[1:] is its -Argument
 // string. desc is the task's -Description.
+//
+// The emitted task carries the S4U principal the fleet's reboot-survival contract
+// (#3322) requires of every registered fak task. Without an explicit -Principal the task
+// is registered for the INTERACTIVE user and only fires while that user is logged on: it
+// survives no reboot that lands at the lock screen, which is the normal state of an
+// unattended box. `-LogonType S4U` runs it without a stored password and without
+// requiring a session; `-RunLevel Limited` keeps it unelevated (an emitted unit must
+// never quietly ask for more privilege than the command needs); `-StartWhenAvailable`
+// catches up a firing the machine slept through, so a once-a-day command still runs on a
+// day the box was asleep at 03:00. That contract was previously pinned only on the
+// tools/*.ps1 installers (fleet_installer_s4u_test.go) while fak's OWN emitter shipped
+// units that died at every reboot — the gap this closes.
 func cronRenderTaskScheduler(label, desc string, interval time.Duration, args []string) string {
 	sec := int64(interval.Seconds())
 	var b strings.Builder
@@ -239,7 +251,9 @@ func cronRenderTaskScheduler(label, desc string, interval time.Duration, args []
 		cronPSQuote(args[0]), cronWinArgString(args[1:]))
 	fmt.Fprintf(&b, "$trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Seconds %d)\n", sec)
 	b.WriteString("$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable\n")
-	fmt.Fprintf(&b, "Register-ScheduledTask -TaskName '%s' -Action $action -Trigger $trigger -Settings $settings -Description '%s' -Force\n",
+	b.WriteString("# Reboot survival (#3322): S4U runs with no stored password and no logged-on session.\n")
+	b.WriteString("$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited\n")
+	fmt.Fprintf(&b, "Register-ScheduledTask -TaskName '%s' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description '%s' -Force\n",
 		cronPSQuote(label), cronPSQuote(desc))
 	return b.String()
 }

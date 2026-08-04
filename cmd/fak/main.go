@@ -246,14 +246,6 @@ func main() {
 		cmdWorkflow(os.Args[2:])
 	case "workflow-audit":
 		cmdWorkflowAudit(os.Args[2:])
-	case "tree-doctor":
-		cmdTreeDoctor(os.Args[2:])
-	case "git-maint":
-		cmdGitMaint(os.Args[2:])
-	case "clean-bins":
-		cmdCleanBins(os.Args[2:])
-	case "self-update":
-		cmdSelfUpdate(os.Args[2:])
 	case "slack":
 		cmdSlack(os.Args[2:])
 	case "chatops":
@@ -677,6 +669,16 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdWorktreeVerb(args)
 	case "wip":
 		cmdWip(args)
+	case "tree-doctor":
+		cmdTreeDoctor(args)
+	case "git-maint":
+		cmdGitMaint(args)
+	case "git-daily":
+		cmdGitDaily(args)
+	case "clean-bins":
+		cmdCleanBins(args)
+	case "self-update":
+		cmdSelfUpdate(args)
 	case "preflight":
 		cmdPreflight(args)
 	case "ci-preflight":
