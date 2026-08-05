@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 // Growth-boundary regression for #3505: every hydrate used to write a fresh
@@ -158,5 +161,70 @@ func TestPruneHydrateBackupsRefusesToEmpty(t *testing.T) {
 
 	if err := pruneHydrateBackups(filepath.Join(dir, "no-such-backups"), ".credentials.json", hydrateBackupKeep); err != nil {
 		t.Errorf("missing backups dir should be a no-op, got %v", err)
+	}
+}
+
+// TestApplyAccountHydrateBoundsSeatBackupDir is the END-TO-END bound at the verb #3505 names.
+// The tests above pin backupIfExists in isolation, but the dir an operator actually watches is
+// grown by applyAccountHydrate, which writes TWO chains in one run: a .credentials.json hydrate
+// also retires the target's stale .oauth-token. So a helper-level cap alone does not witness
+// that the production path is bounded — this does.
+//
+// It also pins the MIGRATION case, which is the one a long-lived seat is actually in: the seat
+// is seeded with a pile that accumulated BEFORE the cap existed, and one real hydrate must reap
+// it back to the cap. A fix that only bounded newly-created seats would leave every existing
+// seat's historical plaintext credentials on disk forever and still pass the helper tests.
+func TestApplyAccountHydrateBoundsSeatBackupDir(t *testing.T) {
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "source")
+	targetDir := filepath.Join(root, "target")
+	backupDir := filepath.Join(targetDir, "backups")
+	for _, d := range []string{sourceDir, targetDir, backupDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	// The source holds the live credential; the target holds the stale pair a hydrate replaces,
+	// so a single run backs up both credential shapes.
+	writeHydrateSeed(t, sourceDir, ".credentials.json", `{"token":"fresh"}`)
+	writeHydrateSeed(t, targetDir, ".credentials.json", `{"token":"stale"}`)
+	writeHydrateSeed(t, targetDir, ".oauth-token", "stale-oauth")
+
+	// Pre-cap accumulation. The stamps are older than any real hydrate's, so the run's own
+	// pre-image is the newest and must be the one that survives.
+	const historical = 20
+	for _, file := range []string{".credentials.json", ".oauth-token"} {
+		for i := 0; i < historical; i++ {
+			name := fmt.Sprintf("%s20250101T0000%02dZ.bak", hydrateBackupPrefix(file), i)
+			if err := os.WriteFile(filepath.Join(backupDir, name), []byte("superseded"), 0o600); err != nil {
+				t.Fatalf("seed historical backup %s: %v", name, err)
+			}
+		}
+	}
+
+	reg := accounts.Registry{Homes: []accounts.Home{
+		{Name: "target", Dir: targetDir, Identity: accounts.Identity{AccountUUID: "acct-1"}},
+		{Name: "source", Dir: sourceDir, Identity: accounts.Identity{AccountUUID: "acct-1"}},
+	}}
+	if _, err := applyAccountHydrate(reg, "target", "source"); err != nil {
+		t.Fatalf("applyAccountHydrate: %v", err)
+	}
+
+	for _, file := range []string{".credentials.json", ".oauth-token"} {
+		got := hydrateBackupNames(t, backupDir, file)
+		if len(got) != hydrateBackupKeep {
+			t.Errorf("%s chain holds %d backups after one hydrate, want the cap %d (seeded %d pre-cap)",
+				file, len(got), hydrateBackupKeep, historical)
+		}
+	}
+
+	// The bound must not have cost the hydrate its actual job.
+	b, err := os.ReadFile(filepath.Join(targetDir, ".credentials.json"))
+	if err != nil {
+		t.Fatalf("read hydrated credential: %v", err)
+	}
+	if string(b) != `{"token":"fresh"}` {
+		t.Errorf("hydrated credential = %q, want the source's", string(b))
 	}
 }
