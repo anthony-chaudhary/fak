@@ -133,6 +133,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// decode Q4_K directly — no f32/Q8 round-trip. (The old gate forced Q8/F32 on any backend.)
 	s.Q4K = p.q4k
 	s.CPUOffloadExperts = p.cpuOffloadExperts
+	// …and the GRADED form of that same placement (#5612), when the operator sized one: which MoE
+	// layers spill to host, and how many device bytes the routed-expert ring (#5611) may hold. No
+	// grade -> no-op, so the line above remains the whole placement decision it was.
+	p.applyExpertSpill(s)
 	// Apple-Silicon Metal GPU forward (`fak serve --metal`): engage the metalgemm GPU
 	// prefill + GPU-resident Q8 decode on the CPU session. Guarded to backend==nil — Metal
 	// is the CPU-session seam (s.Backend stays nil), and setting s.Metal on a device session

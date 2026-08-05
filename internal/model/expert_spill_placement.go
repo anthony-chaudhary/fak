@@ -191,6 +191,11 @@ type ExpertSpillPlacement struct {
 	// RingBytes is the routed-expert ring budget (Session.ExpertRingBytes) implied by this spill; 0
 	// leaves the ring off and the device-side experts on the unbounded permanent path.
 	RingBytes int64
+	// spilled is Fit.SpillLayers already resolved into the layer-ordinal SET the split predicate
+	// tests, computed ONCE here rather than per session. Resolving it walks every resident tensor
+	// name (MoEExpertLayers), which on a 753B checkpoint is ~70k names — a per-session cost on a
+	// path that builds a session per request. nil means ungraded (see spilledExpertLayers).
+	spilled map[int]bool
 }
 
 // ResolveExpertSpillPlacement resolves the graded placement for this model against a measured device byte
@@ -218,7 +223,57 @@ func (m *Model) ResolveExpertSpillPlacement(deviceBudgetBytes int64, userN int) 
 	if err != nil {
 		return ExpertSpillPlacement{}, false, err
 	}
-	return ExpertSpillPlacement{Budget: b, Fit: fit, RingBytes: b.RingBytesAt(fit.SpillLayers)}, true, nil
+	return ExpertSpillPlacement{
+		Budget:    b,
+		Fit:       fit,
+		RingBytes: b.RingBytesAt(fit.SpillLayers),
+		spilled:   m.spilledExpertLayers(fit.SpillLayers),
+	}, true, nil
+}
+
+// spilledExpertLayers resolves "spill the first n MoE layers" into the layer-ordinal SET a
+// placement predicate can test in O(1). nil is the UNGRADED answer and covers both endpoints —
+// n <= 0 (spill nothing through the graded path) and n >= the MoE layer count (spilling every
+// layer is exactly the layer-blind isExpertWeight) — so the caller has one nil check rather than
+// two range checks, and the default path allocates nothing.
+func (m *Model) spilledExpertLayers(n int) map[int]bool {
+	if n <= 0 {
+		return nil
+	}
+	layers := m.MoEExpertLayers()
+	if n >= len(layers) {
+		return nil
+	}
+	spilled := make(map[int]bool, n)
+	for _, l := range layers[:n] {
+		spilled[l] = true
+	}
+	return spilled
+}
+
+// gradedExpertSpillPredicate turns a resolved spill set into the predicate splitKernel runs.
+//
+// An empty set returns isExpertWeight itself — byte-for-byte the ungraded pre-#5612 predicate, not
+// a wrapper that reproduces it — so the default path keeps its exact identity and cost. Otherwise
+// an expert weight goes to host only when its layer is in the set; a NON-expert weight never does
+// (dense, router, attention and lm_head stay on the device exactly as before), and an expert weight
+// whose name carries no parseable layer ordinal spills — the memory-safe direction, since the
+// device is the scarce side and an unplaceable name must not silently consume VRAM the plan did
+// not budget.
+func gradedExpertSpillPredicate(spilled map[int]bool) func(string) bool {
+	if len(spilled) == 0 {
+		return isExpertWeight
+	}
+	return func(name string) bool {
+		if !isExpertWeight(name) {
+			return false
+		}
+		l, ok := expertLayerIndex(name)
+		if !ok {
+			return true
+		}
+		return spilled[l]
+	}
 }
 
 // ApplyExpertSpillPlacement installs a resolved plan on this session: the spill count grades the split
@@ -227,8 +282,10 @@ func (m *Model) ResolveExpertSpillPlacement(deviceBudgetBytes int64, userN int) 
 // all-device placement untouched, so an operator who asked for a ring but no spill gets exactly
 // that, and a plan that spills nothing never quietly routes every expert GEMM to the host.
 //
-// Applying a plan REPLACES any earlier one (it also clears the memoized predicate), so a session
-// re-planned mid-life cannot keep running the previous grade.
+// Applying a plan REPLACES any earlier one, so a session re-planned mid-life cannot keep running
+// the previous grade. It installs the predicate the plan already resolved rather than clearing it
+// for a lazy rebuild: a served session is built per REQUEST, and rebuilding would re-walk every
+// resident tensor name each time (spilledExpertLayers) for an answer that cannot change.
 func (s *Session) ApplyExpertSpillPlacement(p ExpertSpillPlacement) {
 	if s == nil {
 		return
@@ -238,7 +295,7 @@ func (s *Session) ApplyExpertSpillPlacement(p ExpertSpillPlacement) {
 	if p.Fit.SpillLayers > 0 {
 		s.CPUOffloadExperts = true
 	}
-	s.spillOnHost = nil
+	s.spillOnHost = gradedExpertSpillPredicate(p.spilled)
 }
 
 // expertSpillOnHost is the placement predicate splitKernel runs — isExpertWeight GRADED by layer.
@@ -253,34 +310,12 @@ func (s *Session) ApplyExpertSpillPlacement(p ExpertSpillPlacement) {
 // scarce side and an unplaceable name must not silently consume VRAM the plan did not budget.
 //
 // The predicate is built once per session and memoized: it is consulted per GEMM, and rebuilding it
-// would re-walk every resident tensor name on a 753B checkpoint each time.
+// would re-walk every resident tensor name on a 753B checkpoint each time. A session configured by
+// ApplyExpertSpillPlacement already carries the resolved predicate and never reaches the walk here;
+// this lazy arm serves a session whose grade was assigned to the field directly.
 func (s *Session) expertSpillOnHost() func(string) bool {
-	if s.spillOnHost != nil {
-		return s.spillOnHost
-	}
-	n := s.ExpertSpillLayers
-	if n <= 0 {
-		s.spillOnHost = isExpertWeight
-		return s.spillOnHost
-	}
-	layers := s.M.MoEExpertLayers()
-	if n >= len(layers) {
-		s.spillOnHost = isExpertWeight
-		return s.spillOnHost
-	}
-	spilled := make(map[int]bool, n)
-	for _, l := range layers[:n] {
-		spilled[l] = true
-	}
-	s.spillOnHost = func(name string) bool {
-		if !isExpertWeight(name) {
-			return false
-		}
-		l, ok := expertLayerIndex(name)
-		if !ok {
-			return true
-		}
-		return spilled[l]
+	if s.spillOnHost == nil {
+		s.spillOnHost = gradedExpertSpillPredicate(s.M.spilledExpertLayers(s.ExpertSpillLayers))
 	}
 	return s.spillOnHost
 }

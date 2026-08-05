@@ -45,9 +45,15 @@ type InKernelPlanner struct {
 	backend           compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
 	metal             bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-Metal builds.
 	cpuOffloadExperts bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
-	maxNew            int
-	temp              float64
-	seed              int64
+	// expertSpill is the resolved graded expert placement (`--n-cpu-moe`, #5612) this planner
+	// installs on every session it builds: how many MoE layers spill to host and how many device
+	// bytes the routed-expert ring may hold. nil — the default and every planner that was never
+	// given a grade — leaves placement exactly as cpuOffloadExperts alone decided it. Resolved once
+	// by SetExpertSpill (inkernel_expert_spill.go), never per request.
+	expertSpill *model.ExpertSpillPlacement
+	maxNew      int
+	temp        float64
+	seed        int64
 
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
@@ -177,6 +183,12 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
 	}
+	// The GRADED expert spill (#5612, inkernel_expert_spill.go) is OFF unless the operator asks:
+	// FAK_N_CPU_MOE=auto sizes it against the measured device budget, FAK_N_CPU_MOE=<N> states it.
+	// Unset — every serve today — nothing is resolved and the placement stays exactly what
+	// cpuOffloadExperts alone made it. Resolved HERE, once, because sizing walks every resident
+	// tensor name and the device path builds a session per request.
+	p.setExpertSpillFromEnv()
 	// RadixAttention KV-prefix reuse is ON by default; FAK_INKERNEL_RADIX=off disables it
 	// (the A/B "tree OFF" arm). Most device backends keep authoritative KV in the backend
 	// HAL store, so host KV clones are disabled there. GLM-MoE-DSA is the exception: its
