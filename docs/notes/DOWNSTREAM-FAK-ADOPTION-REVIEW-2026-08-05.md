@@ -1,5 +1,18 @@
 # What a downstream fak adopter did differently — and what is public-safe to bring back
 
+> ⚠️ **Partially corrected, same day, by
+> [`DOWNSTREAM-REVIEW-VERIFIED-2026-08-05.md`](DOWNSTREAM-REVIEW-VERIFIED-2026-08-05.md).** That
+> note ran steps 1–3 of § "Next checkable steps" below. Outcome: **§A1 and §A2's could-not-run claim
+> are wrong and §A4 is overstated** — `tools/scorecard_control_pane.py` already emits `debt: None`
+> for an unmeasured card, excludes it from the sum by type, prints `(N measured, M errored)`,
+> hard-fails the ratchet on any errored card, and returns exit `2` when unpinned. This note assessed
+> the scorecard producers and the pinned baseline but never the fold that consumes them. **§A3
+> survives and sharpens** (both ratchet axes read the numerator, neither reads the domain). **§C7 is
+> confirmed and half-fixed** — the multi-line lane bug is real, is in `parseLanes` rather than the
+> `splitLaneTree` this note looked at, and is now fixed and pinned by a test. **§C5 is settled in
+> the downstream repo's favour.** The text below is left as written, per *"retract in place and keep
+> the retracted text visible"*.
+
 **Date:** 2026-08-05 · **Subject:** a contract-delivered Go repository (referred to here as *the
 downstream repo*) that adopted fak's guard, lane, worktree and shipgate concepts and then hardened
 them against a ~30-concurrent-session shared checkout and a 50–150-worker agent fleet.
