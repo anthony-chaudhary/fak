@@ -36,6 +36,11 @@ type Provenance struct {
 	Params    SamplingParams `json:"params"`
 	Reference Trace          `json:"reference"`
 	Engine    Trace          `json:"engine"`
+	// Requests is what each side did with those params: which normalized request
+	// fields it could not honor and how the request it actually executed differed
+	// (#4518). Without it a passing run only asserts that two traces agree, not
+	// that they answer the same question.
+	Requests RequestRecord `json:"requests"`
 }
 
 // FailureBundle is the portable, replay-complete artifact emitted on any failing
@@ -53,6 +58,10 @@ type FailureBundle struct {
 	Engine          Trace       `json:"engine"`
 	Detail          string      `json:"detail"`
 	Scrubbed        bool        `json:"scrubbed"`
+	// Requests travels with the bundle so a failure reproduces from the bundle
+	// ALONE (#4515): a replayer that cannot see the engine dropped top_k would
+	// re-run a different request than the one that failed.
+	Requests RequestRecord `json:"requests"`
 	// Classification is the machine-readable half of first-failure localization
 	// (#4520): which layer of the serving path the bundle's own evidence points
 	// at, or an explicit abstention when it points nowhere. It is Classify's
@@ -98,11 +107,24 @@ func RunCase(c QualityCase, ref, eng Runner, oracles []Oracle) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("engine runner %q: %w", eng.Name(), err)
 	}
-	prov := Provenance{CaseID: c.ID, Params: c.Params, Reference: refTrace, Engine: engTrace}
+	requests := RequestRecord{Reference: requestFidelity(ref, c), Engine: requestFidelity(eng, c)}
+	prov := Provenance{CaseID: c.ID, Params: c.Params, Reference: refTrace, Engine: engTrace, Requests: requests}
 
-	verdicts := make([]Verdict, 0, len(oracles))
+	verdicts := make([]Verdict, 0, len(oracles)+1)
 	pass := true
 	var firstFail *Verdict
+	// Request fidelity is judged BEFORE any oracle and, when it fails, becomes the
+	// first failure by construction: if the two sides were not handed the same
+	// request, no downstream verdict is interpretable — agreement proves nothing
+	// and disagreement indicts the wrong layer. On a faithful run nothing is
+	// appended, so a runner that never declares a request keeps the exact verdict
+	// list it had before this check existed.
+	if v, drifted := requestFidelityVerdict(requests); drifted {
+		verdicts = append(verdicts, v)
+		pass = false
+		fv := v
+		firstFail = &fv
+	}
 	for i := range oracles {
 		v := oracles[i].Judge(refTrace, engTrace, c)
 		verdicts = append(verdicts, v)
@@ -142,6 +164,7 @@ func RunCase(c QualityCase, ref, eng Runner, oracles []Oracle) (Result, error) {
 			Reference:       refTrace,
 			Engine:          engTrace,
 			Detail:          firstFail.Detail,
+			Requests:        requests,
 		})
 		stage := classifyFailure(*bundle)
 		bundle.Classification = &stage
@@ -168,6 +191,12 @@ func scrubFailureBundle(f FailureBundle) *FailureBundle {
 		f.Engine.Tokens[i] = redact(f.Engine.Tokens[i])
 	}
 	f.Detail = redact(f.Detail)
+	// A "prompt" delta echoes request text verbatim, so it is redacted like every
+	// other quoted surface. Both records are rebuilt onto fresh slices rather than
+	// edited in place: the bundle's RequestRecord shares its backing array with
+	// the Result's own Provenance, and scrubbing must not reach back through it.
+	f.Requests.Reference.Diff = redactDeltas(f.Requests.Reference.Diff, redact)
+	f.Requests.Engine.Diff = redactDeltas(f.Requests.Engine.Diff, redact)
 	if f.FirstDivergence != nil {
 		d := *f.FirstDivergence
 		d.Reference = redact(d.Reference)
@@ -176,6 +205,18 @@ func scrubFailureBundle(f FailureBundle) *FailureBundle {
 	}
 	f.Scrubbed = true
 	return &f
+}
+
+func redactDeltas(ds []FieldDelta, redact func(string) string) []FieldDelta {
+	if len(ds) == 0 {
+		return ds
+	}
+	out := make([]FieldDelta, len(ds))
+	for i, d := range ds {
+		d.Requested, d.Effective = redact(d.Requested), redact(d.Effective)
+		out[i] = d
+	}
+	return out
 }
 
 func oracleNames(os []Oracle) []string {
