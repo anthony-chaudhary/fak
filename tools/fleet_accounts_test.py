@@ -19,7 +19,29 @@ ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT / "tools"))
 
+# Arrange the DIR, not just the variable (#5390). fleet_accounts binds REG_DIR/REGISTRY_PATH
+# at IMPORT time from the host registry ladder, and the ladder's discovery rungs are real
+# places: on a maintainer's box FLEET_REG_DIR-unset now resolves to %LOCALAPPDATA%\Fleet\
+# registry, which carries a live sessions.json AND a live probe_ledger.jsonl. The routing,
+# wave-allocation and runtime-status cases below would then grade against the operator's
+# actual fleet instead of their fixtures -- green on CI (no host registry) and false-red on
+# a laptop, which is the worst shape a suite can have. So pin an empty registry BEFORE the
+# import: the env rung outranks every discovery rung, so nothing on this host can be read.
+_HERMETIC_REG = tempfile.mkdtemp(prefix="fleet-accounts-test-reg-")
+_SAVED_REG_ENV = {k: os.environ.get(k) for k in ("FLEET_REG_DIR", "FLEET_STATE_DIR")}
+os.environ["FLEET_REG_DIR"] = _HERMETIC_REG
+os.environ.pop("FLEET_STATE_DIR", None)
+
 import fleet_accounts  # noqa: E402
+
+
+def tearDownModule() -> None:
+    for key, value in _SAVED_REG_ENV.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    shutil.rmtree(_HERMETIC_REG, ignore_errors=True)
 
 
 def account_dir(root: Path, name: str, projects: bool = True) -> Path:
@@ -330,8 +352,12 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(status["block_kind"], "auth")
 
     def test_explicit_empty_registry_does_not_load_live_registry(self) -> None:
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("FLEET_REG_DIR", None)
+        # The claim is about the `registry={}` ARGUMENT short-circuiting, so the registry dir
+        # has to be arranged, not merely unnamed: popping FLEET_REG_DIR used to mean "no
+        # ledger anywhere", but since #5390 an unnamed dir falls through to the host's real
+        # registry, whose live ledger legitimately opens the probe rung. Name the module's
+        # empty dir instead -- the same "nothing to read" the pop used to imply by accident.
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": _HERMETIC_REG}, clear=False):
             with mock.patch.object(
                 fleet_accounts, "load_registry",
                 side_effect=AssertionError("unexpected load")
@@ -1634,9 +1660,10 @@ class LedgerGateGradeTest(unittest.TestCase):
 
     Mirror of internal/fleetaccounts/status_ledgergate_test.go. The Go twin has to pin every
     rung accountprobe.ResolveRegDir surveys (LOCALAPPDATA, TMP, ...) so its verdict is not a
-    fact about the operator's laptop; account_probe.reg_dir resolves only FLEET_REG_DIR else
-    the clone-root tools/_registry, so naming the env var pins it outright here -- except in
-    the one case that deliberately leaves it unset, which patches the resolver instead."""
+    fact about the operator's laptop; account_probe.reg_dir now walks the SAME ladder via
+    fleet_regdir, so the env rung -- which outranks every discovery rung -- is what pins it
+    outright here, except in the one case that deliberately leaves it unset and patches the
+    resolver instead."""
 
     ACCT = ".claude-gate5439"
 

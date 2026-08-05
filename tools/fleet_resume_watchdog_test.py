@@ -5,7 +5,8 @@ These pin the parity the .ps1 already had and the .py port had drifted from:
   * REG_DIR must follow FLEET_REG_DIR so the watchdog READS the registry/plan/ledger
     from the same dir the fleet_sessions.py refresh child WRITES (the silent-no-op /
     split-resume-once-ledger blocker when an ambient FLEET_REG_DIR is set by the
-    control pane or an operator).
+    control pane or an operator) -- and with the variable UNSET both sides must still
+    land on the one host registry the shared resolver picks, never a second one (#5390).
   * CLAUDE_EXE must prefer the fleet-wide FLEET_CLAUDE_EXE convention (account_probe.py
     et al.), with FAK_CLAUDE_EXE only a back-compat fallback.
   * Active probing must stay gated to the live tick so a default dry-run spends nothing.
@@ -50,9 +51,20 @@ def test_reg_dir_follows_fleet_reg_dir(tmp_path):
     assert wd.REG_DIR == target, "watchdog must read where fleet_sessions.py writes"
 
 
-def test_reg_dir_defaults_to_local_registry():
+def test_reg_dir_unset_converges_on_the_shared_resolver():
+    """With FLEET_REG_DIR unset the watchdog must land wherever the SHARED resolver lands.
+
+    It used to hard-code the clone-root ``tools/_registry`` here. That is a real dir on a
+    maintainer's box and NOT the one the prober writes its ledger to, so an env-unset
+    watchdog maintained a second, ledger-less registry beside the live one -- the #5390
+    fork. Pinning the resolver rather than a literal path is what keeps the watchdog, the
+    fleet_sessions.py writer and the Go reader on one dir no matter which rung wins here.
+    """
+    import fleet_regdir
+
     wd = _reload({"FLEET_REG_DIR": None})
-    assert wd.REG_DIR == os.path.join(wd.HERE, "_registry")
+    assert wd.REG_DIR == fleet_regdir.reg_dir(), \
+        "an unset FLEET_REG_DIR must resolve, not fork into a second registry"
 
 
 def test_claude_exe_prefers_fleet_convention(tmp_path):

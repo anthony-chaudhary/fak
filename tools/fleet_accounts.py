@@ -95,6 +95,7 @@ try:
 except ImportError:  # pragma: no cover - Python <3.9 fallback
     ZoneInfo = None
 
+import fleet_regdir
 import fleet_session_signals
 
 USER = os.environ.get("FLEET_USER_HOME", os.path.expanduser("~"))
@@ -108,10 +109,10 @@ CONFIG_HOME = os.environ.get(
 # A dir counts as an opencode *account* when it holds one of these config files
 # (the opencode.json/jsonc is the switch seam, the way projects/ is for Claude).
 OPENCODE_MARKER_FILES = ("opencode.json", "opencode.jsonc")
-REG_DIR = os.environ.get(
-    "FLEET_REG_DIR",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "_registry"),
-)
+# The RUNTIME registry: $FLEET_REG_DIR when the fleet names it, else the host ladder
+# (see fleet_regdir). It used to fall back straight to the clone-root tools/_registry,
+# which is what let an env-unset run maintain a SECOND registry beside the watchdog's.
+REG_DIR = fleet_regdir.reg_dir()
 # The account POLICY is operator CONFIG, not runtime STATE, so it must NOT move with
 # FLEET_REG_DIR. The watchdog (fleet_status.ps1 / fleet_resume_watchdog.ps1) redirects
 # FLEET_REG_DIR to a host state dir (e.g. %LOCALAPPDATA%\Fleet\registry) so the live
@@ -1253,9 +1254,9 @@ def _should_consult_probe_ledger(registry: dict | None, probe_ledger: bool | Non
     the same fix, so the two surfaces answer one question the same way:
 
       - FLEET_REG_DIR names a ledger-bearing dir -> consulted, exactly as before.
-      - FLEET_REG_DIR unset but the resolved dir (tools/_registry) carries the ledger ->
-        consulted NOW, where before the rung never ran and a fresh probe verdict stayed
-        invisible to the roster no matter how correctly the dir resolved.
+      - FLEET_REG_DIR unset but the dir the host ladder resolves to (see fleet_regdir)
+        carries the ledger -> consulted NOW, where before the rung never ran and a fresh
+        probe verdict stayed invisible to the roster no matter how correctly it resolved.
       - FLEET_REG_DIR names a ledger-LESS dir -> NOT consulted, where before the rung ran
         over a ledger that was not there. Every read returned nothing, so the fold fell
         through to the carried block anyway; refusing to run says so instead of pretending

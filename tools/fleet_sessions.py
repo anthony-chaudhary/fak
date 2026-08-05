@@ -36,6 +36,7 @@ import datetime as dt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # import sibling helper
 import fleet_version  # noqa: E402
+import fleet_regdir  # noqa: E402  -- the host's one registry dir (never a second one)
 import fleet_accounts  # noqa: E402  -- account-policy layer (worker/excluded/non-account)
 import fleet_session_signals  # noqa: E402
 
@@ -606,7 +607,11 @@ INFRA_RESUMABLE = ("STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_ORG_DISABLED")
 # resume_cmd for it -- the recovery is a FRESH continuation, not `claude --resume`).
 STOPLIKE = DEAD | set(INFRA_RESUMABLE) | {"STOPPED_QUIET", "INFRA_AUTH",
                    "USER_CLOSED", "PARKED_WAIT", "NEVER_STARTED"}
-REG_DIR = os.environ.get("FLEET_REG_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_registry"))
+# $FLEET_REG_DIR when the fleet names it, else the host ladder (fleet_regdir). This module
+# WRITES sessions.json / decisions.log / transitions.log / resume_plan.json, so its old
+# clone-root fallback is what physically forked a host: a hand-run `fleet_sessions.py
+# registry` published a second, ledger-less roster beside the watchdog's live one.
+REG_DIR = fleet_regdir.reg_dir()
 RESUME_PROMPT = ("Resume where you left off; re-establish any /goal or /loop "
                  "and continue toward it.")
 

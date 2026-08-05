@@ -39,6 +39,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fleet_version  # noqa: E402
+import fleet_regdir  # noqa: E402  -- the host's one registry dir (never a second one)
 import fleet_trend  # noqa: E402
 from dispatch_worker import install_no_window_subprocess_defaults  # noqa: E402
 
@@ -225,7 +226,7 @@ def collect_throughput(root: Path) -> dict[str, Any]:
         # Provenance the consumer surfaces: counted from the git commit graph, so a
         # flat run is a real HEAD stall, not a self-reported number passing as witnessed.
         tp["lands_witness"] = "git"
-    reg_dir = Path(os.environ.get("FLEET_REG_DIR") or (root / "tools" / "_registry"))
+    reg_dir = Path(fleet_regdir.reg_dir(str(root / "tools" / "_registry")))
     resumes = resume_attempt_count(reg_dir)
     if resumes is not None:
         tp["resumes"] = resumes

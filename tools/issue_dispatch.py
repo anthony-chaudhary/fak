@@ -137,7 +137,11 @@ def refresh_registry(root: Path) -> dict[str, Any]:
     """Re-derive the account registry from live sessions BEFORE routing.
 
     The switcher (``fleet_accounts route``, called inside the preflight) reads the
-    cached ``tools/_registry/sessions.json`` snapshot. On an always-on tick that
+    cached ``sessions.json`` snapshot in the host registry -- $FLEET_REG_DIR when the
+    fleet names it, else whatever ``fleet_regdir`` resolves. This tick runs with the
+    variable UNSET, and until #5390 that meant the clone-root ``tools/_registry``: this
+    refresh maintained a SECOND, ledger-less registry beside the prober's, so the
+    switcher routed off a snapshot that could not derive a single block. On an always-on tick that
     snapshot goes stale between launches, so an account that just hit a weekly
     limit — or whose org disabled Claude-Code subscription access — would still be
     handed out, the worker would spawn and instantly die, and the loop would make
