@@ -235,6 +235,7 @@ def classify(path):
     throttle_weekly = None  # weekly reset window, when the banner carries one
     pending = None          # an assistant tool_use still awaiting its tool_result
     last = None             # summary of the last meaningful user/assistant record
+    last_ts = ""            # that record's OWN ISO-8601 timestamp (#3459 newest-copy key)
     last_kind = None        # nature of that final record (drives DONE vs DEAD vs USER_CLOSED)
     saw_assistant = False   # did the MODEL ever emit a real (non-synthetic) assistant turn?
     for ln in read_tail(path):
@@ -261,6 +262,9 @@ def classify(path):
                 throttle_weekly = windows.get("weekly")
         last = {"role": m.get("role", o.get("type")), "txt": txt,
                 "syn": m.get("model") == "<synthetic>", "stop": m.get("stop_reason")}
+        # The TURN's own timestamp, not the file's mtime -- the key that ranks copies of
+        # one session id in _copy_rank (#3459). Records missing it keep the prior value.
+        last_ts = str(o.get("timestamp") or "") or last_ts
         if o.get("type") == "assistant":
             if m.get("model") != "<synthetic>":
                 saw_assistant = True     # a genuine model turn (not a harness banner)
@@ -385,7 +389,7 @@ def classify(path):
                              _first_instruction(head_records))
     return {"disp": disp, "category": category, "cause": cause, "reason": reason,
             "last_kind": last_kind, "age_min": round(age, 1),
-            "seen_utc": mtime.isoformat(),
+            "seen_utc": mtime.isoformat(), "last_ts": last_ts,
             "throttle_reset": throttle if throttle_current else None,
             "throttle_weekly": throttle_weekly if throttle_current else None,
             "throttle_seen": throttle,
@@ -952,6 +956,100 @@ def _resumable_disp(r):
     return bool(r.get("autonomous")) and (r["disp"] in DEAD or r["disp"] == "NEVER_STARTED")
 
 
+def _copy_rank(r):
+    """Rank one COPY of a session id against its siblings; the highest tuple wins.
+
+    Ordered last-turn timestamp, then transcript size, then file mtime -- deliberately
+    the same rule as the Go source of truth (internal/resume/sweep.Classify: "superset =
+    latest last-ts, then most records (NOT file mtime)"). mtime-first is the exact trap
+    #3459 was filed on: when a dead driver appends a synthetic "API Error" banner to a
+    stale PREFIX of a session, that copy's mtime jumps to now WITHOUT gaining a single
+    real turn -- so the freshest FILE can be the least-progressed TRANSCRIPT. ISO-8601
+    UTC timestamps compare correctly as plain strings, so no parsing is needed."""
+    return (str(r.get("last_ts") or ""),
+            int(r.get("records") or 0),
+            str(r.get("seen_utc") or ""))
+
+
+def _newest_by_sid(rows):
+    """{session id: the ONE row that speaks for it} -- the newest copy of each sid.
+
+    A re-home writes the same sid under another config dir, so one session routinely
+    exists as ~20 files across the ``.claude-*`` account dirs on this host and scan()
+    classifies EVERY one of them independently."""
+    best: dict[str, dict] = {}
+    for r in rows:
+        sid = r.get("session", "")
+        cur = best.get(sid)
+        if cur is None or _copy_rank(r) > _copy_rank(cur):
+            best[sid] = r
+    return best
+
+
+def _live_resume_sids():
+    """Session ids a `claude --resume <sid>` process is driving on this host RIGHT NOW.
+
+    Delegates to resume_sweep's census (one process-enumeration implementation, not a
+    fork) and is imported LAZILY so the registry refresh never pays for it -- or dies on
+    it -- outside decide(). FAIL-OPEN: any failure yields an EMPTY set, leaving the gate
+    inert, because an unreadable process table must never strand a genuinely-crashed
+    session. That census is Windows-only today; the cross-platform belt is the
+    driver-side WatchdogSkipLive guard in internal/resume/watchdog.go, which refuses to
+    LAUNCH a live sid whatever the plan says."""
+    try:
+        import resume_sweep  # noqa: PLC0415 -- lazy: only paid for on the decide() path
+        return {str(s) for s in resume_sweep.live_resume_sids()}
+    except Exception:
+        return set()
+
+
+def _live_or_stale_copy_gate(rows, live_sids=None):
+    """Pre-pass: decide WHICH copy of a session id may reach the decision ladder at all,
+    and drop every copy of a session that is demonstrably alive (#3459).
+
+    The harm this closes: ``resume_plan.json`` queued 94aea02a as STOPPED_APIERR --
+    crashed -- while a live `claude` process was advancing a NEWER copy of that same
+    UUID under another account dir (its terminal turn was an ordinary Write tool_use).
+    Running the watchdog `--live` would have fired a second driver onto a live
+    transcript. scan() classifies every on-disk copy independently, so the stale copy's
+    synthetic "API Error" tail became the plan's verdict for the whole session.
+
+    Two gates, both keyed on the session id, both stamped BEFORE decide()'s per-row loop
+    so a gated row never re-homes, never consumes a REHOME_CAP slot, and never reaches
+    plan_entry:
+      (1) LIVENESS -- a running `claude --resume <sid>` driver (process census), or any
+          copy of the sid that classified LIVE, means the session is already being
+          advanced. NO copy of it may be queued, whatever disposition the bytes on disk
+          carry. The copy that is itself LIVE is left alone: decide()'s own SKIP_LIVE
+          already names it correctly.
+      (2) NEWEST-COPY -- of the remaining copies only the newest (_copy_rank: last-turn
+          timestamp, then size, then mtime) speaks for the session, so the plan
+          classifies the terminal turn of the newest transcript rather than an arbitrary
+          older one. Every older copy is stamped SKIP_STALE_COPY here.
+
+    live_sids is injectable so the decision stays hermetic under test; None means "no
+    census was taken" (inert), NOT "nothing is live"."""
+    live = {str(s) for s in (live_sids or ())}
+    live |= {r.get("session", "") for r in rows if r.get("disp") == "LIVE"}
+    live.discard("")
+    newest = _newest_by_sid(rows)
+    for r in rows:
+        sid = r.get("session", "")
+        if r.get("disp") == "LIVE":
+            continue                                   # decide() stamps this one SKIP_LIVE
+        if sid and sid in live:
+            r["action"] = "SKIP_LIVE_DRIVER"
+        elif r is not newest.get(sid):
+            r["action"] = "SKIP_STALE_COPY"
+    return rows
+
+
+# Actions stamped by a pre-pass BEFORE decide()'s ladder runs. A row carrying one is
+# already decided: it skips the ladder entirely (so it can never re-home or consume an
+# `assigned` cap slot) and, being none of them AUTO_RESUME, never reaches the plan.
+PRE_STAMPED = ("DEFER_DUPLICATE_TASK", "SKIP_LIVE_DRIVER", "SKIP_STALE_COPY")
+
+
 def _dedup_defer(rows, reg_dir=None):
     """Pre-pass: when several crashed sessions are the SAME recurring autonomous task
     (same task_sig), resume only ONE and DEFER the rest. Stamps the losers'
@@ -1058,7 +1156,7 @@ def _resume_inplace_or_escalate(r, availability, assigned, inplace_counts):
     assigned[tgt["account"]] = assigned.get(tgt["account"], 0) + 1
 
 
-def decide(rows, throttle, availability=None):
+def decide(rows, throttle, availability=None, live_sids=None):
     """Stamp each row with a deterministic action + an account-correct resume command.
     Only AUTONOMOUS, genuinely-DEAD (crashed/killed) sessions are auto-resumable.
     The two look-alikes are held back explicitly so they are never resumed and the
@@ -1082,7 +1180,17 @@ def decide(rows, throttle, availability=None):
 
     Dedup: identical repeating tasks (same task_sig across sids) are collapsed by the
     ``_dedup_defer`` pre-pass to ONE primary; the rest are stamped DEFER_DUPLICATE_TASK
-    here and skip the decision ladder entirely, so they never consume a re-home slot."""
+    here and skip the decision ladder entirely, so they never consume a re-home slot.
+
+    Liveness / newest-copy (#3459): the ``_live_or_stale_copy_gate`` pre-pass runs FIRST
+    and settles WHICH copy of a session id may reach the ladder at all -- a sid with a
+    live `claude --resume` driver is dropped whole, and of the rest only the newest copy
+    speaks for the session. Without it the ladder classified whichever copy scan() found,
+    so a stale copy's synthetic "API Error" tail queued a session that was alive.
+    ``live_sids`` is the caller's process census (main() takes it); None leaves the
+    process half INERT (fail-open) so a hermetic caller decides on the on-disk evidence
+    alone -- the disp=="LIVE" half of the gate still applies."""
+    _live_or_stale_copy_gate(rows, live_sids)  # pre-pass: gate live sids + stale copies
     _dedup_defer(rows)                       # pre-pass: stamp duplicate-task losers
     assigned: dict[str, int] = {}
     # prior in-place resume counts per sid -> escalate a repeat-crasher to another seat
@@ -1094,9 +1202,11 @@ def decide(rows, throttle, availability=None):
         r["resume_account"] = r["account"]
         r["resume_config_dir"] = config_dir(r["account"])
         r["rehomed"] = False
-        if r.get("action") == "DEFER_DUPLICATE_TASK":
-            # already decided by the dedup pre-pass; the primary covers this task. Skip
-            # the ladder so this never re-homes or consumes an `assigned` cap slot.
+        if r.get("action") in PRE_STAMPED:
+            # already decided by a pre-pass -- a duplicate task the primary covers, a sid
+            # a live driver is already advancing, or an older copy of a sid the newest one
+            # speaks for. Skip the ladder so this never re-homes, never consumes an
+            # `assigned` cap slot, and (being no AUTO_RESUME) never reaches the plan.
             r["resume_cmd"] = None
             continue
         if "pytest" in r["project"] or not cwd_ok:
@@ -1431,7 +1541,11 @@ def main():
     throttle = merge_known_throttle(throttle, rows)
     auth = merge_known_auth(rows)
     availability = account_availability(throttle, rows, auth)
-    decide(rows, throttle, availability)
+    # #3459: hand decide() this host's live-driver census. Without it the liveness gate
+    # only sees sessions whose OWN copy classified LIVE -- and the copy that queued
+    # 94aea02a was a stale one under another account dir, so no on-disk row carried that
+    # evidence. _live_resume_sids() is the process-table half and fails open to empty.
+    decide(rows, throttle, availability, live_sids=_live_resume_sids())
     if MODE == "json":
         print(json.dumps({"app_version": fleet_version.app_version(), "now": NOW.isoformat(),
                           "throttle": throttle, "auth": auth,
