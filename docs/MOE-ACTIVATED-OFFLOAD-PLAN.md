@@ -43,9 +43,15 @@ policy, a prefetch, a pin-set or a byte budget could attach on the live path.
 weights through the bounded ring instead of `halW`
 (`internal/model/expert_ring_hal.go`, #5611): budgeted, LRU-evicted, page-in/hit/evict
 accounted, with dense/attention/router/shared-expert weights keeping permanent residency. It
-is the seam the rest of the ladder attaches to. It is **not yet operator-reachable** - no CLI
-flag sets the budget, so every session in the tree still runs placement 2 by default. Sizing
-that budget from a flag is R1 (#5612).
+is the seam the rest of the ladder attaches to.
+
+**4. Graded and bounded, opt-in (R1, landed).** `Session.ExpertSpillLayers` grades placement 1
+by layer instead of by name, and the same resolve sizes placement 3's ring from the leftover
+device bytes (`internal/model/expert_spill_placement.go`,
+`internal/agent/inkernel_expert_spill.go`, #5612). The three now compose rather than compete:
+the first N MoE layers' experts on host, the rest device-resident but *bounded* by the ring,
+the dense base permanent. `FAK_N_CPU_MOE=auto|<N>` reaches it on a serve; `--n-cpu-moe` is not
+wired yet, so the flag surface is still R1's open remainder.
 
 ## What is already built (and where it stops)
 
@@ -53,8 +59,8 @@ Nine witnessed capabilities exist. Column 3 is the load-bearing one.
 
 | Capability | Where | Live-path status |
 |---|---|---|
-| Bounded per-weight device ring (byte budget, LRU victim, pinned-exempt, page-in/hit/evict counters) | `internal/model/paging_ring.go` | **Wired (R0, #5611).** `pagedRing.stage` + `internal/model/expert_ring_hal.go` put it under the session weight HAL for routed experts, opt-in per session via `Session.ExpertRingBytes`. Was off-path (sole constructor `v4_expert_runtime.go:67`, DeepSeek-V4 only). Still needs R1's flag to be operator-reachable. |
-| Graded spill sizing + auto-fit to a measured device budget (`--n-cpu-moe N` semantics) | `internal/model/expert_spill_fit.go` (#5281, closed) | **No caller.** `ResolveExpertSpill` / `AutoFitExpertSpill` are exported and unused outside tests; no CLI flag exposes N. |
+| Bounded per-weight device ring (byte budget, LRU victim, pinned-exempt, page-in/hit/evict counters) | `internal/model/paging_ring.go` | **Wired (R0, #5611).** `pagedRing.stage` + `internal/model/expert_ring_hal.go` put it under the session weight HAL for routed experts, opt-in per session via `Session.ExpertRingBytes`. Was off-path (sole constructor `v4_expert_runtime.go:67`, DeepSeek-V4 only). R1 sizes the budget, so `FAK_N_CPU_MOE` now reaches it. |
+| Graded spill sizing + auto-fit to a measured device budget (`--n-cpu-moe N` semantics) | `internal/model/expert_spill_fit.go` (#5281, closed) | **Wired (R1, #5612).** `Model.ResolveExpertSpillPlacement` builds the budget from measured resident bytes and real MoE layer ordinals, `Session.ApplyExpertSpillPlacement` installs it, and `InKernelPlanner.SetExpertSpill` resolves it once per serve against `compute.DeviceMemoryInfo`. Was exported and unused outside tests. Flag surface still open (`FAK_N_CPU_MOE` only). |
 | Value-aware evictor: routing-heat hysteresis + LFU-decay, scored against the Belady oracle | `internal/model/expert_residency_lfu.go` (#4357, closed) | **Simulation only,** deliberately off the live path; the ring is still plain LRU via `polymodel.Pool`. |
 | Cross-session expert usage histogram, warm-start pin selection, between-turn `RepinPass` | `internal/model/expert_warmpins.go` (#4358, closed) | **Off-path.** `pagedRing.pins` is never consulted - `matMulStaged` still takes a static `pinned` bool per call (`paging_ring.go:56-61`). |
 | Per-expert range read + `MADV_WILLNEED` readahead over a fused expert slab | `internal/model/expert_readahead.go` (#4359, closed) | **Off-path.** Nothing in the load/decode path calls `readExpertSlice` or `willneedExpertSlice`. |
@@ -70,9 +76,10 @@ each piece was landed under a "generation frame" that explicitly deferred wiring
 issue owned the wiring itself. #2726 (which *did* own it) was closed COMPLETED on the
 primitive while its own follow-on rung stayed open in the code comments.
 
-**Status: one of the nine is now wired** (row 1, R0/#5611) - the bounded ring, which is the
-one every other rung attaches to. The remaining eight are still off-path, and the ring itself
-is still session-level opt-in with no flag behind it.
+**Status: two of the nine are now wired** (row 1, R0/#5611 - the bounded ring every other rung
+attaches to; row 2, R1/#5612 - the graded spill that sizes its budget). The remaining seven are
+still off-path, and both wired rungs are opt-in: on today they are reached by an environment
+knob, not yet by a `fak serve` flag.
 
 ## The ladder
 
@@ -107,7 +114,7 @@ weights keep their permanent residency.
 - **Not done here:** the budget has no CLI knob (R1), the ring is plain LRU and ignores the
   warm-start pin-set (R2/R4), misses are synchronous (R3) and read the fully-resident slab (R5).
 
-### R1 - P0 - #5612 - Ship the graded knob and admit on the working set
+### R1 - P0 - #5612 - Ship the graded knob and admit on the working set - **PARTLY LANDED**
 
 Expose the spill count that `expert_spill_fit.go` already computes (`--n-cpu-moe N`, plus
 `auto` = `AutoFitExpertSpill` against measured device headroom), and teach preflight to admit
@@ -116,9 +123,35 @@ a model on **activated working set + ring budget** rather than the full expert b
 - **Why P0 alongside R0:** without it, R0's budget has no operator control and preflight still
   refuses models that the ring makes servable. `ggufload`'s
   `FitCPUOffloadExpertsOnDevice` is binary today: all experts host, or refuse.
-- **Witness:** a checkpoint whose full expert bulk exceeds the device budget is admitted and
-  decodes at a chosen N, with the plan JSON reporting the sized split; the refusal path still
-  fires when even the dense base plus the minimum ring does not fit.
+- **Landed - the graded placement** (`internal/model/expert_spill_placement.go`, `c0d5e12b41`).
+  `splitKernel`'s predicate is graded by `Session.ExpertSpillLayers`: `MoEExpertLayers` reads
+  the model's *real* routed-expert layer ordinals (so "first N MoE layers" is not "layers
+  0..N-1" on a hybrid checkpoint with a dense prefix), `ExpertSpillBudgetFor` builds the
+  sizing input from measured resident bytes with the per-layer cost rounded **up** so an uneven
+  checkpoint over-spills rather than under-counting into an OOM, and `RingBytesAt` derives R0's
+  ring budget from the same arithmetic. At `ExpertSpillLayers <= 0` the predicate *is*
+  `isExpertWeight`, so the default path is byte-for-byte unchanged.
+- **Landed - the served seam** (`internal/agent/inkernel_expert_spill.go`).
+  `InKernelPlanner.SetExpertSpill` resolves once at setup (sizing walks every resident tensor
+  name; the device path builds a session per request) against a device budget measured from
+  `compute.DeviceMemoryInfo` *free* bytes less a 15% KV/activation reserve, and installs it on
+  every session the planner builds. It refuses rather than degrades on an out-of-range N, on
+  `auto` with no measurable budget, and on an explicit spill of a model with no routed-expert
+  residency. `FAK_N_CPU_MOE=auto|<N>|off` is the operator door.
+- **Witnessed:** `internal/model/expert_spill_placement_test.go` (spill order follows real MoE
+  ordinals behind a dense prefix; the ungraded grade matches the legacy predicate name-for-name;
+  a graded split routes only the first layers to the host kernel with prefill bit-identical
+  across placements; sizing from resident bytes; out-of-range refusal) and
+  `internal/agent/inkernel_expert_spill_test.go` (the plan reaches successive sessions; the
+  ungraded default leaves placement untouched; each refusal fires; the env door grades the
+  planner the real constructor builds).
+- **Not done:** `fak serve --n-cpu-moe` is not wired (`cmd/fak/serve.go`,
+  `internal/gateway/gateway.go`), so the knob is env-only; and preflight still admits on the
+  full expert bulk - `refuseEPPlanIfUnfit` / `FitCPUOffloadExpertsOnDevice` have not been
+  taught the activated-working-set + ring-budget form. **Open remainder of #5612.**
+- **Remaining witness:** a checkpoint whose full expert bulk exceeds the device budget is
+  admitted and decodes at a chosen N, with the plan JSON reporting the sized split; the refusal
+  path still fires when even the dense base plus the minimum ring does not fit.
 
 ### R2 - P1 - #5613 - Consult the pin-set and persist the histogram on the live ring
 
@@ -207,5 +240,7 @@ optimization *downstream* of a bounded, shared activated set, not a substitute f
 `internal/model/moe_offload.go` (the static split) -> `internal/model/hal.go` (`weightHALStaged`,
 the unbounded memoizer that is still the default) -> `internal/model/paging_ring.go`
 (`stage`/`hold`, the bounded twin) -> `internal/model/expert_ring_hal.go` (R0: the wiring that
-binds them for routed experts) -> `internal/model/expert_spill_fit.go` (the sizing math still
-waiting for a caller - R1).
+binds them for routed experts) -> `internal/model/expert_spill_fit.go` (the sizing math) ->
+`internal/model/expert_spill_placement.go` (R1: what gives that math a caller and the split
+kernel a grade) -> `internal/agent/inkernel_expert_spill.go` (R1: the resolve-once, install-per-
+session seam a serve reaches through `FAK_N_CPU_MOE`).
