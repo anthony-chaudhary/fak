@@ -328,16 +328,51 @@ func TestRequestUndeclaredRunnerIsAdditive(t *testing.T) {
 	if n := len(res.Verdicts); n != len(c.Oracles) {
 		t.Errorf("verdicts = %d, want %d: a faithful run appends nothing", n, len(c.Oracles))
 	}
-	for _, rec := range []RequestFidelity{res.Provenance.Requests.Reference, res.Provenance.Requests.Engine} {
-		if rec.Declared {
-			t.Errorf("runner %q does not implement RequestAdapter and must not be recorded as declared", rec.Runner)
-		}
-		if !rec.Faithful() {
-			t.Errorf("an undeclared runner is treated as faithful; got %+v", rec)
-		}
+	// ScriptedRunner predates the seam and still satisfies Runner unedited: it is
+	// recorded as UNdeclared, and treated as faithful, so nothing it shipped before
+	// the seam existed changed underneath it.
+	eng := res.Provenance.Requests.Engine
+	if eng.Declared {
+		t.Errorf("runner %q does not implement RequestAdapter and must not be recorded as declared", eng.Runner)
+	}
+	if !eng.Faithful() {
+		t.Errorf("an undeclared runner is treated as faithful; got %+v", eng)
 	}
 	if res.Provenance.Requests.Reference.Runner != "reference" {
 		t.Errorf("record must name the runner; got %q", res.Provenance.Requests.Reference.Runner)
+	}
+}
+
+// TestReferenceRunnerDeclaresItsRequest pins the concrete adapter: the golden
+// path is AUDITED, not assumed. The reference is what every other verdict is
+// measured against, so a result that audited only the engine would rest its
+// baseline on an assumption — the "missing or inconclusive evidence is never
+// pass" rule applied to the side that defines what passing means.
+func TestReferenceRunnerDeclaresItsRequest(t *testing.T) {
+	c := topKCase() // top_k SET, so an unsupported-field claim would be a real drop
+	res, err := RunCase(c, ReferenceRunner{}, DemoEngine(""), oraclesFor(t, c))
+	if err != nil {
+		t.Fatalf("RunCase: %v", err)
+	}
+	ref := res.Provenance.Requests.Reference
+	if !ref.Declared {
+		t.Error("ReferenceRunner must implement RequestAdapter so the baseline is measured, not assumed")
+	}
+	if !ref.Faithful() {
+		t.Errorf("the reference answers the case's own request by definition; got %+v", ref)
+	}
+	if len(ref.Unsupported) != 0 {
+		t.Errorf("the reference supports every normalized field; got %v", ref.Unsupported)
+	}
+	// Declaring the baseline must not perturb a clean run: same verdicts, no bundle.
+	if !res.Pass {
+		t.Fatalf("a clean run must still pass; got %s", Explain(res))
+	}
+	if n := len(res.Verdicts); n != len(c.Oracles) {
+		t.Errorf("verdicts = %d, want %d: a faithful reference appends nothing", n, len(c.Oracles))
+	}
+	if _, ok := any(ReferenceRunner{}).(RequestAdapter); !ok {
+		t.Error("ReferenceRunner must satisfy RequestAdapter")
 	}
 }
 

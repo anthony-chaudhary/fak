@@ -23,6 +23,20 @@ func (r ReferenceRunner) Run(c QualityCase) (Trace, error) {
 	return t, nil
 }
 
+// EffectiveRequest makes ReferenceRunner the package's one CONCRETE
+// RequestAdapter (#4518). The reference is the baseline every other verdict is
+// measured against, so leaving it merely ASSUMED faithful is the weakest link in
+// the record: a run could report an audited engine against an unaudited golden
+// path and still call itself evidence. The declaration is exact rather than
+// generous — the case's own prompt and params, with nothing unsupported —
+// because a reference trace is BY DEFINITION the answer to the case's own
+// request. Declaring it costs nothing on a faithful run (requestFidelity finds
+// no drop and no diff, so no verdict is appended) and upgrades every result's
+// reference record from Declared:false to an actual measurement.
+func (ReferenceRunner) EffectiveRequest(c QualityCase) EffectiveRequest {
+	return EffectiveRequest{Prompt: c.Prompt, Params: c.Params}
+}
+
 // ScriptedRunner is an engine-path adapter that replays a fixed trace. It models a
 // specific engine build/mode for hermetic tests and for the CLI demo, and is the
 // shape real engine adapters take: capture the engine's decode into a Trace and
