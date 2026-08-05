@@ -110,9 +110,15 @@ declaring a session usable again — and before a hardware-gated task depends on
 fresh round-trip witness in this order.
 
 1. `dgxbridge doctor` — network-free. It resolves a token and a control channel and stops
-   there. An unauthorized or public-only checkout reports `NOT READY` with both checks
-   missing; that is the boundary working as designed, not a bridge fault, and no later step
-   can run from that host.
+   there. An unauthorized checkout reports `NOT READY`; that is the boundary working as
+   designed, not a bridge fault, and no later step can run from that host. Read *which*
+   check failed rather than the headline: `control_channel` is the one that decides lab
+   access. A fleet dev host commonly resolves `slack_token` from an unrelated scoreboard
+   credential and still reports `NOT READY` on `control_channel` alone, so expect one green
+   check and do not read it as partial authorization. Nor is finding a token-bearing
+   `.env.slack.local` evidence of lab access — the checked-in ones carry a scoreboard token
+   and no channel, and none of the channel paths `doctor` names in its own hint
+   (`-channel <id>`, `SLACK_CHANNEL`, `FAK_SLACK_CHANNEL`) is populated on such a host.
 2. `dgxbridge doctor -probe` — adds the live round-trip against the resolved session. The
    `readback` sub-check is the gate: green means a command's output actually came back, not
    merely that the session answered a control verb.
@@ -127,8 +133,8 @@ green probe is weaker evidence than one captured round-trip of known content. Re
 rather than trusting an earlier green when the answer is close to a decision bar.
 
 Steps 2 and 3 need live credentials. A host without them cannot reach any session — `doctor`
-reports `NOT READY` with both checks missing and stops there — so the round-trip witness is
-unavailable from that host, but the class logic is still checkable. The bridge package's own
+reports `NOT READY`, in the common case on `control_channel` alone, and stops there — so the
+round-trip witness is unavailable from that host, but the class logic is still checkable. The bridge package's own
 tests are network-free and pin which condition maps to which class, so building the client
 from the private snapshot into a scratch Go module and running that package's tests confirms
 that a slow transport reports a hub class and never a wedged-shell one. Use that when a
