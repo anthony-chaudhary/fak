@@ -325,7 +325,14 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 					_ = os.RemoveAll(dir)
 				}
 				fmt.Fprintf(stderr, "fak accounts: REFUSED (identity-hijack): %s\n", col.Detail)
-				fmt.Fprintf(stderr, "  enrolling it as %q would collapse two seats onto one rate-limit bucket; pass --force to override, or remove seat %q first\n", rosterName, col.ConflictSeat)
+				fmt.Fprintf(stderr, "  enrolling it as %q would collapse two seats onto one rate-limit bucket. Pick a remedy:\n", rosterName)
+				fmt.Fprintf(stderr, "    fresh dir     — meant to add a DIFFERENT account? log in again under a FRESH config dir\n")
+				fmt.Fprintf(stderr, "                    (CLAUDE_CONFIG_DIR=<new dir> claude /login), then re-run. Never log into another seat's dir.\n")
+				fmt.Fprintf(stderr, "    canonicalize  — this login should BE seat %q? rebind that seat onto it in place:\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "                    fak accounts enroll-current --name %s --force\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "    tombstone     — retiring seat %q instead? tombstone it with fall-forward, then re-run:\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "                    fak accounts remove --name %s --rehome-to <seat>\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "  (--force enrolls the duplicate anyway: two seats on one bucket, one of which the rotation drops)\n")
 				return 1
 			}
 			fmt.Fprintf(stderr, "fak accounts: warning: --force enrolling a duplicate of seat %q (%s)\n", col.ConflictSeat, col.Account)
