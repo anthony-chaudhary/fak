@@ -89,11 +89,15 @@ const (
 //	auto     grind      OFF        mechanical work never recovers the wall-clock cost
 //	auto     unknown    OFF        conservative: unclassifiable work probably needs no rigor
 //
-// `auto` is the default. The interactive launcher has no work class to hand in, so a bare
-// `fak accounts launch` resolves auto→unknown→OFF: lean and fast by default, with --ultracode=on
-// as the operator's explicit opt-in. `true`/`false` stay accepted as on/off aliases so a script
-// written against the old bool flag keeps working. An unrecognized posture is a loud error rather
-// than a silent default — the same fail-on-bad-mode discipline normalizeManagedCacheMode uses.
+// The FLAG default is `on`, not `auto`: a new instance should already BE in ultracode when it
+// starts, so nobody has to type `/effort ultracode` into a fresh session — the posture a launch
+// is born with is the one that survives, since a session-only --settings cannot be retrofitted
+// onto an already-running agent. `auto` is still the work-class-aware posture and stays one flag
+// away (`--ultracode=auto`) for a caller that CAN classify its work; the interactive launcher
+// carries no work class, so auto→unknown→OFF remains the lean/fast escape hatch #5016 wanted, and
+// `--ultracode=off` suppresses it outright. `true`/`false` stay accepted as on/off aliases so a
+// script written against the old bool flag keeps working. An unrecognized posture is a loud error
+// rather than a silent default — the same fail-on-bad-mode discipline normalizeManagedCacheMode uses.
 func resolveUltracodePosture(posture string, kind ultracodeWorkKind) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(posture)) {
 	case "on", "true":
@@ -234,7 +238,7 @@ type launchParams struct {
 	useHeadroom      bool   // default true — order the rotation by the live runtime headroom signal
 	useGuard         bool   // default true
 	skipPerms        bool   // default true
-	ultracodePosture string // ultracode posture: auto|on|off (default auto — resolved by resolveUltracodePosture)
+	ultracodePosture string // ultracode posture: auto|on|off (default on — resolved by resolveUltracodePosture)
 	model            string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
 	modelExplicit    bool
 	fallbackModel    string // default Fable 5 — comma-separated fallback CHAIN tried when the default Opus 4.8 startup is unavailable
@@ -375,10 +379,11 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", mcErr)
 		return 2
 	}
-	// Ultracode posture (#5016): auto|on|off, default auto. The interactive launcher carries no
-	// work class, so `auto` resolves through ultracodeKindUnknown to the conservative OFF and an
-	// operator opts in explicitly with --ultracode=on. Fail loud on a bad posture, exactly as the
-	// managed-cache mode does above.
+	// Ultracode posture: auto|on|off, default ON — an instance this launcher starts is born in
+	// ultracode rather than needing an operator to type /effort ultracode into it. The interactive
+	// launcher carries no work class, so the #5016 work-class table is reached only by an explicit
+	// `--ultracode=auto` (which resolves through ultracodeKindUnknown to OFF); `--ultracode=off`
+	// is the direct opt-out. Fail loud on a bad posture, exactly as the managed-cache mode does above.
 	ultracodeOn, ucErr := resolveUltracodePosture(p.ultracodePosture, ultracodeKindUnknown)
 	if ucErr != nil {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", ucErr)

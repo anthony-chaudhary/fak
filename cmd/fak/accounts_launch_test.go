@@ -206,6 +206,9 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 		"login             = ready (can_serve=true)",
 		"guard             = on",
 		"model             = " + defaultLaunchModel,
+		// The launcher's default posture is ON, and the plan says so in the operator's own
+		// words — a bare launch is born in ultracode with no /effort typed into it.
+		"ultracode         = on (--ultracode=on;",
 		// The unconfigured launch now defaults managed cache to on (operator policy).
 		"on (forces the stable-prefix 1h-TTL cache upgrade regardless of billing)",
 		"--dangerously-skip-permissions",
@@ -284,9 +287,10 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 	if !strings.Contains(joined, "guard --managed-cache on --") {
 		t.Fatalf("argv missing on-by-default managed-cache posture before --: %#v", gotArgv)
 	}
-	// The default posture is --ultracode=auto, which an unclassified launch resolves to OFF
-	// (#5016), so a bare launch carries no ultracode --settings.
-	wantTail := "claude --dangerously-skip-permissions --model " + defaultLaunchModel + " --resume xyz"
+	// The default posture is --ultracode=on, so a bare launch is born in ultracode: the
+	// --settings payload rides between the pinned --model and the caller's passthrough.
+	wantTail := "claude --dangerously-skip-permissions --model " + defaultLaunchModel +
+		" --settings " + ultracodeSettingsArg + " --resume xyz"
 	if !strings.HasSuffix(joined, wantTail) {
 		t.Fatalf("argv tail wrong: %q", joined)
 	}
@@ -792,8 +796,8 @@ func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("launch --guard=false rc=%d stderr=%s", rc, errb.String())
 	}
-	// Default --ultracode=auto + an unclassified launch => no ultracode --settings (#5016).
-	want := []string{"claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel}
+	// Default --ultracode=on => the ultracode --settings rides even an unguarded launch.
+	want := []string{"claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel, "--settings", ultracodeSettingsArg}
 	if !reflect.DeepEqual(gotArgv, want) {
 		t.Fatalf("direct launch argv = %#v, want %#v", gotArgv, want)
 	}
@@ -801,7 +805,9 @@ func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 
 // TestResolveUltracodePosture pins the posture x work-class table #5016 documents: an explicit
 // on/off always wins, and `auto` earns ultracode ONLY for rigor-class work — grind and the
-// unclassified/interactive case stay OFF for latency.
+// unclassified/interactive case stay OFF for latency. The table is unchanged by the flag default
+// moving to `on`; that default only decides which ROW an unflagged launch lands on, which
+// TestRunAccountsLaunchUltracodePosture below pins separately.
 func TestResolveUltracodePosture(t *testing.T) {
 	cases := []struct {
 		posture string
@@ -843,17 +849,18 @@ func TestResolveUltracodePosture(t *testing.T) {
 	}
 }
 
-// TestRunAccountsLaunchUltracodePosture pins #5016: --ultracode is a three-value posture
-// auto|on|off (default auto), and the ultracode --settings arg is emitted ONLY when the posture
-// resolves ON. A bare launch carries no work class, so auto resolves to the conservative OFF —
-// replacing the blanket default-on that made every seat pay the orchestration tax.
+// TestRunAccountsLaunchUltracodePosture pins the launcher default: --ultracode is a three-value
+// posture auto|on|off defaulting to ON, so a BARE launch is born in ultracode and no operator has
+// to type /effort ultracode into a fresh session. The #5016 work-class table is still one flag
+// away — an explicit `--ultracode=auto` on an unclassified launch resolves to OFF — and
+// `--ultracode=off` is the direct opt-out.
 func TestRunAccountsLaunchUltracodePosture(t *testing.T) {
 	cases := []struct {
 		name    string
 		args    []string
 		wantArg bool
 	}{
-		{"default (auto) + unclassified launch omits ultracode", nil, false},
+		{"default (on) launches in ultracode", nil, true},
 		{"explicit auto + unclassified launch omits ultracode", []string{"--ultracode=auto"}, false},
 		{"explicit on forces ultracode", []string{"--ultracode=on"}, true},
 		{"explicit off omits ultracode", []string{"--ultracode=off"}, false},
