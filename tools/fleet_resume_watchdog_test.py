@@ -1148,6 +1148,121 @@ def test_continuous_reverts_to_tick_cap_when_governor_fails_open(tmp_path, monke
         "the fail-open is surfaced durably (#2173), never silent"
 
 
+def _drive_cron(root, monkeypatch, *, backlog, headroom, ticks, tick_sec, spacing_sec, cap, env):
+    """Drive `ticks` successive CRON ticks of the REAL main() launch loop over a fixture backlog
+    on a virtual clock. Returns (latencies, ticks_used).
+
+    Fixture: `backlog` sessions that are ALL already dead at t=0 (the moment the backlog exists),
+    with the first cron tick firing at t=0 and each later tick at k*`tick_sec`. Every session's
+    death is t=0, so its launch offset on the virtual clock IS its death->launch latency.
+
+    The clock advances ONLY through the watchdog's own inter-launch spacing (time.sleep), so the
+    latencies are measured from the real loop's pacing decisions rather than asserted from a
+    formula. Between ticks the plan is re-derived WITHOUT the sessions already resumed: a live
+    `claude --resume` forks the transcript into a NEW sid, so fleet_sessions.py never re-plans a
+    resumed sid (the .ps1 models the same fact with PruneClosedPlanRows).
+
+    Conservative by construction: real deaths land at a uniformly random offset INSIDE a cron
+    period, so the tick-quantized baseline here (deaths exactly on a tick boundary) understates
+    its own real latency. A drop measured against it is a lower bound on the real drop."""
+    import json as _json
+    reg = root / "reg"
+    log = root / "log"
+    cfg = root / "cfg"
+    for d in (reg, log, cfg):
+        d.mkdir(parents=True, exist_ok=True)
+    plan_path = reg / "resume_plan.json"
+    sids = [f"{i:08d}-2222-3333-4444-555555555555" for i in range(backlog)]
+
+    def _row(sid):
+        return {"session": sid, "account": ".claude-t", "resume_account": ".claude-t",
+                "project": "C--work-fak", "cwd": None, "disp": "STOPPED_APIERR",
+                "rehomed": False, "config_dir": str(cfg), "resume_config_dir": str(cfg)}
+
+    base_env = {"FAK_LIVE": "1", "FLEET_REG_DIR": str(reg), "FAK_WATCHDOG_LOG_DIR": str(log),
+                "FAK_MAX_PER_TICK": str(cap), "FAK_LAUNCH_SPACING_SEC": str(spacing_sec),
+                "FAK_PROBE": "none", "CLAUDE_CODE_SESSION_ID": None}
+    base_env.update(env)
+    wd = _reload(base_env)
+
+    clock = [0.0]
+    launched_at: dict[str, float] = {}
+
+    class _Proc:
+        def __init__(self, pid):
+            self.pid = pid
+
+    def fake_popen(argv, **kw):
+        argv = list(argv)
+        if "--resume" in argv:
+            launched_at.setdefault(argv[argv.index("--resume") + 1], clock[0])
+        return _Proc(9000 + len(launched_at))
+
+    class _R:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    def fake_gate():
+        # the source governor stays the real rate limiter: admit while the box has free
+        # headroom across every account, then DEFER.
+        if len(launched_at) < headroom:
+            return True, "admitted"
+        return False, "SOURCE_SATURATED"
+
+    monkeypatch.setattr(wd.subprocess, "run", lambda *a, **k: _R())
+    monkeypatch.setattr(wd.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(wd.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setattr(wd, "source_admit_gate", fake_gate)
+
+    ticks_used = 0
+    for k in range(ticks):
+        assert clock[0] <= k * tick_sec, "a tick's launches must fit inside the cron period"
+        clock[0] = float(k * tick_sec)
+        remaining = [s for s in sids if s not in launched_at]
+        if not remaining:
+            break
+        plan_path.write_text(_json.dumps({"plan": [_row(s) for s in remaining]}), encoding="utf-8")
+        assert wd.main() == 0
+        ticks_used = k + 1
+    return [launched_at[s] for s in sids if s in launched_at], ticks_used
+
+
+def test_continuous_drain_lowers_p50_death_to_launch_latency(tmp_path, monkeypatch):
+    # Acceptance #3: MEASURED p50 death->launch latency on a fixture backlog drops vs the
+    # tick-quantized baseline. Same backlog, same headroom, same spacing, same cron period --
+    # only FAK_DRAIN_CONTINUOUS differs, so the delta is attributable to the drain alone.
+    import math
+    import statistics
+    backlog, cap, tick_sec, spacing = 24, 4, 300, 5
+    common = dict(backlog=backlog, headroom=backlog, ticks=backlog + 1, tick_sec=tick_sec,
+                  spacing_sec=spacing, cap=cap)
+    baseline, baseline_ticks = _drive_cron(
+        tmp_path / "baseline", monkeypatch, env={"FAK_DRAIN_CONTINUOUS": None}, **common)
+    continuous, continuous_ticks = _drive_cron(
+        tmp_path / "continuous", monkeypatch,
+        env={"FAK_DRAIN_CONTINUOUS": "1", "FAK_DRAIN_MAX": "500"}, **common)
+
+    # both modes eventually recover the WHOLE backlog -- the comparison is over the same set
+    assert len(baseline) == backlog and len(continuous) == backlog
+    # ... but the baseline needs ceil(B/cap) cron ticks to get there; the drain needs one
+    assert baseline_ticks == math.ceil(backlog / cap) == 6
+    assert continuous_ticks == 1
+
+    p50_baseline = statistics.median(baseline)
+    p50_continuous = statistics.median(continuous)
+    assert p50_continuous < p50_baseline, (p50_continuous, p50_baseline)
+    # the baseline p50 is bounded BELOW by the cron period (tick quantization); the drain's p50
+    # collapses to the source-governor spacing floor and the whole backlog lands inside one period
+    assert p50_baseline > tick_sec, p50_baseline
+    assert p50_continuous <= backlog * spacing, p50_continuous
+    assert max(continuous) < tick_sec, max(continuous)
+    # Measured on this fixture (B=24, cap=4, tick=300s, spacing=5s): p50 death->launch
+    # 757.5s -> 57.5s (13.2x), worst case 1515s -> 115s, 6 cron ticks -> 1. Pinned as
+    # inequalities, not magic numbers, so a spacing/cap retune cannot make this assertion lie.
+    assert p50_continuous * 10 < p50_baseline, (p50_continuous, p50_baseline)
+
+
 def test_powershell_watchdog_has_continuous_drain_parity():
     # #3587 parity: the .ps1 (the Windows scheduled-task launcher) carries the SAME drain surface as
     # the .py so an operator configures the drain once and it applies whichever watchdog the box runs.
