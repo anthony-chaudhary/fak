@@ -31,6 +31,12 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 // lm_head, and the SHARED expert every token uses — keeps its permanent halW residency, because those
 // are activated every token and evicting them could only cost.
 //
+// Prior-art: activation-aware expert orchestration over a bounded GPU tier is ktransformers'
+// GPU/CPU expert placement (https://github.com/kvcache-ai/ktransformers) and the 3-tier
+// GPU/pinned-CPU/SSD expert cache the MoE-offload literature converged on; the route here is
+// "borrow", not scratch-build. The distinct axis is DeepSeek EPLB, which balances experts ACROSS
+// ranks rather than bounding residency WITHIN one device (#3886) — see the plan's non-goals.
+//
 // Why it reuses rather than invents. The byte budget, the LRU victim choice, the pinned exemption and
 // the all-or-nothing admit are polymodel.Pool's — the same policy internal/residency uses for whole
 // models — so `used <= budget` and pinned-never-evicted hold here by construction. pagedRing already
