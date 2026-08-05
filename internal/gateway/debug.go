@@ -16,21 +16,21 @@ import (
 )
 
 type debugVarsResponse struct {
-	Gateway          debugGatewayVars               `json:"gateway"`
-	Runtime          debugRuntimeVars               `json:"runtime"`
-	Kernel           debugKernelVars                `json:"kernel"`
-	Inference        debugInferenceVars             `json:"inference"`
-	Upstream         debugUpstreamVars              `json:"upstream"`
-	VCache           *debugVCacheVars               `json:"vcache,omitempty"`
-	CacheAttribution *debugCacheAttributionVars     `json:"cache_attribution,omitempty"`
-	ManagedCache     *debugManagedCacheVars         `json:"managed_cache,omitempty"`
+	Gateway          debugGatewayVars           `json:"gateway"`
+	Runtime          debugRuntimeVars           `json:"runtime"`
+	Kernel           debugKernelVars            `json:"kernel"`
+	Inference        debugInferenceVars         `json:"inference"`
+	Upstream         debugUpstreamVars          `json:"upstream"`
+	VCache           *debugVCacheVars           `json:"vcache,omitempty"`
+	CacheAttribution *debugCacheAttributionVars `json:"cache_attribution,omitempty"`
+	ManagedCache     *debugManagedCacheVars     `json:"managed_cache,omitempty"`
 	// ShrinkLevers is the #5493 prompt-shrink-lever posture: which of the three levers are
 	// configured ON, and which of those the wire this gateway actually built can run. It sits
 	// beside ManagedCache because it answers the same class of question for a different lever
 	// family — configured-vs-live — and because the three levers it covers are the ones whose
 	// silent inertness on a self-hosted wire would otherwise be read as a verdict on the
 	// kernel. Omitted when no lever is configured on. See shrink_lever_live.go.
-	ShrinkLevers *debugShrinkLeverVars `json:"shrink_levers,omitempty"`
+	ShrinkLevers     *debugShrinkLeverVars          `json:"shrink_levers,omitempty"`
 	VCacheFamilies   *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
 	VCacheGovernor   []vcacheGovernorDecisionRecord `json:"vcache_governor_journal,omitempty"`
 	VCacheGovQuality *vcacheGovernorQualityVars     `json:"vcache_governor_quality,omitempty"`
@@ -355,6 +355,24 @@ type debugCompactionVars struct {
 	UncachedTrimShedTokens      uint64            `json:"uncached_trim_shed_tokens"`
 	CacheReadTokens             uint64            `json:"cache_read_tokens"`
 	LastPostFireCacheReadTokens float64           `json:"last_post_fire_cache_read_tokens"`
+	// AnchorStarved was previously rendered ONLY on the Prometheus surface
+	// (fak_gateway_compaction_anchor_starved_total), so the JSON front door every operator tool
+	// actually polls could not tell the #1407 pathology from a benign short session. Same counter,
+	// same meaning — a subset of BailReasons["under_budget"].
+	AnchorStarved uint64 `json:"anchor_starved"`
+	// SolvencyForced is the fired-at-a-loss subset (Config.CompactSolvencyFloorTokens overrode the
+	// burst economics). Surfaced here so a fire count can be read net of survival buys.
+	SolvencyForced uint64 `json:"solvency_forced"`
+	// Budget is the CONFIGURED compaction line (Config.CompactHistoryBudget) this gateway resolved.
+	// `fak guard` overrides the flag default for every launch (resolveGuardCompactBudget), so the
+	// number in --help is NOT reliably the number in force; this is the one actually being compared.
+	Budget int `json:"budget"`
+	// LastSuffixTokens / PeakSuffixTokens are the compactible messages[] span the most recent and
+	// the largest-so-far bail measured against Budget. Headroom = Budget - LastSuffixTokens. They
+	// answer the question a bail-reason tally cannot: whether "under_budget" means this session is
+	// short, or means the line sits above the span this traffic ever reaches.
+	LastSuffixTokens uint64 `json:"last_suffix_tokens"`
+	PeakSuffixTokens uint64 `json:"peak_suffix_tokens"`
 }
 
 type debugHTTPMetricVars struct {
@@ -566,6 +584,11 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 				UncachedTrimShedTokens:      compact.uncachedTrimShed,
 				CacheReadTokens:             compact.cacheReads,
 				LastPostFireCacheReadTokens: compact.lastCacheRd,
+				AnchorStarved:               compact.anchorStarved,
+				SolvencyForced:              compact.solvencyForced,
+				Budget:                      s.compactHistoryBudget,
+				LastSuffixTokens:            compact.lastSuffixTokens,
+				PeakSuffixTokens:            compact.peakSuffixTokens,
 			},
 			RequestMemory:        debugRequestMemoryMetricRows(reqMemoryRows.plans),
 			RequestMemoryFit:     debugRequestMemoryFitRows(reqMemoryRows.fits),

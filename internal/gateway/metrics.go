@@ -130,19 +130,29 @@ type gatewayMetrics struct {
 	//   - OBSERVED (provider-reported, relayed): compactCacheReads / compactLastCacheRd are the
 	//     upstream's cache_read_input_tokens. fak attributes nothing to itself from them.
 	// Kept off inferenceMu — different hot path, no lock coupling.
-	compactMu             sync.Mutex
-	compactAttempts       map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
-	compactBailReasons    map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
-	compactDropped        uint64            // WITNESSED: whole messages stubbed out across all fires
-	compactShed           uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
-	compactCacheReads     uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
-	compactLastCacheRd    float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
-	compactAnchorStarved  uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
-	compactSolvencyForced uint64            // WITNESSED: fires the burst economics REFUSED that the context-solvency floor forced anyway (agent.CompactOutcome.SolvencyForced). A subset of attempts[fired]; these are deliberately unprofitable bursts bought to keep the session inside its window, so they must never be read as cache wins.
-	uncachedTrimResults   uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
-	uncachedTrimShed      uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
-	ttlUpgrades           map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
-	placementAttempts     map[string]uint64 // WITNESSED: offensive cache-breakpoint placement attempts by outcome ("placed" | agent.BreakpointReason*). "placed" is the fak-authored slice — a breakpoint spliced onto a caller that sent none, so the provider cache_read it earns is fak-unlocked; "already_set" is the Claude-Code shape fak leaves alone (the client's cache, not fak's).
+	compactMu            sync.Mutex
+	compactAttempts      map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
+	compactBailReasons   map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
+	compactDropped       uint64            // WITNESSED: whole messages stubbed out across all fires
+	compactShed          uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
+	compactCacheReads    uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
+	compactLastCacheRd   float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
+	compactAnchorStarved uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
+	// WITNESSED headroom: how far the MOST RECENT under_budget bail sat from firing
+	// (agent.CompactOutcome.SuffixTokens, the compactible messages[] span — the system/tools floor
+	// is a separate top-level block and is NOT counted here). The bail reason alone cannot tell a
+	// session that is one turn from the cut apart from one structurally incapable of ever reaching
+	// it, because the compactor computes this split on every bail and then discards it. Recording
+	// the last and peak values turns "under_budget x872" into a distance, which is the difference
+	// between "the budget is fine, this session is short" and "the line sits above the band this
+	// traffic ever occupies". Zero until the first under_budget bail carries a span.
+	compactLastSuffixTokens uint64
+	compactPeakSuffixTokens uint64
+	compactSolvencyForced   uint64            // WITNESSED: fires the burst economics REFUSED that the context-solvency floor forced anyway (agent.CompactOutcome.SolvencyForced). A subset of attempts[fired]; these are deliberately unprofitable bursts bought to keep the session inside its window, so they must never be read as cache wins.
+	uncachedTrimResults     uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
+	uncachedTrimShed        uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
+	ttlUpgrades             map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
+	placementAttempts       map[string]uint64 // WITNESSED: offensive cache-breakpoint placement attempts by outcome ("placed" | agent.BreakpointReason*). "placed" is the fak-authored slice — a breakpoint spliced onto a caller that sent none, so the provider cache_read it earns is fak-unlocked; "already_set" is the Claude-Code shape fak leaves alone (the client's cache, not fak's).
 	// anchorMon is the LIVE loop over that same placement stream (#3622): the counter above is a
 	// cumulative tally nobody watches, so a session whose head turns volatile mid-conversation just
 	// stops incrementing "placed" and nothing fires. The monitor folds each outcome into a rolling

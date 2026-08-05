@@ -73,6 +73,8 @@ type compactionSnapshot struct {
 	lastCacheRd         float64
 	anchorStarved       uint64
 	solvencyForced      uint64
+	lastSuffixTokens    uint64
+	peakSuffixTokens    uint64
 	uncachedTrimResults uint64
 	uncachedTrimShed    uint64
 	ttlUpgrades         map[string]uint64
@@ -194,6 +196,8 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 		lastCacheRd:         m.compactLastCacheRd,
 		anchorStarved:       m.compactAnchorStarved,
 		solvencyForced:      m.compactSolvencyForced,
+		lastSuffixTokens:    m.compactLastSuffixTokens,
+		peakSuffixTokens:    m.compactPeakSuffixTokens,
 		uncachedTrimResults: m.uncachedTrimResults,
 		uncachedTrimShed:    m.uncachedTrimShed,
 	}

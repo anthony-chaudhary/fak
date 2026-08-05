@@ -203,6 +203,15 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 		// than from a second counter, so the two numbers cannot drift apart (#5443).
 		m.compactAttempts["bailed"]++
 		m.compactBailReasons[out.Reason]++
+		// Headroom witness: the compactible span this bail measured. Recorded for every bail that
+		// resolved one (under_budget and burst_unprofitable both carry it; the pre-eligibility
+		// bails resolve no span and leave it 0, so they never pull the peak down).
+		if out.SuffixTokens > 0 {
+			m.compactLastSuffixTokens = uint64(out.SuffixTokens)
+			if uint64(out.SuffixTokens) > m.compactPeakSuffixTokens {
+				m.compactPeakSuffixTokens = uint64(out.SuffixTokens)
+			}
+		}
 		if out.AnchorStarved {
 			// A subset of under_budget: the anchor protected a prefix larger than the budget, so
 			// the lever could not fire. Counted apart so "idle" can be proven NOT a short session.
