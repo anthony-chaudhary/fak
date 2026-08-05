@@ -36,6 +36,14 @@ the live population still never exceeds the cap.
 
     python tools/issue_dispatch.py --wave --max-workers 4         # plan a wave (dry)
     python tools/issue_dispatch.py --wave --max-workers 4 --live  # spawn the wave
+
+``--warm-floor`` / ``--stagger-s`` (#3610) prime the shared ~35.8k startup floor once
+per wave and space the launches so members 2..N re-enter that prefix as a cache READ.
+``--floor-cache-meter`` is the read-only counterpart: it joins the durable wave
+sidecars to the gateway-usage ledger by guard pid and prints the warm-vs-cold A/B over
+wave FOLLOWERS, refusing to grade an arm it has no evidence for.
+
+    python tools/issue_dispatch.py --floor-cache-meter             # the warm/cold A/B
 """
 from __future__ import annotations
 
@@ -1300,17 +1308,45 @@ def _write_wave_artifacts(runs_dir: Path, payload: dict[str, Any]) -> None:
     """Write the wave-level sidecar the done-condition names — ``{wave_id, size,
     lanes, seats}`` — plus a full ``last-wave.json`` for inspection. The sidecar is
     the contract artifact: one record per tick enumerable from disk alongside the
-    per-worker ``.wave`` membership stamps."""
+    per-worker ``.wave`` membership stamps.
+
+    #3610: the sidecar also carries the launch-cache POSTURE and the per-member
+    ``{rank, pid}`` join key, because ``last-wave.json`` is overwritten every tick and
+    an A/B of warm-vs-cold waves needs two DURABLE records to compare. Without these
+    two fields the wave leaves no trace that can be joined to provider cache counters,
+    which is exactly what blocked the meter this issue's third box asks for.
+    """
     try:
         runs_dir.mkdir(parents=True, exist_ok=True)
         sidecar = {"wave_id": payload.get("wave_id"), "size": payload.get("size"),
-                   "lanes": payload.get("lanes"), "seats": payload.get("seats_used")}
+                   "lanes": payload.get("lanes"), "seats": payload.get("seats_used"),
+                   "launched_at_ms": int(time.time() * 1000),
+                   "launch_cache": payload.get("launch_cache"),
+                   "warm_floor": payload.get("warm_floor"),
+                   "members": _wave_join_members(payload.get("members") or [])}
         (runs_dir / f"dispatch-wave-{payload.get('wave_id')}.json").write_text(
             json.dumps(sidecar, indent=2), encoding="utf-8")
         (runs_dir / "last-wave.json").write_text(
             json.dumps(payload, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+def _wave_join_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project the wave's members down to the floor-cache JOIN KEY (#3610).
+
+    The pid is the spawned ``fak guard`` process, and guard stamps ``os.Getpid()`` into
+    every gateway-usage row it writes (internal/gatewayusageledger.NewRow), so the pid
+    is what resolves a member to its OWN provider cache counters. Members that never
+    spawned (dry run) carry a null pid and simply do not join.
+    """
+    out: list[dict[str, Any]] = []
+    for m in members:
+        spawned = m.get("spawned") or {}
+        out.append({"lane": m.get("lane"), "rank": m.get("rank"),
+                    "pid": spawned.get("pid"),
+                    "seat": (m.get("account") or {}).get("tag")})
+    return out
 
 
 def _wave_launch_knobs(warm_floor: bool | None,
@@ -1658,6 +1694,282 @@ def render_wave(p: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# #3610 box 3: the per-wave floor cache meter (the warm-vs-cold A/B readout).
+#
+# The wave now leaves a joinable sidecar (_write_wave_artifacts), and `fak guard`
+# already appends ONE gateway-usage row per session carrying the provider's own
+# cache counters keyed by the guard process pid. Joining those two planes on pid is
+# what turns "we shipped a warm knob" into "here is what the warm knob measured".
+#
+# HONEST BASIS — read this before quoting a number from it. The gateway-usage row is
+# a WHOLE-SESSION aggregate: it cannot separate the ~35.8k launch floor from the
+# cache writes a worker accrues later in its own turns. So this meter does NOT
+# isolate the floor slice. What it does measure is the follower population's cache
+# READ SHARE and cache-WRITE volume under warm-vs-cold launches, which is the
+# observable the floor effect moves. A warm cohort whose followers read materially
+# more than the cold cohort's is the promotion evidence; equal cohorts are the
+# demotion evidence. Isolating the floor itself needs a FIRST-TURN usage row, which
+# the ledger does not emit today (see the final report's next step).
+GATEWAY_USAGE_REL = ".fak/nightrun/gateway-usage.jsonl"
+FLOOR_CACHE_SCHEMA = "fleet-wave-floor-cache/1"
+# A follower whose session read share clears this is counted as having re-entered a
+# warm prefix rather than paid for a fresh one. Deliberately a coarse majority test:
+# the aggregate basis above cannot support a tighter threshold honestly.
+FLOOR_READER_SHARE = 0.5
+FLOOR_CACHE_BASIS = (
+    "session-aggregate provider counters joined to wave members by guard pid; "
+    "the launch floor is NOT separated from in-session cache writes")
+
+
+def read_usage_rows(path: Path) -> list[dict[str, Any]]:
+    """Parse the gateway-usage JSONL ledger. A missing/unreadable ledger is a clean
+    first-run state (empty), never an error — matching the Go reader's fall-open
+    posture. A corrupt line is skipped rather than aborting the whole read."""
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("schema") and row.get("pid") is not None:
+            rows.append(row)
+    return rows
+
+
+def _usage_for_pid(rows: list[dict[str, Any]], pid: int,
+                   since_ms: int | None) -> dict[str, Any] | None:
+    """The richest usage row a member's pid resolves to.
+
+    ``since_ms`` is the PID-REUSE GUARD: an OS recycles pids, and the ledger spans
+    days, so a row written BEFORE the wave launched cannot belong to this member. The
+    last surviving row wins because guard's exit row carries the full session totals.
+    """
+    best: dict[str, Any] | None = None
+    for row in rows:
+        if row.get("pid") != pid:
+            continue
+        stamp = row.get("unix_millis")
+        if since_ms is not None and isinstance(stamp, int) and stamp < since_ms:
+            continue
+        if best is None or (row.get("unix_millis") or 0) >= (best.get("unix_millis") or 0):
+            best = row
+    return best
+
+
+def _cache_axes(row: dict[str, Any]) -> dict[str, Any]:
+    """Project a usage row onto the three prompt-token axes the floor question needs.
+
+    ``read_share`` uses the SAME denominator as the Go per-session view
+    (cmd/fak/dispatch_sessions.go: dispatchSessionCacheReadShare) so the two planes
+    never disagree about what "cache read share" means.
+    """
+    counters = row.get("counters") or {}
+
+    def _n(key: str) -> int:
+        val = counters.get(key)
+        return int(val) if isinstance(val, (int, float)) else 0
+
+    read, write, uncached = (_n("cached_prompt_tokens"),
+                             _n("cache_creation_tokens"), _n("input_tokens"))
+    prompt = read + write + uncached
+    return {"cache_read": read, "cache_write": write, "uncached_input": uncached,
+            "read_share": round(read / prompt, 4) if prompt else None,
+            "observed_turns": _n("observed_turns")}
+
+
+def read_wave_sidecars(runs_dir: Path) -> tuple[list[dict[str, Any]], int]:
+    """Every durable per-wave sidecar, oldest launch first, split from the LEGACY ones.
+
+    ``last-wave.json`` is deliberately NOT read: it is overwritten each tick, so it can
+    never supply the second arm of an A/B.
+
+    A sidecar written before this issue carries neither the launch-cache posture nor
+    the member pids, so it is UNJOINABLE — and, critically, it is not a cold-arm data
+    point either: it records no posture at all. Counting those as "cold" would inflate
+    the cold arm with dozens of waves that contribute zero followers, which reads as
+    evidence when it is silence. They are returned as a COUNT so the readout can say
+    how much history is invisible instead of quietly absorbing it.
+    """
+    try:
+        paths = sorted(runs_dir.glob("dispatch-wave-*.json"))
+    except OSError:
+        return [], 0
+    waves: list[dict[str, Any]] = []
+    legacy = 0
+    for path in paths:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict) or not doc.get("wave_id"):
+            continue
+        if not isinstance(doc.get("members"), list) or not isinstance(
+                doc.get("launch_cache"), dict):
+            legacy += 1
+            continue
+        waves.append(doc)
+    waves.sort(key=lambda w: w.get("launched_at_ms") or 0)
+    return waves, legacy
+
+
+def _meter_wave(wave: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Join ONE wave's members to their provider cache counters and classify each."""
+    launched = wave.get("launched_at_ms")
+    since = launched if isinstance(launched, int) else None
+    posture = wave.get("launch_cache") or {}
+    members: list[dict[str, Any]] = []
+    for m in wave.get("members") or []:
+        rank, pid = m.get("rank"), m.get("pid")
+        rec: dict[str, Any] = {"lane": m.get("lane"), "rank": rank, "pid": pid,
+                               "role": "leader" if rank == 0 else "follower"}
+        row = _usage_for_pid(rows, pid, since) if isinstance(pid, int) else None
+        if row is None:
+            rec["matched"] = False
+            # Named, not silent: an unmatched member is missing evidence, and a meter
+            # that quietly drops it would read as a cleaner result than it earned.
+            rec["reason"] = ("no gateway-usage row for this pid at/after launch "
+                             "(worker still live, or guard wrote no exit row)")
+        else:
+            rec["matched"] = True
+            rec.update(_cache_axes(row))
+            share = rec.get("read_share")
+            rec["floor"] = ("unknown" if share is None else
+                            "read" if share >= FLOOR_READER_SHARE else "write")
+        members.append(rec)
+    followers = [m for m in members if m["role"] == "follower" and m["matched"]]
+    return {
+        "wave_id": wave.get("wave_id"),
+        "launched_at_ms": launched,
+        "warm_floor": bool(posture.get("warm_floor")),
+        "stagger_s": posture.get("stagger_s"),
+        "staggered_spawns": posture.get("staggered_spawns"),
+        "size": wave.get("size"),
+        "members": members,
+        "followers_matched": len(followers),
+        "followers_reading": sum(1 for m in followers if m.get("floor") == "read"),
+    }
+
+
+def _cohort(waves: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fold one A/B arm over its FOLLOWERS only (rank>=1).
+
+    Rank 0 is excluded by construction: someone has to pay the first write, so the
+    leader is never evidence either way. The claim under test is strictly about
+    workers 2..N.
+    """
+    followers = [m for w in waves for m in w["members"]
+                 if m["role"] == "follower" and m["matched"]]
+    shares = [m["read_share"] for m in followers if m.get("read_share") is not None]
+    writes = [m["cache_write"] for m in followers if m.get("cache_write") is not None]
+    return {
+        "waves": len(waves),
+        "followers": len(followers),
+        "reading": sum(1 for m in followers if m.get("floor") == "read"),
+        "mean_read_share": round(sum(shares) / len(shares), 4) if shares else None,
+        "mean_cache_write": round(sum(writes) / len(writes), 1) if writes else None,
+    }
+
+
+def wave_floor_cache(root: Path, *, runs_dir: Path | None = None,
+                     usage_path: Path | None = None) -> dict[str, Any]:
+    """#3610 box 3: the per-wave cache read/write meter and its warm-vs-cold A/B.
+
+    A PURE fold over two on-disk planes (wave sidecars + the gateway-usage ledger):
+    same inputs -> same readout, launches nothing, writes nothing, so a test drives it
+    hermetically by planting both. Read ``FLOOR_CACHE_BASIS`` before quoting it — the
+    counters are whole-session aggregates, so this measures the follower population's
+    cache posture, not the floor slice in isolation.
+    """
+    runs = runs_dir if runs_dir is not None else root / RUNS_DIRNAME
+    usage = usage_path if usage_path is not None else root / GATEWAY_USAGE_REL
+    rows = read_usage_rows(usage)
+    sidecars, legacy = read_wave_sidecars(runs)
+    metered = [_meter_wave(w, rows) for w in sidecars]
+    warm = [w for w in metered if w["warm_floor"]]
+    cold = [w for w in metered if not w["warm_floor"]]
+    ab = {"warm": _cohort(warm), "cold": _cohort(cold)}
+    doc: dict[str, Any] = {
+        "schema": FLOOR_CACHE_SCHEMA,
+        "workspace": str(root),
+        "usage_ledger": str(usage),
+        "usage_rows": len(rows),
+        "basis": FLOOR_CACHE_BASIS,
+        "reader_share_threshold": FLOOR_READER_SHARE,
+        "waves": metered,
+        "legacy_waves": legacy,
+        "ab": ab,
+    }
+    doc.update(_floor_cache_verdict(ab))
+    return doc
+
+
+def _floor_cache_verdict(ab: dict[str, Any]) -> dict[str, Any]:
+    """Grade the A/B, and REFUSE to grade it when an arm has no evidence.
+
+    An empty arm is the common state (the knob is opt-in and defaults off), so the
+    honest verdict there names the missing arm instead of reporting a comparison it
+    cannot make. ``ok`` is False for that case: an operator running this to decide
+    promotion should get a non-zero exit, not a green-looking blank.
+    """
+    warm, cold = ab["warm"], ab["cold"]
+    if not warm["followers"] or not cold["followers"]:
+        missing = "warm" if not warm["followers"] else "cold"
+        other = "cold" if missing == "warm" else "warm"
+        return {"ok": False, "verdict": "INSUFFICIENT_EVIDENCE",
+                "reason": (f"no matched followers in the {missing} arm "
+                           f"({other} arm has {ab[other]['followers']}); run a wave "
+                           f"with {'--warm-floor' if missing == 'warm' else 'the knob off'} "
+                           "and let its workers exit, then re-read")}
+    w_share, c_share = warm["mean_read_share"], cold["mean_read_share"]
+    if w_share is None or c_share is None:
+        return {"ok": False, "verdict": "INSUFFICIENT_EVIDENCE",
+                "reason": "matched followers carried no prompt-token counters to compare"}
+    if w_share > c_share:
+        return {"ok": True, "verdict": "WARM_READS_MORE",
+                "reason": (f"warm followers read {w_share:.1%} of their prompt tokens "
+                           f"vs {c_share:.1%} cold ({warm['reading']}/{warm['followers']} "
+                           f"vs {cold['reading']}/{cold['followers']} over the "
+                           f"{FLOOR_READER_SHARE:.0%} bar)")}
+    return {"ok": False, "verdict": "NO_MEASURED_EFFECT",
+            "reason": (f"warm followers read {w_share:.1%} vs {c_share:.1%} cold — the "
+                       "warm pre-request did not move the follower cache posture")}
+
+
+def render_floor_cache(doc: dict[str, Any]) -> str:
+    """Operator readout for the meter."""
+    ab = doc.get("ab") or {}
+    lines = [f"floor cache meter: {doc.get('verdict')}",
+             f"  ledger    : {doc.get('usage_rows')} usage row(s) @ {doc.get('usage_ledger')}",
+             f"  basis     : {doc.get('basis')}"]
+    if doc.get("legacy_waves"):
+        lines.append(f"  legacy    : {doc.get('legacy_waves')} pre-#3610 sidecar(s) "
+                     "carry no posture/pids — invisible to the A/B, not cold evidence")
+    for arm in ("warm", "cold"):
+        c = ab.get(arm) or {}
+        share = c.get("mean_read_share")
+        lines.append(
+            f"  {arm:<9} : {c.get('waves')} wave(s), {c.get('followers')} matched "
+            f"follower(s), {c.get('reading')} reading; "
+            f"mean read share {'n/a' if share is None else f'{share:.1%}'}, "
+            f"mean cache write {c.get('mean_cache_write')}")
+    for w in doc.get("waves") or []:
+        posture = "warm" if w.get("warm_floor") else "cold"
+        floors = ",".join(f"r{m.get('rank')}={m.get('floor') or 'unmatched'}"
+                          for m in w.get("members") or [])
+        lines.append(f"  {w.get('wave_id')} [{posture}, "
+                     f"stagger={w.get('stagger_s') or 0}s] {floors}")
+    lines.append(f"  -> {doc.get('reason')}")
+    return "\n".join(lines)
+
+
 def escape_plan(root: Path, safe_priority: dict[str, int] | None) -> dict[str, Any]:
     """The read-only ACTION plan behind ``--escape-self-source``: turn the Arm-1 escape
     SIGNAL into the exact operator command that drains the top held self-source P1 the
@@ -1806,10 +2118,20 @@ def main(argv: list[str] | None = None) -> int:
                          f"back-to-back spawn; {LAUNCH_STAGGER_ENV} retunes it). Note "
                          "fak forces the 1h stable-prefix TTL by default, so the "
                          "budget is usually far wider than the provider's 5-min floor")
+    ap.add_argument("--floor-cache-meter", action="store_true",
+                    help="#3610: READ-ONLY per-wave cache read/write meter — join the "
+                         "durable wave sidecars to the gateway-usage ledger by guard "
+                         "pid and print the warm-vs-cold A/B over wave FOLLOWERS "
+                         "(rank>=1). Launches nothing. Exits non-zero when an arm has "
+                         "no matched followers, so it cannot report a blank as a pass")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
+    if args.floor_cache_meter:
+        doc = wave_floor_cache(root)
+        print(json.dumps(doc, indent=2) if args.json else render_floor_cache(doc))
+        return 0 if doc.get("ok") else 1
     if args.escape_self_source:
         pick = pick_lane(root, None)
         doc = escape_plan(root, pick.get("priority_by_lane"))
