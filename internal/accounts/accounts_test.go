@@ -3,6 +3,7 @@ package accounts
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -575,6 +576,92 @@ func TestServeAtStructuralFailureStaysLoud(t *testing.T) {
 	}
 	if _, _, entry, err := r.ServeAt("ghost", cd, now); err == nil || entry != nil {
 		t.Fatalf("an unknown name must stay fail-loud, got entry=%v err=%v", entry, err)
+	}
+}
+
+// deadRolePairFixture is the shape that broke the `f` launcher on the maintainers' box:
+// BOTH role seats are live-but-unserveable — the active seat's config dir had been
+// re-logged into another account and the anchor needed a login — while ready seats sat in
+// the pool. The role-only fall-forward bounced active->anchor->active and the walk died on
+// its OWN cycle guard ("accounts: rehome cycle through ..."), so a bare `fak accounts
+// launch` refused to start anything at all.
+func deadRolePairFixture() Registry {
+	ready := func(name, uuid string) Home {
+		return Home{Name: name, Dir: "/h/.claude-" + name,
+			Identity: Identity{Email: name + "@example.test", AccountUUID: uuid, Exists: true, HasCreds: true}}
+	}
+	// Live (never tombstoned) but cannot serve: the dir is there, the credentials are not.
+	dead := func(name string) Home {
+		return Home{Name: name, Dir: "/h/.claude-" + name, Identity: Identity{Exists: true}}
+	}
+	return Registry{
+		Roles: map[string]string{RoleActive: "active-dead", RoleAnchor: "anchor-dead"},
+		// pool-ready sits BETWEEN the two dead role seats so the sweep is proven to be a
+		// registry-order scan of the whole roster, not a lucky first/last hit.
+		Homes: []Home{dead("anchor-dead"), ready("pool-ready", "u-pool"), dead("active-dead")},
+	}
+}
+
+// TestServeAtDeadRolePairFallsForwardToPool pins the fix: once both roles are exhausted the
+// walk sweeps the POOL instead of dead-ending on its cycle guard.
+func TestServeAtDeadRolePairFallsForwardToPool(t *testing.T) {
+	r := deadRolePairFixture()
+
+	h, chain, entry, err := r.ServeAt("active-dead", nil, time.Time{})
+	if err != nil {
+		t.Fatalf("a dead active+anchor pair must fall forward to a ready pool seat, got: %v", err)
+	}
+	if h.Name != "pool-ready" {
+		t.Fatalf("served %q, want pool-ready", h.Name)
+	}
+	if entry != nil {
+		t.Fatalf("nothing is cooled here: entry must be nil, got %v", entry)
+	}
+	if got := strings.Join(chain, ","); got != "active-dead,anchor-dead" {
+		t.Fatalf("chain = %v, want [active-dead anchor-dead] (both refused role hops)", chain)
+	}
+	// Serve (the cooldown-blind wrapper the older callers still use) gets the same rescue.
+	if h, _, err := r.Serve("active-dead"); err != nil || h.Name != "pool-ready" {
+		t.Fatalf("Serve = %q,%v, want pool-ready,<nil>", h.Name, err)
+	}
+}
+
+// TestServeAtDeadRolePairDegradesOntoCooledPool pins the next rung down: when the only
+// pool seat is held back solely by an active cooldown, the walk still REACHES it, so the
+// all-cooled terminal degrades onto it (with its entry) rather than refusing to resolve.
+func TestServeAtDeadRolePairDegradesOntoCooledPool(t *testing.T) {
+	r := deadRolePairFixture()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
+	cd.Cool(UUIDBucketKey("u-pool"), CooldownUsageLimit, "weekly limit", now, now.Add(20*time.Minute))
+
+	h, chain, entry, err := r.ServeAt("active-dead", cd, now)
+	if err != nil {
+		t.Fatalf("an all-cooled pool must degrade, not hard-error: %v", err)
+	}
+	if h.Name != "pool-ready" {
+		t.Fatalf("served %q, want pool-ready", h.Name)
+	}
+	if entry == nil || !entry.ResetAt.Equal(now.Add(20*time.Minute)) {
+		t.Fatalf("the cooled landing must carry its entry as the degraded signal, got %v", entry)
+	}
+	if got := strings.Join(chain, ","); got != "active-dead,anchor-dead" {
+		t.Fatalf("chain = %v, want [active-dead anchor-dead]", chain)
+	}
+	// Once the window elapses the same registry resolves clean, with no manual action.
+	if _, _, entry, err := r.ServeAt("active-dead", cd, now.Add(time.Hour)); err != nil || entry != nil {
+		t.Fatalf("an elapsed cooldown must resolve clean, got entry=%v err=%v", entry, err)
+	}
+}
+
+// TestServeAtEmptyPoolStaysLoud pins that the pool sweep is a rescue, not a silent landing:
+// strip the one ready seat and the same walk fails loud again.
+func TestServeAtEmptyPoolStaysLoud(t *testing.T) {
+	r := deadRolePairFixture()
+	r.Homes = slices.DeleteFunc(slices.Clone(r.Homes), func(h Home) bool { return h.Name == "pool-ready" })
+
+	if h, _, entry, err := r.ServeAt("active-dead", nil, time.Time{}); err == nil || entry != nil {
+		t.Fatalf("no seat can serve: must stay fail-loud, got seat=%q entry=%v err=%v", h.Name, entry, err)
 	}
 }
 
