@@ -146,6 +146,42 @@ if [ "$EP_RANKS" -gt 1 ]; then
 else
   export FAK_EP_REQUIRE_DEVICE_PG="${FAK_EP_REQUIRE_DEVICE_PG:-0}"
 fi
+
+# EP_COORDINATED=1 selects the COORDINATED expert-parallel topology (#4835) instead of the
+# default HTTP request mirror. The difference is what a rank does with a request:
+#
+#   mirror (EP_FRONTEND_FANOUT=1, the default) : rank 0 re-POSTs the whole body to every
+#     follower, so all N ranks tokenize, prefill, decode AND sample the same prompt and only
+#     rank 0's body is returned. That is the topology the sanctioned 8-GPU witness measured at
+#     0.0406 tok/s, slower than the ~0.2 tok/s scalar pure-fak baseline.
+#   coordinated (EP_COORDINATED=1) : ranks>0 bind NO listener at all. They park in
+#     model.RunEPFollower and replay exactly the forward rank 0 announces, contributing only
+#     their local expert work + collectives, so the prompt is tokenized once and sampled once.
+#
+# Three settings are load-bearing and are forced here rather than left to the operator, because
+# `fak serve` REFUSES the combination at boot (cmd/fak/serve_ep_coord.go) and a refusal after a
+# 466 GB stage is an expensive way to learn it:
+#   * FAK_EP_COORDINATED_DECODE=1 is the opt-in the serve reads;
+#   * EP_FRONTEND_FANOUT=0 keeps FAK_EP_FANOUT_ADDRS empty — the two topologies cannot coexist,
+#     a follower fed its own copy of the request would run rank 0's frames AND an independent
+#     decode on one DistComm;
+#   * FAK_INKERNEL_RADIX=off — a rank-0 session restored from a KV-prefix hit prefills only the
+#     divergent suffix, at a position the follower's fresh mirror never computed, and the
+#     follower fails that request closed. Losing that cache is a REAL cost, not a formality:
+#     the warm sanctioned-hardware read-back measured 0.214 tok/s on an exact-prefix repeat vs 0.0917 tok/s on
+#     a distinct prompt, so the coordinated arm must beat the DISTINCT-prompt baseline to be a
+#     net-true gain.
+EP_COORDINATED="${EP_COORDINATED:-0}"
+if [ "$EP_COORDINATED" = "1" ]; then
+  if [ "$EP_RANKS" -le 1 ]; then
+    ph "BAD_EP_COORDINATED EP_COORDINATED=1 needs EP_RANKS>1 (there is no process group to coordinate over)"
+    exit 12
+  fi
+  export FAK_EP_COORDINATED_DECODE=1
+  export FAK_INKERNEL_RADIX=off
+  EP_FRONTEND_FANOUT=0
+  ph "EP_COORDINATED ranks=$EP_RANKS rank0 owns tokenization+sampling; ranks 1-$((EP_RANKS - 1)) contribute local expert work only (HTTP request mirror OFF, radix prefix reuse OFF)"
+fi
 if [ "${FAK_CUDA_NCCL:-0}" = "1" ] && { ! have_nccl_headers || ! have_nccl_lib; }; then
   ph "NCCL_DEV_MISSING headers=$(have_nccl_headers && echo yes || echo no) lib=$(have_nccl_lib && echo yes || echo no) (install libnccl-dev/libnccl2 or set NCCL_HOME)"
   exit 13
@@ -275,7 +311,13 @@ smoke_ready_ep() {
 }
 
 smoke_ready() {
-  if [ "$EP_RANKS" -gt 1 ] && [ "${EP_FRONTEND_FANOUT:-1}" != "1" ]; then
+  # Coordinated EP (#4835): ranks>0 bind NO listener, so the per-rank fanout smoke below would
+  # curl seven dead ports and report SMOKE_FAIL on a serve that is in fact healthy. Rank 0 is
+  # the whole public surface here, and its single request already drives every rank through
+  # the collectives — which is exactly what this smoke is for.
+  if [ "${EP_COORDINATED:-0}" = "1" ]; then
+    smoke_ready_single
+  elif [ "$EP_RANKS" -gt 1 ] && [ "${EP_FRONTEND_FANOUT:-1}" != "1" ]; then
     smoke_ready_ep
   else
     smoke_ready_single
