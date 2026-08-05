@@ -193,6 +193,42 @@ fak mac --overlay
 `--overlay-interval 5s` changes the refresh rate; `--overlay` never launches
 Claude.
 
+## Capture the showcase visual (`not yet`)
+
+There is **no committed showcase capture of `fak mac`** — the two surfaces above are
+documented but never shown. This section is the pre-registered recipe so whoever next
+has the hardware can produce it in one sitting, and so nobody produces the wrong thing.
+Tracked by [#2694](https://github.com/anthony-chaudhary/fak/issues/2694).
+
+**Host gate (why it is not done).** The capture needs a *live* M3-class Mac gateway —
+this repo's is `node-macos-a`, which is down. [#2611](https://github.com/anthony-chaudhary/fak/issues/2611)
+is closed, but it closed on a `fak macbench recover` fix, **not** on recovering the node;
+its physical residual (wake the peer, restart the gateway) is unchanged. A closed blocker
+here does not mean an unblocked capture — re-check reachability before picking this up.
+
+**The recipe.** Two panes against a gateway serving Qwen3.6, recorded as a screenshot or
+short asciinema/GIF:
+
+```bash
+fak claude-mac-fak            # pane 1: the preflight panel, then a real interactive turn
+fak mac --overlay             # pane 2: live prefill/decode while that turn runs
+```
+
+The frame must contain the preflight panel (`health: ok`, `engine(build)=metal`,
+`planner(live)=inkernel`) *and* the served turn's real completion.
+
+**Honesty fence — this one may not be rendered from a fixture.** `visuals/` holds two
+offline-rendered captures (`visuals/guard-tui-capture.md`,
+`visuals/info-overlay-capture.md`) that draw a non-reproducible live UI from a checked-in
+fixture. **That pattern is not available here.** This capture's whole claim is that the
+numbers are real, so it must show the honest slow first turn — a high prefill time and a
+long `duration_ms`, the 10–15 minutes this page warns about above — never a sped-up or
+staged "instant" frame.
+
+**When it lands.** Store it under `visuals/` with a sibling `visuals/*-capture.md` note
+carrying the two commands above, caption it as a **local Apple M3 Pro single-stream run**
+naming the model, and link it from both the README showcase bullet and this page.
+
 ## Watch fak from Grafana
 
 The repo ships a Prometheus + Grafana stack at
