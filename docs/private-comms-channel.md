@@ -113,12 +113,19 @@ fresh round-trip witness in this order.
    there. An unauthorized checkout reports `NOT READY`; that is the boundary working as
    designed, not a bridge fault, and no later step can run from that host. Read *which*
    check failed rather than the headline: `control_channel` is the one that decides lab
-   access. A fleet dev host commonly resolves `slack_token` from an unrelated scoreboard
-   credential and still reports `NOT READY` on `control_channel` alone, so expect one green
-   check and do not read it as partial authorization. Nor is finding a token-bearing
+   access. Expect *which* checks fail to depend on your working directory, because `doctor`
+   resolves `.env.slack.local` relative to the directory you run it from. One unauthorized
+   fleet dev host therefore reports two different `NOT READY` shapes: run from the `fak`
+   clone root — where this note sends you — and **both** checks read missing; run from a
+   directory that happens to hold a token-bearing `.env.slack.local` and `slack_token` reads
+   green with `control_channel` missing alone. Neither shape is partial authorization, and
+   neither is evidence that the block described here does not apply to your host; they are
+   the same unauthorized host seen from two directories. Nor is finding a token-bearing
    `.env.slack.local` evidence of lab access — the checked-in ones carry a scoreboard token
    and no channel, and none of the channel paths `doctor` names in its own hint
-   (`-channel <id>`, `SLACK_CHANNEL`, `FAK_SLACK_CHANNEL`) is populated on such a host.
+   (`-channel <id>`, `SLACK_CHANNEL`, `FAK_SLACK_CHANNEL`) is populated on such a host. If
+   you want the token half out of the picture, run `doctor` from the clone root and read
+   `control_channel` alone.
 2. `dgxbridge doctor -probe` — adds the live round-trip against the resolved session. The
    `readback` sub-check is the gate: green means a command's output actually came back, not
    merely that the session answered a control verb.
