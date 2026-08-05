@@ -144,6 +144,18 @@ type Session struct {
 	// to VRAM exactly once, not once per token. (On cpu-ref, Upload is identity over the
 	// zero-copy host view, so caching changes nothing and the bit-equality gate holds.)
 	halW map[string]compute.Tensor
+	// ExpertRingBytes bounds the DEVICE residency of ROUTED expert weights (`.mlp.experts.N.*`) at
+	// this many bytes, staging them through a pagedRing (expert_ring_hal.go, #5611) instead of the
+	// never-evicting halW memoizer above. It is what makes the ACTIVATED expert set a bounded object:
+	// a MoE checkpoint activates ~3% of its experts per token, so a budget far below the expert bulk
+	// still serves the working set, and the coldest expert is evicted rather than accumulated. Dense,
+	// attention, router, lm_head and SHARED-expert weights are unaffected — they are activated every
+	// token and keep permanent residency. 0 (the default) disables the ring entirely and leaves every
+	// path byte-for-byte unchanged.
+	ExpertRingBytes int64
+	// expertRing is the bounded routed-expert ring, built lazily on the first routed-expert staging
+	// when ExpertRingBytes > 0 and freed by Close. nil on every session that never declared a budget.
+	expertRing *pagedRing
 	// halStep counts tokens run through the HAL (diagnostic / legacy warm-up counter).
 	halStep int
 	// halLogitsWarm gates CUDA-graph capture: it flips true only after one FULL

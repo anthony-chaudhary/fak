@@ -86,6 +86,12 @@ func (s *Session) Close() {
 			delete(s.halW, name)
 		}
 	}
+	// Routed-expert weights served by the bounded ring are NOT in halW (that is the point), so they
+	// need their own teardown or their device handles would outlive the session.
+	if s.expertRing != nil {
+		s.expertRing.freeAll()
+		s.expertRing = nil
+	}
 	if kv, ok := s.halKV.(interface{ Free() }); ok {
 		kv.Free()
 	}
@@ -190,10 +196,10 @@ func requireTensorPresent(missing bool, kind, name string) {
 }
 
 func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
-	return s.weightHALStaged("q8:"+name, func() compute.Tensor {
+	return s.weightHALStagedBounded("q8:"+name, name, func() compute.Tensor {
 		requireTensorPresent(qt == nil, "Q8", name)
 		return compute.NewQ8(compute.Default(), []int{qt.out, qt.in}, qt.q, qt.d, qBlk)
-	}, compute.Q8_0)
+	}, compute.Q8_0, q8ResidentBytes(qt))
 }
 
 // weightHALQ4K stages a resident Q4_K weight (raw GGUF super-block bytes) onto the backend, the
@@ -203,10 +209,10 @@ func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
 // lets the GLM-DSA forward run its dense projections from a memory-lean Q4_K model on the device —
 // the Q4_K majority of a 753B GLM-5.2 on the GPU, with only ~0.56 B/weight resident.
 func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
-	return s.weightHALStaged("q4k:"+name, func() compute.Tensor {
+	return s.weightHALStagedBounded("q4k:"+name, name, func() compute.Tensor {
 		requireTensorPresent(qt == nil, "Q4_K", name)
 		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
-	}, compute.Q4_K)
+	}, compute.Q4_K, q4kResidentBytes(qt))
 }
 
 // weightHALKQuant stages verbatim Q5_K/Q6_K GGUF bytes. CUDA dequantizes in the
@@ -227,7 +233,7 @@ func (s *Session) weightHALKQuant(name string, qt *kQuantTensor) compute.Tensor 
 	default:
 		panic("model: unsupported resident expert k-quant: " + qt.kind.String())
 	}
-	return s.weightHALStaged("kquant-raw:"+name, host, dt)
+	return s.weightHALStagedBounded("kquant-raw:"+name, name, host, dt, kQuantResidentBytes(qt))
 }
 
 // supportsRoutedExpertKQuant is the explicit optional capability used both by
@@ -242,17 +248,30 @@ func (s *Session) supportsRoutedExpertKQuant() bool {
 	return ok && routed.SupportsRoutedExpertKQuant()
 }
 
+// expertWeight is one resolved routed-expert projection: its canonical tensor name plus whichever
+// resident quantized representation the model actually carries (exactly one of q4/kq is non-nil).
+type expertWeight struct {
+	name string
+	q4   *q4kTensor
+	kq   *kQuantTensor
+}
+
+// halKey is the dtype-prefixed staging key this weight lands under — the same key weightHALQ4K /
+// weightHALKQuant use for halW and for the routed-expert ring, so a hold names exactly the resident
+// the staging created.
+func (w expertWeight) halKey() string {
+	if w.q4 != nil {
+		return "q4k:" + w.name
+	}
+	return "kquant-raw:" + w.name
+}
+
 // expertSwiGLUHAL keeps routed expert gate/up/down projections and the SwiGLU
 // activation on Backend. It admits only projections with an honest resident Q4_K
 // or one-time-staged F16 Q5_K/Q6_K representation.
 func (s *Session) expertSwiGLUHAL(gateName, upName, downName string, x []float32) ([]float32, bool) {
 	if s == nil || s.halW == nil || !s.supportsRoutedExpertKQuant() {
 		return nil, false
-	}
-	type expertWeight struct {
-		name string
-		q4   *q4kTensor
-		kq   *kQuantTensor
 	}
 	resolve := func(name string) (expertWeight, bool) {
 		if qt := s.M.q4kw[name]; qt != nil {
@@ -279,9 +298,19 @@ func (s *Session) expertSwiGLUHAL(gateName, upName, downName string, x []float32
 		}
 		return s.weightHALKQuant(w.name, w.kq)
 	}
-	gateW := resident(weights[0])
-	upW := resident(weights[1])
-	downW := resident(weights[2])
+	// One expert is THREE weights used together, so under a bounded routed-expert ring
+	// (Session.ExpertRingBytes, #5611) staging `up` could evict `gate` and Free a handle the GEMMs
+	// below still need. Hold each weight for the rest of this expert's computation and release it on
+	// return; without a ring every hold is a no-op and this is byte-for-byte the previous path.
+	staged := make([]compute.Tensor, len(weights))
+	for i, w := range weights {
+		staged[i] = resident(w)
+		if r := s.routedExpertRing(w.name); r != nil {
+			r.hold(w.halKey())
+			defer r.release(w.halKey())
+		}
+	}
+	gateW, upW, downW := staged[0], staged[1], staged[2]
 
 	hostX := compute.NewF32(compute.Default(), []int{len(x)}, append([]float32(nil), x...))
 	dx := s.Backend.Upload(hostX, compute.F32)

@@ -35,13 +35,13 @@ import (
 //   - a weight evicted under budget pressure pages IN again on its next use — it is not silently
 //     lost, distinguishing a ring (bounded residency) from splitKernel (unbounded host residency).
 //
-// Scope (honest, matching pagedKernel + residency.Manager): a STANDALONE primitive, OFF the live
-// serve path, no async/pinned H2D yet. It stages f32, Q8_0, or Q4_K weights (matMul / matMulQ8 /
-// matMulQ4K), so the ring accounts the QUANTIZED residency a memory-lean MoE host actually streams
-// (#3174 R1) rather than an f32 expansion of it — but wiring it into the session weight HAL as the
-// paged twin of weightHALQ4K/weightHALQ8 (so a real model streams experts per-layer under a device
-// budget) is still the follow-on rung of #2726. This lands the bounded-residency lifecycle + the
-// witness that rung builds on. It moves no bytes and links nothing new into the default binary.
+// Scope: it stages f32, Q8_0, or Q4_K weights (matMul / matMulQ8 / matMulQ4K), so the ring accounts
+// the QUANTIZED residency a memory-lean MoE host actually streams (#3174 R1) rather than an f32
+// expansion of it. The follow-on rung #2726 named — wiring it into the session weight HAL as the
+// bounded twin of weightHALQ4K/weightHALQ8, so a real model streams ROUTED EXPERTS under a device
+// budget — landed as #5611 (epic #5606 R0) via stage() + expert_ring_hal.go; it is opt-in per
+// session (Session.ExpertRingBytes > 0) and inert at the default 0. Still no async/pinned H2D: a
+// miss uploads synchronously (the prefetch seam is #5614).
 type pagedRing struct {
 	be   compute.Backend
 	pool *polymodel.Pool
@@ -52,6 +52,20 @@ type pagedRing struct {
 	pageIn int // cold uploads (a miss that was admitted)
 	hit    int // resident reuses (a handle served without upload)
 	evict  int // page-outs (LRU victims dropped during admit to stay within budget)
+
+	// peak is the high-water mark of pool.Used() — the largest device weight footprint the ring ever
+	// held. It is the boundedness WITNESS: peak <= budget across an arbitrary access sequence is what
+	// distinguishes a ring from the unbounded halW memoizer, and it cannot be recovered after the fact
+	// from used() (which only reports the instantaneous set).
+	peak int64
+
+	// holds counts the live hold() spans per weight (see hold/release). A weight with a live hold is
+	// PINNED in the pool for the span, so admitting a later weight cannot evict a handle its caller is
+	// still using — the invariant a multi-weight op (one expert's gate/up/down) depends on.
+	holds map[polymodel.ModelID]int
+	// heldPins records the ids whose Pinned bit hold() itself set, so release() restores only those and
+	// never clears a pin the durable pin-set owns.
+	heldPins map[polymodel.ModelID]bool
 
 	// pins is the online-learning resident pin-set (expert_warmpins.go): the workload-personalized
 	// hot-set warm-started from the summed cross-session usage histogram and drifted between turns by
@@ -102,11 +116,35 @@ func uploadStaged(be compute.Backend, src compute.Tensor, dtype compute.Dtype, s
 // fits only by dropping a pinned resident (ErrPinnedNoRoom); the caller then falls back to a per-op
 // paged (pagedKernel) or host GEMM, exactly as an over-budget weight would.
 func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype compute.Dtype, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
+	wt, ok := r.stage(name, mk, dtype, weightBytes, pinned)
+	if !ok {
+		return nil
+	}
+	return append([]float32(nil), r.be.Read(r.be.MatMul(wt, x))...)
+}
+
+// stage is the RESIDENCY half of matMulStaged with the GEMM removed: it makes the named weight
+// device-resident under the ring budget and hands back the live handle, so a caller that wants to
+// run its OWN ops against the weight (the session weight HAL, whose expertSwiGLUHAL issues three
+// MatMuls and a SwiGLU itself) gets the bounded residency without the ring dictating the math.
+// matMulStaged is stage + MatMul, so the two share one lifecycle by construction and the bit-equality
+// the ring witnesses for matMulStaged transfers to every stage() caller: on a HIT the resident handle
+// is reused and Touched, on a MISS mk builds the host source, it is uploaded as dtype (page-in) and
+// admitted — evicting the coldest UNPINNED residents, whose handles are Freed — and retained.
+//
+// Returns ok=false, having paged nothing and left the resident set unchanged, when the weight is
+// unadmittable (polymodel.ErrTooLarge — it alone exceeds the budget; or ErrPinnedNoRoom — it fits
+// only by dropping a pinned resident). The caller then falls back to its own unbounded/host path,
+// exactly as matMulStaged's nil return means.
+//
+// The returned handle is valid only until the NEXT stage/matMul on the same ring may evict it. A
+// caller holding several handles at once must hold() each for the span it uses them (see hold).
+func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
 	id := polymodel.ModelID(name)
 	if wt, ok := r.resident[id]; ok {
 		r.pool.Touch(id)
 		r.hit++
-		return append([]float32(nil), r.be.Read(r.be.MatMul(wt, x))...)
+		return wt, true
 	}
 	// Miss: build + upload the weight, then admit it under the budget. Admit is all-or-nothing: on
 	// error the pool is unchanged, so page the just-uploaded handle straight back out and defer.
@@ -114,7 +152,7 @@ func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype co
 	evicted, err := r.pool.Admit(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned})
 	if err != nil {
 		r.be.Free(wt)
-		return nil
+		return compute.Tensor{}, false
 	}
 	r.pageIn++
 	for _, vid := range evicted {
@@ -125,7 +163,96 @@ func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype co
 		}
 	}
 	r.resident[id] = wt
-	return append([]float32(nil), r.be.Read(r.be.MatMul(wt, x))...)
+	if used := r.pool.Used(); used > r.peak {
+		r.peak = used
+	}
+	return wt, true
+}
+
+// hold protects an already-staged weight from eviction for the span of a multi-weight computation,
+// and release ends that span. They exist because one MoE expert is THREE weights (gate/up/down) used
+// together: without a hold, staging `up` under a tight budget could evict `gate` and Free a handle
+// the caller is about to MatMul against — a use-after-free the unbounded halW memoizer could never
+// produce. Holds nest (a second hold on the same weight only increments), so overlapping spans are safe.
+//
+// The mechanism is polymodel's own documented recipe for changing a resident descriptor — Evict then
+// re-Admit with Pinned set — not a new policy: a held weight is exactly a pinned resident, so it
+// inherits the pool's proven pinned-never-evicted invariant. release restores ONLY pins hold itself
+// set (heldPins), so a durable pin from the warm-start pin-set survives a hold/release cycle. A hold
+// on a weight the ring does not hold (an unadmittable one that fell back to the caller's own path) is
+// a no-op, so callers need not branch on whether staging was served by the ring.
+func (r *pagedRing) hold(name string) {
+	id := polymodel.ModelID(name)
+	if r.holds == nil {
+		r.holds = map[polymodel.ModelID]int{}
+	}
+	r.holds[id]++
+	if r.holds[id] > 1 {
+		return // already held; the first hold owns the pin
+	}
+	m, ok := r.pool.Get(id)
+	if !ok || m.Pinned {
+		return // not ring-resident, or already pinned by the durable pin-set — nothing to set or restore
+	}
+	m.Pinned = true
+	r.repin(id, m)
+	if r.heldPins == nil {
+		r.heldPins = map[polymodel.ModelID]bool{}
+	}
+	r.heldPins[id] = true
+}
+
+// release ends one hold span (see hold). The last release of a weight hold() pinned clears that pin,
+// returning it to the LRU victim pool.
+func (r *pagedRing) release(name string) {
+	id := polymodel.ModelID(name)
+	n := r.holds[id]
+	if n <= 0 {
+		return
+	}
+	if n > 1 {
+		r.holds[id] = n - 1
+		return
+	}
+	delete(r.holds, id)
+	if !r.heldPins[id] {
+		return
+	}
+	delete(r.heldPins, id)
+	if m, ok := r.pool.Get(id); ok {
+		m.Pinned = false
+		r.repin(id, m)
+	}
+}
+
+// repin rewrites a resident descriptor in place via polymodel's Evict-then-Admit recipe (the pool
+// documents the descriptor as immutable otherwise). Re-admitting bytes the pool just released cannot
+// exceed a budget they already fit, so the Admit cannot fail; if it ever did, the handle is paged out
+// so `resident` and `pool` stay in the exact lockstep the rest of the ring assumes.
+func (r *pagedRing) repin(id polymodel.ModelID, m polymodel.Model) {
+	r.pool.Evict(id)
+	if _, err := r.pool.Admit(m); err != nil {
+		if h, live := r.resident[id]; live {
+			r.be.Free(h)
+			delete(r.resident, id)
+		}
+		delete(r.holds, id)
+		delete(r.heldPins, id)
+	}
+}
+
+// freeAll pages every resident weight out and drops the pool accounting to zero — the teardown a ring
+// owner runs at close so no device handle outlives the session that staged it.
+func (r *pagedRing) freeAll() {
+	if r == nil {
+		return
+	}
+	for id, t := range r.resident {
+		r.be.Free(t)
+		delete(r.resident, id)
+		r.pool.Evict(id)
+	}
+	r.holds, r.heldPins = nil, nil
 }
 
 // matMul runs y = w·x for the named f32 weight [out,in] under the ring budget — the original ring
@@ -172,3 +299,7 @@ func (r *pagedRing) residentCount() int { return len(r.resident) }
 // used / budget expose the polymodel byte accounting: used() <= budget() always.
 func (r *pagedRing) used() int64   { return r.pool.Used() }
 func (r *pagedRing) budget() int64 { return r.pool.Budget() }
+
+// peakUsed is the high-water mark of used() over the ring's life — the number a boundedness witness
+// asserts against budget(), since used() alone cannot show what the footprint reached in between.
+func (r *pagedRing) peakUsed() int64 { return r.peak }
