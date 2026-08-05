@@ -51,6 +51,24 @@ type Sample struct {
 	AvailableMB  int     `json:"available_mb"`   // free RAM; rules OUT memory exhaustion as the cause
 	DiskQueueLen float64 `json:"disk_queue_len"` // current physical-disk queue; rules OUT disk saturation
 
+	// SpawnWindowSeconds is the wall-clock span SpawnBurst was counted over.
+	//
+	// WHY THIS FIELD IS LOAD-BEARING. A spawn COUNT is meaningless without its
+	// window: 22 births is unremarkable over a second and a storm over a
+	// millisecond. Before this field existed the axis compared a bare count to a
+	// bare threshold, so its meaning silently tracked whatever interval the
+	// caller happened to sample at — the same number meant different things to
+	// two callers, and neither could tell. Live capture on the reference box
+	// (2026-08-05, 101 one-second ticks under ordinary fleet load) measured a
+	// median of 22 gross births/sec, p95 63, max 83: against the count threshold
+	// of 8 that is a stall verdict on 95% of ticks of a perfectly healthy box.
+	//
+	// Zero means the window is unknown, which keeps the legacy count comparison
+	// for callers that never set it. A caller that DOES know its window gets the
+	// rate comparison (SpawnBurstRateStall), which is the only one that can be
+	// calibrated against a measured distribution.
+	SpawnWindowSeconds float64 `json:"spawn_window_seconds,omitempty"`
+
 	// Handle census. A per-process handle count that climbs unbounded is a
 	// classic Windows leak (Russinovich's rule of thumb: >10k handles/proc is a
 	// likely leak). On this box the terminal emulator has been the top holder,
@@ -143,8 +161,53 @@ type Thresholds struct {
 	ContextSwitchStall float64 // ctx switches/sec (default 100k)
 	SysCallStall       float64 // syscalls/sec (default 500k)
 
-	// Spawn burst: net or gross new processes within one sample interval.
+	// Spawn burst, WINDOW-UNKNOWN path: net or gross new processes within one
+	// sample interval, compared as a bare count. Used only when the Sample does
+	// not carry SpawnWindowSeconds, and for the ProcessDelta fallback (a NET
+	// delta, whose calibration is unrelated to a gross birth rate).
 	SpawnBurstStall int // default 8
+
+	// SpawnBurstRateStall is the spawn axis in the only unit that can be
+	// calibrated: gross births per SECOND. Used when the Sample carries
+	// SpawnWindowSeconds and reports a gross SpawnBurst.
+	//
+	// CALIBRATION AND ITS LIMIT (be honest about which half is measured):
+	//   Negative class — MEASURED. 101 one-second ticks on the reference box
+	//   under ordinary fleet load (python dispatchers shelling git/bash/grep, a
+	//   peer `go test` run, 22 resident fak workers) gave median 22 births/sec,
+	//   p95 63, max 83. 150/sec sits ~1.8x above that measured max, so ordinary
+	//   fleet operation — including the go-toolchain and git-loop bursts that
+	//   dominate it — cannot trip this axis.
+	//   Positive class — NOT YET MEASURED. No desktop freeze has been captured
+	//   with a gross-birth axis armed; the reference freeze was recorded on the
+	//   NET ProcessDelta axis (+9 in one 2s window), which is a different
+	//   quantity and cannot be converted. So this default bounds FALSE POSITIVES
+	//   from a measured distribution; its SENSITIVITY is unproven until a freeze
+	//   is captured with SpawnWindowSeconds set. Treat a firing as a real signal,
+	//   but do not read a non-firing as proof the box is calm.
+	//
+	// THE UNIT IS "WHAT A POLL SAMPLER SEES", NOT "WHAT THE KERNEL DID. A
+	// PID-diff sampler can only count a birth that SURVIVES to its next
+	// enumeration, and short-lived processes mostly do not. Measured against a
+	// known ground truth on the reference box (200 injected `cmd /c exit`, ~40ms
+	// lifetime, 1s sampling): the sampler caught 10 of 200 — 5%, a 20x
+	// undercount. The bias is not a constant to divide out; it scales with
+	// process LIFETIME, so it is near 1x for a storm of long-lived workers and
+	// near 20x for a storm of `git rev-parse`/`grep` — worst exactly where the
+	// churn is worst. This threshold is therefore expressed in sampler units and
+	// is only comparable against readings taken the same way.
+	//
+	// The consequence for the whole package: the spawn axis is a CORROBORATING
+	// signal, not the primary one. TotalFaultsPerSec / ContextSwitchesPerSec /
+	// SystemCallsPerSec are counted by the kernel per event and cannot be missed
+	// by sampling, so they see the storm the spawn axis structurally under-reads.
+	// Measured cost of one process creation on the reference box (same controlled
+	// injection, cheapest possible process, so these are FLOORS): ~8,166 page
+	// faults, ~2,203 context switches, ~12,981 syscalls. That is the mechanism by
+	// which spawn churn shows up on the fault axis at full strength while the
+	// spawn axis itself sees a twentieth of it.
+	// Zero disables the rate axis (the count path still applies).
+	SpawnBurstRateStall float64 // default 150 births/sec, in POLL-SAMPLER units
 
 	// Genuine-resource guards (to correctly ATTRIBUTE, not to gate stalls).
 	MemLowMB      int     // available RAM below this = memory pressure (default 2048)
@@ -187,21 +250,22 @@ type Thresholds struct {
 // DefaultThresholds returns the calibrated defaults.
 func DefaultThresholds() Thresholds {
 	return Thresholds{
-		SoftFaultStall:     400000,
-		SoftFaultElevated:  150000,
-		HardFaultDiskFrac:  0.15,
-		ContextSwitchStall: 100000,
-		SysCallStall:       500000,
-		SpawnBurstStall:    8,
-		MemLowMB:           2048,
-		DiskQueueBusy:      4,
-		HandleLeakProc:     10000,
-		SystemHandleHigh:   1000000,
-		ThreadLeakProc:     500,
-		HandleGrowthDelta:  1500,
-		HandleGrowthFloor:  3000,
-		ThreadGrowthDelta:  100,
-		ThreadGrowthFloor:  200,
+		SoftFaultStall:      400000,
+		SoftFaultElevated:   150000,
+		HardFaultDiskFrac:   0.15,
+		ContextSwitchStall:  100000,
+		SysCallStall:        500000,
+		SpawnBurstStall:     8,
+		SpawnBurstRateStall: 150,
+		MemLowMB:            2048,
+		DiskQueueBusy:       4,
+		HandleLeakProc:      10000,
+		SystemHandleHigh:    1000000,
+		ThreadLeakProc:      500,
+		HandleGrowthDelta:   1500,
+		HandleGrowthFloor:   3000,
+		ThreadGrowthDelta:   100,
+		ThreadGrowthFloor:   200,
 	}
 }
 
@@ -240,6 +304,18 @@ type Verdict struct {
 	ThreadGrowthPID     int    `json:"thread_growth_pid,omitempty"`
 	ThreadGrowthCount   int    `json:"thread_growth_count,omitempty"` // current thread count
 	ThreadGrowthDelta   int    `json:"thread_growth_delta,omitempty"` // climb since baseline
+}
+
+// spawnRate converts a gross birth count to births/sec, reporting ok only when
+// BOTH the count and the window it was measured over are present. A count with
+// no window is not a rate and must not be treated as one — that conflation is
+// what let the axis be calibrated against one caller's interval and then read by
+// another at a different one.
+func (s Sample) spawnRate() (float64, bool) {
+	if s.SpawnBurst <= 0 || s.SpawnWindowSeconds <= 0 {
+		return 0, false
+	}
+	return float64(s.SpawnBurst) / s.SpawnWindowSeconds, true
 }
 
 // hardFraction is the share of total faults that actually hit disk. A tiny
@@ -311,14 +387,34 @@ func Classify(s Sample, t Thresholds) Verdict {
 
 	// Spawn storm: a burst of new processes in one interval. This is the most
 	// specific and actionable cause, so it wins attribution when present.
-	spawn := s.SpawnBurst
-	if spawn == 0 && s.ProcessDelta > 0 {
-		spawn = s.ProcessDelta
-	}
-	if t.SpawnBurstStall > 0 && spawn >= t.SpawnBurstStall {
-		stall = true
-		v.Cause = CauseSpawnStorm
-		v.Reasons = append(v.Reasons, fmt.Sprintf("spawn burst %d processes in one interval (>= %d)", spawn, t.SpawnBurstStall))
+	// Two paths, because a count and a rate are not the same quantity. When the
+	// sample carries the window the gross burst was counted over, compare a
+	// RATE against a rate threshold — the only unit with a measured calibration
+	// (see Thresholds.SpawnBurstRateStall). Otherwise fall back to the legacy
+	// bare-count comparison, which is all a window-less caller can support.
+	//
+	// The ProcessDelta fallback always takes the count path even when a window
+	// is present: it is a NET delta, and SpawnBurstStall was calibrated against
+	// exactly that. Applying the gross-birth rate threshold to a net delta would
+	// silently disarm the axis for every caller that has no gross count.
+	if rate, ok := s.spawnRate(); ok && t.SpawnBurstRateStall > 0 {
+		if rate >= t.SpawnBurstRateStall {
+			stall = true
+			v.Cause = CauseSpawnStorm
+			v.Reasons = append(v.Reasons, fmt.Sprintf(
+				"spawn burst %.0f processes/sec (%d in %.2fs, >= %.0f/sec)",
+				rate, s.SpawnBurst, s.SpawnWindowSeconds, t.SpawnBurstRateStall))
+		}
+	} else {
+		spawn := s.SpawnBurst
+		if spawn == 0 && s.ProcessDelta > 0 {
+			spawn = s.ProcessDelta
+		}
+		if t.SpawnBurstStall > 0 && spawn >= t.SpawnBurstStall {
+			stall = true
+			v.Cause = CauseSpawnStorm
+			v.Reasons = append(v.Reasons, fmt.Sprintf("spawn burst %d processes in one interval (>= %d)", spawn, t.SpawnBurstStall))
+		}
 	}
 
 	// Soft-fault churn: huge total faults, small hard fraction, RAM free.

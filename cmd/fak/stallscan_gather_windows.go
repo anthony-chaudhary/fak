@@ -67,15 +67,32 @@ $snap = { Get-CimInstance Win32_Process | ForEach-Object {
 # unaffected. Get-Snap yields [] on a transient failure, never throws.
 function Get-Snap { $r=@(& $snap); return ,$r }
 $first=@(); foreach($try in 1..4){ $first=Get-Snap; if($first.Count -gt 50){break}; Start-Sleep -Milliseconds 250 }
+# A degraded FIRST snapshot would make every process in the second look newly
+# born, fabricating a spawn storm exactly when the box is already struggling.
+# Only report the birth count when the baseline passed the same plausibility bar.
+$spawnKnown = ($first.Count -gt 50)
 $a=@{}; foreach($p in $first){ $a[$p.pid]=$p }
+# Time the ACTUAL window rather than assuming the nominal 1s sleep. The two
+# enumerations are not free (and get slower under the very stall this diagnoses,
+# where the retry loop above may add seconds), so the true span can be several
+# times the sleep. A birth COUNT divided by an assumed window is a fabricated
+# rate; dividing by the measured one is a real one.
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
 Start-Sleep -Seconds 1
 $second=@(); foreach($try in 1..4){ $second=Get-Snap; if($second.Count -gt 50){break}; Start-Sleep -Milliseconds 250 }
-$top=@(); $hlist=@(); $handleTotal=0
+$sw.Stop()
+$spawnWindow = [math]::Round($sw.Elapsed.TotalSeconds, 3)
+$top=@(); $hlist=@(); $handleTotal=0; $spawned=0
 foreach($p in $second){
   $handleTotal += $p.handles
   $hlist += [pscustomobject]@{ pid=$p.pid; name=$p.name; handles=$p.handles; threads=$p.threads }
   $prev = $a[$p.pid]
+  # A PID in the second snapshot but not the first was BORN inside the window.
+  # This is the gross birth count the spawn axis needs; the net process delta
+  # cancels it away (a burst of short-lived spawns is born AND reaped between
+  # samples). Free here: both enumerations already exist for the I/O delta.
   if ($prev) { $d = $p.ops - $prev.ops; if ($d -gt 0) { $top += [pscustomobject]@{ pid=$p.pid; name=$p.name; ops=$d } } }
+  else { $spawned++ }
 }
 $top   = $top   | Sort-Object ops     -Descending | Select-Object -First 12
 $topH  = $hlist | Sort-Object handles -Descending | Select-Object -First 12
@@ -92,6 +109,9 @@ $topT  = $hlist | Sort-Object threads -Descending | Select-Object -First 12
   availMB     = [int]$h['Available MBytes']
   diskQ       = $h['Current Disk Queue Length']
   handleTotal = [int64]$handleTotal
+  spawned     = [int]$spawned
+  spawnKnown  = [bool]$spawnKnown
+  spawnWindow = [double]$spawnWindow
   top         = $top
   topHandles  = $topH
   topThreads  = $topT
@@ -128,6 +148,16 @@ type stallRaw struct {
 	AvailMB     int     `json:"availMB"`
 	DiskQ       float64 `json:"diskQ"`
 	HandleTotal int64   `json:"handleTotal"`
+	// Spawned is the GROSS count of processes born inside the probe's own
+	// snapshot window (PIDs present in the second enumeration and absent from
+	// the first). SpawnKnown is false when the first enumeration came back
+	// degraded, in which case Spawned is meaningless and must not be trusted.
+	// SpawnWindow is the MEASURED wall-clock span between the two enumerations,
+	// which is what makes Spawned convertible to a rate. It is not the nominal
+	// sleep: the enumerations themselves cost time, and more of it under a stall.
+	Spawned     int     `json:"spawned"`
+	SpawnKnown  bool    `json:"spawnKnown"`
+	SpawnWindow float64 `json:"spawnWindow"`
 	// Top and TopHandles are json.RawMessage because PowerShell's ConvertTo-Json
 	// unwraps a SINGLE-element array into a bare object — so on a quiet box (only
 	// one process with a positive IO delta) these arrive as `{...}`, not `[...]`.
@@ -187,6 +217,26 @@ func gatherStallSample(topN int) (stallscan.Sample, string) {
 		s.ProcessDelta = raw.Procs - prevProcCount
 	}
 	prevProcCount = raw.Procs
+	// The spawn axis wants GROSS births, not the net census delta. A storm of
+	// short-lived spawns (git/pwsh/tasklist bursts — the reference freeze's own
+	// signature) is born and reaped inside one interval, so the net delta reads
+	// ~0 and the axis stays blind to exactly the shape it was built for. The
+	// probe now counts PIDs that appeared between its two enumerations, and
+	// reports the MEASURED span of that window alongside the count so Classify
+	// can compare a births/sec RATE. Handing over the count alone would be worse
+	// than useless: on this box ordinary fleet load runs 22 gross births/sec
+	// (p95 63), which clears the legacy count threshold of 8 on 95% of ticks.
+	//
+	// SpawnKnown false = the baseline enumeration was degraded, so every process
+	// would look newly born. Leave SpawnBurst at zero rather than fabricate a
+	// storm; Classify then falls back to ProcessDelta exactly as before. A
+	// non-positive measured window is treated the same way — a count we cannot
+	// convert is not evidence, and must not be smuggled onto the count path
+	// where its calibration does not apply.
+	if raw.SpawnKnown && raw.Spawned > 0 && raw.SpawnWindow > 0 {
+		s.SpawnBurst = raw.Spawned
+		s.SpawnWindowSeconds = raw.SpawnWindow
+	}
 	var topIO []stallTopIO
 	if err := psList(raw.Top, &topIO); err == nil {
 		for _, p := range topIO {
