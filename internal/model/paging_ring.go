@@ -70,9 +70,15 @@ type pagedRing struct {
 	// pins is the online-learning resident pin-set (expert_warmpins.go): the workload-personalized
 	// hot-set warm-started from the summed cross-session usage histogram and drifted between turns by
 	// RepinPass. nil until WarmStartPins seeds it — a ring that was never warm-started has no pin-set,
-	// so isExpertPinned reports false and RepinPass is a no-op. Off the live serve path today
-	// (matMulStaged still takes a static `pinned` per call; consulting the set is the #2726 follow-on).
+	// so isExpertPinned reports false and RepinPass is a no-op. R2/#5613 gave it its live-path
+	// consumer: weightHALStagedBounded computes matMulStaged's `pinned` from it per routed expert
+	// (expert_ring_pins.go), so the pool's pinned-never-evicted invariant now protects the workload's
+	// hot set instead of nothing.
 	pins *ExpertPinSet
+	// turn is THIS turn's routed-expert usage, folded in by observeExpert and consumed by
+	// Session.ExpertRingEndTurn (which decays the standing heat, folds this in, repins, and dumps).
+	// nil alongside a nil pins, so a ring that was never warm-started observes nothing.
+	turn *ExpertUsageHistogram
 }
 
 // newPagedRing returns a ring over be with the given resident weight-byte budget. A nil backend

@@ -64,6 +64,9 @@ func (s *Session) routedExpertRing(name string) *pagedRing {
 	}
 	if s.expertRing == nil {
 		s.expertRing = newPagedRing(s.Backend, s.ExpertRingBytes)
+		// R2/#5613: seed the durable pin-set before the first staging, so turn 1 already pins the
+		// prior's hot set. A session declaring neither knob gets no pin-set and the plain-LRU ring.
+		s.warmStartExpertPins(s.expertRing)
 	}
 	return s.expertRing
 }
@@ -90,9 +93,16 @@ func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Ten
 		}
 	}
 	if r := s.routedExpertRing(name); r != nil {
-		// pinned=false: R0 gives the ring plain LRU. Consulting the warm-start pin-set
-		// (pagedRing.isExpertPinned, expert_warmpins.go) is R2/#5613.
-		if t, ok := r.stage(key, mk, dtype, weightBytes, false); ok {
+		// R2/#5613: `pinned` comes from the durable, workload-personalized pin-set rather than the
+		// constant false R0 passed, and the staging is folded into this turn's usage histogram so
+		// the actuator repins against real routing. A session with no pin-set answers false and
+		// observes nothing, which is R0's plain-LRU ring byte-for-byte.
+		pinned := false
+		if layer, expert, ok := routedExpertIdentity(name); ok {
+			pinned = r.isExpertPinned(layer, expert)
+			r.observeExpert(layer, expert)
+		}
+		if t, ok := r.stage(key, mk, dtype, weightBytes, pinned); ok {
 			return t
 		}
 	}
@@ -143,6 +153,9 @@ type ExpertRingStats struct {
 	PageIns   int `json:"page_ins"`
 	Hits      int `json:"hits"`
 	Evictions int `json:"evictions"`
+	// PinnedCount is how many experts the durable pin-set (R2/#5613) currently holds exempt from
+	// eviction. 0 means plain LRU — either no pin-set was declared, or the prior was empty.
+	PinnedCount int `json:"pinned_count"`
 }
 
 // ExpertRing reports this session's bounded routed-expert residency. It returns the zero value (in
@@ -162,5 +175,6 @@ func (s *Session) ExpertRing() ExpertRingStats {
 		PageIns:       r.pageIn,
 		Hits:          r.hit,
 		Evictions:     r.evict,
+		PinnedCount:   r.pins.Len(),
 	}
 }

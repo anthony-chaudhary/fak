@@ -153,9 +153,26 @@ type Session struct {
 	// token and keep permanent residency. 0 (the default) disables the ring entirely and leaves every
 	// path byte-for-byte unchanged.
 	ExpertRingBytes int64
+	// ExpertPinBudget is how many routed experts the ring may hold PINNED — exempt from LRU eviction
+	// — chosen as the hottest of the persisted cross-session usage prior and drifted between turns by
+	// ExpertRingEndTurn (expert_ring_pins.go, #5613). It buys back the cold page-in a hot expert
+	// otherwise pays after every eviction and every restart. It must stay well under the ring's own
+	// capacity in experts: a pin-set as large as the ring leaves no victims and the ring degrades to
+	// a memoizer that refuses new work. 0 (the default) is plain LRU.
+	ExpertPinBudget int
+	// ExpertUsagePath is where this session dumps its routed-expert usage histogram at each turn
+	// boundary and warm-starts its pin-set from at the first staging. A missing file is the cold
+	// first run, not an error — the run BUILDS the prior a later one starts from, which is why a
+	// path alone (with no pin budget) is still useful. "" disables persistence entirely; a caller
+	// folding several sessions' dumps sums them with SumExpertUsageHistograms and points here at the
+	// result.
+	ExpertUsagePath string
 	// expertRing is the bounded routed-expert ring, built lazily on the first routed-expert staging
 	// when ExpertRingBytes > 0 and freed by Close. nil on every session that never declared a budget.
 	expertRing *pagedRing
+	// expertPinErr retains a warm-start load failure until the next turn boundary reports it: a
+	// corrupt usage dump must degrade the session to a cold start, not fail it, but must not vanish.
+	expertPinErr error
 	// halStep counts tokens run through the HAL (diagnostic / legacy warm-up counter).
 	halStep int
 	// halLogitsWarm gates CUDA-graph capture: it flips true only after one FULL
