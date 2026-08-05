@@ -204,6 +204,7 @@ func scaleExpertBandBytes(total uint64, band, experts int) (uint64, error) {
 type RoutedExpertActiveSet struct {
 	NumExperts     int   // expert_count
 	ExpertsUsed    int   // expert_used_count (K); 0 when the header omits it (active-*/token pending)
+	MoELayers      int   // distinct block ordinals carrying a batched routed-expert tensor — the DENOMINATOR that turns the whole-model routed band into a per-layer one (a hybrid checkpoint's dense prefix carries none, so this is not block_count)
 	RoutedResident int64 // sum of every batched routed-expert tensor payload (all experts, unsharded)
 	PerExpert      int64 // RoutedResident / NumExperts — one expert's resident bytes across every MoE layer
 	ActivePerToken int64 // K × PerExpert — routed-expert bytes a decoded token streams (0 when K unread)
@@ -246,6 +247,7 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 		return RoutedExpertActiveSet{}, false, nil
 	}
 	var routedBytes, routedElems, totalBytes, totalElems, inputEmbedBytes uint64
+	moeLayers := map[int]struct{}{}
 	for _, info := range s.File.Tensors {
 		n, err := tensorPayloadBytes(info)
 		if err != nil {
@@ -260,9 +262,10 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 		}
 		totalBytes += n
 		totalElems += e
-		if _, _, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+		if layer, _, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 			routedBytes += n
 			routedElems += e
+			moeLayers[layer] = struct{}{}
 		}
 		if strings.EqualFold(info.Name, "token_embd.weight") {
 			inputEmbedBytes = n
@@ -281,6 +284,7 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 	as := RoutedExpertActiveSet{
 		NumExperts:        cfg.NumExperts,
 		ExpertsUsed:       cfg.NumExpertsPerTok,
+		MoELayers:         len(moeLayers),
 		RoutedResident:    int64(routedBytes),
 		PerExpert:         perExpert,
 		RoutedParams:      int64(routedElems),
