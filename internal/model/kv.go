@@ -228,6 +228,23 @@ type Session struct {
 	// host) and the forward stays byte-for-byte the resident path. See splitKernel.
 	CPUOffloadExperts bool
 
+	// ExpertSpillLayers GRADES CPUOffloadExperts (#5612): with the split on, spill only the FIRST N
+	// MoE layers' expert GEMMs to host RAM and keep the rest device-resident — llama.cpp's
+	// `--n-cpu-moe N`, over the model's real MoE layer ordinals (MoEExpertLayers). It is the dial
+	// between the two endpoints the split kernel could express before: all experts host, or none.
+	//
+	// 0 (the default) or a value at/above the MoE layer count means UNGRADED — every expert weight
+	// spills, byte-for-byte the pre-#5612 predicate — so the field is inert unless a plan sets it,
+	// and CPUOffloadExperts alone still means what it always meant. Nothing spills when
+	// CPUOffloadExperts is false, whatever this holds. Size it with Model.ResolveExpertSpillPlacement and install
+	// it with Session.ApplyExpertSpillPlacement, which keeps it in agreement with ExpertRingBytes.
+	ExpertSpillLayers int
+
+	// spillOnHost memoizes the graded placement predicate (expertSpillOnHost). It is consulted per
+	// GEMM and its construction walks every resident tensor name, so it is built once per session;
+	// ApplyExpertSpillPlacement clears it so a re-planned session cannot keep running the old grade.
+	spillOnHost func(string) bool
+
 	// PrecisionPolicy enables dynamic whole-token precision. When set, Prefill/Step
 	// speculatively run the Q8_0 path, inspect the returned distribution, and may roll the
 	// KV cache back to recompute the same token/span in f32. It is additive: nil preserves
