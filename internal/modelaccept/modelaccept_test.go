@@ -279,3 +279,31 @@ func TestEvaluateUsesDeclaredSentinelLine(t *testing.T) {
 		t.Fatalf("embedded sentinel must hold: %+v", got)
 	}
 }
+
+func TestProspectiveV3CompletedReportPassesExactTiers(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "model-acceptance-prospective-v3-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var in Input
+	if err := json.Unmarshal(data, &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Corpus.ID != "top3-prospective-sentinel-v3" || len(in.Runs) != 18 {
+		t.Fatalf("completed campaign corpus=%q runs=%d", in.Corpus.ID, len(in.Runs))
+	}
+	got := Evaluate(in)
+	if got.Verdict != Pass || len(got.Models) != 3 {
+		t.Fatalf("decision=%+v", got)
+	}
+	wantTier := map[string]int{
+		"claude-opus-4-8":           0,
+		"claude-sonnet-4-6":         1,
+		"claude-haiku-4-5-20251001": 2,
+	}
+	for _, model := range got.Models {
+		if model.Verdict != Pass || model.Samples != 6 || model.RequestedTier != wantTier[model.Model] {
+			t.Fatalf("model=%+v", model)
+		}
+	}
+}
