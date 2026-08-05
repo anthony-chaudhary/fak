@@ -819,14 +819,7 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		opts.ResidentTokens = int(s.metrics.heldResidentPeakTokens(trace))
 		opts.SolvencyFloorTokens = s.compactSolvencyFloorTokens
 	}
-	// Survival-class gate (#2421): the compaction runs under the page-class contract rather than
-	// straight onto the wire. Every page in the eviction domain (messages[]) carries a class its
-	// KIND fixes — PINNED (the active steer, the live continuation seed), REPLAYABLE (CAS-backed
-	// results a restore handle pages back in), EVICTABLE (aged prose) — and a plan that would
-	// evict a PINNED page is refused with PIN_EVICT_REFUSED and the body forwarded unchanged,
-	// after one retry against the evictable set only. Same signature and same outcome shape as the
-	// bare compactor, so everything below is untouched; see pinsurvival.go.
-	out, outcome := s.compactWithSurvivalClasses(req.Raw, opts)
+	out, outcome := agent.CompactAnthropicHistoryWithOptions(req.Raw, opts)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	// Restore handle: when this fire tombstoned the session's originating task, the outcome carries
