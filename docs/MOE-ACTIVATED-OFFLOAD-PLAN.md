@@ -1,6 +1,6 @@
 ---
 title: "MoE activated-expert offload - the promotion plan"
-description: "fak has built nine witnessed pieces of an activated-expert offload machine and wired none of them to the serve path. This is the ordered promotion ladder that makes the activated working set a first-class, bounded, observable object: ring wiring, graded spill knob, pin-set, prefetch, evictor policy, checkpoint tier, operator surface."
+description: "fak had built nine witnessed pieces of an activated-expert offload machine and wired none of them to the serve path. This is the ordered promotion ladder that makes the activated working set a first-class, bounded, observable object: ring wiring (R0, landed), graded spill knob, pin-set, prefetch, evictor policy, checkpoint tier, operator surface."
 ---
 
 # MoE activated-expert offload - the promotion plan
@@ -36,8 +36,16 @@ weight handle in `s.halW` and **never evicts**: the map is only torn down at ses
 since the session started*, monotonically converging on the full expert bulk. It is a
 memoizer, not a cache - no budget, no victim, no accounting.
 
-Neither placement has a bounded activated working set. There is no seam where a residency
+Neither placement has a bounded activated working set. There was no seam where a residency
 policy, a prefetch, a pin-set or a byte budget could attach on the live path.
+
+**3. Bounded, opt-in (R0, landed).** `Session.ExpertRingBytes > 0` now stages *routed* expert
+weights through the bounded ring instead of `halW`
+(`internal/model/expert_ring_hal.go`, #5611): budgeted, LRU-evicted, page-in/hit/evict
+accounted, with dense/attention/router/shared-expert weights keeping permanent residency. It
+is the seam the rest of the ladder attaches to. It is **not yet operator-reachable** - no CLI
+flag sets the budget, so every session in the tree still runs placement 2 by default. Sizing
+that budget from a flag is R1 (#5612).
 
 ## What is already built (and where it stops)
 
@@ -45,7 +53,7 @@ Nine witnessed capabilities exist. Column 3 is the load-bearing one.
 
 | Capability | Where | Live-path status |
 |---|---|---|
-| Bounded per-weight device ring (byte budget, LRU victim, pinned-exempt, page-in/hit/evict counters) | `internal/model/paging_ring.go` | **Off-path.** Sole constructor is `internal/model/v4_expert_runtime.go:67` - DeepSeek-V4 only. Its own header (`:38-44`) states it is off the serve path and names the session-HAL wiring as the follow-on rung. |
+| Bounded per-weight device ring (byte budget, LRU victim, pinned-exempt, page-in/hit/evict counters) | `internal/model/paging_ring.go` | **Wired (R0, #5611).** `pagedRing.stage` + `internal/model/expert_ring_hal.go` put it under the session weight HAL for routed experts, opt-in per session via `Session.ExpertRingBytes`. Was off-path (sole constructor `v4_expert_runtime.go:67`, DeepSeek-V4 only). Still needs R1's flag to be operator-reachable. |
 | Graded spill sizing + auto-fit to a measured device budget (`--n-cpu-moe N` semantics) | `internal/model/expert_spill_fit.go` (#5281, closed) | **No caller.** `ResolveExpertSpill` / `AutoFitExpertSpill` are exported and unused outside tests; no CLI flag exposes N. |
 | Value-aware evictor: routing-heat hysteresis + LFU-decay, scored against the Belady oracle | `internal/model/expert_residency_lfu.go` (#4357, closed) | **Simulation only,** deliberately off the live path; the ring is still plain LRU via `polymodel.Pool`. |
 | Cross-session expert usage histogram, warm-start pin selection, between-turn `RepinPass` | `internal/model/expert_warmpins.go` (#4358, closed) | **Off-path.** `pagedRing.pins` is never consulted - `matMulStaged` still takes a static `pinned` bool per call (`paging_ring.go:56-61`). |
@@ -62,6 +70,10 @@ each piece was landed under a "generation frame" that explicitly deferred wiring
 issue owned the wiring itself. #2726 (which *did* own it) was closed COMPLETED on the
 primitive while its own follow-on rung stayed open in the code comments.
 
+**Status: one of the nine is now wired** (row 1, R0/#5611) - the bounded ring, which is the
+one every other rung attaches to. The remaining eight are still off-path, and the ring itself
+is still session-level opt-in with no flag behind it.
+
 ## The ladder
 
 Tracked as epic **#5606** with children **#5611-#5618**.
@@ -69,22 +81,31 @@ Tracked as epic **#5606** with children **#5611-#5618**.
 Ordered by leverage-over-cost. R0 is the keystone: R2, R3, R4, R5, R7 all attach to the seam
 it creates, and none of them can land without it.
 
-### R0 - P0 - #5611 - Bound the activated set: wire the ring under the expert weight HAL
+### R0 - P0 - #5611 - Bound the activated set: wire the ring under the expert weight HAL - **LANDED**
 
-Give `Session` a budgeted expert ring and route *routed-expert* weight staging through it
-instead of the unbounded `halW` memoizer, keyed by canonical tensor name, gated by
-`isRoutedExpertWeight` so dense/attention/router weights keep their permanent residency.
+`Session` has a budgeted expert ring (`ExpertRingBytes`, default 0 = off) and *routed-expert*
+weight staging goes through it instead of the unbounded `halW` memoizer, keyed by the same
+dtype-prefixed HAL key and gated by `isRoutedExpertWeight` so dense/attention/router/shared
+weights keep their permanent residency.
 
 - **Why first:** it converts "residency" from an emergent side effect of a memo map into a
   declared, bounded object with a budget and a victim policy. Every other rung is a policy
   or an observer *on that object*.
 - **Reuse:** `pagedRing` already proves bit-equality between hit and miss paths against the
   cpu-ref backend, and inherits `polymodel.Pool`'s `used<=budget` and pinned-never-evicted
-  invariants by construction.
-- **Witness:** (a) bit-exactness - a ring-served forward is byte-identical to the resident-HAL
-  forward over a fixed prompt; (b) boundedness - peak device weight bytes stay under the
-  configured budget across a decode window that activates more distinct experts than fit;
-  (c) recovery - an evicted expert pages back in on its next activation.
+  invariants by construction. R0 added only `stage()` - `matMulStaged` with the GEMM removed,
+  so the two share one lifecycle and the bit-equality transfers - plus `hold`/`release`, because
+  one expert is three co-used weights and a tight budget must not evict `gate` to admit `down`.
+- **Witness** (`internal/model/expert_ring_hal_test.go`, all green): (a) bit-exactness - six
+  experts through a two-expert ring are byte-identical to the resident-HAL forward, with hits,
+  page-ins and evictions all exercised; (b) boundedness - peak device weight bytes stay under
+  budget and no routed expert reaches `halW`; (c) recovery - an evicted expert pages back in on
+  its next activation, and `Close` pages the ring out; (d) co-residency - a two-weight budget
+  holds one expert's projections together and falls the third back to permanent residency rather
+  than freeing a handle in use; (e) default-unchanged - at `ExpertRingBytes == 0` no ring is
+  built and every weight uploads exactly once, as before.
+- **Not done here:** the budget has no CLI knob (R1), the ring is plain LRU and ignores the
+  warm-start pin-set (R2/R4), misses are synchronous (R3) and read the fully-resident slab (R5).
 
 ### R1 - P0 - #5612 - Ship the graded knob and admit on the working set
 
@@ -183,7 +204,8 @@ optimization *downstream* of a bounded, shared activated set, not a substitute f
 
 ## Reading order
 
-`internal/model/moe_offload.go` (the static split) -> `internal/model/hal.go:170-284` (the
-unbounded memoizer that is the actual default) -> `internal/model/paging_ring.go` (the
-bounded twin that should replace it for routed experts) -> `internal/model/expert_spill_fit.go`
-(the sizing math waiting for a caller).
+`internal/model/moe_offload.go` (the static split) -> `internal/model/hal.go` (`weightHALStaged`,
+the unbounded memoizer that is still the default) -> `internal/model/paging_ring.go`
+(`stage`/`hold`, the bounded twin) -> `internal/model/expert_ring_hal.go` (R0: the wiring that
+binds them for routed experts) -> `internal/model/expert_spill_fit.go` (the sizing math still
+waiting for a caller - R1).
