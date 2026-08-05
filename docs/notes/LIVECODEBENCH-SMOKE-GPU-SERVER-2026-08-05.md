@@ -72,6 +72,23 @@ mid-think returns `length` with an empty `content`. The default is now `LCB_MAX_
 and the summarizer prints an `EMPTY_HINT` naming the current budget whenever any sample is
 empty, so the next reader is not sent hunting a phantom serve failure.
 
+**The 2048 default is witnessed, not assumed.** Re-run against the same live serve from the
+committed script (`HEAD=176f948`), with only the default supplying the budget:
+
+```
+LCB_MAX_TOKENS=2048
+PROBLEMS=3 SAMPLES=3 NONEMPTY=3 WITH_CODE=3
+TOKENS prompt=75 completion=2142 cached=30 retries=0
+  lcb-sample-001   chars=1548
+  lcb-sample-002   chars=1067
+  lcb-sample-003   chars=739
+SMOKE_PASS nonempty=3 gen_s=94
+```
+
+`RESULT.txt` 1500 bytes `md5=9fae7c6d087473ff884b0d988d0025f8`. The 512-budget empty is gone;
+the cost is 67s → 94s for three problems. Note `completion=2142` across three samples — the
+budget is per-request headroom for the think chain, not a per-request spend.
+
 Sample-003 answered *"It looks like you didn't include the array in your message"* — correct
 behavior. The committed sample suite carries one-sentence **stub** prompts, not real
 LiveCodeBench statements. It is a transport-and-shape fixture, not a difficulty fixture. Do
@@ -137,9 +154,6 @@ Prefer `poll` over a blocking `wait` for the detached job: a long `wait` holds a
 - **No pass@1.** Generation only, per the fence above. Grading needs `lcb_runner`.
 - **No real problem statements.** The committed suite is a 3-problem stub sample; a
   difficulty-meaningful run needs a fetched `release_v2` suite.
-- **The 3/3 re-run at `LCB_MAX_TOKENS=2048` has not been executed** — the default changed and
-  was verified against the recorded report and a stub endpoint, but the larger budget has not
-  been re-run against the live serve.
 - **The chunked-pull and base64-carrier wrappers live in scratch, not in the repo.** They are
   described here precisely enough to rebuild; folding them into the bridge client is the
   obvious follow-on.
