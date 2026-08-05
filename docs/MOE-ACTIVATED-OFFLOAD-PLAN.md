@@ -122,7 +122,7 @@ a model on **activated working set + ring budget** rather than the full expert b
 
 - **Why P0 alongside R0:** without it, R0's budget has no operator control and preflight still
   refuses models that the ring makes servable. `ggufload`'s
-  `FitCPUOffloadExpertsOnDevice` is binary today: all experts host, or refuse.
+  `FitCPUOffloadExpertsOnDevice` was binary: all experts host, or refuse.
 - **Landed - the graded placement** (`internal/model/expert_spill_placement.go`, `c0d5e12b41`).
   `splitKernel`'s predicate is graded by `Session.ExpertSpillLayers`: `MoEExpertLayers` reads
   the model's *real* routed-expert layer ordinals (so "first N MoE layers" is not "layers
@@ -145,13 +145,32 @@ a model on **activated working set + ring budget** rather than the full expert b
   `internal/agent/inkernel_expert_spill_test.go` (the plan reaches successive sessions; the
   ungraded default leaves placement untouched; each refusal fires; the env door grades the
   planner the real constructor builds).
+- **Landed - the activated-working-set admission** (`internal/ggufload/expert_activated_fit.go`).
+  Both prior admissions ask *do the weights fit*: `FitOnDevice` charges the whole checkpoint,
+  `FitCPUOffloadExpertsOnDevice` charges the dense base and moves the *entire* expert band to
+  host. Neither can express what the ring runs. `ActivatedExpertFit` names three levels of device
+  demand from the header alone - **floor** (dense base + one MoE layer's K experts), **token**
+  (dense base + K experts on every MoE layer), **band** (what today's admission demands) - and
+  the refusal line moves to the floor, the honest one: below it no ring budget can assemble a
+  single expert GEMM group, above it the model is servable but paging. `RingBytes` is whatever
+  the budget leaves after the dense base, clamped to `[floor, band]`, and *is* the device-scoped
+  expert demand of the emitted plan, so the refusal falls out of the plan rather than a second
+  branch. `RoutedExpertActiveSet` gained `MoELayers` as the per-layer denominator - deliberately
+  not `block_count`, since a hybrid checkpoint's dense prefix carries no routed experts.
+- **Witnessed** (cont.): `internal/ggufload/expert_activated_fit_test.go` - at a budget holding
+  the base plus one whole token's activation, `FitOnDevice` **refuses** the fixture and
+  `FitActivatedExpertsOnDevice` **admits** it (same source, same backend, same headroom); one
+  byte below the floor it still refuses with a typed `*compute.FitError`; ring + host always
+  re-sum to the band; unknown K and K > E both fall back to the whole band rather than being
+  admitted as a small activated set.
 - **Not done:** `fak serve --n-cpu-moe` is not wired (`cmd/fak/serve.go`,
-  `internal/gateway/gateway.go`), so the knob is env-only; and preflight still admits on the
-  full expert bulk - `refuseEPPlanIfUnfit` / `FitCPUOffloadExpertsOnDevice` have not been
-  taught the activated-working-set + ring-budget form. **Open remainder of #5612.**
+  `internal/gateway/gateway.go`), so the knob is env-only; and `refuseEPPlanIfUnfit` still calls
+  the band-shaped `FitCPUOffloadExpertsOnDevice` rather than the activated form that now exists
+  beside it. Both are blocked on peer hunks in those files, not on design - the flag is three
+  mechanical touch-points and the swap is one line. **Open remainder of #5612.**
 - **Remaining witness:** a checkpoint whose full expert bulk exceeds the device budget is
-  admitted and decodes at a chosen N, with the plan JSON reporting the sized split; the refusal
-  path still fires when even the dense base plus the minimum ring does not fit.
+  admitted *through the serve flag* and decodes at a chosen N, with the plan JSON reporting the
+  sized split.
 
 ### R2 - P1 - #5613 - Consult the pin-set and persist the histogram on the live ring
 
@@ -243,4 +262,6 @@ the unbounded memoizer that is still the default) -> `internal/model/paging_ring
 binds them for routed experts) -> `internal/model/expert_spill_fit.go` (the sizing math) ->
 `internal/model/expert_spill_placement.go` (R1: what gives that math a caller and the split
 kernel a grade) -> `internal/agent/inkernel_expert_spill.go` (R1: the resolve-once, install-per-
-session seam a serve reaches through `FAK_N_CPU_MOE`).
+session seam a serve reaches through `FAK_N_CPU_MOE`) ->
+`internal/ggufload/expert_activated_fit.go` (R1: the admission that stops charging a checkpoint
+for the experts it will never hold at once).
