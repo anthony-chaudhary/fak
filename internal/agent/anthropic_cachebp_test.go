@@ -653,3 +653,62 @@ func TestBodyHasCacheControlKey(t *testing.T) {
 		}
 	}
 }
+
+func TestUpgradeAnthropicStableCacheTTL1hExtendsOrderedMessagePrefixes(t *testing.T) {
+	raw := []byte(`{"model":"claude-sonnet-4","system":[{"type":"text","text":"stable head","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"first stable turn","cache_control":{"type":"ephemeral"}}]},{"role":"assistant","content":[{"type":"text","text":"answer"}]},{"role":"user","content":[{"type":"text","text":"second stable turn","cache_control":{"type":"ephemeral"}}]}],"max_tokens":64}`)
+
+	out, oc := UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes(raw)
+	if oc.Reason != TTLUpgradeReasonNone || oc.Target != "messages" {
+		t.Fatalf("outcome = %+v, want message-prefix upgrade", oc)
+	}
+	if oc.UpgradedHeadBreakpoints != 1 || oc.UpgradedMessageBreakpoints != 2 {
+		t.Fatalf("upgrade split = head %d message %d, want 1/2", oc.UpgradedHeadBreakpoints, oc.UpgradedMessageBreakpoints)
+	}
+	if got := bytes.Count(out, []byte(`"ttl":"1h"`)); got != 3 {
+		t.Fatalf("1h breakpoint count = %d, want 3:\n%s", got, out)
+	}
+	// The rewrite must preserve the caller's bytes apart from the three ttl fields.
+	stripped := bytes.ReplaceAll(out, []byte(`,"ttl":"1h"`), nil)
+	if !bytes.Equal(stripped, raw) {
+		t.Fatalf("rewrite changed non-ttl bytes:\n got %s\nwant %s", stripped, raw)
+	}
+}
+
+func TestUpgradeAnthropicStableCacheTTL1hRefusesVolatileMessagePrefix(t *testing.T) {
+	raw := []byte(`{"model":"claude-sonnet-4","system":[{"type":"text","text":"stable head","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"request 550e8400-e29b-41d4-a716-446655440000","cache_control":{"type":"ephemeral"}}]}],"max_tokens":64}`)
+
+	out, oc := UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes(raw)
+	if oc.Reason != TTLUpgradeReasonVolatileMessage || oc.Target != "messages" {
+		t.Fatalf("outcome = %+v, want volatile-message refusal", oc)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Fatalf("refusal changed bytes:\n got %s\nwant %s", out, raw)
+	}
+}
+
+func TestUpgradeAnthropicStableCacheTTL1hRefusesMixedTTLOrdering(t *testing.T) {
+	// A caller-selected 5m head may not be followed by a fak-authored 1h message
+	// breakpoint: Anthropic requires longer TTLs to precede shorter TTLs.
+	raw := []byte(`{"model":"claude-sonnet-4","system":[{"type":"text","text":"stable head","cache_control":{"type":"ephemeral","ttl":"5m"}}],"messages":[{"role":"user","content":[{"type":"text","text":"stable turn","cache_control":{"type":"ephemeral"}}]}],"max_tokens":64}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes(raw)
+	if oc.Reason != TTLUpgradeReasonTTLAlreadySet {
+		t.Fatalf("outcome = %+v, want ttl_already_set", oc)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Fatal("ordering refusal changed bytes")
+	}
+}
+
+func TestUpgradeAnthropicStableCacheTTL1hHeadOnlyIsDistinctAblation(t *testing.T) {
+	raw := []byte(`{"model":"claude-sonnet-4","system":[{"type":"text","text":"head","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"history","cache_control":{"type":"ephemeral"}}]}],"max_tokens":64}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1hHeadOnly(raw)
+	if oc.Reason != TTLUpgradeReasonNone || oc.UpgradedHeadBreakpoints != 1 || oc.UpgradedMessageBreakpoints != 0 {
+		t.Fatalf("head-only outcome = %+v", oc)
+	}
+	if got := bytes.Count(out, []byte(`"ttl":"1h"`)); got != 1 {
+		t.Fatalf("head-only 1h count = %d, want 1: %s", got, out)
+	}
+	if !bytes.Contains(out, []byte(`"text":"history","cache_control":{"type":"ephemeral"}`)) {
+		t.Fatalf("head-only arm changed message breakpoint: %s", out)
+	}
+}

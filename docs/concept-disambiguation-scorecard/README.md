@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **36** (clarity 0 + coverage 36) |
-| **Crystal-clear concepts (and climbing)** | **410** crystal of 2123 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2295 / 2331** (98.5% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **71** (clarity 0 + coverage 71) |
+| **Crystal-clear concepts (and climbing)** | **414** crystal of 2127 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2298 / 2369** (97.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 190 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **60** of 2795 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **60** of 2802 indexed names |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 99.0/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.1/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2123 concepts - score 99.0/100 (grade A) - disambiguation-debt 36
+concept-disambiguation chart - 2127 concepts - score 98.1/100 (grade A) - disambiguation-debt 71
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 410
+  * crystal       #######..................... 414
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -45,7 +45,7 @@ clarity mix by family (each cell = one concept):
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         *******************ooooooooooooooooooooo (40 concept(s); 19 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
-  evict            ********oooooooooooooooooooooooooooooooo (40 concept(s); 8 crystal)
+  evict            ************oooooooooooooooooooooooooooooooo (44 concept(s); 12 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 13 crystal)
   guard-gate       ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (325 concept(s); 84 crystal)
   layout           ****ooooooooo      (13 concept(s); 4 crystal)
@@ -62,29 +62,29 @@ clarity mix by family (each cell = one concept):
   witness-proof    **************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 50 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ###########################. 319/328
-  guard-gate       ############################ 385/391
-  render-materialize ###########################. 177/182
-  session-runtime  ###########################. 213/218
-  loop             ###########################. 77/81
-  policy-capability ###########################. 153/157
-  cache            ############################ 262/264
+  plan             ###########################. 319/334
+  policy-capability ##########################.. 153/164
+  session-runtime  ###########################. 213/223
+  render-materialize ###########################. 177/186
+  guard-gate       ###########################. 385/393
+  cache            ###########################. 261/268
+  loop             ##########################.. 77/83
+  witness-proof    ###########################. 139/143
   score-debt       ###########################. 84/86
+  attention        ############################ 75/76
+  context-ctx      ############################ 199/200
   decision         ###########################. 52/53
+  gateway-engine   ############################ 169/170
+  layout           ##########################.. 14/15
   support-maturity ###########################. 45/46
-  attention        ############################ 74/74
-  context-ctx      ############################ 200/200
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  evict            ############################ 45/45
-  gateway-engine   ############################ 169/169
-  layout           ############################ 14/14
+  evict            ############################ 49/49
   pool             ############################ 37/37
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
-  witness-proof    ############################ 139/139
 
-namespace coverage  [###############################.] 98.5%  (2295/2331 confusable tokens positioned)
+namespace coverage  [###############################.] 97.0%  (2298/2369 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 190/190
 
-name index: 2795 lookup name(s) -> 2123 concept(s), 60 ambiguous
+name index: 2802 lookup name(s) -> 2127 concept(s), 60 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **190 / 190** (190 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1436 / 3922 |
+| Boundaries drawn (mutual / total) | 1452 / 3938 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2795 over 2123 concepts |
+| Lookup names indexed | 2802 over 2127 concepts |
 | Lookup names landing on several concepts | 60 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2123 |
+| Concepts carrying a contrast set | 2127 |
 
 ## The concepts (best verdict first)
 
@@ -248,6 +248,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | dev-tier | **fak dev (namespace)** - The CLI namespace that dispatches the dev-tier verbs (resolveDevVerb, cmd/fak/dev.go) and behind which the bare dev spellings are gated - a COMMAND surface that reads devindex to decide what is dev-tier. |
 | * | crystal | subsystem | dev-tier | **devindex** - internal/devindex: the CATALOG that classifies every verb's tier (TierFrontdoor / TierDev / TierHidden) from the live dispatch switch - the WITNESSED source the two operator-heaviness meters read to split frontdoor_verbs from dev_verbs. |
 | * | crystal | symbol | evict | **EvictionVictim** - cacheprice.EvictionVictim(residents) returns the INDEX of the disaggregated-KV-pool prefix to evict first: the lowest retention DENSITY (DisaggregationRetentionValue per CapacityTokens), compared exactly by cross-multiplication (float-free), ties breaking toward the larger footprint. |
+| * | crystal | symbol | evict | **PIN_EVICT_REFUSED (survival-class compaction refusal)** - The closed refusal token a history compaction names when the plan it was about to forward would have evicted a page the kernel classes PINNED - the session's active steer, its live continuation seed, or a standing system invariant (#2421). Registered in dos.toml [reasons.PIN_EVICT_REFUSED] and in the internal/agent compaction bail vocabulary; on it the outbound body is forwarded UNCHANGED rather than compacted lossily. |
+| * | crystal | symbol | evict | **ctxplan.ClassEvictable (survival class)** - The least-protected member of ctxplan's survival-class vocabulary (#2421): a context page that may be dropped and is then genuinely gone - aged transcript prose. It is the ZERO value of SurvivalClass, so an unstamped or unrecognised page falls to it and can never be silently promoted into the protected set by a kind string the model supplied. |
+| * | crystal | symbol | evict | **ctxplan.CheckEviction (survival-class adjudication)** - The verification half of the survival-class contract (#2421): given typed pages and the page IDs some other planner proposes to drop, it returns PIN_EVICT_REFUSED when any of them classes PINNED and empty otherwise. It is what makes the guarantee hold for eviction plans ctxplan did not author - a byte splicer on a wire body, say. |
+| * | crystal | symbol | evict | **ctxplan.PlanEviction (survival-class eviction planner)** - The planner half of the survival-class contract (#2421): it plans the drop that brings typed pages down to a token budget while honouring each page's class - refusing whole with PIN_EVICT_REFUSED when the PINNED floor alone exceeds the budget, and otherwise shedding the EVICTABLE set before it touches a single REPLAYABLE page. |
 | * | crystal | metric | evict | **CostEvictions** - The radixkv counter (Stats.CostEvictions) tallying evictions made by the legacy cost-aware eviction strategy. |
 | * | crystal | symbol | evict | **EvictionLRU** - The radixkv EvictionPolicy enum value (EvictionLRU) selecting least-recently-used eviction ordering. |
 | * | crystal | symbol | evict | **evict (KV cache)** - Physical tensor span removal and RoPE re-rotation in KV cache for memory compaction |
@@ -2395,8 +2399,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2486/3922 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2123 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2486/3938 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2127 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2405,32 +2409,32 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 2795 lookup name(s) resolves - 60 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 2802 lookup name(s) resolves - 60 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 319 | 328 | 9 |
-| guard-gate | 385 | 391 | 6 |
-| render-materialize | 177 | 182 | 5 |
-| session-runtime | 213 | 218 | 5 |
-| loop | 77 | 81 | 4 |
-| policy-capability | 153 | 157 | 4 |
-| cache | 262 | 264 | 2 |
+| plan | 319 | 334 | 15 |
+| policy-capability | 153 | 164 | 11 |
+| session-runtime | 213 | 223 | 10 |
+| render-materialize | 177 | 186 | 9 |
+| guard-gate | 385 | 393 | 8 |
+| cache | 261 | 268 | 7 |
+| loop | 77 | 83 | 6 |
+| witness-proof | 139 | 143 | 4 |
 | score-debt | 84 | 86 | 2 |
+| attention | 75 | 76 | 1 |
+| context-ctx | 199 | 200 | 1 |
 | decision | 52 | 53 | 1 |
+| gateway-engine | 169 | 170 | 1 |
+| layout | 14 | 15 | 1 |
 | support-maturity | 45 | 46 | 1 |
-| attention | 74 | 74 | 0 |
-| context-ctx | 200 | 200 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| evict | 45 | 45 | 0 |
-| gateway-engine | 169 | 169 | 0 |
-| layout | 14 | 14 | 0 |
+| evict | 49 | 49 | 0 |
 | pool | 37 | 37 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
-| witness-proof | 139 | 139 | 0 |
 

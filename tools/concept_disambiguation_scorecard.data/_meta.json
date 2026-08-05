@@ -153,10 +153,57 @@
           "category": "incidental",
           "reason": "A live Windows Scheduled Task name, recorded as a row of measured fleet data in the taskvc inventory -- not a term in the audit's vocabulary. Its meaning is entirely given by the task/capture pair it names, and the roster turns over whenever a fleet loop is added or retired, so positioning it would book concept coverage for the contents of a data table and go stale on the next fleet change. Matches the set-wide INCIDENTAL classification already applied to this inventory's task names and installer basenames in 24cc467aa.",
           "token": "July4CacheValueAutospawn"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "cache_creation_span"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "cacheCreationSpanLabel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "CacheCreationTokensHeadOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "CacheCreationTokensMessagePrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "inferCacheCreationTokensHeadOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "inferCacheCreationTokensMessagePrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "maybeUpgradeAnthropicCacheTTL1HScoped"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "UpgradeAnthropicStableCacheTTL1hHeadOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes"
         }
       ],
       "id": "cache",
       "ignore": [
+        "CacheCreationTokensHeadOnly",
+        "CacheCreationTokensMessagePrefix",
         "CacheValueBaseline",
         "CacheValueFacts",
         "CacheValueGateDebtKey",
@@ -164,11 +211,15 @@
         "FAK_TOKEN_CACHE_MAX_BYTES",
         "July4CacheValueAutospawn",
         "TokenCacheDir",
+        "UpgradeAnthropicStableCacheTTL1hHeadOnly",
+        "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes",
         "WindowCache",
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
         "cacheBurstBacktest",
+        "cacheCreationSpanLabel",
         "cacheValueGateFactsFromReport",
+        "cache_creation_span",
         "cache_trace_test",
         "cacheable",
         "cachebreakevents",
@@ -218,11 +269,14 @@
         "droppedcachedtokens",
         "fakcachevalueinputpermtokusd",
         "flushcache",
+        "inferCacheCreationTokensHeadOnly",
+        "inferCacheCreationTokensMessagePrefix",
         "infercachecreationtokens",
         "infercachedhits",
         "infercachedtokens",
         "lastcacherd",
         "loadCacheValueGateBaseline",
+        "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
         "normalizedSchemaCacheCap",
         "normalizedSchemaCacheLen",
@@ -1275,6 +1329,11 @@
           "category": "incidental",
           "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
           "token": "printGuardLaunchPostures"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal refactor seam, not a new policy concept: dispatchPreflightChurn was split into a thin wrapper over dispatchPreflightChurnState so the arming verdict (stallscan.Arming) can be returned alongside the ChurnCheck for the host_churn tick payload. It introduces no new admission rule, threshold, or vocabulary -- the policy lives in dispatchtick.ApplyChurnBackpressure.",
+          "token": "dispatchPreflightChurnState"
         }
       ],
       "exclude": [
@@ -1290,6 +1349,7 @@
         "adjudication",
         "adjudicators",
         "capabilities",
+        "dispatchPreflightChurnState",
         "formatAmendmentPosture",
         "guardWindowsArgvPreflight",
         "normalizeDecodePolicyLabel",
@@ -1318,6 +1378,11 @@
           "category": "incidental",
           "reason": "closed-vocabulary enum member; its Context is the audited change's outdated base state, not the context-window concept",
           "token": "MechanismStaleContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #2186 cache attribution scope; not a new managed-context concept.",
+          "token": "noteCtxValueTTL1hScope"
         }
       ],
       "id": "context-ctx",
@@ -1329,6 +1394,7 @@
         "contexts",
         "ctx",
         "ctxsleep",
+        "noteCtxValueTTL1hScope",
         "recalled",
         "recalling",
         "recalls"
@@ -1564,14 +1630,34 @@
       "roots": []
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "The Go binding of the already-positioned canonical token PIN_EVICT_REFUSED (c2421-pin-evict-refused) inside internal/agent's compaction bail vocabulary. A language-level constant NAME for one concept, deliberately spelled so its value is the same string as the dos.toml reason and the ctxplan constant - not a second concept.",
+          "token": "CompactReasonPinEvictRefused"
+        },
+        {
+          "category": "incidental",
+          "reason": "The ctxplan-side Go binding of the same canonical token PIN_EVICT_REFUSED (c2421-pin-evict-refused). One token from planner to wire to operator; the constant name is a binding, not a distinct concept.",
+          "token": "ReasonPinEvictRefused"
+        },
+        {
+          "category": "incidental",
+          "reason": "A parameter name on ctxplan.CheckEviction (c2421-check-eviction) naming the page IDs a foreign plan proposes to drop. A local identifier, not a concept.",
+          "token": "evictIDs"
+        }
+      ],
       "id": "evict",
       "ignore": [
-        "evictable",
+        "CompactReasonPinEvictRefused",
+        "EvictionsPerHit",
+        "ReasonPinEvictRefused",
+        "evictIDs",
         "evictSupported",
+        "evictable",
+        "evicting",
         "eviction",
         "evicts",
-        "evicting",
-        "EvictionsPerHit",
         "noteEviction",
         "recordEvictChoice"
       ],
@@ -1693,6 +1779,11 @@
           "category": "incidental",
           "reason": "unexported single-call-site printer for the wip reconcile --reclaim listing; it renders rows but carries no domain meaning of its own — the positioned concepts are Reclaimable and ReclaimRow in internal/wiprecon",
           "token": "wipReclaimRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local human-text output formatter for one verb (fak runaway), the exact shape of renderStallscan and its siblings in cmd/fak. Writes findings to an io.Writer; materializes no resource, owns no lifecycle, and is not part of any render/materialize abstraction.",
+          "token": "renderRunaway"
         }
       ],
       "id": "render-materialize",
@@ -1715,6 +1806,7 @@
         "renderCommitDrainResult",
         "renderCommitVelocity",
         "renderGhostReport",
+        "renderRunaway",
         "renderValidate",
         "renderVelocityLeg",
         "rendered",
@@ -1838,6 +1930,11 @@
           "category": "incidental",
           "reason": "The parameter struct for wipLandWith; a Go options-carrier for the already-positioned land verb, holding no distinction of its own.",
           "token": "wipLandOptions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Positioned canonically in its primary family as c2421-plan-eviction (ctxplan.PlanEviction, the survival-class eviction planner). It surfaces in the plan family only because it RETURNS an EvictionPlan; the concept itself is an eviction verb, not a planning one.",
+          "token": "PlanEviction"
         }
       ],
       "exclude": [
@@ -1854,6 +1951,7 @@
         "DecodeInterleavePlan",
         "FleetBenchPlanDoc",
         "PlanDecodeInterleave",
+        "PlanEviction",
         "PlanResolver",
         "SweepPlanGreedy",
         "SweepPlanMain",
@@ -1897,13 +1995,21 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Windows print-spooler PROCESS NAME in internal/runaway's protected-names allowlist (never auto-terminate). Not a pooling concept: it is an OS image name matched case-insensitively against Win32_Process.Name, and shares only the substring 'pool'.",
+          "token": "spoolsv"
+        }
+      ],
       "exclude": [
         "spool"
       ],
       "id": "pool",
       "ignore": [
         "kvpoolbytes",
-        "poolspanscores"
+        "poolspanscores",
+        "spoolsv"
       ],
       "min_files": 2,
       "name": "Pool family",

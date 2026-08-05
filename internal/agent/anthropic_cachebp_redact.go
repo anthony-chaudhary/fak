@@ -242,7 +242,7 @@ func retryPlaceWithRedactedHead(raw []byte, refused BreakpointOutcome) ([]byte, 
 // upgradeAnthropicStableCacheTTL1hOnce refused volatile_head, it normalizes the head and
 // retries the upgrade — converting the permanent managed-cache dead-end (#2191) into a
 // witnessed 1h-tier upgrade on the stabilized head. Same identity discipline as placement.
-func retryUpgradeWithRedactedHead(raw []byte, refused TTLUpgradeOutcome) ([]byte, TTLUpgradeOutcome) {
+func retryUpgradeWithRedactedHead(raw []byte, refused TTLUpgradeOutcome, includeMessages bool) ([]byte, TTLUpgradeOutcome) {
 	if !cacheBPRedactEnabled() {
 		refused.RedactReason = RedactReasonDisabled
 		return raw, refused
@@ -252,7 +252,7 @@ func retryUpgradeWithRedactedHead(raw []byte, refused TTLUpgradeOutcome) ([]byte
 		refused.RedactReason = roc.Reason
 		return raw, refused
 	}
-	out, oc := upgradeAnthropicStableCacheTTL1hOnce(red)
+	out, oc := upgradeAnthropicStableCacheTTL1hOnce(red, includeMessages)
 	if oc.Reason != TTLUpgradeReasonNone {
 		refused.RedactReason = RedactReasonUnconverted
 		return raw, refused

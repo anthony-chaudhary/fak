@@ -918,6 +918,8 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 		TotalTokenEquiv:                           ms.TotalTokenEquiv(),
 		ProviderPromptCacheReadTokenEquiv:         ms.ProviderPromptCacheReadTokenEquiv,
 		ProviderPromptCacheWritePremiumTokenEquiv: ms.ProviderPromptCacheWritePremiumTokenEquiv,
+		CacheCreationTokensHeadOnly:               sum.CacheCreationTokensHeadOnly,
+		CacheCreationTokensMessagePrefix:          sum.CacheCreationTokensMessagePrefix,
 		FakCompactionShedTokens:                   ms.FakCompactionShedTokens,
 		FakCompactionCacheReadTokens:              ms.FakCompactionCacheReadTokens,
 		FakKVPrefixReusedTokens:                   ms.FakKVPrefixReusedTokens,

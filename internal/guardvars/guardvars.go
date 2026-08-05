@@ -64,6 +64,8 @@ type CacheAttributionVars struct {
 
 	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
 	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"` // negative until reads repay writes
+	CacheCreationTokensHeadOnly               uint64  `json:"cache_creation_tokens_head_only,omitempty"`
+	CacheCreationTokensMessagePrefix          uint64  `json:"cache_creation_tokens_message_prefix,omitempty"`
 	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
 	// FakCompactionCacheReadTokens is the OBSERVED provider cache_read at this session's compaction
 	// fires — the warm witness FakTokenEquiv prices the shed on (min(shed, this) prices at the read

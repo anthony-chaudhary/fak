@@ -76,7 +76,12 @@ type gatewayMetrics struct {
 	// Anthropic usage block does not split 5m vs 1h creation tokens (#2179). A turn's
 	// write only lands here when Server.ttl1hActiveFor reports true for its trace.
 	inferCacheCreationTokensUpgraded uint64
-	inferDecodeSecs                  float64
+	// Split the upgraded write arm into the original head-only baseline and the
+	// message-prefix extension (#2186). Provider usage cannot subdivide a single
+	// write further, so each served turn is attributed by its admitted layout.
+	inferCacheCreationTokensHeadOnly      uint64
+	inferCacheCreationTokensMessagePrefix uint64
+	inferDecodeSecs                       float64
 	// Prefill (time-to-first-token) is split from decode ONLY on a path that can
 	// observe the first content delta — the streaming Anthropic passthrough. On a
 	// buffered turn the planner returns one all-up duration with no observable
@@ -681,7 +686,9 @@ type AdjudicationSummary struct {
 	// inferCacheCreationTokensUpgraded). 0 means either the lever was off or every write
 	// stayed on the 5m tier; MechanismSavings/ProviderCacheNetSavings price the remainder
 	// (CacheCreationTokens - CacheCreationTokensUpgraded) at the 5m tier as before (#2179).
-	CacheCreationTokensUpgraded uint64 `json:"cache_creation_tokens_upgraded,omitempty"`
+	CacheCreationTokensUpgraded      uint64 `json:"cache_creation_tokens_upgraded,omitempty"`
+	CacheCreationTokensHeadOnly      uint64 `json:"cache_creation_tokens_head_only,omitempty"`
+	CacheCreationTokensMessagePrefix uint64 `json:"cache_creation_tokens_message_prefix,omitempty"`
 
 	// Compaction* folds the Anthropic history-compaction visibility into the same guard exit
 	// summary, split WITNESSED (what fak authored) vs OBSERVED (what the provider reported):
@@ -859,6 +866,8 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.VendorOutputTokens = m.inferVendorComplTokens
 	sum.CacheCreationTokens = m.inferCacheCreationTokens
 	sum.CacheCreationTokensUpgraded = m.inferCacheCreationTokensUpgraded
+	sum.CacheCreationTokensHeadOnly = m.inferCacheCreationTokensHeadOnly
+	sum.CacheCreationTokensMessagePrefix = m.inferCacheCreationTokensMessagePrefix
 	// Observed per-turn E2E latency distribution (same lock observeInferenceTimed holds
 	// when it writes inferE2EHist), so the exit line can price turns-saved into wall-clock
 	// at the session's own measured per-turn cost.
@@ -1035,7 +1044,7 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 	// ATTRIBUTED, not provider-reported — the Anthropic usage block never splits 5m
 	// vs 1h creation tokens, so this is fak's own per-turn upgrade witness
 	// (noteCtxValueTTL1h), read BEFORE this turn's write is folded into the total.
-	s.metrics.recordCacheCreationTierSplit(usage.CacheCreationInputTokens, s.ttl1hActiveFor(traceID))
+	s.metrics.recordCacheCreationTierSplit(usage.CacheCreationInputTokens, s.ttl1hActiveFor(traceID), s.ttl1hMessagePrefixFor(traceID))
 	// Record this turn into the per-family live-observe window (#935) BEFORE the sink
 	// gates below, so the per-family / governor / warmth view is populated even with
 	// --log off and --debug-stats off. The family is the session/trace prefix; the token
@@ -1083,6 +1092,7 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 		"cached_prompt_tokens":        usage.CachedPromptTokens(),
 		"cache_read_input_tokens":     usage.CacheReadInputTokens,
 		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+		"cache_creation_span":         cacheCreationSpanLabel(usage.CacheCreationInputTokens, s.ttl1hActiveFor(traceID), s.ttl1hMessagePrefixFor(traceID)),
 		"total_tokens":                usage.TotalTokens,
 		"compaction_fired":            compacted,
 		"context_event":               contextEvent,

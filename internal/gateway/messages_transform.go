@@ -65,11 +65,11 @@ func (s *Server) prepareServedAnthropicRequest(ctx context.Context, r *http.Requ
 	// breakpoint to Anthropic's 1h tier before any body shrinker touches req.Raw, so a
 	// long session idling past the 5m window re-enters on a cache read. Every attempt is
 	// witnessed on /metrics (fak_gateway_cache_ttl_upgrade_total).
-	ttl1hUpgraded := s.maybeUpgradeAnthropicCacheTTL1H(req)
+	ttl1hUpgraded, ttl1hMessagePrefix := s.maybeUpgradeAnthropicCacheTTL1HScoped(req)
 	if ttl1hUpgraded {
 		// #2446: the 1h window now applies to this session, so the ctxvalue wakeup
 		// horizon reads the 1h TTL instead of the 5m default from here on.
-		s.noteCtxValueTTL1h(reqTrace)
+		s.noteCtxValueTTL1hScope(reqTrace, ttl1hMessagePrefix)
 	}
 	// ctxplan planned VIEW on the Anthropic passthrough (#927 — the deferred #555 req.Raw
 	// transform): when --ctx-view-budget is set, plan req.Messages into an O(1) resident

@@ -885,13 +885,32 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 // was already active for this turn), else leaves them counted only in the unsplit
 // inferCacheCreationTokens total — the same conservative "priced at 5m" convention
 // MechanismSavings/ProviderCacheNetSavings apply to any unattributed write (#2179).
-func (m *gatewayMetrics) recordCacheCreationTierSplit(cacheCreateTok int, upgraded bool) {
+func cacheCreationSpanLabel(cacheCreateTok int, upgraded, messagePrefix bool) string {
+	if cacheCreateTok <= 0 {
+		return "none"
+	}
+	if !upgraded {
+		return "head_5m"
+	}
+	if messagePrefix {
+		return "message_prefix_1h"
+	}
+	return "head_1h"
+}
+
+func (m *gatewayMetrics) recordCacheCreationTierSplit(cacheCreateTok int, upgraded, messagePrefix bool) {
 	if m == nil || cacheCreateTok <= 0 || !upgraded {
 		return
 	}
 	m.inferenceMu.Lock()
-	m.inferCacheCreationTokensUpgraded += uint64(cacheCreateTok)
-	m.inferenceMu.Unlock()
+	defer m.inferenceMu.Unlock()
+	n := uint64(cacheCreateTok)
+	m.inferCacheCreationTokensUpgraded += n
+	if messagePrefix {
+		m.inferCacheCreationTokensMessagePrefix += n
+	} else {
+		m.inferCacheCreationTokensHeadOnly += n
+	}
 }
 
 func (s *Server) observePlannerRequestMemory() {

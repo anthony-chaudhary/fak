@@ -92,11 +92,12 @@ const (
 // is a count or a token sum; none carries prompt content. Mutated only under
 // Server.ctxValueMu.
 type sessionCtxValue struct {
-	turns           int  // every served turn (all wires), not just compacted ones
-	contextEvents   int  // turns where fak's own compaction/planned-view transform fired
-	turnsSinceEvent int  // turns since the last context event; == turns when none yet
-	lastTurnEvent   bool // the most recent turn was a context event
-	ttl1hActive     bool // the 1h prompt-cache TTL-upgrade rung fired for this session
+	turns              int  // every served turn (all wires), not just compacted ones
+	contextEvents      int  // turns where fak's own compaction/planned-view transform fired
+	turnsSinceEvent    int  // turns since the last context event; == turns when none yet
+	lastTurnEvent      bool // the most recent turn was a context event
+	ttl1hActive        bool // the 1h prompt-cache TTL-upgrade rung fired for this session
+	ttl1hMessagePrefix bool // that rung upgraded at least one message-prefix breakpoint
 
 	// ring holds the last ctxValueWindow turns' resident-token counts within the
 	// CURRENT window era; a context event clears it, so the growth slope never spans
@@ -447,7 +448,12 @@ func (s *Server) ctxValueForLocked(trace string) *sessionCtxValue {
 // the upgrade applies (maybeUpgradeAnthropicCacheTTL1H). A nil server or empty
 // trace no-ops; the note-minted record stays out of the multi-session snapshot
 // until a real served turn is observed (the no-phantom invariant).
-func (s *Server) noteCtxValueTTL1h(trace string) {
+func (s *Server) noteCtxValueTTL1h(trace string) { s.noteCtxValueTTL1hScope(trace, false) }
+
+// noteCtxValueTTL1hScope records whether this trace's admitted 1h layout reaches
+// into messages. That scope lets provider cache_creation tokens be split into the
+// head-only baseline versus the message-prefix arm without guessing from totals.
+func (s *Server) noteCtxValueTTL1hScope(trace string, messagePrefix bool) {
 	if s == nil || strings.TrimSpace(trace) == "" {
 		return
 	}
@@ -455,6 +461,7 @@ func (s *Server) noteCtxValueTTL1h(trace string) {
 	defer s.ctxValueMu.Unlock()
 	if v := s.ctxValueForLocked(trace); v != nil {
 		v.ttl1hActive = true
+		v.ttl1hMessagePrefix = v.ttl1hMessagePrefix || messagePrefix
 	}
 }
 
@@ -471,6 +478,20 @@ func (s *Server) ttl1hActiveFor(trace string) bool {
 	defer s.ctxValueMu.Unlock()
 	if v, ok := s.ctxValue[trace]; ok {
 		return v.ttl1hActive
+	}
+	return false
+}
+
+// ttl1hMessagePrefixFor reports whether the admitted 1h layout for trace includes
+// a message-prefix breakpoint. False is the head-only control arm.
+func (s *Server) ttl1hMessagePrefixFor(trace string) bool {
+	if s == nil || strings.TrimSpace(trace) == "" {
+		return false
+	}
+	s.ctxValueMu.Lock()
+	defer s.ctxValueMu.Unlock()
+	if v, ok := s.ctxValue[trace]; ok {
+		return v.ttl1hMessagePrefix
 	}
 	return false
 }

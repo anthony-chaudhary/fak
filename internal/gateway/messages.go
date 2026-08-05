@@ -819,7 +819,14 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		opts.ResidentTokens = int(s.metrics.heldResidentPeakTokens(trace))
 		opts.SolvencyFloorTokens = s.compactSolvencyFloorTokens
 	}
-	out, outcome := agent.CompactAnthropicHistoryWithOptions(req.Raw, opts)
+	// Survival-class gate (#2421): the compaction runs under the page-class contract rather than
+	// straight onto the wire. Every page in the eviction domain (messages[]) carries a class its
+	// KIND fixes — PINNED (the active steer, the live continuation seed), REPLAYABLE (CAS-backed
+	// results a restore handle pages back in), EVICTABLE (aged prose) — and a plan that would
+	// evict a PINNED page is refused with PIN_EVICT_REFUSED and the body forwarded unchanged,
+	// after one retry against the evictable set only. Same signature and same outcome shape as the
+	// bare compactor, so everything below is untouched; see pinsurvival.go.
+	out, outcome := s.compactWithSurvivalClasses(req.Raw, opts)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	// Restore handle: when this fire tombstoned the session's originating task, the outcome carries
@@ -875,10 +882,22 @@ func (s *Server) maybeAnchorAnthropicRaw(req *agent.AnthropicMessagesRequest, tr
 }
 
 func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesRequest) bool {
+	upgraded, _ := s.maybeUpgradeAnthropicCacheTTL1HScoped(req)
+	return upgraded
+}
+
+func (s *Server) maybeUpgradeAnthropicCacheTTL1HScoped(req *agent.AnthropicMessagesRequest) (bool, bool) {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || !s.cacheTTL1H {
-		return false
+		return false, false
 	}
-	out, outcome := agent.UpgradeAnthropicStableCacheTTL1h(req.Raw)
+	upgrade := agent.UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes
+	// Explicit control arm for #2186: retain the original system/tools-only
+	// behavior while leaving the managed-cache posture enabled. This makes a
+	// head-only versus message-prefix sweep independent of the lever-off arm.
+	if envEnabled("FAK_ABLATE_TTL_1H_HEAD_ONLY") {
+		upgrade = agent.UpgradeAnthropicStableCacheTTL1hHeadOnly
+	}
+	out, outcome := upgrade(req.Raw)
 	if outcome.Reason == agent.TTLUpgradeReasonNoStableBreakpoint {
 		// #2175: the flagship lever no-ops forever on a caller that sends zero cache_control,
 		// because upgrade only edits an EXISTING stable-head breakpoint. Compose place-then-upgrade
@@ -888,12 +907,12 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 		placed, placement := agent.PlaceAnthropicCacheBreakpointWithOutcome(req.Raw)
 		s.metrics.observePlacement(placement)
 		if placement.Reason == agent.BreakpointReasonNone {
-			if upgraded, upgradeOutcome := agent.UpgradeAnthropicStableCacheTTL1h(placed); upgradeOutcome.Reason == agent.TTLUpgradeReasonNone {
+			if upgraded, upgradeOutcome := upgrade(placed); upgradeOutcome.Reason == agent.TTLUpgradeReasonNone {
 				req.Raw = upgraded
 				// New outcome value distinct from "upgraded" (upgrade-only) and "placed" (placement-only
 				// from the compaction path), so a sweep can attribute the composed case on its own row.
 				s.metrics.observeCacheTTLUpgrade(cacheTTLUpgradePlacedAndUpgraded)
-				return true
+				return true, upgradeOutcome.UpgradedMessageBreakpoints > 0
 			}
 		}
 	}
@@ -901,10 +920,10 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 	// an active-but-never-eligible session is visible on /metrics instead of silent.
 	s.metrics.observeCacheTTLUpgrade(outcome.Reason)
 	if outcome.Reason != agent.TTLUpgradeReasonNone {
-		return false
+		return false, false
 	}
 	req.Raw = out
-	return true
+	return true, outcome.UpgradedMessageBreakpoints > 0
 }
 
 // maybeElideAnthropicRaw shrinks oversized tool_result bodies in the outbound passthrough body
