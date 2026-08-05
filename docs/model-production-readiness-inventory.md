@@ -53,12 +53,12 @@ Readiness percentage is `passed gates / 6`; it is a coverage measure, not a prob
 The machine-readable join is produced by:
 
 ```powershell
-fak model readiness-inventory --input examples/model-acceptance-top3.json --artifact-revision internal/modelaccept@r1+gdf6ae047e --expected-corpus top3-exact-model-acceptance-v1 --as-of 2026-07-15T00:15:00-07:00
+fak model readiness-inventory --input examples/model-acceptance-prospective-v3-report.json --artifact-revision examples/model-acceptance-prospective-v3-report.json@r1+gf722bd39cd --expected-corpus top3-prospective-sentinel-v3 --as-of 2026-08-05T23:00:00Z
 ```
 
-The source artifact is [`examples/model-acceptance-top3.json`](../examples/model-acceptance-top3.json), evaluated by `internal/modelaccept@r1+gdf6ae047e`. Corpus `top3-exact-model-acceptance-v1` was declared at `2026-07-14T22:55:00-07:00`; all applicable observations are timestamped `2026-07-14T23:00:00-07:00`. The exact-ID rows are: Opus tier 0 with 9 samples, Sonnet tier 1 with 6 samples, and Haiku tier 2 with 3 samples. The inventory fails closed for missing/mismatched/stale provenance and cannot borrow a PASS across model IDs.
+The source artifact is [`examples/model-acceptance-prospective-v3-report.json`](../examples/model-acceptance-prospective-v3-report.json) at `examples/model-acceptance-prospective-v3-report.json@r1+gf722bd39cd`, evaluated by `internal/modelaccept@r6+gf722bd39cd`. Corpus `top3-prospective-sentinel-v3` was declared and published before observation; the 18 fixed attempts ran from `2026-08-05T15:26:54-07:00` through `2026-08-05T15:29:37-07:00`. Each exact ID has six eligible samples and passes only its declared tier: Opus T0, Sonnet T1, and Haiku T2. The inventory fails closed for missing/mismatched/stale provenance and cannot borrow a PASS across model IDs.
 
-These PASS rows cover only this bounded pilot corpus. They do not relax any configured, protocol/cache, cost-truth, or reliability/rollback gate, and they do not claim broader agentic variance coverage tracked by #4797. Runtime dispatch enforcement remains exact-ID and tier scoped under #4799.
+These PASS rows cover only the two declared production-shaped task classes; they do not change the independent HOLD/PARTIAL gates below. Runtime dispatch consumes this exact-ID artifact and refuses above-tier, absent, stale, malformed, alias, or HOLD evidence before provider invocation. The scrubbed comparison and raw-stream digest are in [`docs/model-acceptance-prospective-v3-readout.md`](model-acceptance-prospective-v3-readout.md).
 
 ## Evidence and remaining work by model
 
@@ -67,7 +67,7 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Configured — PASS:** `internal/dispatchtick/launchprofile.go` declares Opus worker profiles; `cmd/fak/accounts_launch.go` and the Fable integration use this exact launch ID.
 - **Used — PASS:** 2,900 observed turns across 61 sessions in the seven-day audit; 61.4% of audited output and 95.0% of estimated spend at the tier level.
 - **Protocol + cache — PARTIAL:** Anthropic gateway/agent suites cover messages, tools, compaction/elision and cache semantics; `docs/benchmarks/ABLATE-RESULTS.md` also records a measured Opus 4.8 run. There is no single exact-model production conformance artifact that closes the full gate.
-- **Capability — PASS (bounded pilot):** exact ID `claude-opus-4-8` passed 9/9 applicable T0 samples in the predeclared acceptance corpus and is witnessed at tier 0. This does not close protocol/cache, cost, or reliability gates. #4633.
+- **Capability — PASS (bounded pilot):** exact ID `claude-opus-4-8` passed 6/6 fixed prospective T0 samples in the predeclared acceptance corpus and is witnessed at tier 0. This does not close protocol/cache, cost, or reliability gates. #4633.
 - **Cost truth — PARTIAL:** the audit emits an estimate and cache-price tests exist, but production needs raw/canonical-ID provenance and fail-closed unknown handling. #4635.
 - **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy reports this exact ID, the clean-checkout dogfood gate rolled unhealthy Opus back to exact Sonnet, and the live provider-seam drill witnessed exact Opus failure attribution plus recovered Sonnet traffic. #4634.
 
@@ -76,7 +76,7 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Configured — PASS:** account launch/default settings and model fixtures name the exact ID; the tier is recognized throughout session audit and routing surfaces.
 - **Used — PASS:** 2,690 observed turns across 465 sessions, the broadest session footprint of the three.
 - **Protocol + cache — PARTIAL:** Sonnet traverses the shared Anthropic path, but shared-path tests alone do not prove exact-model streaming/tool/cache behavior in production.
-- **Capability — PASS (bounded pilot):** exact ID `claude-sonnet-4-6` passed 6/6 applicable T1 samples in the predeclared acceptance corpus and is witnessed at tier 1. This does not close protocol/cache, cost, or reliability gates. #4633.
+- **Capability — PASS (bounded pilot):** exact ID `claude-sonnet-4-6` passed 6/6 fixed prospective T1 samples in the predeclared acceptance corpus and is witnessed at tier 1. This does not close protocol/cache, cost, or reliability gates. #4633.
 - **Cost truth — PARTIAL:** tier cost is estimated, but exact identity and cache-price provenance need the canonical report. #4635.
 - **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy and alert contract name exact Sonnet; the live drill recovered through Sonnet and the no-safe-fallback control held rather than selecting tier-2 Haiku for tier-1 work. #4634.
 - **Configuration debt:** #3929 already tracks the contradictory ultra-bucket launch table versus preset/docs and must close before the matrix can be called coherent.
@@ -86,7 +86,7 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Configured — PASS:** the exact dated ID is present in account defaults and model-aware tests, and the session auditor recognizes the Haiku tier.
 - **Used — PASS:** 1,195 observed turns across 177 sessions.
 - **Protocol + cache — PARTIAL:** real traffic proves reachability, not model-scoped tool/cache conformance.
-- **Capability — PASS (bounded pilot):** exact ID `claude-haiku-4-5-20251001` passed 3/3 applicable T2 samples in the predeclared acceptance corpus and is witnessed at tier 2. This does not prove capability above T2 or close protocol/cache, cost, or reliability gates. #4633.
+- **Capability — PASS (bounded pilot):** exact ID `claude-haiku-4-5-20251001` passed 6/6 fixed prospective T2 samples in the predeclared acceptance corpus and is witnessed at tier 2. This does not prove capability above T2 or close protocol/cache, cost, or reliability gates. #4633.
 - **Cost truth — HOLD:** the exact dated emitted name is the known alias hazard documented in `notes/BORROW-ROUTING-SIGNALS-GATEWAY-PLANO-STUDY-2026-07-13.md`; unknown or mismatched catalog names must not become `$0`. #4635.
 - **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy and alert contract name exact Haiku; executable evaluator tests witness Haiku failure holding/escalating with no lower fallback, while the live tier-1 control proves Haiku is not used as an unsafe downgrade. #4634.
 
