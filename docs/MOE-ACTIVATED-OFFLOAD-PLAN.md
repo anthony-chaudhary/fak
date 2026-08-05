@@ -62,7 +62,7 @@ Nine witnessed capabilities exist. Column 3 is the load-bearing one.
 | Bounded per-weight device ring (byte budget, LRU victim, pinned-exempt, page-in/hit/evict counters) | `internal/model/paging_ring.go` | **Wired (R0, #5611).** `pagedRing.stage` + `internal/model/expert_ring_hal.go` put it under the session weight HAL for routed experts, opt-in per session via `Session.ExpertRingBytes`. Was off-path (sole constructor `v4_expert_runtime.go:67`, DeepSeek-V4 only). R1 sizes the budget, so `FAK_N_CPU_MOE` now reaches it. |
 | Graded spill sizing + auto-fit to a measured device budget (`--n-cpu-moe N` semantics) | `internal/model/expert_spill_fit.go` (#5281, closed) | **Wired (R1, #5612).** `Model.ResolveExpertSpillPlacement` builds the budget from measured resident bytes and real MoE layer ordinals, `Session.ApplyExpertSpillPlacement` installs it, and `InKernelPlanner.SetExpertSpill` resolves it once per serve against `compute.DeviceMemoryInfo`. Was exported and unused outside tests. Flag surface still open (`FAK_N_CPU_MOE` only). |
 | Value-aware evictor: routing-heat hysteresis + LFU-decay, scored against the Belady oracle | `internal/model/expert_residency_lfu.go` (#4357, closed) | **Simulation only,** deliberately off the live path; the ring is still plain LRU via `polymodel.Pool`. |
-| Cross-session expert usage histogram, warm-start pin selection, between-turn `RepinPass` | `internal/model/expert_warmpins.go` (#4358, closed) | **Off-path.** `pagedRing.pins` is never consulted - `matMulStaged` still takes a static `pinned` bool per call (`paging_ring.go:56-61`). |
+| Cross-session expert usage histogram, warm-start pin selection, between-turn `RepinPass` | `internal/model/expert_warmpins.go` (#4358, closed) | **Wired (R2, #5613).** `internal/model/expert_ring_pins.go` gives `pagedRing.pins` its live consumer: `weightHALStagedBounded` computes the `pinned` bool from the durable set per routed expert, stagings feed a per-turn histogram, and `Session.ExpertRingEndTurn` repins + dumps. Was off-path - the set was never consulted and `matMulStaged` took a static bool per call. |
 | Per-expert range read + `MADV_WILLNEED` readahead over a fused expert slab | `internal/model/expert_readahead.go` (#4359, closed) | **Off-path.** Nothing in the load/decode path calls `readExpertSlice` or `willneedExpertSlice`. |
 | Lazy per-expert GGUF slab source (reads `stride`, not `E*stride`) | `internal/model/gguf_expert_source.go` | **Off-path.** No constructor on the loader path; `ggufload` still materializes the whole fused block. |
 | Routed-expert route observer + access-trace replay corpus | `internal/model/expert_replay.go` | **Off-path.** `SetExpertRouteObserver` has no non-test caller. |
@@ -112,7 +112,8 @@ weights keep their permanent residency.
   than freeing a handle in use; (e) default-unchanged - at `ExpertRingBytes == 0` no ring is
   built and every weight uploads exactly once, as before.
 - **Not done here:** the budget has no CLI knob (R1), the ring is plain LRU and ignores the
-  warm-start pin-set (R2/R4), misses are synchronous (R3) and read the fully-resident slab (R5).
+  warm-start pin-set (since closed by R2; victim choice among unpinned residents is still LRU,
+  R4), misses are synchronous (R3) and read the fully-resident slab (R5).
 
 ### R1 - P0 - #5612 - Ship the graded knob and admit on the working set - **PARTLY LANDED**
 
@@ -172,15 +173,46 @@ a model on **activated working set + ring budget** rather than the full expert b
   admitted *through the serve flag* and decodes at a chosen N, with the plan JSON reporting the
   sized split.
 
-### R2 - P1 - #5613 - Consult the pin-set and persist the histogram on the live ring
+### R2 - P1 - #5613 - Consult the pin-set and persist the histogram on the live ring - **LANDED**
 
 Make `matMulStaged` consult `isExpertPinned` instead of the caller's static bool, dump the
 usage histogram per turn, sum it at boot to warm-start pins, and run `RepinPass` between
 turns.
 
 - **Reuse:** all four pieces ship in `expert_warmpins.go`; this is the consult + lifecycle.
+- **Landed** (`internal/model/expert_ring_pins.go`, `64e3f5a92a5b`) as three joins onto code
+  that already existed. *Consult:* `weightHALStagedBounded` derives `(layer, expert)` from the
+  canonical weight name (`routedExpertIdentity`) and passes `r.isExpertPinned`, so polymodel's
+  pinned-never-evicted invariant protects the workload's hot set instead of nothing. *Observe:*
+  every routed-expert staging folds a touch into the ring's per-turn histogram, so the prior is
+  built from real routing rather than a profiling run. *Persist:* `Session.ExpertRingEndTurn`
+  decays the standing heat, folds the turn in, repins under a bounded swap cap, fills any pin
+  slot still free, and dumps crash-safely to `Session.ExpertUsagePath`. Two new session knobs
+  (`ExpertPinBudget`, `ExpertUsagePath`); declaring neither is R0's plain-LRU ring
+  byte-for-byte.
+- **One piece of new policy, not a join.** `RepinPass` only ever *swaps* - it walks the pinned
+  experts and exchanges the coldest for a hotter candidate - so a set that starts empty stays
+  empty however much heat accumulates. Warm-starting fills the set from a prior, so #4358 never
+  had to; but a cold run with no prior on disk would then serve its whole life on plain LRU and
+  only begin pinning after a restart. `fillPins` closes that: filling a free slot displaces
+  nothing, so it is bounded by the operator's budget rather than by the churn cap, and it is
+  refused for an expert carrying no heat (an unobserved pin is a guess; LRU is a better one).
 - **Witness:** turn-2 cold-start page-ins fall against turn-1 for a repeated workload, and the
-  pinned set survives a process restart.
+  pinned set survives a process restart. Both hold in
+  `internal/model/expert_ring_pins_test.go`, on a sweep longer than the ring - the window pure
+  recency cannot cache, so run 1 scores 0 hits by construction and every hit in run 2 is
+  attributable to the pin-set. A second process sharing only the dumped histogram pages in
+  **30** routed weights against the first's **39**, and the identity it warm-starts pinned is
+  the one the first process's routing selected, not a tie-break default. Three gates alongside:
+  declaring no knobs is R0 exactly (no pin-set, no observation, no-op boundary), the identity
+  parse refuses shared experts / the router / dense weights / malformed ordinals rather than
+  crediting a silent `(0,0)` (which is a *real* identity), and a corrupt dump degrades to a cold
+  start while still reporting itself once at the next turn boundary.
+- **Not done:** the turn boundary has no *caller* on the serve path yet - `ExpertRingEndTurn` is
+  a session method a decode loop must invoke at a quiescent point, and picking that point (plus
+  the `decay`/`maxSwaps` defaults, and where the dump lives for a multi-session host) belongs
+  with the operator surface in R6/#5617. Victim choice among unpinned residents is still LRU
+  (R4/#5615) and a miss is still a synchronous upload (R3/#5614).
 
 ### R3 - P1 - #5614 - Router-lookahead prefetch (composes with #4300)
 
@@ -264,4 +296,7 @@ binds them for routed experts) -> `internal/model/expert_spill_fit.go` (the sizi
 kernel a grade) -> `internal/agent/inkernel_expert_spill.go` (R1: the resolve-once, install-per-
 session seam a serve reaches through `FAK_N_CPU_MOE`) ->
 `internal/ggufload/expert_activated_fit.go` (R1: the admission that stops charging a checkpoint
-for the experts it will never hold at once).
+for the experts it will never hold at once) -> `internal/model/expert_warmpins.go` (the durable
+usage histogram, warm-start selection and between-turns actuator, all built by #4358) ->
+`internal/model/expert_ring_pins.go` (R2: the three joins that put that machinery on the live
+staging path, plus the fill `RepinPass` never had).
