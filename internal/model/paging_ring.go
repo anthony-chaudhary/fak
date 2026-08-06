@@ -100,6 +100,19 @@ type pagedRing struct {
 	// expertRingTraceLimit, so a truncated window cannot read as a complete one.
 	trace        []ExpertAccessTraceEvent
 	traceDropped int
+
+	// prefetching marks the stagings issued by the R3 activated-set prefetch (#5614,
+	// expert_ring_prefetch.go) as HINTS rather than demands: they take recency (the weight really is
+	// newly resident) but earn no heat, because a policy that ranked on its own prefetcher's guesses
+	// would protect what was speculated instead of what was used.
+	prefetching bool
+	// prefetched counts weights staged ahead of their GEMM. activatedExperts / activatedCovered are
+	// the COVERAGE meter — of the experts the router activated and this ring could serve, how many
+	// the budget could actually hold — which is the plan's "were this token's activated experts
+	// resident?" question made countable.
+	prefetched       int
+	activatedExperts int
+	activatedCovered int
 }
 
 // newPagedRing returns a ring over be with the given resident weight-byte budget. A nil backend

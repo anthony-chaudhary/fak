@@ -165,6 +165,14 @@ type ExpertRingStats struct {
 	// PinnedCount is how many experts the durable pin-set (R2/#5613) currently holds exempt from
 	// eviction. 0 means plain LRU — either no pin-set was declared, or the prior was empty.
 	PinnedCount int `json:"pinned_count"`
+	// Prefetched is how many weights the activated-set prefetch (R3/#5614) staged ahead of their
+	// GEMM. ActivatedExperts / ActivatedCovered are the COVERAGE meter: of the experts the router
+	// activated and this ring could serve, how many the budget could actually hold. Covered <
+	// Activated is the direct read on an undersized ring — the tuning signal a hit rate alone cannot
+	// give, because a ring too small to hold one layer's top-k reports honest misses forever.
+	Prefetched       int `json:"prefetched"`
+	ActivatedExperts int `json:"activated_experts"`
+	ActivatedCovered int `json:"activated_covered"`
 }
 
 // ExpertRing reports this session's bounded routed-expert residency. It returns the zero value (in
@@ -185,5 +193,9 @@ func (s *Session) ExpertRing() ExpertRingStats {
 		Hits:          r.hit,
 		Evictions:     r.evict,
 		PinnedCount:   r.pins.Len(),
+
+		Prefetched:       r.prefetched,
+		ActivatedExperts: r.activatedExperts,
+		ActivatedCovered: r.activatedCovered,
 	}
 }

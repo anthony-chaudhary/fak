@@ -455,6 +455,10 @@ func (moeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	if sk, ok := mat.(sessionQ4KKernel); ok {
 		sk.s.recordQ4KExpertRoute(len(picks))
 	}
+	// R3/#5614: the router has just named this layer's whole activated set, so stage the prefix of
+	// it the ring budget can hold before any expert GEMM runs, instead of discovering each expert one
+	// GEMM too late. Inert without a routed-expert ring, which is the default.
+	prefetchActivatedExperts(m, layer, picks, mat)
 	// Batched-expert decode lever (#1382): the top-k routed experts of a Qwen3.6-27B q4_k_m MoE
 	// layer are the dominant decode cost (mlp_decode, ~32-54% — the MAC-QWEN36 diagnosis), and the
 	// per-expert loop below fires ONE command buffer / parFor per expert. Two batched paths collapse
@@ -569,6 +573,8 @@ func (glmMoeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	H := cfg.HiddenSize
 	delta := make([]float32, H)
 	picks := glmRoute(m, layer, xn, mat)
+	// R3/#5614: same-step activated-set prefetch — see moeFFN.apply. Inert without a ring.
+	prefetchActivatedExperts(m, layer, picks, mat)
 	// Lever 2: on the pure-CPU resident path, batch the routed experts' GEMVs into ONE parFor
 	// per projection instead of ~3 per expert (moe_host_batch.go) — bit-identical to the loop
 	// below (TestBatchedExpertDeltaMatchesLoop). Any config the fast path does not model

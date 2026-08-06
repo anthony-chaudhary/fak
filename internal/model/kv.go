@@ -174,6 +174,10 @@ type Session struct {
 	// (SelectExpertRingEvictPolicy); it is fixed for the ring's life, because switching mid-flight
 	// would score one window under two policies.
 	ExpertRingEvict ExpertRingEvictPolicy
+	// ExpertPrefetch selects whether each MoE layer's activated set is staged into the ring up front
+	// (the default, expert_ring_prefetch.go, #5614) or discovered one expert at a time as the GEMMs
+	// reach for it. Inert without a ring, like every knob above it.
+	ExpertPrefetch ExpertPrefetchMode
 	// expertRing is the bounded routed-expert ring, built lazily on the first routed-expert staging
 	// when ExpertRingBytes > 0 and freed by Close. nil on every session that never declared a budget.
 	expertRing *pagedRing

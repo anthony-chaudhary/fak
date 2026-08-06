@@ -96,7 +96,11 @@ func (r *pagedRing) noteAccess(id polymodel.ModelID) {
 		r.lastUse = map[polymodel.ModelID]uint64{}
 	}
 	r.lastUse[id] = r.clock
-	if r.policy == ExpertRingEvictLRU {
+	// A prefetch (R3/#5614) is a HINT, not a demand: it is genuinely newly resident, so it takes
+	// recency, but it must not earn heat. Heat ranked on the prefetcher's own guesses is
+	// self-confirming — it would protect exactly what was speculated whether or not anything read it,
+	// and the offline gauge would then score an access stream the workload never produced.
+	if r.policy == ExpertRingEvictLRU || r.prefetching {
 		return
 	}
 	if r.heat == nil {
