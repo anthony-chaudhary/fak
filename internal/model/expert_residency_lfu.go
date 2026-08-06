@@ -115,12 +115,25 @@ func ReplayExpertResidencyLFUDecay(trace ExpertAccessTrace, opts ExpertResidency
 	}, nil
 }
 
-// simulateLFUDecayResidency is the pure accounting loop. Heat is tracked for every span ever
-// seen, resident or not: a shadow ("ghost") heat lets a repeatedly-bypassed newcomer earn
-// promotion, and an evicted span retains its heat so re-promotion respects accumulated value.
-// Victim selection and every tie-break are deterministic (lowest heat, then oldest use, then
-// lowest id) so the report is reproducible under Go's randomized map iteration.
+// simulateLFUDecayResidency is the full value-aware policy: the decaying-heat victim ranking PLUS
+// the admission hysteresis. It is what this file's #4357 report scores.
 func simulateLFUDecayResidency(events []compute.KVReplayEvent, budget, decayEvery int) ExpertResidencyPolicyRow {
+	return simulateHeatResidency(events, budget, decayEvery, true)
+}
+
+// simulateHeatResidency is the pure accounting loop, with the admission hysteresis as a SEPARATE
+// axis from the victim ranking. The split exists because the live ring (#5615,
+// expert_ring_policy.go) can adopt the ranking but not yet the hysteresis — a bypassed weight still
+// has to be served, and the HAL's fallback for a refused stage is permanent residency — so scoring
+// the ring against the hysteresis variant would measure a policy it does not run. Callers wanting
+// the shipped #4357 policy use simulateLFUDecayResidency; the ring's gate passes hysteresis=false.
+//
+// Heat is tracked for every span ever seen, resident or not: a shadow ("ghost") heat lets a
+// repeatedly-bypassed newcomer earn promotion, and an evicted span retains its heat so re-promotion
+// respects accumulated value. Victim selection and every tie-break are deterministic (lowest heat,
+// then oldest use, then lowest id) so the report is reproducible under Go's randomized map
+// iteration.
+func simulateHeatResidency(events []compute.KVReplayEvent, budget, decayEvery int, hysteresis bool) ExpertResidencyPolicyRow {
 	heat := map[int]int{}
 	resident := map[int]int{} // spanID -> tokens
 	lastUsed := map[int]uint64{}
@@ -168,12 +181,16 @@ func simulateLFUDecayResidency(events []compute.KVReplayEvent, budget, decayEver
 			continue // larger than the whole ring: a permanent miss, never resident.
 		}
 		if residentTokens+ev.Tokens > budget {
-			// Eviction required — apply the hysteresis gate against the coldest victim.
-			victim := coldestVictim()
-			vHeat := heat[victim]
-			if heat[ev.SpanID] <= vHeat+vHeat/4+4 {
-				row.Bypasses++ // newcomer not decisively hotter: decline to thrash the hot set.
-				continue
+			// Eviction required — apply the hysteresis gate against the coldest victim, when this
+			// variant carries one. Without it the newcomer is always admitted and only the VICTIM
+			// ranking differs from LRU, which is what the live ring implements.
+			if hysteresis {
+				victim := coldestVictim()
+				vHeat := heat[victim]
+				if heat[ev.SpanID] <= vHeat+vHeat/4+4 {
+					row.Bypasses++ // newcomer not decisively hotter: decline to thrash the hot set.
+					continue
+				}
 			}
 			for residentTokens+ev.Tokens > budget && len(resident) > 0 {
 				vid := coldestVictim()

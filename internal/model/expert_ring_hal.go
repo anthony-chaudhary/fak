@@ -64,6 +64,11 @@ func (s *Session) routedExpertRing(name string) *pagedRing {
 	}
 	if s.expertRing == nil {
 		s.expertRing = newPagedRing(s.Backend, s.ExpertRingBytes)
+		// R4/#5615: the victim ranking is fixed for the ring's whole life, because changing it
+		// mid-flight would score one window under two policies and make the next measurement
+		// uninterpretable. The zero value is LRU, so this is inert unless an operator promoted the
+		// candidate on measured evidence (SelectExpertRingEvictPolicy).
+		s.expertRing.policy = s.ExpertRingEvict
 		// R2/#5613: seed the durable pin-set before the first staging, so turn 1 already pins the
 		// prior's hot set. A session declaring neither knob gets no pin-set and the plain-LRU ring.
 		s.warmStartExpertPins(s.expertRing)
@@ -101,6 +106,10 @@ func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Ten
 		if layer, expert, ok := routedExpertIdentity(name); ok {
 			pinned = r.isExpertPinned(layer, expert)
 			r.observeExpert(layer, expert)
+			// R4/#5615: the ORDERED record the offline regret gauge replays. Independent of the
+			// pin knobs — a session may want to MEASURE which victim policy its workload deserves
+			// without running a pin-set at all.
+			r.observeTrace(layer, expert, weightBytes)
 		}
 		if t, ok := r.stage(key, mk, dtype, weightBytes, pinned); ok {
 			return t

@@ -79,6 +79,27 @@ type pagedRing struct {
 	// Session.ExpertRingEndTurn (which decays the standing heat, folds this in, repins, and dumps).
 	// nil alongside a nil pins, so a ring that was never warm-started observes nothing.
 	turn *ExpertUsageHistogram
+
+	// policy is the VICTIM ranking among unpinned residents (R4/#5615, expert_ring_policy.go).
+	// At the zero value (ExpertRingEvictLRU) the ring evicts nothing of its
+	// own and polymodel's coldestUnpinned choice stands, which is this file's original behaviour
+	// byte-for-byte; under ExpertRingEvictValueAware the ring picks victims by decaying heat and
+	// evicts them BEFORE Admit, so Admit fits without choosing.
+	policy ExpertRingEvictPolicy
+	// heat is the per-weight decaying access counter the value-aware policy ranks on, and lastUse
+	// the recency clock it tie-breaks on. heat is nil under LRU (never allocated) and RETAINS an
+	// evicted weight's count as ghost heat. accesses drives the decay cadence.
+	heat     map[polymodel.ModelID]int
+	lastUse  map[polymodel.ModelID]uint64
+	clock    uint64
+	accesses int
+
+	// trace is the ORDERED routed-expert access sequence this ring staged — what the offline regret
+	// gauge replays. The R2 histogram above is aggregate and loses the order Belady needs, so the
+	// two coexist rather than one deriving from the other. traceDropped counts accesses past
+	// expertRingTraceLimit, so a truncated window cannot read as a complete one.
+	trace        []ExpertAccessTraceEvent
+	traceDropped int
 }
 
 // newPagedRing returns a ring over be with the given resident weight-byte budget. A nil backend
@@ -147,6 +168,7 @@ func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype co
 // caller holding several handles at once must hold() each for the span it uses them (see hold).
 func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
 	id := polymodel.ModelID(name)
+	r.noteAccess(id) // policy bookkeeping (R4): recency clock always, decaying heat under a value-aware policy
 	if wt, ok := r.resident[id]; ok {
 		r.pool.Touch(id)
 		r.hit++
@@ -154,7 +176,10 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 	}
 	// Miss: build + upload the weight, then admit it under the budget. Admit is all-or-nothing: on
 	// error the pool is unchanged, so page the just-uploaded handle straight back out and defer.
+	// Under a non-default victim policy the ring makes room ITSELF first (evictForPolicy), so the
+	// Admit below fits and polymodel's own LRU choice never applies.
 	wt := uploadStaged(r.be, mk(), dtype, "paged-ring-weight")
+	r.evictForPolicy(weightBytes)
 	evicted, err := r.pool.Admit(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned})
 	if err != nil {
 		r.be.Free(wt)

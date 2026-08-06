@@ -167,6 +167,13 @@ type Session struct {
 	// folding several sessions' dumps sums them with SumExpertUsageHistograms and points here at the
 	// result.
 	ExpertUsagePath string
+	// ExpertRingEvict selects how the ring ranks eviction victims among its UNPINNED residents
+	// (expert_ring_policy.go, #5615). The zero value is LRU — polymodel's own choice, which the ring
+	// has always inherited and which is a default rather than a finding. Promote the value-aware
+	// candidate only from a measured verdict on this workload's own trace
+	// (SelectExpertRingEvictPolicy); it is fixed for the ring's life, because switching mid-flight
+	// would score one window under two policies.
+	ExpertRingEvict ExpertRingEvictPolicy
 	// expertRing is the bounded routed-expert ring, built lazily on the first routed-expert staging
 	// when ExpertRingBytes > 0 and freed by Close. nil on every session that never declared a budget.
 	expertRing *pagedRing
