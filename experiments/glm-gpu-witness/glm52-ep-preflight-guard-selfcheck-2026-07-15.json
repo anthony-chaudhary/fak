@@ -23,6 +23,14 @@
     {"name": "D no nvidia-smi", "ranks": 8, "free_gib_per_gpu": null, "verdict": "EP_PREFLIGHT_SKIP (fail-open) — proceeds", "exit": 0},
     {"name": "E one dirty GPU", "ranks": 8, "free_gib_per_gpu": "70.3 on gpu3, 78.6 elsewhere", "total_gib_per_gpu": 80.0, "required_gib": 77.1, "verdict": "EP_PREFLIGHT_REFUSE (1/8 short ~6.8 GiB)", "exit": 93}
   ],
-  "reproduce": "extract the '# --- pre-flight per-GPU free-VRAM gate' block from tools/glm52_ep_witness.sh, stub log()/OUT/DONE/VIS/RANKS and a mock nvidia-smi that echoes 'free, total' MiB per '-i <idx>', and run the five scenarios above (no GPU needed).",
+  "correction": {
+    "corrected_at": "2026-08-05",
+    "what_was_wrong": "FALSE WITNESS. As published on 2026-07-15 this file named two things under code_under_test — 'tools/glm52_ep_witness.sh (EP_PREFLIGHT gate)' and 'internal/compute.RequiredFreeBytes + TestRequiredFreeBytesIsExactFitBoundary' — and NEITHER existed anywhere in the tree. The script had no pre-flight block and compute had no RequiredFreeBytes; the string 'RequiredFreeBytes' appeared only in this file and in two scratch notes. The scenario table below was therefore never executed against any code: it was a design sketch published in the shape of a result.",
+    "what_changed": "The named code was written, so the witness is now true rather than the claim withdrawn: internal/compute/requiredfree.go (RequiredFreeBytes, the exact inverse of BudgetAfterHeadroom, defined against fitsWithinReportedMemory rather than restating the formula), internal/compute/requiredfree_test.go (TestRequiredFreeBytesIsExactFitBoundary), and the '# --- pre-flight per-GPU free-VRAM gate' block in tools/glm52_ep_witness.sh. The scenarios below were then RUN, for the first time, on 2026-08-05 — all six pass, reproducing the verdicts and the 77.1 / 85.6 GiB thresholds exactly as published.",
+    "how_it_stays_true": "tools/glm52_ep_preflight_test.go resolves every code_under_test entry to a real file and symbol, pins the gate's PLAN_GIB table and threshold against compute.RequiredFreeBytes (asserting the gate can neither admit a run the load then refuses nor refuse a loadable one), and executes the self-check. Deleting any named part turns it red instead of letting this file quietly go back to lying.",
+    "still_not_a_witness_for": "unchanged — see not_a_witness_for above. Correcting this file does NOT advance #4952's definition-of-done, which still requires a sanctioned GPU node."
+  },
+  "selfcheck_executed_at": "2026-08-05T00:00:00Z",
+  "reproduce": "bash tools/glm52_ep_preflight_selfcheck.sh — extracts the '# --- pre-flight per-GPU free-VRAM gate' block from tools/glm52_ep_witness.sh, stubs log()/OUT/DONE/VIS/RANKS and a mock nvidia-smi that echoes 'free, total' MiB per '-i <idx>', and runs the scenarios above plus an unarmed-rank-count case (no GPU needed). Also driven from Go by TestGLM52EPPreflightSelfcheckScenariosPass.",
   "fail_open": "the gate never blocks a run when nvidia-smi is absent or returns no reading (non-NVIDIA / CI host), and is overridable via REQUIRE_FREE_GIB for any other RANKS/context/model."
 }
