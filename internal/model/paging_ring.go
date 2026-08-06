@@ -59,6 +59,22 @@ type pagedRing struct {
 	hit    int // resident reuses (a handle served without upload)
 	evict  int // page-outs (LRU victims dropped during admit to stay within budget)
 
+	// lookups and refused are the RECONCILIATION pair (R6/#5617). lookups is incremented once at the
+	// top of stage(), before anything is decided; refused once on the only exit that returns no
+	// handle. Every stage call therefore ends in exactly one of hit / pageIn / refused, so
+	// `hit + pageIn + refused == lookups` is an identity an operator surface can CHECK rather than
+	// assume — the difference between reporting the ring's own accounting and reporting a parallel
+	// estimate that can silently drift from it. They are counted independently of the outcome
+	// counters on purpose: a check whose two sides are computed from the same increment proves
+	// nothing.
+	lookups int
+	refused int
+	// pageInBytes is the total device bytes moved by cold uploads. Bytes-per-token is the operator's
+	// tuning number and it cannot be recovered from pageIn alone, because routed-expert projections
+	// are not all the same size (a gate/up pair and a down matrix differ, and quantization differs
+	// per tensor).
+	pageInBytes int64
+
 	// pending holds the in-flight transfer Fence for each weight staged through
 	// compute.AsyncUploader and not yet awaited (#5627). A weight is in this map for exactly the
 	// window between "issued" and "visible": awaitStaged clears it, and NOTHING may read, multiply
@@ -237,6 +253,7 @@ func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype co
 // caller holding several handles at once must hold() each for the span it uses them (see hold).
 func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
 	id := polymodel.ModelID(name)
+	r.lookups++      // R6 reconciliation: booked before anything is decided, so it counts every exit
 	r.noteAccess(id) // policy bookkeeping (R4): recency clock always, decaying heat under a value-aware policy
 	// R7 ledger: a DEMAND is an agent asking for bytes, so the prefetch's hints are excluded — they
 	// are the ring guessing, and counting them would inflate the B*K numerator with demand that never
@@ -271,6 +288,7 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 			fence.Wait() // never Free storage a transfer is still writing into
 		}
 		r.be.Free(wt)
+		r.refused++
 		if r.shared != nil {
 			// R7: on a shared ring this is the operator's signal that the budget cannot hold the
 			// CONCURRENTLY HELD experts of the attached agents — see SharedExpertRingConfig.BudgetBytes.
@@ -280,6 +298,7 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 		return compute.Tensor{}, false
 	}
 	r.pageIn++
+	r.pageInBytes += weightBytes
 	if r.shared != nil {
 		// The payer is booked even for a prefetch: the bytes were paid for by whoever hinted them,
 		// and a later agent served off that span is coalescing whether the span opened on a demand or

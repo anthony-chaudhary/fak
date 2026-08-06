@@ -373,6 +373,17 @@ func (sh *SharedExpertRing) Stats() SharedExpertRingStats {
 	}
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
+	return sh.statsLocked()
+}
+
+// statsLocked is Stats without the locking, for a caller already inside a ring span — the same
+// "session-level entry points lock, the rest never does" discipline the rest of this file follows.
+// The operator report (R6/#5617) reads it that way so its ring, coalescing and placement numbers are
+// ONE snapshot rather than several taken while peers moved the ring underneath.
+func (sh *SharedExpertRing) statsLocked() SharedExpertRingStats {
+	if sh == nil {
+		return SharedExpertRingStats{}
+	}
 	return SharedExpertRingStats{
 		Enabled:           !sh.closed,
 		Agents:            len(sh.attached),

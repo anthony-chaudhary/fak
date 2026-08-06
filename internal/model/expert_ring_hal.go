@@ -168,6 +168,16 @@ type ExpertRingStats struct {
 	PageIns   int `json:"page_ins"`
 	Hits      int `json:"hits"`
 	Evictions int `json:"evictions"`
+	// Lookups is every staging request the ring received and Refusals the ones it could not admit
+	// (the caller then falls back to permanent halW residency — safe, but unbounded). They are the
+	// RECONCILIATION pair R6/#5617 reports against: Hits+PageIns+Refusals == Lookups is an identity
+	// counted on both sides independently, so an operator surface can prove it is reading the ring's
+	// own accounting rather than a parallel estimate. PageInBytes is the device bytes cold uploads
+	// actually moved — the numerator of bytes-per-token, which PageIns alone cannot give because
+	// routed projections differ in size and quantization.
+	Lookups     int   `json:"lookups"`
+	Refusals    int   `json:"refusals"`
+	PageInBytes int64 `json:"page_in_bytes"`
 	// PinnedCount is how many experts the durable pin-set (R2/#5613) currently holds exempt from
 	// eviction. 0 means plain LRU — either no pin-set was declared, or the prior was empty.
 	PinnedCount int `json:"pinned_count"`
@@ -235,6 +245,9 @@ func (r *pagedRing) stats() ExpertRingStats {
 		PageIns:       r.pageIn,
 		Hits:          r.hit,
 		Evictions:     r.evict,
+		Lookups:       r.lookups,
+		Refusals:      r.refused,
+		PageInBytes:   r.pageInBytes,
 		PinnedCount:   r.pins.Len(),
 
 		Prefetched:       r.prefetched,
