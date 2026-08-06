@@ -1207,6 +1207,11 @@
           "category": "incidental",
           "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
           "token": "witnessGitRunner"
+        },
+        {
+          "category": "incidental",
+          "reason": "A local variable in finishGuardChildAndReport holding the already-rendered banner string that recordGuardCompactionWitness returned. The proof concept it carries is the guardCompactionWitness row positioned in this family; the binding itself exists only so the durable write happens outside the !quiet branch while the emit happens inside it.",
+          "token": "compactionWitness"
         }
       ],
       "id": "witness-proof",
@@ -1225,6 +1230,7 @@
         "WitnessEvidenceOptions",
         "WitnessEvidenceStats",
         "WitnessMove",
+        "compactionWitness",
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
         "dispatchWitnessArchiveStranded",
@@ -1401,12 +1407,18 @@
           "category": "incidental",
           "reason": "Implementation symbol for the #2186 cache attribution scope; not a new managed-context concept.",
           "token": "noteCtxValueTTL1hScope"
+        },
+        {
+          "category": "incidental",
+          "reason": "A local string variable in cmd/fak's guard exit funnel. It holds pre-rendered banner text, reads no context window and mutates none; the compaction it reports on happened earlier, inside internal/gateway.",
+          "token": "compactionWitness"
         }
       ],
       "id": "context-ctx",
       "ignore": [
         "MechanismStaleContext",
         "cctx",
+        "compactionWitness",
         "compactions",
         "context",
         "contexts",
@@ -1813,6 +1825,16 @@
           "category": "incidental",
           "reason": "An unexported per-verb string builder for one CLI table: it formats the fleetbus.Report that `fak fleet control` already owns and has no meaning outside that one command's stdout. Not a rendering concept.",
           "token": "renderFleetControl"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local human-table printer for the one gitspawn bench report; carries no concept of its own beyond the render-materialize family root already positioned.",
+          "token": "renderGitSpawnReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local printer for the gitspawn bench baseline-vs-current comparison; a presentation helper for this command, not a distinct concept.",
+          "token": "renderGitSpawnDelta"
         }
       ],
       "id": "render-materialize",
@@ -1836,6 +1858,8 @@
         "renderCommitVelocity",
         "renderFleetControl",
         "renderGhostReport",
+        "renderGitSpawnDelta",
+        "renderGitSpawnReport",
         "renderRunaway",
         "renderValidate",
         "renderVelocityLeg",
