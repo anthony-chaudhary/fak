@@ -168,7 +168,8 @@ a model on **activated working set + ring budget** rather than the full expert b
   `internal/gateway/gateway.go`), so the knob is env-only; and `refuseEPPlanIfUnfit` still calls
   the band-shaped `FitCPUOffloadExpertsOnDevice` rather than the activated form that now exists
   beside it. Both are blocked on peer hunks in those files, not on design - the flag is three
-  mechanical touch-points and the swap is one line. **Open remainder of #5612.**
+  mechanical touch-points and the swap is one line. **#5612 is closed, so the open remainder is
+  tracked as #5628** rather than left inside a closed thread.
 - **Remaining witness:** a checkpoint whose full expert bulk exceeds the device budget is
   admitted *through the serve flag* and decodes at a chosen N, with the plan JSON reporting the
   sized split.
@@ -247,7 +248,11 @@ computes.
   overlap against. What landed is the ORDERING the overlap would rest on (every weight upload
   precedes the first expert GEMM) at zero extra page-ins and bit-identical output. Turning that
   into a real overlap number needs an async staging primitive on the `Backend` interface - the
-  next checkable step for this rung, and a prerequisite the plan did not price.
+  next checkable step for this rung, and a prerequisite the plan did not price. **#5614 is
+  closed, so that prerequisite is tracked as #5627** (an optional `AsyncUploader`/`Fence`
+  extension, shaped like the existing `RankUploader`). It gates the ladder's actual latency
+  win: R0-R4 made expert residency bounded, pinned, policy-chosen and prefetched, but a ring
+  miss is still a *synchronous* upload on the critical path.
 - **L+1 lookahead stays with #4300**, and the reason is structural rather than schedule: layer
   L+1's router input is downstream of layer L's own expert output, so crossing the layer
   boundary requires a *predictor*, not just earlier issue. `prefetchActivatedExperts` takes a
