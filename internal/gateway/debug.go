@@ -38,9 +38,13 @@ type debugVarsResponse struct {
 	ModelLoad        *debugModelLoadVars            `json:"model_load,omitempty"`
 	KVMemory         *debugKVMemoryVars             `json:"kv_memory,omitempty"`
 	RequestMemory    *debugRequestMemoryVars        `json:"request_memory,omitempty"`
-	Sessions         []debugSessionVars             `json:"sessions,omitempty"`
-	Assumptions      []SessionAssumption            `json:"assumptions,omitempty"`
-	ContextQueries   []ContextQueryAuditRecord      `json:"context_queries,omitempty"`
+	// MoEResidency is what a serve that declared an expert budget paid to keep the top-k
+	// activated experts resident (R6, #5617). Omitted unless some request actually engaged a
+	// routed-expert ring, so its absence means "not engaged" rather than "engaged, cost zero".
+	MoEResidency   *debugMoEResidencyVars    `json:"moe_residency,omitempty"`
+	Sessions       []debugSessionVars        `json:"sessions,omitempty"`
+	Assumptions    []SessionAssumption       `json:"assumptions,omitempty"`
+	ContextQueries []ContextQueryAuditRecord `json:"context_queries,omitempty"`
 	// Endpoints is the live accounts+nodes block — which Claude seats and which serving
 	// nodes THIS session is using (fak guard's status area). Nil/omitted unless the host
 	// set a provider (SetSessionEndpointsProvider) that has something to report.
@@ -335,6 +339,51 @@ type debugKVMemoryVars struct {
 	Splits             int     `json:"splits,omitempty"`
 }
 
+// debugMoEResidencyVars is the activated-expert residency block. Unlike the Prometheus family,
+// which leaves ratios to PromQL, this one carries the derived rates precomputed: /debug/vars is
+// read by a human answering "is the budget I declared the right size", and making them divide
+// page-in bytes by forwarded tokens in their head is how that question goes unanswered.
+type debugMoEResidencyVars struct {
+	Requests int64 `json:"requests"`
+	Tokens   int64 `json:"tokens"`
+
+	Lookups     int64 `json:"lookups"`
+	Hits        int64 `json:"hits"`
+	PageIns     int64 `json:"page_ins"`
+	Evictions   int64 `json:"evictions"`
+	Refusals    int64 `json:"refusals"`
+	PageInBytes int64 `json:"page_in_bytes"`
+
+	BudgetBytes int64 `json:"budget_bytes,omitempty"`
+	PeakBytes   int64 `json:"peak_bytes,omitempty"`
+
+	HitRate             float64 `json:"hit_rate"`
+	RefusalRate         float64 `json:"refusal_rate"`
+	ExpertBytesPerToken float64 `json:"expert_bytes_per_token"`
+	PeakBudgetUsed      float64 `json:"peak_budget_used,omitempty"`
+
+	// The most recent request's framing. Shape makes the byte rates readable (3% of experts
+	// activated is why an offload budget can be small); placement is the pin-set gauge, which
+	// describes one request and does not sum.
+	Experts           int     `json:"experts,omitempty"`
+	ExpertsPerToken   int     `json:"experts_per_token,omitempty"`
+	ActivatedFraction float64 `json:"activated_fraction,omitempty"`
+	PlacementBasis    string  `json:"placement_basis,omitempty"`
+	PlacementDrift    float64 `json:"placement_drift,omitempty"`
+	// PlacementServedShare is the complement of drift: the share of the request's expert touches
+	// the resident plan actually served. Named for what it measures rather than as "coverage",
+	// which in this repo already means how much of a surface a test exercises.
+	PlacementServedShare float64 `json:"placement_served_share,omitempty"`
+	SharedRingAgents     int     `json:"shared_ring_agents,omitempty"`
+	AgentsPerPageIn      float64 `json:"agents_per_page_in,omitempty"`
+
+	// ReconciliationFailures is the alarm; FailedChecks names what disagreed on the most recent
+	// unreconciled request, so an operator who sees a non-zero count is not left guessing which
+	// of the numbers above stopped being trustworthy.
+	ReconciliationFailures int64    `json:"reconciliation_failures"`
+	FailedChecks           []string `json:"failed_checks,omitempty"`
+}
+
 type debugRequestMemoryVars struct {
 	Backend       string                         `json:"backend"`
 	PromptTokens  int                            `json:"prompt_tokens"`
@@ -563,6 +612,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		ModelLoad:        debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
+		MoEResidency:     debugMoEResidency(s.planner),
 		Sessions:         s.debugSessions(ctx, now),
 		Assumptions:      s.debugAssumptions(ctx),
 		ContextQueries:   s.contextQueryAuditSnapshot(),
@@ -1119,6 +1169,57 @@ func debugOperationRows(rows []operationMetricSnapshot) []debugOperationMetricVa
 			By:          row.key.by,
 			Latency:     debugLatency(row.val),
 		})
+	}
+	return out
+}
+
+// debugMoEResidency renders a serve's activated-expert residency, or nil when there is nothing to
+// render — a proxy planner (no reporter) or a local one whose operator declared no expert budget,
+// so no session ever built a ring. Both are ordinary configurations, and reporting them as a block
+// of zeros would claim a measurement nobody took.
+func debugMoEResidency(p agent.Planner) *debugMoEResidencyVars {
+	reporter, ok := p.(agent.MoEResidencyReporter)
+	if !ok {
+		return nil
+	}
+	l := reporter.MoEResidencyStats()
+	if l.Requests == 0 {
+		return nil
+	}
+	last := l.Last
+	out := &debugMoEResidencyVars{
+		Requests:               l.Requests,
+		Tokens:                 l.Tokens,
+		Lookups:                l.Lookups,
+		Hits:                   l.Hits,
+		PageIns:                l.PageIns,
+		Evictions:              l.Evictions,
+		Refusals:               l.Refusals,
+		PageInBytes:            l.PageInBytes,
+		BudgetBytes:            l.BudgetBytes,
+		PeakBytes:              l.PeakBytes,
+		HitRate:                l.HitRate(),
+		RefusalRate:            l.RefusalRate(),
+		ExpertBytesPerToken:    l.ExpertBytesPerToken(),
+		PeakBudgetUsed:         l.PeakBudgetUsed(),
+		Experts:                last.Shape.Experts,
+		ExpertsPerToken:        last.Shape.ExpertsPerToken,
+		ActivatedFraction:      last.Shape.ActivatedFraction,
+		PlacementDrift:         last.Placement.Drift,
+		PlacementServedShare:   last.Placement.Coverage,
+		AgentsPerPageIn:        last.Rates.AgentsPerPageIn,
+		ReconciliationFailures: l.ReconciliationFailures,
+	}
+	if basis := strings.TrimSpace(last.Placement.Basis); basis != "" && basis != "none" {
+		out.PlacementBasis = basis
+	}
+	if last.Shared != nil {
+		out.SharedRingAgents = last.Shared.Agents
+	}
+	for _, c := range last.Reconciliation.Checks {
+		if !c.OK {
+			out.FailedChecks = append(out.FailedChecks, c.Name)
+		}
 	}
 	return out
 }

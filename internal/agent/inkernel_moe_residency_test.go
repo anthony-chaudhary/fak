@@ -137,6 +137,24 @@ func TestMoEResidencyLedgerIsInertWithoutARing(t *testing.T) {
 	nilp.noteMoEResidency(nil, 0) // must not panic
 }
 
+// TestInKernelPlannerSatisfiesTheResidencyReporter pins the seam the gateway crosses, which it
+// crosses by a RUNTIME type assertion (planner.(MoEResidencyReporter)) rather than a declared
+// dependency. Nothing else would notice if the method were renamed or its signature drifted: the
+// build would stay green, the assertion would start failing, and the whole telemetry family would
+// quietly vanish from every scrape and every /debug/vars — which looks exactly like a serve that
+// declared no expert budget, the state this rung exists to distinguish.
+func TestInKernelPlannerSatisfiesTheResidencyReporter(t *testing.T) {
+	var p Planner = &InKernelPlanner{}
+	r, ok := p.(MoEResidencyReporter)
+	if !ok {
+		t.Fatal("*InKernelPlanner no longer satisfies MoEResidencyReporter; the gateway's type " +
+			"assertion now fails silently and emits no MoE residency at all")
+	}
+	if !moeLedgerIsZero(r.MoEResidencyStats()) {
+		t.Fatal("a fresh planner reported a non-zero ledger through the reporter interface")
+	}
+}
+
 // moeLedgerIsZero is spelled out rather than compared against the zero value because the ledger
 // carries a whole report, which holds slices and is therefore not comparable.
 func moeLedgerIsZero(l MoEResidencyLedger) bool {
