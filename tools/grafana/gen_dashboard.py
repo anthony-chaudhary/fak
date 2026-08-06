@@ -1465,9 +1465,15 @@ FLEET_EXPORTER_NOTE = (
 
 # The drill-down door: one data link from the overview's session table into the
 # per-session dashboard, carrying the clicked session id as the template variable.
+# ${__url_time_range} is load-bearing, not decoration: without it Grafana opens the
+# drill-down at ITS OWN default range, so an operator who zoomed the overview to the
+# ten minutes around an incident would land on a dashboard showing the last 6h and
+# read it as the same window. Carrying the range is what makes the two dashboards one
+# surface at two zoom levels rather than two views that happen to link.
 SESSION_DRILL_LINK = [{
     "title": "Drill down: this session",
-    "url": "/d/fak-fleet-session/fak-fleet-session-drill-down?var-session=${__value.raw}",
+    "url": "/d/fak-fleet-session/fak-fleet-session-drill-down"
+           "?var-session=${__value.raw}&${__url_time_range}",
 }]
 
 

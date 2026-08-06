@@ -661,7 +661,7 @@
                 "value": [
                   {
                     "title": "Drill down: this session",
-                    "url": "/d/fak-fleet-session/fak-fleet-session-drill-down?var-session=${__value.raw}"
+                    "url": "/d/fak-fleet-session/fak-fleet-session-drill-down?var-session=${__value.raw}&${__url_time_range}"
                   }
                 ]
               }
