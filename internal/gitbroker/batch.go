@@ -170,10 +170,25 @@ func (p *batchProc) start() error {
 // p.mu.
 func (p *batchProc) kill() {
 	p.dead = true
-	cmd := p.cmd
+	cmd, in := p.cmd, p.in
 	p.cmd, p.in, p.out = nil, nil, nil
 	if cmd == nil || cmd.Process == nil {
 		return
+	}
+	// Close stdin HERE rather than leaving it to the Wait below, because on
+	// Windows killing the process this package started does not necessarily
+	// reap the git that is actually serving the stream. The `git` every
+	// non-Git-Bash shell resolves first on PATH (`C:\Program Files\Git\cmd\
+	// git.exe`, ~46 KB) is a launcher that re-execs the real `git.exe` (~4 MB,
+	// under mingw64\bin) as a CHILD holding the inherited pipes and the
+	// repository as its working directory. TerminateProcess reaches the
+	// launcher alone, so the real `cat-file --batch` outlives the kill —
+	// measured still alive more than two seconds after it, pinning the repo
+	// directory. Stdin EOF is the one signal that reaches the process actually
+	// reading the pipe, whichever one that is, and it is the same mechanism
+	// close() and the parent-exit path already rely on.
+	if in != nil {
+		_ = in.Close()
 	}
 	_ = cmd.Process.Kill()
 	// Reap the child so it does not linger as a zombie. Wait may race a

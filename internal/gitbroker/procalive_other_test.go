@@ -24,3 +24,16 @@ func gitProcessGone(pid int) bool {
 		return true
 	}
 }
+
+// killGitProcessTree terminates the git this package started. Here that is one
+// kill, because `git` on PATH is the git binary itself: POSIX has no equivalent
+// of the Git-for-Windows launcher `.exe` that re-execs the real git as a child
+// and survives its parent's death, which is why the Windows build of this
+// helper has to walk descendants. See procalive_windows_test.go.
+func killGitProcessTree(pid int) error {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return p.Kill()
+}

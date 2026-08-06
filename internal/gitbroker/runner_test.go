@@ -199,7 +199,12 @@ func TestKilledPoolFallsBackTransparently(t *testing.T) {
 	if proc == nil {
 		t.Fatal("no warm process to kill")
 	}
-	if err := proc.Kill(); err != nil {
+	// The whole TREE, not just the pid this package holds. On Windows the `git`
+	// on PATH is usually a launcher that runs the real git as a child, and a
+	// single kill leaves that child answering our pipe — so a plain
+	// proc.Kill() would leave the pool WORKING and this test would be asserting
+	// against a pool that was never killed. See killGitProcessTree.
+	if err := killGitProcessTree(proc.Pid); err != nil {
 		t.Fatalf("kill the pool: %v", err)
 	}
 	for i := 0; i < 200 && !gitProcessGone(proc.Pid); i++ {
