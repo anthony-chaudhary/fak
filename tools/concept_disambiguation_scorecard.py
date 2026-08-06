@@ -2061,6 +2061,35 @@ def _front_matter(title: str, desc: str) -> list[str]:
     return ["---", f'title: "{title}"', f'description: "{desc}"', "---", ""]
 
 
+def provenance_row(card: dict[str, Any]) -> str:
+    """Render the `As of` row, refusing an empty provenance instead of emitting one.
+
+    This row is the one line that dates every other number on the page, and it silently
+    rendered as `| As of |  (fak ) |` for as long as the data directory's `_meta.json` carried
+    no `meta` block (#5609). The `'?'` fallback that was supposed to catch it could never fire:
+    the card builder writes `meta.get("as_of", "")`, so a MISSING key arrives here as a present
+    empty string and `.get(key, '?')` returns `''`, not the default. The table still looked
+    well-formed, which is why it survived.
+
+    That is the grounding epic's class inside a generator — an absent value rendered as a
+    valid-looking empty one. A document asserting that every number below it is re-derived
+    cannot decline to say WHEN. So empty is treated as missing, and missing refuses.
+    """
+    as_of = str(card.get("as_of") or "").strip()
+    version = str(card.get("fak_version") or "").strip()
+    missing = [name for name, value in (("as_of", as_of), ("fak_version", version)) if not value]
+    if missing:
+        raise ValueError(
+            "concept-disambiguation scorecard: refusing to render an undated scorecard — "
+            + ", ".join(missing)
+            + " is empty or absent in the data directory's _meta.json \"meta\" block. "
+            "Populate it the way the sibling scorecards do "
+            "(docs/industry-scorecard, docs/persona-fit-scorecard): an undated derived claim "
+            "is not a derived claim."
+        )
+    return f"| As of | {as_of} (fak {version}) |"
+
+
 def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> str:
     c = payload.get("corpus") or {}
     cov = c.get("coverage") or {}
@@ -2109,7 +2138,7 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
     out.append(f"| **Ambiguous lookup names (drive to 0)** | "
                f"**{(c.get('index') or {}).get('ambiguous_keys', 0)}** of "
                f"{(c.get('index') or {}).get('keys', 0)} indexed names |")
-    out.append(f"| As of | {c.get('as_of', '?')} (fak {c.get('fak_version', '?')}) |")
+    out.append(provenance_row(c))
     out.append(f"| Legacy bounded score (saturates; not the driver) | {c.get('score', 0)}/100 "
                f"(grade {c.get('grade', '?')}) |")
     out.append("")

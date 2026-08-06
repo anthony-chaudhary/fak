@@ -1,5 +1,9 @@
 {
   "schema": "fak-concept-disambiguation-scorecard.data/1",
+  "meta": {
+    "as_of": "2026-08-05",
+    "fak_version": "0.43.0"
+  },
   "glossary": "",
   "families": [
     {
