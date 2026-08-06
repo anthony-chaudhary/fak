@@ -1387,6 +1387,16 @@
           "category": "incidental",
           "reason": "Unexported three-field struct carrying one contesting lease's id, globs and liveness class so the stand-down can name which holder it yielded to; a local record shape, not a concept.",
           "token": "dispatchWitnessLaneHolder"
+        },
+        {
+          "category": "incidental",
+          "reason": "The workspace-axis payload of a sessionledger Checkpoint: a HEAD sha plus dirty-entry digests. Its meaning is wholly derived from the Checkpoint pair it forms half of, so it names a field, not a concept of its own.",
+          "token": "tree_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for that tree-axis payload; it hashes the dirty entries and returns the struct, carrying no concept beyond the value it builds.",
+          "token": "NewTreeWitness"
         }
       ],
       "id": "witness-proof",
@@ -1399,6 +1409,7 @@
         "HonestyClaimUnwitnessed",
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
+        "NewTreeWitness",
         "TurnOutcomesFromWitness",
         "VerdictUnwitnessed",
         "WithCoreLockWitness",
@@ -1438,6 +1449,7 @@
         "refutes",
         "refutil",
         "revocations",
+        "tree_witness",
         "want_witness",
         "withdefaultoriginwitnesses",
         "witnessGitRunner",
