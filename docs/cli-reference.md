@@ -146,6 +146,12 @@ else — repo-workflow verbs, scorecards, benches, dispatch/loop plumbing — is
 lists every verb with its tier. The bare dev spellings below still work today
 (the `fak dev` namespace is compatibility-first); `fak dev` is the canonical form.
 
+The `session`, `signal`, and `ps` verbs are the front door to out-of-band control
+of a session that is **already running** — steer, redirect, pause, resume, cancel,
+terminate, throttle, budget, priority. That closed vocabulary, what each op may
+touch, the witness that proves it applied, and the closed refusal tokens are
+specified in [`docs/operator-control-plane.md`](operator-control-plane.md).
+
 ```
 fak dev       [<verb> ...]                             # list the dev tier, or run a dev verb (canonical spelling)
 fak run       --trace testdata/tau2/tau2-smoke.json    # replay a trace through the kernel
