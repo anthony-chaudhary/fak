@@ -132,6 +132,25 @@ type pagedRing struct {
 	prefetched       int
 	activatedExperts int
 	activatedCovered int
+
+	// shared is the cross-agent owner (R7/#5618, expert_ring_shared.go) when this ring is the
+	// residency of a (model, device) pair rather than of one conversation: it carries the mutex every
+	// attached session serializes on and the coalescing ledger the hooks below feed. nil on a private
+	// per-session ring, which is the default and where every hook is a branch not taken.
+	//
+	// The methods in THIS file never lock, under any owner. Serialization happens at the session-level
+	// entry points (Session.ringEnter), so there is one place to audit and no lock ordering to get
+	// wrong — see expert_ring_shared.go's header.
+	shared *SharedExpertRing
+}
+
+// dropResidency closes a weight's residency span in the cross-agent ledger, if there is one. Called
+// wherever a handle leaves `resident`, so the next page-in of that weight is accounted as a new span
+// with a new payer rather than continuing the old one.
+func (r *pagedRing) dropResidency(id polymodel.ModelID) {
+	if r.shared != nil {
+		r.shared.endResidency(id)
+	}
 }
 
 // newPagedRing returns a ring over be with the given resident weight-byte budget. A nil backend
@@ -219,9 +238,19 @@ func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype co
 func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
 	id := polymodel.ModelID(name)
 	r.noteAccess(id) // policy bookkeeping (R4): recency clock always, decaying heat under a value-aware policy
+	// R7 ledger: a DEMAND is an agent asking for bytes, so the prefetch's hints are excluded — they
+	// are the ring guessing, and counting them would inflate the B*K numerator with demand that never
+	// existed. A serve is booked on hit and on miss alike, because either way this agent got the
+	// weight off this residency span.
+	if r.shared != nil && !r.prefetching {
+		r.shared.noteDemand()
+	}
 	if wt, ok := r.resident[id]; ok {
 		r.pool.Touch(id)
 		r.hit++
+		if r.shared != nil && !r.prefetching {
+			r.shared.noteServe(id)
+		}
 		// A HIT on a weight the prefetch staged is where overlap is actually observed: the transfer
 		// was issued a GEMM or more ago, and either landed underneath that work or did not. Skip the
 		// fence while prefetching — re-hinting an in-flight weight must not block the hint path.
@@ -242,9 +271,21 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 			fence.Wait() // never Free storage a transfer is still writing into
 		}
 		r.be.Free(wt)
+		if r.shared != nil {
+			// R7: on a shared ring this is the operator's signal that the budget cannot hold the
+			// CONCURRENTLY HELD experts of the attached agents — see SharedExpertRingConfig.BudgetBytes.
+			// The fallback is safe (permanent halW residency) but unbounded, so it must be counted.
+			r.shared.noteRefusal()
+		}
 		return compute.Tensor{}, false
 	}
 	r.pageIn++
+	if r.shared != nil {
+		// The payer is booked even for a prefetch: the bytes were paid for by whoever hinted them,
+		// and a later agent served off that span is coalescing whether the span opened on a demand or
+		// on a guess.
+		r.shared.notePageIn(id, weightBytes)
+	}
 	if fence != nil {
 		if r.pending == nil {
 			r.pending = map[polymodel.ModelID]compute.Fence{}
@@ -260,10 +301,14 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 			r.discardStaged(vid)
 			r.be.Free(vh) // page the LRU victim out; its device storage is released
 			delete(r.resident, vid)
+			r.dropResidency(vid)
 			r.evict++
 		}
 	}
 	r.resident[id] = wt
+	if r.shared != nil && !r.prefetching {
+		r.shared.noteServe(id)
+	}
 	// A DEMAND miss must hand back a settled handle: every caller of stage() goes straight on to
 	// read or multiply it. Only the prefetch path may return with the transfer still in flight,
 	// which is the whole point of the extension — issue now, pay later or not at all.
@@ -384,6 +429,7 @@ func (r *pagedRing) repin(id polymodel.ModelID, m polymodel.Model) {
 			r.discardStaged(id)
 			r.be.Free(h)
 			delete(r.resident, id)
+			r.dropResidency(id)
 		}
 		delete(r.holds, id)
 		delete(r.heldPins, id)
@@ -400,6 +446,7 @@ func (r *pagedRing) freeAll() {
 		r.discardStaged(id) // never tear down storage a transfer is still writing into
 		r.be.Free(t)
 		delete(r.resident, id)
+		r.dropResidency(id)
 		r.pool.Evict(id)
 	}
 	r.pending = nil

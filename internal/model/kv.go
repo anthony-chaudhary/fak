@@ -180,7 +180,23 @@ type Session struct {
 	ExpertPrefetch ExpertPrefetchMode
 	// expertRing is the bounded routed-expert ring, built lazily on the first routed-expert staging
 	// when ExpertRingBytes > 0 and freed by Close. nil on every session that never declared a budget.
+	// When sharedRing is set it points at THAT ring instead, so every routed-expert path — demand,
+	// prefetch, telemetry — reads a shared ring by exactly the rule it read a private one by.
 	expertRing *pagedRing
+	// sharedRing is the cross-agent routed-expert residency this session attached to (R7/#5618,
+	// expert_ring_shared.go), nil for the per-conversation default. It is what makes Close DETACH
+	// rather than free: the bytes belong to the (model, device) pair, not to this conversation.
+	//
+	// Only routed-expert WEIGHT residency is shared. KV cache, conversation state and halW stay
+	// per-session — the safety property SharedExpertRing.Attach enforces by refusing a session over a
+	// different *Model or Backend.
+	sharedRing *SharedExpertRing
+	// ringAgent is this session's identity in the shared ring's coalescing ledger; empty when private.
+	ringAgent string
+	// ringDepth is the reentrancy depth of the shared-ring lock span this session currently holds (see
+	// Session.ringEnter). It needs no synchronization of its own: a Session is single-goroutine, so
+	// only the goroutine running its forward can ever touch it.
+	ringDepth int
 	// expertPinErr retains a warm-start load failure until the next turn boundary reports it: a
 	// corrupt usage dump must degrade the session to a cold start, not fail it, but must not vanish.
 	expertPinErr error

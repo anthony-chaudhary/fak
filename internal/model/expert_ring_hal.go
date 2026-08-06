@@ -98,6 +98,12 @@ func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Ten
 		}
 	}
 	if r := s.routedExpertRing(name); r != nil {
+		// R7/#5618: under a SHARED ring these four ring touches must not interleave with a peer
+		// agent's staging, so they run inside one span. The span is reentrant, so the demand path's
+		// outer stage-and-hold span (hal.go) nests here without deadlocking, and it is a no-op under
+		// the per-session default — byte-for-byte the pre-R7 path.
+		done := s.ringEnter(r)
+		defer done()
 		// R2/#5613: `pinned` comes from the durable, workload-personalized pin-set rather than the
 		// constant false R0 passed, and the staging is folded into this turn's usage histogram so
 		// the actuator repins against real routing. A session with no pin-set answers false and
@@ -203,11 +209,23 @@ func (s ExpertRingStats) AsyncOverlapFraction() float64 {
 // ExpertRing reports this session's bounded routed-expert residency. It returns the zero value (in
 // particular Enabled=false) for a session with no ring — either because no budget was declared or
 // because no routed expert has been staged yet.
+// A session attached to a SHARED ring (R7/#5618) reports that ring's AGGREGATE residency — the
+// budget, footprint and ledger of every attached agent together — because that is what bounds this
+// session's experts. The per-agent split lives in SharedExpertRing.Stats.
 func (s *Session) ExpertRing() ExpertRingStats {
 	if s == nil || s.expertRing == nil {
 		return ExpertRingStats{}
 	}
 	r := s.expertRing
+	done := s.ringEnter(r)
+	defer done()
+	return r.stats()
+}
+
+// stats is the ring's own residency account, split out from Session.ExpertRing so the shared-ring
+// owner (SharedExpertRing.Stats) can read the same numbers under its own lock without going through
+// a session that may not exist any more.
+func (r *pagedRing) stats() ExpertRingStats {
 	return ExpertRingStats{
 		Enabled:       true,
 		BudgetBytes:   r.budget(),

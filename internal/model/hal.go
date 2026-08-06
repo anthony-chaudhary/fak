@@ -87,8 +87,14 @@ func (s *Session) Close() {
 		}
 	}
 	// Routed-expert weights served by the bounded ring are NOT in halW (that is the point), so they
-	// need their own teardown or their device handles would outlive the session.
-	if s.expertRing != nil {
+	// need their own teardown or their device handles would outlive the session. A SHARED ring
+	// (R7/#5618) is the exception and the reason the branch exists: its residency belongs to the
+	// (model, device) pair, so this conversation ending must DETACH and leave every byte in place for
+	// the agents still using it. Freeing here would page out a peer's working set — and Free a handle
+	// it is about to multiply against.
+	if s.sharedRing != nil {
+		s.sharedRing.Detach(s)
+	} else if s.expertRing != nil {
 		s.expertRing.freeAll()
 		s.expertRing = nil
 	}
@@ -340,13 +346,28 @@ func (s *Session) expertSwiGLUHAL(gateName, upName, downName string, x []float32
 	// (Session.ExpertRingBytes, #5611) staging `up` could evict `gate` and Free a handle the GEMMs
 	// below still need. Hold each weight for the rest of this expert's computation and release it on
 	// return; without a ring every hold is a no-op and this is byte-for-byte the previous path.
+	//
+	// Under a SHARED ring (R7/#5618) staging and holding must be ONE span, not two statements: a peer
+	// agent's stage landing between them could evict the handle just returned and Free it — a
+	// use-after-free the per-session ring could not produce, because nothing else could touch it. The
+	// span is reentrant, so weightHALStagedBounded's own span nests inside this one, and it is a
+	// no-op under the per-session default.
 	staged := make([]compute.Tensor, len(weights))
 	for i, w := range weights {
-		staged[i] = resident(w)
-		if r := s.routedExpertRing(w.name); r != nil {
-			r.hold(w.halKey())
-			defer r.release(w.halKey())
+		r := s.routedExpertRing(w.name)
+		if r == nil {
+			staged[i] = resident(w)
+			continue
 		}
+		done := s.ringEnter(r)
+		staged[i] = resident(w)
+		r.hold(w.halKey())
+		done()
+		defer func(key string) {
+			done := s.ringEnter(r)
+			r.release(key)
+			done()
+		}(w.halKey())
 	}
 	gateW, upW, downW := staged[0], staged[1], staged[2]
 

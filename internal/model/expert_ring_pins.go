@@ -168,6 +168,10 @@ func (s *Session) ExpertRingEndTurn(decay float64, maxSwaps int) ([]ExpertPinSwa
 		return nil, nil
 	}
 	r := s.expertRing
+	// R7/#5618: a shared ring's pin-set and heat are cross-agent state, so the repin runs inside a
+	// ring span. "No forward in flight" is this session's quiescence; a peer agent's may not be.
+	done := s.ringEnter(r)
+	defer done()
 	swaps := r.RepinPass(r.turn, decay, maxSwaps)
 	swaps = append(swaps, r.pins.fillPins()...)
 	r.turn = NewExpertUsageHistogram()

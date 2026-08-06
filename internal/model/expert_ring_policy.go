@@ -234,6 +234,10 @@ func (s *Session) ExpertRingTrace() ExpertAccessTrace {
 		return ExpertAccessTrace{}
 	}
 	r := s.expertRing
+	// R7/#5618: the trace is ring state a peer agent may be appending to right now, so the snapshot
+	// is taken inside a ring span. Inert under the per-session default.
+	done := s.ringEnter(r)
+	defer done()
 	type key struct{ layer, expert int }
 	size := map[key]int64{}
 	for _, e := range r.trace {

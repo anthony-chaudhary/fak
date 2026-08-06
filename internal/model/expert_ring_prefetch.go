@@ -205,6 +205,11 @@ func (s *Session) prefetchActivatedExperts(layer int, picks []routePick) {
 	if len(plans) == 0 {
 		return
 	}
+	// R7/#5618: everything from here down mutates ring state, so under a shared ring it runs inside
+	// one span — including the `prefetching` flag, which is ring-wide and would otherwise let a peer
+	// agent's DEMAND be booked as this agent's hint. A no-op under the per-session default.
+	release := s.ringEnter(r)
+	defer release()
 	r.activatedExperts += len(plans)
 
 	// Phase 2: stage the longest prefix that fits. `prefetching` marks these stagings as hints, so
