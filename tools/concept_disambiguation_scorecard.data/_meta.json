@@ -203,6 +203,31 @@
           "category": "incidental",
           "reason": "The JSON field name on the guardCompactionWitness row for gateway's already-positioned CompactionCacheReadTokens / FakCompactionCacheReadTokens value. A serialization key that carries the warm witness on the row so an auditor never reaches for a fleet-cumulative cache_read; not a new cache concept.",
           "token": "cache_read_at_fire"
+        },
+        {
+          "category": "incidental",
+          "reason": "A 64 MiB default byte bound on the gitbroker Class A object store; a sizing constant for one cache instance, not a cache concept.",
+          "token": "DefaultCacheBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field name on the gitbroker stats document counting served-from-store answers; a wire label for an existing counter.",
+          "token": "cache_hits"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field name on the gitbroker stats document counting answers that fell through to a live git spawn; a wire label for an existing counter.",
+          "token": "cache_misses"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field name on the gitbroker stats document reporting the store's current byte footprint; a wire label for an existing gauge.",
+          "token": "cache_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constructor for the gitbroker Class A object store; it allocates the map and its byte bound, carrying no concept beyond the store it builds.",
+          "token": "newCache"
         }
       ],
       "id": "cache",
@@ -212,6 +237,7 @@
         "CacheValueBaseline",
         "CacheValueFacts",
         "CacheValueGateDebtKey",
+        "DefaultCacheBytes",
         "FAK_TOKEN_CACHE",
         "FAK_TOKEN_CACHE_MAX_BYTES",
         "July4CacheValueAutospawn",
@@ -224,7 +250,10 @@
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
         "cacheValueGateFactsFromReport",
+        "cache_bytes",
         "cache_creation_span",
+        "cache_hits",
+        "cache_misses",
         "cache_read_at_fire",
         "cache_trace_test",
         "cacheable",
@@ -284,6 +313,7 @@
         "loadCacheValueGateBaseline",
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
+        "newCache",
         "normalizedSchemaCacheCap",
         "normalizedSchemaCacheLen",
         "observecachettlupgrade",

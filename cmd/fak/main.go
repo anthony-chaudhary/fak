@@ -675,6 +675,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdGitMaint(args)
 	case "git-daily":
 		cmdGitDaily(args)
+	case "gitd":
+		cmdGitd(args)
 	case "clean-bins":
 		cmdCleanBins(args)
 	case "self-update":

@@ -164,6 +164,7 @@ var verbManifest = []Verb{
 	{Name: "garden", Synopsis: "the issue-garden: triage and groom GitHub issues (kind/priority/area)", Lane: "cmd"},
 	{Name: "git-daily", Synopsis: "the scheduled daily git-hygiene tick: reap orphaned git locks, then consolidate the object DB; deduped per day", Lane: "gitgate"},
 	{Name: "git-maint", Synopsis: "lock-aware safe object-DB consolidation: build midx + commit-graph, fold loose objects, never prune", Lane: "gitgate"},
+	{Name: "gitd", Synopsis: "resident per-repo git broker over a unix socket: cached content-addressed reads, provenance on every answer", Lane: "gitbroker"},
 	{Name: "glm52-prefill-sweep", Synopsis: "GLM-5.2 prefill-latency sweep: --dry-run prints the plan, --endpoint runs it and lands ledger artifacts", Lane: "cmd"},
 	{Name: "go", Synopsis: "go build/vet/test passthrough that masks peers' untracked-sibling poison via a buildcheck -overlay", Lane: "cmd"},
 	{Name: "goal-park", Synopsis: "park a supervisor goal claim: status|claim a goal identity to a single owner via the .fak/goal-park store", Lane: "cmd"},

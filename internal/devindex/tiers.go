@@ -180,6 +180,7 @@ var verbTiers = map[string]VerbTier{
 	"garden":                        TierDev,
 	"git-daily":                     TierDev,
 	"git-maint":                     TierDev,
+	"gitd":                          TierDev,
 	"glm52-prefill-sweep":           TierDev,
 	"go":                            TierDev,
 	"goal-park":                     TierDev,
