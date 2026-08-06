@@ -2127,3 +2127,10 @@ agentHookDelegate is one registered child process for one agent-LIFECYCLE event 
 repoguardArgv resolves the repo-guard PreToolUse delegate's child command for a repo root: the compiled tools/.bin/repoguard if present, else the tools/repo_guard.py source, else NOT-PRESENT. It answers only 'what should be executed here, and does it exist', never whether the guard allows the call.
 
 **Distinct from:** Not repoguard itself (the separate cmd/repoguard binary that renders the permission decision on stdout), and not agentHookDelegate (the registry entry that OWNS this resolver alongside its event). repoguardArgv deliberately omits the settings.json wrapper's staleness probe, which blanked a stale binary and fell through to a source path it never confirmed existed -- silently running nothing.
+
+
+### micro-context
+
+A lightweight logical agent execution context containing only a task delta, bounded mutable state, capabilities, budget, continuation identity, and output contract over an immutable shared agent base.
+
+**Distinct from:** A logical scheduling and isolation unit over one shared base; not a full harness process, not a provider context-window limit, and not context-MMU result-byte admission.

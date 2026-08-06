@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **69** (clarity 0 + coverage 69) |
-| **Crystal-clear concepts (and climbing)** | **417** crystal of 2130 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2299 / 2368** (97.1% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **74** (clarity 4 + coverage 70) |
+| **Crystal-clear concepts (and climbing)** | **419** crystal of 2132 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2299 / 2369** (97.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 190 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **60** of 2805 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **61** of 2807 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 98.1/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 96.1/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2130 concepts - score 98.1/100 (grade A) - disambiguation-debt 69
+concept-disambiguation chart - 2132 concepts - score 96.1/100 (grade A) - disambiguation-debt 74
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 417
+  * crystal       #######..................... 419
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -41,7 +41,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ****ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (69 concept(s); 4 crystal)
   cache            *****************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (217 concept(s); 41 crystal)
-  context-ctx      *****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (186 concept(s); 29 crystal)
+  context-ctx      *******************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (188 concept(s); 31 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         *******************ooooooooooooooooooooo (40 concept(s); 19 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -70,9 +70,9 @@ coverage by family (positioned / discovered):
   loop             ##########################.. 77/83
   cache            ############################ 261/265
   evict            ##########################.. 49/52
+  gateway-engine   ############################ 169/172
   score-debt       ###########################. 84/87
   decision         ###########################. 52/54
-  gateway-engine   ############################ 169/171
   support-maturity ###########################. 45/46
   attention        ############################ 74/74
   context-ctx      ############################ 199/199
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 140/140
 
-namespace coverage  [###############################.] 97.1%  (2299/2368 confusable tokens positioned)
+namespace coverage  [###############################.] 97.0%  (2299/2369 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 190/190
 
-name index: 2805 lookup name(s) -> 2130 concept(s), 60 ambiguous
+name index: 2807 lookup name(s) -> 2132 concept(s), 61 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -117,8 +117,8 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | Confusable name-pairs discovered | 190 |
 | **Separated from each other (drive to all)** | **190 / 190** (190 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
-| Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1450 / 3942 |
+| Entangled concepts (own twin undrawn) | 1 |
+| Boundaries drawn (mutual / total) | 1450 / 3945 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2805 over 2130 concepts |
-| Lookup names landing on several concepts | 60 |
-| **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2130 |
+| Lookup names indexed | 2807 over 2132 concepts |
+| Lookup names landing on several concepts | 61 |
+| **Shared names whose concepts stay unseparated (drive to 0)** | **1** |
+| Concepts carrying a contrast set | 2132 |
 
 ## The concepts (best verdict first)
 
@@ -207,6 +207,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **maxCtxRestoreCASEntries** - Cap constant bounding the durable media-restore CAS directory, oldest-modified-out on overflow (the disk analogue of the stash caps). |
 | * | crystal | symbol | context-ctx | **ctxRestoreCASDir** - Helper resolving the durable media-restore CAS directory from the environment at call time; empty string means durable persistence is off. |
 | * | crystal | concept | context-ctx | **managed context** - managed context is fak's gateway-owned context program - the SLO-reported alternative to client-managed context (internal/productscorecard ManagedContextSLOReport). |
+| * | crystal | concept | context-ctx | **micro-context** - A lightweight logical agent execution context containing only a task delta, bounded mutable state, capabilities, budget, continuation identity, and output contract over an immutable shared agent base. |
+| * | crystal | symbol | context-ctx | **microcontextdemo** - The Go command that runs the synthetic S0 micro-context research spine. |
 | * | crystal | symbol | context-ctx | **MechanismStaleContext** - The closed-vocabulary MechanismClass label for an audit finding whose failure mechanism is acting on stale repository state - overwriting, clobbering, or reverting a peer's newer work, or building on an outdated base. It classifies HOW a change failed cross-model audit, never why. |
 | * | crystal | symbol | context-ctx | **compaction_summary** - Regrowth attribution class for the compacted row's replacement_history: the summary transcript the Codex compactor injects into the fresh window after a fire (#4768), measured by row length only. |
 | * | crystal | symbol | context-ctx | **environment_context** - Upstream Codex marker (<environment_context>) that tags an injected environment header message in rollout transcripts; the #4768 regrowth scanner classifies rows containing it as reinjected instruction payload. |
@@ -2400,20 +2402,20 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
+| grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
+| indexed | `index_resolves` | 82 | 1 | 1 unresolvable shared lookup name(s) |
+| honesty | `clarity_consistent` | 82 | 1 | 1 verdict overclaim(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2492/3942 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2130 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2495/3945 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2132 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
 | separation | `pair_separated` | 100 | 0 | all 190 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
-| grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 2805 lookup name(s) resolves - 60 land on several concepts, all separated |
-| honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
@@ -2427,9 +2429,9 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | loop | 77 | 83 | 6 |
 | cache | 261 | 265 | 4 |
 | evict | 49 | 52 | 3 |
+| gateway-engine | 169 | 172 | 3 |
 | score-debt | 84 | 87 | 3 |
 | decision | 52 | 54 | 2 |
-| gateway-engine | 169 | 171 | 2 |
 | support-maturity | 45 | 46 | 1 |
 | attention | 74 | 74 | 0 |
 | context-ctx | 199 | 199 | 0 |

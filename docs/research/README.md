@@ -8,6 +8,9 @@
 
 **Next action:** before applying a research claim, find its provenance, maturity, and promotion witness; if any is missing, keep the claim in research and verify it independently.
 
+## Active focus
+
+- [Micro-context fabrics for 100–10,000 parallel agents](micro-context-fabrics.md) — split one cached agent base into many bounded logical contexts; includes the runnable 10k synthetic spine and controlled-kernel/API-only research ladder.
 ## Read research by maturity
 
 Research material makes options and uncertainty inspectable. It can identify a useful mechanism, report a measurement, or define a future architecture without claiming that fak currently supports it.

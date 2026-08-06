@@ -1,0 +1,43 @@
+{
+  "rows": [
+    {
+      "id": "micro-context",
+      "canonical": "micro-context",
+      "family": "context-ctx",
+      "kind": "concept",
+      "definition": "A lightweight logical agent execution context containing only a task delta, bounded mutable state, capabilities, budget, continuation identity, and output contract over an immutable shared agent base.",
+      "distinction": "A logical scheduling and isolation unit over one shared base; not a full harness process, not a provider context-window limit, and not context-MMU result-byte admission.",
+      "distinct_from": [
+        "context-mmu",
+        "compaction"
+      ],
+      "aliases": [
+        "microcontextdemo"
+      ],
+      "grounding": "microcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "microcontextdemo",
+      "canonical": "microcontextdemo",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The Go command that runs the synthetic S0 micro-context research spine.",
+      "distinction": "A runnable proof command, not the micro-context concept, not a production harness, and not a model-throughput benchmark.",
+      "distinct_from": [
+        "micro-context"
+      ],
+      "aliases": [],
+      "grounding": "microcontextdemo",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
