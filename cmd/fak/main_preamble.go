@@ -43,6 +43,9 @@ func recoverUsage(verb *string, argv *[]string, start time.Time) {
 //     dev-only verb with no top-level arm is dispatched here and reported handled.
 func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 	if len(os.Args) < 2 {
+		if maybeLaunchDefault() {
+			return true
+		}
 		usage()
 		recordUsage(*verb, *argv, 2, start)
 		os.Exit(2)
