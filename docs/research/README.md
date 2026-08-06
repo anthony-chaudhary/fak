@@ -58,3 +58,4 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [Micro-context S5a controlled-kernel 1,000-context ramp](micro-context-s5a-controlled-kernel-1k.md)
 - [Micro-context S6 API-only adapter](micro-context-s6-api-only.md)
 - [Micro-context quality and observability ledger](micro-context-quality-ledger.md)
+- [Micro-context S7 mixed-tenant fairness](micro-context-s7-fairness.md)

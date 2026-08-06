@@ -1,0 +1,31 @@
+{
+  "schema": "fak-microcontext-fairness/1",
+  "verdict": "PASS",
+  "submitted": 800,
+  "scheduled": 794,
+  "cancelled": 6,
+  "refused_spend": 1,
+  "interactive_wait_p95_ms": 0.75,
+  "bulk_wait_p95_ms": 0.759,
+  "per_tenant_scheduled": {
+    "bulk": 200,
+    "interactive": 594
+  },
+  "max_service_lag": {
+    "bulk": 0,
+    "interactive": 6
+  },
+  "selection_cost_ns": 1044100,
+  "allocation_bytes": 524664,
+  "estimated_idle_model_ns": 0,
+  "duplicate_output_tokens": 0,
+  "failed_work_units": 0,
+  "spend_micros": {
+    "bulk": 400,
+    "interactive": 594
+  },
+  "economics_verdict": "cost-only; no economic gain claimed without a tuned serving baseline",
+  "scope": "offline deterministic scheduler fixture; fairness scheduling and overhead only, not model throughput or provider economics"
+}
+
+
