@@ -5,9 +5,14 @@
 // a Windows box (process create + Defender scan), so a single `git commit` paid ~12-16s of
 // pure interpreter-spawn tax before any checking happened. None of the gates does real work:
 // each is regex/substring/os.Stat over `git diff --cached`, sub-millisecond once the
-// interpreter is up. This package collapses all 8 gates into one Go process that reads the
+// interpreter is up. This package collapses those gates into one Go process that reads the
 // staged diff ONCE and runs every gate over it — the whole measured cost was spawn overhead,
 // so a single static-binary start recovers essentially all of it.
+//
+// The registry has grown well past that Python-era set: PreCommitGates() registers all 17 gates
+// today. That number is BOUND, not typed — exhaustiveness_claim_test.go re-derives it from the
+// registry and fails when the two disagree, so this sentence cannot quietly decay the way the
+// count it replaces did (#5605, epic #5601). Adding a gate is expected to update it.
 //
 // Each gate is a byte-faithful port of its tools/check_*.py / scrub_public_copy.py oracle;
 // a `parity_test.go` differential harness asserts identical verdicts against the Python
