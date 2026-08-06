@@ -24,6 +24,29 @@
 //     That is the ratchet tightening: the allowlist can never grow, so the Python surface
 //     monotonically decreases over time.
 //
+// # The one narrow widening case: a shared module, not a new tool
+//
+// The allowlist gains a row only for a file that is not a new TOOL at all: a shared
+// module extracted OUT of already-grandfathered tools/*.py callers, whose behavior
+// already exists in Go. tools/fleet_regdir.py is the shape — the Python twin of
+// internal/accountprobe/regdir.go, imported in-process by six grandfathered fleet
+// modules that each carried a divergent copy of the same registry-dir fallback. No new
+// capability escaped into Python: six copies of existing Python logic became one, and
+// the Go reader remains the authority the module mirrors. All three preconditions hold,
+// and the commit body has to argue them:
+//
+//   - every consumer is itself grandfathered, and the import is in-process — a Go-only
+//     resolver would mean a process spawn per registry read, not a port;
+//   - the behavior already has a Go implementation, so the module is a mirror of that
+//     authority rather than a second one;
+//   - the rows are APPENDED to the slice literal by hand, never swept in by a full
+//     regeneration (which stays reserved for tightening), so the diff is exactly the
+//     widen being argued for and nothing else.
+//
+// Anything else — a new operator-facing script, or a capability with no Go home — is
+// refused: write it in Go. Even the sanctioned widen is temporary; when the callers are
+// ported the module leaves with them and the recipe below drops the rows.
+//
 // # Regenerating the baseline
 //
 // You regenerate baseline.go only to TIGHTEN it after a port-and-delete — never to
