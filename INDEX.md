@@ -244,6 +244,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Daily Git hygiene dogfood — 2026-08-06](docs/notes/GIT-DAILY-DOGFOOD-2026-08-06.md) -- auto-indexed dated note.
 - [Token classes as a guard/server duty — spine and research note](docs/notes/TOKEN-CLASS-SHIFT-LEFT-SPINE-2026-08-06.md) -- auto-indexed dated note.
 - [Knowing the denominator for an agentic trajectory](docs/notes/AGENTIC-TRAJECTORY-DENOMINATOR-2026-08-06.md) -- auto-indexed dated note.
 - [Air-gapped deployment kit + SBOM (#3279) — generation triage, 2026-07-23](docs/notes/AIRGAPPED-KIT-SBOM-TRIAGE-3279-2026-07-23.md) -- auto-indexed dated note.
