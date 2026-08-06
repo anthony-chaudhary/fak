@@ -1478,11 +1478,17 @@
           "category": "incidental",
           "reason": "A Go test function name cited in a doc comment as the place the HARD =\u003e un-lifted invariant is pinned. It names a test, not a concept in the scorer's vocabulary: its meaning is fully given by the invariant it checks, which is itself positioned under the grade rows. Positioning every test identifier would book coverage for the test suite rather than the domain.",
           "token": "TestModeDebtGradeInvariants"
+        },
+        {
+          "category": "incidental",
+          "reason": "GitDailyDebtKey is only the Go const that HOLDS the positioned corpus key git_daily_debt (internal/metrics/git_daily_health.go); the concept is the key value itself, positioned as gitdailydebt. Same shape as RatchetDebtKey, which is named inside climb_ratchet_debt's definition rather than positioned on its own.",
+          "token": "GitDailyDebtKey"
         }
       ],
       "id": "score-debt",
       "ignore": [
         "CacheValueGateDebtKey",
+        "GitDailyDebtKey",
         "NegationOperatorDebtKey",
         "ScorecardAxis",
         "ScorecardAxisOracle",
@@ -2045,12 +2051,20 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "gitDailyDayLayout is a file-local mirror of Go's reference-date layout 2006-01-02, duplicated as a literal because internal/gitdaily (which owns gitdaily.DayLayout) sits a layer ABOVE internal/metrics and so cannot be imported here. It introduces no layout concept of its own.",
+          "token": "gitDailyDayLayout"
+        }
+      ],
       "id": "layout",
       "ignore": [
-        "layouts",
+        "archusesmlamoelayout",
         "defaultlayout",
-        "usesmlamoelayout",
-        "archusesmlamoelayout"
+        "gitDailyDayLayout",
+        "layouts",
+        "usesmlamoelayout"
       ],
       "min_files": 2,
       "name": "Layout family",
