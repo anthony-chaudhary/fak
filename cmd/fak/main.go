@@ -887,6 +887,9 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchPost(os.Stdout, os.Stderr, argv[1:]))
 		case "request":
 			os.Exit(runBenchRequest(os.Stdout, os.Stderr, argv[1:]))
+		case "gitspawn":
+			// #5620: git process spawns per unit of work on the three hot paths.
+			os.Exit(runGitSpawnBench(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
