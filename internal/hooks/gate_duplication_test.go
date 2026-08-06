@@ -168,12 +168,12 @@ func TestGateDuplication_OversizedNeighborhoodSkipped(t *testing.T) {
 		[]string{"internal/foo/a.go", "internal/foo/b.go"},
 	)
 	// cap 1 < 2 tracked siblings -> the directory is not read -> no findings.
-	if findings, err := duplicationFindings(d, 1, 3); err != nil || len(findings) != 0 {
+	if findings, err := duplicationFindings(d, 1, 3, dupMinGradedWindows); err != nil || len(findings) != 0 {
 		t.Fatalf("an over-cap directory must be skipped; got findings=%+v err=%v", findings, err)
 	}
 	// A generous cap admits the same directory and the clone fires -> proves the cap is what
 	// suppressed it above, not the fixture.
-	if findings, err := duplicationFindings(d, 2500, 3); err != nil || len(findings) != 1 {
+	if findings, err := duplicationFindings(d, 2500, 3, dupMinGradedWindows); err != nil || len(findings) != 1 {
 		t.Fatalf("under the cap the clone should fire; got findings=%+v err=%v", findings, err)
 	}
 }
@@ -294,5 +294,48 @@ func TestGateDuplication_NeighborhoodReadsDiskNotGitShow(t *testing.T) {
 	}
 	if showCalls != 0 {
 		t.Errorf("neighborhood read spawned `git show` %d time(s); the per-file fan-out that wedged the pre-commit hook must be gone (disk read only)", showCalls)
+	}
+}
+
+// Severity is the MAGNITUDE half of the finding (#4328): how much of the block just added
+// already exists, graded on the candidate's own windows. A verbatim sibling paste covers
+// every window it added, so it sits at the top of the 0-100 scale. The floor is passed as 1
+// here so this test pins the grading arithmetic alone, not the ungraded branch below.
+func TestGateDuplication_SeverityGradesVerbatimPasteAtFull(t *testing.T) {
+	d := stagedForDup(
+		map[string]string{"internal/foo/new.go": siblingFile(dupBlock)},
+		map[string]string{"internal/foo/existing.go": siblingFile(dupBlock)},
+		[]string{"internal/foo/existing.go"},
+	)
+	findings, err := duplicationFindings(d, 2500, 3, 1)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("expected exactly one finding; got findings=%+v err=%v", findings, err)
+	}
+	if got := findings[0].Severity; got != 100 {
+		t.Errorf("severity = %d, want 100 — a verbatim paste covers every window it added", got)
+	}
+}
+
+// Below the grading floor the finding is left UNGRADED however total its coverage. Severity 0
+// means "no grade", never "graded harmless": an operator who opts into severity-driven
+// escalation must not have a small all-idiom block hard-blocked. The floor suppresses the
+// GRADE only — the same finding must still fire and still warn.
+func TestGateDuplication_SeverityUngradedBelowFloor(t *testing.T) {
+	d := stagedForDup(
+		map[string]string{"internal/foo/new.go": siblingFile(dupBlock)},
+		map[string]string{"internal/foo/existing.go": siblingFile(dupBlock)},
+		[]string{"internal/foo/existing.go"},
+	)
+	// A floor no fixture can reach forces the ungraded branch on the very block the test
+	// above grades at 100 — so the difference can only be the floor.
+	findings, err := duplicationFindings(d, 2500, 3, 1<<20)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("the floor must suppress the grade, not the finding; got findings=%+v err=%v", findings, err)
+	}
+	if got := findings[0].Severity; got != 0 {
+		t.Errorf("severity = %d under an unreachable floor, want 0 (ungraded)", got)
+	}
+	if findings[0].Gate != "DUPLICATION" || findings[0].File != "internal/foo/new.go" {
+		t.Errorf("ungraded finding lost its identity: %+v", findings[0])
 	}
 }

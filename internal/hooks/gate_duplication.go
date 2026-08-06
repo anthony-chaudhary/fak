@@ -44,6 +44,14 @@ const (
 	// today's biggest package (cmd/fak ~1.1k) so every real directory is still covered; it exists
 	// only to cap unbounded future growth.
 	dupMaxNeighborhood = 2500
+	// dupMinGradedWindows is the ABSOLUTE floor below which a finding is left UNGRADED
+	// (Severity 0) however high its coverage fraction runs. Coverage alone would read a tiny
+	// block whose every window is an idiom as a 100% copy, and an operator who opted into
+	// near-total-copy escalation must not have a five-line `for … if err != nil` hard-block
+	// their commit. 40 distinct qualifying windows is roughly a 10-15 line block of real logic
+	// — the size at which "all of it already exists" stops being idiom and starts being a
+	// paste. Below it the gate still WARNS exactly as before; it just refuses to grade.
+	dupMinGradedWindows = 40
 )
 
 // gateDuplication fires ONE DUPLICATION finding per staged non-test .go file whose ADDED block
@@ -53,12 +61,13 @@ const (
 // tracked listing cannot be read it returns ErrCouldNotRun (the runner skips the gate), never a
 // false DUPLICATION.
 func gateDuplication(d *StagedDiff) ([]Finding, error) {
-	return duplicationFindings(d, dupMaxNeighborhood, dupNeighborMatches)
+	return duplicationFindings(d, dupMaxNeighborhood, dupNeighborMatches, dupMinGradedWindows)
 }
 
-// duplicationFindings is gateDuplication's core with the neighborhood cap and per-finding match
-// cap as parameters, so a unit test can drive the size-cap branch without thousands of files.
-func duplicationFindings(d *StagedDiff, maxNeighborhood, maxMatches int) ([]Finding, error) {
+// duplicationFindings is gateDuplication's core with the neighborhood cap, per-finding match cap,
+// and grading floor as parameters, so a unit test can drive the size-cap and ungraded branches
+// without thousands of files or a hand-counted window budget.
+func duplicationFindings(d *StagedDiff, maxNeighborhood, maxMatches, minGradedWindows int) ([]Finding, error) {
 	// Candidate blocks: the concatenated added lines of each staged non-test .go file, tokenized to
 	// their qualifying clone-window keys ONCE here. A trivial addition (below clonescan's ~34-token
 	// window) yields an empty want-set — Query would no-op on it — so it is pruned up front and no
@@ -135,13 +144,32 @@ func duplicationFindings(d *StagedDiff, maxNeighborhood, maxMatches int) ([]Find
 			continue
 		}
 		findings = append(findings, Finding{
-			Gate:   "DUPLICATION",
-			File:   c.rel,
-			Line:   c.line,
-			Detail: dupDetail(c.rel, matches),
+			Gate:     "DUPLICATION",
+			File:     c.rel,
+			Line:     c.line,
+			Detail:   dupDetail(c.rel, matches),
+			Severity: dupSeverity(index, c.want, c.rel, minGradedWindows),
 		})
 	}
 	return findings, nil
+}
+
+// dupSeverity grades one already-matched candidate by COVERAGE — what fraction of the block just
+// added already exists in the neighborhood — as a 0-100 percent. It runs only after Query found a
+// match, so the clean path pays nothing for it.
+//
+// Two deliberate asymmetries. It grades on the candidate's own window count, never on
+// Match.Windows: that number counts sibling-side hits and rises with sheer size, so a big honest
+// addition would grade as a near-total copy. And it returns 0 — UNGRADED, per Finding.Severity —
+// for any candidate under minGradedWindows, so a small all-idiom block can never reach a
+// severity-driven refusal. The percent floors (integer division), so a reported severity is never
+// higher than the true coverage; a consumer thresholding on it under-escalates rather than over.
+func dupSeverity(index *clonescan.TreeIndex, want map[string]bool, selfPath string, minGradedWindows int) int {
+	matched, total := index.Coverage(want, selfPath)
+	if total < minGradedWindows || total <= 0 {
+		return 0
+	}
+	return matched * 100 / total
 }
 
 // trackedGoByDir lists the tracked .go tree once and returns, for each WANTED directory, its

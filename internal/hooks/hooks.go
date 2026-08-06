@@ -48,12 +48,20 @@ type AddedLine struct {
 }
 
 // Finding is one gate violation. A gate returns zero findings for a clean staged set.
+//
+// Severity is the one OPTIONAL, gate-specific grade (#4328): a 0-100 magnitude a gate may
+// attach when it can measure HOW BAD this finding is, so a caller can act on the degree
+// rather than only on the gate's blanket block/warn mode. It is `omitempty` and every gate
+// but DUPLICATION leaves it zero, so the JSON report of every other gate is byte-unchanged.
+// Zero therefore means UNGRADED, never "graded as harmless" — a consumer must not read an
+// absent severity as a low one.
 type Finding struct {
 	Gate     string `json:"gate"`               // PUBLIC_LEAK, SECRET_SHAPE, ...
 	File     string `json:"file"`               // repo-relative path ("" when not file-scoped)
 	Line     int    `json:"line"`               // 0 when not applicable
 	Detail   string `json:"detail"`             // the human message
 	Advisory bool   `json:"advisory,omitempty"` // visible but non-blocking in this push
+	Severity int    `json:"severity,omitempty"` // 0 = ungraded; DUPLICATION: copied-coverage percent (0-100)
 }
 
 // Gate is one commit-boundary check. ModeEnv/EscapeEnv name the env vars that soften or skip
