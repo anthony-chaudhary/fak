@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"strings"
@@ -26,13 +27,14 @@ type endpointStats struct {
 }
 
 type openAIEndpoint struct {
-	baseURL string
-	apiKey  string
-	model   string
-	base    *sharedBase
-	client  *http.Client
-	statsMu sync.Mutex
-	stats   endpointStats
+	baseURL    string
+	apiKey     string
+	model      string
+	base       *sharedBase
+	client     *http.Client
+	statsMu    sync.Mutex
+	stats      endpointStats
+	prefixMode string
 }
 
 type chatRequest struct {
@@ -81,10 +83,15 @@ func (g *openAIEndpoint) Complete(ctx context.Context, messages []agent.Message,
 	}
 	request := chatRequest{Model: g.model, MaxTokens: 8, Temperature: 0, Stream: true}
 	request.StreamOptions.IncludeUsage = true
-	request.Messages = []agent.Message{
-		{Role: agent.RoleSystem, Content: g.base.instructions},
-		messages[0],
+	system := g.base.instructions
+	if g.prefixMode == "unique" {
+		// Fixed-width, per-task prefix mutation defeats byte-identical reuse while
+		// preserving byte count and message count. Token counts remain observed.
+		h := fnv.New32a()
+		_, _ = h.Write([]byte(messages[0].Content))
+		system = strings.Replace(system, "00000000", fmt.Sprintf("%08x", h.Sum32()), 1)
 	}
+	request.Messages = []agent.Message{{Role: agent.RoleSystem, Content: system}, messages[0]}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, err

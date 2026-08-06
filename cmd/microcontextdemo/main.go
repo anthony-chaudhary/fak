@@ -32,6 +32,7 @@ type config struct {
 	Provider       string
 	Hardware       string
 	RequestTimeout time.Duration
+	PrefixMode     string
 }
 
 type report struct {
@@ -70,6 +71,12 @@ type sharedBase struct {
 	instructions string
 	fingerprint  string
 }
+
+func canonicalBaseInstructions() string {
+	return strings.Repeat("You are one worker in a bounded micro-context fabric. Preserve task isolation and return a short non-empty answer. Stable shared setup material follows. ", 24) + " Context identity: 00000000."
+}
+
+func canonicalBaseFingerprint() string { return "microcontext-base-v1" }
 
 type fakeEndpoint struct {
 	base     *sharedBase
@@ -158,16 +165,16 @@ func run(ctx context.Context, cfg config) (report, error) {
 	if cfg.Contexts < 1 || cfg.Workers < 1 {
 		return report{}, fmt.Errorf("contexts and workers must be positive")
 	}
-	base := &sharedBase{
-		instructions: strings.Repeat("You are one worker in a bounded micro-context fabric. Preserve task isolation and return a short non-empty answer. ", 2),
-		fingerprint:  "microcontext-base-v1",
-	}
+	base := &sharedBase{instructions: canonicalBaseInstructions(), fingerprint: canonicalBaseFingerprint()}
 	var gw microagent.Gateway
 	var live *openAIEndpoint
 	mode := "synthetic"
 	if cfg.Endpoint != "" {
 		var err error
 		live, err = newOpenAIEndpoint(cfg.Endpoint, cfg.APIKey, cfg.Model, base, cfg.RequestTimeout)
+		if live != nil {
+			live.prefixMode = cfg.PrefixMode
+		}
 		if err != nil {
 			return report{}, err
 		}
@@ -253,6 +260,8 @@ func run(ctx context.Context, cfg config) (report, error) {
 func main() {
 	var cfg config
 	var verifyPath string
+	var abOutput string
+	var verifyABPath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
@@ -264,6 +273,8 @@ func main() {
 	flag.StringVar(&cfg.Hardware, "hardware", "", "hardware provenance label")
 	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", 2*time.Minute, "per-request live endpoint timeout")
 	flag.StringVar(&verifyPath, "verify", "", "verify a captured S1 JSON artifact and exit")
+	flag.StringVar(&abOutput, "prefix-ab", "", "run the S2 prefix A/B and write JSON to this path (or - for stdout)")
+	flag.StringVar(&verifyABPath, "verify-prefix-ab", "", "verify a captured S2 prefix A/B artifact and exit")
 	flag.Parse()
 	if verifyPath != "" {
 		if err := verifyArtifact(verifyPath); err != nil {
@@ -271,6 +282,28 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("PASS: verified", verifyPath)
+		return
+	}
+	if verifyABPath != "" {
+		if err := verifyABArtifact(verifyABPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyABPath)
+		return
+	}
+	if abOutput != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+		defer cancel()
+		r, err := runAB(ctx, cfg)
+		if writeErr := writeAB(abOutput, r); writeErr != nil {
+			fmt.Fprintln(os.Stderr, writeErr)
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
