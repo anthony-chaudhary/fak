@@ -1036,13 +1036,15 @@ func cmdAgent(argv []string) {
 	logOut := fs.String("log", "", "optional path to write the per-call trace log")
 	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	routeManifest := fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
+	routeAccounts := fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	_ = fs.Parse(argv)
 	applyPolicy(*policyPath)
-	loadedRoute, runOpts, err := loadAgentRouteOptions(*routeManifest)
+	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*routeManifest, *routeAccounts)
 	must(err)
 	if loadedRoute != nil {
 		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *routeManifest)
 	}
+	announceAgentRouteAccounts(os.Stderr, *routeAccounts, loadedAccounts)
 
 	var planner agent.Planner
 	if *offline || *baseURL == "" {
