@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -106,5 +108,31 @@ func TestGatewayBearerPrecedence(t *testing.T) {
 	t.Setenv("LCB_API_KEY", "  sk-lcb  ")
 	if got := bearerFromEnv(); got != "sk-lcb" {
 		t.Fatalf("LCB_API_KEY wins and is trimmed: got %q", got)
+	}
+}
+
+func TestGatewaySamplerRetainsFinishReasonAndReasoningOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","reasoning_content":"unfinished reasoning"},"finish_reason":"length"}],"usage":{"prompt_tokens":2,"completion_tokens":8}}`))
+	}))
+	defer srv.Close()
+	sample := gatewaySampler(srv.Client(), livecodebench.RawArmConfig{Endpoint: srv.URL, Model: "m"}, 8)
+	content, usage, err := sample(context.Background(), livecodebench.Problem{QuestionID: "q", Prompt: "p"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "unfinished reasoning" || usage.FinishReason != "length" || !usage.ReasoningOnly {
+		t.Fatalf("content=%q usage=%+v", content, usage)
+	}
+}
+
+func TestRawArmSummarySurfacesTerminationCounts(t *testing.T) {
+	report := livecodebench.RawArmReport{Model: "m", Endpoint: "e", N: 2, Problems: make([]livecodebench.RawArmProblem, 3), Usage: livecodebench.RawArmUsage{CachedPromptTokens: 7, Truncated: 2, ReasoningOnly: 1}}
+	got := rawArmSummary(report)
+	for _, want := range []string{"2 truncated", "1 reasoning-only"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary %q does not contain %q", got, want)
+		}
 	}
 }

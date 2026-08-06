@@ -129,8 +129,7 @@ func runRaw(argv []string) int {
 		fmt.Fprintf(os.Stderr, "livecodebench raw: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "livecodebench raw: %d problem(s) × n=%d via %s (model %s), %d cached prompt tokens\n",
-		len(report.Problems), report.N, report.Endpoint, report.Model, report.Usage.CachedPromptTokens)
+	fmt.Fprintln(os.Stderr, rawArmSummary(report))
 	// #2108 honest accounting: the rate is stated against genuine lookups only;
 	// problems resumed from a prior report are reported separately, never as hits.
 	if *useCache {
@@ -149,6 +148,11 @@ func runRaw(argv []string) int {
 // taking the key requirement off the serve. The credential is read from the
 // environment (never a flag) so it stays out of the process table and out of
 // the emitted report.
+func rawArmSummary(report livecodebench.RawArmReport) string {
+	return fmt.Sprintf("livecodebench raw: %d problem(s)  n=%d via %s (model %s), %d cached prompt tokens, %d truncated, %d reasoning-only",
+		len(report.Problems), report.N, report.Endpoint, report.Model, report.Usage.CachedPromptTokens, report.Usage.Truncated, report.Usage.ReasoningOnly)
+}
+
 func bearerFromEnv() string {
 	for _, env := range []string{"LCB_API_KEY", "FAK_GATEWAY_KEY", "OPENAI_API_KEY"} {
 		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
@@ -204,11 +208,12 @@ func gatewaySampler(client *http.Client, cfg livecodebench.RawArmConfig, maxToke
 		if len(out.Choices) == 0 {
 			return "", livecodebench.RawSampleUsage{}, fmt.Errorf("gateway returned no choices")
 		}
-		return out.Choices[0].Message.Content, livecodebench.RawSampleUsage{
-			PromptTokens:       out.Usage.PromptTokens,
-			CompletionTokens:   out.Usage.CompletionTokens,
-			CachedPromptTokens: out.Usage.CachedPromptTokens(),
-		}, nil
+		choice := out.Choices[0]
+		content, reasoningOnly := choice.Message.Content, false
+		if strings.TrimSpace(content) == "" && strings.TrimSpace(choice.Message.ReasoningContent) != "" {
+			content, reasoningOnly = choice.Message.ReasoningContent, true
+		}
+		return content, livecodebench.RawSampleUsage{PromptTokens: out.Usage.PromptTokens, CompletionTokens: out.Usage.CompletionTokens, CachedPromptTokens: out.Usage.CachedPromptTokens(), FinishReason: choice.FinishReason, ReasoningOnly: reasoningOnly}, nil
 	}
 }
 
@@ -231,7 +236,8 @@ func seedParam(seed int64) *int64 {
 
 type chatCompletionsResponse struct {
 	Choices []struct {
-		Message agent.Message `json:"message"`
+		Message      agent.Message `json:"message"`
+		FinishReason string        `json:"finish_reason,omitempty"`
 	} `json:"choices"`
 	Usage agent.Usage `json:"usage"`
 }
