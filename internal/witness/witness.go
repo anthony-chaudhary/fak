@@ -27,6 +27,7 @@
 //	notests:<ref>     the commit did NOT edit its own gating tests (reward-hack guard)
 //	symptom:<ref>     a fix(...) ships a test that fails on the parent, passes at the ref (#1326)
 //	exec:<json>       fail-to-pass/pass-to-pass execution witness
+//	settled:<json>    an asynchronously produced artifact has stopped growing (#5646)
 //
 // The notests rung is the dual of the others: where the rest CONFIRM that a
 // claimed effect is present, notests REFUTES when a ship-commit modified the very
@@ -258,6 +259,11 @@ func (r *Resolver) resolveUncached(ctx context.Context, c *abi.ToolCall, kind, a
 		return abi.WitnessConfirmed
 	case "exec":
 		return r.resolveExecution(ctx, arg)
+	case "settled":
+		// The settled-artifact rung (#5646): `path:` proves an asynchronously
+		// produced artifact EXISTS; this proves it has stopped growing and belongs
+		// to THIS run, so a consumer never parses a prefix. See settle.go.
+		return r.resolveSettled(ctx, arg)
 	case "symptom":
 		// The fix-witness rung (#1326): does the fix at <ref> carry a test that FAILS on the
 		// parent and PASSES at the ref? Structural check always runs; the red-then-green

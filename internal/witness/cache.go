@@ -24,7 +24,9 @@ package witness
 //
 // path: / clean: / committed: read the WORKING TREE or the index — mutable state
 // with no content address — and commit:<ref> IS a bare resolution (caching it saves
-// nothing). exec: runs arbitrary commands against the current tree; rsl: is a
+// nothing). exec: runs arbitrary commands against the current tree; settled: (#5646)
+// is a live observation of an artifact that is BY DEFINITION still moving, so a
+// memoized verdict would be the exact staleness it exists to refuse; rsl: is a
 // flagged spike. All of those stay uncached, always.
 //
 // ABSTAIN IS NEVER CACHED: an abstain is infrastructure uncertainty (git missing,
