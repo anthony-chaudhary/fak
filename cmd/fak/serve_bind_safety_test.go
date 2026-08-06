@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -195,6 +197,59 @@ func TestAdmitServeBindOnRealFlagSurface(t *testing.T) {
 			t.Errorf("%s: admitServeBind(%v) must stay quiet, wrote: %s", c.name, c.argv, stderr.String())
 		case c.wantErr != "" && !strings.Contains(stderr.String(), c.wantErr):
 			t.Errorf("%s: admitServeBind(%v) stderr must contain %q, got: %s", c.name, c.argv, c.wantErr, stderr.String())
+		}
+	}
+}
+
+// repoDosToml reads the workspace refusal vocabulary, walking up from the package dir so the
+// test does not care how deep cmd/fak sits.
+func repoDosToml(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	for {
+		p := filepath.Join(dir, "dos.toml")
+		if b, err := os.ReadFile(p); err == nil {
+			return string(b)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Skip("no dos.toml above the package dir (detached build tree) — nothing to bind against")
+		}
+		dir = parent
+	}
+}
+
+// A structured refusal is only structured if the vocabulary KNOWS the token. This gate shipped
+// with its matrix well before UNAUTHENTICATED_OFF_HOST_BIND was declared in dos.toml, so
+// `dos check-reason` classified fak's own security refusal as UNCLASSIFIED prose drift — the
+// exact failure a closed vocabulary exists to kill, on the one refusal where a reader most needs
+// a classification and a fix. This binds the emitted token to its declaration (#5373).
+func TestServeBindRefusalTokenIsDeclaredInTheClosedVocabulary(t *testing.T) {
+	body := repoDosToml(t)
+	header := "[reasons." + serveBindRefusalToken + "]"
+	i := strings.Index(body, header)
+	if i < 0 {
+		t.Fatalf("dos.toml declares no %s, so `dos check-reason %s` answers UNCLASSIFIED: "+
+			"fak would emit a refusal token its own closed vocabulary does not recognise",
+			header, serveBindRefusalToken)
+	}
+	block := body[i+len(header):]
+	if j := strings.Index(block, "\n["); j >= 0 {
+		block = block[:j]
+	}
+	for _, want := range []string{"OPERATOR_GATE", "refusal", "summary", "fix", "see_also"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("dos.toml %s is missing %q — an operator who hits this refusal gets no classification or next step", header, want)
+		}
+	}
+	// The declared fix has to name the same doors and escape the in-band refusal names, or the
+	// vocabulary and the gate would tell an operator two different things.
+	for _, want := range []string{"--require-key-env", "--key-principal", serveUnsafeBindFlag} {
+		if !strings.Contains(block, want) {
+			t.Errorf("dos.toml %s must name %q, the way the in-band refusal does", header, want)
 		}
 	}
 }
