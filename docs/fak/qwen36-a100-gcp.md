@@ -132,9 +132,17 @@ lever (#483) + fused kernels (#279) + continuous batching (#401).
 
 ## Honest scope
 
-- **The literal Qwen3.6-27B does not run on fak's forward yet** — it's a GDN/SSM hybrid; fak
-  panics on the first decode (#934). See the Status section at the top. The runbook serves a
-  **supported** standard-arch coder (Qwen2.5-Coder-14B) meanwhile.
+- **The literal Qwen3.6-27B now runs on fak's own forward** — superseding this page's earlier
+  "panics on the first decode (#934)" scope note, which a datacenter-GPU run has since
+  falsified. A `--backend cuda` serve of the pinned `Qwen3.6-27B-Q4_K_M.gguf` answers
+  `/v1/chat/completions` with real code, logging its own path per turn as
+  `inkernel_chat backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true` — fak's
+  whole-operation GDN/SSM decode kernel (#4725), no external engine in the path. Falling back
+  to a standard-arch coder is no longer required to serve this model.
+  What that does **not** establish is *numeric* parity: reaching the kernel and being
+  bit-defensibly right are different claims, and the acceptance gate that would settle it is
+  still mispinned (see above). Read this as "the forward executes", not "the forward is proven
+  correct".
 - **Proven end-to-end on a live datacenter GPU (2026-06-27)**: provision → `-tags cuda` build (sm_80) →
   GGUF load → gateway (`/healthz`, `/v1/models`) → **a real coding turn from the laptop through
   an SSH-forward tunnel** (`is_prime`, a reverse-string lambda — correct code from fak's own
