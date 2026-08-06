@@ -57,10 +57,12 @@ Each rung must run end to end before the next is treated as real.
 | S0 | Synthetic 10k logical contexts over bounded workers (current) | exact completion count, one base install, peak concurrency ≤ worker cap |
 | S1 | **Observed:** one real OpenAI-compatible endpoint, 100 delta contexts, no tools | [100/100 captured witness](micro-context-s1-real-endpoint.md): wall time, TTFT, usage-derived token rates, failures |
 | S2 | **Observed:** shared-prefix A/B, unique full prompts vs one base + deltas | [No cache benefit on first endpoint](micro-context-s2-prefix-ab.md); scoped concurrency gain retained separately |
+| S2b | Shared-prefix A/B on a cache-observable controlled kernel (#5817) | kernel cache hit/miss counters, prefill tokens saved, tuned baselines; supersedes the S2 cache verdict |
 | S3 | **Observed:** 1k resumable contexts with bounded scheduler RAM and backpressure | [1,000-context hibernation witness](micro-context-s3-hibernation-restart.md): queue age, resident/hibernated counts, runtime reconstruction |
 | S4a | **Observed:** versioned lightweight descriptor through existing Host/Gateway | [Harness inventory and 1,000-context adapter](micro-context-s4-lightweight-descriptor.md) |
 | S4b | **Observed:** compatibility-class planner | [Mixed workload](micro-context-s4-compatibility-scheduler.md): isolation, aging, cancellation, padding/fill telemetry |
 | S4 | **Observed fixture:** tool-capable microagents through capability/resource/idempotency/readback seams | [Parallel effect-safety witness](micro-context-s4-effect-safety.md) |
+| S5a | 1,000 real-model-turn contexts on one controlled node (#5820) | ledger: TTFT/tail, prefill/decode tokens/sec, RAM/KV roofline, useful-result rate |
 | S5 | 10k contexts under a controlled kernel | useful-result throughput, tail latency, memory/KV roofline, overload behavior |
 | S6 | API-only adapter | provider-supported cache controls or measured natural prefix reuse; no kernel-only claims |
 | S7 | Multi-user/fairness mode | tenant isolation, weighted fairness, cancellation, spend and rate-limit envelopes |
@@ -151,6 +153,16 @@ Epic: [#5785](https://github.com/anthony-chaudhary/fak/issues/5785) (P0, G0).
 - [#5793](https://github.com/anthony-chaudhary/fak/issues/5793) — S6 API-only adapter.
 - [#5794](https://github.com/anthony-chaudhary/fak/issues/5794) — quality and observability ledger.
 - [#5795](https://github.com/anthony-chaudhary/fak/issues/5795) — S7 multi-user fairness and economics.
+- [#5817](https://github.com/anthony-chaudhary/fak/issues/5817) — S2b kernel cache-observable shared-prefix A/B.
+- [#5818](https://github.com/anthony-chaudhary/fak/issues/5818) — multi-turn descriptor continuation budgets.
+- [#5819](https://github.com/anthony-chaudhary/fak/issues/5819) — in-kernel compatibility-batch execution.
+- [#5820](https://github.com/anthony-chaudhary/fak/issues/5820) — S5a 1,000 real-model-turn contexts on one controlled node.
+- [#5821](https://github.com/anthony-chaudhary/fak/issues/5821) — cache-value Track-1 fold of witnessed shared-base reuse.
+- [#5830](https://github.com/anthony-chaudhary/fak/issues/5830)–[#5844](https://github.com/anthony-chaudhary/fak/issues/5844) — hardening fan-out off spine `28846558d0` (qa, dogfood, product, observability, integration, docs, release).
+
+2026-08-06: #5792–#5795 repaired to dispatch-ready contract bodies (research completion
+standard, routed); the `research` label was removed from the open leaves so the
+dispatcher can route them (it is a triage-hold label, kept on the epic only).
 
 ## Prior art to reuse
 
