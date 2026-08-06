@@ -119,11 +119,12 @@ sandbox's own disk stays readable and writable. The read-side refusals are enfor
 the wired `arg_rules` path view rather than the `mount_view` vocabulary this tier names —
 the capability is live, its declarative spelling is still #5310 (the example says so).
 Crucially the T0 half is **witnessed, not asserted**: the run reads the box off the
-*guest's own kernel* (`systemd-detect-virt`, `/proc`, `findmnt`), names the
-hypervisor-attached device backing the rootfs, and fails if any fak-backed mount, device,
-or FUSE server exists — so "fak did not provide this disk" is evidence the script can
-red-line on, not a sentence it prints. A run that cannot find a T0 declines to claim the
-VM half rather than printing it anyway (`FAK_REQUIRE_T0=1` makes that an `exit 1`).
+*guest's own kernel* (`systemd-detect-virt`, `/proc`, `findmnt`), names the source device
+and filesystem type backing the rootfs (whatever the substrate turns out to be), and fails
+if any fak-backed mount, device, or FUSE server exists — so "fak did not provide this disk"
+is evidence the script can red-line on, not a sentence it prints. A run that cannot find a
+T0 declines to claim the VM half rather than printing it anyway (`FAK_REQUIRE_T0=1` makes
+that an `exit 1`).
 **Both** T0 kinds this tier names are now captured — a hypervisor guest (rootfs on a
 hypervisor-attached `ext4` device) and an OCI container (rootfs an `overlay` the runtime
 composed from image layers) — and their FS-decision ledgers agree row for row, which is the
