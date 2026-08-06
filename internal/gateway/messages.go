@@ -819,7 +819,14 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		opts.ResidentTokens = int(s.metrics.heldResidentPeakTokens(trace))
 		opts.SolvencyFloorTokens = s.compactSolvencyFloorTokens
 	}
-	out, outcome := agent.CompactAnthropicHistoryWithOptions(req.Raw, opts)
+	// Survival-class gate (#2421): the byte-level compactor runs UNDER the per-page survival
+	// contract rather than on its own. compactWithSurvivalClasses is a drop-in for
+	// agent.CompactAnthropicHistoryWithOptions — same pair back, so the metric, restore-handle, and
+	// fired/reason handling below are unchanged — that first refuses a budget which cannot hold the
+	// PINNED floor (PIN_EVICT_REFUSED, body forwarded unchanged), then verifies a fired plan still
+	// carries every pinned page byte-identical, retrying against the evictable set only when it does
+	// not. A body with no classifiable eviction domain delegates straight through.
+	out, outcome := s.compactWithSurvivalClasses(req.Raw, opts)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	// Restore handle: when this fire tombstoned the session's originating task, the outcome carries

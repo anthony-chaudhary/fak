@@ -208,6 +208,7 @@ func TestCompactBailReasonPartition(t *testing.T) {
 		CompactReasonRedecodeFail,
 		CompactReasonPrefixMismatch,
 		CompactReasonMalformedBody,
+		CompactReasonPinEvictRefused,
 	}
 	for _, r := range preEligible {
 		if !CompactBailPreEligible(r) {

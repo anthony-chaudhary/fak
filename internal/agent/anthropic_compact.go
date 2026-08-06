@@ -138,6 +138,22 @@ const (
 	// remaining session horizon (CacheBurstPaysBack == false), so the warm cache hit is kept over a
 	// smaller prompt. The firstbp default never returns this (it never bursts) — see #1407/#1408.
 	CompactReasonBurstUnprofitable = "burst_unprofitable"
+	// CompactReasonPinEvictRefused is the SURVIVAL-CLASS refusal (#2421): the compaction would
+	// have evicted a page whose kind classes it PINNED (the active steer, the live continuation
+	// seed, a standing system invariant — ctxplan.ClassPinned), so the body is forwarded UNCHANGED
+	// rather than compacted lossily. It is the one bail whose cause is a CONTRACT rather than an
+	// economics or a structural limit: every other reason says "the drop was not worth it" or "the
+	// drop could not be built", while this one says "the drop was refused".
+	//
+	// Two properties are deliberate. It is emitted by the GATEWAY's compaction path
+	// (compactAnthropicRawWithReason), which owns the page classification, not by this package's
+	// byte splicer — it is registered here because this is the package that OWNS the bail
+	// vocabulary the gateway's metric labels and Prometheus HELP enumerate. And its token is
+	// SCREAMING_CASE where its siblings are lower_snake, because it is the same string the repo's
+	// refusal vocabulary registers (dos.toml [reasons.PIN_EVICT_REFUSED]) and the same string the
+	// planner returns (ctxplan.ReasonPinEvictRefused): one token from planner to wire to operator,
+	// with no translation table in between to drift.
+	CompactReasonPinEvictRefused = "PIN_EVICT_REFUSED"
 )
 
 // CompactOutcome is the observable verdict of one compaction attempt. Reason==CompactReasonNone

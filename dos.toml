@@ -1340,6 +1340,13 @@ summary  = "`dos status` returned a run digest containing a `claimed` field, vio
 fix      = "Fix the status producer so the digest contains only liveness, ledger-verified progress, lease region, and resume evidence; do not consume claimed status."
 see_also = ["dos status", "tools/dispatch_status.py"]
 
+[reasons.PIN_EVICT_REFUSED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a compaction plan would have evicted a PINNED context page -- a system invariant, the active steer, or the continuation seed -- so the gateway forwarded the body UNCHANGED instead of compacting lossily. The survival class is assigned deterministically from the page's kind (ctxplan.ClassOf), never from model output, so no prose a model emits can pin itself into the protected set or talk a page out of it."
+fix      = "raise --compact-history-budget above the pinned floor, or shed load elsewhere (fewer resident tools, a smaller steer). A refusal means the budget cannot hold the state the session needs to stay correct -- do NOT work around it by dropping the pin, which is the silent context loss the class exists to prevent. Floor: go test ./internal/gateway -run 'TestPinEvictRefused|TestPinnedPageSurvivesCompaction'"
+see_also = ["internal/ctxplan/survival.go", "internal/gateway/pinsurvival.go", "internal/gateway/messages.go"]
+
 [reasons.ARCH_LAYER_VIOLATION]
 category = "OPERATOR_GATE"
 refusal  = true
