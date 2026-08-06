@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/launchshim"
 )
@@ -39,6 +40,8 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 			return runLaunchStatus(stdout, stderr)
 		case "doctor":
 			return runLaunchDoctor(stdout, stderr, argv[1:])
+		case "stats":
+			return runLaunchStats(stdout, stderr, argv[1:])
 		case "help", "-h", "--help":
 			fmt.Fprint(stdout, launchHelpText)
 			return 0
@@ -88,8 +91,16 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 	}
-	if launchshim.EffectiveDirect(c, *direct) {
-		return runLaunchChild(stdout, stderr, command, args)
+	directMode := launchshim.EffectiveDirect(c, *direct)
+	surface := "explicit"
+	if len(argv) == 0 {
+		surface = "bare"
+	}
+	started := time.Now()
+	if directMode {
+		code := runLaunchChild(stdout, stderr, command, args)
+		_ = launchshim.Record(surface, p, "direct", launchOutcome(code), time.Since(started))
+		return code
 	}
 	fak, err := os.Executable()
 	if err != nil {
@@ -97,7 +108,9 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	guardArgs := append([]string{"guard", "--"}, append([]string{command}, args...)...)
-	return runLaunchChild(stdout, stderr, fak, guardArgs)
+	code := runLaunchChild(stdout, stderr, fak, guardArgs)
+	_ = launchshim.Record(surface, p, "guarded", launchOutcome(code), time.Since(started))
+	return code
 }
 
 func runLaunchChild(stdout, stderr io.Writer, command string, args []string) int {
@@ -319,6 +332,46 @@ func runLaunchStatus(stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "default: %s\ninterception: %s\n", firstNonEmpty(c.Default, "(unset)"), map[bool]string{true: "disabled", false: "enabled"}[c.Disabled])
 	for _, k := range ks {
 		fmt.Fprintf(stdout, "%s: %s\n", k, c.Providers[k].Command)
+	}
+	return 0
+}
+
+func launchOutcome(code int) string {
+	if code == 0 {
+		return "success"
+	}
+	if code > 1 {
+		return "provider_exit"
+	}
+	return "launch_error"
+}
+func runLaunchStats(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("launch stats", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit versioned JSON")
+	reset := fs.Bool("reset", false, "reset aggregate counters")
+	if err := fs.Parse(argv); err != nil || fs.NArg() != 0 {
+		return 2
+	}
+	if *reset {
+		if err := launchshim.ResetStats(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "launch stats reset")
+		return 0
+	}
+	stats, err := launchshim.ReadStats()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, stats, "fak launch stats")
+	}
+	fmt.Fprintf(stdout, "LAUNCH STATS schema=%s counters=%d\n", stats.Schema, len(stats.Counters))
+	for _, c := range stats.Counters {
+		fmt.Fprintf(stdout, "  %s %s %s %s %s %d\n", c.Surface, c.Provider, c.Posture, c.Outcome, c.Latency, c.Count)
 	}
 	return 0
 }
