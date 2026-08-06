@@ -33,7 +33,7 @@ func cmdHooks(argv []string) { os.Exit(runHooks(os.Stdout, os.Stderr, argv)) }
 
 func runHooks(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | pre-push | import-witness | popup-scan | claim-reclass | lane-audit)")
+		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | pre-push | import-witness | popup-scan | claim-reclass | lane-audit | agent <pretool|posttool|stop>)")
 		return 2
 	}
 	switch argv[0] {
@@ -52,8 +52,12 @@ func runHooks(stdout, stderr io.Writer, argv []string) int {
 		return runHooksClaimReclass(stdout, stderr, os.Stdin, argv[1:])
 	case "lane-audit":
 		return runHooksLaneAudit(stdout, stderr, argv[1:])
+	case "agent":
+		// Agent-LIFECYCLE hooks, not the commit boundary. Reads the harness envelope on stdin
+		// and answers on a DIFFERENT exit-code contract — see cmd/fak/hooks_agent.go.
+		return runHooksAgent(stdout, stderr, os.Stdin, argv[1:])
 	default:
-		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | pre-push | import-witness | popup-scan | claim-reclass | lane-audit)\n", argv[0])
+		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | pre-push | import-witness | popup-scan | claim-reclass | lane-audit | agent)\n", argv[0])
 		return 2
 	}
 }
