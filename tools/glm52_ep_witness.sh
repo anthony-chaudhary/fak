@@ -54,6 +54,77 @@ log "HEAD=$(git rev-parse --short HEAD 2>/dev/null) RANKS=$RANKS VIS=$VIS PORT=$
 log "SHARD=$SHARD"
 [ -f "$SHARD" ] || { log "NO_STAGED_SHARD — set GLM_SHARD"; echo 95 >"$DONE"; exit 95; }
 
+# --- pre-flight per-GPU free-VRAM gate (EP_PREFLIGHT, #4952) ---------------------------------
+# Read every visible GPU's live free/total VRAM ONCE, here, before the CUDA build and the rank
+# spawn. Without this the only signal is N opaque per-rank FitTooBig walls AFTER a ~20 minute
+# build and a full load attempt — and because each rank reports only its own device, "needs 73.23
+# GiB, device has 71.41 GiB" on all eight looked like a load-plan regression rather than what it
+# was: leftover residency from a peer's process. #4952 was filed on that misreading.
+#
+# The threshold is the exact inverse of the load-time fit arithmetic — internal/compute's
+# RequiredFreeBytes(per-rank plan bytes, headroom), the inverse of BudgetAfterHeadroom — so this
+# gate cannot admit a run the in-process check then refuses, or refuse one it would have admitted.
+# tools/glm52_ep_preflight_test.go pins the numbers below against that function.
+#
+# It FAILS OPEN by construction: no nvidia-smi, no reading, or no known plan total for this RANKS
+# means SKIP and proceed. It never invents a refusal it cannot ground.
+#
+#   REQUIRE_FREE_GIB  per-GPU free VRAM to demand (overrides the derivation entirely)
+#   PLAN_GIB          per-rank plan total in GiB (default: the published table below)
+#   EP_HEADROOM       fit headroom fraction (default 0.05, the expert-parallel device headroom)
+EP_HEADROOM="${EP_HEADROOM:-0.05}"
+PLAN_GIB="${PLAN_GIB:-}"
+if [ -z "$PLAN_GIB" ]; then
+  # Per-rank plan totals measured in experiments/glm-gpu-witness/glm52-ep-load-plan-witness-2026-06-30.json
+  # (weights) plus the ~2.08 GiB KV at --context-budget-tokens 4096. Only the rank counts with a
+  # measured witness are listed; any other RANKS leaves the gate unarmed rather than guessing.
+  case "$RANKS" in
+    8) PLAN_GIB=73.23 ;;
+    7) PLAN_GIB=81.33 ;;
+  esac
+fi
+REQ_MIB=""
+if [ -n "${REQUIRE_FREE_GIB:-}" ]; then
+  REQ_MIB=$(awk "BEGIN{printf \"%d\", int($REQUIRE_FREE_GIB * 1024) + ($REQUIRE_FREE_GIB * 1024 > int($REQUIRE_FREE_GIB * 1024))}")
+elif [ -n "$PLAN_GIB" ]; then
+  # ceil(plan_mib / (1 - headroom)) — RequiredFreeBytes at MiB granularity, rounded the safe way.
+  REQ_MIB=$(awk "BEGIN{r=$PLAN_GIB*1024/(1-$EP_HEADROOM); printf \"%d\", int(r) + (r > int(r))}")
+fi
+if [ -z "$REQ_MIB" ]; then
+  log "EP_PREFLIGHT_SKIP no published per-rank plan total for RANKS=$RANKS — set REQUIRE_FREE_GIB or PLAN_GIB to arm the gate"
+elif ! command -v nvidia-smi >/dev/null 2>&1; then
+  log "EP_PREFLIGHT_SKIP no nvidia-smi — cannot read free VRAM, proceeding (fail-open)"
+else
+  log "EP_PREFLIGHT require_free=$(awk "BEGIN{printf \"%.1f\", $REQ_MIB/1024}")GiB/gpu (plan=${PLAN_GIB:-override} headroom=$EP_HEADROOM) gpus=$VIS"
+  ep_short=0; ep_seen=0; ep_toosmall=0; ep_detail=""
+  for gpu in $(echo "$VIS" | tr ',' ' '); do
+    read -r ep_free ep_total <<<"$(nvidia-smi --query-gpu=memory.free,memory.total --format=csv,noheader,nounits -i "$gpu" 2>/dev/null | tr -d ' ' | tr ',' ' ')"
+    case "$ep_free" in ''|*[!0-9]*) continue ;; esac
+    ep_seen=$((ep_seen + 1))
+    [ "$ep_free" -ge "$REQ_MIB" ] && continue
+    ep_short=$((ep_short + 1))
+    case "$ep_total" in
+      ''|*[!0-9]*) : ;;
+      *) [ "$ep_total" -lt "$REQ_MIB" ] && ep_toosmall=$((ep_toosmall + 1)) ;;
+    esac
+    ep_detail="$ep_detail gpu$gpu(free=$(awk "BEGIN{printf \"%.1f\", $ep_free/1024}")GiB short=$(awk "BEGIN{printf \"%.1f\", ($REQ_MIB-$ep_free)/1024}")GiB)"
+  done
+  if [ "$ep_seen" = 0 ]; then
+    log "EP_PREFLIGHT_SKIP nvidia-smi returned no usable reading for gpus $VIS — proceeding (fail-open)"
+  elif [ "$ep_short" = 0 ]; then
+    log "EP_PREFLIGHT_OK $ep_seen/$ep_seen gpu(s) hold >= $(awk "BEGIN{printf \"%.1f\", $REQ_MIB/1024}")GiB free — proceeds to build+serve"
+  elif [ "$ep_toosmall" -gt 0 ]; then
+    log "EP_PREFLIGHT_REFUSE ($ep_short/$ep_seen CARD TOO SMALL — need > card total):$ep_detail"
+    log "  RANKS=$RANKS cannot fit this card at all. Raise RANKS to shard the experts further, lower --context-budget-tokens, or use a larger card."
+    echo 93 >"$DONE"; exit 93
+  else
+    log "EP_PREFLIGHT_REFUSE ($ep_short/$ep_seen short):$ep_detail"
+    log "  The card is big enough but the memory is not free — almost always stale residency from a peer process. Check 'nvidia-smi', free the GPUs, and re-run. Override with REQUIRE_FREE_GIB if this threshold is wrong for your config."
+    echo 93 >"$DONE"; exit 93
+  fi
+fi
+# --- end pre-flight per-GPU free-VRAM gate ---------------------------------------------------
+
 log "== build -tags cuda,nccl =="
 t=$(date +%s)
 if bash internal/compute/build_cuda.sh binary ./cmd/fak "$ROOT/fakbin_nccl" >"$ROOT/build_nccl.log" 2>&1; then
