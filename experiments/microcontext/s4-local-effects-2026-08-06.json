@@ -1,0 +1,20 @@
+{
+  "schema": "fak-microcontext-effects/1",
+  "verdict": "PASS",
+  "observed_at": "2026-08-06T20:12:06Z",
+  "submitted": 5,
+  "disjoint_completed": 2,
+  "conflicts_refused": 1,
+  "authority_refused": 1,
+  "verified": 4,
+  "replayed_after_restart": 1,
+  "physical_applies": 3,
+  "journal_entries": 4,
+  "claims": [
+    "explicit tools and nonblocking resource ownership isolate parallel effects",
+    "durable idempotency plus independent readback prevents duplicate retry/restart effects"
+  ],
+  "non_claims": [
+    "fixture file effects are not arbitrary tool safety or distributed transaction evidence"
+  ]
+}

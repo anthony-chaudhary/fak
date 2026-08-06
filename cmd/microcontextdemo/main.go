@@ -272,6 +272,7 @@ func main() {
 	var descriptorOutput string
 	var verifyDescriptorPath string
 	var compatOutput, verifyCompatPath string
+	var effectsOutput, verifyEffectsPath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
@@ -296,6 +297,8 @@ func main() {
 	flag.StringVar(&verifyDescriptorPath, "verify-descriptor-bench", "", "verify a captured descriptor benchmark artifact and exit")
 	flag.StringVar(&compatOutput, "compatibility-witness", "", "run compatibility scheduler witness and write JSON")
 	flag.StringVar(&verifyCompatPath, "verify-compatibility", "", "verify compatibility artifact")
+	flag.StringVar(&effectsOutput, "effects-witness", "", "run effect-safety witness and write JSON")
+	flag.StringVar(&verifyEffectsPath, "verify-effects", "", "verify effect-safety artifact")
 	flag.Parse()
 	if verifyPath != "" {
 		if err := verifyArtifact(verifyPath); err != nil {
@@ -311,6 +314,30 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("PASS: verified", verifyABPath)
+		return
+	}
+	if verifyEffectsPath != "" {
+		if err := verifyEffectsArtifact(verifyEffectsPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyEffectsPath)
+		return
+	}
+	if effectsOutput != "" {
+		r, err := buildEffectsReport()
+		b, e := json.MarshalIndent(r, "", "  ")
+		if e == nil {
+			e = os.WriteFile(effectsOutput, append(b, '\n'), 0o644)
+		}
+		if e != nil {
+			fmt.Fprintln(os.Stderr, e)
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		return
 	}
 	if verifyCompatPath != "" {

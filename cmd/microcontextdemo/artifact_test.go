@@ -25,3 +25,9 @@ func TestCheckedInCompatibilityArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCheckedInEffectsArtifact(t *testing.T) {
+	if err := verifyEffectsArtifact("../../experiments/microcontext/s4-local-effects-2026-08-06.json"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -60,7 +60,7 @@ Each rung must run end to end before the next is treated as real.
 | S3 | **Observed:** 1k resumable contexts with bounded scheduler RAM and backpressure | [1,000-context hibernation witness](micro-context-s3-hibernation-restart.md): queue age, resident/hibernated counts, runtime reconstruction |
 | S4a | **Observed:** versioned lightweight descriptor through existing Host/Gateway | [Harness inventory and 1,000-context adapter](micro-context-s4-lightweight-descriptor.md) |
 | S4b | **Observed:** compatibility-class planner | [Mixed workload](micro-context-s4-compatibility-scheduler.md): isolation, aging, cancellation, padding/fill telemetry |
-| S4 | Tool-capable microagents through the real policy/tool seam | per-context capabilities, deterministic journal, independent effect verification |
+| S4 | **Observed fixture:** tool-capable microagents through capability/resource/idempotency/readback seams | [Parallel effect-safety witness](micro-context-s4-effect-safety.md) |
 | S5 | 10k contexts under a controlled kernel | useful-result throughput, tail latency, memory/KV roofline, overload behavior |
 | S6 | API-only adapter | provider-supported cache controls or measured natural prefix reuse; no kernel-only claims |
 | S7 | Multi-user/fairness mode | tenant isolation, weighted fairness, cancellation, spend and rate-limit envelopes |
