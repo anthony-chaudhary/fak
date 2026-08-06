@@ -262,6 +262,61 @@
           "category": "incidental",
           "reason": "identifier for the canonical input.uncached token class in tokenprofile; the class is documented by the #5771 spine, not an additional cache mechanism",
           "token": "InputUncached"
+        },
+        {
+          "token": "no_cache_state_delta",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "ReasonCacheState",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "cache_state_changed",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "VerdictNoCacheStateDelta",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "CacheStateAllowlist",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "NewCacheStateAllowlist",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "NonCache",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "non_cache_fingerprint",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "cache_state_fingerprint",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "NonCacheParity",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
+        },
+        {
+          "token": "DefaultCacheStateAllowlist",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates."
         }
       ],
       "id": "cache",
@@ -366,7 +421,18 @@
         "runCacheValueGateScore",
         "tokencache",
         "uncached",
-        "usercachedir"
+        "usercachedir",
+        "no_cache_state_delta",
+        "ReasonCacheState",
+        "cache_state_changed",
+        "VerdictNoCacheStateDelta",
+        "CacheStateAllowlist",
+        "NewCacheStateAllowlist",
+        "NonCache",
+        "non_cache_fingerprint",
+        "cache_state_fingerprint",
+        "NonCacheParity",
+        "DefaultCacheStateAllowlist"
       ],
       "min_files": 3,
       "name": "Cache family",
@@ -1537,6 +1603,16 @@
           "category": "incidental",
           "reason": "Field carrying an external quality witness reference, not a new proof taxonomy concept.",
           "token": "QualityWitness"
+        },
+        {
+          "token": "VerdictSetupNotWitnessed",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'witnessed' here means a trial leg actually PUBLISHED its setup fields so the pair can be judged at all - an input-presence fence on a benchmark record, not a cache-coherence world-state witness, not an RSI measurement witness, and not a Claim corroborated by WitnessResolver."
+        },
+        {
+          "token": "setup_not_witnessed",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'witnessed' here means a trial leg actually PUBLISHED its setup fields so the pair can be judged at all - an input-presence fence on a benchmark record, not a cache-coherence world-state witness, not an RSI measurement witness, and not a Claim corroborated by WitnessResolver."
         }
       ],
       "id": "witness-proof",
@@ -1609,7 +1685,9 @@
         "witnessing",
         "witnesssametaskids",
         "wrong_missing_witness",
-        "QualityWitness"
+        "QualityWitness",
+        "VerdictSetupNotWitnessed",
+        "setup_not_witnessed"
       ],
       "min_files": 3,
       "name": "Witness / evidence family",
@@ -2115,6 +2193,66 @@
           "category": "incidental",
           "reason": "Typed refusal for insufficient quote history, not a support or maturity state.",
           "token": "ErrUnsupportedColdStart"
+        },
+        {
+          "token": "VerdictParityOK",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "setup_parity_ok",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "VerdictSetupParityClean",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "setup_parity_clean",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "VerdictSetupParityFlagged",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "setup_parity_flagged",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "NonCacheParity",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "ParityHolds",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "SetupParityReport",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "SetupParityBlocks",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "DefaultSetupParityPairs",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
+        },
+        {
+          "token": "DefaultSetupParityReport",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder."
         }
       ],
       "id": "support-maturity",
@@ -2158,7 +2296,19 @@
         "targetcoverage",
         "topncoverage",
         "unsupported",
-        "ErrUnsupportedColdStart"
+        "ErrUnsupportedColdStart",
+        "VerdictParityOK",
+        "setup_parity_ok",
+        "VerdictSetupParityClean",
+        "setup_parity_clean",
+        "VerdictSetupParityFlagged",
+        "setup_parity_flagged",
+        "NonCacheParity",
+        "ParityHolds",
+        "SetupParityReport",
+        "SetupParityBlocks",
+        "DefaultSetupParityPairs",
+        "DefaultSetupParityReport"
       ],
       "min_files": 3,
       "name": "Support / coverage / correctness / parity / maturity family",
@@ -2586,6 +2736,11 @@
           "category": "incidental",
           "reason": "Windows print-spooler PROCESS NAME in internal/runaway's protected-names allowlist (never auto-terminate). Not a pooling concept: it is an OS image name matched case-insensitively against Win32_Process.Name, and shares only the substring 'pool'.",
           "token": "spoolsv"
+        },
+        {
+          "token": "PooledSpeedupPct",
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'pooled' is the VERB of aggregating the speedup across admitted trial pairs, the same verb-sense this family already ignores as poolspanscores - not a session bounded-LRU pool container and not a cachemeta PoolProfile."
         }
       ],
       "exclude": [
@@ -2595,7 +2750,8 @@
       "ignore": [
         "kvpoolbytes",
         "poolspanscores",
-        "spoolsv"
+        "spoolsv",
+        "PooledSpeedupPct"
       ],
       "min_files": 2,
       "name": "Pool family",
