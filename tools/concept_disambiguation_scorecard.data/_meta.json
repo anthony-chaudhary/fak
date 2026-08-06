@@ -1377,6 +1377,16 @@
           "category": "incidental",
           "reason": "The repo-relative path literal .fak/nightrun/compaction-health.jsonl, placed beside the harness-resources ledger the sibling exit-summary producer appends to. A path constant, not a proof concept.",
           "token": "guardCompactionWitnessLedgerRel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported reader that returns the live lane leases contesting one dead worker's sweep; a lookup over the existing lease store feeding the rung's stand-down, not a distinct witness concept.",
+          "token": "dispatchWitnessContestingLaneHolders"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported three-field struct carrying one contesting lease's id, globs and liveness class so the stand-down can name which holder it yielded to; a local record shape, not a concept.",
+          "token": "dispatchWitnessLaneHolder"
         }
       ],
       "id": "witness-proof",
@@ -1400,10 +1410,12 @@
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
         "dispatchWitnessArchiveStranded",
+        "dispatchWitnessContestingLaneHolders",
         "dispatchWitnessDirtyFile",
         "dispatchWitnessDirtyPaths",
         "dispatchWitnessDirtyPathsGit",
         "dispatchWitnessGitOut",
+        "dispatchWitnessLaneHolder",
         "dispatchWitnessRevertStranded",
         "dispatchWitnessSamePath",
         "dispatchWitnessStashPaths",
