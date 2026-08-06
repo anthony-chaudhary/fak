@@ -1,6 +1,6 @@
 ---
 title: "Triage: query-card freshness/supersession rung (#3163) — what shipped, what remains"
-description: "Classifies #3163's horizon from repo evidence: the FRESH / SUPERSEDED_BY / STALE rung on FeatureCard already shipped in internal/selfquery/freshness.go and is emitted on the --json and MCP surfaces; the residual is a cmd-lane render gap (the human table never prints the rung) plus two never-started supersession signals. Also disambiguates the two freshness axes the issue itself confuses."
+description: "Classifies #3163's horizon from repo evidence and records its close: the FRESH / SUPERSEDED_BY / STALE rung on FeatureCard shipped in internal/selfquery/freshness.go, and the last residual — a cmd-lane render gap where the human table dropped the rung — closed with c92b3ba341 (#5803), so the issue's own first checkable step (compute AND print SUPERSEDED_BY) is now met on every surface. Leftovers are the two never-started supersession signals (supersedes: front-matter edge, Resolved by <sha>), the first still gated behind the edge extractor of #3161, which is closed against a commit that does not implement it. Also disambiguates the two freshness axes the issue itself confuses."
 ---
 
 # Triage: query-card freshness/supersession rung (#3163)
@@ -106,34 +106,50 @@ index-fresh and still hand an agent a superseded note.
 
 ## How to observe it today
 
-The rung reaches the `--json` and MCP (`fak_feature_query`) surfaces:
+The rung reaches **all three** surfaces — `--json`, MCP (`fak_feature_query`),
+and (since `c92b3ba341`) the default operator table. Same query, both renders:
 
 ```console
-$ fak feature query "field borrow query quality" --limit 40 --json
-...
+$ fak feature query "Borrow scout lmnr Laminar" --limit 2 --json
+"name":      "doc:Borrow scout: lmnr (Laminar) → fak — deep re-study (2026-07-10)",
+"freshness": "FRESH",
 "name":      "doc:Borrow scout: lmnr (Laminar) → fak (2026-07-09)",
 "freshness": "SUPERSEDED_BY:doc:Borrow scout: lmnr (Laminar) → fak — deep re-study (2026-07-10)",
+
+$ fak feature query "Borrow scout lmnr Laminar" --limit 2   # trailing column, rows elided mid-line
+…  read  devindex  - auto-indexed dated note.   FRESH
+…  read  devindex  …(Apache-2.0 `5f14c5c`), rea…  SUPERSEDED_BY:doc:Borrow scout: lmnr (Laminar) → fak — deep re-study (2026-07-10)
 ```
+
+`STALE` is pinned on the same render by the exact-output test
+`TestFeatureQueryTextPrintsFreshnessRungs` (`cmd/fak/feature_test.go`), since it
+needs a deleted cited artifact to fire.
 
 ## What genuinely remains
 
-1. **The human table never prints the rung** — the one clause of #3163's own
-   *"First checkable step"* (*"compute **and print** `SUPERSEDED_BY`"*) that is
-   still unmet on the operator surface. `cmd/fak/feature.go:93` renders five
-   columns (`Name`, `Kind`, `Effect`, `Source`, `Summary`) and drops
-   `c.Freshness` entirely, so the same card that reports
-   `SUPERSEDED_BY:…` in `--json` shows nothing in the default render. Witnessed
-   above: identical query, one surface carries the rung and the other does not.
-   This is a `cmd`-lane change (a column plus a render test), **not** docs — a
-   fix committed under a `(fak docs)` ship stamp would not diff-witness.
-2. **The explicit `supersedes:` front-matter edge** — proposal item 1's third
+The render residual this note originally carried is **closed**:
+`c92b3ba341` (#5803) extracted `writeFeatureRows` and added `c.Freshness` as a
+sixth column plus an exact-output render test. With it, #3163's own *"First
+checkable step"* — *"compute **and print** `SUPERSEDED_BY`"* — is met on every
+surface, which is what closes the issue. Two never-started signals remain, and
+both were already demoted out of this ticket:
+
+1. **The explicit `supersedes:` front-matter edge** — proposal item 1's third
    signal, a hand-declared supersession the dated-note heuristic cannot see.
    `internal/selfquery/freshness.go:40-43` already records this as a known
    follow-on and shapes `noteInfo`/`freshnessByKey` so it can layer on without
    disturbing the dated-note path. It shares an edge extractor with the
-   graph-query sibling under epic #1494, which is why it is a foundation item
-   rather than a one-file change.
-3. **`Resolved by <sha>` as a supersession signal** — proposal item 1's second
+   graph-query sibling #3161, which is why it is a foundation item rather than a
+   one-file change. **That dependency is not satisfied:** #3161 is *closed*, but
+   its recorded resolving commit `cae824a` adds
+   `.claude/skills/field-borrow/SKILL.md` and a borrow note and touches no
+   `internal/selfquery` code — no edge extractor exists in the tree (nothing
+   under `internal/selfquery` reads `see_also:`, `[[wikilinks]]`, or
+   `supersedes:`). The blocker is a mis-bound close, not a shipped foundation.
+   Also worth noting: only one note in `docs/notes/**` writes a `supersedes:`
+   key at all, and its value is `none` — so the extractor currently has **zero**
+   producers to read, which is the honest reason this stayed demoted.
+2. **`Resolved by <sha>` as a supersession signal** — proposal item 1's second
    signal. Never started; needs git plumbing on the query path that the current
    tier has deliberately avoided.
 
@@ -158,26 +174,33 @@ re-opened as gaps:
   supports naming it rather than parking it in `needs-triage`: the load-bearing
   rung has *already landed* with witnesses and no dependency on a future
   architecture bet, which is the `gen/now` definition in
-  [`docs/generation.md`](../generation.md); and the residual that still belongs
-  to *this* ticket's own acceptance (item 1 above) is a few lines of render code
-  in the `cmd` lane. The genuinely later-horizon work is already carved out of
-  this issue — the push/INVALIDATE half into #3326, the explicit-edge extractor
-  into the graph-query sibling under epic #1494 — so #3163 does not carry a mixed
-  horizon the way, for instance, [#2928 did](DISPATCH-DURABLE-BOARD-2928-TRIAGE-2026-07-15.md).
-- **Smallest honest next step:** add the rung to the `cmd/fak/feature.go` render
-  (a sixth column, or a suffix on superseded/stale rows) with an exact-output
-  render test, committed in the `cmd` lane. That closes #3163's "first checkable
-  step" on the last surface where it is still unmet.
+  [`docs/generation.md`](../generation.md); and the residual that still belonged
+  to *this* ticket's own acceptance — the render column — was a few lines in the
+  `cmd` lane and has since landed. The genuinely later-horizon work is already
+  carved out of this issue — the push/INVALIDATE half into #3326, the
+  explicit-edge extractor into the graph-query sibling under epic #1494 — so
+  #3163 does not carry a mixed horizon the way, for instance,
+  [#2928 did](DISPATCH-DURABLE-BOARD-2928-TRIAGE-2026-07-15.md).
+- **Smallest honest next step (taken, `c92b3ba341`):** add the rung to the
+  `cmd/fak/feature.go` render with an exact-output render test, committed in the
+  `cmd` lane. That closed #3163's "first checkable step" on the last surface
+  where it was unmet, and **#3163 closes on it**.
+- **Next step for the leftovers:** re-open #3161 (its own close comment invites
+  it: *"Reopen if this does not fully resolve it"*) so the edge extractor has a
+  live owner; the `supersedes:` rung then layers on at
+  `internal/selfquery/freshness.go:40-43` — but only once some note actually
+  writes the key.
 
 ## Generation close evidence
 
 - **Promotion evidence:** the rung is shipped, fenced, and test-covered
   (`internal/selfquery/freshness.go`, nine named tests, `74ca356fd5` +
-  `903dc2769c`) and is live on the `--json` / `fak_feature_query` surfaces — the
-  witnessed capture above shows a real card carrying
-  `SUPERSEDED_BY:<resolvable card name>`. That retires the issue's founding
-  blocker ("query result cards carry no per-card freshness rung at all") for
-  every machine-read consumer.
+  `903dc2769c`) and is live on the `--json`, `fak_feature_query`, **and default
+  operator-table** surfaces (`c92b3ba341`, #5803, one exact-output render test) —
+  the witnessed capture above shows a real card carrying
+  `SUPERSEDED_BY:<resolvable card name>` in *both* renders of the same query.
+  That retires the issue's founding blocker ("query result cards carry no
+  per-card freshness rung at all") for every consumer, machine **and** human.
 - **Demotion / retirement evidence:** proposal item 1's `Resolved by <sha>` and
   `supersedes:` signals are demoted out of the near term — neither is started,
   the explicit-edge one is gated behind an extractor owned by a sibling issue,
@@ -186,10 +209,21 @@ re-opened as gaps:
   of item 3 is **retired**, not deferred: the tier-1 `os.Stat` re-check satisfies
   the intent and calling out to `dos_recall` from the query hot path would cost
   purity for no added signal.
-- **Invalidating assumption:** this triage assumes the rung's *consumers are
-  machines* — MCP clients and `--json` readers — so shipping it on those surfaces
-  is the substantive win and the missing human column is cosmetic. If the primary
-  consumer turns out to be an **operator reading the default table**, then #3163's
-  headline ask has been unmet on the surface that matters since 2026-07-08, item 1
-  above is not cosmetic, and this note's `gen/now`-and-nearly-done classification
-  understates the remaining work.
+- **Assumption that was invalidating, now moot:** this triage originally assumed
+  the rung's *consumers are machines* — MCP clients and `--json` readers — making
+  the missing human column cosmetic, and named the operator-reader case as the
+  branch that would invalidate the "nearly done" call. Rather than defend the
+  assumption, the branch was **removed**: `c92b3ba341` shipped the column, so
+  both readings now land on the same verdict. Cost of settling it that way: one
+  render function and a 16-line test.
+- **Still-invalidating assumption:** the close assumes supersession derived from
+  **dated-note filename ordering** is enough signal to call the currency axis
+  answered. It only fires for `.md` files under `docs/notes/` carrying an ISO
+  date whose date-stripped slugs are *byte-equal*. A superseding note that
+  renames its topic slug, lives outside `docs/notes/`, or supersedes across
+  topics is invisible to the rung and will silently return unhedged. If the
+  corpus turns out to supersede mostly by rewrite-under-a-new-title rather than
+  by re-dating the same slug, then the shipped signal covers the rare case and
+  the two demoted signals (`supersedes:` edge, `Resolved by <sha>`) are the real
+  ones — and re-opening this axis under epic #1494 is warranted. Nothing in the
+  repo measures that ratio today; that measurement is the cheapest next probe.
