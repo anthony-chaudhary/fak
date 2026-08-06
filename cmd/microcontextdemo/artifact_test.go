@@ -7,3 +7,9 @@ func TestCheckedInS1Artifact(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCheckedInS3Artifact(t *testing.T) {
+	if err := verifyS3Artifact("../../experiments/microcontext/s3-local-hibernate-restart-2026-08-06.json"); err != nil {
+		t.Fatal(err)
+	}
+}

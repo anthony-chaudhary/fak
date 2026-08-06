@@ -262,6 +262,10 @@ func main() {
 	var verifyPath string
 	var abOutput string
 	var verifyABPath string
+	var s3Output string
+	var verifyS3Path string
+	var s3Resident, s3Low, s3Warm, s3Turns int
+	var s3Memory uint64
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
@@ -275,6 +279,13 @@ func main() {
 	flag.StringVar(&verifyPath, "verify", "", "verify a captured S1 JSON artifact and exit")
 	flag.StringVar(&abOutput, "prefix-ab", "", "run the S2 prefix A/B and write JSON to this path (or - for stdout)")
 	flag.StringVar(&verifyABPath, "verify-prefix-ab", "", "verify a captured S2 prefix A/B artifact and exit")
+	flag.StringVar(&s3Output, "hibernate-restart", "", "run the S3 hibernation/restart witness and write JSON to this path (or - for stdout)")
+	flag.StringVar(&verifyS3Path, "verify-hibernate-restart", "", "verify a captured S3 artifact and exit")
+	flag.IntVar(&s3Resident, "resident-high", 32, "S3 hard resident context cap")
+	flag.IntVar(&s3Low, "resident-low", 16, "S3 warm-band low watermark")
+	flag.IntVar(&s3Warm, "warm-cap", 8, "S3 warm reserve cap")
+	flag.IntVar(&s3Turns, "turns", 2, "S3 synthetic turns per logical context")
+	flag.Uint64Var(&s3Memory, "memory-envelope", 64<<20, "S3 peak Go allocation delta envelope in bytes")
 	flag.Parse()
 	if verifyPath != "" {
 		if err := verifyArtifact(verifyPath); err != nil {
@@ -290,6 +301,41 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("PASS: verified", verifyABPath)
+		return
+	}
+	if verifyS3Path != "" {
+		if err := verifyS3Artifact(verifyS3Path); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyS3Path)
+		return
+	}
+	if s3Output != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		r, err := runS3(ctx, s3Config{Contexts: cfg.Contexts, Workers: cfg.Workers, ResidentHigh: s3Resident, ResidentLow: s3Low, WarmCap: s3Warm, Turns: s3Turns, MemoryBytes: s3Memory})
+		var werr error
+		if s3Output == "-" {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			werr = enc.Encode(r)
+		} else {
+			b, marshalErr := json.MarshalIndent(r, "", "  ")
+			if marshalErr != nil {
+				werr = marshalErr
+			} else {
+				werr = os.WriteFile(s3Output, append(b, '\n'), 0o644)
+			}
+		}
+		if werr != nil {
+			fmt.Fprintln(os.Stderr, werr)
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		return
 	}
 	if abOutput != "" {

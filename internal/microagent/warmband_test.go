@@ -704,3 +704,56 @@ func TestWarmBandSkipsNonRestorableAgent(t *testing.T) {
 		t.Errorf("band touched a non-Restorable agent: %+v", s)
 	}
 }
+
+func TestWarmBandRecoverAfterProcessRestart(t *testing.T) {
+	dir := t.TempDir()
+	log := newWarmLog()
+	original := &warmAgent{id: "restartable", turns: 2, log: log}
+
+	first, err := microagent.NewWarmBand(microagent.WarmBandConfig{Dir: dir, Low: 1, High: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Enroll("restartable", original); err != nil {
+		t.Fatal(err)
+	}
+	h, err := first.Acquire(context.Background(), "restartable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done, err := h.Step(context.Background(), nil); err != nil || done {
+		t.Fatalf("first step done=%v err=%v", done, err)
+	}
+	if err := first.Yield("restartable"); err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+
+	second, err := microagent.NewWarmBand(microagent.WarmBandConfig{Dir: dir, Low: 1, High: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	blank := &warmAgent{log: log}
+	if err := second.Recover("restartable", blank); err != nil {
+		t.Fatal(err)
+	}
+	h, err = second.Acquire(context.Background(), "restartable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done, err := h.Step(context.Background(), nil); err != nil || !done {
+		t.Fatalf("resumed step done=%v err=%v", done, err)
+	}
+	second.Retire("restartable")
+	if got := second.Stats(); got.Resident != 0 || got.Parked != 0 {
+		t.Fatalf("post-retire stats=%+v", got)
+	}
+	var state warmState
+	if err := json.Unmarshal(log.snapshot()["restartable"], &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Took != 2 || len(state.Hist) != 2 {
+		t.Fatalf("restored state=%+v", state)
+	}
+}

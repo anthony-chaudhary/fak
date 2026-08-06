@@ -50,3 +50,5 @@ Promotion does not rewrite history. Put durable instructions in the maintained c
 Research often depends on a specific backend, model, release, hardware tier, dataset, or offline/live mode. Apply a result only to the mode and generation it names. A future-generation label expresses horizon rather than support, and priority expresses importance rather than maturity.
 
 The repository's studies and dated investigations currently live under [`docs/notes/`](../notes/); the curated [Notes & research index](../../INDEX.md#notes--research-docsnotes) is the human route. [`docs/sota/`](../sota/) tracks state-of-the-art comparisons. Use [`llms.txt`](../../llms.txt) for machine-oriented discovery.
+
+- [Micro-context S3 hibernation/restart](micro-context-s3-hibernation-restart.md)

@@ -242,6 +242,31 @@ func (b *WarmBand) Enroll(id string, r Restorable) error {
 	return nil
 }
 
+// Recover registers an agent whose frozen context already exists in the band's
+// HibernationStore. Unlike Enroll it never rewrites the snapshot. This is the
+// process-restart seam: a fresh WarmBand can rebuild its in-memory registry from
+// a durable list of ids while preserving each agent's last committed state.
+func (b *WarmBand) Recover(id string, r Restorable) error {
+	if r == nil {
+		return ErrNilAgent
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return ErrWarmBandClosed
+	}
+	if _, dup := b.blanks[id]; dup {
+		return ErrDuplicateID
+	}
+	if !b.store.Parked(id) {
+		return fmt.Errorf("microagent: warm band recover %q: %w", id, ErrNotEnrolled)
+	}
+	b.blanks[id] = r.Blank
+	b.addParkedLocked(id)
+	b.kick()
+	return nil
+}
+
 // Acquire takes a resident slot for id and returns the LIVE agent to Step. It resolves the
 // agent in the order that makes a warm hit free and a miss merely ordinary:
 //
