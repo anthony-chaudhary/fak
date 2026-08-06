@@ -34,7 +34,7 @@ func TestAwaitFleetControlAdvancesThroughInjectedSleep(t *testing.T) {
 	if err := bus.Publish(d); err != nil {
 		t.Fatal(err)
 	}
-	report, waited, err := awaitFleetControl(bus, d, 600*time.Millisecond)
+	report, waited, err := awaitFleetControl(bus, d, 600*time.Millisecond, fleetbus.DefaultInstanceTTL)
 	if err != nil {
 		t.Fatal(err)
 	}

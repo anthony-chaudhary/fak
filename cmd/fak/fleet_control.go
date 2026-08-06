@@ -93,6 +93,7 @@ func runFleetControlSend(stdout, stderr io.Writer, argv []string) int {
 	wait := fs.Duration("wait", 10*time.Second, "how long to wait for acks; 0 publishes without witnessing (and exits 1)")
 	busDir := fs.String("bus", "", "bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus)")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
+	rosterTTL := fs.Duration("roster-ttl", fleetbus.DefaultInstanceTTL, "fresh-instance roster window used for this fold")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -131,7 +132,11 @@ func runFleetControlSend(stdout, stderr io.Writer, argv []string) int {
 	if bus == nil {
 		return code
 	}
-	roster, err := bus.Instances(now, fleetbus.DefaultInstanceTTL)
+	if *rosterTTL <= 0 {
+		fmt.Fprintln(stderr, "fak fleet control send: --roster-ttl must be positive")
+		return 2
+	}
+	roster, err := bus.Instances(now, *rosterTTL)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak fleet control send: read roster: %v\n", err)
 		return 2
@@ -154,7 +159,7 @@ func runFleetControlSend(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	rep, waited, err := awaitFleetControl(bus, d, *wait)
+	rep, waited, err := awaitFleetControl(bus, d, *wait, *rosterTTL)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak fleet control send: %v\n", err)
 		return 1
@@ -166,11 +171,11 @@ func runFleetControlSend(stdout, stderr io.Writer, argv []string) int {
 // or the budget runs out. It re-reads the ROSTER each pass, not just the acks: an
 // instance that announces after the publish is a real new target, and a denominator
 // frozen at publish time would report it as never having existed.
-func awaitFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive, wait time.Duration) (fleetbus.Report, time.Duration, error) {
+func awaitFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive, wait, rosterTTL time.Duration) (fleetbus.Report, time.Duration, error) {
 	const poll = 250 * time.Millisecond
 	start := fleetControlNow()
 	for {
-		rep, err := foldFleetControl(bus, d)
+		rep, err := foldFleetControl(bus, d, rosterTTL)
 		waited := fleetControlNow().Sub(start)
 		if err != nil {
 			return fleetbus.Report{}, waited, err
@@ -186,9 +191,9 @@ func awaitFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive, wait time.Dur
 	}
 }
 
-func foldFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive) (fleetbus.Report, error) {
+func foldFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive, rosterTTL time.Duration) (fleetbus.Report, error) {
 	now := fleetControlNow()
-	roster, err := bus.Instances(now, fleetbus.DefaultInstanceTTL)
+	roster, err := bus.Instances(now, rosterTTL)
 	if err != nil {
 		return fleetbus.Report{}, fmt.Errorf("read roster: %w", err)
 	}
@@ -207,6 +212,7 @@ func runFleetControlStatus(stdout, stderr io.Writer, argv []string) int {
 	directive := fs.String("directive", "", "directive id to fold (as printed by `send`)")
 	busDir := fs.String("bus", "", "bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus)")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
+	rosterTTL := fs.Duration("roster-ttl", fleetbus.DefaultInstanceTTL, "fresh-instance roster window used for this fold")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -231,7 +237,11 @@ func runFleetControlStatus(stdout, stderr io.Writer, argv []string) int {
 	want := strings.TrimSpace(*directive)
 	for _, d := range directives {
 		if d.ID == want {
-			rep, err := foldFleetControl(bus, d)
+			if *rosterTTL <= 0 {
+				fmt.Fprintln(stderr, "fak fleet control status: --roster-ttl must be positive")
+				return 2
+			}
+			rep, err := foldFleetControl(bus, d, *rosterTTL)
 			if err != nil {
 				fmt.Fprintf(stderr, "fak fleet control status: %v\n", err)
 				return 1

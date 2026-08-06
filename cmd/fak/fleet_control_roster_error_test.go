@@ -33,7 +33,7 @@ func TestFoldFleetControlRefusesUnreadableRoster(t *testing.T) {
 	if err := os.Mkdir(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err = foldFleetControl(bus, d)
+	_, err = foldFleetControl(bus, d, fleetbus.DefaultInstanceTTL)
 	if err == nil || !strings.Contains(err.Error(), "read roster") {
 		t.Fatalf("err=%v, want visible roster failure", err)
 	}
@@ -51,7 +51,7 @@ func TestFoldFleetControlRefusesUnreadableAcknowledgements(t *testing.T) {
 	if err := os.Mkdir(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err = foldFleetControl(bus, d)
+	_, err = foldFleetControl(bus, d, fleetbus.DefaultInstanceTTL)
 	if err == nil || !strings.Contains(err.Error(), "read acknowledgements") {
 		t.Fatalf("err=%v, want visible ack failure", err)
 	}
