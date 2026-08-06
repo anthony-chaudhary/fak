@@ -49,7 +49,8 @@ const DefaultFleetBusInterval = 5 * time.Second
 // meaning needs: the drive table it can write, and whether this serve owns a loop a
 // steer could ever reach.
 type fleetBusApplier struct {
-	tbl *session.Table
+	tbl        *session.Table
+	durability *sessionDurability
 	// native mirrors gateway.Server.ownsSessionLoop (unexported there): a non-native
 	// serve has no owned loop to deliver an operator turn to, so a steer that reached
 	// it would sit in a mailbox nothing drains.
@@ -144,47 +145,46 @@ func (a *fleetBusApplier) applyLifecycle(d fleetbus.Directive, op sessionctl.Con
 	if reason == "" {
 		reason = "fleet control " + string(op)
 	}
-	if d.Selector.NarrowsSessions() {
-		sel := sessionctl.BroadcastSelector{Lane: d.Selector.Lane, Wave: d.Selector.Wave, Label: d.Selector.Label}
-		report, refusal := sessionctl.Broadcast(a.tbl, sel, op, reason)
-		if refusal != nil {
-			return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "%s", refusal.Error())
-		}
-		if report.Matched == 0 {
-			return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "%s", a.noMatchDetail(d.Selector))
-		}
-		if report.Applied == 0 {
-			return fleetbus.OutcomeRefused(fleetbus.ApplyRefused,
-				"all %d matched session(s) refused %s (see the drive table's own tokens)", report.Matched, op)
-		}
-		return fleetbus.OutcomeApplied(
-			fmt.Sprintf("%s: %d/%d session(s) took it (%s)", op, report.Applied, report.Matched, sel.String()),
-			report.Applied)
-	}
-
-	snapshot := a.tbl.Snapshot()
-	if len(snapshot) == 0 {
+	matched := a.matchedSessions(d.Selector)
+	if len(matched) == 0 {
 		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "%s", a.noMatchDetail(d.Selector))
 	}
-	var applied int
-	for _, st := range snapshot {
-		if _, took := a.tbl.Transition(st.TraceID, run, reason); took {
-			applied++
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	applied := 0
+	for _, traceID := range matched {
+		st, took := a.tbl.Transition(traceID, run, reason)
+		if !took {
+			continue
 		}
+		if a.durability != nil && a.durability.registry != nil {
+			if err := a.durability.writeThrough(ctx, traceID, st); err != nil {
+				return fleetbus.OutcomeRefused(fleetbus.ApplyRefused,
+					"%s applied in memory for %s but durable mirror failed: %v", op, traceID, err)
+			}
+		}
+		applied++
 	}
 	if applied == 0 {
 		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused,
-			"all %d live session(s) refused %s (terminal sessions refuse a lifecycle op exactly as they would alone)", len(snapshot), op)
+			"all %d matched session(s) refused %s (see the drive table's own tokens)", len(matched), op)
 	}
-	return fleetbus.OutcomeApplied(
-		fmt.Sprintf("%s: %d/%d session(s) took it (every live session on this instance)", op, applied, len(snapshot)),
+	if a.durability == nil || a.durability.registry == nil {
+		out := fleetbus.OutcomeApplied(
+			fmt.Sprintf("%s: %d/%d session(s) took it in memory only (durability disabled)", op, applied, len(matched)),
+			applied)
+		out.Witness = "memory-only:" + out.Witness
+		return out
+	}
+	out := fleetbus.OutcomeApplied(
+		fmt.Sprintf("%s: %d/%d session(s) took it and reached the durable mirror", op, applied, len(matched)),
 		applied)
+	out.Witness = "durable:" + out.Witness
+	return out
 }
 
-// matchedSessions resolves the trace ids a directive's SESSION axes name. With no
-// session axis stated every live session matches (see applyLifecycle's note on why that
-// widening is already gated); with one stated, an UNTAGGED session never matches —
-// sessionctl's fail-closed rule, inherited rather than re-litigated.
 func (a *fleetBusApplier) matchedSessions(sel fleetbus.Selector) []string {
 	var out []string
 	narrow := sel.NarrowsSessions()
@@ -284,7 +284,7 @@ func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval 
 		fmt.Fprintf(os.Stderr, "fak serve: --fleet-bus disabled: %v\n", refusal)
 		return func() {}
 	}
-	ap := &fleetBusApplier{tbl: tbl, native: native, ctx: ctx}
+	ap := &fleetBusApplier{tbl: tbl, native: native, durability: serveSessionDurability, ctx: ctx}
 
 	// announce re-stamps and republishes presence, returning the record the drain then
 	// matches against. Re-stamping through NewInstance rather than poking SeenUTC keeps
