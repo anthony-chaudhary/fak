@@ -40,7 +40,7 @@ func usageWallText() string {
 
 const usageCoreText = `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
-  fak launch   [install|uninstall|default|enable|disable|status] [claude|codex] [--direct]
+  fak launch   [install|uninstall|default|enable|disable|status|doctor] [claude|codex] [--direct]
   fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
   fak commit status [--dir DIR] [--json]
   fak commit preflight --path P [--path P ...] [--dir DIR] [--json]

@@ -33,3 +33,17 @@ Choose or change bare-`fak` behavior with `fak launch default claude` or
 `fak launch default codex`. Configuration is stored in the platform user config
 directory under `fak/launch.json`; `FAK_LAUNCH_CONFIG` and `FAK_LAUNCH_BIN` are
 available for managed installs and tests.
+
+
+## Diagnose launch posture
+
+```bash
+fak launch doctor
+fak launch doctor --json
+fak launch help
+```
+
+Doctor checks each provider without launching it and reports one of `READY`,
+`NOT_ON_PATH`, `SHADOWED`, `UNDERLYING_MISSING`, `RECURSIVE`, `DISABLED`, or
+`CONFIG_INVALID`, plus one recovery command for every non-ready row. Its versioned JSON
+redacts local paths to basenames and never includes prompts or forwarded arguments.

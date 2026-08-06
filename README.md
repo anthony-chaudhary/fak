@@ -136,7 +136,7 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 
 Either way, `fak version` confirms it. Manual archive downloads, containers, build-from-source, and release-provenance verification: [INSTALL.md](INSTALL.md).
 
-Want the kernel with no new command to remember? `fak launch install --provider all --default claude` installs reversible `claude`/`codex` shims and makes bare `fak` launch your chosen provider. The original provider binaries are not overwritten; use `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable` to bypass interception. [Zero-adoption launch guide](docs/zero-adoption-launch.md).
+Want the kernel with no new command to remember? `fak launch install --provider all --default claude` installs reversible `claude`/`codex` shims and makes bare `fak` launch your chosen provider. The original provider binaries are not overwritten; use `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable` to bypass interception. Run `fak launch doctor` for a redacted readiness report. [Zero-adoption launch guide](docs/zero-adoption-launch.md).
 
 ## Going deeper
 

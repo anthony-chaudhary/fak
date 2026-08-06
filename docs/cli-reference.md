@@ -816,3 +816,7 @@ The following work was completed as the initial wave-0 build:
 See [PARTITION.md](https://github.com/anthony-chaudhary/fak/blob/main/PARTITION.md) for the current partition manifest and wave plan.
 
 License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
+
+## `fak launch`
+
+`fak launch doctor [--json]` diagnoses shim and provider posture with versioned, redacted output.

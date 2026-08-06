@@ -37,6 +37,11 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 			return runLaunchToggle(stdout, stderr, argv[0] == "disable")
 		case "status":
 			return runLaunchStatus(stdout, stderr)
+		case "doctor":
+			return runLaunchDoctor(stdout, stderr, argv[1:])
+		case "help", "-h", "--help":
+			fmt.Fprint(stdout, launchHelpText)
+			return 0
 		}
 	}
 	fs := flag.NewFlagSet("launch", flag.ContinueOnError)
