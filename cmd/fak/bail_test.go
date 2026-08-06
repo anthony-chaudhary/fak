@@ -85,26 +85,21 @@ var bailEmitterAliases = map[string][]string{
 	bailUnauthenticatedBind: {"serveBindRefusalToken"},
 }
 
-// pendingBailWiring is the honest part of this change: reasons whose recovery
-// plan is written and resolvable, but whose bail SITE still prints a bare
-// sentence. Each entry names the site so the remaining work is a lookup, not a
-// re-hunt. They are all in cmd/fak/serve.go, cmd/fak/serve_stages.go, and
-// cmd/fak/main.go, which carry other sessions' in-flight edits in this shared
-// checkout — converting them there would sweep a peer's work into a path-scoped
-// commit, so they wait for those files to go quiet.
+// pendingBailWiring holds reasons whose recovery plan is written and resolvable
+// but whose bail SITE still prints a bare sentence. Each entry names the site, so
+// the remaining work is a lookup rather than a re-hunt.
+//
+// It is EMPTY, and that is the point: every reason in the vocabulary is emitted
+// by a real site. The map stays because the ratchet below needs somewhere to
+// record a deliberate gap — a reason whose site is blocked (in this shared
+// checkout, usually a file another session is mid-edit) can be declared here
+// instead of silently shipping as a recovery for a refusal fak never makes.
 //
 // TestConfigBailReasonsAreEmitted ratchets in BOTH directions: wiring one of
 // these fails until it is removed from this map, and adding a reason without
 // either a site or an entry here fails too. Growing the list is still possible —
 // what it cannot be is silent, since the entry has to be written and reviewed.
-var pendingBailWiring = map[string]string{
-	bailNotAWorkspace:          "cmd/fak/serve.go warnIfNotFakWorkspace",
-	bailPolicyCheckNoFile:      "cmd/fak/serve_stages.go --policy-check requires --policy FILE",
-	bailKeyPrincipalUnresolved: "cmd/fak/serve.go --key-principal resolution",
-	bailAddrRequired:           "cmd/fak/serve_stages.go --addr is required",
-	bailBackendUnavailable:     "cmd/fak/serve.go --backend not available",
-	bailRouteManifestInvalid:   "cmd/fak/serve.go --route-manifest / --route-accounts",
-}
+var pendingBailWiring = map[string]string{}
 
 // TestConfigBailReasonsAreEmitted keeps the vocabulary honest about itself. A
 // reason with a plan but no site is a recovery for a refusal fak never makes:

@@ -98,27 +98,26 @@ the checks instead.
 
 ## The vocabulary
 
-Tokens are additive-only and stable. **Emitted** means a bail site prints it
-today; **catalog** means the recovery resolves but the site still prints a bare
-sentence. The catalog rows are tracked in `pendingBailWiring`
-(`cmd/fak/bail_test.go`), which fails if an entry goes stale — the site got wired
-but the entry stayed — and fails if a new reason arrives with neither a site nor
-an entry. A reason cannot quietly ship as a recovery for a refusal fak never
-makes.
+Tokens are additive-only and stable, and every one is emitted by a real bail
+site. `TestConfigBailReasonsAreEmitted` (`cmd/fak/bail_test.go`) holds that
+property: a reason with a plan but no site fails the build unless it is
+explicitly declared in `pendingBailWiring` with the site it is waiting on. So a
+reason cannot quietly ship as a recovery for a refusal fak never makes, and a
+deliberate gap has to be written down rather than discovered later.
 
-| Reason | Cause | Status |
+| Reason | Cause | Where it fires |
 |---|---|---|
-| `POLICY_LOAD_FAILED` | The capability floor at `--policy` did not load. fak refuses to serve on a floor it could not read, and never downgrades to a permissive default. | emitted |
-| `KEY_ENV_UNSET` | A key-bearing env var was named but is unset or empty. Naming the var is what arms the requirement. | emitted |
-| `BUDGET_FLAG_INCOHERENT` | The session-budget flags contradict each other — e.g. `--restart-on-budget` with no positive `--context-budget-tokens`. | emitted |
-| `WEIGHTS_REQUIRED` | The requested artifact is derived from the model's own header and no weights were given. | emitted |
-| `UNAUTHENTICATED_OFF_HOST_BIND` | The requested `--addr` is reachable from off this host and no inbound token door is configured. | emitted |
-| `NOT_A_WORKSPACE` | The working directory is not inside a fak workspace (no `dos.toml` upward), so the corpus, devindex, and session-state planes bind the wrong tree. A warning, not a refusal. | catalog |
-| `POLICY_CHECK_NO_FILE` | `--policy-check` validates a manifest and none was given. | catalog |
-| `KEY_PRINCIPAL_UNRESOLVED` | A `--key-principal` binding did not resolve, so the tenant keyset is only half armed. | catalog |
-| `ADDR_REQUIRED` | `fak serve` was given no transport: `--addr` was cleared and `--stdio` was not passed. | catalog |
-| `BACKEND_UNAVAILABLE` | The named `--backend` is not registered in this binary. | catalog |
-| `ROUTE_MANIFEST_INVALID` | The model-routing manifest or account roster did not load. | catalog |
+| `POLICY_LOAD_FAILED` | The capability floor at `--policy` did not load. fak refuses to serve on a floor it could not read, and never downgrades to a permissive default. | any verb that installs a floor (`serve`, `chat`, `attest`, the agent verbs), and `fak policy --check` |
+| `KEY_ENV_UNSET` | A key-bearing env var was named but is unset or empty. Naming the var is what arms the requirement. | `serve --require-key-env`, `serve --engine-cache-admin-key-env`, `console agent` against a credential-gated target |
+| `KEY_PRINCIPAL_UNRESOLVED` | A `--key-principal` binding did not resolve, so the tenant keyset is only half armed. | `serve --key-principal` |
+| `BUDGET_FLAG_INCOHERENT` | The session-budget flags contradict each other — e.g. a reset/restart-on-budget with no positive `--context-budget-tokens`. | `serve`, `console agent` |
+| `ADDR_REQUIRED` | No transport: `--addr` is empty and `--stdio` was not passed. | `serve` |
+| `UNAUTHENTICATED_OFF_HOST_BIND` | The requested `--addr` is reachable from off this host and no inbound token door is configured. | `serve` bind guard |
+| `BACKEND_UNAVAILABLE` | The named `--backend` is not registered in this binary. | `serve`, `serve --plan-json` |
+| `ROUTE_MANIFEST_INVALID` | The model-routing manifest or account roster did not load. | `serve --route-manifest`, `serve --route-accounts` |
+| `WEIGHTS_REQUIRED` | The requested artifact is derived from the model's own header and no weights were given. | `serve --plan-json` |
+| `POLICY_CHECK_NO_FILE` | `--policy-check` validates a manifest and none was given. | `serve --policy-check` |
+| `NOT_A_WORKSPACE` | The working directory is not inside a fak workspace (no `dos.toml` upward), so the corpus, devindex, and session-state planes bind the wrong tree. A warning, not a refusal. | `serve` startup |
 
 `fak recover --list` prints this live, merged with the tree-class tokens
 (`OFF_TRUNK`, `COLLISION_RISK`, `MERGE_IN_PROGRESS`, …) that cover working-tree

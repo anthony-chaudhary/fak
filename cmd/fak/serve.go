@@ -335,11 +335,20 @@ func warnIfNotFakWorkspace(stderr io.Writer) {
 	if err != nil {
 		wd = "(unknown cwd)"
 	}
-	fmt.Fprintf(stderr,
-		"fak serve: WARNING — no dos.toml found upward from cwd %q; this is not a fak workspace. "+
-			"The dojo corpus, devindex, and session-state planes will bind THIS cwd, not a fak repo. "+
-			"Launch fak serve from a fak checkout, or set the MCP server config \"cwd\" to your fak workspace root.\n",
-		wd)
+	// A warning rather than a refusal, which is exactly why it needs the same shape
+	// as a bail: nothing stops, so an operator who skims this line serves a
+	// silently mis-bound tree for the rest of the session.
+	writeConfigBail(stderr, configBail{
+		Verb:    "fak serve",
+		Reason:  bailNotAWorkspace,
+		Summary: "WARNING — this is not a fak workspace; the dojo corpus, devindex, and session-state planes will bind THIS cwd, not a fak repo",
+		Knobs: []bailKnob{
+			bailCWD(wd, "no dos.toml found walking upward").want("a directory inside your fak checkout"),
+		},
+		// Nothing stops here, so the fix has to stay INLINE — a warning that makes
+		// you run a second command to learn the remedy is one you scroll past.
+		Check: "git rev-parse --show-toplevel   # the repo this cwd actually resolves to\n          launch fak serve from a fak checkout, or set the MCP server entry's \"cwd\" to your fak workspace root",
+	})
 }
 
 // serveKeyPrincipals resolves the repeated `--key-principal PRINCIPAL=ENV_VAR` specs into
@@ -356,7 +365,17 @@ func warnIfNotFakWorkspace(stderr io.Writer) {
 func serveKeyPrincipals(specs []string, lookupEnv func(string) string, stderr io.Writer) (map[string]string, bool) {
 	keyPrincipals, err := gateway.ParseKeyPrincipals(specs, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak serve: --key-principal %v — refusing to start a gateway whose tenant keyset did not fully resolve (an unresolved binding leaves that tenant attributed by the caller-supplied X-Fak-Principal header instead of by its key)\n", err)
+		// The summary keeps the original sentence intact, X-Fak-Principal clause and
+		// all: it is what says WHY this fails closed rather than warning, and the
+		// block is meant to add a next step, never to cost the reason.
+		writeConfigBail(stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailKeyPrincipalUnresolved,
+			Summary: fmt.Sprintf("--key-principal %v — refusing to start a gateway whose tenant keyset did not fully resolve (an unresolved binding leaves that tenant attributed by the caller-supplied X-Fak-Principal header instead of by its key)", err),
+			Knobs: []bailKnob{
+				bailFlag("key-principal", strings.Join(specs, " ")).want("PRINCIPAL=ENV_VAR per tenant, each naming a set, distinct env var"),
+			},
+		})
 		return nil, false
 	}
 	return keyPrincipals, true
@@ -375,7 +394,16 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	if *sf.routeManifest != "" {
 		loaded, err := modelroute.LoadManifest(*sf.routeManifest)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak serve: --route-manifest:", err)
+			writeConfigBail(os.Stderr, configBail{
+				Verb:    "fak serve",
+				Reason:  bailRouteManifestInvalid,
+				Summary: fmt.Sprintf("--route-manifest did not load: %v", err),
+				Knobs: []bailKnob{
+					bailFlag("route-manifest", *sf.routeManifest),
+					bailFile(*sf.routeManifest, "did not load").want("a modelroute manifest whose every plan member resolves"),
+				},
+				Bind: []string{"path=" + *sf.routeManifest},
+			})
 			os.Exit(1)
 		}
 		routeMan = &loaded
@@ -392,7 +420,16 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	if *sf.routeAccounts != "" {
 		loaded, err := modelroute.LoadRoster(*sf.routeAccounts)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak serve: --route-accounts:", err)
+			writeConfigBail(os.Stderr, configBail{
+				Verb:    "fak serve",
+				Reason:  bailRouteManifestInvalid,
+				Summary: fmt.Sprintf("--route-accounts did not load: %v", err),
+				Knobs: []bailKnob{
+					bailFlag("route-accounts", *sf.routeAccounts),
+					bailFile(*sf.routeAccounts, "did not load").want("a fak-accounts/v1 roster carrying env var NAMES, never secrets"),
+				},
+				Bind: []string{"path=" + *sf.routeAccounts},
+			})
 			os.Exit(1)
 		}
 		routeRoster = &loaded
@@ -888,6 +925,28 @@ func resolveServeChatBackend(backendName string) (compute.Backend, error) {
 		return nil, fmt.Errorf("fak serve: --backend %q is not available (registered backends: %v). A device backend needs both a matching build tag (e.g. -tags %s) and a reachable device at runtime.", backendName, compute.Registered(), backendName)
 	}
 	return be, nil
+}
+
+// writeBackendUnavailableBail renders the BACKEND_UNAVAILABLE bail for a --backend
+// this binary never registered. Shared by the serve entry points so both report
+// the same knobs; resolveServeChatBackend fails for exactly this one reason, so a
+// non-nil error from it is always this bail.
+//
+// The name is not silently downgraded to CPU: a typo that quietly served on the
+// wrong device would misreport every throughput number taken from that run.
+func writeBackendUnavailableBail(w io.Writer, verb, backendName string) {
+	writeConfigBail(w, configBail{
+		Verb:    verb,
+		Reason:  bailBackendUnavailable,
+		Summary: fmt.Sprintf("--backend %q is not registered in this binary", backendName),
+		Knobs: []bailKnob{
+			bailFlag("backend", backendName).want(fmt.Sprintf("one of %v, or omit --backend to serve on the CPU path", compute.Registered())),
+		},
+		// Keep the build-tag half of the original message: "not registered" reads
+		// as a runtime/device problem, but the usual cause is a binary compiled
+		// without the tag, which no amount of checking the device will reveal.
+		Check: fmt.Sprintf("fak doctor serve   # decode tier and serve readiness; a device backend needs BOTH a build tag (-tags %s) and a reachable device", backendName),
+	})
 }
 
 // resolveServeMetal decides whether `fak serve` runs the in-kernel chat through the

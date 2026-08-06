@@ -212,7 +212,7 @@ func runServeSizingJSON(sf *serveFlags) {
 	}
 	be, err := resolveServeChatBackend(*sf.backendName)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		writeBackendUnavailableBail(os.Stderr, "fak serve", *sf.backendName)
 		os.Exit(2)
 	}
 	ws, err := ggufload.OpenWeights(*sf.ggufPath)

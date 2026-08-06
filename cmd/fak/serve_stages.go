@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -98,7 +99,16 @@ func resolveServeModelSources(sf *serveFlags) {
 // a missing or invalid manifest; it binds no listener.
 func runServePolicyCheck(policyPath string) {
 	if policyPath == "" {
-		fmt.Fprintln(os.Stderr, "fak serve: --policy-check requires --policy FILE")
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailPolicyCheckNoFile,
+			Summary: "--policy-check validates a manifest and none was given",
+			Knobs: []bailKnob{
+				bailFlag("policy-check", "true"),
+				bailFlag("policy", "").want("the manifest to validate"),
+			},
+			Check: "fak policy --dump   # the default manifest, as a starting file",
+		})
 		os.Exit(2)
 	}
 	rt, err := policy.LoadRuntime(policyPath)
@@ -118,7 +128,7 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 	// the load. Lookup (not Pick) keeps typos fail-loud rather than silently degrading to CPU.
 	chatBackend, err := resolveServeChatBackend(*sf.backendName)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		writeBackendUnavailableBail(os.Stderr, "fak serve", *sf.backendName)
 		os.Exit(2)
 	}
 	if chatBackend != nil {
@@ -325,7 +335,16 @@ func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
 	}
 	engineCacheAdminKey, ok := resolveRequiredKey(*sf.engineCacheAdminKeyEnv, os.Getenv)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "fak serve: --engine-cache-admin-key-env %s is set but unset/empty — refusing to send cache-reset requests with NO admin auth (set the secret or omit the flag)\n", *sf.engineCacheAdminKeyEnv)
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailKeyEnvUnset,
+			Summary: "refusing to send cache-reset requests with no admin auth: the named admin-key variable is empty",
+			Knobs: []bailKnob{
+				bailFlag("engine-cache-admin-key-env", *sf.engineCacheAdminKeyEnv),
+				bailEnv(*sf.engineCacheAdminKeyEnv, "").want("the engine-cache admin secret, or omit the flag"),
+			},
+			Bind: []string{"env=" + *sf.engineCacheAdminKeyEnv},
+		})
 		os.Exit(2)
 	}
 	if *sf.engineCacheIdleTimeout < 0 {
@@ -334,15 +353,39 @@ func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
 	}
 	requireKey, ok := resolveRequiredKey(*sf.requireKeyEnv, os.Getenv)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "fak serve: --require-key-env %s is set but unset/empty — refusing to start a network-facing gateway with NO authentication (set the secret or omit the flag)\n", *sf.requireKeyEnv)
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailKeyEnvUnset,
+			Summary: "refusing to start a network-facing gateway with no authentication: the named bearer variable is empty",
+			Knobs: []bailKnob{
+				bailFlag("require-key-env", *sf.requireKeyEnv),
+				bailEnv(*sf.requireKeyEnv, "").want("the bearer token callers must present, or omit the flag"),
+			},
+			Bind: []string{"env=" + *sf.requireKeyEnv},
+		})
 		os.Exit(2)
 	}
 	if *sf.contextBudgetTokens < 0 {
-		fmt.Fprintln(os.Stderr, "fak serve: --context-budget-tokens must be non-negative")
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailBudgetFlagIncoherent,
+			Summary: "--context-budget-tokens must be non-negative",
+			Knobs: []bailKnob{
+				bailFlag("context-budget-tokens", strconv.Itoa(*sf.contextBudgetTokens)).want("0 to disable, or a positive token count"),
+			},
+		})
 		os.Exit(2)
 	}
 	if *sf.resetOnBudget && *sf.contextBudgetTokens <= 0 {
-		fmt.Fprintln(os.Stderr, "fak serve: --reset-on-budget requires --context-budget-tokens N")
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailBudgetFlagIncoherent,
+			Summary: "--reset-on-budget has no budget to reset against",
+			Knobs: []bailKnob{
+				bailFlag("reset-on-budget", "true"),
+				bailFlag("context-budget-tokens", strconv.Itoa(*sf.contextBudgetTokens)).want("a positive token count, or drop --reset-on-budget"),
+			},
+		})
 		os.Exit(2)
 	}
 	// COLD resume (#629): re-attach the persisted drive state of every session BEFORE the
@@ -543,7 +586,18 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		return
 	}
 	if *sf.addr == "" {
-		fmt.Fprintln(os.Stderr, "fak serve: --addr is required (or pass --stdio)")
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailAddrRequired,
+			Summary: "no transport: --addr is empty and --stdio was not passed",
+			Knobs: []bailKnob{
+				// --addr has a non-empty default, so an empty one was SET empty —
+				// usually a shell variable that expanded to nothing.
+				bailFlag("addr", "").want("HOST:PORT, e.g. 127.0.0.1:8080"),
+				bailFlag("stdio", "false").want("true, to serve MCP over stdin/stdout instead"),
+			},
+			Check: "fak serve --help   # the transport flags and their defaults",
+		})
 		os.Exit(2)
 	}
 	// #3051/#3083: a local in-kernel GLM serve pays a one-time ~500s backend warmup
