@@ -378,3 +378,27 @@ func writeGodfileMap(b *strings.Builder, name string, m map[string]int) {
 	}
 	b.WriteString("}\n")
 }
+
+func TestGodfileScanRaisedFunctionCeilingDoesNotDisableFileCeiling(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "internal", "big", "big.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	b.WriteString("package big\n")
+	for i := 0; i < 1510; i++ {
+		b.WriteString("// line\n")
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tree := &TrackedTree{Root: root, Paths: []string{"internal/big/big.go"}, fileCache: map[string]fileEntry{}}
+	oldFunc, oldFile := godFuncMaxLines, godFileMaxLines
+	godFuncMaxLines, godFileMaxLines = 2000, 1500
+	t.Cleanup(func() { godFuncMaxLines, godFileMaxLines = oldFunc, oldFile })
+	scans := godfileScanTree(tree)
+	if len(scans) != 1 || scans[0].lines <= godFileMaxLines {
+		t.Fatalf("scans=%+v, raised function ceiling hid file", scans)
+	}
+}
