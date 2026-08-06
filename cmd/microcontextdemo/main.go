@@ -271,6 +271,7 @@ func main() {
 	var s3Memory uint64
 	var descriptorOutput string
 	var verifyDescriptorPath string
+	var compatOutput, verifyCompatPath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
@@ -293,6 +294,8 @@ func main() {
 	flag.Uint64Var(&s3Memory, "memory-envelope", 64<<20, "S3 peak Go allocation delta envelope in bytes")
 	flag.StringVar(&descriptorOutput, "descriptor-bench", "", "run the 1,000-context descriptor/harness benchmark and write JSON")
 	flag.StringVar(&verifyDescriptorPath, "verify-descriptor-bench", "", "verify a captured descriptor benchmark artifact and exit")
+	flag.StringVar(&compatOutput, "compatibility-witness", "", "run compatibility scheduler witness and write JSON")
+	flag.StringVar(&verifyCompatPath, "verify-compatibility", "", "verify compatibility artifact")
 	flag.Parse()
 	if verifyPath != "" {
 		if err := verifyArtifact(verifyPath); err != nil {
@@ -308,6 +311,30 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("PASS: verified", verifyABPath)
+		return
+	}
+	if verifyCompatPath != "" {
+		if err := verifyCompatibilityArtifact(verifyCompatPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyCompatPath)
+		return
+	}
+	if compatOutput != "" {
+		r, err := buildCompatReport()
+		b, e := json.MarshalIndent(r, "", "  ")
+		if e == nil {
+			e = os.WriteFile(compatOutput, append(b, '\n'), 0o644)
+		}
+		if e != nil {
+			fmt.Fprintln(os.Stderr, e)
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		return
 	}
 	if verifyDescriptorPath != "" {

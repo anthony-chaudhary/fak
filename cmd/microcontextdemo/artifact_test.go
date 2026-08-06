@@ -19,3 +19,9 @@ func TestCheckedInDescriptorArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCheckedInCompatibilityArtifact(t *testing.T) {
+	if err := verifyCompatibilityArtifact("../../experiments/microcontext/s4-local-compatibility-2026-08-06.json"); err != nil {
+		t.Fatal(err)
+	}
+}
