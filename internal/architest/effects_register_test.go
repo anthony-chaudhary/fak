@@ -849,7 +849,7 @@ func syntheticRepo() map[string]string {
 		"go.mod": "module example.com/synth\n\ngo 1.26\n\nrequire example.org/dep v1.2.3\n",
 		".github/workflows/ci.yml": "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n" +
 			"      - run: go install example.org/tool/cmd/tool@latest\n",
-		"Dockerfile":         "FROM golang:1.26 AS build\nRUN curl -fsSL https://example.org/asset.tgz -o /tmp/a.tgz\n",
+		"Dockerfile":          "FROM golang:1.26 AS build\nRUN curl -fsSL https://example.org/asset.tgz -o /tmp/a.tgz\n",
 		"internal/x/spawn.go": "package x\n\nfunc f() { _ = exec.Command(\"nvidia-smi\", \"-L\") }\n",
 	}
 }
