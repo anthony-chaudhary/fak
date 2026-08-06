@@ -256,6 +256,13 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 	gen, stopped, err = ln.gen, ln.stopped, ln.err
 	decodeS = time.Since(td).Seconds()
+	// 5) R6/#5617: fold this request's activated-expert residency into the serve-scoped ledger while
+	// the session is still alive — the `defer s.Close()` above takes the ring, and with it every
+	// counter the offload ladder built, the moment this function returns. The token count is what
+	// was actually FORWARDED (the prompt suffix the prefix cache could not serve, plus what was
+	// generated), because a token served from cache activated no expert and would make the ring's
+	// bytes-per-token read cheaper than it is. Inert on a session with no ring, which is the default.
+	p.noteMoEResidency(s, int64(len(ids)-matched+gen))
 	return
 }
 

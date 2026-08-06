@@ -94,6 +94,12 @@ type InKernelPlanner struct {
 	reqMemMu      sync.Mutex
 	lastReqMemory RequestMemoryStats
 
+	// moeResidencyState is the serve-scoped fold of every request's activated-expert residency
+	// (R6/#5617, inkernel_moe_residency.go). It is embedded because the ring lives on a session
+	// this planner builds and closes PER REQUEST, so without a planner-scoped ledger the whole
+	// ladder's accounting is destroyed at each teardown and no serve surface can see it.
+	moeResidencyState
+
 	oomRetryMu sync.Mutex
 	oomRetry   map[string]*inKernelOOMRetryClassStats
 
