@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // `fak bench gitspawn`  -  count GIT PROCESS SPAWNS per unit of work on the three hot
@@ -301,6 +303,7 @@ func seedGitSpawnRepo(work string) (string, error) {
 	}
 	git := func(args ...string) error {
 		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		windowgate.ConfigureBackgroundCommand(c)
 		c.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=fak bench", "GIT_AUTHOR_EMAIL=bench@fak.invalid",
 			"GIT_COMMITTER_NAME=fak bench", "GIT_COMMITTER_EMAIL=bench@fak.invalid",
@@ -353,6 +356,7 @@ func measureGitSpawnScenario(ctx context.Context, sc gitSpawnScenario, evDir str
 	defer cancel()
 
 	c := exec.CommandContext(rctx, sc.Argv[0], sc.Argv[1:]...)
+	windowgate.ConfigureBackgroundCommand(c)
 	c.Dir = sc.Dir
 	c.Env = append(os.Environ(), gitSpawnTraceEnv+"="+evDir)
 	c.Stdout, c.Stderr = io.Discard, io.Discard
@@ -504,6 +508,7 @@ func calibrateGitSpawnCounter(evDir, repo string, n int) (gitSpawnCalibration, e
 	start := time.Now()
 	for i := 0; i < n; i++ {
 		c := exec.Command("git", "-C", repo, "rev-parse", "--git-dir")
+		windowgate.ConfigureBackgroundCommand(c)
 		c.Env = env
 		c.Stdout, c.Stderr = io.Discard, io.Discard
 		if err := c.Run(); err != nil {
@@ -528,7 +533,9 @@ func calibrateGitSpawnCounter(evDir, repo string, n int) (gitSpawnCalibration, e
 }
 
 func gitSpawnGitVersion() string {
-	out, err := exec.Command("git", "--version").Output()
+	c := exec.Command("git", "--version")
+	windowgate.ConfigureBackgroundCommand(c)
+	out, err := c.Output()
 	if err != nil {
 		return ""
 	}
