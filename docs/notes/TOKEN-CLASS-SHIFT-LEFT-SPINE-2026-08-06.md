@@ -50,3 +50,19 @@ The point is not the default weights; they are explicit policy inputs. The value
 - The spine does not yet gate or route a live request; those integrations are separately dispatchable issues.
 
 These boundaries prevent a preflight estimate from masquerading as a billed or hardware-observed fact.
+
+
+## Equal-total halo (#5780)
+
+Run the keyless captured comparison and its contract check from the repository root:
+
+```bash
+go run ./cmd/fak token-profile --halo
+go run ./cmd/fak token-profile --selfcheck
+```
+
+The halo fixes both requests at 102,000 total tokens. Scalar admission therefore says
+`ADMIT` to both, while class-aware load admits the cache-heavy profile and refuses the
+decode-heavy profile at the same declared 50,000-unit budget. Cost and scheduler bars
+make the unequal vectors visible; the result is a forecast, not a claim about observed
+provider billing or hardware service time.
