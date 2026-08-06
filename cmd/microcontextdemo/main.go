@@ -293,6 +293,8 @@ func main() {
 	var compatOutput, verifyCompatPath string
 	var effectsOutput, verifyEffectsPath string
 	var verifyAPIOnlyPath string
+	var qualityInput, qualityOutput, verifyQualityPath string
+	var qualitySamples int
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
@@ -329,7 +331,30 @@ func main() {
 	flag.StringVar(&effectsOutput, "effects-witness", "", "run effect-safety witness and write JSON")
 	flag.StringVar(&verifyEffectsPath, "verify-effects", "", "verify effect-safety artifact")
 	flag.StringVar(&verifyAPIOnlyPath, "verify-api-only", "", "verify captured S6 API-only artifact")
+	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
+	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
+	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
+	flag.StringVar(&verifyQualityPath, "verify-quality", "", "verify a captured quality ledger")
 	flag.Parse()
+	if verifyQualityPath != "" {
+		if err := verifyQualityLedgerArtifact(verifyQualityPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyQualityPath)
+		return
+	}
+	if qualityInput != "" {
+		if qualityOutput == "" {
+			fmt.Fprintln(os.Stderr, "quality-output is required")
+			os.Exit(2)
+		}
+		if err := writeQualityLedger(qualityInput, qualityOutput, qualitySamples); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if verifyAPIOnlyPath != "" {
 		if err := verifyAPIOnlyArtifact(verifyAPIOnlyPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)

@@ -1,0 +1,46 @@
+{
+  "schema": "fak-microcontext-quality-ledger/1",
+  "run_id": "microcontext-ledger-microcontext-base-v1",
+  "base_id": "microcontext-base-v1",
+  "check_contract": "caller-supplied-independent-outcome-check",
+  "mode": "openai-compatible",
+  "provider": "groq-api-only-openai-compatible",
+  "model": "llama-3.1-8b-instant",
+  "submitted": 4,
+  "retired": 4,
+  "failed": 0,
+  "cancelled": 0,
+  "retried": 0,
+  "elapsed_ms": 1023,
+  "verification": {
+    "checked": 4,
+    "passed": 4,
+    "failed": 0
+  },
+  "claim_families": {
+    "orchestration": {
+      "submitted_total": 4,
+      "physical_workers": 4
+    },
+    "inference": {
+      "prompt_tokens": 2876,
+      "completion_tokens": 32,
+      "usage_responses": 4
+    },
+    "useful_work": {
+      "verified_completions": 4,
+      "per_wall_second": 3.910068426197459
+    }
+  },
+  "error_classes": {},
+  "sample_ids": [
+    "ctx-00000000",
+    "ctx-00000001",
+    "ctx-00000002",
+    "ctx-00000003"
+  ],
+  "sample_limit": 4
+}
+
+
+
