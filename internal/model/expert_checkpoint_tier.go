@@ -422,9 +422,10 @@ type ExpertCheckpointStats struct {
 	ResidentBytes int64 `json:"resident_bytes"`
 	PeakBytes     int64 `json:"peak_bytes"`
 	ResidentCount int   `json:"resident_count"`
-	// Failures counts reads that errored, and LastError names the most recent one. A resolve
-	// failure degrades to "weight absent" rather than killing the forward, so without these an IO
-	// fault would be indistinguishable from a checkpoint that simply does not carry the tensor.
+	// Failures counts reads that errored, and LastError names the most recent one. The demand path
+	// raises an IO failure rather than swallowing it, but the R3 prefetch is best-effort and a
+	// checkpoint whose backing file went away mid-run would otherwise be visible only as a stall;
+	// these two are the standing record that the tier tried and could not read.
 	Failures  int    `json:"failures"`
 	LastError string `json:"last_error,omitempty"`
 }
