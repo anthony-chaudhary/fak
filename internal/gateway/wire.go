@@ -545,6 +545,55 @@ type FakExt struct {
 	// over the served loop, and StoppedBySession names the session boundary if one ended
 	// the loop early. nil on the proxy path.
 	NativeArm *agent.ArmMetrics `json:"native_arm,omitempty"`
+	// Compaction is the machine-readable continuation contract for the compaction
+	// boundary this turn crossed (#2422), or nil on every turn that did not compact.
+	// It is the TYPED twin of the in-band `[fak]` note: the note tells the model what
+	// survived, this tells an orchestrator the same fact without parsing prose.
+	Compaction *CompactionContract `json:"compaction,omitempty"`
+}
+
+// CompactionContract is what a compaction boundary PROMISES the turn that continues past
+// it (#2422). A harness that merely summarizes-and-continues has to state that behavior as
+// prose convention and hope the model reads it; this is the same statement made verifiable —
+// emitted once per boundary, derived from the planner's actual survival sets rather than
+// from a description of them.
+//
+// The two consumers read the SAME record. The model reads it rendered as an in-band note
+// (compactionContractNote) and learns which classes survived and which evicted pages are
+// re-derivable; an orchestrator reads this struct off `fak.compaction` and needs no prose
+// parsing at all. Both therefore cannot disagree about what a boundary did.
+type CompactionContract struct {
+	// ContractVersion is the schema version of this record (compactionContractVersion). A
+	// reader that does not recognise the version must treat the rest as opaque rather than
+	// guess: the whole point is that the boundary's meaning is not inferred.
+	ContractVersion int `json:"contract_version"`
+	// PreservedClasses is the per-survival-class kept/evicted split of the eviction plan,
+	// in resistance order (PINNED, REPLAYABLE, EVICTABLE), listing only classes the page
+	// set actually contained. This is the "what survived" half, and it is a projection of
+	// the plan the compaction ran under — not a re-derivation that could drift from it.
+	PreservedClasses []PreservedClassSplit `json:"preserved_classes"`
+	// EvictedByteCount is the total wire bytes of the evicted pages: the size of the loss,
+	// stated rather than left for the model to notice.
+	EvictedByteCount int `json:"evicted_byte_count"`
+	// ReplayablePageDigests are the content digests of the evicted pages that class
+	// REPLAYABLE — the "what is re-derivable" half. An evicted EVICTABLE page has no digest
+	// here because it has no recovery either, and listing one would imply a restore that
+	// cannot happen. Capped at maxReplayablePageDigests so a huge shed cannot inflate the
+	// response body it is meant to be shrinking.
+	ReplayablePageDigests []string `json:"replayable_page_digests,omitempty"`
+	// Instruction is the closed continuation token (compactionContractInstruction): the
+	// boundary is a summarize-and-continue, so the turn after it must not treat the
+	// shortened transcript as a reason to wrap up.
+	Instruction string `json:"instruction"`
+}
+
+// PreservedClassSplit is one survival class's outcome in an eviction plan: how many pages of
+// that class the plan kept and how many it dropped. Both counts ride together because either
+// alone is unreadable — "2 kept" says nothing without the denominator.
+type PreservedClassSplit struct {
+	Class   string `json:"class"`
+	Kept    int    `json:"kept"`
+	Evicted int    `json:"evicted"`
 }
 
 // WireRedaction is the response view of one agent.TranscriptRedaction: enough to

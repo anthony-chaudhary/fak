@@ -1134,6 +1134,11 @@
           "category": "incidental",
           "reason": "HTTP handler method that serves the checkpoint verb on the session control subtree; a transport adapter over the existing session chain, introducing no session-runtime concept.",
           "token": "handleSessionCheckpointVerb"
+        },
+        {
+          "category": "incidental",
+          "reason": "HTTP handler that routes a mid-flight verb to the named trace's mailbox; a transport adapter over the existing session registry.",
+          "token": "handleFakSessionMidflight"
         }
       ],
       "id": "session-runtime",
@@ -1155,6 +1160,7 @@
         "guardSessionStartNodeWrapsDriver",
         "guardSessionStartProcIsDriver",
         "guardsessiontempdir",
+        "handleFakSessionMidflight",
         "handleSessionCheckpointVerb",
         "handoff_session_give_up",
         "interactivesession",
@@ -1769,13 +1775,59 @@
           "category": "incidental",
           "reason": "The durable row type is positioned in the witness-proof family. It records what compaction did for one session but owns no context window and performs no compaction; the counters it carries are measured in internal/gateway.",
           "token": "guardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported projection of one ctxplan eviction plan onto the wire contract struct; it reshapes a plan the compactor already produced and decides nothing about context itself.",
+          "token": "compactionContractFrom"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported per-trace take-once accessor over the pending-contract map; a lifecycle read on a record the compaction path already minted, introducing no context concept.",
+          "token": "takeCompactionContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "The wire projection of one compaction boundary's eviction plan (class split, evicted bytes, replayable digests, continuation token). It reports what ctxplan's survival gate already decided; the concept lives in ctxplan's survival classes, not in this response shape.",
+          "token": "CompactionContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "The mutex guarding the per-trace pending-contract map on Server; a concurrency primitive, not a concept.",
+          "token": "compactionContractMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported writer that latches one boundary's contract under its trace, bounded by the same session reaper; a map insert on a record the compaction path already minted.",
+          "token": "noteCompactionContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "The integer schema version stamped on each contract so an unfamiliar reader treats the rest as opaque; a versioning constant.",
+          "token": "compactionContractVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "The closed continuation token string a boundary emits so the next turn does not read a shortened transcript as a reason to wrap up; a fixed literal, not a concept.",
+          "token": "compactionContractInstruction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported renderer turning one contract into the in-band [fak] line a content-block-only client can see; a presentation helper over the same record the typed field carries.",
+          "token": "compactionContractNote"
         }
       ],
       "id": "context-ctx",
       "ignore": [
+        "CompactionContract",
         "MechanismStaleContext",
         "appendGuardCompactionWitnessTo",
         "cctx",
+        "compactionContractFrom",
+        "compactionContractInstruction",
+        "compactionContractMu",
+        "compactionContractNote",
+        "compactionContractVersion",
         "compactionWitness",
         "compactions",
         "context",
@@ -1793,13 +1845,15 @@
         "guardCompactionWitnessSchema",
         "latestGuardCompactionWitness",
         "newGuardCompactionWitness",
+        "noteCompactionContract",
         "noteCtxValueTTL1hScope",
         "readGuardCompactionWitnesses",
         "recalled",
         "recalling",
         "recalls",
         "recordGuardCompactionWitness",
-        "setGuardCompactionAnchorMode"
+        "setGuardCompactionAnchorMode",
+        "takeCompactionContract"
       ],
       "min_files": 3,
       "name": "Context-management family",
@@ -2053,11 +2107,22 @@
           "category": "incidental",
           "reason": "A parameter name on ctxplan.CheckEviction (c2421-check-eviction) naming the page IDs a foreign plan proposes to drop. A local identifier, not a concept.",
           "token": "evictIDs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper that counts the REPLAYABLE rows in a contract's class split for the in-band note; a read over an existing record, not an eviction concept.",
+          "token": "replayableEvictedCount"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field on the contract totalling the wire bytes of the evicted pages; a measurement of an eviction the planner already decided, not an eviction concept.",
+          "token": "EvictedByteCount"
         }
       ],
       "id": "evict",
       "ignore": [
         "CompactReasonPinEvictRefused",
+        "EvictedByteCount",
         "EvictionsPerHit",
         "ReasonPinEvictRefused",
         "evictIDs",
@@ -2067,7 +2132,8 @@
         "eviction",
         "evicts",
         "noteEviction",
-        "recordEvictChoice"
+        "recordEvictChoice",
+        "replayableEvictedCount"
       ],
       "min_files": 3,
       "name": "Eviction family",
@@ -2628,6 +2694,11 @@
           "category": "incidental",
           "reason": "A NETWORK loopback address test (localhost/127.0.0.1/::1), not an iteration or dispatch loop. It is a local mirror of internal/modelroute.isLoopbackBaseURL used to keep the fleet trust boundary disjoint from the on-box/device zone; it shares only the substring 'loop' with the loop concept family.",
           "token": "isLoopbackFleetHost"
+        },
+        {
+          "category": "incidental",
+          "reason": "A wire error code returned when a mid-flight verb names a trace with no owned run to reach; a refusal label, not a loop concept.",
+          "token": "midflight_no_owned_loop"
         }
       ],
       "id": "loop",
@@ -2668,6 +2739,7 @@
         "loopsnapshotforid",
         "loopstate",
         "meta_superloop",
+        "midflight_no_owned_loop",
         "noloopledger",
         "q8prefillneedstokenloop",
         "recordloop",

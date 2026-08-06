@@ -1067,7 +1067,8 @@ type SessionThroughput struct {
 type SessionControlRequest struct {
 	Run        string             `json:"run,omitempty"`        // verb "run": target run-state token
 	Reason     string             `json:"reason,omitempty"`     // verb "run": reason token (closed vocabulary)
-	Budget     *SessionBudget     `json:"budget,omitempty"`     // verb "budget"
+	Budget     *SessionBudget     `json:"budget,omitempty"`     // verb "budget", and the mid-flight "set-budget" (#2403)
+	CallID     string             `json:"call_id,omitempty"`    // verb "drop-pending-call" (#2403): the one queued call to skip
 	Pace       *SessionPace       `json:"pace,omitempty"`       // verb "pace"
 	Priority   *int               `json:"priority,omitempty"`   // verb "priority"
 	Wall       *SessionWall       `json:"wall,omitempty"`       // verb "wall" (#2762): wall-clock limit
@@ -1431,6 +1432,16 @@ type Server struct {
 	ctxExpenseNotedMu sync.Mutex
 	ctxExpenseNoted   map[string]struct{}
 
+	// compactionContract holds, per session trace, the continuation contract the LAST
+	// compaction boundary emitted (#2422, compaction_contract.go), pending the next completed
+	// turn that reports it. Unlike ctxExpenseNoted this is a TAKE-ONCE latch rather than a
+	// once-per-session seen-set: every boundary is a distinct loss the model has to be told
+	// about, so the reporting turn consumes the record instead of suppressing later ones.
+	// Minted lazily by noteCompactionContract, drained by takeCompactionContract, and bounded
+	// by the same maxResetHealthSessions reaper. Report-only: nothing here mutates the body.
+	compactionContractMu sync.Mutex
+	compactionContract   map[string]*CompactionContract
+
 	// ctxRestore holds, per session trace, the content-addressed stash of ORIGINATING tasks the
 	// Anthropic-passthrough compaction dropped (ctxrestore.go). A fired tombstone hands the gateway
 	// the dropped turn's bytes + its sha256-hex handle (agent.CompactOutcome.RestoreID/RestoreBytes),
@@ -1735,6 +1746,10 @@ type Server struct {
 	// loop's model round-trips per request. See Config.Native / native_serve.go.
 	native         bool
 	nativeMaxTurns int
+	// midflight is the live per-trace mid-flight verb mailbox registry (#2403): the
+	// lookup POST /v1/fak/session/{trace}/{interrupt|drop-pending-call|set-budget}
+	// crosses to reach the owned run it names. See native_midflight.go.
+	midflight midflightRuns
 	// vdsoProxyFill opts the proxy path into warming the vDSO from admitted inbound
 	// tool_result blocks (Config.VDSOProxyFill). Default false. See admitInboundResults.
 	vdsoProxyFill bool

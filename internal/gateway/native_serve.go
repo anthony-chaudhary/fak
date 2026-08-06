@@ -210,7 +210,9 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string) (agent.ArmMetrics, error) {
 	ensureGovernedRungs()
 	task := lastUserText(req.Messages)
-	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, s.nativeRunOptions(ctx, reqTrace)...)
+	opts, release := s.nativeRunOptions(ctx, reqTrace)
+	defer release()
+	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, opts...)
 }
 
 // runNativeArmStream drives the owned loop for one STREAMED request. onProgress (may be
@@ -220,7 +222,8 @@ func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesR
 func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink, onProgress agent.ProgressObserver) (agent.ArmMetrics, error) {
 	ensureGovernedRungs()
 	task := lastUserText(req.Messages)
-	opts := s.nativeRunOptions(ctx, reqTrace)
+	opts, release := s.nativeRunOptions(ctx, reqTrace)
+	defer release()
 	if onProgress != nil {
 		opts = append(opts, agent.WithProgressObserver(onProgress))
 	}
@@ -286,8 +289,20 @@ func ensureGrammarRung() {
 	abi.RegisterAdjudicator(5, grammar.Default)
 }
 
-func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) []agent.RunOption {
-	opts := make([]agent.RunOption, 0, 2)
+// The returned release closes this run's mid-flight mailbox and MUST be deferred by the
+// caller: the registry entry is what a control-plane verb looks the live run up by, so
+// leaving it behind would let a later verb address a finished run.
+func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent.RunOption, func()) {
+	opts := make([]agent.RunOption, 0, 4)
+	// #2403 write half: open this run's mid-flight mailbox under the request trace — the
+	// same id the typed progress events carry — so POST /v1/fak/session/{trace}/{interrupt|
+	// drop-pending-call|set-budget} reaches THIS live run and lands at its next clean turn
+	// boundary. Wired here rather than per-entrypoint so the buffered and streamed native
+	// /v1/messages turns and the agent-sessions run are all addressable by the same verbs.
+	// An empty trace registers nothing and yields a nil mailbox, which WithMidflightVerbs
+	// accepts as the historical (mailbox-free) loop.
+	mfOpt, release := s.midflightRunOption(reqTrace)
+	opts = append(opts, mfOpt)
 	if s.decideSession != nil {
 		opts = append(opts, agent.WithSessionGate(agent.SessionGate{
 			Decide: func(trace string) (int, bool, int, string) {
@@ -316,7 +331,7 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) []agent.
 			opts = append(opts, agent.WithRouteManifest(mfst))
 		}
 	}
-	return opts
+	return opts, release
 }
 
 func sendAnthropicTerminalWithNativeArm(send func(string, any), stop string, usage anthropicUsage, arm *agent.ArmMetrics) {
