@@ -1,4 +1,4 @@
-# Managed-cache message-prefix ablation — 2026-08-05
+# Managed-cache message-prefix ablation â€” 2026-08-05
 
 Issue: #2186 (duplicate contract: #2176).
 
@@ -12,12 +12,12 @@ Keep `FAK_ABLATE_TTL_1H_HEAD_ONLY=1` as the distinct head-only control arm.
 Anthropic's 1h cache write costs 2x the 5m write, while a 1h cache hit costs the same
 0.1x input rate. For a stable prefix of `P` tokens:
 
-- head-only / 5m after a 5–60 minute idle: rewrite `1.25P`;
+- head-only / 5m after a 5â€“60 minute idle: rewrite `1.25P`;
 - message-prefix / 1h after that idle: one initial `2P` write, then each resume reads `0.1P`;
 - incremental first-write premium: `0.75P`;
 - avoided expired-tail rewrite on one qualifying resume: `1.15P`.
 
-Therefore one observed 5–60 minute resume repays the premium (`0.75 / 1.15 = 0.652`
+Therefore one observed 5â€“60 minute resume repays the premium (`0.75 / 1.15 = 0.652`
 qualifying resumes). The default remains conditional on ACTIVE posture; OFF is unchanged.
 
 ## Ablation row and witness

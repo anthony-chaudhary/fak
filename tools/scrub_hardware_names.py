@@ -402,6 +402,23 @@ def audit_message(msg_path: str) -> int:
     return 0 if mode == "warn" else 1
 
 
+def _display_path(f: Path):
+    """Name a file for a human: repo-relative inside the repo, as-given outside it.
+
+    Path.relative_to RAISES for an absolute path that is not under REPO, so the bare
+    `f.relative_to(REPO) if f.is_absolute() else f` this replaces could crash while
+    formatting a diagnostic -- including the unreadable-file report, whose entire job is
+    to survive a file the scrubber could not handle. A doc set passed explicitly on the
+    command line is free to live anywhere.
+    """
+    if not f.is_absolute():
+        return f
+    try:
+        return f.relative_to(REPO)
+    except ValueError:
+        return f
+
+
 def main() -> int:
     try:  # Windows consoles default to cp1252; doc prose carries ×, →, ✅, etc.
         sys.stdout.reconfigure(encoding="utf-8")
@@ -430,12 +447,27 @@ def main() -> int:
     for f in files:
         if not f.exists():
             continue
-        original = f.read_text(encoding="utf-8")
+        try:
+            original = f.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            # A doc this scrubber cannot DECODE is a doc it has not CHECKED, and an
+            # unchecked doc is not a clean one. Letting the decode raise was the worse
+            # failure: an uncaught traceback also exits 1, and 1 is this gate's "a prose
+            # hardware name was found" verdict -- so one mis-encoded file arrived at the
+            # Go/Python parity differential as a tell nobody could locate. Report it under
+            # the exit-2 "unreadable" contract audit_message already follows, and name the
+            # byte so the repair is mechanical rather than a hunt.
+            rel = _display_path(f)
+            print(f"hardware-name lint: UNREADABLE -- {rel} is not valid UTF-8 "
+                  f"(byte {exc.object[exc.start]:#04x} at offset {exc.start})", file=sys.stderr)
+            print("  fix: re-encode the file as UTF-8 -- it is most likely cp1252, where "
+                  "0x97 is an em dash and 0x96 an en dash.", file=sys.stderr)
+            return 2
         if args.check:
             hits = residual_hits(original)
             if hits:
                 residual_files += 1
-                rel = f.relative_to(REPO) if f.is_absolute() else f
+                rel = _display_path(f)
                 for n, line in hits[:6]:
                     print(f"  {rel}:{n}: {line.strip()}")
             continue
@@ -443,7 +475,7 @@ def main() -> int:
         if new == original:
             continue
         changed += 1
-        rel = f.relative_to(REPO) if f.is_absolute() else f
+        rel = _display_path(f)
         if args.apply:
             f.write_text(new, encoding="utf-8", newline="")
             print(f"  scrubbed {rel}")
