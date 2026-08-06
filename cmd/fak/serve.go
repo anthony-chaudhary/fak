@@ -1273,6 +1273,13 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 			must(fmt.Errorf("fak serve: --expert-parallel sharded load requires the resident-Q4K path; set FAK_Q4K=1 (or --cpu-offload-experts) so this rank admits only its expert band"))
 		}
 	}
+	// How many ranks this process's WEIGHTS are actually split across. A rank is sharded only when
+	// it was handed a band: expertRanks alone must never select a per-rank plan, or an unsharded
+	// process would under-account the full model it really loads and pass a fit it should fail.
+	residentRanks := 1
+	if expertShard != nil && expertRanks > 1 {
+		residentRanks = expertRanks
+	}
 	// #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed — the ~50-100x
 	// time-to-ready tax a CPU server hit loading GLM-5.2 off /projects (NFS, ~82 min) vs a local NVMe
@@ -1295,7 +1302,12 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// load from ~100 min to minutes. The per-request session decodes Q4_K (s.Q4K=true) on both
 		// the device (dense) and host (offloaded experts). The fit check still uses the dense-vs-
 		// expert split so experts dwarfing VRAM stay host-scoped while the dense side must fit.
-		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, contextBudgetTokens)
+		// #4952: a sharded rank admits only its expert band (WithExpertShard above), so the host
+		// expert pool must be charged that band and not the whole routed set — otherwise the
+		// host-scope refusal below over-refuses ~ranks-fold, and it does so BEFORE the authoritative
+		// rank-local gate (refuseEPPlanIfUnfit) ever runs. residentRanks is 1 for every unsharded
+		// serve, which plans exactly as before.
+		memPlan, err := fitAndPlanServeGGUFCPUOffloadExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
 		must(err)
 		// #971 blocker 3: the dense weights fit-checked above land in VRAM, but the routed MoE
 		// experts (~424 GiB for GLM-5.2 Q4_K) are pinned in HOST RAM — and a device backend does not
@@ -1317,8 +1329,8 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		fmt.Printf("fak: GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)\n", backend.Name())
 		var memPlan compute.MemoryPlan
 		var err error
-		if expertShard != nil && expertRanks > 1 {
-			memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, expertRanks, contextBudgetTokens)
+		if residentRanks > 1 {
+			memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
 		} else {
 			memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
 		}
