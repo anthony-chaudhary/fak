@@ -61,7 +61,7 @@ Nine witnessed capabilities exist. Column 3 is the load-bearing one.
 |---|---|---|
 | Bounded per-weight device ring (byte budget, LRU victim, pinned-exempt, page-in/hit/evict counters) | `internal/model/paging_ring.go` | **Wired (R0, #5611).** `pagedRing.stage` + `internal/model/expert_ring_hal.go` put it under the session weight HAL for routed experts, opt-in per session via `Session.ExpertRingBytes`. Was off-path (sole constructor `v4_expert_runtime.go:67`, DeepSeek-V4 only). R1 sizes the budget, so `FAK_N_CPU_MOE` now reaches it. |
 | Graded spill sizing + auto-fit to a measured device budget (`--n-cpu-moe N` semantics) | `internal/model/expert_spill_fit.go` (#5281, closed) | **Wired (R1, #5612).** `Model.ResolveExpertSpillPlacement` builds the budget from measured resident bytes and real MoE layer ordinals, `Session.ApplyExpertSpillPlacement` installs it, and `InKernelPlanner.SetExpertSpill` resolves it once per serve against `compute.DeviceMemoryInfo`. Was exported and unused outside tests. Flag surface still open (`FAK_N_CPU_MOE` only). |
-| Value-aware evictor: routing-heat hysteresis + LFU-decay, scored against the Belady oracle | `internal/model/expert_residency_lfu.go` (#4357, closed) | **Simulation only,** deliberately off the live path; the ring is still plain LRU via `polymodel.Pool`. |
+| Value-aware evictor: routing-heat hysteresis + LFU-decay, scored against the Belady oracle | `internal/model/expert_residency_lfu.go` (#4357, closed) | **Ranking wired (R4, #5615); hysteresis still simulation only.** `internal/model/expert_ring_policy.go` gives the ring a victim-policy seam (`Session.ExpertRingEvict`), records the ordered trace the seam is judged on, and gates promotion on measured regret. The admission hysteresis stays off the live path — a bypassed weight would fall back to *permanent* `halW` residency, inverting its intent. Was simulation only, with no seam to move. |
 | Cross-session expert usage histogram, warm-start pin selection, between-turn `RepinPass` | `internal/model/expert_warmpins.go` (#4358, closed) | **Wired (R2, #5613).** `internal/model/expert_ring_pins.go` gives `pagedRing.pins` its live consumer: `weightHALStagedBounded` computes the `pinned` bool from the durable set per routed expert, stagings feed a per-turn histogram, and `Session.ExpertRingEndTurn` repins + dumps. Was off-path - the set was never consulted and `matMulStaged` took a static bool per call. |
 | Per-expert range read + `MADV_WILLNEED` readahead over a fused expert slab | `internal/model/expert_readahead.go` (#4359, closed) | **Off-path.** Nothing in the load/decode path calls `readExpertSlice` or `willneedExpertSlice`. |
 | Lazy per-expert GGUF slab source (reads `stride`, not `E*stride`) | `internal/model/gguf_expert_source.go` | **Off-path.** No constructor on the loader path; `ggufload` still materializes the whole fused block. |
@@ -211,8 +211,9 @@ turns.
 - **Not done:** the turn boundary has no *caller* on the serve path yet - `ExpertRingEndTurn` is
   a session method a decode loop must invoke at a quiescent point, and picking that point (plus
   the `decay`/`maxSwaps` defaults, and where the dump lives for a multi-session host) belongs
-  with the operator surface in R6/#5617. Victim choice among unpinned residents is still LRU
-  (R4/#5615) and a miss is still a synchronous upload (R3/#5614).
+  with the operator surface in R6/#5617. Victim choice among unpinned residents defaulted to LRU
+  here (since made a measured seam by R4/#5615) and a miss is still a synchronous upload
+  (R3/#5614).
 
 ### R3 - P1 - #5614 - Router-lookahead prefetch (composes with #4300)
 
@@ -228,7 +229,7 @@ computes.
 - **Witness:** fraction of activated-expert page-in latency overlapped with compute; decode
   step time with prefetch on vs off at a fixed ring budget.
 
-### R4 - P1 - #5615 - Promote the evictor on measured regret, not on faith
+### R4 - P1 - #5615 - Promote the evictor on measured regret, not on faith - **LANDED**
 
 Give the ring a policy seam and select the policy by replaying the real expert-access trace
 through the Belady oracle. The literature is explicitly contested here: recency is a poor
@@ -240,6 +241,30 @@ prior for MoE access because routing is layer-sequential, so the LRU the ring in
 - **Witness:** `GoodDecisionRatio` (realized/oracle) of the shipped policy on a real routing
   trace, reported against LRU on the same trace. Promote only on a positive delta with no hit
   regression.
+- **Landed** (`fcd61d86a059`, `internal/model/expert_ring_policy.go`) as three joins:
+  *seam* - under `Session.ExpertRingEvict = ExpertRingEvictValueAware` the ring ranks victims
+  by decaying heat (LRU tie-break) and evicts them *before* `polymodel.Admit`, so Admit fits
+  without choosing; *trace* - the ring records the **ordered** access sequence its own staging
+  produced (`Session.ExpertRingTrace`), because R2's usage histogram is aggregate and loses the
+  order Belady needs; *gate* - `SelectExpertRingEvictPolicy` replays that trace under both
+  policies against one oracle and promotes only on a strict eviction win with no hit
+  regression.
+- **The gate scores the policy the ring actually runs.** It deliberately does *not* call
+  `ReplayExpertResidencyLFUDecay`, which scores #4357's full policy - ranking **plus** admission
+  hysteresis. `simulateLFUDecayResidency` was split over a new
+  `simulateHeatResidency(..., hysteresis bool)` so the gate can score the ranking alone; #4357's
+  own report keeps the hysteresis variant unchanged. A gauge that scores a policy the ring does
+  not run measures nothing.
+- **Measured**, live ring, same budget, same jitter window: LRU 60 page-ins / 6 hits / 54
+  evictions; value-aware 47 / 19 / 41. The gate, fed the trace that ring recorded, returns the
+  same verdict independently (good-decision ratio 0.571 vs LRU 0.143). Default is off
+  byte-for-byte: the zero value is LRU, allocates no heat map, and a session declaring it has a
+  ledger identical to one that never mentions a policy.
+- **Not done here:** hysteresis on the live path. In the simulation a bypass is free; in the
+  ring `weightHALStagedBounded`'s fallback for a refused stage is *permanent* `halW` residency,
+  which would promote the very expert the policy wanted transient and break R0's "no routed
+  expert reaches `halW`" bound. Serving a bypassed weight transiently needs a staging contract
+  the HAL does not have yet. No operator verb over the gate either - that is R6/#5617.
 
 ### R5 - P2 - #5616 - Put a checkpoint tier under a ring miss
 
@@ -299,4 +324,7 @@ session seam a serve reaches through `FAK_N_CPU_MOE`) ->
 for the experts it will never hold at once) -> `internal/model/expert_warmpins.go` (the durable
 usage histogram, warm-start selection and between-turns actuator, all built by #4358) ->
 `internal/model/expert_ring_pins.go` (R2: the three joins that put that machinery on the live
-staging path, plus the fill `RepinPass` never had).
+staging path, plus the fill `RepinPass` never had) -> `internal/model/expert_residency_lfu.go`
+(the value-aware policy #4357 simulated and measured, and the `hysteresis` axis R4 split out of
+it) -> `internal/model/expert_ring_policy.go` (R4: the victim seam, the ordered trace, and the
+gate that promotes only on measured regret).
