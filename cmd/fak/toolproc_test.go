@@ -143,6 +143,80 @@ func TestToolprocHookGrowthCompactsWithoutAnyStop(t *testing.T) {
 	}
 }
 
+// TestToolprocHookGrowthCompactsPastUnreadableTail is #3557's crash-heavy case at
+// its sharpest. The SAME kill that skips Stop also tears the journal: the append
+// path holds no fsync, so an OOM-kill, a host reboot, or a power loss mid-write
+// leaves a truncated final row. The strict fold reader is fail-closed by design,
+// so that one row makes every subsequent firing's ParseTailFile refuse — and a
+// refusal that returns before the compaction leaves the file pinned above the
+// window with NO firing, pre/post/stop alike, able to reclaim it: growth-triggered
+// compaction is exactly as dead as the stop-gated one it replaced.
+//
+// It is the hazard CompactJournalFile already solved one level down (#3556's
+// lenient read exists so a bad row is EXPELLED rather than making the file
+// un-boundable forever) — reachable only if the firing actually gets there. So an
+// ordinary pre firing must still bound a torn journal, and the fault must still be
+// reported rather than swallowed.
+func TestToolprocHookGrowthCompactsPastUnreadableTail(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "journal.jsonl")
+	beforeSize := writeOversizedJournal(t, journal)
+
+	// What a session killed mid-append leaves behind: a half-written final row.
+	f, err := os.OpenFile(journal, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"kind":"spawn","call_id":"torn","at_uni` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	beforeSize, err = func() (int64, error) { fi, err := os.Stat(journal); return fi.Size(), err }()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The torn row must genuinely defeat the strict reader, or this test proves nothing.
+	if _, err := toolproc.ParseTailFile(journal); err == nil {
+		t.Fatal("fixture is not actually unreadable: ParseTailFile accepted the torn row")
+	}
+
+	pre := `{"session_id":"s1","tool_name":"Bash","tool_use_id":"toolu_a","tool_input":{"command":"make test"}}`
+	hookErr := toolprocHookOnce(strings.NewReader(pre), "pre", journal, toolproc.HookEnvelope{}, 9_000)
+
+	after, err := os.Stat(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() >= beforeSize || after.Size() > toolproc.JournalCompactThresholdBytes {
+		t.Fatalf("a torn tail row blocked the bound: before=%d after=%d threshold=%d",
+			beforeSize, after.Size(), int64(toolproc.JournalCompactThresholdBytes))
+	}
+
+	// The unreadable-journal fault is still surfaced (runToolprocHook renders it
+	// fail-open); bounding the file must not silently swallow it.
+	if hookErr == nil {
+		t.Error("the unreadable-tail fault must still be reported, not swallowed by the compaction")
+	}
+
+	// The compaction expelled the torn row, so the journal comes back fold-clean and
+	// the next firing parses normally — the wedge is self-healing, not permanent.
+	tab := foldJournalFile(t, journal, 10_000)
+	var found bool
+	for _, p := range tab.Procs {
+		if p.CallID == "orphan-live" {
+			found = p.State == toolproc.StateRunning
+		}
+		if p.CallID == "torn" {
+			t.Error("the torn row survived compaction")
+		}
+	}
+	if !found {
+		t.Fatalf("long-lived spawn lost while bounding a torn journal: %+v", tab.Counts)
+	}
+}
+
 // writeOversizedJournal builds a shared journal past JournalCompactThresholdBytes:
 // one live spawn at the very front — older than the 4 MiB tail window, so only
 // CompactJournal's keep-every-un-exited-spawn invariant can save it — followed by
