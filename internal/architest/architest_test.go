@@ -193,7 +193,8 @@ var tier = map[string]int{
 	"cachevaluereport": 2, // weekly cache-value TREND roll-up (epic #1301 rung A, Track 1): pure Fold over cachevalueledger(1) into a by-week realized-reuse trend, #1066-fenced; imports cachevalueledger(1)+stdlib only, off the hot path.
 	"auditusage":       2, // cross-session audit usage rollup (#1612): folds sink rows from journal(2), loopmgr(1), dispatchaudit(1), and usage ledgers into one CLI report; off the hot path.
 	"harvest":          2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
-	"journal": 2, "gitgate": 2, "gitdaily": 2, "safecommit": 2, "patchcommit": 2,
+	"launchshim": 1, // user-local launch configuration + direct-bypass policy; stdlib-only foundation consumed by cmd/fak.
+	"journal":    2, "gitgate": 2, "gitdaily": 2, "safecommit": 2, "patchcommit": 2,
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
 	"capindex": 2, // protocol-blind capability keystone (#1104 C1): CapRef/Capability/Index/Resolver + skill resolver, imports only abi(0). The gateway-backed MCP/A2A resolvers live in capindexgw(4) so the core stays importable by the tier-3 skill-loader (ctxresidency/ctxmmu, #1106).
 
