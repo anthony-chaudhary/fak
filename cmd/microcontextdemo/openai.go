@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/microagent"
 )
 
 type endpointStats struct {
@@ -35,6 +36,7 @@ type openAIEndpoint struct {
 	statsMu    sync.Mutex
 	stats      endpointStats
 	prefixMode string
+	admission  *microagent.APIAdmission
 }
 
 type chatRequest struct {
@@ -78,6 +80,16 @@ func newOpenAIEndpoint(baseURL, apiKey, model string, base *sharedBase, timeout 
 func (g *openAIEndpoint) Model() string { return g.model }
 
 func (g *openAIEndpoint) Complete(ctx context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	var lease *microagent.APILease
+	if g.admission != nil {
+		estimatedPrompt := len(g.base.instructions)/4 + len(messages[0].Content)/4
+		var err error
+		lease, err = g.admission.Acquire(ctx, estimatedPrompt, 8)
+		if err != nil {
+			return nil, err
+		}
+		defer lease.Release()
+	}
 	if len(messages) != 1 || messages[0].Role != agent.RoleUser {
 		return nil, fmt.Errorf("delta contract: got %d messages", len(messages))
 	}
@@ -112,6 +124,10 @@ func (g *openAIEndpoint) Complete(ctx context.Context, messages []agent.Message,
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		limited, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		retry := microagent.RetryAfter(resp.Header, time.Now())
+		if retry > 0 {
+			return nil, fmt.Errorf("endpoint status %s retry_after=%s: %s", resp.Status, retry, strings.TrimSpace(string(limited)))
+		}
 		return nil, fmt.Errorf("endpoint status %s: %s", resp.Status, strings.TrimSpace(string(limited)))
 	}
 
@@ -164,6 +180,9 @@ func (g *openAIEndpoint) Complete(ctx context.Context, messages []agent.Message,
 	g.stats.cachedTokens += cached
 	if usageSeen {
 		g.stats.usageResponses++
+	}
+	if lease != nil && usageSeen {
+		lease.Reconcile(int(prompt), int(completion))
 	}
 	g.statsMu.Unlock()
 	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: text.String()}}, nil

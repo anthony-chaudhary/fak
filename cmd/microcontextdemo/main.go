@@ -37,6 +37,7 @@ type config struct {
 	RequestTimeout time.Duration
 	RunTimeout     time.Duration
 	PrefixMode     string
+	APIShape       microagent.APIProviderShape
 }
 
 type report struct {
@@ -75,10 +76,10 @@ type report struct {
 	ClientPeakRSSBytes    int64   `json:"client_peak_rss_bytes,omitempty"`
 	ServerPeakRSSBytes    int64   `json:"server_peak_rss_bytes,omitempty"`
 	ServerPeakHeapBytes   int64   `json:"server_peak_heap_alloc_bytes,omitempty"`
-	EndpointPeakRequests    int     `json:"endpoint_peak_requests,omitempty"`
+	EndpointPeakRequests  int     `json:"endpoint_peak_requests,omitempty"`
 	KVCapacityEvidence    string  `json:"kv_capacity_evidence,omitempty"`
 	QueueEvidence         string  `json:"queue_evidence,omitempty"`
-	ResultCheck    string  `json:"result_check,omitempty"`
+	ResultCheck           string  `json:"result_check,omitempty"`
 	VerifiedResultsPerSec float64 `json:"verified_nonempty_results_per_wall_second,omitempty"`
 }
 
@@ -189,6 +190,10 @@ func run(ctx context.Context, cfg config) (report, error) {
 		live, err = newOpenAIEndpoint(cfg.Endpoint, cfg.APIKey, cfg.Model, base, cfg.RequestTimeout)
 		if live != nil {
 			live.prefixMode = cfg.PrefixMode
+			if cfg.APIShape.RequestsPerMinute > 0 {
+				cfg.APIShape.Name = cfg.Provider
+				live.admission, err = microagent.NewAPIAdmission(cfg.APIShape)
+			}
 		}
 		if err != nil {
 			return report{}, err
@@ -287,6 +292,7 @@ func main() {
 	var verifyDescriptorPath string
 	var compatOutput, verifyCompatPath string
 	var effectsOutput, verifyEffectsPath string
+	var verifyAPIOnlyPath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
@@ -298,6 +304,14 @@ func main() {
 	flag.StringVar(&cfg.Hardware, "hardware", "", "hardware provenance label")
 	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", 2*time.Minute, "per-request live endpoint timeout")
 	flag.DurationVar(&cfg.RunTimeout, "run-timeout", 15*time.Minute, "overall run timeout (0 disables the deadline)")
+	flag.IntVar(&cfg.APIShape.RequestsPerMinute, "api-rpm", 0, "API-only request-per-minute admission limit (0 disables adapter admission)")
+	flag.IntVar(&cfg.APIShape.TokensPerMinute, "api-tpm", 0, "API-only estimated token-per-minute admission limit")
+	flag.IntVar(&cfg.APIShape.Concurrency, "api-concurrency", 0, "API-only provider concurrency admission limit")
+	flag.Int64Var(&cfg.APIShape.MaxSpendMicros, "api-spend-micros", 0, "API-only estimated spend envelope in provider micro-units")
+	flag.Int64Var(&cfg.APIShape.PromptMicrosPerToken, "api-prompt-micros-per-token", 0, "API-only estimated prompt cost per token")
+	flag.Int64Var(&cfg.APIShape.OutputMicrosPerToken, "api-output-micros-per-token", 0, "API-only estimated output cost per token")
+	flag.StringVar(&cfg.APIShape.ReuseControl, "api-cache-control", "byte-identical-prefix", "API-only cache control shape")
+	flag.StringVar(&cfg.APIShape.ReuseEvidence, "api-cache-telemetry", "opaque", "API-only cache telemetry shape")
 	flag.StringVar(&verifyPath, "verify", "", "verify a captured S1 JSON artifact and exit")
 	flag.StringVar(&abOutput, "prefix-ab", "", "run the S2 prefix A/B and write JSON to this path (or - for stdout)")
 	flag.StringVar(&verifyABPath, "verify-prefix-ab", "", "verify a captured S2 prefix A/B artifact and exit")
@@ -314,7 +328,16 @@ func main() {
 	flag.StringVar(&verifyCompatPath, "verify-compatibility", "", "verify compatibility artifact")
 	flag.StringVar(&effectsOutput, "effects-witness", "", "run effect-safety witness and write JSON")
 	flag.StringVar(&verifyEffectsPath, "verify-effects", "", "verify effect-safety artifact")
+	flag.StringVar(&verifyAPIOnlyPath, "verify-api-only", "", "verify captured S6 API-only artifact")
 	flag.Parse()
+	if verifyAPIOnlyPath != "" {
+		if err := verifyAPIOnlyArtifact(verifyAPIOnlyPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyAPIOnlyPath)
+		return
+	}
 	if verifyPath != "" {
 		if err := verifyArtifact(verifyPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -503,4 +526,3 @@ func runVersionProbe(ctx context.Context, name string) (time.Duration, error) {
 	err = cmd.Run()
 	return time.Since(start), err
 }
-
