@@ -2207,6 +2207,11 @@
           "category": "incidental",
           "reason": "An unexported arm-and-return-stop wiring helper matching this file's sibling startXLoop functions. It starts the fleetbus drain goroutine for the lifetime of ctx and names no new kind of loop.",
           "token": "startFleetBusLoop"
+        },
+        {
+          "category": "incidental",
+          "reason": "A NETWORK loopback address test (localhost/127.0.0.1/::1), not an iteration or dispatch loop. It is a local mirror of internal/modelroute.isLoopbackBaseURL used to keep the fleet trust boundary disjoint from the on-box/device zone; it shares only the substring 'loop' with the loop concept family.",
+          "token": "isLoopbackFleetHost"
         }
       ],
       "id": "loop",
@@ -2226,6 +2231,7 @@
         "fakbgloopup",
         "fakloopledger",
         "faklooprunid",
+        "isLoopbackFleetHost",
         "loopRegionDequeue",
         "loopRegionEnqueue",
         "loopRegionHolders",
