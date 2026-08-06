@@ -33,35 +33,17 @@ package accounts
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
 // credentialRefreshToken returns the refreshToken a dir's live session credential holds, or ""
-// when the dir carries no parseable credential / no refresh token. It is deliberately separate
-// from CredentialAccessToken: the ACCESS token identifies the account (what the identity probe
-// resolves), while the REFRESH token identifies the token FAMILY — the thing two dirs must never
-// share. The raw token never leaves this package's callers as a value to log; use
-// RefreshFamilyID for anything operator-visible.
+// when the dir carries no parseable credential / no refresh token. It reads through the shared
+// credentialTokens decoder (credidentity.go) rather than re-opening the file: the ACCESS token
+// identifies the account, the REFRESH token identifies the token FAMILY, but both come from one
+// read of one block. The raw token is never a value to log; use RefreshFamilyID for anything
+// operator-visible.
 func credentialRefreshToken(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	b, err := os.ReadFile(filepath.Join(dir, ".credentials.json"))
-	if err != nil {
-		return ""
-	}
-	var doc struct {
-		ClaudeAiOauth struct {
-			RefreshToken string `json:"refreshToken"`
-		} `json:"claudeAiOauth"`
-	}
-	if json.Unmarshal(b, &doc) != nil {
-		return ""
-	}
-	return strings.TrimSpace(doc.ClaudeAiOauth.RefreshToken)
+	_, refresh := credentialTokens(dir)
+	return refresh
 }
 
 // RefreshFamilyID is a short, NON-SECRET fingerprint of the OAuth token family a config dir is

@@ -27,22 +27,34 @@ import (
 // the metadata. It is deliberately narrow to the auto-refreshing session credential: a bare
 // .oauth-token setup credential is handled separately by the enroll flow's token probe.
 func CredentialAccessToken(dir string) string {
+	access, _ := credentialTokens(dir)
+	return access
+}
+
+// credentialTokens decodes a dir's .credentials.json claudeAiOauth block ONCE and returns both
+// tokens, whitespace-trimmed; either is "" when absent, and both are "" when the dir carries no
+// readable credential. The two tokens answer different questions — the ACCESS token identifies the
+// account (CredentialAccessToken, for the identity probe) while the REFRESH token identifies the
+// token FAMILY (RefreshFamilyID, for the sharing hazard in credfamily.go) — but they are one read
+// of one file, so the decode lives here once rather than being cloned per caller.
+func credentialTokens(dir string) (accessToken, refreshToken string) {
 	if dir == "" {
-		return ""
+		return "", ""
 	}
 	b, err := os.ReadFile(filepath.Join(dir, ".credentials.json"))
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var doc struct {
 		ClaudeAiOauth struct {
-			AccessToken string `json:"accessToken"`
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
 		} `json:"claudeAiOauth"`
 	}
 	if json.Unmarshal(b, &doc) != nil {
-		return ""
+		return "", ""
 	}
-	return strings.TrimSpace(doc.ClaudeAiOauth.AccessToken)
+	return strings.TrimSpace(doc.ClaudeAiOauth.AccessToken), strings.TrimSpace(doc.ClaudeAiOauth.RefreshToken)
 }
 
 // LoginWarningIdentityStale is the status/list warning for a seat whose on-disk .claude.json
