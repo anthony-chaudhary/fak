@@ -166,7 +166,17 @@ if [ "$T0_KIND" != host ]; then
   [ -n "$ROOTFS" ] && printf '      rootfs   %s\n' "$ROOTFS"
   [ -n "$WORKFS" ] && printf '      workdir  %s\n' "$WORKFS"
   # fak ships no filesystem: no mount, no device, no FUSE server anywhere on this box.
-  if command -v findmnt >/dev/null 2>&1 && findmnt -rno SOURCE,FSTYPE,TARGET 2>/dev/null | grep -qiE '(^|[^a-z])fak([^a-z]|$)|fuse\.fak'; then
+  #
+  # Match WHOLE FIELDS, never a substring — and consult SOURCE/FSTYPE only. Who PROVIDES a
+  # filesystem is the source device and its type; the TARGET is merely where the mount was
+  # hung, so a path is never evidence about its provider. That distinction is load-bearing
+  # here because this repo is itself named `fak`: bind-mounting the checkout — the README's
+  # own `docker run -v "$PWD:/w"` — yields `SOURCE=C:\[/work/fak] FSTYPE=9p`, and a
+  # substring test read that stray "fak" as "a fak-backed mount exists" and failed this
+  # rung in EVERY container, i.e. in exactly the T0 this example exists to witness. A real
+  # fak-backed mount announces itself in the type (`fak` / `fuse.fak`) or as a source device
+  # literally named `fak`; a bind mount of a directory called fak is 9p/overlay/ext4.
+  if command -v findmnt >/dev/null 2>&1 && findmnt -rno SOURCE,FSTYPE 2>/dev/null | grep -qiE '^fak(fs)?[[:space:]]|[[:space:]](fuse\.)?fak(fs)?$'; then
     printf '  \033[31m✗\033[0m %-46s -> a fak-backed mount exists (fak would BE the FS)\n' "fak provides no filesystem here"
     FAILS=$((FAILS + 1))
   else

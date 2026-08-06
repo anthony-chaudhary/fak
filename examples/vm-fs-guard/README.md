@@ -36,7 +36,20 @@ exists to refute.
 ```bash
 docker run --rm -v "$PWD:/w" -w /w golang:1.23 examples/vm-fs-guard/run.sh
 FAK_REQUIRE_T0=1 examples/vm-fs-guard/run.sh   # unwitnessed T0 -> exit 1 (CI/promotion)
+
+# the container capture in EXAMPLE-OUTPUT.md, reproducible on a dirty trunk: cross-build
+# once, then let a stock image supply the disk and nothing else.
+GOOS=linux GOARCH=amd64 go build -o "$BIN_DIR/fak" ./cmd/fak
+docker run --rm -v "$PWD:/w:ro" -v "$BIN_DIR:/fakbin:ro" -w /w \
+  -e FAK_BIN=/fakbin/fak -e FAK_REQUIRE_T0=1 debian:bookworm-slim \
+  ./examples/vm-fs-guard/run.sh
 ```
+
+Both T0 kinds the issue names are captured: a **hypervisor guest** (WSL2) and an **OCI
+container**, detected by different signals over different rootfs types, agreeing row for row
+on the ledger. They are separate branches of the detector, so running only one leaves the
+other unexercised — the container branch shipped with a rung that failed the recipe above
+until the container capture was actually taken (see EXAMPLE-OUTPUT.md § *earned its keep*).
 
 **On a dirty shared trunk, skip the build** — point the witness at a prebuilt binary:
 
@@ -155,7 +168,10 @@ issue's captures are now live CLI decisions taken inside a guest fak did not pro
 the out-of-view `Read → DENY DEFAULT_DENY`, the poisoned read `→ QUARANTINE
 TRUST_VIOLATION`, and the nine-row exit ledger ([`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md)),
 captured under `FAK_REQUIRE_T0=1` so an unwitnessed substrate would have failed the run
-instead of silently downgrading it. Three halves promoted to get here: #2578 (the T2 read
+instead of silently downgrading it — and now in **both** T0 kinds the issue names, a
+hypervisor guest *and* an OCI container, whose ledgers agree row for row across two rootfs
+types (`ext4` on a hypervisor-attached device, `overlay` composed from image layers).
+Three halves promoted to get here: #2578 (the T2 read
 seam, witnessed over local *and* remote reads); **T0 itself** — the run reads the substrate
 off the guest kernel rather than asserting it, and found a hypervisor guest with its rootfs
 on a hypervisor-attached block device and no fak mount present; and the **read-side T1
@@ -169,11 +185,13 @@ claim (e.g. fak grows a T0 provider), this witness — which exists to back exac
 claim — is retired with it. Concretely: the T0 rung fails the run the moment a fak-backed
 mount appears on the box, so *this example red-lines itself* if fak ever becomes the FS
 provider. That is the demotion trigger, wired rather than promised.
-**Invalidating assumptions**: (1) the captured T0 is a hypervisor guest (WSL2) standing in
-for the real E2B/Fly/Cloudflare platforms; if the boundary behaves differently under a
-guest kernel that *intercepts syscalls* (gVisor, Firecracker + seccomp) than under this
-substitute, the witness must be re-run there before the strategic claim rests on it — the
-detector proves *a* VM, not *that* VM. (2) The T0 rung witnesses the substrate, not the
+**Invalidating assumptions**: (1) the captured T0s are a hypervisor guest (WSL2) and an OCI
+container standing in for the real E2B/Fly/Cloudflare platforms; if the boundary behaves
+differently under a guest kernel that *intercepts syscalls* (gVisor, Firecracker + seccomp)
+than under these substitutes, the witness must be re-run there before the strategic claim
+rests on it — the detector proves *a* VM and *a* container, not *those* platforms. Both
+captures here were also taken on one host, so they share a kernel (`…-microsoft-standard-WSL2`)
+and are not independent of it. (2) The T0 rung witnesses the substrate, not the
 enforcement path: it shows fak owns no mount, which is necessary but not sufficient for
 "fak adjudicates every FS syscall" — an agent bypassing the tool interface (a raw `open()`
 from spawned code) is outside what `fak preflight` decides, and this example does not claim

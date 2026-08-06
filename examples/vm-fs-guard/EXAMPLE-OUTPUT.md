@@ -89,6 +89,74 @@ So the disk is unambiguously the sandbox's, while every verdict below it is fak'
 is the epic's claim — *fak is the virtual filesystem, not the virtual machine* — as
 evidence rather than as prose.
 
+## Inside an OCI container (the E2B/Fly/Cloudflare stand-in)
+
+The issue this example backs names its T0 as "*a container or microVM standing in for
+E2B/Fly/Cloudflare*". The VM half is captured above; this is the container half, on a
+stock `debian:bookworm-slim` with the checkout bind-mounted read-only and a prebuilt
+binary — again under `FAK_REQUIRE_T0=1`:
+
+```text
+$ docker run --rm -v "$PWD:/w:ro" -v "$BIN_DIR:/fakbin:ro" -w /w \
+    -e FAK_BIN=/fakbin/fak -e FAK_REQUIRE_T0=1 debian:bookworm-slim \
+    ./examples/vm-fs-guard/run.sh
+[vm-fs-guard] T0 - the box that PROVIDES the disk (the sandbox's job, never fak's):
+  PASS T0 witnessed from inside the guest             -> container - OCI container (runtime marker present) - Linux 6.6.114.1-microsoft-standard-WSL2
+      rootfs   overlay overlay /
+      workdir  C:\[/work/fak] 9p     /w
+  PASS fak provides no filesystem here                -> no fak mount, device, or FUSE server
+...
+[vm-fs-guard] FS-decision ledger (the boundary's exit record):
+  TIER VERDICT     REASON         CALL
+  T1  DENY        SELF_MODIFY    Edit  .git/config (repo internals)
+  T1  DENY        SELF_MODIFY    Write ~/.ssh/id_rsa (a private key)
+  T1  DENY        SELF_MODIFY    Write /workspace/.env (a secrets file)
+  T1  DENY        SELF_MODIFY    Write internal/adjudicator/decide.go (kernel)
+  T1  DENY        DEFAULT_DENY   Read  /srv/secrets/prod.pem (out of view)
+  T1  DENY        POLICY_BLOCK   Write /workspace/vendor/lib.go (ro subtree)
+  --  ALLOW       (permitted)    Read  /workspace/src/main.go (in scope)
+  --  ALLOW       (permitted)    Write /workspace/notes.md (in scope)
+  T2  QUARANTINE  TRUST_VIOLATION poisoned read held out of context
+
+[vm-fs-guard] all witnesses passed - fak adjudicated FS syscalls INSIDE a container it did not provision:
+EXIT=0
+```
+
+A **different T0 kind, detected by a different signal** (the runtime's marker file, not a
+hypervisor signature), over a **different rootfs** — `overlay`, a filesystem the container
+runtime composed out of image layers seconds earlier. fak provisioned none of it, and holds
+no mount on it. Yet the nine ledger rows are **byte-identical** to the WSL2 capture above
+and to the Windows-host capture below: three boxes, three filesystems, two operating
+systems, two independently built binaries, one decision.
+
+**This capture earned its keep by failing first.** The `fak provides no filesystem here`
+rung scanned mount records for the *substring* `fak` — and this repository is *named* `fak`,
+so bind-mounting the checkout hands the container a mount line whose source is the checkout
+path. The old pattern, run against the real mount table inside the container:
+
+```text
+$ docker run --rm -v "$PWD:/w:ro" -w /w debian:bookworm-slim bash -c \
+    "findmnt -rno SOURCE,FSTYPE,TARGET | grep -iE '(^|[^a-z])fak([^a-z]|$)|fuse\.fak'"
+C:\x5c[/work/fak] 9p /w
+```
+
+(`-rno` is raw mode, which escapes the backslash as `\x5c`; the same mount prints as
+`C:\[/work/fak] 9p /w` in the transcript above, where `mount_of()` calls `findmnt -no`.)
+
+That is a **9p bind mount of a directory**, not a fak-backed filesystem — but the rung read
+the match as "a fak-backed mount exists (fak would BE the FS)" and failed the run. Scope of
+the bug, stated exactly: it trips whenever some mount's `SOURCE`/`TARGET` contains `fak` as a
+whole word, which is precisely what the `docker run -v "$PWD:/w"` recipe this example
+recommends produces **from a checkout of this repo** — the container path a reader is most
+likely to take. (A checkout at, say, `/src/proj` does not trip it; the archive-mounted run
+used to cross-check this section did not either, because `fakhead2581` is not a whole-word
+match.) The check now matches whole `SOURCE`/`FSTYPE` fields and ignores `TARGET`, because
+who *provides* a filesystem is its source device and type, never the path it was hung at.
+
+That the VM capture passed while the container recipe failed is the argument for capturing
+both: the `vm` and `container` branches of the detector are different code, and only one of
+them had ever been run.
+
 ## On a bare host (no sandbox)
 
 Run the same script outside a container/VM and the T1/T2 rungs still pass, but the run
