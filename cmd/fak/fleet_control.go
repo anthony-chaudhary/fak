@@ -55,6 +55,7 @@ func runFleetControl(stdout, stderr io.Writer, argv []string) int {
 
 // fleetControlNow is the clock seam, matching fleetNow's role in the sibling verbs.
 var fleetControlNow = time.Now
+var fleetControlSleep = time.Sleep
 
 // defaultFleetBusDir puts the bus beside the registry the fleet tools already agree on,
 // so a fleet that shares FLEET_STATE_DIR shares a bus without being told twice.
@@ -181,7 +182,7 @@ func awaitFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive, wait time.Dur
 		if remaining > poll {
 			remaining = poll
 		}
-		time.Sleep(remaining)
+		fleetControlSleep(remaining)
 	}
 }
 
