@@ -18,9 +18,11 @@
 // Class B is working-tree state: mutable, and cached (treestate.go) only behind a
 // sampled StateKey plus a settling window, with the entry stored only if the key
 // is unchanged after the answer is computed. Class C is decisional and is NEVER
-// cached — Class.Decisional() routes it straight to a fresh execution, and the
-// source scan in classc_scan_test.go fails the build if a Class C query ever
-// reaches a cache.
+// cached — Server.treeState asks Class.Decisional() first and routes a decisional
+// caller straight to a fresh execution, and Client.Tree independently refuses a
+// cached reply to one, so a regressed broker costs a spawn rather than a stale
+// gate decision. Both checks are runtime; a build-time source scan that fails the
+// build if a Class C query ever reaches a cache lands with #5623's test half.
 //
 // This doc used to say Class B was "deliberately NOT cached here", deferring it
 // to #5623. That stopped being true when treestate.go and singleflight.go landed

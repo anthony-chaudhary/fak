@@ -21,13 +21,13 @@ import (
 // name plus the default temp layout can push a socket path past that bound and
 // fail the bind for reasons that have nothing to do with the code under test, so
 // every socket in this file lives under a name-free directory instead.
-func rendezvousDir(t *testing.T) string {
-	t.Helper()
+func rendezvousDir(tb testing.TB) string {
+	tb.Helper()
 	dir, err := os.MkdirTemp("", "gb")
 	if err != nil {
-		t.Fatalf("temp dir: %v", err)
+		tb.Fatalf("temp dir: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	tb.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
 }
 
