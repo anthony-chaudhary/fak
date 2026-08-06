@@ -562,7 +562,7 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	// a fanned `steer` can be delivered at all, and a non-native serve refuses it with the
 	// same STEER_NO_OWNED_LOOP the single-session route refuses a 202 for.
 	stopFleetBus := startFleetBusLoop(ctx, resolveFleetBusDir(sf), resolveFleetBusID(sf),
-		*sf.fleetBusInterval, serveSessions, *sf.native)
+		*sf.fleetBusInterval, serveSessions, *sf.native, serveGwBusApplier{srv: rt.srv})
 	defer stopFleetBus()
 
 	// Everything a finished serve must leave behind, whichever transport served it. The stdio

@@ -28,14 +28,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/fleetbus"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
@@ -51,6 +54,7 @@ const DefaultFleetBusInterval = 5 * time.Second
 type fleetBusApplier struct {
 	tbl        *session.Table
 	durability *sessionDurability
+	gateway    gwBusApplier
 	// native mirrors gateway.Server.ownsSessionLoop (unexported there): a non-native
 	// serve has no owned loop to deliver an operator turn to, so a steer that reached
 	// it would sit in a mailbox nothing drains.
@@ -59,7 +63,63 @@ type fleetBusApplier struct {
 	ctx context.Context
 }
 
+// gwBusApplier is the narrow, gateway-scoped control surface. Its vocabulary is
+// deliberately disjoint from sessionctl: routing dispatches one token to one owner.
+type gwBusApplier interface {
+	ReloadRoute() (witness string, changed bool, err error)
+}
+
+const gwBusReloadRoute fleetbus.Op = "gateway-route-reload"
+
+type gwBusOpSpec struct {
+	Capability string
+	Boundary   string
+	Witness    string
+}
+
+var gwBusOps = map[fleetbus.Op]gwBusOpSpec{
+	gwBusReloadRoute: {
+		Capability: "gateway.route.reload",
+		Boundary:   "configured route-manifest watcher",
+		Witness:    "route reload event (source, generation, result)",
+	},
+}
+
+func isGwBusOp(op fleetbus.Op) bool {
+	_, ok := gwBusOps[op]
+	return ok
+}
+
+func validateFleetBusVocabularies() error {
+	for op := range gwBusOps {
+		if _, overlap := sessionctl.Spec(sessionctl.ControlOp(op)); overlap {
+			return fmt.Errorf("fleet-bus op %q is ambiguous between gateway and session appliers", op)
+		}
+	}
+	return nil
+}
+
+func (a *fleetBusApplier) applyGwBus(d fleetbus.Directive) fleetbus.Outcome {
+	if a.gateway == nil {
+		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "%s is not configured on this gateway", d.Op)
+	}
+	witness, changed, err := a.gateway.ReloadRoute()
+	if err != nil {
+		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "%s refused: %v", d.Op, err)
+	}
+	if strings.TrimSpace(witness) == "" {
+		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "%s returned no effect witness", d.Op)
+	}
+	if !changed {
+		return fleetbus.OutcomeApplied("gateway-route-unchanged:"+witness, 0)
+	}
+	return fleetbus.OutcomeApplied("gateway-route-reloaded:"+witness, 1)
+}
+
 func (a *fleetBusApplier) Apply(d fleetbus.Directive) fleetbus.Outcome {
+	if isGwBusOp(d.Op) {
+		return a.applyGwBus(d)
+	}
 	op := sessionctl.ControlOp(strings.TrimSpace(string(d.Op)))
 	if _, known := sessionctl.Spec(op); !known {
 		return fleetbus.OutcomeRefused(fleetbus.UnknownOp,
@@ -254,6 +314,19 @@ func (a *fleetBusApplier) noMatchDetail(sel fleetbus.Selector) string {
 
 // --- the drain loop -------------------------------------------------------- //
 
+type serveGwBusApplier struct{ srv *gateway.Server }
+
+func (a serveGwBusApplier) ReloadRoute() (string, bool, error) {
+	if a.srv == nil || a.srv.RouteWatcher() == nil {
+		return "", false, errors.New("route reload is not configured")
+	}
+	ev := a.srv.RouteWatcher().Reload()
+	if ev.Err != nil {
+		return "", false, ev.Err
+	}
+	return fmt.Sprintf("source=%s reloads=%d rejects=%d", ev.Path, ev.Reloads, ev.Rejects), ev.Reloaded, nil
+}
+
 // startFleetBusLoop arms this serve as a bus INSTANCE: announce presence, then drain
 // every interval for the lifetime of ctx. It mirrors startGatewayUsageSnapshotLoop's
 // shape — an empty dir is a byte-for-byte no-op, the returned stop func cancels, and the
@@ -263,12 +336,16 @@ func (a *fleetBusApplier) noMatchDetail(sel fleetbus.Selector) string {
 // only on the first tick would leave a window where `fak fleet control send` refuses
 // FLEETBUS_NO_TARGET against a fleet that is actually up — a refusal that is correct
 // about the roster and wrong about the world.
-func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval time.Duration, tbl *session.Table, native bool) func() {
+func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval time.Duration, tbl *session.Table, native bool, gwAppliers ...gwBusApplier) func() {
 	if strings.TrimSpace(busDir) == "" {
 		return func() {}
 	}
 	if interval <= 0 {
 		interval = DefaultFleetBusInterval
+	}
+	if err := validateFleetBusVocabularies(); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: --fleet-bus disabled: %v\n", err)
+		return func() {}
 	}
 	bus, err := fleetbus.OpenDir(busDir)
 	if err != nil {
@@ -285,6 +362,9 @@ func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval 
 		return func() {}
 	}
 	ap := &fleetBusApplier{tbl: tbl, native: native, durability: serveSessionDurability, ctx: ctx}
+	if len(gwAppliers) != 0 {
+		ap.gateway = gwAppliers[0]
+	}
 
 	// announce re-stamps and republishes presence, returning the record the drain then
 	// matches against. Re-stamping through NewInstance rather than poking SeenUTC keeps
@@ -374,5 +454,9 @@ func fleetBusAdvertisedOps() []fleetbus.Op {
 	for _, op := range sessionctl.BroadcastableOps() {
 		ops = append(ops, fleetbus.Op(op))
 	}
+	for op := range gwBusOps {
+		ops = append(ops, op)
+	}
+	slices.Sort(ops)
 	return ops
 }
