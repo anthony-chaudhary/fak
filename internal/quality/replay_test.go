@@ -180,8 +180,11 @@ func TestReplayReportsIncompleteBundlesAsInconclusive(t *testing.T) {
 			want:   "unrunnable oracle",
 		},
 		"blames an oracle the case never runs": {
-			mutate: func(b *FailureBundle) { b.FailingOracle = "grounding-rubric"; b.Case.Oracles = []string{"greedy-token-diff"} },
-			want:   "which the embedded case does not run",
+			mutate: func(b *FailureBundle) {
+				b.FailingOracle = "grounding-rubric"
+				b.Case.Oracles = []string{"greedy-token-diff"}
+			},
+			want: "which the embedded case does not run",
 		},
 	}
 	for name, tc := range cases {
