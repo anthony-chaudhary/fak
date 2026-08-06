@@ -326,13 +326,21 @@ func renderFleetLiveExposition(w *promWriter, inv sessionInventory, byID map[str
 			func(r sessionInventoryRow, _ session.Descriptor) (float64, bool) {
 				return boolGauge(r.CachePosture == "warm"), true
 			}},
-		{"fak_fleet_session_generation", "LIVE: re-continuation depth — how many budget-reset generations this session has been through.",
+		// Both of these are emitted UNCONDITIONALLY, including at zero, because zero is a
+		// real measured value here rather than a missing one. Generation 0 means "never
+		// re-continued" and priority 0 is the DEFAULT scheduling priority (Pick sorts
+		// ascending, so 0 is the most common value in a healthy fleet, not an unset one).
+		// Suppressing them would leave an ordinary session's stat panel reading "No data",
+		// which an operator reads as "the exporter does not know" — the opposite of the
+		// truth. Contrast the wall-clock pair below, which is suppressed precisely because
+		// an unbudgeted session has no limit to report.
+		{"fak_fleet_session_generation", "LIVE: re-continuation depth — how many budget-reset generations this session has been through. 0 means it is still on its first.",
 			func(_ sessionInventoryRow, d session.Descriptor) (float64, bool) {
-				return float64(d.Generation), d.Generation > 0
+				return float64(d.Generation), true
 			}},
-		{"fak_fleet_session_priority", "LIVE: the session's scheduling priority as persisted in the durable registry.",
+		{"fak_fleet_session_priority", "LIVE: the session's scheduling priority as persisted in the durable registry. Lower is picked first; 0 is the default.",
 			func(_ sessionInventoryRow, d session.Descriptor) (float64, bool) {
-				return float64(d.Priority), d.Priority != 0
+				return float64(d.Priority), true
 			}},
 		// The wall-clock budget pair is emitted only when a LIMIT was actually set: an
 		// unbudgeted session has no denominator, and a 0-limit series would render as a
