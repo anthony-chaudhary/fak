@@ -215,7 +215,7 @@ turns.
   here (since made a measured seam by R4/#5615) and a miss is still a synchronous upload
   (R3/#5614).
 
-### R3 - P1 - #5614 - Router-lookahead prefetch (composes with #4300)
+### R3 - P1 - #5614 - Router-lookahead prefetch (composes with #4300) - **SEAM LANDED**
 
 The router for layer L+1 is computable before layer L's expert GEMMs retire. Issue the
 page-in for the next layer's activated experts against the ring while the current layer
@@ -228,6 +228,30 @@ computes.
 - **Reuse:** `willneedExpertSlice` (#4359) is the host-side hint half.
 - **Witness:** fraction of activated-expert page-in latency overlapped with compute; decode
   step time with prefetch on vs off at a fixed ring budget.
+- **Landed** (`aa78492e5fea`, `internal/model/expert_ring_prefetch.go`): the SAME-STEP floor.
+  `prefetchActivatedExperts` stages the layer's own routed top-k at layer entry, in route
+  order, from a seam in `moeFFN.apply` / `glmMoeFFN.apply`. Two rules keep it a prefetch
+  rather than a thrash - **do not prefetch what cannot stay** (only the prefix of the set the
+  budget holds; running past it evicts what was just fetched) and **a prefetch is a hint, not
+  a demand** (it takes recency but earns no heat, and never enters R2's histogram or R4's
+  trace, because a policy ranked on its own prefetcher's guesses is self-confirming). It never
+  falls back to permanent `halW`, so a misconfigured budget cannot convert speculation into
+  permanent residency.
+- **Coverage meter.** `ExpertRingStats.ActivatedCovered/ActivatedExperts` answers the plan's
+  own thesis question - "were this token's activated experts resident?" - directly. A ring too
+  small to hold one layer's top-k reports honest misses forever, which a hit rate alone cannot
+  distinguish from a cold start.
+- **Not done - the stated witness is NOT produced.** "Fraction of page-in latency overlapped
+  with compute" cannot be measured here: `compute.Backend` exposes `Upload` as the only
+  host->device path and no stream or event handle, so there is nothing on cpu-ref to measure an
+  overlap against. What landed is the ORDERING the overlap would rest on (every weight upload
+  precedes the first expert GEMM) at zero extra page-ins and bit-identical output. Turning that
+  into a real overlap number needs an async staging primitive on the `Backend` interface - the
+  next checkable step for this rung, and a prerequisite the plan did not price.
+- **L+1 lookahead stays with #4300**, and the reason is structural rather than schedule: layer
+  L+1's router input is downstream of layer L's own expert output, so crossing the layer
+  boundary requires a *predictor*, not just earlier issue. `prefetchActivatedExperts` takes a
+  pick list, and a predictor is simply a different producer of one.
 
 ### R4 - P1 - #5615 - Promote the evictor on measured regret, not on faith - **LANDED**
 
@@ -327,4 +351,5 @@ usage histogram, warm-start selection and between-turns actuator, all built by #
 staging path, plus the fill `RepinPass` never had) -> `internal/model/expert_residency_lfu.go`
 (the value-aware policy #4357 simulated and measured, and the `hysteresis` axis R4 split out of
 it) -> `internal/model/expert_ring_policy.go` (R4: the victim seam, the ordered trace, and the
-gate that promotes only on measured regret).
+gate that promotes only on measured regret) -> `internal/model/expert_ring_prefetch.go` (R3:
+the same-step activated-set prefetch, the anti-thrash prefix rule, and the coverage meter).
