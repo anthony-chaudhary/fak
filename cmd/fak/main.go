@@ -270,6 +270,8 @@ func main() {
 		// Per-agent RSS + CPU density witness for the in-process microagent host
 		// vs the guarded-CLI baseline (#2008; mock engine, no spend).
 		cmdMicroBench(os.Args[2:])
+	case "token-profile":
+		cmdTokenProfile(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "serve-wiring":

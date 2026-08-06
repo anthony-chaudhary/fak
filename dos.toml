@@ -105,6 +105,7 @@ concurrent = [
   "modelaccept",
   "executionroute",
   "market",
+  "tokenprofile",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -448,6 +449,7 @@ autopick = [
   "egresslist", # #5130: internal/egresslist leaf -- see [lanes].concurrent note.
   "egressrefresh", # #5130: internal/egressrefresh leaf -- see [lanes].concurrent note.
   "leasequeue", # #5505: internal/leasequeue leaf -- see [lanes].concurrent note.
+  "tokenprofile",
   # new-leaf:lane
 ]
 
@@ -1016,6 +1018,7 @@ skilleffectiveness = ["internal/skilleffectiveness/**"]
 skillfootprint = ["internal/skillfootprint/**"]
 taskvc = ["internal/taskvc/**"]
 gitdaily = ["internal/gitdaily/**"]
+tokenprofile = ["internal/tokenprofile/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

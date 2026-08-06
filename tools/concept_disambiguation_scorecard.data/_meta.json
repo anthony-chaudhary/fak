@@ -40,7 +40,7 @@
         },
         {
           "category": "incidental",
-          "reason": "path helper naming \u003cgit-common-dir\u003e/fak/token-cache (#4330); concrete dir name, cf. cachedir/usercachedir",
+          "reason": "path helper naming <git-common-dir>/fak/token-cache (#4330); concrete dir name, cf. cachedir/usercachedir",
           "token": "TokenCacheDir"
         },
         {
@@ -232,6 +232,36 @@
           "category": "incidental",
           "reason": "Unexported constructor for the gitbroker Class A object store; it allocates the map and its byte bound, carrying no concept beyond the store it builds.",
           "token": "newCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "local flag variable for canonical cached-input pricing; not a separate cache concept (#5771)",
+          "token": "cachedPrice"
+        },
+        {
+          "category": "incidental",
+          "reason": "local scheduler-weight flag for canonical cached-input tokens; not a separate cache concept (#5771)",
+          "token": "cachedWeight"
+        },
+        {
+          "category": "incidental",
+          "reason": "price field for the input.cached token class defined by tokenprofile; not a separate cache concept (#5771)",
+          "token": "InputCachedPerMillion"
+        },
+        {
+          "category": "incidental",
+          "reason": "price field for the input.uncached token class defined by tokenprofile; not a separate cache concept (#5771)",
+          "token": "InputUncachedPerMillion"
+        },
+        {
+          "category": "incidental",
+          "reason": "identifier for the canonical input.cached token class in tokenprofile; the class is documented by the #5771 spine, not an additional cache mechanism",
+          "token": "InputCached"
+        },
+        {
+          "category": "incidental",
+          "reason": "identifier for the canonical input.uncached token class in tokenprofile; the class is documented by the #5771 spine, not an additional cache mechanism",
+          "token": "InputUncached"
         }
       ],
       "id": "cache",
@@ -244,6 +274,10 @@
         "DefaultCacheBytes",
         "FAK_TOKEN_CACHE",
         "FAK_TOKEN_CACHE_MAX_BYTES",
+        "InputCached",
+        "InputCachedPerMillion",
+        "InputUncached",
+        "InputUncachedPerMillion",
         "July4CacheValueAutospawn",
         "TokenCacheDir",
         "UpgradeAnthropicStableCacheTTL1hHeadOnly",
@@ -267,6 +301,8 @@
         "cachecreation",
         "cachecreationtokensupgraded",
         "cached",
+        "cachedPrice",
+        "cachedWeight",
         "cachedecay",
         "cachedhits",
         "cachedir",
@@ -1143,6 +1179,16 @@
           "category": "incidental",
           "reason": "HTTP handler that routes a mid-flight verb to the named trace's mailbox; a transport adapter over the existing session registry.",
           "token": "handleFakSessionMidflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field carrying caller-configured abstract load units in the token-profile forecast; not a runtime scheduler concept (#5771)",
+          "token": "scheduler_units"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field carrying caller-configured token-class coefficients; not a runtime scheduler concept (#5771)",
+          "token": "scheduler_weights"
         }
       ],
       "id": "session-runtime",
@@ -1178,6 +1224,8 @@
         "runtuisessions",
         "sanitizeSessionForPath",
         "scheduled",
+        "scheduler_units",
+        "scheduler_weights",
         "schedulers",
         "scheduling",
         "sessionRegistryRecoveryStage",
@@ -1638,7 +1686,7 @@
         },
         {
           "category": "incidental",
-          "reason": "A pure string-builder renderer in the guard exit-summary grammar, named by the format\u003cSection\u003e convention its dozen siblings share. It introduces no vocabulary: its meaning is wholly given by the concepts it prints, PolicyKnob and AmendGatedWiden, both positioned. Positioning the renderer would book concept coverage for a formatting helper and would need re-deciding for every sibling section.",
+          "reason": "A pure string-builder renderer in the guard exit-summary grammar, named by the format<Section> convention its dozen siblings share. It introduces no vocabulary: its meaning is wholly given by the concepts it prints, PolicyKnob and AmendGatedWiden, both positioned. Positioning the renderer would book concept coverage for a formatting helper and would need re-deciding for every sibling section.",
           "token": "formatAmendmentPosture"
         },
         {
@@ -1918,7 +1966,7 @@
         },
         {
           "category": "incidental",
-          "reason": "A Go test function name cited in a doc comment as the place the HARD =\u003e un-lifted invariant is pinned. It names a test, not a concept in the scorer's vocabulary: its meaning is fully given by the invariant it checks, which is itself positioned under the grade rows. Positioning every test identifier would book coverage for the test suite rather than the domain.",
+          "reason": "A Go test function name cited in a doc comment as the place the HARD => un-lifted invariant is pinned. It names a test, not a concept in the scorer's vocabulary: its meaning is fully given by the invariant it checks, which is itself positioned under the grade rows. Positioning every test identifier would book coverage for the test suite rather than the domain.",
           "token": "TestModeDebtGradeInvariants"
         },
         {
@@ -1945,7 +1993,7 @@
       ],
       "min_files": 3,
       "name": "Scorecard / debt family",
-      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans \u003e= min_files only because the path is threaded through BuildPlan/IssueBody.",
+      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans >= min_files only because the path is threaded through BuildPlan/IssueBody.",
       "roots": [
         "scorecard",
         "debt"
@@ -1960,7 +2008,7 @@
         },
         {
           "category": "build-tag-only",
-          "reason": "Sentinel error defined only in the non-linux mbind stub (decode_interleave_mbind_other.go, !(linux\u0026\u0026amd64)).",
+          "reason": "Sentinel error defined only in the non-linux mbind stub (decode_interleave_mbind_other.go, !(linux&&amd64)).",
           "token": "errInterleaveUnsupported"
         },
         {

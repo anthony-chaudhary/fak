@@ -515,6 +515,9 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                  enqueue a durable Slack digest — counts + the vault-head chain
                  anchor — through the slack outbox, so a hijacked/corrupted vault is
                  witnessed off-box even if the local anchor is tampered)
+  fak token-profile [--input N --cached-input N --max-output N] [--json|--halo]
+      Shift token economics and scheduler load left into a typed preflight forecast.
+
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL [--replica-base-url URL ...] --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--plan-json] [--require-key-env VAR] [--vdso=true]

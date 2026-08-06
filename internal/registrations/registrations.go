@@ -137,6 +137,7 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/operatorquestion"
 	_ "github.com/anthony-chaudhary/fak/internal/operatorresolve"
 	_ "github.com/anthony-chaudhary/fak/internal/planresolve"
+	_ "github.com/anthony-chaudhary/fak/internal/tokenprofile"
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"
 	_ "github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )

@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **61** (clarity 0 + coverage 61) |
-| **Crystal-clear concepts (and climbing)** | **415** crystal of 2128 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2298 / 2359** (97.4% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **69** (clarity 0 + coverage 69) |
+| **Crystal-clear concepts (and climbing)** | **417** crystal of 2130 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2299 / 2368** (97.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 190 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **60** of 2803 indexed names |
-| As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 98.3/100 (grade A) |
+| **Ambiguous lookup names (drive to 0)** | **60** of 2805 indexed names |
+| As of | 2026-08-05 (fak 0.43.0) |
+| Legacy bounded score (saturates; not the driver) | 98.1/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2128 concepts - score 98.3/100 (grade A) - disambiguation-debt 61
+concept-disambiguation chart - 2130 concepts - score 98.1/100 (grade A) - disambiguation-debt 69
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 415
+  * crystal       #######..................... 417
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ************oooooooooooooooooooooooooooooooo (44 concept(s); 12 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 13 crystal)
-  guard-gate       ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (325 concept(s); 84 crystal)
+  guard-gate       **************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (327 concept(s); 86 crystal)
   layout           ****ooooooooo      (13 concept(s); 4 crystal)
   loop             ****************************oooooooooooooooooooooooooooooooooooooo (66 concept(s); 28 crystal)
   plan             *********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (262 concept(s); 21 crystal)
@@ -62,17 +62,17 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (131 concept(s); 51 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ###########################. 319/333
+  plan             ###########################. 319/335
+  session-runtime  ###########################. 213/225
   policy-capability ##########################.. 153/164
-  guard-gate       ###########################. 385/394
-  session-runtime  ###########################. 213/221
+  guard-gate       ###########################. 386/396
   render-materialize ###########################. 177/184
   loop             ##########################.. 77/83
   cache            ############################ 261/265
+  evict            ##########################.. 49/52
   score-debt       ###########################. 84/87
-  evict            ###########################. 49/51
+  decision         ###########################. 52/54
   gateway-engine   ############################ 169/171
-  decision         ###########################. 52/53
   support-maturity ###########################. 45/46
   attention        ############################ 74/74
   context-ctx      ############################ 199/199
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 140/140
 
-namespace coverage  [###############################.] 97.4%  (2298/2359 confusable tokens positioned)
+namespace coverage  [###############################.] 97.1%  (2299/2368 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 190/190
 
-name index: 2803 lookup name(s) -> 2128 concept(s), 60 ambiguous
+name index: 2805 lookup name(s) -> 2130 concept(s), 60 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **190 / 190** (190 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1448 / 3939 |
+| Boundaries drawn (mutual / total) | 1450 / 3942 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2803 over 2128 concepts |
+| Lookup names indexed | 2805 over 2130 concepts |
 | Lookup names landing on several concepts | 60 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2128 |
+| Concepts carrying a contrast set | 2130 |
 
 ## The concepts (best verdict first)
 
@@ -347,6 +347,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | guard-gate | **DefaultGatedSinks (default egress-sink policy)** - The reasonable default GatedSinks configuration: gates EGRESS (exfiltration) and DESTRUCTIVE (irreversible mutation) sinks on session taint, but NOT EXEC (preserves dev work). |
 | * | crystal | symbol | guard-gate | **ContractGate (contract validation gate)** - A named validation checkpoint in an official run contract (browseraction/terminalbench/toolsandbox) that gates promotion: candidate_task_ids, official_harness_pin, same_task_ids_required, etc. |
 | * | crystal | concept | guard-gate | **guardrail (safety boundary)** - A safety boundary or constraint that prevents an AI system from taking harmful actions; often implemented as policy checks or refusal reasons. |
+| * | crystal | symbol | guard-gate | **agentHookDelegate** - agentHookDelegate is one registered child process for one agent-LIFECYCLE event (PreToolUse/PostToolUse/Stop): the compiled stand-in for a single hooks entry in .claude/settings.json, carrying the event it serves and an Argv resolver that reports whether the delegate is present on this box at all. |
+| * | crystal | symbol | guard-gate | **repoguardArgv** - repoguardArgv resolves the repo-guard PreToolUse delegate's child command for a repo root: the compiled tools/.bin/repoguard if present, else the tools/repo_guard.py source, else NOT-PRESENT. It answers only 'what should be executed here, and does it exist', never whether the guard allows the call. |
 | * | crystal | symbol | guard-gate | **AmendGatedWiden** - The amendment class meaning a GATED OPERATOR CHANNEL (overlay, reload, operator escalation) may widen this policy surface, and the agent may never widen it on its own. One of four closed classes alongside FROZEN, RATCHET and SELF_AMENDABLE. |
 | * | crystal | symbol | guard-gate | **GatedAction** - GatedAction is the sessionctl payload of one call the adjudication gate refused with an ESCALATE disposition, parked on the out-of-band operator inbox (#2757): the tool name, the raw proposed args, the closed refusal reason, and the gate's preview — what an external operator reads to approve or deny the action. |
 | * | crystal | symbol | guard-gate | **ParkGatedAction** - ParkGatedAction is the sessionctl blocking park op of the out-of-band operator inbox (#2757): it publishes one GatedAction as an addressable pending action and blocks the calling loop until an operator verdict arrives, the park window elapses, or the context is cancelled, witnessing every outcome on the trace's park Next records at the consume point. |
@@ -2400,8 +2402,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2491/3939 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2128 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2492/3942 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2130 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2410,24 +2412,24 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 2803 lookup name(s) resolves - 60 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 2805 lookup name(s) resolves - 60 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 319 | 333 | 14 |
+| plan | 319 | 335 | 16 |
+| session-runtime | 213 | 225 | 12 |
 | policy-capability | 153 | 164 | 11 |
-| guard-gate | 385 | 394 | 9 |
-| session-runtime | 213 | 221 | 8 |
+| guard-gate | 386 | 396 | 10 |
 | render-materialize | 177 | 184 | 7 |
 | loop | 77 | 83 | 6 |
 | cache | 261 | 265 | 4 |
+| evict | 49 | 52 | 3 |
 | score-debt | 84 | 87 | 3 |
-| evict | 49 | 51 | 2 |
+| decision | 52 | 54 | 2 |
 | gateway-engine | 169 | 171 | 2 |
-| decision | 52 | 53 | 1 |
 | support-maturity | 45 | 46 | 1 |
 | attention | 74 | 74 | 0 |
 | context-ctx | 199 | 199 | 0 |
