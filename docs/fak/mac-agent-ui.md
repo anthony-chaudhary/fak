@@ -206,6 +206,21 @@ is closed, but it closed on a `fak macbench recover` fix, **not** on recovering 
 its physical residual (wake the peer, restart the gateway) is unchanged. A closed blocker
 here does not mean an unblocked capture — re-check reachability before picking this up.
 
+**The re-check, concretely.** Two commands, no bearer and no Mac required. Neither
+launches Claude Code, and `/healthz` is the gateway's *always*-unauthenticated liveness
+route, so a live gateway answers it from anywhere on the tailnet:
+
+```bash
+tailscale status                                       # is any macOS peer online at all?
+curl -sS -m 5 http://node-macos-a.local:8080/healthz   # does the gateway answer?
+```
+
+Both must pass before this is pickable. **Last re-check 2026-08-05: still blocked** — the
+name `node-macos-a` does not resolve from the fleet's Windows dev box, and the only macOS
+peer on the tailnet has been offline 12 days. When you re-check, replace that line with
+your date and the command that failed, so a later reader can tell a fresh probe from a
+stale note.
+
 **The recipe.** Two panes against a gateway serving Qwen3.6, recorded as a screenshot or
 short asciinema/GIF:
 
