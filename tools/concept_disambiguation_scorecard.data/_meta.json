@@ -1532,6 +1532,11 @@
           "category": "incidental",
           "reason": "A wire error code string returned with HTTP 400 when a checkpoint request omits its tree-witness body; a refusal label, not a concept.",
           "token": "checkpoint_no_tree_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field carrying an external quality witness reference, not a new proof taxonomy concept.",
+          "token": "QualityWitness"
         }
       ],
       "id": "witness-proof",
@@ -1603,7 +1608,8 @@
         "witnesses",
         "witnessing",
         "witnesssametaskids",
-        "wrong_missing_witness"
+        "wrong_missing_witness",
+        "QualityWitness"
       ],
       "min_files": 3,
       "name": "Witness / evidence family",
@@ -1698,6 +1704,26 @@
           "category": "incidental",
           "reason": "Internal refactor seam, not a new policy concept: dispatchPreflightChurn was split into a thin wrapper over dispatchPreflightChurnState so the arming verdict (stallscan.Arming) can be returned alongside the ChurnCheck for the host_churn tick payload. It introduces no new admission rule, threshold, or vocabulary -- the policy lives in dispatchtick.ApplyChurnBackpressure.",
           "token": "dispatchPreflightChurnState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Versioned quote input record for the existing capability surface, not a new policy capability.",
+          "token": "CapabilitySnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Version identifier field inside the capability snapshot, not a policy concept.",
+          "token": "ToolPolicyVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Legacy default wire reason retained only in the quote CLI implementation, not a capability concept.",
+          "token": "capability_failure"
+        },
+        {
+          "category": "incidental",
+          "reason": "Quote revision helper reacting to a failed route, not a capability definition.",
+          "token": "ReviseForCapabilityFailure"
         }
       ],
       "exclude": [
@@ -1723,7 +1749,11 @@
         "policyblocks",
         "policylabel",
         "postures",
-        "printGuardLaunchPostures"
+        "printGuardLaunchPostures",
+        "CapabilitySnapshot",
+        "ToolPolicyVersion",
+        "capability_failure",
+        "ReviseForCapabilityFailure"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",
@@ -2080,6 +2110,11 @@
           "category": "incidental",
           "reason": "unexported cmd/fak glue that reads the profile, resolves the module path from go.mod and calls CoverageScores/CoverageEntries; the named concepts are those two, this is their call site",
           "token": "joinCoverageScores"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed refusal for insufficient quote history, not a support or maturity state.",
+          "token": "ErrUnsupportedColdStart"
         }
       ],
       "id": "support-maturity",
@@ -2122,7 +2157,8 @@
         "supports",
         "targetcoverage",
         "topncoverage",
-        "unsupported"
+        "unsupported",
+        "ErrUnsupportedColdStart"
       ],
       "min_files": 3,
       "name": "Support / coverage / correctness / parity / maturity family",

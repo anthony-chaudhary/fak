@@ -1,0 +1,38 @@
+{
+  "schema": "trajctl-quote-backtest.v1",
+  "request_class": "repo_question",
+  "corpus_size": 6,
+  "tested": 4,
+  "cold_start_refusals": 2,
+  "censored": 1,
+  "coverage": [
+    {
+      "quantile": "p50",
+      "target": 0.5,
+      "empirical_lower": 0,
+      "empirical_upper": 0.25,
+      "known_covered": 0,
+      "unknown_censored": 1,
+      "total": 4
+    },
+    {
+      "quantile": "p80",
+      "target": 0.8,
+      "empirical_lower": 0.5,
+      "empirical_upper": 0.75,
+      "known_covered": 2,
+      "unknown_censored": 1,
+      "total": 4
+    },
+    {
+      "quantile": "p95",
+      "target": 0.95,
+      "empirical_lower": 0.5,
+      "empirical_upper": 0.75,
+      "known_covered": 2,
+      "unknown_censored": 1,
+      "total": 4
+    }
+  ],
+  "verdict": "OBSERVED"
+}
