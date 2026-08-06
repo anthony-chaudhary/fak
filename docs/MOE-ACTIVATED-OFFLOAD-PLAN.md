@@ -64,7 +64,7 @@ Nine witnessed capabilities exist. Column 3 is the load-bearing one.
 | Value-aware evictor: routing-heat hysteresis + LFU-decay, scored against the Belady oracle | `internal/model/expert_residency_lfu.go` (#4357, closed) | **Ranking wired (R4, #5615); hysteresis still simulation only.** `internal/model/expert_ring_policy.go` gives the ring a victim-policy seam (`Session.ExpertRingEvict`), records the ordered trace the seam is judged on, and gates promotion on measured regret. The admission hysteresis stays off the live path — a bypassed weight would fall back to *permanent* `halW` residency, inverting its intent. Was simulation only, with no seam to move. |
 | Cross-session expert usage histogram, warm-start pin selection, between-turn `RepinPass` | `internal/model/expert_warmpins.go` (#4358, closed) | **Wired (R2, #5613).** `internal/model/expert_ring_pins.go` gives `pagedRing.pins` its live consumer: `weightHALStagedBounded` computes the `pinned` bool from the durable set per routed expert, stagings feed a per-turn histogram, and `Session.ExpertRingEndTurn` repins + dumps. Was off-path - the set was never consulted and `matMulStaged` took a static bool per call. |
 | Per-expert range read + `MADV_WILLNEED` readahead over a fused expert slab | `internal/model/expert_readahead.go` (#4359, closed) | **Off-path.** Nothing in the load/decode path calls `readExpertSlice` or `willneedExpertSlice`. |
-| Lazy per-expert GGUF slab source (reads `stride`, not `E*stride`) | `internal/model/gguf_expert_source.go` | **Off-path.** No constructor on the loader path; `ggufload` still materializes the whole fused block. |
+| Lazy per-expert GGUF slab source (reads `stride`, not `E*stride`) | `internal/model/gguf_expert_source.go` | **Wired end to end (R5, #5616).** `internal/model/expert_checkpoint_tier.go` puts it under a ring miss - a routed expert absent from `q4kw`/`kqw` resolves to a checkpoint *descriptor* and faults its own stride only when the ring misses - and `internal/ggufload/expert_checkpoint_source.go` builds those descriptors from the GGUF tensor directory with no payload IO, so `WithStreamedExperts` loads a model that never materializes the fused block. Was off-path with no consumer at all. |
 | Routed-expert route observer + access-trace replay corpus | `internal/model/expert_replay.go` | **Off-path.** `SetExpertRouteObserver` has no non-test caller. |
 | Planned-vs-observed placement coverage/drift gauge | `internal/model/expert_placement_drift.go` (#3902) | **Off-path.** No caller. |
 | Expert-residency eviction regret vs the KV Belady replay oracle | #4233 (closed), on `compute/kvreplay_oracle.go` | **Off-path.** Reachable only through the replay harness. |
@@ -111,9 +111,12 @@ weights keep their permanent residency.
   holds one expert's projections together and falls the third back to permanent residency rather
   than freeing a handle in use; (e) default-unchanged - at `ExpertRingBytes == 0` no ring is
   built and every weight uploads exactly once, as before.
-- **Not done here:** the budget has no CLI knob (R1), the ring is plain LRU and ignores the
-  warm-start pin-set (since closed by R2; victim choice among unpinned residents is still LRU,
-  R4), misses are synchronous (R3) and read the fully-resident slab (R5).
+- **Not done here, and where each went.** R0 shipped with four gaps: the budget had no CLI knob
+  (R1 gave it one, flag surface still open); the ring ignored the warm-start pin-set (R2 wired
+  it) and chose victims by plain LRU (R4 gave it a measured seam); a miss was issued at the last
+  possible instant (R3 issues the whole activated set at layer entry - true *overlap* still
+  needs the async staging primitive tracked as #5627); and a miss read the fully-resident slab
+  (R5 lets it fault one expert's stride instead).
 
 ### R1 - P0 - #5612 - Ship the graded knob and admit on the working set - **PARTLY LANDED**
 
@@ -295,7 +298,7 @@ prior for MoE access because routing is layer-sequential, so the LRU the ring in
   expert reaches `halW`" bound. Serving a bypassed weight transiently needs a staging contract
   the HAL does not have yet. No operator verb over the gate either - that is R6/#5617.
 
-### R5 - P2 - #5616 - Put a checkpoint tier under a ring miss
+### R5 - P2 - #5616 - Put a checkpoint tier under a ring miss - **LANDED**
 
 A ring miss should read *that expert's* stride from the checkpoint, not force the whole fused
 `[E, out, in]` block resident in host RAM. Wire `ggufExpertSource` / `readExpertSlice` under
@@ -303,6 +306,62 @@ the miss path to complete the device / pinned-host / checkpoint ladder.
 
 - **Witness:** bytes read per decode step scale with k, not E, at a fixed ring budget; output
   is bit-identical to the fully-resident slab path.
+- **Landed** (`d702ddc24e59`, `internal/model/expert_checkpoint_tier.go`). Both halves already
+  existed and neither was wired: `ggufExpertSource` (#3174) indexes `{offset, [E,out,in],
+  quant-block geometry}` per fused tensor at construction with **no payload IO** and reads one
+  expert's sub-range; what it lacked was a *consumer on the decode path*.
+  `ExpertCheckpointTier` is that consumer - it maps a canonical per-expert name to (fused
+  tensor, expert index, quant geometry) and hands back the very `q4kTensor` / `kQuantTensor`
+  the resident path would have.
+- **It hands the HAL a DESCRIPTOR, not bytes**, and that is the load-bearing choice.
+  `Session.resolveExpertWeight` answers a checkpoint expert with its ring key, dtype and
+  resident byte cost - all read off the index - and the stride is faulted inside the staging
+  closure that `pagedRing.stage` calls **only on a miss**. Faulting at resolve time would have
+  made every routed expert pay checkpoint IO even at a budget sized for the whole activated
+  set, quietly defeating R0-R4; `TestExpertCheckpointRingHitCostsNoCheckpointRead` is the
+  guard on that.
+- **Host residency is bounded too.** R0 bounded *device* residency and nothing bounded *host*
+  residency. The retained-host cache is a `polymodel.Pool` - the same budget/LRU/pinned-exempt
+  policy the ring borrows - and the default budget is **0, stream-through**: on a device
+  backend the host copy is dead the moment `Upload` returns, so retaining by default would
+  re-introduce exactly the unbounded footprint this rung removes.
+- **Measured**, `H=256, E=8, k=4`: the streamed layer is bit-equal to the fully-resident one
+  while reading `k*3*stride = 442,368 B` against the whole-slab `E*3*stride = 884,736 B`;
+  a second step over the same activated set adds **zero** reads. Malformed geometry is refused
+  atomically at `AddShard`, never at read time; a failed read is counted and raised, never
+  swallowed (`Failures` / `LastError`).
+- **The loader half landed too** (`internal/ggufload/expert_checkpoint_source.go`).
+  `(*WeightSource).FusedExpertTensors` turns the GGUF tensor *directory* - names, dims, types,
+  file offsets, all parsed at open - into `model.FusedExpertTensor` descriptors with **zero
+  payload IO**, grouped per shard file because a tensor's `FileOffset` is relative to the shard
+  holding it. `WithStreamedExperts(hostBytes)` then makes the loader return before
+  `shapeAndBytes` on a described slab, so the fused block is never materialized at all:
+  `TestStreamedExpertsLoadLeavesTheSlabOnDisk` asserts the loaded model holds **0** routed
+  experts resident and reaches all `E*3` through the tier, having read none of them yet.
+- **A descriptor is arithmetic with nothing behind it**, so it is checked against the shipped
+  eager splitter rather than against itself: for every expert,
+  `[Offset + e*stride, Offset + (e+1)*stride)` must be byte-identical to what
+  `splitGLMMoeDsaExpertsRawQuant` made resident (`...LocateTheEagerSplitByteForByte`, Q6_K and
+  Q5_K). An off-by-one in `Rows`/`Cols`/`Experts` cannot fail loudly at decode - it would feed
+  the GEMM misaligned quant blocks - so it has to fail here.
+- **Declines are the safe direction.** A descriptor is emitted only for Q4_K/Q5_K/Q6_K, a
+  reduction dim that is whole 256-weight super-blocks, and a name
+  `model.ResidentKQuantEligible` already admits. Q8_0/Q4_0/IQ3_XXS/IQ4_XS/Q2_0 experts are
+  residentable but have no per-expert staging yet, so they keep the unchanged eager path: a
+  missing descriptor costs host RAM, a wrong one costs correctness.
+- **The lifetime contract is fail-closed.** The tier reads through the `WeightSource`'s own
+  shard readers and does not own them, so the source must outlive the model.
+  `LoadModelQ4KProfileOptions` closes the checkpoint on return (`loadVia`), so it **refuses**
+  `WithStreamedExperts` naming that reason instead of handing back a model that dies on its
+  first routed expert - over a streamed checkpoint there is no resident copy to degrade to.
+  Streamed experts plus an expert-parallel band are also refused: a tier serves *every* expert,
+  a band says this rank must never touch the others.
+- **Still open on this rung:** the streamed slab is deliberately absent from the load-path
+  byte breakdown (it was neither held resident nor round-tripped, so tallying it either way
+  would misreport the load); its reads show up only in `ExpertCheckpointStats`. Wiring
+  `WithStreamedExperts` to an operator knob on `fak serve` is R6/#5617, which owns the surface.
+  Coalescing two agents' concurrent fault of the same cold expert into one read is R7/#5618,
+  which needs a shared ring to coalesce *onto*; this rung supplies the tier it coalesces at.
 
 ### R6 - P2 - #5617 - Make it an operator-visible object
 
@@ -357,4 +416,7 @@ staging path, plus the fill `RepinPass` never had) -> `internal/model/expert_res
 (the value-aware policy #4357 simulated and measured, and the `hysteresis` axis R4 split out of
 it) -> `internal/model/expert_ring_policy.go` (R4: the victim seam, the ordered trace, and the
 gate that promotes only on measured regret) -> `internal/model/expert_ring_prefetch.go` (R3:
-the same-step activated-set prefetch, the anti-thrash prefix rule, and the coverage meter).
+the same-step activated-set prefetch, the anti-thrash prefix rule, and the coverage meter) ->
+`internal/model/gguf_expert_source.go` (the per-expert range reader, indexed at construction with
+no payload IO) -> `internal/model/expert_checkpoint_tier.go` (R5: the consumer that puts it under
+a ring miss, and the descriptor-not-bytes resolution that keeps a ring hit free of IO).
