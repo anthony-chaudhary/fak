@@ -56,17 +56,38 @@ func (o Orphan) String() string {
 	return fmt.Sprintf("%s:%d: func %s is defined but never referenced in its package (ORPHAN_FUNC)", o.File, o.Line, o.Name)
 }
 
-// ScanDir parses every .go file directly under dir (non-recursive — a Go package is a
-// single directory) and returns the unexported, receiver-less top-level functions that
-// no file in the package references, sorted by name. relPrefix is prepended to each
-// finding's File so a caller can report repo-relative paths (pass "" for bare
-// basenames). A dir with no readable Go files yields no findings and no error; a single
-// file that fails to parse is skipped, not fatal — orphanscan is a syntactic best-effort
-// pass, not a compiler.
+// Report is a scan of one package: what was flagged, and what the scan could not read.
+// Unparsed is the honest caveat a GATE needs and a human report does not. References
+// are counted per file, so a file that will not parse contributes none — and if that
+// file held a func's only call site, the func looks unreferenced when it is not. On a
+// shared tree with in-flight siblings that is not hypothetical, so a gate asserting on
+// this package must be able to see that the input was incomplete and decline to judge
+// rather than red the trunk on a mid-save neighbour.
+type Report struct {
+	Orphans  []Orphan // the findings, sorted by name then file
+	Unparsed []string // files skipped because they could not be read or parsed (relPrefix applied)
+}
+
+// ScanDir returns just the findings for dir. It is the original, narrow seam kept for
+// callers that only report to a human (internal/antipattern folds it into ORPHAN_FUNC
+// debt); anything gating on the result wants ScanDirReport, which also says whether the
+// package was fully readable.
 func ScanDir(dir, relPrefix string) ([]Orphan, error) {
+	rep, err := ScanDirReport(dir, relPrefix)
+	return rep.Orphans, err
+}
+
+// ScanDirReport parses every .go file directly under dir (non-recursive — a Go package is
+// a single directory) and returns the unexported, receiver-less top-level functions that
+// no file in the package references, sorted by name, plus the files it could not parse.
+// relPrefix is prepended to each reported path so a caller can report repo-relative paths
+// (pass "" for bare basenames). A dir with no readable Go files yields no findings and no
+// error; a single file that fails to parse is skipped and RECORDED, not fatal —
+// orphanscan is a syntactic best-effort pass, not a compiler.
+func ScanDirReport(dir, relPrefix string) (Report, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return Report{}, err
 	}
 	fset := token.NewFileSet()
 
@@ -80,6 +101,16 @@ func ScanDir(dir, relPrefix string) ([]Orphan, error) {
 	// each candidate's own declaration ident (subtracted below). A name with a count
 	// above its self-declaration is referenced and therefore not an orphan.
 	refs := map[string]int{}
+	var unparsed []string
+
+	// relOf renders one entry the way findings report it, so a skipped file and a
+	// flagged func name the same path shape.
+	relOf := func(name string) string {
+		if relPrefix == "" {
+			return name
+		}
+		return relPrefix + "/" + name
+	}
 
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
@@ -88,11 +119,15 @@ func ScanDir(dir, relPrefix string) ([]Orphan, error) {
 		path := filepath.Join(dir, e.Name())
 		src, readErr := os.ReadFile(path)
 		if readErr != nil {
-			continue // an unreadable file contributes nothing, not an error
+			// An unreadable file contributes no references, so it is recorded for the
+			// same reason an unparseable one is: it may have held the only call site.
+			unparsed = append(unparsed, relOf(e.Name()))
+			continue
 		}
 		f, parseErr := parser.ParseFile(fset, path, src, parser.ParseComments)
 		if parseErr != nil || f == nil {
-			continue // a file that will not parse is skipped, not fatal
+			unparsed = append(unparsed, relOf(e.Name())) // skipped, recorded, not fatal
+			continue
 		}
 		generated := isGenerated(f)
 
@@ -110,10 +145,7 @@ func ScanDir(dir, relPrefix string) ([]Orphan, error) {
 		if generated {
 			continue // a generated file may DEFINE a func but never orphan-owns it
 		}
-		relFile := e.Name()
-		if relPrefix != "" {
-			relFile = relPrefix + "/" + e.Name()
-		}
+		relFile := relOf(e.Name())
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Recv != nil { // only top-level, receiver-less funcs
@@ -146,7 +178,8 @@ func ScanDir(dir, relPrefix string) ([]Orphan, error) {
 		}
 		return out[i].File < out[j].File
 	})
-	return out, nil
+	sort.Strings(unparsed)
+	return Report{Orphans: out, Unparsed: unparsed}, nil
 }
 
 // isUnexported reports whether name begins with a lowercase letter (a Go unexported

@@ -204,28 +204,70 @@ func TestOrphanString(t *testing.T) {
 	}
 }
 
-// TestDogfoodRealRepo runs the scanner over the live cmd/fak package and LOGS what it
-// finds without failing. It proves the pass survives a real, large, sometimes
-// non-compiling package, and surfaces candidate "built but never wired" funcs for a
-// human to triage. It is intentionally non-asserting: turning a finding into a red
-// build is a gate decision that lives elsewhere, so this test never blocks the tree on
-// the messy real world.
+// dogfoodPkgs are the live packages the gate judges. Deliberately a short, named list
+// rather than the whole tree: this gate's job is to stop NEW orphans in the packages
+// that have already been triaged against the allowlist, and widening the scan to
+// packages nobody has baselined would red the trunk with pre-existing debt.
+var dogfoodPkgs = []string{"cmd/fak", "internal/gateway"}
+
+// TestDogfoodRealRepo is the gate (#3167). It runs the scanner over the live packages
+// and FAILS on any orphan that the checked-in allowlist and the //orphanscan:keep
+// directive do not account for — so a newly orphaned func reds the tree instead of
+// being logged and ignored, which is what the log-only predecessor did.
+//
+// It stays a ratchet, not a cliff: known debt is pinned in keep_allowlist.txt with a
+// per-entry reason, so only a NEW orphan can fail. Two deliberate degradations keep it
+// from crying wolf on a shared tree with in-flight siblings — a package that is absent
+// is skipped, and a package with a file the scan could not parse is skipped too, since
+// that file may hold the only call site of a func that would otherwise look orphaned.
+// A stale allowlist entry is reported but never fails: pruning it is the fix landing,
+// and a peer who wires a func should not red the tree for fixing something.
 func TestDogfoodRealRepo(t *testing.T) {
+	keep, err := KeepAllowlist()
+	if err != nil {
+		t.Fatalf("KeepAllowlist: %v", err) // the gate cannot judge without its own input
+	}
 	root := repoRoot(t)
-	for _, rel := range []string{"cmd/fak", "internal/gateway"} {
+
+	var scanned []string
+	var found []Orphan
+	for _, rel := range dogfoodPkgs {
 		dir := filepath.Join(root, filepath.FromSlash(rel))
-		if _, err := os.Stat(dir); err != nil {
+		if _, statErr := os.Stat(dir); statErr != nil {
+			t.Logf("%s: absent, not judged", rel)
 			continue
 		}
-		orphans, err := ScanDir(dir, rel)
-		if err != nil {
-			t.Logf("%s: scan error: %v", rel, err)
+		rep, scanErr := ScanDirReport(dir, rel)
+		if scanErr != nil {
+			t.Errorf("%s: scan error: %v", rel, scanErr)
 			continue
 		}
-		t.Logf("%s: %d orphan-func candidate(s)", rel, len(orphans))
-		for _, o := range orphans {
+		if len(rep.Unparsed) > 0 {
+			// An unparseable neighbour contributes no references, so a live func can
+			// look orphaned. Decline to judge this package rather than fail on it.
+			t.Logf("%s: NOT judged — %d file(s) did not parse (an in-flight sibling): %v",
+				rel, len(rep.Unparsed), rep.Unparsed)
+			continue
+		}
+		scanned = append(scanned, rel)
+		found = append(found, rep.Orphans...)
+		t.Logf("%s: %d orphan-func candidate(s)", rel, len(rep.Orphans))
+		for _, o := range rep.Orphans {
 			t.Logf("  %s", o)
 		}
+	}
+	if len(scanned) == 0 {
+		t.Skip("no dogfood package could be judged this run")
+	}
+
+	unexpected, unused := Gate(scanned, found, keep)
+	for _, o := range unexpected {
+		t.Errorf("new orphan func: %s\n\t%s", o, SuppressionHint(o))
+	}
+	for _, k := range unused {
+		// Advisory only — this fires when someone FIXED an orphan.
+		t.Logf("allowlist entry %q is no longer an orphan; prune its line from "+
+			"internal/orphanscan/keep_allowlist.txt", k.Key())
 	}
 }
 
