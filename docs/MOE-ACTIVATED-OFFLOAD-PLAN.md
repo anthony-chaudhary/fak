@@ -374,12 +374,54 @@ hit/page-in/evict counts, bytes per token, pinned set, and the coverage/drift ga
 - **Witness:** the verb reports a live ring's counters for a decode window; the numbers
   reconcile with the ring's own accounting.
 
-### R7 - P2 - #5618 - Cross-agent coalescing on a live ring (#5243 L2)
+### R7 - P2 - #5618 - Cross-agent coalescing on a live ring (#5243 L2) - **LANDED**
 
 With B concurrent agents, per-step top-k selections union to far fewer distinct experts than
 `B*k`, so one page-in serves many agents. Epic #5243 and its children own the model, the
 telemetry and the bench; what they lack is a live shared ring to coalesce *onto*. R0 supplies
 it.
+
+- **Witness:** one shared ring pages in strictly fewer bytes than B private rings running the
+  same routing, each given the *whole* budget; bytes per agent-token fall as B grows; every
+  agent's output stays byte-identical to a solo run.
+- **Landed** (`095d6b1036`, `internal/model/expert_ring_shared.go`) by lifting the routed-expert
+  ring from CONVERSATION scope to **(model, device)** scope. R0's ring was already bounded,
+  accounted and evicting - it was just built lazily *per Session*, so two agents on the same
+  model paged the same expert twice and no counter could have said so, because "which agent
+  demanded this weight" was not a thing the ring knew. `SharedExpertRing` is that missing object;
+  `Attach` re-points a session's `expertRing` at it.
+- **Only model-constant bytes move.** Expert 41's `down_proj` is the same bytes for every agent,
+  so residency for it is a property of the (model, device) pair. KV cache, conversation state,
+  the sampler, `halW` and the dense weights all stay per-session, and `Attach` *refuses* - it
+  does not assert - a session whose `*Model` or `Backend` pointer differs, or which already owns
+  routed-expert residency. A ring shared between two models would feed model A's expert bytes to
+  model B's GEMM; pointer identity is the one check a name collision cannot spoof.
+- **The stage->hold window is the new hazard, and it is closed.** Under a private ring,
+  `stage()` returning a handle and `hold()` pinning it are adjacent statements with nothing in
+  between; under a shared one a peer's `stage` can land there, evict that handle and `Free` it.
+  `expertSwiGLUHAL` takes one span around *both*, which is why `Session.ringEnter` is reentrant
+  (a per-session depth counter, safe because a Session is single-goroutine by construction). The
+  discipline is one line to audit: **session-level entry points lock, `pagedRing` methods never
+  do** - so there is no lock ordering to get wrong.
+- **The meter answers #5243's question directly** rather than by simulation. The unit of account
+  is a residency span (page-in -> evict) with a *payer*: `AgentsPerPageIn` is `B*k/|U(B)|`
+  measured on real routing (exactly 1.0 at B=1 by construction, asserted), and `CrossAgentHits`
+  is the part plain temporal reuse cannot explain. Prefetch hints are excluded from demands but
+  still set a payer, so a later agent served off a speculated span still counts as coalescing.
+- **Budget sizing gains a constraint the per-session ring did not have.** Each agent holds its
+  current expert's three projections pinned for the span of its GEMMs, so the budget must exceed
+  **B x 3 projections** or an agent finds every resident pinned by its peers
+  (`ErrPinnedNoRoom`), is refused, and falls back to *permanent* `halW` residency - safe and
+  correct, but unbounded, which is what the ring exists to stop. This was found by a test, not
+  by reading: `Stats().Refusals` now counts exactly that, so an undersized budget is visible
+  instead of silently converging on the pre-R0 memoizer.
+- **Default is unchanged, byte-for-byte.** `r.shared == nil` on every per-session ring, so
+  `ringEnter` returns a no-op closure and every ledger hook is a branch not taken.
+- **Still open on this rung:** the meter is private. Surfacing `SharedExpertRingStats` on serve
+  telemetry and a `fak` verb - and calling `NoteAgentToken` from the decode loop - belongs to
+  R6/#5617, which owns the operator surface. `-race` is not runnable on the dev host (no cgo
+  compiler), so the concurrency witness leans on an exact demand count under 4 goroutines as its
+  lost-update detector, plus `-count=30 -cpu=8`.
 
 ### R8 - P3 - #5247 - Grouped GEMM over the coalesced activated union
 
@@ -419,4 +461,6 @@ gate that promotes only on measured regret) -> `internal/model/expert_ring_prefe
 the same-step activated-set prefetch, the anti-thrash prefix rule, and the coverage meter) ->
 `internal/model/gguf_expert_source.go` (the per-expert range reader, indexed at construction with
 no payload IO) -> `internal/model/expert_checkpoint_tier.go` (R5: the consumer that puts it under
-a ring miss, and the descriptor-not-bytes resolution that keeps a ring hit free of IO).
+a ring miss, and the descriptor-not-bytes resolution that keeps a ring hit free of IO) ->
+`internal/model/expert_ring_shared.go` (R7: the same ring at (model, device) scope, the reentrant
+span that makes it safe for B agents, and the payer/served ledger that measures coalescing).
