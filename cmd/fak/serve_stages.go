@@ -212,6 +212,11 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	// This header-only forward gate precedes expert-shard derivation and
 	// loadServeInKernelModel, which owns memory planning and tensor payload reads.
+	// The graded expert spill is an OPERATOR grade, so it is validated at the terminal's expense,
+	// not the load's: a mistyped --n-cpu-moe refuses here rather than after the weights are
+	// resident. Carried to the planner through agent.ExpertSpillEnv (serve_ncpumoe.go).
+	must(applyServeNCPUMoE(*sf.nCPUMoE))
+
 	pf, err := preflightServeBackendForward(*sf.ggufPath, rt.chatBackend)
 	must(err)
 	writeServeBackendForwardPreflight(os.Stderr, pf)
