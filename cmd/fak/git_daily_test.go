@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -163,5 +165,118 @@ func TestGitDailyStatusReportIsValidJSON(t *testing.T) {
 	}
 	if back["ledger"] == "" || back["schema"] != "fak-git-daily-status/1" {
 		t.Fatalf("envelope = %s", b)
+	}
+}
+
+// TestGitDailyStatusRendersOutcomeCounters is the #5586 acceptance: the success /
+// refusal / error tally has to be readable off the EXISTING --status surface, so a
+// regression shows up in the readout an operator already runs instead of needing a bug
+// report to go looking for it.
+func TestGitDailyStatusRendersOutcomeCounters(t *testing.T) {
+	var out bytes.Buffer
+	writeGitDailyStatus(&out, "C:/repo/.git/"+gitdaily.LedgerName, []gitdaily.Row{
+		{Schema: gitdaily.Schema, Day: "2026-08-01", LooseBefore: 4200, LooseAfter: 12},
+		{Schema: gitdaily.Schema, Day: "2026-08-02", GraceRefused: "LOCKED"},
+		{Schema: gitdaily.Schema, Day: "2026-08-03", GraceRefused: "LOCKED"},
+		{Schema: gitdaily.Schema, Day: "2026-08-04", GraceRefused: "POSTURE_DRIFT", Incident: true},
+	})
+	got := out.String()
+	for _, want := range []string{
+		"4 recorded runs (2026-08-01..2026-08-04)",
+		"1 ok, 2 refused, 1 error",
+		"folded 4188 loose objects",
+		"refused LOCKED x2",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status render missing %q\n---\n%s", want, got)
+		}
+	}
+}
+
+// TestGitDailyStatusCountersAreHonestAboutSkips: PRUNE_OFF is the configured posture of
+// a healthy default run (the grace-prune tier is opt-in), so a clean history must read
+// as all-ok. If it read as "refused", the counter would cry wolf on every single default
+// clone and nobody would look at it when a real LOCKED streak arrived.
+func TestGitDailyStatusCountersAreHonestAboutSkips(t *testing.T) {
+	var out bytes.Buffer
+	writeGitDailyStatus(&out, "/tmp/x.jsonl", []gitdaily.Row{
+		{Schema: gitdaily.Schema, Day: "2026-08-04", LooseBefore: 4129, LooseAfter: 0, GracePruneRefused: "PRUNE_OFF"},
+	})
+	got := out.String()
+	if !strings.Contains(got, "1 ok, 0 refused, 0 error") {
+		t.Errorf("default-posture history did not read as healthy\n---\n%s", got)
+	}
+	// The wording must not let an operator read the tally as trigger fires: skipped
+	// ticks (ALREADY_RAN_TODAY / TICK_BUSY) deliberately write no row.
+	if !strings.Contains(got, "recorded runs") {
+		t.Errorf("counter line does not qualify what it counts\n---\n%s", got)
+	}
+}
+
+// TestGitDailyStatusReportCarriesOutcomes pins the machine-readable half of the same
+// ask: the counters ride in the --status --json envelope, folded from exactly the rows
+// beside them, so the two can never disagree.
+func TestGitDailyStatusReportCarriesOutcomes(t *testing.T) {
+	rows := []gitdaily.Row{
+		{Schema: gitdaily.Schema, Day: "2026-08-03", LooseBefore: 100, LooseAfter: 0},
+		{Schema: gitdaily.Schema, Day: "2026-08-04", GraceRefused: "LOCKED"},
+	}
+	b, err := json.Marshal(gitDailyStatusReport{
+		Schema:   "fak-git-daily-status/1",
+		Ledger:   "/repo/.git/" + gitdaily.LedgerName,
+		Outcomes: gitdaily.FoldOutcomes(rows),
+		Rows:     rows,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Outcomes gitdaily.Outcomes `json:"outcomes"`
+		Rows     []gitdaily.Row    `json:"rows"`
+	}
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Outcomes.Runs != len(back.Rows) {
+		t.Fatalf("counters (%d runs) disagree with the rows they shipped with (%d): %s",
+			back.Outcomes.Runs, len(back.Rows), b)
+	}
+	if back.Outcomes.OK != 1 || back.Outcomes.Refused != 1 || back.Outcomes.Reasons["LOCKED"] != 1 {
+		t.Fatalf("outcome envelope = %s", b)
+	}
+}
+
+// TestGitDailyStatusRealLedgerCapture is the #5586 WITNESS, pinned: the five
+// `fak-git-daily/1` rows below are the verbatim contents of this clone's own ledger
+// (C:\work\fak\.git\fak-git-daily.jsonl) on 2026-08-05, and the asserted line is the
+// readout `fak git-daily --status 50` actually printed from them:
+//
+//	git-daily status — C:\work\fak\.git\fak-git-daily.jsonl
+//	5 recorded runs (2026-08-04..2026-08-05): 5 ok, 0 refused, 0 error; folded 10038 loose objects
+//
+// Replaying the captured BYTES (not hand-built structs) through the same Status ->
+// writeGitDailyStatus path the operator surface uses is what keeps the capture honest:
+// if the fold, the parse, or the rendering drifts, this test fails instead of the
+// readout quietly starting to lie. Note the first row folded 0 loose (4129 -> 4129) yet
+// still counts ok — a tick that reaped locks and found the object DB already packed did
+// its job; only a refusal or an incident is a non-ok outcome.
+func TestGitDailyStatusRealLedgerCapture(t *testing.T) {
+	captured := []string{
+		`{"schema":"fak-git-daily/1","day":"2026-08-04","at":"2026-08-04T11:14:37-07:00","lease_locks_reaped":0,"index_locks_reaped":7,"lock_actions":1,"loose_before":4129,"loose_after":4129,"packs_before":4,"packs_after":4,"grace_prune_refused":"PRUNE_OFF"}`,
+		`{"schema":"fak-git-daily/1","day":"2026-08-04","at":"2026-08-04T11:18:58-07:00","lease_locks_reaped":0,"index_locks_reaped":0,"lock_actions":0,"loose_before":4129,"loose_after":0,"packs_before":4,"packs_after":2,"grace_prune_refused":"PRUNE_OFF"}`,
+		`{"schema":"fak-git-daily/1","day":"2026-08-04","at":"2026-08-04T11:59:46-07:00","lease_locks_reaped":0,"index_locks_reaped":0,"lock_actions":1,"loose_before":48,"loose_after":0,"packs_before":2,"packs_after":4,"grace_prune_refused":"PRUNE_OFF"}`,
+		`{"schema":"fak-git-daily/1","day":"2026-08-04","at":"2026-08-04T12:15:16-07:00","lease_locks_reaped":0,"index_locks_reaped":0,"lock_actions":1,"loose_before":34,"loose_after":0,"packs_before":4,"packs_after":4,"grace_prune_refused":"PRUNE_OFF"}`,
+		`{"schema":"fak-git-daily/1","day":"2026-08-05","at":"2026-08-05T04:39:17-07:00","lease_locks_reaped":0,"index_locks_reaped":1,"lock_actions":2,"loose_before":5827,"loose_after":0,"packs_before":4,"packs_after":4,"grace_prune_refused":"PRUNE_OFF"}`,
+	}
+	path := filepath.Join(t.TempDir(), gitdaily.LedgerName)
+	if err := os.WriteFile(path, []byte(strings.Join(captured, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	writeGitDailyStatus(&out, path, gitdaily.Status(path, 50))
+	const want = "5 recorded runs (2026-08-04..2026-08-05): 5 ok, 0 refused, 0 error; folded 10038 loose objects"
+	if got := out.String(); !strings.Contains(got, want) {
+		t.Fatalf("captured readout drifted\nwant line: %s\n---got---\n%s", want, got)
 	}
 }

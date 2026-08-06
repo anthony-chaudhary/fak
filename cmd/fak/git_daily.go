@@ -97,9 +97,10 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		rows := gitdaily.Status(path, *status)
 		if *asJSON {
 			return encodeJSONOrFail(stdout, stderr, gitDailyStatusReport{
-				Schema: "fak-git-daily-status/1",
-				Ledger: path,
-				Rows:   rows,
+				Schema:   "fak-git-daily-status/1",
+				Ledger:   path,
+				Outcomes: gitdaily.FoldOutcomes(rows),
+				Rows:     rows,
 			}, "fak git-daily")
 		}
 		writeGitDailyStatus(stdout, path, rows)
@@ -168,10 +169,16 @@ func emitGitDailyUnit(stdout, stderr io.Writer, target, label, fakBin, repoRoot 
 
 // gitDailyStatusReport is the --status --json envelope: the resolved ledger path next to
 // the rows, so a reader of the JSON never has to re-derive which file it was read from.
+//
+// Outcomes travels WITH the rows it was folded from (#5586). A consumer that only wants
+// "is this job healthy?" reads the counters and stops; one that wants to know why reads
+// the rows underneath — and because the summary is a fold of exactly the rows in this
+// envelope, the two can never disagree the way a separately-kept counter would.
 type gitDailyStatusReport struct {
-	Schema string         `json:"schema"`
-	Ledger string         `json:"ledger"`
-	Rows   []gitdaily.Row `json:"rows"`
+	Schema   string            `json:"schema"`
+	Ledger   string            `json:"ledger"`
+	Outcomes gitdaily.Outcomes `json:"outcomes"`
+	Rows     []gitdaily.Row    `json:"rows"`
 }
 
 // writeGitDailyText prints the operator report: the skip decision if any, then the lock
@@ -248,14 +255,16 @@ func writeGitDailyText(w io.Writer, res gitdaily.Result) {
 	}
 }
 
-// writeGitDailyStatus prints the ledger readback: one line per run, then the deferred
-// streak — the signal that says the ghosts are winning and the backlog is growing.
+// writeGitDailyStatus prints the ledger readback: the outcome counters first, then one
+// line per run, then the deferred streak — the signal that says the ghosts are winning
+// and the backlog is growing.
 func writeGitDailyStatus(w io.Writer, path string, rows []gitdaily.Row) {
 	fmt.Fprintf(w, "git-daily status — %s\n", path)
 	if len(rows) == 0 {
 		fmt.Fprintln(w, "no runs recorded yet (the ledger is written by an applied, non-skipped run).")
 		return
 	}
+	writeGitDailyOutcomes(w, gitdaily.FoldOutcomes(rows))
 	for _, r := range rows {
 		note := fmt.Sprintf("folded %d loose (%d -> %d), packs %d -> %d, locks cleared %d",
 			r.LooseFolded(), r.LooseBefore, r.LooseAfter, r.PacksBefore, r.PacksAfter,
@@ -270,5 +279,25 @@ func writeGitDailyStatus(w io.Writer, path string, rows []gitdaily.Row) {
 	}
 	if n, reason := gitdaily.DeferredStreak(rows); n > 1 {
 		fmt.Fprintf(w, "\nfold tier has been held back %s for %d consecutive runs — the backlog is growing.\n", reason, n)
+	}
+}
+
+// writeGitDailyOutcomes prints the one-line success/refusal/error tally over the rows
+// being shown, plus the refusal breakdown when there is one (#5586).
+//
+// It says "recorded runs" on purpose. A skipped tick (ALREADY_RAN_TODAY, TICK_BUSY)
+// writes no ledger row — that is exactly what makes an hourly catch-up trigger safe — so
+// these counters tally the ticks that reached the tiers, NOT the times the scheduler
+// fired. Labelling them "runs" flat would invite an operator to read a healthy hourly
+// trigger as a job that only ran four times.
+func writeGitDailyOutcomes(w io.Writer, o gitdaily.Outcomes) {
+	window := o.FirstDay
+	if o.LastDay != o.FirstDay {
+		window += ".." + o.LastDay
+	}
+	fmt.Fprintf(w, "%d recorded runs (%s): %d ok, %d refused, %d error; folded %d loose objects\n",
+		o.Runs, window, o.OK, o.Refused, o.Errors, o.LooseFolded)
+	for _, reason := range o.ReasonsByCount() {
+		fmt.Fprintf(w, "  refused %s x%d\n", reason, o.Reasons[reason])
 	}
 }
