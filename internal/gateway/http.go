@@ -1199,6 +1199,19 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|budget|pace|priority|wall|throughput}")
 			return
 		}
+		// fork/export/import are their own shape (#2419): they act on the durable
+		// session CHAIN rather than on the drive table, so they take their own bodies
+		// and answer their own documents (session_teleport.go). Dispatched before the
+		// generic control path, which decodes a SessionControlRequest.
+		if s.handleTeleportVerb(w, r, traceID, verb) {
+			return
+		}
+		// checkpoint (#2425) is the same family: it binds the durable chain's head to a
+		// git tree witness in one record, so it carries its own body and answers its own
+		// document (session_checkpoint.go) rather than the drive-state control shape.
+		if s.handleSessionCheckpointVerb(w, r, traceID, verb) {
+			return
+		}
 		// steer is its own shape (operator input to a RUNNING session, #760): a different
 		// body and a different sink (the a2achan bus, not the drive table). Dispatch it
 		// before the generic control path. A refused steer (tainted/over-scoped/uncapped)

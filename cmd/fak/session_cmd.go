@@ -104,12 +104,35 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	if verb == "checkpoint" {
 		return runSessionCheckpoint(stdout, stderr, args)
 	}
+	// checkpoint-witness (#2425) mints the OTHER checkpoint: not an image copy but the
+	// two-axis hash pair {ledger_head_hash, tree_witness}, bound in one append-only
+	// sessionledger record so a peer can check "this conversation state corresponds to
+	// this workspace state" without trusting the session that claimed it. Offline; the
+	// only thing it dials is git.
+	if verb == "checkpoint-witness" {
+		return runSessionCheckpointWitness(stdout, stderr, args)
+	}
 	// fork (#2761) snapshot-and-branches a session into a divergent continuation — an offline
 	// image-in, image-out move over internal/sessionimage.ForkDir that pins the branch point
 	// (checkpoint, #2760) then diverges from it (branch, #1200), source read-only, never
 	// dialing a live gateway. Dispatched alongside its sibling lifecycle verbs.
 	if verb == "fork" {
+		// Two forks share this verb, told apart by shape (see session_teleport.go):
+		// #2761's image fork requires --out/--checkpoint, while #2419's ledger fork
+		// takes a bare <trace> and mints a new trace over the shared prefix. The bare
+		// form used to be a usage error, so nothing that parsed before now re-routes.
+		if teleportIsLedgerFork(args) {
+			return runTeleportFork(stdout, stderr, args)
+		}
 		return runSessionFork(stdout, stderr, args)
+	}
+	// export/import (#2419) move a session between hosts as a verified hash closure
+	// over the durable ledger — offline, like their sibling lifecycle verbs.
+	if verb == "export" {
+		return runTeleportExport(stdout, stderr, args)
+	}
+	if verb == "import" {
+		return runTeleportImport(os.Stdin, stdout, stderr, args)
 	}
 	if verb == "audit" {
 		return runSessionAuditAlias(stdout, stderr, args)
@@ -900,11 +923,32 @@ func sessionUsage(w io.Writer) {
   fak session checkpoint <image-dir> --out <snap-dir> [--reason R] [--json]
                                                offline on-demand snapshot of a session
                                                (same id, copy-on-write, source unaffected)
+  fak session checkpoint-witness <trace> [--repo DIR] [--ledger-dir DIR]
+                       [--untracked no|normal|all] [--verify] [--json]
+                                               offline two-axis checkpoint: bind the session
+                                               ledger head to a git tree witness (HEAD SHA +
+                                               dirty-set digest) in one record, and re-check
+                                               it later — a failure names the axis that moved
+                                               (tree = the workspace drifted, transcript = the
+                                               ledger no longer matches the record)
   fak session fork     <parent-image-dir> --out <fork-dir> --checkpoint <branch-point-dir>
                        [--id ID] [--reason R] [--to-model M] [--to-host H] [--registry PATH] [--json]
                                                snapshot-and-branch a session into a divergent
                                                continuation: pin an immutable branch point,
                                                then fork it under a fresh trace (original untouched)
+  fak session fork     <trace> [--to ID] [--ledger-dir D] [--json]
+                                               DURABLE-LEDGER fork: mint a new trace pointing at
+                                               the shared prefix and print it with that prefix
+                                               hash (no --out/--checkpoint = this arm, not the
+                                               image fork above; nothing is copied)
+  fak session export   <trace> [--out FILE] [--ledger-dir D]
+                       [--turns N] [--tokens N] [--context-tokens N] [--taint T] [--generation N]
+                                               write the session's portable hash closure — ledger
+                                               head, the entries reaching it, and the re-arm state
+  fak session import   [--in FILE] [--ledger-dir D] [--json]
+                                               re-arm a session on THIS host from a closure: the
+                                               chain is RE-DERIVED, so a bundle altered in flight
+                                               cannot reproduce its head and is refused
 
 flags: --addr (default $FAK_ADDR or http://127.0.0.1:8080)  --key ($FAK_KEY)
        --if-rev N (optimistic-concurrency guard)  --json

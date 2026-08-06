@@ -1094,6 +1094,16 @@
           "category": "incidental",
           "reason": "A boolean predicate on Selector reporting whether any session-scoped axis (lane/wave/label) was stated. A field-presence test on an existing type, not a concept of its own.",
           "token": "NarrowsSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "The flag-parsing shell for the fak session checkpoint-witness verb; it reads the session's ledger but introduces no session-runtime concept beyond the trace it looks up.",
+          "token": "runSessionCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "HTTP handler method that serves the checkpoint verb on the session control subtree; a transport adapter over the existing session chain, introducing no session-runtime concept.",
+          "token": "handleSessionCheckpointVerb"
         }
       ],
       "id": "session-runtime",
@@ -1115,6 +1125,7 @@
         "guardSessionStartNodeWrapsDriver",
         "guardSessionStartProcIsDriver",
         "guardsessiontempdir",
+        "handleSessionCheckpointVerb",
         "handoff_session_give_up",
         "interactivesession",
         "kernelSession",
@@ -1123,6 +1134,7 @@
         "requireminimaxsession",
         "restartfreshsession",
         "runSessionAuditCodex",
+        "runSessionCheckpointWitness",
         "runtuisessions",
         "sanitizeSessionForPath",
         "scheduled",
@@ -1397,6 +1409,41 @@
           "category": "incidental",
           "reason": "Constructor for that tree-axis payload; it hashes the dirty entries and returns the struct, carrying no concept beyond the value it builds.",
           "token": "NewTreeWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "An 8 MiB read cap on a single file when hashing the tree axis; a resource bound on the witness computation, not a concept.",
+          "token": "maxWitnessFileBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "The JSON shape fak session checkpoint-witness prints; a serialization view of sessionledger.Checkpoint for one CLI verb, carrying no meaning the Checkpoint does not already hold.",
+          "token": "checkpointWitnessReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "The flag-parsing shell for the fak session checkpoint-witness verb; a CLI entry point, not a distinct concept.",
+          "token": "runSessionCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper that re-checks a stored checkpoint against a freshly computed tree witness and names which axis diverged; a verb-local branch over sessionledger's own verify, not a separate concept.",
+          "token": "verifyCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local human-readable printer for one checkpoint record; a presentation helper for this command's stdout.",
+          "token": "renderCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper that reads HEAD plus the dirty set from the working tree and builds a sessionledger.TreeWitness from it; an I/O adapter feeding the existing type.",
+          "token": "liveTreeWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "A wire error code string returned with HTTP 400 when a checkpoint request omits its tree-witness body; a refusal label, not a concept.",
+          "token": "checkpoint_no_tree_witness"
         }
       ],
       "id": "witness-proof",
@@ -1417,6 +1464,8 @@
         "WitnessEvidenceStats",
         "WitnessMove",
         "appendGuardCompactionWitnessTo",
+        "checkpointWitnessReport",
+        "checkpoint_no_tree_witness",
         "compactionWitness",
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
@@ -1439,6 +1488,8 @@
         "guardCompactionWitnessLedgerRel",
         "guardCompactionWitnessSchema",
         "latestGuardCompactionWitness",
+        "liveTreeWitness",
+        "maxWitnessFileBytes",
         "named_witness",
         "newGuardCompactionWitness",
         "nwitness",
@@ -1448,8 +1499,11 @@
         "refuted",
         "refutes",
         "refutil",
+        "renderCheckpointWitness",
         "revocations",
+        "runSessionCheckpointWitness",
         "tree_witness",
+        "verifyCheckpointWitness",
         "want_witness",
         "withdefaultoriginwitnesses",
         "witnessGitRunner",
@@ -2123,6 +2177,11 @@
           "category": "incidental",
           "reason": "Local printer for the gitspawn bench baseline-vs-current comparison; a presentation helper for this command, not a distinct concept.",
           "token": "renderGitSpawnDelta"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local human-table printer for one checkpoint record on this command's stdout; a presentation helper, not a rendering concept of its own.",
+          "token": "renderCheckpointWitness"
         }
       ],
       "id": "render-materialize",
@@ -2142,6 +2201,7 @@
         "materializes",
         "metricsrender",
         "priorwtrendercrash",
+        "renderCheckpointWitness",
         "renderCommitDrainResult",
         "renderCommitVelocity",
         "renderFleetControl",
