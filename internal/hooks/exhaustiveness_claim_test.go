@@ -84,7 +84,7 @@ func claimsInComment(file string, line int, text string) []gateCountClaim {
 
 // The claim under test. Adding a gate without updating the package doc fails HERE, at the moment
 // the debt is created, instead of leaving a reader to trust a number nobody owns.
-func TestGateCountClaimsMatchTheRegistry(t *testing.T) {
+func TestDocCountClaimsMatchTheGateRegistry(t *testing.T) {
 	claims := findGateCountClaims(t, ".")
 
 	// Non-vacuity: this package's doc is expected to state its own size. A scanner that silently
@@ -126,7 +126,7 @@ func gateCountClaimMismatches(claims []gateCountClaim, live map[string]int) []st
 
 // The enforcement path, proven on a stale claim. Without this, a green run only shows that the
 // tree happens to agree right now — not that disagreement would be caught.
-func TestGateCountClaimMismatchIsReportedWithBothNumbers(t *testing.T) {
+func TestDocCountClaimMismatchIsReportedWithBothNumbers(t *testing.T) {
 	live := liveGateCounts()
 	stale := claimsInComment("hooks.go", 8, "// This package collapses all 8 gates into one Go process")
 	if len(stale) != 1 {
@@ -156,7 +156,7 @@ func TestGateCountClaimMismatchIsReportedWithBothNumbers(t *testing.T) {
 
 // The scanner's own contract, on fixtures rather than on the tree — so "the real package happens to
 // be consistent right now" can never be mistaken for "the check works".
-func TestGateCountClaimScannerMatchesClaimsAndIgnoresMentions(t *testing.T) {
+func TestDocCountClaimScannerMatchesClaimsAndIgnoresMentions(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		comment  string
@@ -202,7 +202,7 @@ func TestGateCountClaimScannerMatchesClaimsAndIgnoresMentions(t *testing.T) {
 // The drift this was written for, restated as a test: had the mechanism existed, a stale count
 // would have failed rather than shipped. Kept as a direct assertion so the regression is legible
 // without re-reading git history.
-func TestGateCountClaimDetectsAStaleCount(t *testing.T) {
+func TestDocCountClaimDetectsAStaleCount(t *testing.T) {
 	stale := claimsInComment("hooks.go", 8, "// This package collapses all 8 gates into one Go process")
 	if len(stale) != 1 {
 		t.Fatalf("the historical stale header did not parse as a claim: %+v", stale)
