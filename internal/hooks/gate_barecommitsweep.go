@@ -66,6 +66,7 @@ func gateBareCommitSweep(d *StagedDiff) ([]Finding, error) {
 	}
 	// Nothing staged => an empty commit (--allow-empty, a merge) sweeps nothing.
 	if len(d.StagedPaths) == 0 {
+		d.NoteCandidates("BARE_COMMIT_SWEEP", 0, "staged path(s) that would be swept")
 		return nil, nil
 	}
 
@@ -74,6 +75,9 @@ func gateBareCommitSweep(d *StagedDiff) ([]Finding, error) {
 		paths = append(paths, strings.ReplaceAll(p, "\\", "/"))
 	}
 	sort.Strings(paths)
+	// The whole staged set IS this gate's domain: it asks what an unvetted bare commit would
+	// fold in, so the denominator is the size of that sweep (#5602).
+	d.NoteCandidates("BARE_COMMIT_SWEEP", len(paths), "staged path(s) that would be swept")
 
 	return []Finding{{
 		Gate:   "BARE_COMMIT_SWEEP",

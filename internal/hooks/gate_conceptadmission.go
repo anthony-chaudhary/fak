@@ -199,10 +199,14 @@ func admissionLeaf(p string) string {
 func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 	metaBytes, ok := d.FileBytes("tools/concept_disambiguation_scorecard.data/_meta.json")
 	if !ok {
+		// No corpus metadata reachable: this gate judged nothing at all. Recording the zero is
+		// what separates it from a run that judged every staged symbol and admitted them (#5602).
+		d.NoteCandidates("CONCEPT_ADMISSION", 0, "staged non-test .go file(s) under internal/ or cmd/")
 		return nil, nil
 	}
 	var meta admissionMeta
 	if json.Unmarshal(metaBytes, &meta) != nil {
+		d.NoteCandidates("CONCEPT_ADMISSION", 0, "staged non-test .go file(s) under internal/ or cmd/")
 		return nil, nil
 	} // semantic gate owns malformed data
 	positioned := map[string]bool{}
@@ -249,11 +253,16 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 	}
 	seen := map[string]bool{}
 	var out []Finding
+	// This gate's filter admits only non-test .go under internal/ or cmd/. A docs-only or
+	// config-only commit admits zero, and used to render exactly like a commit whose every new
+	// symbol was already positioned in the corpus (#5602).
+	judged := 0
 	for path, lines := range d.AddedByFile {
 		p := filepath.ToSlash(path)
 		if !(strings.HasPrefix(p, "internal/") || strings.HasPrefix(p, "cmd/")) || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			continue
 		}
+		judged++
 		for _, line := range lines {
 			text, isCode := conceptScanLine(line.Text)
 			for _, m := range conceptIdentRE.FindAllStringIndex(text, -1) {
@@ -324,6 +333,7 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 		}
 		return out[i].File < out[j].File
 	})
+	d.NoteCandidates("CONCEPT_ADMISSION", judged, "staged non-test .go file(s) under internal/ or cmd/")
 	return out, nil
 }
 

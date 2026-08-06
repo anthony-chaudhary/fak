@@ -7,14 +7,17 @@ import (
 )
 
 func checkConceptFreshness(d *StagedDiff) ([]Finding, error) {
-	relevant := false
+	// Counted rather than short-circuited: the loop no longer breaks on the first hit, because
+	// "one concept path staged" and "forty" are different runs and this gate could not tell them
+	// apart (#5602). The cost is one pass over an already-in-memory slice, no extra git read.
+	relevant := 0
 	for _, p := range d.StagedPaths {
 		if conceptcatalog.RelevantPath(p) {
-			relevant = true
-			break
+			relevant++
 		}
 	}
-	if !relevant {
+	d.NoteCandidates("CONCEPT_FRESHNESS", relevant, "staged concept-corpus path(s)")
+	if relevant == 0 {
 		return nil, nil
 	}
 	res, err := conceptcatalog.CheckGitTree(d.Root, "")

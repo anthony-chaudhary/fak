@@ -109,6 +109,12 @@ func duplicationFindings(d *StagedDiff, maxNeighborhood, maxMatches, minGradedWi
 		})
 		touched[dir] = true
 	}
+	// The gate's own name for its domain: staged non-test .go blocks that survived the
+	// trivial-addition prune, i.e. the ones large enough to clone anything. Recording it here
+	// covers BOTH exits — the common small-commit case that returns immediately below, and the
+	// full scan — so "nothing was big enough to check" stops looking like "nothing was a
+	// clone" (#5602).
+	d.NoteCandidates("DUPLICATION", len(candidates), "staged .go block(s) above the clone window")
 	if len(candidates) == 0 {
 		return nil, nil
 	}

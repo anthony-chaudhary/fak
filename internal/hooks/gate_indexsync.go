@@ -23,10 +23,15 @@ func gateIndexSync(d *StagedDiff) ([]Finding, error) {
 		}
 	}
 	if !relevant {
+		// The exemplar case for #5602: this gate ran, admitted NOTHING, and returns the same
+		// empty verdict it returns after judging a dozen index files. Record the zero so the two
+		// stop rendering identically.
+		d.NoteCandidates("INDEX_SYNC", 0, "staged index file(s) + new note(s)")
 		return nil, nil
 	}
 
 	var findings []Finding
+	judged := 0
 
 	// DANGLING: for each STAGED index file, every relative .md link must resolve (shared with tree twin).
 	for _, idx := range indexFiles {
@@ -37,12 +42,19 @@ func gateIndexSync(d *StagedDiff) ([]Finding, error) {
 		if !ok {
 			continue
 		}
+		judged++
 		findings = append(findings, danglingIndexLinkFindings(d, idx, string(body))...)
 	}
 
 	// ORPHAN: newly-added dated docs/notes/ notes not listed in INDEX.md (shared with tree twin).
 	index, _ := d.IndexMD()
+	for _, p := range d.AddedPaths {
+		if strings.HasPrefix(p, "docs/notes/") && strings.HasSuffix(p, ".md") {
+			judged++
+		}
+	}
 	findings = append(findings, orphanNoteFindings(d.AddedPaths, index)...)
+	d.NoteCandidates("INDEX_SYNC", judged, "staged index file(s) + new note(s)")
 	return findings, nil
 }
 

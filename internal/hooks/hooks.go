@@ -14,6 +14,13 @@
 // registry and fails when the two disagree, so this sentence cannot quietly decay the way the
 // count it replaces did (#5605, epic #5601). Adding a gate is expected to update it.
 //
+// The pattern, named once here so it is reusable: an exhaustiveness claim in this tree — "all N
+// gates", "the only caller", "every package" — carries the witness that would refute it. Either a
+// count is bound to the registry it quantifies over (this doc + exhaustiveness_claim_test.go), or
+// membership is asserted in both directions (failclosed_ledger_test.go), or the claim names the
+// test that enforces it (architest's TestEveryPackageDeclaresTier). A claim carrying none of those
+// is prose, and prose decays silently.
+//
 // Each gate is a byte-faithful port of its tools/check_*.py / scrub_public_copy.py oracle;
 // a `parity_test.go` differential harness asserts identical verdicts against the Python
 // checkers (kept on disk as the fallback when no `fak` binary resolves, and as the oracle).
@@ -189,6 +196,13 @@ type StagedDiff struct {
 	// timeout path would crash the very commit the bound exists to let through.
 	cacheMu   sync.Mutex
 	fileCache map[string]fileEntry // rel path -> cached read
+
+	// candMu guards candidates, the per-gate CANDIDATE DENOMINATOR ledger (#5602) — how many
+	// staged items each gate's own filter admitted for judgement. It is written from inside a
+	// gate's Check, so it is reachable by an abandoned over-budget gate concurrently with the
+	// next one for exactly the reason cacheMu exists. See candidates.go.
+	candMu     sync.Mutex
+	candidates map[string]candidateNote // gate name -> what that gate judged over
 }
 
 type fileEntry struct {

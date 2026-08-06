@@ -952,6 +952,11 @@
           "category": "incidental",
           "reason": "Local printer for the guard-allow expiry listing; a presentation helper for one CLI view, not a distinct concept.",
           "token": "printGuardAllowExpiries"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plain accessor on StagedDiff listing which gates recorded a denominator this run. It names no new idea: the concept is the CANDIDATE DENOMINATOR ledger (#5602) it reads, and this is one of three method names on it.",
+          "token": "ReportedGates"
         }
       ],
       "exclude": [
@@ -975,6 +980,7 @@
         "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
         "GATED_UNWITNESSED",
         "GateFlipped",
+        "ReportedGates",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "admitGuardShrinkLevers",
         "appendGuardCompactionWitnessTo",
@@ -2671,6 +2677,16 @@
           "category": "incidental",
           "reason": "Positioned canonically in its primary family as c2421-plan-eviction (ctxplan.PlanEviction, the survival-class eviction planner). It surfaces in the plan family only because it RETURNS an EvictionPlan; the concept itself is an eviction verb, not a planning one.",
           "token": "PlanEviction"
+        },
+        {
+          "category": "incidental",
+          "reason": "The recording half of the same StagedDiff accessor pair as Candidates and ReportedGates. A method name, not a distinct concept: the concept is the CANDIDATE DENOMINATOR (#5602) each gate records into.",
+          "token": "NoteCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported record struct carrying one gate's candidate count and its unit inside the StagedDiff ledger. A private field holder, not a concept in its own right: the concept is the CANDIDATE DENOMINATOR (#5602) that NoteCandidates records and Candidates reads back.",
+          "token": "candidateNote"
         }
       ],
       "exclude": [
@@ -2686,6 +2702,7 @@
         "Candidates",
         "DecodeInterleavePlan",
         "FleetBenchPlanDoc",
+        "NoteCandidates",
         "PlanDecodeInterleave",
         "PlanEviction",
         "PlanResolver",
@@ -2693,6 +2710,7 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "buildMainPlan",
+        "candidateNote",
         "candidatePaths",
         "candidatemean",
         "candidates",

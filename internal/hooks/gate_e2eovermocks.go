@@ -60,14 +60,6 @@ func matchSecurityPrefix(p string) (string, bool) {
 // Findings are deduped by matched prefix (touching three adjudicator files gives one finding)
 // and sorted by prefix for determinism, mirroring gatePriorArt's shape.
 func gateE2EOverMocks(d *StagedDiff) ([]Finding, error) {
-	// Witness: any added line carrying the "E2E-verified:" token quiets the whole gate — the
-	// author has staged/attested the real end-to-end run the rule asks for.
-	for _, al := range d.AddedLines() {
-		if strings.Contains(strings.ToLower(al.Text), e2eWitnessTrailer) {
-			return nil, nil
-		}
-	}
-
 	// matched: prefix -> first touched path under it, deduped by prefix.
 	matched := map[string]string{}
 	for _, raw := range d.StagedPaths {
@@ -75,6 +67,23 @@ func gateE2EOverMocks(d *StagedDiff) ([]Finding, error) {
 			if _, seen := matched[prefix]; !seen {
 				matched[prefix] = strings.ReplaceAll(raw, "\\", "/")
 			}
+		}
+	}
+
+	// The denominator is the security-critical surface this commit actually touched, deduped by
+	// prefix — the set the gate judges, not the staged set it was handed (#5602).
+	//
+	// Computed BEFORE the witness check on purpose. Suppressing first and counting later would
+	// report zero candidates for an attested commit that touched forty security prefixes, which
+	// reads as "no security surface here" — a denominator that misdescribes the run is worse
+	// than none, and this gate's whole job is to make that surface visible.
+	d.NoteCandidates("E2E_OVER_MOCKS", len(matched), "touched security-surface prefix(es)")
+
+	// Witness: any added line carrying the "E2E-verified:" token quiets the whole gate — the
+	// author has staged/attested the real end-to-end run the rule asks for.
+	for _, al := range d.AddedLines() {
+		if strings.Contains(strings.ToLower(al.Text), e2eWitnessTrailer) {
+			return nil, nil
 		}
 	}
 

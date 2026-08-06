@@ -14,10 +14,14 @@ import (
 // is intentional without turning harmless deny/removal edits into review noise.
 func gateTrustWidening(d *StagedDiff) ([]Finding, error) {
 	var findings []Finding
+	// The filter here is TRUST-CONFIG files, a narrow slice of any staged set. A commit that
+	// touches none admits zero — the state this gate could not previously report (#5602).
+	judged := 0
 	for file, lines := range d.AddedByFile {
 		if !trustConfigPath(file) {
 			continue
 		}
+		judged += len(lines)
 		content, exists := d.FileBytes(file)
 		for _, line := range lines {
 			if !addedTrustGrant(line.Text, content, exists, line.New) {
@@ -31,6 +35,7 @@ func gateTrustWidening(d *StagedDiff) ([]Finding, error) {
 			})
 		}
 	}
+	d.NoteCandidates("TRUST_WIDENING", judged, "added line(s) in trust-config file(s)")
 	return findings, nil
 }
 

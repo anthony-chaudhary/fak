@@ -31,6 +31,10 @@ func gateBrokenLink(d *StagedDiff) ([]Finding, error) {
 		staged[p] = true
 	}
 	var findings []Finding
+	// This gate's filter is the FRONT-DOOR allowlist, not the staged set: a commit touching a
+	// hundred files that includes no front-door doc admits zero candidates here, and used to be
+	// indistinguishable from one where every front-door link resolved (#5602).
+	judged := 0
 	for _, f := range frontDoor {
 		if !staged[f] {
 			continue
@@ -39,12 +43,14 @@ func gateBrokenLink(d *StagedDiff) ([]Finding, error) {
 		if !ok {
 			continue
 		}
+		judged++
 		content := string(b)
 		dir := path.Dir(f)
 		findings = append(findings, findDeadLinks(d, f, dir, content)...)
 		findings = append(findings, findDeadInlineRefs(d, f, dir, content)...)
 		findings = append(findings, scrubPrivateRefs(f, dir, content)...)
 	}
+	d.NoteCandidates("BROKEN_LINK", judged, "staged front-door doc(s)")
 	return findings, nil
 }
 

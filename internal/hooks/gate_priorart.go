@@ -52,14 +52,6 @@ const priorArtSuppressTrailer = "prior-art:"
 // Findings are deduped by op slug (touching three files of one op gives one finding) and sorted
 // by slug for determinism.
 func gatePriorArt(d *StagedDiff) ([]Finding, error) {
-	// Suppression: any added line carrying the "Prior-art:" token quiets the whole gate. The
-	// author has attested to consulting prior art, which is exactly what the advisory asks for.
-	for _, al := range d.AddedLines() {
-		if strings.Contains(strings.ToLower(al.Text), priorArtSuppressTrailer) {
-			return nil, nil
-		}
-	}
-
 	ops := sotamatrix.Operations()
 	// matched: slug -> (op, first touched path that matched it), deduped by slug.
 	type hit struct {
@@ -79,6 +71,20 @@ func gatePriorArt(d *StagedDiff) ([]Finding, error) {
 					break
 				}
 			}
+		}
+	}
+
+	// The denominator is the SOTA kernel surface this commit touched, deduped by slug. Counted
+	// before the suppression check below, for the same reason E2E_OVER_MOCKS is: a suppressed
+	// commit that touched four kernels must not report the same zero as one that touched none
+	// (#5602).
+	d.NoteCandidates("PRIOR_ART", len(matched), "touched SOTA kernel op(s)")
+
+	// Suppression: any added line carrying the "Prior-art:" token quiets the whole gate. The
+	// author has attested to consulting prior art, which is exactly what the advisory asks for.
+	for _, al := range d.AddedLines() {
+		if strings.Contains(strings.ToLower(al.Text), priorArtSuppressTrailer) {
+			return nil, nil
 		}
 	}
 
