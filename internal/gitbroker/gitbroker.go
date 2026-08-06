@@ -11,12 +11,26 @@
 // on this Windows fleet: cmd/fak/guard_lifecycle_ipc.go net.Listen("unix", …)s
 // in production, and Go supports AF_UNIX on Windows 10+.
 //
-// CLASS A ONLY. This rung caches exactly one thing: content-addressed reads,
-// keyed by a full object ID. Git objects are immutable, so a Class A entry can
-// never go stale and this cache needs no invalidation at all — which is exactly
-// why it is the first thing to land. Working-tree state (Class B/C) is mutable,
-// needs real invalidation, and is deliberately NOT cached here (#5623). IsOID is
-// the gate: a key that is not a full OID is answered live, every time.
+// THREE QUERY CLASSES, THREE DIFFERENT ANSWERS. Class A is content-addressed:
+// keyed by a full object ID, immutable, so an entry can never go stale and needs
+// no invalidation at all — which is why it was the first thing to land. IsOID is
+// the gate; a key that is not a full OID is never stored in the object cache.
+// Class B is working-tree state: mutable, and cached (treestate.go) only behind a
+// sampled StateKey plus a settling window, with the entry stored only if the key
+// is unchanged after the answer is computed. Class C is decisional and is NEVER
+// cached — Class.Decisional() routes it straight to a fresh execution, and the
+// source scan in classc_scan_test.go fails the build if a Class C query ever
+// reaches a cache.
+//
+// This doc used to say Class B was "deliberately NOT cached here", deferring it
+// to #5623. That stopped being true when treestate.go and singleflight.go landed
+// in this package: eafe11f67e committed them under a subject stamped (#5622),
+// whose own gate line reads "No Class B or C query is cached in this rung". A
+// package doc that contradicts its package is worse than no doc — a reviewer
+// checking the Class B rule reads the comment, believes it, and stops looking.
+// So the rule now lives where a build can check it rather than in a sentence a
+// later commit can silently falsify. Ship binding for the Class B/C half is
+// #5623; eafe11f67e's (#5622) stamp understates what it landed.
 //
 // FAIL-OPEN IS THE WHOLE SAFETY ARGUMENT. #4603 (`core.fsmonitor=true` pointed
 // at a dead daemon) is the standing lesson that a resident thing which dies must
@@ -271,9 +285,9 @@ type Stats struct {
 }
 
 // cache is the Class A store: OID -> Object, bounded by total payload bytes.
-// There is no invalidation path and there must never be one — the day this
-// caches something mutable is the day it needs one, and that is #5623's problem
-// in #5623's package.
+// There is no invalidation path and there must never be one. Mutable state is
+// not this type's job: it lives in treeCache (treestate.go), which is keyed and
+// invalidated separately precisely so that this one can stay unkeyed forever.
 type cache struct {
 	mu      sync.Mutex
 	m       map[string]Object
