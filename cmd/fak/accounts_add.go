@@ -890,11 +890,15 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 
 // applyTombstone performs the registry-side retirement of the ACTIVE seat at reg.Homes[idx]:
 // it sets status=tombstoned + rehome + audit fields, disables the seat, and moves any roles it
-// held onto liveRehomeName (which the caller has already resolved to an active seat). With
-// archive it ALSO renames the seat's config dir to <dir>.DELETED-<date> and repoints the
-// registry handle (name + dir) plus any rehome ref that named the old handle — the manual
-// dir-rename + hand-edit-registry dance, done for you. It refuses the live CLAUDE_CONFIG_DIR,
-// since you cannot move the dir the current session runs from.
+// held onto liveRehomeName (which the caller has already resolved to an active seat). WITHOUT
+// archive the seat is tombstoned in place under its own name, so it FLATTENS the pool: every OTHER
+// seat whose rehome edge named it is repointed forward to liveRehomeName, compressing `C -> S -> L`
+// to `C -> L` instead of letting the registry accrete `tombstoned -> … -> live` chains as
+// intermediate hops retire (#4672). With archive it instead renames the seat's config dir to
+// <dir>.DELETED-<date> and repoints the registry handle (name + dir) plus any inbound rehome edge
+// that named the old handle onto the renamed one — a repoint `restore` reverses — the manual
+// dir-rename + hand-edit-registry dance, done for you. It refuses the live CLAUDE_CONFIG_DIR, since
+// you cannot move the dir the current session runs from.
 //
 // It mutates reg only; the caller saves + syncs + prints the summary. It returns the roles it
 // moved (for the summary) and a nonzero code (with a printed error) on an archive filesystem
@@ -939,6 +943,21 @@ func applyTombstone(stdout, stderr io.Writer, reg *accounts.Registry, idx int, r
 		for i := range reg.Homes {
 			if reg.Homes[i].RehomeTo == oldName {
 				reg.Homes[i].RehomeTo = newName
+			}
+		}
+	} else {
+		// Flatten inbound rehome edges past a seat tombstoned IN PLACE (#4672). The seat keeps its
+		// name here (no --archive rename), so every OTHER seat that rehomed to it would keep naming
+		// a now-dead seat — and as intermediate hops retire the pool accretes tombstoned->…->live
+		// chains that `list --all` renders as rehomes pointing at dead seats. Repoint each such edge
+		// forward to the live seat this removal falls to. (The archive branch above already repoints
+		// inbound edges onto the renamed handle, which `restore` reverses; a plain tombstone has no
+		// rename and nothing to reverse, so flattening forward is the correct hygiene.) idx is
+		// skipped naturally — its own RehomeTo is the rehome handle, never fromName (a self-rehome is
+		// refused upstream) — and fromName != liveRehomeName for the same reason, so no self-loop.
+		for i := range reg.Homes {
+			if i != idx && reg.Homes[i].RehomeTo == fromName {
+				reg.Homes[i].RehomeTo = liveRehomeName
 			}
 		}
 	}
