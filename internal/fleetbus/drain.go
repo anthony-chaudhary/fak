@@ -100,7 +100,7 @@ func Drain(b Bus, self Instance, ap Applier, now time.Time) (DrainReport, error)
 	}
 	for _, d := range directives {
 		rep.Seen++
-		if !d.Selector.MatchesInstance(self) {
+		if !d.TargetsInstance(self) {
 			continue
 		}
 		rep.Matched++

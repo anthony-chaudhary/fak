@@ -558,6 +558,21 @@ func (d Directive) WithTargets(targets []Instance) Directive {
 	return d
 }
 
+// TargetsInstance binds delivery to the publish-time roster when Targets is present.
+// Legacy directives without Targets retain selector matching for wire compatibility.
+// A process that boots after publish must never execute a retained lifecycle command.
+func (d Directive) TargetsInstance(inst Instance) bool {
+	if len(d.Targets) == 0 {
+		return d.Selector.MatchesInstance(inst)
+	}
+	for _, id := range d.Targets {
+		if id == inst.ID {
+			return true
+		}
+	}
+	return false
+}
+
 // directiveID digests every field that changes what the directive MEANS. The id is
 // the idempotency key the apply claim is taken against, so anything that would make
 // two directives different commands must be in here.
