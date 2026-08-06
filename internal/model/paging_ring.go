@@ -40,8 +40,14 @@ import (
 // expansion of it. The follow-on rung #2726 named — wiring it into the session weight HAL as the
 // bounded twin of weightHALQ4K/weightHALQ8, so a real model streams ROUTED EXPERTS under a device
 // budget — landed as #5611 (epic #5606 R0) via stage() + expert_ring_hal.go; it is opt-in per
-// session (Session.ExpertRingBytes > 0) and inert at the default 0. Still no async/pinned H2D: a
-// miss uploads synchronously (the prefetch seam is #5614).
+// session (Session.ExpertRingBytes > 0) and inert at the default 0.
+//
+// Async H2D landed with #5627: a backend advertising compute.AsyncUploader stages through
+// UploadAsync and the ring holds the Fence in `pending` until the weight is demanded. A DEMAND
+// stage (hit or miss) always settles its fence before returning a handle, so every existing caller
+// keeps a synchronous contract; only the #5614 prefetch returns with a transfer still in flight,
+// which is what makes overlap possible AND measurable (awaitStaged). A backend without the
+// extension takes the synchronous path with a nil fence and is byte-for-byte unchanged.
 type pagedRing struct {
 	be   compute.Backend
 	pool *polymodel.Pool
@@ -52,6 +58,19 @@ type pagedRing struct {
 	pageIn int // cold uploads (a miss that was admitted)
 	hit    int // resident reuses (a handle served without upload)
 	evict  int // page-outs (LRU victims dropped during admit to stay within budget)
+
+	// pending holds the in-flight transfer Fence for each weight staged through
+	// compute.AsyncUploader and not yet awaited (#5627). A weight is in this map for exactly the
+	// window between "issued" and "visible": awaitStaged clears it, and NOTHING may read, multiply
+	// or Free a handle while its id is still here.
+	pending map[polymodel.ModelID]compute.Fence
+	// asyncOverlapped / asyncWaited split the awaited fences by whether the transfer had ALREADY
+	// landed when its weight was finally demanded. Overlapped means the bytes moved underneath other
+	// work — the fraction the activated-set prefetch exists to grow. Waited means the demand caught
+	// up with the transfer and paid for it on the critical path. Their ratio is the overlap meter;
+	// counting them needs no clock, which is why it is trustworthy on a machine under load.
+	asyncOverlapped int
+	asyncWaited     int
 
 	// peak is the high-water mark of pool.Used() — the largest device weight footprint the ring ever
 	// held. It is the boundedness WITNESS: peak <= budget across an arbitrary access sequence is what
@@ -142,6 +161,24 @@ func uploadStaged(be compute.Backend, src compute.Tensor, dtype compute.Dtype, s
 	return be.Upload(src, dtype)
 }
 
+// uploadStagedAsync is uploadStaged over compute.AsyncUploader when the backend offers one,
+// returning the in-flight handle plus its Fence. A backend without the extension falls through to
+// the synchronous path and a nil Fence, which awaitStaged treats as already-landed — so cpu-ref
+// and every other synchronous backend keep the exact upload they had (#5627).
+//
+// The classed-upload path is preferred when BOTH are available only for the synchronous case: an
+// async upload cannot also carry the memory-class label today, and mislabelling the class would
+// corrupt the offload accounting that sizes the ring. Async is the newer, narrower capability, so
+// it yields.
+func uploadStagedAsync(be compute.Backend, src compute.Tensor, dtype compute.Dtype, site string) (compute.Tensor, compute.Fence) {
+	if _, classed := be.(classedUploadBackend); !classed {
+		if ab, ok := be.(compute.AsyncUploader); ok {
+			return ab.UploadAsync(src, dtype)
+		}
+	}
+	return uploadStaged(be, src, dtype, site), nil
+}
+
 // matMulStaged is the dtype-general ring core shared by the f32 matMul and the quantized matMulQ8 /
 // matMulQ4K twins. It runs y = w·x for the named weight, keeping the uploaded device handle resident
 // under the ring budget. On a HIT (name already resident) the handle is reused and Touched (no
@@ -185,32 +222,99 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 	if wt, ok := r.resident[id]; ok {
 		r.pool.Touch(id)
 		r.hit++
+		// A HIT on a weight the prefetch staged is where overlap is actually observed: the transfer
+		// was issued a GEMM or more ago, and either landed underneath that work or did not. Skip the
+		// fence while prefetching — re-hinting an in-flight weight must not block the hint path.
+		if !r.prefetching {
+			r.awaitStaged(id)
+		}
 		return wt, true
 	}
 	// Miss: build + upload the weight, then admit it under the budget. Admit is all-or-nothing: on
 	// error the pool is unchanged, so page the just-uploaded handle straight back out and defer.
 	// Under a non-default victim policy the ring makes room ITSELF first (evictForPolicy), so the
 	// Admit below fits and polymodel's own LRU choice never applies.
-	wt := uploadStaged(r.be, mk(), dtype, "paged-ring-weight")
+	wt, fence := uploadStagedAsync(r.be, mk(), dtype, "paged-ring-weight")
 	r.evictForPolicy(weightBytes)
 	evicted, err := r.pool.Admit(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned})
 	if err != nil {
+		if fence != nil {
+			fence.Wait() // never Free storage a transfer is still writing into
+		}
 		r.be.Free(wt)
 		return compute.Tensor{}, false
 	}
 	r.pageIn++
+	if fence != nil {
+		if r.pending == nil {
+			r.pending = map[polymodel.ModelID]compute.Fence{}
+		}
+		r.pending[id] = fence
+	}
 	for _, vid := range evicted {
 		if vh, ok := r.resident[vid]; ok {
+			// A victim may itself still be in flight (prefetched, then evicted before it was ever
+			// demanded). Freeing storage under a live transfer is a use-after-free the synchronous
+			// path could not produce, so the fence is settled first and its cost is NOT booked as
+			// overlap — nothing computed against it.
+			r.discardStaged(vid)
 			r.be.Free(vh) // page the LRU victim out; its device storage is released
 			delete(r.resident, vid)
 			r.evict++
 		}
 	}
 	r.resident[id] = wt
+	// A DEMAND miss must hand back a settled handle: every caller of stage() goes straight on to
+	// read or multiply it. Only the prefetch path may return with the transfer still in flight,
+	// which is the whole point of the extension — issue now, pay later or not at all.
+	if !r.prefetching {
+		r.awaitStaged(id)
+	}
 	if used := r.pool.Used(); used > r.peak {
 		r.peak = used
 	}
 	return wt, true
+}
+
+// awaitStaged makes a staged weight visible to subsequent ops and books the overlap (#5627).
+//
+// The Done() poll happens BEFORE the Wait, and that ordering is the whole meter: a fence already
+// satisfied when its weight is demanded moved its bytes underneath other work, and one that is not
+// costs the caller the remainder on the critical path. Counting the two is clock-free, so the
+// number means the same thing on an idle box and a loaded one.
+//
+// It is idempotent and safe on a weight that was never staged asynchronously — a missing entry is
+// an already-visible weight, which is exactly the synchronous backend's every case.
+func (r *pagedRing) awaitStaged(id polymodel.ModelID) {
+	f, ok := r.pending[id]
+	if !ok {
+		return
+	}
+	delete(r.pending, id)
+	if f == nil {
+		return
+	}
+	if f.Done() {
+		r.asyncOverlapped++
+		return
+	}
+	r.asyncWaited++
+	f.Wait()
+}
+
+// discardStaged settles an in-flight transfer whose weight is about to be dropped, WITHOUT booking
+// it in the overlap meter. An evicted-before-demand prefetch tells us nothing about whether
+// transfers overlap compute — nothing ever computed against it — so counting it either way would
+// bias the fraction the meter exists to report.
+func (r *pagedRing) discardStaged(id polymodel.ModelID) {
+	f, ok := r.pending[id]
+	if !ok {
+		return
+	}
+	delete(r.pending, id)
+	if f != nil {
+		f.Wait()
+	}
 }
 
 // hold protects an already-staged weight from eviction for the span of a multi-weight computation,
@@ -277,6 +381,7 @@ func (r *pagedRing) repin(id polymodel.ModelID, m polymodel.Model) {
 	r.pool.Evict(id)
 	if _, err := r.pool.Admit(m); err != nil {
 		if h, live := r.resident[id]; live {
+			r.discardStaged(id)
 			r.be.Free(h)
 			delete(r.resident, id)
 		}
@@ -292,10 +397,12 @@ func (r *pagedRing) freeAll() {
 		return
 	}
 	for id, t := range r.resident {
+		r.discardStaged(id) // never tear down storage a transfer is still writing into
 		r.be.Free(t)
 		delete(r.resident, id)
 		r.pool.Evict(id)
 	}
+	r.pending = nil
 	r.holds, r.heldPins = nil, nil
 }
 

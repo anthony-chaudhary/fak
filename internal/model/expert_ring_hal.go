@@ -173,6 +173,31 @@ type ExpertRingStats struct {
 	Prefetched       int `json:"prefetched"`
 	ActivatedExperts int `json:"activated_experts"`
 	ActivatedCovered int `json:"activated_covered"`
+	// AsyncOverlapped / AsyncWaited are the #5627 overlap meter, and they are populated ONLY on a
+	// backend advertising compute.AsyncUploader — both stay 0 on cpu-ref and on every synchronous
+	// backend, where a staged weight is visible the moment it is staged and there is nothing to
+	// overlap. Overlapped counts transfers already landed when their weight was demanded (the bytes
+	// moved underneath other work); Waited counts those the demand caught up with and paid for on
+	// the critical path. A transfer evicted before it was ever demanded is in neither: nothing
+	// computed against it, so it says nothing about overlap.
+	AsyncOverlapped int `json:"async_overlapped"`
+	AsyncWaited     int `json:"async_waited"`
+}
+
+// AsyncOverlapFraction is the share of fenced activated-expert transfers that had already landed
+// when their weight was demanded — the number R3/#5614 asked for and could not produce, because
+// before #5627 there was no handle to attribute a transfer to.
+//
+// It returns 0 when nothing was fenced, which is the honest reading for a synchronous backend:
+// not "no overlap was achieved" but "overlap is not a thing this backend can report". Read it
+// alongside AsyncOverlapped+AsyncWaited, which is the denominator, exactly as the coverage meter
+// is read against ActivatedExperts.
+func (s ExpertRingStats) AsyncOverlapFraction() float64 {
+	fenced := s.AsyncOverlapped + s.AsyncWaited
+	if fenced <= 0 {
+		return 0
+	}
+	return float64(s.AsyncOverlapped) / float64(fenced)
 }
 
 // ExpertRing reports this session's bounded routed-expert residency. It returns the zero value (in
@@ -197,5 +222,7 @@ func (s *Session) ExpertRing() ExpertRingStats {
 		Prefetched:       r.prefetched,
 		ActivatedExperts: r.activatedExperts,
 		ActivatedCovered: r.activatedCovered,
+		AsyncOverlapped:  r.asyncOverlapped,
+		AsyncWaited:      r.asyncWaited,
 	}
 }

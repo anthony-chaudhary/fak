@@ -139,6 +139,7 @@ func (r *pagedRing) evictForPolicy(weightBytes int64) {
 	}
 	for _, id := range victims {
 		if h, live := r.resident[id]; live {
+			r.discardStaged(id)
 			r.be.Free(h)
 			delete(r.resident, id)
 		}
