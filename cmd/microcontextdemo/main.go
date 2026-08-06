@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,10 +22,16 @@ import (
 )
 
 type config struct {
-	Contexts  int
-	Workers   int
-	Delay     time.Duration
-	Selfcheck bool
+	Contexts       int
+	Workers        int
+	Delay          time.Duration
+	Selfcheck      bool
+	Endpoint       string
+	APIKey         string
+	Model          string
+	Provider       string
+	Hardware       string
+	RequestTimeout time.Duration
 }
 
 type report struct {
@@ -40,6 +47,23 @@ type report struct {
 	ElapsedMS          int64   `json:"elapsed_ms"`
 	ShardsPerSecond    float64 `json:"shards_per_second"`
 	Scope              string  `json:"scope"`
+	FirstFailure       string  `json:"first_failure,omitempty"`
+	Mode               string  `json:"mode"`
+	Endpoint           string  `json:"endpoint,omitempty"`
+	Provider           string  `json:"provider,omitempty"`
+	Model              string  `json:"model,omitempty"`
+	Hardware           string  `json:"hardware,omitempty"`
+	BaseFingerprint    string  `json:"base_fingerprint"`
+	PromptTokens       int64   `json:"prompt_tokens,omitempty"`
+	CompletionTokens   int64   `json:"completion_tokens,omitempty"`
+	CachedPromptTokens int64   `json:"cached_prompt_tokens,omitempty"`
+	UsageResponses     int     `json:"usage_responses,omitempty"`
+	TTFTP50MS          float64 `json:"ttft_p50_ms,omitempty"`
+	TTFTP95MS          float64 `json:"ttft_p95_ms,omitempty"`
+	LatencyP50MS       float64 `json:"latency_p50_ms,omitempty"`
+	LatencyP95MS       float64 `json:"latency_p95_ms,omitempty"`
+	PromptTokensPerSec float64 `json:"prompt_tokens_per_wall_second,omitempty"`
+	DecodeTokensPerSec float64 `json:"decode_tokens_per_wall_second,omitempty"`
 }
 
 type sharedBase struct {
@@ -98,8 +122,9 @@ func (g *fakeEndpoint) Complete(ctx context.Context, messages []agent.Message, _
 }
 
 type shardAgent struct {
-	id   string
-	done bool
+	id    string
+	done  bool
+	exact bool
 }
 
 func (a *shardAgent) Step(ctx context.Context, gw microagent.Gateway) (bool, error) {
@@ -110,19 +135,47 @@ func (a *shardAgent) Step(ctx context.Context, gw microagent.Gateway) (bool, err
 	if err != nil {
 		return false, err
 	}
-	if resp == nil || resp.Message.Content != "done:"+a.id {
+	if resp == nil || strings.TrimSpace(resp.Message.Content) == "" {
+		return false, fmt.Errorf("empty completion for %s", a.id)
+	}
+	if a.exact && resp.Message.Content != "done:"+a.id {
 		return false, fmt.Errorf("bad completion for %s", a.id)
 	}
 	a.done = true
 	return true, nil
 }
 
+func percentileMS(values []time.Duration, q float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	idx := int(float64(len(values)-1) * q)
+	return float64(values[idx].Microseconds()) / 1000
+}
+
 func run(ctx context.Context, cfg config) (report, error) {
 	if cfg.Contexts < 1 || cfg.Workers < 1 {
 		return report{}, fmt.Errorf("contexts and workers must be positive")
 	}
-	base := &sharedBase{instructions: "one immutable agent base shared by every micro-context", fingerprint: "microcontext-base-v1"}
-	gw := newFakeEndpoint(base, cfg.Delay)
+	base := &sharedBase{
+		instructions: strings.Repeat("You are one worker in a bounded micro-context fabric. Preserve task isolation and return a short non-empty answer. ", 2),
+		fingerprint:  "microcontext-base-v1",
+	}
+	var gw microagent.Gateway
+	var live *openAIEndpoint
+	mode := "synthetic"
+	if cfg.Endpoint != "" {
+		var err error
+		live, err = newOpenAIEndpoint(cfg.Endpoint, cfg.APIKey, cfg.Model, base, cfg.RequestTimeout)
+		if err != nil {
+			return report{}, err
+		}
+		gw = live
+		mode = "openai-compatible"
+	} else {
+		gw = newFakeEndpoint(base, cfg.Delay)
+	}
 	host, err := microagent.NewHost(gw, microagent.Config{Workers: cfg.Workers, Queue: cfg.Contexts})
 	if err != nil {
 		return report{}, err
@@ -131,7 +184,7 @@ func run(ctx context.Context, cfg config) (report, error) {
 	start := time.Now()
 	for i := 0; i < cfg.Contexts; i++ {
 		id := "ctx-" + strconv.Itoa(i)
-		if err := host.Spawn(id, &shardAgent{id: id}); err != nil {
+		if err := host.Spawn(id, &shardAgent{id: id, exact: live == nil}); err != nil {
 			return report{}, fmt.Errorf("spawn %s: %w", id, err)
 		}
 	}
@@ -142,37 +195,85 @@ func run(ctx context.Context, cfg config) (report, error) {
 	results := host.Reap()
 	sort.Slice(results, func(i, j int) bool { return results[i].ID < results[j].ID })
 	failed := 0
+	var firstFailure string
 	for _, result := range results {
 		if !result.Done || result.Err != nil {
 			failed++
+			if firstFailure == "" && result.Err != nil {
+				firstFailure = result.ID + ": " + result.Err.Error()
+			}
 		}
 	}
 	r := report{
 		Schema: "fak-microcontext-spine/1", Verdict: "PASS", LogicalShards: cfg.Contexts,
 		PhysicalWorkers: cfg.Workers, Completed: len(results) - failed, Failed: failed,
-		SharedBaseInstalls: 1, TurnCount: gw.calls.Load(), PeakInFlight: gw.peak.Load(),
-		ElapsedMS: elapsed.Milliseconds(), ShardsPerSecond: float64(cfg.Contexts) / elapsed.Seconds(),
-		Scope: "synthetic endpoint; proves bounded harness fan-out and shared-base semantics, not model tokens/sec",
+		SharedBaseInstalls: 1, ElapsedMS: elapsed.Milliseconds(), ShardsPerSecond: float64(cfg.Contexts) / elapsed.Seconds(),
+		Mode: mode, Provider: cfg.Provider, Model: cfg.Model, Hardware: cfg.Hardware, BaseFingerprint: base.fingerprint, FirstFailure: firstFailure,
 	}
-	if failed != 0 || len(results) != cfg.Contexts || gw.calls.Load() != int64(cfg.Contexts) || len(gw.seen) != cfg.Contexts || gw.peak.Load() > int64(cfg.Workers) {
+	if live == nil {
+		fake := gw.(*fakeEndpoint)
+		r.TurnCount = fake.calls.Load()
+		r.PeakInFlight = fake.peak.Load()
+		r.Scope = "synthetic endpoint; proves bounded harness fan-out and shared-base semantics, not model tokens/sec"
+		if fake.calls.Load() != int64(cfg.Contexts) || len(fake.seen) != cfg.Contexts || fake.peak.Load() > int64(cfg.Workers) {
+			r.Verdict = "FAIL"
+			return r, fmt.Errorf("synthetic spine invariant failed")
+		}
+		if cfg.Selfcheck && cfg.Contexts > 1 && cfg.Workers > 1 && fake.peak.Load() < 2 {
+			r.Verdict = "FAIL"
+			return r, fmt.Errorf("parallelism was not observed")
+		}
+	} else {
+		stats := live.snapshot()
+		r.Endpoint = cfg.Endpoint
+		r.TurnCount = int64(len(stats.latencies))
+		r.PeakInFlight = int64(cfg.Workers) // admission ceiling; endpoint-internal batching is not inferred
+		r.PromptTokens = stats.promptTokens
+		r.CompletionTokens = stats.completionTokens
+		r.CachedPromptTokens = stats.cachedTokens
+		r.UsageResponses = stats.usageResponses
+		r.TTFTP50MS = percentileMS(stats.ttfts, .50)
+		r.TTFTP95MS = percentileMS(stats.ttfts, .95)
+		r.LatencyP50MS = percentileMS(stats.latencies, .50)
+		r.LatencyP95MS = percentileMS(stats.latencies, .95)
+		r.PromptTokensPerSec = float64(stats.promptTokens) / elapsed.Seconds()
+		r.DecodeTokensPerSec = float64(stats.completionTokens) / elapsed.Seconds()
+		r.Scope = "real streaming endpoint; token rates are aggregate observed usage divided by wall time, not server-internal kernel rates; critical-path latency is reported separately"
+		if stats.usageResponses != cfg.Contexts || len(stats.ttfts) != cfg.Contexts {
+			r.Verdict = "FAIL"
+			return r, fmt.Errorf("live telemetry incomplete: usage=%d ttft=%d want=%d", stats.usageResponses, len(stats.ttfts), cfg.Contexts)
+		}
+	}
+	if failed != 0 || len(results) != cfg.Contexts || r.TurnCount != int64(cfg.Contexts) {
 		r.Verdict = "FAIL"
 		return r, fmt.Errorf("spine invariant failed")
 	}
-	if cfg.Selfcheck && cfg.Contexts > 1 && cfg.Workers > 1 && gw.peak.Load() < 2 {
-		r.Verdict = "FAIL"
-		return r, fmt.Errorf("parallelism was not observed")
-	}
 	return r, nil
 }
-
 func main() {
 	var cfg config
+	var verifyPath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
 	flag.BoolVar(&cfg.Selfcheck, "selfcheck", false, "enforce spine invariants")
+	flag.StringVar(&cfg.Endpoint, "endpoint", "", "OpenAI-compatible endpoint root; empty uses the synthetic S0 endpoint")
+	flag.StringVar(&cfg.APIKey, "api-key", "", "endpoint API key (prefer environment expansion by the caller)")
+	flag.StringVar(&cfg.Model, "model", "", "live endpoint model id")
+	flag.StringVar(&cfg.Provider, "provider", "", "provider provenance label")
+	flag.StringVar(&cfg.Hardware, "hardware", "", "hardware provenance label")
+	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", 2*time.Minute, "per-request live endpoint timeout")
+	flag.StringVar(&verifyPath, "verify", "", "verify a captured S1 JSON artifact and exit")
 	flag.Parse()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if verifyPath != "" {
+		if err := verifyArtifact(verifyPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyPath)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	r, err := run(ctx, cfg)
 	enc := json.NewEncoder(os.Stdout)

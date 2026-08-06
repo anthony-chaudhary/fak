@@ -55,7 +55,7 @@ Each rung must run end to end before the next is treated as real.
 | Rung | Working component | Required witness |
 |---|---|---|
 | S0 | Synthetic 10k logical contexts over bounded workers (current) | exact completion count, one base install, peak concurrency ≤ worker cap |
-| S1 | One real OpenAI-compatible endpoint, 100 delta contexts, no tools | wall time, TTFT, prefill/decode tokens, cache status, failures |
+| S1 | **Observed:** one real OpenAI-compatible endpoint, 100 delta contexts, no tools | [100/100 captured witness](micro-context-s1-real-endpoint.md): wall time, TTFT, usage-derived token rates, failures |
 | S2 | Shared-prefix A/B: unique full prompts vs one base + deltas | tuned-baseline net tokens/sec and prefix-cache bytes/hit provenance |
 | S3 | 1k resumable contexts with bounded RAM/KV and backpressure | queue age, resident/hibernated counts, recovery after restart |
 | S4 | Tool-capable microagents through the real policy/tool seam | per-context capabilities, deterministic journal, independent effect verification |
@@ -160,4 +160,3 @@ Epic: [#5785](https://github.com/anthony-chaudhary/fak/issues/5785) (P0, G0).
   agentic caching layers and open gaps.
 - [`docs/notes/MOE-SSD-MULTI-AGENT-NET-TOKS-2026-07-18.md`](../notes/MOE-SSD-MULTI-AGENT-NET-TOKS-2026-07-18.md):
   inference-throughput roofline; do not blend it with orchestration metrics.
-
