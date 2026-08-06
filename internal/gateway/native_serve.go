@@ -203,6 +203,10 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 //     the next turn of THIS loop (the consumer half that had no live caller).
 //   - WithRouteManifest: the live, hot-reloadable routing policy (s.route), so a per-call
 //     model route is bound before each in-loop k.Syscall, exactly as the proxy path does.
+//   - WithRouteAccounts + WithRoutePrincipal: the model-ACCOUNT roster (s.roster) and the
+//     request's isolation principal, so the routed id the manifest PICKs is resolved to
+//     the account-bound Target.EngineRoute() and gated on the caller's tenancy — the same
+//     resolveRoute the proxy path runs, rather than a manifest-only route (#5644).
 //
 // The loop is seeded with the request's last user message; the kernel-owned tool catalog
 // is the sole tool path. It returns the per-turn ArmMetrics — the witness that the loop,
@@ -331,6 +335,26 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent
 			opts = append(opts, agent.WithRouteManifest(mfst))
 		}
 	}
+	// #5644: hang the roster mirror the manifest option only half-wired. Until now the
+	// owned loop resolved a tool call's engine through the MANIFEST alone while the
+	// proxying path resolved the same call through the manifest AND the account roster
+	// (buildCall -> routeEngine -> resolveRoute -> Target.EngineRoute()), so two serving
+	// modes of one binary bound two different routes for the same call and the residency
+	// PDP adjudicating a native turn saw a manifest route where the proxy path would have
+	// shown it an account-resolved one. Passed unconditionally: a nil roster leaves the
+	// abstract routed id verbatim, which is byte-for-byte the pre-#5644 native loop, so a
+	// gateway with no --route-accounts is unchanged.
+	//
+	// The principal rides along because the roster's residency arm needs BOTH halves
+	// (#5332): resolveRoute refuses an account whose principals allowlist does not name
+	// this caller, so wiring the roster without the principal would make the native path
+	// resolve a route the proxy path REFUSES — trading one divergence for a worse one.
+	// withAuth already stamped the request principal onto ctx, and an unattributed caller
+	// yields "", which Target.Admits fails closed against a restricted account.
+	opts = append(opts,
+		agent.WithRouteAccounts(s.roster),
+		agent.WithRoutePrincipal(principalFromContext(ctx)),
+	)
 	return opts, release
 }
 

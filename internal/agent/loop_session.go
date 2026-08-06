@@ -11,6 +11,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +46,7 @@ type runConfig struct {
 	trace                 string
 	route                 *modelroute.Manifest
 	roster                *modelroute.Roster
+	principal             string
 	spec                  *abi.Speculator
 	contextPlanner        *SessionPlanner
 	contextBaselineOutput int
@@ -272,6 +274,25 @@ func WithRouteAccounts(r *modelroute.Roster) RunOption {
 	return func(c *runConfig) { c.roster = r }
 }
 
+// WithRoutePrincipal wires the caller's tenant ISOLATION principal (the org/project a
+// keyset key authenticated as, #5332) into the in-process agent loop, so the account
+// roster's RESIDENCY arm adjudicates the same principal the served gateway does. It is
+// the second half of WithRouteAccounts: the roster answers WHICH account a routed id
+// binds to, and the principal answers WHETHER this caller may dispatch through that
+// account at all. Without it a roster-wired loop would resolve an account-bound route
+// that the gateway's resolveRoute REFUSES for the same call, which is the divergence
+// WithRouteAccounts exists to close (#5644) — so a caller that wires a roster on a
+// multi-tenant path must wire the principal too.
+//
+// An EMPTY principal is the unattributed caller (no keyset, or the single
+// --require-key-env bearer) and is fail-CLOSED against a restricted account, exactly as
+// Target.Admits specifies; an account naming NO principals is unrestricted and admits
+// everyone, so a pre-#5332 roster resolves byte-for-byte as before. A caller may pass
+// the option unconditionally.
+func WithRoutePrincipal(principal string) RunOption {
+	return func(c *runConfig) { c.principal = principal }
+}
+
 // WithSpeculator wires the SEAM-4 predicted-next-path engine (#809) into RunArm so the
 // loop SPECULATES the next tool call ahead of the model: after a turn's tool calls run,
 // the loop predicts the model's next call, runs it effect-free under a speculative epoch,
@@ -317,13 +338,18 @@ func (c runConfig) routeToolEngine(tool string) string {
 // resolveToolEngine returns the FINAL engine route to bind to abi.ToolCall.Engine for
 // one tool call: the abstract routed id from routeToolEngine, then — when an account
 // roster is wired (WithRouteAccounts, #2528) — resolved through it to the account-bound,
-// residency-honest Target.EngineRoute(). It mirrors the gateway's resolveRoute exactly,
-// so the in-process loop and the served gateway can never diverge on WHOSE account a
-// routed id lands on. An id the roster cannot resolve (no binding and no default account)
-// is a FAIL-LOUD error carrying the recovery hint — never a silent fallback to the
-// default engine, so a misconfigured roster cannot dispatch a routed call to the wrong
-// account. A nil roster, or an empty/ensemble route (id ""), returns the abstract id
-// verbatim: byte-for-byte the pre-roster loop and the kernel default respectively.
+// residency-honest Target.EngineRoute(), and finally gated on whether this run's
+// principal is admitted to that account (WithRoutePrincipal, #5332). It mirrors the
+// gateway's resolveRoute exactly, so the in-process loop and the served gateway can never
+// diverge on WHOSE account a routed id lands on — the PRECEDENCE is manifest first
+// (which abstract id), roster second (which account), principal third (may this caller
+// use it); a roster binds nothing without a manifest, because the roster is only
+// consulted for an id the manifest already PICKed. An id the roster cannot resolve (no
+// binding and no default account) is a FAIL-LOUD error carrying the recovery hint —
+// never a silent fallback to the default engine, so a misconfigured roster cannot
+// dispatch a routed call to the wrong account. A nil roster, or an empty/ensemble route
+// (id ""), returns the abstract id verbatim: byte-for-byte the pre-roster loop and the
+// kernel default respectively.
 func (c runConfig) resolveToolEngine(tool string) (string, error) {
 	id := c.routeToolEngine(tool)
 	if c.roster == nil || id == "" {
@@ -332,6 +358,17 @@ func (c runConfig) resolveToolEngine(tool string) (string, error) {
 	t, err := c.roster.Resolve(id)
 	if err != nil {
 		return "", fmt.Errorf("route accounts: %w (fix the roster binding for %q or set a default account; no silent fallback)", err, id)
+	}
+	if !t.Admits(c.principal) {
+		// Name the principal and the account, never the credential — the same shape (and
+		// the same fail-closed verdict) the gateway's resolveRoute reports, so an operator
+		// reads one refusal whichever path served the turn. An empty principal is rendered
+		// as <unattributed> so "wrong tenant" is distinguishable from "no tenant at all".
+		who := c.principal
+		if strings.TrimSpace(who) == "" {
+			who = "<unattributed>"
+		}
+		return "", fmt.Errorf("route accounts: principal %s is not admitted to account %q (routed model %q): that account's principals allowlist scopes it to another tenant (#5332) — add this principal to the account, or route this run through an account it is provisioned for", who, t.Account, id)
 	}
 	return t.EngineRoute(), nil
 }
