@@ -30,3 +30,17 @@ func TestSpineRejectsInvalidDimensions(t *testing.T) {
 		t.Fatal("expected invalid-dimensions error")
 	}
 }
+
+func TestRunContextTimeout(t *testing.T) {
+	ctx, cancel := overallDeadline(context.Background(), 0)
+	defer cancel()
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("disabled run timeout unexpectedly installed a deadline")
+	}
+	ctx, cancel = overallDeadline(context.Background(), time.Minute)
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("positive run timeout did not install a deadline")
+	}
+}
+

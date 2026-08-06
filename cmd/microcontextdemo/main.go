@@ -35,39 +35,51 @@ type config struct {
 	Provider       string
 	Hardware       string
 	RequestTimeout time.Duration
+	RunTimeout     time.Duration
 	PrefixMode     string
 }
 
 type report struct {
-	Schema             string  `json:"schema"`
-	Verdict            string  `json:"verdict"`
-	LogicalShards      int     `json:"logical_shards"`
-	PhysicalWorkers    int     `json:"physical_workers"`
-	Completed          int     `json:"completed"`
-	Failed             int     `json:"failed"`
-	SharedBaseInstalls int64   `json:"shared_base_installs"`
-	TurnCount          int64   `json:"turn_count"`
-	PeakInFlight       int64   `json:"peak_in_flight"`
-	ElapsedMS          int64   `json:"elapsed_ms"`
-	ShardsPerSecond    float64 `json:"shards_per_second"`
-	Scope              string  `json:"scope"`
-	FirstFailure       string  `json:"first_failure,omitempty"`
-	Mode               string  `json:"mode"`
-	Endpoint           string  `json:"endpoint,omitempty"`
-	Provider           string  `json:"provider,omitempty"`
-	Model              string  `json:"model,omitempty"`
-	Hardware           string  `json:"hardware,omitempty"`
-	BaseFingerprint    string  `json:"base_fingerprint"`
-	PromptTokens       int64   `json:"prompt_tokens,omitempty"`
-	CompletionTokens   int64   `json:"completion_tokens,omitempty"`
-	CachedPromptTokens int64   `json:"cached_prompt_tokens,omitempty"`
-	UsageResponses     int     `json:"usage_responses,omitempty"`
-	TTFTP50MS          float64 `json:"ttft_p50_ms,omitempty"`
-	TTFTP95MS          float64 `json:"ttft_p95_ms,omitempty"`
-	LatencyP50MS       float64 `json:"latency_p50_ms,omitempty"`
-	LatencyP95MS       float64 `json:"latency_p95_ms,omitempty"`
-	PromptTokensPerSec float64 `json:"prompt_tokens_per_wall_second,omitempty"`
-	DecodeTokensPerSec float64 `json:"decode_tokens_per_wall_second,omitempty"`
+	Schema                string  `json:"schema"`
+	Verdict               string  `json:"verdict"`
+	LogicalShards         int     `json:"logical_shards"`
+	PhysicalWorkers       int     `json:"physical_workers"`
+	Completed             int     `json:"completed"`
+	Failed                int     `json:"failed"`
+	SharedBaseInstalls    int64   `json:"shared_base_installs"`
+	TurnCount             int64   `json:"turn_count"`
+	PeakInFlight          int64   `json:"peak_in_flight"`
+	ElapsedMS             int64   `json:"elapsed_ms"`
+	ShardsPerSecond       float64 `json:"shards_per_second"`
+	Scope                 string  `json:"scope"`
+	FirstFailure          string  `json:"first_failure,omitempty"`
+	Mode                  string  `json:"mode"`
+	Endpoint              string  `json:"endpoint,omitempty"`
+	Provider              string  `json:"provider,omitempty"`
+	Model                 string  `json:"model,omitempty"`
+	Hardware              string  `json:"hardware,omitempty"`
+	BaseFingerprint       string  `json:"base_fingerprint"`
+	PromptTokens          int64   `json:"prompt_tokens,omitempty"`
+	CompletionTokens      int64   `json:"completion_tokens,omitempty"`
+	CachedPromptTokens    int64   `json:"cached_prompt_tokens,omitempty"`
+	UsageResponses        int     `json:"usage_responses,omitempty"`
+	TTFTP50MS             float64 `json:"ttft_p50_ms,omitempty"`
+	TTFTP95MS             float64 `json:"ttft_p95_ms,omitempty"`
+	TTFTMaxMS             float64 `json:"ttft_max_ms,omitempty"`
+	LatencyP50MS          float64 `json:"latency_p50_ms,omitempty"`
+	LatencyP95MS          float64 `json:"latency_p95_ms,omitempty"`
+	LatencyMaxMS          float64 `json:"latency_max_ms,omitempty"`
+	PromptTokensPerSec    float64 `json:"prompt_tokens_per_wall_second,omitempty"`
+	DecodeTokensPerSec    float64 `json:"decode_tokens_per_wall_second,omitempty"`
+	ResourceSamples       int     `json:"resource_samples,omitempty"`
+	ClientPeakRSSBytes    int64   `json:"client_peak_rss_bytes,omitempty"`
+	ServerPeakRSSBytes    int64   `json:"server_peak_rss_bytes,omitempty"`
+	ServerPeakHeapBytes   int64   `json:"server_peak_heap_alloc_bytes,omitempty"`
+	EndpointPeakRequests    int     `json:"endpoint_peak_requests,omitempty"`
+	KVCapacityEvidence    string  `json:"kv_capacity_evidence,omitempty"`
+	QueueEvidence         string  `json:"queue_evidence,omitempty"`
+	ResultCheck    string  `json:"result_check,omitempty"`
+	VerifiedResultsPerSec float64 `json:"verified_nonempty_results_per_wall_second,omitempty"`
 }
 
 type sharedBase struct {
@@ -244,8 +256,10 @@ func run(ctx context.Context, cfg config) (report, error) {
 		r.UsageResponses = stats.usageResponses
 		r.TTFTP50MS = percentileMS(stats.ttfts, .50)
 		r.TTFTP95MS = percentileMS(stats.ttfts, .95)
+		r.TTFTMaxMS = percentileMS(stats.ttfts, 1)
 		r.LatencyP50MS = percentileMS(stats.latencies, .50)
 		r.LatencyP95MS = percentileMS(stats.latencies, .95)
+		r.LatencyMaxMS = percentileMS(stats.latencies, 1)
 		r.PromptTokensPerSec = float64(stats.promptTokens) / elapsed.Seconds()
 		r.DecodeTokensPerSec = float64(stats.completionTokens) / elapsed.Seconds()
 		r.Scope = "real streaming endpoint; token rates are aggregate observed usage divided by wall time, not server-internal kernel rates; critical-path latency is reported separately"
@@ -283,6 +297,7 @@ func main() {
 	flag.StringVar(&cfg.Provider, "provider", "", "provider provenance label")
 	flag.StringVar(&cfg.Hardware, "hardware", "", "hardware provenance label")
 	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", 2*time.Minute, "per-request live endpoint timeout")
+	flag.DurationVar(&cfg.RunTimeout, "run-timeout", 15*time.Minute, "overall run timeout (0 disables the deadline)")
 	flag.StringVar(&verifyPath, "verify", "", "verify a captured S1 JSON artifact and exit")
 	flag.StringVar(&abOutput, "prefix-ab", "", "run the S2 prefix A/B and write JSON to this path (or - for stdout)")
 	flag.StringVar(&verifyABPath, "verify-prefix-ab", "", "verify a captured S2 prefix A/B artifact and exit")
@@ -439,7 +454,7 @@ func main() {
 		}
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := overallDeadline(context.Background(), cfg.RunTimeout)
 	defer cancel()
 	r, err := run(ctx, cfg)
 	enc := json.NewEncoder(os.Stdout)
@@ -451,6 +466,12 @@ func main() {
 	}
 }
 
+func overallDeadline(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, timeout)
+}
 func runVersionProbe(ctx context.Context, name string) (time.Duration, error) {
 	args := []string{"--version"}
 	if name == "fak" {
@@ -482,3 +503,4 @@ func runVersionProbe(ctx context.Context, name string) (time.Duration, error) {
 	err = cmd.Run()
 	return time.Since(start), err
 }
+

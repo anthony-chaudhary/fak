@@ -55,3 +55,4 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [Micro-context S4a lightweight descriptor](micro-context-s4-lightweight-descriptor.md)
 - [Micro-context S4b compatibility scheduler](micro-context-s4-compatibility-scheduler.md)
 - [Micro-context S4c effect safety](micro-context-s4-effect-safety.md)
+- [Micro-context S5a controlled-kernel 1,000-context ramp](micro-context-s5a-controlled-kernel-1k.md)
