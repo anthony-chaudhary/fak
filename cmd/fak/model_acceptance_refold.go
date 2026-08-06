@@ -145,7 +145,7 @@ func refoldAcceptanceReport(in modelaccept.Input, rawDir string) (modelaccept.In
 		old := prior[key]
 		refolded = append(refolded, modelaccept.Run{
 			Model: key.model, ActualModel: parsed.actualModel, Task: key.task, Repetition: key.repetition,
-			Result: parsed.result, ToolValid: parsed.toolValid, ToolCalls: parsed.toolCalls,
+			Result: parsed.result, ToolValid: parsed.toolValid, ToolCalls: parsed.toolCalls, ToolTurns: parsed.toolTurns,
 			Refusal: parsed.refusal, RetryCount: parsed.retryCount, Recovered: parsed.recovered,
 			LatencyMS: parsed.latencyMS, InputTokens: parsed.inputTokens, CostUSD: parsed.costUSD,
 			ObservedAt: old.ObservedAt,

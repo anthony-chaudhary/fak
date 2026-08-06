@@ -39,6 +39,50 @@ func TestParseClaudeAcceptanceExactIDAndBehaviors(t *testing.T) {
 	}
 }
 
+// TestParseClaudeAcceptanceCountsToolTurns pins the width denominator the fold
+// grades on (#5802). The load-bearing case is the split one: Claude Code writes a
+// single assistant response as one stream event per content block under the SAME
+// message id, so a batched turn must collapse back to ONE turn — otherwise every
+// model looks serialized and no corpus task could ever witness width.
+func TestParseClaudeAcceptanceCountsToolTurns(t *testing.T) {
+	const model = "exact-a"
+	toolUse := func(id string, calls int) string {
+		content := []any{}
+		for i := 0; i < calls; i++ {
+			content = append(content, map[string]any{"type": "tool_use", "name": "mcp__acceptance__lookup"})
+		}
+		b, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"model": model, "id": id, "content": content}})
+		return string(b)
+	}
+	result, _ := json.Marshal(map[string]any{"type": "result", "subtype": "success", "result": "OK", "usage": map[string]any{"input_tokens": 1}, "modelUsage": map[string]any{model: map[string]any{}}})
+	for _, tc := range []struct {
+		name                 string
+		events               []string
+		wantCalls, wantTurns int
+	}{
+		{"two calls in one event", []string{toolUse("msg_1", 2)}, 2, 1},
+		{"one response split across events", []string{toolUse("msg_1", 1), toolUse("msg_1", 1)}, 2, 1},
+		{"serialized across responses", []string{toolUse("msg_1", 1), toolUse("msg_2", 1)}, 2, 2},
+		{"tool result closes the turn", []string{toolUse("msg_1", 1), `{"type":"user","message":{"content":[{"type":"tool_result","is_error":false}]}}`, toolUse("msg_1", 1)}, 2, 2},
+		{"text-only response is not a tool turn", []string{`{"type":"assistant","message":{"model":"exact-a","id":"msg_1","content":[{"type":"text","text":"thinking"}]}}`, toolUse("msg_2", 1)}, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(strings.Join(append(append([]string{}, tc.events...), string(result)), "\n") + "\n")
+			p, err := parseClaudeAcceptance(raw, model, modelaccept.Task{Expected: "OK", ToolRequired: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.toolCalls != tc.wantCalls || p.toolTurns != tc.wantTurns {
+				t.Fatalf("calls=%d turns=%d, want %d/%d", p.toolCalls, p.toolTurns, tc.wantCalls, tc.wantTurns)
+			}
+			run := modelaccept.Run{ToolCalls: p.toolCalls, ToolTurns: p.toolTurns}
+			if got, want := modelaccept.ToolCallWidth(run), (tc.wantCalls+tc.wantTurns-1)/max(tc.wantTurns, 1); got != want {
+				t.Fatalf("width=%d, want %d", got, want)
+			}
+		})
+	}
+}
+
 func TestParseClaudeAcceptanceFailsClosed(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

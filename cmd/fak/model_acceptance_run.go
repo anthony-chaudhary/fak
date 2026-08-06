@@ -39,6 +39,7 @@ type claudeStreamEvent struct {
 	Type    string `json:"type"`
 	Message struct {
 		Model   string `json:"model"`
+		ID      string `json:"id"`
 		Content []struct {
 			Type, Name, Text string
 			ID               string `json:"id"`
@@ -184,6 +185,7 @@ func executeAcceptanceRun(opts acceptanceRunOptions, fixture, mcpPath, model str
 	r.Result = parsed.result
 	r.ProviderError = cmdErr != nil || parseErr != nil
 	r.ToolCalls = parsed.toolCalls
+	r.ToolTurns = parsed.toolTurns
 	r.ToolValid = parsed.toolValid
 	r.Refusal = parsed.refusal
 	r.RetryCount = parsed.retryCount
@@ -223,7 +225,8 @@ var errAcceptanceProvider = errors.New("acceptance provider failure")
 
 type parsedAcceptance struct {
 	actualModel, result, refusal string
-	toolCalls, retryCount        int
+	toolCalls, toolTurns         int
+	retryCount                   int
 	toolValid, recovered         bool
 	latencyMS, inputTokens       int64
 	costUSD                      float64
@@ -234,6 +237,16 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 	var resultSeen bool
 	toolNames := []string{}
 	toolErrors := []bool{}
+	// Turn accounting for the width axis (#5802): a turn is counted once, and only
+	// if it issued at least one tool call — the ToolTurns denominator
+	// internal/agent/turnbatch.go folds.
+	curTurnID, curTurnTools, haveTurn := "", 0, false
+	closeTurn := func() {
+		if haveTurn && curTurnTools > 0 {
+			p.toolTurns++
+		}
+		haveTurn, curTurnID, curTurnTools = false, "", 0
+	}
 	s := bufio.NewScanner(bytes.NewReader(raw))
 	s.Buffer(make([]byte, 4096), 4<<20)
 	for s.Scan() {
@@ -251,13 +264,28 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 				}
 				p.actualModel = e.Message.Model
 			}
+			n := 0
 			for _, c := range e.Message.Content {
 				if c.Type == "tool_use" {
 					toolNames = append(toolNames, c.Name)
+					n++
 				}
+			}
+			// Claude Code emits ONE assistant response as several stream events — one
+			// per content block, all stamped with the same message id — so a turn must
+			// be keyed by that id and the splits merged, or a batched turn reads as N
+			// serialized ones and width collapses to 1. An empty id never merges, so
+			// an id-less split stays its own turn (same rule as turnbatch's parser).
+			if haveTurn && e.Message.ID != "" && e.Message.ID == curTurnID {
+				curTurnTools += n
+			} else {
+				closeTurn()
+				haveTurn, curTurnID, curTurnTools = true, e.Message.ID, n
 			}
 		}
 		if e.Type == "user" {
+			// A tool_result (or a human turn) closes the open assistant turn.
+			closeTurn()
 			for _, c := range e.Message.Content {
 				if c.Type == "tool_result" {
 					toolErrors = append(toolErrors, c.IsError)
@@ -288,6 +316,7 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 			}
 		}
 	}
+	closeTurn()
 	if err := s.Err(); err != nil {
 		return p, err
 	}
@@ -423,7 +452,7 @@ func classifyAcceptanceFailure(task modelaccept.Task, run modelaccept.Run, cmdEr
 	if task.ExpectedRefusal != "" && run.Refusal != task.ExpectedRefusal {
 		return "policy_refusal", "required policy refusal was not observed"
 	}
-	toolOK := !task.ToolRequired || (run.ToolValid && run.ToolCalls >= task.MinToolCalls)
+	toolOK := !task.ToolRequired || (run.ToolValid && run.ToolCalls >= task.MinToolCalls && modelaccept.ToolCallWidth(run) >= task.MinParallelToolCalls)
 	retryOK := !task.RetryRequired || run.RetryCount > 0
 	recoveryOK := !task.RecoveryRequired || run.Recovered
 	if !modelaccept.ResultMatches(task, run.Result) || !toolOK || !retryOK || !recoveryOK {

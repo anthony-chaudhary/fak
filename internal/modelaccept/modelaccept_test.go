@@ -238,6 +238,110 @@ func TestProspectiveV3DeclarationPrecedesObservations(t *testing.T) {
 	}
 }
 
+// TestAgenticCorpusGradesToolCallWidthPerTurn binds the declared width task to the
+// fold. The corpus must carry a task whose two independent lookups have no data
+// dependency, and the fold must separate the ONE-turn solution from the serialized
+// one — the two shapes that min_tool_calls alone grades identically.
+func TestAgenticCorpusGradesToolCallWidthPerTurn(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "model-acceptance-agentic-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var declared Input
+	if err := json.Unmarshal(data, &declared); err != nil {
+		t.Fatal(err)
+	}
+	var width Task
+	for _, task := range declared.Corpus.Tasks {
+		if task.MinParallelToolCalls > 0 {
+			width = task
+			break
+		}
+	}
+	if width.ID == "" {
+		t.Fatal("agentic corpus declares no per-turn width task")
+	}
+	if !width.ToolRequired || width.MinParallelToolCalls < 2 || width.MinToolCalls < width.MinParallelToolCalls {
+		t.Fatalf("width task is not gradeable: %+v", width)
+	}
+	for _, tc := range []struct {
+		name                 string
+		minParallel          int
+		toolCalls, toolTurns int
+		want                 Verdict
+		wantWidth            float64
+	}{
+		// Identical VOLUME, opposite width: batching both lookups in one turn is the
+		// capability; serializing them across two turns is not.
+		{"batched in one turn", width.MinParallelToolCalls, 2, 1, Pass, 2},
+		{"serialized across two turns", width.MinParallelToolCalls, 2, 2, Hold, 1},
+		// An unreporting harness proves nothing, so it fails closed rather than
+		// inheriting a pass from the volume field.
+		{"tool turns unreported", width.MinParallelToolCalls, 2, 0, Hold, 0},
+		// Pigeonhole floor: 3 calls over 2 turns prove one turn carried 2.
+		{"proven floor across turns", width.MinParallelToolCalls, 3, 2, Pass, 1.5},
+		// Additive and optional: without a declared width, a serialized run still
+		// passes exactly as it did before the axis existed.
+		{"no width requirement", 0, 2, 2, Pass, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := width
+			task.Repetitions, task.MinParallelToolCalls = 1, tc.minParallel
+			in := Input{
+				Schema: Schema,
+				Corpus: Corpus{ID: "width-v1", DeclaredAt: "2026-07-15T00:40:00-07:00", Tasks: []Task{task}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}},
+				Models: []ModelRequest{{Model: "exact-a", RequestedTier: task.Tier}},
+				Runs:   []Run{{Model: "exact-a", ActualModel: "exact-a", Task: task.ID, Repetition: 1, Result: task.Expected, ToolValid: true, ToolCalls: tc.toolCalls, ToolTurns: tc.toolTurns, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-15T00:41:00-07:00"}},
+			}
+			got := Evaluate(in)
+			d := decision(in, "exact-a")
+			if got.Verdict != tc.want || d.Verdict != tc.want {
+				t.Fatalf("verdict=%s want %s reasons=%v", got.Verdict, tc.want, d.Reasons)
+			}
+			if d.ToolCallsPerToolTurn != tc.wantWidth || d.ToolCalls != tc.toolCalls || d.ToolTurns != tc.toolTurns {
+				t.Fatalf("width figure=%v calls=%d turns=%d want %v/%d/%d", d.ToolCallsPerToolTurn, d.ToolCalls, d.ToolTurns, tc.wantWidth, tc.toolCalls, tc.toolTurns)
+			}
+			if tc.want == Hold {
+				if !strings.Contains(strings.Join(d.Reasons, " "), "tool width mismatch") {
+					t.Fatalf("width HOLD needs its own reason: %v", d.Reasons)
+				}
+				// Width stays out of invalid_tool_rate: a serialized run issued valid
+				// calls, so the volume/validity meter must not absorb the width miss.
+				if d.InvalidToolRate != 0 {
+					t.Fatalf("width miss leaked into invalid_tool_rate: %v", d.InvalidToolRate)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateRejectsMalformedWidthContract(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		edit       func(*Input)
+	}{
+		{"width without tool_required", "invalid minimum parallel tool calls", func(in *Input) {
+			in.Corpus.Tasks[0].MinParallelToolCalls = 2
+		}},
+		{"negative width", "invalid minimum parallel tool calls", func(in *Input) {
+			in.Corpus.Tasks[2].MinParallelToolCalls = -1
+		}},
+		{"more turns than calls", "more tool turns than tool calls", func(in *Input) {
+			in.Runs[0].ToolCalls, in.Runs[0].ToolTurns = 1, 2
+		}},
+		{"negative turns", "negative behavior count", func(in *Input) { in.Runs[0].ToolTurns = -1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := validInput()
+			tc.edit(&in)
+			got := Evaluate(in)
+			if got.Verdict != Hold || !strings.Contains(strings.Join(got.Reasons, " "), tc.want) {
+				t.Fatalf("decision=%+v want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResultMatchesSentinelLineOnly(t *testing.T) {
 	task := Task{Expected: "FAK_ACCEPTANCE_RESULT=OK", ResultMatch: "sentinel_line"}
 	for _, result := range []string{
