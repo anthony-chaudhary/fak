@@ -190,6 +190,7 @@ func executeAcceptanceRun(opts acceptanceRunOptions, fixture, mcpPath, model str
 	r.Refusal = parsed.refusal
 	r.RetryCount = parsed.retryCount
 	r.Recovered = parsed.recovered
+	r.Decision = acceptanceObservedWidth(task, r)
 	r.LatencyMS = parsed.latencyMS
 	r.InputTokens = parsed.inputTokens
 	r.CostUSD = parsed.costUSD
@@ -439,6 +440,29 @@ func safeName(s string) string {
 	}, s)
 }
 
+func acceptanceObservedWidth(task modelaccept.Task, run modelaccept.Run) string {
+	if !task.MeasureToolWidth || run.ToolCalls < task.MinToolCalls {
+		return ""
+	}
+	if modelaccept.ToolCallWidth(run) >= 2 {
+		return "batched"
+	}
+	return "sequential"
+}
+
+func acceptanceToolContractSatisfied(task modelaccept.Task, run modelaccept.Run) bool {
+	if !task.ToolRequired {
+		return true
+	}
+	if !run.ToolValid || run.ToolCalls < task.MinToolCalls {
+		return false
+	}
+	if task.MeasureToolWidth {
+		return run.Decision == "batched" || run.Decision == "sequential"
+	}
+	return modelaccept.ToolCallWidth(run) >= task.MinParallelToolCalls
+}
+
 func classifyAcceptanceFailure(task modelaccept.Task, run modelaccept.Run, cmdErr, parseErr error) (string, string) {
 	if cmdErr != nil {
 		return "provider_infrastructure", cmdErr.Error()
@@ -452,7 +476,7 @@ func classifyAcceptanceFailure(task modelaccept.Task, run modelaccept.Run, cmdEr
 	if task.ExpectedRefusal != "" && run.Refusal != task.ExpectedRefusal {
 		return "policy_refusal", "required policy refusal was not observed"
 	}
-	toolOK := !task.ToolRequired || (run.ToolValid && run.ToolCalls >= task.MinToolCalls && modelaccept.ToolCallWidth(run) >= task.MinParallelToolCalls)
+	toolOK := acceptanceToolContractSatisfied(task, run)
 	retryOK := !task.RetryRequired || run.RetryCount > 0
 	recoveryOK := !task.RecoveryRequired || run.Recovered
 	if !modelaccept.ResultMatches(task, run.Result) || !toolOK || !retryOK || !recoveryOK {

@@ -411,3 +411,14 @@ func TestProspectiveV3CompletedReportPassesExactTiers(t *testing.T) {
 		}
 	}
 }
+
+func TestDecisionTaskRequiresTwoToolCalls(t *testing.T) {
+	in := validInput()
+	in.Corpus.Tasks[0].ToolRequired = true
+	in.Corpus.Tasks[0].MinToolCalls = 1
+	in.Corpus.Tasks[0].MeasureToolWidth = true
+	decision := Evaluate(in)
+	if decision.Verdict != Hold || !strings.Contains(strings.Join(decision.Reasons, " "), "measure_tool_width") {
+		t.Fatalf("decision=%+v", decision)
+	}
+}

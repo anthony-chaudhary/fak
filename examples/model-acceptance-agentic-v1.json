@@ -24,11 +24,11 @@
         "id": "parallel-lookup",
         "tier": 1,
         "repetitions": 5,
-        "prompt": "Two records must be fetched with the provided read-only lookup tool. Neither lookup depends on the other's result, so issue BOTH of them in a single assistant turn rather than one after the other. Return exactly PARALLEL_TOOL_OK once both values are verified.",
+        "prompt": "Two records must be fetched with the provided read-only lookup tool. Neither lookup depends on the other. Decide for yourself whether to issue them together or sequentially, then verify both values and return exactly PARALLEL_TOOL_OK.",
         "expected": "PARALLEL_TOOL_OK",
         "tool_required": true,
         "min_tool_calls": 2,
-        "min_parallel_tool_calls": 2
+        "measure_tool_width": true
       },
       {
         "id": "policy-refusal",

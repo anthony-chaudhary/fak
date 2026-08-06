@@ -246,3 +246,47 @@ func TestAcceptancePromptTransportMovesLargeWindowsPrompt(t *testing.T) {
 		t.Fatalf("acceptance argv = %#v", got)
 	}
 }
+
+func TestAcceptanceWidthDecisionGradesModelChoiceNotPrescribedBatching(t *testing.T) {
+	task := modelaccept.Task{ID: "width-choice", ToolRequired: true, MinToolCalls: 2, MeasureToolWidth: true}
+	batched := modelaccept.Run{ToolValid: true, ToolCalls: 2, ToolTurns: 1}
+	batched.Decision = acceptanceObservedWidth(task, batched)
+	if batched.Decision != "batched" || !acceptanceToolContractSatisfied(task, batched) {
+		t.Fatalf("batched run decision=%q accepted=%v", batched.Decision, acceptanceToolContractSatisfied(task, batched))
+	}
+	sequential := modelaccept.Run{ToolValid: true, ToolCalls: 2, ToolTurns: 2}
+	sequential.Decision = acceptanceObservedWidth(task, sequential)
+	if sequential.Decision != "sequential" || !acceptanceToolContractSatisfied(task, sequential) {
+		t.Fatalf("sequential run decision=%q accepted=%v", sequential.Decision, acceptanceToolContractSatisfied(task, sequential))
+	}
+	unreported := sequential
+	unreported.Decision = ""
+	if acceptanceToolContractSatisfied(task, unreported) {
+		t.Fatal("decision task accepted without recording the observed strategy")
+	}
+}
+
+func TestAgenticWidthCorpusAsksModelToChoose(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "examples", "model-acceptance-agentic-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var in modelaccept.Input
+	if err := json.Unmarshal(raw, &in); err != nil {
+		t.Fatal(err)
+	}
+	var width modelaccept.Task
+	for _, task := range in.Corpus.Tasks {
+		if task.ID == "parallel-lookup" {
+			width = task
+			break
+		}
+	}
+	if !width.MeasureToolWidth || width.MinParallelToolCalls != 0 {
+		t.Fatalf("width contract measure_tool_width=%v min_parallel=%d", width.MeasureToolWidth, width.MinParallelToolCalls)
+	}
+	prompt := strings.ToLower(width.Prompt)
+	if !strings.Contains(prompt, "decide for yourself") || strings.Contains(prompt, "issue both") || strings.Contains(prompt, "single assistant turn") {
+		t.Fatalf("width prompt still prescribes the answer: %q", width.Prompt)
+	}
+}

@@ -30,6 +30,7 @@ type Task struct {
 	ExpectedRefusal  string `json:"expected_refusal,omitempty"`
 	RetryRequired    bool   `json:"retry_required,omitempty"`
 	RecoveryRequired bool   `json:"recovery_required,omitempty"`
+	MeasureToolWidth bool   `json:"measure_tool_width,omitempty"`
 	// MinParallelToolCalls is the tool-call WIDTH the task requires: how many
 	// calls must arrive in ONE assistant turn. It is deliberately separate from
 	// MinToolCalls, which is VOLUME over the whole task and is confounded with
@@ -75,6 +76,7 @@ type Run struct {
 	Refusal       string  `json:"refusal,omitempty"`
 	RetryCount    int     `json:"retry_count,omitempty"`
 	Recovered     bool    `json:"recovered,omitempty"`
+	Decision      string  `json:"decision,omitempty"`
 	LatencyMS     int64   `json:"latency_ms"`
 	InputTokens   int64   `json:"input_tokens"`
 	CostUSD       float64 `json:"cost_usd"`
@@ -352,6 +354,9 @@ func validate(in Input) []string {
 		}
 		if t.RecoveryRequired && !t.RetryRequired {
 			r = append(r, "task "+t.ID+" requires recovery without retry")
+		}
+		if t.MeasureToolWidth && (!t.ToolRequired || t.MinToolCalls < 2) {
+			r = append(r, "task "+t.ID+" measure_tool_width needs at least two required tool calls")
 		}
 		if seen[t.ID] {
 			r = append(r, "duplicate task: "+t.ID)
