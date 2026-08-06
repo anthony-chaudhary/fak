@@ -796,6 +796,26 @@
           "category": "incidental",
           "reason": "The durable row type is positioned in the witness-proof family. It is a JSON record produced after the guarded child has exited and the gateway is torn down; it makes no admission or refusal decision, so it is not a guard-gate concept.",
           "token": "guardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper that filters expired entries out of one guard-allow overlay at read time; a TTL sweep over an existing structure, not a distinct gate concept.",
+          "token": "guardAllowDropExpired"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported bookkeeping helper that drops expiry stamps whose rule no longer exists in the overlay; housekeeping on the same map, not a separate concept.",
+          "token": "guardAllowPruneOrphanExpiry"
+        },
+        {
+          "category": "incidental",
+          "reason": "One-line RFC3339 UTC formatter for a guard-allow expiry timestamp; a format helper carrying no concept of its own.",
+          "token": "guardAllowExpiryStamp"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local printer for the guard-allow expiry listing; a presentation helper for one CLI view, not a distinct concept.",
+          "token": "printGuardAllowExpiries"
         }
       ],
       "exclude": [
@@ -840,6 +860,9 @@
         "gates",
         "gatew",
         "gating",
+        "guardAllowDropExpired",
+        "guardAllowExpiryStamp",
+        "guardAllowPruneOrphanExpiry",
         "guardClaudeCommandIndex",
         "guardCompactionAnchorFirst",
         "guardCompactionAnchorHead",
@@ -921,6 +944,7 @@
         "newGuardCompactionWitness",
         "newguardlaunchnonce",
         "normalizeGuardOperatorQuestionMode",
+        "printGuardAllowExpiries",
         "printGuardLaunchPostures",
         "readGuardCompactionWitnesses",
         "readguardstopsledger",

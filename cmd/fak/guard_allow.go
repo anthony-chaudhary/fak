@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -53,6 +54,16 @@ type guardAllowOverlay struct {
 	Version     string   `json:"version"`
 	Allow       []string `json:"allow,omitempty"`
 	AllowPrefix []string `json:"allow_prefix,omitempty"`
+	// Expiry records an optional TTL per widening (#5179, epic #5170 Track D
+	// "GATED-WIDEN safety rails"): it maps an Allow / AllowPrefix entry name to an
+	// RFC3339 (UTC) instant after which the entry is auto-reverted. `fak guard allow
+	// <tool> --ttl <duration>` writes now+duration here; a name ABSENT from the map is
+	// permanent (the pre-#5179 semantics). Read paths drop an entry whose expiry has
+	// passed (guardAllowDropExpired), so an operator widening "just for now" returns the
+	// floor to its heaviest baseline on the next `fak guard` launch without a manual
+	// removal — closing the drift the ticket names. Keyed by the entry string so one map
+	// covers both the exact-name and the prefix list.
+	Expiry map[string]string `json:"expiry,omitempty"`
 }
 
 type guardAllowOverlayLayer struct {
@@ -169,6 +180,11 @@ func loadGuardAllowOverlay(path string) (guardAllowOverlay, error) {
 	ov.Version = guardAllowOverlayVersion
 	ov.Allow = guardAllowNormalize(ov.Allow)
 	ov.AllowPrefix = guardAllowNormalize(ov.AllowPrefix)
+	// Launch-boundary TTL auto-revert (#5179): every read path funnels through here, so an
+	// entry past its expiry is dropped from the floor and from `--list` alike on the next
+	// launch. A missing/permanent entry and an unparseable stamp are retained.
+	ov, _ = guardAllowDropExpired(ov, time.Now())
+	guardAllowPruneOrphanExpiry(&ov)
 	return ov, nil
 }
 
@@ -179,6 +195,7 @@ func saveGuardAllowOverlay(path string, ov guardAllowOverlay) error {
 	ov.Version = guardAllowOverlayVersion
 	ov.Allow = guardAllowNormalize(ov.Allow)
 	ov.AllowPrefix = guardAllowNormalize(ov.AllowPrefix)
+	guardAllowPruneOrphanExpiry(&ov)
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("guard allow overlay: mkdir %s: %w", dir, err)
@@ -292,6 +309,80 @@ func guardAllowNormalize(in []string) []string {
 	return out
 }
 
+// guardAllowExpiryStamp is the on-disk expiry format: RFC3339 in UTC, so the file stays
+// a stable, timezone-free, reviewable diff. `--ttl <d>` records now+d through this.
+func guardAllowExpiryStamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+// guardAllowDropExpired removes every Allow / AllowPrefix entry whose recorded expiry is
+// at or before now, returning the pruned overlay and the sorted names dropped (#5179).
+// It is the launch-boundary auto-revert: because every read path funnels through
+// loadGuardAllowOverlay, an entry past its TTL is gone from the enforced floor AND from
+// `fak guard allow --list` on the next `fak guard` launch, with no manual removal.
+//
+// Two entries are DELIBERATELY retained: one with no expiry (the permanent, pre-#5179
+// case) and one whose stamp will not parse. A malformed timestamp must never silently
+// revoke a widening an operator is relying on — the fail-safe direction here is to keep
+// the grant and leave the bad stamp visible, not to drop on a parse error.
+func guardAllowDropExpired(ov guardAllowOverlay, now time.Time) (guardAllowOverlay, []string) {
+	if len(ov.Expiry) == 0 {
+		return ov, nil
+	}
+	expired := make(map[string]bool, len(ov.Expiry))
+	var dropped []string
+	for name, stamp := range ov.Expiry {
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(stamp))
+		if err != nil {
+			continue // unparseable stamp → treat as permanent, keep
+		}
+		if !now.Before(t) { // now >= expiry
+			expired[name] = true
+			dropped = append(dropped, name)
+		}
+	}
+	if len(expired) == 0 {
+		return ov, nil
+	}
+	out := guardAllowOverlay{Version: ov.Version}
+	out.Allow = guardAllowSubtract(ov.Allow, dropped)
+	out.AllowPrefix = guardAllowSubtract(ov.AllowPrefix, dropped)
+	for name, stamp := range ov.Expiry {
+		if expired[name] {
+			continue
+		}
+		if out.Expiry == nil {
+			out.Expiry = map[string]string{}
+		}
+		out.Expiry[name] = stamp
+	}
+	sort.Strings(dropped)
+	return out, dropped
+}
+
+// guardAllowPruneOrphanExpiry drops Expiry keys that no longer name a live Allow /
+// AllowPrefix entry, so removing a tool (or its natural drop) never leaves a dangling
+// stamp behind. Time-independent by design: the time-based revert is guardAllowDropExpired
+// on the read path; this only keeps the map a strict index of the two positive lists.
+func guardAllowPruneOrphanExpiry(ov *guardAllowOverlay) {
+	if len(ov.Expiry) == 0 {
+		return
+	}
+	live := make(map[string]bool, len(ov.Allow)+len(ov.AllowPrefix))
+	for _, n := range ov.Allow {
+		live[n] = true
+	}
+	for _, n := range ov.AllowPrefix {
+		live[n] = true
+	}
+	for name := range ov.Expiry {
+		if !live[name] {
+			delete(ov.Expiry, name)
+		}
+	}
+	if len(ov.Expiry) == 0 {
+		ov.Expiry = nil
+	}
+}
+
 // guardAllowSubtract returns in with every element of remove dropped.
 func guardAllowSubtract(in, remove []string) []string {
 	rm := make(map[string]bool, len(remove))
@@ -319,6 +410,7 @@ func cmdGuardAllow(argv []string) {
 	session := fs.Bool("session", false, "write the SESSION-scope overlay: the narrowest layer, applied last, so it is the last word over the repo/user/env layers. EPHEMERAL — a guard drops this layer both at its boot and at its session end, so the widening never survives into another session. Scoped PER LAUNCH: run this INSIDE a guarded session, where the guard's injected $FAK_GUARD_SESSION_ID names the file it is reading. Run outside one it lands in sessions/current.allow.json, which no live guard resolves — so nothing honors it")
 	remove := fs.Bool("remove", false, "remove the named tool(s)/prefix(es) from the overlay instead of adding")
 	prefix := fs.Bool("prefix", false, "treat the positional args as allow_prefix entries (a tool-name PREFIX) rather than exact names")
+	ttl := fs.Duration("ttl", 0, "record an EXPIRY on the added entr(ies): e.g. --ttl 1h. On the first `fak guard` launch after the window they are auto-reverted (dropped from the floor and from --list); a re-add with no --ttl makes the entr(ies) permanent again. 0 = permanent (default).")
 	fromJournal := fs.Bool("from-journal", false, "list the tools a guarded session BLOCKED (DEFAULT_DENY) from an audit journal, each with the exact command to allow it")
 	journalPath := fs.String("journal", "", "the audit journal --from-journal reads (default: the newest repo-local guard journal)")
 	fromClaudeSettings := fs.Bool("from-claude-settings", false, "import permissions.allow from Claude settings.json (+ settings.local.json, or a positional path) into the overlay; name-level entries only")
@@ -340,6 +432,21 @@ func cmdGuardAllow(argv []string) {
 		writeScope = guardAllowScopeSession
 	case *user:
 		writeScope = "user"
+	}
+	// --ttl only means anything when ADDING named entries: it stamps an expiry on each. It is
+	// a contradiction with --remove and a no-op for the import/list modes, so refuse those
+	// combinations rather than silently ignoring the flag. A negative window would add an
+	// already-expired entry (dropped on the very next launch), which is never what an operator
+	// means, so refuse it too.
+	if *ttl != 0 {
+		switch {
+		case *ttl < 0:
+			fmt.Fprintln(os.Stderr, "fak guard allow: --ttl must be a positive duration (e.g. --ttl 1h)")
+			os.Exit(2)
+		case *remove || *list || *fromJournal || *fromClaudeSettings || *fromMCPConfig:
+			fmt.Fprintln(os.Stderr, "fak guard allow: --ttl applies only when adding named entr(ies); it cannot combine with --remove/--list/--from-*")
+			os.Exit(2)
+		}
 	}
 	path, err := guardAllowWritePathForScope(writeScope)
 	if err != nil {
@@ -396,11 +503,30 @@ func cmdGuardAllow(argv []string) {
 		} else {
 			ov.Allow = append(ov.Allow, names...)
 		}
+		// Stamp (or clear) the per-entry expiry. --ttl records now+window; a re-add with no
+		// --ttl clears any prior stamp, so an operator can promote a "just for now" widening
+		// back to permanent by adding it again (#5179).
+		if *ttl > 0 {
+			if ov.Expiry == nil {
+				ov.Expiry = map[string]string{}
+			}
+			stamp := guardAllowExpiryStamp(time.Now().Add(*ttl))
+			for _, n := range names {
+				ov.Expiry[n] = stamp
+			}
+		} else {
+			for _, n := range names {
+				delete(ov.Expiry, n)
+			}
+		}
 		if err := saveGuardAllowOverlay(path, ov); err != nil {
 			fmt.Fprintln(os.Stderr, "fak guard allow:", err)
 			os.Exit(1)
 		}
 		fmt.Printf("fak guard allow: added %s to the operator allow overlay.\n", strings.Join(names, ", "))
+		if *ttl > 0 {
+			fmt.Printf("  Expires in %s (at %s) — auto-reverted on the first `fak guard` launch after that.\n", *ttl, guardAllowExpiryStamp(time.Now().Add(*ttl)))
+		}
 		if !*prefix {
 			printGuardAllowShellAttachments(os.Stdout, names)
 		}
@@ -540,6 +666,30 @@ func printGuardAllowOverlay(w io.Writer, path string, ov guardAllowOverlay) {
 	if len(ov.AllowPrefix) > 0 {
 		fmt.Fprintf(w, "  allow (prefix): %s\n", strings.Join(ov.AllowPrefix, ", "))
 	}
+	printGuardAllowExpiries(w, ov, time.Now())
+}
+
+// printGuardAllowExpiries renders the remaining TTL of each expiring entry (#5179), so an
+// operator listing the overlay can see which widenings are temporary and how long they
+// have left. Entries are sorted for a stable readout; an already-expired entry never
+// reaches here because loadGuardAllowOverlay drops it before the render.
+func printGuardAllowExpiries(w io.Writer, ov guardAllowOverlay, now time.Time) {
+	if len(ov.Expiry) == 0 {
+		return
+	}
+	names := make([]string, 0, len(ov.Expiry))
+	for name := range ov.Expiry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(ov.Expiry[name]))
+		if err != nil {
+			fmt.Fprintf(w, "  expires       : %s (unparseable stamp %q — treated as permanent)\n", name, ov.Expiry[name])
+			continue
+		}
+		fmt.Fprintf(w, "  expires       : %s in %s (at %s)\n", name, t.Sub(now).Round(time.Second), guardAllowExpiryStamp(t))
+	}
 }
 
 // guardAllowUsage is the one-screen help for the subcommand.
@@ -550,6 +700,7 @@ func guardAllowUsage() string {
 		"usage:",
 		"  fak guard allow <tool>...              add exact tool name(s) to the always-allow overlay",
 		"  fak guard allow --prefix <prefix>...   add an allow_prefix (a tool-name PREFIX family) instead",
+		"  fak guard allow <tool> --ttl 1h        add with an EXPIRY: auto-reverted on the first launch past the window",
 		"  fak guard allow --remove <name>...     remove entr(ies) from the overlay",
 		"  fak guard allow --list                 print every effective layer with its scope, precedence and provenance",
 		"  fak guard allow --user <tool>...       write the per-user home layer instead of repo-local",
