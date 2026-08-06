@@ -111,6 +111,84 @@ func TestPlanClassifyAndRefuseGroundedConcept(t *testing.T) {
 		t.Fatal("positioned grounding was silently hidden")
 	}
 }
+
+// TestPlanClassifyPreservesEveryTopLevelMetaKey pins the round-trip contract of the
+// _meta.json rewrite. PlanClassify DECODES the whole file into a struct and RE-ENCODES the
+// file from that struct, so any top-level key the struct fails to declare is not merely
+// ignored — it is DELETED from the file the plan writes.
+//
+// The key that actually bit is "meta", which carries {as_of, fak_version}: the canonical
+// generator refuses to render an undated scorecard, so dropping the block turned every
+// `fak concept classify` in the repo into a generator crash. It surfaced as
+// "decode planned snapshot: unexpected end of JSON input" — naming neither the deleted
+// block nor the file it vanished from — because the crash exits 1, and exit 1 is the same
+// code the generator uses for an honestly-generated ACTION snapshot.
+//
+// The shared fixture cannot witness this: Metadata declares only Families, so the
+// _meta.json it writes has no schema, no glossary and no meta block available to lose.
+// This test therefore writes a file shaped like the REAL corpus and asserts the plan hands
+// every key back. Written generically over the decoded map rather than as three named
+// assertions, so a future top-level key added to the corpus is covered on arrival.
+func TestPlanClassifyPreservesEveryTopLevelMetaKey(t *testing.T) {
+	c, _ := fixture(t)
+	path := filepath.Join(c.Dir, "_meta.json")
+
+	// Re-shape the fixture's _meta.json to match the real corpus: the fixture writes only
+	// "families", while the corpus also carries "schema", "meta" and "glossary".
+	var onDisk map[string]any
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(b, &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	onDisk["schema"] = "concept-disambiguation/1"
+	onDisk["glossary"] = "docs/glossary.md"
+	onDisk["meta"] = map[string]any{"as_of": "2026-08-05", "fak_version": "0.43.0"}
+	if b, err = json.MarshalIndent(onDisk, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, append(b, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := LoadDir(c.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanClassify(reloaded, ClassifyRequest{Family: "cache", Token: "cache_helper_test", Category: "test-only", Reason: "only a fixture helper"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var planned map[string]any
+	if err = json.Unmarshal(plan.Changes[0].Content, &planned); err != nil {
+		t.Fatalf("planned _meta.json does not decode: %v", err)
+	}
+	for key := range onDisk {
+		if _, ok := planned[key]; !ok {
+			t.Errorf("classify deleted top-level key %q from _meta.json", key)
+		}
+	}
+
+	// The dating block specifically must survive with its VALUES, not merely its key: an
+	// empty as_of/fak_version fails the generator exactly as a missing block does.
+	meta, ok := planned["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta block is %T, want an object", planned["meta"])
+	}
+	for _, field := range []string{"as_of", "fak_version"} {
+		if s, _ := meta[field].(string); s == "" {
+			t.Errorf("meta.%s = %q after classify, want the value carried through", field, s)
+		}
+	}
+
+	// And the classification itself still landed — preserving the file must not come at
+	// the cost of the write the caller asked for.
+	if !bytes.Contains(plan.Changes[0].Content, []byte("cache_helper_test")) {
+		t.Error("classified token missing from the planned _meta.json")
+	}
+}
 func TestProductionCorpusExcludesTestsAndBuildTags(t *testing.T) {
 	root := t.TempDir()
 	os.WriteFile(filepath.Join(root, "only_test.go"), []byte("package p // TestOnlyToken"), 0600)
@@ -161,7 +239,12 @@ func scorecardE2EFixture(t *testing.T, gap string) (Catalog, string) {
 	if err := os.MkdirAll(data, 0755); err != nil {
 		t.Fatal(err)
 	}
-	metaDoc := map[string]any{"schema": "fak-concept-disambiguation-scorecard/1", "glossary": "docs/glossary.md", "families": []map[string]any{{"id": "cache", "name": "Cache", "roots": []string{"cache"}, "ignore": []string{"cache"}, "min_files": 1}}}
+	// The "meta" dating block is REQUIRED, not decorative: the canonical generator refuses
+	// to render an undated scorecard, and this fixture drives the generator for real. Its
+	// absence is why this end-to-end test failed with an opaque
+	// "decode planned snapshot: unexpected end of JSON input" — the same blind spot that
+	// let PlanClassify ship a round-trip which deleted this very block from the real corpus.
+	metaDoc := map[string]any{"schema": "fak-concept-disambiguation-scorecard/1", "meta": map[string]any{"as_of": "2026-08-06", "fak_version": "0.0.0-test"}, "glossary": "docs/glossary.md", "families": []map[string]any{{"id": "cache", "name": "Cache", "roots": []string{"cache"}, "ignore": []string{"cache"}, "min_files": 1}}}
 	mb, _ := json.MarshalIndent(metaDoc, "", "  ")
 	if err := os.WriteFile(filepath.Join(data, "_meta.json"), append(mb, '\n'), 0600); err != nil {
 		t.Fatal(err)
