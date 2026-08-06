@@ -410,9 +410,13 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                 run <id> <state> | budget <id> [--turns N] [--tokens N] [--context-tokens N] |
                 pace <id> [--max-tokens N] |
                 audit [summary|discover|audit|deep] [--days N] |
+                terminate <id> [--reason R] |
                 priority <id> <N>   [--addr URL] [--key K] [--if-rev N] [--json]
                 (the OPERATOR control surface: read a served session's live DRIVE state
-                 and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes)
+                 and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes.
+                 One of the three verbs forming the OUT-OF-BAND CONTROL PLANE with
+                 fak signal and fak ps - the closed op vocabulary, each op's boundary,
+                 witness-of-applied, and refusal: docs/operator-control-plane.md)
   fak resume    plan [--resident-tokens N] [--idle-seconds S] [--ttl 5m|1h] [--horizon N]
                 [--shed-budget N] [--seed-tokens N] [--input-price F] [--output-price F]
                 [--image DIR] [--json]
@@ -426,7 +430,8 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
   fak top       (= fak ps --watch)
                 (the READ-ONLY PROCESS TABLE: one aligned row per live session folded
                  from GET /v1/fak/sessions; --watch is the top mode. Issues no control
-                 verb - control a session with fak session)
+                 verb - control a session with fak session or fak signal; the plane
+                 they form: docs/operator-control-plane.md)
   fak windowgate [scan|report] [--workspace DIR] [--json] [--fail-on-candidates]
                 (NO-DESKTOP-POPUP audit: hard-ratcheted scheduled-task, Python, and
                  Go background helper launches must suppress Windows console windows;
@@ -434,7 +439,10 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
   fak signal    <id> pause | resume | stop [--reason R] | steer --text "..."
                 (JOB CONTROL for a running session - the OS process-model names over the
                  control plane; steer sends INPUT to a running agent, taken at its next
-                 turn boundary. Answers Claude Code #21419, the SIGCONT+stdin gap)
+                 turn boundary. Answers Claude Code #21419, the SIGCONT+stdin gap.
+                 NOT a second control plane: the same /v1/fak/session routes fak session
+                 uses. The whole plane: docs/operator-control-plane.md. Unrelated despite
+                 the name: fak steering (Slack reporting), fak steer (pull requests))
   fak task      sample [--json] [--done N --total N --unit UNIT]
                 (the PROCESS-LOCAL TASK MANAGER snapshot: current hardware/runtime
                  sample plus task/step/concept progress and ETA when progress is known)
