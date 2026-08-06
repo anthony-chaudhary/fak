@@ -576,8 +576,11 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		if *sf.dojoMode {
 			_ = persistLiveDojoEpisode("serve", rt.srv)
 		}
-		// Append the full served-turn counter-family snapshot (#1610).
-		persistGatewayUsageObservation(rt.srv, "serve", transport, time.Since(rt.t0))
+		// Append the full served-turn counter-family snapshot (#1610). The row is stamped
+		// with a session id only when this process hosted exactly one session, so a
+		// multiplexed gateway's total is never attributed to one of its traces — see
+		// serveUsageSessionID.
+		persistGatewayUsageObservation(rt.srv, "serve", transport, time.Since(rt.t0), serveUsageSessionID(serveSessions))
 		dumpServeSessions(serveSessions, *sf.sessionStatePath) // #629: persist drive state for the next cold resume
 	}
 

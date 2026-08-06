@@ -643,7 +643,12 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	// Until now only `fak serve` exits reached this ledger, so the per-session WHY
 	// behind a zero fak-slice (burst_unprofitable vs anchor-starved vs under_budget)
 	// was unrecoverable after exit on the flagship guard path (epic #1601 gap).
-	persistGatewayUsageObservation(srv, "guard", agentName, sessionWindow)
+	// The guard path is the one that CAN name its session: one guard process wraps one
+	// agent session, so guardTraceID is a true per-session join key (unless it is the
+	// shared non-durable sentinel, which gatewayUsageSessionID drops). Stamping it is what
+	// lets `fak fleet metrics` drill a fleet roll-up down to this named session instead of
+	// stopping at a process-level total.
+	persistGatewayUsageObservation(srv, "guard", agentName, sessionWindow, gatewayUsageSessionID(guardTraceID))
 	if dojoMode {
 		_ = persistLiveDojoEpisode("guard", srv)
 	}

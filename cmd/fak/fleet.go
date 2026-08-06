@@ -9,6 +9,7 @@ package main
 //	fak fleet replace  --session S [--index N] [--force] [--json]  render a safe replacement for a stuck worker
 //	fak fleet capacity [--require N] [--product claude|all] [--json]  preflight account-seat ceiling
 //	fak fleet control  send | status | instances                      command every live instance, and read the acks back
+//	fak fleet metrics  [--serve] [--textfile F] [--fleet]             Prometheus exposition: live per-session + historical roll-ups
 //
 // control is the one verb whose subject is the OTHER processes rather than this
 // machine's evidence: it publishes a directive onto the shared bus and folds the acks
@@ -39,13 +40,14 @@ import (
 )
 
 func cmdFleet(argv []string) {
-	dispatchSubcommands("fleet", "monitor | janitor | fold | replace | capacity | control", argv,
+	dispatchSubcommands("fleet", "monitor | janitor | fold | replace | capacity | control | metrics", argv,
 		subcommand{"monitor", runFleetMonitor},
 		subcommand{"janitor", runFleetJanitor},
 		subcommand{"fold", runFleetFold},
 		subcommand{"replace", runFleetReplace},
 		subcommand{"capacity", runFleetCapacity},
 		subcommand{"control", runFleetControl},
+		subcommand{"metrics", runFleetMetrics},
 	)
 }
 

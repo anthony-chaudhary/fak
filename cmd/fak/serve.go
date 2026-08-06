@@ -673,11 +673,71 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 // same append-only JSONL pattern persistCacheValueObservations already uses for the
 // narrower cache-value axis (#1303). Best-effort: a write failure never fails the
 // session. context is a free-form label (e.g. "http"/"stdio").
-func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string, uptime time.Duration) {
-	row := gatewayusageledger.NewRow("exit", sessionType, context, "", uptime, gatewayUsageProvenance(srv), gatewayUsageCounters(srv), time.Now())
+//
+// sessionID is the row's JOIN KEY back to a named session, and it is the caller's job to
+// pass one ONLY when the row really describes a single session — see
+// gatewayUsageSessionID. The ledger's session_id has been optional since the schema
+// landed and every caller passed "", so no historical row carries one; that is why the
+// fleet exporter publishes an identified/unidentified census rather than assuming the
+// per-session drill-down covers the corpus.
+func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string, uptime time.Duration, sessionID string) {
+	row := gatewayusageledger.NewRow("exit", sessionType, context, sessionID, uptime, gatewayUsageProvenance(srv), gatewayUsageCounters(srv), time.Now())
 	if err := gatewayusageledger.Append(nightrunLedgerPath(gatewayusageledger.DefaultLedgerRel), row); err != nil {
 		fmt.Fprintf(os.Stderr, "fak: gateway-usage ledger append failed (non-fatal): %v\n", err)
 	}
+}
+
+// guardSharedTraceSentinel is the CONSTANT trace resolveGuardSessionID hands an ordinary
+// non-durable `fak guard` launch. Every such launch on every machine gets this same
+// string, so it identifies the guard PATH, not a session.
+const guardSharedTraceSentinel = "guard"
+
+// gatewayUsageSessionID returns the id a usage row may be stamped with, or "" when the
+// caller's trace is not a per-session identity.
+//
+// WHY THIS FILTER EXISTS. The join key is only useful if it is unique per session, and a
+// non-durable guard launch resolves to the shared "guard" sentinel. Stamping that would be
+// strictly WORSE than leaving the field empty: thousands of unrelated sessions would
+// collapse into one enormous series on a per-session panel, and it would look like a real
+// session rather than like missing data. An empty id is honestly absent — it shows up in
+// the exporter's unidentified census — while a shared id is a wrong answer that reads as a
+// right one.
+func gatewayUsageSessionID(trace string) string {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || trace == guardSharedTraceSentinel {
+		return ""
+	}
+	return trace
+}
+
+// serveUsageSessionID names the session a `fak serve` exit row describes — but ONLY when
+// the process hosted exactly one.
+//
+// A serve gateway MULTIPLEXES a session table, so unlike guard (one process, one wrapped
+// agent) its exit counters are a process total that can span many traces. Stamping any one
+// of those traces would attribute the WHOLE process's tokens, turns and verdicts to a
+// single session — a per-session cost panel would then show one session having spent what
+// five of them did, and nothing on the panel would reveal the blend.
+//
+// So the rule is the one case where the process total and the session total are the same
+// number: Len()==1. A single-session serve (the dispatch launcher's usual shape — one
+// worker process for one lane's work) becomes drillable; a genuinely multiplexed one stays
+// honestly unidentified and lands in the exporter's unidentified census, where it reads as
+// "this row covers more than one session" instead of as a wrong attribution.
+//
+// The table is read at EXIT, after the last turn, so Len() is the count of sessions that
+// survived to the end. An LRU-evicted mid-run session is not counted — which is the
+// conservative direction: eviction can only turn a would-be-stamped row into an
+// unidentified one, never the reverse.
+func serveUsageSessionID(tbl *session.Table) string {
+	if tbl == nil || tbl.Len() != 1 {
+		return ""
+	}
+	snap := tbl.Snapshot()
+	if len(snap) != 1 {
+		return ""
+	}
+	return gatewayUsageSessionID(snap[0].TraceID)
 }
 
 // gatewayUsageProvenance stamps the calibration-relevant config the Server actually ran

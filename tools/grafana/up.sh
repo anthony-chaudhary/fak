@@ -29,6 +29,7 @@ GATEWAY_ADDR="${FAK_GATEWAY_ADDR:-0.0.0.0:8080}"   # 0.0.0.0 so Docker's host.do
 GATEWAY_HOSTPORT="127.0.0.1:8080"                  # where WE health-check it
 BOTTLENECK_PORT="${FLEET_BOTTLENECK_PORT:-9095}"
 CACHEVALUE_PORT="${FAK_CACHEVALUE_PORT:-9097}"
+FLEET_METRICS_PORT="${FAK_FLEET_METRICS_PORT:-9098}"
 MODEL_LABEL="${FAK_DOGFOOD_MODEL:-smollm2-135m}"
 
 log()  { printf '\033[1;36m[up]\033[0m %s\n' "$*" >&2; }
@@ -73,28 +74,40 @@ start_bg() {  # name port-check-path "command…"  → records a pidfile
 }
 
 # ===== 1. real weights for the pure kernel =====
-export FAK_MODEL_DIR="${FAK_MODEL_DIR:-$ROOT/fak/internal/model/.cache/smollm2-135m}"
+# $ROOT is the repository root and the Go module root (AGENTS.md: "the Go module is the
+# repository root"), so the paths below are $ROOT/… — NOT $ROOT/fak/…, which pointed at
+# a nested checkout this repo does not have and made every `cd` here fail.
+export FAK_MODEL_DIR="${FAK_MODEL_DIR:-$ROOT/internal/model/.cache/smollm2-135m}"
 if [ "${FAK_NO_GATEWAY:-0}" != "1" ]; then
   if [ ! -f "$FAK_MODEL_DIR/weights.f32" ]; then
     warn "no fak-format export at $FAK_MODEL_DIR — running fetch-model.sh (downloads SmolLM2-135M, ~one-time)…"
-    ( cd "$ROOT/fak" && FAK_MODEL_DIR="$FAK_MODEL_DIR" bash ./scripts/fetch-model.sh ) \
+    ( cd "$ROOT" && FAK_MODEL_DIR="$FAK_MODEL_DIR" bash ./scripts/fetch-model.sh ) \
       || die "fetch-model.sh failed; set FAK_MODEL_DIR to an existing export or run with FAK_NO_GATEWAY=1."
   fi
   log "pure-kernel weights: $FAK_MODEL_DIR"
 fi
 
 # ===== 2. build fak (native; go build is fine on this host) =====
-if [ "${FAK_NO_GATEWAY:-0}" != "1" ]; then
-  FAK_BIN="$RUN_DIR/fak"
-  if [ ! -x "$FAK_BIN" ] || [ "${FAK_REBUILD:-0}" = "1" ]; then
-    log "building fak → $FAK_BIN"
-    ( cd "$ROOT/fak" && go build -o "$FAK_BIN" ./cmd/fak ) || die "go build failed."
-  fi
+# NOT gated on FAK_NO_GATEWAY any more: that flag means "chart fleet metrics only", and
+# the fleet-session exporter below is exactly what such an operator wants. It needs the
+# binary but neither the gateway nor any weights — it folds files on disk.
+FAK_BIN="$RUN_DIR/fak"
+if [ ! -x "$FAK_BIN" ] || [ "${FAK_REBUILD:-0}" = "1" ]; then
+  log "building fak → $FAK_BIN"
+  ( cd "$ROOT" && go build -o "$FAK_BIN" ./cmd/fak ) || die "go build failed."
 fi
 
 # ===== 3. metrics sources on the host =====
 start_bg fleet_bottleneck "$BOTTLENECK_PORT /metrics" \
   python3 "$ROOT/tools/fleet_bottleneck.py" serve --port "$BOTTLENECK_PORT"
+
+# The fleet-session exporter: the LIVE per-session inventory (which sessions are alive
+# right now) plus the HISTORICAL cost/cache roll-ups, re-folded from disk on every
+# scrape. It is the only source carrying a per-session label, so it is what makes the
+# fleet dashboards drill down. Deliberately OUTSIDE the FAK_NO_GATEWAY guard: it needs
+# no gateway, no weights and no network.
+start_bg fak_fleet "$FLEET_METRICS_PORT /metrics" \
+  "$FAK_BIN" fleet metrics --serve --addr "0.0.0.0:$FLEET_METRICS_PORT"
 
 if [ "${FAK_NO_GATEWAY:-0}" != "1" ]; then
   start_bg fak_gateway "8080 /metrics" \
@@ -137,6 +150,7 @@ cat >&2 <<EOF
   fleet src   http://localhost:$BOTTLENECK_PORT/metrics
   gateway     http://$GATEWAY_HOSTPORT/metrics   (engine=inkernel model=$MODEL_LABEL)
   cache value http://localhost:$CACHEVALUE_PORT/metrics   (nightrun ledgers + ablate arms)
+  fleet sess  http://localhost:$FLEET_METRICS_PORT/metrics   (live session inventory + roll-ups)
 
   Drive a real kernel decode (populates fak_kernel_* / fak_gateway_*):
     curl -s http://$GATEWAY_HOSTPORT/v1/fak/syscall -H 'Content-Type: application/json' \\

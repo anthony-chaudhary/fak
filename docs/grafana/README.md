@@ -55,7 +55,7 @@ ad-hoc and are *not* listed here; they are exported from Grafana and posted with
 
 ## Seeded from the real provisioned dashboards
 
-The initial entries are the five dashboards
+The entries are the dashboards
 [`tools/grafana`](https://github.com/anthony-chaudhary/fak/tree/main/tools/grafana) provisions (real `uid`s, `category:
 debug`, `lifetime: stack-local`) — they resolve against a local
 `http://localhost:3000` stack (`tools/grafana/up.sh`, login `admin` / `fleet`).
