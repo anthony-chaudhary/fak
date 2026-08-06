@@ -77,6 +77,10 @@ const (
 // churn that poisons dispatch preflight.
 const defaultRefreshTimeout = 90 * time.Second
 
+// refreshBackupRoot is where a pre-refresh snapshot lands (the shared #3987 store). Split out so
+// the safety net is named at the call site.
+func refreshBackupRoot(homeDir string) string { return accounts.BackupRoot(homeDir) }
+
 func runAccountsRefresh(stdout, stderr io.Writer, p refreshParams) int {
 	if p.homeDir == "" {
 		fmt.Fprintln(stderr, "fak accounts: cannot resolve home dir")
@@ -104,7 +108,20 @@ func runAccountsRefresh(stdout, stderr io.Writer, p refreshParams) int {
 	sort.Strings(names)
 
 	rows := make([]refreshRow, 0, len(names))
+	backupRoot := refreshBackupRoot(p.homeDir)
 	for _, seat := range names {
+		// Snapshot BEFORE the refresh. A refresh is a credential-overwrite path like any other: when
+		// the refresh grant fails, Claude Code can leave the file HOLLOW (both tokens blanked). This
+		// verb hit that on its first roster-wide run — july16-netra's refresh token had already
+		// expired, the spawn failed, and the credential came back empty. The pre-image had only been
+		// captured because a separate `fak accounts backup` happened to run earlier that session;
+		// relying on that is luck, so take it here (#3987's backup-on-write rule, applied to the one
+		// overwrite path that was missing it). A backup miss warns, never blocks.
+		if snaps, berr := accounts.SnapshotBeforeOverwrite(backupRoot, seat, dirs[seat], time.Now()); berr != nil {
+			fmt.Fprintf(stderr, "fak accounts: warning: %s: pre-refresh credential backup failed: %v\n", seat, berr)
+		} else if len(snaps) > 0 && !p.asJSON {
+			fmt.Fprintf(stdout, "%-20s %-8s snapshotted %d blob(s) before refresh\n", seat, "backup", len(snaps))
+		}
 		rows = append(rows, refreshSeat(seat, dirs[seat], timeout, p.force, p.spawn))
 	}
 
@@ -123,7 +140,7 @@ func runAccountsRefresh(stdout, stderr io.Writer, p refreshParams) int {
 	fmt.Fprintf(stdout, "summary: %d seat(s): ok=%d fresh=%d stale=%d hollow=%d skipped=%d\n",
 		len(rows), sum["ok"], sum["fresh"], sum["stale"], sum["hollow"], sum["skipped"])
 	if sum["hollow"] > 0 {
-		fmt.Fprintln(stdout, "a hollow seat has no usable credential left: `fak accounts restore-credential --name <seat>`, else a human /login")
+		fmt.Fprintln(stdout, "a hollow seat has no usable credential left: `fak accounts restore-credential --name <seat>` reverses the blanking (the pre-refresh snapshot above), but a credential whose REFRESH token has itself expired can only be revived by a human /login")
 	}
 	if sum["stale"] > 0 {
 		fmt.Fprintln(stdout, "a stale seat was DUE for a refresh, ran, and rotated nothing: its refresh token is likely dead, so plan a human /login before dispatch relies on it")

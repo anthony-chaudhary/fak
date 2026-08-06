@@ -417,7 +417,19 @@ func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("hydrated %s from %s: copied %s and %d missing project file(s)", targetName, sourceName, copiedCred, copiedSessions), nil
+	note := fmt.Sprintf("hydrated %s from %s: copied %s and %d missing project file(s)", targetName, sourceName, copiedCred, copiedSessions)
+	// A COPIED .credentials.json leaves both dirs on ONE OAuth token family, and Claude Code rotates
+	// the refresh token when it refreshes — so the first of the pair to refresh silently invalidates
+	// the other (internal/accounts/credfamily.go carries the 401 witness). A hydrate therefore cannot
+	// produce two independently-refreshable seats, and this repair is reachable unattended from
+	// `accounts doctor --write`, where the loser would be the HEALTHY source seat that was working
+	// fine. The enroll path resolves its own copy immediately; here the choice of which seat to keep
+	// is the operator's, so surface the hazard on the repair note rather than silently picking.
+	if share := accounts.DetectSharedRefreshFamily(source.Dir, target.Dir); share.Shared {
+		note += fmt.Sprintf("; WARNING: %s and %s now share OAuth token family %s — the first to refresh will silently 401 the other; split them with `fak accounts refresh --name %s --force`",
+			sourceName, targetName, share.FamilyID, targetName)
+	}
+	return note, nil
 }
 
 func fileExists(path string) bool {
