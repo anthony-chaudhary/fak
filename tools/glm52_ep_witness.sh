@@ -75,9 +75,10 @@ log "SHARD=$SHARD"
 EP_HEADROOM="${EP_HEADROOM:-0.05}"
 PLAN_GIB="${PLAN_GIB:-}"
 if [ -z "$PLAN_GIB" ]; then
-  # Per-rank plan totals measured in experiments/glm-gpu-witness/glm52-ep-load-plan-witness-2026-06-30.json
-  # (weights) plus the ~2.08 GiB KV at --context-budget-tokens 4096. Only the rank counts with a
-  # measured witness are listed; any other RANKS leaves the gate unarmed rather than guessing.
+  # Per-rank plan totals: the EP device totals measured in
+  # experiments/glm-gpu-witness/glm52-ep-load-plan-witness-2026-06-30.json (71.11 GiB at 8 ranks,
+  # 79.21 GiB at 7) plus ~2.12 GiB of KV at --context-budget-tokens 4096. Only the rank counts with
+  # a measured witness are listed; any other RANKS leaves the gate unarmed rather than guessing.
   case "$RANKS" in
     8) PLAN_GIB=73.23 ;;
     7) PLAN_GIB=81.33 ;;

@@ -72,12 +72,19 @@ func TestGLM52EPPreflightWitnessNamesCodeThatExists(t *testing.T) {
 	// by default, which is the whole failure mode this test exists to prevent.
 	resolvers := map[string]func() error{
 		"tools/glm52_ep_witness.sh (EP_PREFLIGHT gate)": func() error {
+			// Markers for the gate's SUBSTANCE, not just its name: both refusal arms, the
+			// refusal exit code, and both fail-open arms. A gate reduced to a logging stub
+			// keeps the EP_PREFLIGHT_* strings, so those alone would not be evidence.
 			return mustContain("../tools/glm52_ep_witness.sh",
 				"# --- pre-flight per-GPU free-VRAM gate",
-				"EP_PREFLIGHT_REFUSE",
+				"EP_PREFLIGHT_REFUSE ($ep_short/$ep_seen CARD TOO SMALL",
+				"EP_PREFLIGHT_REFUSE ($ep_short/$ep_seen short)",
 				"EP_PREFLIGHT_OK",
-				"EP_PREFLIGHT_SKIP",
-				"REQUIRE_FREE_GIB")
+				"EP_PREFLIGHT_SKIP no nvidia-smi",
+				"EP_PREFLIGHT_SKIP no published per-rank plan total",
+				`echo 93 >"$DONE"; exit 93`,
+				"REQUIRE_FREE_GIB",
+				"nvidia-smi --query-gpu=memory.free,memory.total")
 		},
 		"internal/compute.RequiredFreeBytes + TestRequiredFreeBytesIsExactFitBoundary": func() error {
 			if err := mustContain("../internal/compute/requiredfree.go", "func RequiredFreeBytes(wantBytes int64, headroom float64) int64"); err != nil {
@@ -85,6 +92,22 @@ func TestGLM52EPPreflightWitnessNamesCodeThatExists(t *testing.T) {
 			}
 			return mustContain("../internal/compute/requiredfree_test.go", "func TestRequiredFreeBytesIsExactFitBoundary(")
 		},
+	}
+
+	// Driving the loop off the witness's own list means SHRINKING that list would silently
+	// disable this test — the same shape of hole as the original false witness. So the known
+	// entries are required to still be declared, not merely checked if present.
+	for want := range resolvers {
+		found := false
+		for _, entry := range w.CodeUnderTest {
+			if entry == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("witness no longer declares code_under_test %q — dropping an entry must not be a way to switch this check off", want)
+		}
 	}
 
 	for _, entry := range w.CodeUnderTest {
@@ -212,8 +235,13 @@ func parseEPPreflightGateNumbers(t *testing.T) (headroom float64, planGiB map[in
 	return headroom, planGiB
 }
 
-// The five scenarios the witness publishes, run for real against the extracted gate block with a
-// mock nvidia-smi. No GPU needed; skipped where bash is unavailable.
+// The scenarios the witness publishes, run for real against the extracted gate block with a mock
+// nvidia-smi. No GPU needed; skipped where bash is unavailable.
+//
+// This is also the ONLY place the shell's own computed threshold is observed. The check above
+// compares PLAN_GIB and EP_HEADROOM against RequiredFreeBytes, but it re-derives the threshold in
+// Go rather than reading what awk produced — so a wrong expression in the gate would slip past it.
+// Here the number the gate PRINTED is matched against RequiredFreeBytes, closing that gap.
 func TestGLM52EPPreflightSelfcheckScenariosPass(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {
@@ -222,5 +250,19 @@ func TestGLM52EPPreflightSelfcheckScenariosPass(t *testing.T) {
 	out, err := exec.Command(bash, filepath.FromSlash("glm52_ep_preflight_selfcheck.sh"), "..").CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "EP_PREFLIGHT_SELFCHECK_PASS") {
 		t.Fatalf("EP_PREFLIGHT self-check did not pass (%v):\n%s", err, out)
+	}
+
+	headroom, table := parseEPPreflightGateNumbers(t)
+	const mib = int64(1) << 20
+	for _, ranks := range []int{8, 7} {
+		planGiB, ok := table[ranks]
+		if !ok {
+			continue
+		}
+		req := compute.RequiredFreeBytes(int64(planGiB*float64(mib)*1024), headroom)
+		want := "require_free=" + strconv.FormatFloat(float64((req+mib-1)/mib)/1024, 'f', 1, 64) + "GiB/gpu"
+		if !strings.Contains(string(out), want) {
+			t.Errorf("RANKS=%d: the gate never printed %q, so its computed threshold is not the one RequiredFreeBytes derives.\nself-check output:\n%s", ranks, want, out)
+		}
 	}
 }

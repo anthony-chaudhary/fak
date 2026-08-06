@@ -39,24 +39,49 @@ mkbin() {
   chmod +x "$WORK/bin/nvidia-smi"
 }
 
-# run <name> <RANKS> <VIS> <gpu-map> <want-exit> <want-substring>
+# pathWithoutNvidiaSmi echoes PATH with every directory that holds a real nvidia-smi removed.
+# The "no nvidia-smi" scenario has to be true on a host that HAS one — this script is meant to run
+# on the GPU node too, where merely omitting the mock would let the block read the real GPUs and
+# turn a fail-open assertion into a spurious refusal. Dropping the mock is not enough; the real
+# binary has to be off PATH. awk/tr/sed/grep stay reachable because only nvidia-smi's own
+# directories are dropped.
+pathWithoutNvidiaSmi() {
+  local out="" d
+  local IFS=:
+  for d in $PATH; do
+    [ -z "$d" ] && continue
+    [ -x "$d/nvidia-smi" ] && continue
+    [ -x "$d/nvidia-smi.exe" ] && continue
+    out="${out:+$out:}$d"
+  done
+  printf '%s' "$out"
+}
+
+# run <name> <RANKS> <VIS> <gpu-map> <want-exit> <want-substring>...
 run() {
   mkbin "$4"
+  local name="$1" ranks="$2" vis="$3" map="$4" wantrc="$5"
+  shift 5
+  local base="$PATH"
+  [ -z "$map" ] && base="$(pathWithoutNvidiaSmi)"
   local out rc
   out=$(
-    PATH="$WORK/bin:$PATH"; export PATH
-    RANKS="$2" VIS="$3" OUT="$WORK/out.txt" DONE="$WORK/done.txt"
+    PATH="$WORK/bin:$base"; export PATH
+    RANKS="$ranks" VIS="$vis" OUT="$WORK/out.txt" DONE="$WORK/done.txt"
     export RANKS VIS OUT DONE
     bash -c 'set -uo pipefail; log(){ echo "$*"; }; source "'"$WORK"'/block.sh"' 2>&1
   )
   rc=$?
-  if [ "$rc" != "$5" ]; then
-    echo "FAIL [$1] exit=$rc want=$5"; echo "$out" | sed 's/^/    /'; return 1
+  if [ "$rc" != "$wantrc" ]; then
+    echo "FAIL [$name] exit=$rc want=$wantrc"; echo "$out" | sed 's/^/    /'; return 1
   fi
-  if ! printf '%s' "$out" | grep -q -- "$6"; then
-    echo "FAIL [$1] output missing '$6'"; echo "$out" | sed 's/^/    /'; return 1
-  fi
-  echo "ok   [$1] exit=$rc"; echo "$out" | sed 's/^/       /'
+  local want
+  for want in "$@"; do
+    if ! printf '%s' "$out" | grep -q -F -- "$want"; then
+      echo "FAIL [$name] output missing '$want'"; echo "$out" | sed 's/^/    /'; return 1
+    fi
+  done
+  echo "ok   [$name] exit=$rc"; echo "$out" | sed 's/^/       /'
   return 0
 }
 
@@ -66,13 +91,22 @@ STALE_8="1:77005,81920;2:77005,81920;3:77005,81920;4:77005,81920;5:77005,81920;6
 DIRTY_ONE_8="1:80486,81920;2:80486,81920;3:71987,81920;4:80486,81920;5:80486,81920;6:80486,81920;7:80486,81920;8:80486,81920"
 PRISTINE_7="1:80486,81920;2:80486,81920;3:80486,81920;4:80486,81920;5:80486,81920;6:80486,81920;7:80486,81920"
 
+# The require_free= assertions below are the load-bearing ones: they pin the threshold the SHELL
+# actually computed, not a restatement of it. A wrong awk formula that still landed between the
+# pristine and stale free values would keep every verdict correct and slip through otherwise.
 fails=0
-run "A stale-residency (reproduces #4952)" 8 "1,2,3,4,5,6,7,8" "$STALE_8"      93 "EP_PREFLIGHT_REFUSE (8/8 short)" || fails=$((fails + 1))
-run "B pristine"                           8 "1,2,3,4,5,6,7,8" "$PRISTINE_8"   0  "EP_PREFLIGHT_OK"                 || fails=$((fails + 1))
-run "C config-too-tight"                   7 "1,2,3,4,5,6,7"   "$PRISTINE_7"   93 "CARD TOO SMALL"                  || fails=$((fails + 1))
-run "D no nvidia-smi"                      8 "1,2,3,4,5,6,7,8" ""              0  "EP_PREFLIGHT_SKIP"               || fails=$((fails + 1))
-run "E one dirty GPU"                      8 "1,2,3,4,5,6,7,8" "$DIRTY_ONE_8"  93 "EP_PREFLIGHT_REFUSE (1/8 short)" || fails=$((fails + 1))
-run "F unarmed rank count"                 5 "1,2,3,4,5"       "1:1024,81920"  0  "EP_PREFLIGHT_SKIP"               || fails=$((fails + 1))
+run "A stale-residency (reproduces #4952)" 8 "1,2,3,4,5,6,7,8" "$STALE_8"      93 \
+  "require_free=77.1GiB/gpu" "EP_PREFLIGHT_REFUSE (8/8 short)" "short=1.9GiB" || fails=$((fails + 1))
+run "B pristine"                           8 "1,2,3,4,5,6,7,8" "$PRISTINE_8"   0  \
+  "require_free=77.1GiB/gpu" "EP_PREFLIGHT_OK 8/8"                            || fails=$((fails + 1))
+run "C config-too-tight"                   7 "1,2,3,4,5,6,7"   "$PRISTINE_7"   93 \
+  "require_free=85.6GiB/gpu" "CARD TOO SMALL"                                 || fails=$((fails + 1))
+run "D no nvidia-smi"                      8 "1,2,3,4,5,6,7,8" ""              0  \
+  "EP_PREFLIGHT_SKIP no nvidia-smi"                                           || fails=$((fails + 1))
+run "E one dirty GPU"                      8 "1,2,3,4,5,6,7,8" "$DIRTY_ONE_8"  93 \
+  "require_free=77.1GiB/gpu" "EP_PREFLIGHT_REFUSE (1/8 short)" "short=6.8GiB"  || fails=$((fails + 1))
+run "F unarmed rank count"                 5 "1,2,3,4,5"       "1:1024,81920"  0  \
+  "EP_PREFLIGHT_SKIP no published per-rank plan total for RANKS=5"            || fails=$((fails + 1))
 
 echo "---"
 if [ "$fails" = 0 ]; then echo "EP_PREFLIGHT_SELFCHECK_PASS"; else echo "EP_PREFLIGHT_SELFCHECK_FAIL=$fails"; fi
