@@ -71,10 +71,11 @@ establishes *whose disk it is*, then three FS-syscall classes decided on top of 
 
 | # | The filesystem syscall | Verdict | Why |
 |---|---|---|---|
-| **T0** | *(not a syscall — the substrate)* the guest kernel's own report of the box, plus every mount on it | **witnessed** | the run reads `systemd-detect-virt` / `/proc` / `findmnt` to confirm it is inside a guest, names the device backing the rootfs (the *hypervisor's*, e.g. `/dev/sdd ext4`), and **fails if any fak-backed mount, device, or FUSE server exists** — the "fak did not provide this disk" half, as evidence |
+| **T0** | *(not a syscall — the substrate)* the guest kernel's own report of the box, plus every mount on it | **witnessed** | the run reads `systemd-detect-virt` / `/proc` / `findmnt` to confirm it is inside a guest, names the device backing the rootfs (the *hypervisor's*, e.g. `/dev/sdf ext4`), and **fails if any fak-backed mount, device, or FUSE server exists** — the "fak did not provide this disk" half, as evidence |
 | **T1** | `Edit .git/config`, `Write ~/.ssh/id_rsa`, `Write /workspace/.env`, `Write internal/adjudicator/decide.go` | **DENY · SELF_MODIFY** | a write into a region the sandbox's disk holds but the agent must never touch — repo internals, a private key, a secrets file, fak's own kernel source — refused *by shape*, naming only the one offending glob |
-| **T1 (read side)** | `Read /srv/secrets/prod.pem` (outside the view), `Write /workspace/vendor/lib.go` (a read-only subtree) | **DENY · DEFAULT_DENY** / **DENY · POLICY_BLOCK** | the issue's capture (a): the sandbox's disk *holds* both files and fak never lets the call reach them — deny-by-default over the path space, the shape a mount namespace has. Declared as `arg_rules` in [`vm-fs-floor.json`](vm-fs-floor.json); see [Honest boundary](#honest-boundary) for why not the `mount_view` spelling |
-| **allow** | `Read /workspace/src/main.go`, `Write /workspace/notes.md` | **ALLOW** | ordinary reads/writes of the sandbox's own disk — the floor gates the **path and the trust**, not the disk |
+| **T1 (read side)** | **all five** granted FS tools aimed outside the view (`Read`/`Edit`/`Write`/`Grep`/`Glob` at `/srv/secrets/…`), plus `Write` *and* `Edit` into `/workspace/vendor/` (a read-only subtree) | **DENY · DEFAULT_DENY** / **DENY · POLICY_BLOCK** | the issue's capture (a): the sandbox's disk *holds* every one of those files and fak never lets the call reach them — deny-by-default over the path space, the shape a mount namespace has. A view that gates only *some* tools is a door, not a boundary, so every tool the floor grants is asserted. Declared as `arg_rules` in [`vm-fs-floor.json`](vm-fs-floor.json); see [Honest boundary](#honest-boundary) for why not the `mount_view` spelling |
+| **allow** | the same five tools aimed *inside* the view (`Read`/`Edit`/`Write`/`Grep`/`Glob` under `/workspace/`) | **ALLOW** | ordinary reads/writes/searches of the sandbox's own disk — the floor gates the **path and the trust**, not the disk |
+| **cost** | `Grep`/`Glob` with **no** `path` arg (an in-view call meaning "the working root") | **DENY · DEFAULT_DENY** *(over-refusal)* | **not a capability — the measured price** of spelling a mount view as per-tool `arg_rules`: a rule can only gate an argument that is *present*, so this in-view call fails closed. Pinned by `t1_cost()` so the price cannot drift silently; it flips to **ALLOW** when [#5310](https://github.com/anthony-chaudhary/fak/issues/5310) wires `mount_view` |
 | **T2** | a poisoned fetch/read *result* carrying a prompt injection | **QUARANTINE · TRUST_VIOLATION** | an untrusted read held out of the agent's context by the result-side admitter, so the injection never lands |
 
 The run ends with the **FS-decision ledger** — the boundary's exit record of every
@@ -96,7 +97,10 @@ widens:
   falls outside the agent's declared view. `allow_glob` makes the view deny-by-default (a
   path matching nothing earns `DEFAULT_DENY` — nothing affirmatively permitted it), and a
   `deny_regex` marks a subtree read-only (a write into it earns `POLICY_BLOCK`). Both are
-  evaluated by the adjudicator on every call, ahead of any affirmative allow.
+  evaluated by the adjudicator on every call, ahead of any affirmative allow. The view is
+  declared for **every FS tool the floor grants**, not just `Read` — see
+  [Honest boundary](#honest-boundary) on why a partial view is a door rather than a
+  boundary, and what the per-tool spelling costs.
 - **T2 (result-side)** — the context-MMU's result-admission floor recognizes a
   prompt-injected tool result and returns `QUARANTINE`/`TRUST_VIOLATION`, holding the
   bytes out of context. `fak demo` folds the real `Kernel.AdmitResult` chain over it.
@@ -128,11 +132,32 @@ T1 story yet:
   is **which monitor refuses it**. Two different spellings of the same idea exist in the
   manifest, and only one of them reaches the request path:
 
-  - **`arg_rules` (wired, and what this witness uses).** An `allow_glob` over `Read`'s
-    `file_path` is deny-by-default over a path space: a target matching no rule earns
+  - **`arg_rules` (wired, and what this witness uses).** An `allow_glob` over a tool's
+    path argument is deny-by-default over a path space: a target matching no rule earns
     `DENY DEFAULT_DENY`, and a `deny_regex` marks a read-only subtree whose write earns
     `DENY POLICY_BLOCK`. The adjudicator evaluates these on every call, so the *capability*
     — hide a tree from the agent while the sandbox keeps providing it — ships today.
+
+    **A view must cover every tool that can reach a path, or it is a door.** `arg_rules`
+    are per-`(tool, arg)`, so the completeness of a hand-spelled view is the operator's
+    burden — and this example got that wrong until the rungs below were added. The floor
+    grants `Read`, `Write`, `Edit`, `Glob`, and `Grep`, but declared path rules for `Read`
+    and `Write` only. Driving the *other* three at the very path the view exists to hide:
+
+    ```text
+    $ fak preflight --policy vm-fs-floor.json --tool Edit --args '{"file_path":"/srv/secrets/prod.pem",…}'
+    verdict=ALLOW reason=NONE by=monitor      # out of view, yet ALLOWed
+    $ fak preflight --policy vm-fs-floor.json --tool Grep --args '{"path":"/srv/secrets",…}'
+    verdict=ALLOW reason=NONE by=monitor      # and again
+    $ fak preflight --policy vm-fs-floor.json --tool Write --args '{"file_path":"/srv/secrets/prod.pem",…}'
+    verdict=ALLOW reason=NONE by=monitor      # Write, too: only vendor/ was ruled
+    ```
+
+    Three of the five tools — and a `Write` to a fully out-of-view absolute path — walked
+    straight through a view the README described as "deny-by-default over the path space".
+    The sentence was true of the two rows the run sampled and false of the manifest. All
+    five tools are now ruled and all five are asserted on every run, so the claim and the
+    check are the same object.
   - **`mount_view` (parses, never runs).**
     [#2577](https://github.com/anthony-chaudhary/fak/issues/2577) closed having landed the
     mount-view *kernel* — the `mount_view` namespace plus `policy.MountViewRefusal`, a

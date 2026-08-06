@@ -20,11 +20,46 @@
       "fix": "read a path inside the mounted workspace, or ask the operator to widen the view"
     },
     {
+      "tool": "Edit",
+      "arg": "file_path",
+      "allow_glob": "/workspace/**",
+      "reason": "DEFAULT_DENY",
+      "fix": "edit a path inside the mounted workspace, or ask the operator to widen the view"
+    },
+    {
+      "tool": "Write",
+      "arg": "file_path",
+      "allow_glob": "/workspace/**",
+      "reason": "DEFAULT_DENY",
+      "fix": "write to a path inside the mounted workspace, or ask the operator to widen the view"
+    },
+    {
+      "tool": "Glob",
+      "arg": "path",
+      "allow_glob": "/workspace/**",
+      "reason": "DEFAULT_DENY",
+      "fix": "pass an explicit path inside the mounted workspace (this view declares no default root)"
+    },
+    {
+      "tool": "Grep",
+      "arg": "path",
+      "allow_glob": "/workspace/**",
+      "reason": "DEFAULT_DENY",
+      "fix": "pass an explicit path inside the mounted workspace (this view declares no default root)"
+    },
+    {
       "tool": "Write",
       "arg": "file_path",
       "deny_regex": "^/workspace/vendor/",
       "reason": "POLICY_BLOCK",
       "fix": "vendor/ is mounted read-only; write your change under /workspace/src instead"
+    },
+    {
+      "tool": "Edit",
+      "arg": "file_path",
+      "deny_regex": "^/workspace/vendor/",
+      "reason": "POLICY_BLOCK",
+      "fix": "vendor/ is mounted read-only; make your change under /workspace/src instead"
     }
   ]
 }
