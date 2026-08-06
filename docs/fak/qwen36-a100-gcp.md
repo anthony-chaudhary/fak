@@ -30,17 +30,29 @@ But two honest constraints shape what to serve:
   floor shipped in #934. The default is `unsloth/Qwen3.6-27B-GGUF` /
   `Qwen3.6-27B-Q4_K_M.gguf`, with exact size and SHA-256 checked before build or serve; a legacy
   Qwen2.5 override cannot emit the Qwen3.6 ready marker.
-- **CUDA GDN/SSM execution is still `not yet`.** #934 did not prove backend parity, and fresh DG2
-  validation found no GPU-resident Qwen3.6-27B turn. #4714 owns that fail-closed CUDA seam. Until
-  it lands and a capacity window produces the hardware artifact, the launcher contract is model
+- **CUDA GDN/SSM execution: the seam landed, parity is still `not yet`.** #934 did not prove
+  backend parity. The fail-closed seam #4714 owned, and the whole-operation GDN decode kernel
+  #4725 owned, have both since closed, so this page must no longer be read as "blocked on
+  #4714" — a device run now reaches the backend forward instead of refusing at it. What is
+  still unproven is *numeric* parity: `cmd/qwen35check`'s acceptance mode is the gate that
+  would prove it, and it is pinned to a different checkpoint than the launcher serves (see
+  below), so it has never actually graded this artifact. Until that pin is reconciled and a
+  capacity window produces an independently read-back artifact, the launcher contract is model
   identity evidence—not #4379 throughput/correctness evidence.
 - **Keep `--cuda-graph` OFF** (the default). At 14B/datacenter GPU it was witnessed to *crash* the serve
   (lazy KV `cudaMalloc` during graph capture, **#932**), not speed it up — until KV is
   pre-allocated before capture.
 
 `scripts/gcp-qwen-serve.sh` and `tools/qwen36_a100_fak_serve.sh` therefore default to the pinned
-Qwen3.6-27B artifact and fail closed on a different repository/file. Live readiness remains
-blocked on #4714 plus an independently read-back A100 run.
+Qwen3.6-27B artifact and fail closed on a different repository/file. Live readiness now rests on
+an independently read-back datacenter-GPU run, not on #4714.
+
+- **The acceptance gate is pinned to the wrong bytes.** `cmd/qwen35check`'s acceptance mode is
+  what would prove GDN/SSM numeric parity (per-step full-logit cosine plus argmax equality against
+  a CPU reference), but its `acceptanceCheckpointBytes` / `acceptanceCheckpointSHA` name a
+  *different* build of the checkpoint than the two launchers pin. A parity run therefore refuses
+  on identity before it compares a single logit, which is why "parity unproven" has persisted
+  even though the kernel work landed. Reconcile the two pins before reading any parity result.
 
 ## Why a single datacenter GPU is enough
 

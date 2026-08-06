@@ -43,8 +43,11 @@ set -uo pipefail
 #   * The default is the exact Qwen3.6-27B Q4_K_M artifact whose model-support floor shipped
 #     in #934. Its identity is pinned below so a moving repository or a legacy Qwen2.5 override
 #     cannot emit the Qwen3.6 readiness marker.
-#   * CUDA GDN/SSM execution remains fail-closed at the runtime/backend seam tracked by #4714;
-#     this launcher contract must not be read as that hardware witness.
+#   * The CUDA GDN/SSM seam tracked by #4714 and the whole-operation GDN decode kernel tracked by
+#     #4725 have both landed, so a device run now reaches the backend forward rather than refusing
+#     at it. What is still unproven is numeric parity: cmd/qwen35check's acceptance mode pins a
+#     different checkpoint build than EXPECTED_SHA256 below, so it has never graded this artifact.
+#     This launcher contract must still not be read as that hardware witness.
 QWEN_DIR="${QWEN_DIR:-/opt/fak-serve-model}"
 REPO="${QWEN_REPO:-unsloth/Qwen3.6-27B-GGUF}"
 QWEN_FILE_GLOB="${QWEN_FILE_GLOB:-Qwen3.6-27B-Q4_K_M.gguf}"
