@@ -234,7 +234,10 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 		// A witnessed collision refuses (exit 3); an infra error fails open
 		// with a warning, the dispatch tick's posture.
 		if regionHold == nil {
-			regionHold = newLoopDriveRegionHold(opt, spec)
+			// announceOn is nil-safe: an undeclared region yields no hold at all,
+			// and a hold that has one announces its nonfatal lease-ref sync
+			// degradations on this drive's stderr (#5571).
+			regionHold = newLoopDriveRegionHold(opt, spec).announceOn(stderr)
 		}
 		if refuse, err := regionHold.ensure(clock()); err != nil {
 			fmt.Fprintf(stderr, "fak loop drive: region admission unavailable (fail-open): %v\n", err)
