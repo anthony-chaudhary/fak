@@ -277,16 +277,51 @@ func Load(path string) (adjudicator.Policy, error) {
 	return rt.Adjudicator, nil
 }
 
+// LoadOp distinguishes the two ways loading a floor fails: the file could not be
+// READ at all, or it was read and did not PARSE. They need different next steps —
+// a wrong path versus a wrong manifest — and the message alone cannot be
+// dispatched on.
+type LoadOp string
+
+const (
+	LoadOpRead  LoadOp = "read"
+	LoadOpParse LoadOp = "parse"
+)
+
+// LoadError is the typed failure LoadRuntime returns. It exists so a CALLER can
+// react to a floor that would not load rather than only print it: the operator's
+// most common fatal misconfiguration used to surface as a bare
+// `fak: policy floor.json: ...` with nowhere to go next, and a caller that wants
+// to say more has to be able to recognize the error first.
+//
+// Error() is byte-identical to the strings this function returned before the type
+// existed, so anything matching on the message is unaffected.
+type LoadError struct {
+	Op   LoadOp
+	Path string
+	Err  error
+}
+
+func (e *LoadError) Error() string {
+	if e.Op == LoadOpRead {
+		return fmt.Sprintf("policy: %v", e.Err)
+	}
+	return fmt.Sprintf("policy %s: %v", e.Path, e.Err)
+}
+
+func (e *LoadError) Unwrap() error { return e.Err }
+
 // LoadRuntime reads, parses, validates, and resolves a manifest file into the
-// full boot-time policy set.
+// full boot-time policy set. A failure is always a *LoadError, so a caller can
+// errors.As it and report the path and which half failed.
 func LoadRuntime(path string) (Runtime, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return Runtime{}, fmt.Errorf("policy: %w", err)
+		return Runtime{}, &LoadError{Op: LoadOpRead, Path: path, Err: err}
 	}
 	rt, err := ParseRuntime(b)
 	if err != nil {
-		return Runtime{}, fmt.Errorf("policy %s: %w", path, err)
+		return Runtime{}, &LoadError{Op: LoadOpParse, Path: path, Err: err}
 	}
 	return rt, nil
 }

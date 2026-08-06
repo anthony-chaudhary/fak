@@ -55,6 +55,7 @@ func configRecoveryPlans() map[string]recoveryPlan {
 			},
 			Notes: []string{
 				"a floor that fails to load is never downgraded to a permissive default — that is the refusal working, not a bug",
+				"read the bail's `file` line first: it says whether <path> could not be READ (a wrong or relative path — fak resolves it against ITS working directory, which under an MCP launcher is the editor's) or was read and did not PARSE",
 				"every deny in the manifest must cite a closed-vocabulary reason; a free-text reason is the most common rejection",
 				"to serve without a custom floor at all, omit --policy rather than passing a file you have not validated",
 			},

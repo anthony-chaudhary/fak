@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -466,10 +467,41 @@ func statusName(s abi.Status) string {
 }
 
 func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fak:", err)
+	if err == nil {
+		return
+	}
+	// applyPolicy — the launch-time floor install, reached from `fak serve`,
+	// `fak chat`, `fak attest`, and the agent verbs — ends here on a floor that
+	// would not load. That made the single most common fatal misconfiguration
+	// fak has print `fak: policy floor.json: invalid manifest: ...` and stop,
+	// with no path named as a knob and nothing to run next.
+	//
+	// applyPolicy lives in main.go and calls this helper, so recognizing the
+	// typed error here upgrades every one of those call sites at once. Every
+	// other must() caller is untouched: only a *policy.LoadError takes this path.
+	var loadErr *policy.LoadError
+	if errors.As(err, &loadErr) {
+		observed := "did not validate"
+		want := "a manifest whose every deny cites a closed-vocabulary reason"
+		if loadErr.Op == policy.LoadOpRead {
+			observed = "could not be read"
+			want = "a readable path to the capability floor"
+		}
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak",
+			Reason:  bailPolicyLoadFailed,
+			Summary: fmt.Sprintf("refusing to start on a capability floor that would not load: %v", err),
+			Knobs: []bailKnob{
+				bailFlag("policy", loadErr.Path),
+				bailFile(loadErr.Path, observed).want(want),
+			},
+			Check: "fak policy --check " + loadErr.Path + "   # the precise rejection, read-only",
+			Bind:  []string{"path=" + loadErr.Path},
+		})
 		os.Exit(1)
 	}
+	fmt.Fprintln(os.Stderr, "fak:", err)
+	os.Exit(1)
 }
 
 // embeddedGGUFTokenizer builds a tokenizer straight from the GGUF's own
