@@ -172,8 +172,9 @@ func ValidToken(s string) bool {
 // Selector names the set a directive addresses, on TWO levels that are read by two
 // different consumers:
 //
-//   - INSTANCE axes (All / Instance / Machine / Role) route the directive to
-//     processes. Only these are read by MatchesInstance, and only by the bus.
+//   - INSTANCE axes (All / Instance / Machine / Role / Model / Zone) route the
+//     directive to processes. Only these are read by MatchesInstance, and only by the
+//     bus.
 //   - SESSION axes (Lane / Wave / Label) narrow WITHIN a matched instance. The bus
 //     never interprets them; it carries them to the applier, which resolves them
 //     against its own live sessions (they are sessionctl.BroadcastSelector's axes,
@@ -192,6 +193,18 @@ type Selector struct {
 	Instance []string `json:"instance,omitempty"`
 	Machine  []string `json:"machine,omitempty"`
 	Role     []string `json:"role,omitempty"`
+	// Model / Zone address instances by declared CAPABILITY rather than by identity —
+	// "everything serving the old checkpoint", not "these four ids". They read
+	// Instance.Models / Instance.Zone, which are claims like Ops and not witnesses, so
+	// a model axis SELECTS an instance and never certifies it: the ack is still the
+	// only proof anything applied.
+	//
+	// Model is set-vs-set — an instance matches when ANY model it declares is named on
+	// the axis. An instance that declares NOTHING (or predates the field) matches no
+	// stated Model axis at all, which is the same fail-closed rule Role already runs:
+	// an untagged record is never swept up by a filter it never answered.
+	Model []string `json:"model,omitempty"`
+	Zone  []string `json:"zone,omitempty"`
 	// Lane / Wave / Label narrow within an instance. Carried, never interpreted here.
 	Lane  string `json:"lane,omitempty"`
 	Wave  string `json:"wave,omitempty"`
@@ -202,7 +215,8 @@ type Selector struct {
 // states only session axes is malformed: "lane=cmd" alone never means "on every
 // machine" — that widening has to be said out loud.
 func (s Selector) AddressesInstances() bool {
-	return s.All || len(s.Instance) > 0 || len(s.Machine) > 0 || len(s.Role) > 0
+	return s.All || len(s.Instance) > 0 || len(s.Machine) > 0 || len(s.Role) > 0 ||
+		len(s.Model) > 0 || len(s.Zone) > 0
 }
 
 // NarrowsSessions reports whether any SESSION axis is stated.
@@ -210,14 +224,22 @@ func (s Selector) NarrowsSessions() bool {
 	return s.Lane != "" || s.Wave != "" || s.Label != ""
 }
 
+// narrowsInstances reports whether any instance axis OTHER than All is stated. It is
+// spelled once so a new axis cannot be added to the addressing set while quietly
+// staying legal to combine with --all.
+func (s Selector) narrowsInstances() bool {
+	return len(s.Instance) > 0 || len(s.Machine) > 0 || len(s.Role) > 0 ||
+		len(s.Model) > 0 || len(s.Zone) > 0
+}
+
 // Validate refuses a selector that cannot address anybody, or one that contradicts
 // itself by combining the affirmative All with a narrowing instance axis.
 func (s Selector) Validate() *Refusal {
 	if !s.AddressesInstances() {
 		return refuse(Malformed,
-			"selector addresses no instance — state --all, or an --instance / --machine / --role; an empty selector never means \"every instance\"")
+			"selector addresses no instance — state --all, or an --instance / --machine / --role / --model / --zone; an empty selector never means \"every instance\"")
 	}
-	if s.All && (len(s.Instance) > 0 || len(s.Machine) > 0 || len(s.Role) > 0) {
+	if s.All && s.narrowsInstances() {
 		return refuse(Malformed,
 			"selector states --all AND an instance filter; pick one (--all means every instance, a filter means some)")
 	}
@@ -242,19 +264,29 @@ func (s Selector) MatchesInstance(inst Instance) bool {
 	if len(s.Role) > 0 && !containsToken(s.Role, inst.Role) {
 		return false
 	}
+	// Set-vs-set: the instance matches when any model it declares is named. An
+	// instance declaring nothing has an empty Models, so this is false — the
+	// fail-closed arm, and the reason adding this axis cannot widen an existing
+	// selector's target set.
+	if len(s.Model) > 0 && !intersectsTokens(s.Model, inst.Models) {
+		return false
+	}
+	if len(s.Zone) > 0 && !containsToken(s.Zone, inst.Zone) {
+		return false
+	}
 	return true
 }
 
 // String renders the stated axes for reports and logs.
 func (s Selector) String() string {
-	parts := make([]string, 0, 6)
+	parts := make([]string, 0, 8)
 	if s.All {
 		parts = append(parts, "all")
 	}
 	for _, ax := range []struct {
 		name string
 		vals []string
-	}{{"instance", s.Instance}, {"machine", s.Machine}, {"role", s.Role}} {
+	}{{"instance", s.Instance}, {"machine", s.Machine}, {"role", s.Role}, {"model", s.Model}, {"zone", s.Zone}} {
 		if len(ax.vals) > 0 {
 			parts = append(parts, ax.name+"="+strings.Join(ax.vals, ","))
 		}
@@ -273,6 +305,18 @@ func (s Selector) String() string {
 func containsToken(set []string, v string) bool {
 	for _, s := range set {
 		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+// intersectsTokens reports whether the axis and the instance's declared set share a
+// member. Either side being empty is false — an axis nobody was asked about and a
+// record that declared nothing both mean "no match", never "match anything".
+func intersectsTokens(axis, declared []string) bool {
+	for _, v := range declared {
+		if containsToken(axis, v) {
 			return true
 		}
 	}
@@ -304,6 +348,22 @@ type Instance struct {
 	// ack is. An op an instance did not declare still gets a real attempt and a real
 	// ack.
 	Ops []Op `json:"ops,omitempty"`
+	// Models is what this instance SAYS it serves, and Zone where it says it sits.
+	// They are the same KIND of thing as Ops — a claim, not a witness — with one
+	// difference that has to be stated because it is easy to misread as promotion:
+	// the Selector's Model/Zone axes DO read these, so they are SELECTION inputs.
+	// Selection is not routing. Being addressed still gets you a real attempt and a
+	// real ack, and an instance that lied about its models refuses at its own
+	// applier exactly as it would have anyway. What the axes buy is that a
+	// model-scoped operator action ("drain everything on the old checkpoint")
+	// addresses the instances that claim it instead of fanning to all and collecting
+	// N refusals — the accepted-but-not-applied shape this package exists to avoid.
+	//
+	// Both are OPTIONAL and additive. A record written by a binary that predates them
+	// parses with them empty, stays in the roster, and keeps matching exactly the
+	// selectors it matched before, so no denominator shrinks (see fold.go).
+	Models []string `json:"models,omitempty"`
+	Zone   string   `json:"zone,omitempty"`
 	// SeenUTC is the announce timestamp (RFC3339 nanos, UTC).
 	SeenUTC string `json:"seen_utc"`
 }
@@ -324,6 +384,52 @@ func NewInstance(id, machine, role string, pid int, addr string, ops []Op, now t
 		return Instance{}, r
 	}
 	return inst, nil
+}
+
+// WithServedModels stamps what this instance serves onto its presence record,
+// returning a copy. Models are trimmed, de-duplicated and sorted so two announces of
+// the same set produce byte-identical records — a roster an operator diffs should not
+// churn because a config file listed the same models in a different order.
+//
+// It is a BUILDER rather than another NewInstance parameter on purpose. NewInstance
+// stamps the fields every presence record must have to be addressed and aged; this is
+// an optional claim an announcer fills in only when it knows it, and folding it into
+// the constructor would force every existing caller — including the ones with nothing
+// to declare — to say so with an empty argument.
+//
+// Model tokens are deliberately NOT held to ValidToken. That check exists because ids
+// are path segments in the directory transport; a model name is only ever compared,
+// never joined onto a path, and real names carry separators ("zai-org/GLM-4.6") that
+// the id alphabet would refuse.
+func (i Instance) WithServedModels(models []string) Instance {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		m = strings.TrimSpace(m)
+		if m == "" || seen[m] {
+			continue
+		}
+		seen[m] = true
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		// nil, not an empty slice: omitempty then keeps the field off the wire, so a
+		// record declaring nothing is byte-identical to one from before the field.
+		out = nil
+	}
+	i.Models = out
+	return i
+}
+
+// WithZone stamps where this instance says it sits, returning a copy. It is a separate
+// builder from WithServedModels because the two answer different questions — what is
+// served, and where it is — and an announcer commonly knows one without the other.
+// Zone is a plain comparison label under the same rule as a model token: never a path
+// segment, so never held to ValidToken.
+func (i Instance) WithZone(zone string) Instance {
+	i.Zone = strings.TrimSpace(zone)
+	return i
 }
 
 // Validate refuses a presence record that cannot be addressed or aged.
