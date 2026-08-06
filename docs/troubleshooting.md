@@ -25,6 +25,7 @@ success.
 
 | What the user sees | First check | Continue here |
 |---|---|---|
+| **fak refused to start and printed a `reason:` token.** | Run the `next:` command the block already printed; it names the checks for that exact token. | [Config bails](config-bails.md) |
 | **The address is already in use.** | Identify the process that owns the configured port; otherwise choose another explicit `--addr`. | [Port conflicts](fak/server-troubleshooting.md#port-conflicts) |
 | **The process exits or never becomes healthy.** | Read the first startup error and confirm the address, engine/model source, policy path, and authentication environment. | [Startup failures](fak/server-troubleshooting.md#startup-failures) |
 | **Model loading reports missing, invalid, or tokenizer data.** | Confirm the configured GGUF/model path exists and matches the selected serving mode. | [Model loading failures](fak/server-troubleshooting.md#model-loading-failures) |

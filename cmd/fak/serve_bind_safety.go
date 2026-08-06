@@ -112,8 +112,9 @@ func serveBindRefusal(addr string, authConfigured, override bool) string {
 		"fak serve: %s — refusing to bind %s, which is reachable from off this host, with no inbound token door: "+
 			"every request would be served unauthenticated. Fix it one of three ways: bind loopback (--addr 127.0.0.1:8080, the default), "+
 			"require a bearer (--require-key-env FAK_API_KEY, with that env var set), or bind per-tenant keys (--key-principal acme=ACME_KEY). "+
-			"If this host really is meant to serve an unauthenticated interface, pass --%s to proceed anyway.",
-		serveBindRefusalToken, addr, serveUnsafeBindFlag)
+			"If this host really is meant to serve an unauthenticated interface, pass --%s to proceed anyway.\n"+
+			"  next:   fak recover %s",
+		serveBindRefusalToken, addr, serveUnsafeBindFlag, serveBindRefusalToken)
 }
 
 // admitServeBind applies the bind-admission rule to the parsed serve flags, writing the

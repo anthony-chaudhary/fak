@@ -65,7 +65,18 @@ func cmdPolicy(argv []string) {
 			RunningVersion: appversion.Current(),
 		})
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak policy:", err)
+			// This is the command the POLICY_LOAD_FAILED recovery sends an operator
+			// to, so it must not dead-end here: the rejection itself carries the
+			// knob that produced it and the next step, exactly like the bail that
+			// sent them (bail.go).
+			writeConfigBail(os.Stderr, configBail{
+				Verb:    "fak policy",
+				Reason:  bailPolicyLoadFailed,
+				Summary: fmt.Sprintf("--check rejected the manifest: %v", err),
+				Knobs:   []bailKnob{bailFile(*check, "did not validate").want("a manifest whose every deny cites a closed-vocabulary reason")},
+				Check:   "fak policy --dump   # the default manifest, to diff yours against",
+				Bind:    []string{"path=" + *check},
+			})
 			os.Exit(1)
 		}
 		fmt.Print(report)

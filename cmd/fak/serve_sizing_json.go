@@ -198,7 +198,16 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 // artifact, print it, and return without loading a tensor byte or binding a listener.
 func runServeSizingJSON(sf *serveFlags) {
 	if *sf.ggufPath == "" {
-		fmt.Fprintln(os.Stderr, "fak serve: --plan-json requires --gguf WEIGHTS (the artifact is header-derived)")
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailWeightsRequired,
+			Summary: "--plan-json requires --gguf WEIGHTS (the artifact is header-derived)",
+			Knobs: []bailKnob{
+				bailFlag("plan-json", "true"),
+				bailFlag("gguf", "").want("a GGUF path, an hf:// URI, or a registry alias"),
+			},
+			Check: "fak ls   # the locally cached models --gguf can name",
+		})
 		os.Exit(2)
 	}
 	be, err := resolveServeChatBackend(*sf.backendName)
