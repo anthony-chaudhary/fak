@@ -84,3 +84,27 @@ func TestRunRawEndToEndViaGateway(t *testing.T) {
 		t.Fatalf("usage fold wrong: %+v", rep.Usage)
 	}
 }
+
+// TestGatewayBearerPrecedence pins the env order the raw arm reads its
+// credential from, and that an unauthenticated endpoint gets no header at all
+// (an empty return, not a "Bearer " with nothing after it).
+func TestGatewayBearerPrecedence(t *testing.T) {
+	for _, env := range []string{"LCB_API_KEY", "FAK_GATEWAY_KEY", "OPENAI_API_KEY"} {
+		t.Setenv(env, "")
+	}
+	if got := bearerFromEnv(); got != "" {
+		t.Fatalf("no credential set: want %q, got %q", "", got)
+	}
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	if got := bearerFromEnv(); got != "sk-openai" {
+		t.Fatalf("OPENAI_API_KEY only: got %q", got)
+	}
+	t.Setenv("FAK_GATEWAY_KEY", "sk-fak")
+	if got := bearerFromEnv(); got != "sk-fak" {
+		t.Fatalf("FAK_GATEWAY_KEY outranks OPENAI_API_KEY: got %q", got)
+	}
+	t.Setenv("LCB_API_KEY", "  sk-lcb  ")
+	if got := bearerFromEnv(); got != "sk-lcb" {
+		t.Fatalf("LCB_API_KEY wins and is trimmed: got %q", got)
+	}
+}

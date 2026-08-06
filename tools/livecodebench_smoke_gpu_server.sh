@@ -27,6 +27,8 @@
 #                    reasoning_content. Do not read that empty as a broken serve.)
 #   LCB_CONCURRENCY  in-flight requests (default 1 — a host-offloaded 753B decode is serial-slow)
 #   LCB_REQ_TIMEOUT  per-request HTTP timeout (default 900s)
+#   LCB_API_KEY      bearer presented to a key-guarded serve (a `fak serve --require-key-env`
+#                    answers an unauthenticated request with HTTP 401; unset = send no header)
 #   LCB_OUTDIR       artifact directory (default /tmp/fakgpu/lcb-smoke)
 #   LCB_OUT          RESULT file (default $LCB_OUTDIR/RESULT.txt); $LCB_OUT.done holds the rc
 #
@@ -45,6 +47,8 @@ LCB_TEMPERATURE="${LCB_TEMPERATURE:-0}"
 LCB_MAX_TOKENS="${LCB_MAX_TOKENS:-2048}"
 LCB_CONCURRENCY="${LCB_CONCURRENCY:-1}"
 LCB_REQ_TIMEOUT="${LCB_REQ_TIMEOUT:-900s}"
+LCB_API_KEY="${LCB_API_KEY:-}"
+export LCB_API_KEY
 LCB_OUTDIR="${LCB_OUTDIR:-/tmp/fakgpu/lcb-smoke}"
 LCB_OUT="${LCB_OUT:-$LCB_OUTDIR/RESULT.txt}"
 DONE="${LCB_OUT}.done"
@@ -65,8 +69,10 @@ log "HEAD=$(git rev-parse --short HEAD 2>/dev/null) $(git log -1 --format=%s 2>/
 log "LCB_ENDPOINT=$LCB_ENDPOINT LCB_SUITE=$(basename "$LCB_SUITE") LCB_N=$LCB_N LCB_TEMPERATURE=$LCB_TEMPERATURE LCB_MAX_TOKENS=$LCB_MAX_TOKENS LCB_CONCURRENCY=$LCB_CONCURRENCY"
 
 # 1. the serve must already be up — this script never starts one.
-MODELS_JSON="$(curl -sf -m 30 "${LCB_ENDPOINT%/}/models" 2>/dev/null)" \
-  || fail "ENDPOINT_UNREACHABLE $LCB_ENDPOINT — this script does not start a serve" 92
+AUTH_HDR=()
+[ -n "$LCB_API_KEY" ] && AUTH_HDR=(-H "Authorization: Bearer $LCB_API_KEY")
+MODELS_JSON="$(curl -sf -m 30 "${AUTH_HDR[@]}" "${LCB_ENDPOINT%/}/models" 2>/dev/null)" \
+  || fail "ENDPOINT_UNREACHABLE $LCB_ENDPOINT — this script does not start a serve (a key-guarded serve also lands here: set LCB_API_KEY)" 92
 log "ENDPOINT_OK models=$(printf '%s' "$MODELS_JSON" | tr -d '\n' | cut -c1-240)"
 if [ -z "$LCB_MODEL" ]; then
   LCB_MODEL="$(printf '%s' "$MODELS_JSON" | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"

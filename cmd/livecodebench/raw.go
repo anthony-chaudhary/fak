@@ -142,6 +142,22 @@ func runRaw(argv []string) int {
 	return 0
 }
 
+// bearerFromEnv returns the bearer credential the raw arm presents to the
+// gateway, or "" when the endpoint is unauthenticated. A `fak serve` started
+// with --require-key-env rejects an unauthenticated POST with HTTP 401, so
+// benchmarking a key-guarded in-kernel serve was previously impossible without
+// taking the key requirement off the serve. The credential is read from the
+// environment (never a flag) so it stays out of the process table and out of
+// the emitted report.
+func bearerFromEnv() string {
+	for _, env := range []string{"LCB_API_KEY", "FAK_GATEWAY_KEY", "OPENAI_API_KEY"} {
+		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // gatewaySampler returns a RawArmSampler that POSTs one OpenAI-compatible
 // chat-completions request per call and returns the completion text plus the
 // provider-relayed usage, normalized here through agent.Usage.CachedPromptTokens()
@@ -166,6 +182,9 @@ func gatewaySampler(client *http.Client, cfg livecodebench.RawArmConfig, maxToke
 			return "", livecodebench.RawSampleUsage{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if key := bearerFromEnv(); key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			return "", livecodebench.RawSampleUsage{}, err
