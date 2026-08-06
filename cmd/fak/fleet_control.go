@@ -153,7 +153,11 @@ func runFleetControlSend(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	rep, waited := awaitFleetControl(bus, d, *wait)
+	rep, waited, err := awaitFleetControl(bus, d, *wait)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak fleet control send: %v\n", err)
+		return 1
+	}
 	return emitFleetControl(stdout, stderr, rep, waited, *wait, *asJSON, "send")
 }
 
@@ -161,14 +165,17 @@ func runFleetControlSend(stdout, stderr io.Writer, argv []string) int {
 // or the budget runs out. It re-reads the ROSTER each pass, not just the acks: an
 // instance that announces after the publish is a real new target, and a denominator
 // frozen at publish time would report it as never having existed.
-func awaitFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive, wait time.Duration) (fleetbus.Report, time.Duration) {
+func awaitFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive, wait time.Duration) (fleetbus.Report, time.Duration, error) {
 	const poll = 250 * time.Millisecond
 	start := fleetControlNow()
 	for {
-		rep := foldFleetControl(bus, d)
+		rep, err := foldFleetControl(bus, d)
 		waited := fleetControlNow().Sub(start)
+		if err != nil {
+			return fleetbus.Report{}, waited, err
+		}
 		if wait <= 0 || rep.Complete || waited >= wait {
-			return rep, waited
+			return rep, waited, nil
 		}
 		remaining := wait - waited
 		if remaining > poll {
@@ -178,11 +185,17 @@ func awaitFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive, wait time.Dur
 	}
 }
 
-func foldFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive) fleetbus.Report {
+func foldFleetControl(bus *fleetbus.DirBus, d fleetbus.Directive) (fleetbus.Report, error) {
 	now := fleetControlNow()
-	roster, _ := bus.Instances(now, fleetbus.DefaultInstanceTTL)
-	acks, _ := bus.Acks(d.ID)
-	return fleetbus.Fold(d, roster, acks, now)
+	roster, err := bus.Instances(now, fleetbus.DefaultInstanceTTL)
+	if err != nil {
+		return fleetbus.Report{}, fmt.Errorf("read roster: %w", err)
+	}
+	acks, err := bus.Acks(d.ID)
+	if err != nil {
+		return fleetbus.Report{}, fmt.Errorf("read acknowledgements: %w", err)
+	}
+	return fleetbus.Fold(d, roster, acks, now), nil
 }
 
 // --- status ---------------------------------------------------------------- //
@@ -217,7 +230,12 @@ func runFleetControlStatus(stdout, stderr io.Writer, argv []string) int {
 	want := strings.TrimSpace(*directive)
 	for _, d := range directives {
 		if d.ID == want {
-			return emitFleetControl(stdout, stderr, foldFleetControl(bus, d), 0, 0, *asJSON, "status")
+			rep, err := foldFleetControl(bus, d)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak fleet control status: %v\n", err)
+				return 1
+			}
+			return emitFleetControl(stdout, stderr, rep, 0, 0, *asJSON, "status")
 		}
 	}
 	// Say which of the two this is: an id that was never issued and one whose ledger

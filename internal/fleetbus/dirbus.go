@@ -189,12 +189,15 @@ func (b *DirBus) Instances(now time.Time, ttl time.Duration) ([]Instance, error)
 	}
 	var out []Instance
 	for _, e := range entries {
+		if e.IsDir() && filepath.Ext(e.Name()) == ".json" {
+			return nil, fmt.Errorf("instance record %s is a directory", e.Name())
+		}
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(b.Root, instancesDir, e.Name()))
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read instance %s: %w", e.Name(), err)
 		}
 		var inst Instance
 		if err := json.Unmarshal(data, &inst); err != nil {
@@ -313,8 +316,11 @@ func (b *DirBus) Acks(directiveID string) ([]Ack, error) {
 	var out []Ack
 	for _, p := range []string{path + ".1", path} {
 		data, err := os.ReadFile(p)
-		if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read ack ledger %s: %w", filepath.Base(p), err)
 		}
 		out = append(out, jsonlledger.Parse(string(data), func(a Ack) bool {
 			return a.Validate() == nil
