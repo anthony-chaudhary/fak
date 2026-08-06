@@ -28,17 +28,24 @@ const (
 	maxRequestBytes      int64 = 8 << 10
 )
 
-// Wire ops. Deliberately two: read one content-addressed object, and report
-// counters. There is no write op in this rung and there is not meant to be one.
+// Wire ops: read one content-addressed object, read working-tree state, and
+// report counters. There is no write op in this package and there is not meant
+// to be one.
 const (
 	opObject = "object"
 	opStats  = "stats"
+	opTree   = "tree"
 )
 
 type wireRequest struct {
 	Token string `json:"token"`
 	Op    string `json:"op"`
 	Rev   string `json:"rev,omitempty"`
+	// Class is what the CALLER declares the answer is for. Absent — an older
+	// client, or a caller that did not think about it — decodes to "", which
+	// Class.Decisional treats as Class C: fresh every time. The unsafe direction
+	// is never the default.
+	Class Class `json:"class,omitempty"`
 }
 
 // wireResponse always carries a Provenance on success. The field is not
@@ -47,6 +54,7 @@ type wireRequest struct {
 type wireResponse struct {
 	Provenance Provenance `json:"provenance,omitempty"`
 	Object     *Object    `json:"object,omitempty"`
+	Tree       *TreeState `json:"tree,omitempty"`
 	Stats      *Stats     `json:"stats,omitempty"`
 	Error      string     `json:"error,omitempty"`
 }
@@ -59,21 +67,40 @@ type Config struct {
 	Dir        string // rendezvous directory; empty = the OS temp dir
 	Runner     Runner
 	CacheBytes int64
+
+	// Tree is the working-tree backend; nil means SpawnTreeRunner{RepoRoot}.
+	Tree TreeRunner
+	// TreeRaceWindow is the assumed filesystem mtime granularity that bounds the
+	// Class B cache's stale-read budget; <=0 means DefaultTreeRaceWindow. See
+	// the budget stated at the top of treestate.go.
+	TreeRaceWindow time.Duration
 }
 
 // Server is the resident per-repo broker.
 type Server struct {
-	rv      Rendezvous
-	ln      net.Listener
-	runner  Runner
-	token   string
-	cache   *cache
-	timeout time.Duration
+	rv       Rendezvous
+	ln       net.Listener
+	repoRoot string
+	runner   Runner
+	tree     TreeRunner
+	token    string
+	cache    *cache
+	trees    *treeCache
+	timeout  time.Duration
+	window   time.Duration
 
-	served   atomic.Int64
-	hits     atomic.Int64
-	misses   atomic.Int64
-	uncached atomic.Int64
+	// Single-flight, one group per query kind. These are what collapse the
+	// concurrent fan-in from eight sessions; they store nothing between calls.
+	objFlight  flightGroup[Object]
+	treeFlight flightGroup[TreeState]
+
+	served     atomic.Int64
+	hits       atomic.Int64
+	misses     atomic.Int64
+	uncached   atomic.Int64
+	treeHits   atomic.Int64
+	treeMisses atomic.Int64
+	treeFresh  atomic.Int64
 
 	done chan struct{}
 	wg   sync.WaitGroup
@@ -90,6 +117,14 @@ func Serve(cfg Config) (*Server, error) {
 	runner := cfg.Runner
 	if runner == nil {
 		runner = SpawnRunner{RepoRoot: cfg.RepoRoot}
+	}
+	tree := cfg.Tree
+	if tree == nil {
+		tree = SpawnTreeRunner{RepoRoot: cfg.RepoRoot}
+	}
+	window := cfg.TreeRaceWindow
+	if window <= 0 {
+		window = DefaultTreeRaceWindow
 	}
 	rv := RendezvousIn(cfg.Dir, cfg.RepoRoot)
 	ln, err := listenFresh(rv.Socket)
@@ -112,13 +147,17 @@ func Serve(cfg Config) (*Server, error) {
 	_ = os.Chmod(rv.Socket, 0o600) // best-effort; AF_UNIX on Windows has no mode
 
 	s := &Server{
-		rv:      rv,
-		ln:      ln,
-		runner:  runner,
-		token:   token,
-		cache:   newCache(cfg.CacheBytes),
-		timeout: defaultHandleTimeout,
-		done:    make(chan struct{}),
+		rv:       rv,
+		ln:       ln,
+		repoRoot: cfg.RepoRoot,
+		runner:   runner,
+		tree:     tree,
+		token:    token,
+		cache:    newCache(cfg.CacheBytes),
+		trees:    &treeCache{},
+		timeout:  defaultHandleTimeout,
+		window:   window,
+		done:     make(chan struct{}),
 	}
 	s.wg.Add(1)
 	go s.accept()
@@ -168,12 +207,17 @@ func (s *Server) Token() string { return s.token }
 func (s *Server) Stats() Stats {
 	entries, bytes := s.cache.sizes()
 	return Stats{
-		Served:    s.served.Load(),
-		Hits:      s.hits.Load(),
-		Misses:    s.misses.Load(),
-		Uncached:  s.uncached.Load(),
-		Entries:   entries,
-		CacheSize: bytes,
+		Served:     s.served.Load(),
+		Hits:       s.hits.Load(),
+		Misses:     s.misses.Load(),
+		Uncached:   s.uncached.Load(),
+		Entries:    entries,
+		CacheSize:  bytes,
+		Coalesced:  s.objFlight.Coalesced() + s.treeFlight.Coalesced(),
+		TreeHits:   s.treeHits.Load(),
+		TreeMisses: s.treeMisses.Load(),
+		TreeFresh:  s.treeFresh.Load(),
+		TreeEntry:  s.trees.held(),
 	}
 }
 
@@ -241,18 +285,33 @@ func (s *Server) handle(conn net.Conn) {
 		}
 		s.served.Add(1)
 		writeResponse(conn, wireResponse{Provenance: prov, Object: &obj})
+	case opTree:
+		st, prov, err := s.treeState(ctx, req.Class)
+		if err != nil {
+			writeResponse(conn, wireResponse{Error: err.Error()})
+			return
+		}
+		s.served.Add(1)
+		writeResponse(conn, wireResponse{Provenance: prov, Tree: &st})
 	default:
 		writeResponse(conn, wireResponse{Error: fmt.Sprintf("unknown op %q", req.Op)})
 	}
 }
 
-// object is the Class A decision point, and the only place the cache is
+// object is the Class A decision point, and the only place the object cache is
 // consulted. A full-OID key may be answered from the immutable-object cache;
 // anything else goes to the backend every single time and is never stored.
+//
+// Every backend read — cached-key or not — goes through single-flight, so N
+// concurrent callers asking the same question cost one git invocation. That is
+// safe for BOTH branches here without any invalidation argument: a full OID is
+// immutable, and a non-OID read is still computed fresh, just once.
 func (s *Server) object(ctx context.Context, rev string) (Object, Provenance, error) {
 	if !IsOID(rev) {
 		s.uncached.Add(1)
-		obj, err := s.runner.Object(ctx, rev)
+		obj, _, err := s.objFlight.Do("obj\x00"+rev, func() (Object, error) {
+			return s.runner.Object(ctx, rev)
+		})
 		if err != nil {
 			return Object{}, "", err
 		}
@@ -263,12 +322,85 @@ func (s *Server) object(ctx context.Context, rev string) (Object, Provenance, er
 		return obj, Cache, nil
 	}
 	s.misses.Add(1)
-	obj, err := s.runner.Object(ctx, rev)
+	obj, _, err := s.objFlight.Do("obj\x00"+rev, func() (Object, error) {
+		o, err := s.runner.Object(ctx, rev)
+		if err == nil {
+			s.cache.put(rev, o)
+		}
+		return o, err
+	})
 	if err != nil {
 		return Object{}, "", err
 	}
-	s.cache.put(rev, obj)
 	return obj, Broker, nil
+}
+
+// treeState is the Class B/C decision point, and the ONLY function in this
+// package permitted to touch the working-tree cache. Read it as three gates in
+// order:
+//
+//  1. DECISIONAL: a caller whose answer feeds a commit gate, a mutation, or a
+//     refusal gets a fresh execution — no cache read, no cache write, and no
+//     joining someone else's in-flight query either, so its snapshot is never
+//     older than its own call. This is the correctness line of the whole epic.
+//  2. UNKEYABLE / UNSETTLED: if the repository cannot be keyed, or the tree was
+//     written so recently that filesystem mtime granularity could hide a peer's
+//     write behind our sample, the answer is computed fresh and not stored.
+//  3. KEYED: sample the key, serve on an exact match, otherwise compute and
+//     store — but only if the key is UNCHANGED across the computation, so a
+//     write that landed while `git status` was running can never be recorded as
+//     the state of the tree after it.
+func (s *Server) treeState(ctx context.Context, class Class) (TreeState, Provenance, error) {
+	if class.Decisional() {
+		s.treeFresh.Add(1)
+		st, err := s.tree.TreeState(ctx)
+		if err != nil {
+			return TreeState{}, "", err
+		}
+		st.Key, _ = sampleStateKey(s.repoRoot, s.window)
+		return st, Broker, nil
+	}
+
+	before, settled := sampleStateKey(s.repoRoot, s.window)
+	if !settled {
+		s.treeFresh.Add(1)
+		st, _, err := s.treeFlight.Do("tree\x00fresh", func() (TreeState, error) {
+			return s.tree.TreeState(ctx)
+		})
+		if err != nil {
+			return TreeState{}, "", err
+		}
+		st.Key = before
+		return st, Broker, nil
+	}
+	if st, ok := s.trees.lookup(before); ok {
+		s.treeHits.Add(1)
+		return st, Cache, nil
+	}
+	s.treeMisses.Add(1)
+	st, _, err := s.treeFlight.Do("tree\x00"+treeFlightKey(before), func() (TreeState, error) {
+		out, err := s.tree.TreeState(ctx)
+		if err != nil {
+			return TreeState{}, err
+		}
+		out.Key = before
+		after, stillSettled := sampleStateKey(s.repoRoot, s.window)
+		if stillSettled && after == before {
+			s.trees.store(before, out)
+		}
+		return out, nil
+	})
+	if err != nil {
+		return TreeState{}, "", err
+	}
+	return st, Broker, nil
+}
+
+// treeFlightKey renders a StateKey as a single-flight key. Two callers coalesce
+// only when they are asking about the SAME tree state; a peer's write between
+// them puts them in different flights rather than sharing one answer.
+func treeFlightKey(k StateKey) string {
+	return fmt.Sprintf("%d\x00%d\x00%s\x00%d", k.IndexMod, k.IndexSize, k.HeadOID, k.RefsMod)
 }
 
 func writeResponse(conn net.Conn, resp wireResponse) {

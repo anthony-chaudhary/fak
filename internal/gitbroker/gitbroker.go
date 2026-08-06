@@ -241,6 +241,13 @@ func canonicalRoot(repoRoot string) string {
 // how much the cache is holding. `fak gitd --status` reads it over the same
 // socket, so "is the broker actually saving spawns?" is answerable from
 // evidence.
+//
+// THE THREE SAVINGS ARE COUNTED SEPARATELY ON PURPOSE (#5623). Hits is the Class
+// A object cache, TreeHits is the Class B working-tree cache, and Coalesced is
+// single-flight — three different mechanisms with three different correctness
+// arguments. Bundled into one "saved" number, neither contribution would be
+// attributable and a later regression could not be localized to the mechanism
+// that caused it.
 type Stats struct {
 	Served    int64 `json:"served"`
 	Hits      int64 `json:"cache_hits"`
@@ -248,6 +255,19 @@ type Stats struct {
 	Uncached  int64 `json:"uncacheable"`
 	Entries   int   `json:"entries"`
 	CacheSize int64 `json:"cache_bytes"`
+
+	// Coalesced counts queries answered by JOINING an execution already in
+	// flight — the single-flight saving, with no cache involved at all.
+	Coalesced int64 `json:"coalesced"`
+
+	// The Class B working-tree cache, counted apart from Class A.
+	TreeHits   int64 `json:"tree_cache_hits"`
+	TreeMisses int64 `json:"tree_cache_misses"`
+	// TreeFresh counts working-tree queries answered by a fresh execution that
+	// was never eligible for the cache: a decisional (Class C) caller, or a tree
+	// too recently written to be keyed safely.
+	TreeFresh int64 `json:"tree_fresh"`
+	TreeEntry bool  `json:"tree_entry"`
 }
 
 // cache is the Class A store: OID -> Object, bounded by total payload bytes.
