@@ -1085,11 +1085,11 @@ func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resi
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
-func fitServeGGUFCPUOffloadOnDevice(ws *ggufload.WeightSource, be compute.Backend, contextBudgetTokens int) error {
+func fitServeGGUFCPUOffloadOnDevice(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int) error {
 	if ws == nil || be == nil {
 		return nil
 	}
-	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, serveDeviceFitBudget(be))
+	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, serveDeviceFitBudget(be))
 	if err != nil {
 		return err
 	}
@@ -1117,11 +1117,21 @@ func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBud
 	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
 }
 
-func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+// serveGGUFCPUOffloadMemoryPlan plans the --cpu-offload-experts split: dense/router/attention
+// weights device-scoped, routed and shared experts host-scoped.
+//
+// ranks is how many expert-parallel ranks this process's weights are split across — 1 for every
+// unsharded serve, which plans exactly as it always has. Above 1 the rank has been handed a band
+// and admits only experts [Lo,Hi) into the host expert pool (the loader's WithExpertShard seam),
+// so the routed set must be charged one band and not in full: charging every rank the whole set
+// overstated host demand ~ranks-fold and made RefuseHostScopedPlanIfTooBigForHost refuse a serve
+// that fits — before the authoritative rank-local gate (refuseEPPlanIfUnfit, #2997) could run at
+// all (#4952).
+func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
-	plan, err := ws.EstimateCPUOffloadExpertsMemoryPlan()
+	plan, err := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks)
 	if err != nil {
 		return nil, err
 	}
@@ -1227,8 +1237,13 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 	return refuseIfTooBigOnDevice(plan, err, be)
 }
 
-func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, contextBudgetTokens, serveDeviceFitBudget(be))
+// fitAndPlanServeGGUFCPUOffloadPathOnDevice keeps serveDeviceFitBudget's generic device headroom
+// even for a sharded rank, rather than the tighter EP load-time one: on this arm the routed
+// experts are host-resident, so the device side is the dense remainder plus KV — not the tight
+// resident-EP case 0.05 exists for. ranks changes which routed bytes are charged, never the
+// headroom.
+func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, serveDeviceFitBudget(be))
 	return refuseIfTooBigOnDevice(plan, err, be)
 }
 
@@ -1238,9 +1253,9 @@ func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTok
 	})
 }
 
-func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		return serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, fit)
+		return serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
 	})
 }
 
@@ -1268,10 +1283,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 	q4kOpts = append(q4kOpts, serveDenseKQuantOptions(backend)...)
 	if expertShard != nil {
 		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))
-		q4kArm := cpuOffloadExperts || os.Getenv("FAK_Q4K") != ""
-		if !q4kArm {
-			must(fmt.Errorf("fak serve: --expert-parallel sharded load requires the resident-Q4K path; set FAK_Q4K=1 (or --cpu-offload-experts) so this rank admits only its expert band"))
-		}
+		must(serveShardSeamRefusal(backend, cpuOffloadExperts, serveShardSeamEnvQ4K()))
 	}
 	// How many ranks this process's WEIGHTS are actually split across. A rank is sharded only when
 	// it was handed a band: expertRanks alone must never select a per-rank plan, or an unsharded
@@ -1307,7 +1319,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// host-scope refusal below over-refuses ~ranks-fold, and it does so BEFORE the authoritative
 		// rank-local gate (refuseEPPlanIfUnfit) ever runs. residentRanks is 1 for every unsharded
 		// serve, which plans exactly as before.
-		memPlan, err := fitAndPlanServeGGUFCPUOffloadExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
+		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
 		must(err)
 		// #971 blocker 3: the dense weights fit-checked above land in VRAM, but the routed MoE
 		// experts (~424 GiB for GLM-5.2 Q4_K) are pinned in HOST RAM — and a device backend does not

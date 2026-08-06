@@ -210,7 +210,7 @@ func TestGatewayLoadProfileCarriesServeMemoryPlanAndCapacity(t *testing.T) {
 
 func TestServeGGUFCPUOffloadMemoryPlanKeepsExpertsHostScoped(t *testing.T) {
 	ws := serveSynthOffloadWeightSource(t)
-	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, 8, serveFitBudget{})
+	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 8, serveFitBudget{})
 	if err != nil {
 		t.Fatalf("serveGGUFCPUOffloadMemoryPlan: %v", err)
 	}
@@ -235,11 +235,11 @@ func TestServeGGUFCPUOffloadMemoryPlanKeepsExpertsHostScoped(t *testing.T) {
 		t.Fatalf("DeviceTotal = %d, want dense weights + KV + HAL transient %d", got, deviceWant)
 	}
 	fitsDeviceSide := serveCapBackend{Backend: compute.Default(), total: 12 << 10, free: 12 << 10, known: true}
-	if err := fitServeGGUFCPUOffloadOnDevice(ws, fitsDeviceSide, 8); err != nil {
+	if err := fitServeGGUFCPUOffloadOnDevice(ws, fitsDeviceSide, 1, 8); err != nil {
 		t.Fatalf("fit should ignore host expert bytes and accept dense+KV+HAL transient side: %v", err)
 	}
 	tooSmallForDenseAndKV := serveCapBackend{Backend: compute.Default(), total: 9 << 10, free: 9 << 10, known: true}
-	err = fitServeGGUFCPUOffloadOnDevice(ws, tooSmallForDenseAndKV, 8)
+	err = fitServeGGUFCPUOffloadOnDevice(ws, tooSmallForDenseAndKV, 1, 8)
 	if err == nil {
 		t.Fatal("dense+KV+HAL transient side over device capacity must be refused")
 	}
@@ -320,7 +320,7 @@ func TestServeCPUOffloadExpertParallelPlanChargesOneRankBandToHost(t *testing.T)
 	const routedBlob = int64(4096)    // 4 experts, sharded
 	const deviceSide = int64(1024 + 512 + 256 + 3072 + 128 + 3584)
 
-	full, err := serveGGUFCPUOffloadMemoryPlan(ws, 8, serveFitBudget{})
+	full, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 8, serveFitBudget{})
 	if err != nil {
 		t.Fatalf("serveGGUFCPUOffloadMemoryPlan: %v", err)
 	}
@@ -329,17 +329,17 @@ func TestServeCPUOffloadExpertParallelPlanChargesOneRankBandToHost(t *testing.T)
 	}
 
 	// An unsharded serve must plan exactly as before: same bytes, same rows, same order.
-	one, err := serveGGUFCPUOffloadExpertParallelMemoryPlan(ws, 1, 8, serveFitBudget{})
+	one, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 8, serveFitBudget{})
 	if err != nil {
-		t.Fatalf("serveGGUFCPUOffloadExpertParallelMemoryPlan(1): %v", err)
+		t.Fatalf("serveGGUFCPUOffloadMemoryPlan(ranks=1): %v", err)
 	}
 	if !reflect.DeepEqual(one, full) {
 		t.Fatalf("ranks=1 plan = %+v, want byte-identical to the unsharded plan %+v", one, full)
 	}
 
-	ep4, err := serveGGUFCPUOffloadExpertParallelMemoryPlan(ws, 4, 8, serveFitBudget{})
+	ep4, err := serveGGUFCPUOffloadMemoryPlan(ws, 4, 8, serveFitBudget{})
 	if err != nil {
-		t.Fatalf("serveGGUFCPUOffloadExpertParallelMemoryPlan(4): %v", err)
+		t.Fatalf("serveGGUFCPUOffloadMemoryPlan(ranks=4): %v", err)
 	}
 	if got, want := ep4.HostTotal(), sharedExperts+routedBlob/4; got != want {
 		t.Fatalf("EP-4 HostTotal = %d, want shared experts + one routed band %d — the byte the host-scope refusal reads", got, want)
@@ -363,7 +363,7 @@ func TestServeCPUOffloadExpertParallelPlanChargesOneRankBandToHost(t *testing.T)
 	// The device-side fit is the generic device headroom, not the tighter EP load-time one: the
 	// experts are host-resident here, so this arm is not the tight resident-EP case.
 	fits := serveCapBackend{Backend: compute.Default(), total: 12 << 10, free: 12 << 10, known: true}
-	if err := fitServeGGUFCPUOffloadOnDevice(ws, fits, 8); err != nil {
+	if err := fitServeGGUFCPUOffloadOnDevice(ws, fits, 4, 8); err != nil {
 		t.Fatalf("sharded offload rank's device side should still fit a dense-sized backend: %v", err)
 	}
 }

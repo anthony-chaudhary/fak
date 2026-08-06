@@ -100,7 +100,9 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		if !be.Caps().UploadDtype {
 			warnings = append(warnings, fmt.Sprintf("--cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); a live serve refuses this combination", be.Name()))
 		}
-		demands, err = serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, serveDeviceFitBudget(be))
+		// The sizing dry-run inspects a single unsharded process, so it plans the whole
+		// routed-expert set (ranks=1) — the same demands a non-EP serve boot would build.
+		demands, err = serveGGUFCPUOffloadMemoryPlan(ws, 1, contextBudgetTokens, serveDeviceFitBudget(be))
 	case be != nil:
 		demands, err = serveGGUFMemoryPlan(ws, !be.Caps().UploadDtype, contextBudgetTokens, serveDeviceFitBudget(be))
 	default:
