@@ -72,6 +72,21 @@ type addParams struct {
 	// It exists as a test/advanced seam, sourced from $FAK_OAUTH_PROFILE_URL at the CLI layer.
 	probeURL string
 
+	// noDivorce (adopt only) opts OUT of the default post-copy token-family divorce. An adopt
+	// COPIES the source's .credentials.json, so both dirs end up holding ONE OAuth refresh token —
+	// and the first side to refresh rotates the family and silently 401s the other (witnessed
+	// 2026-08-06: an enrolled seat's refresh logged the operator's own interactive session out,
+	// its access token still hours from expiry). By default the enroll therefore refreshes the new
+	// seat immediately, so the seat provably owns its own family and the source's now-dead
+	// credential is reported at enroll time instead of detonating later. Pass this to keep the
+	// copy byte-identical and control the timing yourself — the hazard then stays armed, which is
+	// the whole reason it is opt-out rather than opt-in.
+	noDivorce bool
+
+	// divorceSpawn overrides the refresh spawn used by the family divorce (nil = the real
+	// `claude -p`). Test seam only, mirroring accounts.RefreshSpawn.
+	divorceSpawn accounts.RefreshSpawn
+
 	// dryRun prints the enrollment plan and returns without any mutation — no dir created, no
 	// credential copied, no OAuth probe, no registry write, no view sync (#3954). It short-circuits
 	// after the read-only refusals (bad target, existing dir, duplicate name, missing source) so a
@@ -271,6 +286,14 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		} else {
 			fmt.Fprintln(stderr, "fak accounts: warning: adopted a credential but could not derive identity; run `fak accounts discover --write` after first login")
 		}
+		// Step 3b: DIVORCE the copied credential's OAuth token family. The copy above left this
+		// seat and `src` holding one refresh token; the first of them to refresh rotates the family
+		// and the other is instantly dead (see internal/accounts/credfamily.go for the witness).
+		// Resolving it here — while the operator is watching the enroll — is the only way the cost
+		// lands at a chosen moment instead of mid-task hours later. It doubles as the seat's
+		// refresh-capability proof: a seat that cannot rotate its own token is a seat that will
+		// demand a human /login, and we would rather learn that now than at dispatch.
+		divorceAdoptedFamily(stdout, stderr, src, dir, p)
 	} else {
 		// SETUP-TOKEN: mint (or read) a brand-new setup-token, twin-check, write, then probe.
 		token, err := obtainToken(stdout, stderr, dir, p)
