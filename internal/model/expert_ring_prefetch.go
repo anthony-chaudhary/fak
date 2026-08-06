@@ -95,8 +95,16 @@ func (m ExpertPrefetchMode) String() string {
 // ok=false for a representation the ring has no staging for. Unlike the demand path this DECLINES
 // rather than panics: a prefetch is best-effort, and a hint must never be the thing that kills a
 // forward the demand path would have served.
+//
+// A checkpoint-served projection (R5/#5616) reports the descriptor its own tier derived, which is
+// built to this same rule. Note what that makes the prefetch: staging one issues the expert's stride
+// read, so an activated set over a streamed checkpoint has its reads issued together at layer entry
+// rather than one GEMM apart — and an expert the ring already holds is skipped by the isResident
+// check below, so it reads nothing at all.
 func (w expertWeight) ringStaging() (key string, mk func() compute.Tensor, dt compute.Dtype, bytes int64, ok bool) {
 	switch {
+	case w.ck != nil:
+		return w.ck.key, w.ck.mk, w.ck.dt, w.ck.bytes, true
 	case w.q4 != nil:
 		qt := w.q4
 		return w.halKey(), func() compute.Tensor {
@@ -118,25 +126,25 @@ func (w expertWeight) ringStaging() (key string, mk func() compute.Tensor, dt co
 	return "", nil, 0, 0, false
 }
 
-// activatedExpertWeights resolves one routed expert's three projections to whichever quantized
-// representation the model actually carries — the same resolution expertSwiGLUHAL performs, so the
-// prefetch reaches for exactly the weights the demand path will. ok=false if any projection is
-// missing or unstageable, in which case this expert is not a ring candidate at all.
+// activatedExpertWeights resolves one routed expert's three projections through the SAME resolver
+// the demand path uses (Session.resolveExpertWeight, hal.go) — the resident stores first, then the
+// R5/#5616 checkpoint tier — so the prefetch reaches for exactly the weights the GEMM will, whether
+// they are host-resident or faulted per expert out of the fused slab. ok=false if any projection is
+// unreachable, in which case this expert is not a ring candidate at all.
+//
+// Resolving here is also what makes a checkpoint fault OVERLAPPABLE: the activated set is known at
+// layer entry, so its reads are issued together instead of one GEMM apart.
 func (s *Session) activatedExpertWeights(layer, expert int) ([3]expertWeight, bool) {
 	var ws [3]expertWeight
 	if s == nil || s.M == nil {
 		return ws, false
 	}
 	for i, suffix := range [3]string{"gate_proj.weight", "up_proj.weight", "down_proj.weight"} {
-		name := expertName(layer, expert, suffix)
-		switch {
-		case s.M.q4kw[name] != nil:
-			ws[i] = expertWeight{name: name, q4: s.M.q4kw[name]}
-		case s.M.kqw[name] != nil:
-			ws[i] = expertWeight{name: name, kq: s.M.kqw[name]}
-		default:
+		w, ok := s.resolveExpertWeight(expertName(layer, expert, suffix))
+		if !ok {
 			return ws, false
 		}
+		ws[i] = w
 	}
 	return ws, true
 }
