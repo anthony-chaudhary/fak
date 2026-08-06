@@ -660,7 +660,10 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				// #2528) the routed id is resolved through it to a residency-honest
 				// EngineRoute() first. No manifest => "" => the kernel default, so the
 				// historical loop is unchanged.
-				engine, rerr := cfg.resolveToolEngine(tool)
+				// Classify the exact metadata shape that execViaKernel will lower onto
+				// the ToolCall, so native manifest matching stays in parity with the
+				// proxy path for read_only and sensitivity labels.
+				engine, rerr := cfg.resolveToolEngine(tool, metaFor(tool))
 				if rerr != nil {
 					// Fail loud, exactly like the gateway's buildCall: a misconfigured roster
 					// must never silently dispatch a routed call to the wrong (or default)

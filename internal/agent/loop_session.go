@@ -324,15 +324,47 @@ func WithContextPlanner(sp *SessionPlanner, baselineOutput int) RunOption {
 // returns "" (the kernel default — an ensemble fan-out is a separate dispatch concern,
 // #597, never collapsed to one member here). It mirrors the gateway's routeEngine
 // exactly so the agent loop and the gateway can never diverge on what a call routes to.
-func (c runConfig) routeToolEngine(tool string) string {
+func (c runConfig) routeToolEngine(tool string, callMeta ...map[string]string) string {
 	if c.route == nil {
 		return ""
 	}
-	d := c.route.Route(modelroute.Subject{Aspect: modelroute.AspectToolCall, Tool: tool})
+	meta := metaFor(tool)
+	if len(callMeta) != 0 && callMeta[0] != nil {
+		meta = callMeta[0]
+	}
+	d := c.route.Route(modelroute.Subject{
+		Aspect: modelroute.AspectToolCall,
+		Tool:   tool,
+		Labels: nativeRouteLabels(meta, c.principal),
+	})
 	if d.Plan.IsEnsemble() {
 		return ""
 	}
 	return d.Plan.Primary()
+}
+
+// nativeRouteLabels mirrors gateway.routeLabels for the signals the owned loop
+// attests at call time. read_only comes from the same metadata that reaches the
+// kernel, sensitivity accepts the gateway's canonical and compatibility spellings,
+// and tenant is the authenticated principal wired into this run. Keeping this at
+// the route boundary means the manifest and the eventual ToolCall classify the same
+// call rather than reconstructing a weaker, tool-name-only subject.
+func nativeRouteLabels(meta map[string]string, principal string) map[string]string {
+	labels := map[string]string{"read_only": "false"}
+	if meta["readOnlyHint"] == "true" {
+		labels["read_only"] = "true"
+	}
+	sensitivity := meta["sensitivity"]
+	if sensitivity == "" {
+		sensitivity = meta["data_sensitivity"]
+	}
+	if sensitivity != "" {
+		labels["sensitivity"] = sensitivity
+	}
+	if principal != "" {
+		labels["tenant"] = principal
+	}
+	return labels
 }
 
 // resolveToolEngine returns the FINAL engine route to bind to abi.ToolCall.Engine for
@@ -350,8 +382,8 @@ func (c runConfig) routeToolEngine(tool string) string {
 // dispatch a routed call to the wrong account. A nil roster, or an empty/ensemble route
 // (id ""), returns the abstract id verbatim: byte-for-byte the pre-roster loop and the
 // kernel default respectively.
-func (c runConfig) resolveToolEngine(tool string) (string, error) {
-	id := c.routeToolEngine(tool)
+func (c runConfig) resolveToolEngine(tool string, callMeta ...map[string]string) (string, error) {
+	id := c.routeToolEngine(tool, callMeta...)
 	if c.roster == nil || id == "" {
 		return id, nil
 	}
