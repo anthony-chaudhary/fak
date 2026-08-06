@@ -47,7 +47,9 @@ enforce that boundary; see the
 A failed readback is not one condition. The bridge client separates the classes because
 they have different fixes, and until #5103 they all surfaced under a single
 `READBACK_WEDGED` token — which sent operators to restart sessions that were never the
-problem. Read the class before acting.
+problem. Read the class before acting. The liveness-probe verb has its own verdict string
+that predates this split and is not in the table; if your symptom is `STALE` rather than a
+readback token, read [the probe section below](#the-probe-verbs-own-verdict-stale-on-every-thread-at-once) first.
 
 | Class | What it proves | Operator action |
 |---|---|---|
@@ -101,6 +103,49 @@ contradictory, so a clean enumeration alongside a failing readback is evidence a
 client, not a puzzle. And a class whose evidence the client assembles is only ever as
 trustworthy as that assembly — which is why the `sentinel_missing` row now sends you to
 check the client before you touch a session.
+
+### The probe verb's own verdict: `STALE` on every thread at once
+
+The same 2026-07-16 outage was witnessed a second time from the operator side, on the
+liveness-probe verb rather than the readback path, and filed separately as #5144. That
+reading was: the hub answers, `sessions` lists three persistent (tmux) sessions `running`,
+`status -probe` returns `STALE (no control reply within timeout)` on **all eight** candidate
+control threads, and the bridge concludes *"No live session: a banner exists but no shell
+answers. An operator must (re)start the control shell/bridge."*
+
+Read that verdict as a category error, not as a finding about the box. A probe that
+deadlines waiting for a control reply has inspected nothing, so it cannot have observed a
+shell — by the table above it is the probe verb's version of the two hub-side classes
+(`hub_timeout` when the poll deadlines, `tail_reply_unrecognized` when the hub does answer
+in a shape the client will not parse), and neither of those implicates a session. The
+table's first consequence governs this verb too: a spent probe budget never reports a wedged
+shell. The pre-#5103 client did not honor that on the probe path — it converted "I heard
+nothing I recognized" into "no shell answers" and sent the operator to restart. So the
+`STALE` string is the same conflation as the old single `READBACK_WEDGED` token, surfacing
+under a different verb and phrased as an operator instruction.
+
+For that specific day the answer is already settled and needs no new evidence: the same
+run's `exec` failed `completion sentinel not found in this thread's transcript`, which is
+`sentinel_missing`, whose root cause is recorded above as client-side reassembly with every
+shell healthy. #5144's first two "Operator action" steps — restart the control sessions,
+then confirm each answers a probe — would have changed nothing, and the sessions they name
+were never the fault. Its third step, re-checking that the GPU watcher is armed, is an
+independent question this record does not settle either way.
+
+The divergence direction is the part worth carrying, because #5144 recorded it backwards.
+The listing and the probe disagreed, and **the listing was the correct one**. "Probe before
+trusting the listing" is therefore the wrong lesson from this signature: a clean `running`
+enumeration standing next to an all-threads `STALE` is not a stale banner, it is a client
+that cannot recognize a reply. Unanimity is the tell. A genuinely dead shell is one
+session's problem; every thread failing at once, against a listing that enumerates cleanly,
+points at the single thing all of them share — the client, or the transport in front of it.
+Check that before you touch a session, and prefer `selftest` (full timeout) over the short
+fail-fast probe budget when you want the class rather than the headline.
+
+What is still owed here is the same live half #5112 owes, not a separate restart: step 3
+below, a trivial fixed-token command round-tripped through the normal run path. It needs lab
+credentials, so a host without them cannot record it, and until someone does, read the
+probe-side restoration as claimed-but-unwitnessed exactly as the readback side is.
 
 ## Prove a readback is restored
 
