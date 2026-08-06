@@ -58,6 +58,7 @@ Each rung must run end to end before the next is treated as real.
 | S1 | **Observed:** one real OpenAI-compatible endpoint, 100 delta contexts, no tools | [100/100 captured witness](micro-context-s1-real-endpoint.md): wall time, TTFT, usage-derived token rates, failures |
 | S2 | **Observed:** shared-prefix A/B, unique full prompts vs one base + deltas | [No cache benefit on first endpoint](micro-context-s2-prefix-ab.md); scoped concurrency gain retained separately |
 | S3 | **Observed:** 1k resumable contexts with bounded scheduler RAM and backpressure | [1,000-context hibernation witness](micro-context-s3-hibernation-restart.md): queue age, resident/hibernated counts, runtime reconstruction |
+| S4a | **Observed:** versioned lightweight descriptor through existing Host/Gateway | [Harness inventory and 1,000-context adapter](micro-context-s4-lightweight-descriptor.md) |
 | S4 | Tool-capable microagents through the real policy/tool seam | per-context capabilities, deterministic journal, independent effect verification |
 | S5 | 10k contexts under a controlled kernel | useful-result throughput, tail latency, memory/KV roofline, overload behavior |
 | S6 | API-only adapter | provider-supported cache controls or measured natural prefix reuse; no kernel-only claims |

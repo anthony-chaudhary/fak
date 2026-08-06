@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -266,6 +269,8 @@ func main() {
 	var verifyS3Path string
 	var s3Resident, s3Low, s3Warm, s3Turns int
 	var s3Memory uint64
+	var descriptorOutput string
+	var verifyDescriptorPath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
@@ -286,6 +291,8 @@ func main() {
 	flag.IntVar(&s3Warm, "warm-cap", 8, "S3 warm reserve cap")
 	flag.IntVar(&s3Turns, "turns", 2, "S3 synthetic turns per logical context")
 	flag.Uint64Var(&s3Memory, "memory-envelope", 64<<20, "S3 peak Go allocation delta envelope in bytes")
+	flag.StringVar(&descriptorOutput, "descriptor-bench", "", "run the 1,000-context descriptor/harness benchmark and write JSON")
+	flag.StringVar(&verifyDescriptorPath, "verify-descriptor-bench", "", "verify a captured descriptor benchmark artifact and exit")
 	flag.Parse()
 	if verifyPath != "" {
 		if err := verifyArtifact(verifyPath); err != nil {
@@ -301,6 +308,32 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("PASS: verified", verifyABPath)
+		return
+	}
+	if verifyDescriptorPath != "" {
+		if err := verifyDescriptorArtifact(verifyDescriptorPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyDescriptorPath)
+		return
+	}
+	if descriptorOutput != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		r, err := runDescriptorBenchmark(ctx, cfg.Contexts)
+		b, merr := json.MarshalIndent(r, "", "  ")
+		if merr == nil {
+			merr = os.WriteFile(descriptorOutput, append(b, '\n'), 0o644)
+		}
+		if merr != nil {
+			fmt.Fprintln(os.Stderr, merr)
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		return
 	}
 	if verifyS3Path != "" {
@@ -362,4 +395,36 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func runVersionProbe(ctx context.Context, name string) (time.Duration, error) {
+	args := []string{"--version"}
+	if name == "fak" {
+		args = []string{"version"}
+	}
+	start := time.Now()
+	var resolved string
+	var err error
+	if name == "fak" {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			candidate := filepath.Join(home, "bin", "fak.exe")
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				resolved = candidate
+			}
+		}
+	}
+	if resolved == "" {
+		resolved, err = exec.LookPath(name)
+		if err != nil {
+			return 0, err
+		}
+		if !filepath.IsAbs(resolved) {
+			resolved, _ = filepath.Abs(resolved)
+		}
+	}
+	cmd := exec.CommandContext(ctx, resolved, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	err = cmd.Run()
+	return time.Since(start), err
 }

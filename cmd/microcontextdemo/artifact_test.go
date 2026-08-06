@@ -13,3 +13,9 @@ func TestCheckedInS3Artifact(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCheckedInDescriptorArtifact(t *testing.T) {
+	if err := verifyDescriptorArtifact("../../experiments/microcontext/s4-local-descriptor-benchmark-2026-08-06.json"); err != nil {
+		t.Fatal(err)
+	}
+}

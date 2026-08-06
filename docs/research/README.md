@@ -52,3 +52,4 @@ Research often depends on a specific backend, model, release, hardware tier, dat
 The repository's studies and dated investigations currently live under [`docs/notes/`](../notes/); the curated [Notes & research index](../../INDEX.md#notes--research-docsnotes) is the human route. [`docs/sota/`](../sota/) tracks state-of-the-art comparisons. Use [`llms.txt`](../../llms.txt) for machine-oriented discovery.
 
 - [Micro-context S3 hibernation/restart](micro-context-s3-hibernation-restart.md)
+- [Micro-context S4a lightweight descriptor](micro-context-s4-lightweight-descriptor.md)
