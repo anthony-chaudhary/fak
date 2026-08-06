@@ -11,7 +11,8 @@ import (
 )
 
 type Provider struct {
-	Command string `json:"command"`
+	Command   string `json:"command"`
+	Canonical string `json:"canonical,omitempty"`
 }
 
 type Config struct {
@@ -79,6 +80,43 @@ func Save(c Config) error {
 		return err
 	}
 	return os.Rename(tmp, p)
+}
+
+// CanonicalCommand resolves a provider executable to a stable absolute identity.
+// EvalSymlinks catches indirect shim recursion on Unix; Abs/Clean and case-folded
+// comparisons retain the same contract for Windows PATHEXT-resolved paths.
+func CanonicalCommand(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", errors.New("empty provider command")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("provider command %s is a directory", filepath.Base(path))
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func SameCommand(a, b string) bool {
+	ca, ea := CanonicalCommand(a)
+	cb, eb := CanonicalCommand(b)
+	if ea == nil && eb == nil {
+		return strings.EqualFold(ca, cb)
+	}
+	aa, _ := filepath.Abs(a)
+	bb, _ := filepath.Abs(b)
+	return strings.EqualFold(filepath.Clean(aa), filepath.Clean(bb))
 }
 
 func NormalizeProvider(s string) (string, error) {
