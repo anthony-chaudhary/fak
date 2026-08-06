@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -835,6 +836,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// remote tier serves matches, that share moves into the external bucket at this same tap.
 	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, matched)
 	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalCompute, promptTok-matched)
+	compReuseEntry := cachemeta.FromProviderCache(cachemeta.ProviderCache{Provider: "fak-inkernel", ModelID: p.modelID, PromptTokens: int64(promptTok), CachedTokens: int64(matched)})
 
 	// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
 	// (and before the tool-call lift below reads it). A reasoning model (Ornith) opens
@@ -847,9 +849,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// model that does not emit <think>.
 	reasoning, content := splitReasoning(sb.String())
 	comp = &Completion{
-		Message:      Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
-		FinishReason: finishReason,
-		Usage:        Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen},
+		Message:       Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
+		FinishReason:  finishReason,
+		ProviderCache: &compReuseEntry,
+		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen},
 	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
 	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a
