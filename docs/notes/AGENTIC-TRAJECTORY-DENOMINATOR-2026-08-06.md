@@ -203,6 +203,155 @@ fallback: bounded scan (+p80 84s) if index probe fails
 This is a service-level estimate, not a guarantee. The user can choose “fast,” “balanced,” or
 “high-assurance” by changing quality/risk/utility, while the underlying raw prediction remains auditable.
 
+## Estimator cost: classical by default and separately metered
+
+The quote mechanism must not become a second agentic trajectory. Its synchronous fast path should be
+classical and bounded: feature extraction, capability-snapshot lookup, cohort lookup, empirical
+quantiles or a small quantile/survival model, and route-template comparison. It requires no generative
+model call. A small request classifier may be used only when its measured decision value exceeds its
+cost; rules or cached embeddings are sufficient for the first spine.
+
+Separate four costs in the ledger because their accounting and amortization differ:
+
+| Cost class | Typical work | Charged/reported as |
+|---|---|---|
+| `quote_compute` | Feature extraction, cohort lookup, quantiles, route comparison | Per request; synchronous estimator overhead. |
+| `readiness_probe` | Stale MCP/index health or authorization checks | Per request when needed; both estimator overhead and trajectory cost. |
+| `passive_telemetry` | Existing trace aggregation and outcome binding | Per request; separately metered observer overhead. |
+| `calibration` | Labels, shadow routes, counterfactual replay, model fitting | Offline cohort cost; amortized, never hidden in per-query latency. |
+
+The production target—not a currently witnessed performance claim—is:
+
+- cached quote fast path: no network or model call and `p95 <= 50 ms`;
+- synchronous quote overhead: at most the smaller of 1% of predicted p80 wall time or 250 ms;
+- if a readiness probe would exceed that budget, return a coarse quote with the uncertain assumption
+  named, or run the probe as a visibly priced trajectory step;
+- trivial requests may take a `bypass` path whose estimate is a static class bound, because estimating
+  them precisely can cost more than answering them;
+- offline calibration/replay has its own budget and sampling rate and cannot be used to make the online
+  overhead appear free.
+
+The ratio is circular before the first estimate, so enforcement is two-stage: a small absolute bootstrap
+budget produces a coarse p80, then the percentage cap governs optional refinement. Every refinement
+uses a value-of-information test: expected reduction in routing loss must exceed compute, latency,
+provider, and observer cost. When it does not, stop estimating.
+
+This follows the repository's [observer-effect standard](../standards/observer-effect.md): measure
+`off`, `passive`, and `full` modes on the same workload, report incremental CPU, memory, latency,
+bytes, tool calls, and provider tokens, and include the estimator itself in net-true comparisons.
+
+## User-visible observability contract
+
+A denominator that exists only in traces does not give the user confidence. The initial quote, every
+material revision, and the terminal reconciliation are first-class user events with both stable JSON
+and concise human rendering. The initial event is immutable; later events reference it by `quote_id`
+and monotonically increasing `revision`.
+
+### Before execution
+
+Show, without requiring a debug flag:
+
+```text
+estimate [balanced, cited-answer/v1]: p50 38s / 3.2k tok; p80 71s / 5.1k; p95 160s / 9.4k
+route: indexed repo search -> targeted reads -> citation check
+confidence: calibrated (n=184, window=30d, p80 hit-rate=0.78); coverage floor=0.91
+assumptions: symbol index at HEAD; GitHub MCP read scope healthy
+estimator overhead: 12ms cached compute; 0 probes; 0 model tokens
+fallback: bounded scan, +84s p80 if the index assumption fails
+```
+
+The default view may be one or two lines, but it must expose a stable way to expand assumptions,
+coverage, method, and calibration support. `cold-start`, `coarse`, `calibrated`, and `abstained` are
+typed states, not prose synonyms for confidence.
+
+### During execution
+
+Emit a revision only when a user-relevant boundary is crossed: predicted p80 changes by a configured
+material fraction, the selected route changes, a quality/coverage floor becomes unreachable, a required
+capability changes state, or a budget threshold is crossed. Show the immutable original beside current,
+plus the cause:
+
+```text
+estimate revised r2: p80 71s -> 154s; symbol index stale, switched to bounded scan
+spent: 29s / 2.1k tok; remaining p80: 125s / 7.0k; quality target unchanged
+estimator overhead cumulative: 43ms compute + 180ms probe; 0 model tokens
+```
+
+Do not stream every posterior update. That creates UI noise and observer cost while making the estimate
+look less stable than it is.
+
+### At completion
+
+Show realized cost against the *original* and final quote, whether the quality witness passed, and—only
+when independently replayed—the best-replayable regret denominator:
+
+```text
+completed: 66s / 4.8k tok; inside original p80 (71s); cited-answer witness PASS
+estimate overhead: 223ms total (0.34% wall), 1 probe, $0 provider cost
+best replayable: not measured; no oracle-efficiency claim
+```
+
+A failed or abandoned run remains in calibration data as a censored/failed outcome. It must not vanish
+from the user history or reliability metrics.
+
+### Stable machine-readable fields
+
+At minimum, the quote/revision event schema carries:
+
+```json
+{
+  "schema": "fak-trajectory-quote/1",
+  "quote_id": "...",
+  "revision": 0,
+  "state": "calibrated",
+  "request_class": "repo_question",
+  "quality_contract": "cited-answer/v1",
+  "utility_profile": "balanced",
+  "route": "indexed-read-cite/v1",
+  "predicted": {
+    "wall_ms": {"p50": 38000, "p80": 71000, "p95": 160000},
+    "tokens": {"p50": 3200, "p80": 5100, "p95": 9400},
+    "success_probability_lower": 0.9
+  },
+  "calibration": {"cohort_n": 184, "window_days": 30, "p80_hit_rate": 0.78},
+  "coverage": {"relevant_region_recall_lower": 0.91},
+  "assumptions": ["symbol-index@HEAD", "github-mcp:read:healthy"],
+  "missing_or_unknown": [],
+  "overhead": {
+    "compute_ms": 12,
+    "probe_ms": 0,
+    "probe_calls": 0,
+    "model_tokens": 0,
+    "provider_cost_usd": 0
+  },
+  "supersedes_revision": null,
+  "revision_reason": "initial"
+}
+```
+
+Do not label `overhead_pct` until a nonzero realized or predicted reference cost is named; retain raw
+counters so it can be recomputed. Capability names shown to users must be scrubbed to public/log-safe
+identifiers, while the snapshot digest preserves reproducibility.
+
+### Operator metrics and diagnostics
+
+Aggregate, with bounded-cardinality labels (`request_class`, `utility_profile`, `route_family`,
+`confidence_state`, and typed revision/failure reason):
+
+- quote count, bypass count, cold-start count, and abstention count;
+- quote compute/probe latency and model/tool/provider cost;
+- empirical p50/p80/p95 coverage and interval width;
+- quality-success calibration and censored/failed outcome rate;
+- revision frequency, magnitude, and cause;
+- capability/index assumption failure rate;
+- realized cost divided by original/final quote, and replay regret where witnessed;
+- observer overhead in `off`, `passive`, and `full` modes.
+
+Never put prompt text, repository paths, tool arguments, tenant IDs, `quote_id`, or unbounded capability
+names in metric labels. Those belong in access-controlled event records. The user-facing history should
+link the quote, revisions, completion witness, and calibration cohort without exposing another tenant's
+requests.
+
 ## Correcting the denominator online
 
 The initial quote will be wrong. Correction is a feature, not an embarrassment.
@@ -395,6 +544,3 @@ distribution**. It is quoted before the run, revised without erasing history, an
 against replayable alternatives. Coverage is a separate query-relative evidence claim that informs the
 quality probability and interval width. Repo size, enabled MCP count, and files read are useful features;
 none is the denominator.
-
-
-
