@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -337,6 +338,12 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	// from "PUBLIC_LEAK never ran and the rest were clean" — two states this hook used to
 	// report identically, letting a persistently-broken SECURITY gate go unnoticed.
 	var skipped []string
+	// reports is the per-gate CANDIDATE DENOMINATOR ledger (#5602): for each gate that was
+	// ENABLED this run, how many staged items its own filter admitted. Gates turned off or
+	// escaped are absent by the same rule that keeps them out of `skipped` — that is operator
+	// intent, not a degraded run, and reporting a zero denominator for a gate nobody asked to
+	// run would misdescribe it as having judged nothing.
+	var reports []gateReport
 	blocked := false
 	gates := preCommitGates()
 	for i, g := range gates {
@@ -354,9 +361,13 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 			// The whole TAIL from here on is unchecked, this gate included — count all of it,
 			// so the ledger never understates how degraded the run was.
 			skipped = append(skipped, enabledGateNames(gates[i:])...)
+			for _, name := range enabledGateNames(gates[i:]) {
+				reports = append(reports, gateReport{Gate: name, Skipped: true})
+			}
 			break
 		}
 		findings, gerr := checkWithinBudget(g, d, gateBudget)
+		reports = append(reports, buildGateReport(d, g.Name, len(findings), gerr != nil))
 		if gerr != nil {
 			// A single gate that could-not-run — or ran past its wall-clock budget (#5335) — is
 			// skipped (fail-open); the other gates still run. Either way the gate is NAMED and
@@ -396,8 +407,15 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 			len(skipped), len(gates), strings.Join(skipped, ", "))
 	}
 
+	// The clean path used to print NOTHING and return 0, and silence carries two meanings:
+	// "every gate checked its candidates and found none" and "no gate had anything to check".
+	// One line naming the domain separates them (#5602).
+	if len(allFindings) == 0 && !*asJSON {
+		fmt.Fprintln(stderr, cleanRunSummary(reports, len(d.StagedPaths)))
+	}
+
 	if *asJSON {
-		emitFindingsJSON(stdout, stderr, allFindings, skipped)
+		emitFindingsJSON(stdout, stderr, allFindings, skipped, reports)
 	}
 	if blocked {
 		if !*asJSON {
@@ -558,6 +576,83 @@ func distinctFindingFiles(findings []hooks.Finding) []string {
 	return files
 }
 
+// gateReport is one enabled gate's line in the `gates` array (#5602): what it judged, how many
+// items it judged, and how many findings that produced.
+//
+// Candidates is a POINTER so "the gate reports no denominator" serializes as JSON null and can
+// never be mistaken for the number 0. Zero is a real answer here — "this gate ran and judged
+// nothing" is exactly the state the issue exists to surface — so unlike Finding.Severity, whose
+// zero means UNGRADED, this field cannot overload zero to mean absent.
+type gateReport struct {
+	Gate       string `json:"gate"`
+	Candidates *int   `json:"candidates"`     // null = this gate reports no denominator
+	Unit       string `json:"unit,omitempty"` // what Candidates counts, in that gate's own terms
+	Findings   int    `json:"findings"`
+	Skipped    bool   `json:"skipped,omitempty"` // ran no verdict this commit (#5299/#5335)
+}
+
+// buildGateReport folds one gate's outcome and the denominator that gate recorded for itself
+// into a report line. A gate that recorded nothing leaves Candidates nil — UNREPORTED, which the
+// caller must not render as 0.
+func buildGateReport(d *hooks.StagedDiff, name string, findings int, skipped bool) gateReport {
+	r := gateReport{Gate: name, Findings: findings, Skipped: skipped}
+	if n, unit, ok := d.Candidates(name); ok {
+		r.Candidates = &n
+		r.Unit = unit
+	}
+	return r
+}
+
+// cleanRunSummary is the one line the clean path prints so silence stops meaning two things.
+// It splits the enabled gates into the ones that actually judged something, the ones that ran
+// and admitted nothing, and the ones that report no denominator at all — three states the old
+// empty payload rendered identically.
+func cleanRunSummary(reports []gateReport, stagedFiles int) string {
+	var judged, idle, unreported int
+	var named []gateReport
+	for _, r := range reports {
+		switch {
+		case r.Skipped:
+			// Already named by the degraded-run line; not a clean-path claim.
+		case r.Candidates == nil:
+			unreported++
+		case *r.Candidates == 0:
+			idle++
+		default:
+			judged++
+			named = append(named, r)
+		}
+	}
+	sort.Slice(named, func(i, j int) bool {
+		if *named[i].Candidates != *named[j].Candidates {
+			return *named[i].Candidates > *named[j].Candidates
+		}
+		return named[i].Gate < named[j].Gate
+	})
+	const show = 3
+	var parts []string
+	for i, r := range named {
+		if i == show {
+			parts = append(parts, fmt.Sprintf("+%d more", len(named)-show))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %d %s", r.Gate, *r.Candidates, r.Unit))
+	}
+	msg := fmt.Sprintf("pre-commit: clean — %d gate(s) over %d staged file(s): %d judged candidates",
+		len(reports), stagedFiles, judged)
+	if len(parts) > 0 {
+		msg += " (" + strings.Join(parts, "; ") + ")"
+	}
+	msg += fmt.Sprintf(", %d judged nothing", idle)
+	if unreported > 0 {
+		// Say UNREPORTED out loud rather than folding it into the zero bucket: a gate that
+		// reports no denominator has not told us it judged nothing, and printing it as if it
+		// had would rebuild the exact ambiguity this line exists to remove.
+		msg += fmt.Sprintf(", %d report no denominator", unreported)
+	}
+	return msg
+}
+
 // emitFindingsJSON writes the --json report: the findings, and the ledger of gates that never
 // delivered a verdict. skipped_gates / skipped_count are the machine-readable half of #5299 —
 // with the fail-open deliberately kept, and stderr silenced under --json, they are the ONLY way
@@ -565,18 +660,27 @@ func distinctFindingFiles(findings []hooks.Finding) []string {
 // gate errored out. Both keys are always present (empty list, zero count on a full run) so a
 // reader never has to treat "absent" as "none". Only gate NAMES appear: a gate's error text can
 // carry the secret material it was scanning for, and never reaches this payload.
-func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding, skipped []string) {
+//
+// `gates` (#5602) is additive on the same principle: it is always present, and it carries each
+// enabled gate's candidate DENOMINATOR so a clean payload states the domain it was clean over.
+func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding, skipped []string, gates []gateReport) {
 	if findings == nil {
 		findings = []hooks.Finding{}
 	}
 	if skipped == nil {
 		skipped = []string{}
 	}
+	if gates == nil {
+		gates = []gateReport{}
+	}
 	payload := map[string]any{
 		"findings":      findings,
 		"count":         len(findings),
 		"skipped_gates": skipped,
 		"skipped_count": len(skipped),
+		// Additive only: every pre-existing key keeps its exact name and meaning, so a consumer
+		// reading findings/count still parses this payload unchanged (#5602).
+		"gates": gates,
 	}
 	if err := writeIndentedJSON(stdout, payload); err != nil {
 		fmt.Fprintf(stderr, "fak hooks: %v\n", err)
