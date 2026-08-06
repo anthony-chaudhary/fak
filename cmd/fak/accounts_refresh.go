@@ -160,10 +160,18 @@ func runAccountsRefresh(stdout, stderr io.Writer, p refreshParams) int {
 func refreshSeat(seat, dir string, timeout time.Duration, force bool, spawn accounts.RefreshSpawn) refreshRow {
 	row := refreshRow{Seat: seat, Dir: dir, FamilyBefore: accounts.RefreshFamilyID(dir)}
 	if row.FamilyBefore == "" {
-		// No refresh token to rotate: an api-key seat, a token-only seat, or an already-hollow
-		// credential. Spawning `claude -p` could not refresh anything, so don't burn the turn.
+		// Nothing to rotate — but WHY matters, and conflating the two reasons hid a dead seat.
+		// A hollow credential (the file is there, both tokens blanked) is a seat that WAS working and
+		// now needs a human /login; grading that `skipped` let a scheduled sweep exit 0 with the
+		// roster down a seat. A dir with no session credential at all is an api-key or setup-token
+		// seat that legitimately has nothing to refresh.
+		if accounts.CredentialHollow(dir) {
+			row.Status = refreshStatusHollow
+			row.Detail = "credential is hollow (both OAuth tokens empty) — a refresh cannot revive it; needs a human /login"
+			return row
+		}
 		row.Status = refreshStatusSkipped
-		row.Detail = "no OAuth refresh token on disk (api-key/token-only seat, or credential already hollow)"
+		row.Detail = "no session credential to refresh (api-key or setup-token seat)"
 		return row
 	}
 

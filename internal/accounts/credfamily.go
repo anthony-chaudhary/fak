@@ -33,6 +33,8 @@ package accounts
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 )
 
 // credentialRefreshToken returns the refreshToken a dir's live session credential holds, or ""
@@ -59,6 +61,24 @@ func RefreshFamilyID(dir string) string {
 	}
 	sum := sha256.Sum256([]byte(tok))
 	return hex.EncodeToString(sum[:4])
+}
+
+// CredentialHollow reports whether dir holds a .credentials.json whose OAuth tokens are BOTH empty
+// strings — the exact shape Claude Code leaves behind when a refresh grant fails (and the shape a
+// credential-dead fleet seat has). It is deliberately distinct from "no credential file at all":
+// an api-key or setup-token seat legitimately has nothing to refresh and must not be alarmed on,
+// while a hollow file means a seat that was working and now needs a human /login. Conflating the
+// two made a dead seat report as "skipped — nothing to refresh", so a scheduled sweep exited 0
+// while the roster was down a seat.
+func CredentialHollow(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".credentials.json")); err != nil {
+		return false // no session credential at all — not hollow, just absent
+	}
+	access, refresh := credentialTokens(dir)
+	return access == "" && refresh == ""
 }
 
 // FamilyShare is the verdict on whether two config dirs are sharing one OAuth token family.
