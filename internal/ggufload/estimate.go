@@ -339,12 +339,48 @@ func (s *WeightSource) EstimateF32LoadMemoryPlan() (compute.MemoryPlan, error) {
 // tensor names as the runtime split kernel (model.CPUOffloadExpertWeight), with GLM-DSA's batched
 // routed-expert GGUF blobs classified before their loader-time 1->E split.
 func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan, error) {
+	return s.estimateCPUOffloadExpertsMemoryPlan(1)
+}
+
+// EstimateCPUOffloadExpertsExpertParallelMemoryPlan is EstimateCPUOffloadExpertsMemoryPlan for a
+// SHARDED expert-parallel rank: the same device/host partition, except batched routed-expert blobs
+// are charged only for the BUSIEST rank's contiguous band. A --cpu-offload-experts rank in a
+// sharded EP serve admits only its band [Lo,Hi) into the host expert pool (WithExpertShard), so
+// charging the whole routed set to every rank overstates host demand ~ranks-fold and fires the
+// host-scope refusal on a serve that actually fits (#4952). It shards on the SAME
+// compute.ExpertParallelLargestBandExperts math as EstimateExpertParallelLoadMemoryPlan and the
+// authoritative rank-local gate (#2997), so no two estimates on the load path can disagree.
+//
+// Shared experts stay replicated — only the batched routed blobs shard. ranks <= 1, a non-batched-
+// MoE arch, or an unconfigurable header all fall back to the full-model plan, byte-identical.
+func (s *WeightSource) EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks int) (compute.MemoryPlan, error) {
+	return s.estimateCPUOffloadExpertsMemoryPlan(ranks)
+}
+
+func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.MemoryPlan, error) {
 	arch, _ := s.File.String("general.architecture")
 	modelType := canonicalGGUFArch(arch)
+	// band>0 only for a real sharded EP rank on a batched-MoE arch; everything else keeps the
+	// full-model accounting untouched (and never reads Config, so no new error path appears on
+	// the ranks<=1 call this method has always served).
+	band, experts := 0, 0
+	if ranks > 1 {
+		cfg, err := s.File.Config()
+		if err != nil {
+			return nil, err
+		}
+		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) && cfg.NumExperts > 0 {
+			if _, err := model.ExpertParallelPlan(cfg.NumExperts, ranks); err != nil {
+				return nil, err
+			}
+			band, experts = compute.ExpertParallelLargestBandExperts(cfg.NumExperts, ranks), cfg.NumExperts
+		}
+	}
 	type key struct {
 		class compute.MemoryClass
 		scope compute.MemoryScope
 		dtype string
+		shard bool
 	}
 	by := map[key]uint64{}
 	for _, info := range s.File.Tensors {
@@ -359,9 +395,19 @@ func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan
 		if err != nil {
 			return nil, err
 		}
-		k := key{class: compute.MemoryWeights, scope: compute.MemoryScopeDevice, dtype: ggufTensorDTypeLabel(info.Type)}
+		shard := false
+		if experts > 0 {
+			if _, _, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+				n, err = scaleExpertBandBytes(n, band, experts)
+				if err != nil {
+					return nil, fmt.Errorf("gguf: estimate offload tensor %s: %w", info.Name, err)
+				}
+				shard = true
+			}
+		}
+		k := key{class: compute.MemoryWeights, scope: compute.MemoryScopeDevice, dtype: ggufTensorDTypeLabel(info.Type), shard: shard}
 		if hostExpert {
-			k = key{class: compute.MemoryOffload, scope: compute.MemoryScopeHost, dtype: ggufTensorDTypeLabel(info.Type)}
+			k = key{class: compute.MemoryOffload, scope: compute.MemoryScopeHost, dtype: ggufTensorDTypeLabel(info.Type), shard: shard}
 		}
 		if by[k] > math.MaxUint64-n {
 			return nil, fmt.Errorf("gguf: estimated device bytes overflow uint64")
@@ -379,7 +425,10 @@ func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan
 		if keys[i].class != keys[j].class {
 			return keys[i].class < keys[j].class
 		}
-		return keys[i].dtype < keys[j].dtype
+		if keys[i].dtype != keys[j].dtype {
+			return keys[i].dtype < keys[j].dtype
+		}
+		return !keys[i].shard && keys[j].shard
 	})
 	plan := make(compute.MemoryPlan, 0, len(keys))
 	for _, k := range keys {
@@ -392,7 +441,13 @@ func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan
 		}
 		detail := "gguf-device-dense-load"
 		if k.scope == compute.MemoryScopeHost {
+			// Keep the replicated host bytes (shared experts, charged to every rank) and the
+			// per-rank routed band in SEPARATE rows, so a refusal message says which of the two
+			// the host pool could not take. Only a sharded rank ever emits the -shard row.
 			detail = "gguf-host-expert-offload"
+			if k.shard {
+				detail = "gguf-host-expert-offload-shard"
+			}
 		}
 		plan = append(plan, compute.MemoryDemand{
 			Class:  k.class,
