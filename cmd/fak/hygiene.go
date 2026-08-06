@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
@@ -18,12 +20,25 @@ import (
 // and runs every ported gate over it — the same collapse `fak hooks` made for the pre-commit hook.
 //
 // Exit codes mirror the gate contract so the Makefile / CI wrapper can fall back to Python:
-// 0 = clean, 1 = a hygiene gate fired, 2 = could-not-run (the wrapper then runs the Python path).
+// 0 = clean, 1 = REFUSED (a hygiene gate fired, OR --gates named no registered gate), 2 =
+// could-not-run (the wrapper then runs the Python path).
+//
+// A bad `--gates` value is deliberately NOT exit 2 (#5604). Exit 2 is precisely the code that
+// sends `make hygiene` to the Python sweep, which would then run, pass, and bury the typo — so
+// routing a usage error through it would rebuild the silent green this refusal exists to remove.
+// It is a refusal, so it shares the hard-fail code with a gate that fired.
 //
 // `--gates A,B,...` runs only the named gates (so `make index-sync` can call this for INDEX_SYNC
-// while `make hygiene` runs the rest); the default is every gate HygieneGates() returns. The
-// remaining make-hygiene checkers (demo_live_links, guard_mcp_status_audit) stay on the Python
-// path until ported (#928 A5).
+// while `make hygiene` runs the rest); the default is every gate HygieneGates() returns. Every
+// entry must name a registered gate: an unknown name is REFUSED rather than silently selecting
+// nothing, mirroring `fak test`'s `unknown check %q` (cmd/fak/test.go). The remaining
+// make-hygiene checkers (demo_live_links, guard_mcp_status_audit) stay on the Python path until
+// ported (#928 A5).
+//
+// A gate whose Check errors stays fail-open — one broken checker must never wedge the tree —
+// but the skip is COUNTED and NAMED (#5299's pre-commit treatment, ported here by #5604), so
+// "every gate ran clean" is distinguishable from "SECRET_SHAPE never ran and the rest were
+// clean".
 
 func cmdHygiene(argv []string) { os.Exit(runHygiene(os.Stdout, os.Stderr, argv)) }
 
@@ -48,8 +63,16 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	want := gateFilter(*gatesCSV)
+	want, ferr := gateFilter(*gatesCSV)
+	if ferr != nil {
+		// A selector that names no real gate would otherwise run ZERO checks and exit 0 — a
+		// report byte-identical to a genuine clean sweep. Refuse instead (#5604).
+		fmt.Fprintf(stderr, "fak hygiene: %v\n", ferr)
+		return 1
+	}
 	var allFindings []hooks.Finding
+	var skipped []string
+	selected := 0
 	blocked := false
 	for _, g := range hooks.HygieneGates() {
 		if want != nil && !want[g.Name] {
@@ -60,9 +83,17 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 		if g.DefaultOff && want == nil {
 			continue
 		}
+		selected++
 		findings, gerr := g.Check(d)
 		if gerr != nil {
-			// a single gate that could-not-run is skipped (fail-open); the others still run.
+			// A single gate that could-not-run is skipped (fail-open); the others still run.
+			// Fail-open stays — but the gate is NAMED and COUNTED, so a persistently-broken
+			// checker is a visible degradation rather than a silent bypass (#5299 → #5604).
+			skipped = append(skipped, g.Name)
+			if !*asJSON {
+				fmt.Fprintf(stderr, "hygiene: gate %s could not run (%s); skipped (fail-open, #5604)\n",
+					g.Name, couldNotRunClass(gerr))
+			}
 			continue
 		}
 		if len(findings) == 0 {
@@ -100,8 +131,16 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 	// would clear each. WARNING MODE — never blocks: it leaves `blocked` and the exit code alone.
 	coreLockWarns := auditCoreLockPaths(changedTreePaths(r))
 
+	// The count, once, at the end of the human report: the per-gate lines above scroll away in a
+	// noisy run, and "how much of the selected gate set actually ran" is the one number that
+	// separates a clean tree from a degraded sweep.
+	if len(skipped) > 0 && !*asJSON {
+		fmt.Fprintf(stderr, "hygiene: %d of %d gate(s) skipped (fail-open) — this run checked a DEGRADED gate set: %s\n",
+			len(skipped), selected, strings.Join(skipped, ", "))
+	}
+
 	if *asJSON {
-		emitHygieneJSON(stdout, stderr, allFindings, coreLockWarns)
+		emitHygieneJSON(stdout, stderr, allFindings, coreLockWarns, skipped)
 	} else {
 		renderCoreLockWarnings(stderr, coreLockWarns)
 	}
@@ -113,24 +152,51 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	if !*asJSON {
-		fmt.Fprintln(stdout, "hygiene OK")
+		// Name the denominator on the clean path too: bare "hygiene OK" reads the same whether
+		// nine gates ran or one did.
+		fmt.Fprintf(stdout, "hygiene OK — %d gate(s) over %d tracked file(s)\n", selected-len(skipped), len(d.Paths))
 	}
 	return 0
 }
 
 // gateFilter parses --gates into a set, or nil to mean "all". Names are upper-cased and trimmed so
 // `--gates index_sync` and `--gates INDEX_SYNC` both resolve.
-func gateFilter(csv string) map[string]bool {
+//
+// Every entry must name a gate HygieneGates() actually registers. An unknown name — a typo, a
+// lower-cased hyphenation, the singular of a plural — used to build a non-empty want set that
+// matched nothing, ran zero checks and exited 0 (#5604). It is now an error, and so is a value
+// that parses to an empty selection (`--gates ,`): an empty gate set is never a silent pass.
+func gateFilter(csv string) (map[string]bool, error) {
 	csv = strings.TrimSpace(csv)
 	if csv == "" {
-		return nil
+		return nil, nil
 	}
+	known := map[string]bool{}
+	var valid []string
+	for _, g := range hooks.HygieneGates() {
+		known[g.Name] = true
+		valid = append(valid, g.Name)
+	}
+	sort.Strings(valid)
+
 	want := map[string]bool{}
+	var unknown []string
 	for _, n := range strings.Split(csv, ",") {
 		n = strings.ToUpper(strings.TrimSpace(n))
-		if n != "" {
-			want[n] = true
+		if n == "" {
+			continue
 		}
+		if !known[n] {
+			unknown = append(unknown, strconv.Quote(n))
+			continue
+		}
+		want[n] = true
 	}
-	return want
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("unknown gate %s (valid: %s)", strings.Join(unknown, ", "), strings.Join(valid, ", "))
+	}
+	if len(want) == 0 {
+		return nil, fmt.Errorf("--gates %q selected no gate (valid: %s)", csv, strings.Join(valid, ", "))
+	}
+	return want, nil
 }

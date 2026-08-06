@@ -105,18 +105,28 @@ func renderCoreLockWarnings(w io.Writer, warnings []coreLockWarning) int {
 // shape) PLUS the advisory core-lock warnings under a separate key, so a metrics consumer can read
 // lock id / class / reason / witness / mode without confusing an advisory warning for a blocking
 // finding. The warnings carry mode="warning" — they never affect the exit code.
-func emitHygieneJSON(stdout, stderr io.Writer, findings []hooks.Finding, warnings []coreLockWarning) {
+//
+// skipped names the gates that could not run (fail-open). It rides under the same
+// skipped_gates / skipped_count keys `fak hooks pre-commit --json` already emits (#5299), so the
+// two commands' reports parse identically and an empty findings list is distinguishable from a
+// findings list that is empty because a gate never ran (#5604).
+func emitHygieneJSON(stdout, stderr io.Writer, findings []hooks.Finding, warnings []coreLockWarning, skipped []string) {
 	if findings == nil {
 		findings = []hooks.Finding{}
 	}
 	if warnings == nil {
 		warnings = []coreLockWarning{}
 	}
+	if skipped == nil {
+		skipped = []string{}
+	}
 	payload := map[string]any{
 		"findings":            findings,
 		"count":               len(findings),
 		"core_lock_warnings":  warnings,
 		"core_lock_warn_mode": coreLockModeWarning,
+		"skipped_gates":       skipped,
+		"skipped_count":       len(skipped),
 	}
 	if err := writeIndentedJSON(stdout, payload); err != nil {
 		fmt.Fprintf(stderr, "fak hygiene: %v\n", err)
