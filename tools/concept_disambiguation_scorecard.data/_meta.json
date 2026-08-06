@@ -198,6 +198,11 @@
           "category": "incidental",
           "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
           "token": "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes"
+        },
+        {
+          "category": "incidental",
+          "reason": "The JSON field name on the guardCompactionWitness row for gateway's already-positioned CompactionCacheReadTokens / FakCompactionCacheReadTokens value. A serialization key that carries the warm witness on the row so an auditor never reaches for a fleet-cumulative cache_read; not a new cache concept.",
+          "token": "cache_read_at_fire"
         }
       ],
       "id": "cache",
@@ -220,6 +225,7 @@
         "cacheCreationSpanLabel",
         "cacheValueGateFactsFromReport",
         "cache_creation_span",
+        "cache_read_at_fire",
         "cache_trace_test",
         "cacheable",
         "cachebreakevents",
@@ -715,6 +721,81 @@
           "category": "false-positive",
           "reason": "Prose lifted from a doc comment (sessionctl's fail-closed rule, inherited rather than re-litigated). There is no symbol named litigated anywhere in the program.",
           "token": "litigated"
+        },
+        {
+          "category": "incidental",
+          "reason": "A pure struct-building helper on cmd/fak's guard exit path. It admits nothing, refuses nothing and returns no verdict, so it is not a guard gate.",
+          "token": "newGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Appends one line to a gitignored runtime ledger under .fak/nightrun. No admission decision, no refusal, no gate.",
+          "token": "appendGuardCompactionWitnessTo"
+        },
+        {
+          "category": "incidental",
+          "reason": "A bufio.Scanner loop over a JSONL file. It decides nothing and refuses nothing.",
+          "token": "readGuardCompactionWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "A last-match-wins lookup helper over an append-only ledger. It carries no admission or refusal semantics.",
+          "token": "latestGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "A strings.Builder that produces banner text. It prints; it does not gate.",
+          "token": "formatGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Best-effort by contract: it returns the empty string rather than failing a session's exit when the ledger cannot be written or read back, which is the explicit opposite of a gate.",
+          "token": "recordGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Resolves a file path and returns it. No gating semantics whatsoever.",
+          "token": "guardCompactionWitnessLedger"
+        },
+        {
+          "category": "incidental",
+          "reason": "A schema version number. It gates nothing.",
+          "token": "guardCompactionWitnessSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "A path string constant. No gate, no decision.",
+          "token": "guardCompactionWitnessLedgerRel"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal \"head\" naming one --compact-anchor-head mode in the durable row's vocabulary. A serialization label for an already-shipped flag, not a new gate.",
+          "token": "guardCompactionAnchorHead"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal \"first-breakpoint\" naming the legacy warm-only anchor mode in the durable row's vocabulary. A serialization label, not a gate.",
+          "token": "guardCompactionAnchorFirst"
+        },
+        {
+          "category": "incidental",
+          "reason": "A two-line bool-to-string mapper for the row's anchor_mode field. It names a mode; it does not decide one.",
+          "token": "guardCompactionAnchorModeName"
+        },
+        {
+          "category": "incidental",
+          "reason": "A package var holding this launch's resolved anchor label so the exit funnel can stamp it without growing a parameter. Storage, not a gate.",
+          "token": "guardCompactionAnchorMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "A one-line setter cmdGuard calls at boot to pin the anchor label for this launch's row. A setter, not a gate.",
+          "token": "setGuardCompactionAnchorMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "The durable row type is positioned in the witness-proof family. It is a JSON record produced after the guarded child has exited and the gateway is torn down; it makes no admission or refusal decision, so it is not a guard-gate concept.",
+          "token": "guardCompactionWitness"
         }
       ],
       "exclude": [
@@ -740,6 +821,7 @@
         "GateFlipped",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "admitGuardShrinkLevers",
+        "appendGuardCompactionWitnessTo",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
         "coreLockLandGate",
@@ -749,6 +831,7 @@
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fetchGuardPreCompactSignalsHTTP",
         "fleetbarecommitguard",
+        "formatGuardCompactionWitness",
         "gate_test",
         "gate_verbtier",
         "gated",
@@ -758,6 +841,14 @@
         "gatew",
         "gating",
         "guardClaudeCommandIndex",
+        "guardCompactionAnchorFirst",
+        "guardCompactionAnchorHead",
+        "guardCompactionAnchorMode",
+        "guardCompactionAnchorModeName",
+        "guardCompactionWitness",
+        "guardCompactionWitnessLedger",
+        "guardCompactionWitnessLedgerRel",
+        "guardCompactionWitnessSchema",
         "guardCoreLock",
         "guardCoreLockAllActive",
         "guardCoreLockAllAdmitAmendment",
@@ -824,16 +915,21 @@
         "guardtrajectorywarningline",
         "guardwireretryhop",
         "installguardmcpregistration",
+        "latestGuardCompactionWitness",
         "loadCacheValueGateBaseline",
         "loadGuardSelfTightenOverlay",
+        "newGuardCompactionWitness",
         "newguardlaunchnonce",
         "normalizeGuardOperatorQuestionMode",
         "printGuardLaunchPostures",
+        "readGuardCompactionWitnesses",
         "readguardstopsledger",
         "readguardstoptranscript",
+        "recordGuardCompactionWitness",
         "runCacheValueGateScore",
         "runGuardOperatorQuestionGate",
         "saveGuardSelfTightenOverlay",
+        "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
         "shrinkLeverGuardCommand",
         "summarizeguardstops",
@@ -1212,6 +1308,51 @@
           "category": "incidental",
           "reason": "A local variable in finishGuardChildAndReport holding the already-rendered banner string that recordGuardCompactionWitness returned. The proof concept it carries is the guardCompactionWitness row positioned in this family; the binding itself exists only so the durable write happens outside the !quiet branch while the emit happens inside it.",
           "token": "compactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "The unexported constructor that folds one session's gateway.AdjudicationSummary into the guardCompactionWitness row positioned in this family. Pure (no clock, no I/O) and adds no proof concept the row does not already carry.",
+          "token": "newGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "The O_APPEND JSONL writer for the guardCompactionWitness row positioned in this family. A file-I/O helper that makes the row durable; the durability concept belongs to the row, not to the writer.",
+          "token": "appendGuardCompactionWitnessTo"
+        },
+        {
+          "category": "incidental",
+          "reason": "The reader half of the guardCompactionWitness ledger positioned in this family. Skipping torn lines is concurrency robustness for a ledger every guarded session appends to, not a separate proof concept.",
+          "token": "readGuardCompactionWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "A reverse scan that returns the newest guardCompactionWitness row for one session id. A lookup over the row positioned in this family, not a concept of its own.",
+          "token": "latestGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Renders one guardCompactionWitness row into the guard exit banner via the shared guardSection/guardRow/guardNote helpers. Presentation of the row positioned in this family.",
+          "token": "formatGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "The exit-funnel entry point that appends the row, re-reads it, and renders only from what survived the round trip. It is the seam that uses the guardCompactionWitness row positioned in this family, not a second proof concept.",
+          "token": "recordGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "A one-line resolver wrapping nightrunLedgerPath for the compaction-health ledger. A path helper for the row positioned in this family.",
+          "token": "guardCompactionWitnessLedger"
+        },
+        {
+          "category": "incidental",
+          "reason": "An int constant (1) stamped on every row so a later reader can tell which shape wrote it. A version tag on the row positioned in this family.",
+          "token": "guardCompactionWitnessSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "The repo-relative path literal .fak/nightrun/compaction-health.jsonl, placed beside the harness-resources ledger the sibling exit-summary producer appends to. A path constant, not a proof concept.",
+          "token": "guardCompactionWitnessLedgerRel"
         }
       ],
       "id": "witness-proof",
@@ -1230,6 +1371,7 @@
         "WitnessEvidenceOptions",
         "WitnessEvidenceStats",
         "WitnessMove",
+        "appendGuardCompactionWitnessTo",
         "compactionWitness",
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
@@ -1245,8 +1387,16 @@
         "dispatchWitnessStrandedBuildFails",
         "dispatchWitnessStrandedBuildFailsGo",
         "done_not_witnessed",
+        "formatGuardCompactionWitness",
+        "guardCompactionWitnessLedger",
+        "guardCompactionWitnessLedgerRel",
+        "guardCompactionWitnessSchema",
+        "latestGuardCompactionWitness",
         "named_witness",
+        "newGuardCompactionWitness",
         "nwitness",
+        "readGuardCompactionWitnesses",
+        "recordGuardCompactionWitness",
         "refutations",
         "refuted",
         "refutes",
@@ -1412,11 +1562,87 @@
           "category": "incidental",
           "reason": "A local string variable in cmd/fak's guard exit funnel. It holds pre-rendered banner text, reads no context window and mutates none; the compaction it reports on happened earlier, inside internal/gateway.",
           "token": "compactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Copies already-measured compaction counters into a JSON row. It performs no compaction and touches no context window; the counters come from internal/gateway.",
+          "token": "newGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Marshals a row and appends it to a file on disk. No context-window state is read or written.",
+          "token": "appendGuardCompactionWitnessTo"
+        },
+        {
+          "category": "incidental",
+          "reason": "Reads durable rows back from disk in append order. It has no relationship to a context window.",
+          "token": "readGuardCompactionWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selects a stored row by session id. It neither inspects nor alters any context window.",
+          "token": "latestGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Formats stored counters into banner lines. No context-window state is involved.",
+          "token": "formatGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pins already-measured compaction counters to disk at session end. It runs after the gateway is torn down and manages no context window.",
+          "token": "recordGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Anchors a repo-relative .fak/nightrun path. Unrelated to context windows.",
+          "token": "guardCompactionWitnessLedger"
+        },
+        {
+          "category": "incidental",
+          "reason": "A JSON schema version integer. It carries no context-window meaning.",
+          "token": "guardCompactionWitnessSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "A gitignored runtime file path. Unrelated to context windows.",
+          "token": "guardCompactionWitnessLedgerRel"
+        },
+        {
+          "category": "incidental",
+          "reason": "A label recorded on the durable row so an anchor-starved count is interpretable. The head-anchoring behaviour it names lives in internal/gateway, not here.",
+          "token": "guardCompactionAnchorHead"
+        },
+        {
+          "category": "incidental",
+          "reason": "A label recorded on the durable row for the legacy anchor mode. The behaviour it names lives in internal/gateway, not in this file.",
+          "token": "guardCompactionAnchorFirst"
+        },
+        {
+          "category": "incidental",
+          "reason": "Maps the resolved --compact-anchor-head bool onto a label string. No context-window state.",
+          "token": "guardCompactionAnchorModeName"
+        },
+        {
+          "category": "incidental",
+          "reason": "Carries a label from flag parsing to the exit funnel. The anchoring itself is gateway behaviour.",
+          "token": "guardCompactionAnchorMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "Assigns a package-level label string at guard boot. No context-window semantics.",
+          "token": "setGuardCompactionAnchorMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "The durable row type is positioned in the witness-proof family. It records what compaction did for one session but owns no context window and performs no compaction; the counters it carries are measured in internal/gateway.",
+          "token": "guardCompactionWitness"
         }
       ],
       "id": "context-ctx",
       "ignore": [
         "MechanismStaleContext",
+        "appendGuardCompactionWitnessTo",
         "cctx",
         "compactionWitness",
         "compactions",
@@ -1424,10 +1650,24 @@
         "contexts",
         "ctx",
         "ctxsleep",
+        "formatGuardCompactionWitness",
+        "guardCompactionAnchorFirst",
+        "guardCompactionAnchorHead",
+        "guardCompactionAnchorMode",
+        "guardCompactionAnchorModeName",
+        "guardCompactionWitness",
+        "guardCompactionWitnessLedger",
+        "guardCompactionWitnessLedgerRel",
+        "guardCompactionWitnessSchema",
+        "latestGuardCompactionWitness",
+        "newGuardCompactionWitness",
         "noteCtxValueTTL1hScope",
+        "readGuardCompactionWitnesses",
         "recalled",
         "recalling",
-        "recalls"
+        "recalls",
+        "recordGuardCompactionWitness",
+        "setGuardCompactionAnchorMode"
       ],
       "min_files": 3,
       "name": "Context-management family",

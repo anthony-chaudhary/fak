@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **56** (clarity 0 + coverage 56) |
-| **Crystal-clear concepts (and climbing)** | **414** crystal of 2127 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2294 / 2350** (97.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **61** (clarity 0 + coverage 61) |
+| **Crystal-clear concepts (and climbing)** | **415** crystal of 2128 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2298 / 2359** (97.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 190 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **60** of 2802 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **60** of 2803 indexed names |
 | As of |  (fak ) |
-| Legacy bounded score (saturates; not the driver) | 98.4/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.3/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2127 concepts - score 98.4/100 (grade A) - disambiguation-debt 56
+concept-disambiguation chart - 2128 concepts - score 98.3/100 (grade A) - disambiguation-debt 61
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 414
+  * crystal       #######..................... 415
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -59,19 +59,19 @@ clarity mix by family (each cell = one concept):
   support-maturity ***************oooooooooooooooooooooo (37 concept(s); 15 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    **************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 50 crystal)
+  witness-proof    ***************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (131 concept(s); 51 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ###########################. 319/332
+  plan             ###########################. 319/333
   policy-capability ##########################.. 153/164
+  guard-gate       ###########################. 385/394
   session-runtime  ###########################. 213/221
   render-materialize ###########################. 177/184
-  guard-gate       ############################ 385/391
   loop             ##########################.. 77/83
   cache            ############################ 261/265
-  evict            ###########################. 46/48
+  score-debt       ###########################. 84/87
+  evict            ###########################. 49/51
   gateway-engine   ############################ 169/171
-  score-debt       ###########################. 84/86
   decision         ###########################. 52/53
   support-maturity ###########################. 45/46
   attention        ############################ 74/74
@@ -82,9 +82,9 @@ coverage by family (positioned / discovered):
   pool             ############################ 37/37
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
-  witness-proof    ############################ 139/139
+  witness-proof    ############################ 140/140
 
-namespace coverage  [###############################.] 97.6%  (2294/2350 confusable tokens positioned)
+namespace coverage  [###############################.] 97.4%  (2298/2359 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 190/190
 
-name index: 2802 lookup name(s) -> 2127 concept(s), 60 ambiguous
+name index: 2803 lookup name(s) -> 2128 concept(s), 60 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **190 / 190** (190 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1442 / 3933 |
+| Boundaries drawn (mutual / total) | 1448 / 3939 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2802 over 2127 concepts |
+| Lookup names indexed | 2803 over 2128 concepts |
 | Lookup names landing on several concepts | 60 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2127 |
+| Concepts carrying a contrast set | 2128 |
 
 ## The concepts (best verdict first)
 
@@ -506,6 +506,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | witness-proof | **WitnessedFiles** - The logvault accessor (v.WitnessedFiles) returning the set of files a run actually witnessed under a prefix (e.g. dispatch-runs), used by guard_audit. |
 | * | crystal | symbol | witness-proof | **witnessPath** - The filesystem path parameter (witnessPath) to a witness artifact read by graders (GradeWitness, AnalyzeNegatedQA). |
 | * | crystal | symbol | witness-proof | **WitnessToolDescriptors** - The conceptbench witness constant (WitnessToolDescriptors, bound to mcp.go toolDescriptors()) naming the ResolveTool referee surface a scenario grades against. |
+| * | crystal | symbol | witness-proof | **guardCompactionWitness (durable per-session compaction-health row)** - cmd/fak/guard_compaction_witness.go guardCompactionWitness: the durable per-session compaction-health row `fak guard` appends at session exit -- {schema, recorded_at, session, anchor_mode, fired, bailed, off, anchor_starved, solvency_forced, shed_tokens, budget, cache_read_at_fire, bail_reasons} folded from the one gateway.Server that guard constructs and tears down per launch, and pinned to the append-only JSONL .fak/nightrun/compaction-health.jsonl so 'did compaction fire for THAT session?' outlives the process that measured it. |
 | * | crystal | symbol | witness-proof | **q2_0_witness_test** - The stub-build (non-Apple-Silicon) test file q2_0_witness_test.go: it pins the ternary Q2_0 reference's math obligations -- bit layout, ternary code set, round-trip error bound, and ref-GEMV-vs-dense parity -- in every build that cannot execute the Metal kernel. |
 | * | crystal | symbol | witness-proof | **CollectiveWitnessed** - Input field on the #4801 ReservationEnvelope recording that a real NCCL collective smoke test passed across the exact reserved GPU ranks, before any artifact transfer begins. |
 | * | crystal | symbol | witness-proof | **ReservationCollectiveUnwitnessed** - The #4801 typed refusal verdict returned when every resource bar clears but no NCCL collective has been proven across the exact reserved ranks. |
@@ -2399,8 +2400,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2491/3933 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2127 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2491/3939 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2128 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2409,23 +2410,23 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 2802 lookup name(s) resolves - 60 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 2803 lookup name(s) resolves - 60 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 319 | 332 | 13 |
+| plan | 319 | 333 | 14 |
 | policy-capability | 153 | 164 | 11 |
+| guard-gate | 385 | 394 | 9 |
 | session-runtime | 213 | 221 | 8 |
 | render-materialize | 177 | 184 | 7 |
-| guard-gate | 385 | 391 | 6 |
 | loop | 77 | 83 | 6 |
 | cache | 261 | 265 | 4 |
-| evict | 46 | 48 | 2 |
+| score-debt | 84 | 87 | 3 |
+| evict | 49 | 51 | 2 |
 | gateway-engine | 169 | 171 | 2 |
-| score-debt | 84 | 86 | 2 |
 | decision | 52 | 53 | 1 |
 | support-maturity | 45 | 46 | 1 |
 | attention | 74 | 74 | 0 |
@@ -2436,5 +2437,5 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | pool | 37 | 37 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
-| witness-proof | 139 | 139 | 0 |
+| witness-proof | 140 | 140 | 0 |
 

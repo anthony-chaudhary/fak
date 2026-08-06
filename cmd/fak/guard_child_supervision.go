@@ -562,6 +562,13 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 			fmt.Fprintln(os.Stderr, "fak guard: "+snap.Report())
 		}
 	}
+	// Pin THIS session's compaction health durably BEFORE the banner and OUTSIDE the !quiet
+	// gate (#3152). The counters live only on the gateway we just tore down, so without this
+	// row a finished session leaves no checkable answer to "did compaction fire for THIS
+	// session?" — and a headless `--quiet` worker, which prints no banner at all, is exactly
+	// the session an auditor comes back to. Best-effort: an unwritable ledger returns "" and
+	// the banner simply omits the block, never failing the exit.
+	compactionWitness := recordGuardCompactionWitness(guardCompactionWitnessLedger(), guardTraceID, srv.AdjudicationSummary(), time.Now())
 	if !quiet {
 		// The wrapped agent (Claude Code) paints a full-screen alternate-screen TUI over this
 		// same terminal and, on a crash or an abnormal exit, can tear it down mid-escape-sequence
@@ -604,6 +611,13 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// in a post-hoc `fak traj score`. Empty (silent) unless trajectory recording
 		// is on, exactly like the sibling lines stay quiet when their signal is absent.
 		emit(guardContextHealthLine())
+		// The durable compaction witness (#3152), rendered from the row pinned above —
+		// not from the live counters — so the operator reads the same bytes a later
+		// `fak guard compaction-witness` audit will read and the banner can never
+		// disagree with the witness of record. Empty (silent) when there was no session
+		// id or the ledger round trip failed — exactly the cases where there is no
+		// durable row to point an auditor at, so printing a block would overclaim.
+		emit(compactionWitness)
 		// The amendment posture (#5184): who could have moved which policy surface
 		// this session. Read from the compiled-in PolicyKnobRegistry, never from
 		// session state, so it is a property of the BINARY the operator is running

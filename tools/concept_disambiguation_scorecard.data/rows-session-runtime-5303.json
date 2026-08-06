@@ -55,7 +55,7 @@
       "kind": "symbol",
       "definition": "internal/session/compactaudit.go CompactSessionReport: one rollout file's compaction health - the per-session summary of what a compaction dropped/kept during that session.",
       "distinction": "A per-SESSION compaction-health record - NOT RenderCompactAudit (the renderer that prints it) and NOT SessionMeta (session identity).",
-      "distinct_from": ["cov5303-session-meta", "session"],
+      "distinct_from": ["cov5303-session-meta", "session", "guardcompactionwitness-3152"],
       "aliases": ["compactSessionReport"],
       "grounding": "CompactSessionReport",
       "grounding_kind": "symbol",
