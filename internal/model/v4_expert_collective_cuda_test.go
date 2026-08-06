@@ -19,6 +19,15 @@ const v4CUDACollectiveRequiredEnv = "FAK_V4_CUDA_COLLECTIVE_REQUIRED"
 // one green.
 var errV4CollectiveCapacityRefused = errors.New("CAPACITY_REFUSED")
 
+// v4CollectiveBuildFix is the COMPLETE recipe both build-gate misses below point at. It names
+// the NATIVE step on purpose: `-tags cuda,nccl` alone does not link, because the NCCL objects
+// (cuda_nccl.cu / cuda_nccl_pg.cu) only enter libfakcuda.a when build_cuda.sh runs with
+// FAK_CUDA_NCCL=1, which is also what adds -lnccl to the cgo link. A refusal that stops at the
+// Go tag therefore hands the operator a command that dies in a cgo link error instead of the
+// rung — the same misdirection this file already fixed one gate earlier, just one rung later,
+// and it burns the scarce multi-GPU window that is the whole cost of this acceptance run.
+const v4CollectiveBuildFix = "rebuild with FAK_CUDA_NCCL=1 bash internal/compute/build_cuda.sh build, then go test -tags cuda,nccl"
+
 // admitV4DeviceCollective admits the production device-collective path over `world` ranks, or
 // returns a typed CAPACITY_REFUSED when the hardware cannot provide it.
 //
@@ -54,11 +63,11 @@ func admitV4DeviceCollectiveVia(world int, lookup func(string) (compute.Backend,
 	// An "on this host" message sends the operator hunting the node; the fix is the build.
 	be, ok := lookup("cuda")
 	if !ok {
-		return nil, fmt.Errorf("%w: no cuda backend registered — internal/compute/cuda.go is //go:build cuda, so an untagged build registers none on ANY node, GPU or not; rebuild with -tags cuda,nccl", errV4CollectiveCapacityRefused)
+		return nil, fmt.Errorf("%w: no cuda backend registered — internal/compute/cuda.go is //go:build cuda, so an untagged build registers none on ANY node, GPU or not; %s", errV4CollectiveCapacityRefused, v4CollectiveBuildFix)
 	}
 	init, ok := be.(compute.CollectiveInitializer)
 	if !ok {
-		return nil, fmt.Errorf("%w: backend %q lacks the CollectiveInitializer seam — InitCollective exists only in internal/compute/cuda_collective.go (//go:build cuda && nccl), so a -tags cuda build WITHOUT nccl cannot express this rung; rebuild with -tags cuda,nccl", errV4CollectiveCapacityRefused, be.Name())
+		return nil, fmt.Errorf("%w: backend %q lacks the CollectiveInitializer seam — InitCollective exists only in internal/compute/cuda_collective.go (//go:build cuda && nccl), so a -tags cuda build WITHOUT nccl cannot express this rung; %s", errV4CollectiveCapacityRefused, be.Name(), v4CollectiveBuildFix)
 	}
 	if err := init.InitCollective(world); err != nil {
 		return nil, fmt.Errorf("%w: world=%d NCCL admission refused: %v", errV4CollectiveCapacityRefused, world, err)
@@ -114,9 +123,87 @@ func TestV4DeviceCollectiveAdmissionTypesBuildTagMisses(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("refusal does not name the build fix %q: %v", tc.want, err)
 			}
+			// The Go tag alone is NOT a runnable fix: without the FAK_CUDA_NCCL=1 native build
+			// there is no libfakcuda.a carrying the NCCL objects (and no -lnccl), so the tagged
+			// command dies in a cgo link error on the very node this rung is scheduled for. The
+			// refusal has to carry the whole recipe or it just relocates the trap.
+			if !strings.Contains(err.Error(), "build_cuda.sh") {
+				t.Fatalf("refusal names the Go tag but not the native NCCL build step, so following it verbatim cannot link: %v", err)
+			}
 			// It must NOT blame the node: the miss is a compile gate, reproducible on an 8-GPU box.
 			if strings.Contains(err.Error(), "on this host") {
 				t.Fatalf("refusal blames the host for a build-tag miss: %v", err)
+			}
+		})
+	}
+}
+
+// refusingCollectiveBackend is a CORRECTLY built (-tags cuda,nccl) cuda backend whose NCCL
+// admission fails — the single-GPU sanctioned-node shape, where ensureNCCL refuses world < 2.
+type refusingCollectiveBackend struct{ compute.Backend }
+
+func (refusingCollectiveBackend) Name() string { return "cuda" }
+func (refusingCollectiveBackend) InitCollective(int) error {
+	return errors.New("a 1-rank collective is the identity and does not need a device communicator")
+}
+
+// silentCollectiveBackend admits without error and then does NOT advertise Caps().Collective —
+// the #971 honesty line holding: a cpu-ref fallback, or a communicator that never really came up.
+type silentCollectiveBackend struct{ compute.Backend }
+
+func (silentCollectiveBackend) Name() string             { return "cuda" }
+func (silentCollectiveBackend) InitCollective(int) error { return nil }
+func (silentCollectiveBackend) Caps() compute.Caps       { return compute.Caps{} }
+
+// TestV4DeviceCollectiveAdmissionTypesHardwareRefusals pins the two refusal modes that fire on
+// a CORRECTLY BUILT binary — i.e. the ones the sanctioned GPU node itself can hit, which the
+// build-tag table above cannot reach. Both must stay typed CAPACITY_REFUSALS, and (the dual of
+// the test above) neither may misdirect to the native build recipe: the binary is already right,
+// so sending the operator back to build_cuda.sh burns the scarce multi-GPU window on a rebuild
+// that cannot change the outcome. The node's GPU count is the cause.
+//
+// This is the load-bearing guard behind #5106's explicit non-claim — "a one-GPU run is explicitly
+// NOT a substitute and must stay CAPACITY_REFUSED". A single-GPU node lands in the first case
+// below; a silent cpu-ref fallback lands in the second. If either ever degraded to an untyped
+// error, FAK_V4_CUDA_COLLECTIVE_REQUIRED=1 would still red — but a run WITHOUT it would skip on
+// an untyped error it was never meant to swallow, and a cpu-ref green could be read as a device
+// witness. Neither is reachable from this CPU host except through the injectable lookup seam.
+func TestV4DeviceCollectiveAdmissionTypesHardwareRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		lookup func(string) (compute.Backend, bool)
+		want   string
+	}{
+		{
+			name:   "nccl admission refused on a single-GPU node",
+			lookup: func(string) (compute.Backend, bool) { return refusingCollectiveBackend{}, true },
+			want:   "NCCL admission refused",
+		},
+		{
+			name:   "admitted but never advertised Caps().Collective",
+			lookup: func(string) (compute.Backend, bool) { return silentCollectiveBackend{}, true },
+			want:   "did not advertise Caps().Collective",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := admitV4DeviceCollectiveVia(2, tc.lookup)
+			if err == nil {
+				t.Fatal("admission succeeded without a real device collective")
+			}
+			// The load-bearing assertion, same as the build-tag table: errors.Is must hold, or
+			// the acceptance harness cannot tell "this box has < 2 GPUs" from "the collective
+			// path broke".
+			if !errors.Is(err, errV4CollectiveCapacityRefused) {
+				t.Fatalf("error is not a typed CAPACITY_REFUSED: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("refusal does not name the hardware miss %q: %v", tc.want, err)
+			}
+			// The DUAL of the build-tag assertion above: a build-gate miss must name the build,
+			// and a hardware miss must NOT — otherwise both classes collapse into one message
+			// and the operator cannot tell which one they are holding.
+			if strings.Contains(err.Error(), "build_cuda.sh") {
+				t.Fatalf("hardware refusal misdirects to the native build recipe: %v", err)
 			}
 		})
 	}
