@@ -197,6 +197,10 @@ func main() {
 		cmdDebug(os.Args[2:])
 	case "policy":
 		cmdPolicy(os.Args[2:])
+	case "enroll":
+		// Pin (or show, or revoke) this box's org trust anchor — the opt-in door to
+		// the org-policy plane, #5323. See cmd/fak/enroll.go.
+		cmdEnroll(os.Args[2:])
 	case "egress":
 		cmdEgress(os.Args[2:])
 	case "eve":
