@@ -11,6 +11,11 @@ import (
 // Windows console windows, and callers keep their ordinary process semantics.
 func ConfigureBackgroundCommand(_ *exec.Cmd) {}
 
+// ConfigureDetachedCommand is a no-op off Windows. There is no console object to
+// decline: the dispatch spawn already calls setsid, which is the POSIX equivalent
+// of dropping the controlling terminal.
+func ConfigureDetachedCommand(_ *exec.Cmd) {}
+
 // JobObject is a no-op placeholder off Windows. POSIX teardown uses ordinary
 // process-group semantics (Setpgid + a group signal), so there is no job handle
 // to own; Close is always a nil-error no-op. Kept so callers can hold a

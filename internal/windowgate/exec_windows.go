@@ -19,6 +19,21 @@ const CreateNoWindow = 0x08000000
 // (CTRL_BREAK_EVENT) reaches the whole tree instead of only the top process.
 const CreateNewProcessGroup = 0x00000200
 
+// DetachedProcess is DETACHED_PROCESS: the child neither inherits the parent's
+// console nor gets one of its own.
+//
+// This is the flag that actually removes the per-worker console COST (#3597).
+// CREATE_NO_WINDOW is often mistaken for it, but the two differ in what they
+// suppress: CREATE_NO_WINDOW suppresses the console's WINDOW while still
+// allocating the console, and on modern Windows every console is hosted by its
+// own conhost.exe/OpenConsole.exe process. So a CREATE_NO_WINDOW child is
+// invisible yet still pays the full per-console price the fleet audit measured —
+// #2340 found 87 accumulated console hosts costing 2,829 threads / 54k handles /
+// 2 GB, and #3405 confirmed that price scales linearly with fleet size
+// (microsoft/terminal#15976). DETACHED_PROCESS allocates no console at all, so
+// there is no host process to pay for.
+const DetachedProcess = 0x00000008
+
 // createSuspended is CREATE_SUSPENDED. StartInNewJob uses it so no child code
 // can run (or fork an escaping descendant) between CreateProcess and assignment
 // to the job object. The primary thread is resumed only after assignment.
@@ -141,6 +156,29 @@ func ConfigureBackgroundCommand(cmd *exec.Cmd) {
 	}
 	cmd.SysProcAttr.HideWindow = true
 	cmd.SysProcAttr.CreationFlags |= CreateNoWindow
+}
+
+// ConfigureDetachedCommand prepares a spawn that must not own a console AT ALL:
+// a fully unattended child whose stdout/stderr are already redirected to files or
+// pipes, so it has no use for one. Use it instead of ConfigureBackgroundCommand
+// only when nobody — neither an operator nor the child itself — reads a console:
+// a detached child cannot be reached by a console control event (CTRL_BREAK), and
+// a descendant that probes for a console sees none.
+//
+// It CLEARS CreateNoWindow rather than OR-ing alongside it. Windows treats the two
+// as mutually exclusive and silently ignores CREATE_NO_WINDOW when DETACHED_PROCESS
+// is present, so leaving both set would encode a contradiction that reads as though
+// the window flag still did something.
+func ConfigureDetachedCommand(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags &^= CreateNoWindow
+	cmd.SysProcAttr.CreationFlags |= DetachedProcess
 }
 
 // ConfigureWorkerCommand prepares a long-lived dispatched-worker / loop-child
