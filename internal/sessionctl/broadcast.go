@@ -220,6 +220,17 @@ var broadcastRunStates = map[ControlOp]session.RunState{
 	OpThrottle:  session.Throttled,
 }
 
+// BroadcastRunState returns the drive-state a broadcastable lifecycle op enqueues,
+// and whether op is broadcastable at all. It exists so a fan-out that resolves its
+// OWN session set — the cross-process fleet bus, whose instance-level selector is
+// already the deliberate-widening gate this package's session selector provides —
+// can ride the same op→run-state table instead of forking a second copy of it. A
+// forked copy is how `resume` and `running` drift apart.
+func BroadcastRunState(op ControlOp) (session.RunState, bool) {
+	run, ok := broadcastRunStates[op]
+	return run, ok
+}
+
 // BroadcastableOps returns the closed set of ops a broadcast may fan, in the
 // vocabulary's stable op order — the CLI help / validation surface.
 func BroadcastableOps() []ControlOp {

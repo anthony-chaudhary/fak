@@ -154,7 +154,7 @@ var verbManifest = []Verb{
 	{Name: "eve", Synopsis: "the impure shell over internal/evebridge: the Eve integration program's operator verbs (security preflight)", Lane: "cmd"},
 	{Name: "experiments", Synopsis: "the experiments registry/runner over experiments/", Lane: "cmd"},
 	{Name: "feature", Synopsis: "query the unified self-feature catalog (dev facts, live tools, memory drivers, capability cards)", Lane: "cmd"},
-	{Name: "fleet", Synopsis: "headless-worker fleet control surface: monitor/janitor/fold/replace/capacity (read-only by default)", Lane: "cmd"},
+	{Name: "fleet", Synopsis: "headless-worker fleet control surface: monitor/janitor/fold/replace/capacity/control (read-only by default)", Lane: "cmd"},
 	{Name: "fleet-accounts", Synopsis: "fleet-wide account management across config-home seats", Lane: "cmd"},
 	{Name: "fleet-trend", Synopsis: "fleet-status trend ledger: append a fleet_top snapshot as a tick, fold the trailing window (append/show)", Lane: "cmd"},
 	{Name: "fleetcap", Synopsis: "dry-run fleet-capacity lens: workers required for a target issue-resolution rate via Little's law", Lane: "cmd"},

@@ -110,6 +110,12 @@ concurrent = [
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
+  # #5619: internal/gitbroker, the resident git query broker. Declared BEFORE the package
+  # exists so the rungs (#5620-#5624) can ship a `(fak gitbroker)` stamp without tripping
+  # TIER_DECLARED on their first push. Sibling of gitgate and deliberately disjoint from it:
+  # gitgate REFUSES git commands, gitbroker ANSWERS git questions, so the two lanes never
+  # collide even though both are named for git.
+  "gitbroker",
   # reconciled 2026-06-27 (#1029): internal/modelreg is a real committed leaf (the
   # friendly-name -> model-ref registry behind `fak run ornith:9b` / `fak serve --gguf`)
   # that had NO declared lane -> a `(fak modelreg)` ship-stamp bound but the arbiter could
@@ -270,7 +276,8 @@ concurrent = [
   "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy", "dormancysim", "dsparity",
   "edittx", "egressfloor", "envconfiglint", "epicprogress", "epochbridge", "escalation",
   "evebridge", "eveimport", "eveparity", "execrollup", "findingsink", "fleet", "fleetaccounts",
-  "fleetbottleneck", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory", "fleetmetrics",
+  "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory",
+  "fleetmetrics",
   "fleetmon", "fleetpane", "fleetreap", "fleetsim", "fleetspine", "fleettrend", "fleetverify",
   "flock", "flowcredit", "focusscore", "frontierswe", "fusedturn", "gardenbundle",
   "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "godsplitplan",
@@ -343,6 +350,7 @@ autopick = [
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
+  "gitbroker", # #5619: internal/gitbroker leaf (the resident git query broker), see [lanes].concurrent note
   "modelreg", # #1029: internal/modelreg leaf (the run-by-name model registry), see [lanes].concurrent note
   "renameconcept", # internal/renameconcept leaf (the concept-rename planner/applier), see [lanes].concurrent note
   "sessionimage",
@@ -545,6 +553,9 @@ blobhttp = ["internal/blobhttp/**"]
 ctxplan = ["internal/ctxplan/**"]
 dgxbridge = ["internal/dgxbridge/**"]
 gitgate = ["internal/gitgate/**"]
+# #5619: the git query broker. Disjoint from gitgate by construction -- gitgate decides
+# whether a git command may run, gitbroker answers git questions without spawning one.
+gitbroker = ["internal/gitbroker/**"]
 hfhub = ["internal/hfhub/**"]
 memq = ["internal/memq/**"]
 polymodel = ["internal/polymodel/**"]
@@ -761,6 +772,7 @@ findingsink = ["internal/findingsink/**"]
 fleet = ["internal/fleet/**"]
 fleetaccounts = ["internal/fleetaccounts/**"]
 fleetbottleneck = ["internal/fleetbottleneck/**"]
+fleetbus = ["internal/fleetbus/**"]
 fleetcap = ["internal/fleetcap/**"]
 fleetcompare = ["internal/fleetcompare/**"]
 fleetfreeze = ["internal/fleetfreeze/**"]
@@ -1767,6 +1779,51 @@ refusal  = true
 summary  = "A fleet/lane-scoped broadcast (issue #2764) had no applicable shape -- an empty selector (an unstated set never means 'every session'), a nil session table, an op outside the closed control vocabulary, or a non-lifecycle op (steer/redirect/budget/priority) that cannot be fanned without a payload -- and was refused whole at the edge, before any session was touched."
 fix      = "State at least one selector axis (--lane / --wave / --label) and fan only a lifecycle op (pause|resume|cancel|terminate|throttle); per-session refusals inside an accepted broadcast surface the drive table's own CONTROL_* tokens. Floor: internal/sessionctl Broadcast edge validation."
 see_also = ["internal/sessionctl/broadcast.go", "internal/sessionctl/broadcast_test.go"]
+
+# #5600 (child of the centralized-fleet-control epic #5599): the closed refusal
+# vocabulary of the CROSS-PROCESS fleet control bus (internal/fleetbus) -- the layer
+# above BROADCAST_MALFORMED, which fans one op inside ONE gateway's session table.
+# The bus carries a directive to every announced INSTANCE and folds an ack back, so a
+# control point can say "4 of 4 applied" and have that be falsifiable. The bus itself
+# declares no ops (it is tier 1 and cannot see sessionctl); op MEANING lives in the
+# serve-side applier, which is why UNKNOWN_OP and APPLY_REFUSED are separate tokens:
+# one is "the bus carried a word this instance does not speak", the other is "this
+# instance spoke it and said no". Producers of record: internal/fleetbus/fleetbus.go
+# (Reasons) and cmd/fak/serve_fleetbus.go (the applier's outcomes).
+[reasons.FLEETBUS_MALFORMED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A fleet-bus envelope could not be trusted as WRITTEN -- a missing or wrong schema tag, an id outside the [A-Za-z0-9._-] token grammar (ids are path segments, so '.' / '..' / a separator would escape the bus directory), an empty selector (an unstated set never means 'every instance'), a selector that states both --all and a filter, or an ack claiming a non-applied status with no reason token."
+fix      = "Fix the envelope at its producer, not at the reader: state at least one selector axis or an explicit --all (never both), keep every id a bare token, and give every non-applied ack a closed reason. Floor: go test ./internal/fleetbus -run 'Validate|Selector'."
+see_also = ["internal/fleetbus/fleetbus.go", "internal/fleetbus/fleetbus_test.go"]
+
+[reasons.FLEETBUS_EXPIRED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A directive reached an instance after its TTL had run out, so the instance ACKED it expired instead of applying it. A control directive is a statement about NOW ('restart, the account was just added'); replaying an hour-old one against an instance that was down for that hour is a fresh action wearing a stale intent."
+fix      = "Re-issue the directive if it is still what you want (`fak fleet control send` re-publishes with a new id), or raise --ttl for an op whose intent genuinely outlives the window. --ttl 0 means never expires -- state it deliberately. Floor: go test ./internal/fleetbus -run Expire."
+see_also = ["internal/fleetbus/drain.go", "internal/fleetbus/fleetbus.go"]
+
+[reasons.FLEETBUS_NO_TARGET]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A send resolved to ZERO instances -- the roster held no fresh instance the selector addressed -- so it was refused at the edge rather than published. Publishing to nobody would return a report that is trivially 'complete' (0 of 0 applied) and read as success; the denominator is the whole point of the roster."
+fix      = "Run `fak fleet control instances` to see who is actually announced and fresh, widen or correct the selector, or arm the instances first (`fak serve --fleet-bus`). An instance silent for longer than the TTL is stale and is not a target. Floor: go test ./cmd/fak -run FleetControl."
+see_also = ["cmd/fak/fleet_control.go", "internal/fleetbus/fold.go"]
+
+[reasons.FLEETBUS_UNKNOWN_OP]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An instance received a directive whose op is outside ITS control vocabulary and acked it refused. The bus is deliberately op-agnostic (it carries an opaque token), so a mixed-version fleet is a real state: the token names the instance that cannot speak the word, rather than dropping the directive and leaving it forever OUTSTANDING."
+fix      = "Send an op the instance advertises (`fak fleet control instances` prints each instance's ops), or upgrade the instances that refused. A refused ack is a completed round trip -- the directive is accounted for, not lost. Floor: go test ./cmd/fak -run FleetBusApplier."
+see_also = ["cmd/fak/serve_fleetbus.go", "internal/fleetbus/drain.go"]
+
+[reasons.FLEETBUS_APPLY_REFUSED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An instance KNEW the op and refused to apply it -- no live session matched, none were tagged into the stated lane/wave/label, the op needs a per-session payload a bare fan cannot name (redirect/budget/priority), or the local route refused it outright (a steer at a serve that owns no session loop carries STEER_NO_OWNED_LOOP through in the detail). An instance that matched nothing refuses rather than acking a hollow 'applied', because a fleet-wide 'everybody applied, 0 affected' is the accepted-but-never-applied phantom wearing a success token."
+fix      = "Read the ack's detail -- it names WHICH nothing this was and each is a different fix: start the serve with --native for steer, drop the session selector if the sessions are untagged, or use the single-session verb for a payload-carrying op. Floor: go test ./cmd/fak -run FleetBusApplier."
+see_also = ["cmd/fak/serve_fleetbus.go", "internal/fleetbus/drain.go", "internal/gateway/http.go"]
 
 # #3066 (child [GATE] of the TOON epic #3064): the closed skip-reason vocabulary
 # the pure `toon.Decide(...)` governor returns instead of `Encode:true`. Each token

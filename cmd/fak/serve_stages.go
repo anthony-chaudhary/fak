@@ -506,6 +506,17 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	stopMetricsSnapshot := startGatewayUsageSnapshotLoop(ctx, rt.srv, *sf.metricsSnapshot, "serve", rt.t0)
 	defer stopMetricsSnapshot()
 
+	// #5600 (epic #5599): with --fleet-bus, this serve joins the fleet control bus as an
+	// INSTANCE — announcing presence and draining directives for the lifetime of ctx, so
+	// a single `fak fleet control send` reaches it along with every peer. Off (the
+	// default) is a byte-for-byte no-op. `*sf.native` is passed in rather than read off
+	// the server because gateway.Server.ownsSessionLoop is unexported; it decides whether
+	// a fanned `steer` can be delivered at all, and a non-native serve refuses it with the
+	// same STEER_NO_OWNED_LOOP the single-session route refuses a 202 for.
+	stopFleetBus := startFleetBusLoop(ctx, resolveFleetBusDir(sf), resolveFleetBusID(sf),
+		*sf.fleetBusInterval, serveSessions, *sf.native)
+	defer stopFleetBus()
+
 	// Everything a finished serve must leave behind, whichever transport served it. The stdio
 	// and HTTP exits below record the SAME four things and differ only in the transport word
 	// they record it under, so the sequence lives here once: a new observation added for one

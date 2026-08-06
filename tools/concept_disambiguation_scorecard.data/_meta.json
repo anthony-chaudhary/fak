@@ -710,17 +710,23 @@
           "category": "incidental",
           "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
           "token": "guardSessionStartDriverEntrypointDirs"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Prose lifted from a doc comment (sessionctl's fail-closed rule, inherited rather than re-litigated). There is no symbol named litigated anywhere in the program.",
+          "token": "litigated"
         }
       ],
       "exclude": [
-        "gateway",
         "aggregat",
         "delegat",
-        "propagat",
-        "navigat",
+        "gateway",
         "investigat",
+        "litigated",
+        "mitigat",
+        "navigat",
         "negat",
-        "mitigat"
+        "propagat"
       ],
       "id": "guard-gate",
       "ignore": [
@@ -958,11 +964,22 @@
           "category": "incidental",
           "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
           "token": "guardSessionStartDriverEntrypointDirs"
+        },
+        {
+          "category": "incidental",
+          "reason": "An unexported method on the fleet-bus applier that filters one drive table's snapshot to the steerable traces a directive's session axes name. It names a local step inside one Apply call, not a session-runtime concept.",
+          "token": "matchedSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "A boolean predicate on Selector reporting whether any session-scoped axis (lane/wave/label) was stated. A field-presence test on an existing type, not a concept of its own.",
+          "token": "NarrowsSessions"
         }
       ],
       "id": "session-runtime",
       "ignore": [
         "ITERM_SESSION_ID",
+        "NarrowsSessions",
         "SessionAutonomous",
         "SessionClass",
         "SessionInteractive",
@@ -981,6 +998,7 @@
         "handoff_session_give_up",
         "interactivesession",
         "kernelSession",
+        "matchedSessions",
         "readSessionHandoffBlocks",
         "requireminimaxsession",
         "restartfreshsession",
@@ -1784,6 +1802,11 @@
           "category": "incidental",
           "reason": "Local human-text output formatter for one verb (fak runaway), the exact shape of renderStallscan and its siblings in cmd/fak. Writes findings to an io.Writer; materializes no resource, owns no lifecycle, and is not part of any render/materialize abstraction.",
           "token": "renderRunaway"
+        },
+        {
+          "category": "incidental",
+          "reason": "An unexported per-verb string builder for one CLI table: it formats the fleetbus.Report that `fak fleet control` already owns and has no meaning outside that one command's stdout. Not a rendering concept.",
+          "token": "renderFleetControl"
         }
       ],
       "id": "render-materialize",
@@ -1805,6 +1828,7 @@
         "priorwtrendercrash",
         "renderCommitDrainResult",
         "renderCommitVelocity",
+        "renderFleetControl",
         "renderGhostReport",
         "renderRunaway",
         "renderValidate",
@@ -2178,6 +2202,11 @@
           "category": "incidental",
           "reason": "Not a symbol at all -- this is the filename loop_region.go extracted from source text by the admission tokenizer. Filed as the same false-positive class as #5533, where a filename or test name quoted in prose is read as an introduced symbol. Classified incidental because there is no concept here to position.",
           "token": "loop_region"
+        },
+        {
+          "category": "incidental",
+          "reason": "An unexported arm-and-return-stop wiring helper matching this file's sibling startXLoop functions. It starts the fleetbus drain goroutine for the lifetime of ctx and names no new kind of loop.",
+          "token": "startFleetBusLoop"
         }
       ],
       "id": "loop",
@@ -2223,6 +2252,7 @@
         "register_scout_loop",
         "runSuperloopFleet",
         "runloop",
+        "startFleetBusLoop",
         "superloopFleetIntent",
         "superloopFleetNext",
         "superloopFleetReport",

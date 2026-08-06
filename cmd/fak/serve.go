@@ -164,6 +164,10 @@ type serveFlags struct {
 	nativeMaxTurns               *int
 	vdsoProxyFill                *bool
 	metricsSnapshot              *time.Duration
+	fleetBus                     *bool
+	fleetBusDir                  *string
+	fleetBusID                   *string
+	fleetBusInterval             *time.Duration
 }
 
 // newServeFlagSet defines the full `fak serve` flag surface and returns the set
@@ -231,6 +235,10 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeMaxTurns = fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
 	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
 	sf.metricsSnapshot = fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, .fak/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
+	sf.fleetBus = fs.Bool("fleet-bus", false, "JOIN THE FLEET CONTROL BUS (#5600, epic #5599): announce this serve as a control-plane instance on the shared bus and drain directives from it every --fleet-bus-interval, so one `fak fleet control send` reaches every live instance at once — the cross-PROCESS fan-out the per-gateway `sessionctl` broadcast and the display-only `fleetspine` each stop short of. Each drained directive is applied through the SAME writes the single-session verbs ride (steer ⇒ the a2achan operator turn, needs --native; pause/resume/cancel/terminate/throttle ⇒ session.Table.Transition) and every one draws an ACK carrying what this process OBSERVED change — the return path that lets the control point say \"3 of 4 applied, 1 refused STEER_NO_OWNED_LOOP\" instead of \"sent\". Exactly-once under at-least-once redelivery: a per-(instance,directive) O_EXCL claim means a directive re-read after a restart is recognised, never re-applied. Off by default (arming a control plane must be stated); the bus directory is --fleet-bus-dir.")
+	sf.fleetBusDir = fs.String("fleet-bus-dir", "", "with --fleet-bus: the shared bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus, else beside the fleet registry). On one machine a directory IS a real cross-process control plane; it is an honest cross-HOST one only where the directory itself is shared (a UNC path, an SMB/NFS mount) — which is what FLEET_STATE_DIR already exists to point at.")
+	sf.fleetBusID = fs.String("fleet-bus-id", "", "with --fleet-bus: this instance's stable bus identity (default: serve-<host>-<pid>). Pass a name to keep one identity across restarts — the id is what the exactly-once apply claim is keyed on, so two live processes sharing one id deliberately share one claim (only one of them applies a given directive).")
+	sf.fleetBusInterval = fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live instance flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	return fs, sf
 }
 

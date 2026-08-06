@@ -808,7 +808,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `EvictPrefix <br><small>EvictPrefix (radixkv token-path eviction)</small>` | **EvictPrefix (radixkv token-path eviction)** | evict / symbol | EvictColdest (kvmmu), EvictNode (radixkv policy) |
 |  | `EvictPrefixNS` | **EvictPrefix (radixkv token-path eviction)** | evict / symbol | EvictColdest (kvmmu), EvictNode (radixkv policy) |
 |  | `evictToBudget <br><small>evictToBudget (radixkv Tree LRU budget pass)</small>` | **evictToBudget (radixkv Tree LRU budget pass)** | evict / symbol | EvictUnderBudget (budget-gated evictor), evict-kvevictlru |
-|  | `EvictUnderBudget (budget-gated evictor) <br><small>evictunderbudget</small>` | **EvictUnderBudget (budget-gated evictor)** | evict / symbol | EvictColdest (kvmmu), Evictions (radixkv LRU counter), c2421-pin-evict-refused, c2421-plan-eviction |
+|  | `EvictUnderBudget (budget-gated evictor) <br><small>evictunderbudget</small>` | **EvictUnderBudget (budget-gated evictor)** | evict / symbol | EvictColdest (kvmmu), Evictions (radixkv LRU counter) |
 |  | `evidence rung` | **witness rung (W0-W3)** | trajectory-control / concept | trajctl-scorerow, x-witness-proof-witnessfunc |
 |  | `EvidenceTrustEpoch` | **EvidenceTrustEpoch** | witness-proof / symbol | x-goal25b-witness-proof-evidencewitness |
 |  | `EvidenceWitness` | **EvidenceWitness** | witness-proof / symbol | x-goal25b-witness-proof-evidencetrustepoch |
@@ -1459,7 +1459,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `KVCacheShape` | **KVCacheShape** | cache / symbol | kv-cache, kvlayout, mla-config |
 |  | `KV-cache substrate` | **T5 KV-cache substrate** | vfs / concept | kv-mmu, vfs-t4-durable-memory |
 |  | `KVCacheToPaged (paged materialize) <br><small>kvcachetopaged</small>` | **KVCacheToPaged (paged materialize)** | cache / symbol | KV cache, vCache |
-|  | `KVCache.TryEvict (fallible exact-span evict)` | **KVCache.TryEvict (fallible exact-span evict)** | evict / symbol | ActionEvict (cachemeta), EvictColdest (kvmmu), c2421-check-eviction |
+|  | `KVCache.TryEvict (fallible exact-span evict)` | **KVCache.TryEvict (fallible exact-span evict)** | evict / symbol | ActionEvict (cachemeta), EvictColdest (kvmmu) |
 | **!** | `KVEvictCostAware <br><small>KVEvictCostAware (KVEvictPolicy replay-policy label)</small>` | **KVEvictCostAware (KVEvictPolicy replay-policy label)** | evict / symbol | evict-kvevictioncost, evict-pickevictionvictim, policy-capability-kv-evict-policy |
 | **!** | `KVEvictCostAware <br><small>KVEvictCostAware (KVEvictPolicy replay-policy label)</small>` | **KVEvictPolicy (compute)** | policy-capability / config | PolicyEvictions (radixkv), evict-kvevictcostaware, evict-kvevictlru |
 |  | `KVEvictionAttestation (cachemeta receipt) <br><small>kvevictionattestation</small>` | **KVEvictionAttestation (cachemeta receipt)** | evict / symbol | EvictColdest (kvmmu), EvictNode (radixkv policy) |
@@ -2125,7 +2125,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `recordDispatchTickLoop <br><small>recordDispatchTickLoop (tick row into the loop ledger)</small>` | **recordDispatchTickLoop (tick row into the loop ledger)** | loop / symbol | c729-dispatch-tick-preflight-file, c729-load-loop-ledger-events |
 |  | `recordGuardUsage <br><small>recordGuardUsage (guard exit usage row)</small>` | **recordGuardUsage (guard exit usage row)** | guard-gate / symbol | c729-fak-guard-stops-ledger-env, c729-maybe-record-guard-session-index |
 |  | `RecoveryPlan <br><small>RecoveryPlan (macbench crash-recovery result)</small>` | **RecoveryPlan (macbench crash-recovery result)** | plan / symbol | plan-planrecovery |
-|  | `recurrentevictunsupportederror` | **KVCache.TryEvict (fallible exact-span evict)** | evict / symbol | ActionEvict (cachemeta), EvictColdest (kvmmu), c2421-check-eviction |
+|  | `recurrentevictunsupportederror` | **KVCache.TryEvict (fallible exact-span evict)** | evict / symbol | ActionEvict (cachemeta), EvictColdest (kvmmu) |
 |  | `RedundantDecisionEvent (abi de-double) <br><small>redundantdecisionevent</small>` | **RedundantDecisionEvent (abi de-double)** | decision / symbol | decision-kernel, fak_kernel_decisions_total (metric) |
 |  | `reference monitor` | **adjudicator** | policy-capability / subsystem | policy-loaded, preflight-ladder, verdict, x-issue1420-policy-capability-adjudicat |
 | **!** | `refusal` | **page-in refusal** | cross-cluster / symbol | memq-refusal |
@@ -2630,7 +2630,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `StampPlanID` | **StampPlanID** | plan / symbol | x-goal25-plan-plancache |
 |  | `standardKVLayout (model) <br><small>standardkvlayout</small>` | **standardKVLayout (model)** | layout / symbol | kvlayout-interface, mlaKVLayout (model) |
 |  | `startGuardSessionThreadDrain <br><small>startGuardSessionThreadDrain (outbox drain on launch)</small>` | **startGuardSessionThreadDrain (outbox drain on launch)** | guard-gate / symbol | cov4739-guard-session-thread-source, guard-kernel |
-|  | `StateEvictable (ctxresidency state) <br><small>stateevictable</small>` | **StateEvictable (ctxresidency state)** | evict / symbol | ActionEvict (cachemeta), EvictColdest (kvmmu), c2421-class-evictable, c2421-pin-evict-refused |
+|  | `StateEvictable (ctxresidency state) <br><small>stateevictable</small>` | **StateEvictable (ctxresidency state)** | evict / symbol | ActionEvict (cachemeta), EvictColdest (kvmmu) |
 |  | `StatusBadGateway (HTTP 502) <br><small>statusbadgateway</small>` | **StatusBadGateway (HTTP 502)** | gateway-engine / doc-term | gateway |
 |  | `StatusWitnessedDone (loop run status) <br><small>statuswitnesseddone</small>` | **StatusWitnessedDone (loop run status)** | witness-proof / symbol | WitnessConfirmed (witness outcome), witness-outcome |
 | **!** | `StatusWitnessRefused (loop run status) <br><small>statuswitnessrefused</small>` | **StatusWitnessRefused (loop run status)** | witness-proof / symbol | WitnessRefuted (witness outcome), x2-witness-proof-witnessstatus |
@@ -2756,7 +2756,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `trunk-red witness emitter` | **emitTrunkRedWitness (pre-existing-red admission recorder)** | witness-proof / symbol | covg4719-witness-proof-trunkredwitnessnote, witness-proof-buildwitness, witness-proof-worktreewitness |
 |  | `trunk-red witness note <br><small>trunkRedWitnessNote, trunkRedWitnessNote (convergence-line renderer), trunkredwitnessnote</small>` | **trunkRedWitnessNote (convergence-line renderer)** | witness-proof / symbol | covg4719-witness-proof-emittrunkredwitness, witness-proof-commitwitnessed |
 |  | `TrustEpoch <br><small>trustepoch</small>` | **TrustEpoch** | witness-proof / symbol | refutation, revocation |
-|  | `tryevict` | **KVCache.TryEvict (fallible exact-span evict)** | evict / symbol | ActionEvict (cachemeta), EvictColdest (kvmmu), c2421-check-eviction |
+|  | `tryevict` | **KVCache.TryEvict (fallible exact-span evict)** | evict / symbol | ActionEvict (cachemeta), EvictColdest (kvmmu) |
 |  | `tuiguardartifact` | **tuiGuardReport (TUI guard pane model)** | guard-gate / symbol | gate, guard-kernel |
 |  | `tuiGuardRenderStyle <br><small>tuiGuardRenderStyle (TUI guard color style), tuiguardrenderstyle</small>` | **tuiGuardRenderStyle (TUI guard color style)** | render-materialize / config | render-materialize-render-tui-guard-styled |
 |  | `tuiGuardReport (TUI guard pane model) <br><small>tuiguardreport</small>` | **tuiGuardReport (TUI guard pane model)** | guard-gate / symbol | gate, guard-kernel |

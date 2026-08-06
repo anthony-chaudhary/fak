@@ -8,6 +8,12 @@ package main
 //	fak fleet fold     [--plan P] [--json] [--ledger L] [--write]  fold final reports into a witnessed ledger
 //	fak fleet replace  --session S [--index N] [--force] [--json]  render a safe replacement for a stuck worker
 //	fak fleet capacity [--require N] [--product claude|all] [--json]  preflight account-seat ceiling
+//	fak fleet control  send | status | instances                      command every live instance, and read the acks back
+//
+// control is the one verb whose subject is the OTHER processes rather than this
+// machine's evidence: it publishes a directive onto the shared bus and folds the acks
+// that come back (see fleet_control.go). Its exit 0 means witnessed-applied, not
+// published — the enqueue is never the witness.
 //
 // monitor/janitor/fold are reads by default; janitor mutates only with --apply,
 // fold appends to the ledger only with --write, replace launches only with
@@ -33,12 +39,13 @@ import (
 )
 
 func cmdFleet(argv []string) {
-	dispatchSubcommands("fleet", "monitor | janitor | fold | replace | capacity", argv,
+	dispatchSubcommands("fleet", "monitor | janitor | fold | replace | capacity | control", argv,
 		subcommand{"monitor", runFleetMonitor},
 		subcommand{"janitor", runFleetJanitor},
 		subcommand{"fold", runFleetFold},
 		subcommand{"replace", runFleetReplace},
 		subcommand{"capacity", runFleetCapacity},
+		subcommand{"control", runFleetControl},
 	)
 }
 
