@@ -2042,6 +2042,22 @@ summary  = "The resident .claude/skills description floor fell materially below 
 fix      = "Re-pin skillfootprint.SkillDescriptionBudgetBytes DOWN to the newly measured floor and update docs/context-budget/skill-description-floor.md in the same commit, so the ratchet tightens. If instead the floor priced as zero or near-zero, the probe is broken, not the catalog: check that `.claude/skills` is present and readable from the working directory. Measure with `fak skill footprint --json`. Floor: `go test ./internal/skillfootprint`."
 see_also = ["internal/skillfootprint/descbudget.go", "docs/context-budget/skill-description-floor.md", "fak skill footprint", "SKILL_DESC_BUDGET_EXCEEDED"]
 
+# The bind-safety startup refusal (#5373, a child of #3279). `fak serve` refuses to bind a
+# listener that is reachable from OFF THIS HOST while no inbound token door is configured --
+# the shape the January 2026 internet-wide scan #3279 cites found 175,108 local-model servers
+# in. The gate has shipped with its three-case test matrix since cmd/fak/serve_bind_safety.go
+# landed, but the token it emits was never declared here, so `dos_check_reason
+# UNAUTHENTICATED_OFF_HOST_BIND` classified fak's own structured refusal as UNCLASSIFIED prose
+# drift -- exactly the failure the closed vocabulary exists to kill, on a security refusal.
+# Declaring it completes that half of #5373's witness. Loopback binds and off-host binds that
+# DO name a token door are never refused; the escape is deliberately verbose.
+[reasons.UNAUTHENTICATED_OFF_HOST_BIND]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "`fak serve` was asked to bind an address reachable from off this host (0.0.0.0, ::, a bare :port, or a routable IP) while neither --require-key-env nor --key-principal configures an inbound token door, so every request the listener would serve is unauthenticated. Refused at startup rather than started silently. Loopback binds (the 127.0.0.1:8080 default, localhost, ::1), --stdio, and any off-host bind that DOES name a token door are unaffected."
+fix      = "Arm a token door: `--require-key-env FAK_API_KEY` (single-tenant bearer) or `--key-principal <tenant>=<ENV_VAR>` (per-tenant keyset), with the named env var set. Or keep the listener local with `--addr 127.0.0.1:8080`. For the deliberate isolated-segment case where a host firewall does the work, pass --unsafe-allow-unauthenticated-bind, which binds anyway and prints a loud warning every boot."
+see_also = ["cmd/fak/serve_bind_safety.go", "cmd/fak/serve_bind_safety_test.go", "docs/air-gapped-deployment-kit.md", "fak serve"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).
