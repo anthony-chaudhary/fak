@@ -244,6 +244,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Knowing the denominator for an agentic trajectory](docs/notes/AGENTIC-TRAJECTORY-DENOMINATOR-2026-08-06.md) -- auto-indexed dated note.
 - [Air-gapped deployment kit + SBOM (#3279) — generation triage, 2026-07-23](docs/notes/AIRGAPPED-KIT-SBOM-TRIAGE-3279-2026-07-23.md) -- auto-indexed dated note.
 - [Borrow study: InferenceMAX/InferenceX — perf-benchmark integrity, serving metrics, SLO/goodput, run-reuse](docs/notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md) -- auto-indexed dated note.
 - [Borrow study: plano (archgw) — routing, signals, provider-handling, guard, budget](docs/notes/BORROW-ROUTING-SIGNALS-GATEWAY-PLANO-STUDY-2026-07-13.md) -- auto-indexed dated note.
