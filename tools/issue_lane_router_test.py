@@ -1281,6 +1281,35 @@ class RequiredCapsTest(unittest.TestCase):
         r2 = route(issue(1, "fix(gateway): admit", body="see fak/internal/gateway/x.go"))
         self.assertEqual(r2["required_caps"], [])
 
+    def test_hardware_label_requires_hardware_cap(self):
+        # #4835: the maintainer-applied `gated/hardware` label is its OWN capability,
+        # not an alias for gpu — it also gates non-accelerator physical work (a systemd
+        # host, a real crash/reboot box), so a GPU-only node must not claim it.
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(4750, "feat(service): project desired state into systemd",
+                      labels=[m.HARDWARE_CAP_LABEL])),
+            ["hardware"])
+
+    def test_hardware_and_gpu_caps_are_anded_not_replaced(self):
+        # A datacenter box declares `gpu,hardware`; a single-GPU dev node declaring only
+        # `gpu` is correctly skipped for a sanctioned multi-node campaign.
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(4784, "perf(glm52): execute routed experts across all GPUs",
+                      body="on the lab a100 box", labels=[m.HARDWARE_CAP_LABEL])),
+            ["gpu", "hardware"])
+
+    def test_hardware_label_absent_leaves_ordinary_work_ungated(self):
+        # Precision guard: the label is the ONLY hardware signal added. Prose that merely
+        # CITES a lab node (#5595/#5594 quote one while being locally-runnable work) stays
+        # ungated — a false skip silently starves the backlog.
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(5595, "feat(operator): subtract parked emissions before the verdict",
+                      body="one emitted ref waits on a live 8-GPU lab witness")),
+            [])
+
 
 class PhantomTreeRegionFidelityTest(unittest.TestCase):
     """#4320 — lease-region-fidelity defect for cmd/fak scope lanes.

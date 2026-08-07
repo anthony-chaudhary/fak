@@ -300,6 +300,29 @@ CONFIDENCE_RANK = {
 GPU_CAP_LABELS = {"cuda", "gpu", "multi-gpu"}
 GPU_CAP_KEYWORDS = ("h100", "a100", "dgx", "nvidia")
 
+# The maintainer-applied "this needs sanctioned physical hardware" label. Unlike the
+# accelerator signals above — which INFER the requirement from prose — this one is a
+# human judgement, so it is precise by construction and needs no regex. It carries its
+# own `hardware` capability rather than `gpu`, because the work it gates is not always
+# accelerator work: #4750 projects desired state into systemd and #4754 wants a real
+# crash/reboot/partition host, neither of which a lone GPU satisfies. A node that can
+# serve it declares FLEET_NODE_CAPS=hardware; a datacenter GPU box declares
+# `gpu,hardware`. The two caps are ANDed by the dispatcher's subset test, so a
+# single-GPU dev node no longer claims multi-node lab campaigns it cannot finish.
+#
+# The measured gap this closes (#4835): the label alone was invisible here, so a P0
+# needing 8-GPU hardware plus a live lab witness returned NO caps and was dispatched 13
+# times on this GPU-less host AFTER the Part-B gate landed. Its own parent #4784 IS
+# gated — only because its body happens to spell the accelerator bare, while #4835
+# writes the digit-suffixed node label, which _has_keyword's whole-token boundary
+# rejects. That near-miss is deliberately NOT cured by loosening the matcher to accept a
+# numeric/plural suffix: doing so newly gates #5595 and #5594, which merely CITE the lab
+# box while being ordinary locally-runnable work (#5595 names it only to describe
+# #4835's parked-ness). A false skip silently starves the backlog with no operator
+# signal, so the precise human label wins over the broader regex.
+HARDWARE_CAP_LABEL = "gated/hardware"
+HARDWARE_CAP = "hardware"
+
 # ---------------------------------------------------------------------------
 # Work-CLASS axis (infra / frontdoor / dev) — orthogonal to the lane an issue
 # routes to. The lane says WHAT FILE-TREE the work touches; the class says WHAT
@@ -619,21 +642,31 @@ def _has_keyword(text: str, keyword: str) -> bool:
 
 def issue_required_caps(issue: dict[str, Any]) -> list[str]:
     """The hardware capabilities a host must declare (FLEET_NODE_CAPS) to run this
-    issue. Returns ["gpu"] when the issue carries an unambiguous accelerator signal —
-    a cuda/gpu/multi-gpu label or scope, or a named-accelerator keyword (h100/a100/
-    dgx/nvidia) in the title/body — else []. The dispatcher's capability gate skips an
-    issue whose required_caps a node lacks, leaving it OPEN + visible for a GPU-capable
-    node's dispatcher to claim; it does NOT stop or cool the issue. Pure + deterministic."""
+    issue, sorted and deduplicated.
+
+    Contributes "gpu" when the issue carries an unambiguous accelerator signal — a
+    cuda/gpu/multi-gpu label or scope, or a named-accelerator keyword (h100/a100/dgx/
+    nvidia) in the title/body — and "hardware" when it carries the maintainer-applied
+    HARDWARE_CAP_LABEL (see that constant for why the human label is its own capability
+    rather than an alias for "gpu"). Both can apply, and the dispatcher requires the
+    node to declare every one of them; [] means any host can run it.
+
+    The dispatcher's capability gate skips an issue whose required_caps a node lacks,
+    leaving it OPEN + visible for a capable node's dispatcher to claim; it does NOT stop
+    or cool the issue. Pure + deterministic."""
     labels = {ln.lower() for ln in _label_names(issue)}
+    caps: set[str] = set()
+    if HARDWARE_CAP_LABEL in labels:
+        caps.add(HARDWARE_CAP)
     if labels & GPU_CAP_LABELS:
-        return ["gpu"]
+        caps.add("gpu")
     scope = _scope_token(str(issue.get("title") or ""))
     if scope in GPU_CAP_LABELS:
-        return ["gpu"]
+        caps.add("gpu")
     text = str(issue.get("title") or "") + "\n" + str(issue.get("body") or "")
     if any(_has_keyword(text, kw) for kw in GPU_CAP_KEYWORDS):
-        return ["gpu"]
-    return []
+        caps.add("gpu")
+    return sorted(caps)
 
 
 def is_blocked_by_human(issue: dict[str, Any], *, label: str = BLOCKED_BY_HUMAN_LABEL) -> bool:
