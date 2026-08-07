@@ -2505,6 +2505,58 @@ def write_account_sidecar(out_log: Path, account: dict[str, Any] | None) -> dict
     return rec
 
 
+def dispatch_account_id(account: dict[str, Any] | None) -> str:
+    """The stable, human-legible identity of the seat a worker is dispatched onto.
+
+    Byte-for-byte the Python mirror of the Go spine's ``dispatchAccountID``
+    (cmd/fak/dispatch_tick_worker.go): the switcher's ``tag`` is the identity of
+    record (it is what the ``.account.json`` sidecar and ``fak dispatch tick``
+    render, and it is the same string ``fak guard``'s rotation note names), and
+    the config dir's BASE NAME is the fallback for a seat carrying no tag. ""
+    only for a genuinely anonymous seat.
+
+    The two implementations must agree exactly, including the imperfect basename
+    fallback: ``goalpark.SameAccount`` is a plain string compare, so a Go-spawned
+    and a Python-spawned worker on the SAME seat that disagreed by one character
+    would each be walled by their own parks and blind to the other's — a silent
+    miss, never an error.
+    """
+    src = account or {}
+    tag = str(src.get("tag") or "").strip()
+    if tag:
+        return tag
+    acct_dir = str(src.get("dir") or "").strip()
+    if acct_dir:
+        return os.path.basename(os.path.normpath(acct_dir))
+    return ""
+
+
+def stamp_dispatch_account(env: dict[str, str],
+                           account: dict[str, Any] | None) -> dict[str, str]:
+    """Return ``env`` with ``DISPATCH_ACCOUNT`` naming the seat this worker serves on.
+
+    ``fak guard`` writes the #4805 long-``Retry-After`` goal park from this very
+    variable (cmd/fak/guard.go's park template) and reads it back through
+    ``goalpark.Record.Blocks``, whose contract is that a record which cannot name
+    whose wall it is blocks NOBODY. Nothing under ``tools/`` ever set it, so every
+    park this Python dispatcher's workers wrote carried ``account=""`` (27 of 27
+    on-disk records at the time of this change) and the account-scoped park landed
+    in #5870 INERT: present in the binary, blocking no one.
+
+    Deleted rather than left blank for an anonymous seat, mirroring the Go spine:
+    an unattributable spawn must not inherit THIS dispatcher's stale identity and
+    mislabel someone else's wall as its own. Returns a NEW dict — the caller's env
+    is never mutated.
+    """
+    out = dict(env)
+    ident = dispatch_account_id(account)
+    if ident:
+        out["DISPATCH_ACCOUNT"] = ident
+    else:
+        out.pop("DISPATCH_ACCOUNT", None)
+    return out
+
+
 def write_lease_sidecar(out_log: Path, lease: dict[str, Any] | None) -> dict[str, Any]:
     """Write the fenced lease token selected for this worker.
 
@@ -2633,6 +2685,13 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     # off is byte-identical to today.
     spawn_cwd, env, wt_info = worker_worktree.isolate_spawn(
         Path(cwd), lane, str(issue), cwd, env, base_sha=base_sha, git=worktree_git)
+    # Name the seat this worker actually serves on, in the SAME variable and the
+    # SAME format the Go spine stamps. This is the ONE choke point every spawn on
+    # this dispatcher passes through (the resolve tick, the contract-repair tick,
+    # dispatch_account_topup, dispatch_glm_docs), so no producer can drift back to
+    # an unattributed park. See stamp_dispatch_account for why a blank one made the
+    # whole account-scoped park inert.
+    env = stamp_dispatch_account(env, account)
     prompt_file: Path | None = None
     prompt_stdin = None
     if backend == "opencode":

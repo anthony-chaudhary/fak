@@ -74,6 +74,58 @@ func TestParkWallsOnlyTheAccountThatWasRateLimited(t *testing.T) {
 	}
 }
 
+// #5870: the account scoping only does anything if the PRODUCER of the fleet's
+// worker units names a seat. Every one of the 27 on-disk park records carried
+// account="" because DISPATCH_ACCOUNT was stamped on the Go dispatch path only,
+// while the live producer of the `resolve-*.log` units is
+// tools/issue_resolve_dispatch.py -- so the park landed inert.
+//
+// This walks the whole seam the way guard does (RecordLongRetry -> Load ->
+// Blocks/Resolve) over the two identity shapes that producer emits, pinned by
+// tools/issue_resolve_dispatch_test.py's DispatchAccountStampTest: the switcher
+// tag, and the config dir's base name for a seat carrying no tag. SameAccount is
+// a plain string compare, so a producer that stamped a DIFFERENT format would
+// fail exactly here -- silently, with Blocks always false, which is the bug this
+// pins shut.
+func TestParkFromADispatchedWorkerNamesItsSeatAndWallsNoOther(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	h := http.Header{}
+	h.Set("Retry-After", "5400") // 1h30m: a real long wall, above LongWaitFloor
+	for _, account := range []string{"aug5-netra", ".claude-july16-netra"} {
+		store := Store{Dir: t.TempDir()}
+		parked, err := store.RecordLongRetry(http.StatusTooManyRequests, h, now, Record{
+			Goal: "gateway", Lane: "gateway", Account: account,
+			Command: []string{"claude", "-p"},
+		})
+		if err != nil || !parked {
+			t.Fatalf("%s: RecordLongRetry parked=%v err=%v", account, parked, err)
+		}
+		rec, err := store.Load("gateway")
+		if err != nil {
+			t.Fatalf("%s: reload: %v", account, err)
+		}
+		if rec.Account == "" {
+			t.Fatalf("%s: persisted account is empty — this park would wall NOBODY", account)
+		}
+		if !rec.Blocks(account, now) {
+			t.Errorf("%s: Blocks(own seat)=false, want true", account)
+		}
+		if rec.Blocks("some-other-seat", now) {
+			t.Errorf("%s: Blocks(sibling seat)=true, want false", account)
+		}
+		if rec.Blocks("", now) {
+			t.Errorf("%s: Blocks(unnamed caller)=true, want false", account)
+		}
+		// Resolve is the seam every supervisor actually consults.
+		if _, blocked := store.Resolve("gateway", account, "test", now); !blocked {
+			t.Errorf("%s: Resolve(own seat) did not block", account)
+		}
+		if _, blocked := store.Resolve("gateway", "some-other-seat", "test", now); blocked {
+			t.Errorf("%s: Resolve(sibling seat) blocked", account)
+		}
+	}
+}
+
 // Resolve is the supervisor seam: it must wall only the walled account, and it
 // must RETIRE a due park by claiming it. Nothing ever called ClaimDue in the
 // product before, so claimed_at stayed 0 forever and a park never resumed.

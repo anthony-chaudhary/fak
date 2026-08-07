@@ -4119,6 +4119,103 @@ class WaveMembershipTest(unittest.TestCase):
             self.assertEqual(list(runs.glob("*.wave")), [])
 
 
+class DispatchAccountStampTest(unittest.TestCase):
+    """#5870: the long-``Retry-After`` goal park is account-scoped
+    (``goalpark.Record.Blocks``), and a record whose ``account`` is blank blocks
+    NOBODY. Only the Go spine ever stamped ``DISPATCH_ACCOUNT``; this dispatcher —
+    the live producer of the fleet's ``resolve-*.log`` units — stamped nothing, so
+    every park its workers wrote was unattributed and the park was inert. These
+    assert the stamp AND that its format matches the Go spine's
+    ``dispatchAccountID`` exactly, because ``SameAccount`` is a plain string
+    compare that fails silently on a mismatch."""
+
+    def test_identity_prefers_the_tag_then_the_dir_basename(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.dispatch_account_id({"tag": "aug5-netra",
+                                     "dir": r"C:\Users\u\.claude-aug5-netra"}),
+            "aug5-netra")
+        # No tag: the config dir's BASE NAME, exactly as Go's
+        # filepath.Base(filepath.Clean(dir)) resolves it. A trailing separator must
+        # not shift the answer to "".
+        self.assertEqual(
+            mod.dispatch_account_id({"dir": "/home/u/.claude-july16-netra"}),
+            ".claude-july16-netra")
+        self.assertEqual(
+            mod.dispatch_account_id({"dir": "/home/u/.claude-july16-netra/"}),
+            ".claude-july16-netra")
+        # Genuinely anonymous, and the blank/absent forms of both fields.
+        self.assertEqual(mod.dispatch_account_id({}), "")
+        self.assertEqual(mod.dispatch_account_id(None), "")
+        self.assertEqual(mod.dispatch_account_id({"tag": "  ", "dir": " "}), "")
+
+    def test_stamp_never_mutates_the_caller_env(self) -> None:
+        mod = load()
+        base = {"DISPATCH_LANE": "tools"}
+        out = mod.stamp_dispatch_account(base, {"tag": "seat-a"})
+        self.assertEqual(out["DISPATCH_ACCOUNT"], "seat-a")
+        self.assertEqual(out["DISPATCH_LANE"], "tools")
+        self.assertNotIn("DISPATCH_ACCOUNT", base)
+
+    def test_anonymous_seat_drops_an_inherited_identity(self) -> None:
+        # An unattributable spawn must NOT inherit this dispatcher's own ambient
+        # DISPATCH_ACCOUNT: that would file someone else's wall under our seat.
+        mod = load()
+        out = mod.stamp_dispatch_account(
+            {"DISPATCH_ACCOUNT": "stale-dispatcher-identity"}, None)
+        self.assertNotIn("DISPATCH_ACCOUNT", out)
+
+    def test_spawn_stamps_the_serving_account_into_the_child_env(self) -> None:
+        # End-to-end over the real spawn seam, no live launch: the child env the
+        # dispatcher hands `fak guard` carries a NON-EMPTY account, which is the
+        # exact string guard writes into the park record and reads back through
+        # Blocks. Proven by capturing Popen's env.
+        import tempfile
+        from unittest import mock
+        mod = load()
+        captured: dict[str, object] = {}
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                captured["env"] = kwargs.get("env")
+                kwargs.get("stdout").close()  # the parent's log fh (no real child)
+                self.pid = 4805
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            acct = {"tag": "aug5-netra", "tier": 1, "model": "opus",
+                    "dir": r"C:\Users\u\.claude-aug5-netra"}
+            with mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                res = mod.spawn_issue_worker(
+                    ["true"], {"DISPATCH_LANE": "gateway"}, runs, runs,
+                    issue=5870, lane="gateway", backend="claude", account=acct)
+            env = captured["env"]
+            self.assertEqual(env["DISPATCH_ACCOUNT"], "aug5-netra")
+            self.assertEqual(env["DISPATCH_LANE"], "gateway")  # base env preserved
+            # The env stamp and the on-disk account sidecar must name ONE seat.
+            self.assertEqual(res["account"]["tag"], env["DISPATCH_ACCOUNT"])
+
+    def test_spawn_without_an_account_leaves_no_stale_identity(self) -> None:
+        import tempfile
+        from unittest import mock
+        mod = load()
+        captured: dict[str, object] = {}
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                captured["env"] = kwargs.get("env")
+                kwargs.get("stdout").close()
+                self.pid = 11
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            with mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                mod.spawn_issue_worker(
+                    ["true"], {"DISPATCH_ACCOUNT": "stale-dispatcher-identity"},
+                    runs, runs, issue=2, lane="tools", backend="claude")
+            self.assertNotIn("DISPATCH_ACCOUNT", captured["env"])
+
+
 class BackendHealthTest(unittest.TestCase):
     """The backend-health reallocation gate: a MAJORITY of stub (banner-only/0-byte,
     dead-pid) logs over the lookback window declares a backend dead — the same signal

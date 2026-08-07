@@ -23,10 +23,23 @@ const LongWaitFloor = time.Hour
 // Retry-After is untrusted input — an oversized, mis-scaled or malformed value
 // (seconds vs milliseconds, a far-future HTTP-date) parks for months — and
 // #4805's park has no other expiry, so an unclamped parked_until is the
-// difference between "a wait" and "a permanent wall". 24h sits above every real
-// subscription reset window (the longest, the weekly cap, resolves well inside a
-// day) and far below the multi-day walls actually observed in the field, so a
-// legitimate long 429 is unchanged and only an absurd one is clipped.
+// difference between "a wait" and "a permanent wall".
+//
+// 24h is a BOUND ON THE DAMAGE ONE PARK MAY DO, not a claim that every wall fits
+// inside a day — an earlier version of this comment asserted the latter ("the
+// longest, the weekly cap, resolves well inside a day") and the corpus refutes
+// it: of the 27 records on disk when this was measured, waits of 127.89h and
+// 129.73h (both announcing 2026-08-12T14:59:59Z, a genuine weekly reset 5.4 days
+// out), plus 71.71h, 39.05h and 35.23h, all announced walls LONGER than the
+// clamp. So the clamp routinely retires a park BEFORE its wall actually lifts.
+// That is the intended trade and it is safe in this direction: a park that
+// expires early fails OPEN (the account is re-admitted and, if the wall is still
+// up, the next 429 re-parks under the newly announced wait — Park re-arms the
+// probe budget for exactly this), whereas an unclamped park fails CLOSED and can
+// wall a seat for months on one malformed Retry-After. AdmitProbe is the other
+// half: it is what keeps a genuine multi-day wall from costing a full window of
+// suppressed work. Do not raise the clamp to "cover" the weekly reset — that
+// re-introduces the permanent-wall failure this bound exists to prevent.
 const MaxWait = 24 * time.Hour
 
 // ProbeBudget bounds how many probe runs ONE park may admit over its whole
