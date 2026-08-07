@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
@@ -23,7 +23,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build gofmt-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build gofmt-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -226,6 +226,22 @@ vcache-gate:
 cache-default-readiness:
 	@go test -count=1 ./internal/vcachescore/ -run '^TestDefaultReadiness'
 	@echo "cache-default-readiness OK"
+
+# gitdaily-score (#5587): the named, deterministic health gate for the daily lock-aware
+# git-hygiene spine (#5577). `fak git-daily --score` grades the job's OWN `fak-git-daily/1`
+# ledger -- adoption, outcome health, fold drift -- into an A-F grade with named evidence,
+# so "is this job still good?" is a command rather than an operator diffing rows by eye.
+# This target runs that same card against the CAPTURED REAL LEDGER pinned in
+# internal/metrics/git_daily_health_test.go: TestGradeGitDailyHealthOnRealLedger asserts the
+# graded output, and TestRealLedgerCaptureIsDerivedFromTheRawRows is the anti-self-report
+# check that the pinned tally is what the raw rows actually fold to -- so the witness can
+# never drift from the evidence it claims to summarize. Like cache-default-readiness above,
+# these already run inside `go test ./...`; NAMING them is what makes the daily job's health
+# a discoverable gate instead of an anonymous unit test. Deterministic: no network, no
+# clock, no git. For this clone's own live grade, run `fak git-daily --score`.
+gitdaily-score:
+	@go test -count=1 ./internal/metrics/ -run 'RealLedger'
+	@echo "gitdaily-score OK"
 
 # model: export the real SmolLM2-135M weights the in-kernel engine (--engine inkernel)
 # loads from FAK_MODEL_DIR. One-time; needs Python. See GETTING-STARTED.md §4b.
