@@ -225,6 +225,7 @@ func runRoutePlace(stdout, stderr io.Writer, roster *modelroute.Roster, subj mod
 	}
 	if journal != nil {
 		printJournalSummary(stdout, *journal)
+		printGradeCitations(stdout, grades, journal.Trails, floor)
 	}
 	return 0
 }
