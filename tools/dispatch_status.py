@@ -29,6 +29,7 @@ target and host clean), 1 when something needs an operator's eye.
 from __future__ import annotations
 
 import argparse
+import bisect
 import calendar
 import concurrent.futures
 import json
@@ -137,6 +138,63 @@ _GUARD_RECENT_LOOKBACK_MIN = 90
 _GUARD_LIVELOCK_THRESHOLD = 3
 _GUARD_LIVELOCK_MIN_COUNT = 10
 _GUARD_LIVELOCK_LIMIT = 10
+
+# --- Empty-guard-session cause split (#5862 done-condition 2) --------------------
+# `empty=N` on the guard card used to be one opaque number: some sessions booted under
+# guard and adjudicated nothing, but not WHY -- so an operator could not tell a fleet
+# parked behind a provider wall (benign, the supervisor resumes the same command) from
+# one that is silently failing to spawn (not benign at all). These name the causes.
+#
+# The terminal-row kinds. A guard session's LAST row can be a supervisor-written child
+# exit witness (internal/journal.KindChildExit / KindChildCrash) rather than an
+# adjudication. It is a genuine chained row but carries NO verdict, so it must not
+# count as "this session adjudicated something" -- see _GUARD_EMPTY note below.
+_GUARD_TERMINAL_KINDS = ("CHILD_EXIT", "CHILD_CRASH")
+# The child-exit reason vocabulary, lowercased from internal/journal/crash.go's Crash*
+# constants plus guardCrashRestartExhaustedReason (cmd/fak/guard_crash_restart.go).
+# A reason outside this set folds to "unknown" rather than inventing a bucket -- the
+# same closed-set discipline internal/dispatchconservation.noCommitReasons enforces on
+# the Go side. Kept as a literal COPY, not an import (Python cannot import Go); the
+# drift test parses the Go source and fails CI when the two sides diverge.
+_GUARD_EMPTY_WITNESS_REASONS = (
+    "clean_exit", "signal_crash", "oom", "nonzero_exit", "rate_limit_exit",
+    "crash_restart_exhausted",
+)
+# Causes derived from the worker log tail. These are literal copies of
+# internal/dispatchconservation's Reason* constants so the guard card and the
+# conservation ledger name the SAME outcome with the SAME string; a cause this repo
+# already knows must not be re-spelled here.
+_GUARD_EMPTY_PROVIDER_QUOTA_WALL = "provider_quota_wall"
+_GUARD_EMPTY_SPAWN_FAILED = "guard_child_spawn_failed"
+_GUARD_EMPTY_DIED_BEFORE_EPILOGUE = "died_before_epilogue"
+_GUARD_EMPTY_CLEAN_EXIT_NO_COMMIT = "clean_exit_no_commit"
+_GUARD_EMPTY_MISSING_LOG = "missing_log_artifact"
+# Not a dispatch spawn at all. guardDefaultAuditPath (cmd/fak/guard_support.go) names
+# the journal `interactive-<pid>-<repo-root-hash>.jsonl` when the operator named no
+# --audit path and set no FAK_AUDIT_JOURNAL -- i.e. an attended/ad-hoc `fak guard`,
+# which consumed NO dispatch slot, NO account rotation and NO spawn. Folding these in
+# with dispatch sessions is what made `empty=N` read as spawn waste when it was not.
+_GUARD_EMPTY_INTERACTIVE = "interactive_not_dispatch"
+_GUARD_EMPTY_UNKNOWN = "unknown"
+_GUARD_INTERACTIVE_PREFIX = "interactive-"
+# Marker literals, copied from internal/dispatchconservation/conservation.go (which
+# documents why each was chosen over a looser one -- e.g. LONG_RETRY_AFTER rather than
+# a bare "429", which also matches a worker that merely READ a rate-limit source file).
+_GUARD_PARK_MARKER = "LONG_RETRY_AFTER"
+_GUARD_SPAWN_FAILED_MARKER = "fak guard: could not run"
+_GUARD_EPILOGUE_MARKER = "── guard · "
+# The guard epilogue prints AFTER the terminal marker, at a median offset of ~7.2 KiB.
+# A 4 KiB tail read misses every marker and returns a confident wrong answer, so read a
+# tail with real margin over that median.
+_GUARD_EMPTY_LOG_TAIL_BYTES = 32768
+# Journal mtime vs worker-log mtime for the same session is exact in practice (max
+# observed skew 14s over the 26 joinable empties in this repo's corpus), so a 10-minute
+# window is generous. Joining on the two FILE mtimes also dodges the trap that bit an
+# earlier pass: the resolve-log FILENAME stamp is UTC while file times are local, so a
+# name-derived correlation silently finds nothing.
+_GUARD_EMPTY_LOG_WINDOW_S = 600.0
+# Hard cap on log tails read per fold so the card stays cheap on a large .dispatch-runs.
+_GUARD_EMPTY_LOG_SCAN_CAP = 400
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
 _LEASEREF_PREFIX = "refs/fak/locks/"
@@ -2814,6 +2872,124 @@ def _guard_livelock_label(row: dict[str, Any]) -> str:
             f"count={row.get('count')} run={row.get('longest_run')}")
 
 
+def _guard_empty_cause_bit(guard: dict[str, Any]) -> str:
+    """``(cause=n, cause=n)`` for the empty-session split, worst cause first, or "".
+
+    One renderer for all three guard-card surfaces (the box line, the reasons list and
+    the markdown report) so the three can never disagree about what ``empty=N`` meant.
+    Empty string when there is nothing to explain — a fleet with no empty sessions
+    should not grow a bucket list that is all zeroes."""
+    by_cause = guard.get("empty_by_cause") or {}
+    if not by_cause:
+        return ""
+    bits = ", ".join(f"{k}={v}" for k, v in by_cause.items())
+    return f" ({bits})"
+
+
+def _guard_worker_log_index(runs_dir: Path) -> list[tuple[float, Path]]:
+    """``(mtime, path)`` for every worker log under ``.dispatch-runs``, oldest first.
+
+    Only ``stat()`` -- no reads. The reads are paid lazily, per empty session, over the
+    tiny mtime window ``_guard_empty_log_cause`` selects."""
+    out: list[tuple[float, Path]] = []
+    try:
+        for lp in runs_dir.glob("*.log"):
+            try:
+                out.append((lp.stat().st_mtime, lp))
+            except OSError:
+                continue
+    except OSError:
+        return []
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def _guard_log_tail(path: Path) -> str:
+    """The last ``_GUARD_EMPTY_LOG_TAIL_BYTES`` of a worker log, decoded leniently."""
+    try:
+        with path.open("rb") as fh:
+            try:
+                fh.seek(-_GUARD_EMPTY_LOG_TAIL_BYTES, os.SEEK_END)
+            except OSError:
+                fh.seek(0)
+            return fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _guard_cause_from_tail(tail: str) -> str:
+    """Name an empty session's cause from its worker log tail, worst-first.
+
+    Order matters and is not arbitrary: a session can carry BOTH a park and an
+    epilogue, and the park is the cause while the epilogue is merely evidence the guard
+    shut down tidily afterwards."""
+    if _GUARD_PARK_MARKER in tail:
+        return _GUARD_EMPTY_PROVIDER_QUOTA_WALL
+    if _GUARD_SPAWN_FAILED_MARKER in tail:
+        return _GUARD_EMPTY_SPAWN_FAILED
+    if _GUARD_EPILOGUE_MARKER not in tail:
+        return _GUARD_EMPTY_DIED_BEFORE_EPILOGUE
+    return _GUARD_EMPTY_CLEAN_EXIT_NO_COMMIT
+
+
+def _guard_empty_log_cause(
+    name: str,
+    mtime: float,
+    log_index: list[tuple[float, Path]],
+    budget: list[int],
+) -> str:
+    """Join one empty journal to its worker log by mtime proximity, then classify it.
+
+    ``budget`` is a one-element list used as a mutable read counter shared across the
+    fold, so a pathological ``.dispatch-runs`` cannot turn the status card into a
+    full-corpus scan: once ``_GUARD_EMPTY_LOG_SCAN_CAP`` tails have been read the rest
+    degrade to ``missing_log_artifact`` (an honest "we did not look" rather than a
+    fabricated cause)."""
+    lo = bisect.bisect_left(log_index, (mtime - _GUARD_EMPTY_LOG_WINDOW_S,))
+    hi = bisect.bisect_right(log_index, (mtime + _GUARD_EMPTY_LOG_WINDOW_S, Path("￿")))
+    for _, lp in log_index[lo:hi]:
+        if budget[0] <= 0:
+            break
+        budget[0] -= 1
+        tail = _guard_log_tail(lp)
+        if name in tail:
+            return _guard_cause_from_tail(tail)
+    return _GUARD_EMPTY_MISSING_LOG
+
+
+def _guard_empty_cause(
+    name: str,
+    witness_reason: str,
+    mtime: float,
+    log_index: list[tuple[float, Path]],
+    budget: list[int],
+) -> str:
+    """The cause for ONE decision-empty guard session, cheapest evidence first.
+
+    1. A supervisor-written child-exit witness row IS the answer, and costs nothing --
+       it was already parsed out of the journal. This is the path #5862's shipped
+       producer fix (ae47d2911d, the exit witness on parked teardowns) feeds, so the
+       breakdown gets sharper on its own as the fleet picks up that build.
+    2. Otherwise the journal NAME already settles whether this was a dispatch spawn at
+       all: `interactive-*` is guardDefaultAuditPath, an attended run.
+    3. Only then pay for a log tail.
+
+    A witness row whose Reason is absent or outside the closed set does NOT short to
+    "unknown": older CHILD_CRASH rows predate the Reason field entirely, and stamping
+    them "unknown" would throw away the name and log evidence that can still explain
+    them. "unknown" is the last resort, never a shortcut."""
+    low = witness_reason.strip().lower()
+    if low in _GUARD_EMPTY_WITNESS_REASONS:
+        return low
+    if name.startswith(_GUARD_INTERACTIVE_PREFIX):
+        return _GUARD_EMPTY_INTERACTIVE
+    cause = _guard_empty_log_cause(name, mtime, log_index, budget)
+    if cause == _GUARD_EMPTY_MISSING_LOG and low:
+        # A terminal row exists but names nothing we recognise and no log survives.
+        return _GUARD_EMPTY_UNKNOWN
+    return cause
+
+
 def guard_coverage(
     runs_dir: Path,
     *,
@@ -2835,8 +3011,17 @@ def guard_coverage(
 
       * ``sessions`` — guarded worker sessions on record (= journal files)
       * ``recent_sessions`` — journals touched within ``lookback_min``
-      * ``empty_sessions`` — journals with 0 decision rows (booted under guard but
-        proposed no adjudicated tool call — the silent empty-turn signature)
+      * ``empty_sessions`` — journals with 0 DECISION rows (booted under guard but
+        proposed no adjudicated tool call — the silent empty-turn signature). A
+        supervisor-written child-exit witness row (CHILD_EXIT/CHILD_CRASH) is NOT a
+        decision: it carries no verdict, it is written by the guard at teardown rather
+        than by the child, and counting it would let #5862's own producer fix
+        (ae47d2911d, which adds that row on parked teardowns) silently DEFLATE this
+        number without explaining a single session. ``zero_row_sessions`` keeps the
+        older literal "the file is empty" count visible beside it.
+      * ``empty_by_cause`` — that count split by a CLOSED cause vocabulary (#5862
+        done-condition 2), so an operator can tell a fleet parked behind a provider
+        wall from one that is failing to spawn. See ``_guard_empty_cause``.
       * ``rows`` / ``recent_rows`` — total / recent kernel decisions
       * ``by_kind`` — the decision mix (DECIDE/DENY/RESULT_DENY/QUARANTINE/VDSO_HIT/…)
       * ``denied`` / ``quarantined`` — derived refusal counts
@@ -2852,6 +3037,8 @@ def guard_coverage(
         "sessions": 0,
         "recent_sessions": 0,
         "empty_sessions": 0,
+        "zero_row_sessions": 0,
+        "empty_by_cause": {},
         "rows": 0,
         "recent_rows": 0,
         "by_kind": {},
@@ -2870,6 +3057,10 @@ def guard_coverage(
     by_kind: dict[str, int] = {}
     livelock_candidates: list[dict[str, Any]] = []
     files: list[tuple[float, str, int]] = []  # (mtime, name, rows) for evidence/recency
+    # (journal stem, witness reason, mtime) for every DECISION-empty session, resolved
+    # to causes after the walk so the log index is built at most once and only when
+    # there is something to explain.
+    empties: list[tuple[str, str, float]] = []
     for jp in audit_dir.glob("*.jsonl"):
         try:
             mtime = jp.stat().st_mtime
@@ -2877,25 +3068,48 @@ def guard_coverage(
         except OSError:
             continue
         rows = 0
+        decisions = 0
+        witness_reason = ""
         for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue
             rows += 1
             try:
-                kind = str(json.loads(line).get("kind") or "UNKNOWN")
+                row = json.loads(line)
+                kind = str(row.get("kind") or "UNKNOWN")
             except ValueError:
-                kind = "MALFORMED"
+                row, kind = {}, "MALFORMED"
+            if kind in _GUARD_TERMINAL_KINDS:
+                # Last one wins: the terminal witness is written at teardown, so a
+                # restarted session's FINAL exit is the one that explains the session.
+                witness_reason = str(row.get("reason") or "") or _GUARD_EMPTY_UNKNOWN
+            else:
+                decisions += 1
             by_kind[kind] = by_kind.get(kind, 0) + 1
         payload["sessions"] += 1
         payload["rows"] += rows
         if rows == 0:
+            payload["zero_row_sessions"] += 1
+        if decisions == 0:
             payload["empty_sessions"] += 1
+            empties.append((jp.name[:-6] if jp.name.endswith(".jsonl") else jp.name,
+                            witness_reason, mtime))
         if mtime >= horizon:
             payload["recent_sessions"] += 1
             payload["recent_rows"] += rows
             livelock_candidates.extend(_guard_livelock_candidates(jp.name, text))
         files.append((mtime, jp.name, rows))
+
+    if empties:
+        log_index = _guard_worker_log_index(runs_dir)
+        budget = [_GUARD_EMPTY_LOG_SCAN_CAP]
+        by_cause: dict[str, int] = {}
+        for name, witness_reason, mtime in empties:
+            cause = _guard_empty_cause(name, witness_reason, mtime, log_index, budget)
+            by_cause[cause] = by_cause.get(cause, 0) + 1
+        payload["empty_by_cause"] = dict(
+            sorted(by_cause.items(), key=lambda kv: (-kv[1], kv[0])))
 
     payload["by_kind"] = dict(sorted(by_kind.items()))
     payload["denied"] = sum(by_kind.get(k, 0) for k in _GUARD_DENY_KINDS)
@@ -4042,7 +4256,8 @@ def _guard_reasons(guard: dict[str, Any]) -> list[str]:
     elif g_sessions:
         reasons.append(
             f"fak guard ran {g_sessions} dispatch session(s) but recorded 0 decisions "
-            f"({guard.get('empty_sessions', 0)} empty) — workers booted under guard "
+            f"({guard.get('empty_sessions', 0)} empty"
+            f"{_guard_empty_cause_bit(guard)}) — workers booted under guard "
             f"but proposed no adjudicated tool call")
     return reasons
 
@@ -4875,7 +5090,8 @@ def _card_health_lines(p: dict[str, Any]) -> list[str]:
         lines.append(
             f"║ guard     : {gd.get('sessions')} session(s) ({gd.get('recent_sessions', 0)} recent), "
             f"{gd.get('rows', 0)} decision(s) [DENY={gd.get('denied', 0)} "
-            f"QUAR={gd.get('quarantined', 0)}{crash_bit}]  empty={gd.get('empty_sessions', 0)}{loop_bit}")
+            f"QUAR={gd.get('quarantined', 0)}{crash_bit}]  "
+            f"empty={gd.get('empty_sessions', 0)}{_guard_empty_cause_bit(gd)}{loop_bit}")
     rs = p.get("run_status") or {}
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
@@ -5506,7 +5722,8 @@ def _md_guard_section(payload: dict[str, Any]) -> list[str]:
             f"- **denied** (DENY + RESULT_DENY): {gd.get('denied', 0)}",
             f"- **quarantined**: {gd.get('quarantined', 0)}",
             f"- **empty sessions** (booted under guard, no adjudicated tool call): "
-            f"{gd.get('empty_sessions', 0)}",
+            f"{gd.get('empty_sessions', 0)}"
+            f"{_guard_empty_cause_bit(gd)}",
             "",
             "| decision kind | count |",
             "|---|---:|",

@@ -2884,6 +2884,181 @@ class GuardCoverageScanTest(unittest.TestCase):
         self.assertEqual(top["longest_run"], 1)
 
 
+class GuardEmptyCauseSplitTest(unittest.TestCase):
+    """`empty=N` on the guard card is split by a CLOSED cause vocabulary (#5862 dc-2).
+
+    An empty guard session used to be one opaque number, so an operator could not tell a
+    fleet parked behind a provider wall (benign — the supervisor resumes the same
+    command) from one silently failing to spawn. Hermetic over a tmp .dispatch-runs."""
+
+    def _corpus(self, d: Path, *, journal: str, rows: list[str],
+                log_tail: str | None = None, at: float = 3_000_000.0) -> None:
+        import os
+        audit = d / load().GUARD_AUDIT_DIRNAME
+        audit.mkdir(parents=True, exist_ok=True)
+        jp = audit / journal
+        jp.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+        os.utime(jp, (at, at))
+        if log_tail is not None:
+            lp = d / "resolve-1-20260807-000000.log"
+            # Name the journal in the log the way the guard's banner does — that string
+            # IS the join key.
+            lp.write_text(f"  audit log  : {jp}\n{log_tail}\n", encoding="utf-8")
+            os.utime(lp, (at, at))
+
+    def test_park_on_a_provider_wall_is_named_not_opaque(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="model-claude-1-aaaa.jsonl", rows=[],
+                         log_tail=("fak guard: goal parked outside active context budget "
+                                   "until 1786402799; reason=LONG_RETRY_AFTER\n"
+                                   "── guard · audit ──\n"))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_sessions"], 1)
+        self.assertEqual(out["empty_by_cause"],
+                         {mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL: 1})
+
+    def test_child_that_never_launched_is_split_from_the_park(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            # A partial epilogue is present, as it is on the real spawn failures: the
+            # spawn marker must still win, or the fleet's only "did not launch" signal
+            # is booked as a clean exit.
+            self._corpus(Path(d), journal="tools-claude-2-bbbb.jsonl", rows=[],
+                         log_tail=("── guard · audit ──\n"
+                                   'fak guard: could not run "claude": snapshot generated '
+                                   "child config: The system cannot find the path specified.\n"))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_SPAWN_FAILED: 1})
+
+    def test_interactive_journal_is_not_counted_as_a_dispatch_spawn(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            # guardDefaultAuditPath's name: an attended `fak guard`, which consumed no
+            # dispatch slot, no account rotation and no spawn.
+            self._corpus(Path(d), journal="interactive-4242-16daf1ca84d5.jsonl", rows=[])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_INTERACTIVE: 1})
+
+    def test_terminal_witness_row_is_not_a_decision_and_names_the_cause(self) -> None:
+        """The regression #5862's own producer fix would otherwise cause.
+
+        ae47d2911d makes a parked teardown write a CHILD_EXIT row. Counting that row as
+        a decision would drop the session out of `empty` entirely — the number would
+        deflate while explaining nothing. It must stay counted AND carry its reason."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="session-claude-3-cccc.jsonl", rows=[
+                '{"seq":1,"kind":"CHILD_EXIT","reason":"CLEAN_EXIT","exit_code":0}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["rows"], 1)
+        self.assertEqual(out["zero_row_sessions"], 0)   # the file is NOT empty ...
+        self.assertEqual(out["empty_sessions"], 1)      # ... but it adjudicated nothing
+        self.assertEqual(out["empty_by_cause"], {"clean_exit": 1})
+
+    def test_a_real_decision_is_never_counted_empty(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="docs-claude-4-dddd.jsonl", rows=[
+                '{"seq":1,"kind":"DECIDE","verdict":"ALLOW"}',
+                '{"seq":2,"kind":"CHILD_EXIT","reason":"CLEAN_EXIT"}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_sessions"], 0)
+        self.assertEqual(out["empty_by_cause"], {})
+
+    def test_unrecognised_witness_reason_falls_through_to_better_evidence(self) -> None:
+        """"unknown" is the last resort, never a shortcut.
+
+        Older CHILD_CRASH rows predate the Reason field; stamping them "unknown" throws
+        away the name/log evidence that still explains them."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="interactive-99-16daf1ca84d5.jsonl", rows=[
+                '{"seq":1,"kind":"CHILD_CRASH"}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_INTERACTIVE: 1})
+
+    def test_no_joinable_log_is_missing_artifact_not_a_fabricated_cause(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="repair-claude-5-eeee.jsonl", rows=[])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_MISSING_LOG: 1})
+
+    def test_log_outside_the_mtime_window_is_not_joined(self) -> None:
+        """The join is bounded, so the card cannot become a full-corpus scan."""
+        mod = load()
+        import os
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="model-claude-6-ffff.jsonl", rows=[],
+                         log_tail="reason=LONG_RETRY_AFTER\n")
+            lp = Path(d) / "resolve-1-20260807-000000.log"
+            far = 3_000_000.0 + mod._GUARD_EMPTY_LOG_WINDOW_S * 3
+            os.utime(lp, (far, far))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_MISSING_LOG: 1})
+
+    def test_causes_are_rendered_on_every_guard_surface(self) -> None:
+        mod = load()
+        bit = mod._guard_empty_cause_bit(
+            {"empty_by_cause": {mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL: 25,
+                                mod._GUARD_EMPTY_INTERACTIVE: 21}})
+        self.assertIn("provider_quota_wall=25", bit)
+        self.assertIn("interactive_not_dispatch=21", bit)
+        # A fleet with nothing to explain grows no all-zero bucket list.
+        self.assertEqual(mod._guard_empty_cause_bit({"empty_by_cause": {}}), "")
+
+    def test_cause_vocabulary_does_not_drift_from_the_go_side(self) -> None:
+        """The closed vocabulary is a literal COPY of Go constants (Python cannot import
+        Go). Parse those constants back OUT of the Go source so a rename on either side
+        fails CI instead of silently producing a cause the other half cannot name.
+
+        This matters concretely: internal/dispatchconservation folds any reason outside
+        its registered set to "unknown", so a cause string invented only here would
+        vanish on the Go side rather than error."""
+        mod = load()
+        root = Path(__file__).resolve().parents[1]
+        cons = (root / "internal" / "dispatchconservation" / "conservation.go")
+        crash = (root / "internal" / "journal" / "crash.go")
+        if not cons.is_file() or not crash.is_file():
+            self.skipTest("Go sources absent")
+        cons_src = cons.read_text(encoding="utf-8", errors="replace")
+        crash_src = crash.read_text(encoding="utf-8", errors="replace")
+        # 1. Every log-derived cause is a dispatchconservation Reason* constant AND is
+        #    registered in noCommitReasons (an unregistered one folds to "unknown").
+        for cause in (mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL,
+                      mod._GUARD_EMPTY_SPAWN_FAILED,
+                      mod._GUARD_EMPTY_DIED_BEFORE_EPILOGUE,
+                      mod._GUARD_EMPTY_CLEAN_EXIT_NO_COMMIT,
+                      mod._GUARD_EMPTY_MISSING_LOG,
+                      mod._GUARD_EMPTY_UNKNOWN):
+            self.assertIn(f'"{cause}"', cons_src,
+                          f"{cause} is not a reason internal/dispatchconservation knows")
+        # 2. Every marker literal is byte-identical to the Go one it copies.
+        for marker in (mod._GUARD_PARK_MARKER, mod._GUARD_SPAWN_FAILED_MARKER,
+                       mod._GUARD_EPILOGUE_MARKER):
+            self.assertIn(f'"{marker}"', cons_src,
+                          f"marker {marker!r} drifted from conservation.go")
+        # 3. Every witness reason is a Crash* constant in internal/journal/crash.go
+        #    (compared upper-cased: the journal stamps them upper, the card renders
+        #    them lower).
+        for reason in mod._GUARD_EMPTY_WITNESS_REASONS:
+            if reason == "crash_restart_exhausted":
+                continue  # cmd/fak/guard_crash_restart.go, checked below
+            self.assertIn(f'"{reason.upper()}"', crash_src,
+                          f"witness reason {reason} is not in the journal's closed set")
+        restart = (root / "cmd" / "fak" / "guard_crash_restart.go")
+        if restart.is_file():
+            self.assertIn('"CRASH_RESTART_EXHAUSTED"',
+                          restart.read_text(encoding="utf-8", errors="replace"))
+        # 4. The terminal kinds are the journal's own Kind constants.
+        for kind in mod._GUARD_TERMINAL_KINDS:
+            self.assertIn(f'"{kind}"', crash_src)
+
+
 class GuardCoverageFoldTest(unittest.TestCase):
     """build_payload + render surface the guard rollup (payload section, reason, card)."""
 
