@@ -889,6 +889,67 @@ class PruneDeadSidecarsTest(unittest.TestCase):
             self.assertEqual(out["pruned"], ["repair-1207-20260702-180000.pid"])
             self.assertEqual(sorted(p.name for p in runs.glob("repair-1207-*")), [])
 
+    def test_repair_cooldown_outlives_the_sidecar_sweep(self) -> None:
+        """The repair cooldown must survive the corpse it was read off.
+
+        Regression: `recently_repaired_issues` read the `repair-*.log` mtime and
+        its `.issues` batch sidecar -- both of which `prune_dead_sidecars` unlinks
+        the moment the groomer exits. So the 360-min anti-churn window silently
+        collapsed to the groomer's OWN LIFETIME, which the live-repair scan already
+        covers, and the same un-repairable heads were re-groomed every ~40 min
+        (measured on this host: 62/186 grooming events inside the window, median
+        gap 43 min). The durable ledger must still cool the whole batch after the
+        sweep has taken every file the old reader depended on.
+        """
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            mod.record_repair_attempt(runs, [3238, 5255, 4318],
+                                      live=True, now_ts=now - 40 * 60)
+            pid_file = runs / "repair-3238-20260702-180000.pid"
+            pid_file.write_text("58753", encoding="utf-8")
+            stem = pid_file.with_suffix("")
+            stem.with_suffix(".log").write_text("", encoding="utf-8")
+            stem.with_suffix(mod.REPAIR_ISSUES_SIDECAR_SUFFIX).write_text(
+                "3238,5255,4318", encoding="utf-8")
+            os.utime(pid_file, (now - 40 * 60, now - 40 * 60))
+
+            def probe(pid):
+                return {"alive": False}
+
+            mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
+            # Every file the OLD reader used is gone -- that is the bug's premise.
+            self.assertEqual(sorted(runs.glob("repair-3238-*")), [])
+            cooled = mod.recently_repaired_issues(
+                runs, cooldown_min=360, now_ts=now)
+
+        self.assertEqual(cooled, {3238, 5255, 4318})
+
+    def test_repair_cooldown_expires_with_its_window(self) -> None:
+        """...and clears itself: past the window the batch is groomable again with
+        no reset verb, so an issue is never pinned out permanently."""
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            mod.record_repair_attempt(runs, [3238, 5255],
+                                      live=True, now_ts=now - 361 * 60)
+            expired = mod.recently_repaired_issues(
+                runs, cooldown_min=360, now_ts=now)
+            # A dry run stays side-effect-free, so it never cools anything.
+            mod.record_repair_attempt(runs, [999], live=False, now_ts=now)
+            dry = mod.recently_repaired_issues(runs, cooldown_min=360, now_ts=now)
+            disabled = mod.recently_repaired_issues(
+                runs, cooldown_min=0, now_ts=now)
+
+        self.assertEqual(expired, set())
+        self.assertEqual(dry, set())
+        self.assertEqual(disabled, set())
+
     def test_recycled_shell_in_window_is_pruned(self) -> None:
         # The exact ghost: a recycled cmd.exe whose create time lands inside the
         # stale sidecar's spawn window. resolve_sidecar_pid_is_live rejects a bare
@@ -2200,6 +2261,14 @@ class EvaluateTest(unittest.TestCase):
             sidecar = Path(td) / ("repair-467-20260702-190000"
                                   + mod.REPAIR_ISSUES_SIDECAR_SUFFIX)
             self.assertEqual(sidecar.read_text(encoding="utf-8"), "467,466")
+            # ...and the DURABLE half: the sidecar above is swept with the corpse,
+            # so the whole batch is also ledgered where the cooldown can still read
+            # it after the groomer dies.
+            ledger = (Path(mod.RUNS_DIRNAME)
+                      / mod._REPAIR_ATTEMPT_LEDGER)
+            rows = [json.loads(x) for x in
+                    ledger.read_text(encoding="utf-8").splitlines() if x.strip()]
+            self.assertEqual(rows[-1]["issues"], [466, 467])
 
     def test_live_repair_worker_blocks_a_second_groomer(self) -> None:
         """Repair admission is serialized: with a groomer already alive, the tick

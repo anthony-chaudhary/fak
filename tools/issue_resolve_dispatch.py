@@ -256,6 +256,18 @@ DEFAULT_REPAIR_BATCH = 5
 # (anti-churn for un-repairables). A SUCCESSFUL repair needs no cooldown escape:
 # its edit bumps the issue's updatedAt, which re-admits it past the hold ledger.
 DEFAULT_REPAIR_COOLDOWN_MIN = 360
+# The DURABLE record of what each repair worker attempted. The cooldown above used
+# to be read off the `repair-<N>-*.log` mtime plus its `.issues` batch sidecar --
+# and `prune_dead_sidecars` DELETES both the moment the groomer exits (repair logs
+# are deliberately disposable). So the cooldown evidence died with the worker: the
+# window only ever covered a groomer that was still ALIVE, which is precisely the
+# case the live-repair scan already refuses. Measured on this host: 62 of 186
+# grooming events (33%) re-groomed an issue inside the 360-min window, median gap
+# 43 min -- four consecutive workers re-grooming #3238/#5255 in 108 minutes, each
+# burning a seat on the same un-repairable heads. The ledger is written at spawn
+# and outlives the sweep, exactly like contract-holds.jsonl; the reader still folds
+# any surviving logs so a live/unpruned groomer is counted the same as before.
+_REPAIR_ATTEMPT_LEDGER = "repair-attempts.jsonl"
 # Same-issue WIP hold (#2975): a finished resolver can leave useful local
 # working-tree changes without a commit. If the same issue is immediately picked
 # again, the second worker stacks onto uncommitted WIP that no live lease owns.
@@ -1381,14 +1393,49 @@ def live_repair_workers(
     return out
 
 
+def record_repair_attempt(runs_dir: Path, issues: list[int] | set[int], *,
+                          live: bool, now_ts: float | None = None) -> None:
+    """Append one repair worker's whole batch to the durable attempt ledger.
+
+    The cooldown's evidence must OUTLIVE the worker that produced it. Its old
+    carrier -- the ``repair-<N>-*.log`` and its ``.issues`` sidecar -- is swept by
+    :func:`prune_dead_sidecars` as soon as the groomer dies, so the window
+    collapsed to the groomer's own lifetime and the same un-repairable heads were
+    re-groomed every ~40 minutes. Live ticks only: a dry run must stay
+    side-effect-free. Fail-open -- a missed row re-grooms sooner, never blocks."""
+    nums = sorted({int(n) for n in issues if int(n or 0) > 0})
+    if not live or not nums:
+        return
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        with (runs_dir / _REPAIR_ATTEMPT_LEDGER).open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"utc": iso, "ts": now, "issues": nums}) + "\n")
+    except OSError:
+        pass
+
+
 def recently_repaired_issues(runs_dir: Path, *, cooldown_min: int,
                              now_ts: float | None = None) -> set[int]:
-    """Issues a contract-repair worker ATTEMPTED within the window -- the mtime of
-    each ``repair-<N>-*.log`` plus every issue in its ``.issues`` batch sidecar.
+    """Issues a contract-repair worker ATTEMPTED within the window -- read from the
+    durable ``repair-attempts.jsonl`` ledger, UNION any still-present
+    ``repair-<N>-*.log`` mtime plus its ``.issues`` batch sidecar.
     Anti-churn for un-repairables: an issue a worker could not honestly bring to
     contract must not be re-groomed every tick. A SUCCESSFUL repair needs no
     escape hatch here -- its edit bumps updatedAt, which re-admits the issue past
     the hold ledger, and a passing review never reaches the repair path again.
+
+    The ledger is the load-bearing half: repair logs are deliberately disposable
+    and :func:`prune_dead_sidecars` unlinks them (with the ``.issues`` sidecar) the
+    moment the groomer exits, so a log-only reader can never see past the CURRENT
+    worker. The surviving-log scan is kept so a live or not-yet-swept groomer still
+    counts, and so a runs dir written before the ledger existed still cools.
+
+    The window is a pure age comparison against ``cooldown_min``: once a row falls
+    past the horizon the issue is admitted again with no reset verb, so an issue
+    that later becomes repairable is never pinned out permanently.
     0 disables the gate."""
     if cooldown_min <= 0 or not runs_dir.is_dir():
         return set()
@@ -1396,6 +1443,21 @@ def recently_repaired_issues(runs_dir: Path, *, cooldown_min: int,
     now = now_ts if now_ts is not None else time.time()
     horizon = now - cooldown_min * 60
     recent: set[int] = set()
+    ledger = runs_dir / _REPAIR_ATTEMPT_LEDGER
+    if ledger.is_file():
+        try:
+            lines = ledger.read_text(encoding="utf-8",
+                                     errors="replace").splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            try:
+                row = json.loads(line)
+                if float(row.get("ts") or 0) < horizon:
+                    continue
+                recent.update(int(n) for n in (row.get("issues") or []))
+            except (TypeError, ValueError):
+                continue
     for log in runs_dir.glob("repair-*.log"):
         m = _REPAIR_LOG_RE.search(log.name)
         if not m:
@@ -1527,7 +1589,10 @@ def prune_dead_sidecars(
     are removed with the ``.pid`` so a half-pruned run never confuses the wave
     auditor; resolve ``.log`` files and ``.witness`` records are retained as the
     durable transcript/cooldown evidence. Repair logs remain disposable and are
-    swept with their repair-only sidecars.
+    swept with their repair-only sidecars -- the repair cooldown does NOT depend on
+    them surviving, because :func:`record_repair_attempt` writes the batch to
+    ``repair-attempts.jsonl`` at spawn. It used to depend on exactly these files,
+    and the 360-min window silently collapsed to the groomer's own lifetime.
     """
     import time
     now = now_ts if now_ts is not None else time.time()
@@ -4943,6 +5008,9 @@ def _maybe_dispatch_contract_repair(
                                  REPAIR_LANE, backend, account=acct,
                                  spawn_probe_s=spawn_probe_s, log_prefix="repair",
                                  prompt_payload=rec["prompt"] if backend in ("claude", "opencode") else None)
+    # Durable first: the .issues sidecar below is swept with the corpse, so the
+    # ledger is what actually holds the cooldown open past this worker's death.
+    record_repair_attempt(runs_dir, rec["issues"], live=live)
     try:
         Path(str(spawned.get("log") or "")).with_suffix(
             REPAIR_ISSUES_SIDECAR_SUFFIX).write_text(nums, encoding="utf-8")
