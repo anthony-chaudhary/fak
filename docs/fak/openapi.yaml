@@ -1208,6 +1208,63 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/session/{trace_id}/subscribe:
+    get:
+      tags: [fak-native]
+      summary: Subscribe / re-attach to one session's event stream
+      description: |
+        Drains ONE session's drive-state revisions after the `?since=` cursor
+        (#2767) — the per-session twin of `/v1/fak/session/changes`, and the
+        operator re-attach primitive: a controller that disconnected reconnects
+        by trace handle with its saved cursor and resumes exactly where it left
+        off, then issues control ops on the same handle
+        (`POST /v1/fak/session/{trace_id}/{verb}`; no new auth model). The cursor
+        is the feed's GLOBAL `seq`, so one cursor vocabulary serves both streams.
+
+        `complete: false` means the bounded retention ring trimmed revisions the
+        client never saw — loss is reported, never silently skipped. Re-read
+        `GET /v1/fak/session/{trace_id}` to re-sync.
+
+        With `?wait=` the request is HELD (long-poll, #4310) until a revision for
+        this session lands past the cursor, so a controller is pushed the next
+        revision instead of re-polling for it. The held reply has the SAME shape
+        as the one-shot drain, and an elapsed hold answers an empty tail at the
+        head cursor — so a follow loop is just "call again with the cursor you
+        were handed", and a client that cannot hold keeps working by omitting
+        `wait`. A deployment built without the session change feed returns 404.
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The session's trace handle (the stable re-attach key, e.g. `gw-3`).
+        - name: since
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: The Seq of the last revision the client saw (its cursor); 0 or omitted returns the whole retained tail. Non-numeric yields `400`.
+        - name: wait
+          in: query
+          required: false
+          schema: { type: string, example: 30s }
+          description: |
+            Optional hold budget as a Go duration (`30s`, `250ms`). Omitted or
+            `0` is the one-shot drain. A budget beyond the server cap (55s) is
+            capped, not refused; an unparseable one yields `400`.
+      responses:
+        '200':
+          description: The session's revisions after the cursor, the next cursor, and whether that tail is complete.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionSubscribeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The session change feed is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /v1/fak/session/{trace_id}/{verb}:
     post:
       tags: [fak-native]
@@ -2076,6 +2133,26 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SessionChangeEvent' }
         cursor: { type: integer, description: The client's next cursor (the highest seq now known). }
+
+    SessionSubscribeResponse:
+      type: object
+      description: |
+        One session's subscribe / re-attach drain (#2767, held form #4310): the
+        revisions for this trace after the client's cursor, the next cursor, and
+        the honest-loss bit.
+      properties:
+        trace_id: { type: string, description: The subscribed session's trace handle (the re-attach key). }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/SessionChangeEvent' }
+        cursor: { type: integer, description: The client's next cursor — the feed's GLOBAL highest seq, shared with /v1/fak/session/changes. }
+        complete:
+          type: boolean
+          description: |
+            True when the resume was lossless — every revision since the client's
+            cursor is still retained. False means the bounded ring trimmed
+            revisions the client never saw; re-read GET /v1/fak/session/{trace_id}
+            to re-sync.
 
     # ----- Multi-node dev-server read plane (#2297) ---------------------------
     LeasesResponse:

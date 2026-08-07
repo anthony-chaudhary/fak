@@ -41,6 +41,12 @@ type sessionFeed struct {
 	ring []SessionChangeEvent // chronological; oldest at front
 	cap  int
 	seq  uint64 // monotone; assigned to each event at append
+	// wake is the held-attach broadcast (#4310): the channel every long-polling
+	// subscriber parks on, closed-and-dropped by add so ONE publish releases
+	// every held request at once. Lazily created by armTrace (session_subscribe.go)
+	// and nil whenever nobody is held, so a feed with only drain clients — the
+	// pre-#4310 shape — carries no waiter state at all.
+	wake chan struct{}
 }
 
 // newSessionFeed builds the drive-state revision ring. capacity<=0 uses
@@ -60,7 +66,15 @@ func (f *sessionFeed) add(st SessionState) {
 	f.mu.Lock()
 	f.seq++
 	f.ring = appendRingCapped(f.ring, SessionChangeEvent{Seq: f.seq, SessionState: st}, f.cap)
+	wake := f.wake
+	f.wake = nil
 	f.mu.Unlock()
+	// Release the held attaches AFTER the unlock: a woken subscriber immediately
+	// re-drains under f.mu, and the publisher must not still be holding the lock
+	// it needs. close() never blocks, so this stays safe under the table lock.
+	if wake != nil {
+		close(wake)
+	}
 }
 
 // drain returns every retained event with Seq > sinceSeq (sinceSeq==0 => all

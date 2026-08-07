@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // session_subscribe_test.go — the subscribe/re-attach op (#2767). The headline
@@ -165,5 +168,154 @@ func TestSessionSubscribeGuards(t *testing.T) {
 	s.handleFakSession(rr, httptest.NewRequest(http.MethodGet, "/v1/fak/session/gw-1/observe", nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("non-subscribe GET verb status = %d, want 405", rr.Code)
+	}
+
+	// An unparseable hold budget 400s rather than silently degrading to the
+	// one-shot drain — a server that quietly never pushes is the worse failure.
+	rr = httptest.NewRecorder()
+	s.handleFakSession(rr, httptest.NewRequest(http.MethodGet, "/v1/fak/session/gw-1/subscribe?wait=abc", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("bad wait status = %d, want 400", rr.Code)
+	}
+}
+
+// armedHold reports whether a held attach is currently parked on the feed's
+// broadcast. It is the deterministic "the request is waiting" signal the #4310
+// witness needs: without it a test could only sleep and hope, and a publish that
+// raced ahead of the hold would silently turn the push test into a drain test.
+func (f *sessionFeed) armedHold() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.wake != nil
+}
+
+// waitArmed blocks until a held attach has armed on the feed, failing the test
+// rather than hanging if it never does.
+func waitArmed(t *testing.T, f *sessionFeed) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if f.armedHold() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("no held attach armed on the feed within 5s")
+}
+
+// TestSessionSubscribeHeldRequestCompletesOnPublish is the #4310 acceptance
+// witness: a caught-up controller attaches with ?wait=, the request PARKS (it is
+// provably armed and has not answered), a revision is published AFTER it parked,
+// and the held request completes carrying exactly that revision and the advanced
+// cursor. Another session's revision in between must not satisfy the hold — the
+// push is per-trace, like the drain it extends.
+func TestSessionSubscribeHeldRequestCompletesOnPublish(t *testing.T) {
+	s := &Server{sessionFeed: newSessionFeed(0)}
+	s.PublishSessionRevision(SessionState{TraceID: "gw-1", Run: "running", Rev: 1}) // seq 1
+
+	// The controller is caught up at cursor 1: there is nothing to drain, so the
+	// held attach has no choice but to wait.
+	done := make(chan SessionSubscribeResponse, 1)
+	go func() {
+		rr := httptest.NewRecorder()
+		s.handleFakSession(rr, httptest.NewRequest(http.MethodGet, "/v1/fak/session/gw-1/subscribe?since=1&wait=30s", nil))
+		var got SessionSubscribeResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Errorf("decode held reply (status %d, body %s): %v", rr.Code, rr.Body.String(), err)
+		}
+		if rr.Code != http.StatusOK {
+			t.Errorf("held subscribe status = %d, want 200 (body %s)", rr.Code, rr.Body.String())
+		}
+		done <- got
+	}()
+
+	waitArmed(t, s.sessionFeed)
+	select {
+	case got := <-done:
+		t.Fatalf("held request answered before any publish: %+v", got)
+	default:
+	}
+
+	// Noise for a different session wakes the feed-global broadcast but must NOT
+	// complete this hold: the subscriber re-drains, finds nothing of its own, and
+	// re-arms.
+	s.PublishSessionRevision(SessionState{TraceID: "gw-2", Run: "running", Rev: 1}) // seq 2
+	waitArmed(t, s.sessionFeed)
+	select {
+	case got := <-done:
+		t.Fatalf("another session's revision completed the hold: %+v", got)
+	default:
+	}
+
+	// The revision this controller is subscribed to — published while it is held.
+	s.PublishSessionRevision(SessionState{TraceID: "gw-1", Run: "paused", Rev: 2}) // seq 3
+
+	select {
+	case got := <-done:
+		if got.TraceID != "gw-1" || len(got.Events) != 1 {
+			t.Fatalf("held reply = %+v; want exactly 1 gw-1 event", got)
+		}
+		if got.Events[0].Rev != 2 || got.Events[0].Seq != 3 {
+			t.Fatalf("held event = rev %d seq %d; want the revision published while held (rev 2, seq 3)", got.Events[0].Rev, got.Events[0].Seq)
+		}
+		if got.Cursor != 3 {
+			t.Fatalf("held cursor = %d, want 3 (advanced past the delivered event)", got.Cursor)
+		}
+		if !got.Complete {
+			t.Fatalf("held reply = %+v; want complete (nothing was trimmed)", got)
+		}
+	// The patience here is deliberately far SHORTER than the ?wait= budget above:
+	// that is what makes this a push test rather than an "eventually" test. If the
+	// publish did not release the hold, the only other way out is the budget
+	// expiring at 30s — so a reply must arrive well inside 5s or the push is dead.
+	case <-time.After(5 * time.Second):
+		t.Fatal("held request never completed after the revision it was waiting for was published (the publish did not release the hold)")
+	}
+}
+
+// TestSessionSubscribeHeldRequestBoundedByWait pins the hold's bound: with no
+// revision to deliver, an elapsed budget answers the SAME shape as the one-shot
+// drain — an empty tail at the head cursor — so a follow loop just calls again
+// with the cursor it was handed, and a connection is never held forever.
+func TestSessionSubscribeHeldRequestBoundedByWait(t *testing.T) {
+	s := &Server{sessionFeed: newSessionFeed(0)}
+	s.PublishSessionRevision(SessionState{TraceID: "gw-2", Run: "running", Rev: 1}) // seq 1: not ours
+
+	rr := httptest.NewRecorder()
+	s.handleFakSession(rr, httptest.NewRequest(http.MethodGet, "/v1/fak/session/gw-1/subscribe?since=1&wait=20ms", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("elapsed hold status = %d, want 200 (body %s)", rr.Code, rr.Body.String())
+	}
+	var got SessionSubscribeResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Events) != 0 || got.TraceID != "gw-1" || !got.Complete {
+		t.Fatalf("elapsed hold = %+v; want an empty complete tail for gw-1", got)
+	}
+	if got.Cursor != 1 {
+		t.Fatalf("elapsed hold cursor = %d, want the head cursor 1", got.Cursor)
+	}
+}
+
+// TestSessionSubscribeIsDocumentedInOpenAPISpec is the spec half of #4310: the
+// subscribe verb lives on the /v1/fak/session/ subtree, which the route-table
+// drift gate can only see as /v1/fak/session/{trace_id} — so the verb needs its
+// own assertion or it stays invisible to every generated SDK.
+func TestSessionSubscribeIsDocumentedInOpenAPISpec(t *testing.T) {
+	raw, err := os.ReadFile(filepath.FromSlash(openAPISpecPath))
+	if err != nil {
+		t.Fatalf("read %s: %v", openAPISpecPath, err)
+	}
+	spec := string(raw)
+
+	const path = "/v1/fak/session/{trace_id}/subscribe"
+	if !specHasPathKey(spec, path) {
+		t.Errorf("%s does not document the subscribe verb (expected an OpenAPI path key %q)", openAPISpecPath, path)
+	}
+	// The held form is the reason the verb is worth documenting: a client cannot
+	// discover the push without the parameter that arms it.
+	if !strings.Contains(spec, "name: wait") {
+		t.Errorf("%s documents the subscribe path but not its ?wait= hold budget (#4310)", openAPISpecPath)
 	}
 }
