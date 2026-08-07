@@ -32,6 +32,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
 // routedTool is a tau2 airline tool the deterministic MockPlanner calls, so the owned loop
@@ -49,6 +50,19 @@ const routedTool = "book_flight"
 type engineRecorder struct {
 	mu   sync.Mutex
 	seen map[string]string
+	// ledger appends EVERY adjudicated call in order, where seen keeps only the first
+	// binding per tool. The count is the load-bearing part for #5707: a call served from
+	// a vDSO tier-2 entry never reaches the chain at all, so "how many times did this
+	// (tool,args) reach the kernel" is exactly the cache-scoping witness.
+	ledger []recordedCall
+}
+
+// recordedCall is one adjudicated tool call as the kernel saw it: the route bound
+// pre-Submit, and the tenant ISOLATION principal the caller lowered onto the call.
+type recordedCall struct {
+	Tool      string
+	Engine    string
+	Principal string
 }
 
 func newEngineRecorder() *engineRecorder { return &engineRecorder{seen: map[string]string{}} }
@@ -60,8 +74,47 @@ func (r *engineRecorder) Adjudicate(_ context.Context, c *abi.ToolCall) abi.Verd
 	if _, dup := r.seen[c.Tool]; !dup {
 		r.seen[c.Tool] = c.Engine
 	}
+	r.ledger = append(r.ledger, recordedCall{Tool: c.Tool, Engine: c.Engine, Principal: c.Meta[vdso.MetaPrincipal]})
 	r.mu.Unlock()
 	return abi.Verdict{Kind: abi.VerdictDefer, By: "engine-recorder"}
+}
+
+// count reports how many times a tool actually reached the adjudicator chain. A vDSO
+// tier-2 hit is served without a syscall, so a flat count across two callers means the
+// second was served from the first's fill.
+func (r *engineRecorder) count(tool string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, rc := range r.ledger {
+		if rc.Tool == tool {
+			n++
+		}
+	}
+	return n
+}
+
+// principalsOf returns, in order, the isolation principal carried by each adjudicated
+// call for one tool — the direct read of what the loop lowered onto the call.
+func (r *engineRecorder) principalsOf(tool string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, rc := range r.ledger {
+		if rc.Tool == tool {
+			out = append(out, rc.Principal)
+		}
+	}
+	return out
+}
+
+// records renders the full ordered ledger for failure messages.
+func (r *engineRecorder) records() []recordedCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]recordedCall, len(r.ledger))
+	copy(out, r.ledger)
+	return out
 }
 
 // route returns the Engine recorded for a tool and whether the call ever reached the
@@ -311,5 +364,159 @@ func TestNativeLoopRouteParityRefusesUnattributedCaller(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "<unattributed>") {
 		t.Fatalf("the refusal should distinguish an unattributed caller from a wrong tenant, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// #5707 — the CACHE half of the same principal boundary. Routing is out of frame
+// below: the seam under test is abi.ToolCall.Meta, not abi.ToolCall.Engine.
+// ---------------------------------------------------------------------------
+
+// scopedReadTool is the READ-shaped tau2 tool the #5707 witness drives, and scopedReadArgs
+// the one byte-identical arg set both tenants call it with — the (tool,args) pair the
+// vDSO's tier-2 store is built to dedup, and therefore the pair a missing principal leaks
+// across tenants.
+const (
+	scopedReadTool = "get_user_details"
+	scopedReadArgs = `{"user_id":"mia_li_3668"}`
+)
+
+// readOnlyPlanner drives ONE read-shaped tool twice with identical args, then finishes.
+//
+// It replaces the MockPlanner for the #5707 witness for a load-bearing reason: the
+// MockPlanner's scripted flow ENDS in a write (book_flight), and a write advances the
+// world version that invalidates every pooled read — so each run's tier-2 fill is
+// destroyed by that same run before the next tenant's turn begins, and the cross-tenant
+// leak cannot be observed through it at all. A read-only flow is also the shape the leak
+// actually matters in: a read-heavy multi-tenant serving session, where one tenant's fill
+// is exactly what the next tenant would be served.
+//
+// The second, identical read is the intra-run dedup the fak arm is measured on, so one
+// planner witnesses both halves: the dedup must survive, partitioned per principal.
+type readOnlyPlanner struct{}
+
+func (readOnlyPlanner) Model() string { return "test-model" }
+
+func (readOnlyPlanner) Complete(_ context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	reads := 0
+	for _, m := range messages {
+		if m.Role == agent.RoleTool && m.Name == scopedReadTool {
+			reads++
+		}
+	}
+	if reads >= 2 {
+		return &agent.Completion{
+			Message:      agent.Message{Role: agent.RoleAssistant, Content: "Read the account twice; nothing to change."},
+			FinishReason: "stop",
+		}, nil
+	}
+	return &agent.Completion{
+		Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{
+			ID: "call_" + itoa(uint64(reads)), Type: "function",
+			Function: agent.Func{Name: scopedReadTool, Arguments: scopedReadArgs},
+		}}},
+		FinishReason: "tool_calls",
+	}, nil
+}
+
+// vdsoScopeServer is a --native Server whose owned loop drives the read-only flow above.
+// Routing is deliberately unwired (no manifest, no roster): the seam under test is
+// abi.ToolCall.Meta, not abi.ToolCall.Engine.
+func vdsoScopeServer(t *testing.T) (*Server, *engineRecorder) {
+	t.Helper()
+	s, rec := nativeParityServer(t, nil, nil)
+	s.planner = readOnlyPlanner{}
+	return s, rec
+}
+
+// THE #5707 witness: one tool, one arg set, two principals, both driven through the OWNED
+// loop — and the second principal's read must reach the kernel rather than be served from
+// the first's fill.
+//
+// The counting witness is deliberately a DELTA, not an absolute. The vDSO's tier-2 store
+// is process-global and survives abi.ResetForTest, so whether tenantA's own read reaches
+// the kernel depends on what sibling tests in this package filled first. The delta does
+// not: on the pre-#5707 tree the loop lowers NO principal, so every tenant shares ONE
+// entry and tenantB's read adds nothing to the ledger whether or not tenantA's did —
+// which is precisely the leak. With the principal lowered, each tenant fills and reads
+// its own scope, so the delta is exactly one dispatch per tenant.
+func TestNativeLoopScopesVdsoPerPrincipal(t *testing.T) {
+	s, rec := vdsoScopeServer(t)
+	// Principals no sibling test in this package dispatches under, so the scopes these
+	// turns fill are this test's alone.
+	const tenantA, tenantB = "vdso-scope-alpha", "vdso-scope-beta"
+
+	driveNativeTurn(t, s, WithPrincipal(context.Background(), tenantA))
+	afterA := rec.count(scopedReadTool)
+
+	driveNativeTurn(t, s, WithPrincipal(context.Background(), tenantB))
+	afterB := rec.count(scopedReadTool)
+
+	if afterB == afterA {
+		t.Fatalf("CROSS-TENANT vDSO LEAK (#5707): principal %q read %q with the same args as %q and "+
+			"the call never reached the kernel — it was served from a tier-2 entry filled under a "+
+			"DIFFERENT principal (%d adjudications before %q's turn, %d after). The owned loop must "+
+			"lower its principal onto ToolCall.Meta[%q] exactly as the proxy path's buildCall does, "+
+			"so one tenant can neither be served from nor fill another's entry. Ledger: %v",
+			tenantB, scopedReadTool, tenantA, afterA, tenantB, afterB, vdso.MetaPrincipal, rec.records())
+	}
+	// Scoping must not become "cache nothing". The MockPlanner reads scopedReadTool TWICE
+	// per run with identical args; the second is the vDSO hit the fak arm is measured on.
+	// One dispatch per tenant per run is the fix; two would mean the dedup was disabled
+	// rather than partitioned.
+	if got := afterB - afterA; got != 1 {
+		t.Fatalf("principal %q dispatched %q %d times in one turn, want exactly 1: the loop reads it "+
+			"twice with identical args, so a second dispatch means per-principal scoping DISABLED "+
+			"the tier-2 dedup instead of partitioning it. Ledger: %v", tenantB, scopedReadTool, got, rec.records())
+	}
+	// The direct read of the fix: every dispatch this test observed is attributed, and the
+	// one tenantB's turn added is attributed to tenantB — not inherited from tenantA.
+	principals := rec.principalsOf(scopedReadTool)
+	if len(principals) == 0 || principals[len(principals)-1] != tenantB {
+		t.Fatalf("the call %q dispatched during %q's turn carried principal %v, want the last to be %q — "+
+			"an unattributed or wrong-tenant call is what makes one tier-2 entry readable by two tenants",
+			scopedReadTool, tenantB, principals, tenantB)
+	}
+	for i, p := range principals {
+		if p != tenantA && p != tenantB {
+			t.Fatalf("dispatch %d of %q carried principal %q, want one of {%q,%q}: an unscoped call "+
+				"re-opens the shared entry for every later tenant. Ledger: %v",
+				i, scopedReadTool, p, tenantA, tenantB, rec.records())
+		}
+	}
+	// REFUTATION: tenantA drives the same read a THIRD time. If per-principal scoping is
+	// real, A's own fill still serves A and nothing new reaches the kernel. A rise here
+	// would mean the key had gone per-CALL (correctness by cache-busting, which would also
+	// destroy the hit/miss timing property the scope exists to protect).
+	driveNativeTurn(t, s, WithPrincipal(context.Background(), tenantA))
+	if afterA2 := rec.count(scopedReadTool); afterA2 != afterB {
+		t.Fatalf("principal %q re-read %q and dispatched again (%d -> %d): its own tier-2 entry must "+
+			"still serve it, or the scope is busting the cache rather than partitioning it. Ledger: %v",
+			tenantA, scopedReadTool, afterB, afterA2, rec.records())
+	}
+}
+
+// The compatibility arm the #5707 done-condition names: with NO principal configured the
+// loop behaves exactly as it does at HEAD — single-tenant, every caller sharing one scope,
+// and no principal key written onto the call at all.
+func TestNativeLoopVdsoScopeUnchangedWithoutPrincipal(t *testing.T) {
+	s, rec := vdsoScopeServer(t)
+
+	driveNativeTurn(t, s, context.Background())
+	afterFirst := rec.count(scopedReadTool)
+	driveNativeTurn(t, s, context.Background())
+
+	if afterSecond := rec.count(scopedReadTool); afterSecond != afterFirst {
+		t.Fatalf("unattributed caller: %q dispatched again on the second turn (%d -> %d) — with no "+
+			"principal every caller shares ONE scope (the documented v0.1 single-tenant behavior), "+
+			"so the second read must still be served from the first's fill. Ledger: %v",
+			scopedReadTool, afterFirst, afterSecond, rec.records())
+	}
+	for i, p := range rec.principalsOf(scopedReadTool) {
+		if p != "" {
+			t.Fatalf("dispatch %d of %q carried principal %q for an unattributed caller, want \"\": "+
+				"the empty principal must write NO key, keeping the no-principal path byte-for-byte HEAD",
+				i, scopedReadTool, p)
+		}
 	}
 }
