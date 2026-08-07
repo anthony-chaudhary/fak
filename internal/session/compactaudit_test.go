@@ -289,6 +289,9 @@ func TestCompactAuditNeverEmitsPromptOrToolBodies(t *testing.T) {
 		"ineffective-fire.jsonl",
 		"missing-token-sample.jsonl",
 		"long-append-only-bounded.jsonl",
+		// The wedge fixture is the only one carrying an inline base64 image body, the
+		// surface that wedges compaction in the first place (#5168).
+		"image-wedge.jsonl",
 	} {
 		rep := scanFixture(t, name)
 		blob, err := json.Marshal(rep)

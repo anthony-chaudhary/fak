@@ -8,8 +8,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 func fixtureCorpusRoot() string {
@@ -63,6 +66,76 @@ func TestSessionCompactAuditJSONScrubbed(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "MUST_NOT_LEAK") {
 		t.Error("json leaked a prompt body")
+	}
+}
+
+// The committed image-wedge fixture is the oversized-single-item wedge rollout: compaction
+// fires twice and resident context never comes off the late-fire ceiling. WEDGED_AT_CEILING is
+// classified in internal/session, but an operator only ever meets it through this verb, so pin
+// the whole seam — corpus walk, per-session row, aggregate roll-up, and the default human
+// report — not just the in-package scan (#5168).
+func TestSessionCompactAuditSurfacesWedgedAtCeiling(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runSession(&out, &errb, []string{"compact-audit", "--root", fixtureCorpusRoot(), "--json"})
+	if rc != 0 {
+		t.Fatalf("rc = %d, stderr = %s", rc, errb.String())
+	}
+	var res struct {
+		Aggregate struct {
+			VerdictCounts map[string]int `json:"verdict_counts"`
+			AnomalyCounts map[string]int `json:"anomaly_counts"`
+		} `json:"aggregate"`
+		Sessions []struct {
+			Path      string   `json:"path"`
+			Verdict   string   `json:"verdict"`
+			FireCount int      `json:"fire_count"`
+			Anomalies []string `json:"anomalies"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+
+	found := false
+	for _, s := range res.Sessions {
+		if filepath.Base(s.Path) != "image-wedge.jsonl" {
+			continue
+		}
+		found = true
+		if s.Verdict != session.VerdictWedgedAtCeiling {
+			t.Errorf("verdict = %q, want %q", s.Verdict, session.VerdictWedgedAtCeiling)
+		}
+		if s.FireCount != 2 {
+			t.Errorf("fire count = %d, want 2 — the wedge is repeated fire WITHOUT relief, not absent fire", s.FireCount)
+		}
+		if !slices.Contains(s.Anomalies, session.AnomalyWedgedAtCeiling) {
+			t.Errorf("anomalies = %v, want %s among them", s.Anomalies, session.AnomalyWedgedAtCeiling)
+		}
+	}
+	if !found {
+		t.Fatalf("corpus walk never reached image-wedge.jsonl; scanned %d sessions", len(res.Sessions))
+	}
+
+	// Exactly one fixture is wedged: a roll-up that counted every repeated-fire session as
+	// wedged would satisfy the per-session check above while being useless to an operator.
+	if got := res.Aggregate.VerdictCounts[session.VerdictWedgedAtCeiling]; got != 1 {
+		t.Errorf("aggregate verdict_counts[%s] = %d, want 1", session.VerdictWedgedAtCeiling, got)
+	}
+	if got := res.Aggregate.AnomalyCounts[session.AnomalyWedgedAtCeiling]; got != 1 {
+		t.Errorf("aggregate anomaly_counts[%s] = %d, want 1", session.AnomalyWedgedAtCeiling, got)
+	}
+	// The wedge fixture's image body must not ride out on the un-scrubbed JSON either.
+	if strings.Contains(out.String(), "MUST_NOT_LEAK") {
+		t.Error("json leaked a prompt or image body")
+	}
+
+	// --json is the script path; the bare verb is what an operator actually runs.
+	var hout, herrb bytes.Buffer
+	if rc := runSession(&hout, &herrb, []string{"compact-audit", "--root", fixtureCorpusRoot()}); rc != 0 {
+		t.Fatalf("human rc = %d, stderr = %s", rc, herrb.String())
+	}
+	if !strings.Contains(hout.String(), session.VerdictWedgedAtCeiling) {
+		t.Errorf("human report never names the wedge verdict:\n%s", hout.String())
 	}
 }
 
