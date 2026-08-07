@@ -24,9 +24,41 @@ const (
 	// for. It is generated from the same catalog as the scorecard and must age with
 	// it - a fresh scorecard beside a stale index would answer "what is this concept"
 	// correctly while answering "which concept is this name" from a retired catalog.
-	GeneratedIndex    = "docs/concept-disambiguation-scorecard/INDEX.md"
+	GeneratedIndex = "docs/concept-disambiguation-scorecard/INDEX.md"
+	// RegenerateCommand is the WORKTREE-mode cure, and it answers CheckFresh only.
+	// The generator derives its numbers by walking the whole workspace, so run from
+	// the repo root it scores every peer's unsaved edit too - a different tree from
+	// the one CheckGitTree scores, and therefore a different answer.
 	RegenerateCommand = "python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard"
+	// RegenerateStagedCommand is the TREE-mode cure, and it is the only one that can
+	// clear a CheckGitTree refusal: it regenerates inside the same clean-room export
+	// of the staged tree that CheckGitTree scored, then writes the artifacts back to
+	// the worktree for the operator to stage (#5829).
+	//
+	// Bare, it resolves the CALLER's index. That is not good enough for a refusal to
+	// quote: a pre-commit hook runs against git's temporary partial-commit index (HEAD
+	// plus the pathspec), while the operator who reads the refusal runs the cure in a
+	// plain shell, where the same words resolve the SHARED .git/index - HEAD plus
+	// whatever every peer left staged. Measured on this trunk, those two trees give
+	// different artifacts and the retry refuses again. Refusals must therefore print
+	// RegenerateStagedCommandFor, never this constant alone.
+	RegenerateStagedCommand = "fak concept generate --staged"
 )
+
+// RegenerateStagedCommandFor pins the tree-mode cure to the exact tree that was scored,
+// so the printed command means the same thing in the operator's shell as it did inside
+// the hook (#5829).
+//
+// Safe to hand out because git write-tree does not merely hash the index, it WRITES the
+// tree object into the repository - so the SHA still resolves after the hook's temporary
+// index is gone. An empty treeish degrades to the bare command rather than emitting a
+// dangling `--tree`, which would be worse than imprecise.
+func RegenerateStagedCommandFor(treeish string) string {
+	if treeish == "" {
+		return RegenerateStagedCommand
+	}
+	return RegenerateStagedCommand + " --tree " + treeish
+}
 
 // generatedArtifacts pairs each tracked artifact with its filename under the
 // generator's --markdown-dir output.
@@ -104,25 +136,126 @@ func normalizeGeneratedNewlines(b []byte) []byte {
 
 // CheckGitTree checks a committed or staged git tree, immune to peer working-tree files.
 // An empty treeish means the current index (git write-tree).
+//
+// The result's Regenerate names the tree-scoped cure, never RegenerateCommand: a refusal
+// produced by scoring a git tree can only be cleared by regenerating from that same tree,
+// and the worktree command answers a tree this check never looked at (#5829).
+//
+// The treeish is resolved HERE rather than inside materializeGitTree so the resolved SHA
+// can be baked into that cure. Naming the tree is what makes the printed command portable
+// out of the hook's environment: "the current index" denotes git's temporary partial-commit
+// index to the hook and the shared .git/index to the operator reading the refusal, and on a
+// multi-session trunk those are different trees with different artifacts.
 func CheckGitTree(root, treeish string) (FreshnessResult, error) {
-	if treeish == "" {
-		b, err := git(root, "write-tree")
-		if err != nil {
-			return FreshnessResult{}, err
-		}
-		treeish = strings.TrimSpace(string(b))
-	}
-	tmp, err := os.MkdirTemp("", "fak-concept-tree-*")
+	resolved, err := resolveTreeish(root, treeish)
 	if err != nil {
 		return FreshnessResult{}, err
 	}
-	defer os.RemoveAll(tmp)
+	tree, cleanup, err := materializeGitTree(root, resolved)
+	if err != nil {
+		return FreshnessResult{}, err
+	}
+	defer cleanup()
+	res, err := CheckFresh(tree)
+	res.Regenerate = RegenerateStagedCommandFor(resolved)
+	return res, err
+}
+
+// resolveTreeish turns the empty treeish into a concrete tree SHA by writing the current
+// index out as a tree. git write-tree persists that tree object, so the SHA outlives the
+// index it came from - including a hook's temporary partial-commit index.
+func resolveTreeish(root, treeish string) (string, error) {
+	if treeish != "" {
+		return treeish, nil
+	}
+	b, err := git(root, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// RegenerateFromGitTree runs the generator against the same clean-room export of
+// treeish that CheckGitTree scores, and writes every tracked artifact under dest
+// (the repo root when empty). It returns the tracked paths written, for the caller
+// to name in its own pathspec - staging is the operator's call on a shared trunk.
+//
+// This is the cure CheckGitTree's refusal prints. The extraction is shared with the
+// check by construction, so the bytes written here are the bytes the check compared
+// against; regenerating from the worktree instead answers a different tree and leaves
+// the refusal standing.
+func RegenerateFromGitTree(root, treeish, dest string) ([]string, error) {
+	if dest == "" {
+		dest = root
+	}
+	tree, cleanup, err := materializeGitTree(root, treeish)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	// Generate into scratch first: generate() encodes the "exit 1 is an honest ACTION
+	// verdict as long as every artifact exists" rule, so a real crash must not leave
+	// half-written artifacts in the operator's worktree.
+	out, err := os.MkdirTemp("", "fak-concept-regen-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(out)
+	if err := generate(tree, out); err != nil {
+		return nil, err
+	}
+	written := make([]string, 0, len(generatedArtifacts))
+	for _, art := range generatedArtifacts {
+		// Copied byte for byte: the generator emits LF and git staging must leave the
+		// blob unchanged (#5136). Any rewriting here re-breaks that round trip.
+		b, err := os.ReadFile(filepath.Join(out, art.Name))
+		if err != nil {
+			return written, fmt.Errorf("read generated %s: %w", art.Name, err)
+		}
+		target := filepath.Join(dest, filepath.FromSlash(art.Tracked))
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return written, err
+		}
+		if err := os.WriteFile(target, b, 0644); err != nil {
+			return written, err
+		}
+		written = append(written, art.Tracked)
+	}
+	return written, nil
+}
+
+// materializeGitTree extracts treeish into a fresh temp directory and returns it with
+// its cleanup. An empty treeish means the current index (git write-tree) - under a
+// pathspec commit that index is git's temporary partial-commit index, so the tree is
+// HEAD plus exactly the committer's pathspec.
+//
+// Deliberately NOT merged with CheckFresh: callers hand CheckFresh the extraction root,
+// never the repo, and collapsing the two roots is how the peer-dirty bug this export
+// exists to prevent gets reintroduced.
+func materializeGitTree(root, treeish string) (string, func(), error) {
+	treeish, err := resolveTreeish(root, treeish)
+	if err != nil {
+		return "", func() {}, err
+	}
+	tmp, err := os.MkdirTemp("", "fak-concept-tree-*")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() { os.RemoveAll(tmp) }
+	if err := extractGitTree(root, treeish, tmp); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return tmp, cleanup, nil
+}
+
+func extractGitTree(root, treeish, tmp string) error {
 	cmd := exec.Command("git", "archive", "--format=tar", treeish)
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
 	raw, err := cmd.Output()
 	if err != nil {
-		return FreshnessResult{}, fmt.Errorf("git archive %s: %w", treeish, err)
+		return fmt.Errorf("git archive %s: %w", treeish, err)
 	}
 	tr := tar.NewReader(bytes.NewReader(raw))
 	for {
@@ -131,16 +264,16 @@ func CheckGitTree(root, treeish string) (FreshnessResult, error) {
 			break
 		}
 		if e != nil {
-			return FreshnessResult{}, e
+			return e
 		}
 		clean := filepath.Clean(filepath.FromSlash(h.Name))
 		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return FreshnessResult{}, fmt.Errorf("unsafe archive path %q", h.Name)
+			return fmt.Errorf("unsafe archive path %q", h.Name)
 		}
 		dst := filepath.Join(tmp, clean)
 		if h.FileInfo().IsDir() {
 			if e := os.MkdirAll(dst, 0755); e != nil {
-				return FreshnessResult{}, e
+				return e
 			}
 			continue
 		}
@@ -148,22 +281,22 @@ func CheckGitTree(root, treeish string) (FreshnessResult, error) {
 			continue
 		}
 		if e := os.MkdirAll(filepath.Dir(dst), 0755); e != nil {
-			return FreshnessResult{}, e
+			return e
 		}
 		f, e := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, h.FileInfo().Mode())
 		if e != nil {
-			return FreshnessResult{}, e
+			return e
 		}
 		_, copyErr := io.Copy(f, tr)
 		closeErr := f.Close()
 		if copyErr != nil {
-			return FreshnessResult{}, copyErr
+			return copyErr
 		}
 		if closeErr != nil {
-			return FreshnessResult{}, closeErr
+			return closeErr
 		}
 	}
-	return CheckFresh(tmp)
+	return nil
 }
 
 func generate(root, out string) error {

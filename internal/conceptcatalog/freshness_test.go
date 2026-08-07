@@ -188,3 +188,136 @@ func fixtureRepo(t *testing.T) string {
 	}
 	return cmdRoot
 }
+
+// TestRegenerateFromGitTreeClearsTheFreshnessGate is the #5829 witness: the cure the
+// CONCEPT_FRESHNESS refusal names has to clear the refusal.
+//
+// The gate scores a git tree, so the fixture is built the way a pathspec commit builds
+// one - a staged artifact change on top of HEAD - and an UNSTAGED peer package sits
+// beside it whose directory name carries a family root, so the generator discovers one
+// more confusable token from the worktree than from the tree. That single unstaged
+// directory is the whole gap: it makes the worktree regeneration (RegenerateCommand)
+// answer a tree the gate never scored, which is why running it left the refusal
+// standing. The two modes are asserted to disagree at the end, so a future change that
+// quietly points the tree-scoped path at the worktree fails here instead of shipping.
+func TestRegenerateFromGitTreeClearsTheFreshnessGate(t *testing.T) {
+	root := fixtureGitRepo(t)
+	readme := filepath.Join(root, filepath.FromSlash(GeneratedReadme))
+	original, err := os.ReadFile(readme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const marker = "Legacy bounded score (saturates; not the driver) |"
+	mutated := strings.Replace(string(original), marker, marker+" stale", 1)
+	if mutated == string(original) {
+		t.Fatalf("fixture marker %q missing", marker)
+	}
+	if err := os.WriteFile(readme, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(root, "add", "--", GeneratedReadme); err != nil {
+		t.Fatal(err)
+	}
+	// The peer's in-flight package: worktree only, never staged. A directory name is a
+	// structural concept, and this one carries the guard-gate family root, so it shifts
+	// the discovered-token count the generator reports.
+	peer := filepath.Join(root, "internal", "guardpeerwip")
+	if err := os.MkdirAll(peer, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(peer, "guardpeerwip.go"), []byte("package guardpeerwip\n\n// Probe is a peer's unsaved work.\nfunc Probe() bool { return true }\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := CheckGitTree(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Fresh {
+		t.Fatal("fixture must start stale for the staged tree")
+	}
+	if !strings.HasPrefix(before.Regenerate, RegenerateStagedCommand+" --tree ") {
+		t.Fatalf("a git-tree refusal must pin its cure to the tree it scored, got %q", before.Regenerate)
+	}
+	pinnedTree := strings.TrimPrefix(before.Regenerate, RegenerateStagedCommand+" --tree ")
+
+	// The operator reads the refusal and runs the printed command in their OWN shell, where
+	// "the current index" is not the index the gate scored - a pre-commit hook gets git's
+	// temporary partial-commit index, the shell gets the shared .git/index that every peer
+	// stages into. Moving the index here is what makes this test able to tell a tree-pinned
+	// cure from a bare one: with a bare `--staged` the regeneration below would answer the
+	// polluted index and the retry would refuse again, which is the #5829 defect surviving
+	// one level down.
+	if _, err := git(root, "add", "--", filepath.Join("internal", "guardpeerwip")); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := git(root, "write-tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(moved)) == pinnedTree {
+		t.Fatal("fixture did not move the index off the scored tree, so it cannot distinguish a pinned cure from a bare one")
+	}
+
+	// Verbatim: the tree named in the refusal, not whatever the shell's index happens to be.
+	written, err := RegenerateFromGitTree(root, pinnedTree, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written) != len(generatedArtifacts) {
+		t.Fatalf("wrote %v, want every tracked artifact", written)
+	}
+	// The retry is a fresh pathspec commit, so rebuild the index the way `git commit -- <paths>`
+	// does: HEAD plus exactly the committer's pathspec. This also discards the pollution above,
+	// which is the point - the peer's staged work was never in the tree being committed.
+	if _, err := git(root, "read-tree", "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range written {
+		if _, err := git(root, "add", "--", p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := CheckGitTree(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Fresh {
+		t.Fatalf("the printed cure %q did not clear the check; still stale: %v", before.Regenerate, after.StalePaths)
+	}
+
+	// The modes must genuinely differ, or this test would pass for the wrong reason.
+	worktree, err := CheckFresh(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worktree.Fresh {
+		t.Fatal("the unstaged peer package did not move the generator's answer, so this fixture cannot tell tree mode from worktree mode")
+	}
+	if worktree.Regenerate != RegenerateCommand {
+		t.Fatalf("worktree mode must keep the worktree cure, got %q", worktree.Regenerate)
+	}
+}
+
+// fixtureGitRepo is fixtureRepo committed into a hermetic repo, so CheckGitTree has an
+// index to resolve. Hooks and signing are disabled: the fixture is an input, not a
+// commit under test.
+func fixtureGitRepo(t *testing.T) string {
+	t.Helper()
+	root := fixtureRepo(t)
+	if _, err := git(root, "init", "-q"); err != nil {
+		t.Fatal(err)
+	}
+	// Exact bytes on both sides of staging; the CRLF path has its own #5136 test.
+	if _, err := git(root, "config", "core.autocrlf", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(root, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(root, "-c", "user.name=concept-test", "-c", "user.email=concept-test@example.invalid",
+		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=", "commit", "-q", "-m", "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
