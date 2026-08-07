@@ -19,6 +19,24 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 **pre-flight + grammar ladder** before it fires, and admitted through a
 **context-MMU** before tool results enter model context.
 
+## `microcontextdemo`: bounded logical-context fabric
+
+`microcontextdemo` is the research/demo CLI for one immutable agent base serving bounded physical model slots across 100, 1,000, and 10,000 logical contexts. It is a separate demo binary, so invoke it with `go run ./cmd/microcontextdemo` rather than as a `fak` subcommand.
+
+```bash
+# Offline LCD floor: deterministic scheduler/shared-base semantics, not model tokens/s.
+go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64
+
+# Verify captured controlled witnesses.
+go run ./cmd/microcontextdemo -verify-kernel-prefix-ab experiments/microcontext/s2b-gcp-inkernel-prefix-ab-pass-2026-08-07.json
+go run ./cmd/microcontextdemo -verify-quality experiments/microcontext/s5-gcp-1000-cuda-outcomes-2026-08-07.json
+go run ./cmd/microcontextdemo -verify-health-scorecard experiments/microcontext/s5-gcp-1000-cuda-health-scorecard-2026-08-07.json
+```
+
+Core live flags match `microcontextdemo -h`: `-endpoint`, `-model`, `-provider`, and `-hardware` declare endpoint provenance; `-contexts` and `-workers` separate logical orchestration from bounded physical execution; `-request-timeout` and `-run-timeout` bound calls and runs. The API-only admission envelope uses `-api-concurrency`, `-api-rpm`, `-api-tpm`, and `-api-spend-micros`. Real in-kernel compatibility batches use `-gguf`, `-compat-batch-hardware`, `-compat-batch-size`, and `-compat-batch-execution`.
+
+All artifact modes have explicit `-verify-*` counterparts in `-h`. The research contract and claim boundaries are in [`docs/research/micro-context-fabrics.md`](research/micro-context-fabrics.md); captured artifacts are indexed in [`docs/research/README.md`](research/README.md).
+
 ## Use fak with your coding agent (Claude Code, Cursor, …)
 
 If you drive a coding agent, fak fits in two ways:
