@@ -50,12 +50,48 @@ func guardRotateOffCooldown(homeDir, registryPath string, now time.Time, warn io
 	if !ok {
 		return cur, false
 	}
+	stampGuardRotationAccount(note)
 	if warn != nil {
 		// The one-line message is rendered by the pure guardrotate.Note.Explain (unit-tested there)
 		// so this wrapper only does I/O.
 		fmt.Fprintln(warn, note.Explain())
 	}
 	return dir, true
+}
+
+// stampGuardRotationAccount re-points $DISPATCH_ACCOUNT at the seat a resolved rotation
+// actually landed on, and reports whether it did.
+//
+// This is the moment the serving account stops being the one the DISPATCHER chose. The
+// #4805 long-Retry-After goal park is written from $DISPATCH_ACCOUNT (guard.go's park
+// template) and read back from it (guardGoalParked), while the dispatcher stamps that
+// variable at SPAWN time — before this rotation exists. Measured on the live fleet: 36 of
+// 59 resolve units in one day carried a rotation line, so on a clear majority the
+// spawn-time identity is NOT the account that served, and a park written under it would
+// file the wall of the seat we rotated ONTO against the seat we rotated OFF: it would wall
+// a healthy account and leave the walled one free. goalpark.SameAccount is a plain string
+// compare and note.To is the same registry seat name the dispatcher's account tag carries,
+// so both sides agree by construction once this fires.
+//
+// A blank target is a no-op rather than a delete: every fail-open branch in
+// guardRotateOffCooldown returns before this, so the only way here with no name is a
+// degenerate note, and clearing the dispatcher's stamp on one would trade a correct
+// identity for an unattributed park — which blocks nobody at all.
+//
+// Scope, so the next reader does not over-trust this: it covers the STARTUP rotation
+// only, which is the one that lands before guard.go builds parkTemplate (that struct
+// reads DISPATCH_ACCOUNT once, so only a stamp written earlier can reach it). The
+// mid-run guardRotationRuntime.rotate path — a rotation after a child failure — moves
+// the serving seat AFTER that capture, so a park written by a relaunched child still
+// names the pre-rotation seat. Closing that one needs parkTemplate.Account to be read
+// at park time rather than at capture time; it is not done here.
+func stampGuardRotationAccount(note guardrotate.Note) bool {
+	to := strings.TrimSpace(note.To)
+	if to == "" {
+		return false
+	}
+	_ = os.Setenv("DISPATCH_ACCOUNT", to)
+	return true
 }
 
 // guardRotateWarnWriter returns the writer the rotation note is emitted to, honoring
