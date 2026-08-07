@@ -73,6 +73,80 @@ func LineageReuse(runs []benchruns.Run, key LineageKey) ReuseVerdict {
 	}
 }
 
+// taskConfig resolves the benchmark config the SELECTED nightrun task would run under
+// — the model and precision its Run command names — so the launch gate can key reuse
+// on that config instead of leaving both axes wildcard (#5087). A nightrun Task
+// carries no config fields; its Run command is the only place it declares one, and
+// these are the flags whose values land in the catalog run's model/precision columns:
+//
+//	-model / --model NAME       the served model id (fak serve, fak macbench, swebench)
+//	-name  / --name  NAME       the bench report's model name (modelbench et al.)
+//	-dir   / --dir   PATH       a local export dir; its basename is the report name
+//	                            modelbench derives when -name is absent
+//	-precision / --precision P  the recorded precision label
+//	-quant     / --quant     P  the same axis spelled as a quantization — value form
+//	                            only, so a valueless boolean -quant pins nothing
+//
+// Both spellings of a value are read (`-f v` and `-f=v`), and an explicit model name
+// beats the -dir fallback wherever the two disagree. An axis the Run does not name
+// stays "" — the pre-#5087 wildcard — so a task that pins nothing is neither over- nor
+// under-matched. An operator fill-me-in placeholder (<glm-5.2.gguf>) or a shell
+// variable ($FAK_GGUF) names no concrete config and is ignored.
+func taskConfig(run string) (model, precision string) {
+	var dirModel string
+	fields := strings.Fields(run)
+	for i, f := range fields {
+		if !strings.HasPrefix(f, "-") {
+			continue
+		}
+		name, val, eq := strings.Cut(strings.TrimLeft(f, "-"), "=")
+		if !eq && i+1 < len(fields) && !strings.HasPrefix(fields[i+1], "-") {
+			val = fields[i+1]
+		}
+		if val = configValue(val); val == "" {
+			continue
+		}
+		switch strings.ToLower(name) {
+		case "model", "name":
+			if model == "" {
+				model = val
+			}
+		case "dir":
+			if dirModel == "" {
+				dirModel = pathBase(val)
+			}
+		case "precision", "quant":
+			if precision == "" {
+				precision = val
+			}
+		}
+	}
+	if model == "" {
+		model = dirModel
+	}
+	return model, precision
+}
+
+// configValue normalizes one parsed flag value and rejects the non-concrete ones: an
+// empty value, an operator placeholder, and a shell variable all name no config.
+func configValue(v string) string {
+	v = strings.TrimSpace(strings.Trim(v, `"'`))
+	if v == "" || strings.ContainsAny(v, "<>$") {
+		return ""
+	}
+	return v
+}
+
+// pathBase is the last element of a path-valued flag, tolerating either separator: a
+// nightrun Run is written for the box that will execute it, not for the box reading it.
+func pathBase(v string) string {
+	v = strings.TrimRight(strings.ReplaceAll(v, `\`, "/"), "/")
+	if i := strings.LastIndex(v, "/"); i >= 0 {
+		return v[i+1:]
+	}
+	return v
+}
+
 // coversLineage reports whether catalog run r is a valid reuse for key: commit must
 // match, and each of machine/model/precision must match unless the key leaves it a
 // wildcard (empty).
