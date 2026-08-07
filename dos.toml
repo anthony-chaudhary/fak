@@ -273,6 +273,7 @@ concurrent = [
   "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "deadlineadmit",
   "deepseekbench", "deepseekv4kv", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
   "deploymanifest", "dispatchaging", "dispatchaudit", "dispatchcache", "dispatchconservation",
+  "dispatchdoa",
   "dispatchpost", "dispatchsweep", "dispatchtick", "docfreshrsi", "dogfoodissues",
   "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy", "dormancysim", "dsparity",
   "edittx", "egressfloor", "envconfiglint", "epicprogress", "epochbridge", "escalation",
@@ -750,6 +751,7 @@ dispatchaging = ["internal/dispatchaging/**"]
 dispatchaudit = ["internal/dispatchaudit/**"]
 dispatchcache = ["internal/dispatchcache/**"]
 dispatchconservation = ["internal/dispatchconservation/**"]
+dispatchdoa = ["internal/dispatchdoa/**"]
 dispatchpost = ["internal/dispatchpost/**"]
 dispatchsweep = ["internal/dispatchsweep/**"]
 dispatchtick = ["internal/dispatchtick/**"]

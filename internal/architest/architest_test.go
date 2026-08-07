@@ -58,6 +58,7 @@ var tier = map[string]int{
 	"apihostprobe":         1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":         1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
 	"dispatchconservation": 1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
+	"dispatchdoa":          1, // #5868: pure DOA-spawn detector — grades a worker log into "the dispatcher spawned it, it wrote a stub, it never reached the guard's agent-launch banner" and folds a window into a clear/warn/alarm spawn-health rung; stdlib-only, imports nothing internal, off the hot path.
 	"eveparity":            1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.
 	"eveimport":            1, // read-only Eve run/OTel evidence importer (#2606): pure deterministic fold of saved NDJSON session streams / eve.* spans into session-ledger rows with default body redaction; stdlib-only, imports nothing internal, off the hot path.
 	"benchcatalog":         1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
@@ -511,7 +512,7 @@ var pureRoot = map[string]bool{
 	"codexmemory": true, "commitintent": true, "commitissuelink": true, "compactcohere": true, "conflationscore": true,
 	"corelocks": true, "covmatrix": true, "ctxknobs": true, "ctxplan": true, "ctxplans": true, "deadlineadmit": true, "deepseekbench": true,
 	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "deploymanifest": true, "devexmeter": true,
-	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true, "egresslist": true,
+	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchdoa": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true, "egresslist": true,
 	"evebridge": true, "eveimport": true, "eveparity": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
 	"fusedturn": true, "ghspam": true, "godsplitplan": true, "growthgate": true,
