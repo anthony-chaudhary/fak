@@ -49,6 +49,11 @@ type RefFinding struct {
 // AuditHardcodedRefs scans tracked-source-like files for main/master branch refs
 // that are not covered by workflowaudit. It classifies known intentional families
 // and leaves anything else unclassified so tests can fail closed.
+//
+// "Tracked" is load-bearing, not decorative. This runs as a live-tree gate inside a
+// shared multi-session checkout, so the walk is pruned to what git actually tracks
+// (plus whatever is already staged) -- see gitUntrackedPaths for why anything else
+// is not this audit's business.
 func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 	if root == "" {
 		var err error
@@ -58,12 +63,15 @@ func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 		}
 	}
 	var findings []RefFinding
-	// The audit walks the filesystem, so without ignore-awareness it descends
-	// gitignored scratch (.fak, scratchpad, .dispatch-runs, tools/_registry, ...)
-	// and flags refs in throwaway data as unclassified -- reddening the gate on any
-	// working tree that has scratch dirs. Prune what git ignores; best-effort, so a
-	// git failure just falls back to the static skip list below.
-	ignored := gitIgnoredPaths(root)
+	// The audit walks the filesystem, so without git-awareness it descends everything
+	// git does NOT track: gitignored scratch (.fak, scratchpad, .dispatch-runs,
+	// tools/_registry, ...) and, on this shared trunk checkout, a peer session's
+	// uncommitted in-flight files. Both flag refs in content that is not on the trunk
+	// as unclassified -- reddening the gate on any working tree that has scratch dirs,
+	// and (worse) reddening MY gate for a file only a PEER can classify. Prune to what
+	// git tracks; best-effort, so a git failure just falls back to the static skip
+	// list below.
+	untracked := gitUntrackedPaths(root)
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -74,7 +82,7 @@ func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if rel != "." && ignored[rel] {
+			if rel != "." && untracked[rel] {
 				return filepath.SkipDir
 			}
 			if skipRefAuditDir(rel) {
@@ -82,7 +90,7 @@ func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 			}
 			return nil
 		}
-		if ignored[rel] {
+		if untracked[rel] {
 			return nil
 		}
 		if !scanRefAuditFile(rel) {
@@ -98,13 +106,24 @@ func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 	return findings, err
 }
 
-// gitIgnoredPaths returns the set of repo-relative paths git ignores under root,
-// collapsed to directories where git can (`ls-files --directory`). Best-effort:
-// a git failure (not a repo, git missing) yields nil so the audit still runs,
-// just without ignore-awareness. NUL-delimited so paths with odd characters are
+// gitUntrackedPaths returns the set of repo-relative paths git does not track under
+// root -- gitignored scratch AND untracked in-flight files alike -- collapsed to
+// directories where git can (`ls-files --directory`).
+//
+// Omitting --exclude-standard is the deliberate part: with it, `--others` reports
+// only NON-ignored untracked paths, so one flag change makes a single call cover both
+// families instead of two calls covering one each.
+//
+// What stays audited is the point: anything in the index is not "other", so a staged
+// new file is still scanned and the worker actually committing a fresh unclassified
+// ref is still gated by it. Only content nobody has committed or staged -- which no
+// worker but its author can classify, and which may never land at all -- drops out.
+//
+// Best-effort: a git failure (not a repo, git missing) yields nil so the audit still
+// runs, just without git-awareness. NUL-delimited so paths with odd characters are
 // exact, not git-quoted.
-func gitIgnoredPaths(root string) map[string]bool {
-	cmd := exec.Command("git", "-C", root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+func gitUntrackedPaths(root string) map[string]bool {
+	cmd := exec.Command("git", "-C", root, "ls-files", "--others", "--directory", "-z")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
