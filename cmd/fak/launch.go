@@ -30,6 +30,12 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 		switch argv[0] {
 		case "install":
 			return runLaunchInstall(stdout, stderr, argv[1:])
+		case "add":
+			return runLaunchAdd(stdout, stderr, argv[1:])
+		case "remove":
+			return runLaunchRemove(stdout, stderr, argv[1:])
+		case "list":
+			return runLaunchList(stdout, stderr, argv[1:])
 		case "uninstall":
 			return runLaunchUninstall(stdout, stderr, argv[1:])
 		case "default":
@@ -83,7 +89,8 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 	if len(args) > 0 && args[0] == "--fak-direct" {
 		*direct, args = true, args[1:]
 	}
-	command := strings.TrimSpace(c.Providers[p].Command)
+	pconf := c.Providers[p]
+	command := strings.TrimSpace(pconf.Command)
 	if command == "" {
 		command, err = exec.LookPath(p)
 		if err != nil {
@@ -91,6 +98,7 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 	}
+	args = append(append([]string(nil), pconf.Args...), args...)
 	directMode := launchshim.EffectiveDirect(c, *direct)
 	surface := "explicit"
 	if len(argv) == 0 {
@@ -98,7 +106,7 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 	}
 	started := time.Now()
 	if directMode {
-		code := runLaunchChild(stdout, stderr, command, args)
+		code := launchChildRunner(stdout, stderr, command, args)
 		_ = launchshim.Record(surface, p, "direct", launchOutcome(code), time.Since(started))
 		return code
 	}
@@ -108,10 +116,12 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	guardArgs := append([]string{"guard", "--"}, append([]string{command}, args...)...)
-	code := runLaunchChild(stdout, stderr, fak, guardArgs)
+	code := launchChildRunner(stdout, stderr, fak, guardArgs)
 	_ = launchshim.Record(surface, p, "guarded", launchOutcome(code), time.Since(started))
 	return code
 }
+
+var launchChildRunner = runLaunchChild
 
 func runLaunchChild(stdout, stderr io.Writer, command string, args []string) int {
 	cmd := exec.Command(command, args...)
@@ -135,6 +145,11 @@ func launchBinDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(d, "fak", "bin"), nil
+}
+
+func mustLaunchBinDir() string {
+	dir, _ := launchBinDir()
+	return dir
 }
 
 func runLaunchInstall(stdout, stderr io.Writer, argv []string) int {
@@ -188,7 +203,7 @@ func runLaunchInstall(stdout, stderr io.Writer, argv []string) int {
 				continue
 			}
 		}
-		c.Providers[p] = launchshim.Provider{Command: underlying}
+		c.Providers[p] = launchshim.Provider{Command: underlying, InstallShim: true}
 		if err := writeLaunchShim(dir, p, fak); err != nil {
 			fmt.Fprintf(stderr, "fak launch install: %v\n", err)
 			return 1
@@ -290,6 +305,10 @@ func runLaunchDefault(stdout, stderr io.Writer, argv []string) int {
 	c, e := launchshim.Load()
 	if e != nil {
 		fmt.Fprintln(stderr, e)
+		return 1
+	}
+	if _, ok := c.Providers[p]; !ok {
+		fmt.Fprintf(stderr, "fak launch default: provider %q is not configured; run 'fak launch add %s --command PATH' first\n", p, p)
 		return 1
 	}
 	c.Default = p

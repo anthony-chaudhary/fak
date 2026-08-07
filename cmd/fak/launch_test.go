@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -12,7 +14,12 @@ import (
 )
 
 func TestLaunchDefaultAndDisablePersist(t *testing.T) {
-	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(t.TempDir(), "launch.json"))
+	dir := t.TempDir()
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
+	command := fakeLaunchProvider(t, dir)
+	if err := launchshim.Save(launchshim.Config{Providers: map[string]launchshim.Provider{"claude": {Command: command}}}); err != nil {
+		t.Fatal(err)
+	}
 	var out, errOut bytes.Buffer
 	if code := runLaunchDefault(&out, &errOut, []string{"claude"}); code != 0 {
 		t.Fatalf("default code=%d stderr=%s", code, errOut.String())
@@ -73,5 +80,96 @@ func TestLaunchDirectRunsRecordedProvider(t *testing.T) {
 	b, _ := os.ReadFile(output)
 	if string(b) != "hello world" {
 		t.Fatalf("args=%q", b)
+	}
+}
+
+func TestLaunchCustomAliasLifecycleAndRedactedList(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
+	t.Setenv("FAK_LAUNCH_BIN", filepath.Join(dir, "bin"))
+	command := fakeLaunchProvider(t, dir)
+	var out, errOut bytes.Buffer
+	args := []string{"add", "--command", command, "--arg", "space value", "--arg=--leading", "--default", "--shim", "third-provider"}
+	if code := runLaunch(&out, &errOut, args); code != 0 {
+		t.Fatalf("add code=%d stderr=%s", code, errOut.String())
+	}
+	c, err := launchshim.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.Providers["third-provider"]
+	if c.Default != "third-provider" || !p.InstallShim || !reflect.DeepEqual(p.Args, []string{"space value", "--leading"}) {
+		t.Fatalf("config=%+v", c)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bin", shimName("third-provider"))); err != nil {
+		t.Fatalf("shim: %v", err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runLaunchList(&out, &errOut, []string{"--json"}); code != 0 {
+		t.Fatalf("list code=%d stderr=%s", code, errOut.String())
+	}
+	if strings.Contains(out.String(), command) || !strings.Contains(out.String(), `"name": "third-provider"`) || !strings.Contains(out.String(), `"template_args": 2`) {
+		t.Fatalf("list=%s", out.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runLaunchRemove(&out, &errOut, []string{"third-provider"}); code != 0 {
+		t.Fatalf("remove code=%d stderr=%s", code, errOut.String())
+	}
+	c, _ = launchshim.Load()
+	if _, ok := c.Providers["third-provider"]; ok || c.Default != "" {
+		t.Fatalf("after remove=%+v", c)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bin", shimName("third-provider"))); !os.IsNotExist(err) {
+		t.Fatalf("shim remains: %v", err)
+	}
+}
+
+func TestLaunchAliasRejectsReservedAndPathLikeNames(t *testing.T) {
+	for _, name := range []string{"serve", "fak", "../other", "two words"} {
+		if _, err := validateLaunchAlias(name); err == nil {
+			t.Errorf("alias %q accepted", name)
+		}
+	}
+}
+
+func fakeLaunchProvider(t *testing.T, dir string) string {
+	t.Helper()
+	name := "provider"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("provider"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLaunchCustomTemplatePreservesArgvBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
+	command := fakeLaunchProvider(t, dir)
+	config := launchshim.Config{Default: "third", Providers: map[string]launchshim.Provider{"third": {Command: command, Args: []string{"space value", "--leading", `quote"value`, "\u03bb"}}}}
+	if err := launchshim.Save(config); err != nil {
+		t.Fatal(err)
+	}
+	old := launchChildRunner
+	defer func() { launchChildRunner = old }()
+	var gotCommand string
+	var gotArgs []string
+	launchChildRunner = func(_ io.Writer, _ io.Writer, command string, args []string) int {
+		gotCommand = command
+		gotArgs = append([]string(nil), args...)
+		return 0
+	}
+	var out, errOut bytes.Buffer
+	if code := runLaunch(&out, &errOut, []string{"--direct", "third", "user value", ";touch never"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	want := []string{"space value", "--leading", `quote"value`, "\u03bb", "user value", ";touch never"}
+	if gotCommand != command || !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("command=%q argv=%q want %q", gotCommand, gotArgs, want)
 	}
 }

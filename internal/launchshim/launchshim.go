@@ -12,8 +12,10 @@ import (
 )
 
 type Provider struct {
-	Command   string `json:"command"`
-	Canonical string `json:"canonical,omitempty"`
+	Command     string   `json:"command"`
+	Canonical   string   `json:"canonical,omitempty"`
+	Args        []string `json:"args,omitempty"`
+	InstallShim bool     `json:"install_shim,omitempty"`
 }
 
 type Config struct {
@@ -54,6 +56,18 @@ func Load() (Config, error) {
 	}
 	if c.Providers == nil {
 		c.Providers = map[string]Provider{}
+	}
+	for name, provider := range c.Providers {
+		canonical, err := NormalizeProvider(name)
+		if err != nil || canonical != name || strings.TrimSpace(provider.Command) == "" {
+			return Config{}, fmt.Errorf("invalid launch provider %q", name)
+		}
+	}
+	if c.Default != "" {
+		canonical, err := NormalizeProvider(c.Default)
+		if err != nil || canonical != c.Default {
+			return Config{}, fmt.Errorf("invalid default provider %q", c.Default)
+		}
 	}
 	return c, nil
 }
@@ -156,13 +170,21 @@ func SameCommand(a, b string) bool {
 	return strings.EqualFold(filepath.Clean(aa), filepath.Clean(bb))
 }
 
-func NormalizeProvider(s string) (string, error) {
-	s = strings.ToLower(strings.TrimSpace(s))
-	switch s {
-	case "claude", "codex":
-		return s, nil
+func NormalizeProvider(name string) (string, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return "", fmt.Errorf("provider name is empty")
 	}
-	return "", fmt.Errorf("provider must be claude or codex, got %q", s)
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("provider name %q is path-like", name)
+	}
+	for i, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9' && i > 0) || (r == '-' && i > 0 && i < len(name)-1) {
+			continue
+		}
+		return "", fmt.Errorf("provider name %q must match [a-z][a-z0-9-]*", name)
+	}
+	return name, nil
 }
 
 func EffectiveDirect(c Config, flag bool) bool {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sync"
 	"testing"
@@ -113,5 +114,38 @@ func TestConcurrentSaveNeverTearsConfig(t *testing.T) {
 	}
 	if len(matches) != 0 {
 		t.Fatalf("temporary files leaked: %v", matches)
+	}
+}
+
+func TestCustomProviderRoundTripKeepsArgumentBoundaries(t *testing.T) {
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(t.TempDir(), "launch.json"))
+	command := filepath.Join(t.TempDir(), "third")
+	if err := os.WriteFile(command, []byte("provider"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := Config{Default: "third-provider", Providers: map[string]Provider{"third-provider": {Command: command, Args: []string{"space value", "--leading", `quote"value`, "\u03bb"}, InstallShim: true}}}
+	if err := Save(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := got.Providers["third-provider"]
+	if !reflect.DeepEqual(p.Args, want.Providers["third-provider"].Args) || !p.InstallShim || got.Default != "third-provider" {
+		t.Fatalf("round trip=%+v", got)
+	}
+}
+
+func TestNormalizeProviderRejectsUnsafeNames(t *testing.T) {
+	for _, name := range []string{"", "../x", "a/b", "-bad", "bad-", "two words", "semi;colon"} {
+		if _, err := NormalizeProvider(name); err == nil {
+			t.Errorf("NormalizeProvider(%q) accepted", name)
+		}
+	}
+	for _, name := range []string{"claude", "third-provider", "qwen3"} {
+		if got, err := NormalizeProvider(name); err != nil || got != name {
+			t.Errorf("NormalizeProvider(%q)=%q,%v", name, got, err)
+		}
 	}
 }

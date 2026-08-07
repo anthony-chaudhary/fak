@@ -103,8 +103,12 @@ func buildLaunchDoctor(c launchshim.Config, loadErr error, configPath, shimDir s
 	sort.Strings(providers)
 	for _, provider := range providers {
 		row := launchDoctorRow{Provider: provider, BypassActive: launchshim.EffectiveDirect(c, false)}
+		recovery := "fak launch install --provider " + provider
+		if provider != "claude" && provider != "codex" {
+			recovery = "fak launch add " + provider + " --command PATH"
+		}
 		if loadErr != nil {
-			row.Reason, row.Action = "CONFIG_INVALID", "fak launch install --provider "+provider
+			row.Reason, row.Action = "CONFIG_INVALID", recovery
 			report.Rows = append(report.Rows, row)
 			continue
 		}
@@ -121,11 +125,11 @@ func buildLaunchDoctor(c launchshim.Config, loadErr error, configPath, shimDir s
 		case c.Disabled:
 			row.Reason, row.Action = "DISABLED", "fak launch enable"
 		case command == "":
-			row.Reason, row.Action = "UNDERLYING_MISSING", "fak launch install --provider "+provider
+			row.Reason, row.Action = "UNDERLYING_MISSING", recovery
 		case samePath(command, shim) || sameLaunchDir(command, shimDir):
 			row.Reason, row.Action = "RECURSIVE", "fak launch uninstall --provider "+provider
 		case statMissing(stat, command):
-			row.Reason, row.Action = "UNDERLYING_MISSING", "fak launch install --provider "+provider
+			row.Reason, row.Action = "UNDERLYING_MISSING", recovery
 		case winnerErr != nil:
 			row.Reason, row.Action = "NOT_ON_PATH", pathRecovery(shimDir)
 		case !samePath(winner, shim):

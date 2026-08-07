@@ -30,7 +30,22 @@ special `--fak-direct` token is consumed by the shim and is not passed to the
 underlying provider.
 
 Choose or change bare-`fak` behavior with `fak launch default claude` or
-`fak launch default codex`. Configuration is stored in the platform user config
+`fak launch default codex`. Add a third provider without waiting for a fak release:
+
+```sh
+fak launch add qwen-local --command /opt/qwen/bin/agent --arg --profile --arg coding --default --shim
+fak launch list --json       # redacted: names and argument counts, never local paths/arguments
+qwen-local "fix the test"    # template argv first, then user argv; no shell evaluation
+fak launch remove qwen-local # also removes its owned shim and clears it as default
+```
+
+Alias names must match `[a-z][a-z0-9-]*`, cannot be paths, and cannot shadow reserved
+`fak` verbs. Repeatable `--arg` values are persisted as an argv array; spaces, Unicode,
+quotes, and leading dashes retain exact argument boundaries. Custom aliases inherit
+`--fak-direct`, `FAK_DIRECT`, `launch disable|enable`, status, doctor, and uninstall
+behavior from the built-ins.
+
+Configuration is stored in the platform user config
 directory under `fak/launch.json`; `FAK_LAUNCH_CONFIG` and `FAK_LAUNCH_BIN` are
 available for managed installs and tests.
 
