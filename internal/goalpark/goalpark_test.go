@@ -46,6 +46,108 @@ func TestLongRetryAfterSurvivesRestartAndResumesExactlyOnce(t *testing.T) {
 	}
 }
 
+// A park is one ACCOUNT's wall on a goal, not the goal's. Before this, the check
+// was account-blind, so a single account's 1h Retry-After stopped every account on
+// the lane for as long as the park lasted.
+func TestParkWallsOnlyTheAccountThatWasRateLimited(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	live := Record{Schema: Schema, Goal: "quality", Account: "seat-a", ParkedUntil: now.Unix() + 3600}
+	for _, tc := range []struct {
+		name    string
+		rec     Record
+		account string
+		want    bool
+	}{
+		{"the walled account is stopped", live, "seat-a", true},
+		{"a sibling account is not", live, "seat-b", false},
+		{"an unnamed caller is not", live, "", false},
+		{"whitespace still matches the same seat", live, "  seat-a ", true},
+		{"an unattributed record stops nobody", Record{Schema: Schema, Goal: "quality", ParkedUntil: now.Unix() + 3600}, "seat-a", false},
+		{"two unattributed sides are not the same account", Record{Schema: Schema, Goal: "quality", ParkedUntil: now.Unix() + 3600}, "", false},
+		{"an elapsed wait stops nobody", Record{Schema: Schema, Goal: "quality", Account: "seat-a", ParkedUntil: now.Unix() - 1}, "seat-a", false},
+		{"a claimed resume stops nobody", Record{Schema: Schema, Goal: "quality", Account: "seat-a", ParkedUntil: now.Unix() + 3600, ClaimedAt: now.Unix()}, "seat-a", false},
+		{"a foreign schema stops nobody", Record{Goal: "quality", Account: "seat-a", ParkedUntil: now.Unix() + 3600}, "seat-a", false},
+	} {
+		if got := tc.rec.Blocks(tc.account, now); got != tc.want {
+			t.Errorf("%s: Blocks(%q)=%v want %v", tc.name, tc.account, got, tc.want)
+		}
+	}
+}
+
+// Resolve is the supervisor seam: it must wall only the walled account, and it
+// must RETIRE a due park by claiming it. Nothing ever called ClaimDue in the
+// product before, so claimed_at stayed 0 forever and a park never resumed.
+func TestResolveScopesByAccountAndRetiresADuePark(t *testing.T) {
+	dir := t.TempDir()
+	store := Store{Dir: dir}
+	start := time.Unix(1_800_000_000, 0)
+	rec := Record{Goal: "quality", Lane: "quality", Account: "seat-a", Command: []string{"claude", "-p"}}
+	if parked, err := store.RecordLongRetry(429, http.Header{"Retry-After": []string{"3600"}}, start, rec); err != nil || !parked {
+		t.Fatalf("parked=%v err=%v", parked, err)
+	}
+
+	// The walled account waits; every sibling account walks straight through.
+	if _, blocked := store.Resolve("quality", "seat-a", "sup", start.Add(time.Minute)); !blocked {
+		t.Fatal("the rate-limited account was not walled by its own park")
+	}
+	if _, blocked := store.Resolve("quality", "seat-b", "sup", start.Add(time.Minute)); blocked {
+		t.Fatal("a sibling account was walled by another account's park")
+	}
+	if got, err := store.Load("quality"); err != nil || got.ClaimedAt != 0 {
+		t.Fatalf("a sibling's pass-through must not claim the live park: %+v err=%v", got, err)
+	}
+
+	// Past parked_until the park retires itself instead of lingering unclaimed.
+	after := start.Add(3600 * time.Second)
+	resumed, blocked := store.Resolve("quality", "seat-a", "sup-a", after)
+	if blocked {
+		t.Fatal("a park whose wait elapsed still walled its account")
+	}
+	if resumed.ClaimedAt != after.Unix() || resumed.ClaimedBy != "sup-a" {
+		t.Fatalf("a due park was not claimed/retired: %+v", resumed)
+	}
+	// Exactly once: a second supervisor cannot re-claim the same resume.
+	again, blocked := store.Resolve("quality", "seat-a", "sup-b", after.Add(time.Second))
+	if blocked || again.ClaimedBy != "sup-a" {
+		t.Fatalf("resume was not exactly-once: blocked=%v rec=%+v", blocked, again)
+	}
+	if _, err := store.ClaimDue("quality", "sup-b", after.Add(time.Second)); !errors.Is(err, ErrClaimed) {
+		t.Fatalf("claim ledger did not hold: %v", err)
+	}
+}
+
+// A missing/unreadable park must fail OPEN: over-parking is the failure this seam exists to prevent.
+func TestResolveFailsOpenWithoutAReadableRecord(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	if _, blocked := store.Resolve("never-parked", "seat-a", "sup", time.Unix(1_800_000_000, 0)); blocked {
+		t.Fatal("a goal with no park record walled its account")
+	}
+}
+
+// An oversized/mis-scaled Retry-After must not become a multi-day wall.
+func TestLongRetryAfterIsCappedAtMaxWait(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	now := time.Unix(1_800_000_000, 0)
+	rec := Record{Goal: "g", Account: "seat-a", Command: []string{"worker"}}
+	if parked, err := store.RecordLongRetry(429, http.Header{"Retry-After": []string{"99999999"}}, now, rec); err != nil || !parked {
+		t.Fatalf("parked=%v err=%v", parked, err)
+	}
+	got, err := store.Load("g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := now.Add(MaxWait).Unix(); got.ParkedUntil != want {
+		t.Fatalf("parked_until=%d want %d (capped at MaxWait)", got.ParkedUntil, want)
+	}
+	// A legitimate long wait under the cap is untouched.
+	if parked, err := store.RecordLongRetry(429, http.Header{"Retry-After": []string{"7200"}}, now, rec); err != nil || !parked {
+		t.Fatalf("parked=%v err=%v", parked, err)
+	}
+	if got, err = store.Load("g"); err != nil || got.ParkedUntil != now.Unix()+7200 {
+		t.Fatalf("an under-cap wait was clipped: %+v err=%v", got, err)
+	}
+}
+
 func TestOrdinaryRetryClassesDoNotEnterLongPark(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	now := time.Unix(10, 0)

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -23,16 +22,29 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+// guardGoalParked answers "is THIS account still walled off this goal?" — never
+// the account-blind "is this lane parked?" it used to answer. Every branch below
+// consults it BEFORE rotation.rotateAfterExit, so a positive verdict
+// short-circuits account rotation entirely; when the verdict was lane-scoped
+// that meant one account's 1h Retry-After stopped every account on the lane for
+// as long as the park lasted, while the dispatcher kept dispatching into it and
+// each child was killed mid-tool_use with no report and no commit. The scoping
+// (and the retire-when-due claim) lives in goalpark.Store.Resolve so the guard
+// cannot re-acquire an ad-hoc, account-blind condition here; a blank or foreign
+// account falls through to rotation, which is the whole point.
 func guardGoalParked() (goalpark.Record, bool) {
-	goal := strings.TrimSpace(os.Getenv("DISPATCH_GOAL"))
-	if goal == "" {
-		goal = strings.TrimSpace(os.Getenv("DISPATCH_LANE"))
-	}
+	goal, account := parkGoalIdentity()
 	if goal == "" {
 		return goalpark.Record{}, false
 	}
-	rec, err := (goalpark.Store{Dir: filepath.Join(repoRoot(), ".fak", "goal-park")}).Load(goal)
-	return rec, err == nil && rec.ClaimedAt == 0 && rec.ParkedUntil > time.Now().Unix()
+	// Name this guard in the park's exactly-once claim ledger, so `fak goal-park
+	// status` shows WHICH supervisor resumed a due park rather than an anonymous
+	// claim.
+	supervisor := "fak-guard"
+	if account != "" {
+		supervisor += "/" + account
+	}
+	return goalParkStore().Resolve(goal, account, supervisor, time.Now())
 }
 
 func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {

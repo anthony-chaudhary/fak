@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -24,6 +25,18 @@ func dispatchWorkerEnv(backend, lane, root, runsDir string, account dispatchtick
 	env["DISPATCH_WORKSPACE"] = root
 	env["DISPATCH_LANE"] = lane
 	env["DISPATCH_BACKEND"] = backend
+	// Name the seat this worker actually runs on. Without it every downstream
+	// consumer of DISPATCH_ACCOUNT (guard's goal-park record, dispatchworker's
+	// env echo) saw "" and could not attribute a wall to an account — which is
+	// why every live park record carried a blank account and therefore walled
+	// EVERY account on the lane instead of the one that was rate-limited.
+	if id := dispatchAccountID(account); id != "" {
+		env["DISPATCH_ACCOUNT"] = id
+	} else {
+		// An unattributable spawn must not inherit THIS process's stale identity
+		// and mislabel someone else's wall as its own.
+		delete(env, "DISPATCH_ACCOUNT")
+	}
 	if strings.TrimSpace(goal) != "" {
 		env["DISPATCH_GOAL"] = strings.TrimSpace(goal)
 		env["FLEET_DISPATCH_GOAL"] = strings.TrimSpace(goal)
@@ -56,6 +69,22 @@ func dispatchWorkerEnv(backend, lane, root, runsDir string, account dispatchtick
 		return nil, fmt.Errorf("unknown backend %q", backend)
 	}
 	return env, nil
+}
+
+// dispatchAccountID is the stable, human-legible identity of the seat a worker
+// was dispatched onto, as stamped into DISPATCH_ACCOUNT. The chooser's tag is
+// the identity of record (it is what the account sidecar and `fak dispatch tick`
+// render); the config dir's base name is the fallback for a seat that carries no
+// tag, so a seat is attributable whenever anything at all distinguishes it.
+// Returns "" only when the account is genuinely anonymous.
+func dispatchAccountID(account dispatchtick.Account) string {
+	if tag := strings.TrimSpace(account.Tag); tag != "" {
+		return tag
+	}
+	if dir := strings.TrimSpace(account.Dir); dir != "" {
+		return filepath.Base(filepath.Clean(dir))
+	}
+	return ""
 }
 
 func opencodeConfigHome(accountDir, runsDir string) string {
@@ -280,6 +309,14 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	cmd.Stdout = fh
 	cmd.Stderr = fh
 	configureDispatchSpawn(cmd)
+	// #3597: a DISPATCHED worker is unattended by construction — its stdout and stderr
+	// are bound to the transcript `fh` just above, and the monitor reads liveness from
+	// that transcript, never from a console. configureDispatchSpawn only hides the
+	// console WINDOW; the console (and its conhost.exe host process) is still allocated,
+	// which is the cost #2340 measured. Decline the console outright here. Scoped to this
+	// spawn deliberately: configureDispatchSpawn's other callers include the operator-
+	// attended `fak dispatch canary` foreground run, which must keep its console.
+	windowgate.ConfigureDetachedCommand(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = fh.Close()
 		return dispatchSpawnResult{}, err
