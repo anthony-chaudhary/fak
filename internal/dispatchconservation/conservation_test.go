@@ -234,6 +234,108 @@ func TestPythonSweepReasonsAccountedNotFolded(t *testing.T) {
 	}
 }
 
+// guardEpilogueFixture is a worker log tail carrying the guard exit summary: two real
+// section rules from cmd/fak/guard_format_layout.go guardSection(). The second one is
+// deliberately the "cache window" section #5867 proposed keying on, so the
+// zero-cache-turn fixture below can drop it while keeping a complete epilogue.
+const guardEpilogueFixture = "" +
+	"fak-turn trace=win-deadbeef ok prov=80.0k tok cache=healthy_cache\n" +
+	"── guard · audit journal ──────────────────────────────\n" +
+	"  appended                  38 decision(s) appended this session\n" +
+	"── guard · cache window ───────────────────────────────\n" +
+	"  recorded                  20 turn(s)\n"
+
+// TestUnknownNoCommitSplitByGuardEpilogue is the #5867 fail-before/pass-after pin: the
+// witness sweep's residual "unknown" — the fleet's LARGEST terminal disposition — must
+// be split by the evidence the worker log tail already carries, instead of booking half
+// the fleet under the one label that means "we could not tell".
+//
+// Measured on this repo's own .dispatch-runs over the clean current-fleet window
+// (2026-08-04T00:00Z..08-07T06:15Z; the 07-28..08-03 -compact-solvency-floor spawn
+// outage is excluded on purpose, a trailing-7d slice would measure that instead):
+// 283 graded resolve units, of which unknown=149 (52.8% of runs, 55.2 of 102.3
+// wall-to-witness seat-hours = 54.0%). `fak dispatch-conservation --window-h 78.6`
+// printed a single opaque `unknown=149`. The same 149 split 114 / 30 / 2 on the tail
+// markers pinned here — no new log retention needed, the sweep's own 4 KiB window
+// already holds every marker (re-running the split at 24 KiB moves zero units).
+func TestUnknownNoCommitSplitByGuardEpilogue(t *testing.T) {
+	runs := t.TempDir()
+	noCommit := map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "unknown"}
+	// A session that reached its guard epilogue and simply landed nothing.
+	mkWorker(t, runs, 40, 1.0, workerOpts{body: guardEpilogueFixture, witness: noCommit})
+	// A session killed MID-TURN: the log ends on an in-flight fak-turn row with no
+	// guard summary at all. 30/30 of the real died-before-epilogue units look like this.
+	mkWorker(t, runs, 41, 1.0, workerOpts{
+		body:    "fak-turn trace=win-cafebabe ok prov=104.4k tok (89% of prompt)\n",
+		witness: noCommit})
+	// The guard never exec'd the agent. Checked FIRST: this run also prints a partial
+	// epilogue, and "the child never ran" is the more specific, more fixable statement.
+	mkWorker(t, runs, 42, 1.0, workerOpts{
+		body: guardEpilogueFixture +
+			"fak guard: could not run \"claude\": snapshot generated child config\n",
+		witness: noCommit})
+
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r[ReasonCleanExitNoCommit] != 1 || r[ReasonDiedBeforeEpilogue] != 1 ||
+		r[ReasonGuardChildSpawnFailed] != 1 || r["unknown"] != 0 {
+		t.Errorf("no_commit_reasons = %v, want one of each split class and NO residual unknown", r)
+	}
+}
+
+// TestCleanExitKeysOnSectionRuleNotCacheWindow refutes the marker #5867 proposed. That
+// issue keys "epilogue present" on the final `guard · cache window` section, but
+// formatVCacheSnapshotPointer (cmd/fak/guard_child_supervision.go) returns "" when the
+// session recorded zero cache turns — so a complete epilogue with no cached turn carries
+// no cache-window section and would be mis-booked as a death.
+//
+// This is not hypothetical: over the full retained history (2382 graded resolve units)
+// the cache-window marker finds 0/69 auth_wall runs, every one of which carries an
+// epilogue the section rule finds (69/69). Inside the unknown bucket the same gate hides
+// 7 runs. Keying on the section rule instead costs nothing and loses none of them.
+func TestCleanExitKeysOnSectionRuleNotCacheWindow(t *testing.T) {
+	runs := t.TempDir()
+	zeroTurnEpilogue := "" +
+		"fak-turn trace=win-deadbeef ok prov=80.0k tok cache=n/a\n" +
+		"── guard · audit journal ──────────────────────────────\n" +
+		"  appended                  12 decision(s) appended this session\n" +
+		"  Track 2 OBSERVED-$ row not written: no provider-cache tokens\n"
+	if strings.Contains(zeroTurnEpilogue, "cache window") {
+		t.Fatal("fixture must NOT contain the cache-window section; that is the point")
+	}
+	mkWorker(t, runs, 43, 1.0, workerOpts{body: zeroTurnEpilogue,
+		witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "unknown"}})
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r[ReasonCleanExitNoCommit] != 1 || r[ReasonDiedBeforeEpilogue] != 0 {
+		t.Errorf("no_commit_reasons = %v, want a zero-cache-turn epilogue read as a CLEAN EXIT", r)
+	}
+}
+
+// TestUnrecognizedReasonStaysUnknownNotRefined keeps the #5866 lesson intact. The split
+// above runs ONLY on a reason a producer itself stamped "unknown". A reason string this
+// package merely fails to recognize must still fold to a bare "unknown" — after this
+// change that residual is a VOCABULARY-DRIFT alarm ("a sidecar writer stamped a class we
+// have never heard of"), which is worth acting on, and silently dressing it up as
+// clean_exit_no_commit would re-hide exactly what #5866 uncovered.
+func TestUnrecognizedReasonStaysUnknownNotRefined(t *testing.T) {
+	runs := t.TempDir()
+	mkWorker(t, runs, 44, 1.0, workerOpts{body: guardEpilogueFixture,
+		witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "a_future_producers_class"}})
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r["unknown"] != 1 || r[ReasonCleanExitNoCommit] != 0 {
+		t.Errorf("no_commit_reasons = %v, want an UNRECOGNIZED reason to stay a bare unknown", r)
+	}
+}
+
+// TestUnknownRefinementFailsOpenOnMissingLog pins the read-only fail-open rule: this
+// package never invents evidence. A graded unknown whose log artifact is gone has no
+// tail to read, so it must land in died_before_epilogue (no exit evidence exists) and
+// must not panic or claim a clean exit.
+func TestUnknownRefinementFailsOpenOnMissingLog(t *testing.T) {
+	if got := refineUnknownNoCommit(filepath.Join(t.TempDir(), "absent.log")); got != ReasonDiedBeforeEpilogue {
+		t.Errorf("refineUnknownNoCommit(missing) = %q, want %q", got, ReasonDiedBeforeEpilogue)
+	}
+}
+
 func TestRepairUnitsCountedSeparately(t *testing.T) {
 	runs := t.TempDir()
 	mkWorker(t, runs, 30, 1.0, workerOpts{kind: "repair", lane: "contract-repair"})
