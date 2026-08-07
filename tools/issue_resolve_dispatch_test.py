@@ -7290,5 +7290,205 @@ class AppendLoopEventArgvTest(unittest.TestCase):
         self.assertNotIn("--evidence", argv)
 
 
+class ReblockStreakHoldTest(unittest.TestCase):
+    """#5869: hold on REPETITION, not on the reason CLASS.
+
+    Measured over the clean current-fleet window (2026-08-04 .. 08-07, 286 finished
+    -worker .witness records / 94.0h over 117 issues), 24 issues hit a re-blockable
+    terminal and drew 54 further worker-units / 16.6h — but 8 of those 54 (15%) went
+    on to land a WITNESSED commit. So the #1396 docstring premise ("re-dispatching it
+    re-blocks identically") is only ~30% true, and a blanket reason-class cooldown
+    would refuse a retry that works one time in seven. These tests pin BOTH
+    directions: the hold fires on a genuine consecutive-identical repeat, and it stays
+    SILENT on the first retry that the measurement says still lands commits.
+    """
+
+    # 2026-08-06T12:00:00Z — the fixture epoch, so a stamped sidecar name and the
+    # ``now_ts`` a tick would pass in are derived from the same instant.
+    EPOCH = 1786363200.0
+
+    @staticmethod
+    def _stamp(ts: float) -> str:
+        import datetime as dt
+        return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime(
+            "%Y%m%d-%H%M%S")
+
+    def _witness(self, runs: Path, issue: int, ts: float, *,
+                 claim: str = "CLAIM_NO_COMMIT", reason: str | None = None) -> Path:
+        """Write one durable ``resolve-<issue>-<UTC>.witness`` record. Note there is
+        no ``os.utime`` here and no ``.pid``/``.log`` sibling: the hold keys off the
+        LAUNCH STAMP IN THE FILENAME plus the record body, which is exactly what
+        survives ``prune_dead_sidecars``."""
+        p = runs / f"resolve-{issue}-{self._stamp(ts)}.witness"
+        body: dict = {"claim": claim, "issue": issue}
+        if reason is not None:
+            body["reason"] = reason
+        p.write_text(json.dumps(body), encoding="utf-8")
+        return p
+
+    def test_first_retry_after_policy_block_is_admitted_second_repeat_is_held(self):
+        """BOTH directions, the load-bearing test.
+
+        One ``policy_block`` is NOT enough: that is the 15%-still-lands case, and
+        holding it is precisely the blanket cooldown #5869 rejects. A SECOND
+        consecutive identical ``policy_block`` is the repetition that proves futility,
+        and only then does the issue leave the candidate stream."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # One re-blockable terminal, 1h ago. The first retry MUST stay admitted.
+            self._witness(runs, 4568, self.EPOCH - 3600, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), set(),
+                "a FIRST retry after a policy_block must still be admitted — 15% of "
+                "them land a witnessed commit")
+            # The retry ran and re-blocked IDENTICALLY. Now hold it.
+            self._witness(runs, 4568, self.EPOCH - 1800, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {4568})
+            records = mod.reblock_streak_held_records(runs, now_ts=self.EPOCH)
+            self.assertEqual(records[0]["reason"], "policy_block")
+            self.assertEqual(records[0]["streak"], 2)
+
+    def test_two_different_terminals_are_not_a_streak(self):
+        """``policy_block`` then ``self_modify`` is two blocks but NOT the same block,
+        so nothing is proven repeatable and the issue stays free. Same for a
+        re-blockable terminal separated by an untyped ``unknown`` — over the window
+        ``policy_block -> unknown`` (13) actually OUTNUMBERS ``policy_block ->
+        policy_block`` (8), and folding those together is the reason-class hold in
+        disguise."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 3695, self.EPOCH - 3600, reason="policy_block")
+            self._witness(runs, 3695, self.EPOCH - 1800, reason="self_modify")
+            # Different reason interleaved: not identical, not held.
+            self._witness(runs, 3267, self.EPOCH - 5400, reason="policy_block")
+            self._witness(runs, 3267, self.EPOCH - 3600, reason="unknown")
+            self._witness(runs, 3267, self.EPOCH - 1800, reason="policy_block")
+            # A transient wall is not a structural block at all.
+            self._witness(runs, 5103, self.EPOCH - 3600, reason="auth_wall")
+            self._witness(runs, 5103, self.EPOCH - 1800, reason="auth_wall")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), set())
+
+    def test_landed_commit_in_the_tail_clears_the_hold(self):
+        """The structural clear. An admitted run that lands a witnessed commit breaks
+        the tail, so the hold evaporates with no reset verb — the property the
+        lane-livelock / repair-cooldown / goal-park defects all lacked."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 5586, self.EPOCH - 7200, reason="policy_block")
+            self._witness(runs, 5586, self.EPOCH - 5400, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {5586})
+            self._witness(runs, 5586, self.EPOCH - 1800, claim="CLAIM_WITNESSED")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), set(),
+                "a landed commit must clear the hold")
+
+    def test_ttl_admits_one_probe_and_the_probe_outcome_decides(self):
+        """The TTL does not declare the issue retryable — it admits exactly ONE probe
+        so the streak CAN break. Without it a held issue could never produce the
+        record that frees it (a self-sealing hold). A probe that re-blocks identically
+        re-arms the hold for another window."""
+        mod = load()
+        ttl = mod.DEFAULT_REBLOCK_STREAK_HOLD_TTL_H
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 4518, self.EPOCH - 7200, reason="policy_block")
+            self._witness(runs, 4518, self.EPOCH - 5400, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {4518})
+            # Past the TTL (measured from the NEWEST run in the streak) the hold
+            # lapses and one probe is admitted.
+            lapsed = self.EPOCH - 5400 + ttl * 3600 + 60
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=lapsed), set())
+            # That probe re-blocked identically -> the hold RE-ARMS for another window.
+            self._witness(runs, 4518, lapsed, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=lapsed + 60), {4518})
+            # A probe with a DIFFERENT outcome would have cleared it instead.
+            self._witness(runs, 4518, lapsed + 120, reason="restart_exhausted")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=lapsed + 180), set())
+
+    def test_updated_at_bump_and_kill_switches(self):
+        """A guard refusal is a verdict on what the ISSUE ASKED FOR, so a re-scope
+        (fresh gh ``updatedAt``) genuinely changes it and re-admits early — the same
+        content-keyed escape the contract/multi-lane ledgers take, and why this hold
+        does NOT take ``collision_held_records``' local-tree opt-out. Either knob at 0
+        disables the gate, matching the other holds' kill switch."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 4568, self.EPOCH - 3600, reason="policy_block")
+            self._witness(runs, 4568, self.EPOCH - 1800, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {4568})
+            # An updatedAt OLDER than the streak does not void it.
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, now_ts=self.EPOCH, updated_ts={4568: self.EPOCH - 2400}),
+                {4568})
+            # A re-scope AFTER the last block re-admits the issue.
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, now_ts=self.EPOCH, updated_ts={4568: self.EPOCH - 600}), set())
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, streak_n=0, now_ts=self.EPOCH), set())
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, ttl_h=0, now_ts=self.EPOCH), set())
+            # A stricter N than the observed streak does not fire.
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, streak_n=3, now_ts=self.EPOCH), set())
+
+    def test_durable_hold_survives_the_process_the_tick_scoped_one_does_not(self):
+        """The DEFECT this closes, stated as a contrast.
+
+        ``held_no_commit_issues`` reads the in-memory result of the witness sweep the
+        CURRENT tick just ran, so a fresh dispatcher process — the next tick — has no
+        memory of the refusal and re-picks the issue. That is the "in-memory tally
+        dies with the process and silently never fires" shape. The durable reader
+        keys off the retained ``.witness`` sidecars instead, so the same evidence
+        still holds after the process that produced it is gone."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 4568, self.EPOCH - 3600, reason="policy_block")
+            self._witness(runs, 4568, self.EPOCH - 1800, reason="policy_block")
+            # A NEW dispatcher process has no in-memory witness result to read.
+            self.assertEqual(mod.held_no_commit_issues(None), set())
+            self.assertEqual(mod.held_no_commit_issues({"no_commit": []}), set())
+            # The durable reader still holds it off the very same evidence.
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {4568})
+
+    def test_history_is_launch_ordered_and_fail_open(self):
+        """Ordering comes from the FILENAME stamp, not the mtime the witness sweep
+        rewrites at an arbitrary later tick. Unreadable/odd sidecars are skipped, never
+        raised, so this can only ever ADD a hold — it can never wedge the picker."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # Written newest-first on disk; history must still come back oldest-first.
+            newer = self._witness(runs, 77, self.EPOCH - 1800, reason="policy_block")
+            older = self._witness(runs, 77, self.EPOCH - 3600, reason="self_modify")
+            os.utime(newer, (self.EPOCH - 9999, self.EPOCH - 9999))
+            os.utime(older, (self.EPOCH, self.EPOCH))
+            hist = mod.issue_witness_history(runs)
+            self.assertEqual([r["reason"] for r in hist[77]],
+                             ["self_modify", "policy_block"])
+            # Garbage in the runs dir is ignored, not raised.
+            (runs / "resolve-nope.witness").write_text("{", encoding="utf-8")
+            (runs / "resolve-88-20260806-120000.witness").write_text(
+                "not json", encoding="utf-8")
+            self.assertNotIn(88, mod.issue_witness_history(runs))
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), set())
+            # A missing runs dir is empty, never an exception.
+            self.assertEqual(mod.issue_witness_history(runs / "gone"), {})
+
+
 if __name__ == "__main__":
     unittest.main()

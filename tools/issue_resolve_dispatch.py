@@ -129,6 +129,9 @@ _ANY_WORKER_LOG_RE = re.compile(r"(?:resolve|repair)-(\d+)-")
 # The `lane=<L>` field of the `# fak-spawn` header `spawn_issue_worker` flushes as
 # the first line of every worker log (used by the pre-spawn lane-lease gate, #1310).
 _SPAWN_LANE_RE = re.compile(r"\blane=(\S+)")
+# ``resolve-<issue>-<YYYYMMDD>-<HHMMSS>.witness`` -> (issue, date, time). Anchored so a
+# stray sidecar name can never yield a bogus launch order (#5869).
+_WITNESS_STAMP_RE = re.compile(r"^resolve-(\d+)-(\d{8})-(\d{6})\.witness$")
 _RID_RE = re.compile(r"^RID-[A-Z0-9]+$")
 DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
 DEFAULT_SPAWN_PROBE_S = 5.0
@@ -220,6 +223,30 @@ _MULTI_LANE_HOLD_LEDGER = "multi-lane-holds.jsonl"
 # contract/multi-lane TTL<=0 short-circuit).
 DEFAULT_COLLISION_HOLD_TTL_H = 3
 _COLLISION_HOLD_LEDGER = "collision-holds.jsonl"
+# Consecutive-identical re-block hold (#5869). #1396 recorded WHY a finished worker
+# landed no commit and held a re-blockable terminal (self_modify / policy_block) --
+# but only for the tick that WITNESSED the exit (:func:`held_no_commit_issues` reads
+# the in-memory sweep result), so the very next tick re-picked the same issue with no
+# memory of the refusal. Measured over the clean current-fleet window (2026-08-04 ..
+# 08-07, 286 finished-worker .witness records / 94.0h over 117 issues): 24 issues hit
+# a re-blockable terminal and drew 54 further worker-units costing 16.6h (17.8% of the
+# window). BUT the docstring premise "re-dispatching it re-blocks identically" is only
+# ~30% true -- 16/54 re-blocked, while 8/54 (15%) went on to land a WITNESSED commit.
+# So the reason CLASS is the wrong key: a blanket hold on the first re-blockable
+# terminal (N=1) suppresses 2-8 real commits at every TTL in the window. What IS
+# predictive is REPETITION -- the last N attempts hit the SAME terminal with nothing
+# changed between them. Replaying the window: N=2 suppresses 6 runs / 1.5h and loses
+# ZERO witnessed commits for any TTL in [3h, 8h]; at TTL>=9h it starts eating #3267's
+# 08-07 00:33 win, which landed 5.3h after that issue's last block. 6h sits inside
+# that zero-loss band with margin on both sides, and it is what makes the hold
+# self-clearing: it does not decide the issue is dead, it admits ONE probe per window
+# and lets the PROBE'S OUTCOME clear or re-arm the hold. Yield is deliberately modest
+# because consecutive-identical streaks are rare while the `unknown` bucket stays
+# untyped (149/232 no-commit runs, 49.7h -- #5867): `policy_block -> unknown` (13)
+# outnumbers `policy_block -> policy_block` (8). Typing that bucket raises this same
+# rule's yield to 24 runs / 7.3h with no change here. Set either to 0 to disable.
+DEFAULT_REBLOCK_STREAK_HOLD_N = 2
+DEFAULT_REBLOCK_STREAK_HOLD_TTL_H = 6
 # Low-yield lane soft-exclude (#2062): a lane whose recent resolve sessions burned
 # turns yet closed nothing is a poison-pill sink (e.g. a GPU-less host re-grabbing a
 # P1 GPU epic it structurally cannot run). The shared lane_yield fold flags it; the
@@ -4139,6 +4166,155 @@ def held_no_commit_issues(witnessed: dict[str, Any] | None) -> set[int]:
     return held
 
 
+def issue_witness_history(runs_dir: Path) -> dict[int, list[dict[str, Any]]]:
+    """``{issue: [record, ...]}`` in LAUNCH order, read from the durable
+    ``resolve-<issue>-<UTC>.witness`` sidecars. Each record carries ``ts`` (the UTC
+    launch stamp parsed from the FILENAME), ``claim`` and ``reason``.
+
+    The filename stamp -- not the mtime -- is the ordering key: it is the worker's
+    launch instant, so it is monotone per issue, whereas the witness sweep rewrites
+    mtimes at an arbitrary later tick and would scramble the sequence. A run's whole
+    lifetime is well under an hour (p95 31 min over the window), so using the launch
+    stamp as the recency key too costs far less than the hold TTL it is compared
+    against, and it keeps this a pure function of names + contents.
+
+    These sidecars are the DURABLE carrier: :func:`prune_dead_sidecars` unlinks a
+    dead worker's ``.pid`` and process-metadata siblings but explicitly RETAINS the
+    ``.log`` and ``.witness`` "as the durable transcript/cooldown evidence", so this
+    history outlives every worker AND every dispatcher process. That is why #5869
+    needs no new ledger: unlike the repair cooldown -- whose carrier WAS swept, which
+    is why :func:`record_repair_attempt` had to start writing ``repair-attempts
+    .jsonl`` -- the evidence this hold keys on is already written and already kept.
+    FAIL-OPEN: an unreadable or unparseable sidecar is skipped, never raised."""
+    hist: dict[int, list[dict[str, Any]]] = {}
+    if not runs_dir.is_dir():
+        return hist
+    for w in runs_dir.glob(f"resolve-*{WITNESS_SIDECAR_SUFFIX}"):
+        m = _WITNESS_STAMP_RE.match(w.name)
+        if not m:
+            continue
+        try:
+            ts = dt.datetime.strptime(
+                m.group(2) + m.group(3), "%Y%m%d%H%M%S").replace(
+                    tzinfo=dt.timezone.utc).timestamp()
+        except ValueError:
+            continue
+        try:
+            row = json.loads(w.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(row, dict):
+            continue
+        hist.setdefault(int(m.group(1)), []).append({
+            "ts": ts,
+            "claim": str(row.get("claim") or ""),
+            "reason": str(row.get("reason") or ""),
+        })
+    for runs in hist.values():
+        runs.sort(key=lambda r: r["ts"])
+    return hist
+
+
+def reblock_streak_held_records(
+    runs_dir: Path,
+    *,
+    streak_n: int = DEFAULT_REBLOCK_STREAK_HOLD_N,
+    ttl_h: int = DEFAULT_REBLOCK_STREAK_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+) -> list[dict[str, Any]]:
+    """Issues whose last ``streak_n`` finished workers ALL hit the SAME re-blockable
+    terminal -- the durable, cross-process half of the #1396 pick-held-invariant that
+    :func:`held_no_commit_issues` only ever provided for the witnessing tick.
+
+    The key is REPETITION, not the reason CLASS. Holding on the class alone (N=1) is
+    what the measurement in #5869 refutes: 15% of the re-dispatches that follow a
+    re-blockable terminal land a witnessed commit, so a first retry after a
+    ``policy_block`` must stay ADMITTED. Only once the SAME terminal recurs with
+    nothing changed between the attempts is the retry provably futile. Streak identity
+    is deliberately strict -- the tail must be ``streak_n`` CONSECUTIVE
+    ``CLAIM_NO_COMMIT`` records carrying ONE reason drawn from
+    ``_HOLD_NO_COMMIT_REASONS``. Anything else in that tail (a landed commit, an
+    ``auth_wall``, a ``restart_exhausted``, an untyped ``unknown``, or the OTHER
+    re-blockable reason) means the attempts were not identical, and the issue stays
+    free to retry.
+
+    THREE things clear the hold, so it can never outlive the condition it describes:
+
+    * **A changed outcome** -- the structural clear. Any admitted run that is not the
+      same re-blockable terminal breaks the tail and the hold evaporates with no reset
+      verb. This is the clear that matters, and the TTL exists to keep it REACHABLE.
+    * **The TTL** -- measured from the newest run in the streak. Elapsed time alone
+      does not declare the issue retryable; it admits exactly ONE probe per window and
+      lets that probe's OUTCOME decide. A probe that re-blocks identically re-arms the
+      hold for another window; a probe that lands anything else clears it for good.
+      Without this a held issue could never produce the record that frees it (the
+      streak cannot break if no run is ever admitted) -- the self-sealing hold.
+    * **A fresh gh ``updatedAt``** -- newer than the newest run in the streak. A guard
+      refusal is a verdict on what the ISSUE ASKED FOR, so a re-scope genuinely
+      changes it. This is the same content-keyed re-admission the contract and
+      multi-lane ledgers take, and it is why this hold does NOT take the local-tree
+      opt-out ``collision_held_records`` needs.
+
+    ``streak_n <= 0`` or ``ttl_h <= 0`` disables the gate (readers return empty),
+    matching the other holds' kill switch. Pure + FAIL-OPEN throughout."""
+    if streak_n <= 0 or ttl_h <= 0:
+        return []
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    horizon = now - ttl_h * 3600
+    out: list[dict[str, Any]] = []
+    for issue, all_runs in sorted(issue_witness_history(runs_dir).items()):
+        # Only runs that have already LAUNCHED count. Live this is a no-op (nothing is
+        # stamped in the future), but it keeps the hold a pure function of ``now_ts``
+        # so a test — or a replay over the retained corpus — can evaluate it at any
+        # instant and see exactly what the picker would have seen at that tick.
+        runs = [r for r in all_runs if r["ts"] <= now]
+        tail = runs[-streak_n:]
+        if len(tail) < streak_n:
+            continue
+        reasons = {r["reason"] for r in tail}
+        if len(reasons) != 1:
+            continue
+        reason = next(iter(reasons))
+        if reason not in _HOLD_NO_COMMIT_REASONS:
+            continue
+        if any(r["claim"] != CLAIM_NO_COMMIT for r in tail):
+            continue
+        newest = tail[-1]["ts"]
+        # TTL lapse: admit exactly one probe and let its outcome re-arm or clear.
+        if newest < horizon:
+            continue
+        # Re-scoped issue: the guard verdict this streak recorded is about a body the
+        # issue no longer has, so re-admit it early rather than holding on stale
+        # evidence.
+        if updated_ts and (updated_ts.get(issue) or 0.0) > newest:
+            continue
+        out.append({
+            "issue": issue,
+            "number": issue,
+            "reason": reason,
+            "streak": streak_n,
+            "last_ts": newest,
+        })
+    return out
+
+
+def reblock_streak_held_issues(
+    runs_dir: Path,
+    *,
+    streak_n: int = DEFAULT_REBLOCK_STREAK_HOLD_N,
+    ttl_h: int = DEFAULT_REBLOCK_STREAK_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+) -> set[int]:
+    """Issue numbers held after ``streak_n`` CONSECUTIVE identical re-blockable
+    terminals (#5869). Set view of :func:`reblock_streak_held_records`."""
+    return {int(r["issue"]) for r in reblock_streak_held_records(
+        runs_dir, streak_n=streak_n, ttl_h=ttl_h, now_ts=now_ts,
+        updated_ts=updated_ts)}
+
+
 def _subject_cites_issue(subject: str, issue: int) -> bool:
     """True when a commit ``subject`` names ``#<issue>`` at a word boundary — the
     same binding key issue_closure_audit uses. A subject that does not name the
@@ -5658,7 +5834,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # fail-open) OR a fresh local contract overlay (a repair worker's landed
     # backfill — the write path a worker can actually complete on this host).
     if (contract_hold_ttl_h > 0 or DEFAULT_MULTI_LANE_HOLD_TTL_H > 0
-            or DEFAULT_COLLISION_HOLD_TTL_H > 0):
+            or DEFAULT_COLLISION_HOLD_TTL_H > 0
+            or DEFAULT_REBLOCK_STREAK_HOLD_TTL_H > 0):
         refreshed_ts = open_issue_updated_map(root)
         for n, ts in contract_overlay_times(runs_dir).items():
             refreshed_ts[n] = max(refreshed_ts.get(n) or 0.0, ts)
@@ -5676,6 +5853,16 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # live tree periodically, so a committed/reverted path re-admits on its own.
     collision_held_prior = collision_held_issues(
         runs_dir, ttl_h=DEFAULT_COLLISION_HOLD_TTL_H, updated_ts=refreshed_ts)
+    # ...AND an issue whose last N finished workers ALL hit the SAME re-blockable
+    # terminal (#5869). ``held_no_commit`` above only holds the tick that WITNESSED
+    # the exit, so the next tick re-picked the issue with no memory of the refusal;
+    # this reads the retained .witness sidecars instead, so the hold survives the
+    # dispatcher process. Keyed on REPETITION rather than the reason class because
+    # 15% of the re-dispatches following a re-blockable terminal still land a commit
+    # — a first retry stays admitted, and only a proven-identical repeat is held.
+    reblock_streak_held = reblock_streak_held_issues(
+        runs_dir, streak_n=DEFAULT_REBLOCK_STREAK_HOLD_N,
+        ttl_h=DEFAULT_REBLOCK_STREAK_HOLD_TTL_H, updated_ts=refreshed_ts)
     # The cross-lane candidate stream the bounded contract scan walks (busiest
     # lane's oldest candidate first, then each other eligible lane's, round-robin).
     # Falls back to the single chosen lane when the router fold predates the
@@ -5711,6 +5898,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         for n in sorted(capability_skipped)]
     skip = (live_issues | cooled | held_no_commit | contract_held_prior
             | multi_lane_held_prior | collision_held_prior
+            | reblock_streak_held
             | local_witnessed | audit_abstain_held | open_witnessed_held
             | capability_skipped)
     scan_stream = contract_scan_stream(eligible_lanes, skip)
@@ -6161,6 +6349,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         payload["contract_held_prior"] = len(contract_held_prior)
     if collision_held_prior:
         payload["collision_held_prior"] = len(collision_held_prior)
+    # Never-silent-drop: name the issues this hold removed, not just a count, so a
+    # reader can tell a consecutive-identical re-block hold from a plain cooldown.
+    if reblock_streak_held:
+        payload["reblock_streak_held"] = sorted(reblock_streak_held)
     payload["issue_contract_gate"] = {
         "ok": bool(contract.get("ok")),
         "unavailable": bool(contract.get("unavailable")),
