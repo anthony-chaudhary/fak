@@ -51,4 +51,3 @@ func validRealEndpointReport(contexts int) report {
 		KVCapacityEvidence: "fixture", QueueEvidence: "fixture", ResultCheck: "fixture", VerifiedResultsPerSec: 1,
 	}
 }
-

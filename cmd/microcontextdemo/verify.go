@@ -71,4 +71,3 @@ func declaredScale(n int) bool {
 		return false
 	}
 }
-
