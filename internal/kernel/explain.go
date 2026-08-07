@@ -53,15 +53,15 @@ type RungVerdict struct {
 // returned, which won, the bounded-disclosure witness, the loopback
 // disposition, and a one-line human explanation. Built only off the hot path.
 type Decision struct {
-	Tool        string        `json:"tool"`
-	ArgsDigest  string        `json:"args_digest,omitempty"` // sha256[:12] of the args bytes — never the raw args
-	ArgsBytes   int           `json:"args_bytes"`            // size of the args payload
-	Consistency string        `json:"consistency"`           // the call's declared consistency level (#1317): STRICT (the default) / BOUNDED_STALE / BEST_EFFORT / SPECULATIVE — recorded verbatim so the relaxation contract is an audit field, not a hidden mode
-	Verdict     string        `json:"verdict"`               // final verdict kind name
-	Reason      string        `json:"reason,omitempty"`      // final reason name (omitted when NONE)
-	By          string        `json:"by,omitempty"`          // winning rung's By (or synthesized: empty-policy/all-defer)
-	Claim       string        `json:"claim,omitempty"`       // final bounded-disclosure witness
-	Disposition string        `json:"disposition,omitempty"` // deny loopback: RETRYABLE/WAIT/ESCALATE/TERMINAL
+	Tool        string `json:"tool"`
+	ArgsDigest  string `json:"args_digest,omitempty"` // sha256[:12] of the args bytes — never the raw args
+	ArgsBytes   int    `json:"args_bytes"`            // size of the args payload
+	Consistency string `json:"consistency"`           // the call's declared consistency level (#1317): STRICT (the default) / BOUNDED_STALE / BEST_EFFORT / SPECULATIVE — recorded verbatim so the relaxation contract is an audit field, not a hidden mode
+	Verdict     string `json:"verdict"`               // final verdict kind name
+	Reason      string `json:"reason,omitempty"`      // final reason name (omitted when NONE)
+	By          string `json:"by,omitempty"`          // winning rung's By (or synthesized: empty-policy/all-defer)
+	Claim       string `json:"claim,omitempty"`       // final bounded-disclosure witness
+	Disposition string `json:"disposition,omitempty"` // deny loopback: RETRYABLE/WAIT/ESCALATE/TERMINAL
 	// DenyRule is the CLOSED-vocabulary id of the policy RUNG that refused
 	// (abi.DenyRuleID). Reason names the refusal's CLASS — POLICY_BLOCK covers the
 	// recursive-delete rung, the out-of-tree-write rung and seven gitgate laws at
@@ -81,9 +81,9 @@ type Decision struct {
 	Remedy      string        `json:"remedy,omitempty"`
 	Posture     string        `json:"posture,omitempty"`    // verdict Meta: e.g. admit_and_log
 	WouldDeny   string        `json:"would_deny,omitempty"` // verdict Meta: the reason a posture downgrade suppressed
-	Redacted    []string      `json:"redacted,omitempty"`    // TRANSFORM: arg keys whose value the rung rewrote
-	Rungs       []RungVerdict `json:"rungs"`                 // every rung consulted, in fold order
-	Explanation string        `json:"explanation"`           // one-line human summary
+	Redacted    []string      `json:"redacted,omitempty"`   // TRANSFORM: arg keys whose value the rung rewrote
+	Rungs       []RungVerdict `json:"rungs"`                // every rung consulted, in fold order
+	Explanation string        `json:"explanation"`          // one-line human summary
 }
 
 // FoldExplain folds an Adjudicator chain EXACTLY as Fold does (same winning
