@@ -414,6 +414,19 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #2439: resolve the TARGET before anything is dispatched. A `to` carrying the
+	// kernel's lease prefix is a kernel-minted lease identity and is resolved strictly —
+	// an id the kernel never minted refuses LEASE_UNKNOWN, one past its expiry refuses
+	// LEASE_EXPIRED. Neither refusal falls back to name routing: that fallback IS the
+	// misroute this closes, where an expired lease id is delivered to whichever agent
+	// holds the underlying NAME now. A plain name still routes as before.
+	if _, reason, ok := s.resolveLeaseTarget(msg.To, time.Now()); !ok {
+		writeErrCode(w, http.StatusGone, strings.ToLower(reason),
+			reason+": the message addresses a kernel-minted lease that is no longer deliverable; "+
+				"it is refused rather than routed to the name's current holder — re-resolve the peer's live lease id")
+		return
+	}
+
 	// Extract tenant from headers
 	tenantID := r.Header.Get("X-Tenant-ID")
 

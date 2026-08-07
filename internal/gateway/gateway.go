@@ -1486,6 +1486,20 @@ type Server struct {
 	tracePrincipalMu sync.RWMutex
 	tracePrincipal   map[string]Principal
 
+	// sessionLeases holds the kernel-MINTED lease identities cross-agent sends address
+	// (#2439): id -> (name, expiry). Addressing a lease id rather than a name is what
+	// makes a send to a dead session refuse instead of misrouting to whoever holds that
+	// name now. Guarded by leaseMu; bounded by the same generational reset as traceOwner.
+	leaseMu       sync.RWMutex
+	sessionLeases map[string]sessionLease
+
+	// controlPlaneLog is the control-plane principal journal (#2439): one row per
+	// /v1/fak/session/{id}/{verb} event with the principal the KERNEL assigned it, refused
+	// or not, so a relayed authority attempt leaves a countable witness. Guarded by
+	// controlPlaneMu; bounded to maxControlPlaneEvents, oldest dropped first.
+	controlPlaneMu  sync.Mutex
+	controlPlaneLog []ControlPlaneEvent
+
 	// turnSafetyMu guards turnSafety, the per-trace stash of the LAST turn's adjudication
 	// SAFETY delta (calls blocked / repaired this turn, results quarantined this turn). The
 	// per-turn fak-turn debug line (debug_stats.go) already shows the turn's cache/token

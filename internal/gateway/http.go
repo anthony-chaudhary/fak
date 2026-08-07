@@ -1207,6 +1207,29 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|budget|pace|priority|wall|throughput}")
 			return
 		}
+		// #2439: the kernel ASSIGNS this control event's authority principal from the
+		// authenticated transport (the route's floor + the trusted front door's relay
+		// header), never from the request body. Authority-CONSUMING verbs — pause/resume
+		// via "run", and the policy-widening budget/wall/throughput — are then refused
+		// outright under a peer / timer / network principal, so "a webhook paused the run"
+		// or "a scheduled task widened the budget" is unrepresentable rather than patched
+		// per channel. Ordered before every verb dispatch so no shape escapes the check;
+		// each verb, refused or admitted, is journaled with its principal.
+		principal := kernelPrincipal(r)
+		if controlVerbConsumesAuthority(verb) && !principal.IsHuman() {
+			s.journalControlPrincipal(ControlPlaneEvent{
+				TraceID:   traceID,
+				Verb:      verb,
+				Principal: principal,
+				Refused:   true,
+				Reason:    ReasonPrincipalNotHuman,
+			})
+			writeErrCode(w, http.StatusForbidden, "principal_not_human",
+				ReasonPrincipalNotHuman+": the "+verb+" verb consumes user authority and arrived under the "+
+					string(principal)+" principal; a relayed message, a webhook delivery, or a scheduled task "+
+					"cannot spend the operator's authority — re-issue it from the human control wire")
+			return
+		}
 		// fork/export/import are their own shape (#2419): they act on the durable
 		// session CHAIN rather than on the drive table, so they take their own bodies
 		// and answer their own documents (session_teleport.go). Dispatched before the
@@ -1278,7 +1301,13 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 						"); it is held as a quarantine stub and never reaches the loop")
 				return
 			}
-			if err := s.steerSession(r.Context(), traceID, sr.Principal, sr.Text); err != nil {
+			// #2439: the append reaches the bus under the KERNEL's principal. A steer is
+			// input, not an authority-consuming act, so a peer/timer steer still lands — but
+			// it lands labelled peer-agent/timer instead of being able to present as the
+			// operator by writing "operator" in its body. The journal row is written before
+			// the Send so a refused steer is still attributable to its principal.
+			s.journalControlPrincipal(ControlPlaneEvent{TraceID: traceID, Verb: verb, Principal: principal})
+			if err := s.steerSession(r.Context(), traceID, stampedSteerPrincipal(principal, sr.Principal), sr.Text); err != nil {
 				writeErr(w, http.StatusUnprocessableEntity, "steer refused: "+err.Error())
 				return
 			}
@@ -1310,6 +1339,10 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusConflict, "session control refused (terminal or stale rev)")
 			return
 		}
+		// #2439: an ADMITTED control verb is journaled with its principal too — the record
+		// answers "which principal drove this session" for every event, not only the refused
+		// ones, so an absent row is evidence of an unstamped path rather than of a clean run.
+		s.journalControlPrincipal(ControlPlaneEvent{TraceID: traceID, Verb: verb, Principal: principal})
 		s.logf("gateway: session %s %s -> rev %d (%s)", traceID, verb, st.Rev, st.Run)
 		writeJSON(w, http.StatusOK, st)
 	default:
