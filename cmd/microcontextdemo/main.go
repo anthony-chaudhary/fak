@@ -294,6 +294,8 @@ func main() {
 	var verifyMultiTurnDescriptorPath string
 	var verifyS2BPath string
 	var compatOutput, verifyCompatPath string
+	var batchModelPath, batchHardware, batchOutput, verifyBatchPath string
+	var batchSize int
 	var effectsOutput, verifyEffectsPath string
 	var verifyAPIOnlyPath string
 	var qualityInput, qualityOutput, verifyQualityPath string
@@ -335,6 +337,7 @@ func main() {
 	flag.StringVar(&verifyS2BPath, "verify-kernel-prefix-ab", "", "verify a controlled in-kernel prefix-cache A/B artifact and exit")
 	flag.StringVar(&compatOutput, "compatibility-witness", "", "run compatibility scheduler witness and write JSON")
 	flag.StringVar(&verifyCompatPath, "verify-compatibility", "", "verify compatibility artifact")
+	registerBatchExecutionFlags(flag.CommandLine, &batchModelPath, &batchHardware, &batchOutput, &verifyBatchPath, &batchSize)
 	flag.StringVar(&effectsOutput, "effects-witness", "", "run effect-safety witness and write JSON")
 	flag.StringVar(&verifyEffectsPath, "verify-effects", "", "verify effect-safety artifact")
 	flag.StringVar(&verifyAPIOnlyPath, "verify-api-only", "", "verify captured S6 API-only artifact")
@@ -430,6 +433,21 @@ func main() {
 			os.Exit(1)
 		}
 		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if verifyBatchPath != "" {
+		if err := verifyBatchExecutionArtifact(verifyBatchPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyBatchPath)
+		return
+	}
+	if batchOutput != "" {
+		if err := runBatchExecution(batchModelPath, batchHardware, batchOutput, batchSize); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
