@@ -51,6 +51,14 @@ func TestOpenWeightsBucketMakesNoPlacementClaim(t *testing.T) {
 	ids := []string{
 		"qwen2.5:14b", "qwen/qwen3.6-27b", "llama3.2", "mistral-large",
 		"mixtral-8x7b", "phi-4", "deepseek-v4-pro", "glm-5.2", "kimi-k3",
+		// The gpt-oss family embeds a VENDOR family name ("gpt") in an
+		// OPEN-WEIGHTS id, so it is the one case where substring order decides
+		// the answer. fak serves these weights itself — MXFP4 dequant-on-load in
+		// internal/ggufload, and a CI oracle in internal/covmatrix
+		// ({Name: "gpt-oss-MoE", ResolverToken: "gptoss", OracleInCI: true}) — so
+		// bucketing them "OpenAI" asserts a vendor placement fak's own tree
+		// disproves (#5115).
+		"gpt-oss-120b", "gpt-oss:20b", "gptoss-120b", "openai/gpt_oss-20b",
 	}
 	for _, id := range ids {
 		bucket := ProviderBucket(id)
