@@ -232,6 +232,88 @@ func (s ServingReport) fresh(obs ServingObservation) bool {
 	return age >= 0 && age <= s.MaxAgeSeconds
 }
 
+// StaleAsOf reports whether the SNAPSHOT AS A WHOLE cannot be shown fresh at
+// nowUnix (issue #5636).
+//
+// fresh() above answers a different and strictly internal question: was an
+// observation recent WHEN THE SNAPSHOT WAS ASSEMBLED? Every stamp it compares comes
+// out of the same document, which makes a report self-certifying. A producer that
+// died last Tuesday leaves behind a file whose as-of and observation stamps are ten
+// seconds apart forever, so every internal check passes forever and the ladder keeps
+// placing work on a rung nobody has looked at in a week. Answering "is the SNAPSHOT
+// recent?" needs a clock the document does not own, so the caller supplies one.
+//
+// This is deliberately NOT called from Place. Placement stays pure — same roster,
+// same candidates, same report, same answer, on any machine at any time — so the
+// clock is applied by the consumer as a transform on the report BEFORE it is placed
+// against. See DegradeStale.
+//
+// THE THREE CASES WHERE THIS DECLINES TO FIRE are each a case where firing would
+// invent a claim, and in none of them does declining leave a stale positive standing:
+//
+//   - NO BOUND DECLARED (MaxAgeSeconds <= 0). The honest reading of declining to state
+//     a TTL is that observations are honored at any age; fresh() already reads it that
+//     way, and a wall clock must not manufacture a bound the operator never wrote.
+//   - NO AS-OF STAMP (AsOfUnix <= 0). There is no instant to measure an age against.
+//     This is not a fail-open: under a declared bound, rule 3 already fails EVERY
+//     observation in such a report closed as unshowably fresh, so the rung is skipped
+//     either way. Firing here would only trade the accurate zone-serving-stale token
+//     for zone-serving-unknown and tell the operator less.
+//   - NO CLOCK (nowUnix <= 0). A caller that supplied no clock cannot check the claim,
+//     and an unchecked claim is not granted in either direction; the internal rule
+//     still governs.
+//
+// A report stamped in the READER's future is stale, mirroring the negative-age guard
+// in fresh() and for the same reason: a producer whose clock runs ahead would
+// otherwise pin a rung open forever, and a broken producer must never be able to do
+// that.
+func (s ServingReport) StaleAsOf(nowUnix int64) bool {
+	if s.MaxAgeSeconds <= 0 || s.AsOfUnix <= 0 || nowUnix <= 0 {
+		return false
+	}
+	age := nowUnix - s.AsOfUnix
+	return age < 0 || age > s.MaxAgeSeconds
+}
+
+// DegradeStale returns a COPY of the report in which every observation reads
+// ServingUnknown, when the report as a whole is stale at nowUnix. A report that is
+// not stale is returned unchanged, so a deployment whose producer is alive places
+// exactly as it does today.
+//
+// TWO CHOICES HERE ARE LOAD-BEARING AND BOTH ARE EASY TO GET WRONG.
+//
+// FIRST: UNKNOWN, NOT DOWN. A snapshot nobody refreshed is an absence of observation,
+// not an observed outage. Degrading to down would report a fleet failure that was
+// never measured — the same sin, pointed the other way, as letting a stale "up" stand.
+// Unknown is the state serving.go already defines as an explicit admission of
+// ignorance, and the ladder records it as zone-serving-unknown: escalation the
+// operator can read as "nobody is watching this rung" rather than "this rung is
+// broken."
+//
+// SECOND: THE ENTRY IS REWRITTEN, NEVER DELETED. Dropping a stale observation looks
+// equivalent and fails OPEN in exactly the deployment that needs it most. By rule 1,
+// silence only gates a candidate on a rung the report claims to COVER; on any rung
+// outside Covers an absent observation gates nothing at all. So a stale report whose
+// entries were deleted would keep handing work to a week-dead host on every
+// uncovered rung. Rewriting the state in place keeps rule 2 in force — an observation
+// that EXISTS is honored whether or not its rung was declared — and the candidate is
+// passed over everywhere.
+//
+// The observation stamps are preserved. They are what a diagnostic surface renders to
+// say HOW stale, and nothing downstream reads them once the state is unknown.
+func (s ServingReport) DegradeStale(nowUnix int64) ServingReport {
+	if !s.StaleAsOf(nowUnix) || len(s.Models) == 0 {
+		return s
+	}
+	out := s
+	out.Models = make(map[string]ServingObservation, len(s.Models))
+	for model, obs := range s.Models {
+		obs.State = ServingUnknown
+		out.Models[model] = obs
+	}
+	return out
+}
+
 // verdict decides what the snapshot says about one candidate.
 //
 // skip is whether the candidate is passed over; reason is the closed token to
