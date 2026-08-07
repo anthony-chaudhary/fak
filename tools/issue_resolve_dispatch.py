@@ -301,6 +301,16 @@ _AUDIT_LOG_RE = re.compile(r"audit log\s*:\s*(.+?\.jsonl)")
 # context burn.
 ACTIVE_COMPACT_RUNAWAY_MIN_COUNT = 3
 ACTIVE_COMPACT_RUNAWAY_MIN_PAST_K = 20.0
+# A turn whose context sits this many thousand tokens BELOW the previous turn's
+# is a compaction shed: positive proof compact control just did its job. Context
+# only grows within a compaction cycle, so a drop this large has no other cause.
+# Hits recorded before the most recent shed describe an overshoot the harness has
+# ALREADY recovered from, so they are forgotten (#5858). Without this the scan
+# counts all-time hits and the hold LATCHES for the rest of a recovered worker's
+# life -- the same "hold outlives the condition that caused it" shape as a lane
+# goal-park that outlived its 429. The hold must describe compact control failing
+# NOW, not once.
+ACTIVE_COMPACT_RUNAWAY_SHED_K = 5.0
 _CTX_BUDGET_RE = re.compile(r"\bctx:(\d+(?:\.\d+)?)k/(\d+(?:\.\d+)?)k")
 _DIST_PAST_COMPACT_RE = re.compile(r"\bdist:(\d+(?:\.\d+)?)k-past-compact")
 _COMPACT_FIELD_RE = re.compile(r"\bcompact=(\S+)")
@@ -541,6 +551,7 @@ def _compact_runaway_from_log(
     *,
     min_count: int = ACTIVE_COMPACT_RUNAWAY_MIN_COUNT,
     min_past_k: float = ACTIVE_COMPACT_RUNAWAY_MIN_PAST_K,
+    shed_k: float = ACTIVE_COMPACT_RUNAWAY_SHED_K,
 ) -> dict[str, Any]:
     """Return positive evidence that one live worker is past compact and looping.
 
@@ -548,12 +559,19 @@ def _compact_runaway_from_log(
     consecutive tool turns are tens of thousands of tokens past the compact
     threshold, another resolver spawn is more likely to multiply the failure
     mode than add useful throughput.
+
+    "Consecutive" is load-bearing and is enforced against the CURRENT compaction
+    cycle only: a compaction shed (:data:`ACTIVE_COMPACT_RUNAWAY_SHED_K`) clears
+    the accumulated hits, because a worker the harness already pulled back under
+    budget is not a runaway no matter how far it once overshot.
     """
     try:
         lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return {"runaway": False, "unavailable": True, "log": str(log)}
     hits: list[dict[str, Any]] = []
+    prev_ctx_k: float | None = None
+    sheds = 0
     for line in lines:
         if "fak-turn" not in line or "finish=tool_use" not in line:
             continue
@@ -565,6 +583,12 @@ def _compact_runaway_from_log(
             limit_k = float(ctx_m.group(2))
         except ValueError:
             continue
+        # Compact control demonstrably fired: forget the overshoot it just cured,
+        # so the hold clears on recovery instead of latching forever.
+        if prev_ctx_k is not None and ctx_k <= prev_ctx_k - shed_k:
+            hits.clear()
+            sheds += 1
+        prev_ctx_k = ctx_k
         past_k = max(0.0, ctx_k - limit_k)
         dist_m = _DIST_PAST_COMPACT_RE.search(line)
         if dist_m:
@@ -587,6 +611,7 @@ def _compact_runaway_from_log(
             "runaway": False,
             "log": str(log),
             "count": len(hits),
+            "sheds": sheds,
             "max_past_k": round(max((h["past_k"] for h in hits), default=0.0), 1),
         }
     last = hits[-1]
@@ -594,6 +619,7 @@ def _compact_runaway_from_log(
         "runaway": True,
         "log": str(log),
         "count": len(hits),
+        "sheds": sheds,
         "max_past_k": round(max(h["past_k"] for h in hits), 1),
         "ctx_k": last["ctx_k"],
         "limit_k": last["limit_k"],
@@ -634,6 +660,12 @@ def active_compact_runaway_hold(
             except ValueError:
                 issue = None
         hit["issue"] = issue
+        # Which lane the runaway actually burns (#5858). A compact runaway is a
+        # property of ONE worker's context, not of the fleet: stamp the lane so
+        # the caller can scope the hold to the colliding lane instead of idling
+        # every disjoint lane behind one worker's local condition. `None` when
+        # the spawn header is unreadable -- the caller fails CLOSED on unknown.
+        hit["lane"] = _spawn_header_lane(log)
         candidates.append(hit)
     if not candidates:
         return {"active": False}
@@ -642,13 +674,16 @@ def active_compact_runaway_hold(
         reverse=True,
     )
     top = candidates[0]
+    lane_bit = f" on lane '{top.get('lane')}'" if top.get("lane") else ""
     return {
         "active": True,
         "candidates": candidates[:5],
+        "lanes": sorted({str(c.get("lane")) for c in candidates if c.get("lane")}),
+        "lane_unknown": any(not c.get("lane") for c in candidates),
         "reason": (
-            f"live worker #{top.get('issue') or '?'} is already past compact "
-            f"by {top.get('max_past_k')}k tokens across {top.get('count')} "
-            "tool-use turns"
+            f"live worker #{top.get('issue') or '?'}{lane_bit} is already past "
+            f"compact by {top.get('max_past_k')}k tokens across "
+            f"{top.get('count')} tool-use turns"
         ),
     }
 
@@ -5661,19 +5696,39 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         return finish(payload)
     compact_runaway = active_compact_runaway_hold(root, runs_dir)
     if compact_runaway.get("active"):
-        reason = str(compact_runaway.get("reason") or "active compact runaway")
+        # Lane-scope the hold (#5858). A compact runaway is ONE worker's local
+        # context condition; it justifies not piling a SECOND worker onto the
+        # same lane, but it is no reason to idle every disjoint lane. Held
+        # fleet-wide it converted one worker's overshoot into a 20-free-slot
+        # stall -- the same unit-fault-becomes-fleet-block shape as a lane lease
+        # held by a long-dead worker. Fail CLOSED when any runaway's lane is
+        # unknown (unreadable spawn header): we cannot prove disjointness then.
+        runaway_lanes = set(compact_runaway.get("lanes") or ())
+        lane_unknown = bool(compact_runaway.get("lane_unknown", True))
+        collides = (
+            lane_unknown
+            or not chosen_lane
+            or str(chosen_lane) in runaway_lanes
+        )
+        compact_runaway = {
+            **compact_runaway,
+            "scoped_lane": chosen_lane,
+            "collides": collides,
+        }
         payload["active_compact_runaway"] = compact_runaway
-        payload["launch_gate"] = launch_gate_blocked(
-            "ACTIVE_COMPACT_RUNAWAY",
-            reason,
-            "wait-for-loop-worker-to-exit-or-fix-compact-control")
-        payload.update({
-            "ok": False,
-            "action": "active_compact_runaway",
-            "verdict": "ACTIVE_COMPACT_RUNAWAY",
-            "reason": reason,
-        })
-        return finish(payload)
+        if collides:
+            reason = str(compact_runaway.get("reason") or "active compact runaway")
+            payload["launch_gate"] = launch_gate_blocked(
+                "ACTIVE_COMPACT_RUNAWAY",
+                reason,
+                "wait-for-loop-worker-to-exit-or-fix-compact-control")
+            payload.update({
+                "ok": False,
+                "action": "active_compact_runaway",
+                "verdict": "ACTIVE_COMPACT_RUNAWAY",
+                "reason": reason,
+            })
+            return finish(payload)
     if not chosen_lane:
         if pick.get("self_modify_held"):
             held = sorted(pick.get("self_modify_held"))

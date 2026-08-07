@@ -382,6 +382,87 @@ class ActiveCompactRunawayTest(unittest.TestCase):
 
         self.assertFalse(hold["active"])
 
+    def test_compact_runaway_clears_after_compaction_shed(self) -> None:
+        """A worker the harness ALREADY pulled back under budget is not a runaway.
+
+        Regression for #5858: the scan used to count all-time past-compact turns,
+        so once a worker overshot, the hold LATCHED for the rest of its life even
+        though compaction fired, shed the context, and the worker kept making
+        progress. The hold must describe compact control failing NOW.
+        """
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            runs.mkdir(parents=True)
+            log = runs / "resolve-4568-20260807-041054.log"
+            lines = [
+                "# fak-spawn issue=4568 lane=quality backend=claude",
+                # Overshoot: 3 turns >=20k past compact (the old latch trigger).
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:126.3k ctx:126.3k/96.0k dist:30.3k-past-compact",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:130.1k ctx:130.1k/96.0k dist:34.1k-past-compact",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:134.1k ctx:134.1k/96.0k dist:38.1k-past-compact",
+                # Compaction FIRES and sheds 66k: proof compact control works.
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:68.1k ctx:68.1k/96.0k",
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:90.3k ctx:90.3k/96.0k",
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:93.3k ctx:93.3k/96.0k",
+            ]
+            log.write_text("\n".join(lines), encoding="utf-8")
+            log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_compact_runaway_hold(root, runs)
+                hit = mod._compact_runaway_from_log(log)
+
+        self.assertFalse(hold["active"])
+        self.assertFalse(hit["runaway"])
+        # The shed was seen and the pre-shed overshoot forgotten, not merely
+        # outweighed -- so the hold clears immediately on recovery.
+        self.assertEqual(hit["sheds"], 1)
+        self.assertEqual(hit["count"], 0)
+
+    def test_compact_runaway_stamps_the_lane_it_burns(self) -> None:
+        """Each runaway candidate names its lane, so the hold can be lane-scoped
+        instead of idling every disjoint lane (#5858)."""
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            runs.mkdir(parents=True)
+            log = runs / "resolve-4568-20260807-041054.log"
+            lines = [
+                "# fak-spawn issue=4568 lane=quality backend=claude",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:126.3k ctx:126.3k/96.0k dist:30.3k-past-compact",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:130.1k ctx:130.1k/96.0k dist:34.1k-past-compact",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:134.1k ctx:134.1k/96.0k dist:38.1k-past-compact",
+            ]
+            log.write_text("\n".join(lines), encoding="utf-8")
+            log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_compact_runaway_hold(root, runs)
+
+        self.assertTrue(hold["active"])
+        self.assertEqual(hold["candidates"][0]["lane"], "quality")
+        self.assertEqual(hold["lanes"], ["quality"])
+        self.assertFalse(hold["lane_unknown"])
+        self.assertIn("lane 'quality'", hold["reason"])
+
 
 class LiveResolutionLanesTest(unittest.TestCase):
     """The pre-spawn lane-lease set (#1310): a lane is HELD when it already has a
@@ -1410,6 +1491,84 @@ class EvaluateTest(unittest.TestCase):
                          "ACTIVE_COMPACT_RUNAWAY")
         self.assertIn("past compact", p["reason"])
         self.assertIn("launch gate: BLOCKED", mod.render(p))
+
+    def test_compact_runaway_on_other_lane_does_not_block_disjoint_lane(self) -> None:
+        """A runaway on lane A must NOT idle the fleet's dispatch to lane B (#5858).
+
+        The observed stall: one worker on lane `quality` was past compact, and the
+        tick refused to launch #4334 on the DISJOINT lane `tools`, holding 20 free
+        slots fleet-wide. A compact runaway is one worker's local context
+        condition; scoping the hold to the colliding lane is what makes it a
+        proportionate response instead of a fleet-wide stop.
+        """
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [4334],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [4334]]]})
+        mod.active_compact_runaway_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": ["quality"],
+            "lane_unknown": False,
+            "reason": "live worker #4568 on lane 'quality' is already past compact",
+            "candidates": [{"issue": 4568, "lane": "quality", "count": 9,
+                            "max_past_k": 38.1}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertNotEqual(p.get("verdict"), "ACTIVE_COMPACT_RUNAWAY")
+        self.assertNotEqual(p.get("action"), "active_compact_runaway")
+        # Never a silent drop: the disjoint runaway is still REPORTED, with the
+        # lane it was scoped against and the explicit no-collision finding.
+        self.assertEqual(p["active_compact_runaway"]["scoped_lane"], "tools")
+        self.assertFalse(p["active_compact_runaway"]["collides"])
+
+    def test_compact_runaway_still_blocks_its_own_lane(self) -> None:
+        """Lane-scoping must not disarm the hold on the lane actually burning."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "quality", "numbers": [4568],
+                          "by_lane_count": {"quality": 1},
+                          "eligible_by_lane": [["quality", [4568]]]})
+        mod.active_compact_runaway_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": ["quality"],
+            "lane_unknown": False,
+            "reason": "live worker #4568 on lane 'quality' is already past compact",
+            "candidates": [{"issue": 4568, "lane": "quality", "count": 9,
+                            "max_past_k": 38.1}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ACTIVE_COMPACT_RUNAWAY")
+        self.assertTrue(p["active_compact_runaway"]["collides"])
+
+    def test_compact_runaway_with_unknown_lane_fails_closed(self) -> None:
+        """An unreadable spawn header cannot prove disjointness, so the hold keeps
+        its old fleet-wide behaviour rather than guessing."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [4334],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [4334]]]})
+        mod.active_compact_runaway_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": [],
+            "lane_unknown": True,
+            "reason": "live worker #4568 is already past compact",
+            "candidates": [{"issue": 4568, "lane": None, "count": 9}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ACTIVE_COMPACT_RUNAWAY")
 
     def test_contract_scan_bounded_holds_when_none_ready(self) -> None:
         """When every scanned issue is thin, the tick still HOLDs (the floor is
