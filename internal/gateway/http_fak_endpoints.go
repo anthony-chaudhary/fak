@@ -152,6 +152,71 @@ type EventsResponse struct {
 	Principals map[string]string `json:"principals,omitempty"`
 }
 
+// decodeEventsRequest decodes the /v1/fak/events POST body STRICTLY — an unknown field
+// is a 400, the body-side twin of the unknown-query-key rejection. It is a local
+// variant of decodeRequestBody rather than a change to that shared helper because
+// every other fak-native verb tolerates forward-compatible extra fields; only the
+// events drain treats an unrecognized key as a filter the caller believes is applied.
+func decodeEventsRequest(w http.ResponseWriter, r *http.Request, req *EventsRequest) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxTranscriptBody)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(req); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		return false
+	}
+	return true
+}
+
+// EventsRequest is the POST body shape of /v1/fak/events: the ?since= cursor plus
+// the optional row predicates (#3979). It is deliberately its OWN type rather than a
+// reuse of ChangesRequest — the two feeds narrow by different columns (the coherence
+// feed by isolation principal, the audit journal by verdict/tool/trace/kind) — and it
+// is decoded STRICTLY, so a misspelled predicate is a 400 rather than a silently
+// unfiltered full-tail drain that reads like "nothing matched".
+type EventsRequest struct {
+	Since   uint64 `json:"since,omitempty"`
+	Verdict string `json:"verdict,omitempty"`
+	Tool    string `json:"tool,omitempty"`
+	TraceID string `json:"trace_id,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+}
+
+// eventsFilterKeys is the closed set of query parameters /v1/fak/events accepts. Any
+// other key is a 400: an unrecognized predicate that were merely IGNORED would drain
+// the whole tail and look to the caller like a filter that matched everything.
+var eventsFilterKeys = map[string]bool{
+	"since": true, "verdict": true, "tool": true, "trace_id": true, "kind": true,
+}
+
+// eventsFilter is a pure conjunctive row predicate over columns journal.Row already
+// carries. An empty field is "don't care", so the zero value matches every row and the
+// unfiltered drain keeps its exact previous behavior. Matching is exact equality — the
+// journal writes Kind and Verdict as closed upper-case enums (DECIDE/DENY/..., the
+// abi.Verdict kinds), and Tool/TraceID are opaque identifiers whose case is meaningful.
+type eventsFilter struct {
+	verdict string
+	tool    string
+	traceID string
+	kind    string
+}
+
+func (f eventsFilter) match(row journal.Row) bool {
+	if f.verdict != "" && row.Verdict != f.verdict {
+		return false
+	}
+	if f.tool != "" && row.Tool != f.tool {
+		return false
+	}
+	if f.traceID != "" && row.TraceID != f.traceID {
+		return false
+	}
+	if f.kind != "" && row.Kind != f.kind {
+		return false
+	}
+	return true
+}
+
 // handleFakEvents drains the durable, hash-chained audit journal
 // (internal/journal) after the client's ?since= cursor — the Seq of the last row
 // it saw; 0 returns the whole retained tail. It mirrors the /v1/fak/changes
@@ -159,6 +224,15 @@ type EventsResponse struct {
 // coherence bus. It serves the bounded in-memory tail without re-reading disk;
 // the full tamper-evident history is the on-disk JSONL. Returns 404 if no journal
 // is configured (FAK_AUDIT_JOURNAL unset at boot). GET or POST {"since":N}.
+//
+// The drain narrows by the combinable row predicates ?verdict= / ?tool= / ?trace_id= /
+// ?kind= (POST body equivalents, #3979), so a remote consumer debugging a deny-storm
+// pays for the rows it asked for instead of the whole tail plus a client-side jq. The
+// predicates are PURE row filters and do not touch the cursor protocol: the cursor
+// still advances over every row the drain walked, including the ones the filter
+// dropped, so a narrowed poll neither re-delivers a filtered-out row on the next call
+// nor skips the head — and a drain that matches nothing still returns the advanced
+// cursor rather than pinning the caller to a stale one.
 func (s *Server) handleFakEvents(w http.ResponseWriter, r *http.Request) {
 	j := activeJournal()
 	if j == nil {
@@ -166,27 +240,46 @@ func (s *Server) handleFakEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var since uint64
+	var filter eventsFilter
 	if r.Method == http.MethodPost {
-		var req ChangesRequest
-		if !decodeRequestBody(w, r, &req) {
+		var req EventsRequest
+		if !decodeEventsRequest(w, r, &req) {
 			return
 		}
 		since = req.Since
-	} else if v := r.URL.Query().Get("since"); v != "" {
-		n, err := strconv.ParseUint(v, 10, 64)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "since must be a non-negative integer")
-			return
+		filter = eventsFilter{verdict: req.Verdict, tool: req.Tool, traceID: req.TraceID, kind: req.Kind}
+	} else {
+		q := r.URL.Query()
+		for key := range q {
+			if !eventsFilterKeys[key] {
+				writeErr(w, http.StatusBadRequest, "unknown query parameter "+strconv.Quote(key)+
+					"; supported: since, verdict, tool, trace_id, kind")
+				return
+			}
 		}
-		since = n
+		if v := q.Get("since"); v != "" {
+			n, err := strconv.ParseUint(v, 10, 64)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, "since must be a non-negative integer")
+				return
+			}
+			since = n
+		}
+		filter = eventsFilter{
+			verdict: q.Get("verdict"), tool: q.Get("tool"),
+			traceID: q.Get("trace_id"), kind: q.Get("kind"),
+		}
 	}
 	rows := j.Recent(0)
 	out := make([]journal.Row, 0, len(rows))
 	cursor := since
 	for _, row := range rows {
-		if row.Seq > since {
+		if row.Seq > since && filter.match(row) {
 			out = append(out, row)
 		}
+		// Advance over EVERY walked row, not just the delivered ones: the cursor is the
+		// caller's "I have seen up to here" watermark over the journal's Seq line, not a
+		// count of what it was handed.
 		if row.Seq > cursor {
 			cursor = row.Seq
 		}
