@@ -1,0 +1,20 @@
+{
+  "schema": "fak-microcontext-health-scorecard/1",
+  "grade": "A",
+  "score": 100,
+  "evidence": "experiments/microcontext/s5-gcp-1000-cuda-outcomes-2026-08-07.json",
+  "submitted": 1000,
+  "success": 1000,
+  "errors": 0,
+  "refusals": 0,
+  "failure_rate": 0,
+  "verification_rate": 1,
+  "useful_per_wall_second": 0.9564307534570189,
+  "drift": "baseline-only; second comparable ledger required for trend",
+  "reasons": [
+    "1,000-context floor met",
+    "zero terminal failures/refusals",
+    "100% independent verification",
+    "positive useful-work throughput"
+  ]
+}

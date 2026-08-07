@@ -301,6 +301,7 @@ func main() {
 	var qualityInput, qualityOutput, verifyQualityPath string
 	var qualitySamples int
 	var fairnessOutput, verifyFairnessPath string
+	var gradeInput, gradeOutput, verifyGradePath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
 	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
 	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
@@ -347,6 +348,9 @@ func main() {
 	flag.StringVar(&verifyQualityPath, "verify-quality", "", "verify a captured quality ledger")
 	flag.StringVar(&fairnessOutput, "fairness-witness", "", "run the S7 mixed-tenant fairness fixture")
 	flag.StringVar(&verifyFairnessPath, "verify-fairness", "", "verify a captured S7 fairness artifact")
+	flag.StringVar(&gradeInput, "health-input", "", "quality ledger to grade for micro-context health")
+	flag.StringVar(&gradeOutput, "health-scorecard", "", "write micro-context health scorecard")
+	flag.StringVar(&verifyGradePath, "verify-health-scorecard", "", "verify micro-context health scorecard")
 	flag.Parse()
 	if verifyFairnessPath != "" {
 		if err := verifyFairnessArtifact(verifyFairnessPath); err != nil {
@@ -358,6 +362,21 @@ func main() {
 	}
 	if fairnessOutput != "" {
 		if err := writeFairness(fairnessOutput); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if verifyGradePath != "" {
+		if err := verifyHealthArtifact(verifyGradePath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyGradePath)
+		return
+	}
+	if gradeOutput != "" {
+		if err := writeHealthGrade(gradeInput, gradeOutput); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
