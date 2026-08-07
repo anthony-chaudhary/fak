@@ -11,6 +11,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
+// oauthEnv is the default --oauth-token-env name (cmd/fak/guard.go) — the explicit
+// headless/automation override that outranks the credential file in
+// resolveAnthropicOAuthToken's precedence, and so (since #3267) short-circuits the
+// STALE_CRED rung and its re-login park.
+const oauthEnv = "CLAUDE_CODE_OAUTH_TOKEN"
+
 // guard_rehydrate_test.go — the #1834 witness: a headless `fak accounts launch` /
 // `fak guard` with an expired-but-refreshable OAuth credential must refresh and serve (no
 // surfaced 401); an expired-and-unrefreshable credential must refuse with a clear re-auth
@@ -140,6 +146,10 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 	// credential here, so disable it for the whole group; its own behavior is covered separately
 	// by the credrefresh tests and the active-refresh subtest below.
 	t.Setenv("FAK_GUARD_AUTO_REFRESH", "0")
+	// Every subtest below exercises the CREDENTIAL-FILE path, so pin the env-token override
+	// empty: since #3267 a set CLAUDE_CODE_OAUTH_TOKEN short-circuits the rung, and a developer
+	// or CI box that happens to export one would otherwise silently turn these into no-ops.
+	t.Setenv(oauthEnv, "")
 	t.Run("headless_refreshable_credential_proceeds_no_401", func(t *testing.T) {
 		dir := t.TempDir()
 		credPath := filepath.Join(dir, ".credentials.json")
@@ -149,7 +159,7 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 		// refreshed it before serving."
 		writeCred(t, credPath, "sk-ant-oat01-live", time.Now().Add(time.Hour).UnixMilli())
 
-		v := guardRunHeadlessRehydrate(false /* headless */, true /* pinUpstream */, credPath)
+		v := guardRunHeadlessRehydrate(false /* headless */, true /* pinUpstream */, credPath, oauthEnv)
 		if !v.Ran {
 			t.Fatal("expected the rung to run on a headless pinned-subscription launch")
 		}
@@ -172,7 +182,7 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 		t.Setenv("FAK_GUARD_PARK_BUDGET", "0")
 		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
 
-		v := guardRunHeadlessRehydrate(false /* headless */, true /* pinUpstream */, credPath)
+		v := guardRunHeadlessRehydrate(false /* headless */, true /* pinUpstream */, credPath, oauthEnv)
 		if !v.Ran {
 			t.Fatal("expected the rung to run on a headless pinned-subscription launch")
 		}
@@ -195,7 +205,7 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 		t.Setenv("FAK_GUARD_PARK_POLL", "1s") // clamped to min 1s; one poll spends the 80ms budget
 		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
 
-		v := guardRunHeadlessRehydrate(false, true, credPath)
+		v := guardRunHeadlessRehydrate(false, true, credPath, oauthEnv)
 		if !v.Ran || !v.Refused {
 			t.Fatalf("park exhaustion must still refuse: got %+v", v)
 		}
@@ -217,7 +227,7 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 			writeCred(t, credPath, "sk-ant-oat01-fresh", time.Now().Add(time.Hour).UnixMilli())
 		}()
 
-		v := guardRunHeadlessRehydrate(false, true, credPath)
+		v := guardRunHeadlessRehydrate(false, true, credPath, oauthEnv)
 		if !v.Ran || v.Refused {
 			t.Fatalf("a re-login landing mid-park must let the launch proceed: got %+v", v)
 		}
@@ -228,7 +238,7 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 		credPath := filepath.Join(dir, ".credentials.json")
 		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
 
-		v := guardRunHeadlessRehydrate(true /* stdinInteractive */, true, credPath)
+		v := guardRunHeadlessRehydrate(true /* stdinInteractive */, true, credPath, oauthEnv)
 		if v.Ran {
 			t.Fatal("an interactive launch must not run the proactive rung — the existing reactive per-request re-read already covers it")
 		}
@@ -239,9 +249,87 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 		credPath := filepath.Join(dir, ".credentials.json")
 		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
 
-		v := guardRunHeadlessRehydrate(false, false /* pinUpstream */, credPath)
+		v := guardRunHeadlessRehydrate(false, false /* pinUpstream */, credPath, oauthEnv)
 		if v.Ran {
 			t.Fatal("a launch not pinning the Claude subscription OAuth token has no credential this rung understands and must not run")
+		}
+	})
+
+	// #3267 — the server-side/unattended witness. An explicit env token OUTRANKS the
+	// credential file (resolveAnthropicOAuthToken: tokenEnv, then .credentials.json, then
+	// .oauth-token), so a missing or expired FILE says nothing about the credential that will
+	// actually be sent upstream. Before the fix this rung inspected the file anyway, found it
+	// stale/absent, and entered the #2260 re-login park — which polls that same file for up to
+	// 24h. In a container running `fak guard -- <harness>` there is no interactive `claude` to
+	// re-login and typically no credential file at all, so the launch hung for the full budget
+	// BEFORE binding the gateway or spawning the child: no request, no audit rows, no failure.
+	// Witnessed live at HEAD 7b41840b63 — a docker run of `fak guard -- claude` with a valid
+	// CLAUDE_CODE_OAUTH_TOKEN exported sat in guardParkForRelogin with zero TCP sockets and no
+	// child process until it was killed (experiments/agent-live/,
+	// guard-container-unattended-live-witness-2026-08-06.json).
+	//
+	// Both subtests below would hang for the (shrunk) park budget and then refuse before the
+	// fix; they pass promptly and cleanly after it.
+	t.Run("env_token_skips_the_relogin_park_absent_cred_file", func(t *testing.T) {
+		// The container shape exactly: HOME has no .credentials.json, the token is in the env.
+		dir := t.TempDir()
+		credPath := filepath.Join(dir, ".credentials.json")
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "50ms")
+		t.Setenv("FAK_GUARD_PARK_BUDGET", "30s") // the pre-fix hang; the fix never reaches it
+		t.Setenv("FAK_GUARD_PARK_POLL", "1s")
+		t.Setenv(oauthEnv, "sk-ant-oat01-from-the-container-env")
+
+		done := make(chan guardHeadlessRehydrateVerdict, 1)
+		go func() {
+			done <- guardRunHeadlessRehydrate(false /* headless */, true /* pinUpstream */, credPath, oauthEnv)
+		}()
+		select {
+		case v := <-done:
+			if v.Ran || v.Refused {
+				t.Fatalf("an explicit env token must leave this rung alone (the file is not the credential sent upstream); got %+v", v)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("guardRunHeadlessRehydrate parked on a credential file that cannot change the outcome — the #3267 unattended-container hang")
+		}
+	})
+
+	t.Run("env_token_skips_the_relogin_park_expired_cred_file", func(t *testing.T) {
+		// The stale-file variant: a mounted or baked-in HOME carries an expired login beside
+		// the env token. The env token still wins upstream, so parking is still pointless.
+		dir := t.TempDir()
+		credPath := filepath.Join(dir, ".credentials.json")
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "50ms")
+		t.Setenv("FAK_GUARD_PARK_BUDGET", "30s")
+		t.Setenv("FAK_GUARD_PARK_POLL", "1s")
+		t.Setenv(oauthEnv, "sk-ant-oat01-from-the-container-env")
+		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
+
+		done := make(chan guardHeadlessRehydrateVerdict, 1)
+		go func() { done <- guardRunHeadlessRehydrate(false, true, credPath, oauthEnv) }()
+		select {
+		case v := <-done:
+			if v.Ran || v.Refused {
+				t.Fatalf("an expired file beside a live env token must not refuse or park; got %+v", v)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("guardRunHeadlessRehydrate parked despite an explicit env token — the #3267 unattended-container hang")
+		}
+	})
+
+	t.Run("empty_env_token_still_uses_the_credential_file", func(t *testing.T) {
+		// The guard is "is the override SET", not "is the name given": an exported-but-empty
+		// CLAUDE_CODE_OAUTH_TOKEN is not a credential, so the file path must still govern —
+		// otherwise the fix above would silently disable STALE_CRED for everyone.
+		dir := t.TempDir()
+		credPath := filepath.Join(dir, ".credentials.json")
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "50ms")
+		t.Setenv("FAK_GUARD_PARK_BUDGET", "0")
+		t.Setenv(oauthEnv, "   ")
+		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
+
+		v := guardRunHeadlessRehydrate(false, true, credPath, oauthEnv)
+		if !v.Ran || !v.Refused {
+			t.Fatalf("a blank env token must not suppress the STALE_CRED rung: got %+v", v)
 		}
 	})
 }

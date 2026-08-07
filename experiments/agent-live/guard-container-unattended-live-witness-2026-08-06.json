@@ -1,0 +1,142 @@
+{
+  "schema": "fak-guard-container-unattended-live-witness/1",
+  "captured_at": "2026-08-06T17:52:32Z",
+  "github_issue": 3267,
+  "epic": 3256,
+  "status": "PARTIAL",
+  "status_summary": "An unattended container ran `fak guard -- claude` with NO TTY, bound its in-process gateway, spawned the harness child, transited real /v1/messages requests through the gateway, and wrote a verified hash-chained audit journal to a mounted volume. The upstream 200 (and therefore the model result and the adjudicated tool call) was NOT reached: Anthropic refused every request with HTTP 403 oauth_not_allowed_for_organization -- an ACCOUNT/ORG policy on this host's subscription, not a fak defect and not fixable from this repo. Checks 2 (transit) and 4 (hash-chained journal) pass; checks 1 and 3 are BLOCKED, not failed.",
+
+  "what_this_witness_primarily_records": "The #3267 defect this run FOUND and FIXED: before the fix, this exact container did not fail -- it HUNG. `fak guard` parked for its full 24h STALE_CRED re-login budget before binding the gateway or spawning the child, because the pre-spawn credential rung inspected <claude-config>/.credentials.json while the credential actually being sent upstream came from $CLAUDE_CODE_OAUTH_TOKEN (which outranks the file). A container has no interactive `claude` to re-login and usually no credential file at all, so an unattended worker hung silently: no request, no audit rows, no failure. See run_pre_fix below.",
+
+  "host": {
+    "platform": "win32 (Windows 11 Pro 10.0.26200)",
+    "docker_server_version": "28.3.3",
+    "container_base": "node:22-bookworm-slim (linux/amd64)"
+  },
+
+  "fak_binary": {
+    "built_from_commit": "7b41840b63",
+    "build": "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath ./cmd/fak, from a clean `git archive HEAD` export plus ONLY the #3267 change (cmd/fak/guard_child.go, cmd/fak/guard_upstream_posture.go) -- peers' uncommitted files excluded so the witness reflects trunk + this fix",
+    "path_in_image": "/usr/local/bin/fak",
+    "sha256": "0ddfc8e41ed51382a6eee9f810d2bb64dd6aa05dcd991e1737fcf316e33a79ed"
+  },
+
+  "harness": {
+    "child": "claude",
+    "version": "2.1.223 (Claude Code)",
+    "installed_in_image": "npm install -g @anthropic-ai/claude-code",
+    "observed_user_agent": "claude-cli/2.1.223 (external, sdk-cli)"
+  },
+
+  "command": {
+    "dockerfile_sha256": "dfc760b39ed8662c2d9b8e15c47fa22926c0f3c44570945ae452f8ac22431974",
+    "docker_run": "docker run --rm -e CLAUDE_CODE_OAUTH_TOKEN -v <hostdir>:/audit fak-guard-worker:3267fix",
+    "no_tty": "deliberately launched WITHOUT `-t` -- there is no controlling terminal in the container; this is the unattended posture the issue asks for",
+    "entrypoint": "fak guard --log /audit/gw.log --anthropic-oauth --budget-envelope spend=$1,tokens=200000,wall=10m -- claude -p \"Run: echo hello-from-guard\" --allowedTools \"Bash(echo:*)\" --output-format json",
+    "env": {
+      "FAK_AUDIT_JOURNAL": "/audit/journal.jsonl (baked into the image -- durable trail on by default for this image)",
+      "CLAUDE_CODE_OAUTH_TOKEN": "<host ~/.claude/.oauth-token, a sk-ant-oat01 setup token, passed by name so the value never appears on a command line>",
+      "ANTHROPIC_API_KEY": "deliberately UNSET (the Check-3 placeholder-swap posture)"
+    },
+    "volumes": {"/audit": "host directory -- the hash-chained journal and gateway log survive the container"},
+    "wall_clock_seconds": 9.75,
+    "child_exit": "non-zero (the harness died on the upstream 403; guard's supervisor recorded and relaunched it)"
+  },
+
+  "checks": {
+    "real_result_returned_through_guard": {
+      "pass": false,
+      "verdict": "BLOCKED -- not reached, not refuted",
+      "blocker": "HTTP 403 oauth_not_allowed_for_organization from Anthropic on every /v1/messages attempt",
+      "upstream_message": "OAuth authentication is currently not allowed for this organization.",
+      "upstream_error_type": "permission_error",
+      "why_not_a_fak_defect": "guard resolved and sent the subscription bearer correctly -- its own banner reads: 'upstream auth - Claude Pro/Max subscription (provider-reported identity; OAuth token from $CLAUDE_CODE_OAUTH_TOKEN, sent as a bearer token)'. The refusal is an organization policy on the account, applied upstream. Nothing in this repo can clear it; it needs an org that permits OAuth/subscription auth, or an ANTHROPIC_API_KEY seat (none is provisioned on this host).",
+      "stdout_sha256": "5b95e346304b2b3afa01570dfd39cf039516ce30aabbb1b46af989343cd0b61b",
+      "stderr_sha256": "77a51f639654a2738bafdeaa1352d58f1347fd3d1667878aa6a77c5343cb5b8e"
+    },
+
+    "request_transited_gateway": {
+      "pass": true,
+      "verdict": "PASS -- transit proven; the 200 half is blocked with check 1",
+      "route": "/v1/messages",
+      "requests_seen": 4,
+      "status_histogram": {"403": 4},
+      "user_agents": ["claude-cli/2.1.223 (external, sdk-cli)"],
+      "gateway_bind": "http://127.0.0.1:41415 (in-process; torn down when the command exits)",
+      "sample": {"bytes": 615, "duration_ms": 494.387, "event": "gateway_http_request", "method": "POST", "path": "/v1/messages", "route": "/v1/messages", "status": 403, "trace_id": "guard-ac489e36cf090516-885b79d194515389", "user_agent": "claude-cli/2.1.223 (external, sdk-cli)"},
+      "reading": "The bytes were the real Claude Code child's and they passed through the in-process kernel gateway inside the container -- had the child reached api.anthropic.com directly there would be no /v1/messages line here at all. What this does NOT prove (because the upstream refused) is the 200 and the credential swap behind it.",
+      "gateway_log_sha256": "1c2ee90c2a4ca5a57362909c76886c4c0cb683cfae58c85d3be473ba528c5079"
+    },
+
+    "no_bypass_credential_swap": {
+      "pass": false,
+      "verdict": "BLOCKED -- depends on an upstream 200, which check 1 never obtained",
+      "note": "The placeholder-injection posture was in force (ANTHROPIC_API_KEY unset, so guard hands the child the invalid `fak-guard-oauth-placeholder` and injects only the gateway URL), but the proof of the swap IS the upstream 200. With every upstream call refused 403 at the org boundary, this check cannot be closed from this run."
+    },
+
+    "tool_call_adjudicated_and_recorded": {
+      "pass": true,
+      "verdict": "PARTIAL-PASS -- the durable hash-chained journal is proven in-container; no DECIDE row, because the model never ran and so never proposed the Bash call",
+      "audit_journal_path": "/audit/journal.jsonl (mounted volume, written from inside the container)",
+      "rows": 6,
+      "chain_intact": true,
+      "chain_verification": "every row's prev_hash equals the previous row's hash, first row's prev_hash empty, 6 distinct hashes -- re-verified from the captured file",
+      "row_kinds": {"CHILD_CRASH": 3, "RESTART_HOP": 3},
+      "decide_rows": 0,
+      "why_no_decide_rows": "a DECIDE row is written when the model proposes a tool call; the model never produced a turn (403), so there was no tool call to adjudicate. The journal machinery is nonetheless witnessed end to end: it was created, appended to, and hash-chained inside the container onto the mounted volume.",
+      "bonus_lifecycle_evidence": "The 6 rows are exactly the 'clean lifecycle for a supervised/restarted worker' the issue's Direction section asks for, captured live: guard's restart supervisor saw the harness child die, recorded CHILD_CRASH, relaunched it, and recorded RESTART_HOP -- three times -- each hop tamper-evidently chained. An unattended worker's crash/restart history is auditable after the fact.",
+      "audit_sha256": "4c05fc6e497b3b7b9cf9b5aad6ea8fe52d48ee7df2e1d920be24ee7a705540f5",
+      "first_row_hash": "fa0148ec28f1bc4e1187f5cdee4e5545887618f3bdb51c1f4067601f7bd19794",
+      "last_row_hash": "7523331c53020438bbe6d9dc65a22159ccab93d3a9e19197d89b009c3cd4c9ba"
+    }
+  },
+
+  "unattended_posture_observed": {
+    "no_tty": "PASS -- container launched without -t; guard took its headless path with no interactive affordance and never prompted",
+    "structured_logs": "PASS -- /audit/gw.log is one JSON record per gateway request; the full headless startup banner went to stderr",
+    "audit_journal_on_by_default_for_the_image": "PASS -- FAK_AUDIT_JOURNAL baked into the image; banner: 'fak: audit journal -> /audit/journal.jsonl (durable, hash-chained)'",
+    "cost_cap_honored": "PASS (seeded and enforced on the wall axis) -- --budget-envelope 'spend=$1,tokens=200000,wall=10m' was accepted and seeded the session: 'fak guard: session time budget - trace_id=guard-ac489e36cf090516-885b79d194515389 max_duration=10m0s'. The spend/token axes were never approached because no turn completed, so their ENFORCEMENT is not witnessed by this run.",
+    "health_inspection_endpoint": "NOT EXERCISED -- /healthz, /metrics and /debug/vars were not probed in this run; the gateway bound loopback-only inside the container and no probe was wired into the compose/k8s snippet yet",
+    "require_key_env": "NOT EXERCISED -- the child<->gateway traffic stayed on loopback inside the container, which is auth-exempt by design; --require-key-env is only mandatory for an off-loopback bind"
+  },
+
+  "run_pre_fix": {
+    "purpose": "the fail-before half of the #3267 fix, captured from the SAME image recipe with a pre-fix binary",
+    "binary": "fak built from 7b41840b63 with NO #3267 change",
+    "outcome": "HUNG -- killed manually after ~9 minutes; it would have parked for the full 24h default budget",
+    "stderr_line": "fak guard: parked - STALE_CRED: waiting for a re-login to land at /home/worker/.claude/.credentials.json (poll every 2m0s, ceiling 24h0m0s). Run `claude` once to refresh, `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN; FAK_GUARD_PARK_BUDGET=0 disables this park.",
+    "irony": "the park's own remedy text says 'or export CLAUDE_CODE_OAUTH_TOKEN' -- which this run HAD done; the rung simply never consulted it",
+    "process_evidence_while_hung": {
+      "processes_in_container": ["pid 1: fak guard ... -- claude -p ..."],
+      "child_processes": "none -- the harness was never spawned",
+      "tcp_sockets": "none -- /proc/1/net/tcp empty; the gateway was never bound",
+      "open_fds": ["4 -> /audit/journal.jsonl", "7 -> /audit/gw.log"],
+      "gw_log_bytes": 0,
+      "journal_bytes": 0,
+      "goroutine_stack": "main.guardParkForRelogin (cmd/fak/guard_park.go:135) <- main.guardRunHeadlessRehydrate (cmd/fak/guard_child.go:460) <- main.resolveGuardUpstreamPosture (cmd/fak/guard_upstream_posture.go:210) <- main.cmdGuard, captured via SIGQUIT"
+    },
+    "stderr_sha256": "9b0475282877f64e429ed45fe41fbf0d72b273221df0ca15953281326fc3d6b2"
+  },
+
+  "fix": {
+    "change": "guardRunHeadlessRehydrate now takes the resolved --oauth-token-env name and returns Ran=false when that env var is set: the env token OUTRANKS the credential file in resolveAnthropicOAuthToken's precedence, so a stale/absent FILE says nothing about the credential actually sent upstream, and parking on it waits for a re-login that cannot change the outcome.",
+    "files": ["cmd/fak/guard_child.go", "cmd/fak/guard_upstream_posture.go", "cmd/fak/guard_rehydrate_test.go"],
+    "unit_witness": "cmd/fak/guard_rehydrate_test.go TestGuardRunHeadlessRehydrate -- 3 new subtests (env_token_skips_the_relogin_park_absent_cred_file, env_token_skips_the_relogin_park_expired_cred_file, empty_env_token_still_uses_the_credential_file). Fail-before: the two park subtests hit their 10s watchdog (FAIL, 20.01s total) with the fix disabled. Pass-after: all 9 subtests PASS in 2.70s. The third subtest pins that a blank env value does NOT suppress STALE_CRED, so the fix cannot silently disable the rung for everyone.",
+    "behavior_preserved": "the #2260 park and the #1834 STALE_CRED refusal are untouched for every launch WITHOUT an env token -- park_exhaustion_still_refuses_stale_cred and park_recovers_when_relogin_lands both still pass."
+  },
+
+  "not_yet_proven": [
+    "The upstream 200 / real model result (check 1) and the credential-swap proof that depends on it (check 3) -- blocked by the account's oauth_not_allowed_for_organization policy, an external constraint no repo change can clear.",
+    "A DECIDE row for an adjudicated tool call inside a container -- needs a turn to complete first, so it is gated behind the same blocker.",
+    "Enforcement of the spend and token axes of --budget-envelope (only the wall axis is witnessed as seeded).",
+    "The /healthz, /metrics, /debug/vars probe surface from outside the container, and the --require-key-env off-loopback bind."
+  ],
+
+  "smallest_next_step": "Re-run this exact image on a host whose Anthropic account permits OAuth/subscription auth (or with an ANTHROPIC_API_KEY seat and --api-key-env ANTHROPIC_API_KEY). Everything else is already in place: the image recipe, the mounted audit volume, and the no-TTY invocation are unchanged, so checks 1, 3 and the DECIDE row should close in one run.",
+
+  "invalidating_assumptions": [
+    "This witness assumes the 403 is purely an org policy and not an artifact of the setup token in ~/.claude/.oauth-token being revoked. Both present as 403; the error_code oauth_not_allowed_for_organization names the organization, not the token, which is why it is read as policy. A run with a freshly minted `claude setup-token` on a permitting org would settle it.",
+    "The supervised-restart rows (CHILD_CRASH/RESTART_HOP) were produced by a child crashing on an upstream 403. They witness that the supervisor records and chains restarts, NOT that it behaves identically on a budget-driven restart (--restart-on-budget), which this run never triggered.",
+    "The fix defers to the env token without validating it. If an operator exports an EXPIRED CLAUDE_CODE_OAUTH_TOKEN, guard now proceeds to a reactive upstream 401 instead of parking. That is the intended trade (the park could never have helped that case -- it polls a different credential), but it does move that failure from pre-spawn to first-request."
+  ]
+}

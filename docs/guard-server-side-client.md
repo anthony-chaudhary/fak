@@ -81,7 +81,7 @@ inspection surface:
 `/metrics` and the full headless banner are the structured-log surface; add
 `--debug-stats <file>` to stream per-turn stats to a mounted path.
 
-## Reference container recipe (not yet witnessed live)
+## Reference container recipe (run live — see the witness below)
 
 The shipped [`Dockerfile`](../Dockerfile) builds the static `fak` binary onto a distroless
 base and runs `fak serve` — the *gateway* runtime. Guard-as-a-client needs one thing that
@@ -90,18 +90,32 @@ image deliberately lacks: **the harness binary must be present in the image**, b
 (e.g. Node for Claude Code) and mounts a volume for the audit journal:
 
 ```dockerfile
-# Reference only — pending a recorded live witness (see "Status" below).
+# This recipe was built and run — see "Recorded live witness" below.
 FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/anthony-chaudhary/fak:latest /usr/local/bin/fak /usr/local/bin/fak
 RUN npm install -g @anthropic-ai/claude-code   # the harness guard will exec
 ENV FAK_AUDIT_JOURNAL=/audit/journal.jsonl      # durable trail on by default for this image
+ENV HOME=/home/worker
+RUN mkdir -p /home/worker /audit /work && chmod 777 /home/worker /audit /work
+WORKDIR /work
 ENTRYPOINT ["fak", "guard", \
+  "--log", "/audit/gw.log", \
+  "--anthropic-oauth", \
   "--budget-envelope", "spend=$25,tokens=200000,wall=2h", \
-  "--context-budget-tokens", "200000", "--restart-on-budget", \
-  "--require-key-env", "FAK_GATEWAY_KEY", \
   "--"]
 CMD ["claude", "-p", "..."]
 ```
+
+Run it **without `-t`** — no TTY is the posture, not a limitation:
+
+```bash
+docker run --rm -e CLAUDE_CODE_OAUTH_TOKEN -v "$PWD/audit:/audit" fak-guard-worker
+```
+
+Pass the token **by name** (`-e CLAUDE_CODE_OAUTH_TOKEN`, no `=value`) so the secret never
+lands in a command line, a shell history, or `docker inspect`.
 
 ```yaml
 # compose: mount the audit journal, pass the key, restart the worker.
@@ -121,6 +135,57 @@ at `/audit`; reuse the base and probe wiring in [`deploy/k8s/README.md`](../depl
 (`/healthz` is the readiness probe) and swap the `serve` command for the `guard` entrypoint
 above.
 
+## Credentials in an unattended container
+
+Export the subscription token as **`CLAUDE_CODE_OAUTH_TOKEN`** (a `claude setup-token`
+value — long-lived, unlike the interactive-login token). It is first in
+`resolveAnthropicOAuthToken`'s precedence, ahead of `<claude-config>/.credentials.json` and
+`.oauth-token`, so a container needs no credential file and no `claude` login at all.
+
+> **Upgrade note (#3267).** Before this fix, a container that did exactly that **hung** —
+> guard's pre-spawn STALE_CRED rung inspected the credential *file*, found it absent, and
+> parked for its full 24h re-login budget *before* binding the gateway or spawning the
+> child. There is no interactive `claude` in a container to end that park, so the worker sat
+> silent: no request, no audit rows, no failure. Guard now defers to the env token and skips
+> the park, because the file it was polling is not the credential being sent upstream. If you
+> are pinned to an older build, `FAK_GUARD_PARK_BUDGET=0` restores the immediate fail-loud
+> refusal and is the correct setting for any unattended worker on those versions.
+
+The park itself is still right for an *attended* headless host, where a human really can run
+`claude` and self-heal the fleet — it is only meaningless when an env token already outranks
+the file.
+
+## Recorded live witness
+
+`experiments/agent-live/guard-container-unattended-live-witness-2026-08-06.json` — the
+recipe above, built and run unattended (Docker 28.3.3, `node:22-bookworm-slim`,
+`claude` 2.1.223, `fak` built from `7b41840b63` + the #3267 fix), status **PARTIAL**:
+
+| Check | Result |
+|---|---|
+| **2 — request transited the gateway** | **PASS** — 4 `POST /v1/messages` records in the mounted `gw.log`, user agent `claude-cli/2.1.223`, gateway bound in-process on `127.0.0.1:41415` |
+| **4 — hash-chained journal** | **PASS (durable trail)** — 6 rows on the mounted volume, chain intact end to end; **0 DECIDE rows**, because no turn completed |
+| **1 — real result through guard** | **BLOCKED** — every upstream call refused `403 oauth_not_allowed_for_organization` |
+| **3 — no-bypass credential swap** | **BLOCKED** — the proof of the swap *is* the upstream 200, which check 1 never got |
+
+The blocker is an **organization policy** on the host's Anthropic account ("OAuth
+authentication is currently not allowed for this organization"), applied upstream — not a
+fak defect. Guard resolved and sent the bearer correctly; its banner reads `upstream auth —
+Claude Pro/Max subscription (… OAuth token from $CLAUDE_CODE_OAUTH_TOKEN, sent as a bearer
+token)`. Re-running the same image on a host whose org permits OAuth auth (or with an
+`ANTHROPIC_API_KEY` seat via `--api-key-env`) should close checks 1, 3 and the DECIDE row in
+one run.
+
+Two things the run witnessed that the acceptance list did not ask for:
+
+- **The supervised-restart lifecycle, live.** The 6 journal rows are three
+  `CHILD_CRASH` → `RESTART_HOP` pairs: guard's supervisor saw the harness child die,
+  recorded it, relaunched it, and chained every hop. An unattended worker's crash/restart
+  history is auditable after the fact.
+- **The cost cap seeding.** `--budget-envelope 'spend=$1,tokens=200000,wall=10m'` seeded the
+  session (`max_duration=10m0s` on the wall axis). Enforcement of the spend/token axes is
+  *not* witnessed — no turn ever consumed any.
+
 ## Status: generation, evidence, and what is not yet proven
 
 **Generation horizon: `gen/next`.** This is a near-term foundation for the corporate
@@ -132,20 +197,29 @@ so the work is packaging and a default-exposure/dogfood proof, not a future arch
 
 - **Promotion evidence (documented mode):** every switch above cites a shipped flag/env in
   `cmd/fak/guard.go` / `cmd/fak/guard_support.go`; this page is the "documented
-  containerized/unattended mode" the issue asks for.
+  containerized/unattended mode" the issue asks for. The recipe was then **built and run** —
+  the witness above — promoting it from a paper reference to one that boots, binds, spawns
+  the harness, transits the gateway, and writes a verified hash-chained journal. That run is
+  also what surfaced the unattended-hang defect in the upgrade note: the packaging exercise
+  found a real behavioral gap, not just a docs gap.
 - **Demotion / retirement evidence:** if a future change makes the durable audit journal
   on-by-default under a detected container (removing the "bake the env in" step), the audit
-  row of this page retires in favor of that default. If the OpenAI-wire seat's live witness
-  (`experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json`) is shown to
-  already cover a containerized run, the "not yet witnessed live" caveat retires.
-- **Invalidating assumption:** the reference recipe above assumes guard can `exec` the
-  harness from an image that carries it and that the four-check gateway-transited proof holds
-  identically inside a container. That has **not** been run here. Until a container run of a
-  real harness (with real credentials) records the four-check witness into
-  `experiments/agent-live/`, the recipe is a documented reference, not a certified image.
+  row of this page retires in favor of that default. The "not yet witnessed live" caveat has
+  already retired against the witness above; its **PARTIAL** qualifier retires when checks 1
+  and 3 close on a permitting org.
+- **Invalidating assumptions:** (1) the 403 is read as an org policy rather than a revoked
+  setup token — both present as 403, and the `oauth_not_allowed_for_organization` code names
+  the organization, but a run with a freshly minted `claude setup-token` on a permitting org
+  would settle it; (2) the restart rows were produced by a child crashing on an upstream 403,
+  so they witness crash-restart chaining, **not** the `--restart-on-budget` path, which this
+  run never triggered; (3) the fix defers to the env token without validating it, so an
+  exported-but-expired token now surfaces as a reactive upstream 401 instead of a pre-spawn
+  park — the intended trade, since the park polled a different credential entirely.
 
-**Not yet reached (the open acceptance gate):** the recorded live container witness — the
-four-check gateway-transited proof captured from an unattended containerized `fak guard --
-<harness>` run, landed in `experiments/agent-live/`. It needs a host that can run the harness
-in a container with live credentials; producing it is the next checkable step toward closing
-#3267.
+**Not yet reached (the remaining acceptance gate):** checks 1 and 3 of the four-check proof —
+a real result over a 200, and the credential-swap proof that depends on it — plus a `DECIDE`
+row for an adjudicated tool call inside the container. All three are gated behind the same
+external blocker: this host's Anthropic account refuses OAuth auth at the organization level
+(`403 oauth_not_allowed_for_organization`). The smallest next step is a re-run of the **same
+image** on a permitting org or an `ANTHROPIC_API_KEY` seat; nothing in the recipe or the repo
+needs to change.
