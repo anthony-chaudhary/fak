@@ -161,6 +161,18 @@ type Row struct {
 	// carries the full correlated record (user id, turn id, per-session
 	// predecessor link) layered on top.
 	Relay *RelayProvenance `json:"relay,omitempty"`
+
+	// Capability-grant field (for CAPABILITY_GRANT: the GATED-WIDEN
+	// provenance witness, #5178). A grant loosens the live security boundary
+	// but is supervision, not a kernel decision, so AppendCapabilityGrant
+	// writes it directly through the chain, like a config swap. NOT part of
+	// the hash-chain pre-image (chainHash lists the chained fields explicitly,
+	// so appending it here leaves every existing journal verifying
+	// byte-for-byte); the chained forensic identity of a grant — Kind, the
+	// widened knob (Tool), the gated channel (Reason) and the actor (By) —
+	// rides the frozen decision fields above, and this carries the full
+	// correlated record (old→new values, amendment class, source) on top.
+	Grant *CapabilityGrantRow `json:"capability_grant,omitempty"`
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
