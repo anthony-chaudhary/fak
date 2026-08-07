@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +21,16 @@ SCRIPT = ROOT / "tools" / "dispatch_status.py"
 
 
 def load():
-    spec = importlib.util.spec_from_file_location("dispatch_status", SCRIPT)
+    """Import `tools/dispatch_status.py` fresh.
+
+    `DISPATCH_STATUS_SCRIPT` repoints this at another copy of the script — the hook
+    that makes a fail-before/pass-after proof reproducible by anyone: dump the
+    pre-fix module with `git show <sha>:tools/dispatch_status.py > /tmp/pristine.py`,
+    point the env var at it, and re-run this same suite against it. Unset (the
+    normal case) it loads the in-tree script, byte-identically to before.
+    """
+    script = Path(os.environ.get("DISPATCH_STATUS_SCRIPT") or SCRIPT)
+    spec = importlib.util.spec_from_file_location("dispatch_status", script)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -1460,7 +1470,12 @@ class LaneLeaseHolderLivenessTest(unittest.TestCase):
         self.assertEqual(dead_lanes, ["cmd", "guard"])
         self.assertIn("RECYCLED", next(
             r["holder_evidence"] for r in lane["dead"] if r["lane"] == "guard"))
-        self.assertIn("dos lease-lane release", lane["next_action"])
+        # The action must never hand the operator a blind reap (#5859). The verb may
+        # be NAMED — as the thing not to run — but never as a command to execute.
+        action = lane["next_action"]
+        self.assertIn("do NOT reap", action)
+        self.assertNotIn("--owner <holder>", action)
+        self.assertNotIn("release --lane", action)
 
     def test_pid_existence_alone_is_not_proof_of_life(self) -> None:
         """A live pid with no readable proc_starttime is UNKNOWN, never live."""
@@ -1486,7 +1501,15 @@ class LaneLeaseHolderLivenessTest(unittest.TestCase):
 
     def test_unreadable_lane_lease_set_is_not_clean(self) -> None:
         """An unread lease set is not a clean one — and neither is one this host has
-        no liveness oracle for."""
+        no liveness oracle for.
+
+        Note the oracle case is now judged from the WAL, not the process table:
+        TTL expiry is time evidence the lease record carries itself, so a host with
+        no psutil can still prove a 452-hour-old lease stale. `available` stays
+        False (the pid corroboration rung is blind), so the card still withholds
+        "clean" — the fail-safe direction is preserved without pretending the WAL
+        said nothing.
+        """
         mod, lane = self._fold(read_error="dos: command not found")
         self.assertFalse(lane["available"])
         out = mod.cross_check_worker_leases({"available": True, "workers": []},
@@ -1495,8 +1518,16 @@ class LaneLeaseHolderLivenessTest(unittest.TestCase):
         no_oracle = mod.summarize_lane_lease_holders(
             self._lane_records(), starts=None, host_id=self.HOST, now_ts=self.NOW)
         self.assertFalse(no_oracle["available"])
-        self.assertEqual(no_oracle["dead_count"], 0)
-        self.assertEqual(no_oracle["unknown_count"], 3)
+        self.assertFalse(mod.lane_lease_verdict_clean(
+            mod.cross_check_worker_leases({"available": True, "workers": []},
+                                          {"active": []}, no_oracle)))
+        # All three fixtures are hours-to-weeks past the 50m TTL, and that is WAL
+        # evidence — no process probe involved.
+        self.assertEqual(no_oracle["dead_count"], 3)
+        self.assertEqual(no_oracle["live_count"], 0)
+        for row in no_oracle["rows"]:
+            self.assertIn("TTL EXPIRED", row["holder_evidence"])
+            self.assertIn("psutil unavailable", row["holder_evidence"])
 
     def test_foreign_host_holder_is_unknown_not_dead(self) -> None:
         """This host cannot probe another host's pid — and must not call it dead."""
@@ -1539,17 +1570,21 @@ class LaneLeaseHolderLivenessTest(unittest.TestCase):
         text = mod.render(p)
         self.assertIn("dead-holder=2", text)
         self.assertIn("lane lease: 3 held", text)
-        self.assertIn("dos lease-lane release", text)
+        self.assertIn("do NOT reap", text)
+        self.assertNotIn("release --lane", text)
         self.assertNotIn("cross-check clean", text)
 
         md = mod.render_md(p, date="2026-08-06")
         self.assertIn("dead-holder=2", md)
         self.assertIn("Kernel lane leases", md)
         self.assertIn("`cmd`", md)
+        self.assertIn("do NOT reap", md)
 
         slack = mod.slack_text(p)
         self.assertIn("dead-holder", slack)
-        self.assertIn("DEAD", slack)
+        self.assertIn("TTL-EXPIRED", slack)
+        self.assertIn("do NOT reap", slack)
+        self.assertNotIn("release --lane", slack)
         self.assertNotIn("worker/lease cross-check clean", slack)
 
     def test_all_live_holders_still_read_clean(self) -> None:
@@ -1603,15 +1638,16 @@ class LaneLeaseHolderLivenessTest(unittest.TestCase):
                 "source": "dos lease-lane live",
                 "available": True,
                 "total": 3, "live_count": 1, "dead_count": 2, "unknown_count": 0,
-                "next_action": ("reap each dead-holder lane lease: "
-                                "`dos lease-lane release --lane <lane> --owner <holder>`"),
+                "next_action": ("do NOT reap: `dos lease-lane release` runs NO "
+                                "liveness check (#5859) · the admission fold already "
+                                "elides these"),
                 "rows": [], "dead": [
                     {"lane": "cmd", "holder": "claude-5031", "pid": 51980,
                      "age_min": 31680.0, "holder_state": "dead",
-                     "holder_evidence": "pid 51980 is not a running process"},
+                     "holder_evidence": "TTL EXPIRED: no acquire stamp for 528h"},
                     {"lane": "modver", "holder": "worker-2461", "pid": 56980,
                      "age_min": 17280.0, "holder_state": "dead",
-                     "holder_evidence": "pid 56980 is not a running process"},
+                     "holder_evidence": "TTL EXPIRED: no acquire stamp for 288h"},
                 ],
             },
         }
@@ -1621,12 +1657,230 @@ class LaneLeaseHolderLivenessTest(unittest.TestCase):
         self.assertIn("dead-holder=2", text)
         self.assertNotIn("worker/lease cross-check clean", text)
         self.assertIn("cmd(claude-5031, pid 51980", text)
-        self.assertIn("dos lease-lane release", text)
+        self.assertIn("do NOT reap", text)
+        self.assertNotIn("release --lane", text)
 
         self.assertTrue(any("dead-holder=2" in r for r in p["reasons"]),
                         f"no dead-holder counter in reasons: {p['reasons']}")
         self.assertFalse(any("cross-check clean" in r for r in p["reasons"]),
                          f"card still reads clean with 2 dead holders: {p['reasons']}")
+
+
+class LaneLeaseEphemeralAcquirerTest(unittest.TestCase):
+    """The holder predicate must judge a lease by the WAL, not by its acquirer pid.
+
+    The first cut of the lane-lease fold decided deadness from `(pid,
+    proc_starttime)` alone. That predicate cannot discriminate: a lane lease's
+    recorded pid is the EPHEMERAL `dos lease-lane acquire` subprocess, which
+    journals the ACQUIRE and exits immediately (`dos/lane_lease.py:466-492`), and
+    the reservation is designed to outlive it (`acquire()` at `:453` says so). So
+    a healthy, actively-held lease always probes "dead", and the card rendered
+    `lane lease: 25 held - live=0 dead-holder=25` while several of those lanes
+    were held by agents running at that instant — four of them acquired MINUTES
+    earlier, and five holders self-released their own leases inside one 9-minute
+    window while probing "dead" throughout.
+
+    The corrected predicate mirrors the kernel's own live-set fold
+    (`dos.lane_lease._lease_is_dead`): heartbeat/TTL staleness is PRIMARY, the pid
+    only corroborates.
+
+    Run this class against the pre-fix module to see it fail:
+
+        git show <sha>:tools/dispatch_status.py > $SCRATCH/pristine_dispatch_status.py
+        DISPATCH_STATUS_SCRIPT=$SCRATCH/pristine_dispatch_status.py \\
+            python tools/dispatch_status_test.py LaneLeaseEphemeralAcquirerTest
+    """
+
+    NOW = 1786080000.0            # 2026-08-07T05:20:00Z
+    HOST = "fleet-box"
+
+    def _classify(self, rec, starts=None):
+        """Classify one record, pinning the clock when the module accepts a pin.
+
+        `now_ts` is passed only if the loaded classifier takes it, so that against a
+        PRE-FIX module these tests still reach the real predicate and fail on its
+        VERDICT rather than erroring out on a missing keyword. The pre-fix classifier
+        reads no clock at all, so omitting the pin changes nothing for it; every
+        fixture below is dated relative to `NOW` and judged only on the resulting
+        state.
+        """
+        import inspect
+        mod = load()
+        fn = mod.classify_lane_lease_holder
+        kwargs = {"host_id": self.HOST}
+        if "now_ts" in inspect.signature(fn).parameters:
+            kwargs["now_ts"] = self.NOW
+        return fn(rec, {} if starts is None else starts, **kwargs)
+
+    @staticmethod
+    def _iso(now: float, minutes_ago: float) -> str:
+        import datetime as _dt
+        return _dt.datetime.fromtimestamp(
+            now - minutes_ago * 60.0, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_absent_pid_with_fresh_heartbeat_is_live(self) -> None:
+        """THE decisive assertion. A lease whose pid is gone but whose heartbeat is
+        FRESH is live — that is the normal, healthy shape of a held lane lease, not
+        a reapable orphan.
+
+        Against the pre-fix classifier this returns `dead` on the strength of the
+        absent pid alone, with no reference to the heartbeat at all.
+        """
+        state, evidence = self._classify({
+            "lane": "tools", "holder": "guard-livelock-5858", "host_id": self.HOST,
+            "pid": 33784, "proc_starttime": _filetime(self.NOW - 4000),
+            "acquired_at": self._iso(self.NOW, 240.0),
+            "heartbeat_at": self._iso(self.NOW, 0.5),
+        }, starts={})       # pid 33784 is NOT in the process table
+        self.assertEqual(state, "live", f"fresh heartbeat judged {state}: {evidence}")
+        self.assertIn("fresh", evidence)
+        self.assertIn("not a running process", evidence)  # the pid IS reported…
+        self.assertIn("ephemeral", evidence)              # …and explicitly discounted
+
+    def test_absent_pid_with_fresh_acquire_stamp_is_live(self) -> None:
+        """The same, for the shape this fleet actually writes: no heartbeat op has
+        ever been journaled here, so `acquired_at` IS the newest stamp. A lease
+        acquired seconds ago must never read dead."""
+        state, evidence = self._classify({
+            "lane": "docs", "holder": "claude-5842", "host_id": self.HOST,
+            "pid": 84412, "proc_starttime": _filetime(self.NOW - 900),
+            "acquired_at": self._iso(self.NOW, 0.75),
+        }, starts={})
+        self.assertEqual(state, "live", f"45s-old lease judged {state}: {evidence}")
+
+    def test_absent_pid_inside_ttl_is_unknown_not_dead(self) -> None:
+        """Past the freshness grace but inside the TTL, with the ephemeral acquirer
+        gone: unproven. `unknown` — never `live`, and never `dead` either, because
+        an absent acquirer pid is the expected state of a healthy lease."""
+        state, evidence = self._classify({
+            "lane": "session", "holder": "claude-5254", "host_id": self.HOST,
+            "pid": 61696, "proc_starttime": _filetime(self.NOW - 3000),
+            "acquired_at": self._iso(self.NOW, 20.0),
+        }, starts={})
+        self.assertEqual(state, "unknown", f"20m-old lease judged {state}: {evidence}")
+        self.assertIn("ephemeral", evidence)
+
+    def test_ttl_expiry_is_the_death_evidence(self) -> None:
+        """A lease past its TTL + grace IS dead — that is the kernel's own primary
+        signal, and it is what `live_leases(expire_dead=True)` elides. The pid rung
+        rides along as corroboration only."""
+        state, evidence = self._classify({
+            "lane": "adjudicator", "holder": "fable-superloop-23874",
+            "host_id": self.HOST, "pid": 63712,
+            "proc_starttime": _filetime(self.NOW - 2_000_000),
+            "acquired_at": self._iso(self.NOW, 31680.0),   # 22 days
+        }, starts={})
+        self.assertEqual(state, "dead")
+        self.assertIn("TTL EXPIRED", evidence)
+
+    def test_declared_ttl_minutes_is_honoured_over_the_backstop(self) -> None:
+        """A lease that declares a long `ttl_minutes` is not dead at the 50-minute
+        backstop — the backstop only catches a record that declared none."""
+        rec = {"lane": "bench", "holder": "long-runner", "host_id": self.HOST,
+               "pid": 4242, "acquired_at": self._iso(self.NOW, 300.0),
+               "ttl_minutes": 600}
+        state, _ = self._classify(rec, starts={})
+        self.assertEqual(state, "unknown")
+        state, evidence = self._classify(dict(rec, ttl_minutes=60), starts={})
+        self.assertEqual(state, "dead")
+        self.assertIn("60-minute TTL", evidence)
+
+    def test_dead_pid_alone_never_kills_a_lease(self) -> None:
+        """The load-bearing inversion, stated directly: across the whole freshness
+        range, a confidently-dead pid on its own produces ZERO `dead` verdicts.
+
+        Pre-fix, every one of these is `dead` — the predicate returned the same
+        answer for a 30-second-old lease and a three-week-old one, which is why it
+        reported live=0 of 25.
+        """
+        states = []
+        for minutes in (0.1, 1.0, 4.9, 5.0, 9.0, 20.0, 45.0):
+            rec = {"lane": f"l{minutes}", "holder": "h", "host_id": self.HOST,
+                   "pid": 999, "proc_starttime": _filetime(self.NOW - 5000),
+                   "acquired_at": self._iso(self.NOW, minutes)}
+            states.append(self._classify(rec, starts={})[0])
+        self.assertNotIn("dead", states, f"dead pid alone still kills leases: {states}")
+        self.assertEqual(states[:4], ["live", "live", "live", "live"])
+
+    def test_whole_set_does_not_collapse_to_all_dead(self) -> None:
+        """The reality check: fold a set shaped like the real one and assert the
+        verdict actually discriminates. A classifier that answers `dead` for every
+        lease is not fixed, whatever its internals say."""
+        mod = load()
+        records = [
+            # freshly acquired, acquirer already exited — the healthy shape
+            {"lane": "docs", "holder": "claude-5842", "host_id": self.HOST,
+             "pid": 84412, "acquired_at": self._iso(self.NOW, 0.75)},
+            {"lane": "hooks", "holder": "claude-5026", "host_id": self.HOST,
+             "pid": 50584, "acquired_at": self._iso(self.NOW, 4.0)},
+            # inside the TTL, unprovable either way
+            {"lane": "tools", "holder": "guard-5858", "host_id": self.HOST,
+             "pid": 33784, "acquired_at": self._iso(self.NOW, 9.0)},
+            {"lane": "cmd", "holder": "claude-5254", "host_id": self.HOST,
+             "pid": 3388, "acquired_at": self._iso(self.NOW, 20.0)},
+            # genuinely aged out
+            {"lane": "adjudicator", "holder": "fable-superloop", "host_id": self.HOST,
+             "pid": 63712, "acquired_at": self._iso(self.NOW, 31680.0)},
+        ]
+        lane = mod.summarize_lane_lease_holders(
+            records, starts={}, host_id=self.HOST, now_ts=self.NOW)
+        self.assertEqual(lane["total"], 5)
+        self.assertEqual(lane["live_count"], 2)
+        self.assertEqual(lane["unknown_count"], 2)
+        self.assertEqual(lane["dead_count"], 1)
+        self.assertLess(lane["dead_count"], lane["total"],
+                        "every lease still reads dead — the predicate is still wrong")
+
+    def test_card_never_calls_dead_what_the_kernel_still_admits(self) -> None:
+        """The safety invariant: the card's `dead` set is a SUBSET of what the
+        kernel's admission fold drops, never a superset.
+
+        It holds because `dead` now requires the same TTL+grace expiry the kernel
+        uses, and the one rung the card narrows (dead-pid corroboration, which the
+        card demands an OBSERVED heartbeat for) only ever moves a verdict toward
+        `unknown`. Asserted here as monotonicity over age: the verdict may only walk
+        live -> unknown -> dead, and it may not reach `dead` before TTL+grace.
+
+        Verified live at authoring time against `dos lease-lane live` on the
+        reference tree: the kernel's `live_leases(expire_dead=True)` dropped 25 of
+        26 leases, the card called 18 of them dead, and `card_dead - kernel_dropped`
+        was empty — the 7 differences were all card-`unknown`, the safe direction.
+        """
+        order = {"live": 0, "unknown": 1, "dead": 2}
+        seen = []
+        for minutes in (0.0, 1.0, 5.0, 5.1, 20.0, 54.9, 55.0, 55.1, 600.0, 31680.0):
+            state, _ = self._classify({
+                "lane": "cmd", "holder": "h", "host_id": self.HOST, "pid": 3388,
+                "proc_starttime": _filetime(self.NOW - 9000),
+                "acquired_at": self._iso(self.NOW, minutes),
+            }, starts={})
+            seen.append((minutes, state))
+            if state == "dead":
+                self.assertGreater(minutes, 50.0 + 5.0,
+                                   f"dead at {minutes}m, before TTL+grace: {seen}")
+        ranks = [order[s] for _, s in seen]
+        self.assertEqual(ranks, sorted(ranks), f"verdict is not monotone in age: {seen}")
+        self.assertEqual(seen[-1][1], "dead")
+        self.assertEqual(seen[0][1], "live")
+
+    def test_next_action_never_recommends_a_blind_release(self) -> None:
+        """`dos lease-lane release` runs no liveness check and its `--owner ""`
+        matches any holder (#5859), so the card must never hand an operator a reap
+        loop over the lane set. It must instead say what IS true: the admission
+        fold self-heals, and a stale structural lease blocks only
+        `lane_lease.acquire()`."""
+        mod = load()
+        action = mod._LANE_LEASE_NEXT_ACTION
+        self.assertNotIn("--owner <holder>", action)
+        self.assertNotIn("release --lane", action)
+        self.assertNotIn("reap each", action)
+        self.assertIn("do NOT reap", action)
+        self.assertIn("#5859", action)
+        self.assertIn("OP_SCAVENGE", action)
+        self.assertIn("adopt()", action)
+        self.assertIn("expire_dead=True", action)
+        self.assertIn("lane_lease.acquire()", action)
+        self.assertIn("dos/lane_lease.py:453", action)
 
 
 class RenderTest(unittest.TestCase):

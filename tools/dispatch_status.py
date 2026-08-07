@@ -1360,12 +1360,50 @@ def scan_live_dispatch_workers(
 # the backlog) and `internal/modver/**` included, the oldest for 22 days. The
 # scope was never widened past the resolver leases; this fold widens it.
 #
-# Liveness is judged on (pid, proc_starttime) — NEVER on bare pid existence. Pids
-# are recycled, and a recycled pid is exactly how a dead holder reads "alive". The
-# reference tree carries a live instance of that: lane `guard` recorded pid 44396,
-# and pid 44396 today is a `conhost.exe` that started ~47 minutes AFTER the
-# recorded start time. A pid-existence check calls that lane healthy; this one does
-# not.
+# Liveness is judged the way the KERNEL judges it — TTL/heartbeat staleness as the
+# PRIMARY evidence, the holder pid only as corroboration. The first cut of this fold
+# had it backwards: it decided deadness from the recorded `(pid, proc_starttime)`
+# alone, and that predicate cannot discriminate at all.
+#
+# A recorded lane-lease `pid` is an EPHEMERAL `dos lease-lane acquire` subprocess
+# that journals the ACQUIRE and exits immediately (`dos/lane_lease.py:466-492`); the
+# reservation it books is DESIGNED to outlive it (`acquire()` at `:453` says so in
+# as many words). So a perfectly healthy, actively-held lease ALWAYS probes
+# "dead" by that test — and it did: the card rendered `live=0 dead-holder=25`
+# while several of those lanes were held by agents running at that instant, four of
+# them acquired MINUTES earlier. In a 9-minute window five of the "dead" holders
+# self-released their own leases. A signal that fires for 100% of the population
+# separates nothing.
+#
+# The kernel's own live-set fold (`dos.lane_lease._lease_is_dead` / `_expire_dead`,
+# what `pretool_sensor`, `decisions.py`, `dispatch_top` and `dos arbitrate` all read
+# through `live_leases(expire_dead=True)`) gets the ordering right, and this fold now
+# mirrors it:
+#
+#   (a) PRIMARY — WAL freshness. The lease's newest stamp (`heartbeat_at`, else
+#       `acquired_at`) inside a grace window ⇒ LIVE, no matter what the pid does.
+#       Past its own `ttl_minutes` (or the kernel's 50-minute backstop) plus that
+#       grace ⇒ DEAD. This is time evidence the WAL carries itself.
+#   (b) CORROBORATION — a confidently-dead holder pid on THIS host, which may only
+#       speed the reclaim of a lease whose OBSERVED heartbeat has already gone
+#       quiet. It may never, on its own, kill a fresh lease.
+#   (c) Everything else is `unknown` — never `live`, never `dead`.
+#
+# One deliberate narrowing vs the kernel, in the fail-safe direction: the kernel
+# lets (b) fire off `acquired_at` when no beat exists, but NOTHING on this fleet
+# writes one (2871 journal entries: 107 ACQUIRE, 81 RELEASE, 2619 ENFORCE, 64
+# REFUSE — and ZERO HEARTBEAT; 0 live records carry `heartbeat_at`). With no beat
+# writer, "the heartbeat went quiet" degenerates back into "older than the grace"
+# and (b) once again fires for every lease. So the card requires (b) to actually
+# corroborate an OBSERVED beat; absent one, TTL expiry is the only positive death
+# evidence, and a lease inside its TTL whose ephemeral acquirer has exited reads
+# `unknown` — which is the normal, healthy shape, not a reapable orphan.
+#
+# The pid rung, when it does apply, still checks `(pid, proc_starttime)` and never
+# bare pid existence — pids are recycled, and a recycled pid is exactly how a dead
+# holder reads "alive". The reference tree carries a live instance: lane `guard`
+# recorded pid 44396, and pid 44396 today is a `conhost.exe` that started ~47
+# minutes AFTER the recorded start time.
 
 _LANE_LEASE_SCHEMA = "fleet-lane-lease-liveness/1"
 # Windows FILETIME epoch (1601-01-01) -> Unix epoch (1970-01-01), in seconds.
@@ -1380,9 +1418,48 @@ _PROC_START_MAX_EPOCH_S = 4102444800.0   # 2100-01-01
 # this only absorbs float rounding; it is deliberately far tighter than any
 # realistic pid-reuse interval, because the whole point is to catch reuse.
 _PROC_START_TOLERANCE_S = 2.0
-_LANE_LEASE_NEXT_ACTION = (
-    "reap each dead-holder lane lease: "
-    "`dos lease-lane release --lane <lane> --owner <holder>`")
+# The kernel's own staleness constants, mirrored so the card and the admission fold
+# cannot drift apart. `dos.lane_lease._DEFAULT_LIVE_TTL_MINUTES` /
+# `_LIVE_TTL_GRACE_MINUTES`.
+_LANE_LEASE_DEFAULT_TTL_MIN = 50.0
+_LANE_LEASE_GRACE_MIN = 5.0
+# The reap action this card USED to print was actively dangerous, and saying so is
+# the point of the line (#5859):
+#
+#   * `dos lease-lane release` performs NO liveness check whatsoever — `cmd_lease_lane`
+#     calls `lane_lease.release()` straight through, and that function evicts a live
+#     holder exactly as happily as a dead one. Its owner filter
+#     (`holder not in (owner, None) and owner != ""`) also short-circuits on an empty
+#     string, so `--owner ""` matches ANY lease on the lane regardless of holder.
+#     Running it across a 25-lane set would have destroyed live work.
+#   * There is no sanctioned per-lane reap verb to point at instead. `lane_lease.adopt()`
+#     (the ownership transfer) and the `OP_SCAVENGE` journal op both exist in the kernel
+#     but neither has a CLI surface — `dos lease-lane` exposes only
+#     acquire/release/heartbeat/spawn/live.
+#   * And no reap is needed for the thing the operator actually cares about: the
+#     ADMISSION view already self-heals. `live_leases(config, expire_dead=True)` — what
+#     `pretool_sensor`, `decisions.py`, `dispatch_top` and `dos arbitrate` read — drops
+#     these leases at read time without touching the WAL. A stale STRUCTURAL lease
+#     therefore blocks exactly one consumer: `lane_lease.acquire()` at
+#     `dos/lane_lease.py:453`, the single caller that deliberately folds without
+#     dead-elision (so a serialized acquirer cannot double-book a fresh reservation).
+#
+# So the honest next action is "observe, do not reap", plus the one narrow symptom
+# worth watching for.
+_LANE_LEASE_NEXT_ACTION_STEPS = (
+    "do NOT reap: `dos lease-lane release` runs NO liveness check (#5859) and its "
+    "`--owner \"\"` matches any holder, so releasing across the lane set evicts live work",
+    "there is no sanctioned per-lane reap verb to use instead — `lane_lease.adopt()` and "
+    "the `OP_SCAVENGE` journal op have no CLI surface (`dos lease-lane` = "
+    "acquire|release|heartbeat|spawn|live)",
+    "none is needed: the admission fold `live_leases(config, expire_dead=True)` already "
+    "elides these at read time for `pretool_sensor`/`decisions.py`/`dispatch_top`/"
+    "`dos arbitrate`, without mutating the WAL",
+    "a stale STRUCTURAL lease therefore blocks exactly one consumer — `lane_lease.acquire()` "
+    "(dos/lane_lease.py:453) — so watch for a repeated acquire REFUSE on one of these lanes "
+    "and escalate THAT lane to the operator; releasing blind is the larger risk",
+)
+_LANE_LEASE_NEXT_ACTION = " · ".join(_LANE_LEASE_NEXT_ACTION_STEPS)
 
 # Holder states. `unknown` is a first-class verdict: anything we cannot PROVE is
 # never folded into `live`, because a false "alive" is how this stayed hidden.
@@ -1448,51 +1525,143 @@ def process_start_times() -> dict[int, float] | None:
     return out
 
 
+def _lane_lease_ttl_min(rec: dict[str, Any]) -> float:
+    """The lease's own declared ``ttl_minutes``, else the kernel's 50-minute backstop.
+
+    Mirrors `dos.lane_lease._lease_is_dead`: a malformed/legacy ACQUIRE that declared
+    no TTL still cannot be immortal.
+    """
+    ttl = rec.get("ttl_minutes")
+    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl <= 0:
+        return _LANE_LEASE_DEFAULT_TTL_MIN
+    return float(ttl)
+
+
+def probe_lane_lease_pid(
+    rec: dict[str, Any],
+    starts: dict[int, float] | None,
+    *,
+    host_id: str = "",
+    tolerance: float = _PROC_START_TOLERANCE_S,
+) -> tuple[bool | None, str]:
+    """The OS-process rung ALONE: ``(alive, evidence)``, with ``alive`` THREE-valued.
+
+    ``True`` only when the pid is running AND its start time matches the one the
+    lease recorded. ``False`` only on positive evidence (the pid is gone, or the pid
+    exists but was RECYCLED into a different process — a pid that merely *exists* is
+    not a live holder). Everything else — no oracle, a foreign host, no usable pid,
+    or a live pid with no recorded ``proc_starttime`` to check it against — is
+    ``None``, "cannot tell", which is never proof of either.
+
+    Deliberately SEPARATE from the verdict: on its own this is NOT evidence of
+    death, because the pid a lane lease records is the ephemeral `dos lease-lane
+    acquire` child that exits by design. `classify_lane_lease_holder` consumes it
+    strictly as a corroborator of WAL staleness.
+    """
+    pid = _int(rec.get("pid"))
+    rec_host = str(rec.get("host_id") or "").strip()
+    if starts is None:
+        return (None, "no process-liveness oracle on this host (psutil unavailable)")
+    if rec_host and host_id and rec_host != host_id:
+        return (None,
+                f"holder recorded on host {rec_host}; this host cannot probe a remote pid")
+    if pid is None or pid <= 0:
+        return (None, "lease carries no usable pid")
+    observed = starts.get(pid)
+    if observed is None:
+        return (False, f"pid {pid} is not a running process")
+    recorded = _proc_starttime_epoch(rec.get("proc_starttime"))
+    if recorded is None:
+        return (None,
+                f"pid {pid} exists but the lease records no readable proc_starttime; "
+                "pid existence alone is not proof of life")
+    if abs(observed - recorded) <= tolerance:
+        return (True,
+                f"pid {pid} running, start time matches the lease ({recorded:.0f})")
+    return (False,
+            f"pid {pid} was RECYCLED: the running process started {observed:.0f}, "
+            f"the lease recorded {recorded:.0f}")
+
+
 def classify_lane_lease_holder(
     rec: dict[str, Any],
     starts: dict[int, float] | None,
     *,
     host_id: str = "",
     tolerance: float = _PROC_START_TOLERANCE_S,
+    now_ts: float | None = None,
 ) -> tuple[str, str]:
     """Judge ONE lane-lease record's holder. Returns ``(state, evidence)``.
 
-    A holder is DEAD only on positive evidence:
+    Mirrors the kernel's own live-set predicate (`dos.lane_lease._lease_is_dead`):
+    **WAL heartbeat/TTL staleness is the PRIMARY evidence; the holder pid only
+    corroborates.** In rung order —
 
-      * its pid is absent from the live process table, or
-      * its pid EXISTS but the process now running under it started at a different
-        time than the lease recorded — the pid was recycled.
-
-    Everything unproven is ``unknown``, never ``live``: no oracle, no/again-invalid
-    pid, a record stamped on a different host (this host cannot probe a remote
-    pid), or a live pid with no recorded ``proc_starttime`` to check it against.
-    That last case is the important one — a pid that merely *exists* is not a live
-    holder, and treating it as one is the exact blindness this fold removes.
+      1. LIVE — the lease's newest WAL stamp (``heartbeat_at``, else ``acquired_at``)
+         is inside the freshness grace. This holds *regardless of the pid*, and it is
+         precisely the case the first cut got wrong: the recorded pid is the ephemeral
+         `dos lease-lane acquire` child, so a fresh, healthy, actively-held lease
+         normally has an ABSENT pid.
+      2. LIVE — the recorded holder process is confidently up on this host with a
+         matching start time. The strongest signal available, when it applies.
+      3. UNKNOWN — no readable stamp at all, so staleness cannot be judged and the
+         pid says nothing on its own.
+      4. DEAD — past the lease's own ``ttl_minutes`` (or the kernel's backstop) plus
+         the grace. TTL expiry is positive, WAL-carried death evidence, and it is what
+         the admission fold `live_leases(expire_dead=True)` itself acts on.
+      5. DEAD — an OBSERVED heartbeat gone quiet past the grace, corroborated by a
+         confidently-dead pid: dead *and* silent, so reclaimable before the full TTL.
+         Requires a real ``heartbeat_at``; a bare ``acquired_at`` is not a beat, and
+         letting it stand in is how the pid rung came to fire for every lease on a
+         fleet whose WAL contains zero HEARTBEAT ops.
+      6. UNKNOWN — inside its TTL but not fresh. Unproven either way, never `live`.
     """
-    pid = _int(rec.get("pid"))
-    rec_host = str(rec.get("host_id") or "").strip()
-    if starts is None:
-        return (LANE_HOLDER_UNKNOWN,
-                "no process-liveness oracle on this host (psutil unavailable)")
-    if rec_host and host_id and rec_host != host_id:
-        return (LANE_HOLDER_UNKNOWN,
-                f"holder recorded on host {rec_host}; this host cannot probe a remote pid")
-    if pid is None or pid <= 0:
-        return (LANE_HOLDER_UNKNOWN, "lease carries no usable pid")
-    observed = starts.get(pid)
-    if observed is None:
-        return (LANE_HOLDER_DEAD, f"pid {pid} is not a running process")
-    recorded = _proc_starttime_epoch(rec.get("proc_starttime"))
-    if recorded is None:
-        return (LANE_HOLDER_UNKNOWN,
-                f"pid {pid} exists but the lease records no readable proc_starttime; "
-                "pid existence alone is not proof of life")
-    if abs(observed - recorded) <= tolerance:
+    now_ts = time.time() if now_ts is None else now_ts
+    pid_alive, pid_note = probe_lane_lease_pid(
+        rec, starts, host_id=host_id, tolerance=tolerance)
+
+    beat_stamp = str(rec.get("heartbeat_at") or "").strip()
+    stamp_epoch = _lease_acquired_epoch(rec)
+    age_min = None if stamp_epoch is None else max(0.0, (now_ts - stamp_epoch) / 60.0)
+    ttl_min = _lane_lease_ttl_min(rec)
+    kind = "heartbeat" if beat_stamp else "acquire stamp"
+
+    # (1) PRIMARY: WAL freshness outranks every process signal.
+    if age_min is not None and age_min <= _LANE_LEASE_GRACE_MIN:
         return (LANE_HOLDER_LIVE,
-                f"pid {pid} running, start time matches the lease ({recorded:.0f})")
-    return (LANE_HOLDER_DEAD,
-            f"pid {pid} was RECYCLED: the running process started {observed:.0f}, "
-            f"the lease recorded {recorded:.0f}")
+                f"{kind} is {_age_text(age_min)} old — fresh inside the "
+                f"{_LANE_LEASE_GRACE_MIN:.0f}-minute grace, so the lease is held "
+                f"regardless of its ephemeral acquirer pid [{pid_note}]")
+
+    # (2) The holder process itself is confidently up.
+    if pid_alive is True:
+        return (LANE_HOLDER_LIVE, pid_note)
+
+    # (3) No credible stamp — the pid alone cannot decide it.
+    if age_min is None:
+        return (LANE_HOLDER_UNKNOWN,
+                "lease carries no readable heartbeat/acquire stamp, so staleness "
+                f"cannot be judged [{pid_note}]")
+
+    # (4) TTL expiry — the kernel's primary death evidence.
+    if age_min > ttl_min + _LANE_LEASE_GRACE_MIN:
+        return (LANE_HOLDER_DEAD,
+                f"TTL EXPIRED: no {kind} for {_age_text(age_min)}, past its "
+                f"{ttl_min:.0f}-minute TTL + {_LANE_LEASE_GRACE_MIN:.0f}-minute grace "
+                f"[{pid_note}]")
+
+    # (5) A real beat that went quiet, corroborated by a confidently-dead pid.
+    if beat_stamp and pid_alive is False:
+        return (LANE_HOLDER_DEAD,
+                f"heartbeat went quiet {_age_text(age_min)} ago and the holder process "
+                f"is confirmed gone [{pid_note}]")
+
+    # (6) Inside its TTL, not fresh, ephemeral acquirer gone — the normal shape.
+    return (LANE_HOLDER_UNKNOWN,
+            f"inside its {ttl_min:.0f}-minute TTL ({_age_text(age_min)} since the "
+            f"{kind}) but not beaten within the grace; the recorded pid is the "
+            f"ephemeral `dos lease-lane acquire` child, so its absence is not "
+            f"evidence of death [{pid_note}]")
 
 
 def _lease_acquired_epoch(rec: dict[str, Any]) -> float | None:
@@ -1534,7 +1703,8 @@ def summarize_lane_lease_holders(
     for rec in records or []:
         if not isinstance(rec, dict):
             continue
-        state, evidence = classify_lane_lease_holder(rec, starts, host_id=host_id)
+        state, evidence = classify_lane_lease_holder(
+            rec, starts, host_id=host_id, now_ts=now_ts)
         acquired = _lease_acquired_epoch(rec)
         age_min = round(max(0.0, (now_ts - acquired) / 60.0), 1) if acquired is not None else None
         rows.append({
@@ -3985,9 +4155,10 @@ def _lane_lease_reasons(worker_leases: dict[str, Any]) -> list[str]:
     if dead:
         bits = _lane_lease_bits(lane.get("dead") or [])
         reasons.append(
-            f"lane-lease DEAD HOLDERS: dead-holder={dead} of {total} lane lease(s) "
-            f"(live={live}, unknown={unknown}) — these trees are fenced by processes that "
-            f"no longer exist{': ' + bits if bits else ''}")
+            f"lane-lease STALE HOLDERS: dead-holder={dead} of {total} lane lease(s) "
+            f"(live={live}, unknown={unknown}) — these leases are past their TTL, so the "
+            f"admission fold already elides them; they still sit in the structural WAL "
+            f"fold{': ' + bits if bits else ''}")
         reasons.append(f"next action: {lane.get('next_action') or _LANE_LEASE_NEXT_ACTION}")
     elif unknown:
         reasons.append(
@@ -4770,7 +4941,13 @@ def _card_lane_lease_lines(wl: dict[str, Any]) -> list[str]:
         f"dead-holder={dead} unknown={_int(lane.get('unknown_count'), 0) or 0}"]
     if dead:
         lines.append(f"║   DEAD    : {_lane_lease_bits(lane.get('dead') or [])}")
-        lines.append(f"║   next    : {lane.get('next_action') or _LANE_LEASE_NEXT_ACTION}")
+        # The action is deliberately multi-clause (#5859) — one clause per line so
+        # the "do NOT reap" verdict is legible on the card instead of wrapping into
+        # the terminal. A payload from an older producer carries a single string.
+        action = lane.get("next_action") or _LANE_LEASE_NEXT_ACTION
+        steps = [s.strip() for s in str(action).split(" · ") if s.strip()]
+        for i, step in enumerate(steps):
+            lines.append(f"║   {'next' if i == 0 else '    '}    : {step}")
     return lines
 
 
@@ -5559,8 +5736,8 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
     if lane and not lane.get("available"):
         parts.append("lane-lease liveness UNKNOWN")
     elif _int(lane.get("dead_count"), 0):
-        parts.append(f"LANE LEASES FENCED: dead-holder {lane.get('dead_count')}"
-                     f"/{lane.get('total')}")
+        parts.append(f"LANE LEASES TTL-EXPIRED: dead-holder {lane.get('dead_count')}"
+                     f"/{lane.get('total')} (admission fold already elides; do not reap)")
     return "capacity: " + " · ".join(parts) if parts else ""
 
 
@@ -5785,8 +5962,8 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
             f"{lane.get('read_error') or 'lane-lease set unreadable'}")
     elif _int(lane.get("dead_count"), 0):
         buckets["action"].append(
-            f"{lane.get('dead_count')} of {lane.get('total')} lane lease(s) fenced by DEAD "
-            f"holders ({_lane_lease_bits(lane.get('dead') or [], limit=3)}) — "
+            f"{lane.get('dead_count')} of {lane.get('total')} lane lease(s) are TTL-EXPIRED "
+            f"in the structural WAL fold ({_lane_lease_bits(lane.get('dead') or [], limit=3)}) — "
             f"{lane.get('next_action') or _LANE_LEASE_NEXT_ACTION}")
     elif lane.get("total"):
         buckets["expected"].append(
