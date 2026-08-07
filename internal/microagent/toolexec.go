@@ -57,6 +57,10 @@ import (
 type ToolExec struct {
 	floor   KernelFloor
 	backend Backend
+	// egress is the optional per-agent network floor (#2017). Nil = ungoverned,
+	// which is exactly what every executor built before #2017 had: the network
+	// dimension is opted into with WithEgress, never inherited by accident.
+	egress *EgressPolicy
 }
 
 // KernelFloor is the in-process kernel adjudication seam ToolExec routes every
@@ -98,6 +102,14 @@ type ToolAction struct {
 	Argv    []string       // program arguments (Path is argv[0] implicitly)
 	Stdin   []byte         // fed to the subprocess stdin (nil => no stdin)
 	Timeout time.Duration  // per-action timeout; <=0 => DefaultActionTimeout
+	// Dest is the network destination this action declares it will reach — a
+	// URL, a host:port, or a bare host. Empty => the action declares no egress
+	// and the egress floor has nothing to decide (#2017). It is deliberately
+	// separate from Args for the same reason Path/Argv are: the floor decides on
+	// the declared destination, and a backend that reaches somewhere else is a
+	// hole the DECLARATION layer cannot close — see egress.go's invalidating
+	// assumption for where that boundary actually has to move.
+	Dest string
 }
 
 // ToolResult is the captured outcome of one action.
@@ -130,6 +142,28 @@ func NewToolExecBackend(floor KernelFloor, b Backend) (*ToolExec, error) {
 	return &ToolExec{floor: floor, backend: b}, nil
 }
 
+// WithEgress returns a COPY of the executor governed by the per-agent network
+// egress floor p (#2017) — the network half of isolation, applied at the seam so
+// every backend inherits it rather than each re-implementing it. A nil policy is
+// refused loud: WithEgress(nil) would read as "governed" at the call site while
+// silently leaving the executor open, and that is the exact failure this floor
+// exists to prevent. To run ungoverned, simply do not call WithEgress.
+//
+// It copies rather than mutates because one ToolExec is shared across an agent's
+// actions: attaching a policy must not retroactively re-govern an executor
+// another agent already holds.
+func (t *ToolExec) WithEgress(p *EgressPolicy) (*ToolExec, error) {
+	if t == nil {
+		return nil, ErrNilFloor
+	}
+	if p == nil {
+		return nil, errors.New("microagent: WithEgress requires an egress policy (nil *EgressPolicy); omit the call to run ungoverned")
+	}
+	cp := *t
+	cp.egress = p
+	return &cp, nil
+}
+
 // Run adjudicates the action through the kernel floor and, ONLY on a kernel
 // Allow, dispatches it to the backend. The return contract:
 //
@@ -154,6 +188,17 @@ func (t *ToolExec) Run(ctx context.Context, act ToolAction) (ToolResult, error) 
 	v := t.floor.Decide(ctx, call)
 	if v.Kind != abi.VerdictAllow {
 		return ToolResult{Verdict: v}, fmt.Errorf("%w: %s (by %s)", ErrActionDenied, verdictReason(v), v.By)
+	}
+
+	// (#2017) The NETWORK half of the same floor. Compute isolation only bounds
+	// what an action may run; this bounds where it may reach. Like the call
+	// floor it sits at the SEAM, before dispatch, so a refusal costs zero
+	// processes at every isolation level and no backend can forget it. Defer
+	// means "nothing to decide" (ungoverned executor, or an action that declares
+	// no destination) and proceeds; anything short of Allow is a refusal.
+	if ev := t.egress.Decide(ctx, act.Dest, call, t.floor); ev.Kind != abi.VerdictAllow && ev.Kind != abi.VerdictDefer {
+		return ToolResult{Verdict: ev}, fmt.Errorf("%w: %s -> %s (by %s)",
+			ErrEgressDenied, verdictReason(ev), act.Dest, ev.By)
 	}
 
 	res, err := t.backend.Dispatch(ctx, act)
