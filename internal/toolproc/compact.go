@@ -77,6 +77,16 @@ func CompactJournal(events []Event, tailKeep int) []Event {
 			out = append(out, ev)
 		case ev.Kind == EvSessionEnd && liveSessions[ev.Session]:
 			out = append(out, ev)
+		case ev.Kind == EvSessionResume && liveSessions[ev.Session]:
+			// Retain a retraction on exactly the same terms as the boundary it
+			// retracts (#3152). The pair is only meaningful together: keeping the
+			// session_end while dropping the session_resume that follows it re-arms a
+			// boundary the journal already withdrew, and the next retained spawn for
+			// that session then refuses the very journal this function promises is
+			// safe to persist. Order-safe by construction — a resume is written ahead
+			// of the spawn that refuted the end, so it can never be retained without
+			// its own end also being retained or already dropped as harmless.
+			out = append(out, ev)
 		}
 	}
 	return out

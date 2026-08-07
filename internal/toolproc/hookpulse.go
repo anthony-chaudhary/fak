@@ -48,7 +48,7 @@ func HookEvents(kind string, p HookPayload, envFor func(tool string) HookEnvelop
 		out = append(out, ev)
 	}
 	if kind != "post" {
-		return out, nil
+		return withSessionResume(out, nowMS, existing), nil
 	}
 
 	// Launch bridge: the response announces a background id => spawn the job.
@@ -60,7 +60,7 @@ func HookEvents(kind string, p HookPayload, envFor func(tool string) HookEnvelop
 				Session: p.SessionID, AtMS: nowMS,
 				DeadlineMS: env.DeadlineMS, HeartbeatEveryMS: env.HeartbeatEveryMS})
 		}
-		return out, nil
+		return withSessionResume(out, nowMS, existing), nil
 	}
 
 	// Poll bridge: the input names a background id => pulse (or finish) the job.
@@ -85,7 +85,20 @@ func HookEvents(kind string, p HookPayload, envFor func(tool string) HookEnvelop
 			out = append(out, Event{Kind: EvPulse, CallID: callID, AtMS: nowMS, Via: via})
 		}
 	}
-	return out, nil
+	return withSessionResume(out, nowMS, existing), nil
+}
+
+// withSessionResume prepends the session_resume retraction when this firing's
+// own spawn refutes a session_end still standing in the journal (#3152). The
+// retraction must lead: Fold consumes the journal in order, so a spawn placed
+// ahead of it would still hit the armed boundary. Returns out unchanged when no
+// boundary is standing, which is the overwhelmingly common case.
+func withSessionResume(out []Event, nowMS int64, existing []Event) []Event {
+	resume, ok := hookSessionResume(out, nowMS, existing)
+	if !ok {
+		return out
+	}
+	return append([]Event{resume}, out...)
 }
 
 // hookCallState reports whether callID was ever journaled and, if so, whether

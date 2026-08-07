@@ -63,6 +63,11 @@ const (
 	EvExit       EventKind = "exit"        // the tool call completed (ok or error)
 	EvKill       EventKind = "kill"        // the supervisor revoked it mid-flight, citing a closed reason
 	EvSessionEnd EventKind = "session_end" // the owning session ended (orphan boundary)
+	// EvSessionResume retracts an earlier session_end for the same session: the
+	// producer observed that session spawn a tool AFTER claiming it ended, so the
+	// boundary was premature. See sessionresume.go for why this is a written row
+	// and not a reader-side tolerance.
+	EvSessionResume EventKind = "session_resume"
 )
 
 // Event is one journal row. The journal is append-only JSONL: unknown FIELDS are
@@ -227,6 +232,14 @@ type Counts struct {
 	// is a KILL, not a probe, so this count is attention that was acted on.
 	StalledMonitors int `json:"stalled_monitors"`
 	Orphaned        int `json:"orphaned"`
+	// SessionsResumed is how many sessions in this journal published a
+	// session_end and then kept spawning — a premature terminal boundary,
+	// retracted by a session_resume row. It is NOT an error count: the table is
+	// correct. It is the visibility that keeps the retraction from being silent,
+	// because a nonzero value means this workspace's harness ends sessions it has
+	// not finished, and every per-session number sliced at that boundary (tool
+	// spawns, guard usage) is short by whatever came after it (#3152).
+	SessionsResumed int `json:"sessions_resumed,omitempty"`
 }
 
 // Config tunes the fold. Zero values are safe: no default deadline (unbounded
@@ -388,6 +401,10 @@ func ValidateEvent(ev Event) error {
 		if ev.Session == "" {
 			return fmt.Errorf("session_end: session required")
 		}
+	case EvSessionResume:
+		if ev.Session == "" {
+			return fmt.Errorf("session_resume: session required")
+		}
 	default:
 		return fmt.Errorf("unknown event kind %q", ev.Kind)
 	}
@@ -432,6 +449,7 @@ func Fold(events []Event, nowMS int64, cfg Config) (Table, error) {
 
 	procs := map[string]*proc{}
 	sessionEnd := map[string]int64{}
+	resumed := map[string]bool{}
 	var order []string
 
 	for _, ev := range events {
@@ -504,10 +522,21 @@ func Fold(events []Event, nowMS int64, cfg Config) (Table, error) {
 			if _, dup := sessionEnd[ev.Session]; !dup {
 				sessionEnd[ev.Session] = ev.AtMS
 			}
+		case EvSessionResume:
+			// The producer witnessed this session spawning after it claimed to end,
+			// so the boundary is retracted: later spawns are admitted normally and
+			// the session's still-running procs stop reading as orphans. A LATER
+			// session_end re-arms the boundary at the new time — the row that counts
+			// is the last one not yet retracted (sessionresume.go).
+			if _, armed := sessionEnd[ev.Session]; armed {
+				delete(sessionEnd, ev.Session)
+				resumed[ev.Session] = true
+			}
 		}
 	}
 
 	t := Table{Schema: TableSchema, NowUnixMS: nowMS, Config: cfg}
+	t.Counts.SessionsResumed = len(resumed)
 	for _, id := range order {
 		p := procs[id]
 		if endMS, dead := sessionEnd[p.Session]; dead && p.Session != "" {
