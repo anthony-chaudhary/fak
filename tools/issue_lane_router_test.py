@@ -572,9 +572,108 @@ class ConfigOverrideTest(unittest.TestCase):
         self.assertEqual(r["confidence"], "keyword")
 
 
+class SeparatorFoldedScopeTest(unittest.TestCase):
+    """Rung 3b: a hyphenated scope naming an unpunctuated lane must still route.
+
+    Lane names in dos.toml carry no separators (`sessionimage`), but issue authors
+    write the same leaf hyphenated in a Conventional-Commits scope
+    (`feat(session-image): ...`). Before the fold those titles matched no rung and
+    the issue went UNROUTED — and an unrouted issue never enters `lanes[...]`, so
+    the dispatch picker can never select it. Measured on the live backlog
+    2026-08-06: 26 open issues (cachevalue 12, sessionjournal 6, harnessres 5,
+    sessionaudit 1, operatorbrief 1, dogfoodissues 1) were stranded this way.
+    """
+
+    def test_hyphenated_scope_routes_to_unpunctuated_lane(self):
+        for title, lane in [
+            ("feat(session-image): cold prompt-cache handling", "sessionimage"),
+            ("fix(slack-outbox): drop the duplicate send", "slackoutbox"),
+            ("feat(app-version): stamp the build", "appversion"),
+        ]:
+            with self.subTest(title=title):
+                r = route(issue(30, title))
+                self.assertEqual(r["lane"], lane)
+                # Graded `alias`, never `exact-scope`: a folded hit is weaker
+                # evidence than a literal lane name.
+                self.assertEqual(r["confidence"], "alias")
+
+    def test_underscore_and_space_separators_fold_too(self):
+        for title in ("feat(session_image): x", "feat(session image): x"):
+            with self.subTest(title=title):
+                self.assertEqual(route(issue(31, title))["lane"], "sessionimage")
+
+    def test_explicit_alias_still_wins_over_the_fold(self):
+        # THE ordering guard. `terminal-bench` is an explicit SCOPE_ALIAS -> bench,
+        # and ALSO matches a real `terminalbench` lane once the hyphen is folded.
+        # The hand-written alias is the operator's stated intent, so rung 3b must sit
+        # BELOW it — otherwise this issue silently re-routes off `bench`.
+        r = m.route_issue(issue(32, "feat(terminal-bench): official contract"),
+                          LANES + ["terminalbench"], TREES)
+        self.assertEqual(r["lane"], "bench")
+        self.assertEqual(r["signal"], "scope:terminal-bench->bench")
+
+    def test_path_still_overrides_a_folded_scope(self):
+        # The fold is scope-rung evidence; a real path still outranks it. (Uses the
+        # `fak/`-prefixed doc-link form: the path rung deliberately skips a bare
+        # `internal/...`, so that form would not exercise the override at all.)
+        r = route(issue(33, "feat(session-image): x",
+                        body="the fix is in fak/internal/gateway/serve.go"))
+        self.assertEqual(r["lane"], "gateway")
+        self.assertEqual(r["confidence"], "path-confirmed")
+
+    def test_folded_signal_names_the_issues_own_scope_token(self):
+        # The signal is the operator's audit trail for WHY a lane was chosen. A
+        # folded hit must report `session-image`, not the Conventional-Commits
+        # TYPE (`feat`), which the pre-existing token fallback would otherwise emit.
+        r = route(issue(35, "feat(session-image): x"))
+        self.assertEqual(r["signal"], "scope:session-image->sessionimage")
+
+    def test_fold_does_not_invent_a_lane(self):
+        # A hyphenated scope matching NO lane stays unrouted — the fold widens the
+        # exact-scope rung, it does not add a catch-all.
+        r = route(issue(34, "feat(no-such-leaf): x"))
+        self.assertIsNone(r["lane"])
+        self.assertEqual(r["confidence"], "none")
+
+    def test_ambiguous_normalized_lane_is_dropped_not_guessed(self):
+        # If two lanes ever collapse to the same folded form, resolve NEITHER.
+        idx = m._norm_lane_index({"foo-bar", "foobar", "baz"})
+        self.assertNotIn("foobar", idx)
+        self.assertEqual(idx["baz"], "baz")
+
+    def test_live_lane_roster_has_no_folded_collisions(self):
+        # The fold is only unambiguous while the real roster stays collision-free.
+        try:
+            concurrent, _trees, _excl = m.lane_taxonomy(Path(__file__).resolve().parents[1])
+        except Exception:  # pragma: no cover - no dos binary in this environment
+            self.skipTest("dos doctor unavailable")
+        if not concurrent:
+            self.skipTest("empty lane roster")
+        folded: dict[str, list[str]] = {}
+        for lane in concurrent:
+            folded.setdefault(m._norm_scope(lane), []).append(lane)
+        self.assertEqual([v for v in folded.values() if len(v) > 1], [])
+
+
 class CoverageTest(unittest.TestCase):
     def _payload(self, routes, **kw):
         return m.build_payload(workspace="C:/work/fleet", routes=routes, trees=TREES, **kw)
+
+    def test_default_issue_limit_is_the_shared_constant(self):
+        # collect() and the CLI must agree, so raising the cap in ONE place lifts it
+        # for every dispatch caller (none of them pass --issue-limit explicitly).
+        import inspect
+        self.assertEqual(inspect.signature(m.collect).parameters["issue_limit"].default,
+                         m.DEFAULT_ISSUE_LIMIT)
+
+    def test_default_issue_limit_clears_the_real_backlog(self):
+        # `gh issue list` is NEWEST-first, so a fetch that hits the cap drops the
+        # OLDEST open issues — they are never routed and never dispatch candidates.
+        # The 1000 default truncated a measured 1383-issue backlog (2026-08-06),
+        # hiding 383 open issues from every picker. Keep headroom above it.
+        self.assertGreaterEqual(m.DEFAULT_ISSUE_LIMIT, 3000)
+        self.assertTrue(m.compute_coverage(
+            issues_fetched=1383, issue_limit=m.DEFAULT_ISSUE_LIMIT)["complete"])
 
     def test_complete_when_under_cap(self):
         cov = m.compute_coverage(issues_fetched=426, issue_limit=1000)
