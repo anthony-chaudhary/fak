@@ -129,12 +129,12 @@ type Evidence struct {
 	// the command that was refused rather than to whichever similar row was newest.
 	CallSeq    uint64 `json:"call_seq,omitempty"`
 	TSUnixNano int64  `json:"ts_unix_nano,omitempty"`
-	Verdict     string `json:"verdict,omitempty"`
-	Tool        string `json:"tool,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	By          string `json:"by,omitempty"`
-	TraceID     string `json:"trace_id,omitempty"`
-	ArgsDigest  string `json:"args_digest,omitempty"`
+	Verdict    string `json:"verdict,omitempty"`
+	Tool       string `json:"tool,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	By         string `json:"by,omitempty"`
+	TraceID    string `json:"trace_id,omitempty"`
+	ArgsDigest string `json:"args_digest,omitempty"`
 }
 
 // Complaint is one agent-authored complaint. In the guard domain (the default) it is an appeal
