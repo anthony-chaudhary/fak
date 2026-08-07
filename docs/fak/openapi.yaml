@@ -1025,6 +1025,34 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/policy:
+    get:
+      tags: [fak-native]
+      summary: Attest the installed capability floor
+      description: >-
+        Reports which capability floor governs this process RIGHT NOW — source plus the
+        effective (post-overlay) digest — with NO reload side effect. The read-only
+        complement of POST /v1/fak/policy/reload: before it, an operator had to POST a
+        reload (re-reading the file, possibly CHANGING the floor) merely to look at it.
+        The observe implementation is injected by the host CLI, so the gateway stays
+        policy-schema blind.
+      responses:
+        '200':
+          description: The installed capability floor, attested by digest.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyObservation' }
+              example: { source: "/etc/fak/policy.json", effective_digest: "policy-sha256:3f786850e387550fdab836ed7e6dc881de23001b", summary: "12 allow, 4 deny", reload_count: 2 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Policy observe is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "policy observe is not configured", type: "invalid_request_error", code: null, param: null } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/policy/reload:
     post:
       tags: [fak-native]
@@ -2026,6 +2054,40 @@ components:
         reloaded: { type: boolean }
         source: { type: string, description: The path the policy was reloaded from. }
         summary: { type: string }
+        effective_digest:
+          type: string
+          description: >-
+            Digest of the EFFECTIVE capability floor after this reload (base manifest
+            folded with the operator allow/deny overlays), in the `policy-sha256:<hex>`
+            grammar. Deliberately the same field and computation as
+            PolicyObservation.effective_digest, so a POST-reload answer and a read-only
+            GET /v1/fak/policy answer are directly comparable — that equality is what
+            lets an operator prove a reload was a no-op.
+
+    PolicyObservation:
+      type: object
+      description: >-
+        Which capability floor governs this process right now, attested by digest, with
+        no reload side effect — the read-only complement of PolicyReloadResponse.
+      properties:
+        source: { type: string, description: The path the installed policy was loaded from. }
+        effective_digest:
+          type: string
+          description: >-
+            Digest of the EFFECTIVE floor (base manifest folded with the operator
+            allow/deny overlays), in the `policy-sha256:<hex>` grammar. It covers the
+            enforced ruleset rather than the file bytes, because the overlay is
+            re-applied on every reload and so the enforced floor differs from what is
+            on disk.
+        summary: { type: string }
+        reload_count:
+          type: integer
+          format: int64
+          description: >-
+            Successful POST /v1/fak/policy/reload swaps this process has served, so an
+            operator can tell a floor hot-swapped under them from one that has stood
+            since launch. Gateway-owned; always emitted, including the 0 of a
+            never-reloaded floor.
 
     RouteReloadResponse:
       type: object

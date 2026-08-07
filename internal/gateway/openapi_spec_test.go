@@ -48,6 +48,7 @@ var specPathFor = map[string]string{
 	"/v1/fak/ctxvalue":              "/v1/fak/ctxvalue",
 	"/v1/fak/revoke":                "/v1/fak/revoke",
 	"/v1/fak/context/change":        "/v1/fak/context/change",
+	"/v1/fak/policy":                "/v1/fak/policy",
 	"/v1/fak/policy/reload":         "/v1/fak/policy/reload",
 	"/v1/fak/route/reload":          "/v1/fak/route/reload",
 	"/v1/fak/trace/reset":           "/v1/fak/trace/reset",

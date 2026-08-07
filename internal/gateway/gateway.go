@@ -482,6 +482,12 @@ type Config struct {
 	// ReloadPolicy reloads the process policy floor in-place. Nil disables the
 	// /v1/fak/policy/reload route.
 	ReloadPolicy PolicyReloadFunc
+	// ObservePolicy reports which capability floor governs this process RIGHT NOW —
+	// source + effective (post-overlay) digest — WITHOUT reloading anything (#3960).
+	// It is the read-only complement of ReloadPolicy, mirroring ObserveTrace/ResetTrace:
+	// before it, an operator had to POST a reload (re-reading the file, possibly CHANGING
+	// the floor) merely to look. Nil disables the GET /v1/fak/policy route.
+	ObservePolicy PolicyObserveFunc
 	// ReloadRoute is the model-routing manifest hot-reload watcher (#4003) — the
 	// route-plane twin of ReloadPolicy. When non-nil it seeds the atomic seam that
 	// backs POST /v1/fak/route/reload, a manual SIGHUP-style forced reload of the
@@ -845,6 +851,31 @@ type PolicyReloadResponse struct {
 	Source          string `json:"source,omitempty"`
 	Summary         string `json:"summary,omitempty"`
 	EffectiveDigest string `json:"effective_digest,omitempty"`
+}
+
+// PolicyObserveFunc is injected by the host CLI so the gateway can ATTEST the
+// installed capability floor without importing policy/adjudicator internals — the
+// read-only complement of PolicyReloadFunc (#3960), mirroring TraceObserveFunc.
+type PolicyObserveFunc func(context.Context) (PolicyObservation, error)
+
+// PolicyObservation is the wire result of GET /v1/fak/policy: which capability floor
+// governs this process right now, attested by digest, with NO reload side effect.
+//
+// EffectiveDigest is deliberately the same field (and the same host-side computation)
+// as PolicyReloadResponse.EffectiveDigest, so a GET answer and a POST-reload answer are
+// directly comparable — that equality is what lets an operator prove a reload was a
+// no-op. It covers the EFFECTIVE floor (base manifest folded with the operator
+// allow/deny overlays), not the file bytes, because the overlay is re-applied on every
+// reload and so the enforced floor differs from what is on disk.
+type PolicyObservation struct {
+	Source          string `json:"source,omitempty"`
+	EffectiveDigest string `json:"effective_digest,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	// ReloadCount is the number of successful POST /v1/fak/policy/reload swaps this
+	// process has served. The gateway owns this counter (the host func never sets it),
+	// so an operator can tell a floor that has been hot-swapped under it from one that
+	// has stood since launch. Always emitted, including the 0 of a never-reloaded floor.
+	ReloadCount int64 `json:"reload_count"`
 }
 
 // RouteReloadResponse is the wire result of POST /v1/fak/route/reload — the outcome
@@ -1232,6 +1263,7 @@ type Server struct {
 	servedFailure  servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
 	traceSeq       uint64        // mints a non-empty TraceID when the wire omits one (atomic)
 	reloadPolicy   PolicyReloadFunc
+	observePolicy  PolicyObserveFunc
 	resetTrace     TraceResetFunc
 	observeTrace   TraceObserveFunc
 	observeSession SessionObserveFunc
@@ -1269,6 +1301,14 @@ type Server struct {
 	// route concurrently; a nil load means routing hot-reload is not configured and
 	// the route answers 404, mirroring a nil reloadPolicy. Set via SetRouteWatcher.
 	routeWatcher atomic.Pointer[modelroute.Watcher]
+
+	// policyReloads counts the SUCCESSFUL POST /v1/fak/policy/reload swaps this
+	// process has served; it backs PolicyObservation.ReloadCount so a GET
+	// /v1/fak/policy answer distinguishes a floor that has been hot-swapped under the
+	// operator from one that has stood since launch (#3960). Gateway-owned on
+	// purpose: the injected host func never sets it, so the count cannot be spoofed
+	// by the policy loader. Atomic because a reload POST and an observe GET race.
+	policyReloads atomic.Int64
 
 	// boundAddr is the address this process is actually listening on, recorded by
 	// Serve once the listener exists (#5642). Before it, nothing in the Server knew
@@ -1987,6 +2027,7 @@ func New(cfg Config) (*Server, error) {
 		logf:                         logf,
 		debugStatsf:                  cfg.DebugStatsf,
 		reloadPolicy:                 cfg.ReloadPolicy,
+		observePolicy:                cfg.ObservePolicy,
 		resetTrace:                   cfg.ResetTrace,
 		observeTrace:                 cfg.ObserveTrace,
 		observeSession:               cfg.ObserveSession,

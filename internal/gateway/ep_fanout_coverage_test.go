@@ -201,6 +201,7 @@ var epFanoutExemptRoutes = map[string]string{
 	"/v1/fak/ctxvalue":              epExemptNoDecode,
 	"/v1/fak/revoke":                epExemptNoDecode,
 	"/v1/fak/context/change":        epExemptNoDecode,
+	"/v1/fak/policy":                epExemptNoDecode,
 	"/v1/fak/policy/reload":         epExemptNoDecode,
 	"/v1/fak/route/reload":          epExemptNoDecode,
 	"/v1/fak/trace/reset":           epExemptNoDecode,

@@ -360,12 +360,48 @@ func (s *Server) handleFakPolicyReload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "policy reload failed: "+err.Error())
 		return
 	}
+	// Count the swap BEFORE answering so a GET /v1/fak/policy that races this
+	// response cannot observe the new floor with the old (pre-swap) count (#3960).
+	s.policyReloads.Add(1)
 	if resp.Source != "" {
 		s.logf("gateway: reloaded capability floor from %s", resp.Source)
 	} else {
 		s.logf("gateway: reloaded capability floor")
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleFakPolicyObserve attests which capability floor governs this process RIGHT
+// NOW (#3960): GET /v1/fak/policy answers {source, effective_digest, summary,
+// reload_count} with NO side effect. It is the read-only complement of
+// handleFakPolicyReload, mirroring handleFakTraceObserve/handleFakTraceReset — before
+// it the only policy route was the MUTATING reload, so an operator had to re-read the
+// manifest (possibly CHANGING the floor) merely to look at it.
+//
+// The digest covers the EFFECTIVE floor (base manifest folded with the operator
+// allow/deny overlays), which is exactly why it cannot be derived from the file bytes:
+// the overlay is re-applied on every reload, so what is ENFORCED differs from what is
+// on disk. The observe implementation is injected by cmd/fak so this package stays
+// policy-schema blind, mirroring reloadPolicy.
+//
+// ReloadCount is stamped HERE rather than by the injected host func: the gateway owns
+// the counter, so a policy loader cannot under-report how often the floor moved.
+func (s *Server) handleFakPolicyObserve(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if s.observePolicy == nil {
+		writeErr(w, http.StatusNotFound, "policy observe is not configured")
+		return
+	}
+	obs, err := s.observePolicy(r.Context())
+	if err != nil {
+		s.logf("gateway: policy observe failed: %v", err)
+		writeErr(w, http.StatusBadRequest, "policy observe failed: "+err.Error())
+		return
+	}
+	obs.ReloadCount = s.policyReloads.Load()
+	writeJSON(w, http.StatusOK, obs)
 }
 
 // handleFakRouteReload forces a reload of the installed model-routing manifest in

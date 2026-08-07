@@ -90,6 +90,10 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/ctxvalue", s.handleFakCtxValue},
 		{"/v1/fak/revoke", s.handleFakRevoke},
 		{"/v1/fak/context/change", s.handleFakContextChange},
+		// /v1/fak/policy (exact, GET) is the read-only floor attestation (#3960); the
+		// longer exact /v1/fak/policy/reload (POST) is matched independently by the mux,
+		// so the observe route never shadows the reload route.
+		{"/v1/fak/policy", s.handleFakPolicyObserve},
 		{"/v1/fak/policy/reload", s.handleFakPolicyReload},
 		{"/v1/fak/route/reload", s.handleFakRouteReload},
 		{"/v1/fak/trace/reset", s.handleFakTraceReset},
