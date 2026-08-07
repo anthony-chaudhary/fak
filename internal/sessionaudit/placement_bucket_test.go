@@ -163,6 +163,16 @@ func TestBucketForPlacementCoversEveryZone(t *testing.T) {
 		{"vendor", "claude-opus-4-6", BucketAnthropic, false, true},
 		{"vendor", "gpt-5.5", BucketOpenAI, false, true},
 		{"vendor", "gemini-3-pro", BucketGoogle, false, true},
+		// gpt-4o pins the boundary the gpt-oss fix moved (#5115): the open-weights
+		// row is matched BEFORE the vendor rows, so it must still let a genuine
+		// OpenAI tier id through. internal/gateway's deepseek_pricing_test.go
+		// attributes on this exact id, so a regression here is cross-package.
+		{"vendor", "gpt-4o", BucketOpenAI, false, true},
+		// ...while the open-weights family that embeds "gpt" keeps its honest
+		// unknown placement even when a vendor zone is asserted for it.
+		{"vendor", "gpt-oss-120b", BucketVendorOpen, false, true},
+		{"fleet", "gpt-oss-120b", BucketFleet, true, true},
+		{"", "gpt-oss-120b", BucketOpenWeights, false, false},
 		// Case and whitespace tolerated, like the residency floor's parser.
 		{" FLEET ", "glm-5.2", BucketFleet, true, true},
 		// No signal => no claim, in either direction.
