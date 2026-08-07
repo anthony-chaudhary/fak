@@ -5695,13 +5695,13 @@ def gate_spawn_on_guard_argv(command: list[str], runs_dir: Path, *, runner=None,
             f"guard binary {command[0]} (build {inv['build_id']}) does not register "
             f"{len(missing)} flag(s) this dispatcher passes: "
             + ", ".join(f"--{f}" for f in missing)
-            + f" — every spawn against it would die at flag-parse before the gateway "
-              f"binds and be miscounted as an idle fleet (#5868: ~350 worker-units "
-              f"lost that way over six days). Planning 0 spawns. Recovery: rebuild or "
-              f"reinstall fak (the build id changes and the probe re-runs by itself), "
-              f"or drop the flag from tools/dispatch_worker.py (the refusal clears "
-              f"against the same cached inventory, no re-probe needed). Set "
-              f"DEFAULT_GUARD_PROBE_TTL_H=0 to disable the gate."),
+            + " — every spawn against it would die at flag-parse before the gateway "
+              "binds and be miscounted as an idle fleet (#5868: ~350 worker-units "
+              "lost that way over six days). Planning 0 spawns. Recovery: rebuild or "
+              "reinstall fak (the build id changes and the probe re-runs by itself), "
+              "or drop the flag from tools/dispatch_worker.py (the refusal clears "
+              "against the same cached inventory, no re-probe needed). Set "
+              "DEFAULT_GUARD_PROBE_TTL_H=0 to disable the gate."),
     }
 
 
