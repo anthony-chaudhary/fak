@@ -119,6 +119,8 @@ var noCommitReasons = map[string]bool{
 	ReasonCleanExitNoCommit:     true,
 	ReasonDiedBeforeEpilogue:    true,
 	ReasonGuardChildSpawnFailed: true,
+	ReasonProviderQuotaWall:     true,
+	ReasonWallClockExhausted:    true,
 }
 
 // Refinements of the sweep's residual "unknown" no-commit reason.
@@ -147,6 +149,74 @@ const (
 	ReasonCleanExitNoCommit     = "clean_exit_no_commit"
 	ReasonDiedBeforeEpilogue    = "died_before_epilogue"
 	ReasonGuardChildSpawnFailed = "guard_child_spawn_failed"
+)
+
+// Refinements of ReasonCleanExitNoCommit — the two typed guard terminals that account
+// for 105 of its 118 units (89.0%) over the same clean window. #5870.
+//
+// WHY these exist. #5867 (above) correctly separated "the session reached its epilogue"
+// from "the session was killed mid-turn", and that made clean_exit_no_commit the
+// fleet's largest single loss: 118 of 291 graded resolve units, ~41% of spent
+// seat-time. It was then read as a THROUGHPUT problem — winners and losers burn the
+// same ~26 minutes, winners get ~53 turns and losers ~25 — and the natural fix is
+// worker-prompt fuel.
+//
+// That reading is wrong, and the artifacts say so without ambiguity. 105 of the 118 end
+// on a terminal the guard already NAMED in the log; the ledger simply had no class for
+// it, so "we could not tell why" was mistaken for "the agent under-produced":
+//
+//   - ReasonProviderQuotaWall (67/118, 56.8%): a provider 429. Two independent
+//     witnesses, either sufficient. (a) goalpark.RecordLongRetry persists a park with
+//     Reason=LONG_RETRY_AFTER only for status 429 whose Retry-After clears
+//     LongWaitFloor, and the guard's two teardown branches in
+//     cmd/fak/guard_child_supervision.go print it ("goal parked outside active context
+//     budget" when the child exited on its own, 25 units; "context budget signal
+//     ignored as terminal" when the guard SUPPRESSED the restart that would have
+//     continued the work, 40 units). (b) cmd/fak/accounts_cooldown.go drops the account
+//     from the servable pool on the same wall (34 units, 32 of them overlapping (a)).
+//     The turn stream corroborates: `FAILED reason=rate_limited wire=anthropic_messages
+//     kind=weekly_limit announced_wait=1h13m40s ceiling=1m30s`.
+//   - ReasonWallClockExhausted (38/118, 32.2%): dispatch always passes --max-duration
+//     (1740s), so the guard drains the session with
+//     internal/session.ReasonTimeBudgetExhausted and stops the wrapped agent.
+//
+// The two are DISJOINT over the measured window (0 units carry both): a parked goal
+// tears the session down immediately, so it never also reaches the 29-minute envelope.
+// Quota is checked first anyway — it names a resource an operator can actually buy or
+// rotate, where the envelope is a knob this repo already owns.
+//
+// Neither is an agent behaviour a worker prompt can move. Keeping them inside
+// clean_exit_no_commit pointed the fleet's largest remaining loss at the wrong lever,
+// and it also CONTAMINATES the prompt A/B that bucket is used to grade: the residual
+// after this split is 13 units (11.0%), and that residual — not the 118 — is the
+// throughput number a prompt change is entitled to claim credit for.
+const (
+	ReasonProviderQuotaWall  = "provider_quota_wall"
+	ReasonWallClockExhausted = "wall_clock_exhausted"
+)
+
+// Terminal markers for the split above. Each is the guard's own literal format string
+// (a copy, not an import — same "the dispatcher is a live-edited surface" discipline as
+// logRE), chosen for specificity over recall:
+//
+//   - goalParkLongRetryMarker is the goalpark Reason constant, which
+//     internal/goalpark.RecordLongRetry sets on NO path other than a 429 with a
+//     >=LongWaitFloor Retry-After. Matching the reason rather than the surrounding
+//     prose catches both teardown branches with one string.
+//   - usageCapCooldownMarker is cmd/fak/accounts_cooldown.go's cooldown line — the same
+//     429 wall seen from the account pool instead of the goal.
+//   - timeBudgetMarker is internal/session.ReasonTimeBudgetExhausted, which the guard
+//     prints only on a genuine wall-clock exhaustion (guardTimeBudgetExhausted).
+//
+// The obvious broader candidate — the bare string "429" or "rate_limit" — is REJECTED:
+// a worker that merely READ a rate-limit-handling source file, or whose agent text
+// discussed one, would match, and the tail window now spans the whole epilogue where
+// unrelated diagnostics live. LONG_RETRY_AFTER appears in 65 of the 118 and in none of
+// the 13 residual units; over the same corpus the loose "429" substring appears in 24.
+const (
+	goalParkLongRetryMarker = "LONG_RETRY_AFTER"
+	usageCapCooldownMarker  = "account cooled by a live usage cap"
+	timeBudgetMarker        = "TIME_BUDGET_EXHAUSTED"
 )
 
 // guardEpilogueMarker is the guard exit summary's section rule — guardSection() in
@@ -188,6 +258,37 @@ const guardChildSpawnFailedMarker = "fak guard: could not run"
 // re-classifying all 149 in-window unknown units at 24 KiB instead moves ZERO of them.
 const unknownRefineTailBytes = 4096
 
+// terminalRefineTailBytes bounds the SECOND-stage read that names the typed terminal
+// inside a clean exit. It is deliberately larger than unknownRefineTailBytes, because
+// the guard prints its exit summary AFTER the terminal that caused the exit: over the
+// 118 measured clean-exit units the epilogue runs a median 7199 bytes (112 of 118
+// exceed 4096), which pushes every terminal line out of the sweep's own window.
+// Measured distance from EOF, and whether the marker lands inside each window:
+//
+//	TIME_BUDGET_EXHAUSTED   median 7671B    0/38 within 4 KiB   38/38 within 16 KiB
+//	LONG_RETRY_AFTER park   median 7564B    4/65 within 4 KiB   65/65 within 16 KiB
+//	usage-cap cooldown      median 8620B    0/34 within 4 KiB   34/34 within 16 KiB
+//
+// So this is not a marker-choice problem that a better regex fixes — at 4 KiB the
+// evidence is simply not in the window, for 100% of the affected units.
+//
+// 16 KiB is not a new liberty this package invents. It is exactly
+// _RESTART_EXHAUSTED_TAIL_BYTES from tools/issue_resolve_dispatch.py, which the PRODUCER
+// already reads for the identical reason, in a comment that describes this exact
+// failure: "Guard writes resource/audit summaries after its managed-context terminal.
+// The live epilogue can exceed the generic 4 KiB quota-banner tail, so give this precise
+// typed signature a larger still-bounded window without broadening every classifier."
+// The producer applied that fix to one signature and never to the others. Matching its
+// number keeps the package's standing rule intact: never claim to see something the
+// producer could not have seen.
+//
+// The first-stage window stays at 4096 ON PURPOSE. #5867 verified its three-way split is
+// stable there (re-running at 24 KiB moves zero units), and that verification is worth
+// more than the symmetry — widening the stage that decides "epilogue present" would put
+// a shipped, separately-evidenced classification back in play for no gain. The wider
+// read runs only AFTER a unit is already known to be a clean exit.
+const terminalRefineTailBytes = 16 * 1024
+
 // refineUnknownNoCommit names a residual "unknown" no-commit from the worker log tail.
 //
 // It runs ONLY on a reason the producer itself stamped "unknown" — never on a reason
@@ -204,9 +305,30 @@ func refineUnknownNoCommit(log string) string {
 	case strings.Contains(tail, guardChildSpawnFailedMarker):
 		return ReasonGuardChildSpawnFailed
 	case strings.Contains(tail, guardEpilogueMarker):
-		return ReasonCleanExitNoCommit
+		return refineCleanExit(log)
 	default:
 		return ReasonDiedBeforeEpilogue
+	}
+}
+
+// refineCleanExit names the typed guard terminal inside an already-established clean
+// exit, or leaves it as ReasonCleanExitNoCommit when there is none.
+//
+// It runs only on the clean-exit branch, so a died-before-epilogue or spawn-failed unit
+// can never be relabelled by it, and it reads a wider window than the branch above for
+// the reason terminalRefineTailBytes documents. Fail-open and read-only like every
+// classifier here: no marker means no claim, and the unit keeps the honest residual
+// label "the session ended normally and landed nothing".
+func refineCleanExit(log string) string {
+	tail := ReadTailBytes(log, terminalRefineTailBytes)
+	switch {
+	case strings.Contains(tail, goalParkLongRetryMarker),
+		strings.Contains(tail, usageCapCooldownMarker):
+		return ReasonProviderQuotaWall
+	case strings.Contains(tail, timeBudgetMarker):
+		return ReasonWallClockExhausted
+	default:
+		return ReasonCleanExitNoCommit
 	}
 }
 
@@ -343,8 +465,24 @@ func ClassifyUnit(log string, alive AliveProbe) Unit {
 			// (#5867). Split it from the log tail the sweep itself read, so a bare
 			// "unknown" survives only as a vocabulary-drift alarm (see
 			// refineUnknownNoCommit) — never as the label for half the fleet.
-			if asString(w["reason"]) == "unknown" {
+			//
+			// The clean-exit case is refined from EITHER entry point on purpose. Today
+			// every affected sidecar on disk carries "unknown", because the producer has
+			// no signature for the epilogue split and falls through to it. But the
+			// producer is actively growing one (tools/issue_resolve_dispatch.py is
+			// mirroring #5867's three classes into its own NO_COMMIT_* vocabulary), and
+			// the moment it does, those units arrive already stamped
+			// "clean_exit_no_commit" and would skip the refinement entirely — the #5870
+			// split would silently stop firing on exactly the runs it was built for,
+			// with no test going red to say so. Refining a producer-stamped clean exit
+			// is sound in its own right regardless: ReasonProviderQuotaWall and
+			// ReasonWallClockExhausted are strict SUB-classes of clean_exit_no_commit,
+			// so this only ever makes an already-correct label more specific.
+			switch asString(w["reason"]) {
+			case "unknown":
 				reason = refineUnknownNoCommit(log)
+			case ReasonCleanExitNoCommit:
+				reason = refineCleanExit(log)
 			}
 			u.Reason = reason
 		}

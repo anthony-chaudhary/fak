@@ -310,6 +310,131 @@ func TestCleanExitKeysOnSectionRuleNotCacheWindow(t *testing.T) {
 	}
 }
 
+// bulkyEpilogue pads a fixture epilogue past a byte budget with real guard section
+// rules, so a test can prove a marker survives being pushed AWAY from EOF by the
+// summary the guard prints after it. The live epilogue is a median 7199 bytes over the
+// 118 measured clean-exit units (112 of 118 exceed 4096), so this is not a synthetic
+// worry: it is the actual geometry of every worker log the sweep grades.
+func bulkyEpilogue(t *testing.T, atLeast int) string {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("── guard · avoided-spend attribution ──────────────────\n")
+	for b.Len() < atLeast {
+		b.WriteString("  owner split               provider ~1.4M (100%) + fak ~0 (0%)\n")
+	}
+	b.WriteString(guardEpilogueFixture)
+	return b.String()
+}
+
+// TestCleanExitSplitsProviderQuotaAndWallClockTerminals is the fail-before/pass-after pin
+// for #5870. clean_exit_no_commit — 118 of 291 graded resolve units over the clean
+// current-fleet window (2026-08-04..08-07), ~41% of fleet seat-time — was read as a
+// THROUGHPUT problem: sessions that ran a full ~26 minutes and simply landed nothing.
+// It is not. 105 of those 118 (89.0%) end on a TYPED guard terminal the ledger was not
+// looking for:
+//
+//   - 67 (56.8%) hit a provider quota wall: a 429 whose Retry-After exceeds
+//     goalpark.LongWaitFloor parks the goal with reason=LONG_RETRY_AFTER
+//     (internal/goalpark.RecordLongRetry), and/or the account is dropped from the
+//     servable pool by cmd/fak/accounts_cooldown.go. The turn stream shows
+//     `FAILED reason=rate_limited ... kind=weekly_limit announced_wait=1h13m40s`.
+//   - 38 (32.2%) hit the wall-clock envelope: dispatch always passes --max-duration
+//     (1740s) and the guard drains the session with TIME_BUDGET_EXHAUSTED
+//     (internal/session.ReasonTimeBudgetExhausted).
+//   - 13 (11.0%) are the residual — a session that really did end quietly with nothing.
+//
+// The two named classes are DISJOINT in the measured window (a parked goal tears down
+// immediately, so it never also reaches the 29m envelope), and neither is an agent
+// behaviour the worker prompt can fix: one is purchased capacity, one is a configured
+// envelope. Booking them as "the agent under-produced" pointed the fleet's largest
+// remaining loss at the wrong lever.
+func TestCleanExitSplitsProviderQuotaAndWallClockTerminals(t *testing.T) {
+	runs := t.TempDir()
+	noCommit := map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "unknown"}
+	// A 429 weekly-limit park. The terminal line sits ABOVE the epilogue, exactly as it
+	// does on disk.
+	mkWorker(t, runs, 50, 1.0, workerOpts{witness: noCommit, body: "" +
+		"fak guard: PARKED goal=\"compute\" parked_until=1785815999 reason=LONG_RETRY_AFTER\n" +
+		"fak-turn trace=win-611ca8 FAILED reason=rate_limited kind=weekly_limit announced_wait=1h13m40s\n" +
+		bulkyEpilogue(t, 6000)})
+	// An account dropped from the servable pool by a live usage cap, with no park line.
+	// 2 of the 67 look only like this.
+	mkWorker(t, runs, 51, 1.0, workerOpts{witness: noCommit, body: "" +
+		"fak guard: account cooled by a live usage cap until 2026-08-04T01:35:27Z — it drops from the servable pool\n" +
+		bulkyEpilogue(t, 6000)})
+	// The wall-clock envelope.
+	mkWorker(t, runs, 52, 1.0, workerOpts{witness: noCommit, body: "" +
+		"fak guard: TIME_BUDGET_EXHAUSTED — wall-clock --max-duration envelope elapsed for compute-claude-54880\n" +
+		bulkyEpilogue(t, 6000)})
+	// The residual: a complete epilogue and no typed terminal at all. This one must KEEP
+	// clean_exit_no_commit — the class has to keep meaning "we looked and found nothing",
+	// or the split has just moved the blindness somewhere else.
+	mkWorker(t, runs, 53, 1.0, workerOpts{witness: noCommit, body: bulkyEpilogue(t, 6000)})
+
+	// The two new class names are asserted as LITERALS, not as the ReasonProviderQuotaWall
+	// / ReasonWallClockExhausted consts the rest of this file would use. That is
+	// deliberate on both counts: it keeps the assertion behavioral rather than tautological
+	// (a const on both sides can be renamed in lockstep and still pass), and it let this
+	// test compile and RED against the pre-#5870 implementation, where it reported
+	// `map[clean_exit_no_commit:4]` — all four fixtures folded into the one bucket.
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r["provider_quota_wall"] != 2 || r["wall_clock_exhausted"] != 1 ||
+		r[ReasonCleanExitNoCommit] != 1 {
+		t.Errorf("no_commit_reasons = %v, want provider_quota_wall=2 wall_clock_exhausted=1 clean_exit_no_commit=1", r)
+	}
+}
+
+// TestProducerStampedCleanExitIsStillRefined is the forward-compatibility pin for the
+// change landing NEXT DOOR. Every affected .witness on disk today reads
+// reason="unknown", because tools/issue_resolve_dispatch.py has no signature for the
+// epilogue split and falls through to it — so the #5870 refinement is reached via the
+// unknown branch. That producer is in the middle of mirroring #5867's three classes
+// into its own NO_COMMIT_* vocabulary, and once it lands, these units arrive already
+// stamped "clean_exit_no_commit".
+//
+// Without this case the split would keep passing every other test in this file while
+// firing on none of the runs it exists for. Pinning it here means the producer can land
+// its half whenever it likes and the ledger keeps naming the terminal.
+func TestProducerStampedCleanExitIsStillRefined(t *testing.T) {
+	runs := t.TempDir()
+	mkWorker(t, runs, 55, 1.0, workerOpts{
+		witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil,
+			"reason": ReasonCleanExitNoCommit},
+		body: "fak guard: TIME_BUDGET_EXHAUSTED — wall-clock envelope elapsed\n" + bulkyEpilogue(t, 6000)})
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r["wall_clock_exhausted"] != 1 || r[ReasonCleanExitNoCommit] != 0 {
+		t.Errorf("no_commit_reasons = %v, want a PRODUCER-stamped clean exit refined to its typed terminal", r)
+	}
+}
+
+// TestTypedTerminalSurvivesTheEpilogueThatBuriesIt is the mechanism pin, kept separate
+// from the classification pin above because it is the whole reason those 105 units were
+// invisible. The witness sweep classifies from a 4 KiB tail
+// (tools/issue_resolve_dispatch.py _CAP_TAIL_BYTES), and the guard prints its exit
+// summary AFTER the terminal that caused the exit. Measured over the 118 units: the
+// TIME_BUDGET_EXHAUSTED marker is a median 7671 bytes from EOF and lands inside the
+// 4 KiB window 0/38 times — but 38/38 inside 16 KiB. Same for the 429 park (4/65 vs
+// 65/65) and the usage cap (0/34 vs 34/34).
+//
+// 16 KiB is not a new liberty: it is _RESTART_EXHAUSTED_TAIL_BYTES, the window the
+// producer's OWN classify_restart_exhaustion already reads for the same reason ("the
+// live epilogue can exceed the generic 4 KiB quota-banner tail"). So this package still
+// never claims to see something the producer could not have seen.
+func TestTypedTerminalSurvivesTheEpilogueThatBuriesIt(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "resolve-54-20260804-000000.log")
+	body := "fak guard: TIME_BUDGET_EXHAUSTED — wall-clock envelope elapsed\n" + bulkyEpilogue(t, 6000)
+	if err := os.WriteFile(log, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadTailBytes(log, unknownRefineTailBytes); strings.Contains(got, "TIME_BUDGET_EXHAUSTED") {
+		t.Fatal("fixture must bury the terminal past the 4 KiB window; that is the point")
+	}
+	if got := refineUnknownNoCommit(log); got != "wall_clock_exhausted" {
+		t.Errorf("refineUnknownNoCommit = %q, want the terminal read through the epilogue that buries it", got)
+	}
+}
+
 // TestUnrecognizedReasonStaysUnknownNotRefined keeps the #5866 lesson intact. The split
 // above runs ONLY on a reason a producer itself stamped "unknown". A reason string this
 // package merely fails to recognize must still fold to a bare "unknown" — after this
