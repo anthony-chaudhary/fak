@@ -573,14 +573,27 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 // require-witness gate's claim (Meta["claim"]). "" when the verdict disclosed
 // nothing. This is the one forensic field the live wire carried but the durable
 // row used to drop, leaving an audit unable to say WHICH glob/arg tripped a deny.
+//
+// The claim is bounded and scrubbed HERE (boundWitness) because the journal is
+// the SOLE scrubber on this wire: internal/guardcorpus copies row.Witness
+// verbatim into the exported dataset and is documented as never re-deriving
+// redaction. Both sources are untrusted for this purpose — Meta is a string map
+// any rung can write, and even the typed Payload.Claim is concatenated from
+// call-derived bytes by several live rungs (see boundWitness).
+//
+// Unlike DenyRule (#5863) this field CANNOT be a closed-vocabulary set-membership
+// test: its value is open-ended remedial prose, 156 distinct values across this
+// host's corpus, and that prose is what keeps a refused agent alive. So it gets
+// the weaker-but-lossless treatment — a generous bound plus a value-targeted
+// scrub — rather than being dropped whole on a non-member.
 func witnessOf(v *abi.Verdict) string {
 	if v == nil {
 		return ""
 	}
 	if wp, ok := v.Payload.(abi.WitnessPayload); ok && wp.Claim != "" {
-		return wp.Claim
+		return boundWitness(wp.Claim)
 	}
-	return v.Meta["claim"]
+	return boundWitness(v.Meta["claim"])
 }
 
 // denyRuleOf extracts the refusing rung's closed-vocabulary rule id from the
@@ -904,6 +917,113 @@ func boundArgsLabel(s string) string {
 		return s
 	}
 	return s[:maxArgsLabelLen] + "..."
+}
+
+const (
+	// maxWitnessLen bounds row.Witness. It is DELIBERATELY not maxArgsLabelLen (96).
+	// Measured over this host's whole corpus (513 .dispatch-runs/guard-audit/*.jsonl,
+	// 82k rows, ~630 with a witness, ~156 distinct values — the corpus is live, so
+	// repeated scans saw 622-631 as peers appended and the reaper pruned): witness
+	// length p50 53, p90 65, p99 447, max 447. Bounding at 96 truncates 57 rows (9.05%) and discards
+	// 26.22% of all witness prose bytes — and the long values are precisely the
+	// gate's own remedy text (the 447-byte OFF_TRUNK refusal names the sanctioned
+	// `fak worktree worker prepare` route only in its second half). Truncating that
+	// converts a recoverable refusal into a dead end, which costs more than the
+	// disclosure it prevents. 512 sits above the observed maximum, so the measured
+	// truncation cost today is ZERO while the field stops being structurally
+	// unbounded.
+	maxWitnessLen = 512
+	boundEllipsis = "..."
+	redactedValue = "[redacted]"
+)
+
+// boundWitness makes the Witness field satisfy the contract internal/guardcorpus
+// states for it. That package copies row.Witness VERBATIM into the exported
+// GUARD-SESSION dataset under a comment asserting the journal "already bounded
+// and scrubbed" it — an assertion that was true of ArgsLabel and false of
+// Witness, which reached the wire raw.
+//
+// The field is NOT rung-authored by construction, which is why a bound is needed
+// rather than just a corrected comment. Live producers concatenate call-derived
+// bytes into the claim: internal/adjudicator/egresslist.go builds
+// "egress restricted, host not allowlisted: "+dests[0] from a host parsed out of
+// the call args, decide.go does the same for the WebFetch host and scheme, and
+// internal/adjudicator/lintwrites.go builds one from the target path plus a
+// Go/JSON parser message that embeds the offending SOURCE TOKEN verbatim.
+func boundWitness(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = redactSecretAssignments(s)
+	if len(s) <= maxWitnessLen {
+		return s
+	}
+	return s[:maxWitnessLen] + boundEllipsis
+}
+
+// redactSecretAssignments replaces the VALUE of any `key=value` / `key: value`
+// atom whose KEY is secretish, and leaves every other byte untouched.
+//
+// It is deliberately NOT safeProvidedArgsLabel's whole-string secretish() drop.
+// That rule keys on the SUBSTRING "secret" anywhere in the string, so reusing it
+// here would blank the witness on exactly the SECRET_EXFIL refusals an operator
+// most needs to read — measured: it destroys 2 distinct corpus values / 4 rows,
+// including "ctxmmu SECRET_EXFIL secret_pattern quarantine_id=q1". Keying on the
+// assignment KEY instead alters ZERO real witness rows — verified by replaying
+// boundWitness over every row of the live corpus (the only assignment keys
+// present are quarantine_id, core.hooksPath and if, none secretish) — while
+// still redacting a value a rung concatenated behind a secret-shaped name.
+func redactSecretAssignments(s string) string {
+	if !secretish(s) {
+		return s // fast path: no needle anywhere, so no assignment can be secretish
+	}
+	var b strings.Builder
+	b.Grow(len(s) + len(redactedValue))
+	i := 0
+	for i < len(s) {
+		if s[i] != '=' && s[i] != ':' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+		sep := i
+		i++
+		// KEY: the identifier run immediately LEFT of the separator.
+		k := sep
+		for k > 0 && isKeyByte(s[k-1]) {
+			k--
+		}
+		if k == sep || !secretish(s[k:sep]) {
+			continue
+		}
+		// VALUE: the next whitespace-delimited atom, after optional separator spacing.
+		v := i
+		for v < len(s) && (s[v] == ' ' || s[v] == '\t') {
+			v++
+		}
+		e := v
+		for e < len(s) && !isWitnessSpace(s[e]) {
+			e++
+		}
+		if e == v {
+			continue // nothing assigned; leave the separator as it stands
+		}
+		b.WriteString(s[i:v]) // preserve the original spacing verbatim
+		b.WriteString(redactedValue)
+		i = e
+	}
+	return b.String()
+}
+
+func isKeyByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+		c == '_' || c == '-' || c == '.'
+}
+
+func isWitnessSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 func verdictName(k abi.VerdictKind) string {
