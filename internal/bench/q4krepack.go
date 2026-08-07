@@ -250,7 +250,21 @@ func q4kGemvRowMajor(raw []byte, out, in int, x, y []float32) {
 // order. Only the memory order moves, so max|Δ| must be exactly 0
 // (TestQ4KInterleavedGemvIsBitIdentical). That is what makes the timing ratio
 // attributable to the layout alone.
+//
+// FULL WIDTH-8 GROUPS TAKE THE SPECIALIZATION. This generic body keeps its per-lane state
+// (accumulators, per-lane scales/mins) in heap slices sized at run time, so every innermost
+// access pays a bounds check and the lane loop cannot unroll — a cost of Go's slice
+// discipline, NOT of the layout, and it was charging the interleaved side most of its
+// measured deficit. q4kGemvInterleaved8 runs the same arithmetic over fixed [8]float32
+// arrays instead; on this host (linux/amd64, avx512 tier, 2048x6144) that moved the ratio
+// from 0.644x to 0.865x, which is what lets the residual gap be read as the layout's own
+// scalar cost rather than as an artifact. The generic body still runs every other width and
+// the short tail group.
 func q4kGemvInterleaved(packed []byte, out, in, width int, x, y []float32) {
+	row0 := 0
+	if width == 8 {
+		row0 = q4kGemvInterleaved8(packed, out, in, x, y)
+	}
 	nblk := in / Q4KSuperBlockWeights
 	rowBytes := nblk * Q4KBlockBytes
 	buf := make([]float32, width*Q4KSuperBlockWeights) // lane-minor: buf[i*width+lane]
@@ -264,11 +278,14 @@ func q4kGemvInterleaved(packed []byte, out, in, width int, x, y []float32) {
 	s2 := make([]float32, width)
 	s3 := make([]float32, width)
 
-	for row0 := 0; row0 < out; row0 += width {
+	for ; row0 < out; row0 += width {
 		w := width
 		if rest := out - row0; rest < w {
 			w = rest
 		}
+		// Every group before row0 was full, so group row0/width starts at exactly
+		// row0*rowBytes — the same invariant the repack's offset math relies on, which is
+		// what lets the width-8 specialization hand off mid-buffer.
 		groupStart := row0 * rowBytes
 		for l := 0; l < w; l++ {
 			acc[l] = 0
@@ -327,6 +344,82 @@ func q4kGemvInterleaved(packed []byte, out, in, width int, x, y []float32) {
 			y[row0+l] = acc[l]
 		}
 	}
+}
+
+// q4kGemvInterleaved8 runs the FULL 8-row groups of the interleaved GEMV and returns the
+// first row it did not handle (the start of the short tail group, which the generic body
+// finishes). It is the pure-Go stand-in for llama.cpp's block_q4_Kx8 kernel: the lane state
+// lives in fixed [8]float32 arrays and every innermost loop has a constant bound, so the
+// compiler keeps lanes in registers, elides the bounds checks, and unrolls — the things a
+// vector register would give for free and that the generic slice body cannot express.
+//
+// The arithmetic, operand order, and accumulation order are byte-for-byte the generic
+// body's, so bit-identity against q4kGemvRowMajor still holds and
+// TestQ4KInterleavedGemvIsBitIdentical covers this path at width 8 (its shapes include
+// full-group, full-plus-tail, and out<width cases).
+func q4kGemvInterleaved8(packed []byte, out, in int, x, y []float32) int {
+	const w = 8
+	nblk := in / Q4KSuperBlockWeights
+	rowBytes := nblk * Q4KBlockBytes
+	var buf [w * Q4KSuperBlockWeights]float32 // lane-minor: buf[i*w+lane]
+
+	row0 := 0
+	for ; row0+w <= out; row0 += w {
+		var acc, dLo, mLo, dHi, mHi, s0, s1, s2, s3 [w]float32
+		groupStart := row0 * rowBytes
+		for b := 0; b < nblk; b++ {
+			base := groupStart + b*w*Q4KBlockBytes
+			dOff, mOff, scOff := base, base+2*w, base+4*w
+			qsOff := base + q4kHeadBytes*w
+
+			for j := 0; j < Q4KSuperBlockWeights; j += 64 {
+				is := j / 32
+				for l := 0; l < w; l++ {
+					d := math.Float32frombits(model.F16BitsToF32Bits(binary.LittleEndian.Uint16(packed[dOff+2*l:])))
+					dmin := math.Float32frombits(model.F16BitsToF32Bits(binary.LittleEndian.Uint16(packed[mOff+2*l:])))
+					sc := packed[scOff+q4kScaleBytes*l:][:q4kScaleBytes]
+					a, c := model.GetScaleMinK4(is, sc)
+					dLo[l], mLo[l] = d*float32(a), dmin*float32(c)
+					a, c = model.GetScaleMinK4(is+1, sc)
+					dHi[l], mHi[l] = d*float32(a), dmin*float32(c)
+				}
+				qi := (j / 64) * 32
+				for k := 0; k < 32; k++ {
+					lanes := (*[w]byte)(packed[qsOff+(qi+k)*w:]) // w contiguous bytes: no gather
+					lo := (*[w]float32)(buf[(j+k)*w:])
+					hi := (*[w]float32)(buf[(j+32+k)*w:])
+					for l := 0; l < w; l++ {
+						q := lanes[l]
+						lo[l] = dLo[l]*float32(q&0x0f) - mLo[l]
+						hi[l] = dHi[l]*float32(q>>4) - mHi[l]
+					}
+				}
+			}
+
+			xs := x[b*Q4KSuperBlockWeights:]
+			s0, s1, s2, s3 = [w]float32{}, [w]float32{}, [w]float32{}, [w]float32{}
+			for i := 0; i < Q4KSuperBlockWeights; i += 4 {
+				b0 := (*[w]float32)(buf[i*w:])
+				b1 := (*[w]float32)(buf[(i+1)*w:])
+				b2 := (*[w]float32)(buf[(i+2)*w:])
+				b3 := (*[w]float32)(buf[(i+3)*w:])
+				x0, x1, x2, x3 := xs[i], xs[i+1], xs[i+2], xs[i+3]
+				for l := 0; l < w; l++ {
+					s0[l] += b0[l] * x0
+					s1[l] += b1[l] * x1
+					s2[l] += b2[l] * x2
+					s3[l] += b3[l] * x3
+				}
+			}
+			for l := 0; l < w; l++ {
+				acc[l] += (s0[l] + s1[l]) + (s2[l] + s3[l])
+			}
+		}
+		for l := 0; l < w; l++ {
+			y[row0+l] = acc[l]
+		}
+	}
+	return row0
 }
 
 // Q4KRepackConfig sizes one A/B run. Zero fields take the defaults in withQ4KDefaults, so
