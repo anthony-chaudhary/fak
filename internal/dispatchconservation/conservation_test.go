@@ -210,6 +210,30 @@ func TestModelSwitchableReasonsAccountedNotFolded(t *testing.T) {
 	}
 }
 
+// TestPythonSweepReasonsAccountedNotFolded pins the classes that ONLY the Python
+// witness sweep stamps (tools/issue_resolve_dispatch.py: NO_COMMIT_RESTART_EXHAUSTED,
+// NO_COMMIT_PREVIEW_CONFIRM, NO_COMMIT_MISSING_LOG) as first-class buckets. That sweep
+// writes the very .witness sidecars this package reads, but its vocabulary is wider
+// than internal/dispatchtick's NoCommit* consts, and noCommitReasons had only copied
+// the dispatchtick half — so these three hit the fold and were booked as "unknown".
+//
+// Regression witnessed on this repo's own .dispatch-runs, 78h window ending
+// 2026-08-07T06:19:45Z: the sidecars held unknown=143 + restart_exhausted=26, and
+// `fak dispatch-conservation --window-h 78` reported `unknown=169` with
+// restart_exhausted missing from the breakdown — 15% of the window's no-commit units
+// relabelled from a named, actionable guard terminal to the residual bucket.
+func TestPythonSweepReasonsAccountedNotFolded(t *testing.T) {
+	runs := t.TempDir()
+	mkWorker(t, runs, 34, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "restart_exhausted"}})
+	mkWorker(t, runs, 35, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "preview_confirm_feedback"}})
+	mkWorker(t, runs, 36, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "missing_log_artifact"}})
+	rep := report(runs, aliveSet(), 6.0)
+	r := rep.Units.NoCommitReasons
+	if r["restart_exhausted"] != 1 || r["preview_confirm_feedback"] != 1 || r["missing_log_artifact"] != 1 || r["unknown"] != 0 {
+		t.Errorf("no_commit_reasons = %v, want each python-sweep class = 1 and no unknown", r)
+	}
+}
+
 func TestRepairUnitsCountedSeparately(t *testing.T) {
 	runs := t.TempDir()
 	mkWorker(t, runs, 30, 1.0, workerOpts{kind: "repair", lane: "contract-repair"})

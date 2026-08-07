@@ -14,7 +14,9 @@
 //	units_spent(window) = shipped_witnessed
 //	                    + committed_unwitnessed
 //	                    + no_commit{self_modify|policy_block|auth_wall|usage_cap|
-//	                                model_unknown|rate_limit|off_trunk|banner_noop|unknown}
+//	                                model_unknown|rate_limit|off_trunk|banner_noop|
+//	                                restart_exhausted|preview_confirm_feedback|
+//	                                missing_log_artifact|unknown}
 //	                    + spawn_failed
 //	                    + leaked_unswept          <- the number this tool exists for
 //
@@ -68,10 +70,38 @@ const (
 
 // noCommitReasons is the witness sweep's no-commit reason vocabulary; anything
 // outside it folds to "unknown".
+//
+// This is a literal copy of the reason strings the sidecar writers actually stamp,
+// from BOTH producers — the same "not an import" discipline logRE below documents:
+//
+//   - internal/dispatchtick/witness.go (NoCommit* consts): the Go model-arm classes
+//     self_modify, policy_block, auth_wall, usage_cap, model_unknown, rate_limit,
+//     off_trunk, banner_noop, unknown.
+//   - tools/issue_resolve_dispatch.py (NO_COMMIT_* consts, classify_no_commit_reason):
+//     the Python witness sweep that writes the .witness sidecars THIS package reads.
+//     It emits three classes the dispatchtick list never had — restart_exhausted,
+//     preview_confirm_feedback and missing_log_artifact.
+//
+// Those three were absent here, so every unit carrying them hit the `!noCommitReasons`
+// fold below and was booked as "unknown" — the ledger under-reported the one cause it
+// most needs to name. Measured on this repo's own .dispatch-runs over a 78h window
+// (2026-08-04..08-07): the sidecars held unknown=143 and restart_exhausted=26, and
+// `fak dispatch-conservation --window-h 78` printed a single inflated unknown=169 with
+// restart_exhausted absent from the breakdown entirely. A guard-restart storm
+// (dominant_cause=BUDGET_CONTEXT_EXHAUSTED, cmd/fak/guard_child.go guardEquivalentRestartStatus)
+// is a NAMED, actionable terminal; folding it into the residual bucket hid 15% of the
+// window's no-commit units behind the label that means "we could not tell".
+//
+// Keep this set a SUPERSET of both producers: a reason that only one side knows is
+// still a real, typed outcome, and silently renaming it to "unknown" is exactly the
+// unaccounted-unit blindness this package exists to remove.
 var noCommitReasons = map[string]bool{
 	"self_modify": true, "policy_block": true, "auth_wall": true,
 	"usage_cap": true, "model_unknown": true, "rate_limit": true,
 	"off_trunk": true, "banner_noop": true, "unknown": true,
+	// tools/issue_resolve_dispatch.py-only classes (see above).
+	"restart_exhausted": true, "preview_confirm_feedback": true,
+	"missing_log_artifact": true,
 }
 
 // Log-name grammar shared with the dispatcher (kept as a literal copy, not an
