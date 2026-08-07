@@ -211,11 +211,22 @@ design:
   different consumer. Forcing all readers to agree is a known regression: eliding
   a still-held region at acquire time double-books it — the exact TOCTOU the lease
   exists to prevent.
-- **The MCP `dos_arbitrate` tool is pure** — state in, decision out, no I/O. With
-  `live_leases` omitted it arbitrates against *nothing live*, so its GO reflects
-  only the leases you passed. Feed it the real live set (e.g.
-  `--leases "$(fak leaseref live)"` on the CLI, or the journal's live leases) or
-  its answer is about an empty world.
+- **The two `arbitrate` surfaces do not agree, and the MCP one fails OPEN.** The
+  `dos arbitrate` **CLI** reads the live lane-journal WAL by default — same set
+  `acquire` folds — so it agrees with the authority; `--leases '[]'` opts out into
+  an empty world. The **MCP tool** `dos_arbitrate` reads nothing: with
+  `live_leases` omitted it arbitrates against *nothing live*, so every lane reads
+  free (`dos_mcp/server.py`, `live_leases=list(live_leases or [])`). Observed live:
+  MCP `dos_arbitrate` returned `"cluster lane 'tools' free — admitted."` with
+  `GO — … disjoint from every live lease, so concurrent work is safe` for a lane
+  `dos lease-lane acquire` refused the same second as `"already held by a live
+  loop"` — [dos-kernel#246](https://github.com/anthony-chaudhary/dos-kernel/issues/246),
+  which proposes defaulting to the WAL and failing *closed* when it is unreadable.
+  Until then, use the CLI form or feed the real live set explicitly (`dos lease-lane
+  live`, `fak leaseref live`). A FREE from a checker that cannot see the store is
+  not evidence of a free lane. (The tool is still non-persisting — it journals
+  nothing — but "no I/O" was never accurate: it already reads the workspace's
+  `dos.toml`.)
 - **Even a correct GO can be stale by acquire time** — arbitrate holds no lock, so
   a peer can take the lane between the two calls.
 

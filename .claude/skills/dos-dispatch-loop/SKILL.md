@@ -61,6 +61,26 @@ the GitRefStore cross-node transport by default (#21). A REFUSE means a sibling 
 already holds an overlapping lane — pick a free one from `kernel.free_clusters` or
 exit. Initialise the loop counters (iteration=1, the breakers at 0).
 
+> **`dos lease-lane acquire` is the lease AUTHORITY; `dos arbitrate` is ADVISORY.**
+> Only `acquire` folds the durable lane-journal WAL under the lease mutex and
+> journals the grant, so only its verdict binds. Honor its REFUSE; never start
+> editing a tree on the strength of an arbitrate GO alone (arbitrate holds no lock,
+> so even a correct GO can be stale by acquire time).
+>
+> The advisory has two surfaces and they do **not** behave the same:
+>
+> - `dos arbitrate` (the **CLI**) reads the live WAL by default, so it agrees with
+>   `acquire`. Passing `--leases '[]'` opts out into an empty world.
+> - The **MCP tool** `dos_arbitrate` reads **nothing** — it arbitrates only against
+>   the `live_leases` you hand it, and an omitted argument means "the world is
+>   empty", so every lane reads free. Observed live: MCP `dos_arbitrate` answered
+>   `"cluster lane 'tools' free — admitted."` for a lane `dos lease-lane acquire`
+>   refused the same second as `"already held by a live loop"`
+>   ([dos-kernel#246](https://github.com/anthony-chaudhary/dos-kernel/issues/246)).
+>   Until that lands, either use the CLI form or pass the real set explicitly
+>   (`dos lease-lane live` / `fak leaseref live`). A FREE from a checker that cannot
+>   see the store is not evidence of a free lane.
+
 ## Step 1 — Pick-selection: skip held + cooled units (the anti-churn gate)
 
 Before a `dispatch` iteration offers a unit, screen the candidate unit set so the
@@ -196,7 +216,7 @@ ship-stamp" contract). So at close-out, commit your lane's writes — driven by 
 same `dos` verbs the loop already uses, with generic git:
 
 - **Commit your lane's writes by explicit pathspec** — stage exactly the files
-  under the lane region you leased (the `tree` globs `dos arbitrate` handed back),
+  under the lane region you leased (the `tree` globs `dos lease-lane acquire` granted),
   then commit naming those paths: `git add <lane paths>`; `git commit -m "<subject>"
   -- <lane paths>`. **Never a bare `git add -A`** — when sibling loops hold disjoint
   lanes on the same tree, a blanket add sweeps another loop's in-flight edits into
@@ -214,7 +234,7 @@ same `dos` verbs the loop already uses, with generic git:
   --porcelain -- <lane paths>` over the region you leased should come back empty once
   you have committed. If it does not, you stranded durable work — `log` it and commit
   it (or, if a path turns out to belong to a *still-live* sibling lease — check
-  `dos arbitrate`/the lane journal — leave it for that loop). Either way the loop
+  `dos lease-lane live`/the lane journal — leave it for that loop). Either way the loop
   must not exit leaving its own lane dirty off a self-reported "done".
 - **Scratch is not stranded work.** Short-lived probe output (a host's scratch
   convention — temp dirs, `*.err`, leading-underscore probes) is deletable noise, not
@@ -234,7 +254,7 @@ the trunk never accumulates anonymous WIP from a loop that stopped mid-write.
 ## What this skill deliberately does NOT do (no silent gap, `CLAUDE.md` heavy tier)
 
 - **No soft-claim lease core.** It coordinates loops by *lane* lease
-  (`dos arbitrate`), not the per-pick soft-claim machinery that stays host-side.
+  (`dos lease-lane acquire`), not the per-pick soft-claim machinery that stays host-side.
   `log` this when a sibling lane is busy rather than waiting on a soft-claim.
 - **No value-greedy focus scheduler.** It picks by lane order + the gate verdict,
   not a host's per-iteration focus ranking. That scheduler is the heavy tier.
