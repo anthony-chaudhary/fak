@@ -138,28 +138,46 @@ func CheckCoreLockHardSelf(ctx context.Context, c CoreLockCheck) (detail string,
 	if claim == "" {
 		return hardSelfDetail(f, "missing maintenance witness", c.Remedy), true
 	}
-	resolver := c.Resolver
-	if resolver == nil {
-		// FAIL CLOSED. No injected resolver and no registered factory means this
-		// binary has NO way to corroborate the claim against evidence the author did
-		// not write — so the claim is an unverified self-report, and a self-report is
-		// precisely what the hard-self lock exists to refuse. Treating "I could not
-		// check" as clearance would make the whole gate disappear in exactly the
-		// build where the checker was left out, which is the failure mode #5392 was
-		// opened to close. The refusal stands and names the missing resolver so the
-		// cause is diagnosable rather than looking like a bad claim.
-		mk := registeredFactory()
-		if mk == nil {
-			return hardSelfDetail(f, "no witness resolver is registered in this binary, so the maintenance claim cannot be corroborated", c.Remedy), true
-		}
-		resolver = mk(c.Run, c.Dir)
+	// THE ONE CHANGE-RELATIVE VERB (changedwitness.go). `changed:<path>` is resolved
+	// HERE, from c.Changed, and is deliberately absent from the shared resolver's
+	// grammar: the other producers of witness claims (the file-admission hook, the
+	// dispatch-tick witness, the agent turn and workflow journals) hold no changed
+	// pathset, so a change-relative question is meaningless there — and for them an
+	// unrecognized kind still ABSTAINS, which is not clearance. It exists because this
+	// gate runs BEFORE any `git add`, so `committed:<path>` is REFUTED for a file the
+	// change ADDS and an additive maintainer could not name their own work.
+	//
+	// It needs no resolver, because it needs no new evidence: the changed pathset was
+	// obtained by the caller from git before the claim was read. That is why it is
+	// decided ahead of the fail-closed resolver branch below rather than through it.
+	var outcome abi.WitnessOutcome
+	var cause string
+	if arg, ok := isChangedWitnessClaim(claim); ok {
+		outcome, cause = resolveChangedWitness(arg, c.Changed)
+	} else {
+		resolver := c.Resolver
 		if resolver == nil {
-			// Same posture for a factory that declines to build one: still no
-			// corroboration, still not clearance.
-			return hardSelfDetail(f, "the registered witness resolver factory produced no resolver, so the maintenance claim cannot be corroborated", c.Remedy), true
+			// FAIL CLOSED. No injected resolver and no registered factory means this
+			// binary has NO way to corroborate the claim against evidence the author did
+			// not write — so the claim is an unverified self-report, and a self-report is
+			// precisely what the hard-self lock exists to refuse. Treating "I could not
+			// check" as clearance would make the whole gate disappear in exactly the
+			// build where the checker was left out, which is the failure mode #5392 was
+			// opened to close. The refusal stands and names the missing resolver so the
+			// cause is diagnosable rather than looking like a bad claim.
+			mk := registeredFactory()
+			if mk == nil {
+				return hardSelfDetail(f, "no witness resolver is registered in this binary, so the maintenance claim cannot be corroborated", c.Remedy), true
+			}
+			resolver = mk(c.Run, c.Dir)
+			if resolver == nil {
+				// Same posture for a factory that declines to build one: still no
+				// corroboration, still not clearance.
+				return hardSelfDetail(f, "the registered witness resolver factory produced no resolver, so the maintenance claim cannot be corroborated", c.Remedy), true
+			}
 		}
+		outcome = resolver.Resolve(ctx, nil, claim)
 	}
-	outcome := resolver.Resolve(ctx, nil, claim)
 
 	// OBSERVE THE CORRELATION THE RESOLVER CANNOT SEE. The resolve above is handed a
 	// nil *abi.ToolCall on purpose — the resolver's rungs are claim-local — so the
@@ -175,12 +193,23 @@ func CheckCoreLockHardSelf(ctx context.Context, c CoreLockCheck) (detail string,
 	if outcome == abi.WitnessConfirmed {
 		return "", false
 	}
-	return hardSelfDetail(f, fmt.Sprintf("maintenance witness %q resolved %s", claim, witnessOutcome(outcome)), c.Remedy), true
+	why := fmt.Sprintf("maintenance witness %q resolved %s", claim, witnessOutcome(outcome))
+	if cause != "" {
+		why += " — " + cause
+	}
+	return hardSelfDetail(f, why, c.Remedy), true
 }
 
 // CoreLockRemedyCommit is the `fak commit` way to supply the maintenance witness.
 // It is the default remedy, so a caller that names none still prints a real cure.
-const CoreLockRemedyCommit = "Use a privileged maintenance path, or rerun fak commit with --core-lock-maintenance-witness <claim> after independent read-back confirms the edit."
+//
+// It names `changed:<path>` explicitly because that verb is otherwise undiscoverable
+// at exactly the moment it is needed: this gate runs before any `git add`, so a
+// maintainer whose change ADDS a core-locked file gets REFUTED by `committed:<path>`
+// on their own new file and has no way to learn, from the refusal alone, that a
+// change-relative claim exists. See changedwitness.go.
+const CoreLockRemedyCommit = "Use a privileged maintenance path, or rerun fak commit with --core-lock-maintenance-witness <claim> after independent read-back confirms the edit. " +
+	"A file this change ADDS is not tracked yet, so committed:<path> is refuted for it — name it with changed:<path>, which confirms only for a path this very commit carries."
 
 // HardSelfFinding reports the hard-self CORE_SELF_MODIFY finding a changed pathset
 // raises, or (zero, false) when it raises none. An unreadable/malformed taxonomy

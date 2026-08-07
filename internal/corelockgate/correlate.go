@@ -95,6 +95,13 @@ func (w WitnessCorrelation) String() string {
 // pathClaimKinds are the claim kinds whose argument IS a repository path, and so the
 // only kinds for which "does it name the change?" is a meaningful question.
 //
+// `changed:` (changedwitness.go) is here because its argument is a repository path
+// like the other two. Its reading is CONFIRMED-implies-correlated by construction —
+// the verb only clears when the path is a member of the very set this correlation
+// compares against — which is the point: it is the spelling that makes "name your own
+// change" reachable for a not-yet-tracked file, so the correlation must read it as the
+// honest case rather than as an abstain.
+//
 // Every other kind is deliberately absent. ancestor:/commit:/grep: resolve against
 // COMMIT HISTORY, and this gate runs before the change is a commit at all (the
 // `fak commit` path asks it before any `git add`; the worker-worktree land asks it
@@ -103,7 +110,7 @@ func (w WitnessCorrelation) String() string {
 // constant-true because a commit is its own ancestor. That is a real weakness, but it
 // is a weakness of the CLAIM GRAMMAR offered to this gate rather than a mismatch this
 // function can measure, so it abstains and says so instead of manufacturing a verdict.
-var pathClaimKinds = map[string]bool{"committed": true, "path": true}
+var pathClaimKinds = map[string]bool{"committed": true, "path": true, ChangedWitnessKind: true}
 
 // CorrelateWitness reports whether a maintenance witness claim names any part of the
 // changed pathset it is being offered to clear. It is pure: no git, no filesystem, no

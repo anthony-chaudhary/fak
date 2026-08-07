@@ -63,7 +63,8 @@ const CoreLockWitnessTrailer = "Core-lock-maintenance-witness"
 // command does not have, which is why the remedy is a parameter of the shared
 // check rather than baked into it.
 const coreLockLandRemedy = "Re-land with `fak worktree worker land --core-lock-maintenance-witness <claim>`, or carry a `" +
-	CoreLockWitnessTrailer + ": <claim>` trailer in the worktree commit message, after independent read-back confirms the edit."
+	CoreLockWitnessTrailer + ": <claim>` trailer in the worktree commit message, after independent read-back confirms the edit. " +
+	"A file this land ADDS is not tracked on the trunk yet, so committed:<path> is refuted for it — name it with changed:<path>, which confirms only for a path this land actually carries."
 
 // LandOption is an additive Land setting. Land takes them variadically so every
 // existing caller (the dispatch land seam, the CLI, the soak tests) compiles and

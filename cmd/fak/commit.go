@@ -106,7 +106,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	reviewObjective := fs.String("review-objective", envOrDefault("FAK_REVIEW_OBJECTIVE", ""), "objective given to --review-model (default: FAK_GOAL_OBJECTIVE, then first commit-message line)")
 	reviewEndpoint := fs.String("review-endpoint", envOrDefault("FAK_REVIEW_ENDPOINT", "http://127.0.0.1:8080/v1"), "OpenAI-compatible base URL for --review-model")
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var holding the bearer token for --review-endpoint (empty value sends no token)")
-	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit")
+	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit; the gate runs before any `git add`, so a file this commit ADDS needs changed:<path> (committed:<path> is refuted for it)")
 	reclaimLock := fs.Bool("reclaim-stale-index-lock", false, "RECOVERY (no commit): reclaim an orphaned .git/index.lock, and sweep leftover .git/next-index-<pid>.lock residue, when the lane evidence proves them stale with no live writer — dry-run unless --apply. Same path as `fak commit status --reclaim-stale-index-lock`")
 	reclaimApply := fs.Bool("apply", false, "with --reclaim-stale-index-lock, actually remove the reclaimed files (default: dry-run)")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")

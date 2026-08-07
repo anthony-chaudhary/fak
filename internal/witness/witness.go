@@ -43,6 +43,18 @@
 // structural half (no test touched => REFUTED) always runs; the red-then-green
 // execution is opt-in via FAK_WITNESS_SYMPTOM (default ABSTAIN). See symptom.go.
 //
+// ONE VERB IS DELIBERATELY NOT HERE. `changed:<path>` ("the path is part of the
+// change now being made") is resolved by internal/corelockgate at the hard-self
+// core-lock consult point and NOWHERE else, because that is the only caller holding a
+// changed pathset to answer it against — see internal/corelockgate/changedwitness.go.
+// Every producer that reaches THIS resolver (the file-admission hook, the
+// dispatch-tick witness, the agent turn and workflow journals) has no changed set at
+// all, so the question is meaningless for them; a `changed:` claim therefore falls
+// through to the ABSTAIN below, which the kernel's fail-closed default turns into a
+// deny. Do not "complete the grammar" by adding a case for it here: a rung that
+// cannot see a change cannot answer a question about one, and a guess would be a
+// false CONFIRM.
+//
 // An unrecognized or empty claim, or any environment where git is unavailable,
 // resolves to ABSTAIN (fail-to-abstain) — the witness never blocks on its own
 // uncertainty; the kernel's fail-closed default turns an abstain into a deny.
