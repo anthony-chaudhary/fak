@@ -1400,6 +1400,235 @@ class WorkerLeaseCrossCheckTest(unittest.TestCase):
         self.assertEqual(out["orphan_lease_count"], 0)
 
 
+# Windows FILETIME (100ns ticks since 1601-01-01) for a known Unix epoch second.
+def _filetime(epoch_s: float) -> int:
+    return int((epoch_s + 11644473600.0) * 1e7)
+
+
+class LaneLeaseHolderLivenessTest(unittest.TestCase):
+    """The cross-check must cover ALL lane leases, and judge holders on
+    (pid, proc_starttime) — never on bare pid existence (#5859).
+
+    Regression guard for the real defect: `dos lease-lane live` returned 24 exclusive
+    lane leases, 18 held by processes that no longer existed (the oldest 22 days old,
+    fencing `cmd/**` and `internal/modver/**`), while the card printed
+    `lease chk : clean=3 orphan-process=0 unmatched-live-lease=0` and folded
+    "worker/lease cross-check clean" into its summary. The cross-check only ever saw
+    the `refs/fak/locks/*` resolver leases, a different substrate entirely.
+    """
+
+    NOW = 1786080000.0
+    HOST = "fleet-box"
+
+    def _lane_records(self) -> list[dict]:
+        """One live holder, one dead (pid gone), one dead by PID RECYCLING."""
+        return [
+            {"lane": "docs", "holder": "worker-live", "host_id": self.HOST,
+             "mode": "exclusive", "pid": 1001, "tree": ["docs/**"],
+             "acquired_at": "2026-08-06T12:00:00Z",
+             "proc_starttime": _filetime(self.NOW - 600)},
+            {"lane": "cmd", "holder": "claude-5031", "host_id": self.HOST,
+             "mode": "exclusive", "pid": 51980, "tree": ["cmd/**"],
+             "acquired_at": "2026-07-19T09:00:00Z",
+             "proc_starttime": _filetime(self.NOW - 1_600_000)},
+            {"lane": "guard", "holder": "worker-2461", "host_id": self.HOST,
+             "mode": "exclusive", "pid": 44396, "tree": ["internal/modver/**"],
+             "acquired_at": "2026-08-06T11:00:00Z",
+             "proc_starttime": _filetime(self.NOW - 4000)},
+        ]
+
+    def _starts(self) -> dict[int, float]:
+        """The live process table. pid 51980 is GONE. pid 44396 EXISTS but was
+        recycled — it started long after the lease recorded it."""
+        return {1001: self.NOW - 600, 44396: self.NOW - 100, 2: self.NOW}
+
+    def _fold(self, **over):
+        mod = load()
+        kwargs = {"starts": self._starts(), "host_id": self.HOST, "now_ts": self.NOW}
+        kwargs.update(over)
+        return mod, mod.summarize_lane_lease_holders(self._lane_records(), **kwargs)
+
+    def test_dead_holder_counted_including_recycled_pid(self) -> None:
+        _, lane = self._fold()
+        self.assertTrue(lane["available"])
+        self.assertEqual(lane["total"], 3)
+        self.assertEqual(lane["live_count"], 1)
+        # BOTH dead holders — the missing pid AND the recycled one. A bare
+        # pid-existence check would score the recycled holder "alive" and report 1.
+        self.assertEqual(lane["dead_count"], 2)
+        dead_lanes = sorted(r["lane"] for r in lane["dead"])
+        self.assertEqual(dead_lanes, ["cmd", "guard"])
+        self.assertIn("RECYCLED", next(
+            r["holder_evidence"] for r in lane["dead"] if r["lane"] == "guard"))
+        self.assertIn("dos lease-lane release", lane["next_action"])
+
+    def test_pid_existence_alone_is_not_proof_of_life(self) -> None:
+        """A live pid with no readable proc_starttime is UNKNOWN, never live."""
+        mod = load()
+        state, evidence = mod.classify_lane_lease_holder(
+            {"lane": "cmd", "pid": 1001, "host_id": self.HOST}, self._starts(),
+            host_id=self.HOST)
+        self.assertEqual(state, "unknown")
+        self.assertIn("pid existence alone is not proof of life", evidence)
+
+    def test_verdict_is_not_clean_with_a_dead_holder(self) -> None:
+        """THE defect, at the verdict seam: a cross-check whose local worker/lease
+        pairs all match must still not read "clean" while a lane is fenced."""
+        mod, lane = self._fold()
+        out = mod.cross_check_worker_leases(
+            {"available": True, "workers": []}, {"active": []}, lane)
+        self.assertEqual(out["dead_holder_count"], 2)
+        self.assertFalse(mod.lane_lease_verdict_clean(out))
+        reasons = " | ".join(mod._worker_lease_reasons(out))
+        self.assertNotIn("cross-check clean", reasons)
+        self.assertIn("dead-holder=2", reasons)
+        self.assertIn("next action:", reasons)
+
+    def test_unreadable_lane_lease_set_is_not_clean(self) -> None:
+        """An unread lease set is not a clean one — and neither is one this host has
+        no liveness oracle for."""
+        mod, lane = self._fold(read_error="dos: command not found")
+        self.assertFalse(lane["available"])
+        out = mod.cross_check_worker_leases({"available": True, "workers": []},
+                                            {"active": []}, lane)
+        self.assertFalse(mod.lane_lease_verdict_clean(out))
+        no_oracle = mod.summarize_lane_lease_holders(
+            self._lane_records(), starts=None, host_id=self.HOST, now_ts=self.NOW)
+        self.assertFalse(no_oracle["available"])
+        self.assertEqual(no_oracle["dead_count"], 0)
+        self.assertEqual(no_oracle["unknown_count"], 3)
+
+    def test_foreign_host_holder_is_unknown_not_dead(self) -> None:
+        """This host cannot probe another host's pid — and must not call it dead."""
+        mod = load()
+        state, _ = mod.classify_lane_lease_holder(
+            {"lane": "cmd", "pid": 51980, "host_id": "other-box"},
+            self._starts(), host_id=self.HOST)
+        self.assertEqual(state, "unknown")
+
+    def test_proc_starttime_decodes_windows_filetime(self) -> None:
+        mod = load()
+        # The real record observed on the reference tree.
+        self.assertAlmostEqual(
+            mod._proc_starttime_epoch(134305505540666317), 1786076954.07, places=1)
+        self.assertIsNone(mod._proc_starttime_epoch(None))
+        self.assertIsNone(mod._proc_starttime_epoch(0))
+
+    def test_read_lane_leases_parses_kernel_json(self) -> None:
+        mod = load()
+        seen = {}
+
+        def runner(cmd, cwd):
+            seen["cmd"], seen["cwd"] = cmd, cwd
+            return (json.dumps(self._lane_records()), None)
+
+        records, err = mod.read_lane_leases(ROOT, runner=runner)
+        self.assertIsNone(err)
+        self.assertEqual(len(records), 3)
+        self.assertEqual(seen["cmd"], ["dos", "lease-lane", "live"])
+        # `--workspace` makes the kernel re-resolve to a different .dos/ and emit
+        # non-JSON; the cwd carries the workspace instead.
+        self.assertNotIn("--workspace", seen["cmd"])
+
+    def test_render_surfaces_dead_holder_on_every_operator_surface(self) -> None:
+        mod, lane = self._fold()
+        worker_leases = mod.cross_check_worker_leases(
+            {"available": True, "workers": []}, {"active": []}, lane)
+        p = build(mod, worker_leases=worker_leases)
+
+        text = mod.render(p)
+        self.assertIn("dead-holder=2", text)
+        self.assertIn("lane lease: 3 held", text)
+        self.assertIn("dos lease-lane release", text)
+        self.assertNotIn("cross-check clean", text)
+
+        md = mod.render_md(p, date="2026-08-06")
+        self.assertIn("dead-holder=2", md)
+        self.assertIn("Kernel lane leases", md)
+        self.assertIn("`cmd`", md)
+
+        slack = mod.slack_text(p)
+        self.assertIn("dead-holder", slack)
+        self.assertIn("DEAD", slack)
+        self.assertNotIn("worker/lease cross-check clean", slack)
+
+    def test_all_live_holders_still_read_clean(self) -> None:
+        """The guard must not cry wolf: with every holder live the card is clean."""
+        mod = load()
+        lane = mod.summarize_lane_lease_holders(
+            self._lane_records()[:1], starts=self._starts(), host_id=self.HOST,
+            now_ts=self.NOW)
+        self.assertEqual(lane["dead_count"], 0)
+        self.assertEqual(lane["live_count"], 1)
+        out = mod.cross_check_worker_leases(
+            {"available": True,
+             "workers": [{"worker": "w", "issue": 1, "pid": 1001, "lane": "tools",
+                          "backend": "claude", "lease_id": "resolve-tools-1765"}]},
+            {"active": [{"id": "resolve-tools-1765", "lane": "tools", "holder": "peer-a"}]},
+            lane)
+        self.assertTrue(mod.lane_lease_verdict_clean(out))
+        self.assertIn("worker/lease cross-check clean",
+                      " | ".join(mod._worker_lease_reasons(out)))
+
+    def test_lane_lease_verdict_absent_fold_preserves_legacy_behaviour(self) -> None:
+        mod = load()
+        out = mod.cross_check_worker_leases({"available": True, "workers": []},
+                                            {"active": []})
+        self.assertTrue(mod.lane_lease_verdict_clean(out))
+        self.assertNotIn("lane_leases", out)
+
+    def test_card_must_not_read_clean_with_a_dead_holder_lease(self) -> None:
+        """THE reported symptom, asserted on the rendered card.
+
+        Deliberately built from a LITERAL payload rather than the fold's own
+        helpers, so it exercises only the pre-existing `worker_lease_check` ->
+        render seam. That makes it a real fail-first guard: against the unfixed
+        `dispatch_status.py` this reaches `render()` and fails on the assertions
+        below (the card printed `clean=3 orphan-process=0 unmatched-live-lease=0`
+        and "worker/lease cross-check clean" with 18 lanes fenced), rather than
+        erroring out on a missing symbol.
+        """
+        mod = load()
+        worker_leases = {
+            "available": True,
+            # Every LOCAL worker/lease pair matches — this is the state that used to
+            # print "clean" while the kernel's lane leases were all fenced.
+            "clean_count": 3,
+            "orphan_process_count": 0,
+            "orphan_lease_count": 0,
+            "clean": [], "orphan_process": [], "orphan_lease": [],
+            "dead_holder_count": 2,
+            "lane_leases": {
+                "schema": "fleet-lane-lease-liveness/1",
+                "source": "dos lease-lane live",
+                "available": True,
+                "total": 3, "live_count": 1, "dead_count": 2, "unknown_count": 0,
+                "next_action": ("reap each dead-holder lane lease: "
+                                "`dos lease-lane release --lane <lane> --owner <holder>`"),
+                "rows": [], "dead": [
+                    {"lane": "cmd", "holder": "claude-5031", "pid": 51980,
+                     "age_min": 31680.0, "holder_state": "dead",
+                     "holder_evidence": "pid 51980 is not a running process"},
+                    {"lane": "modver", "holder": "worker-2461", "pid": 56980,
+                     "age_min": 17280.0, "holder_state": "dead",
+                     "holder_evidence": "pid 56980 is not a running process"},
+                ],
+            },
+        }
+        p = build(mod, worker_leases=worker_leases)
+
+        text = mod.render(p)
+        self.assertIn("dead-holder=2", text)
+        self.assertNotIn("worker/lease cross-check clean", text)
+        self.assertIn("cmd(claude-5031, pid 51980", text)
+        self.assertIn("dos lease-lane release", text)
+
+        self.assertTrue(any("dead-holder=2" in r for r in p["reasons"]),
+                        f"no dead-holder counter in reasons: {p['reasons']}")
+        self.assertFalse(any("cross-check clean" in r for r in p["reasons"]),
+                         f"card still reads clean with 2 dead holders: {p['reasons']}")
+
+
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_minimal_payload(self) -> None:
         mod = load()
@@ -1512,7 +1741,8 @@ class RenderTest(unittest.TestCase):
         self.assertTrue(any("orphan-process=1" in r for r in p["reasons"]))
         self.assertTrue(any("unmatched-live-lease=1" in r for r in p["reasons"]))
         text = mod.render(p)
-        self.assertIn("lease chk : clean=1 orphan-process=1 unmatched-live-lease=1", text)
+        self.assertIn(
+            "lease chk : clean=1 orphan-process=1 unmatched-live-lease=1 dead-holder=0", text)
         self.assertIn("orphan-process resolve-1770-20260701-120001", text)
         self.assertIn("unmatched-live-lease resolve-model-1700", text)
         slack = mod.slack_text(p)
