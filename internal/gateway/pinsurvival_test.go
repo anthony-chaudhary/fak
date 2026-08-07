@@ -269,7 +269,8 @@ func TestSurvivalGateInertOnUnclassifiableBody(t *testing.T) {
 	// And the gate delegates straight through to the bare compactor for such a body.
 	s := anthropicPassthroughServer(1200)
 	raw := []byte(`{"model":"claude","max_tokens":16}`)
-	out, outcome := s.compactWithSurvivalClasses(raw, agent.CompactOptions{Budget: 1200})
+	// "" trace: a non-session caller records no continuation contract (#2422).
+	out, outcome := s.compactWithSurvivalClasses(raw, agent.CompactOptions{Budget: 1200}, "")
 	if !bytes.Equal(out, raw) || outcome.Reason == agent.CompactReasonPinEvictRefused {
 		t.Fatalf("an unclassifiable body must pass through unchanged with the compactor's own reason, got reason=%q", outcome.Reason)
 	}

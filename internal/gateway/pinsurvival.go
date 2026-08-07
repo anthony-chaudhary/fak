@@ -161,7 +161,13 @@ func pinnedPagesSurvive(body []byte, pinned [][]byte) bool {
 //     available for the drop to claim, so the kept window has to reach past them. If that retry
 //     also fails to preserve the pinned set, the refusal stands and the body is forwarded
 //     unchanged. Losing the standing instruction is not a cheaper outcome than a longer prompt.
-func (s *Server) compactWithSurvivalClasses(raw []byte, opts agent.CompactOptions) ([]byte, agent.CompactOutcome) {
+//
+// trace keys the CONTINUATION CONTRACT (#2422) this boundary emits when a compaction actually
+// fires: the plan computed here is projected onto the wire record the next completed turn reports
+// on both channels (an in-band `[fak]` note and the `fak.compaction` extension). It is recorded
+// from the plan this compaction ran under rather than re-derived downstream, so the contract cannot
+// disagree with the boundary it describes. "" (tests, non-session callers) records nothing.
+func (s *Server) compactWithSurvivalClasses(raw []byte, opts agent.CompactOptions, trace string) ([]byte, agent.CompactOutcome) {
 	pages, pinned, ok := anthropicSurvivalPages(raw)
 	if !ok {
 		return agent.CompactAnthropicHistoryWithOptions(raw, opts)
@@ -170,13 +176,26 @@ func (s *Server) compactWithSurvivalClasses(raw []byte, opts agent.CompactOption
 	if plan.Refusal != "" {
 		return raw, agent.CompactOutcome{Reason: agent.CompactReasonPinEvictRefused}
 	}
+	// announce records this boundary's continuation contract (#2422) for the next completed turn to
+	// report. It fires ONLY on a return that actually hands back a compacted body — a bail and a
+	// PIN_EVICT_REFUSED both forward the body unchanged, so no boundary was crossed and announcing
+	// one would tell the model a loss that did not happen. It reads the PRE-compaction elements,
+	// which are exactly the pages the returned body no longer holds.
+	announce := func() {
+		s.noteCompactionContract(trace, compactionContractFrom(pages, anthropicMessageElements(raw), plan))
+	}
 	out, outcome := agent.CompactAnthropicHistoryWithOptions(raw, opts)
-	if outcome.Reason != agent.CompactReasonNone || pinnedPagesSurvive(out, pinned) {
+	if outcome.Reason != agent.CompactReasonNone {
+		return out, outcome
+	}
+	if pinnedPagesSurvive(out, pinned) {
+		announce()
 		return out, outcome
 	}
 	retry := opts
 	retry.Budget = opts.Budget + plan.PinnedTokens
 	if out2, outcome2 := agent.CompactAnthropicHistoryWithOptions(raw, retry); outcome2.Reason == agent.CompactReasonNone && pinnedPagesSurvive(out2, pinned) {
+		announce()
 		return out2, outcome2
 	}
 	return raw, agent.CompactOutcome{Reason: agent.CompactReasonPinEvictRefused}

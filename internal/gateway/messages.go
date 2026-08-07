@@ -80,6 +80,26 @@ type anthropicTurn struct {
 	// `fak` extension as the OpenAI wire, and a quarantine also raises an in-band
 	// note so the agent knows its tool output was paged out (not lost).
 	ResultAdmissions []ResultAdmission
+	// Compaction is the continuation contract for the compaction boundary this turn
+	// crossed (#2422), or nil when it crossed none. It rides the `fak` extension as the
+	// orchestrator-readable twin of the in-band `[fak]` boundary note the same record
+	// rendered into this turn's leading text block.
+	Compaction *CompactionContract
+}
+
+// fakExt builds this turn's `fak` response extension: the tool-activity view plus, on a turn
+// that crossed a compaction boundary, the continuation contract (#2422). A turn with neither
+// yields nil, so the `fak` key stays omitted rather than appearing empty.
+func (t *anthropicTurn) fakExt() *FakExt {
+	ext := fakExtFrom(t.Adjs, t.ResultAdmissions)
+	if t.Compaction == nil {
+		return ext
+	}
+	if ext == nil {
+		ext = &FakExt{}
+	}
+	ext.Compaction = t.Compaction
+	return ext
 }
 
 var anthropicStreamPingInterval = 15 * time.Second
@@ -309,7 +329,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, anthropicMessageResponse{
 		ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 		Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
-		Fak: fakExtFrom(turn.Adjs, turn.ResultAdmissions),
+		Fak: turn.fakExt(),
 	})
 }
 
@@ -826,7 +846,7 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	// PINNED floor (PIN_EVICT_REFUSED, body forwarded unchanged), then verifies a fired plan still
 	// carries every pinned page byte-identical, retrying against the evictable set only when it does
 	// not. A body with no classifiable eviction domain delegates straight through.
-	out, outcome := s.compactWithSurvivalClasses(req.Raw, opts)
+	out, outcome := s.compactWithSurvivalClasses(req.Raw, opts, trace)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	// Restore handle: when this fire tombstoned the session's originating task, the outcome carries
@@ -1317,7 +1337,7 @@ func (s *Server) writeAnthropicTurn(w http.ResponseWriter, stream bool, turn *an
 		writeJSON(w, http.StatusOK, anthropicMessageResponse{
 			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
-			Fak: fakExtFrom(turn.Adjs, turn.ResultAdmissions),
+			Fak: turn.fakExt(),
 		})
 		return
 	}
@@ -1477,6 +1497,17 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	if note := s.ctxExpenseNoteOnce(reqTrace); note != "" {
 		blocks = prependTextBlock(blocks, note)
 	}
+	// Compaction continuation contract (#2422): if this turn crossed a compaction boundary,
+	// tell the model what survived, what stays re-derivable, and — the whole point — that the
+	// shortened transcript is not a reason to wrap up. takeCompactionContract CONSUMES the
+	// boundary record, so the note fires exactly once per boundary; the same record rides the
+	// `fak.compaction` extension below for an orchestrator that reads no prose. Prepended LAST
+	// so it lands FIRST, ahead of the per-call notes: the model needs to know its history was
+	// shed before it reads a verdict about a single tool call.
+	compaction := s.takeCompactionContract(reqTrace)
+	if note := compactionContractNote(compaction); note != "" {
+		blocks = prependTextBlock(blocks, note)
+	}
 	// Echo the model the client asked for (Anthropic reflects the requested id);
 	// fall back to the gateway's configured model when the client omitted it.
 	if model == "" {
@@ -1498,6 +1529,13 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 		},
 		Adjs:             adjs,
 		ResultAdmissions: resultAdmissions,
+		// The SAME record the in-band note above rendered, carried on the turn so
+		// fakExt lands it under `fak.compaction` (#2422). Both channels must describe
+		// one boundary: an orchestrator that reads no prose and a model that reads
+		// nothing else have to be told the same thing, and taking the contract twice
+		// (once per channel) would let the take-once latch serve one and starve the
+		// other. nil on a turn that crossed no boundary, so the key stays omitted.
+		Compaction: compaction,
 	}, nil
 }
 
@@ -1604,7 +1642,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusOK, anthropicMessageResponse{
 			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
-			Fak: fakExtFrom(turn.Adjs, turn.ResultAdmissions),
+			Fak: turn.fakExt(),
 		})
 		return
 	}
