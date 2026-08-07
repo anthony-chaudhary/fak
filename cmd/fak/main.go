@@ -635,6 +635,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdRun(args)
 	case "launch":
 		cmdLaunch(args)
+	case "tool-width":
+		cmdToolWidth(args)
 	case "replay":
 		// Explicit, unambiguous spelling of the trace-replay path (`fak run --trace`).
 		cmdRunTrace(args)
