@@ -1,0 +1,64 @@
+{
+  "name": "refused-file-drawer",
+  "note": "The refusal fixture: a sweep that admits searching nine thresholds but hands over only the three arms it liked, including a winner at raw p = 0.004 that reads as a strong improvement. The six unreported arms are exactly the evidence the contract needs to audit the selection, so the certification is refused (search_family_incomplete) rather than priced over the three arms that happened to be shown. Fail-closed: an unauditable family is never a pass, and the naive read that would have certified is preserved on the receipt alongside the refusal.",
+  "certification": {
+    "alpha": 0.05,
+    "rule": "min-p",
+    "adjustment": "bonferroni",
+    "declared_arms": 9,
+    "winner": "prefetch-depth-3"
+  },
+  "family": [
+    {
+      "id": "prefetch-depth-3",
+      "point": "prefetch_depth=3",
+      "p_value": 0.004,
+      "evidence": {
+        "case_id": "prefix-cache/long-context",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "prefetch-depth-4",
+      "point": "prefetch_depth=4",
+      "p_value": 0.31,
+      "evidence": {
+        "case_id": "prefix-cache/long-context",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "prefetch-depth-5",
+      "point": "prefetch_depth=5",
+      "p_value": 0.52,
+      "evidence": {
+        "case_id": "prefix-cache/long-context",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    }
+  ]
+}
