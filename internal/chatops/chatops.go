@@ -44,6 +44,25 @@
 // design) and routes it through guarded dispatch; a read verb is answered inline —
 // notably `status`/`fleet`, which surface the gateway's cross-machine SessionFleet
 // aggregate straight into the channel.
+//
+// # The second fence: approvals (#2266)
+//
+// Surviving the parse fence is NOT permission to run. A verb whose reversibility label
+// is anything but `reversible` takes a second, TWO-TURN fence — propose → approve →
+// execute — implemented in approval.go and documented there. The one-line summary: the
+// grammar row carries a Risk consumed verbatim from the adjudicator's reversibility
+// vocabulary (#2156), Result.Gated() reports whether the two-turn contract applies,
+// Propose mints a single-use TTL-bounded nonce plus its proposal card, and Adjudicate
+// folds an `approve <nonce>` / `deny <nonce>` reply into an execute/deny/refuse verdict
+// with the audit rows the journal is built from. That fence is why the parse fence's
+// output can be routed at all: a single chat line can never fire an irreversible verb.
+//
+// v0 (this file plus approval.go) is the reply-keyword surface, which works on the
+// polling transport and needs nothing new on the wire. v1 swaps keywords for Block Kit
+// buttons and is BLOCKED-BY the inbound transport spike #2267: `block_actions` payloads
+// require an interactive transport (Socket Mode child) that does not exist yet. v1
+// changes the INPUT SURFACE ONLY — the nonce, the TTL, the self-approval policy and the
+// audit rows are identical — so every v0 test here keeps guarding the v1 contract.
 package chatops
 
 import "strings"
@@ -95,6 +114,8 @@ const (
 	VerbResume   Verb = "resume"   // resume a stalled loop/run
 	VerbBench    Verb = "bench"    // kick a background benchmark
 	VerbHalt     Verb = "halt"     // kill-switch: stop the door acting on further commands
+	VerbApprove  Verb = "approve"  // second turn of the approval contract: `approve <nonce>`
+	VerbDeny     Verb = "deny"     // second turn of the approval contract: `deny <nonce>`
 )
 
 // The closed refusal vocabulary. Every rejection carries exactly one of these tokens,
@@ -110,37 +131,72 @@ const (
 	ReasonMissingOperand = "MISSING_OPERAND"
 )
 
-// VerbSpec is one row of the closed grammar: the verb, its routing class, whether it
-// requires an operand, and a one-line help string. Grammar() is the single source of
-// truth the door parses against AND the `help` verb renders from, so the two can never
-// drift.
+// VerbSpec is one row of the closed grammar: the verb, its routing class, the
+// reversibility label the approval gate reads (#2156's vocabulary, consumed verbatim —
+// see Risk), whether it requires an operand, a one-line help string, and the blast-radius
+// sentence the proposal card prints for a gated verb. Grammar() is the single source of
+// truth the door parses against, the `help` verb renders from, AND the approval gate
+// labels from, so the three can never drift.
 type VerbSpec struct {
 	Verb         Verb
 	Class        Class
+	Risk         Risk // the consumed reversibility label; the zero value gates (fail-closed)
 	NeedsOperand bool
 	Help         string
+	// Blast is the one-line blast-radius sentence Card() prints for a gated verb —
+	// what actually happens if this runs, not how to type it. Empty for a reversible
+	// verb, which never reaches a proposal card.
+	Blast string
 }
 
 var grammar = []VerbSpec{
-	{VerbHelp, ClassRead, false, "list the verbs the door accepts"},
-	{VerbPing, ClassRead, false, "liveness check — the door replies pong"},
-	{VerbStatus, ClassRead, false, "current session + fleet status snapshot"},
-	{VerbFleet, ClassRead, false, "the cross-machine fleet aggregate: verdict, machine count, stale/action split"},
-	{VerbDispatch, ClassAct, true, "start a detached run for an issue, e.g. `dispatch #2265`"},
-	{VerbResume, ClassAct, true, "resume a stalled loop or run by id"},
-	{VerbBench, ClassAct, true, "kick a background benchmark, e.g. `bench frontierswe`"},
-	{VerbHalt, ClassControl, false, "kill-switch: stop the door acting on further commands"},
+	{Verb: VerbHelp, Class: ClassRead, Risk: RiskReversible,
+		Help: "list the verbs the door accepts"},
+	{Verb: VerbPing, Class: ClassRead, Risk: RiskReversible,
+		Help: "liveness check — the door replies pong"},
+	{Verb: VerbStatus, Class: ClassRead, Risk: RiskReversible,
+		Help: "current session + fleet status snapshot"},
+	{Verb: VerbFleet, Class: ClassRead, Risk: RiskReversible,
+		Help: "the cross-machine fleet aggregate: verdict, machine count, stale/action split"},
+	{Verb: VerbDispatch, Class: ClassAct, Risk: RiskOutwardFacing, NeedsOperand: true,
+		Help:  "start a detached run for an issue, e.g. `dispatch #2265`",
+		Blast: "starts a detached worker that commits and pushes on the shared trunk and comments on the issue"},
+	{Verb: VerbResume, Class: ClassAct, Risk: RiskOutwardFacing, NeedsOperand: true,
+		Help:  "resume a stalled loop or run by id",
+		Blast: "wakes a stalled worker that resumes committing and pushing on the shared trunk"},
+	{Verb: VerbBench, Class: ClassAct, Risk: RiskIrreversible, NeedsOperand: true,
+		Help:  "kick a background benchmark, e.g. `bench frontierswe`",
+		Blast: "burns metered model/GPU spend that cannot be un-spent once the run starts"},
+	// The kill-switch is deliberately REVERSIBLE, so it fires on one line. Halting is
+	// the safe direction (it stops the door acting), it is undone by re-enabling the
+	// door, and a brake you must approve twice is a brake that does not work.
+	{Verb: VerbHalt, Class: ClassControl, Risk: RiskReversible,
+		Help: "kill-switch: stop the door acting on further commands"},
+	// The second turn of the contract itself. Reversible by construction: gating an
+	// approval verb would be an infinite regress (approving the approval). Authorization
+	// is still the same fail-closed admin allowlist, checked twice — once by Parse's
+	// NOT_ADMIN fence and again by Adjudicate.
+	{Verb: VerbApprove, Class: ClassControl, Risk: RiskReversible, NeedsOperand: true,
+		Help: "approve a pending gated command in its thread, e.g. `approve a1b2c3d4`"},
+	{Verb: VerbDeny, Class: ClassControl, Risk: RiskReversible, NeedsOperand: true,
+		Help: "deny a pending gated command in its thread, e.g. `deny a1b2c3d4`"},
 }
 
 // Grammar returns a copy of the closed verb set, best-first for help rendering. The
 // slice is copied so a caller cannot mutate the door's grammar.
 func Grammar() []VerbSpec { return append([]VerbSpec(nil), grammar...) }
 
-// Reasons returns the closed refusal vocabulary — every token Parse can emit.
+// Reasons returns the package's closed refusal vocabulary — every token Parse or
+// Adjudicate can emit. The first seven are the door's ordered parse fence; the rest are
+// the approval gate's OPERATOR_GATE family (see approval.go). One flat set, so a
+// downstream audit or `dos check-reason` can bind any refusal this package produces
+// without knowing which half emitted it.
 func Reasons() []string {
 	return []string{
 		ReasonBotLoop, ReasonWrongChannel, ReasonNotAddressed,
 		ReasonEmpty, ReasonNotAdmin, ReasonUnknownVerb, ReasonMissingOperand,
+		ReasonApprovalUnknownNonce, ReasonApprovalForeignThread,
+		ReasonApprovalReplayed, ReasonApprovalExpired, ReasonApprovalSelf,
 	}
 }
 
@@ -170,6 +226,7 @@ type Config struct {
 type Result struct {
 	Class   Class
 	Verb    Verb
+	Risk    Risk   // the verb's consumed reversibility label; drives Gated()
 	Operand string // the verb's argument (issue id, run id, …); "" when the verb takes none
 	Nonce   string // the idempotency key (the message TS) for act verbs
 	Channel string // where the reply/ack posts
@@ -177,6 +234,11 @@ type Result struct {
 	Refused bool
 	Reason  string // a closed refusal token (one of Reasons()); set iff Refused
 }
+
+// Gated reports whether this parsed command must take the two-turn approval contract
+// (propose → approve → execute) instead of executing on the one chat line that carried
+// it. A refusal is never gated — it already stopped at the fence.
+func (r Result) Gated() bool { return !r.Refused && r.Risk.Gated() }
 
 // Parse folds one inbound Message through the ordered fence and returns the decision.
 // It is total and pure: same inputs, same Result, no side effects.
@@ -217,6 +279,7 @@ func Parse(m Message, cfg Config) Result {
 	return Result{
 		Class:   spec.Class,
 		Verb:    spec.Verb,
+		Risk:    spec.Risk,
 		Operand: operand,
 		Nonce:   m.TS,
 		Channel: m.Channel,
