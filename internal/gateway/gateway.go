@@ -1270,6 +1270,16 @@ type Server struct {
 	// the route answers 404, mirroring a nil reloadPolicy. Set via SetRouteWatcher.
 	routeWatcher atomic.Pointer[modelroute.Watcher]
 
+	// boundAddr is the address this process is actually listening on, recorded by
+	// Serve once the listener exists (#5642). Before it, nothing in the Server knew
+	// its own dialable address, so the A2A agent card advertised a literal
+	// `fleet.example.com` — a served descriptor pointing at a host that is not fak.
+	// It is an atomic pointer because Serve writes it while a handler may read it
+	// concurrently; a nil load means "not serving on a listener we own" (a bare
+	// Handler under httptest), in which case the request's own Host is the only
+	// answer. See a2aSelfBaseURL.
+	boundAddr atomic.Pointer[string]
+
 	// loops is the in-kernel background-loop supervisor (internal/bgloop): the
 	// runtime that keeps registered recurring loops progressing while the gateway is
 	// up, observable via /v1/fak/loops and the fak_bgloop_* metrics. Started on the

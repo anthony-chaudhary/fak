@@ -208,6 +208,14 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 // its own listener and calls Serve directly. It mirrors net/http.Server's
 // ListenAndServe/Serve split.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	// Record the address we actually bound so a served descriptor can name this
+	// process instead of a literal (#5642). This is the ONLY point where the chosen
+	// address is known — with an ephemeral ":0" bind the port does not exist until
+	// the listener does — and both entry points funnel through here.
+	if a := ln.Addr(); a != nil {
+		addr := a.String()
+		s.boundAddr.Store(&addr)
+	}
 	// Bounded timeouts so a single slow/idle connection cannot pin a goroutine +
 	// socket indefinitely (slow-loris-on-body / idle-keepalive DoS). ReadTimeout
 	// also caps body-delivery TIME (MaxBytesReader only caps SIZE).
