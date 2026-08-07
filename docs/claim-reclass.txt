@@ -21,3 +21,8 @@ commit: 00713794bfb9eb4503b264dd70ea73d4791c8a56
 type: docs
 witness: docs/model-accounts.md
 reason: The landed subject reads `fix(modelroute): document the shipped turn-evidence producer`, but the diff is docs/model-accounts.md alone (+64/-8) and touches no program source. The producer it describes was already shipped; this commit only wrote down where the grader's input comes from. The `fix(...)` type therefore overstated a documentation change as a code-effect one — the evidence supports a `docs` claim and nothing more.
+
+commit: ab9fc0eca886a3a7df44f702d5f1460428441b44
+type: docs
+witness: .claude/goal-prompts/resolve-top-issue-witnessed.md
+reason: The landed subject reads `fix(dispatch): treat a kernel refusal as a pause and checkpoint-commit in the goal fuel`, but the diff is .claude/goal-prompts/resolve-top-issue-witnessed.md alone (+58/-56) and touches no program source. Nothing in the dispatch path changed: the commit rewrote the /goal fuel's prose so a worker READS a refusal as a pause and checkpoint-commits, which is a change to the instructions handed to an agent, not to any code that runs. The `fix(...)` type therefore overstated a prompt-documentation edit as a code-effect one — the evidence supports a `docs` claim and nothing more.
