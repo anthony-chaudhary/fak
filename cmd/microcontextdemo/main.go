@@ -290,6 +290,8 @@ func main() {
 	var s3Memory uint64
 	var descriptorOutput string
 	var verifyDescriptorPath string
+	var multiTurnDescriptorOutput string
+	var verifyMultiTurnDescriptorPath string
 	var compatOutput, verifyCompatPath string
 	var effectsOutput, verifyEffectsPath string
 	var verifyAPIOnlyPath string
@@ -327,6 +329,8 @@ func main() {
 	flag.Uint64Var(&s3Memory, "memory-envelope", 64<<20, "S3 peak Go allocation delta envelope in bytes")
 	flag.StringVar(&descriptorOutput, "descriptor-bench", "", "run the 1,000-context descriptor/harness benchmark and write JSON")
 	flag.StringVar(&verifyDescriptorPath, "verify-descriptor-bench", "", "verify a captured descriptor benchmark artifact and exit")
+	flag.StringVar(&multiTurnDescriptorOutput, "multi-turn-descriptor", "", "run the 1,000-context multi-turn descriptor witness and write JSON")
+	flag.StringVar(&verifyMultiTurnDescriptorPath, "verify-multi-turn-descriptor", "", "verify a captured multi-turn descriptor witness and exit")
 	flag.StringVar(&compatOutput, "compatibility-witness", "", "run compatibility scheduler witness and write JSON")
 	flag.StringVar(&verifyCompatPath, "verify-compatibility", "", "verify compatibility artifact")
 	flag.StringVar(&effectsOutput, "effects-witness", "", "run effect-safety witness and write JSON")
@@ -437,6 +441,32 @@ func main() {
 		}
 		if e != nil {
 			fmt.Fprintln(os.Stderr, e)
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if verifyMultiTurnDescriptorPath != "" {
+		if err := verifyMultiTurnDescriptorArtifact(verifyMultiTurnDescriptorPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyMultiTurnDescriptorPath)
+		return
+	}
+	if multiTurnDescriptorOutput != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		r, err := runMultiTurnDescriptor(ctx, cfg.Contexts, cfg.Workers, s3Turns)
+		b, merr := json.MarshalIndent(r, "", "  ")
+		if merr == nil {
+			merr = os.WriteFile(multiTurnDescriptorOutput, append(b, '\n'), 0o644)
+		}
+		if merr != nil {
+			fmt.Fprintln(os.Stderr, merr)
 			os.Exit(1)
 		}
 		if err != nil {

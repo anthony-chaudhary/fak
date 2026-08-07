@@ -55,6 +55,7 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [Micro-context S4a lightweight descriptor](micro-context-s4-lightweight-descriptor.md)
 - [Micro-context S4b compatibility scheduler](micro-context-s4-compatibility-scheduler.md)
 - [Micro-context S4c effect safety](micro-context-s4-effect-safety.md)
+- [Micro-context S4d: bounded multi-turn continuation](micro-context-s4d-multi-turn-descriptor.md) — exact 1,000×3 turn accounting with continuation-token and byte-verified mid-task restore.
 - [Micro-context S5a controlled-kernel 1,000-context ramp](micro-context-s5a-controlled-kernel-1k.md)
 - [Micro-context S6 API-only adapter](micro-context-s6-api-only.md)
 - [Micro-context quality and observability ledger](micro-context-quality-ledger.md)

@@ -1,0 +1,22 @@
+{
+  "schema": "fak-microcontext-multi-turn-descriptor/1",
+  "verdict": "PASS",
+  "observed_at": "2026-08-07T00:00:47Z",
+  "descriptor_schema": "fak-micro-context-descriptor/2",
+  "contexts": 1000,
+  "turns_per_logical_agent": 3,
+  "expected_turns": 3000,
+  "accounted_turns": 3000,
+  "completed": 1000,
+  "failed": 0,
+  "continuation_tokens": 1000,
+  "continuation_mismatches": 0,
+  "mid_task_hibernations": 1000,
+  "verified_restores": 1000,
+  "parked_bytes": 201000,
+  "base_installs": 1,
+  "physical_workers": 16,
+  "wall_ns": 4486225400,
+  "verified_completions_per_second": 222.90453796637144,
+  "claim_boundary": "observed deterministic Host/Gateway accounting and byte-verified hibernate restore; not model throughput, quality, KV residency, or process RSS"
+}
