@@ -101,8 +101,11 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		workspaceRoot = repoguard.FindRepoRoot(cwd)
 		safeRoots := repoguard.SafeRootsForWorkspace(workspaceRoot)
-		liveMonitorIDs := liveMonitorIDsForRead(payload, workspaceRoot, stderr)
-		return repoguard.EvaluateWithLiveMonitorIDs(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots, liveMonitorIDs), nil
+		hints := repoguard.Hints{
+			LiveMonitorIDs:   liveMonitorIDsForRead(payload, workspaceRoot, stderr),
+			LeafDeclarations: leafDeclarationsForWrite(payload, workspaceRoot),
+		}
+		return repoguard.EvaluateWithHints(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots, hints), nil
 	}()
 	if err != nil {
 		fmt.Fprintf(stderr, "repo_guard: internal error, allowing (%v)\n", err)
@@ -219,6 +222,33 @@ func liveMonitorIDsForRead(payload hookPayload, workspaceRoot string, stderr io.
 		return nil
 	}
 	return ids
+}
+
+// leafDeclarationsForWrite loads the lane/tier taxonomy for the UNDECLARED_LEAF
+// rung. Gated twice so the hook stays cheap on the tool calls that can never
+// trip it: only Write-class tools, and only when the path actually lands in an
+// internal/<leaf> tree — every other call reads no files at all.
+func leafDeclarationsForWrite(payload hookPayload, workspaceRoot string) repoguard.LeafDeclarations {
+	switch payload.ToolName {
+	case "Write", "Edit", "MultiEdit", "NotebookEdit":
+	default:
+		return repoguard.LeafDeclarations{}
+	}
+	fp := hookWritePath(payload.ToolInput)
+	if _, ok := repoguard.LeafForWritePath(fp, workspaceRoot); !ok {
+		return repoguard.LeafDeclarations{}
+	}
+	return repoguard.LeafDeclarationsForWorkspace(workspaceRoot)
+}
+
+func hookWritePath(input map[string]any) string {
+	if v, ok := input["file_path"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := input["notebook_path"].(string); ok {
+		return v
+	}
+	return ""
 }
 
 func repoGuardToolprocJournalPath(workspaceRoot string) string {
