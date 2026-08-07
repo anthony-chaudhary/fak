@@ -325,6 +325,18 @@ func (g *GitGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 			// arg-predicate rung already uses (Meta["fix"]) so the agent sees the route.
 			Meta: map[string]string{"fix": law},
 		}
+		// Every law here is AUTHORED as "<law-id>[ refused]: <prose>", so its leading
+		// atom is the law's own id — and it is the ONLY part of the law that is a
+		// stable key rather than agent-facing prose. Promote it to the verdict's
+		// closed-vocabulary rule id so a fleet operator can separate skip-hooks from
+		// off-trunk from reset-hard: all seven trunk laws in the measured corpus land
+		// on the same ("gitgate", "POLICY_BLOCK") pair, and telling them apart today
+		// means prefix-matching a claim up to 447 characters long (#5863).
+		// abi.DenyRuleID admits only declared ids, so a law whose id is not yet in the
+		// vocabulary stamps nothing rather than leaking its prose.
+		if rule, ok := abi.DenyRuleID(law); ok {
+			v.Meta[abi.MetaDenyRule] = rule
+		}
 		g.recordRefusal(ctx, "gitgate", gitgateReasonClass(law, abi.ReasonName(v.Reason)), []string{"shell", "-c", cmd}, nil)
 		return v
 	}

@@ -412,6 +412,13 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 				Reason:  abi.ReasonSelfModify,
 				By:      "monitor",
 				Payload: abi.WitnessPayload{Claim: g},
+				// Three different rungs below cite SELF_MODIFY and disclose only the
+				// glob, so on the wire they are one undifferentiated bucket. The rule
+				// id separates them (#5863) — and it is what decides whether a
+				// SELF_MODIFY on a `cd fak && …` compound came in through a path ARG or
+				// through the shell command line, the hypothesis the journal could not
+				// confirm.
+				Meta: denyRule(abi.DenyRuleSelfModifyPath),
 			}, nil)
 		}
 	}
@@ -432,6 +439,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 				Reason:  abi.ReasonSelfModify,
 				By:      "monitor",
 				Payload: abi.WitnessPayload{Claim: g},
+				Meta:    denyRule(abi.DenyRuleSelfModifyCommand),
 			}, nil)
 		}
 	}
@@ -454,6 +462,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 				Reason:  abi.ReasonSelfModify,
 				By:      "monitor",
 				Payload: abi.WitnessPayload{Claim: g},
+				Meta:    denyRule(abi.DenyRuleSelfModifySynthTool),
 			}, nil)
 		}
 		// Record agent-authored scripts (the ledger half) so the NEXT exec is
