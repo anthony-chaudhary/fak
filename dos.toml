@@ -641,6 +641,7 @@ issuefanout = ["internal/issuefanout/**"] # #2522: internal/issuefanout leaf (th
 chatopsdetach = ["internal/chatopsdetach/**"]
 godfileceiling = ["internal/godfileceiling/**"]
 microagent = ["internal/microagent/**"]
+microcontextdemo = ["cmd/microcontextdemo/**"]
 l3kv = ["internal/l3kv/**"]
 doomloop = ["internal/doomloop/**"]
 cvregress = ["internal/cvregress/**"]
@@ -2064,5 +2065,14 @@ see_also = ["cmd/fak/serve_bind_safety.go", "cmd/fak/serve_bind_safety_test.go",
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).
+[reasons.MICROCONTEXT_LEDGER_REFUSED]
+category = "MISROUTE"
+refusal  = true
+summary  = "A micro-context witness, quality ledger, cache A/B, or health scorecard failed schema or accounting reconciliation, so fak refused to grade or publish it."
+fix      = "Run the matching `microcontextdemo -verify-* <artifact>` command printed by the producing stage; regenerate the artifact from the source run rather than editing totals by hand."
+see_also = ["cmd/microcontextdemo", "docs/research/README.md", "go run ./cmd/microcontextdemo -h"]
 [retention]
 audits_keep_last = 30
+
+
+
