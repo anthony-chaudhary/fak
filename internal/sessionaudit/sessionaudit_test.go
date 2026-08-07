@@ -609,6 +609,29 @@ func TestNonClaudeProviderCostRates(t *testing.T) {
 	}
 	// Providers with no clean published card stay UNPRICED (honest UNMEASURED, not
 	// a fabricated $0.00) — this guards the boundary the KPI relies on.
+	//
+	// gpt/gemini are still here after #5115 tried to move them into the priced set.
+	// Three findings from that attempt, so the next implementer does not re-derive them:
+	//
+	//  1. A bare family key over-matches. PriceFor is substring/first-hit, so "gpt"
+	//     also captures gpt-oss, which fak serves itself — see
+	//     TestOpenWeightsFamiliesAreNeverPricedAsVendor for the executable form.
+	//  2. One Rates row cannot carry either vendor's tier structure. Rates has four
+	//     flat axes and no tier or context axis, while the ids already in this tree
+	//     (gpt-5.6-sol/gpt-5.5/gpt-5-codex/gpt-4o-mini; gemini-3-pro/gemini-3.5-flash)
+	//     span a >20x published spread. Claude is keyed PER TIER for exactly this
+	//     reason; deepseek/glm/kimi got single keys only because each cited one
+	//     flagship rate. Pricing a family therefore emits a number wrong by up to that
+	//     spread with NO UnpricedModels hold — the #4490 failure this boundary prevents.
+	//  3. The rates themselves were not citable from this host: fetching the OpenAI and
+	//     Google pricing pages is refused (TRUST_VIOLATION, terminal), and search
+	//     returned only third-party trackers that disagree with each other. The
+	//     deepseek/glm/kimi rows above carry a primary source and a retrieval date;
+	//     matching that discipline means a real page, not a tracker.
+	//
+	// Moving these into the priced set needs per-tier keys matched longest-first (an
+	// unrecognized tier staying UNPRICED rather than falling back to a family rate)
+	// AND a cited rate table. Until both hold, unpriced is the honest answer.
 	for _, m := range []string{"gpt-5", "gemini-2.5-pro", "qwen2.5:14b"} {
 		if _, ok := PriceFor(m); ok {
 			t.Fatalf("PriceFor(%q) = ok, but this provider has no rate card and must stay UNMEASURED", m)
