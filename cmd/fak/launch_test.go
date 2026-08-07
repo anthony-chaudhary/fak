@@ -246,3 +246,70 @@ func mustExecutable(t *testing.T) string {
 	}
 	return path
 }
+
+func TestLaunchCorruptConfigFailsClosedWithoutOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "launch.json")
+	t.Setenv("FAK_LAUNCH_CONFIG", path)
+	want := []byte(`{"broken":`)
+	if err := os.WriteFile(path, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runLaunch(&out, &errOut, []string{"--direct", "claude"}); code == 0 {
+		t.Fatalf("corrupt config accepted")
+	}
+	got, _ := os.ReadFile(path)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("corrupt config overwritten: %q", got)
+	}
+	if !strings.Contains(errOut.String(), "parse") {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+}
+
+func TestLaunchBypassScopesAndExitPropagation(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
+	command := fakeLaunchProvider(t, dir)
+	if err := launchshim.Save(launchshim.Config{Default: "third", Providers: map[string]launchshim.Provider{"third": {Command: command}}}); err != nil {
+		t.Fatal(err)
+	}
+	old := launchChildRunner
+	defer func() { launchChildRunner = old }()
+	var gotCommand string
+	var gotArgs []string
+	launchChildRunner = func(_ io.Writer, _ io.Writer, command string, args []string) int {
+		gotCommand, gotArgs = command, append([]string(nil), args...)
+		return 23
+	}
+	for _, tc := range []struct {
+		name     string
+		env      bool
+		disabled bool
+		argv     []string
+	}{
+		{"explicit", false, false, []string{"--direct", "third", "unicode-value"}},
+		{"shim-token", false, false, []string{"third", "--fak-direct", `quote"value`}},
+		{"environment", true, false, []string{"third", "env"}},
+		{"persisted", false, true, []string{"third", "disabled"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FAK_DIRECT", "")
+			c, _ := launchshim.Load()
+			c.Disabled = tc.disabled
+			if err := launchshim.Save(c); err != nil {
+				t.Fatal(err)
+			}
+			if tc.env {
+				t.Setenv("FAK_DIRECT", "1")
+			}
+			var out, errOut bytes.Buffer
+			if code := runLaunch(&out, &errOut, tc.argv); code != 23 {
+				t.Fatalf("exit=%d stderr=%s", code, errOut.String())
+			}
+			if gotCommand != command || len(gotArgs) != 1 {
+				t.Fatalf("command=%q args=%q", gotCommand, gotArgs)
+			}
+		})
+	}
+}
