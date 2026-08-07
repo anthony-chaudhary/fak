@@ -62,6 +62,58 @@ WITNESS_OK = "diff-witnessed"
 # dos grades test-line-dominant), booking 0 closes for the whole class.
 RESOLVING_CLAIM_KINDS = {"code_effect", "test", "test_cover"}
 NONRESOLVING_HOLD = "CLAIM_KIND_NONRESOLVING"
+# Author-disclaimed resolution gate (#5865): every OTHER gate here reasons over the
+# ISSUE (labels, body, timeline) or over the commit's DIFF SHAPE (claim kind, touched
+# paths). None reads the commit MESSAGE -- which is exactly where an author states
+# scope. The witnessed harm: #2694 was planned `would_close` on 2726d19, whose own body
+# says "this commit does not claim it [...] No artifact is claimed under `visuals/` [...]
+# The issue stays open." It got through because the #2998 claim gate has a docs-rung
+# carve-out (a `docs(`-titled issue accepts a doc claim) and #2694's body carries no
+# unchecked task box for the #3870 coverage gate to catch.
+#
+# The gate is deliberately RUNG-BLIND, because the carve-out is only one of the doors
+# this class walks through: 3dbe6bf2 (#3258) is `code_effect` over real source paths and
+# still says "claiming it as a served endpoint now would be claiming an integration that
+# has no witness". A commit that disclaims its own resolution cannot witness one at any
+# rung.
+#
+# Markers are AUTHOR-PLACED disclaimers, never an inference over general commit wording.
+# Measured over the last 1500 commits this set matches 7 (0.47%), and every hit is a
+# genuine "I did not finish this" note. A bare `follow-on` marker was REJECTED for this
+# set on that measurement: it matches 56/1500 (3.7%) and would falsely refuse fec8da6f76,
+# one of #2299's own witnesses ("The cmd/fak host wiring [...] is a deferred follow-on").
+DISCLAIMED_HOLD = "COMMIT_DISCLAIMS_RESOLUTION"
+# The witness commit message could not be read. Unlike the issue-side gates this is an
+# ALLOW with an audit note, not a hold -- see ``disclaimer_binds_closure``.
+DISCLAIM_UNREADABLE_NOTE = "COMMIT_BODY_UNREADABLE"
+# `does not` / `doesn't` / `doesnt`, with either quote glyph (issue+commit prose uses the
+# smart quote U+2019 freely, and a marker that missed it would be trivially evadable).
+_NT = r"does\s*n[o’']?t"
+_DISCLAIM_MARKERS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("the issue stays open", re.compile(
+        r"\b(?:the|this)\s+issue\s+(?:still\s+)?(?:stays|remains|is\s+still)\s+open\b",
+        re.IGNORECASE)),
+    ("does not close the issue", re.compile(
+        rf"\b{_NT}\s+close\s+(?:this|the)\s+issue\b", re.IGNORECASE)),
+    ("leaves the issue open", re.compile(
+        r"\b(?:leaves?|keeps?)\s+(?:the\s+|this\s+)?issue\s+open\b", re.IGNORECASE)),
+    ("this commit does not claim it", re.compile(
+        rf"\bthis\s+(?:commit|change|patch)\s+{_NT}\s+"
+        r"(?:claim|close|resolve|satisfy|witness)\b", re.IGNORECASE)),
+    ("no artifact is claimed", re.compile(
+        r"\bno\s+(?:artifact|witness|evidence|resolution|fix)\s+is\s+claimed\b",
+        re.IGNORECASE)),
+    ("the work has no witness", re.compile(
+        r"\b(?:has|have|with|carries)\s+no\s+witness\b", re.IGNORECASE)),
+    ("not yet witnessed", re.compile(
+        r"\bnot\s+yet\s+witnessed\b|\bno\s+witness\s+yet\b", re.IGNORECASE)),
+    ("would be claiming", re.compile(
+        r"\bwould\s+be\s+claiming\b", re.IGNORECASE)),
+)
+# The one NUMBERED form, scoped to the issue actually under consideration. A body saying
+# "#5847 stays OPEN" disclaims *that* issue: holding every OTHER issue's close on it would
+# be an over-refusal, so this marker is compiled per-candidate against its own number.
+_DISCLAIM_THIS_ISSUE_TMPL = r"#{n}\s+(?:still\s+)?(?:stays|remains)\s+open\b"
 # State-readback idempotency (#2641): `gh issue close` returning rc 0 proves the
 # COMMAND ran, not that the issue is durably closed — a concurrent/lagging reopen
 # leaves it OPEN/REOPENED. The closure loop reads the authoritative state back and
@@ -288,6 +340,76 @@ def claim_binds_resolution(rv: dict[str, Any], row: dict[str, Any]) -> tuple[boo
         return True, None
     return False, (f"{NONRESOLVING_HOLD}: {kind} claim (docs/triage-shaped) "
                    f"cannot resolve a non-docs issue")
+
+
+def commit_body(root: Path, sha: str) -> str | None:
+    """The witness commit's full message (subject + body), or None if unreadable."""
+    if not sha:
+        return None
+    rc, out, _ = run_capture(["git", "show", "-s", "--format=%B", sha], root, timeout=15)
+    return None if rc != 0 else (out or "")
+
+
+def _excerpt(text: str, match: "re.Match[str]", pad: int = 60) -> str:
+    """The matched disclaimer plus surrounding words, flattened onto one line.
+
+    The hold reason has to be checkable by a human reading the plan without going back
+    to git, so it quotes the author's own sentence rather than just naming the marker."""
+    start = max(0, match.start() - pad)
+    end = min(len(text), match.end() + pad)
+    return " ".join(text[start:end].split())
+
+
+def commit_disclaims_resolution(number: Any, body: str) -> tuple[bool, str | None]:
+    """Pure commit-message -> (binds, hold_reason) author-disclaimer decision (#5865).
+
+    Holds (returns False) only when the author EXPLICITLY wrote that this commit does not
+    resolve the issue -- "The issue stays open", "this commit does not claim it", "no
+    artifact is claimed", "would be claiming an integration that has no witness". Those
+    are statements of fact by the one person who knew the scope; no diff-shape or
+    label heuristic can outvote them, so the gate applies at every rung.
+
+    A NUMBERED disclaimer is scoped to the issue it names: "#5847 stays OPEN" holds a
+    close of #5847 and nothing else. Everything else binds -- the marker set is
+    high-precision by measurement (7/1500 recent commits), never a general read of
+    hedging language."""
+    text = body or ""
+    for label, rx in _DISCLAIM_MARKERS:
+        m = rx.search(text)
+        if m:
+            return False, (
+                f"{DISCLAIMED_HOLD}: the witness commit's own message disclaims "
+                f"resolution ({label}) -- \"{_excerpt(text, m)}\"; a commit that says it "
+                f"does not resolve #{number} cannot witness that it does")
+    if number is not None:
+        rx = re.compile(_DISCLAIM_THIS_ISSUE_TMPL.format(n=re.escape(str(number))),
+                        re.IGNORECASE)
+        m = rx.search(text)
+        if m:
+            return False, (
+                f"{DISCLAIMED_HOLD}: the witness commit's own message says #{number} "
+                f"stays open -- \"{_excerpt(text, m)}\"")
+    return True, None
+
+
+def disclaimer_binds_closure(root: Path, row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Does the witness commit's own message permit closing this issue? (#5865)
+
+    Unlike the issue-side gates, an unreadable input here ALLOWS (with an audit note)
+    instead of failing closed, and that asymmetry is deliberate rather than a lapse: this
+    gate only ever ADDS a refusal on POSITIVE evidence -- a disclaimer the author wrote.
+    An absent or unreadable commit message is not evidence of a disclaimer. Failing
+    closed on it would convert every workspace where `git show` cannot resolve the
+    witness into a blanket hold, which is a large unwitnessed behavior change, and it
+    would strand exactly the rows the pre-existing gates already decide correctly. The
+    safety property is unchanged: a row this gate abstains on is still subject to every
+    other gate, precisely as it was before #5865."""
+    body = commit_body(root, str(row.get("sha") or ""))
+    if body is None:
+        return True, (f"{DISCLAIM_UNREADABLE_NOTE}: could not read the witness commit "
+                      f"message for {str(row.get('sha') or '?')[:10]}, so there is no "
+                      "disclaimer evidence either way")
+    return commit_disclaims_resolution(row.get("number"), body)
 
 
 def classify_coverage(number: Any, body: str,
@@ -627,6 +749,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     gate_active = require_pushed and origin_main_resolvable(root)
     planned, results = [], []
     closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
+    skipped_disclaimed = 0
     close_not_persistent = already_counted = 0
     skipped_partial = skipped_coverage_unknown = 0
     skipped_reopened = skipped_reopen_unknown = 0
@@ -650,6 +773,21 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             skipped_nonresolving += 1
             results.append(item)
             continue
+        # #5865: a commit whose own message disclaims resolution -- "The issue stays
+        # open", "this commit does not claim it", "would be claiming an integration that
+        # has no witness" -- can never witness that resolution, at ANY rung. Runs here,
+        # ahead of every gh probe, because it is a local git read and a self-disclaimed
+        # witness needs no tracker round-trip to refuse. An unreadable message ALLOWS
+        # with an audit note (see disclaimer_binds_closure): the gate adds refusals on
+        # positive evidence only, it never converts silence into a hold.
+        undisclaimed, disclaim_hold = disclaimer_binds_closure(root, row)
+        if not undisclaimed:
+            item["action"] = "skip_disclaimed"
+            item["reason"] = disclaim_hold
+            skipped_disclaimed += 1
+            results.append(item)
+            continue
+        note_gate(item, disclaim_hold)  # gate abstained (commit message unreadable)
         if gate_active and not reachable_from_origin(root, row["sha"]):
             item["action"] = "skip_unpushed"
             item["reason"] = "resolving commit not on origin/main yet (not durable)"
@@ -766,6 +904,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             1 for r in results if r.get("action") == "would_close"),
             "skipped_unwitnessed": skipped,
             "skipped_nonresolving": skipped_nonresolving,
+            "skipped_disclaimed": skipped_disclaimed,
             "skipped_partial": skipped_partial,
             "skipped_coverage_unknown": skipped_coverage_unknown,
             "skipped_reopened": skipped_reopened,
@@ -801,6 +940,7 @@ def render(p: dict[str, Any]) -> str:
     lines.append(f"  -> closed={c.get('closed')} would_close={c.get('would_close')} "
                  f"skipped={c.get('skipped_unwitnessed')} "
                  f"nonresolving={c.get('skipped_nonresolving')} "
+                 f"disclaimed={c.get('skipped_disclaimed')} "
                  f"partial={c.get('skipped_partial')} "
                  f"coverage_unknown={c.get('skipped_coverage_unknown')} "
                  f"reopened={c.get('skipped_reopened')} "
@@ -820,7 +960,8 @@ def render(p: dict[str, Any]) -> str:
 def close_decision(action: str) -> str:
     if action in {"closed", "would_close"}:
         return "close"
-    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_partial",
+    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_disclaimed",
+                  "skip_partial",
                   "skip_coverage_unknown", "skip_reopened", "skip_reopen_unknown",
                   "skip_effect_unobserved", "skip_effect_unknown",
                   "skip_unpushed", CLOSE_ALREADY_COUNTED}:
