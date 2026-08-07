@@ -40,6 +40,11 @@ const stampMarker = "fak-wip: "
 // LATER process — a fleet host recovering a crashed session cannot otherwise know
 // what the dead session owned. An empty Scope means "nothing declared", not
 // "everything claimed" (#5539).
+// Host, DeltaBytes, MetadataOnly and DeltaObject are the FLEET fields (#3880). They
+// are all `omitempty` and all optional by construction: a stamp minted before they
+// existed decodes with every one of them zero, and every reader below treats that zero
+// as "not stated" rather than as a measurement. See fleet.go for what each one licenses
+// a peer host to conclude — and, more importantly, what it does not.
 type Stamp struct {
 	SessionID      string   `json:"session_id"`
 	StartSHA       string   `json:"start_sha"`
@@ -47,6 +52,35 @@ type Stamp struct {
 	Scope          []string `json:"scope,omitempty"`
 	Buildable      bool     `json:"buildable"`
 	CheckpointedAt int64    `json:"checkpointed_at"`
+	// Host is the OWNER HOST: the stable per-machine node id (leaseref.LocalNodeID) of
+	// the machine that minted this checkpoint. The session id alone cannot answer "which
+	// machine died" once refs from several hosts land in one coordinator clone — every
+	// host writes into the same flat refs/fak/wip/<session> namespace, so the ref name
+	// carries no locality at all. Empty means the minting clone did not state a host, and
+	// the fleet fold labels that HostUnknown rather than guessing (the same tolerance
+	// leaseref.ParseHolder extends to a legacy free-form holder).
+	Host string `json:"host,omitempty"`
+	// DeltaBytes is what the capturing clone measured the checkpoint's delta to weigh, in
+	// uncompressed bytes of the blobs it introduces over its parent. It is stamped at
+	// CAPTURE time because that is the one moment the delta is already being computed —
+	// measuring it again per-ref at sync time would put the O(refs) git fan-out back into
+	// the path that had to fight it out (#5336). Zero means UNMEASURED (a legacy stamp, a
+	// measurement that failed, or a genuinely empty delta); PlanPublish treats unmeasured
+	// as under any bound, which is exactly today's behaviour and never withholds a delta
+	// it could not prove was fat.
+	DeltaBytes int64 `json:"delta_bytes,omitempty"`
+	// MetadataOnly marks a PUBLICATION STUB rather than a checkpoint: a commit minted over
+	// the EMPTY tree carrying this stamp and nothing else, pushed in place of an over-bound
+	// delta so the session stays fleet-visible without the coordinator clone swallowing the
+	// objects (#3880). It is never true on a locally-minted checkpoint — only on the object
+	// a size-gated publish sends — so a peer reading it knows the ref names real work that
+	// is NOT on the remote.
+	MetadataOnly bool `json:"metadata_only,omitempty"`
+	// DeltaObject is the owner clone's real checkpoint object id, recorded on a stub so the
+	// withheld delta is NAMEABLE from the fleet view. Cross-host apply is out of scope here
+	// (#3880 makes the WIP visible, C4 `land` moves it), but a disposition that says
+	// "recover from the owner host" is only actionable if it can say WHAT to ask for.
+	DeltaObject string `json:"delta_object,omitempty"`
 }
 
 // ValidSession reports whether id is a single safe ref segment: no '/', no
@@ -146,6 +180,12 @@ type StatusReport struct {
 	// describes how much this clone actually knows about the remote it counted them
 	// against, and conflating the two is how staleness gets presented as absence.
 	Mirror *MirrorView `json:"mirror,omitempty"`
+	// Fleet is the PEER HOSTS' checkpoints folded in from this clone's mirror of the
+	// remote — nil unless the caller asked for it (`fak wip status --fleet`, #3880).
+	// Deliberately a sibling of Sessions rather than more rows in it: every other reader
+	// of Sessions is tree-relative (reap deletes from it, land materializes out of it),
+	// and a peer host's checkpoint belongs to none of those populations. See fleet.go.
+	Fleet *FleetReport `json:"fleet,omitempty"`
 }
 
 // Fold projects the live ref records into a sorted StatusReport, computing each
