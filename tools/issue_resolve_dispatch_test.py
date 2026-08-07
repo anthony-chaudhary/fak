@@ -324,6 +324,148 @@ class ActiveGuardLivelockTest(unittest.TestCase):
 
         self.assertFalse(hold["active"])
 
+    @staticmethod
+    def _livelock_fixture(root: Path, rows: list[dict], *,
+                          lane: str | None = "quality") -> tuple[Path, Path]:
+        """Write a live worker's resolve log + guard journal under ``root``."""
+        import json
+        runs = root / ".dispatch-runs"
+        audit_dir = runs / "guard-audit"
+        audit_dir.mkdir(parents=True)
+        audit = audit_dir / "tools-claude-1234.jsonl"
+        audit.write_text("\n".join(json.dumps(r) for r in rows),
+                         encoding="utf-8")
+        log = runs / "resolve-2720-20260705-202908.log"
+        header = (f"# fak-spawn issue=2720 lane={lane} backend=claude\n"
+                  if lane else "")
+        log.write_text(f"{header}audit log  : {audit}\n", encoding="utf-8")
+        log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+        return runs, audit
+
+    @staticmethod
+    def _quarantine_row() -> dict:
+        return {"kind": "QUARANTINE", "verdict": "QUARANTINE",
+                "tool": "tool_result", "reason": "SECRET_EXFIL",
+                "args_digest": "abc123"}
+
+    @staticmethod
+    def _clean_row(i: int) -> dict:
+        return {"kind": "DECIDE", "verdict": "ALLOW", "tool": "Bash",
+                "args_digest": f"clean{i}"}
+
+    def test_guard_livelock_clears_once_the_worker_escapes(self) -> None:
+        """A worker that already broke OUT of the livelock is not livelocked.
+
+        Regression for #5861: the scan counted all-time quarantines in an
+        append-only journal, so the tally could never fall back under the
+        threshold. Once a worker crossed it the hold LATCHED for the life of the
+        journal -- here, through 400 consecutive clean decisions after the
+        livelock ended. The hold must describe a livelock happening NOW.
+        """
+        import tempfile
+        mod = load()
+        rows = ([self._quarantine_row() for _ in range(10)]
+                + [self._clean_row(i) for i in range(400)])
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, audit = self._livelock_fixture(root, rows)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+                hit = mod._guard_result_livelock(audit)
+
+        self.assertFalse(hold["active"])
+        self.assertFalse(hit["livelock"])
+        # The escape was SEEN and the pre-escape burst forgotten, not merely
+        # outweighed -- so the hold clears on recovery instead of latching.
+        self.assertEqual(hit["escapes"], 1)
+        self.assertEqual(hit["count"], 0)
+        self.assertEqual(hit["rows"], 410)
+
+    def test_scattered_quarantines_are_not_a_livelock(self) -> None:
+        """Ten quarantines spread singly across thousands of productive rows --
+        never two adjacent -- is a lifetime tally, not a livelock (#5861)."""
+        import tempfile
+        mod = load()
+        rows: list[dict] = []
+        for burst in range(10):
+            rows.extend(self._clean_row(burst * 200 + i) for i in range(200))
+            rows.append(self._quarantine_row())
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, audit = self._livelock_fixture(root, rows)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+                hit = mod._guard_result_livelock(audit)
+
+        self.assertFalse(hold["active"])
+        self.assertFalse(hit["livelock"])
+        # Each repeat lands a full escape window after the previous one, so each
+        # starts a fresh burst instead of accumulating into a false fuse.
+        self.assertEqual(hit["count"], 1)
+
+    def test_tight_livelock_still_fires_after_the_escape_window(self) -> None:
+        """The recency window must not disarm a worker that IS spinning now."""
+        import tempfile
+        mod = load()
+        # Long productive prefix, then a tight burst that never lets up.
+        rows = ([self._clean_row(i) for i in range(300)]
+                + [self._quarantine_row() for _ in range(12)])
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, audit = self._livelock_fixture(root, rows)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+                hit = mod._guard_result_livelock(audit)
+
+        self.assertTrue(hold["active"])
+        self.assertEqual(hit["count"], 12)
+        self.assertEqual(hit["rows_since"], 0)
+
+    def test_guard_livelock_stamps_the_lane_it_burns(self) -> None:
+        """Each livelock candidate names its lane, so the hold can be lane-scoped
+        instead of idling every disjoint lane (#5861)."""
+        import tempfile
+        mod = load()
+        rows = [self._quarantine_row() for _ in range(10)]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, _ = self._livelock_fixture(root, rows, lane="quality")
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+
+        self.assertTrue(hold["active"])
+        self.assertEqual(hold["candidates"][0]["lane"], "quality")
+        self.assertEqual(hold["lanes"], ["quality"])
+        self.assertFalse(hold["lane_unknown"])
+        self.assertIn("lane 'quality'", hold["reason"])
+
+    def test_guard_livelock_without_spawn_header_reports_unknown_lane(self) -> None:
+        """An unreadable spawn header yields no lane, and the hold SAYS so, so
+        the caller can fail closed rather than guess disjointness (#5861)."""
+        import tempfile
+        mod = load()
+        rows = [self._quarantine_row() for _ in range(10)]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, _ = self._livelock_fixture(root, rows, lane=None)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+
+        self.assertTrue(hold["active"])
+        self.assertIsNone(hold["candidates"][0]["lane"])
+        self.assertEqual(hold["lanes"], [])
+        self.assertTrue(hold["lane_unknown"])
+
 
 class ActiveCompactRunawayTest(unittest.TestCase):
     def test_live_worker_past_compact_becomes_spawn_hold(self) -> None:
@@ -1466,6 +1608,84 @@ class EvaluateTest(unittest.TestCase):
                          "ACTIVE_GUARD_LIVELOCK")
         self.assertIn("guard result livelock", p["reason"])
         self.assertIn("launch gate: BLOCKED", mod.render(p))
+
+    def test_guard_livelock_on_other_lane_does_not_block_disjoint_lane(self) -> None:
+        """A guard livelock on lane A must NOT idle dispatch to lane B (#5861).
+
+        Same shape #5858 fixed for ACTIVE_COMPACT_RUNAWAY: one worker stuck on
+        the same quarantined tool_result is a local tool-loop condition, and
+        scoping the hold to the colliding lane is what makes it a proportionate
+        response instead of a fleet-wide stop.
+        """
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [4334],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [4334]]]})
+        mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": ["quality"],
+            "lane_unknown": False,
+            "reason": ("live worker #2720 on lane 'quality' is already in a "
+                       "guard result livelock"),
+            "candidates": [{"issue": 2720, "lane": "quality", "count": 50}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertNotEqual(p.get("verdict"), "ACTIVE_GUARD_LIVELOCK")
+        self.assertNotEqual(p.get("action"), "active_guard_livelock")
+        # Never a silent drop: the disjoint livelock is still REPORTED, with the
+        # lane it was scoped against and the explicit no-collision finding.
+        self.assertEqual(p["active_guard_livelock"]["scoped_lane"], "tools")
+        self.assertFalse(p["active_guard_livelock"]["collides"])
+
+    def test_guard_livelock_still_blocks_its_own_lane(self) -> None:
+        """Lane-scoping must not disarm the hold on the lane actually spinning."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "quality", "numbers": [2867],
+                          "by_lane_count": {"quality": 1},
+                          "eligible_by_lane": [["quality", [2867]]]})
+        mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": ["quality"],
+            "lane_unknown": False,
+            "reason": ("live worker #2720 on lane 'quality' is already in a "
+                       "guard result livelock"),
+            "candidates": [{"issue": 2720, "lane": "quality", "count": 50}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ACTIVE_GUARD_LIVELOCK")
+        self.assertTrue(p["active_guard_livelock"]["collides"])
+
+    def test_guard_livelock_with_unknown_lane_fails_closed(self) -> None:
+        """An unreadable spawn header cannot prove disjointness, so the hold keeps
+        its old fleet-wide behaviour rather than guessing."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [4334],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [4334]]]})
+        mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": [],
+            "lane_unknown": True,
+            "reason": "live worker #2720 is already in a guard result livelock",
+            "candidates": [{"issue": 2720, "lane": None, "count": 50}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ACTIVE_GUARD_LIVELOCK")
+        self.assertTrue(p["active_guard_livelock"]["collides"])
 
     def test_active_compact_runaway_blocks_spawn(self) -> None:
         """A live compact-control runaway pauses new issue spawns before the

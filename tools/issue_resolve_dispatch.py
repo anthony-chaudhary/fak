@@ -294,6 +294,19 @@ def is_orientation_doc(path: str) -> bool:
 # resolve log names a guard-audit journal and that journal proves a repeated
 # quarantined result.
 ACTIVE_GUARD_LIVELOCK_MIN_COUNT = 10
+# How many journal rows the worker may append WITHOUT reproducing a quarantine
+# before that quarantine is treated as escaped. Guard journals are append-only,
+# so a plain lifetime tally never decreases: once a worker crossed
+# :data:`ACTIVE_GUARD_LIVELOCK_MIN_COUNT` the hold LATCHED for the rest of the
+# journal's life, even after the worker broke out and shipped hundreds of clean
+# decisions (#5861). A livelocked worker reproduces the IDENTICAL quarantine
+# within a handful of rows -- dispatch_status's status-card fold, which this
+# scan's docstring calls itself the result-side analogue of, treats 3 consecutive
+# repeats as the tight signal. 50 intervening rows with no recurrence is more
+# than an order of magnitude past that, so it is positive proof the worker moved
+# on, the same role the compaction shed plays for the compact-runaway hold. The
+# hold must describe a livelock happening NOW, not one that happened once.
+ACTIVE_GUARD_LIVELOCK_ESCAPE_ROWS = 50
 _AUDIT_LOG_RE = re.compile(r"audit log\s*:\s*(.+?\.jsonl)")
 # Active compact-runaway spawn hold: a worker that is already far past the
 # compact threshold while still taking tool turns is not healthy headroom. This
@@ -461,15 +474,32 @@ def _audit_path_from_log(log: Path, root: Path) -> Path | None:
     return found
 
 
-def _guard_result_livelock(journal: Path, *,
-                           min_count: int = ACTIVE_GUARD_LIVELOCK_MIN_COUNT) -> dict[str, Any]:
+def _guard_result_livelock(
+    journal: Path,
+    *,
+    min_count: int = ACTIVE_GUARD_LIVELOCK_MIN_COUNT,
+    escape_rows: int = ACTIVE_GUARD_LIVELOCK_ESCAPE_ROWS,
+) -> dict[str, Any]:
     """Return positive evidence for repeated quarantined tool_result rows.
 
     This is the result-side analogue of the status-card livelock fold, scoped to
     active worker journals. The key includes reason + digest so unrelated
     quarantines do not trip the fuse.
+
+    "Livelock" is load-bearing and is enforced against the CURRENT burst only
+    (:data:`ACTIVE_GUARD_LIVELOCK_ESCAPE_ROWS`, #5861): every parsed journal row
+    advances a clock, and a key the worker has not reproduced for that many rows
+    is forgotten because the worker demonstrably moved past it. Without that,
+    the count is an append-only LIFETIME tally -- it can never fall back under
+    ``min_count``, so the hold latches for the life of the journal, and ten
+    quarantines scattered singly across thousands of productive rows (never two
+    adjacent, a livelock by no reading) trip the fuse just as hard as ten in a
+    row.
     """
     counts: dict[tuple[str, str, str], int] = {}
+    last_row: dict[tuple[str, str, str], int] = {}
+    escapes = 0
+    row_idx = 0
     try:
         lines = journal.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -481,6 +511,9 @@ def _guard_result_livelock(journal: Path, *,
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # Every well-formed kernel decision is a tick of progress, whatever it
+        # decided -- that is what pushes an old quarantine out of the window.
+        row_idx += 1
         verdict = str(row.get("verdict") or "").upper()
         tool = str(row.get("tool") or row.get("name") or "")
         if verdict != "QUARANTINE" or tool != "tool_result":
@@ -490,12 +523,29 @@ def _guard_result_livelock(journal: Path, *,
         if not digest:
             continue
         key = (tool, reason, digest)
+        prev = last_row.get(key)
+        if prev is not None and row_idx - prev > escape_rows:
+            # The worker went a full escape window without reproducing this
+            # quarantine and then hit it again: the earlier burst is one it
+            # already escaped, so this is a NEW burst that must reach min_count
+            # on its own merits.
+            counts[key] = 0
+            escapes += 1
         counts[key] = counts.get(key, 0) + 1
+        last_row[key] = row_idx
+    # Tail escape: a burst whose last repeat is already an escape window behind
+    # the journal head describes a worker that has since recovered. Forget it,
+    # so the hold CLEARS on recovery instead of latching.
+    for key, idx in last_row.items():
+        if row_idx - idx > escape_rows:
+            counts[key] = 0
+            escapes += 1
     if not counts:
-        return {"livelock": False, "path": str(journal)}
+        return {"livelock": False, "path": str(journal), "rows": row_idx}
     (tool, reason, digest), count = max(counts.items(), key=lambda item: item[1])
     if count < min_count:
-        return {"livelock": False, "path": str(journal), "count": count}
+        return {"livelock": False, "path": str(journal), "count": count,
+                "rows": row_idx, "escapes": escapes}
     return {
         "livelock": True,
         "path": str(journal),
@@ -503,6 +553,9 @@ def _guard_result_livelock(journal: Path, *,
         "reason": reason,
         "digest": digest,
         "count": count,
+        "rows": row_idx,
+        "escapes": escapes,
+        "rows_since": row_idx - last_row[(tool, reason, digest)],
     }
 
 
@@ -529,18 +582,28 @@ def active_guard_livelock_hold(root: Path, runs_dir: Path, *,
                 issue = int(m.group(1))
             except ValueError:
                 issue = None
-        hit.update({"log": str(log), "issue": issue})
+        # Which lane the livelock actually burns (#5861, mirroring #5858's
+        # compact-runaway fix). A guard result livelock is a property of ONE
+        # worker's own tool loop, not of the fleet: stamp the lane -- readable
+        # from the very log this scan already opened -- so the caller can scope
+        # the hold to the colliding lane instead of idling every disjoint lane.
+        # `None` when the spawn header is unreadable; the caller fails CLOSED.
+        hit.update({"log": str(log), "issue": issue,
+                    "lane": _spawn_header_lane(log)})
         candidates.append(hit)
     if not candidates:
         return {"active": False}
     candidates.sort(key=lambda h: int(h.get("count") or 0), reverse=True)
     top = candidates[0]
+    lane_bit = f" on lane '{top.get('lane')}'" if top.get("lane") else ""
     return {
         "active": True,
         "candidates": candidates[:5],
+        "lanes": sorted({str(c.get("lane")) for c in candidates if c.get("lane")}),
+        "lane_unknown": any(not c.get("lane") for c in candidates),
         "reason": (
-            f"live worker #{top.get('issue') or '?'} is already in a guard "
-            f"result livelock: {top.get('tool')} {top.get('reason')} "
+            f"live worker #{top.get('issue') or '?'}{lane_bit} is already in a "
+            f"guard result livelock: {top.get('tool')} {top.get('reason')} "
             f"digest={str(top.get('digest') or '')[:12]} count={top.get('count')}"
         ),
     }
@@ -5681,19 +5744,41 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         return finish(payload)
     guard_livelock = active_guard_livelock_hold(root, runs_dir)
     if guard_livelock.get("active"):
-        reason = str(guard_livelock.get("reason") or "active guard livelock")
+        # Lane-scope the hold (#5861, the follow-on to #5858's identical fix for
+        # ACTIVE_COMPACT_RUNAWAY). A guard result livelock is ONE worker's local
+        # tool loop; it justifies not piling a SECOND worker onto the same lane,
+        # but it is no reason to idle every disjoint lane. Held fleet-wide it
+        # converts one worker's stuck tool_result into a whole-fleet stall --
+        # the same unit-fault-becomes-fleet-block shape as a lane lease held by
+        # a long-dead worker. Fail CLOSED when any livelock's lane is unknown
+        # (unreadable spawn header): we cannot prove disjointness then.
+        livelock_lanes = set(guard_livelock.get("lanes") or ())
+        lane_unknown = bool(guard_livelock.get("lane_unknown", True))
+        collides = (
+            lane_unknown
+            or not chosen_lane
+            or str(chosen_lane) in livelock_lanes
+        )
+        guard_livelock = {
+            **guard_livelock,
+            "scoped_lane": chosen_lane,
+            "collides": collides,
+        }
+        # Reported either way, so a scoped-past hold is legible, never a silent drop.
         payload["active_guard_livelock"] = guard_livelock
-        payload["launch_gate"] = launch_gate_blocked(
-            "ACTIVE_GUARD_LIVELOCK",
-            reason,
-            "wait-for-loop-worker-to-exit-or-fix-guard-result-livelock")
-        payload.update({
-            "ok": False,
-            "action": "active_guard_livelock",
-            "verdict": "ACTIVE_GUARD_LIVELOCK",
-            "reason": reason,
-        })
-        return finish(payload)
+        if collides:
+            reason = str(guard_livelock.get("reason") or "active guard livelock")
+            payload["launch_gate"] = launch_gate_blocked(
+                "ACTIVE_GUARD_LIVELOCK",
+                reason,
+                "wait-for-loop-worker-to-exit-or-fix-guard-result-livelock")
+            payload.update({
+                "ok": False,
+                "action": "active_guard_livelock",
+                "verdict": "ACTIVE_GUARD_LIVELOCK",
+                "reason": reason,
+            })
+            return finish(payload)
     compact_runaway = active_compact_runaway_hold(root, runs_dir)
     if compact_runaway.get("active"):
         # Lane-scope the hold (#5858). A compact runaway is ONE worker's local
