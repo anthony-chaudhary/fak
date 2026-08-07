@@ -292,6 +292,7 @@ func main() {
 	var verifyDescriptorPath string
 	var multiTurnDescriptorOutput string
 	var verifyMultiTurnDescriptorPath string
+	var verifyS2BPath string
 	var compatOutput, verifyCompatPath string
 	var effectsOutput, verifyEffectsPath string
 	var verifyAPIOnlyPath string
@@ -331,6 +332,7 @@ func main() {
 	flag.StringVar(&verifyDescriptorPath, "verify-descriptor-bench", "", "verify a captured descriptor benchmark artifact and exit")
 	flag.StringVar(&multiTurnDescriptorOutput, "multi-turn-descriptor", "", "run the 1,000-context multi-turn descriptor witness and write JSON")
 	flag.StringVar(&verifyMultiTurnDescriptorPath, "verify-multi-turn-descriptor", "", "verify a captured multi-turn descriptor witness and exit")
+	flag.StringVar(&verifyS2BPath, "verify-kernel-prefix-ab", "", "verify a controlled in-kernel prefix-cache A/B artifact and exit")
 	flag.StringVar(&compatOutput, "compatibility-witness", "", "run compatibility scheduler witness and write JSON")
 	flag.StringVar(&verifyCompatPath, "verify-compatibility", "", "verify compatibility artifact")
 	flag.StringVar(&effectsOutput, "effects-witness", "", "run effect-safety witness and write JSON")
@@ -399,6 +401,14 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("PASS: verified", verifyABPath)
+		return
+	}
+	if verifyS2BPath != "" {
+		if err := verifyS2BArtifact(verifyS2BPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: verified", verifyS2BPath)
 		return
 	}
 	if verifyEffectsPath != "" {

@@ -51,6 +51,7 @@ Research often depends on a specific backend, model, release, hardware tier, dat
 
 The repository's studies and dated investigations currently live under [`docs/notes/`](../notes/); the curated [Notes & research index](../../INDEX.md#notes--research-docsnotes) is the human route. [`docs/sota/`](../sota/) tracks state-of-the-art comparisons. Use [`llms.txt`](../../llms.txt) for machine-oriented discovery.
 
+- [Micro-context S2b controlled in-kernel prefix-cache A/B](micro-context-s2b-kernel-cache-ab.md) — fresh-process arms reconcile response usage with RadixAttention counters and observe a fixture-scoped 2.16x shared-base service gain.
 - [Micro-context S3 hibernation/restart](micro-context-s3-hibernation-restart.md)
 - [Micro-context S4a lightweight descriptor](micro-context-s4-lightweight-descriptor.md)
 - [Micro-context S4b compatibility scheduler](micro-context-s4-compatibility-scheduler.md)
