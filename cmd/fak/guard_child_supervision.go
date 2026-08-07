@@ -77,7 +77,17 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		runErr := windowgate.RunInNewJob(child)
 		if rec, parked := guardGoalParked(); parked {
 			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; next=%s\n", rec.ParkedUntil, rec.Reason, rec.NextAction)
-			break
+			// #5862: a bare `break` here left the loop with NO teardown at all — no
+			// witness row, no journal flush/Close, no refusal carry-forward sidecar, and
+			// no gateway cancel — so a parked session's journal stayed zero-byte and its
+			// cause was unrecoverable. Tear down exactly like the supervised loop's parked
+			// branches: witness first (finishGuardChildAndReport closes the journal), then
+			// report. runErr is deliberately dropped for the same reason the supervised
+			// sibling drops it — a park is a scheduled resume, not a session failure, so
+			// the process keeps the exit-0 semantics the `break` already had.
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
+			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
 		}
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
@@ -229,6 +239,16 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			runErr := event.RunErr
 			if rec, parked := guardGoalParked(); parked {
 				fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; next=%s\n", rec.ParkedUntil, rec.Reason, rec.NextAction)
+				// #5862: this is the branch the FLEET takes. Dispatch always passes
+				// --max-duration (1740s), and maxDurationLimit > 0 routes every dispatched
+				// worker into this supervised loop (guard.go), so a turn-0 provider 429 that
+				// parks the goal tears down HERE. It used to skip the witness while its
+				// guardChildRestart sibling below wrote one — and that asymmetry alone is why
+				// a parked session's journal was zero-byte even though its .refusals.json
+				// sidecar (written inside finishGuardChildAndReport) was not. The child has
+				// already exited on this branch, so there is nothing to stop: append the
+				// witness before the report, which closes the journal.
+				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
 				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
