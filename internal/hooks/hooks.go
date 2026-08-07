@@ -133,6 +133,7 @@ func PreCommitGates() []Gate {
 		// the exact one-line edit (or `fak new-leaf`). Set FLEET_TIER_GUARD=block to hard-enforce it,
 		// ALLOW_UNTIERED_LEAF=1 to skip it once.
 		{Name: "UNTIERED_LEAF", ModeEnv: "FLEET_TIER_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_UNTIERED_LEAF", Check: gateUntieredLeaf},
+		{Name: "PARALLEL_FABRIC_NUDGE", ModeEnv: "FLEET_PF_NUDGE", DefaultMode: "warn", EscapeEnv: "ALLOW_PF_NUDGE", Check: checkParallelFabricNudge},
 		// GOFMT is ADVISORY (DefaultMode "warn"): the commit-boundary sibling of make ci's
 		// gofmt-check. It fires when a staged .go file is not gofmt-clean, before the drift reds
 		// every peer's `make ci` at the trunk — a recurring red the release notes keep clearing
