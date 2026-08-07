@@ -67,6 +67,7 @@ type QualityLedger struct {
 	Verification  VerificationSummary `json:"verification"`
 	ClaimFamilies ClaimFamilies       `json:"claim_families"`
 	ErrorClasses  map[string]int      `json:"error_classes"`
+	Outcomes      map[string]int      `json:"outcomes"`
 	SampleIDs     []string            `json:"sample_ids"`
 	SampleLimit   int                 `json:"sample_limit"`
 }
@@ -91,6 +92,7 @@ func IngestSourceRun(data []byte, runID, baseID string, verifier OutcomeCheck, s
 		return QualityLedger{}, errors.New("microagent: sample limit must be nonnegative")
 	}
 	l := QualityLedger{Schema: QualityLedgerSchema, RunID: runID, BaseID: baseID, CheckContract: "caller-supplied-independent-outcome-check", Mode: w.Mode, Provider: w.Provider, Model: w.Model, Submitted: w.LogicalShards, Retired: w.Completed, Failed: w.Failed, ElapsedMS: w.ElapsedMS, SampleLimit: sampleLimit, ErrorClasses: map[string]int{}}
+	l.Outcomes = map[string]int{"success": w.Completed, "error": w.Failed, "refusal": 0}
 	l.ClaimFamilies.Orchestration.SubmittedTotal, l.ClaimFamilies.Orchestration.PhysicalWorkers = w.LogicalShards, w.PhysicalWorkers
 	l.ClaimFamilies.Inference.PromptTokens, l.ClaimFamilies.Inference.CompletionTokens, l.ClaimFamilies.Inference.UsageResponses = w.PromptTokens, w.CompletionTokens, w.UsageResponses
 	for i := 0; i < w.Completed; i++ {
@@ -121,6 +123,9 @@ func VerifyQualityLedger(l QualityLedger) error {
 	}
 	if l.Submitted != l.Retired+l.Failed+l.Cancelled || l.Verification.Checked != l.Retired || l.Verification.Passed+l.Verification.Failed != l.Submitted {
 		return errors.New("microagent: ledger totals do not reconcile")
+	}
+	if l.Outcomes == nil || l.Outcomes["success"] != l.Retired || l.Outcomes["error"] != l.Failed || l.Outcomes["refusal"] != l.Cancelled {
+		return errors.New("microagent: outcome counters do not reconcile")
 	}
 	if l.ClaimFamilies.Orchestration.SubmittedTotal != l.Submitted {
 		return errors.New("microagent: orchestration family mismatch")

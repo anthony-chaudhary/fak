@@ -42,3 +42,19 @@ func TestQualityLedgerCannotOmitFailures(t *testing.T) {
 		t.Fatal("expected denominator refusal")
 	}
 }
+
+func TestQualityLedgerExposesOutcomeCounters(t *testing.T) {
+	w := SourceRun{Schema: "fak-microcontext-spine/1", LogicalShards: 3, PhysicalWorkers: 1, Completed: 2, Failed: 1, TurnCount: 2, ElapsedMS: 1000}
+	b, _ := json.Marshal(w)
+	l, err := IngestSourceRun(b, "run", "base", OutcomeCheckFunc(func(string) error { return nil }), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Outcomes["success"] != 2 || l.Outcomes["error"] != 1 || l.Outcomes["refusal"] != 0 {
+		t.Fatalf("outcomes=%v", l.Outcomes)
+	}
+	l.Outcomes["error"] = 0
+	if err := VerifyQualityLedger(l); err == nil {
+		t.Fatal("expected outcome reconciliation refusal")
+	}
+}

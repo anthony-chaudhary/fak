@@ -61,5 +61,6 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [Micro-context S4e real compatibility-batch execution](micro-context-s4e-compat-batch-execution.md) — planner batches execute through the in-kernel batch seam; the first mixed-length CPU fixture is an honest 0.539x negative result.
 - [Micro-context S5a controlled-kernel 1,000-context ramp](micro-context-s5a-controlled-kernel-1k.md)
 - [Micro-context S6 API-only adapter](micro-context-s6-api-only.md)
+- [Micro-context outcome counters](micro-context-outcome-counters.md) — the existing quality ledger exposes reconciled success/error/refusal totals; controlled 1k CUDA readout is 1000/0/0.
 - [Micro-context quality and observability ledger](micro-context-quality-ledger.md)
 - [Micro-context S7 mixed-tenant fairness](micro-context-s7-fairness.md)
