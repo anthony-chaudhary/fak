@@ -110,7 +110,12 @@ func renderCoreLockWarnings(w io.Writer, warnings []coreLockWarning) int {
 // skipped_gates / skipped_count keys `fak hooks pre-commit --json` already emits (#5299), so the
 // two commands' reports parse identically and an empty findings list is distinguishable from a
 // findings list that is empty because a gate never ran (#5604).
-func emitHygieneJSON(stdout, stderr io.Writer, findings []hooks.Finding, warnings []coreLockWarning, skipped []string) {
+//
+// scope / scope_narrowing ride under the same keys as the staged hook's payload (#5603) — and
+// carry a DIFFERENT population value, which is the point. The two commands' reports parse
+// identically and share gate names, so without this key a consumer holding one payload cannot
+// tell a clean tree from a clean staged set.
+func emitHygieneJSON(stdout, stderr io.Writer, findings []hooks.Finding, warnings []coreLockWarning, skipped []string, scope runScope) {
 	if findings == nil {
 		findings = []hooks.Finding{}
 	}
@@ -127,6 +132,8 @@ func emitHygieneJSON(stdout, stderr io.Writer, findings []hooks.Finding, warning
 		"core_lock_warn_mode": coreLockModeWarning,
 		"skipped_gates":       skipped,
 		"skipped_count":       len(skipped),
+		"scope":               scope.Population,
+		"scope_narrowing":     scope.narrowingPayload(),
 	}
 	if err := writeIndentedJSON(stdout, payload); err != nil {
 		fmt.Fprintf(stderr, "fak hygiene: %v\n", err)

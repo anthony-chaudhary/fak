@@ -22,11 +22,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 )
 
-// decodeFindingsJSON runs emitFindingsJSON and decodes the payload a consumer would parse.
+// decodeFindingsJSON runs emitFindingsJSON and decodes the payload a consumer would parse. The
+// scope argument (#5603) is the staged population with no operator narrowing — the posture these
+// denominator tests are about; hooks_scope_test.go varies it.
 func decodeFindingsJSON(t *testing.T, findings []hooks.Finding, skipped []string, gates []gateReport) map[string]any {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	emitFindingsJSON(&stdout, &stderr, findings, skipped, gates)
+	emitFindingsJSON(&stdout, &stderr, findings, skipped, gates, runScope{Population: scopePopulationStaged})
 	if stderr.Len() > 0 {
 		t.Fatalf("emitFindingsJSON wrote to stderr: %s", stderr.String())
 	}
@@ -99,13 +101,18 @@ func TestGateReportUnreportedIsNullNotZero(t *testing.T) {
 func TestEmitFindingsJSONStaysAdditive(t *testing.T) {
 	payload := decodeFindingsJSON(t, nil, nil, nil)
 
-	for _, key := range []string{"findings", "count", "skipped_gates", "skipped_count", "gates"} {
+	for _, key := range []string{
+		"findings", "count", "skipped_gates", "skipped_count", // #5299
+		"gates",                    // #5602
+		"scope", "scope_narrowing", // #5603
+	} {
 		if _, present := payload[key]; !present {
-			t.Errorf("key %q missing; all five keys are always present so a reader never treats absent as none", key)
+			t.Errorf("key %q missing; every key is always present so a reader never treats absent as none", key)
 		}
 	}
-	if len(payload) != 5 {
-		t.Errorf("payload has %d keys (%v); #5602 is additive — exactly the four #5299 keys plus `gates`",
+	if len(payload) != 7 {
+		t.Errorf("payload has %d keys (%v); this epic only ADDS — the four #5299 keys, plus `gates`\n"+
+			"(#5602), plus scope/scope_narrowing (#5603), and nothing renamed or removed",
 			len(payload), payload)
 	}
 	// Empty must be [] and 0, never null: the nil-to-empty normalization is the reason a consumer
@@ -134,7 +141,7 @@ func TestCleanRunSummarySeparatesJudgedFromIdle(t *testing.T) {
 		{Gate: "DUPLICATION", Skipped: true},                  // named by the degraded-run line instead
 	}
 
-	got := cleanRunSummary(reports, 40)
+	got := cleanRunSummary(reports, 40, runScope{Population: scopePopulationStaged})
 
 	for _, want := range []string{
 		"2 judged candidates",     // GOFMT + PUBLIC_LEAK
@@ -163,7 +170,7 @@ func TestCleanRunSummaryOmitsUnreportedClauseWhenEveryGateAnswered(t *testing.T)
 	got := cleanRunSummary([]gateReport{
 		{Gate: "GOFMT", Candidates: n(3), Unit: "staged .go file(s)"},
 		{Gate: "INDEX_SYNC", Candidates: n(0), Unit: "staged index file(s)"},
-	}, 3)
+	}, 3, runScope{Population: scopePopulationStaged})
 
 	if strings.Contains(got, "no denominator") {
 		t.Errorf("every gate answered, but the summary still discloses an unreported bucket\ngot: %s", got)

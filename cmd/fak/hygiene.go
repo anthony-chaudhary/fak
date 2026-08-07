@@ -72,15 +72,31 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 	}
 	var allFindings []hooks.Finding
 	var skipped []string
+	// scope is what this sweep quantified OVER (#5603). It is the whole-tree twin of the staged
+	// hook's scope, and the reason the two must both carry it: several gate names appear in BOTH
+	// registries, so a reader handed one report in isolation cannot tell which population a
+	// "clean" verdict covered. Advisory stays empty here on purpose — hygiene has no per-gate
+	// warn mode; its advisory-ness is per FINDING (PushScoped / Finding.Advisory), which is a
+	// property of the verdict rather than a narrowing of the gate set, and claiming otherwise
+	// would put a state in this field that the operator never chose.
+	scope := runScope{Population: scopePopulationTree}
 	selected := 0
 	blocked := false
 	for _, g := range hooks.HygieneGates() {
 		if want != nil && !want[g.Name] {
+			// --gates is operator intent: real narrowing, never a degradation. Naming it keeps a
+			// one-gate sweep from reading like the full one (#5603) — the same confusion #5604
+			// refused for a selector that matched NOTHING, one step short of the empty case.
+			scope.Narrowing.NotRun = append(scope.Narrowing.NotRun, g.Name+" (not selected)")
+			scope.Narrowing.ByOperator = append(scope.Narrowing.ByOperator, g.Name)
 			continue
 		}
 		// A DefaultOff gate (a migration-in-flight ratchet like BARE_DEV_SPELLING) runs only
-		// when named explicitly via --gates, never in the default `make ci` sweep.
+		// when named explicitly via --gates, never in the default `make ci` sweep. That is a
+		// compiled default, NOT this operator's choice, so it is named as not-run but never
+		// counted against the operator.
 		if g.DefaultOff && want == nil {
+			scope.Narrowing.NotRun = append(scope.Narrowing.NotRun, g.Name+" (default-off)")
 			continue
 		}
 		selected++
@@ -140,7 +156,7 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		emitHygieneJSON(stdout, stderr, allFindings, coreLockWarns, skipped)
+		emitHygieneJSON(stdout, stderr, allFindings, coreLockWarns, skipped, scope)
 	} else {
 		renderCoreLockWarnings(stderr, coreLockWarns)
 	}
@@ -153,8 +169,11 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 	}
 	if !*asJSON {
 		// Name the denominator on the clean path too: bare "hygiene OK" reads the same whether
-		// nine gates ran or one did.
-		fmt.Fprintf(stdout, "hygiene OK — %d gate(s) over %d tracked file(s)\n", selected-len(skipped), len(d.Paths))
+		// nine gates ran or one did. The scope clause says what the denominator is a denominator
+		// OF (#5603) — without it this line and the staged hook's clean line are the same shape
+		// over two different populations.
+		fmt.Fprintf(stdout, "hygiene OK — %d gate(s) over %d tracked file(s) — %s\n",
+			selected-len(skipped), len(d.Paths), scope.note())
 	}
 	return 0
 }

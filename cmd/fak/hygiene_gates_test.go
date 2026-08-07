@@ -120,7 +120,7 @@ func TestRunHygiene_UnknownGateExitsNonZero(t *testing.T) {
 // from "clean because SECRET_SHAPE never ran".
 func TestEmitHygieneJSON_ReportsSkips(t *testing.T) {
 	var out, errb bytes.Buffer
-	emitHygieneJSON(&out, &errb, nil, nil, []string{"SECRET_SHAPE", "BROKEN_LINK"})
+	emitHygieneJSON(&out, &errb, nil, nil, []string{"SECRET_SHAPE", "BROKEN_LINK"}, runScope{Population: scopePopulationTree})
 
 	var got struct {
 		Count        int      `json:"count"`
@@ -147,7 +147,7 @@ func TestEmitHygieneJSON_ReportsSkips(t *testing.T) {
 // keys with empty/zero values (never absent, never null), so a consumer can parse one shape.
 func TestEmitHygieneJSON_CleanRunReportsNoSkips(t *testing.T) {
 	var out, errb bytes.Buffer
-	emitHygieneJSON(&out, &errb, nil, nil, nil)
+	emitHygieneJSON(&out, &errb, nil, nil, nil, runScope{Population: scopePopulationTree})
 
 	var got map[string]any
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {

@@ -344,12 +344,37 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	// intent, not a degraded run, and reporting a zero denominator for a gate nobody asked to
 	// run would misdescribe it as having judged nothing.
 	var reports []gateReport
+	// scope is what this run quantified OVER (#5603): the staged set, plus the gates operator
+	// intent left unable to refuse. `reports` says how much each gate judged; scope says which
+	// population those numbers were drawn from and which gates are missing from them entirely.
+	// Both narrowings are silent today — a run with half the gate set softened prints the same
+	// "clean" as a full one, and a staged-clean commit reads like a clean tree.
+	scope := runScope{Population: scopePopulationStaged}
 	blocked := false
 	gates := preCommitGates()
 	for i, g := range gates {
 		mode, escaped := gateModeDefault(g.ModeEnv, g.EscapeEnv, g.DefaultMode)
 		if mode == "off" || escaped {
-			continue // operator intent, not a degraded run: never counted as skipped
+			// Operator intent, not a degraded run: still never counted as skipped (#5299 keeps
+			// meaning "a checker broke"). But it IS a narrowing, so scope names it (#5603).
+			why := "off"
+			if escaped {
+				why = "escaped"
+			}
+			scope.Narrowing.NotRun = append(scope.Narrowing.NotRun, g.Name+" ("+why+")")
+			if escaped || gateModeIsEnvSet(g.ModeEnv) {
+				scope.Narrowing.ByOperator = append(scope.Narrowing.ByOperator, g.Name)
+			}
+			continue
+		}
+		if mode != "block" {
+			// Ran, judged real candidates, and cannot refuse. Distinguishing a gate that SHIPS
+			// advisory from one an operator quietened this run is the whole point of ByEnv:
+			// collapsing them would report a hollowed-out run as fak's designed posture.
+			scope.Narrowing.Advisory = append(scope.Narrowing.Advisory, g.Name)
+			if gateModeIsEnvSet(g.ModeEnv) {
+				scope.Narrowing.ByOperator = append(scope.Narrowing.ByOperator, g.Name)
+			}
 		}
 		// Charge every gate against the shared wall clock, so N slow gates cannot sum past the
 		// total the way N per-gate budgets could.
@@ -411,11 +436,11 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	// "every gate checked its candidates and found none" and "no gate had anything to check".
 	// One line naming the domain separates them (#5602).
 	if len(allFindings) == 0 && !*asJSON {
-		fmt.Fprintln(stderr, cleanRunSummary(reports, len(d.StagedPaths)))
+		fmt.Fprintln(stderr, cleanRunSummary(reports, len(d.StagedPaths), scope))
 	}
 
 	if *asJSON {
-		emitFindingsJSON(stdout, stderr, allFindings, skipped, reports)
+		emitFindingsJSON(stdout, stderr, allFindings, skipped, reports, scope)
 	}
 	if blocked {
 		if !*asJSON {
@@ -607,7 +632,7 @@ func buildGateReport(d *hooks.StagedDiff, name string, findings int, skipped boo
 // It splits the enabled gates into the ones that actually judged something, the ones that ran
 // and admitted nothing, and the ones that report no denominator at all — three states the old
 // empty payload rendered identically.
-func cleanRunSummary(reports []gateReport, stagedFiles int) string {
+func cleanRunSummary(reports []gateReport, stagedFiles int, scope runScope) string {
 	var judged, idle, unreported int
 	var named []gateReport
 	for _, r := range reports {
@@ -650,7 +675,10 @@ func cleanRunSummary(reports []gateReport, stagedFiles int) string {
 		// had would rebuild the exact ambiguity this line exists to remove.
 		msg += fmt.Sprintf(", %d report no denominator", unreported)
 	}
-	return msg
+	// Every count above is a count OF something, and until now the line never said of what
+	// (#5603). The scope clause closes that: which population the staged file count came from,
+	// and which gates operator intent left out of the numbers entirely.
+	return msg + " — " + scope.note()
 }
 
 // emitFindingsJSON writes the --json report: the findings, and the ledger of gates that never
@@ -663,7 +691,10 @@ func cleanRunSummary(reports []gateReport, stagedFiles int) string {
 //
 // `gates` (#5602) is additive on the same principle: it is always present, and it carries each
 // enabled gate's candidate DENOMINATOR so a clean payload states the domain it was clean over.
-func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding, skipped []string, gates []gateReport) {
+// `scope` / `scope_narrowing` (#5603) complete it — the denominators are meaningless to a
+// consumer that cannot tell WHICH population they were drawn from, and `fak hygiene` emits
+// overlapping gate names over a different one.
+func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding, skipped []string, gates []gateReport, scope runScope) {
 	if findings == nil {
 		findings = []hooks.Finding{}
 	}
@@ -681,6 +712,11 @@ func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding, skippe
 		// Additive only: every pre-existing key keeps its exact name and meaning, so a consumer
 		// reading findings/count still parses this payload unchanged (#5602).
 		"gates": gates,
+		// scope is a bare string, not an object, so the cheapest possible check —
+		// `.scope == "staged"` — is the one that works; the structured detail lives beside it
+		// under its own key rather than forcing every consumer through a nested read (#5603).
+		"scope":           scope.Population,
+		"scope_narrowing": scope.narrowingPayload(),
 	}
 	if err := writeIndentedJSON(stdout, payload); err != nil {
 		fmt.Fprintf(stderr, "fak hooks: %v\n", err)
