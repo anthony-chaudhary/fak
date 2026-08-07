@@ -163,26 +163,31 @@ const (
 // has Committed && Verified && Reason == "". RacedExtra lists the committed files that NO
 // requested path covers — the evidence of a raced commit.
 type Result struct {
-	Committed        bool                     `json:"committed"`
-	SHA              string                   `json:"committed_sha,omitempty"`
-	Paths            []string                 `json:"paths"`
-	Verified         bool                     `json:"verified"`
-	Pushed           bool                     `json:"pushed"`
-	Value            float64                  `json:"value"`
-	ValueUnit        string                   `json:"value_unit,omitempty"`
-	Score            int                      `json:"score"`
-	LegacyScore      int                      `json:"legacy_score,omitempty"`
-	LegacyScoreScale int                      `json:"legacy_score_scale,omitempty"`
-	Grade            string                   `json:"grade"`
-	ScoreNotes       []string                 `json:"score_notes,omitempty"`
-	Reason           string                   `json:"reason,omitempty"`
-	Detail           string                   `json:"detail,omitempty"`
-	RacedExtra       []string                 `json:"raced_extra_paths,omitempty"`
-	HeadBefore       string                   `json:"head_before,omitempty"`
-	LockHoldNS       int64                    `json:"lock_hold_ns,omitempty"`
-	CoreLockPaths    []string                 `json:"core_lock_paths,omitempty"`
-	CoreLockWitness  string                   `json:"core_lock_witness,omitempty"`
-	Review           *modelroute.ReviewResult `json:"review,omitempty"`
+	Committed        bool     `json:"committed"`
+	SHA              string   `json:"committed_sha,omitempty"`
+	Paths            []string `json:"paths"`
+	Verified         bool     `json:"verified"`
+	Pushed           bool     `json:"pushed"`
+	Value            float64  `json:"value"`
+	ValueUnit        string   `json:"value_unit,omitempty"`
+	Score            int      `json:"score"`
+	LegacyScore      int      `json:"legacy_score,omitempty"`
+	LegacyScoreScale int      `json:"legacy_score_scale,omitempty"`
+	Grade            string   `json:"grade"`
+	ScoreNotes       []string `json:"score_notes,omitempty"`
+	Reason           string   `json:"reason,omitempty"`
+	Detail           string   `json:"detail,omitempty"`
+	RacedExtra       []string `json:"raced_extra_paths,omitempty"`
+	HeadBefore       string   `json:"head_before,omitempty"`
+	LockHoldNS       int64    `json:"lock_hold_ns,omitempty"`
+	CoreLockPaths    []string `json:"core_lock_paths,omitempty"`
+	CoreLockWitness  string   `json:"core_lock_witness,omitempty"`
+	// CoreLockWitnessCorrelation is whether CoreLockWitness actually named a path
+	// this commit changed ("correlated" / "uncorrelated" / "indeterminate", plus
+	// why). A CONFIRMED witness is not automatically a RELEVANT one; this is the
+	// reading that says which, and it is recorded on the maintenance decision note.
+	CoreLockWitnessCorrelation string                   `json:"core_lock_witness_correlation,omitempty"`
+	Review                     *modelroute.ReviewResult `json:"review,omitempty"`
 	// Velocity is the effect-qualified ship-speed reading (#4241): separate local and
 	// push legs, each scored only after the command's authoritative effect fields
 	// qualify it (Committed&&Verified for local, additionally Pushed for push). It is
@@ -697,13 +702,17 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		changedForCoreLock = paths
 	}
 	if f, ok := coreLockHardSelfFinding(changedForCoreLock); ok {
-		if detail, fired := checkCoreLockHardSelf(ctx, run, opts, changedForCoreLock); fired {
+		detail, fired, corr := checkCoreLockHardSelf(ctx, run, opts, changedForCoreLock)
+		if fired {
 			res.Reason = ReasonCoreSelfModify
 			res.Detail = detail
 			return res, true, nil
 		}
 		res.CoreLockPaths = append([]string(nil), f.Paths...)
 		res.CoreLockWitness = strings.TrimSpace(opts.CoreLockMaintenanceWitness)
+		// The witness cleared the lock; whether it named anything this commit
+		// actually changes is a SEPARATE question, answered here and recorded.
+		res.CoreLockWitnessCorrelation = corr.String()
 	}
 
 	// (4a2) STALE_UNTRACKED — blob-identity, lock-free, before any `git add` (#5408). A path

@@ -92,6 +92,22 @@ type Decision struct {
 	// Witness is the independent claim/evidence string that cleared an allow or
 	// assertion when a guard required read-back instead of self-report.
 	Witness string `json:"witness,omitempty"`
+	// WitnessCorrelation records whether that Witness claim actually named any part
+	// of the change it cleared ("correlated" / "uncorrelated" / "indeterminate",
+	// plus the sentence naming why — see corelockgate.CorrelateWitness).
+	//
+	// It exists because a CONFIRMED witness is not the same evidence as a RELEVANT
+	// one: the `committed:<path>` rung asks only whether a path is tracked ANYWHERE
+	// in the repository, so a claim naming a file the change never touched resolves
+	// CONFIRMED and clears the gate. The claim and the changed pathset were already
+	// recorded side by side on this note (Witness and Tree), which means the
+	// mismatch was computable from the record but had never been computed. This
+	// field computes it at write time so a reader — and the enforcement rung that
+	// follows — sees the answer rather than having to re-derive it.
+	//
+	// Empty on notes written before the correlation existed, and on any decision
+	// where no claim was offered; absence is "not measured", never "correlated".
+	WitnessCorrelation string `json:"witness_correlation,omitempty"`
 }
 
 // Recorder appends decisions to refs/fak/decisions through the package's existing

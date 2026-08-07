@@ -57,15 +57,23 @@ const CoreLockRemedyCommit = corelockgate.CoreLockRemedyCommit
 // maintenance witness claim that the resolver independently confirms. This gate
 // runs before staging, so an unwitnessed hard-self edit leaves the index and HEAD
 // untouched. It is the Options-shaped face of CheckCoreLockHardSelf.
-func checkCoreLockHardSelf(ctx context.Context, run Runner, opts Options, changedPaths []string) (detail string, fired bool) {
-	return CheckCoreLockHardSelf(ctx, CoreLockCheck{
+//
+// It also carries back the witness/change CORRELATION the gate observed: whether
+// the claim that cleared the lock named any path this commit is actually changing.
+// The correlation does not affect the refusal — it is recorded on the maintenance
+// decision note so a witness that points away from its change stops being invisible.
+func checkCoreLockHardSelf(ctx context.Context, run Runner, opts Options, changedPaths []string) (detail string, fired bool, corr corelockgate.WitnessCorrelation) {
+	var observed corelockgate.WitnessCorrelation
+	detail, fired = CheckCoreLockHardSelf(ctx, CoreLockCheck{
 		Dir:      opts.Dir,
 		Run:      corelockgate.Runner(run),
 		Resolver: opts.CoreLockWitnessResolver,
 		Changed:  changedPaths,
 		Witness:  opts.CoreLockMaintenanceWitness,
 		Remedy:   CoreLockRemedyCommit,
+		Observe:  func(c corelockgate.WitnessCorrelation) { observed = c },
 	})
+	return detail, fired, observed
 }
 
 // coreLockHardSelfFinding is the commit path's binding to the shared classifier: it
@@ -125,13 +133,23 @@ func recordCoreLockMaintenance(ctx context.Context, opts Options, res Result) {
 		}
 		paths = append(paths, f.Paths...)
 	}
+	// The correlation observed at gate time, where the pre-commit changed set was in
+	// hand. When that was not carried (a caller that supplied the claim by another
+	// route), recompute from the committed pathset — which is the same question
+	// asked of the same claim, just after the commit rather than before it. An
+	// empty reading is omitted from the note rather than recorded as a pass.
+	corr := strings.TrimSpace(res.CoreLockWitnessCorrelation)
+	if corr == "" {
+		corr = corelockgate.CorrelateWitness(claim, res.Paths).String()
+	}
 	d := witness.Decision{
-		Op:                "corelock-maintenance",
-		Verdict:           witness.VerdictAllow,
-		ReasonClass:       ReasonCoreSelfModify,
-		Tree:              paths,
-		PathspecAssertion: "hard-self-maintenance-witness-confirmed",
-		Witness:           claim,
+		Op:                 "corelock-maintenance",
+		Verdict:            witness.VerdictAllow,
+		ReasonClass:        ReasonCoreSelfModify,
+		Tree:               paths,
+		PathspecAssertion:  "hard-self-maintenance-witness-confirmed",
+		Witness:            claim,
+		WitnessCorrelation: corr,
 	}
 	_ = opts.Recorder.AppendDecision(ctx, res.SHA, d)
 }

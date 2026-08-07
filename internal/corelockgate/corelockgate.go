@@ -111,6 +111,13 @@ type CoreLockCheck struct {
 	// Remedy is the caller's own "how to supply that witness" sentence, quoted in
 	// the refusal detail. Empty falls back to the `fak commit` remedy.
 	Remedy string
+	// Observe, when non-nil, receives the witness/change correlation computed for a
+	// claim that was actually RESOLVED (see correlate.go). It is ADVISORY: the
+	// allow/refuse decision below is not affected by it, so a caller can record —
+	// and an operator can read — a witness that points away from the change it
+	// cleared, before that mismatch is ever made blocking. A caller that passes no
+	// hook simply does not observe; nothing about the gate changes.
+	Observe func(WitnessCorrelation)
 }
 
 // CheckCoreLockHardSelf reports the hard-self core-lock refusal for a changed
@@ -153,6 +160,18 @@ func CheckCoreLockHardSelf(ctx context.Context, c CoreLockCheck) (detail string,
 		}
 	}
 	outcome := resolver.Resolve(ctx, nil, claim)
+
+	// OBSERVE THE CORRELATION THE RESOLVER CANNOT SEE. The resolve above is handed a
+	// nil *abi.ToolCall on purpose — the resolver's rungs are claim-local — so the
+	// only place that can ask "does this claim name the change it is clearing?" is
+	// right here, where c.Changed is in hand. correlate.go answers it from those
+	// inputs alone (no git, no filesystem). The reading is reported, NOT enforced:
+	// see correlate.go for why a mismatch is recorded before it is made blocking on
+	// a surface whose lock has no environment escape.
+	if c.Observe != nil {
+		c.Observe(CorrelateWitness(claim, c.Changed))
+	}
+
 	if outcome == abi.WitnessConfirmed {
 		return "", false
 	}
