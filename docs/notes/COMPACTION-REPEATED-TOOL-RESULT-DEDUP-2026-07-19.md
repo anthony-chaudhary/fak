@@ -213,6 +213,45 @@ The unit-level witness that DID land with the port, in
 asserting a sub-16 KB body repeated N times folds to one verbatim copy and N−1 pointers —
 the case today's threshold provably misses.
 
+## Replayed bound (2026-08-07) — and two corrections to this note
+
+The measurable half of item 3 now exists: a **counterfactual replay** of the shipped fold over
+the 3,288-rollout corpus, scored by `session.ScanCompactRolloutReplay`
+(`internal/session/compactregrowth_replay.go`) and driven from
+`internal/agent/message_elide_corpus_replay_test.go`. Full numbers:
+`internal/session/testdata/compactaudit/replay-bound-witness-2026-08-07.md`.
+
+Headline, over 1,544 post-fire windows carrying tool results:
+
+| quantity | value |
+|---|---|
+| windows carrying `REPEATED_TOOL_RESULT` | 300 -> 142 (**158 collapsed, 52.7%**) |
+| duplicate bytes | 12,673,440 -> 5,680,466 (**-55.2%**) |
+| bytes shed by the fold | **165,366,011** (13.8% of tool-result bytes) |
+| lines destroyed (false positives) | **0** of 2,903,131 removed |
+
+Two results correct claims made above.
+
+1. **Just over half the duplication is unreachable by this mechanism — or any within-wire one.**
+   The reach split is 47.6% in-window vs **52.4% cross-fire**: the earlier copy of those bytes
+   precedes the compaction fire, so it was compacted out of the wire and the fold has nothing to
+   match it against. This note argued the port is "a genuine cut" for guarded sessions without
+   bounding it; the bound is roughly half the audited duplicate bytes, not all of them. The
+   issue's own phrasing — "the same output re-entering the window it was just compacted out of"
+   — names precisely the case the shipped mechanism cannot fix.
+
+2. **`dup_bytes` undercounts the fold by ~13x, so item 3's metric is wrong twice over.** 96.9%
+   of the 49,716 folds are *partial* — a shared line span inside a body that is not byte-identical
+   to any other. The audit keys duplicates at whole-row granularity (`{content hash, ROW length}`,
+   which also makes it blind to identical outputs under call ids of differing width), so it
+   measures 12.7 MB of duplication where the span-level fold actually removes 165 MB. Item 3's
+   named quantities are not merely blind to a gateway-side transform; they are the wrong
+   granularity for the mechanism this issue chose.
+
+The false-positive zero is non-vacuous: the same detector, same corpus, reports 1,196,294
+destroyed lines for the *full* pass (dedup + the pre-existing size-gated head+tail elision, which
+is lossy by design), and 0 for the dedup level alone.
+
 ## Generation classification
 
 **`gen/next`** (`Generation G1 - Next Gen`). Not `gen/now`: the mechanism is not an

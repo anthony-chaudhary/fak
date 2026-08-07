@@ -242,6 +242,9 @@ type regrowthTracker struct {
 	toolByCall map[string]string
 	windows    []*regrowthWindow // closed and open, in fire order
 	cur        *regrowthWindow
+	// replay is nil unless a caller armed the #5254 counterfactual dedup replay
+	// (compactregrowth_replay.go). Nil is the production path and costs nothing.
+	replay *regrowthReplay
 }
 
 func newRegrowthTracker() *regrowthTracker {
@@ -341,7 +344,27 @@ func (tr *regrowthTracker) observeSample(resident, inputTokens, reuseTokens int,
 // lets a post-fire reinjection of pre-fire setup read as a duplicate.
 func (tr *regrowthTracker) observeResponseItem(parsed bool, payload, head []byte, rowLen int64) {
 	class, key := tr.classifyItem(parsed, payload, head, rowLen)
-	tr.observeClassed(class, key, rowLen)
+	dup := tr.observeClassed(class, key, rowLen)
+	// The counterfactual replay needs the tool-result BODY, which the audit itself is careful
+	// never to retain. Re-extract it here rather than threading it through classifyItem, so the
+	// production path (replay == nil) keeps its body-blind hot loop untouched.
+	if tr.replay != nil && tr.cur != nil && strings.HasPrefix(class, RegrowClassToolResPrefix) {
+		tr.replay.observe(toolResultSlot(parsed, payload, head), rowLen, dup, !parsed)
+	}
+}
+
+// toolResultSlot re-reads the `output` slot of a tool-result row for the replay only. It mirrors
+// exactly what classifyItem hashed, so the replay scores the same bytes the anomaly was raised on.
+func toolResultSlot(parsed bool, payload, head []byte) []byte {
+	if parsed && len(payload) > 0 {
+		var p struct {
+			Output json.RawMessage `json:"output"`
+		}
+		if json.Unmarshal(payload, &p) == nil && p.Output != nil {
+			return p.Output
+		}
+	}
+	return headContentSlice(head, `"output":`)
 }
 
 // observeCompacted attributes the compaction summary row itself (its
@@ -350,7 +373,10 @@ func (tr *regrowthTracker) observeCompacted(rowLen int64) {
 	tr.observeClassed(RegrowClassCompactSummary, regrowKey{}, rowLen)
 }
 
-func (tr *regrowthTracker) observeClassed(class string, key regrowKey, rowLen int64) {
+// observeClassed attributes one row to its class and reports whether the row was a session-wide
+// content duplicate, so the counterfactual replay scores rows under the audit's own verdict rather
+// than a second, possibly divergent, rule.
+func (tr *regrowthTracker) observeClassed(class string, key regrowKey, rowLen int64) bool {
 	dup := false
 	if key.hash != 0 && rowLen >= RegrowthDupMinBytes {
 		if _, ok := tr.seen[key]; ok {
@@ -361,7 +387,7 @@ func (tr *regrowthTracker) observeClassed(class string, key regrowKey, rowLen in
 	}
 	w := tr.cur
 	if w == nil {
-		return
+		return dup
 	}
 	st := w.reg.Classes[class]
 	if st == nil {
@@ -377,6 +403,7 @@ func (tr *regrowthTracker) observeClassed(class string, key regrowKey, rowLen in
 	if rowLen >= RegrowthOversizedRowBytes {
 		w.reg.Anomalies = appendUnique(w.reg.Anomalies, AnomalyOversizedEvent)
 	}
+	return dup
 }
 
 // classifyItem maps a response_item row to its content class and content-hash key.
@@ -496,6 +523,11 @@ func (tr *regrowthTracker) closeCurrent(censor string, nextFireAt time.Time) {
 		return
 	}
 	tr.cur = nil
+	// Score the counterfactual replay on exactly the audit's window boundaries, before any
+	// telemetry-driven early return below can skip it.
+	if tr.replay != nil {
+		tr.replay.closeWindow()
+	}
 	r := w.reg
 
 	if censor == RegrowthCensorNextFire && w.haveTS && !nextFireAt.IsZero() {
