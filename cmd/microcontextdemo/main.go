@@ -353,11 +353,7 @@ func main() {
 	flag.StringVar(&verifyGradePath, "verify-health-scorecard", "", "verify micro-context health scorecard")
 	flag.Parse()
 	if verifyFairnessPath != "" {
-		if err := verifyFairnessArtifact(verifyFairnessPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyFairnessPath)
+		runVerify("verify-fairness", verifyFairnessPath, verifyFairnessArtifact)
 		return
 	}
 	if fairnessOutput != "" {
@@ -368,11 +364,7 @@ func main() {
 		return
 	}
 	if verifyGradePath != "" {
-		if err := verifyHealthArtifact(verifyGradePath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyGradePath)
+		runVerify("verify-health-scorecard", verifyGradePath, verifyHealthArtifact)
 		return
 	}
 	if gradeOutput != "" {
@@ -383,11 +375,7 @@ func main() {
 		return
 	}
 	if verifyQualityPath != "" {
-		if err := verifyQualityLedgerArtifact(verifyQualityPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyQualityPath)
+		runVerify("verify-quality", verifyQualityPath, verifyQualityLedgerArtifact)
 		return
 	}
 	if qualityInput != "" {
@@ -402,43 +390,23 @@ func main() {
 		return
 	}
 	if verifyAPIOnlyPath != "" {
-		if err := verifyAPIOnlyArtifact(verifyAPIOnlyPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyAPIOnlyPath)
+		runVerify("verify-api-only", verifyAPIOnlyPath, verifyAPIOnlyArtifact)
 		return
 	}
 	if verifyPath != "" {
-		if err := verifyArtifact(verifyPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyPath)
+		runVerify("verify", verifyPath, verifyArtifact)
 		return
 	}
 	if verifyABPath != "" {
-		if err := verifyABArtifact(verifyABPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyABPath)
+		runVerify("verify-prefix-ab", verifyABPath, verifyABArtifact)
 		return
 	}
 	if verifyS2BPath != "" {
-		if err := verifyS2BArtifact(verifyS2BPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyS2BPath)
+		runVerify("verify-kernel-prefix-ab", verifyS2BPath, verifyS2BArtifact)
 		return
 	}
 	if verifyEffectsPath != "" {
-		if err := verifyEffectsArtifact(verifyEffectsPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyEffectsPath)
+		runVerify("verify-effects", verifyEffectsPath, verifyEffectsArtifact)
 		return
 	}
 	if effectsOutput != "" {
@@ -458,11 +426,7 @@ func main() {
 		return
 	}
 	if verifyBatchPath != "" {
-		if err := verifyBatchExecutionArtifact(verifyBatchPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyBatchPath)
+		runVerify("verify-compat-batch-execution", verifyBatchPath, verifyBatchExecutionArtifact)
 		return
 	}
 	if batchOutput != "" {
@@ -473,11 +437,7 @@ func main() {
 		return
 	}
 	if verifyCompatPath != "" {
-		if err := verifyCompatibilityArtifact(verifyCompatPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyCompatPath)
+		runVerify("verify-compatibility", verifyCompatPath, verifyCompatibilityArtifact)
 		return
 	}
 	if compatOutput != "" {
@@ -497,11 +457,7 @@ func main() {
 		return
 	}
 	if verifyMultiTurnDescriptorPath != "" {
-		if err := verifyMultiTurnDescriptorArtifact(verifyMultiTurnDescriptorPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyMultiTurnDescriptorPath)
+		runVerify("verify-multi-turn-descriptor", verifyMultiTurnDescriptorPath, verifyMultiTurnDescriptorArtifact)
 		return
 	}
 	if multiTurnDescriptorOutput != "" {
@@ -523,11 +479,7 @@ func main() {
 		return
 	}
 	if verifyDescriptorPath != "" {
-		if err := verifyDescriptorArtifact(verifyDescriptorPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyDescriptorPath)
+		runVerify("verify-descriptor-bench", verifyDescriptorPath, verifyDescriptorArtifact)
 		return
 	}
 	if descriptorOutput != "" {
@@ -549,11 +501,7 @@ func main() {
 		return
 	}
 	if verifyS3Path != "" {
-		if err := verifyS3Artifact(verifyS3Path); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println("PASS: verified", verifyS3Path)
+		runVerify("verify-hibernate-restart", verifyS3Path, verifyS3Artifact)
 		return
 	}
 	if s3Output != "" {
