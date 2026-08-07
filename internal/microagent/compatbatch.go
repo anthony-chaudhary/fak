@@ -47,7 +47,7 @@ type CompatibilityStats struct {
 // most one batch per pass so a deep class cannot starve another.
 func ComposeCompatible(in []CompatibleWork, c CompatibilityConfig) ([]CompatibilityBatch, CompatibilityStats, error) {
 	if c.MaxBatch <= 0 || c.MaxQueuePerClass <= 0 || c.MaxPadding < 0 {
-		return nil, CompatibilityStats{}, errors.New("microagent: invalid compatibility config")
+		return nil, CompatibilityStats{}, errors.New("microagent: invalid compatibility config; set max_batch and max_queue_per_class > 0 and max_padding >= 0")
 	}
 	if c.Now.IsZero() {
 		c.Now = time.Now()
@@ -61,7 +61,7 @@ func ComposeCompatible(in []CompatibleWork, c CompatibilityConfig) ([]Compatibil
 			continue
 		}
 		if w.ID == "" || w.Tokens <= 0 {
-			return nil, s, errors.New("microagent: work requires id and positive tokens")
+			return nil, s, errors.New("microagent: work requires id and positive tokens; assign a nonempty id and tokens > 0 before scheduling")
 		}
 		if incompleteKey(w.Key) {
 			singles = append(singles, w)
