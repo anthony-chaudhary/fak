@@ -115,6 +115,12 @@ type orgCheckOptions struct {
 // rendered; anything else takes the original policy.LoadRuntime path unchanged, so a
 // plain manifest  -  including an unreadable or invalid one  -  keeps the exact wording
 // this verb has always produced.
+//
+// The ONE ambient read is the advisory modver rev printed beside a valid manifest's path
+// (#4311): it arrives through the policyManifestRevFn seam, is best-effort (a manifest
+// outside a git repo, or one that is not a tracked examples/<file>.json module, simply
+// resolves to no rev), and is display only  -  it is never consulted to decide whether a
+// floor validates, so the accept/reject behavior above is exactly what it was.
 func checkPolicyFile(path string, org orgCheckOptions) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err == nil && isOrgEnvelope(raw) {
@@ -124,7 +130,7 @@ func checkPolicyFile(path string, org orgCheckOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("OK  %s  (manifest valid; every deny cites a closed-vocabulary reason)\n\n%s", path, policy.SummaryRuntime(rt)), nil
+	return fmt.Sprintf("OK  %s%s  (manifest valid; every deny cites a closed-vocabulary reason)\n\n%s", path, policyRevTag(policyManifestRevFn(path)), policy.SummaryRuntime(rt)), nil
 }
 
 // isOrgEnvelope sniffs whether raw is a signed `fak-org-policy/v1` envelope rather
