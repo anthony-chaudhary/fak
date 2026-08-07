@@ -5486,6 +5486,219 @@ def gate_opencode_gateway(planned: int, account: dict, *, probe=None) -> tuple[i
     return 0, f"gateway_down: backend_unhealthy: {detail}"
 
 
+# --- Pre-spawn guard-argv probe (#5868 done-condition 3) ------------------------
+#
+# A `--compact-solvency-floor` flag-parse regression killed every worker AT SPAWN for
+# six days (2026-07-28 .. 08-03, ~350 worker-units, 100% death/day) and read as an
+# IDLE FLEET the whole time, because a death before the gateway binds classifies as
+# `unknown`. `internal/dispatchdoa` (#5868) now DETECTS that shape after the fact
+# (350/382 outage runs, 0 false positives on 290 clean runs). This is the prevention
+# half: probe the binary ONCE per build-id and refuse to dispatch a wave into one that
+# cannot accept the argv the dispatcher is about to hand it.
+#
+# WHAT THE PROBE IS, AND WHY IT IS NOT `guard --help`. Measured against the shipped
+# binary: `fak guard --help` exits 0 and prints a 1452-byte SHORT usage that does not
+# mention `--compact-solvency-floor` at all. An exit-code probe on `--help` would
+# therefore have reported HEALTHY through all six days of the outage — it proves the
+# binary runs, which was never in doubt; the binary ran fine, it just did not know one
+# flag. `fak guard -h -all` is the probe that discriminates: exit 0, ~31 KiB, and it
+# lists every registered flag (76 in the build measured here, matching the binary's own
+# "N flags in this build" self-report). Comparing that INVENTORY against the flags in
+# the planned argv is what catches a producer/binary skew, and it costs ~23 ms.
+#
+# THE CACHE HOLDS THE INVENTORY, NOT A VERDICT. Keyed on a build id -- (resolved path,
+# size, mtime_ns) -- so one exec covers every worker spawned against that binary. The
+# verdict is recomputed from the cached inventory on every tick, which is what makes
+# the refusal self-clearing from BOTH sides with no reset verb:
+#
+#   * REBUILD/REINSTALL the binary -> size/mtime change -> the build id changes -> the
+#     cache entry no longer matches -> a fresh probe runs. This is the operator
+#     recovery path, and it is the SAME action that fixes the actual outage.
+#   * FIX THE PRODUCER (drop the flag in dispatch_worker.py) -> the planned flag set
+#     changes -> the missing-flag set recomputes empty against the SAME cached
+#     inventory -> the fleet resumes with no re-exec and no cache invalidation.
+#   * The TTL expires the inventory even when neither side moved, so a cached reading
+#     can never outlive its evidence.
+#   * `DEFAULT_GUARD_PROBE_TTL_H = 0` disables the gate entirely.
+#
+# FAIL DIRECTION IS INVERTED FROM THE OTHER HOLDS, DELIBERATELY. Every other reader in
+# this file fails open so it can only ever ADD a hold; this one refuses to SPAWN, so
+# failing closed on a bad reading is itself an outage. It therefore refuses ONLY on a
+# positive observation: the probe exited cleanly AND returned a plausible inventory
+# (>= _GUARD_PROBE_MIN_FLAGS) AND a planned flag is provably absent from it. An
+# ambiguous reading -- exec error, timeout, non-zero exit, an implausibly short
+# inventory (e.g. an older binary that lacks `-all` and rejects it) -- is UNKNOWN: it
+# spawns anyway and is NOT cached, so it costs one 23 ms re-probe next tick and can
+# never wedge the fleet.
+_GUARD_PROBE_LEDGER = "guard-probe.json"
+DEFAULT_GUARD_PROBE_TTL_H = 24
+_GUARD_PROBE_TIMEOUT_S = 20.0
+# Below this the inventory is not trustworthy enough to refuse on (the shipped build
+# registers 76). An old binary that rejects `-all` prints a ~20-flag short usage, so
+# this is also what keeps such a binary UNKNOWN rather than falsely condemned.
+_GUARD_PROBE_MIN_FLAGS = 40
+# Flags `cmd/fak/guard.go` PEELS from argv before `fs.Parse` (guard.go:109-118), so
+# they are legitimately absent from the FlagSet's own `-h -all` inventory and must
+# never count as missing. `-all`/`-h` are the probe's own argv.
+_GUARD_PROBE_PEELED = frozenset({"core-lock-all", "all", "help", "h"})
+# Go's flag.PrintDefaults emits `  -name type` at exactly two spaces; the wrapped
+# description lines below it start with four spaces + a tab, and the hand-written
+# common-flags block uses `--name`. Anchoring on the two-space single-dash form takes
+# the DEFINITIONS only, never a flag merely NAMED inside another flag's prose.
+_GUARD_FLAG_DEF_RE = re.compile(r"^  -([A-Za-z][A-Za-z0-9_-]*)", re.M)
+
+
+def guard_build_id(fak_bin: str | Path | None) -> str | None:
+    """Identity of the guard binary a wave is about to be dispatched against:
+    ``<size>-<mtime_ns>-<basename>``. Stat-only, so it costs nothing per spawn and
+    changes the instant anyone rebuilds or reinstalls -- which is exactly the event
+    that must invalidate a cached inventory. Returns ``None`` (-> gate fails open)
+    when the path is missing or unstattable."""
+    if not fak_bin:
+        return None
+    try:
+        st = Path(fak_bin).stat()
+    except (OSError, ValueError):
+        return None
+    return f"{st.st_size}-{st.st_mtime_ns}-{Path(fak_bin).name}"
+
+
+def planned_guard_flags(command: list[str]) -> set[str]:
+    """The guard flag names in a guard-wrapped launch argv, as
+    ``dispatch_worker.guard_wrap`` builds it: ``[fak, guard, --provider, X, ...,
+    --audit, P, --, <agent command...>]``.
+
+    Scanning STOPS at the first bare ``--``: everything after it is the AGENT's argv,
+    parsed by claude/codex, and a flag there says nothing about the guard binary.
+    Returns an empty set for anything that is not a guard wrap (an unguarded launch
+    has no guard argv to be skewed against), which is the gate's fail-open path."""
+    if len(command) < 2 or command[1] != "guard":
+        return set()
+    flags: set[str] = set()
+    for tok in command[2:]:
+        if tok == "--":
+            break
+        if not tok.startswith("-") or tok == "-":
+            continue
+        name = tok.lstrip("-").split("=", 1)[0]
+        if name and name not in _GUARD_PROBE_PEELED:
+            flags.add(name)
+    return flags
+
+
+def probe_guard_flags(fak_bin: str | Path, *, runner=None,
+                      timeout_s: float = _GUARD_PROBE_TIMEOUT_S) -> dict[str, Any]:
+    """Run the one-shot inventory probe ``fak guard -h -all`` and parse the flags it
+    registers. This never binds a gateway and never launches an agent -- ``-h`` short
+    -circuits inside ``flag.Parse`` -- so it is safe to run on every dispatcher process.
+
+    Returns ``{"rc", "flags": sorted[...], "bytes", "error"}``. Any exception is
+    captured into ``error`` rather than raised: the caller treats an errored probe as
+    UNKNOWN and spawns anyway."""
+    argv = [str(fak_bin), "guard", "-h", "-all"]
+    run = runner or (lambda a: subprocess.run(
+        a, capture_output=True, text=True, errors="replace", timeout=timeout_s))
+    try:
+        res = run(argv)
+    except Exception as exc:  # OSError, TimeoutExpired, anything the runner raises
+        return {"rc": None, "flags": [], "bytes": 0, "error": f"{type(exc).__name__}: {exc}"}
+    text = (getattr(res, "stdout", "") or "") + (getattr(res, "stderr", "") or "")
+    return {"rc": getattr(res, "returncode", None),
+            "flags": sorted(set(_GUARD_FLAG_DEF_RE.findall(text))),
+            "bytes": len(text), "error": None}
+
+
+def guard_flag_inventory(fak_bin: str | Path | None, runs_dir: Path, *, runner=None,
+                         now_ts: float | None = None,
+                         ttl_h: int = DEFAULT_GUARD_PROBE_TTL_H,
+                         record: bool = True) -> dict[str, Any]:
+    """The cached ``{build_id -> flags}`` inventory, probing at most ONCE per build-id
+    per TTL window. Returns ``{"build_id", "flags", "cached", "usable", "detail"}``;
+    ``usable`` is False for every ambiguous reading, and an unusable reading is never
+    written to the cache, so a transient failure costs one re-probe and nothing else."""
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    build_id = guard_build_id(fak_bin)
+    if not build_id:
+        return {"build_id": None, "flags": [], "cached": False, "usable": False,
+                "detail": f"unstattable guard binary {fak_bin!r}"}
+    ledger = Path(runs_dir) / _GUARD_PROBE_LEDGER
+    cache: dict[str, Any] = {}
+    try:
+        loaded = json.loads(ledger.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            cache = loaded
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get(build_id)
+    if (isinstance(hit, dict) and isinstance(hit.get("flags"), list)
+            and (now - float(hit.get("ts") or 0.0)) <= ttl_h * 3600):
+        return {"build_id": build_id, "flags": list(hit["flags"]), "cached": True,
+                "usable": True, "detail": "cached"}
+    probed = probe_guard_flags(fak_bin, runner=runner)
+    flags = probed["flags"]
+    if probed["error"] or probed["rc"] not in (0, None) or len(flags) < _GUARD_PROBE_MIN_FLAGS:
+        return {"build_id": build_id, "flags": flags, "cached": False, "usable": False,
+                "detail": (f"inconclusive probe (rc={probed['rc']}, "
+                           f"{len(flags)} flags, err={probed['error']})")}
+    if record:
+        # Keyed on the build id AND pruned to it: the cache is a read-through of the
+        # CURRENT binary's own self-description, so a superseded build's row is dead
+        # weight, not history. Best effort -- a write failure just re-probes.
+        try:
+            Path(runs_dir).mkdir(parents=True, exist_ok=True)
+            ledger.write_text(json.dumps({build_id: {
+                "utc": dt.datetime.fromtimestamp(now, dt.timezone.utc).isoformat(),
+                "ts": now, "bin": str(fak_bin), "flags": flags}}, indent=1),
+                encoding="utf-8")
+        except OSError:
+            pass
+    return {"build_id": build_id, "flags": flags, "cached": False, "usable": True,
+            "detail": f"probed {len(flags)} flags"}
+
+
+def gate_spawn_on_guard_argv(command: list[str], runs_dir: Path, *, runner=None,
+                             now_ts: float | None = None,
+                             ttl_h: int = DEFAULT_GUARD_PROBE_TTL_H,
+                             record: bool = True) -> dict[str, Any] | None:
+    """Refuse a wave whose guard binary provably cannot accept the planned argv.
+
+    Returns ``None`` to SPAWN (the only outcome for every ambiguous reading), or a
+    verdict dict naming the missing flags and the recovery path. The refusal fires
+    only on the positive observation described above the constants: a usable inventory
+    that is missing a flag the dispatcher is about to pass, which is precisely the
+    shape that produced ~350 dead-on-arrival worker-units over six days."""
+    if ttl_h <= 0:
+        return None
+    planned = planned_guard_flags(command)
+    if not planned:
+        return None
+    inv = guard_flag_inventory(command[0], runs_dir, runner=runner, now_ts=now_ts,
+                               ttl_h=ttl_h, record=record)
+    if not inv["usable"]:
+        return None
+    missing = sorted(planned - set(inv["flags"]))
+    if not missing:
+        return None
+    return {
+        "verdict": "GUARD_ARGV_UNSUPPORTED",
+        "build_id": inv["build_id"],
+        "missing_flags": missing,
+        "probe": {"flags": len(inv["flags"]), "cached": inv["cached"]},
+        "reason": (
+            f"guard binary {command[0]} (build {inv['build_id']}) does not register "
+            f"{len(missing)} flag(s) this dispatcher passes: "
+            + ", ".join(f"--{f}" for f in missing)
+            + f" — every spawn against it would die at flag-parse before the gateway "
+              f"binds and be miscounted as an idle fleet (#5868: ~350 worker-units "
+              f"lost that way over six days). Planning 0 spawns. Recovery: rebuild or "
+              f"reinstall fak (the build id changes and the probe re-runs by itself), "
+              f"or drop the flag from tools/dispatch_worker.py (the refusal clears "
+              f"against the same cached inventory, no re-probe needed). Set "
+              f"DEFAULT_GUARD_PROBE_TTL_H=0 to disable the gate."),
+    }
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               live: bool, refresh: bool = True, cooldown_min: int = 120,
               backend: str = "claude",
@@ -6712,6 +6925,27 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     payload["command"] = command
     payload["guarded"] = guarded
     payload["launch_gate"] = launch_gate_for_guard(guarded, backend)
+    # #5868 done-condition 3 — the LAST gate before exec, and the only one that reads
+    # the argv actually about to be handed over. `command` is fully built here, so the
+    # probe compares the real planned flags against this build-id's real inventory
+    # (one ~23 ms exec per binary, cached under .dispatch-runs/guard-probe.json). A
+    # skew means EVERY spawn against this binary dies at flag-parse before the gateway
+    # binds, so the correct response is a 0-spawn tick, not a per-issue hold. The lease
+    # acquired above is released first: refusing the wave must not strand the lane.
+    _argv_refusal = gate_spawn_on_guard_argv(
+        command, runs_dir, record=live) if guarded else None
+    if _argv_refusal:
+        if lease.get("acquired"):
+            payload["lease_release"] = release_lane_lease(
+                root, lease, runner=lease_runner)
+        payload.update({
+            "ok": False, "action": "guard_argv_unsupported",
+            "verdict": _argv_refusal["verdict"],
+            "guard_probe": {k: _argv_refusal[k]
+                            for k in ("build_id", "missing_flags", "probe")},
+            "reason": _argv_refusal["reason"],
+        })
+        return finish(payload)
     # Per-worker commit-sha tracking (#1324 proposal #2): stamp repo HEAD now, before
     # the worker can commit, so a later tick re-audits the commit THIS worker lands
     # (base..HEAD citing #target). Fail-open: a git error -> no base, and the witness

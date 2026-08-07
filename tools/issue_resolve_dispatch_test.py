@@ -7671,5 +7671,264 @@ class ReblockStreakHoldTest(unittest.TestCase):
             self.assertEqual(mod.issue_witness_history(runs / "gone"), {})
 
 
+class GuardArgvProbeTest(unittest.TestCase):
+    """#5868 done-condition 3: stop a DOA wave BEFORE it spawns.
+
+    A ``--compact-solvency-floor`` flag-parse regression killed every worker at spawn
+    for six days (~350 worker-units) and read as an idle fleet throughout, because a
+    death before the gateway binds classifies as ``unknown``. ``internal/dispatchdoa``
+    detects that shape after the fact; this gate refuses to dispatch into it at all.
+
+    The first test is the load-bearing one: it pins the MEASURED finding that the
+    obvious probe (``fak guard --help``) does not discriminate this regression, so the
+    gate must compare the flag INVENTORY instead of an exit code.
+    """
+
+    # The real `fak guard --help` output, exit 0, 1452 bytes — abridged to the shape
+    # that matters: it is a curated COMMON-flags block using the `--name` form, and it
+    # never mentions --compact-solvency-floor. Measured against the shipped binary.
+    SHORT_HELP = (
+        "usage: fak guard [flags] -- <agent command...>\n"
+        "\ncommon flags:\n"
+        "  --policy         capability-floor manifest to enforce\n"
+        "  --provider       upstream wire: anthropic|openai|gemini|xai\n"
+        "  --audit          change where the decision journal is written\n"
+        "\n76 flags in this build. 'fak guard -h -all' lists every one grouped.\n")
+
+    # The flags dispatch_worker.claude_guard_budget_args + guard_wrap actually pass.
+    PLANNED = ["provider", "precompact-hook", "session-id", "context-budget-tokens",
+               "compact-history-budget", "compact-solvency-floor", "restart-on-budget",
+               "restart-limit", "max-duration", "audit"]
+
+    @staticmethod
+    def _inventory(names) -> str:
+        """`fak guard -h -all` output shape: Go flag.PrintDefaults emits `  -name type`
+        at exactly two spaces, with the description wrapped beneath at four+tab."""
+        return "usage: fak guard [flags] -- <agent command...>\n" + "".join(
+            f"  -{n} string\n    \tdescription of {n}\n" for n in names)
+
+    class _Res:
+        def __init__(self, rc, out="", err=""):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    def _runner(self, res, calls: list):
+        def run(argv):
+            calls.append(list(argv))
+            if isinstance(res, Exception):
+                raise res
+            return res
+        return run
+
+    def _bin(self, d: Path, body: str = "x" * 64) -> Path:
+        p = d / "fak.exe"
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def _argv(self, exe: Path, flags=None) -> list[str]:
+        out = [str(exe), "guard"]
+        for f in (flags if flags is not None else self.PLANNED):
+            out += [f"--{f}", "v"]
+        # The AGENT's own command, after the separator. Its flags are parsed by
+        # claude, not by the guard, so they must never be probed.
+        return out + ["--", "claude", "-p", "--dangerously-skip-permissions"]
+
+    def test_guard_help_alone_does_not_discriminate_the_regression(self):
+        """THE finding. `fak guard --help` exits 0 on a binary that is missing the
+        flag — it proves the binary RUNS, which was never in doubt; the binary ran
+        fine, it just did not know one flag. An exit-code probe on --help would have
+        reported HEALTHY through all six days of the outage. So the gate must not
+        refuse on it, and must not be fooled into thinking it has a verdict."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            self.assertNotIn("compact-solvency-floor", self.SHORT_HELP,
+                             "the real short usage does not even name the flag")
+            calls: list = []
+            probe = mod.probe_guard_flags(
+                exe, runner=self._runner(self._Res(0, err=self.SHORT_HELP), calls))
+            self.assertEqual(probe["rc"], 0, "--help succeeds on the broken binary")
+            self.assertLess(len(probe["flags"]), mod._GUARD_PROBE_MIN_FLAGS)
+            # ...and because that reading is not a plausible inventory, the gate
+            # SPAWNS rather than condemning a binary it cannot actually read.
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs,
+                runner=self._runner(self._Res(0, err=self.SHORT_HELP), calls)))
+            self.assertFalse((runs / mod._GUARD_PROBE_LEDGER).exists(),
+                             "an inconclusive reading is never cached")
+
+    def test_healthy_build_id_is_not_held(self):
+        """A binary that registers every planned flag dispatches, and the probe it
+        cost is not re-paid — the whole point of keying on the build id."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            healthy = self._Res(0, err=self._inventory(
+                self.PLANNED + [f"filler-{i}" for i in range(60)]))
+            calls: list = []
+            for _ in range(3):
+                self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                    self._argv(exe), runs, runner=self._runner(healthy, calls)))
+            self.assertEqual(len(calls), 1, "one probe per build-id, not per spawn")
+            self.assertEqual(calls[0][1:], ["guard", "-h", "-all"])
+
+    def test_missing_flag_refuses_the_wave_before_any_spawn(self):
+        """The outage shape itself: the producer passes a flag the binary does not
+        register. Every spawn against it would die at flag-parse before the gateway
+        binds, so the tick plans ZERO spawns instead of ~350 dead worker-units."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            old = [f for f in self.PLANNED if f != "compact-solvency-floor"]
+            stale = self._Res(0, err=self._inventory(
+                old + [f"filler-{i}" for i in range(60)]))
+            verdict = mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(stale, []))
+            self.assertIsNotNone(verdict)
+            self.assertEqual(verdict["verdict"], "GUARD_ARGV_UNSUPPORTED")
+            self.assertEqual(verdict["missing_flags"], ["compact-solvency-floor"])
+            self.assertIn("rebuild or reinstall", verdict["reason"],
+                          "a refusal that does not name its recovery path is an "
+                          "outage of its own")
+
+    def test_rebuild_clears_the_refusal_with_no_reset_verb(self):
+        """Recovery path #1, and the reason the cache is keyed on the BUILD ID: the
+        operator action that fixes the outage (rebuild/reinstall) is the same one that
+        invalidates the cache. Nothing has to be cleared by hand."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            old = [f for f in self.PLANNED if f != "compact-solvency-floor"]
+            calls: list = []
+            self.assertIsNotNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(
+                    self._Res(0, err=self._inventory(
+                        old + [f"f{i}" for i in range(60)])), calls)))
+            before = mod.guard_build_id(exe)
+            # Rebuild: a different binary at the same path.
+            self._bin(runs, body="y" * 4096)
+            self.assertNotEqual(mod.guard_build_id(exe), before)
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(
+                    self._Res(0, err=self._inventory(
+                        self.PLANNED + [f"f{i}" for i in range(60)])), calls)))
+            self.assertEqual(len(calls), 2, "the new build id forces exactly one "
+                                            "fresh probe, not a probe per spawn")
+
+    def test_producer_side_fix_clears_against_the_same_cached_inventory(self):
+        """Recovery path #2, and why the cache holds the INVENTORY rather than a
+        verdict: dropping the flag from the dispatcher clears the refusal with no
+        re-exec at all, because the verdict is recomputed every tick."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            old = [f for f in self.PLANNED if f != "compact-solvency-floor"]
+            stale = self._Res(0, err=self._inventory(
+                old + [f"f{i}" for i in range(60)]))
+            calls: list = []
+            self.assertIsNotNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(stale, calls)))
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe, flags=old), runs, runner=self._runner(stale, calls)))
+            self.assertEqual(len(calls), 1, "no re-probe needed to clear")
+
+    def test_every_ambiguous_reading_fails_open_and_is_never_cached(self):
+        """A probe failure must not wedge the fleet — failing closed forever is its
+        own outage, and this gate refuses to SPAWN, so its fail direction is inverted
+        from every other hold in this file. Only a positive observation refuses."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            argv = self._argv(exe)
+            short = self._inventory([f"f{i}" for i in range(5)])
+            for label, res in (
+                    ("exec error", OSError("binary vanished")),
+                    ("probe timeout", subprocess.TimeoutExpired("fak", 20)),
+                    ("non-zero exit (an older binary rejects -all)",
+                     self._Res(2, err="flag provided but not defined: -all\n")),
+                    ("implausibly short inventory", self._Res(0, err=short))):
+                with self.subTest(label):
+                    self.assertIsNone(
+                        mod.gate_spawn_on_guard_argv(
+                            argv, runs, runner=self._runner(res, [])),
+                        f"{label} must SPAWN, not wedge the fleet")
+                    self.assertFalse((runs / mod._GUARD_PROBE_LEDGER).exists())
+            # An unstattable binary is ambiguous too, not a condemnation.
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(runs / "gone.exe"), runs,
+                runner=self._runner(self._Res(0, err=short), [])))
+
+    def test_agent_argv_and_peeled_flags_are_not_probed(self):
+        """Two false-positive sources that would refuse a perfectly good binary: the
+        agent's own flags after the ``--`` separator (parsed by claude, not the
+        guard), and the postures cmd/fak/guard.go PEELS before fs.Parse — which are
+        therefore absent from the FlagSet's own inventory by design."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            planned = mod.planned_guard_flags(
+                [str(exe), "guard", "--provider", "anthropic", "--core-lock-all",
+                 "--", "claude", "-p", "--dangerously-skip-permissions"])
+            self.assertEqual(planned, {"provider"})
+            # Not a guard wrap at all -> nothing to skew against.
+            self.assertEqual(mod.planned_guard_flags(
+                [str(exe), "--verbose", "--", "claude"]), set())
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                [str(exe), "claude", "-p"], runs,
+                runner=self._runner(self._Res(0, err=""), [])))
+
+    def test_ttl_expiry_and_kill_switch(self):
+        """Recovery paths #3 and #4: a cached inventory cannot outlive its evidence
+        even when neither side moved, and the gate has the same 0-disables kill switch
+        as every other hold in this file."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            full = self._Res(0, err=self._inventory(
+                self.PLANNED + [f"f{i}" for i in range(60)]))
+            calls: list = []
+            now = 1786363200.0
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(full, calls), now_ts=now))
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(full, calls),
+                now_ts=now + mod.DEFAULT_GUARD_PROBE_TTL_H * 3600 - 60))
+            self.assertEqual(len(calls), 1, "inside the TTL the cache answers")
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(full, calls),
+                now_ts=now + mod.DEFAULT_GUARD_PROBE_TTL_H * 3600 + 60))
+            self.assertEqual(len(calls), 2, "past the TTL it re-probes")
+            # Kill switch: never probes, never refuses.
+            off: list = []
+            old = [f for f in self.PLANNED if f != "compact-solvency-floor"]
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, ttl_h=0, runner=self._runner(
+                    self._Res(0, err=self._inventory(
+                        old + [f"f{i}" for i in range(60)])), off)))
+            self.assertEqual(off, [])
+
+    def test_probe_argv_is_the_help_form_and_never_launches_an_agent(self):
+        """The probe must stay a probe: `-h` short-circuits inside flag.Parse, so it
+        binds no gateway and hands off no task. Asserted on the captured argv, because
+        a probe that could launch is not one probe per build-id, it is an outage."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            exe = self._bin(Path(d))
+            calls: list = []
+            mod.probe_guard_flags(exe, runner=self._runner(self._Res(0), calls))
+            self.assertEqual(calls, [[str(exe), "guard", "-h", "-all"]])
+            self.assertNotIn("--", calls[0], "no agent-command separator")
+            self.assertNotIn("--probe", calls[0],
+                             "`fak guard --probe` is a SMOKE mode that still brings "
+                             "up the gateway — not a cheap argv probe")
+
+
 if __name__ == "__main__":
     unittest.main()
