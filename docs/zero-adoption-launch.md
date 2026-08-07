@@ -58,6 +58,12 @@ fak launch doctor --json
 fak launch help
 ```
 
+Generated shims target the managed `fak-launch` copy in the shim directory rather than
+the transient package-manager or `go install` source path. After replacing or moving fak,
+run `fak launch doctor --repair` once to refresh that stable copy and every owned shim;
+provider bindings and the direct escape remain untouched. Launch config is schema-versioned
+and transparently migrates the original unversioned shape to `fak.launch.v2` on the next write.
+
 Doctor checks each provider without launching it and reports one of `READY`,
 `NOT_ON_PATH`, `SHADOWED`, `UNDERLYING_MISSING`, `RECURSIVE`, `DISABLED`, or
 `CONFIG_INVALID`, plus one recovery command for every non-ready row. Its versioned JSON

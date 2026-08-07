@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -147,5 +148,38 @@ func TestNormalizeProviderRejectsUnsafeNames(t *testing.T) {
 		if got, err := NormalizeProvider(name); err != nil || got != name {
 			t.Errorf("NormalizeProvider(%q)=%q,%v", name, got, err)
 		}
+	}
+}
+
+func TestLoadMigratesV1AndRejectsFutureSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "launch.json")
+	t.Setenv("FAK_LAUNCH_CONFIG", path)
+	command := filepath.Join(t.TempDir(), "provider")
+	if err := os.WriteFile(command, []byte("provider"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v1 := fmt.Sprintf(`{"default":"claude","providers":{"claude":{"command":%q}}}`, command)
+	if err := os.WriteFile(path, []byte(v1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != ConfigSchema || got.Default != "claude" {
+		t.Fatalf("migration=%+v", got)
+	}
+	if err := Save(got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), `"schema": "fak.launch.v2"`) {
+		t.Fatalf("saved=%s", raw)
+	}
+	if err := os.WriteFile(path, []byte(`{"schema":"fak.launch.v99"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "unsupported launch config schema") {
+		t.Fatalf("future schema err=%v", err)
 	}
 }

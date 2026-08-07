@@ -189,6 +189,11 @@ func runLaunchInstall(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	installed := 0
+	stable, err := installStableLaunchTarget(dir, fak)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak launch install:", err)
+		return 1
+	}
 	for _, p := range providers {
 		underlying, err := exec.LookPath(p)
 		if err != nil {
@@ -204,7 +209,7 @@ func runLaunchInstall(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 		c.Providers[p] = launchshim.Provider{Command: underlying, InstallShim: true}
-		if err := writeLaunchShim(dir, p, fak); err != nil {
+		if err := writeLaunchShim(dir, p, stable); err != nil {
 			fmt.Fprintf(stderr, "fak launch install: %v\n", err)
 			return 1
 		}
@@ -235,6 +240,32 @@ func sameLaunchDir(path, dir string) bool {
 	b, _ := filepath.Abs(dir)
 	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
+func stableLaunchTarget(dir, fak string) string {
+	if filepath.Clean(filepath.Dir(fak)) == filepath.Clean(dir) && strings.HasPrefix(strings.ToLower(filepath.Base(fak)), "fak-launch") {
+		return fak
+	}
+	name := "fak-launch"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(dir, name)
+}
+
+func installStableLaunchTarget(dir, fak string) (string, error) {
+	target := stableLaunchTarget(dir, fak)
+	if samePath(target, fak) {
+		return target, nil
+	}
+	raw, err := os.ReadFile(fak)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(target, raw, 0o755); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
 func shimName(provider string) string {
 	if runtime.GOOS == "windows" {
 		return provider + ".cmd"

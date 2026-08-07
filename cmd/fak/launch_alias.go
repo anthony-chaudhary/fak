@@ -90,7 +90,12 @@ func runLaunchAdd(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintln(stderr, "fak launch add:", err)
 			return 1
 		}
-		if err := writeLaunchShim(mustLaunchBinDir(), name, exe); err != nil {
+		stable, err := installStableLaunchTarget(mustLaunchBinDir(), exe)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak launch add:", err)
+			return 1
+		}
+		if err := writeLaunchShim(mustLaunchBinDir(), name, stable); err != nil {
 			fmt.Fprintln(stderr, "fak launch add:", err)
 			return 1
 		}

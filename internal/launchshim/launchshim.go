@@ -18,7 +18,10 @@ type Provider struct {
 	InstallShim bool     `json:"install_shim,omitempty"`
 }
 
+const ConfigSchema = "fak.launch.v2"
+
 type Config struct {
+	Schema    string              `json:"schema,omitempty"`
 	Default   string              `json:"default,omitempty"`
 	Disabled  bool                `json:"disabled,omitempty"`
 	Providers map[string]Provider `json:"providers,omitempty"`
@@ -54,6 +57,10 @@ func Load() (Config, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return Config{}, fmt.Errorf("parse %s: %w", p, err)
 	}
+	if c.Schema != "" && c.Schema != ConfigSchema {
+		return Config{}, fmt.Errorf("unsupported launch config schema %q", c.Schema)
+	}
+	c.Schema = ConfigSchema
 	if c.Providers == nil {
 		c.Providers = map[string]Provider{}
 	}

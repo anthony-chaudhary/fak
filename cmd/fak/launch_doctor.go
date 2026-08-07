@@ -89,6 +89,36 @@ func runLaunchDoctor(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+func repairLaunchShims() error {
+	c, err := launchshim.Load()
+	if err != nil {
+		return err
+	}
+	dir, err := launchBinDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	target, err := installStableLaunchTarget(dir, exe)
+	if err != nil {
+		return err
+	}
+	for name, provider := range c.Providers {
+		if provider.InstallShim {
+			if err := writeLaunchShim(dir, name, target); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 type launchLookPath func(string) (string, error)
 type launchStat func(string) (os.FileInfo, error)
 

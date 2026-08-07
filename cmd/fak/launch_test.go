@@ -173,3 +173,76 @@ func TestLaunchCustomTemplatePreservesArgvBoundaries(t *testing.T) {
 		t.Fatalf("command=%q argv=%q want %q", gotCommand, gotArgs, want)
 	}
 }
+
+func TestStableLaunchTargetSurvivesSourceReplacement(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "install", "fak.exe")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shimDir := filepath.Join(dir, "shims")
+	if err := os.MkdirAll(shimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target, err := installStableLaunchTarget(shimDir, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeLaunchShim(shimDir, "third", target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("v2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != "v1" {
+		t.Fatalf("stable target changed with source: %q", got)
+	}
+	shim, _ := os.ReadFile(filepath.Join(shimDir, shimName("third")))
+	if !strings.Contains(string(shim), target) || strings.Contains(string(shim), source) {
+		t.Fatalf("shim=%q target=%q source=%q", shim, target, source)
+	}
+	if _, err := installStableLaunchTarget(shimDir, source); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(target)
+	if string(got) != "v2" {
+		t.Fatalf("repair target=%q", got)
+	}
+}
+
+func TestRepairLaunchShimsRefreshesStableTarget(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
+	t.Setenv("FAK_LAUNCH_BIN", filepath.Join(dir, "bin"))
+	provider := fakeLaunchProvider(t, dir)
+	if err := launchshim.Save(launchshim.Config{Providers: map[string]launchshim.Provider{"third": {Command: provider, InstallShim: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repairLaunchShims(); err != nil {
+		t.Fatal(err)
+	}
+	target := stableLaunchTarget(filepath.Join(dir, "bin"), mustExecutable(t))
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("stable target: %v", err)
+	}
+	shim, err := os.ReadFile(filepath.Join(dir, "bin", shimName("third")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(shim), target) {
+		t.Fatalf("shim=%q target=%q", shim, target)
+	}
+}
+
+func mustExecutable(t *testing.T) string {
+	t.Helper()
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

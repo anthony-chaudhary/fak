@@ -819,7 +819,7 @@ License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
 
 ## `fak launch`
 
-`fak launch doctor [--json]` diagnoses shim and provider posture with versioned, redacted output.
+`fak launch doctor [--json] [--repair]` diagnoses shim/provider posture; `--repair` refreshes the managed upgrade-stable fak target and owned shims.
 
 `fak launch add NAME --command PATH [--arg ARG ...] [--default] [--shim]` persists a
 custom provider as an argv template. `fak launch remove NAME` removes the binding and
