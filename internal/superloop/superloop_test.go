@@ -967,17 +967,17 @@ func TestRunTheNightWalksThreeDimensions(t *testing.T) {
 }
 
 // TestTendScoreboardsWalksReportingSurfaces pins the reporting-family intent's shape: the
-// four outward-facing report scorecards fak posts to Slack (product, release, steerability,
-// milestone) as MEASURABLE members, the operator-steerability overlay's maintenance loop
-// (#5039) as the one liveness member, plus the Slack-beat feed-delivery surface as a
-// descend pointer. It also pins the once-only guarantee (none of the four scorecards is
+// outward-facing report scorecards fak posts to Slack (product, release, steerability,
+// milestone, osp-residual) as MEASURABLE members, the operator-steerability overlay's
+// maintenance loop (#5039) as the one liveness member, plus the Slack-beat feed-delivery
+// surface as a descend pointer. It also pins the once-only guarantee (none of the cards is
 // walked by another intent, so the root fold counts each once) and that tend descends it.
 func TestTendScoreboardsWalksReportingSurfaces(t *testing.T) {
 	sb, ok := Lookup("tend-scoreboards")
 	if !ok {
 		t.Fatal("tend-scoreboards not registered")
 	}
-	wantCards := map[string]bool{"product": true, "release": true, "steer": true, "milestone": true}
+	wantCards := map[string]bool{"product": true, "release": true, "steer": true, "milestone": true, "osp_residual": true}
 	gotCards := map[string]Member{}
 	var surfaces, loops int
 	for _, m := range sb.Members {
@@ -1033,6 +1033,7 @@ func TestTendScoreboardsWalksReportingSurfaces(t *testing.T) {
 		{Member: gotCards["product"], Measured: true, Debt: 0},
 		{Member: gotCards["release"], Measured: true, Debt: 0},
 		{Member: gotCards["steer"], Measured: true, Debt: 0},
+		{Member: gotCards["osp_residual"], Measured: true, Debt: 0},
 		{Member: steerprOverlayMember(t, sb), Measured: true, Debt: 0},
 		{Member: Member{Kind: KindSurface, Ref: "fak slack beat"}, Container: true},
 	})

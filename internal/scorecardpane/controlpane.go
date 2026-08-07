@@ -99,6 +99,27 @@ var Cards = []Card{
 	{Key: "stability", Debt: "stability_debt", Script: "stability_scorecard.py", Label: "stability"},
 	{Key: "slop", Debt: "slop_debt", Script: "code_slop_scorecard.py", Label: "code-slop", Corpus: []string{"**/*.go", "**/CLAIMS.md"}},
 	{Key: "steer", Debt: "steerability_debt", Script: "steerability_scorecard.py", Label: "steerability"},
+	// The operator-steerability RESIDUAL card (#5022): how many forming units in the
+	// pending dev->release delta are banded RESIDUAL — a claim the kernel could not
+	// witness, i.e. exactly the pile that owes an operator a look. Debt IS that count,
+	// so a clean overlay holds it at/near 0. It reads `fak steer prs --json` (schema
+	// fak.steerpr.v1), whose residual_count is the same number the overlay's own
+	// worst-first render leads with — one number, one source, no second oracle.
+	//
+	// It is ORTHOGONAL to the neighbouring cards and must not be read as a second
+	// take on either: `steer` (steerability_debt) grades package-graph shape and
+	// `heaviness` grades the CLI surface, while this one owns units awaiting
+	// attention and nothing else.
+	//
+	// Corpus is deliberately EMPTY (never carried on a --since fold): the number is a
+	// function of git history plus the witness ledger, not of tracked tree files, so
+	// a diff-disjoint carry would reproduce a stale residual pile as if it were fresh.
+	//
+	// UNMEASURED-not-0 fence: when the payload cannot be read at all (an unresolvable
+	// base/head ref exits non-zero with no JSON on stdout) the card errors, Debt stays
+	// nil, BaselineDoc omits the key, and the superloop walk reports UNMEASURED. A
+	// broken read must never fold as a clean zero — see TestOSPResidualUnreadableIsUnmeasuredNeverZero.
+	{Key: "osp_residual", Debt: "residual_count", Cmd: "go run ./cmd/fak steer prs --json", Label: "osp-residual"},
 	{Key: "conflation", Debt: "conflation_debt", Cmd: "go run ./cmd/fak conflation-scorecard --json", Label: "conflation"},
 	{Key: "ui_quality", Debt: "ui_quality_debt", Cmd: "go run ./cmd/fak ui-quality-scorecard --json", Label: "ui-quality", Corpus: []string{"cmd/fak/"}},
 	{Key: "disambiguation", Debt: "disambiguation_debt", Script: "concept_disambiguation_scorecard.py", Label: "concept-disambiguation"},

@@ -98,12 +98,25 @@ func TestSteerprOverlayMemberIsRunnableAsPrinted(t *testing.T) {
 
 // TestSteerprOverlayAddsNoScorecardRef pins the once-only fold this registration must
 // not disturb: the overlay member carries LIVENESS, not a scorecard key, so it adds
-// nothing to ScorecardRefs() and cannot double-count any card's debt at the root. The
-// osp_residual card (and its scorecard member) is #5022's deliverable, not this one's.
+// nothing to ScorecardRefs() and cannot double-count any card's debt at the root.
+//
+// The osp_residual CARD landed separately (#5022) as its own KindScorecard member, so
+// the ref is now legitimately present in the registry — what stays forbidden is the
+// LIVENESS member growing a scorecard ref of its own. The assertion is therefore
+// pinned to the overlay member itself rather than to the absence of the card key.
 func TestSteerprOverlayAddsNoScorecardRef(t *testing.T) {
 	for _, ref := range ScorecardRefs() {
-		if ref == steerprOverlayLoopRef || ref == "osp_residual" {
-			t.Errorf("scorecard ref %q leaked into the registry from the overlay registration — this ticket registers LIVENESS only; the card is #5022", ref)
+		if ref == steerprOverlayLoopRef {
+			t.Errorf("scorecard ref %q leaked into the registry from the overlay registration — this member registers LIVENESS only", ref)
+		}
+	}
+	sb, ok := Lookup("tend-scoreboards")
+	if !ok {
+		t.Fatal("tend-scoreboards not registered")
+	}
+	for _, m := range sb.Members {
+		if m.Ref == steerprOverlayLoopRef && m.Kind != KindLoop {
+			t.Errorf("overlay member %q has kind %q, want %q — its debt is liveness, never a scorecard", m.Ref, m.Kind, KindLoop)
 		}
 	}
 	if rep := Graph(); !rep.OnceOnly {
