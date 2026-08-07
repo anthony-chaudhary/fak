@@ -148,6 +148,209 @@ func TestLongRetryAfterIsCappedAtMaxWait(t *testing.T) {
 	}
 }
 
+// A park must not seal itself shut for its whole announced window.
+//
+// This is the ONE test here written against the pre-existing API only (Resolve,
+// RecordLongRetry), so its fail-before is a genuine wrong-behaviour assertion
+// rather than a missing symbol: before the probe slots existed, Resolve returned
+// blocked=true for every call between ParkedAt and ParkedUntil, so the run that
+// would have shown the wall was gone never happened. Measured over
+// 2026-08-04..08-07, 25 of the 41 units torn down on this branch had another pool
+// account with logged successful turns within ±45 minutes.
+func TestParkAdmitsAProbeInsteadOfSealingItsWholeWindow(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	start := time.Unix(1_800_000_000, 0)
+	rec := Record{Goal: "gateway", Lane: "gateway", Account: "seat-a", Command: []string{"claude", "-p"}}
+	// A 3h announced wait: 3h/ProbeBudget is 45m, under LongWaitFloor, so the
+	// floor governs and slots open at +1h and +2h.
+	if parked, err := store.RecordLongRetry(429, http.Header{"Retry-After": []string{"10800"}}, start, rec); err != nil || !parked {
+		t.Fatalf("parked=%v err=%v", parked, err)
+	}
+	// Inside the first interval the wall holds: no probe may be admitted early,
+	// because a probe that walks straight back into the same 429 costs a worker
+	// unit and learns nothing.
+	for _, early := range []time.Duration{time.Minute, 30 * time.Minute, 59 * time.Minute} {
+		if _, blocked := store.Resolve("gateway", "seat-a", "sup", start.Add(early)); !blocked {
+			t.Fatalf("a probe was admitted %s into the wall, under the %s floor", early, LongWaitFloor)
+		}
+	}
+	// The slot opens on the floor and exactly one run goes through.
+	if _, blocked := store.Resolve("gateway", "seat-a", "sup", start.Add(time.Hour)); blocked {
+		t.Fatal("the park sealed its whole window: no probe was ever admitted")
+	}
+	// ...and the wall immediately closes again behind it.
+	if _, blocked := store.Resolve("gateway", "seat-a", "sup", start.Add(time.Hour+time.Minute)); !blocked {
+		t.Fatal("the park stayed open after its probe: a probe is a one-shot pass, not a clear")
+	}
+	if _, blocked := store.Resolve("gateway", "seat-a", "sup", start.Add(2*time.Hour)); blocked {
+		t.Fatal("the second probe slot never opened")
+	}
+}
+
+// THE FALSE-CLEAR GUARD. A probe is evidence-gathering, not a verdict: a park
+// whose condition still holds must survive its own probe completely intact —
+// still walling its account, still unclaimed, still ending at the announced
+// parked_until — or the probe becomes a way to launder a live wall into a clear.
+func TestParkProbeDoesNotClearAParkWhoseConditionStillHolds(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	start := time.Unix(1_800_000_000, 0)
+	rec := Record{Goal: "quality", Lane: "quality", Account: "seat-a", Command: []string{"claude", "-p"}}
+	if parked, err := store.RecordLongRetry(429, http.Header{"Retry-After": []string{"14400"}}, start, rec); err != nil || !parked {
+		t.Fatalf("parked=%v err=%v", parked, err)
+	}
+	before, err := store.Load("quality")
+	if err != nil {
+		t.Fatal(err)
+	}
+	probed, ok := store.AdmitProbe("quality", "sup-a", start.Add(time.Hour))
+	if !ok {
+		t.Fatal("no probe slot opened at the floor")
+	}
+	if probed.Probes != 1 {
+		t.Fatalf("probes=%d want 1", probed.Probes)
+	}
+	after, err := store.Load("quality")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ClaimedAt != 0 || after.ClaimedBy != "" {
+		t.Fatalf("a probe claimed/retired a live park: %+v", after)
+	}
+	if after.ParkedUntil != before.ParkedUntil || after.ParkedAt != before.ParkedAt {
+		t.Fatalf("a probe moved the announced window: %d..%d want %d..%d",
+			after.ParkedAt, after.ParkedUntil, before.ParkedAt, before.ParkedUntil)
+	}
+	if after.Reason != before.Reason || !reflect.DeepEqual(after.Command, before.Command) {
+		t.Fatalf("a probe rewrote the park's identity: %+v", after)
+	}
+	// The wall is still up for its account for the rest of the window, and still
+	// down for every sibling account.
+	if !after.Blocks("seat-a", start.Add(2*time.Hour)) {
+		t.Fatal("a probed park stopped walling the account it was recorded for")
+	}
+	if after.Blocks("seat-b", start.Add(2*time.Hour)) {
+		t.Fatal("a probed park started walling a sibling account")
+	}
+	if _, blocked := store.Resolve("quality", "seat-a", "sup-b", start.Add(time.Hour+time.Second)); !blocked {
+		t.Fatal("the wall did not close behind the probe")
+	}
+}
+
+// One probe slot is one worker unit, so concurrent supervisors must not both
+// spend it. Same O_EXCL discipline as ClaimDue, and every error path must refuse
+// rather than manufacture a probe.
+func TestParkProbeSlotIsAdmittedExactlyOnce(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	start := time.Unix(1_800_000_000, 0)
+	rec := Record{Goal: "g", Account: "seat-a", Command: []string{"worker"}}
+	if parked, err := store.RecordLongRetry(429, http.Header{"Retry-After": []string{"14400"}}, start, rec); err != nil || !parked {
+		t.Fatalf("parked=%v err=%v", parked, err)
+	}
+	at := start.Add(time.Hour)
+	if _, ok := store.AdmitProbe("g", "sup-a", at); !ok {
+		t.Fatal("first probe was refused")
+	}
+	// A second supervisor at the same instant, and a fresh Store standing in for
+	// another process, both find the slot spent.
+	if _, ok := store.AdmitProbe("g", "sup-b", at); ok {
+		t.Fatal("two supervisors both spent one probe slot")
+	}
+	if _, ok := (Store{Dir: store.Dir}).AdmitProbe("g", "sup-c", at.Add(time.Minute)); ok {
+		t.Fatal("a second process re-spent an already-taken probe slot")
+	}
+	if got, err := store.Load("g"); err != nil || got.Probes != 1 {
+		t.Fatalf("probes=%+v err=%v want exactly 1", got, err)
+	}
+	// A goal with no park record can never yield a probe.
+	if _, ok := store.AdmitProbe("never-parked", "sup", at); ok {
+		t.Fatal("an absent park record manufactured a probe")
+	}
+}
+
+// The bound: spacing comes from the provider's announced wait, the budget caps
+// total cost however long the wall is, and neither a degenerate window nor an
+// exhausted budget may open a slot.
+func TestParkProbeSpacingHonorsTheAnnouncedWaitAndStaysBounded(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	mk := func(wait time.Duration, probes int, last time.Time) Record {
+		r := Record{Schema: Schema, Goal: "g", Account: "seat-a", ParkedAt: now.Unix(), Probes: probes}
+		r.ParkedUntil = now.Add(wait).Unix()
+		if !last.IsZero() {
+			r.LastProbeAt = last.Unix()
+		}
+		return r
+	}
+	for _, tc := range []struct {
+		name string
+		wait time.Duration
+		want time.Duration
+	}{
+		{"a short wall is governed by the floor, not by wait/budget", 3 * time.Hour, LongWaitFloor},
+		{"the announced wait governs once it clears the floor", 24 * time.Hour, 6 * time.Hour},
+		{"the clamped weekly reset probes four times a day", MaxWait, MaxWait / ProbeBudget},
+		{"a degenerate window falls back to the floor", 0, LongWaitFloor},
+	} {
+		if got := mk(tc.wait, 0, time.Time{}).ProbeInterval(); got != tc.want {
+			t.Errorf("%s: ProbeInterval(wait=%s)=%s want %s", tc.name, tc.wait, got, tc.want)
+		}
+	}
+	long := 24 * time.Hour
+	for _, tc := range []struct {
+		name   string
+		probes int
+		last   time.Time
+		at     time.Duration
+		want   bool
+	}{
+		{"not due before one interval has passed", 0, time.Time{}, 5 * time.Hour, false},
+		{"due on the interval", 0, time.Time{}, 6 * time.Hour, true},
+		{"spacing measures from the last probe, not from ParkedAt", 1, now.Add(6 * time.Hour), 11 * time.Hour, false},
+		{"the next slot opens one interval after the last probe", 1, now.Add(6 * time.Hour), 12 * time.Hour, true},
+		{"an exhausted budget never opens another slot", ProbeBudget, now, 100 * time.Hour, false},
+	} {
+		if got := mk(long, tc.probes, tc.last).ProbeDue(now.Add(tc.at)); got != tc.want {
+			t.Errorf("%s: ProbeDue=%v want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A re-park is a NEW wall under a freshly announced wait, so it must start with a
+// full probe budget — and its slot sidecars must not collide with the spent slots
+// of the generation it replaced, or the re-armed park would be unprobeable and
+// would seal exactly the window this seam exists to keep open.
+func TestReparkReArmsTheProbeBudget(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	start := time.Unix(1_800_000_000, 0)
+	rec := Record{Goal: "g", Account: "seat-a", Command: []string{"worker"}}
+	if _, err := store.RecordLongRetry(429, http.Header{"Retry-After": []string{"14400"}}, start, rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.AdmitProbe("g", "sup", start.Add(time.Hour)); !ok {
+		t.Fatal("first-generation probe refused")
+	}
+	// The probe walked back into the same wall and the provider announced a new
+	// wait: this is the re-arm path.
+	reparked := start.Add(time.Hour)
+	if parked, err := store.RecordLongRetry(429, http.Header{"Retry-After": []string{"7200"}}, reparked, rec); err != nil || !parked {
+		t.Fatalf("re-park parked=%v err=%v", parked, err)
+	}
+	got, err := store.Load("g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Probes != 0 || got.LastProbeAt != 0 {
+		t.Fatalf("a re-park inherited the previous generation's spent budget: %+v", got)
+	}
+	if got.ParkedUntil != reparked.Unix()+7200 {
+		t.Fatalf("re-park did not adopt the newly announced wait: %+v", got)
+	}
+	// Slot 0 of the NEW generation is available even though slot 0 of the old one
+	// was spent.
+	if _, ok := store.AdmitProbe("g", "sup", reparked.Add(time.Hour)); !ok {
+		t.Fatal("the re-armed park could not be probed: slot sidecars collided across generations")
+	}
+}
+
 func TestOrdinaryRetryClassesDoNotEnterLongPark(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	now := time.Unix(10, 0)

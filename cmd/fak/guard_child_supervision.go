@@ -47,6 +47,27 @@ func guardGoalParked() (goalpark.Record, bool) {
 	return goalParkStore().Resolve(goal, account, supervisor, time.Now())
 }
 
+// guardParkProbeStatus renders WHY a park declined this run rather than only
+// that it did. A park that reports nothing but "parked until T" is unfalsifiable
+// from the log: an operator reading a torn-down worker cannot tell whether the
+// wall is still being tested or has sealed shut. The probe ledger is the whole
+// anti-self-seal contract (goalpark.AdmitProbe), so it belongs on the same line
+// as the teardown it explains.
+func guardParkProbeStatus(rec goalpark.Record, now time.Time) string {
+	next := "budget spent"
+	if rec.Probes < goalpark.ProbeBudget {
+		since := rec.LastProbeAt
+		if since == 0 {
+			since = rec.ParkedAt
+		}
+		next = time.Until(time.Unix(since, 0).Add(rec.ProbeInterval())).Round(time.Second).String()
+		if !now.Before(time.Unix(since, 0).Add(rec.ProbeInterval())) {
+			next = "open"
+		}
+	}
+	return fmt.Sprintf("probes=%d/%d next_probe=%s", rec.Probes, goalpark.ProbeBudget, next)
+}
+
 func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	// The startup renderer created the card and queued its control replies. Bind its
 	// periodic status fold to the live gateway before the child starts; finalizeOutcome
@@ -76,7 +97,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		runErr := windowgate.RunInNewJob(child)
 		if rec, parked := guardGoalParked(); parked {
-			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; next=%s\n", rec.ParkedUntil, rec.Reason, rec.NextAction)
+			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
 			// #5862: a bare `break` here left the loop with NO teardown at all — no
 			// witness row, no journal flush/Close, no refusal carry-forward sidecar, and
 			// no gateway cancel — so a parked session's journal stayed zero-byte and its
@@ -238,7 +259,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		case guardChildCompleted:
 			runErr := event.RunErr
 			if rec, parked := guardGoalParked(); parked {
-				fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; next=%s\n", rec.ParkedUntil, rec.Reason, rec.NextAction)
+				fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
 				// #5862: this is the branch the FLEET takes. Dispatch always passes
 				// --max-duration (1740s), and maxDurationLimit > 0 routes every dispatched
 				// worker into this supervised loop (guard.go), so a turn-0 provider 429 that
@@ -293,7 +314,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		case guardChildRestart:
 			if rec, parked := guardGoalParked(); parked {
 				if !quiet {
-					fmt.Fprintf(os.Stderr, "fak guard: context budget signal ignored as terminal; goal parked until %d reason=%s\n", rec.ParkedUntil, rec.Reason)
+					fmt.Fprintf(os.Stderr, "fak guard: context budget signal ignored as terminal; goal parked until %d reason=%s %s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()))
 				}
 				stopGuardChild(child, wait, 2*time.Second)
 				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)

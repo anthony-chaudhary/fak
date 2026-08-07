@@ -29,6 +29,29 @@ const LongWaitFloor = time.Hour
 // legitimate long 429 is unchanged and only an absurd one is clipped.
 const MaxWait = 24 * time.Hour
 
+// ProbeBudget bounds how many probe runs ONE park may admit over its whole
+// wait. It is the reason a park cannot self-seal.
+//
+// A park suppresses exactly the runs that would produce the evidence its wall is
+// gone, so a park whose only exit is its own timer can never learn that its
+// condition ended early — and these conditions DO end early. The wall is one
+// account's subscription cap; the provider resets it on its own schedule, an
+// operator can clear the matching account cooldown, and the pool holds other
+// accounts that were never walled at all. Measured over the clean current-fleet
+// window (2026-08-04T00:00Z..08-07T07:00Z, 291 graded resolve units): of the 41
+// units the guard tore down on the "context budget signal ignored as terminal"
+// branch, 25 had ANOTHER pool account with logged successful turns within ±45
+// minutes of the teardown, and in 0 of the 41 was every other account inside a
+// recorded cooldown. "The whole pool is walled" — the reading under which
+// declining is correct — was therefore demonstrably false most of the time this
+// park stopped work.
+//
+// 4 is what makes probing affordable: a probe costs one worker unit, and a park
+// may spend at most ProbeBudget of them however long the wall is. Spacing comes
+// from the provider's own announced wait (ProbeInterval), never from an invented
+// timeout.
+const ProbeBudget = 4
+
 var (
 	ErrNotDue   = errors.New("goalpark: earliest legal resume time has not arrived")
 	ErrClaimed  = errors.New("goalpark: resume already claimed")
@@ -50,6 +73,13 @@ type Record struct {
 	ClaimedAt   int64    `json:"claimed_at,omitempty"`
 	ClaimedBy   string   `json:"claimed_by,omitempty"`
 	NextAction  string   `json:"next_legal_action"`
+	// Probes/LastProbeAt are the anti-self-seal ledger: how many probe runs this
+	// park generation has already let through the wall, and when the last one was
+	// admitted. Persisted (not in-memory) because the supervisors that consult a
+	// park are separate processes, and reset by Park so a re-park under a freshly
+	// announced wait starts with a full budget.
+	Probes      int   `json:"probes,omitempty"`
+	LastProbeAt int64 `json:"last_probe_at,omitempty"`
 }
 
 // SameAccount is the one account-identity comparison the park uses. Identities
@@ -86,6 +116,44 @@ func (r Record) Blocks(account string, now time.Time) bool {
 	return r.ClaimedAt == 0 && now.Unix() < r.ParkedUntil
 }
 
+// ProbeInterval is the minimum spacing between two probe runs of one park: the
+// provider's announced wait divided by ProbeBudget, floored at LongWaitFloor.
+//
+// Deriving it from the ANNOUNCED wait is what keeps the bound honest. The
+// provider hands us a real number (the field's observed 429s announce waits from
+// ~1h13m to the multi-day weekly reset), so a short wall gets tight probing and a
+// long one gets sparse probing, with the same worst-case cost of ProbeBudget
+// units either way; no fixed guess can do both.
+//
+// The LongWaitFloor floor is the re-hit bound. A probe that immediately walks
+// back into the same wall is worse than no probe — it burns a unit and learns
+// nothing — and this park only exists for waits of at least LongWaitFloor, so no
+// probe may be admitted less than that after the wall was recorded. A degenerate
+// or non-positive window falls back to the floor rather than probing freely.
+func (r Record) ProbeInterval() time.Duration {
+	wait := time.Duration(r.ParkedUntil-r.ParkedAt) * time.Second
+	if iv := wait / ProbeBudget; iv > LongWaitFloor {
+		return iv
+	}
+	return LongWaitFloor
+}
+
+// ProbeDue reports whether this park's next probe slot has opened. It is a pure
+// predicate over the record — AdmitProbe is what actually spends the slot — and
+// it deliberately measures from the LAST admitted probe, falling back to
+// ParkedAt, so the very first probe is spaced off the moment the wall was
+// recorded rather than off process start.
+func (r Record) ProbeDue(now time.Time) bool {
+	if r.Probes >= ProbeBudget {
+		return false
+	}
+	since := r.LastProbeAt
+	if since == 0 {
+		since = r.ParkedAt
+	}
+	return !now.Before(time.Unix(since, 0).Add(r.ProbeInterval()))
+}
+
 type Store struct{ Dir string }
 
 func (s Store) path(goal string) string {
@@ -100,6 +168,13 @@ func (s Store) Park(r Record) error {
 	r.Schema = Schema
 	r.ClaimedAt = 0
 	r.ClaimedBy = ""
+	// A re-park is a NEW wall with a newly announced wait — the provider just told
+	// us the old number is stale — so it starts with a full probe budget. The slot
+	// sidecars are keyed by ParkedAt (probePath) precisely so this reset cannot
+	// collide with the previous generation's already-spent slots and silently
+	// leave the new park unprobeable.
+	r.Probes = 0
+	r.LastProbeAt = 0
 	r.NextAction = "wait until parked_until; then supervisor atomically claims and resumes the same command"
 	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 		return err
@@ -216,6 +291,10 @@ func (s Store) ClaimDue(goal, supervisor string, now time.Time) (Record, error) 
 // blocked is Record.Blocks: only THIS account's own unclaimed, unexpired park
 // walls it. Everything else falls through so the caller can rotate accounts.
 //
+// A blocked verdict is additionally offered the park's open probe slot, if any,
+// so the wall cannot seal itself shut for its whole announced window — see
+// AdmitProbe for the bound and for all three of this park's clearing paths.
+//
 // When the wait HAS elapsed, Resolve claims the record on the spot. #4805 wrote
 // "wait until parked_until; then supervisor atomically claims and resumes the
 // same command" into every record's next_legal_action, but nothing in the
@@ -239,6 +318,15 @@ func (s Store) Resolve(goal, account, supervisor string, now time.Time) (Record,
 		return Record{}, false
 	}
 	if rec.Blocks(account, now) {
+		// The wall is still standing for this account — but a park that only ever
+		// answers "blocked" suppresses the very run that would show the wall is
+		// gone, so it can outlive its own condition indefinitely. Spend a probe
+		// slot if one has opened (AdmitProbe documents the bound and the other two
+		// clearing paths); the record stays live either way, so a wall that really
+		// is still up costs one unit per slot rather than the whole window.
+		if probed, ok := s.AdmitProbe(goal, supervisor, now); ok {
+			return probed, false
+		}
 		return rec, true
 	}
 	due := rec.ClaimedAt == 0 && now.Unix() >= rec.ParkedUntil
@@ -249,6 +337,65 @@ func (s Store) Resolve(goal, account, supervisor string, now time.Time) (Record,
 		}
 	}
 	return rec, false
+}
+
+// probePath names the exclusive sidecar for one probe SLOT of one park
+// GENERATION. ParkedAt is in the name because Park resets Probes to 0: without
+// it a re-park would ask for slot 0 again, find the previous generation's file,
+// and never be probeable — a park that re-arms itself into permanent silence,
+// which is the exact failure this whole seam exists to prevent.
+func (s Store) probePath(goal string, parkedAt int64, slot int) string {
+	return fmt.Sprintf("%s.probe-%d-%d", s.path(goal), parkedAt, slot)
+}
+
+// AdmitProbe hands exactly ONE caller the park's currently-open probe slot: a
+// single run allowed through a wall that is otherwise still standing, so the
+// park can learn whether its condition survives.
+//
+// It is the second of this park's three clearing paths, and the only one that
+// does not depend on the wall lasting exactly as long as it was announced to:
+//
+//  1. parked_until elapses — Resolve claims and retires the record (the timer).
+//  2. a probe slot opens — one run passes through and its outcome is the
+//     evidence: a run that re-hits the 429 re-parks under the newly announced
+//     wait (RecordLongRetry -> Park, which re-arms the budget), a run that does
+//     not simply works, which is the recovery this exists for.
+//  3. MaxWait clamps the recorded window at write time, so no announced wait —
+//     malformed, mis-scaled, or a genuine multi-day weekly reset — parks longer
+//     than a day.
+//
+// Admitting a probe deliberately does NOT clear, claim, or shorten the park: the
+// record stays live and keeps walling every other run on the walled account. A
+// probe is a one-shot pass, not a verdict, so a wall that really is still up
+// costs one unit per slot instead of the whole window.
+//
+// Exclusivity uses the same O_EXCL sidecar discipline as ClaimDue, so concurrent
+// supervisors across processes cannot both spend one slot. Every failure path —
+// unreadable record, slot already taken, unwritable store — returns false: an
+// error must never manufacture a probe, because a probe costs a worker unit.
+func (s Store) AdmitProbe(goal, prober string, now time.Time) (Record, bool) {
+	r, err := s.Load(goal)
+	if err != nil || !r.ProbeDue(now) {
+		return r, false
+	}
+	f, err := os.OpenFile(s.probePath(goal, r.ParkedAt, r.Probes), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return r, false
+	}
+	fmt.Fprintf(f, "%s %d\n", prober, now.Unix())
+	if err = f.Close(); err != nil {
+		return r, false
+	}
+	r.Probes++
+	r.LastProbeAt = now.Unix()
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return r, false
+	}
+	if err = os.WriteFile(s.path(goal), append(b, '\n'), 0o600); err != nil {
+		return r, false
+	}
+	return r, true
 }
 
 func ParseRetryAfter(value string, now time.Time) (time.Time, bool) {
