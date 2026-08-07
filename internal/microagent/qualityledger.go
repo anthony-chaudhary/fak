@@ -83,13 +83,13 @@ func IngestSourceRun(data []byte, runID, baseID string, verifier OutcomeCheck, s
 		return QualityLedger{}, err
 	}
 	if w.LogicalShards <= 0 || w.Completed < 0 || w.Failed < 0 || w.Completed+w.Failed != w.LogicalShards || w.TurnCount != int64(w.Completed) || w.ElapsedMS <= 0 {
-		return QualityLedger{}, errors.New("microagent: witness accounting does not reconcile")
+		return QualityLedger{}, errors.New("microagent: regenerate the source witness; submitted must equal completed+failed, completed must equal turn_count, and elapsed_ms must be positive")
 	}
 	if runID == "" || baseID == "" || verifier == nil {
-		return QualityLedger{}, errors.New("microagent: run, base, and independent verifier are required")
+		return QualityLedger{}, errors.New("microagent: pass non-empty run/base IDs and install an independent OutcomeCheck verifier")
 	}
 	if sampleLimit < 0 {
-		return QualityLedger{}, errors.New("microagent: sample limit must be nonnegative")
+		return QualityLedger{}, errors.New("microagent: set sample_limit to zero or a positive bounded count")
 	}
 	l := QualityLedger{Schema: QualityLedgerSchema, RunID: runID, BaseID: baseID, CheckContract: "caller-supplied-independent-outcome-check", Mode: w.Mode, Provider: w.Provider, Model: w.Model, Submitted: w.LogicalShards, Retired: w.Completed, Failed: w.Failed, ElapsedMS: w.ElapsedMS, SampleLimit: sampleLimit, ErrorClasses: map[string]int{}}
 	l.Outcomes = map[string]int{"success": w.Completed, "error": w.Failed, "refusal": 0}
@@ -119,25 +119,25 @@ func IngestSourceRun(data []byte, runID, baseID string, verifier OutcomeCheck, s
 
 func VerifyQualityLedger(l QualityLedger) error {
 	if l.Schema != QualityLedgerSchema || l.RunID == "" || l.BaseID == "" || l.CheckContract == "" {
-		return errors.New("microagent: ledger identity missing")
+		return errors.New("microagent: regenerate the ledger with schema, run_id, base_id, and check_contract")
 	}
 	if l.Submitted != l.Retired+l.Failed+l.Cancelled || l.Verification.Checked != l.Retired || l.Verification.Passed+l.Verification.Failed != l.Submitted {
-		return errors.New("microagent: ledger totals do not reconcile")
+		return errors.New("microagent: regenerate the ledger; submitted must equal retired+failed+cancelled and verification totals must match submitted")
 	}
 	if l.Outcomes == nil || l.Outcomes["success"] != l.Retired || l.Outcomes["error"] != l.Failed || l.Outcomes["refusal"] != l.Cancelled {
-		return errors.New("microagent: outcome counters do not reconcile")
+		return errors.New("microagent: regenerate outcomes; success/error/refusal must equal retired/failed/cancelled")
 	}
 	if l.ClaimFamilies.Orchestration.SubmittedTotal != l.Submitted {
-		return errors.New("microagent: orchestration family mismatch")
+		return errors.New("microagent: regenerate claim_families; orchestration.submitted_total must equal submitted")
 	}
 	if l.ClaimFamilies.UsefulWork.VerifiedCompletions != l.Verification.Passed {
-		return errors.New("microagent: useful-work denominator mismatch")
+		return errors.New("microagent: regenerate claim_families; useful_work.verified_completions must equal verification.passed")
 	}
 	if len(l.SampleIDs) > l.SampleLimit {
-		return errors.New("microagent: sample cardinality exceeded")
+		return errors.New("microagent: raise sample_limit or trim sample_ids to the declared bound")
 	}
 	if !sort.StringsAreSorted(l.SampleIDs) {
-		return errors.New("microagent: sample context IDs are unstable")
+		return errors.New("microagent: sort sample_ids lexically before publishing the ledger")
 	}
 	return nil
 }

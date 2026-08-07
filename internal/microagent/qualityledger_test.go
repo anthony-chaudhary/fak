@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +57,16 @@ func TestQualityLedgerExposesOutcomeCounters(t *testing.T) {
 	l.Outcomes["error"] = 0
 	if err := VerifyQualityLedger(l); err == nil {
 		t.Fatal("expected outcome reconciliation refusal")
+	}
+}
+
+func TestQualityLedgerErrorsLeadWithRecovery(t *testing.T) {
+	_, err := IngestSourceRun([]byte(`{"logical_shards":2,"completed":1,"turn_count":1}`), "r", "b", OutcomeCheckFunc(func(string) error { return nil }), 0)
+	if err == nil || !strings.Contains(err.Error(), "regenerate the source witness") {
+		t.Fatalf("err=%v", err)
+	}
+	_, err = IngestSourceRun([]byte(`{"logical_shards":1,"completed":1,"turn_count":1,"elapsed_ms":1}`), "", "b", OutcomeCheckFunc(func(string) error { return nil }), 0)
+	if err == nil || !strings.Contains(err.Error(), "pass non-empty run/base IDs") {
+		t.Fatalf("err=%v", err)
 	}
 }
