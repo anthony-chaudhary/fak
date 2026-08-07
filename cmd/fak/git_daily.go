@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gitdaily"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // cmdGitDaily — `fak git-daily`: the once-a-day unattended git-hygiene tick an OS
@@ -29,7 +31,9 @@ import (
 // serialized by an advisory lock and skipped once the ledger shows an applied run for
 // today's local date (--force re-runs). Every applied run appends a `fak-git-daily/1`
 // ledger row, so --status answers "has this actually been folding, or deferring as
-// LOCKED for a week?" from evidence.
+// LOCKED for a week?" from evidence, and --score GRADES that same evidence (#5587) —
+// adoption, outcome health, fold drift — so "is this job still good?" is one command
+// with a letter and named defects rather than an operator diffing rows by eye.
 //
 // Default is APPLY. Exit 0 on success or a deliberate skip; 1 when the run surfaced
 // something an operator must repair (posture drift, failed lock cleanup, or an
@@ -47,6 +51,7 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root to maintain (default: discover from cwd)")
 	ledger := fs.String("ledger", "", "witness ledger path (default: <git-common-dir>/"+gitdaily.LedgerName+")")
 	status := fs.Int("status", 0, "instead of running, print the last N ledger rows (0 = do not read back)")
+	score := fs.Bool("score", false, "instead of running, GRADE the recorded history (adoption, outcome health, fold drift) and exit non-zero on a defect")
 	pruneWorktrees := fs.Bool("prune-worktrees", false, "opt the tick into treedoctor's full sweep (merged/orphan worktree removal); default is locks-only")
 	gracePrune := fs.Bool("grace-prune", false, "opt into gitgate's supervised grace-prune tier (quiet window + >=2-week expire floor); default never deletes an object")
 	pruneExpire := fs.String("prune-expire", "", "override the grace-prune expire window (must be provably >= 2 weeks; empty = the floor)")
@@ -104,6 +109,30 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 			}, "fak git-daily")
 		}
 		writeGitDailyStatus(stdout, path, rows)
+		return 0
+	}
+
+	// --score is the GRADED readback (#5587): the same pure, non-perturbing read as
+	// --status, folded into a letter grade with named evidence, so "is this job still
+	// good?" is one command rather than an operator diffing rows by eye. It exits 1 on
+	// debt, which is what lets a cron/CI caller gate on it without parsing the text.
+	if *score {
+		path := gitdaily.LedgerPath(opts)
+		// Limit 0 = the whole retained history: a grade over the last handful of rows
+		// would miss exactly the multi-day drift streak the card exists to catch.
+		in := gitDailyHealthInput(gitdaily.Status(path, 0), path)
+		payload := metrics.GradeGitDailyHealth(in)
+		if *asJSON {
+			if code := encodeJSONOrFail(stdout, stderr, payload, "fak git-daily"); code != 0 {
+				return code
+			}
+		} else {
+			fmt.Fprintln(stdout, metrics.GitDailyHealthFragment(in, payload))
+			fmt.Fprintln(stdout, scorecard.Render(payload, metrics.GitDailyDebtKey))
+		}
+		if !payload.OK {
+			return 1
+		}
 		return 0
 	}
 
@@ -252,6 +281,40 @@ func writeGitDailyText(w io.Writer, res gitdaily.Result) {
 	if res.LedgerErr != "" {
 		fmt.Fprintf(w, "LEDGER WRITE FAILED: %s\n  the once-a-day dedupe cannot hold until this is fixed (%sredo full work on every trigger).\n",
 			res.LedgerErr, would)
+	}
+}
+
+// gitDailyHealthInput projects the recorded ledger rows onto the pure fold's witness set
+// (#5587). Every field descends from a row the tick already appended — this reads the
+// ledger, it never counts anything of its own, so the grade cannot disagree with
+// `--status`.
+//
+// The projection lives HERE, at the I/O edge, and not in internal/metrics: gitdaily sits a
+// layer above metrics, so the card cannot import it without redding architest with
+// ARCH_LAYER_VIOLATION. Keeping the card a pure fold over plain tallies is also what makes
+// it deterministic — no clock, no filesystem, no git.
+func gitDailyHealthInput(rows []gitdaily.Row, path string) metrics.GitDailyHealthInput {
+	tally := gitdaily.FoldOutcomes(rows)
+	outcomes := make([]string, 0, len(rows))
+	for _, r := range rows {
+		outcomes = append(outcomes, string(r.Outcome()))
+	}
+	return metrics.GitDailyHealthInput{
+		Runs:        tally.Runs,
+		OK:          tally.OK,
+		Refused:     tally.Refused,
+		Errors:      tally.Errors,
+		Reasons:     tally.Reasons,
+		FirstDay:    tally.FirstDay,
+		LastDay:     tally.LastDay,
+		LooseFolded: tally.LooseFolded,
+		// The streak rule lives with the card so "a streak" cannot drift between the
+		// grade and the caller that feeds it.
+		RefusedStreak: metrics.GitDailyRefusedStreak(outcomes),
+		// LOCAL date, matching gitdaily.DayLayout — the ledger's day keys are local, so a
+		// UTC "today" would read a full day stale for half the world every evening.
+		Today:      time.Now().Format(gitdaily.DayLayout),
+		LedgerPath: path,
 	}
 }
 

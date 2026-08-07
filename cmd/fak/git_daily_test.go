@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gitdaily"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
 // TestGitDailyEmitUnitTaskScheduler is the "cron thing" acceptance witness on Windows:
@@ -278,5 +279,99 @@ func TestGitDailyStatusRealLedgerCapture(t *testing.T) {
 	const want = "5 recorded runs (2026-08-04..2026-08-05): 5 ok, 0 refused, 0 error; folded 10038 loose objects"
 	if got := out.String(); !strings.Contains(got, want) {
 		t.Fatalf("captured readout drifted\nwant line: %s\n---got---\n%s", want, got)
+	}
+}
+
+// gitDailyCapturedLedger writes the verbatim `fak-git-daily/1` rows of this clone's own
+// ledger (C:\work\fak\.git\fak-git-daily.jsonl, captured 2026-08-05) to a temp file and
+// returns its path. Shared by the #5587 score tests so they replay the SAME real bytes
+// the #5586 status test does — if the two readouts ever disagree about one ledger, that
+// is the bug the card exists to make impossible.
+func gitDailyCapturedLedger(t *testing.T) string {
+	t.Helper()
+	captured := []string{
+		`{"schema":"fak-git-daily/1","day":"2026-08-04","at":"2026-08-04T11:14:37-07:00","lease_locks_reaped":0,"index_locks_reaped":7,"lock_actions":1,"loose_before":4129,"loose_after":4129,"packs_before":4,"packs_after":4,"grace_prune_refused":"PRUNE_OFF"}`,
+		`{"schema":"fak-git-daily/1","day":"2026-08-04","at":"2026-08-04T11:18:58-07:00","lease_locks_reaped":0,"index_locks_reaped":0,"lock_actions":0,"loose_before":4129,"loose_after":0,"packs_before":4,"packs_after":2,"grace_prune_refused":"PRUNE_OFF"}`,
+		`{"schema":"fak-git-daily/1","day":"2026-08-04","at":"2026-08-04T11:59:46-07:00","lease_locks_reaped":0,"index_locks_reaped":0,"lock_actions":1,"loose_before":48,"loose_after":0,"packs_before":2,"packs_after":4,"grace_prune_refused":"PRUNE_OFF"}`,
+		`{"schema":"fak-git-daily/1","day":"2026-08-04","at":"2026-08-04T12:15:16-07:00","lease_locks_reaped":0,"index_locks_reaped":0,"lock_actions":1,"loose_before":34,"loose_after":0,"packs_before":4,"packs_after":4,"grace_prune_refused":"PRUNE_OFF"}`,
+		`{"schema":"fak-git-daily/1","day":"2026-08-05","at":"2026-08-05T04:39:17-07:00","lease_locks_reaped":0,"index_locks_reaped":1,"lock_actions":2,"loose_before":5827,"loose_after":0,"packs_before":4,"packs_after":4,"grace_prune_refused":"PRUNE_OFF"}`,
+	}
+	path := filepath.Join(t.TempDir(), gitdaily.LedgerName)
+	if err := os.WriteFile(path, []byte(strings.Join(captured, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestGitDailyScoreProjectionMatchesStatus is the #5587 witness at the CLI seam: the
+// graded readout and the `--status` readout are folded from ONE ledger read, so the two
+// operator surfaces cannot drift apart and quietly disagree about the same history.
+//
+// Everything asserted here is CLOCK-INDEPENDENT on purpose. The adoption axis measures
+// the newest row against time.Now(), so a captured ledger goes stale as the calendar
+// advances; asserting the letter grade or the exit code against a frozen capture would
+// pass today and fail tomorrow for no code change. The counters, the folded volume and
+// the streak are properties of the ROWS alone, so they are the honest thing to pin here —
+// the grading rules themselves are pinned deterministically in internal/metrics.
+func TestGitDailyScoreProjectionMatchesStatus(t *testing.T) {
+	path := gitDailyCapturedLedger(t)
+	rows := gitdaily.Status(path, 0)
+
+	in := gitDailyHealthInput(rows, path)
+	tally := gitdaily.FoldOutcomes(rows)
+
+	if in.Runs != tally.Runs || in.OK != tally.OK || in.Refused != tally.Refused || in.Errors != tally.Errors {
+		t.Errorf("graded input disagrees with the --status fold:\n  score  %d runs / %d ok / %d refused / %d error\n  status %d runs / %d ok / %d refused / %d error",
+			in.Runs, in.OK, in.Refused, in.Errors, tally.Runs, tally.OK, tally.Refused, tally.Errors)
+	}
+	if in.LooseFolded != tally.LooseFolded {
+		t.Errorf("graded loose volume = %d, --status says %d", in.LooseFolded, tally.LooseFolded)
+	}
+	if in.FirstDay != tally.FirstDay || in.LastDay != tally.LastDay {
+		t.Errorf("graded window = %s..%s, --status says %s..%s", in.FirstDay, in.LastDay, tally.FirstDay, tally.LastDay)
+	}
+	if in.LedgerPath != path {
+		t.Errorf("graded input names ledger %q, want the one it read: %q", in.LedgerPath, path)
+	}
+	// Today must be the LOCAL day key the ledger's own day keys are written in, or the
+	// recency axis compares two different calendars and reads a day stale every evening.
+	if _, err := time.Parse(gitdaily.DayLayout, in.Today); err != nil {
+		t.Errorf("graded today %q does not parse as a %s day key: %v", in.Today, gitdaily.DayLayout, err)
+	}
+
+	// The clock-independent half of the captured fragment: five ok ticks that folded
+	// 10038 loose objects, with no trailing non-ok streak.
+	const want = "runs=5 ok=5 refused=0 error=0 folded=10038 streak=0"
+	got := metrics.GitDailyHealthFragment(in, metrics.GradeGitDailyHealth(in))
+	if !strings.Contains(got, want) {
+		t.Fatalf("captured score fragment drifted\nwant substring: %s\n---got---\n%s", want, got)
+	}
+}
+
+// TestGitDailyScoreOnAnEmptyLedgerIsNotHealthy pins the exit-code contract the cron/CI
+// caller gates on, using the one case that is genuinely clock-independent: a ledger with
+// no rows. "Never ran" must not read as "healthy" — an unwitnessed job is exactly the
+// silent failure (#4602) this verb exists to surface, and a card that graded absence as
+// OK would exit 0 forever on a job that stopped years ago.
+func TestGitDailyScoreOnAnEmptyLedgerIsNotHealthy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), gitdaily.LedgerName)
+	in := gitDailyHealthInput(gitdaily.Status(path, 0), path)
+	payload := metrics.GradeGitDailyHealth(in)
+
+	if payload.OK {
+		t.Errorf("an empty ledger graded OK; --score would exit 0 on a job that never ran")
+	}
+	// The defect has to NAME the witness it looked at, so an operator knows which file to
+	// go check rather than being told a bare grade.
+	var named bool
+	for _, k := range payload.KPIs {
+		for _, d := range k.Defects {
+			if strings.Contains(d, path) {
+				named = true
+			}
+		}
+	}
+	if !named {
+		t.Errorf("no defect names the ledger %q it was scored from: %+v", path, payload.KPIs)
 	}
 }
