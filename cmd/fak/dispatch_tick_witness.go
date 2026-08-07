@@ -165,6 +165,13 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		dispatchtick.ClaimNoCommit:    {},
 	}
 	var records []dispatchtick.WitnessRecord
+	// #5864 beat-while-working: the mirror of the #4324 release below. This sweep
+	// is the one place in the Go dispatch stack that re-observes a worker, so it
+	// is also the only place a lane-lease heartbeat can be driven BY the work
+	// still being in progress rather than by a timer that outlives it. Built once
+	// per sweep; it reads the live-lease set lazily, so a sweep with nothing
+	// running spawns no `dos` child.
+	beater := newDispatchLaneBeater(root)
 	for _, log := range resolveLogs(runsDir) {
 		issue, ok := issueFromResolveLog(filepath.Base(log))
 		if !ok {
@@ -179,7 +186,17 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			continue // no pid -> cannot prove the worker finished -> not yet auditable
 		}
 		if dispatchPIDAlive(pid) {
-			continue // still running -> it may not have committed yet
+			// Still running -> it may not have committed yet, AND its lane lease is
+			// being worked right now. #5864: refresh the lease HERE, off the same
+			// process-table read that just proved the worker is alive, so the beat
+			// can never outlive the holder — the next sweep that finds this pid dead
+			// takes the release branch below instead. Live sweeps only: a dry-run
+			// audit must never write to the shared WAL. Fail-open — every refusal and
+			// fault is counted on the payload and nothing is propagated.
+			if live {
+				beater.beatLiveWorker(log, stem, pid, time.Now())
+			}
+			continue
 		}
 		base := ""
 		if b, err := os.ReadFile(stem + dispatchtick.BaseSHASidecarSuffix); err == nil {
@@ -309,6 +326,13 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		"witnessed":   buckets[dispatchtick.ClaimWitnessed],
 		"unwitnessed": buckets[dispatchtick.ClaimUnwitnessed],
 		"no_commit":   buckets[dispatchtick.ClaimNoCommit],
+	}
+	// #5864: the beat outcomes, by closed-vocabulary reason, so "which lanes were
+	// attested and why were the rest not" is countable straight off the tick
+	// payload rather than inferred from the WAL's silence. Absent when the sweep
+	// found no live worker to attest.
+	if beat := beater.summary(); beat != nil {
+		payload["lane_beat"] = beat
 	}
 	return payload, records
 }
