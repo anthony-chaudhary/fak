@@ -186,7 +186,9 @@ def _origin_gate_line(lane: str) -> str:
                 "hermetic test) → expected artifact: an OK/passing test run; refusal "
                 "mode: a NEW `tools/*.py` reds the pythongate ratchet "
                 "(`go test ./internal/pythongate -run TestNoNewPythonTools`, "
-                "`REASON_NEW_PYTHON_TOOL`) — port new tooling to a `fak` subcommand instead")
+                # NEW_PYTHON_TOOL is the token pythongate actually stamps;
+                # ReasonNewPythonTool is only its Go constant name (#3220).
+                "`NEW_PYTHON_TOOL`) — port new tooling to a `fak` subcommand instead")
     if lane == "docs":
         return ("command `make claims-lint` → expected artifact: a clean claims-lint "
                 "run; refusal mode: an unstamped or overclaimed `- [` line in CLAIMS.md "
@@ -229,6 +231,145 @@ def _origin_quality_checks(lane: str, issue: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# --- Worker guidance as structured, witnessed rules (#3220) ------------------
+# The `how to work it` / `git laws` blocks used to be long free paragraphs baked
+# into the f-string below. That made them hard to scan and — the load-bearing
+# defect — unobservable: nothing could tell whether a rule still mapped to a live
+# gate, so a rule naming a retired refusal token read exactly like one that bit.
+#
+# Both renderers now emit the SAME rule set, each rule `{id, imperative, witness}`
+# where the witness is the refusal token or command that enforces it. The Go set in
+# ``internal/dispatchtick/promptrules.go`` is the spec; this table mirrors it, and
+# ``TestPythonRendererMirrorsTheGoRuleSpec`` there fails if an id or a witness here
+# drifts from it. The witnesses themselves are held honest by ``internal/promptlint``
+# against fak's live reason/verb registries, so a retired token reds the Go gate.
+
+
+def _render_rules(header: str, rules: list[tuple[str, str, str]]) -> str:
+    """Render one rule set as uniform bullets — ``- <id>: <imperative> - witness `<w>`
+    ``— matching dispatchtick.RenderPromptRules byte for byte."""
+    return "\n".join([header] + [f"- {rid}: {imp} - witness `{wit}`"
+                                 for rid, imp, wit in rules])
+
+
+def _work_rules(n: int, lane: str) -> list[tuple[str, str, str]]:
+    """The `how to work it:` rules. Mirrors dispatchtick.WorkRules."""
+    return [
+        ("lane-lease",
+         "Take the lease for the lane whose files you will actually edit before "
+         f"touching them (`{lane}` here) and never --force onto a lane a LIVE holder "
+         "owns. A refusal here is a pause, not your stop condition: acquire the lane "
+         "that matches your files, or - if the holder is provably dead, meaning its "
+         "pid is gone AND its lease is long past heartbeat - reap it by naming that "
+         "dead holder in a release, then re-acquire",
+         f"dos lease-lane acquire --lane {lane} --owner <you>"),
+        # The single highest-value rule in this set: forensics over 111 zero-commit
+        # worker sessions found 16% ended the instant a turn hit a kernel refusal,
+        # because the old lane-lease rule's "honor a REFUSE (pick nothing and stop)"
+        # was the ONLY refusal guidance in the packet - it actively taught quitting.
+        ("refusal-taxonomy",
+         "Treat a kernel refusal as a PAUSE, not your stop condition: re-read the "
+         "refusal's own stated fix and take the action it names - either re-propose "
+         "the SAME call byte-identical with only the confirm token added, or switch "
+         "to the compiled sidestep it points at (e.g. `fak sync push` for a gated "
+         "push, which needs no token at all). Only a refusal whose own stated fix "
+         "names NO available action is a wall you may stop at; everything else you "
+         "work through",
+         "REQUIRE_WITNESS"),
+        ("smallest-change",
+         "Make the SMALLEST change that resolves the issue's actual ask - prefer one "
+         "leaf / one file, and on an epic you cannot land whole, land the smallest "
+         "honest increment and say in your report what remains",
+         "fak dispatch issue-smallness-lint"),
+        # The other prompt-shaped cause of the zero-commit sessions: the old packet
+        # gated the FIRST commit behind a full green `make ci`, but the median killed
+        # worker dies at 8-10 minutes and 27 of 37 killed workers already held edits -
+        # so edits were GUARANTEED to strand.
+        ("checkpoint-commit",
+         "Commit each working increment AS YOU REACH IT instead of saving every "
+         "commit for the end - your session can be killed at any moment and "
+         "uncommitted edits are simply lost. A checkpoint is honest as soon as it "
+         "COMPILES and its own targeted test passes; that bar is deliberately lower "
+         "than the full `make ci` ship gate, but it is never a licence for broken "
+         "work. Say only what actually landed in the subject and withhold the "
+         "issue-closing `Fixes` line until the real fix is green. Do NOT use a "
+         "`wip(...)` subject - it forces the claim to none and lands your work "
+         "UNWITNESSED, which silently defeats the witness ledger",
+         "fak commit --path"),
+        ("gate-before-done",
+         "Run the gate yourself before claiming done: the lane's own test "
+         "(`go test ./... -count=1` for the touched package, or the doc/lint check "
+         "the issue names) - a claim with no gate run is not done",
+         "LOOP_DONE_UNWITNESSED"),
+        ("proof-by-default",
+         "Match the proof to the defect: visual/TUI bugs need a captured render or "
+         "screenshot witness; logic/behavior bugs need a failing-before and "
+         "passing-after repro test; docs/operator changes need a lint, render, or "
+         f"exact-output fixture; shipped/done claims need a witnessed commit tied to "
+         f"`#{n}` and `(fak {lane})`. Do not stop on narrative alone",
+         "LOOP_DONE_UNWITNESSED"),
+        ("no-delete",
+         "NEVER run a delete command (`rm`, `del`, `Remove-Item`, `rmdir`, "
+         "`git clean`) for ANY reason, including your own scratch files - leave them "
+         "in place and name them in your final report. You commit by explicit "
+         "pathspec, so untracked scratch can never contaminate your commit: deleting "
+         "it is never required, and a stray deletion swept into a commit reverts a "
+         "peer's live work",
+         "SPURIOUS_STAGED_DELETION"),
+        # The honest escape hatch is LOAD-BEARING - a genuinely blocked worker must be
+        # able to stop and say so - but it used to be the second clause of the packet's
+        # FIRST sentence, which offered quitting as a co-equal opening move.
+        ("honest-bail",
+         "Stopping short is legitimate ONLY after you have tried the sanctioned "
+         "adaptation the blocker itself named and that also failed - then end with a "
+         "final report giving the exact gate you could not reach, what you already "
+         "tried, and the smallest next checkable step. Never stop on the first "
+         "refusal, and never let an unfinished attempt become a silent exit: commit "
+         "whatever already works first",
+         "LOOP_DONE_UNWITNESSED"),
+    ]
+
+
+def _git_law_rules(n: int, lane: str, branch: str = "main") -> list[tuple[str, str, str]]:
+    """The `git laws:` rules. Mirrors dispatchtick.GitLawRules."""
+    return [
+        ("main-only",
+         f"Work on the configured development branch `{branch}` ONLY - never branch, "
+         "never a new worktree",
+         "OFF_TRUNK"),
+        ("commit-by-path",
+         'Commit with `git commit -s -m "<subject>" -- <explicit paths>`: sign-off '
+         "(DCO), BY PATH only, staging just the files you wrote",
+         "PATHSPEC_RACE"),
+        ("no-blanket-add",
+         "NEVER `git add -A` on this shared multi-session tree - a blanket add steals "
+         "a sibling's in-flight files",
+         "BARE_COMMIT_SWEEP"),
+        ("message-before-pathspec",
+         "Put `-m`/`-F` BEFORE the `--` pathspec separator - git parses everything "
+         "after `--` as a pathspec, so an `-m` placed after it is silently read as a "
+         "pathspec, and a bare `git commit` with no message at all opens the "
+         "interactive editor and hangs headless",
+         "INTERACTIVE_HANG"),
+        ("issue-binding-trailer",
+         f"Reference `#{n}` in the subject AND end it with a `(fak {lane})` trailer, "
+         f"lead with a verb (`fix({lane}): ... (#{n}) (fak {lane})`; use "
+         "add/fix/implement/test, NEVER a noun-led description) - miss either and the "
+         "closure auditor never closes your resolved issue",
+         "dos commit-audit"),
+        ("no-history-rewrite",
+         "No push / tag / force-push / history-rewrite / reset / clean / "
+         f"checkout-of-tracked-files - just commit on `{branch}`",
+         "NEVER_AMEND_SHARED"),
+        ("pathspec-race-recovery",
+         "On a race refusal, preserve your working-tree edits, refresh from the "
+         "current trunk witness, and recommit by the same explicit paths - never "
+         "recover by sweeping the tree, and stop with the specific blocker if refresh "
+         "exposes a conflict or a live merge",
+         "PATHSPEC_RACE"),
+    ]
+
+
 def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str,
                   host_os: str | None = None) -> str:
     """Render the resolution prompt for ONE issue. Pure: no I/O.
@@ -247,11 +388,22 @@ def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str,
     win_hint = _windows_shell_guidance(host_os)
     win_hint_block = f"\n{win_hint}\n" if win_hint else ""
     origin_checks = _origin_quality_checks(lane, issue)
+    # Both guidance blocks render FROM the structured rule set above, so every
+    # imperative carries the witness that proves it is still enforced (#3220).
+    work_rules = _render_rules(
+        "how to work it (each rule: the imperative, then the witness that keeps it "
+        "honest):", _work_rules(n, lane))
+    git_laws = _render_rules(
+        "git laws (enforced below the agent - breaking them refuses your commit):",
+        _git_law_rules(n, lane))
 
     return f"""your goal: resolve GitHub issue #{n} ({title}) with the smallest correct \
 change that genuinely closes it, then ship it on `main` citing `#{n}` in the \
-commit subject — OR end with a final report naming the exact gate you could not \
-reach and why. Do NOT fabricate a pass.
+commit subject. Commit each working increment as you reach it rather than saving \
+every commit for the end — a killed session loses whatever you never committed. \
+Do NOT fabricate a pass, and do NOT treat the first refusal you hit as your stop \
+condition: the `refusal-taxonomy` and `honest-bail` rules below are the only \
+sanctioned ways to stop short.
 
 read first: run `gh issue view {n}` for the live issue, then orient with \
 `AGENTS.md` (build/test/run + the hard rules) and `llms.txt` (the doc map). \
@@ -269,47 +421,17 @@ issue body (verbatim, may be truncated — re-read live):
 {body or '(no body — read the title and `gh issue view` for the full thread)'}
 ---
 
-how to work it:
-- Take the lane lease first if siblings may collide: \
-`dos arbitrate --workspace . --lane {lane} --kind cluster` (honor a REFUSE — pick \
-nothing and stop; do not --force onto a held lane).
-- Make the SMALLEST change that resolves the issue's actual ask. Prefer one leaf \
-/ one file. If the issue is a docs/observability/test ask, that is often a single \
-file. If it is a large epic you cannot land whole, land the smallest honest \
-increment and say in your report what remains.
-- Run the gate yourself before claiming done: the lane's own test \
-(`go test ./... -count=1` for the touched package, or the doc/lint check the \
-issue names). A claim with no gate run is not done.
+{work_rules}
 
 {origin_checks}
 
-git laws (enforced below the agent — breaking them refuses your commit):
-- Work on `main` ONLY. Never branch / new-worktree (the OFF_TRUNK guard refuses it).
-- `git commit -s -m "<subject>" -- <explicit paths>` — sign-off (DCO), commit BY \
-PATH only, with `-m`/`-F` BEFORE the `--` pathspec separator: git parses everything \
-after `--` as a pathspec, so an `-m` placed AFTER `--` is silently parsed as a \
-pathspec instead of a message, and a bare `git commit` with no `-m`/`-F` at all \
-opens the interactive editor and hangs headless (`INTERACTIVE_HANG`). NEVER \
-`git add -A` (shared multi-session tree — a blanket add steals a sibling's \
-in-flight files). Stage only the files you wrote.
-- **Reference `#{n}` in the subject AND end it with a `(fak {lane})` trailer**, \
-lead with a verb (e.g. `fix({lane}): … (#{n}) (fak {lane})`; use add/fix/implement/\
-test, NEVER a noun-led description). The `#{n}` binds your commit to the issue; the \
-verb-led subject + `(fak {lane})` trailer is what makes `dos commit-audit` grade it \
-`diff-witnessed` instead of ABSTAIN — and the closure auditor closes the issue ONLY \
-on a witnessed commit. Miss either the `#{n}` or the trailer and your resolved issue \
-never closes.
-- No push / tag / force-push / history-rewrite / reset / clean / \
-checkout-of-tracked-files. Just commit on main.
-- If `fak commit` or a hook reports `PATHSPEC_RACE`, preserve your working-tree \
-edits, refresh from the current trunk witness, and recommit by the same explicit \
-paths. Do NOT recover by sweeping the tree (`git add -A`, broad staging, reset, \
-clean, or checkout). If refresh exposes a conflict or a live merge, stop with the \
-specific blocker instead of staging unrelated files.
+{git_laws}
 
 acceptance (your stop condition): a committed change on `main` whose subject \
-cites `#{n}` and whose gate you actually ran is green — OR a final report that \
-names the specific missing artifact/host capability and the smallest next step. \
+cites `#{n}` and whose gate you actually ran is green — OR, only after you have \
+tried the sanctioned adaptation the blocker itself named and it also failed, a \
+final report that names the specific missing artifact/host capability and the \
+smallest next step. \
 Honesty over a green-looking lie: the repo keeps a witness ledger and a \
 self-authored "done" is re-checked against git. If you discovered a durable fact \
 worth keeping (a lane quirk, a host gotcha, a blocker), surface it explicitly in \
