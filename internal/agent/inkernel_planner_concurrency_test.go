@@ -140,4 +140,14 @@ func TestInKernelCPUPathUnaffectedByDevMu(t *testing.T) {
 	if comp == nil || comp.Usage.CompletionTokens == 0 {
 		t.Fatal("CPU Complete generated nothing")
 	}
+	if comp.Usage.PromptTokensDetails == nil || comp.Usage.CachedPromptTokens() != 0 {
+		t.Fatalf("cold completion cache usage=%+v", comp.Usage.PromptTokensDetails)
+	}
+	comp, err = p.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("warm CPU Complete errored: %v", err)
+	}
+	if comp.ProviderCache == nil || comp.ProviderCache.Metrics.PrefillTokensSaved <= 0 || comp.Usage.CachedPromptTokens() != int(comp.ProviderCache.Metrics.PrefillTokensSaved) {
+		t.Fatalf("warm cache telemetry diverged: usage=%+v provider_cache=%+v", comp.Usage, comp.ProviderCache)
+	}
 }

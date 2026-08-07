@@ -852,7 +852,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		Message:       Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
 		FinishReason:  finishReason,
 		ProviderCache: &compReuseEntry,
-		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen},
+		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
 	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
 	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a
