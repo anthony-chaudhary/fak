@@ -627,9 +627,11 @@ grant); a resolved row wins, the flag pair fills when no row matches, and an
 unreadable manifest falls open to the flags.
 
 hook also bridges BACKGROUND jobs (the pulse source for streamed output): a
-launch post announcing a background id spawns a second proc "bg:<id>" (tool
-"<tool>[bg]", envelope resolved for that tag), each output poll naming that id
-pulses it (Via = the poll call), and a poll reporting completion exits it — so
+launch post announcing a background id spawns a second proc "bg:<session>:<id>"
+(tool "<tool>[bg]", envelope resolved for that tag; the harness's background id
+is per-session and this journal is workspace-shared, so the identity names the
+owning session), each output poll naming that id in that same session pulses it
+(Via = the poll call), and a poll reporting completion exits it — so
 a healthy polled job reads LIVE, a silent one STALLED, instead of both hiding
 behind the launch call's instant exit.
 

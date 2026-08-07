@@ -17,9 +17,11 @@ import (
 // HookEvents closes it with two bridge derivations, both pure:
 //
 //   - a launch post whose response announces a background id spawns a SECOND
-//     proc "bg:<id>" (tool "<tool>[bg]") — the job itself, now subject to the
-//     deadline/stall/orphan machinery its launch call escaped by returning
-//     early;
+//     proc "bg:<session>:<id>" (tool "<tool>[bg]") — the job itself, now subject
+//     to the deadline/stall/orphan machinery its launch call escaped by
+//     returning early. The harness's background id is per-session and the
+//     journal is workspace-shared, so the identity carries the owning session
+//     (bgident.go, #5880);
 //   - a poll post whose input names that id pulses the bg proc (Via = the
 //     poll's own call id), and a poll response that reports the job finished
 //     exits it — streamed output becomes liveness, so a healthy polled job
@@ -53,7 +55,7 @@ func HookEvents(kind string, p HookPayload, envFor func(tool string) HookEnvelop
 
 	// Launch bridge: the response announces a background id => spawn the job.
 	if id := hookBackgroundID(p.ToolResponse); id != "" {
-		callID := "bg:" + id
+		callID := backgroundCallID(p.SessionID, id)
 		if _, known := hookCallState(callID, existing); !known {
 			env := envFor(p.ToolName + "[bg]")
 			out = append(out, Event{Kind: EvSpawn, CallID: callID, Tool: p.ToolName + "[bg]",
@@ -64,8 +66,10 @@ func HookEvents(kind string, p HookPayload, envFor func(tool string) HookEnvelop
 	}
 
 	// Poll bridge: the input names a background id => pulse (or finish) the job.
+	// Resolved through the same constructor as the launch, so the poll can only
+	// reach a job in its OWN session (bgident.go).
 	if id := hookPolledID(p.ToolInput); id != "" {
-		callID := "bg:" + id
+		callID := backgroundCallID(p.SessionID, id)
 		state, known := hookCallState(callID, existing)
 		if !known {
 			return out, nil // job never journaled; a pulse would refuse the fold

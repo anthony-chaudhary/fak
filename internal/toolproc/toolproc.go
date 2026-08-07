@@ -240,6 +240,15 @@ type Counts struct {
 	// not finished, and every per-session number sliced at that boundary (tool
 	// spawns, guard usage) is short by whatever came after it (#3152).
 	SessionsResumed int `json:"sessions_resumed,omitempty"`
+	// BackgroundIDsUnqualified is how many background-job procs in this table
+	// still carry the pre-#5880 identity "bg:<id>" — the harness's per-session
+	// job id used bare as a key in the workspace-shared journal, where it
+	// collides between sessions (bgident.go). It is NOT an error count and these
+	// rows fold normally; it is the size of the backlog compaction has yet to
+	// reclaim, so an operator can tell "old rows not yet aged out" from "the
+	// producer is still minting unqualified ids". It reaches zero on its own as
+	// those calls go terminal and CompactJournal drops them.
+	BackgroundIDsUnqualified int `json:"background_ids_unqualified,omitempty"`
 }
 
 // Config tunes the fold. Zero values are safe: no default deadline (unbounded
@@ -539,6 +548,9 @@ func Fold(events []Event, nowMS int64, cfg Config) (Table, error) {
 	t.Counts.SessionsResumed = len(resumed)
 	for _, id := range order {
 		p := procs[id]
+		if isUnqualifiedBackgroundCallID(id) {
+			t.Counts.BackgroundIDsUnqualified++
+		}
 		if endMS, dead := sessionEnd[p.Session]; dead && p.Session != "" {
 			p.sessionEndedMS = endMS
 		}

@@ -30,6 +30,9 @@ func TestLiveMonitorTaskIDsFromJournal(t *testing.T) {
 	journal := strings.Join([]string{
 		`{"kind":"spawn","call_id":"mon-live","session":"s1","tool":"Monitor","at_unix_ms":1}`,
 		`{"kind":"spawn","call_id":"bg:bg-live","session":"s1","tool":"Monitor[bg]","at_unix_ms":2}`,
+		// Session-qualified since #5880; rows written before it keep the bare
+		// shape above, and both must resolve to the same tasks/<id>.output name.
+		`{"kind":"spawn","call_id":"bg:s1:bg-qualified","session":"s1","tool":"Monitor[bg]","at_unix_ms":2}`,
 		`{"kind":"spawn","call_id":"mon-other-session","session":"s2","tool":"Monitor","at_unix_ms":3}`,
 		`{"kind":"spawn","call_id":"mon-done","session":"s1","tool":"Monitor","at_unix_ms":4}`,
 		`{"kind":"exit","call_id":"mon-done","at_unix_ms":5,"status":"ok"}`,
@@ -38,7 +41,7 @@ func TestLiveMonitorTaskIDsFromJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"mon-live", "bg-live"} {
+	for _, want := range []string{"mon-live", "bg-live", "bg-qualified"} {
 		if !ids[want] {
 			t.Fatalf("live ids = %v, missing %q", ids, want)
 		}

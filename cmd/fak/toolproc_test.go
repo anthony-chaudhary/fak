@@ -398,7 +398,9 @@ func TestToolprocHookBridgesBackgroundJob(t *testing.T) {
 	}
 	var job *toolproc.Proc
 	for i := range tab.Procs {
-		if tab.Procs[i].CallID == "bg:j1" {
+		// Session-qualified: the harness's background id is per-session and this
+		// journal is workspace-shared (#5880).
+		if tab.Procs[i].CallID == "bg:s1:j1" {
 			job = &tab.Procs[i]
 		}
 	}
