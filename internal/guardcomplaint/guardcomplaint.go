@@ -122,7 +122,13 @@ type Evidence struct {
 	Source      string `json:"source"` // "journal" | "manual" | "none"
 	JournalPath string `json:"journal_path,omitempty"`
 	Seq         uint64 `json:"seq,omitempty"`
-	TSUnixNano  int64  `json:"ts_unix_nano,omitempty"`
+	// CallSeq is the kernel's per-call submission id (journal `call_seq`), i.e. the
+	// identity of the REFUSED CALL — as opposed to Seq, which is the journal ROW
+	// ordinal and restarts at 1 in every file. Together with TraceID (the session)
+	// it names one denial exactly, which is what makes an appeal auditable back to
+	// the command that was refused rather than to whichever similar row was newest.
+	CallSeq    uint64 `json:"call_seq,omitempty"`
+	TSUnixNano int64  `json:"ts_unix_nano,omitempty"`
 	Verdict     string `json:"verdict,omitempty"`
 	Tool        string `json:"tool,omitempty"`
 	Reason      string `json:"reason,omitempty"`
@@ -420,8 +426,15 @@ func (c Complaint) evidenceBlock() string {
 	if e.ArgsDigest != "" {
 		fmt.Fprintf(&b, "- args digest: `%s`\n", e.ArgsDigest)
 	}
+	if e.CallSeq != 0 {
+		fmt.Fprintf(&b, "- call id: `%d`\n", e.CallSeq)
+	}
 	if e.Seq != 0 {
 		fmt.Fprintf(&b, "- journal seq: `%d`\n", e.Seq)
+	}
+	if e.CallSeq != 0 && e.TraceID != "" {
+		fmt.Fprintf(&b, "- reselect this exact denial: `--from-journal --trace-id %s --call-seq %d`\n",
+			e.TraceID, e.CallSeq)
 	}
 	if e.JournalPath != "" {
 		fmt.Fprintf(&b, "- journal: `%s` (verify with `fak audit verify`)\n", e.JournalPath)
@@ -523,13 +536,20 @@ func FetchExisting(repo string, limit int) ([]dogfoodissues.Issue, error) {
 
 // DenialSelector identifies the journal denial a complaint is actually appealing.
 // Reason and Tool are useful coarse filters, but they are not an identity: a busy guard
-// session routinely records several denials with the same reason/tool pair. Seq, TraceID,
-// and ArgsDigest are exact selectors that bind the complaint to the refused call rather
-// than whichever similar denial happened most recently (#3830).
+// session routinely records several denials with the same reason/tool pair. Seq, CallSeq,
+// TraceID, and ArgsDigest are exact selectors that bind the complaint to the refused call
+// rather than whichever similar denial happened most recently (#3830).
+//
+// TraceID (the session) and CallSeq (the kernel's per-call submission id) are the pair an
+// appeal can actually quote back, because the refusal itself names them; they select one
+// denial deterministically without scanning ambiguous rows (#5213). ArgsDigest identifies
+// the call CONTENT, so it collapses a genuinely re-issued identical call into one match,
+// and Seq addresses a journal ROW, which is only unique inside a single file.
 type DenialSelector struct {
 	Reason     string
 	Tool       string
 	Seq        uint64
+	CallSeq    uint64
 	TraceID    string
 	ArgsDigest string
 }
@@ -599,6 +619,7 @@ func matchingDenials(paths []string, selector DenialSelector) []*Evidence {
 			}
 			var row struct {
 				Seq        uint64 `json:"seq"`
+				CallSeq    uint64 `json:"call_seq"`
 				TSUnixNano int64  `json:"ts_unix_nano"`
 				Kind       string `json:"kind"`
 				Tool       string `json:"tool"`
@@ -632,6 +653,13 @@ func matchingDenials(paths []string, selector DenialSelector) []*Evidence {
 			if selector.Seq != 0 && row.Seq != selector.Seq {
 				continue
 			}
+			// A zero CallSeq means "unselected", matching the Seq convention above. A row
+			// that carries no call id has CallSeq 0 and therefore never satisfies a
+			// non-zero selector — fail-closed, so an unidentifiable row can not be
+			// mistaken for the call being appealed.
+			if selector.CallSeq != 0 && row.CallSeq != selector.CallSeq {
+				continue
+			}
 			if traceFilter != "" && strings.TrimSpace(row.TraceID) != traceFilter {
 				continue
 			}
@@ -642,6 +670,7 @@ func matchingDenials(paths []string, selector DenialSelector) []*Evidence {
 				Source:      "journal",
 				JournalPath: path,
 				Seq:         row.Seq,
+				CallSeq:     row.CallSeq,
 				TSUnixNano:  row.TSUnixNano,
 				Verdict:     verdict,
 				Tool:        row.Tool,
