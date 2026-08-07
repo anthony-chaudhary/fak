@@ -673,25 +673,113 @@ func firstStringField(obj map[string]any, names ...string) string {
 	return ""
 }
 
+// navStems names command stems that only position the shell — they select a
+// directory or load an environment, they are not the operative command. Labeling
+// one of them names the navigation prefix of a compound command and throws the
+// command that actually ran away ("cd fak && go test ./..." -> "cd fak"), which
+// collapsed unrelated failures onto one undiagnosable label (#5863). Their
+// argument is a path, so the stem cannot simply be dropped in favor of the second
+// token either — the whole segment has to be stepped over.
+var navStems = map[string]bool{
+	"cd":           true,
+	"chdir":        true,
+	"pushd":        true,
+	"popd":         true,
+	"set-location": true,
+	"source":       true,
+	".":            true,
+}
+
+// commandStem names the operative command of a shell command line as at most two
+// scrubbed atoms. It walks the connector-separated segments and steps over leading
+// navigation segments so the label names what ran, not how the shell got there. The
+// label stays bounded and scrubbed exactly as before — this re-aims the same two
+// atoms, it never emits more of them. If every segment is navigation there is no
+// operative command to name, so the first segment's label is kept.
 func commandStem(command string) string {
-	for _, seg := range strings.Split(command, ";") {
-		fields := strings.Fields(seg)
-		for i, raw := range fields {
-			tok := cleanToken(raw)
-			if tok == "" || tok == "&" || strings.HasPrefix(tok, "-") || strings.HasPrefix(strings.ToLower(tok), "$env:") {
-				continue
+	first := ""
+	for _, seg := range commandSegments(command) {
+		label, stem := segmentLabel(seg)
+		if label == "" {
+			continue
+		}
+		if first == "" {
+			first = label
+		}
+		if navStems[strings.ToLower(stem)] {
+			continue
+		}
+		return label
+	}
+	return first
+}
+
+// commandSegments splits a command line on the connectors that separate one command
+// from the next (";", "&&", "||", "|", "&", newline). Quoting is deliberately not
+// parsed: the result only ever feeds a bounded, scrubbed label, never execution, and
+// a mis-split can only produce a shorter atom, never a longer or less-redacted one.
+func commandSegments(command string) []string {
+	segs := []string{}
+	var b strings.Builder
+	flush := func() {
+		if s := strings.TrimSpace(b.String()); s != "" {
+			segs = append(segs, s)
+		}
+		b.Reset()
+	}
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		switch c {
+		case ';', '|', '&', '\n', '\r':
+			flush()
+			if i+1 < len(command) && command[i+1] == c { // collapse "&&" / "||"
+				i++
 			}
-			stem := pathStem(tok)
-			if stem == "" {
-				continue
-			}
-			if next := commandSecond(fields[i+1:]); next != "" {
-				return boundArgsLabel(stem + " " + next)
-			}
-			return stem
+		default:
+			b.WriteByte(c)
 		}
 	}
-	return ""
+	flush()
+	return segs
+}
+
+// segmentLabel returns the bounded label for one segment plus the bare stem it was
+// built from, so the caller can tell a navigation segment from an operative one.
+func segmentLabel(seg string) (label, stem string) {
+	fields := strings.Fields(seg)
+	for i, raw := range fields {
+		tok := cleanToken(raw)
+		if skipStemToken(tok) {
+			continue
+		}
+		s := pathStem(tok)
+		if s == "" {
+			continue
+		}
+		if next := commandSecond(fields[i+1:]); next != "" {
+			return boundArgsLabel(s + " " + next), s
+		}
+		return s, s
+	}
+	return "", ""
+}
+
+// skipStemToken reports whether a token cannot be the operative command's stem. An
+// environment assignment ("VAR=value", "env", "export") is skipped so the label
+// names the command the environment was set up for — and so an assignment's value
+// can never reach the label, which it could before (#5863).
+func skipStemToken(tok string) bool {
+	if tok == "" || tok == "&" {
+		return true
+	}
+	if strings.HasPrefix(tok, "-") || strings.Contains(tok, "=") {
+		return true
+	}
+	switch strings.ToLower(tok) {
+	case "env", "export":
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(tok), "$env:")
 }
 
 func commandSecond(fields []string) string {
