@@ -237,22 +237,31 @@ func ParseLog(raw string) []Commit {
 				files = append(files, line)
 			}
 		}
-		leaf := ""
-		if m := leafRE.FindStringSubmatch(subject); m != nil {
-			leaf = m[1]
-		}
-		typ := ""
-		if m := typeRE.FindStringSubmatch(subject); m != nil {
-			typ = m[1]
-		}
-		resolves := Issues(subject, nil)
-		mentions := Issues(body, resolves)
-		commits = append(commits, Commit{
-			SHA: sha, Subject: subject, Leaf: leaf, Type: typ,
-			Resolves: resolves, Mentions: mentions, Files: files,
-		})
+		commits = append(commits, parseCommit(sha, subject, body, files))
 	}
 	return commits
+}
+
+// parseCommit derives ONE commit's overlay facts from its message: the unit's
+// ship-stamp leaf, the conventional-commit type, and the closure-grade vs
+// mention issue refs. It is the single per-commit parser, shared by ParseLog
+// (the tick's git-log path) and AssignLanded (the land-time path, #5026), so the
+// unit a commit is assigned the moment it lands and the unit the tick folds it
+// into cannot drift — there is no second implementation to drift from.
+func parseCommit(sha, subject, body string, files []string) Commit {
+	leaf := ""
+	if m := leafRE.FindStringSubmatch(subject); m != nil {
+		leaf = m[1]
+	}
+	typ := ""
+	if m := typeRE.FindStringSubmatch(subject); m != nil {
+		typ = m[1]
+	}
+	resolves := Issues(subject, nil)
+	return Commit{
+		SHA: sha, Subject: subject, Leaf: leaf, Type: typ,
+		Resolves: resolves, Mentions: Issues(body, resolves), Files: files,
+	}
 }
 
 // Issues extracts deduplicated #N refs from text, excluding any already present
