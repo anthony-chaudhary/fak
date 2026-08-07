@@ -176,3 +176,126 @@ func TestGuardAllowSaveRoundTripsExpiryAndPrunesOrphans(t *testing.T) {
 		t.Errorf("orphan stamp must be pruned on save: %v", got.Expiry)
 	}
 }
+
+// guardAllowPinClock pins guardAllowNow for the duration of the test, so every TTL
+// decision under test (the read-path drop, the `--list` render, the `--ttl` stamp) is
+// evaluated at a chosen instant instead of the wall clock.
+func guardAllowPinClock(t *testing.T, at time.Time) func(time.Time) {
+	t.Helper()
+	saved := guardAllowNow
+	t.Cleanup(func() { guardAllowNow = saved })
+	cur := at
+	guardAllowNow = func() time.Time { return cur }
+	return func(to time.Time) { cur = to }
+}
+
+// TestGuardAllowTTLBoundaryIsCrossedAtRead pins the load-bearing claim the earlier
+// witnesses could only assert one side of: the SAME on-disk overlay is honored before its
+// expiry and refused at/after it, with nothing between the two reads but the clock. That
+// is what "the TTL is enforced" means operationally — the guard does not consult a
+// sweeper, a mtime, or a rewrite of the file; it re-decides every read against now.
+//
+// The boundary is asserted as inclusive (an entry is gone AT its stamp, not one tick
+// later), because an off-by-one there is the difference between a widening that ends when
+// the operator was told it ends and one that outlives its window. Pinning the clock is
+// what makes this checkable at all: with the wall clock the only stamps a test can use are
+// so far past or future that the crossing itself is never exercised, and any attempt to
+// actually wait for a window is flaky on a loaded shared runner.
+func TestGuardAllowTTLBoundaryIsCrossedAtRead(t *testing.T) {
+	expiresAt := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "allow.json")
+	body := `{"allow":["temp_tool","permanent_tool"],"expiry":{"temp_tool":"` +
+		guardAllowExpiryStamp(expiresAt) + `"}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setClock := guardAllowPinClock(t, expiresAt.Add(-time.Second))
+	ov, err := loadGuardAllowOverlay(path)
+	if err != nil {
+		t.Fatalf("load (inside window): %v", err)
+	}
+	if !guardAllowNamePresent(ov.Allow, "temp_tool") {
+		t.Errorf("one second BEFORE its expiry the entry must still be honored: %v", ov.Allow)
+	}
+
+	// Exactly at the stamp: the window is over. `now >= expiry` drops.
+	setClock(expiresAt)
+	if ov, err = loadGuardAllowOverlay(path); err != nil {
+		t.Fatalf("load (at the boundary): %v", err)
+	}
+	if guardAllowNamePresent(ov.Allow, "temp_tool") {
+		t.Errorf("AT its expiry the entry must be dropped, still honored: %v", ov.Allow)
+	}
+
+	setClock(expiresAt.Add(24 * time.Hour))
+	if ov, err = loadGuardAllowOverlay(path); err != nil {
+		t.Fatalf("load (past the window): %v", err)
+	}
+	if guardAllowNamePresent(ov.Allow, "temp_tool") {
+		t.Errorf("past its expiry the entry must stay dropped: %v", ov.Allow)
+	}
+	if !guardAllowNamePresent(ov.Allow, "permanent_tool") {
+		t.Errorf("an entry with no stamp must survive every crossing: %v", ov.Allow)
+	}
+
+	// READ-time, not a sweeper: three loads across the boundary and the file on disk is
+	// still byte-for-byte what the operator wrote. A guard that rewrote the overlay to
+	// enforce a TTL would revoke the widening for every OTHER reader too — including a
+	// concurrent session whose own clock has not reached the window yet — and would turn a
+	// read-only surface (`--list`) into a mutation.
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("expiry must be evaluated at READ time, not by rewriting the overlay:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+// TestGuardAllowTTLZeroMeansPermanent pins the DEFAULT half of the contract: `--ttl 0`
+// (i.e. the flag not passed at all) is "no expiry", never "expires immediately". A zero
+// window that stamped now+0 would make every ordinary `fak guard allow <tool>` a widening
+// the next launch silently revokes — the loudest possible regression, and one no other
+// test in this file would catch because they all supply an explicit stamp.
+//
+// It also pins the promotion path the flag help promises: re-adding an entry with no
+// --ttl CLEARS the stamp it carried, so a "just for now" widening becomes permanent
+// again rather than keeping its old, now-invisible deadline.
+func TestGuardAllowTTLZeroMeansPermanent(t *testing.T) {
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	ov := guardAllowOverlay{Allow: []string{"tool_a"}}
+
+	if stamp := guardAllowStampExpiry(&ov, []string{"tool_a"}, 0, now); stamp != "" {
+		t.Errorf("--ttl 0 must record NO stamp, got %q", stamp)
+	}
+	if len(ov.Expiry) != 0 {
+		t.Errorf("--ttl 0 must leave the expiry map empty, got %v", ov.Expiry)
+	}
+	// The permanence has to hold at the read path too, arbitrarily far in the future.
+	if got, dropped := guardAllowDropExpired(ov, now.AddDate(100, 0, 0)); len(dropped) != 0 ||
+		!guardAllowNamePresent(got.Allow, "tool_a") {
+		t.Errorf("an unstamped entry must never expire; dropped=%v allow=%v", dropped, got.Allow)
+	}
+
+	// A positive window stamps exactly now+ttl off the injected clock...
+	stamp := guardAllowStampExpiry(&ov, []string{"tool_a"}, 90*time.Minute, now)
+	if want := guardAllowExpiryStamp(now.Add(90 * time.Minute)); stamp != want {
+		t.Errorf("--ttl 90m stamped %q, want %q", stamp, want)
+	}
+	if ov.Expiry["tool_a"] != stamp {
+		t.Errorf("the stamp on the entry (%q) must be the one reported to the operator (%q)", ov.Expiry["tool_a"], stamp)
+	}
+
+	// ...and a re-add with no --ttl promotes it back to permanent.
+	if stamp := guardAllowStampExpiry(&ov, []string{"tool_a"}, 0, now); stamp != "" {
+		t.Errorf("a re-add with no --ttl must report no expiry, got %q", stamp)
+	}
+	if _, ok := ov.Expiry["tool_a"]; ok {
+		t.Errorf("a re-add with no --ttl must clear the prior stamp: %v", ov.Expiry)
+	}
+}

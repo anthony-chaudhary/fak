@@ -183,7 +183,7 @@ func loadGuardAllowOverlay(path string) (guardAllowOverlay, error) {
 	// Launch-boundary TTL auto-revert (#5179): every read path funnels through here, so an
 	// entry past its expiry is dropped from the floor and from `--list` alike on the next
 	// launch. A missing/permanent entry and an unparseable stamp are retained.
-	ov, _ = guardAllowDropExpired(ov, time.Now())
+	ov, _ = guardAllowDropExpired(ov, guardAllowNow())
 	guardAllowPruneOrphanExpiry(&ov)
 	return ov, nil
 }
@@ -312,6 +312,42 @@ func guardAllowNormalize(in []string) []string {
 // guardAllowExpiryStamp is the on-disk expiry format: RFC3339 in UTC, so the file stays
 // a stable, timezone-free, reviewable diff. `--ttl <d>` records now+d through this.
 func guardAllowExpiryStamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+// guardAllowNow is the ONE clock every #5179 TTL decision reads: the read-time expiry
+// check in loadGuardAllowOverlay, the `--list` remaining-TTL render, and the `--ttl`
+// stamp `fak guard allow` writes. It is a package var rather than a direct time.Now()
+// call so a test can pin the exact instant an entry crosses its expiry and witness both
+// sides of that boundary against ONE on-disk overlay — the alternative is a test that
+// either sleeps for the window (slow, and flaky under a loaded shared runner) or can only
+// ever assert a stamp so far in the past that the boundary itself is never exercised.
+// Production is unaffected: the default is time.Now, and nothing but a test reassigns it.
+var guardAllowNow = time.Now
+
+// guardAllowStampExpiry applies the `--ttl` semantics to the entries just added: a
+// POSITIVE window records now+ttl on each name, and a ttl of ZERO (the default — "no
+// expiry") CLEARS any stamp those names carried, so re-adding a "just for now" widening
+// with no --ttl promotes it back to permanent (#5179). It returns the stamp written, or
+// "" for the permanent case, so the operator echo quotes the instant that actually landed
+// on disk instead of re-deriving it from a second clock read.
+//
+// A negative window never reaches here — cmdGuardAllow refuses it up front, because
+// stamping an already-past expiry would add an entry the very next launch drops.
+func guardAllowStampExpiry(ov *guardAllowOverlay, names []string, ttl time.Duration, now time.Time) string {
+	if ttl <= 0 {
+		for _, n := range names {
+			delete(ov.Expiry, n)
+		}
+		return ""
+	}
+	if ov.Expiry == nil {
+		ov.Expiry = map[string]string{}
+	}
+	stamp := guardAllowExpiryStamp(now.Add(ttl))
+	for _, n := range names {
+		ov.Expiry[n] = stamp
+	}
+	return stamp
+}
 
 // guardAllowDropExpired removes every Allow / AllowPrefix entry whose recorded expiry is
 // at or before now, returning the pruned overlay and the sorted names dropped (#5179).
@@ -506,26 +542,14 @@ func cmdGuardAllow(argv []string) {
 		// Stamp (or clear) the per-entry expiry. --ttl records now+window; a re-add with no
 		// --ttl clears any prior stamp, so an operator can promote a "just for now" widening
 		// back to permanent by adding it again (#5179).
-		if *ttl > 0 {
-			if ov.Expiry == nil {
-				ov.Expiry = map[string]string{}
-			}
-			stamp := guardAllowExpiryStamp(time.Now().Add(*ttl))
-			for _, n := range names {
-				ov.Expiry[n] = stamp
-			}
-		} else {
-			for _, n := range names {
-				delete(ov.Expiry, n)
-			}
-		}
+		stamp := guardAllowStampExpiry(&ov, names, *ttl, guardAllowNow())
 		if err := saveGuardAllowOverlay(path, ov); err != nil {
 			fmt.Fprintln(os.Stderr, "fak guard allow:", err)
 			os.Exit(1)
 		}
 		fmt.Printf("fak guard allow: added %s to the operator allow overlay.\n", strings.Join(names, ", "))
-		if *ttl > 0 {
-			fmt.Printf("  Expires in %s (at %s) — auto-reverted on the first `fak guard` launch after that.\n", *ttl, guardAllowExpiryStamp(time.Now().Add(*ttl)))
+		if stamp != "" {
+			fmt.Printf("  Expires in %s (at %s) — auto-reverted on the first `fak guard` launch after that.\n", *ttl, stamp)
 		}
 		if !*prefix {
 			printGuardAllowShellAttachments(os.Stdout, names)
@@ -666,7 +690,7 @@ func printGuardAllowOverlay(w io.Writer, path string, ov guardAllowOverlay) {
 	if len(ov.AllowPrefix) > 0 {
 		fmt.Fprintf(w, "  allow (prefix): %s\n", strings.Join(ov.AllowPrefix, ", "))
 	}
-	printGuardAllowExpiries(w, ov, time.Now())
+	printGuardAllowExpiries(w, ov, guardAllowNow())
 }
 
 // printGuardAllowExpiries renders the remaining TTL of each expiring entry (#5179), so an
