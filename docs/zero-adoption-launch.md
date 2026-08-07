@@ -10,8 +10,15 @@ claude                 # now: fak guard -- <original claude> ...
 fak                    # launches the configured default provider
 ```
 
-The installer records the already-resolved provider executable and creates a small
-shim; it never renames or overwrites the provider binary. `fak launch status` shows
+The installer records the already-resolved provider executable, creates a small shim,
+and idempotently adds the shim directory to supported PowerShell/bash/zsh/fish startup
+files inside a clearly delimited fak-owned block. It prints the one-line command for the
+current shell because startup-file edits cannot mutate an already-running process. Use
+`--no-path` for managed environments that own PATH themselves. Uninstall removes only the
+fak block and converges as a no-op when it is already absent; user bytes around it remain
+unchanged.
+
+It never renames or overwrites the provider binary. `fak launch status` shows
 the exact recorded paths. `fak launch uninstall --provider all` removes the shims
 and configuration bindings.
 

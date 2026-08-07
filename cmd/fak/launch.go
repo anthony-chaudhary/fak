@@ -157,6 +157,7 @@ func runLaunchInstall(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	providerFlag := fs.String("provider", "all", "provider shim to install: claude, codex, or all")
 	makeDefault := fs.String("default", "", "also make claude or codex the default for bare fak")
+	noPath := fs.Bool("no-path", false, "do not edit supported shell startup files")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -231,7 +232,23 @@ func runLaunchInstall(stdout, stderr io.Writer, argv []string) int {
 	if installed == 0 {
 		return 1
 	}
-	fmt.Fprintf(stdout, "prepend %s to PATH (the provider binaries were not overwritten)\n", dir)
+	if !*noPath {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintln(stderr, "fak launch install PATH:", err)
+			return 1
+		}
+		for _, profile := range launchshim.Profiles(home, runtime.GOOS) {
+			if _, err := launchshim.Activate(profile, dir); err != nil {
+				fmt.Fprintf(stderr, "fak launch install PATH %s: %v\n", launchshim.ProfileSummary(profile), err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "activated PATH in %s\n", profile.Path)
+			fmt.Fprintf(stdout, "current shell: %s\n", launchshim.CurrentShellCommand(profile.Shell, dir))
+		}
+	} else {
+		fmt.Fprintf(stdout, "prepend %s to PATH (the provider binaries were not overwritten)\n", dir)
+	}
 	return 0
 }
 
@@ -320,6 +337,15 @@ func runLaunchUninstall(stdout, stderr io.Writer, argv []string) int {
 	if e = launchshim.Save(c); e != nil {
 		fmt.Fprintln(stderr, e)
 		return 1
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		for _, profile := range launchshim.Profiles(home, runtime.GOOS) {
+			if _, err := launchshim.Deactivate(profile); err != nil {
+				fmt.Fprintf(stderr, "fak launch uninstall PATH %s: %v\n", launchshim.ProfileSummary(profile), err)
+				return 1
+			}
+		}
 	}
 	return 0
 }

@@ -821,6 +821,10 @@ License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
 
 `fak launch doctor [--json] [--repair]` diagnoses shim/provider posture; `--repair` refreshes the managed upgrade-stable fak target and owned shims.
 
+`fak launch install [--provider claude|codex|all] [--default NAME] [--no-path]`
+installs managed shims and, unless `--no-path` is set, an idempotent fak-owned PATH block
+for supported PowerShell/POSIX startup files. Uninstall removes only that block.
+
 `fak launch add NAME --command PATH [--arg ARG ...] [--default] [--shim]` persists a
 custom provider as an argv template. `fak launch remove NAME` removes the binding and
 owned shim; `fak launch list [--json]` lists bindings without exposing local command paths
