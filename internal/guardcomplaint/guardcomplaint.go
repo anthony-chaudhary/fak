@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 )
@@ -135,6 +136,19 @@ type Evidence struct {
 	By         string `json:"by,omitempty"`
 	TraceID    string `json:"trace_id,omitempty"`
 	ArgsDigest string `json:"args_digest,omitempty"`
+	// DenyRule is the closed-vocabulary id of the policy RUNG that refused
+	// (abi.DenyRuleID). Reason names the refusal's CLASS, which is too coarse to
+	// appeal against: a single ("gitgate", "POLICY_BLOCK") pair covers seven
+	// distinct trunk-discipline laws, and ("monitor", "POLICY_BLOCK") covers the
+	// recursive-delete, out-of-tree-write and deny-regex rungs at once. Naming the
+	// rung is what lets an appeal argue against the rule that actually matched
+	// instead of the whole class (#5213).
+	//
+	// It is re-validated through the closed set on the way IN (see matchingDenials),
+	// so a tampered or unknown value is dropped WHOLE rather than filtered into the
+	// set — the appeal body is rendered into a GitHub issue, so this field must
+	// never be able to carry a byte of tool argument, path, or command text.
+	DenyRule string `json:"deny_rule,omitempty"`
 }
 
 // Complaint is one agent-authored complaint. In the guard domain (the default) it is an appeal
@@ -414,6 +428,9 @@ func (c Complaint) evidenceBlock() string {
 	if e.Reason != "" {
 		fmt.Fprintf(&b, "- reason: `%s`\n", e.Reason)
 	}
+	if e.DenyRule != "" {
+		fmt.Fprintf(&b, "- matched rule: `%s`\n", e.DenyRule)
+	}
 	if e.Tool != "" {
 		fmt.Fprintf(&b, "- tool: `%s`\n", e.Tool)
 	}
@@ -628,6 +645,7 @@ func matchingDenials(paths []string, selector DenialSelector) []*Evidence {
 				Reason     string `json:"reason"`
 				By         string `json:"by"`
 				ArgsDigest string `json:"args_digest"`
+				DenyRule   string `json:"deny_rule"`
 			}
 			if json.Unmarshal([]byte(line), &row) != nil {
 				continue
@@ -678,6 +696,12 @@ func matchingDenials(paths []string, selector DenialSelector) []*Evidence {
 				By:          row.By,
 				TraceID:     row.TraceID,
 				ArgsDigest:  row.ArgsDigest,
+			}
+			// Membership test, never a character filter: an id that is not already in
+			// the closed vocabulary is dropped whole, so nothing a rung did not author
+			// in source can reach the rendered appeal.
+			if id, ok := abi.DenyRuleID(row.DenyRule); ok {
+				cand.DenyRule = id
 			}
 			matches = append(matches, cand)
 		}

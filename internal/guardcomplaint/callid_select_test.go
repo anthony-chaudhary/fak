@@ -143,3 +143,79 @@ func TestEvidenceBlockNamesTheRefusedCall(t *testing.T) {
 		}
 	}
 }
+
+// TestEvidenceCarriesMatchedRule pins the second half of #5213: an appeal must name
+// the RUNG that refused, not only the refusal's class. ("monitor","POLICY_BLOCK")
+// alone covers the recursive-delete, out-of-tree-write and deny-regex rungs at once,
+// so a class-only witness cannot say which rule the appeal is arguing against.
+func TestEvidenceCarriesMatchedRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guard-audit.jsonl")
+	lines := []string{
+		`{"seq":1,"call_seq":11,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","by":"monitor","trace_id":"s","deny_rule":"rm_rf"}`,
+		`{"seq":2,"call_seq":12,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","by":"monitor","trace_id":"s","deny_rule":"out_of_tree_write"}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{path}
+
+	// Same reason, same tool, same session, same decider — different rungs.
+	for _, tc := range []struct {
+		callSeq uint64
+		rule    string
+	}{
+		{11, "rm_rf"},
+		{12, "out_of_tree_write"},
+	} {
+		got := SelectDenial(paths, DenialSelector{TraceID: "s", CallSeq: tc.callSeq})
+		if got.Evidence == nil || got.Evidence.DenyRule != tc.rule {
+			t.Fatalf("call %d evidence = %+v, want deny rule %q", tc.callSeq, got.Evidence, tc.rule)
+		}
+		if body := (Complaint{Evidence: got.Evidence}).evidenceBlock(); !strings.Contains(body, "- matched rule: `"+tc.rule+"`") {
+			t.Fatalf("evidence block missing matched rule %q:\n%s", tc.rule, body)
+		}
+	}
+}
+
+// TestEvidenceDropsUnknownDenyRuleWhole is the disclosure witness. deny_rule is
+// rendered verbatim into a GitHub issue, so its value space must stay exactly the
+// compile-time closed set. A value outside that set is dropped WHOLE — never
+// trimmed, filtered, or truncated into the set, which is the partial-credit failure
+// that leaked an env-assignment value into args_label before #5863.
+func TestEvidenceDropsUnknownDenyRuleWhole(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tampered.jsonl")
+	lines := []string{
+		`{"seq":1,"call_seq":11,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","trace_id":"s","deny_rule":"AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI"}`,
+		`{"seq":2,"call_seq":12,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","trace_id":"s","deny_rule":"rm_rf /home/user/.ssh/id_rsa"}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{path}
+
+	// A value with no member spelling at all: dropped entirely.
+	got := SelectDenial(paths, DenialSelector{TraceID: "s", CallSeq: 11})
+	if got.Evidence == nil {
+		t.Fatalf("selection = %+v, want the row to still bind", got)
+	}
+	if got.Evidence.DenyRule != "" {
+		t.Fatalf("deny rule = %q, want it dropped whole", got.Evidence.DenyRule)
+	}
+
+	// A member id followed by attacker-supplied text: canonicalization keeps ONLY
+	// the authored leading atom, so the trailing path can never reach the body.
+	got = SelectDenial(paths, DenialSelector{TraceID: "s", CallSeq: 12})
+	if got.Evidence == nil || got.Evidence.DenyRule != "rm_rf" {
+		t.Fatalf("evidence = %+v, want the bare member id rm_rf", got.Evidence)
+	}
+	body := (Complaint{Evidence: got.Evidence}).evidenceBlock()
+	for _, leak := range []string{"id_rsa", "/home/user", "wJalrXUtnFEMI", "AWS_SECRET"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("evidence block leaked %q:\n%s", leak, body)
+		}
+	}
+	// The audit structure that matters is still there.
+	if !strings.Contains(body, "- matched rule: `rm_rf`") {
+		t.Fatalf("evidence block lost the matched rule:\n%s", body)
+	}
+}
