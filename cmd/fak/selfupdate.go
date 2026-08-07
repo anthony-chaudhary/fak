@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
@@ -56,7 +58,8 @@ func cmdSelfUpdate(argv []string) {
 	// case: a dev fak invokes self-update to converge the FLEET binary), read the TARGET's
 	// embedded stamp — not this invoking binary's. Otherwise the dirty dev binary's "Unknown"
 	// would short-circuit the update and the stale fleet binary would never get replaced.
-	stamp := binstamp.Self()
+	selfStamp := binstamp.Self() // ALWAYS the invoking binary's own stamp (see convergeInvoker)
+	stamp := selfStamp
 	subject := "running"
 	fleetTarget := false // --target names a DIFFERENT binary (the scheduler/fleet case)
 	if t := strings.TrimSpace(*target); t != "" && !sameBinary(t) {
@@ -96,11 +99,13 @@ func cmdSelfUpdate(argv []string) {
 		// leak of "<binary>.old.<pid>.<i>" files (the 9 GB class this reaper exists to prevent)
 		// is a one-line signal here instead of an invisible pile only `ls` would reveal.
 		reportAsideFootprint(installTargetOr(*target))
+		emitSelfUpdateOutcome(outcomeCheckOnly, installTargetOr(*target), fmt.Sprintf("%s/%s", verdict, skew.Verdict))
 		return
 	}
 	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry).
 	proceed := selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict)
 	if !proceed {
+		emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skew.Verdict), installTargetOr(*target), fmt.Sprintf("%s", skew.Verdict))
 		switch {
 		case fleetTarget:
 			fmt.Println("self-update: target already current — nothing to do.")
@@ -134,6 +139,7 @@ func cmdSelfUpdate(argv []string) {
 	if lerr != nil {
 		if lerr == selfinstall.ErrBusy {
 			fmt.Println("self-update: another self-update is already building — skipping this run.")
+			emitSelfUpdateOutcome(outcomeBusy, installTarget, "single-flight lock held")
 			return
 		}
 		fmt.Fprintln(os.Stderr, "self-update: lock error:", lerr)
@@ -179,6 +185,7 @@ func cmdSelfUpdate(argv []string) {
 	_, cleanup, perr := selfinstall.PrepareOrigin(ctx, selfinstall.RealRunner, repoRoot, "origin/main", buildDir)
 	if perr != nil {
 		fmt.Fprintln(os.Stderr, "self-update:", perr)
+		emitSelfUpdateOutcome(outcomePrepareFailed, installTarget, perr.Error())
 		os.Exit(1)
 	}
 	defer cleanup()
@@ -190,8 +197,157 @@ func cmdSelfUpdate(argv []string) {
 	})
 	fmt.Println(selfinstall.FormatResult(res))
 	if !res.Installed {
+		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, string(res.Stage)+": "+res.Detail)
 		os.Exit(1)
 	}
+
+	// Converge the SIBLING binaries too. --target is ONE path; a real host runs several fak
+	// binaries and the fleet does not load the one this flag names:
+	//
+	//   - the INVOKER (os.Executable()). Under the scheduled task this is an absolute path
+	//     captured at REGISTRATION time, so its build is frozen at whatever was on disk that
+	//     day while --target advances every tick. Every later fix to self-update itself is
+	//     then dead code on the host, because the updater that actually runs is the frozen one.
+	//   - <root>/tools/.bin/fak[.exe] — the in-tree path tools/dispatch_worker.py
+	//     resolve_fak_bin prefers ahead of PATH when building every worker's `fak guard --`
+	//     argv. While that file exists, PATH is never consulted, so converging only a PATH
+	//     binary leaves every dispatched worker on the stale in-tree one.
+	//
+	// Neither is refreshed by anything else on the host, and the omission is invisible: the
+	// tick still exits 0, because from --target's point of view everything worked.
+	//
+	// We already hold the single-flight lock and already have a gated origin/main worktree, so
+	// each extra convergence costs one cache-warm rebuild and reuses the SAME build->vet->smoke
+	// ladder. A non-green tree still installs nothing.
+	stragglers := []string{}
+	if fleetTarget && convergeSiblings(selfStamp, headRev) {
+		for _, sib := range selfUpdateSiblings(repoRoot, installTarget) {
+			fmt.Printf("self-update: sibling %s is not converged by anything else — converging it too …\n", sib)
+			sres := selfinstall.Install(ctx, selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
+				RepoRoot: buildDir,
+				Target:   sib,
+			})
+			fmt.Println("self-update: sibling " + filepath.Base(sib) + " — " + selfinstall.FormatResult(sres))
+			if !sres.Installed {
+				stragglers = append(stragglers, sib+" ("+string(sres.Stage)+": "+sres.Detail+")")
+			}
+		}
+	}
+	if len(stragglers) > 0 {
+		// --target DID land, so this is not a failed build — but a host where the fleet's own
+		// binary stayed behind is exactly the silent staleness above. Name it and exit non-zero
+		// rather than reporting success for a half-converged host.
+		emitSelfUpdateOutcome(outcomeSiblingStale, installTarget, "not converged: "+strings.Join(stragglers, "; "))
+		os.Exit(1)
+	}
+	emitSelfUpdateOutcome(outcomeInstalled, installTarget, res.Detail)
+}
+
+// selfUpdateSiblings lists the OTHER fak binaries on this host that a fleet consumer resolves
+// but no updater targets: the binary running this command, and the in-tree
+// <root>/tools/.bin/fak[.exe] that dispatch_worker.resolve_fak_bin prefers ahead of PATH.
+// Paths that do not exist are skipped (we converge binaries, never create new install
+// locations), as is anything equal to the primary target. Order is stable and deduped
+// case-insensitively so a Windows host does not swap the same file twice.
+func selfUpdateSiblings(repoRoot, target string) []string {
+	cands := []string{}
+	if exe, err := os.Executable(); err == nil {
+		cands = append(cands, exe)
+	}
+	if r := strings.TrimSpace(repoRoot); r != "" {
+		cands = append(cands,
+			filepath.Join(r, "tools", ".bin", "fak"+exeSuffix()),
+		)
+	}
+	seen := map[string]bool{}
+	if abs, err := filepath.Abs(filepath.Clean(target)); err == nil {
+		seen[strings.ToLower(abs)] = true
+	}
+	out := []string{}
+	for _, c := range cands {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		abs, err := filepath.Abs(filepath.Clean(c))
+		if err != nil {
+			continue
+		}
+		key := strings.ToLower(abs)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if st, err := os.Stat(abs); err != nil || st.IsDir() {
+			continue // converge only binaries that already exist; never create a new install
+		}
+		out = append(out, abs)
+	}
+	return out
+}
+
+// selfUpdateOutcome is the closed vocabulary of self-update tick outcomes.
+//
+// The scheduler observes ONLY the process exit code, and rc=0 is identical for "installed a
+// fresh build", "target already current", "another build was in flight", and "--check". So a
+// host whose binary has not advanced in nine hours is indistinguishable from one that is
+// perfectly converged — the success code is decoupled from whether an update happened. Every
+// exit path therefore emits exactly one greppable `self-update: outcome=<cause>` line, so the
+// tick leaves a durable, machine-readable record of WHICH of those four things it did.
+type selfUpdateOutcome string
+
+const (
+	outcomeInstalled     selfUpdateOutcome = "installed"      // target swapped to a fresh gated build
+	outcomeTargetCurrent selfUpdateOutcome = "target-current" // --target already at origin/main
+	outcomeSelfFresh     selfUpdateOutcome = "self-fresh"     // SELF mode, running binary is trunk tip
+	outcomeSelfAhead     selfUpdateOutcome = "self-ahead"     // SELF mode, local build newer than trunk
+	outcomeSelfLocal     selfUpdateOutcome = "self-local"     // SELF mode, dirty/unstamped/diverged
+	outcomeSelfUnknown   selfUpdateOutcome = "self-unknown"   // SELF mode, freshness unresolvable
+	outcomeBusy          selfUpdateOutcome = "busy"           // single-flight lock held by a live build
+	outcomeCheckOnly     selfUpdateOutcome = "check-only"     // --check reported and exited
+	outcomeGateFailed    selfUpdateOutcome = "gate-failed"    // build/vet/smoke/swap refused the candidate
+	outcomePrepareFailed selfUpdateOutcome = "prepare-failed" // could not stage the origin/main worktree
+	outcomeSiblingStale  selfUpdateOutcome = "sibling-stale"  // --target landed, a fleet-loaded sibling did not
+)
+
+// emitSelfUpdateOutcome prints the single machine-readable outcome line for this tick. It
+// carries its own UTC timestamp so the record is self-describing wherever it is captured — the
+// scheduler's "Last Result" is one overwritten integer with no history, so a tick that leaves
+// only an exit code cannot answer "when did the fleet binary last actually advance?".
+func emitSelfUpdateOutcome(cause selfUpdateOutcome, target, detail string) {
+	line := fmt.Sprintf("self-update: at=%s outcome=%s target=%s",
+		time.Now().UTC().Format(time.RFC3339), cause, target)
+	if d := strings.TrimSpace(detail); d != "" {
+		line += " detail=" + strconv.Quote(d)
+	}
+	fmt.Println(line)
+}
+
+// selfUpdateSkipOutcome names WHY a tick decided not to build, mirroring the branches of the
+// message switch so the greppable outcome and the human sentence can never drift apart.
+func selfUpdateSkipOutcome(fleetTarget bool, skew versionskew.Verdict) selfUpdateOutcome {
+	if fleetTarget {
+		return outcomeTargetCurrent
+	}
+	switch skew {
+	case versionskew.Ahead:
+		return outcomeSelfAhead
+	case versionskew.Fresh:
+		return outcomeSelfFresh
+	case versionskew.Dirty, versionskew.Unstamped, versionskew.Diverged:
+		return outcomeSelfLocal
+	default:
+		return outcomeSelfUnknown
+	}
+}
+
+// convergeSiblings reports whether the sibling binaries must ALSO be swapped after a fleet-mode
+// install. It consults the INVOKER's own stamp (never --target's, which we just refreshed), and
+// demands proof of freshness to skip: anything short of binstamp.Fresh — including an
+// unresolvable Unknown — converges, because a fleet binary that cannot prove it is current is
+// exactly the silent staleness this exists to end.
+func convergeSiblings(selfStamp binstamp.Stamp, head string) bool {
+	return binstamp.Compare(selfStamp, head) != binstamp.Fresh
 }
 
 // selfUpdateShouldBuild decides whether self-update proceeds to build+gate+install. The two
