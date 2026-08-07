@@ -3973,6 +3973,41 @@ NO_COMMIT_MISSING_LOG = "missing_log_artifact"
 NO_COMMIT_RESTART_EXHAUSTED = "restart_exhausted"
 NO_COMMIT_UNKNOWN = "unknown"
 
+# --- residual-bucket split (#5870, closing the #5867/#5869 seam) ------------
+# The three classes below replace the bare ``unknown`` fall-through. They are NOT new
+# analysis: internal/dispatchconservation already DERIVES exactly these at READ time
+# (refineUnknownNoCommit, #5867) by re-reading the same 4 KiB log tail this function
+# already holds -- but only for the reader's own report. Everything that routes off the
+# SIDECAR (`reblock_streak_held_records`, `held_no_commit_issues`, dispatch_status)
+# still saw an untyped blob, because the WRITER stamped ``unknown``. Over the retained
+# corpus that blob was 1278 of 2391 .witness records. Typing at write time makes the
+# sidecar self-describing, so the reader's refinement becomes a fallback for HISTORY
+# rather than the only place the type exists.
+#
+# Vocabulary safety (the #5866 trap): these three strings are ALREADY in the Go
+# reader's ``noCommitReasons`` set -- fbdf1e9d87 added them there. So emitting them
+# here CANNOT re-create #5866, where a Python-only class fell through
+# ``if !noCommitReasons[reason] { reason = "unknown" }``. That is checked by a pin on
+# the Go side (producer_vocab_test.go) which reads THESE constants' values, so the two
+# halves cannot drift apart silently. Any FOURTH class added here needs its Go row in
+# the same commit.
+NO_COMMIT_CLEAN_EXIT = "clean_exit_no_commit"
+NO_COMMIT_DIED_BEFORE_EPILOGUE = "died_before_epilogue"
+NO_COMMIT_GUARD_SPAWN_FAILED = "guard_child_spawn_failed"
+
+# The guard exit summary's SECTION RULE -- ``guardSection`` in
+# cmd/fak/guard_format_layout.go renders ``── guard · <name> ──…`` once per section, so
+# its presence in the tail proves the guard reached its epilogue and the session ended
+# NORMALLY. Deliberately the section rule and not the ``guard · cache window`` section:
+# that one is emitted only when the session recorded cache turns
+# (``if turns <= 0`` in cmd/fak/guard_child_supervision.go), and #5867 measured it
+# finding 0 of 69 auth_wall runs whose epilogue the section rule finds 69/69.
+_GUARD_EPILOGUE_MARKER = "── guard · "
+# ``fak guard: could not run %q: %v`` (cmd/fak/guard_child_supervision.go) -- the guard
+# never exec'd the agent at all. Checked FIRST because such a run ALSO prints a partial
+# epilogue, and "the child never started" is the more specific, more fixable statement.
+_GUARD_CHILD_SPAWN_FAILED_MARKER = "fak guard: could not run"
+
 # An opencode/glm worker that prints only its startup banner ("> build · glm-…") and
 # exits — the documented banner-only no-op (#1275).
 _NOOP_BANNER_RE = re.compile(r">\s*build\s*[·:]", re.IGNORECASE)
@@ -4009,14 +4044,49 @@ def classify_restart_exhaustion(log: Path) -> dict | None:
             "dominant_cause": match.group("cause")}
 
 
+def refine_unknown_no_commit(tail: str) -> str:
+    """Name the residual no-commit -- the runs that match no failure SIGNATURE -- from
+    what the guard epilogue in ``tail`` shows about HOW the session ended (#5870).
+
+    This is the write-time twin of ``refineUnknownNoCommit`` in
+    internal/dispatchconservation (#5867); both read the same 4 KiB tail and apply the
+    same two markers in the same order, so a sidecar stamped here and a sidecar refined
+    there name the same run identically. Three outcomes, and they are genuinely
+    different work items:
+
+    * ``guard_child_spawn_failed`` -- the guard could not exec the agent. A mechanical
+      host/config fault, not an agent outcome, and not a verdict on the issue.
+    * ``clean_exit_no_commit`` -- the guard wrote its epilogue, so the session ENDED
+      NORMALLY and simply landed nothing. This is the one that is a verdict on the
+      attempt: same wall-clock as a winning run, nothing to show. Repeats of it are
+      what the #5869 re-block streak hold exists to stop paying for.
+    * ``died_before_epilogue`` -- no epilogue at all; the worker was killed mid-turn.
+      Actionable as supervision/retention only. Never a statement about the issue, so
+      a repeat of it must NOT be read as "this issue re-blocks identically".
+
+    Total on the residual: every no-commit now carries a type. FAIL-OPEN by
+    construction -- an empty tail (unreadable log) yields ``died_before_epilogue``,
+    which is the honest reading of "no exit evidence was ever written"."""
+    if _GUARD_CHILD_SPAWN_FAILED_MARKER in tail:
+        return NO_COMMIT_GUARD_SPAWN_FAILED
+    if _GUARD_EPILOGUE_MARKER in tail:
+        return NO_COMMIT_CLEAN_EXIT
+    return NO_COMMIT_DIED_BEFORE_EPILOGUE
+
+
 def classify_no_commit_reason(log: Path) -> str:
     """Why did a finished worker land no resolving commit? Classify from the log TAIL
     (the guard summary + final turn live at the end) so the witness records a
     STRUCTURED reason rather than an opaque CLAIM_NO_COMMIT. Lets an anti-churn picker
     tell a re-blockable guard refusal (self_modify / policy_block) from a transient
     wall (auth_wall) or a DOA backend (banner_noop). Pure + FAIL-OPEN: a missing log
-    artifact gets a typed missing_log_artifact reason; no recognized signature stays
-    UNKNOWN (never a false positive)."""
+    artifact gets a typed missing_log_artifact reason.
+
+    The residual -- a run matching no failure signature -- is no longer stamped a bare
+    ``unknown``: :func:`refine_unknown_no_commit` splits it by the guard epilogue the
+    same tail already carries (#5870). ``unknown`` therefore survives only in HISTORIC
+    sidecars, which keeps it meaningful: a fresh ``unknown`` reaching a reader now means
+    a writer this vocabulary has never heard of, not "we did not look"."""
     try:
         if not log.exists():
             return NO_COMMIT_MISSING_LOG
@@ -4043,7 +4113,7 @@ def classify_no_commit_reason(log: Path) -> str:
         small = False
     if small and _NOOP_BANNER_RE.search(tail):
         return NO_COMMIT_BANNER_NOOP
-    return NO_COMMIT_UNKNOWN
+    return refine_unknown_no_commit(tail)
 
 
 # --- SPAWN_FAILED cause attribution (#2635) --------------------------------

@@ -5306,7 +5306,10 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         # carries real turns — it must NOT be misread as a banner no-op.
         big = "> build · glm-5.2\n" + ("fak-turn trace=guard ok saved=80k tok\n" * 200)
         p = self._write(big)
-        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+        # No banner no-op, and (#5870) no bare `unknown` either: the tail carries no
+        # guard epilogue, so the run reads as killed mid-turn.
+        self.assertEqual(mod.classify_no_commit_reason(p),
+                         mod.NO_COMMIT_DIED_BEFORE_EPILOGUE)
 
     def test_restart_exhausted_is_typed_with_count_and_cause(self) -> None:
         mod = load()
@@ -5340,10 +5343,16 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         self.assertEqual(mod.classify_no_commit_reason(p),
                          mod.NO_COMMIT_RESTART_EXHAUSTED)
 
-    def test_unknown_when_no_signature(self) -> None:
+    def test_residual_with_no_signature_is_typed_not_unknown(self) -> None:
         mod = load()
+        # #5870: the residual is no longer a bare `unknown`. This log matches no
+        # failure signature AND carries no guard epilogue -> died_before_epilogue.
         p = self._write("the worker ran a few turns and then exited cleanly\n")
-        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+        # Asserted with the PRE-EXISTING constant first, so this fails as a
+        # wrong-behavior assertion on the old sweep, not merely as a missing symbol.
+        self.assertNotEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+        self.assertEqual(mod.classify_no_commit_reason(p),
+                         mod.NO_COMMIT_DIED_BEFORE_EPILOGUE)
 
     def test_missing_log_artifact(self) -> None:
         import tempfile
@@ -5359,6 +5368,86 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         # also present (the guard refusal is the actionable cause).
         p = self._write("> build · glm-5.2\n...\nreason=SELF_MODIFY\n")
         self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_SELF_MODIFY)
+
+
+class RefineUnknownNoCommitTest(unittest.TestCase):
+    """The residual no-commit bucket is TYPED AT WRITE TIME (#5870), by the same two
+    markers internal/dispatchconservation applies at read time (#5867), so the .witness
+    sidecar the dispatcher routes off is self-describing instead of an opaque blob."""
+
+    # `guardSection` (cmd/fak/guard_format_layout.go) pads the rule to 60 columns.
+    def _section(self, name: str) -> str:
+        head = "── guard · " + name + " "
+        return head + "─" * max(0, 60 - len(head)) + "\n"
+
+    def test_guard_epilogue_means_clean_exit(self) -> None:
+        mod = load()
+        tail = ("fak-turn trace=guard ok\n" + self._section("audit")
+                + "  refused                    0\n")
+        self.assertEqual(mod.refine_unknown_no_commit(tail),
+                         mod.NO_COMMIT_CLEAN_EXIT)
+
+    def test_epilogue_without_a_cache_window_section_still_counts(self) -> None:
+        mod = load()
+        # THE #5867 LESSON, pinned. `guard · cache window` is emitted only when the
+        # session recorded cache turns, so keying on it books a quiet clean exit as a
+        # death. Keying on the SECTION RULE has no such blind spot: an epilogue whose
+        # only section is `audit` is still an epilogue.
+        tail = self._section("audit") + "  refused                    0\n"
+        self.assertNotIn("cache window", tail)
+        self.assertEqual(mod.refine_unknown_no_commit(tail),
+                         mod.NO_COMMIT_CLEAN_EXIT)
+
+    def test_no_epilogue_means_died_before_epilogue(self) -> None:
+        mod = load()
+        tail = "fak-turn trace=e3f9 in-flight saved=12k tok\n"
+        self.assertEqual(mod.refine_unknown_no_commit(tail),
+                         mod.NO_COMMIT_DIED_BEFORE_EPILOGUE)
+
+    def test_spawn_failure_wins_over_a_partial_epilogue(self) -> None:
+        mod = load()
+        # A guard that could not exec the agent ALSO prints a partial epilogue, and
+        # "the child never started" is the more specific — and more fixable — claim.
+        tail = (self._section("audit")
+                + 'fak guard: could not run "claude": exec: not found\n')
+        self.assertEqual(mod.refine_unknown_no_commit(tail),
+                         mod.NO_COMMIT_GUARD_SPAWN_FAILED)
+
+    def test_empty_tail_fails_open_to_died_before_epilogue(self) -> None:
+        mod = load()
+        self.assertEqual(mod.refine_unknown_no_commit(""),
+                         mod.NO_COMMIT_DIED_BEFORE_EPILOGUE)
+
+    def test_classifier_never_returns_a_bare_unknown(self) -> None:
+        mod = load()
+        # The writer's vocabulary is now total over the residual: `unknown` survives
+        # only in HISTORIC sidecars, which is what keeps it meaningful as a
+        # vocabulary-drift alarm on the reading side.
+        self.assertNotIn(mod.NO_COMMIT_UNKNOWN, {
+            mod.refine_unknown_no_commit(t) for t in
+            ("", "nothing here\n", self._section("audit"),
+             "fak guard: could not run \"x\": e\n")})
+
+    def test_refined_classes_are_not_added_to_the_reblock_hold_set(self) -> None:
+        mod = load()
+        # MEASURED DECISION, pinned so it is not "fixed" by assumption. #5869 predicted
+        # that typing this bucket would lift its re-block streak hold from 6 runs/1.5h
+        # to 24 runs/7.3h "with no change here". Replaying the same window (2026-08-04
+        # .. 08-07, 293 finished .witness records / 95.3h over 121 issues) against the
+        # typed sidecars: with the hold set UNCHANGED the yield is bit-identical — 6
+        # runs / 1.5h, the same six runs — because a `clean_exit_no_commit` streak is
+        # not a streak of a re-blockable reason. Adding clean_exit_no_commit here DOES
+        # reach 33 runs / 10.9h, but it suppresses SIX runs that landed a witnessed
+        # commit (62b998c75, 9f1558700, 0573fbe1d, b6a80c576, b4d656107, 0d0255ad8),
+        # destroying the zero-witnessed-loss property that is #5869's whole safety
+        # argument. A clean exit that lands nothing is not a refusal to re-block on.
+        for reason in (mod.NO_COMMIT_CLEAN_EXIT, mod.NO_COMMIT_DIED_BEFORE_EPILOGUE,
+                       mod.NO_COMMIT_GUARD_SPAWN_FAILED):
+            self.assertNotIn(reason, mod._HOLD_NO_COMMIT_REASONS)
+        self.assertEqual(mod.held_no_commit_issues({"no_commit": [
+            {"issue": 11, "reason": mod.NO_COMMIT_CLEAN_EXIT},
+            {"issue": 22, "reason": mod.NO_COMMIT_DIED_BEFORE_EPILOGUE},
+            {"issue": 33, "reason": mod.NO_COMMIT_GUARD_SPAWN_FAILED}]}), set())
 
 
 class HeldNoCommitIssuesTest(unittest.TestCase):
