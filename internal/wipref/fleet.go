@@ -146,13 +146,16 @@ func (p PublishPlan) Gated() bool { return p.MetadataOnly > 0 }
 // is byte-stable across runs and two clones' ledgers diff cleanly. A record whose session
 // is not one safe ref segment, or that carries no object, is DROPPED rather than smuggled
 // into a refspec — the same rule wipWriteMirror holds.
+//
+// The session is taken from the REF NAME and never from the stamp, unlike every READ path
+// in this package. A read wants the identity the capture declared; a push can only send
+// refs that exist, and a stamp whose SessionID disagrees with the ref it sits on would
+// otherwise produce a refspec naming a ref git does not have. Same reason wipWriteMirror
+// keys its mirror entries off the ref.
 func PlanPublish(recs []RefRecord, maxDeltaBytes int64) PublishPlan {
 	plan := PublishPlan{MaxDeltaBytes: maxDeltaBytes, Entries: []PublishEntry{}}
 	for _, r := range recs {
-		sess := r.Stamp.SessionID
-		if sess == "" {
-			sess = SessionFromRef(r.Ref)
-		}
+		sess := SessionFromRef(r.Ref)
 		if !ValidSession(sess) || r.Object == "" {
 			continue
 		}
