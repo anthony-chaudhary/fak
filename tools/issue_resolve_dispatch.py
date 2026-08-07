@@ -236,17 +236,53 @@ _COLLISION_HOLD_LEDGER = "collision-holds.jsonl"
 # terminal (N=1) suppresses 2-8 real commits at every TTL in the window. What IS
 # predictive is REPETITION -- the last N attempts hit the SAME terminal with nothing
 # changed between them. Replaying the window: N=2 suppresses 6 runs / 1.5h and loses
-# ZERO witnessed commits for any TTL in [3h, 8h]; at TTL>=9h it starts eating #3267's
-# 08-07 00:33 win, which landed 5.3h after that issue's last block. 6h sits inside
-# that zero-loss band with margin on both sides, and it is what makes the hold
-# self-clearing: it does not decide the issue is dead, it admits ONE probe per window
-# and lets the PROBE'S OUTCOME clear or re-arm the hold. Yield is deliberately modest
+# ZERO witnessed commits at every TTL below 7.0h.
+#
+# The TTL was re-derived at 0.1h resolution over the WHOLE retained corpus (2396
+# .witness records / 313 issues; every armed 2-streak in it falls in the 08-04+
+# current-fleet window, so the window IS the signal and the pre-outage and outage
+# slices arm no streak at all). Three things that derivation corrects, because the
+# first cut of this constant shipped on a mis-read of them:
+#
+#   * The boundary is 7.0h EXACTLY, so a 6h default carried 1.0h of margin, not the
+#     0.4h the second reading reported. #4568's f34f02f84 -- the commit that reading
+#     blamed -- launched 2.69h and landed 2.85h after that issue's last block, not
+#     6.4h.
+#   * The boundary is NOT set by a late lander. It is a SUPPRESSION CASCADE: at
+#     TTL>=7.0h the hold eats #4568's untyped `unknown` run at 08-07 00:30 (6.97h
+#     after the policy_block at 08-06 17:32), and deleting that run from the trace
+#     re-forms a [policy_block, policy_block] tail that never existed in reality --
+#     which then eats the 06:52 win. The number that sets the band is a block-to-
+#     UNRELATED-run gap, so reading the block-to-win distribution alone (a clean void
+#     between 2.69h and 9.33h) does NOT find it. This is also why raising N does not
+#     buy safety: N=3 loses that same win from TTL=4h.
+#   * Loss is NON-MONOTONE in the TTL -- N=2 is lossless again across [12.3h, 13.3h]
+#     -- because suppression rewrites the streak structure downstream of itself. A
+#     "zero-loss band [a,b]" is therefore the wrong shape to quote; the only
+#     defensible statistic is the largest TTL below which nothing is lost anywhere.
+#
+# 5h is that value minus a deliberate 2.0h margin, and on this corpus it is FREE: the
+# suppression yield is flat at 6 runs / 1.5h across the whole plateau [4.4h, 6.2h], so
+# 6h -> 5h suppresses exactly as much while doubling the distance to the first loss.
+# The forward cost is the tail it gives up: of the 32 re-dispatches that FOLLOW a
+# re-blockable block, 28 arrive inside 4h (median 3.28h, p90 4.55h) and just 1 (3.1%)
+# lands in the (5h, 6h] band a 6h TTL would still have caught.
+#
+# The TTL is also what makes the hold self-clearing: it does not decide the issue is
+# dead, it admits ONE probe per window and lets that PROBE'S OUTCOME clear or re-arm
+# the hold -- 5h still clears a full window ahead of the 3.28h median re-dispatch
+# cadence, so the probe stays reachable. Yield is deliberately modest
 # because consecutive-identical streaks are rare while the `unknown` bucket stays
 # untyped (149/232 no-commit runs, 49.7h -- #5867): `policy_block -> unknown` (13)
 # outnumbers `policy_block -> policy_block` (8). Typing that bucket raises this same
 # rule's yield to 24 runs / 7.3h with no change here. Set either to 0 to disable.
 DEFAULT_REBLOCK_STREAK_HOLD_N = 2
-DEFAULT_REBLOCK_STREAK_HOLD_TTL_H = 6
+DEFAULT_REBLOCK_STREAK_HOLD_TTL_H = 5
+# The measured TTL at which the replay first destroys a witnessed commit (see above).
+# Kept as a named constant so the margin between it and the shipped default is a
+# testable invariant rather than a claim in a comment that drifts off the data.
+REBLOCK_STREAK_FIRST_LOSS_TTL_H = 7.0
+REBLOCK_STREAK_MIN_TTL_MARGIN_H = 1.5
 # Low-yield lane soft-exclude (#2062): a lane whose recent resolve sessions burned
 # turns yet closed nothing is a poison-pill sink (e.g. a GPU-less host re-grabbing a
 # P1 GPU epic it structurally cannot run). The shared lane_yield fold flags it; the

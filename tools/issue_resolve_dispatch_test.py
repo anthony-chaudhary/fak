@@ -7504,6 +7504,98 @@ class ReblockStreakHoldTest(unittest.TestCase):
             self.assertEqual(
                 mod.reblock_streak_held_issues(runs, now_ts=lapsed + 180), set())
 
+    # ---- #5869 follow-up: the TTL margin, re-derived over the whole corpus --------
+    #
+    # The real 10-run trace of #4568 (UTC launch stamps), the ONLY trace in the 2396
+    # -record corpus that sets the zero-witnessed-loss boundary. Its 06:52 win is
+    # f34f02f84; the load-bearing gap is 17:32 -> 00:30 = 6.97h, between a block and
+    # an UNRELATED untyped run.
+    _T4568 = [
+        ("08-06 02:30", "unknown"), ("08-06 04:56", "policy_block"),
+        ("08-06 07:44", "unknown"), ("08-06 11:01", "self_modify"),
+        ("08-06 14:00", "policy_block"), ("08-06 17:32", "policy_block"),
+        ("08-06 20:49", "policy_block"), ("08-07 00:30", "unknown"),
+        ("08-07 04:10", "policy_block"), ("08-07 06:52", None),
+    ]
+
+    @staticmethod
+    def _utc(label: str) -> float:
+        import datetime as dt
+        return dt.datetime.strptime("2026-" + label, "%Y-%m-%d %H:%M").replace(
+            tzinfo=dt.timezone.utc).timestamp()
+
+    def _replay(self, mod, trace, issue: int, ttl_h: float) -> list[str]:
+        """Counterfactual replay of ``trace`` under a ``ttl_h`` hold, driven by the
+        REAL gate rather than a re-implementation of it: at each launch instant the
+        picker sees only the sidecars of the runs that were not suppressed upstream,
+        which is what makes the cascade visible. Returns the SUPPRESSED labels."""
+        suppressed: list[str] = []
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for label, reason in trace:
+                ts = self._utc(label)
+                held = mod.reblock_streak_held_issues(runs, ttl_h=ttl_h, now_ts=ts)
+                if issue in held:
+                    suppressed.append(label)
+                    continue
+                if reason is None:
+                    self._witness(runs, issue, ts, claim="CLAIM_WITNESSED")
+                else:
+                    self._witness(runs, issue, ts, reason=reason)
+        return suppressed
+
+    def test_default_ttl_keeps_a_margin_under_the_measured_first_loss(self):
+        """The shipped TTL must sit a stated distance BELOW the replayed boundary.
+
+        This is the invariant the first cut of the constant lacked: it was justified
+        by a quoted "band", and a band cannot be re-checked when the corpus moves.
+        Naming the boundary and the margin makes the justification executable."""
+        mod = load()
+        self.assertLessEqual(
+            mod.DEFAULT_REBLOCK_STREAK_HOLD_TTL_H
+            + mod.REBLOCK_STREAK_MIN_TTL_MARGIN_H,
+            mod.REBLOCK_STREAK_FIRST_LOSS_TTL_H,
+            "the default TTL must stay at least "
+            f"{mod.REBLOCK_STREAK_MIN_TTL_MARGIN_H}h under the measured "
+            f"{mod.REBLOCK_STREAK_FIRST_LOSS_TTL_H}h first-loss boundary")
+
+    def test_boundary_is_a_suppression_cascade_not_a_late_lander(self):
+        """Pins the mechanism, because the mechanism is what was mis-read.
+
+        At the measured boundary the hold does NOT eat the win by out-waiting it: the
+        win launches 2.7h after that issue's last block, well inside ANY TTL here.
+        It eats an untyped `unknown` 6.97h downstream of an EARLIER block, and only
+        the DELETION of that run re-forms a [policy_block, policy_block] tail that
+        never existed in the real trace. That is why reading the block-to-win
+        distribution alone (nothing between 2.69h and 9.33h) cannot find this."""
+        mod = load()
+        at_boundary = self._replay(
+            mod, self._T4568, 4568, mod.REBLOCK_STREAK_FIRST_LOSS_TTL_H)
+        self.assertIn("08-07 00:30", at_boundary,
+                      "the cascade TRIGGER: the untyped run 6.97h after the 17:32 "
+                      "block is what a 7.0h TTL newly swallows")
+        self.assertIn("08-07 06:52", at_boundary,
+                      "and deleting it costs the f34f02f84 win — the boundary")
+        # The win is NOT a late lander: it launches 2.7h after the last block, so a
+        # hold that ate it by duration alone would have eaten it at every TTL >= 3h.
+        self.assertLess(
+            (self._utc("08-07 06:52") - self._utc("08-07 04:10")) / 3600.0, 3.0)
+
+    def test_shipped_default_loses_nothing_on_the_boundary_trace(self):
+        """Fail-safe direction: at the SHIPPED TTL the same real trace keeps its win,
+        and it keeps the cascade trigger too — the margin is margin in the mechanism,
+        not just in the number."""
+        mod = load()
+        at_default = self._replay(
+            mod, self._T4568, 4568, mod.DEFAULT_REBLOCK_STREAK_HOLD_TTL_H)
+        self.assertNotIn("08-07 06:52", at_default,
+                         "the shipped default must not destroy f34f02f84")
+        self.assertNotIn("08-07 00:30", at_default,
+                         "nor arm the cascade that destroys it")
+        # It is still a HOLD, not a no-op: the repeat 3.3h after the 14:00/17:32
+        # streak is exactly the futile re-dispatch the gate exists to refuse.
+        self.assertIn("08-06 20:49", at_default)
+
     def test_updated_at_bump_and_kill_switches(self):
         """A guard refusal is a verdict on what the ISSUE ASKED FOR, so a re-scope
         (fresh gh ``updatedAt``) genuinely changes it and re-admits early — the same
