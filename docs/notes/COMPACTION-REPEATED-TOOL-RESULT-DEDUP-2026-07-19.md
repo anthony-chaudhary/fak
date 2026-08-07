@@ -11,6 +11,15 @@ Status: MECHANISM DECIDED (this note = DoD item 1 of
 the DoD specifies it** — the corpus-provenance check below measured why, and it is the
 one result in this note that changes what #5254 can claim.
 
+**2026-08-06 update.** The `--guarded-only` provenance filter this note named as the
+remaining blocker on item 3 now exists (`internal/session/compactaudit_provenance.go`,
+`fak session compact-audit --guarded-only`), and the retargeted witness was run:
+`internal/session/testdata/compactaudit/guarded-cohort-witness-2026-08-06.md`. Item 3
+is still **not** satisfied, but the blocker has moved from a missing capability to a
+missing population — only **2** fak-guarded Codex sessions exist since the port landed
+(2026-07-27), and they carry **0** compaction fires, so no post-port window is
+measurable. See "Retargeted witness" below for what the run did and did not license.
+
 Child of [#4768](https://github.com/anthony-chaudhary/fak/issues/4768)
 (attribution parent), grandchild of #4763. Sibling classes stay where they are:
 `compaction_summary` with #3071, cache-creation pricing with #2785.
@@ -178,6 +187,26 @@ have today: a provenance filter (e.g. `--guarded-only`, joining
 `~/.codex/fak-guarded-sessions/*.json`). That filter — not the port — is the remaining
 blocker on item 3, and it is a `session`-lane change, not an `agent`-lane one.
 
+**BUILT AND RUN (2026-08-06).** `--guarded-only` / `--guard-witness-dir` landed on
+`fak session compact-audit`; the sweep fails closed when the ledger is absent or empty,
+because an empty guarded cohort renders identically to "the class is gone". Full numbers:
+`internal/session/testdata/compactaudit/guarded-cohort-witness-2026-08-06.md`. Three
+results, none of them the reduction the DoD asked for:
+
+1. The mixed-provenance problem is confirmed at scale: **122 of 3,206** rollouts (3.8%)
+   join the ledger, stable against this note's 120/2,448 (4.9%) on a smaller slice.
+2. The corpus-wide headline reproduces (`REPEATED_TOOL_RESULT` 300/1,587 = 18.90%;
+   `tool_result/shell_command` 67.6% of regrowth bytes), so the class is not shrinking
+   on the box as a whole.
+3. The guarded cohort carries 2.80% (3/107) vs bare 20.07% (297/1,480) — but **154 of
+   158** ledger records predate the port, so that gap is *pre-port*, and the guarded
+   cohort is unmatched (0/107 windows rebounded; all 107 are censored). Observation-length
+   skew and a real fak effect are not separable from this run.
+
+Post-port (`--guarded-only --since 2026-07-28`): **2 guarded rollouts, 0 fires, no
+regrowth block**. Item 3 is blocked on accumulating guarded sessions that fire
+compaction, not on tooling.
+
 The unit-level witness that DID land with the port, in
 `internal/agent/message_elide_crossturn_test.go`: a decoded-path prefix-monotonicity test
 (the review-worthy risk above, asserted directly rather than inherited) plus a fixture
@@ -193,26 +222,34 @@ acceptance is a **dogfood / default-exposure proof**, which is precisely what
 compatibility policy, or cross-generation dependency is required; the wire ABI is
 untouched (the pointer is in-band text inside an existing string field).
 
-- **Promotion evidence** (→ `gen/now`): a `compact-audit` re-run **scoped to the guard
-  witness ledger** showing `REPEATED_TOOL_RESULT` window share and `tool_result/*`
-  `dup_bytes` down on guarded sessions created after the port, with no accuracy
-  regression. Blocked on the `--guarded-only` provenance filter, not on the port.
-- **Demotion / retirement evidence**: if the scoped re-run shows the class already
-  suppressed on fak-routed sessions, the child retires into #4768 as an artifact of
-  mixed-provenance measurement. If a future measurement shows guarded sessions carry a
-  materially *lower* `REPEATED_TOOL_RESULT` share than bare ones even BEFORE this port,
-  the 66% headline is a property of un-guarded Codex and the issue's framing — not just
-  its witness — retargets to a client-side seam fak does not own (`gen/second-next`).
+- **Promotion evidence** (→ `gen/now`): a `compact-audit --guarded-only` re-run showing
+  `REPEATED_TOOL_RESULT` window share and `tool_result/*` `dup_bytes` down on guarded
+  sessions created **after** the port, with no accuracy regression. The filter now
+  exists; as of 2026-08-06 the run returns 2 guarded rollouts and 0 fires since the
+  port, so promotion is blocked on population, not tooling. The concrete bar: enough
+  post-2026-07-27 guarded sessions to produce a double-digit count of post-fire windows.
+- **Demotion / retirement evidence — PARTIALLY FIRED (2026-08-06).** This note
+  pre-registered: "if a future measurement shows guarded sessions carry a materially
+  *lower* `REPEATED_TOOL_RESULT` share than bare ones even BEFORE this port, the 66%
+  headline is a property of un-guarded Codex". Measured: guarded 2.80% (3/107) vs bare
+  20.07% (297/1,480), with 154 of 158 ledger records predating the port. That is the
+  demotion branch — but it does **not** complete, because the guarded cohort is
+  unmatched (0/107 windows rebounded; median in-window growth 72,127 tokens vs the
+  corpus's 82,717 slow / 215,942 fast). Retirement into #4768 requires separating
+  observation-length skew from a real fak effect; this run cannot.
 - **Invalidating assumption — MEASURED, and it FIRED.** The load-bearing assumption was
   *that the 1,510 measured windows came from Codex sessions whose traffic crossed fak's
-  `/v1/responses` wire.* Measured above: only **120 of 2,448** corpus sessions (4.9%)
-  appear in the guard witness ledger, over 5 days of a 6-week corpus. The mechanism
-  survives (the wire gap is real and verified); the DoD's item-3 measurement does not.
-- **Still-unverified assumption** (the next one that could bite): that the guarded 120
-  are *representative* of the 2,328 un-guarded sessions. If guarded runs skew toward
-  short supervised tasks, even the scoped re-run will under-read the class. Whoever
-  builds `--guarded-only` should report guarded-vs-bare tool-call volume alongside the
-  dedup delta so a skew is visible rather than silently priced in.
+  `/v1/responses` wire.* Measured: only **120 of 2,448** corpus sessions (4.9%) appear
+  in the guard witness ledger, re-measured 2026-08-06 as **122 of 3,206** (3.8%) on the
+  whole corpus. The mechanism survives (the wire gap is real and verified); the DoD's
+  item-3 measurement does not.
+- **Still-unverified assumption — now the load-bearing one.** That the guarded cohort is
+  *representative* of the un-guarded one. The 2026-08-06 run makes the skew visible
+  rather than hypothetical: guarded windows never rebound (0/107) and start from a
+  median 92,903 pre-fire resident tokens against the corpus's 237,820. Guarded runs are
+  shorter and lighter, so any guarded-vs-bare delta under-reads the class by an unknown
+  factor. Whoever gets a post-port population must report the cohort shape (rebound
+  count, median growth, median pre-fire tokens) beside the dedup delta.
 
 ## Routing note
 
