@@ -94,6 +94,9 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 		if rule := sessionsteer.SessionStartRule(directive); rule != "" {
 			additionalContext = guardSessionStartHint + "\n\n" + rule
 		}
+		if strings.TrimSpace(os.Getenv("FAK_TOOL_WIDTH_HINT")) != "off" {
+			additionalContext += "\n\n" + sessionsteer.IndependentToolHint(true)
+		}
 	}
 	// Emit-time reframe (#3566): route the composed additionalContext through the deterministic,
 	// token-superset-safe positive-voice pass so every string fak injects at SessionStart leads

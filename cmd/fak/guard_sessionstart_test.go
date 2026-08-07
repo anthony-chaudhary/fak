@@ -445,7 +445,7 @@ func TestGuardSessionStartManagedInjectsRule(t *testing.T) {
 	}
 
 	managed := readCtx([]string{"--mode", "on", "--managed"})
-	for _, want := range []string{"fak_index_work", "managed context is ON", "CHECKPOINT", "REBUILD"} {
+	for _, want := range []string{"fak_index_work", "managed context is ON", "CHECKPOINT", "REBUILD", "TOOL_WIDTH_HINT", "independent", "dependent calls sequential"} {
 		if !strings.Contains(managed, want) {
 			t.Fatalf("managed injection missing %q: %s", want, managed)
 		}
@@ -794,4 +794,15 @@ func TestGuardSessionStartWritesNegframeJournal(t *testing.T) {
 			t.Fatalf("three session starts left %d rows, want 1 (the boundary must truncate):\n%s", n, raw)
 		}
 	})
+}
+
+func TestSessionStartBatchingPostureCanStayShadowDisabled(t *testing.T) {
+	t.Setenv("FAK_TOOL_WIDTH_HINT", "off")
+	var out, errb bytes.Buffer
+	if code := runGuardSessionStart(&out, &errb, []string{"--mode", "on", "--managed"}); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	if strings.Contains(out.String(), "TOOL_WIDTH_HINT") {
+		t.Fatalf("disabled posture injected: %s", out.String())
+	}
 }

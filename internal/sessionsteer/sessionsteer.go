@@ -264,3 +264,13 @@ func SessionStartRule(d SteerDirective) string {
 		"mcp__fak__fak_context_value (window left + step advice), mcp__fak__fak_context_spans / " +
 		"mcp__fak__fak_context_restore (recover a compacted originating task)."
 }
+
+// IndependentToolHint is the shadow-first launch-time nudge for independent tool work.
+// It is advisory only: callers opt in explicitly and no Stop/admission decision depends on it.
+func IndependentToolHint(shadow bool) string {
+	mode := "advisory"
+	if shadow {
+		mode = "shadow-advisory"
+	}
+	return "TOOL_WIDTH_HINT (" + mode + "): when two or more tool calls are independent, prefer issuing them in one assistant turn; keep dependent calls sequential. This is a latency/width optimization, never permission to skip verification or batch conflicting writes."
+}
