@@ -500,10 +500,56 @@ inflates a claim, and it reports every loss:
 from a journal and some from a hand-written summary produces a grade whose provenance
 nobody can state afterwards.
 
-**What is not shipped:** nothing yet *writes* this journal. `internal/ablate`'s
-`StubTierScorer` still grades nothing, so today the file is something you produce — from
-DOS's git witness, a judge score, or your own harness. That producer is the one piece
-standing between this ladder and traffic that moves by itself.
+### Producing the journal
+
+`fak dispatch tick --placement-evidence` writes it, from the witness sweep the dispatch
+loop already runs. The seam is **off by default** — an unconfigured tick writes no
+sidecars, adds no payload keys, and creates no journal — and switching it on turns each
+finished worker slot into one graded row:
+
+```console
+$ fak dispatch tick --placement-evidence --accounts-roster tools/model-accounts.json
+```
+
+Three facts are recorded where each one exists, because a later sweep cannot reconstruct
+any of them — labels get re-tagged, rosters get re-bound:
+
+| Field | Where it comes from | Refused when |
+| --- | --- | --- |
+| `model` | the slot's `--model` pin | unpinned — a seat-default slot is evidence about nobody |
+| `class` | the issue's `tier/*` labels (T2 → `routine`, T1 → `normal-impl`, T0/ultra → `ultra-hard`) | untagged, or a coordination label — an unknown class reads as the **T0 floor**, which is right conservatism for choosing a floor for WORK and a capability-*minting* hole read backwards to grade a MODEL |
+| `zone` | the roster's binding for that model, bound entries only | the roster does not bind it — never defaulted to `device`, since over-reporting self-hosting is the error you would act on |
+
+Provenance follows **what checked the slot**, never how it turned out:
+
+```
+the affected tests ran (GREEN or RED)  ->  verify=witness, success = GREEN
+no test run                            ->  verify=judge,   success = the diff-shape claim
+```
+
+That split is the one that matters, because `--outcomes` never merges across provenance: a
+producer that filed its successes as `witness` and its failures as `judge` would hand the
+grader a witness row that is 100% successes — every row honest, the corpus a lie, and
+nothing downstream able to tell. Both outcomes of the same check carry the same
+provenance, so a model cannot bank its greens at a rung its reds never reach.
+
+Rows land in `.dispatch-runs/turn-outcomes.jsonl`, and the tick payload reports what the
+sweep could *not* grade — `unattributed`, `unclassified`, `undated`, `unidentified` — as
+four separate numbers rather than one "skipped", because each is a different missing wire
+with a different fix, and *"the fleet ran 400 slots and graded nobody"* has an actionable
+cause where a silent zero does not.
+
+Then grade against it, with nothing hand-written anywhere in the path:
+
+```console
+$ fak route --accounts tools/model-accounts.json --place --labels work_class=routine \
+    --outcomes .dispatch-runs/turn-outcomes.jsonl --since 30d
+```
+
+The bar is still 20 witnessed attempts at 80% per (model, class), so a fleet reaches its
+first MEASURED model only once it has actually done that much of that kind of work. That
+is the intended shape: the ladder descends on what a model has been observed to do, not on
+when the seam was switched on.
 
 ### Placing against what is actually answering
 
@@ -697,10 +743,20 @@ gives every downstream consumer one predicate to attribute a token by. Witnessed
 `TestShippedExampleRosterCarriesAllThreeZones`, and — at the enforcing floor —
 `TestFleetZoneStaysRemoteAtTheFloor` plus `TestTierOneRouteMirrorAgreesWithTheFloor`.
 *Also shipped:* `Roster.Place` **chooses** a zone (see *Walking the ladder* above).
-*Deferred, and deliberately so:* nothing yet calls it on the live dispatch path, the
-serving path does not yet **record** the zone it used, and the residency floor does not
-yet treat a fleet host as inside a trust boundary. Zone-aware placement, the self-hosted
-token-fraction metric, and the escalation ladder are separate, individually reviewable
+*Also shipped, opt-in and off by default:* the dispatch loop now closes the loop on its
+own evidence — `fak dispatch tick --placement-evidence` **records** the rung and work
+class each finished slot ran under and journals its graded outcome (see *Producing the
+journal* above), and `--rung-placement` grades the roster from that journal and starts an
+unpinned worker on the cheapest rung the evidence supports. An unconfigured tick is
+byte-identical to one from before the ladder existed.
+
+*Deferred, and deliberately so:* the residency floor still treats a fleet host as
+**remote** — `ZoneFleet.SelfHosted()` is true but `OnBox()` is false, so naming the zone
+changed what fak can *attribute*, not what it *permits* (`TestFleetZoneStaysRemoteAtTheFloor`).
+Sub-agent placement is still refused rather than guessed: `PlaceSpawn` will not accept an
+empty work class, and mapping an agent type onto one needs an operator-owned declaration
+(`spawn_classes`) rather than an inference from the call site. And nothing produces a
+`--serving` liveness snapshot automatically. These are separate, individually reviewable
 changes on top of this vocabulary — not implied by it. They are tracked as
 [epic #5416](https://github.com/anthony-chaudhary/fak/issues/5416).
 
