@@ -45,7 +45,7 @@ def load_fleet_accounts():
 
 
 def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res=None,
-                 seat=None, weekly=None):
+                 seat=None, weekly=None, fak_bin=None):
     """Replace the shelling-out checks with constant synthetic results.
 
     ``host_res`` stubs the host-resource probe (#1337); the default is a roomy box
@@ -65,7 +65,13 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res
     ``{"capped": False}`` means "no cooldown active" so the pre-cooldown verdict logic
     is unchanged. Stubbing keeps evaluate() hermetic: without it the cooldown fold
     would read the real box's `.dispatch-runs/account-cap-*.json` holds into every
-    test. A test exercising the cooldown passes an explicit capped hold of its own."""
+    test. A test exercising the cooldown passes an explicit capped hold of its own.
+
+    ``fak_bin`` stubs the binary-provenance table. The default is ONE clean agreeing
+    build, so the advisory adds nothing to any verdict test. Stubbing matters twice
+    here: unstubbed, evaluate() would spawn a real ``fak version`` per resolver AND
+    append a tick to the real repo's ``.dispatch-runs/fak-bin-provenance.json``. The
+    recorder is stubbed alongside it for the same reason."""
     host = host if host is not None else {"safe": True, "flagged": 0, "flagged_names": []}
     account = account if account is not None else {
         "available": True, "tag": "worker-a", "dir": "/acct/a", "tier": 1,
@@ -82,6 +88,15 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res
     mod.host_resources = lambda: host_res
     mod.seat_check = lambda root, *, product=None: seat
     mod.weekly_cap_check = lambda root, **kw: weekly
+    fak_bin = fak_bin if fak_bin is not None else {
+        "schema": mod.FAK_BIN_PROVENANCE_SCHEMA,
+        "resolvers": {"preflight_gate": {"path": "/x/fak", "resolved": True,
+                                         "build": "deadbeef", "dirty": False,
+                                         "build_key": "1-2-fak"}},
+        "distinct_builds": 1, "builds": ["deadbeef"], "agree": True,
+        "dirty": [], "unresolved": []}
+    mod.fak_bin_provenance = lambda root, env=None, **kw: fak_bin
+    mod.record_fak_bin_provenance = lambda root, prov, **kw: None
 
 
 def run_eval(mod, **kw):
@@ -1555,6 +1570,155 @@ class WeeklyCapCooldownTest(unittest.TestCase):
         self.assertIn("weekly-cap:", text)
         self.assertIn(self.ACTIVE_UNTIL, text)  # retry window named on the status line
         self.assertIn("1h7m0s", text)
+
+
+class FakBinProvenanceTest(unittest.TestCase):
+    """Which `fak` build made this decision?
+
+    Three resolvers pick a binary on one dispatch tick under three different rules
+    (`<root>/fak.exe` for the preflight/contract gates, `<ws>/tools/.bin/fak.exe` for
+    the worker's guard front, bare PATH for the lease gate), so they agree only by
+    accident. These tests pin the MEASUREMENT, not a resolution order: nothing here
+    may change which binary any resolver picks."""
+
+    CLEAN = "0.43.0\nbuild: abc123def456\ngo: go1.26.5  windows/amd64\n"
+    DIRTY = "0.43.0\nbuild: 8af92fbdc366 +uncommitted  (committed 2026-08-07T07:37:02Z)\n"
+
+    def setUp(self) -> None:
+        self.mod = load()
+
+    def test_build_identity_reads_the_build_id_and_the_uncommitted_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            exe = Path(td) / "fak.exe"
+            exe.write_bytes(b"x" * 7)
+            clean = self.mod.fak_build_identity(exe, probe=lambda p: (self.CLEAN, None))
+            self.assertEqual(clean["build"], "abc123def456")
+            self.assertFalse(clean["dirty"])
+            self.assertEqual(clean["size"], 7)
+            # build_key is the SAME <size>-<mtime_ns>-<basename> shape as
+            # issue_resolve_dispatch.guard_build_id, so a provenance row joins
+            # against the guard-probe inventory already in .dispatch-runs.
+            self.assertTrue(clean["build_key"].startswith("7-"))
+            self.assertTrue(clean["build_key"].endswith("-fak.exe"))
+            dirty = self.mod.fak_build_identity(exe, probe=lambda p: (self.DIRTY, None))
+            self.assertTrue(dirty["dirty"])
+            self.assertEqual(dirty["build"], "8af92fbdc366")
+
+    def test_unrunnable_binary_reports_unknown_never_clean(self) -> None:
+        """An undeterminable build stays None. Coercing it to `dirty: False` would
+        report an unreviewable binary as reviewed -- the exact lie this exists to stop."""
+        with tempfile.TemporaryDirectory() as td:
+            exe = Path(td) / "fak"
+            exe.write_bytes(b"")
+            row = self.mod.fak_build_identity(exe, probe=lambda p: ("", "boom"))
+            self.assertIsNone(row["build"])
+            self.assertIsNone(row["dirty"])
+            self.assertEqual(row["error"], "boom")
+        missing = self.mod.fak_build_identity(None)
+        self.assertFalse(missing["resolved"])
+
+    def test_provenance_flags_disagreement_and_a_dirty_gate(self) -> None:
+        mod = self.mod
+        mod.fak_bin_resolutions = lambda root, env=None: {
+            "preflight_gate": "/root/fak.exe",     # -> DIRTY banner
+            "worker_guard": "/ws/tools/.bin/fak",  # -> clean banner
+            "path": None}
+        # Two distinct builds; the repo-root one is the `+uncommitted` hand-build.
+        rows = {"/root/fak.exe": {"build": "8af92fbdc366", "dirty": True,
+                                  "build_key": "10-1-fak.exe"},
+                "/ws/tools/.bin/fak": {"build": "b225bb1ca20f", "dirty": False,
+                                       "build_key": "20-1-fak"}}
+
+        def ident(path, **kw):
+            if not path:
+                return {"path": None, "resolved": False}
+            return {"path": str(path), "resolved": True, **rows[str(path)]}
+
+        prov = mod.fak_bin_provenance(ROOT, identity=ident)
+        self.assertFalse(prov["agree"])
+        self.assertEqual(prov["distinct_builds"], 2)
+        self.assertEqual(prov["dirty"], ["preflight_gate"])
+        self.assertEqual(prov["unresolved"], ["path"])
+        warns = mod.fak_bin_warnings(prov)
+        self.assertTrue(any(w.startswith("DIRTY_FAK_BIN") for w in warns))
+        self.assertTrue(any(w.startswith("FAK_BIN_DISAGREEMENT") for w in warns))
+
+    def test_one_clean_agreeing_build_is_silent(self) -> None:
+        """No warning when there is nothing to warn about -- an advisory that fires
+        every tick is an advisory nobody reads."""
+        prov = {"resolvers": {"a": {"path": "/x", "resolved": True, "build": "b",
+                                    "dirty": False, "build_key": "1-1-fak"},
+                              "b": {"path": "/y", "resolved": True, "build": "b",
+                                    "dirty": False, "build_key": "1-1-fak"}},
+                "distinct_builds": 1, "agree": True, "dirty": []}
+        self.assertEqual(self.mod.fak_bin_warnings(prov), [])
+
+    def test_record_accumulates_ticks_per_distinct_configuration(self) -> None:
+        """Keyed on the resolver->build fingerprint, so a 03:00 disagreement is still
+        answerable at 09:00 and the file stays bounded by configurations, not ticks."""
+        mod = self.mod
+        prov = {"resolvers": {"gate": {"path": "/x", "build": "b1", "dirty": True,
+                                       "build_key": "1-1-fak"}},
+                "agree": True, "dirty": ["gate"], "builds": ["b1"]}
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mod.record_fak_bin_provenance(root, prov, now="2026-08-07T01:00:00+00:00")
+            path = mod.record_fak_bin_provenance(root, prov, now="2026-08-07T02:00:00+00:00")
+            doc = json.loads(Path(path).read_text(encoding="utf-8"))
+            self.assertEqual(doc["schema"], mod.FAK_BIN_PROVENANCE_SCHEMA)
+            row = doc["gate=1-1-fak"]
+            self.assertEqual(row["ticks"], 2)
+            self.assertEqual(row["first_utc"], "2026-08-07T01:00:00+00:00")
+            self.assertEqual(row["last_utc"], "2026-08-07T02:00:00+00:00")
+            self.assertEqual(row["dirty"], ["gate"])
+            # A DIFFERENT build lands as its own key -- the old row survives.
+            prov2 = {"resolvers": {"gate": {"path": "/x", "build": "b2", "dirty": False,
+                                            "build_key": "2-2-fak"}},
+                     "agree": True, "dirty": [], "builds": ["b2"]}
+            mod.record_fak_bin_provenance(root, prov2, now="2026-08-07T03:00:00+00:00")
+            doc = json.loads(Path(path).read_text(encoding="utf-8"))
+            self.assertEqual(sorted(k for k in doc if k != "schema"),
+                             ["gate=1-1-fak", "gate=2-2-fak"])
+
+    def test_record_never_raises_on_an_unwritable_root(self) -> None:
+        """Advisory, so it fails OPEN: provenance must never be able to fail a gate."""
+        with mock.patch.object(Path, "mkdir", side_effect=OSError("nope")):
+            self.assertIsNone(self.mod.record_fak_bin_provenance(ROOT, {"resolvers": {}}))
+
+    def test_resolutions_call_the_real_resolvers_and_never_raise(self) -> None:
+        """The table CALLS each resolver rather than restating its rule, so it cannot
+        drift from what dispatch executes; a resolver that blows up degrades to None."""
+        got = self.mod.fak_bin_resolutions(ROOT, {"PATH": "", "FAK_BIN": ""})
+        self.assertEqual(sorted(got), ["path", "preflight_gate", "worker_guard"])
+
+    def test_evaluate_carries_provenance_and_a_dirty_gate_never_changes_the_verdict(self) -> None:
+        mod = self.mod
+        dirty = {"schema": mod.FAK_BIN_PROVENANCE_SCHEMA,
+                 "resolvers": {"preflight_gate": {"path": "/root/fak.exe", "resolved": True,
+                                                  "build": "8af92fbdc366", "dirty": True,
+                                                  "build_key": "1-1-fak.exe"}},
+                 "distinct_builds": 3, "builds": ["a", "b", "c"], "agree": False,
+                 "dirty": ["preflight_gate"], "unresolved": []}
+        patch_checks(mod, fak_bin=dirty)
+        payload = run_eval(mod)
+        self.assertEqual(payload["verdict"], mod.OK_VERDICT)  # advisory, not a gate
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["fak_bin"]["dirty"], ["preflight_gate"])
+        text = mod.render(payload)
+        self.assertIn("8af92fbdc366 +uncommitted", text)
+        self.assertIn("DIRTY_FAK_BIN", text)
+
+    def test_a_provenance_probe_that_explodes_leaves_the_verdict_intact(self) -> None:
+        mod = self.mod
+        patch_checks(mod)
+
+        def boom(root, env=None, **kw):
+            raise RuntimeError("probe exploded")
+
+        mod.fak_bin_provenance = boom
+        payload = run_eval(mod)
+        self.assertEqual(payload["verdict"], mod.OK_VERDICT)
+        self.assertIn("probe exploded", payload["fak_bin"]["error"])
 
 
 class _FakeCompleted:
