@@ -54,7 +54,7 @@ jobs:
       # It witnesses both provider identities and lossless config lifecycle on every
       # claimed OS family instead of relying on compile-only evidence (#5810).
       - name: launchshim acceptance (Claude + Codex)
-        run: go test ./internal/launchshim -run 'TestProviderAcceptanceMatrix|TestConcurrentSaveNeverTearsConfig|TestCanonicalCommand' -count=1
+        run: go test ./internal/launchshim -run 'TestProviderAcceptanceMatrix|TestConcurrentSaveNeverTearsConfig|TestCanonicalCommand|TestActivationLifecyclePreservesUserBytesAndConverges|TestActivationBlocksResolveShimFirst' -count=1
 
       - name: build (whole module compiles)
         run: go build ./...
