@@ -6,6 +6,7 @@
 
 ## Current authorities
 
+- Micro-context fabric contract and bounded 100/1k/10k floor (`microcontextdemo`): [`docs/research/micro-context-fabrics.md`](docs/research/micro-context-fabrics.md); captured stage witnesses: [`docs/research/README.md`](docs/research/README.md)
 - Product scope and mode choice: [`README.md`](README.md)
 - Human role map: [`START-HERE.md`](START-HERE.md)
 - Documentation by audience, job, and lifecycle, plus the exhaustive repository map: [`INDEX.md`](INDEX.md)
@@ -18,6 +19,7 @@
 - Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
+- Running that same `fak guard` seam **server-side** — a hosted harness (Claude Code / Codex / a CI runner) governed unattended in a container, with no TTY, a mounted hash-chained audit journal, a cost cap, and a supervised-restart lifecycle; the complement to the local-dev framing above and to [`docs/integrations/embed-in-your-product.md`](docs/integrations/embed-in-your-product.md) (which governs your own direct API call): [`docs/guard-server-side-client.md`](docs/guard-server-side-client.md)
 - Claude Code on your own Mac's local model (one command: `fak mac`, long form `fak claude-mac-fak`, pointing Claude Code at a Mac's own `fak serve` gateway; no model is pinned — the walkthrough's "Stand up the Mac side" sizes one to the Mac's memory; first local turn is slow and single-stream, but end-to-end and observable via the preflight panel): [`docs/fak/mac-agent-ui.md`](docs/fak/mac-agent-ui.md)
 - Shared endpoint with `fak serve`: [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md)
 - Configuration: [`docs/fak/server-config.md`](docs/fak/server-config.md)
