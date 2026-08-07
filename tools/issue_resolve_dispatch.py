@@ -5596,8 +5596,14 @@ def probe_guard_flags(fak_bin: str | Path, *, runner=None,
     captured into ``error`` rather than raised: the caller treats an errored probe as
     UNKNOWN and spawns anyway."""
     argv = [str(fak_bin), "guard", "-h", "-all"]
+    # CREATE_NO_WINDOW is mandatory, not cosmetic: this runs once per dispatcher
+    # process under headless automation, and a console-tool spawn that flashes a
+    # window is exactly what the pre-push DESKTOP_POPUP_REGRESSION gate refuses (it
+    # refused this very function's first cut). Same spread as every other helper
+    # subprocess in the dispatch path (see _git_capture).
     run = runner or (lambda a: subprocess.run(
-        a, capture_output=True, text=True, errors="replace", timeout=timeout_s))
+        a, capture_output=True, text=True, errors="replace", timeout=timeout_s,
+        creationflags=no_window_creationflags()))
     try:
         res = run(argv)
     except Exception as exc:  # OSError, TimeoutExpired, anything the runner raises

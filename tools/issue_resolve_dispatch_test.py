@@ -7929,6 +7929,29 @@ class GuardArgvProbeTest(unittest.TestCase):
                              "`fak guard --probe` is a SMOKE mode that still brings "
                              "up the gateway — not a cheap argv probe")
 
+    def test_default_runner_suppresses_the_console_window(self):
+        """The DEFAULT runner (the one that actually ships — every other test injects
+        a fake) must spawn with CREATE_NO_WINDOW. This is not cosmetic: the probe runs
+        once per dispatcher process under headless automation, and the pre-push
+        DESKTOP_POPUP_REGRESSION gate refuses a console-tool spawn that would flash a
+        window. It refused this function's first cut, which omitted the flag."""
+        mod = load()
+        seen: dict = {}
+
+        def fake_run(argv, **kwargs):
+            seen["argv"], seen["kwargs"] = list(argv), kwargs
+            return self._Res(0, err=self._inventory(["provider"]))
+
+        with tempfile.TemporaryDirectory() as d:
+            exe = self._bin(Path(d))
+            with mock.patch.object(mod.subprocess, "run", fake_run):
+                mod.probe_guard_flags(exe)
+        self.assertEqual(seen["argv"][1:], ["guard", "-h", "-all"])
+        self.assertEqual(seen["kwargs"].get("creationflags"),
+                         mod.no_window_creationflags())
+        self.assertTrue(seen["kwargs"].get("timeout"),
+                        "an unbounded probe could hang the dispatcher")
+
 
 if __name__ == "__main__":
     unittest.main()
