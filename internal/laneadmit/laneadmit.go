@@ -28,6 +28,12 @@ const (
 	ConflictTreeOverlap   = "tree_overlap"   // requested tree geometrically overlaps the lease's tree
 	ConflictSameLane      = "same_lane"      // same named lane serializes even on disjoint trees
 	ConflictExclusiveLane = "exclusive_lane" // an exclusive lane runs alone against everything
+	// ConflictLaneAncestry is same_lane's hierarchical case: the two lanes are not equal, but one
+	// CONTAINS the other (`gateway` vs `gateway/server`), so they still serialize. It is reported
+	// as its own kind rather than folded into same_lane because the cure differs — a same_lane
+	// holder means "wait", an ancestry holder means "the peer took a coarser lane than it needed;
+	// a sibling sub-lane would have been admitted".
+	ConflictLaneAncestry = "lane_ancestry"
 )
 
 // Request is one surface asking "may I act on this lane/tree right now".
@@ -106,9 +112,13 @@ type Verdict struct {
 // surface can afford to ask it on each act boundary. It shares leaseref's
 // honest scope: local visibility, not cross-host atomicity.
 func Decide(req Request, live []Lease, tax Taxonomy) Verdict {
+	reqLane := CanonicalLane(req.Lane)
 	tree := cleanGlobs(req.Tree)
-	if len(tree) == 0 && req.Lane != "" && tax.Loaded {
-		tree = cleanGlobs(tax.Trees[req.Lane])
+	if len(tree) == 0 && reqLane != "" && tax.Loaded {
+		// TreeFor, not a bare tax.Trees lookup: a DECLARED lane resolves to its own row exactly
+		// as before, and an undeclared SUB-lane derives its tree from the nearest declared
+		// ancestor instead of falling through to the empty-tree conservative-overlap rule.
+		tree = cleanGlobs(tax.TreeFor(reqLane))
 	}
 	// A provably read-only request writes nothing and therefore contends with nothing — it is
 	// admitted against every live lease, ABOVE the empty-tree conservative-overlap rule. This is
@@ -126,18 +136,27 @@ func Decide(req Request, live []Lease, tax Taxonomy) Verdict {
 		if l.ReadOnly {
 			continue
 		}
-		lane := l.Lane
+		lane := CanonicalLane(l.Lane)
 		if lane == "" {
 			lane = LaneOfLeaseID(l.ID)
 		}
 		kind := ""
 		switch {
-		case tax.Loaded && req.Lane != "" && tax.Exclusive[req.Lane]:
+		// Exclusivity INHERITS down the hierarchy (Taxonomy.IsExclusive): a sub-lane of `abi`
+		// cannot escape the serial ABI gate by naming a narrower unit.
+		case tax.Loaded && reqLane != "" && tax.IsExclusive(reqLane):
 			kind = ConflictExclusiveLane
-		case tax.Loaded && lane != "" && tax.Exclusive[lane]:
+		case tax.Loaded && lane != "" && tax.IsExclusive(lane):
 			kind = ConflictExclusiveLane
-		case req.Lane != "" && lane == req.Lane:
+		// Case-folded, since CanonicalLane preserves case for the file-lane tail: two spellings of
+		// one lane must still report as same_lane rather than falling through to ancestry.
+		case reqLane != "" && foldLane(lane) == foldLane(reqLane):
 			kind = ConflictSameLane
+		// The hierarchical case: unequal lanes where one contains the other still serialize.
+		// For two flat lanes LanesConflict is exactly the equality above, so this arm can only
+		// fire once a caller opts into a sub-lane.
+		case reqLane != "" && lane != "" && LanesConflict(reqLane, lane):
+			kind = ConflictLaneAncestry
 		case dispatchorder.TreesOverlap(tree, l.Tree):
 			kind = ConflictTreeOverlap
 		}
@@ -176,6 +195,8 @@ func conflictDetail(req Request, tree []string, c Conflict) string {
 		return fmt.Sprintf("requested %s conflicts with live lease %s (exclusive lane %s runs alone)", subject, c.LeaseID, strmatch.FirstNonEmpty(c.Lane, req.Lane))
 	case ConflictSameLane:
 		return fmt.Sprintf("requested %s is already held by live lease %s (same lane serializes even on disjoint trees)", subject, c.LeaseID)
+	case ConflictLaneAncestry:
+		return fmt.Sprintf("requested %s serializes behind live lease %s on lane %q (one lane contains the other; a disjoint sub-lane would be admitted)", subject, c.LeaseID, c.Lane)
 	default:
 		return fmt.Sprintf("requested %s overlaps live lease %s tree %v", subject, c.LeaseID, c.Tree)
 	}
@@ -188,19 +209,23 @@ func conflictDetail(req Request, tree []string, c Conflict) string {
 //     "resolve-<lane>-<issue#>" (cmd/fak dispatchLaneLeaseID / dispatchIssueLeaseID)
 //   - the shared grammar new surfaces mint: "<surface>-lane-<lane>"
 //     (e.g. "loop-lane-docs", "coord-lane-gateway")
+//
+// A SUB-lane travels in the id under laneWireSep, so "loop-lane-docs_notes" decodes back to
+// the canonical "docs/notes". A flat id decodes to itself — no declared lane carries `_`, so
+// the decode cannot corrupt an existing id.
 func LaneOfLeaseID(id string) string {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return ""
 	}
 	if i := strings.Index(id, "-lane-"); i >= 0 {
-		return id[i+len("-lane-"):]
+		return decodeLaneWire(id[i+len("-lane-"):])
 	}
 	if rest, ok := strings.CutPrefix(id, "resolve-"); ok {
 		if i := strings.LastIndexByte(rest, '-'); i > 0 && allDigits(rest[i+1:]) {
 			rest = rest[:i]
 		}
-		return rest
+		return decodeLaneWire(rest)
 	}
 	return ""
 }
@@ -213,7 +238,7 @@ func LeaseID(surface, lane, scope string) string {
 	if surface == "" {
 		surface = "coord"
 	}
-	if lane = cleanToken(lane); lane != "" {
+	if lane = encodeLaneWire(lane); lane != "" {
 		return surface + "-lane-" + lane
 	}
 	if scope = cleanToken(scope); scope != "" {
@@ -299,6 +324,119 @@ func cleanGlobs(globs []string) []string {
 		}
 	}
 	return out
+}
+
+// encodeLaneWire renders a canonical lane as the ONE ref-path segment a lease id must be. Each
+// segment is scrubbed by cleanToken (the pre-existing rule), a literal `_` inside a segment is
+// DOUBLED so it cannot be misread as the separator (`dispatch_wave.go` -> `dispatch__wave.go`),
+// and the segments are joined with a single laneWireSep. Finally a `.lock` suffix — the one
+// spelling git's check-ref-format rejects outright — is escaped with a trailing separator that
+// decodes back to nothing, since CanonicalLane drops a trailing separator.
+//
+// A flat lane has one segment and no `_`, so its id is byte-identical to the pre-hierarchy form.
+func encodeLaneWire(lane string) string {
+	segs := LaneSegments(CanonicalLane(lane))
+	out := make([]string, 0, len(segs))
+	for i, seg := range segs {
+		// The FIRST segment is always a declared dos.toml lane (a derived lane is rooted at one by
+		// construction), and dos.toml's vocabulary is lowercase — so fold it, and two spellings of
+		// a declared lane cannot mint two different refs for one lock. Every segment AFTER it is a
+		// real path component whose case must survive: git refs are case-sensitive, so folding the
+		// tail would make the id lossless-looking but decode to a lane whose derived tree matches
+		// nothing on a case-sensitive filesystem.
+		if i == 0 {
+			// The FIRST segment is always a declared dos.toml lane and that vocabulary is
+			// lowercase, so folding it means two spellings cannot mint two refs for one lock.
+			seg = strings.ToLower(seg)
+		}
+		if tok := escapeLaneSegment(seg); tok != "" {
+			out = append(out, tok)
+		}
+	}
+	id := strings.Join(out, laneWireSep)
+	if strings.HasSuffix(id, ".lock") {
+		id += laneWireSep
+	}
+	return id
+}
+
+// decodeLaneWire inverts encodeLaneWire: `_` is a segment break, `--` is a literal `-`, `-u` is a
+// literal `_`. CanonicalLane then drops the trailing separator the `.lock` escape may have added.
+//
+// An id minted before sub-lanes existed carries neither `_` nor `-` inside its lane part (every
+// declared lane is `[a-z0-9]+`), so it decodes to itself and every live lease still resolves to
+// the lane it was minted for.
+func decodeLaneWire(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == laneWireSep[0]:
+			b.WriteString(LaneSep)
+		case s[i] == laneWireEsc[0] && i+1 < len(s) && s[i+1] == laneWireEsc[0]:
+			b.WriteString(laneWireEsc)
+			i++
+		case s[i] == laneWireEsc[0] && i+1 < len(s) && s[i+1] == 'u':
+			b.WriteString(laneWireSep)
+			i++
+		case s[i] == laneWireEsc[0] && i+3 < len(s) && s[i+1] == 'x':
+			hi, okHi := unhex(s[i+2])
+			lo, okLo := unhex(s[i+3])
+			if !okHi || !okLo {
+				b.WriteByte(s[i])
+				continue
+			}
+			b.WriteByte(hi<<4 | lo)
+			i += 3
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return CanonicalLane(b.String())
+}
+
+// escapeLaneSegment renders one lane segment into the ref-safe alphabet internal/leaseref's
+// validID accepts, REVERSIBLY. It is cleanToken's total twin: where cleanToken collapses an
+// unrepresentable byte to `-` (fine for a scope token nobody decodes), this escapes it, because a
+// lane recovered from a lease id has to name the same path it was minted from.
+//
+//   - ->  --        _  ->  -u        any other non-[A-Za-z0-9._] byte  ->  -x<2 hex>
+//
+// Case is preserved: a segment below the declared root is a real path component, and git refs are
+// case-sensitive, so folding it would decode to a lane whose derived tree matches nothing on a
+// case-sensitive filesystem.
+func escapeLaneSegment(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.':
+			b.WriteByte(c)
+		case c == laneWireEsc[0]:
+			b.WriteString(laneWireEsc + laneWireEsc)
+		case c == laneWireSep[0]:
+			b.WriteString(laneWireEsc + "u")
+		default:
+			b.WriteString(laneWireEsc + "x")
+			const hex = "0123456789abcdef"
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&0x0f])
+		}
+	}
+	return b.String()
+}
+
+// unhex decodes one lowercase-or-upper hex digit, returning ok=false for a non-hex byte so a
+// hand-typed or corrupted id degrades to a literal rather than a silently wrong lane.
+func unhex(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
 }
 
 func cleanToken(s string) string {
