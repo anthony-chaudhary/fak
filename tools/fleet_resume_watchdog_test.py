@@ -287,16 +287,29 @@ def _seed_ps1_fleet(tmp_path, *, fak_exit, fak_reason, sessions, ledger_rows=())
     claude = tmp_path / "claude.cmd"
     claude.write_text('@echo off\r\necho launched>>"%s"\r\n' % marker, encoding="ascii")
 
-    # The fake `fak` serves two roles: the `resume admit` gate (echo a decision + exit code)
-    # and, once a managed-cache posture is configured, the `fak guard <posture> -- claude ...`
-    # front. The guard branch records the argv it was fronted with (the behavioral witness that
-    # the posture reached the launch) and is inert for the admit-only tests (%1 != "guard").
+    # The fake `fak` serves three roles: the `resume cap` tick sizer (#3581), the `resume admit`
+    # gate (echo a decision + exit code), and, once a managed-cache posture is configured, the
+    # `fak guard <posture> -- claude ...` front. The guard branch records the argv it was fronted
+    # with (the behavioral witness that the posture reached the launch) and is inert for the
+    # admit-only tests (%1 != "guard").
+    #
+    # The `resume cap` branch is REQUIRED, not optional: since #3581 the .ps1 defaults -MaxPerTick
+    # to 0 and derives the tick size from `fak resume cap`. A fake that answers only `resume admit`
+    # leaves .cap null -> [int]$null -> cap=0 -> "per-tick cap reached (0)" -> the watchdog launches
+    # NOTHING, and every behavioral test below silently asserts against a tick that never ran. The
+    # payload mirrors internal/resume.WatchdogCap and is self-consistent (2 healthy seats x seat_cap
+    # 6 = 12 capacity, 4 active -> headroom 8 -> cap 8, inside floor 4 / ceiling 64) so the derived
+    # cap comfortably exceeds the handful of sessions these fixtures seed.
     guard_marker = tmp_path / "guard_fronts.txt"
     fak = tmp_path / "fak.cmd"
     fak.write_text(
         '@echo off\r\n'
         'if "%1"=="guard" (\r\n'
         'echo %* >> "' + str(guard_marker) + '"\r\n'
+        'exit /b 0\r\n'
+        ')\r\n'
+        'if "%2"=="cap" (\r\n'
+        'echo {"cap":8,"floor":4,"ceiling":64,"seat_cap":6,"healthy_seats":2,"headroom":8}\r\n'
         'exit /b 0\r\n'
         ')\r\n'
         'echo {"decision":{"reason":"' + fak_reason + '"}}\r\n'
