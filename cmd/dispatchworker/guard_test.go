@@ -282,6 +282,64 @@ func TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker(t *testing.T) {
 	}
 }
 
+// TestDetachedLauncherDefaultsSpawnFromABareInvocation pins the three param defaults that
+// decide whether `launch_wave_detached.ps1 -Count 30 -Launch` spawns a wave or zero workers
+// (#5895). A cron, a CI step and a refill loop all issue the bare form, so a default that
+// only works when overridden is a default that does not work.
+//
+// The failure was silent in the worst way: each spawn threw `pointer file not found` and the
+// launcher reported a wave, so the run read as launched-and-unproductive rather than never
+// started. Nothing in the tracked tree asserted these strings — the same coverage gap that
+// let the guard budget drift in TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker.
+func TestDetachedLauncherDefaultsSpawnFromABareInvocation(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+	for _, name := range []string{"launch_goal_detached.ps1", "launch_wave_detached.ps1"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(repoRoot, "tools", name)
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			ps1 := string(b)
+
+			// (a) The default pointer must name a file that is actually in the tree. The
+			// previous default died to a rename, not a typo, so pin existence rather than
+			// any particular name.
+			m := regexp.MustCompile(`\[string\]\$PointerFile\s*=\s*"([^"]+)"`).FindStringSubmatch(ps1)
+			if m == nil {
+				t.Fatalf("%s: no [string]$PointerFile default found — did the param rename?", name)
+			}
+			pointer := filepath.Join(repoRoot, filepath.FromSlash(m[1]))
+			body, err := os.ReadFile(pointer)
+			if err != nil {
+				t.Fatalf("%s: default -PointerFile %q is not in the tree (%v): every spawn throws\n"+
+					"  `pointer file not found` and the wave is zero workers.", name, m[1], err)
+			}
+
+			// (b) The rendered /goal condition must clear the launcher's own 4000 cap. Count
+			// RUNES, not bytes: PowerShell compares $cond.Length, which is chars, and this
+			// pointer carries multibyte glyphs — byte length overstates it by ~28.
+			if cond := len([]rune("/goal " + string(body))); cond > 4000 {
+				t.Errorf("%s: default -PointerFile %q renders a %d-char /goal condition (>4000 cap):\n"+
+					"  the launcher throws per spawn, so the wave is zero workers. Shrink the pointer.",
+					name, m[1], cond)
+			}
+
+			// (c) No default may hardcode an absolute path. The old -Workspace named a sibling
+			// clone whose missing tools/proc_resource_guard.py fail-safed the preflight to
+			// REFUSE_INSPECT (cap=4, granted=0), and the old -LogDir pinned that same sibling's
+			// .goal-runs — which is how a liveness probe reads ANOTHER wave's artifacts and a
+			// recycled id lets a predecessor vouch for a corpse. Both must derive.
+			absDefault := regexp.MustCompile(`\[string\]\$(Workspace|LogDir)\s*=\s*"([a-zA-Z]:[\\/]|\\\\)[^"]*"`)
+			for _, bad := range absDefault.FindAllStringSubmatch(ps1, -1) {
+				t.Errorf("%s: -%s defaults to the absolute path %q; derive it from $PSScriptRoot\n"+
+					"  (tools/ -> repo root) or from $Workspace so a bare invocation targets THIS checkout.",
+					name, bad[1], strings.TrimSpace(bad[0]))
+			}
+		})
+	}
+}
+
 // TestClaudeGuardSolvencyFloorDerivation pins the CONTEXT-SOLVENCY floor the launch path
 // hands the gateway as --compact-solvency-floor. The gateway cannot derive this itself —
 // it prices a compaction burst in cache dollars and never sees a window SIZE — so the

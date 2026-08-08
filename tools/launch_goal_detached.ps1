@@ -60,8 +60,18 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$PointerFile = ".claude/goal-prompts/resolve-tickets-witnessed.md",
-  [string]$Workspace   = "C:\work\fleet",
+  # Both defaults were wrong in the same direction (#5895) and are coupled: the pointer is
+  # Test-Path'd AFTER `Set-Location $Workspace` below, so a relative pointer path is read
+  # against the workspace. The old pair named a file that is not in the tree AND a sibling
+  # checkout, so a bare invocation threw `pointer file not found` before reaching the gate.
+  # Keep this name pointing at a file that exists; the guard test pins both its existence
+  # and the /goal char cap, since a rename is what deleted the previous default.
+  [string]$PointerFile = ".claude/goal-prompts/resolve-top-issue-witnessed.md",
+  # Self-locating: tools/ -> repo root, i.e. the checkout this script was invoked from —
+  # the same derivation $repoRoot uses below. The old literal named a sibling clone missing
+  # tools/proc_resource_guard.py, so dispatch_preflight fail-safed to REFUSE_INSPECT
+  # (cap=4, granted=0) and refused the spawn. An explicit -Workspace still overrides.
+  [string]$Workspace   = (Split-Path -Parent $PSScriptRoot),
   # Where the worker's logs + pid breadcrumb land. Empty derives <Workspace>\.goal-runs
   # — the SAME dir dispatch_preflight.py scans for live /goal pid breadcrumbs (#2226).
   # Point it elsewhere only if you accept that the spawn gate then cannot see these
