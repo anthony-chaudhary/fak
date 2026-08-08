@@ -33,17 +33,24 @@ metadata:
 
 Settle all four before Phase 3. Each one has silently voided a whole wave.
 
-**1. The launcher's default `-PointerFile` DOES NOT EXIST.**
-`launch_wave_detached.ps1:49` and `launch_goal_detached.ps1:63` both default to
-`.claude/goal-prompts/resolve-tickets-witnessed.md`, and that file is **not in the tree**
-(verified 2026-08-08). `launch_goal_detached.ps1:163` throws `pointer file not found` — so
-a bare `launch_wave_detached.ps1 -Count 30 -Launch` fails on **every** spawn and the wave
-is zero workers. ⭐ **Always pass `-PointerFile` explicitly.** This skill always does.
+**1. `-PointerFile` — FIXED (#5895, `2b2710ee71`), and pass it anyway.**
+Both launchers used to default to `.claude/goal-prompts/resolve-tickets-witnessed.md`,
+which a rename had deleted from the tree, so `Test-Path` threw `pointer file not found` on
+**every** spawn and a bare `-Count 30 -Launch` was zero workers. The default now names
+`resolve-top-issue-witnessed.md`, and `TestDetachedLauncherDefaultsSpawnFromABareInvocation`
+(`cmd/dispatchworker/guard_test.go`) pins for both launchers that the default pointer
+exists and renders under the char cap — a rename cannot silently reintroduce it.
+⭐ **Still pass `-PointerFile` explicitly here**, because this skill launches a *per-wave*
+rendered pointer (Phase 2) and that filename is the wave's attribution.
 
 **2. The `/goal` condition is hard-capped at 4000 characters.**
-`launch_goal_detached.ps1:165-166` builds `"/goal " + <pointer body>` and throws above
-4000. Measured: `resolve-top-issue-witnessed.md` is 3988 bytes — **6 characters** from the
-throw. ⇒ **The tensorbuild model of concatenating four preambles into the prompt does not
+`launch_goal_detached.ps1` builds `"/goal " + <pointer body>` and throws when
+`$cond.Length > 4000`. ⛔ **That length is in CHARS, so never quote a byte count as the
+margin.** Measured: `resolve-top-issue-witnessed.md` is 3988 **bytes** but 3960 **chars**
+(14 multibyte glyphs), so the condition renders at 3966 — **34 chars** of headroom, not
+the 6 the byte count suggests. The Phase 2 `wc -c` gate below is byte-based and therefore
+*conservative*: it refuses early, which is the safe direction, but it is not the number
+the launcher compares. ⇒ **The tensorbuild model of concatenating four preambles into the prompt does not
 port.** Worker rules live in repo files the worker *reads*
 ([`refusals.md`](refusals.md), the witnessed spec); the fuel stays a *pointer*. Re-measure
 after any edit — the check is one line and it is in Phase 2.
@@ -68,12 +75,14 @@ auto --live` tops the population back toward target. A `REFUSE_*` is never somet
 route around; `-SkipPreflight` is an operator-only override that removes the floor for the
 whole wave.
 
-⛔ **Pass `-Workspace` explicitly too — the default is a *different* checkout.** Both
-launchers default to `C:\work\fleet`, which on this box is a stale sibling clone missing
-`tools/proc_resource_guard.py`; preflight fail-safes to **`REFUSE_INSPECT`, cap=4, granted=0**
-and the whole wave is refused. Same run against `C:\work\fak` returned `SPAWN_OK` and the
-plan above. **The workspace is the tree your workers will share** — point it at this
-checkout.
+⭐ **`-Workspace` — FIXED (#5895, `2b2710ee71`).** Both launchers used to default to a
+stale sibling clone missing `tools/proc_resource_guard.py`, so preflight fail-safed to
+**`REFUSE_INSPECT`, cap=4, granted=0** and refused the whole wave; `launch_wave_detached.ps1`
+pinned that same sibling's `.goal-runs`, which is how a probe reads *another* wave's
+artifacts. Both now derive from `$PSScriptRoot` (`tools/` → repo root), and the guard test
+refuses any absolute-path default. A bare invocation targets **this** checkout and reaches
+the gate. **The workspace is still the tree your workers will share** — pass it explicitly
+whenever that is not the checkout you are running from.
 
 **4. Workers here SELF-SELECT their leaf — so only `fak intent` stops double-work.**
 Unlike an orchestrator-assigned wave, fak's fuel has each worker pick the top-ranked ready
@@ -166,9 +175,11 @@ if they were this run's — a stale predecessor vouching for a corpse.
     -WorkKind engineering -Workspace "C:\work\fak" -Launch
 ```
 
-⛔ **Both non-default arguments are load-bearing** (§ 1 and § 3): the default `-PointerFile`
-does not exist, and the default `-Workspace` is a stale sibling checkout that fails
-preflight. Neither failure is quiet at spawn time, but both read as "the wave ran".
+⭐ **Both arguments are still worth passing** (§ 1 and § 3), though neither is a landmine
+any more: `-PointerFile` because this skill launches a *per-wave* rendered pointer whose
+filename is the wave's attribution, and `-Workspace` because the tree your workers share
+should be a decision, not an inference. Before #5895 both defaults were wrong and both
+failures read as "the wave ran" — that is why they are named here at all.
 
 **What the launcher already solves — do not re-implement any of it.** It asks the switcher
 for N *distinct-account* session slots in one call (distinctness by Anthropic
@@ -289,10 +300,10 @@ fak dispatch closure-audit --workspace . --json
 
 | # | trap | tell |
 |---|---|---|
-| 1 | default `-PointerFile` does not exist | every spawn throws `pointer file not found`; wave = 0 workers |
-| 2 | fuel over 4000 chars | `goal condition is N chars (>4000 cap)` — thrown per spawn |
+| 1 | ~~default `-PointerFile` does not exist~~ **fixed #5895** | was: every spawn throws `pointer file not found`; wave = 0 workers. Now pinned by a guard test |
+| 2 | fuel over 4000 chars | `goal condition is N chars (>4000 cap)` — thrown per spawn. **Chars, not bytes** — a byte count understates the margin |
 | 3 | asking for N > what seats allow | plan shows `granted` ≪ `requested`; the binding term is usually `seat_free`, **not** `cap` |
-| 3b | default `-Workspace C:\work\fleet` | `REFUSE_INSPECT … guard not found: …\tools\proc_resource_guard.py`, cap=4, granted=0 |
+| 3b | ~~default `-Workspace` names a sibling clone~~ **fixed #5895** | was: `REFUSE_INSPECT … guard not found: …\tools\proc_resource_guard.py`, cap=4, granted=0. Both launchers now derive from `$PSScriptRoot` |
 | 4 | hand-wrapping workers in your own `fak guard` | whole wave dies together when the parent gateway exits |
 | 5 | re-running the launcher to "top up" | the per-spawn gate can't see starting siblings — use `fak dispatch auto` |
 | 6 | reaping dead-holder lane leases | `dos lease-lane release` has no liveness check; `--owner ""` evicts live work |
