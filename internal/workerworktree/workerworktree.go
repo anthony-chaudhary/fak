@@ -350,6 +350,12 @@ func TrunkHeadSHA(root string, git GitRunner) string {
 // wedges a spawn. Detached on purpose: pinned to a SHA, never a branch, so git
 // does not refuse it and it can never trip OFF_TRUNK. Idempotent: a target path
 // already tracked as this worktree is reported Reused rather than re-added.
+//
+// With the warm pool on (PoolCapEnv, off by default) a miss on that same-key reuse
+// falls to a POOL lease first: an idle worktree of this lane, re-pointed at base, also
+// reported Reused — so a NEW worker can inherit a materialized tree, which the same-key
+// check alone never allowed (#3572). Result.Path is authoritative; a leased member does
+// NOT sit at Path(lane, key, wtRoot).
 func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
 	base := baseSHA
 	if base == "" {
@@ -371,6 +377,16 @@ func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
 			}
 		}
 	}
+	// #3572 warm pool: hand this worker an ALREADY-materialized idle worktree of its
+	// lane (a fast reset to the new base) instead of paying `worktree add`'s full
+	// checkout. Runs AFTER the same-lane+key reuse check above, which is the cheaper
+	// hit, and falls straight through to the create path below on any miss — so with
+	// the pool off (the default) this is one env read and nothing else changes.
+	if k := PoolCap(); k > 0 {
+		if res, ok := leasePooled(root, lane, base, wtRoot, git); ok {
+			return res
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
 		return Result{OK: false, Path: wt, BaseSHA: base,
 			Reason: "could not create worktree root: " + err.Error() + " — fail open"}
@@ -388,10 +404,24 @@ func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
 // only durable output is the commit Land already placed on the trunk. Best-effort:
 // a removal failure is reported, never raised, and a trailing `worktree prune`
 // clears the admin record. Refuses any non-marker path as a guardrail.
+//
+// With the warm pool on (PoolCapEnv, off by default) the worktree is instead RETURNED
+// to its lane's idle set while that lane is under the cap — reset clean and marked
+// idle, so the next Prepare leases it rather than re-adding one (#3572). A return
+// reports OK with Removed=false; overflow and every failure path force-remove as above.
 func Reap(root, wtPath string, git GitRunner) Result {
 	if !IsWorkerWorktree(wtPath) {
 		return Result{OK: false, Path: wtPath, Removed: false,
 			Reason: "refusing to reap a non-worker worktree"}
+	}
+	// #3572 warm pool: RETURN the worktree to its lane's idle set instead of destroying
+	// it, up to the cap; past the cap (or on any hiccup) it force-removes exactly as
+	// below. Removed stays false for a return — the worktree really is still there, and
+	// a caller counting reclaimed dirs must not be told otherwise.
+	if k := PoolCap(); k > 0 {
+		if res, ok := returnPooled(root, wtPath, k, git); ok {
+			return res
+		}
 	}
 	rc, out := run(git, root, []string{"worktree", "remove", "--force", wtPath})
 	removed := rc == 0

@@ -1319,6 +1319,26 @@
           "category": "incidental",
           "reason": "path-to-session-id helper for the batch row (base name minus .jsonl), mirroring the evidence-minimal naming the sibling session-audit runners already use; a spelling detail, not a governed concept",
           "token": "sessionNameForBatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "The JSON/metrics field spelling of the COMPACTION_THRASH session verdict, positioned as x2-context-ctx-reasoncompactionthrash. Same concept in its wire casing, not a session-runtime concept of its own.",
+          "token": "session_compaction_thrash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported gateway metrics field accumulating the thrash session count behind the positioned counter x2-guard-gate-compactionthrashsessionstotal. Storage for that metric, not a distinct concept.",
+          "token": "compactThrashSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported local holding the same count while the metrics page is rendered. A render-time local for the positioned counter, not a distinct concept.",
+          "token": "thrashSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
+          "token": "fak_gateway_compaction_thrash_sessions_total"
         }
       ],
       "id": "session-runtime",
@@ -1329,10 +1349,12 @@
         "SessionClass",
         "SessionInteractive",
         "bumpSessionHandoffBlocks",
+        "compactThrashSessions",
         "confusedsessions",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
         "enqueueGuardSessionThreadNotice",
+        "fak_gateway_compaction_thrash_sessions_total",
         "gemma4_session_test",
         "gen_session_effectiveness_svg",
         "guardSessionStartDriverEntrypointBases",
@@ -1361,6 +1383,7 @@
         "scheduling",
         "sessionNameForBatch",
         "sessionRegistryRecoveryStage",
+        "session_compaction_thrash",
         "session_registry_recovery",
         "sessionids",
         "sessions",
@@ -1369,6 +1392,7 @@
         "slotting",
         "stopDispHandoffSessionGiveUp",
         "tSESSION",
+        "thrashSessions",
         "topsessions",
         "totalslots",
         "tuisessionrow",
@@ -1782,6 +1806,11 @@
           "category": "incidental",
           "reason": "The startup predicate that decides whether the self-hosted wire admits the three prompt-shrink levers. Not a distinct concept: it is a boolean over the already-positioned lever set, evaluated once at serve start, and it introduces no vocabulary a reader could confuse with a sibling -- the levers themselves carry the meaning.",
           "token": "shrinkWireInKernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
+          "token": "fak_gateway_compaction_thrash_sessions_total"
         }
       ],
       "id": "gateway-engine",
@@ -1791,6 +1820,7 @@
         "engineered",
         "engineering",
         "engineers",
+        "fak_gateway_compaction_thrash_sessions_total",
         "gateways",
         "kernel32",
         "kernelSession",
@@ -2077,11 +2107,68 @@
           "category": "incidental",
           "reason": "Unexported renderer turning one contract into the in-band [fak] line a content-block-only client can see; a presentation helper over the same record the typed field carries.",
           "token": "compactionContractNote"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal value of ReasonCompactionThrash, positioned as x2-context-ctx-reasoncompactionthrash. Same concept spelled as its dos.toml reason code, not a second one.",
+          "token": "COMPACTION_THRASH"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal value of envCompactionThrashStop, positioned as x2-context-ctx-envcompactionthrashstop. Same concept spelled as its environment-variable name, not a second one.",
+          "token": "FAK_COMPACTION_THRASH_STOP"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported package constant holding the threshold (3) at which back-to-back context-event turns grade as thrash. A tuning literal inside the positioned verdict x2-context-ctx-reasoncompactionthrash, not a distinct concept.",
+          "token": "ctxThrashConsecutiveRefills"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported renderer turning one already-computed step-advice verdict into the model-facing advisory line. A projection of the existing managed-context step_advice concept, not a new one.",
+          "token": "ctxAdviceNote"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported per-state-entry dedupe wrapper around ctxAdviceNote so the pushed advisory fires once on the way into a pressure state. A delivery detail of the same advisory, not a distinct concept.",
+          "token": "ctxAdviceNoteOnce"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constructor for the session-gate refusal taken only when the stop is armed. An action taken on the positioned verdict x2-context-ctx-reasoncompactionthrash, not a separate concept.",
+          "token": "compactionThrashRefusal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported renderer for that refusal's response body. Wire formatting of the same refusal, not a distinct concept.",
+          "token": "compactionThrashRefusalBody"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported per-session counter of consecutive at-limit refills, the state ctxThrashConsecutiveRefills is compared against. Internal bookkeeping for the positioned verdict, not a distinct concept.",
+          "token": "compactionThrashStreak"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported recorder incrementing the thrash count on the metrics page. The counting step of the positioned verdict and its metric x2-guard-gate-compactionthrashsessionstotal, not a separate concept.",
+          "token": "recordCompactionThrash"
+        },
+        {
+          "category": "incidental",
+          "reason": "The JSON/metrics field spelling of the positioned verdict x2-context-ctx-reasoncompactionthrash. Same concept in its wire casing, not a second one.",
+          "token": "session_compaction_thrash"
+        },
+        {
+          "category": "incidental",
+          "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
+          "token": "fak_gateway_compaction_thrash_sessions_total"
         }
       ],
       "id": "context-ctx",
       "ignore": [
+        "COMPACTION_THRASH",
         "CompactionContract",
+        "FAK_COMPACTION_THRASH_STOP",
         "MechanismStaleContext",
         "appendGuardCompactionWitnessTo",
         "cctx",
@@ -2090,12 +2177,19 @@
         "compactionContractMu",
         "compactionContractNote",
         "compactionContractVersion",
+        "compactionThrashRefusal",
+        "compactionThrashRefusalBody",
+        "compactionThrashStreak",
         "compactionWitness",
         "compactions",
         "context",
         "contexts",
         "ctx",
+        "ctxAdviceNote",
+        "ctxAdviceNoteOnce",
+        "ctxThrashConsecutiveRefills",
         "ctxsleep",
+        "fak_gateway_compaction_thrash_sessions_total",
         "formatGuardCompactionWitness",
         "guardCompactionAnchorFirst",
         "guardCompactionAnchorHead",
@@ -2113,7 +2207,9 @@
         "recalled",
         "recalling",
         "recalls",
+        "recordCompactionThrash",
         "recordGuardCompactionWitness",
+        "session_compaction_thrash",
         "setGuardCompactionAnchorMode",
         "takeCompactionContract"
       ],
@@ -2867,6 +2963,56 @@
           "category": "incidental",
           "reason": "bench setup-parity receipt symbol (issue #5704): 'pooled' is the VERB of aggregating the speedup across admitted trial pairs, the same verb-sense this family already ignores as poolspanscores - not a session bounded-LRU pool container and not a cachemeta PoolProfile.",
           "token": "PooledSpeedupPct"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported package constant holding the off-by-default cap value (0) for the warm worktree pool; the concept it stands for is positioned as x2-pool-workerworktreepoolcapenv/x2-pool-workerworktreepoolcap. It is a default literal, not a distinct pool concept.",
+          "token": "defaultPoolCap"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal VALUE of the PoolCapEnv constant, positioned as x2-pool-workerworktreepoolcapenv. It is the same concept spelled as its wire name, not a second one.",
+          "token": "FLEET_WORKER_WORKTREE_POOL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constant naming the sidecar directory (.fak-wt-pool) that holds the pool's idle markers. A file-layout detail of one package's pool implementation, not a pool concept.",
+          "token": "poolStateDir"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constant naming the .idle marker suffix. A file-naming detail of the pool's on-disk marker format, not a pool concept.",
+          "token": "poolIdleExt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper joining the worktree root to poolStateDir. Path plumbing for one implementation, not a pool concept.",
+          "token": "poolStatePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper naming one member's idle-marker file. Path plumbing for one implementation, not a pool concept.",
+          "token": "poolMarker"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper listing a lane's idle members in sorted order and clearing markers whose worktree is gone. An internal enumeration step of the positioned pool cap, not a separate concept.",
+          "token": "poolIdleMembers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper re-pointing an already-materialized worktree at the new base and dropping uncommitted state before it is leased out. An internal step of the positioned pool lease, not a separate concept.",
+          "token": "resetPooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper taking an idle member for a new worker on the Prepare path. An internal step of the positioned pool cap, not a separate concept.",
+          "token": "leasePooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper returning a finished worktree to the idle set on the Reap path, up to the cap. An internal step of the positioned pool cap, not a separate concept.",
+          "token": "returnPooled"
         }
       ],
       "exclude": [
@@ -2874,10 +3020,20 @@
       ],
       "id": "pool",
       "ignore": [
+        "FLEET_WORKER_WORKTREE_POOL",
+        "PooledSpeedupPct",
+        "defaultPoolCap",
         "kvpoolbytes",
+        "leasePooled",
+        "poolIdleExt",
+        "poolIdleMembers",
+        "poolMarker",
+        "poolStateDir",
+        "poolStatePath",
         "poolspanscores",
-        "spoolsv",
-        "PooledSpeedupPct"
+        "resetPooled",
+        "returnPooled",
+        "spoolsv"
       ],
       "min_files": 2,
       "name": "Pool family",
