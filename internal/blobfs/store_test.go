@@ -95,6 +95,13 @@ func TestContentDedup(t *testing.T) {
 	if hits != 1 {
 		t.Fatalf("want 1 dedup hit, got %d", hits)
 	}
+	stats := s.ByteStats()
+	if stats.NovelBytes != int64(len(b)) {
+		t.Fatalf("want %d novel bytes, got %d", len(b), stats.NovelBytes)
+	}
+	if stats.DedupedBytesAvoided != int64(len(b)) {
+		t.Fatalf("want %d deduped bytes avoided, got %d", len(b), stats.DedupedBytesAvoided)
+	}
 }
 
 // TestRestartSurvival is the reason blobfs exists: a digest written by one store
