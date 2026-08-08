@@ -77,7 +77,35 @@ type RebootAdvice struct {
 	// byte-for-byte what it was and every consumer that reads just the headline is
 	// untouched. Read len==0 as "the headline was the only crosser."
 	Crossers []RebootAdvice `json:"crossers,omitempty"`
+
+	// Unmeasured names the ENABLED reboot axes this sample carried NO per-process
+	// census for. It is the binary/source skew guard (issue #3668 remedy 1). The
+	// gate reads TopHandles/TopThreads; a reading written by a `fak.exe` built
+	// BEFORE an axis existed carries that array empty, and Advised=false then
+	// spells that absence EXACTLY the way it spells a host that was measured and
+	// found calm. That is how a stale deployed binary kept returning a clean bill
+	// of health while a WindowsTerminal sat at 3,206 threads: the source had the
+	// thread axis, the artifact on disk did not, and nothing in the record said so.
+	// Naming the axis here is what stops "nobody measured this" from ever being
+	// spelled like "measured, nothing there" — the rule arming.go enforces one
+	// level up for a missing RECORD, applied to a missing AXIS inside a record that
+	// is present. An empty census is never a legitimate reading: every live process
+	// holds handles and threads, so zero rows means the census failed or the
+	// producer predates the axis, never that no process qualified.
+	//
+	// An axis whose line is 0 is off ON PURPOSE and is never listed — disabled is
+	// the one silent state that needs no alarm. Empty when every enabled axis had a
+	// census, and omitempty drops it, so a healthy record stays byte-for-byte what
+	// it was. Carried on the headline only; the Crossers elements leave it unset
+	// the same way they leave Crossers unset, so the structure stays one level deep.
+	Unmeasured []string `json:"unmeasured,omitempty"`
 }
+
+// Measured reports whether every ENABLED reboot axis actually had a census to
+// judge. Consumers must gate on it before reading Advised=false as calm:
+// `!Advised && !Measured()` is "no verdict was reachable", not "no reboot
+// needed" — the difference between a quiet host and an unwatched one.
+func (a RebootAdvice) Measured() bool { return len(a.Unmeasured) == 0 }
 
 // SecondaryCrossers returns the crossers BEHIND the headline — the drivers the
 // old single-max verdict masked — and nothing when the headline was the only
@@ -105,16 +133,38 @@ func (a RebootAdvice) SecondaryCrossers() []RebootAdvice {
 // second crosser is a second driver of the same decision, not a detail of the
 // first (issue #4614). The headline fields are unchanged, and Crossers stays
 // unset when only one process crossed.
+//
+// Any enabled axis the sample carried no census for is named in Unmeasured, on
+// the page and on the no-page alike, so a stale producer's silence can never be
+// read as calm (issue #3668 remedy 1 — see the field's doc).
 func AdviseReboot(s Sample, t RebootThresholds) RebootAdvice {
+	unmeasured := unmeasuredAxes(s, t)
 	crossers := rebootCrossers(s, t)
 	if len(crossers) == 0 {
-		return RebootAdvice{Advised: false}
+		return RebootAdvice{Advised: false, Unmeasured: unmeasured}
 	}
 	head := crossers[0]
 	if len(crossers) > 1 {
 		head.Crossers = crossers
 	}
+	head.Unmeasured = unmeasured
 	return head
+}
+
+// unmeasuredAxes names each ENABLED reboot axis whose per-process census is
+// empty — the axes this sample could not have decided. A line of 0 is skipped
+// because an operator turned that axis off deliberately, which is the one
+// silence that carries its own explanation. Returns nil when every enabled axis
+// had rows, so the field stays absent from a healthy record.
+func unmeasuredAxes(s Sample, t RebootThresholds) []string {
+	var out []string
+	if t.HandleHighWater > 0 && len(s.TopHandles) == 0 {
+		out = append(out, "handle_high_water")
+	}
+	if t.ThreadHighWater > 0 && len(s.TopThreads) == 0 {
+		out = append(out, "thread_high_water")
+	}
+	return out
 }
 
 // rebootCrossers returns one advice per process at/above a reboot high-water,
