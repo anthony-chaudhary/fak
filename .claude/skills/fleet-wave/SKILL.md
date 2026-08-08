@@ -199,10 +199,35 @@ cadence, which reads live population rather than racing it.
 ## Phase 4 — Monitor. Watchers see what workers inside the tree cannot.
 
 ```bash
-ls -t C:/work/fleet/.goal-runs/$WAVE-*.pid | wc -l          # spawned
-tail -5 C:/work/fleet/.goal-runs/$WAVE-*.err.log            # the honest failure channel
-fak dispatch status --runs-dir C:/work/fleet/.goal-runs --json
+RUNS="$(git rev-parse --show-toplevel)/.goal-runs"          # ⭐ the workspace you launched with
+ls -t "$RUNS"/$WAVE-*.pid | wc -l                           # spawned
+cat "$RUNS"/$WAVE-*.out.log                                 # ⭐ READ THIS FIRST — see below
+tail -5 "$RUNS"/$WAVE-*.err.log                             # guard's own exit summary
+fak dispatch status --runs-dir "$RUNS" --json
 ```
+
+⛔ **Derive the runs dir from the workspace you launched with — never hardcode the
+sibling checkout.** `launch_goal_detached.ps1` sets `$LogDir = Join-Path $Workspace
+'.goal-runs'`, so probing a different tree silently reads *another* wave's artifacts. The
+default sibling's `.goal-runs` held **941** of them at last count and ids recycle — that
+is the stale predecessor vouching for the corpse, self-inflicted.
+
+⭐ **`out.log` is the highest-value read in the whole phase and it is ~117 bytes.** It
+carries the upstream refusal verbatim. When the wave dies together, three causes present
+identically and this one line separates them:
+
+| out.log says | cause | next |
+|---|---|---|
+| nine **distinct** `session <id>` + `BUDGET_CONTEXT_EXHAUSTED` | budget starvation | join the guard session id from `err.log` onto `.fak/nightrun/compaction-health.jsonl` |
+| **one** session id repeated across all workers | seat/env collapse | the launcher's strip-then-pin regressed — do not hand-wrap |
+| empty, processes actually alive | broken probe | bash `kill -0` lies on native Windows pids; use PowerShell `Get-Process -Id` |
+
+⛔ **Healthy compaction does NOT exonerate the context path.** `anchor_starved=0`,
+`solvency_forced=0` and all-correct bail reasons (`under_budget`, `too_few_msgs`,
+`burst_unprofitable`) mean the compactor worked *and the session died anyway* — which
+indicts the CUMULATIVE drain ceiling (`--context-budget-tokens`), a different knob on a
+different scale from the per-turn shed-line. A worker reads a comfortable
+`ctx:83.2k/96.0k` on the turn its cumulative budget dies. Never compare the two numbers.
 
 Spawn 2–3 **independent read-only** monitor sessions with [`monitor.md`](monitor.md).
 Their job is the three things no worker can see from inside: a **committed-red trunk**, a

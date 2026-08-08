@@ -24,12 +24,22 @@ That is what keeps a model in the loop rather than a cron job.
 
 **1. Liveness.** Spawned vs still running vs exited:
 ```bash
-ls C:/work/fleet/.goal-runs/$WAVE-*.pid | wc -l
-tail -3 C:/work/fleet/.goal-runs/$WAVE-*.err.log
+RUNS="$(git rev-parse --show-toplevel)/.goal-runs"   # the workspace the wave launched with
+ls "$RUNS"/$WAVE-*.pid | wc -l
+cat "$RUNS"/$WAVE-*.out.log                          # ~117 bytes; the upstream refusal verbatim
+tail -3 "$RUNS"/$WAVE-*.err.log
 ```
+⛔ **Derive `$RUNS`; never hardcode a sibling checkout.** The launcher writes to
+`<Workspace>/.goal-runs`, so a hardcoded path reads *another* wave's artifacts — and the
+default sibling's dir holds ~941 of them with recycling ids.
 ⛔ **Print the lines; never `grep -c`.** A count self-matches the shell that is searching —
 it returns a confident `1` for a dead process, and "both owners alive, do not reap" is how a
 wave loses its lanes. ⛔ A `.err.log` that is empty is not a verdict; pair it with the pid.
+⭐ **Liveness probes lie in both directions.** bash `kill -0 <pid>` reports every native
+Windows pid dead — use PowerShell `Get-Process -Id`. But once N independent `.err.log`
+files each carry their own exit record, that is a real death, not a probe bug: escalate it
+with the `out.log` line quoted, and say whether the session ids are distinct (nine sessions
+that each died) or identical (one seat that took the wave down).
 
 **2. Is the committed trunk green?** The working tree lies — an untracked file makes the
 author's own build pass while the committed tree is broken. Check a **pinned snapshot**, and
