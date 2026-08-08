@@ -339,6 +339,76 @@ func recoverHead(path string) (seq uint64, lastHash string, end int64, err error
 		return 0, "", 0, fmt.Errorf("usagelog: stat %s: %w", path, err)
 	}
 	defer f.Close()
+	base, err := tailScanStart(f)
+	if err != nil {
+		return 0, "", 0, fmt.Errorf("usagelog: scan %s: %w", path, err)
+	}
+	seq, lastHash, end, err = scanHeadFrom(f, path, base)
+	if err != nil {
+		return 0, "", 0, err
+	}
+	if base > 0 && lastHash == "" {
+		// The window opened AFTER the last row terminator (a single row longer than
+		// the window, or a torn tail that swallowed it), so it yielded no head at
+		// all. Re-scan from byte 0: returning the genesis head here would restart
+		// seq at 1 and FORK the chain, the exact #2608 failure this function exists
+		// to prevent.
+		return scanHeadFrom(f, path, 0)
+	}
+	return seq, lastHash, end, nil
+}
+
+// recoverTailWindow bounds how far back from EOF recoverHead starts scanning. The
+// chain head is the LAST row, so every row before the window can only be parsed and
+// thrown away — but the journal is append-only and unbounded, so scanning from byte
+// 0 made every `fak` invocation re-parse the whole invocation history of the machine.
+// That is a per-spawn cost that grows without limit: at 21 MB it measured ~300 ms on
+// the reference host, dwarfing every other part of startup, and every hook that
+// shells `fak` paid it once per turn (#5626). 256 KiB holds thousands of rows; the
+// guard in recoverHead covers the case where it does not hold even one.
+const recoverTailWindow = 256 << 10
+
+// tailScanStart returns the row boundary recoverHead should start scanning at: the
+// byte after the first newline at or after EOF-recoverTailWindow, so a scan never
+// starts mid-row. It returns 0 for a journal smaller than the window, or for a
+// window holding no newline at all — both cases fall back to the original
+// whole-file scan.
+//
+// Starting past the older rows means a torn line OLDER than the window no longer
+// stops the scan. That changes only the already-corrupt case, and in the safer
+// direction: the head becomes the true last row, so appends continue the live chain
+// instead of forking off a truncated prefix. Detecting corruption was never this
+// function's job — Verify owns that, and Open is deliberately robust so a damaged
+// log cannot brick a CLI invocation.
+func tailScanStart(f *os.File) (int64, error) {
+	st, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if st.Size() <= recoverTailWindow {
+		return 0, nil // small journal: the whole-file scan already IS a tail scan
+	}
+	from := st.Size() - recoverTailWindow
+	buf := make([]byte, recoverTailWindow)
+	n, err := f.ReadAt(buf, from)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return 0, err
+	}
+	i := bytes.IndexByte(buf[:n], '\n')
+	if i < 0 {
+		return 0, nil
+	}
+	return from + int64(i) + 1, nil
+}
+
+// scanHeadFrom runs the head-recovery scan from an absolute byte offset, reporting
+// end in absolute file offsets so a caller (and Append's stale-head check) can
+// compare it against the live file size regardless of where the scan started.
+func scanHeadFrom(f *os.File, path string, base int64) (seq uint64, lastHash string, end int64, err error) {
+	if _, err := f.Seek(base, io.SeekStart); err != nil {
+		return 0, "", 0, fmt.Errorf("usagelog: scan %s: %w", path, err)
+	}
+	end = base
 	br := bufio.NewReaderSize(f, 64*1024)
 	for {
 		chunk, rerr := br.ReadBytes('\n')

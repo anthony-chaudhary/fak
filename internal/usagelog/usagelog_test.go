@@ -1,6 +1,9 @@
 package usagelog
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,5 +312,95 @@ func TestLoadOrCreateSaltIsStable(t *testing.T) {
 	}
 	if string(s1) != string(s2) {
 		t.Fatal("salt not stable across loads")
+	}
+}
+
+// TestRecoverHeadStartsAtTheTailNotByteZero is the boundedness witness for #5626:
+// head recovery must read a bounded tail, not the whole journal. It is asserted
+// deterministically rather than by timing — the journal opens with a torn line far
+// older than the tail window, which a scan starting at byte 0 stops on (yielding the
+// genesis head), and which a scan starting in the tail window never sees. Passing it
+// therefore proves the scan no longer begins at byte 0, which is exactly the property
+// that made every `fak` spawn re-parse the machine's entire invocation history.
+func TestRecoverHeadStartsAtTheTailNotByteZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	var buf bytes.Buffer
+	buf.WriteString("{ this line is torn and is NOT valid json\n")
+	var last Row
+	for seq := 1; buf.Len() <= 2*recoverTailWindow; seq++ {
+		last = Row{
+			Schema: SchemaV1,
+			Seq:    uint64(seq),
+			Verb:   "version",
+			Hash:   fmt.Sprintf("sha256:%064x", seq),
+		}
+		b, err := json.Marshal(last)
+		if err != nil {
+			t.Fatalf("marshal row %d: %v", seq, err)
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		t.Fatalf("write journal: %v", err)
+	}
+
+	seq, hash, end, err := recoverHead(path)
+	if err != nil {
+		t.Fatalf("recoverHead: %v", err)
+	}
+	if seq != last.Seq {
+		t.Errorf("recovered seq = %d, want %d (the true last row, i.e. the scan skipped the stale prefix)", seq, last.Seq)
+	}
+	if hash != last.Hash {
+		t.Errorf("recovered hash = %q, want %q", hash, last.Hash)
+	}
+	if end != int64(buf.Len()) {
+		t.Errorf("recovered end = %d, want %d (the live file size)", end, buf.Len())
+	}
+}
+
+// TestRecoverHeadFallsBackWhenTailWindowHoldsNoRow covers the one case the tail
+// window cannot serve: a final row LONGER than the window, so the window opens past
+// its terminator and yields no row at all. Recovery must fall back to a full scan
+// there — returning the genesis head instead would restart seq at 1 and fork the
+// chain, the #2608 failure head recovery exists to prevent.
+func TestRecoverHeadFallsBackWhenTailWindowHoldsNoRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	lg, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	first, err := lg.Append(Row{Verb: "run", Args: []string{strings.Repeat("x", recoverTailWindow+4096)}})
+	if err != nil {
+		t.Fatalf("append oversized row: %v", err)
+	}
+	_ = lg.Close()
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if st.Size() <= recoverTailWindow {
+		t.Fatalf("row is %d bytes, need > %d for this case to exercise the fallback", st.Size(), recoverTailWindow)
+	}
+
+	lg2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	second, err := lg2.Append(Row{Verb: "guard"})
+	if err != nil {
+		t.Fatalf("append after reopen: %v", err)
+	}
+	_ = lg2.Close()
+
+	if second.Seq != 2 {
+		t.Errorf("seq after reopen = %d, want 2 (continued, not forked)", second.Seq)
+	}
+	if second.PrevHash != first.Hash {
+		t.Errorf("chain not linked: prev=%q want %q", second.PrevHash, first.Hash)
+	}
+	if n, err := Verify(path); err != nil || n != 2 {
+		t.Errorf("Verify after oversized-row recovery: n=%d err=%v, want n=2 err=nil", n, err)
 	}
 }
