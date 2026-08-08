@@ -132,13 +132,24 @@ ship-alone bar and fak's rationale comments are already dense in the same style.
 The capability witness could not use `fak_feature_query`. Three calls, phrased at three
 different axes, each returned the whole index (~1.0–1.2M characters, over the response
 limit). The entire step-6 witness was redone with raw `Grep` over `internal/` plus
-`gh issue list --search`. This is the concrete motivation behind #5901, and it is why every
-ABSENT above was confirmed by reading fak's code on the seam rather than by a ranker miss.
+`gh issue list --search`. That is why every ABSENT above was confirmed by reading fak's code
+on the seam rather than by a ranker miss. Filed as **#5958** — a *boundedness* defect
+(`internal/selfquery/selfquery.go:255-256` caps only when `Limit > 0`, and every default
+caller passes `0`), distinct from #5901's *ranking-quality* borrow.
 
-Separately, and on-axis for #5898: while this note's sibling issue bodies were being written,
-a tool call was refused with `NEVER_AMEND_SHARED` because the *text being written* discussed
-history rewriting. No such operation was in flight. An action rule matched prose — the exact
-pathology #5898 is filed to fix, observed during the pass that filed it.
+Separately: while this note's sibling issue bodies were being written, a tool call was
+refused with `NEVER_AMEND_SHARED` because the *text being written* discussed history
+rewriting. No such operation was in flight. Filed as **#5960**. Adversarial verification
+corrected the first reading of it: this is **not** the #5898 pathology. gitgate already reads
+only the sink-bearing argument, so it is not an argument-scoping miss — the correct argument
+contains prose that `internal/gitgate` lexes as shell (backtick spans, heredoc bodies). #5898
+would ship in full and leave the refusal standing; the correction is recorded on #5898.
+
+Three defects in fak's own tooling surfaced this way and were filed after adversarial
+verification: **#5958** (feature-query boundedness), **#5959** (`issue_lane_router.py`
+accepts a bare `--apply-labels-write` and silently discards it — the reason the eight borrows
+above were labelled by hand), **#5960** (gitgate refuses prose about the trunk rules). A
+fourth candidate — a gap in this skill's own fan-out wording — was refuted 3/3 and dropped.
 
 ## Companions
 
