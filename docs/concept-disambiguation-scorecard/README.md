@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **116** (clarity 4 + coverage 112) |
-| **Crystal-clear concepts (and climbing)** | **426** crystal of 2139 positioned |
+| **Disambiguation-debt (drive to 0)** | **127** (clarity 15 + coverage 112) |
+| **Crystal-clear concepts (and climbing)** | **428** crystal of 2141 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2302 / 2414** (95.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **61** of 2814 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **61** of 2816 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 95.5/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 93.1/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2139 concepts - score 95.5/100 (grade A) - disambiguation-debt 116
+concept-disambiguation chart - 2141 concepts - score 93.1/100 (grade A) - disambiguation-debt 127
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 426
+  * crystal       #######..................... 428
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -53,8 +53,8 @@ clarity mix by family (each cell = one concept):
   plan             **********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (263 concept(s); 22 crystal)
   policy-capability ****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (133 concept(s); 28 crystal)
   pool             ***oooooooooooooooooooooooooooooo (33 concept(s); 3 crystal)
-  render-materialize ****ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (157 concept(s); 4 crystal)
-  score-debt       ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (70 concept(s); 6 crystal)
+  render-materialize *****ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 5 crystal)
+  score-debt       *******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (71 concept(s); 7 crystal)
   session-runtime  *************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (187 concept(s); 25 crystal)
   support-maturity ***************oooooooooooooooooooooo (37 concept(s); 15 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 191/191
 
-name index: 2814 lookup name(s) -> 2139 concept(s), 61 ambiguous
+name index: 2816 lookup name(s) -> 2141 concept(s), 61 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,8 +118,8 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **191 / 191** (190 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 2 |
-| Boundaries drawn (mutual / total) | 1464 / 3964 |
-| Dangling `distinct_from` references (drive to 0) | 0 |
+| Boundaries drawn (mutual / total) | 1472 / 3972 |
+| Dangling `distinct_from` references (drive to 0) | 11 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
 
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2814 over 2139 concepts |
+| Lookup names indexed | 2816 over 2141 concepts |
 | Lookup names landing on several concepts | 61 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **1** |
-| Concepts carrying a contrast set | 2139 |
+| Concepts carrying a contrast set | 2141 |
 
 ## The concepts (best verdict first)
 
@@ -449,10 +449,12 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | pool | **DISPATCH_POOL** - The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE. |
 | * | crystal | symbol | pool | **Pool (session)** - Bounded-LRU session state container with a fixed ceiling on concurrent sessions |
 | * | crystal | symbol | pool | **PoolProfile** - Pooling character of a residency tier describing host count, coherence model, and shareability |
+| * | crystal | symbol | render-materialize | **RenderHealth (git-daily health readout)** - The one-call operator readout for the git-daily health card: it composes the graded card from HealthFacts and projects it through scorecard.Render as a terminal work-list keyed on HealthDebtKey. |
 | * | crystal | symbol | render-materialize | **RenderAuditClusterReport** - Renders the cross-model failure-clustering dogfood section from an already-folded AuditClusterResult: a correlation-not-causation fence, then sufficient clusters split from insufficient or confounded ones, then route-policy proposals. |
 | * | crystal | symbol | render-materialize | **RenderPlan** - Prompt-assembly layout: stable prefix of reused views plus volatile tail of raw faults |
 | * | crystal | symbol | render-materialize | **RenderItem** - One cell materialized into context by OpRender query effect |
 | * | crystal | symbol | render-materialize | **Rendered** - One span paged into fresh history through the trust gate |
+| * | crystal | symbol | score-debt | **HealthDebtKey (git-daily health card)** - The scorecard debt-integer key for the git-daily health card: the string "git_daily_debt" under which the card publishes its count of health lenses scoring below the pass line. |
 | * | crystal | symbol | score-debt | **GradeNotDebt** - The mode-debt scorer's grade for a dial that is correctly harness-held and model-unreachable: a safety dial the model cannot reach is not implicit-mode debt at all, so it is excluded from the lift worklist entirely rather than ranked at the bottom of it. |
 | * | crystal | symbol | score-debt | **NotDebt** - The Scorecard roll-up COUNT of dials that graded GradeNotDebt: how many surveyed dials were excluded from the lift worklist as correctly harness-held safety dials. Derived by Score so no consumer re-folds the grades. |
 | * | crystal | subsystem | score-debt | **scorecard** - One deterministic measurement of a surface that folds reality into a single *_debt integer plus an A-F grade (the family is documented in the scorecard skill). |
@@ -2409,17 +2411,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
+| separation | `reference_resolves` | 0 | 11 | 11 dangling distinct_from reference(s) |
 | honesty | `clarity_consistent` | 64 | 2 | 2 verdict overclaim(s) |
 | indexed | `index_resolves` | 82 | 1 | 1 unresolvable shared lookup name(s) |
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2500/3964 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2139 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2500/3972 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2141 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
-| separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
 | separation | `pair_separated` | 100 | 0 | all 191 confusable name-pair(s) are separated |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
