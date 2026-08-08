@@ -1,0 +1,40 @@
+{
+  "name": "fully-matched",
+  "note": "The positive control (#5660): the SAME three-arm campaign with the third arm's tokenizer corrected to the one the campaign declared it held. Every selected arm witnesses every held axis and every arm agrees, so the gate must return comparable. It is the half of the proof artifact that keeps the adversarial half honest — a gate that refused everything would also 'catch' the third arm, and this fixture is what shows the refusal is discriminating rather than reflexive.",
+  "campaign": {
+    "id": "sampler-sweep-2026w32",
+    "held_axes": ["model", "tokenizer", "engine", "dataset"]
+  },
+  "arms": [
+    {
+      "id": "baseline-greedy",
+      "role": "control",
+      "axes": {
+        "model": "fixture-7b",
+        "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+        "engine": "fak/cpu",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    },
+    {
+      "id": "candidate-topp",
+      "role": "treatment",
+      "axes": {
+        "model": "fixture-7b",
+        "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+        "engine": "fak/cpu",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    },
+    {
+      "id": "candidate-minp",
+      "role": "treatment",
+      "axes": {
+        "model": "fixture-7b",
+        "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+        "engine": "fak/cpu",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    }
+  ]
+}

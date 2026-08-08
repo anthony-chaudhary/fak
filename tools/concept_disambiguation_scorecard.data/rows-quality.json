@@ -1,0 +1,148 @@
+{
+  "rows": [
+    {
+      "id": "comparisondecision",
+      "canonical": "ComparisonDecision (one cell of a multiplicity family)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "One quality comparison's adjudicated outcome inside a multiplicity family: the (model, slice, metric) cell, its correction-adjusted p-value, whether the correction rejected it, whether the hierarchical gate left it untested, and - when it blocks - the reason plus the first divergence and the scrubbed replay artifact an operator acts on.",
+      "distinction": "It is the PER-CELL statistical outcome inside one adjudicated family of quality comparisons; the whole-family verdict that contains it is MultiplicityDecision. It is not a cadence/cost calibration decision like TierDecision, and not any ship-or-not release verdict.",
+      "distinct_from": [
+        "x-decision-tierdecision",
+        "multiplicitydecision",
+        "multiplicitydecisionschema",
+        "comparabilitydecision"
+      ],
+      "aliases": [],
+      "grounding": "ComparisonDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "filingplan",
+      "canonical": "FilingPlan (quality regression auto-filing lifecycle plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/quality/issue_autofile.go: the set of issue-tracker lifecycle actions (open/update/hold/close) one quality RUN implies, computed purely from the durable Tracker state plus that run's observations, each action carrying the scrubbed replay bundle that reproduces it.",
+      "distinction": "Plans QUALITY-REGRESSION issues keyed by case/model/backend/mode/metric/first-bad, and CLOSES them on a green window of consecutive green runs - NOT SuitePlan (which splits a case corpus into PR/nightly/release suites before anything runs) and NOT modelroute's FindingPlan (which plans cross-audit finding actions from model-auditor receipts and deliberately never closes).",
+      "distinct_from": [
+        "x3-plan-findingplan"
+      ],
+      "aliases": [],
+      "grounding": "FilingPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "multiplicitypolicy",
+      "canonical": "MultiplicityPolicy (statistical policy for a comparison family)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The declaration one family of quality comparisons is held to: the alpha error budget, the multiplicity correction that spends it (holm-bonferroni, benjamini-hochberg, or none), and which metrics are PRIMARY so the secondary family has a gate to open behind.",
+      "distinction": "It governs the STATISTICAL adjudication of a family of quality comparisons - how many hypotheses may be tested and at what adjusted threshold. It is not a runtime admission or scheduling policy like DefaultAdmissionPolicy, not a cadence or context-residency policy like TierPolicy, and not a routing policy.",
+      "distinct_from": [
+        "x2-policy-capability-tierpolicy",
+        "x2-policy-capability-defaultadmissionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "MultiplicityPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "multiplicitydecision",
+      "canonical": "MultiplicityDecision (whole-family multiplicity verdict)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The whole-family verdict over one adjudicated grid of quality comparisons: the declared policy, the bound that policy actually buys stated in words, every per-cell ComparisonDecision, the blocking subset ordered strongest-evidence-first, any family-level refusal, the per-tier cost rollup, and a Pass that is true only when nothing blocked and nothing was refused.",
+      "distinction": "It is the WHOLE-FAMILY verdict over a grid of quality comparisons; the per-cell outcome nested inside it is ComparisonDecision. It is not a cadence or cost calibration decision like TierDecision, and not any ship-or-not release verdict.",
+      "distinct_from": [
+        "comparisondecision",
+        "x-decision-tierdecision",
+        "multiplicitydecisionschema",
+        "comparabilitydecision"
+      ],
+      "aliases": [],
+      "grounding": "MultiplicityDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "multiplicitydecisionschema",
+      "canonical": "MultiplicityDecisionSchema (versioned tag on a multiplicity decision)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The versioned schema tag stamped on every MultiplicityDecision artifact (fak-quality-multiplicity/1) so a consumer pins the major version and a shape change becomes a conscious migration rather than silent field drift.",
+      "distinction": "It is the SCHEMA IDENTIFIER string stamped on the artifact, not the artifact itself (MultiplicityDecision) and not the per-cell outcome nested inside it (ComparisonDecision).",
+      "distinct_from": [
+        "multiplicitydecision",
+        "comparisondecision",
+        "comparabilitydecision"
+      ],
+      "aliases": [],
+      "grounding": "MultiplicityDecisionSchema",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "comparabilitydecision",
+      "canonical": "ComparabilityDecision (set-wide multi-arm campaign comparability verdict)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "internal/quality/set_comparability.go: the verdict over a multi-arm campaign's COMPLETE selected arm set - the declared held axes, every selected arm with its role typed against a closed set, the three-way verdict (comparable / not_comparable / could_not_establish), every typed finding naming the exact arms and axis at fault, and the bound that verdict licenses stated in words.",
+      "distinction": "It decides whether a campaign's arms were COMPARABLE AT ALL - whether every declared held axis was witnessed by, and identical across, every selected arm. It is not a statistical adjudication of a comparison family (MultiplicityDecision) nor one cell's outcome inside one (ComparisonDecision): those spend an error budget over hypotheses, this establishes the precondition that makes any such comparison meaningful.",
+      "distinct_from": [
+        "multiplicitydecision",
+        "comparisondecision",
+        "multiplicitydecisionschema",
+        "findingheldaxisunwitnessed"
+      ],
+      "aliases": [],
+      "grounding": "ComparabilityDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "findingheldaxisunwitnessed",
+      "canonical": "FindingHeldAxisUnwitnessed (a selected arm witnessed no value for a declared held axis)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "internal/quality/set_comparability.go: the typed finding that a selected campaign arm handed over no value (absent or blank) for an axis its campaign declared it holds constant, so that axis was never established as held across the complete arm set.",
+      "distinction": "It records ABSENCE OF EVIDENCE from a named arm - silence, which is not agreement - and forces the could-not-establish verdict. It is distinct from FindingHeldAxisDiffers, which is positive proof that a fully witnessed axis takes more than one value across the set; unknown dominates different precisely because this finding means the axis enumeration was never complete.",
+      "distinct_from": [
+        "comparabilitydecision"
+      ],
+      "aliases": [],
+      "grounding": "FindingHeldAxisUnwitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
