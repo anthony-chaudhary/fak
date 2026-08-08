@@ -86,7 +86,24 @@ def install_no_window_subprocess_defaults(module: Any = subprocess) -> None:
         return wrapped
 
     module.run = with_flags(module.run)
-    module.Popen = with_flags(module.Popen)
+    # Popen has to stay a CLASS, so wrap it by SUBCLASSING rather than with with_flags.
+    # `class Popen(subprocess.Popen)` is a shape the stdlib itself uses -- asyncio's
+    # windows_utils does exactly that at import time -- so swapping the class for a plain
+    # function turns every later subclass into a TypeError. The damage then lands nowhere
+    # near this line: unittest.mock imports asyncio, so any script that installed these
+    # defaults silently lost `from unittest import mock` for the rest of the process, and
+    # the traceback blamed asyncio's own __init__. Subclassing keeps isinstance checks and
+    # subclassing intact while still defaulting the flag.
+    base_popen = module.Popen
+
+    class _NoWindowPopen(base_popen):  # type: ignore[misc,valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs.setdefault("creationflags", no_window_creationflags())
+            super().__init__(*args, **kwargs)
+
+    _NoWindowPopen.__name__ = getattr(base_popen, "__name__", "Popen")
+    _NoWindowPopen.__qualname__ = getattr(base_popen, "__qualname__", "Popen")
+    module.Popen = _NoWindowPopen
     module.call = with_flags(module.call)
     module.check_call = with_flags(module.check_call)
     module.check_output = with_flags(module.check_output)

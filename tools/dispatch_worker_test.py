@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -929,6 +932,81 @@ class DispatchWorkerTest(unittest.TestCase):
             sep = wrapped.index("--")
             self.assertIn("--mcp-config", wrapped[sep + 1:])
             self.assertEqual(wrapped[sep + 1], "claude")
+
+
+class NoWindowSubprocessDefaultsTest(unittest.TestCase):
+    """`install_no_window_subprocess_defaults` patches a module's subprocess helpers to
+    default `creationflags`. The KIND of each patched attribute has to survive that."""
+
+    class _FakePopen:
+        def __init__(self, *args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+
+    def setUp(self) -> None:
+        self.m = load()
+
+    def _fake_subprocess(self):
+        mod = types.SimpleNamespace()
+        for name in ("run", "call", "check_call", "check_output"):
+            mod.__dict__[name] = (lambda n: (lambda *a, **k: (n, a, k)))(name)
+        mod.Popen = self._FakePopen
+        return mod
+
+    def _install(self, mod) -> None:
+        # The installer is a no-op off Windows, so force the branch: the invariant below
+        # is pinned on every host rather than only on the one where it can regress.
+        orig = self.m.os.name
+        self.m.os.name = "nt"
+        try:
+            self.m.install_no_window_subprocess_defaults(mod)
+        finally:
+            self.m.os.name = orig
+
+    def test_popen_stays_a_subclassable_class(self) -> None:
+        mod = self._fake_subprocess()
+        self._install(mod)
+        self.assertTrue(inspect.isclass(mod.Popen), "Popen must stay a class, not a function")
+        # The exact shape the stdlib uses: asyncio.windows_utils does
+        # `class Popen(subprocess.Popen)` at import time, and unittest.mock imports
+        # asyncio -- so a function here costs the whole process `from unittest import
+        # mock`, with a traceback pointing at asyncio rather than at this module.
+        class Derived(mod.Popen):
+            pass
+
+        self.assertTrue(issubclass(Derived, self._FakePopen))
+
+    def test_popen_still_defaults_creationflags(self) -> None:
+        mod = self._fake_subprocess()
+        self._install(mod)
+        p = mod.Popen(["git", "status"])
+        self.assertEqual(p.kwargs.get("creationflags"), self.m.no_window_creationflags())
+        self.assertEqual(p.args, (["git", "status"],))
+
+    def test_explicit_creationflags_still_win(self) -> None:
+        mod = self._fake_subprocess()
+        self._install(mod)
+        # CREATE_NEW_PROCESS_GROUP: a value no default would produce on either host, so
+        # this stays a real assertion on POSIX where the default flag is 0.
+        p = mod.Popen(["git", "status"], creationflags=0x200)
+        self.assertEqual(p.kwargs.get("creationflags"), 0x200)
+
+    def test_asyncio_still_imports_after_install(self) -> None:
+        # The end-to-end witness for the regression: install the defaults on the REAL
+        # subprocess module inside a child process, then import the thing that subclasses
+        # Popen. A child keeps the (idempotent, process-wide) patch out of this runner.
+        prog = (
+            "import importlib.util,subprocess,sys\n"
+            f"sys.path.insert(0, {str(SCRIPT.parent)!r})\n"
+            f"spec = importlib.util.spec_from_file_location('dw', {str(SCRIPT)!r})\n"
+            "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+            "mod.install_no_window_subprocess_defaults(subprocess)\n"
+            "from unittest import mock\n"
+            "print('ok')\n"
+        )
+        out = subprocess.run([sys.executable, "-c", prog], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("ok", out.stdout)
 
 
 if __name__ == "__main__":
