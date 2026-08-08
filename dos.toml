@@ -44,6 +44,32 @@ pilot_development_branch = "dev"
 # worker at once). The trees are prefix-based and pairwise disjoint by construction.
 # `internal/abi` is the frozen, human-owned spine (PARTITION.md "wave-0, unleasable")
 # -> EXCLUSIVE: an ABI change is the serial gate that every leaf imports.
+#
+# SUB-LANES (internal/laneadmit/lanetree.go). Every name below is a lane ROOT, not the
+# whole vocabulary. A lane name is path-shaped, so `gateway/server` and
+# `gateway/server.go` are addressable WITHOUT a row here: they derive their tree from
+# the nearest declared ancestor (`gateway` -> `internal/gateway/**`, hence
+# `internal/gateway/server/**` and `internal/gateway/server.go`). That is what takes the
+# addressable space from the 543 names in this file to 13,678 over the tracked tree --
+# measured, not projected, by TestRepoLaneSpaceMultiplier in internal/laneadmit. Keep
+# declaring roots here; do NOT enumerate what is below them.
+#
+# Defaults, all chosen so nothing below this comment changes meaning:
+#   * DEFAULT GRANULARITY IS THE LEAF. A surface that names `gateway` gets
+#     `internal/gateway/**` exactly as before and serializes with every other `gateway`
+#     holder. Narrowing is opt-in: a caller must name the sub-lane to get it.
+#   * A SUB-LANE IS NEVER MORE PERMISSIVE THAN ITS ROOT. A parent's holder blocks every
+#     descendant and vice versa (conflict kind `lane_ancestry`), `exclusive` below
+#     INHERITS downward (no `abi/...` escapes the serial ABI gate), and a tail that
+#     cannot be derived falls back to the ancestor's coarse tree.
+#   * DIRECTORY granularity is the safe cut for CODE roots: siblings are separate Go
+#     packages, so neither worker's half-finished edit can red the other's build. FILE
+#     granularity is honest only where files do not co-compile (docs, visuals, examples,
+#     testdata). Callers pick; the taxonomy does not force one.
+#   * A lease id keeps ONE ref segment: `gateway/server` travels as
+#     `<surface>-lane-docs_notes` because internal/leaseref's validID rejects `/`
+#     (and git could not hold both refs/fak/locks/x and .../x/y). The encoding is
+#     reversible for any real path -- see escapeLaneSegment.
 [lanes]
 concurrent = [
   "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
@@ -1690,6 +1716,13 @@ refusal  = true
 summary  = "the all-in-one deployment is at its configured concurrent-governed-session ceiling (FAK_MAX_SESSIONS): a NEW session's admission is backpressured at the served boundary (503 + Retry-After) with this reason, before the model is consulted. Sessions already in flight are never refused — only the new session is shed — so saturation sheds new load instead of degrading the loops already running."
 fix      = "let an in-flight session finish (headroom frees the next scrape) and retry the new session, or scale the deployment out / raise FAK_MAX_SESSIONS if the host genuinely has capacity. Size the ceiling from the sizing model in docs/fak/deployment-guide.md and watch the fak_gateway_session_saturation gauge to scale BEFORE saturation. A zero/unset ceiling never fires this. Floor: go test ./internal/gateway -run TestSessionCeiling."
 see_also = ["internal/gateway/session_ceiling.go", "internal/gateway/session_admit.go", "docs/fak/deployment-guide.md", "RATE_LIMIT_BACKOFF", "GATE_PRESSURE"]
+
+[reasons.COMPACTION_THRASH]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "the served session's context window refilled to the compaction limit on 3 consecutive turns (#2424): history compaction FIRED every one of those turns and bought no lasting headroom, so the session is spending a compaction per reply and making no progress against its window. Detection and the /metrics count are always on; the session STOP that carries this reason at the served boundary is armed only by FAK_COMPACTION_THRASH_STOP."
+fix      = "restart the work in a FRESH window seeded from durable state (commit, plan, ledger) rather than letting the same transcript re-fill — tightening --compact-history-budget only compacts more often and changes nothing, because the binding constraint is the traffic, not the budget. Shrink the per-turn floor instead: window large reads, summarize bulky tool results, and drop tools the run does not use. Watch fak_gateway_compaction_thrash_sessions_total before arming the stop. Floor: go test ./internal/gateway -run TestCompactionThrashVerdict."
+see_also = ["internal/gateway/ctxadvice.go", "internal/gateway/ctxvalue.go", "internal/gateway/session_admit.go", "SESSION_CEILING_SATURATED", "BUDGET_CONTEXT_EXHAUSTED"]
 
 # Verification-ladder INDETERMINATE (#1210, C2/G2 of the agent-programming-grammar
 # epic #1208): the first-class verdict the declarable verification ladder
