@@ -11,15 +11,6 @@ import (
 // different question — not "what window did the upstream announce?" (ResolveReset, already
 // covered there) but "how long should the seat be held when nothing was announced?".
 
-func weeklyMustTime(t *testing.T, s string) time.Time {
-	t.Helper()
-	ts, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		t.Fatalf("parse %q: %v", s, err)
-	}
-	return ts.UTC()
-}
-
 // TestIsWeeklyLimitPhrases: the weekly classifier is phrase-anchored. It must catch the
 // forms Claude and the gateway actually emit, and must NOT promote an ordinary rolling-cap
 // line to the longer weekly floor.
@@ -56,7 +47,7 @@ func TestIsWeeklyLimitPhrases(t *testing.T) {
 // message announces NO window used to fall to DefaultCooldownWindow (1h), so the seat was
 // re-admitted ~168 times before its real reset. It now takes the weekly floor instead.
 func TestResolveCooldownResetWeeklyFloor(t *testing.T) {
-	now := weeklyMustTime(t, "2026-07-06T12:00:00Z")
+	now := mustTime(t, "2026-07-06T12:00:00Z")
 
 	// The exact message the repo's own TestResolveResetNoWindowIsZero pins to zero: a
 	// weekly cap whose only reset is a bare, deliberately-untrusted wall-clock.
@@ -78,14 +69,14 @@ func TestResolveCooldownResetWeeklyFloor(t *testing.T) {
 // An announced window — absolute or relative — still decides, so #2610's announced_wait
 // path is untouched and a weekly cap announcing 1h7m is held 1h7m, not 6h.
 func TestResolveCooldownResetAnnouncedWindowWins(t *testing.T) {
-	now := weeklyMustTime(t, "2026-07-06T12:00:00Z")
+	now := mustTime(t, "2026-07-06T12:00:00Z")
 
 	rel := ResolveCooldownReset("kind=weekly_limit announced_wait≈1h7m", now)
 	if want := now.Add(67 * time.Minute).UTC(); !rel.Equal(want) {
 		t.Fatalf("announced relative wait: got %s want %s", rel, want)
 	}
 	abs := ResolveCooldownReset("weekly limit reached; resets at 2026-07-07T15:00:00Z", now)
-	if want := weeklyMustTime(t, "2026-07-07T15:00:00Z"); !abs.Equal(want) {
+	if want := mustTime(t, "2026-07-07T15:00:00Z"); !abs.Equal(want) {
 		t.Fatalf("announced absolute reset: got %s want %s", abs, want)
 	}
 }
@@ -94,7 +85,7 @@ func TestResolveCooldownResetAnnouncedWindowWins(t *testing.T) {
 // with no announced window) still resolves to zero, so the caller falls back to
 // DefaultCooldownWindow. The floor must not silently lengthen every usage cooldown.
 func TestResolveCooldownResetNonWeeklyKeepsDefault(t *testing.T) {
-	now := weeklyMustTime(t, "2026-07-06T12:00:00Z")
+	now := mustTime(t, "2026-07-06T12:00:00Z")
 	for _, msg := range []string{
 		"Claude usage limit reached. Your limit will reset at 5pm (America/Los_Angeles).",
 		"You've hit your 5-hour limit",
@@ -109,7 +100,7 @@ func TestResolveCooldownResetNonWeeklyKeepsDefault(t *testing.T) {
 // TestCoolUnannouncedWeeklyHoldsPastTheRollingDefault is the behavioral half: the seat is
 // still cooled at the moment the old 1-hour default would have re-offered it.
 func TestCoolUnannouncedWeeklyHoldsPastTheRollingDefault(t *testing.T) {
-	now := weeklyMustTime(t, "2026-07-06T12:00:00Z")
+	now := mustTime(t, "2026-07-06T12:00:00Z")
 	s := &CooldownStore{entries: map[string]CooldownEntry{}}
 
 	reset := ResolveCooldownReset("You've hit your weekly limit for Opus", now)
