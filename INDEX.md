@@ -248,6 +248,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Study: can1357/oh-my-pi @896bf5f3 — CoW worker isolation, mid-stream tool-argument interception reframed affordance-first, compaction arithmetic, reversible secret placeholders, replay-safety and quota preflight (epic #5917, #5918-#5927)](docs/notes/CONCEPT-STUDY-OH-MY-PI-2026-08-08.md) -- auto-indexed dated note.
 - [Study: youneslaaroussi/Marionette @1f058aa2 — live tool-call loop steering, playbook-derived tool faulting, sequenced scripted-model E2E, ingest-time source denial (#5904-#5910)](docs/notes/CONCEPT-STUDY-MARIONETTE-2026-08-08.md) -- auto-indexed dated note.
 - [Study: agnt-gg/agnt @66208c56 — cache-prefix, gate-predicate and estimator borrows; source-available so INSPIRE-only (#5896-#5903)](docs/notes/CONCEPT-STUDY-AGNT-2026-08-08.md) -- auto-indexed dated note.
 - [Study: PrimeIntellect-ai/prime-agent @a18809e0 — RLM + Continual Harness pass; lock-holder identity and worktree-effect progress, plus a second fak-side witness pass that retracted the row-9 dismissal (#5892/#5893, #5913-#5915)](docs/notes/CONCEPT-STUDY-PRIME-AGENT-2026-08-08.md) -- auto-indexed dated note.
