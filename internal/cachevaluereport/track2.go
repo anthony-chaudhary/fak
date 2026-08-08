@@ -155,6 +155,11 @@ type SavingsObservation struct {
 	CompactionAnchorStarved uint64
 	CompactionBudget        int
 
+	// BillingMode is the seat posture resolved at write time (#3664) — see
+	// NormalizeBillingMode for the closed set. A producer that cannot see the billing
+	// class leaves it blank, which reads as unknown and folds NOTIONAL.
+	BillingMode string
+
 	Pricing SavingsPricing
 }
 
@@ -235,6 +240,14 @@ type SavingsRow struct {
 	OutputPerMTokUSD float64 `json:"output_per_mtok_usd,omitempty"`
 	PricingSource    string  `json:"pricing_source,omitempty"`
 	DollarStatus     string  `json:"dollar_status,omitempty"`
+
+	// BillingMode is WHICH seat the $ duals above were billed to, stamped at write from
+	// the session's resolved credential class (#3664). PricingSource says what rate the
+	// row was priced AT; this says whether that price was actually charged per token.
+	// Absent on every row written before the field existed and on any producer that
+	// cannot see its own billing — both read as unknown and fold NOTIONAL, never
+	// real-dollar (NormalizeBillingMode / RealDollarBillingMode).
+	BillingMode string `json:"billing_mode,omitempty"`
 
 	// Fidelity is the mechanism's context-faithfulness class, stamped at write from
 	// Fidelity(Mechanism) so a producer can never drift from the prose ("lossless"
@@ -388,6 +401,14 @@ func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 		GeneratedAt:   now.Format(time.RFC3339),
 		PricingSource: strings.TrimSpace(obs.Pricing.Source),
 		DollarStatus:  savingsDollarStatus(obs.Pricing),
+	}
+	// Stamp the seat posture only when the producer actually named one (#3664). A blank
+	// observation stays BLANK on the wire rather than being normalized to an explicit
+	// "unknown": both fold notional, but the absence honestly says "nobody looked",
+	// which is exactly what every pre-#3664 row says, and it keeps the emitted JSON of
+	// a producer that never learned about billing byte-identical to before.
+	if strings.TrimSpace(obs.BillingMode) != "" {
+		base.BillingMode = NormalizeBillingMode(obs.BillingMode)
 	}
 	var rows []SavingsRow
 	if obs.CacheReadTokens > 0 || obs.CacheCreationTokens > 0 {
