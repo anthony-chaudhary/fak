@@ -32,11 +32,6 @@ Three pieces, deliberately separated:
      named lane serializes even on disjoint trees (the lease's lane is
      inferred by matching its tree against the `dos.toml [lanes.trees]`
      taxonomy, so no lease-record schema change was needed);
-  3b. a request whose lane **contains, or is contained by**, a live lease's
-     lane is refused (`lane_ancestry`) — `gateway` and `gateway/server` are
-     not the same lane, but the parent may edit anywhere beneath the child, so
-     they still serialize. Disjoint siblings (`gateway/server` vs
-     `gateway/router`) do not. See [sub-lanes](#sub-lanes-the-vocabulary-is-derived-not-enumerated);
   4. a requested tree **overlapping** a live lease's tree is refused —
      `dispatchorder.TreesOverlap`, the same prefix geometry the dispatch
      fan-out price uses (one algebra, never re-derived). An empty tree is
@@ -63,6 +58,16 @@ dispatch worker's lane lease refuses a loop drive — witnessed end-to-end in
 [`cmd/fak/loop_drive_region_test.go`](../cmd/fak/loop_drive_region_test.go).
 
 ## Sub-lanes: the vocabulary is derived, not enumerated
+
+> **Read this first: `regionadmit` does not implement any of this yet.** The
+> sub-lane algebra below lives in `internal/laneadmit`, the *other* pure
+> admission twin. `regionadmit.Decide` — the decision this page documents, and
+> the one `fak loop region`, `fak loop drive` and the dispatch tick actually
+> call — still compares lane names by string equality and resolves a lane's
+> tree by exact `tax.Trees[lane]` lookup. This section is here because it is
+> the same contract at the next rung and the two twins are meant to converge;
+> adopting it in `regionadmit` is tracked, not shipped. The concrete
+> consequence today is in [honest boundary](#honest-boundary).
 
 Rule 3 makes a lane a **mutex**, so the number of declared lanes *is* the
 concurrency ceiling: two workers on genuinely disjoint files inside one leaf
@@ -108,11 +113,18 @@ addressable lanes at leaf granularity, **1,152** at directory granularity,
   `docs/notes`. The encoding is reversible for every one of the 13,690 derived
   lanes (`TestRepoLaneSpaceIsWellFormed`) — an unleasable lane is not a lane.
 
+`laneadmit.Decide` gains one rung for it: a request whose lane **contains, or
+is contained by**, a live lease's lane refuses with `lane_ancestry`. `gateway`
+and `gateway/server` are not the same lane, but the parent may edit anywhere
+beneath the child, so they still serialize; disjoint siblings
+(`gateway/server` vs `gateway/router`) do not, and that is the entire source of
+the added concurrency.
+
 Backward compatible by construction: all 543 declared lanes are a single
 `[a-z0-9]+` segment, so `LaneContains` degenerates to string equality,
-`LanesConflict` degenerates to the `lane == req.Lane` test `Decide` always ran,
-and a lease id minted before sub-lanes existed decodes to itself. Flat verdicts
-are byte-identical (`TestDecideFlatVerdictsUnchanged`).
+`LanesConflict` degenerates to the `lane == req.Lane` test `laneadmit.Decide`
+always ran, and a lease id minted before sub-lanes existed decodes to itself.
+Flat verdicts are byte-identical (`TestDecideFlatVerdictsUnchanged`).
 
 ## Using it from a GOAL.md loop
 
@@ -168,12 +180,13 @@ never releases is still bounded: the TTL lapses the record and
   classified back to its lane by containment, so same-lane serialization and
   exclusive-lane blocking still apply to it; a tree spanning several lanes
   owns no lane and is protected by geometry alone.
-- **Naming a sub-lane is what buys the concurrency, not narrowing the tree.**
-  The bullet above is the reason: a narrowed *tree* is still classified back to
-  its declared lane, so rule 3 serializes it against the parent anyway. Two
-  workers only run concurrently inside one leaf when each names a disjoint
-  **lane** (`--lane gateway/server` vs `--lane gateway/router`). Narrowing the
-  tree alone changes nothing.
+- **Do not pass a sub-lane to `--lane` yet — it is strictly worse than the
+  root.** `regionadmit.ResolveTree` resolves a lane by exact
+  `tax.Trees[lane]` lookup, so an undeclared `--lane gateway/server` resolves
+  to **no tree at all**, which rung 4 reads as unknown blast radius and
+  collides with *every* live lease. Pass the declared root (`--lane gateway`)
+  and narrow with `--tree` instead; the bullet above explains why that keeps
+  the lane's semantics.
 - **The loop-drive lease renews per turn (TTL 3600s by default).** A single
   agent turn longer than the TTL lapses the lease mid-turn; if nobody took the
   region meanwhile the next turn boundary reacquires it silently, and if a
@@ -190,14 +203,23 @@ race between two clones is not arbitrated. Same-host, the fence
 only as complete as the lease set it is shown: a surface that acquires nothing
 (RSI by design; any legacy uncoordinated launch) is still invisible.
 
-**Sub-lanes are algebra, not yet throughput.** `Decide` understands hierarchy,
-but no dispatch surface picks a sub-lane on its own: `fak dispatch wave` still
-routes an issue to a declared leaf, so effective fleet concurrency (measured at
-~22 in #5854) is **unchanged** until a caller opts in. Two things gate that
-opt-in and neither is a drive-by — the lease record conflates admission
-geometry with authorization geometry, so narrowing only the pricer yields
-phantom concurrency (#5854), and `internal/hooks`'s commit-stamp lane
-vocabulary is still flat, so a `(fak gateway/server)` trailer would not bind.
+**Sub-lanes are algebra, not yet throughput.** `laneadmit.Decide` understands
+hierarchy; nothing on this page's path does. Three separate gaps, each tracked
+rather than shipped:
+
+1. **`regionadmit` has not adopted it.** Its `Taxonomy` is a different type
+   with an exact-match `Trees` lookup and no ancestor walk, so `--lane
+   gateway/server` gets an empty tree and `abi/registry.go` does not inherit
+   `abi`'s exclusivity at rung 1. Porting means changing the live admission
+   path `fak dispatch tick` and `fak loop drive` already run.
+2. **No surface picks a sub-lane on its own.** `fak dispatch wave` still routes
+   an issue to a declared leaf, so effective fleet concurrency (measured at ~22
+   in #5854) is unchanged even once rung 1 lands. #5854 is the blocker: the
+   lease record conflates admission geometry with authorization geometry, so
+   narrowing only the pricer yields phantom concurrency.
+3. **The commit-stamp lane vocabulary is still flat.** `internal/hooks` would
+   not bind a `(fak gateway/server)` trailer, so a worker holding a sub-lane
+   cannot stamp a commit for it.
 
 Named next rungs, tracked in the backlog: the super-loop drive rung entering
 members through this gate (#2224), preflight live-count reading these leases
