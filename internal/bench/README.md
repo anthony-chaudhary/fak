@@ -162,3 +162,53 @@ rung's ablation (e.g. `internal/negframe` reframe on vs off) *net* by diffing tw
 artifacts. The committed witness `testdata/negbench-reference-oracle.json` is the
 reference-oracle run (model + host named, `OBSERVED`, `enforced: false`).
 
+
+## Scheduler token-weight calibration (`tokenweightcal`) — [#5778](https://github.com/anthony-chaudhary/fak/issues/5778)
+
+The scheduler weights in `tokenprofile.DefaultWeights` (`1 / 0.25 / 4`) are explicit
+*illustrative policy inputs* from [#5771](https://github.com/anthony-chaudhary/fak/issues/5771),
+not hardware truth. This arm fits them from a measured service-time ledger and refuses to
+let an illustrative or synthetic input pass itself off as a measurement.
+
+`CalibrateTokenWeights` fits `service_ms ≈ fixed + u·w_u + c·w_c + d·w_d` over the three
+classes #5771 separates — uncached prefill, cache read/transfer, decode — by ordinary
+least squares on the `fit` split, then scores the result on a never-fitted `holdout`
+split against a **tuned** scalar-total baseline (the scalar gets its own least-squares
+refit first, so the comparison is not a strawman).
+
+### Producing a ledger on a sanctioned compute node
+
+One JSONL row per observation (`fak-token-service-sample/1`), each declaring
+`measured:` or `synthetic:` provenance plus model / engine / hardware / batch. Weights
+never pool across those four — a mixed ledger is refused. Then:
+
+```bash
+FAK_TOKENCAL_LEDGER=/tmp/token-service-da33.jsonl \
+FAK_TOKENCAL_OUT=/tmp/token-weights-da33.json \
+FAK_TOKENCAL_BOUND_PCT=5 \
+  go test ./internal/bench -run TestWriteTokenWeightCalibration -count=1 -v
+```
+
+The artifact (`fak-token-weight-calibration/1`) carries the fitted per-class rates with
+95% intervals, `r_squared` / residual std, the held-out MAPE/RMSE for both arms, the
+renormalized `scheduler_weights` drop-in for `tokenprofile.Weights`, and a self-verifying
+`digest`. A calibration refusal is a valid recorded outcome, not a reason to fabricate.
+
+### What it refuses
+
+- **Uncontrolled shapes** — if the token shapes do not vary the three classes
+  independently the normal matrix is singular; no weight is identifiable and the fit is
+  refused rather than pseudo-inverted into a confident-looking answer.
+- **Split leakage** — a `shape_id` present in both splits.
+- **Net-true gain without the receipts** — `EvaluateNetSchedulingValue` is a hard error
+  unless the measured alternative *and* the measured per-decision scheduling overhead are
+  both supplied. Net value is `RMSE reduction − added overhead`, so an accuracy win that
+  costs more to compute than it saves does not count as a gain.
+- **Synthetic data claiming hardware truth** — a `synthetic:` ledger can fit and predict
+  well and still cannot produce a net-true gain claim. Only a `measured:` ledger can.
+
+`testdata/token_service_synthetic.jsonl` is a committed **synthetic** fixture (26 shapes,
+seeded noise), regenerable byte-for-byte from `syntheticTokenRows` via
+`FAK_TOKENCAL_FIXTURE_OUT=testdata/token_service_synthetic.jsonl`. It exists to test the
+fold and to demonstrate the shape of the gap; it is **not** a hardware measurement and no
+device claim rests on it.
