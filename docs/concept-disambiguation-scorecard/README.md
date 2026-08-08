@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **127** (clarity 15 + coverage 112) |
-| **Crystal-clear concepts (and climbing)** | **428** crystal of 2141 positioned |
+| **Crystal-clear concepts (and climbing)** | **430** crystal of 2143 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2302 / 2414** (95.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **61** of 2816 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **61** of 2818 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 93.1/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2141 concepts - score 93.1/100 (grade A) - disambiguation-debt 127
+concept-disambiguation chart - 2143 concepts - score 93.1/100 (grade A) - disambiguation-debt 127
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 428
+  * crystal       #######..................... 430
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -43,14 +43,14 @@ clarity mix by family (each cell = one concept):
   cache            *****************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (217 concept(s); 41 crystal)
   context-ctx      *******************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (188 concept(s); 31 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
-  decision         ***********************ooooooooooooooooooooo (44 concept(s); 23 crystal)
+  decision         ************************ooooooooooooooooooooo (45 concept(s); 24 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ************oooooooooooooooooooooooooooooooo (44 concept(s); 12 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 13 crystal)
   guard-gate       **************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (327 concept(s); 86 crystal)
   layout           ****ooooooooo      (13 concept(s); 4 crystal)
   loop             ****************************oooooooooooooooooooooooooooooooooooooo (66 concept(s); 28 crystal)
-  plan             **********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (263 concept(s); 22 crystal)
+  plan             ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 23 crystal)
   policy-capability ****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (133 concept(s); 28 crystal)
   pool             ***oooooooooooooooooooooooooooooo (33 concept(s); 3 crystal)
   render-materialize *****ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 5 crystal)
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 191/191
 
-name index: 2816 lookup name(s) -> 2141 concept(s), 61 ambiguous
+name index: 2818 lookup name(s) -> 2143 concept(s), 61 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **191 / 191** (190 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 2 |
-| Boundaries drawn (mutual / total) | 1472 / 3972 |
+| Boundaries drawn (mutual / total) | 1472 / 3974 |
 | Dangling `distinct_from` references (drive to 0) | 11 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2816 over 2141 concepts |
+| Lookup names indexed | 2818 over 2143 concepts |
 | Lookup names landing on several concepts | 61 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **1** |
-| Concepts carrying a contrast set | 2141 |
+| Concepts carrying a contrast set | 2143 |
 
 ## The concepts (best verdict first)
 
@@ -227,6 +227,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cross-cluster | **page-in refusal** - internal/ctxplan's Refusal: a selected span the trust gate declined to page in (sealed, or its bytes went missing) - reported to the caller, never rendered into the fresh history. |
 | * | crystal | symbol | cross-cluster | **effect refusal** - internal/memq's Refusal: a cell an effect declined to touch (sealed / tombstoned / page-in refused) - recorded with a reason on the executor's result. |
 | * | crystal | symbol | decision | **IndexLockReclaimDecision** - The reap-or-keep verdict for a stale git .git/index.lock: a Reap flag plus a closed-vocabulary reason, decided purely from the commit-lane observer's evidence (lock presence, process-probe success, live-writer count, staleness past the grace window). |
+| * | crystal | symbol | decision | **TurnTaxDecision** - The recorded outcome of one PlanTurnTax call: the strategy chosen for a turn, the operator-readable reason it was chosen, and the three per-strategy token taxes plus availability flags the choice was made from. |
 | * | crystal | symbol | decision | **ContainmentDecision (toolprocgate)** - The closed verdict-plus-evidence struct returned by DecideContainment in internal/toolprocgate that adjudicates whether a tool-process spawn is admitted, deferred, or refused based on crash-blast-radius containment policy (fleet breaker, surface quarantine, co-location cap), carrying the ContainmentVerdict, the one-bit Admit gate, a reason, and the fault-window evidence so a refusal is auditable. |
 | * | crystal | symbol | decision | **SteerDecision (trajctl)** - One regime-gate steering decision for one objective at one turn boundary (internal/trajctl/steer.go): an Action (nudge/arm/suppress/none) plus the Signal that triggered it and the ObjectiveID it targets, produced by DecideNudge or SteerSweep when the recent score curve is unhealthy (STALL/DRIFT/DETOUR_OVERRUN) and ledgered as one JSONL row via AppendSteerDecisions. |
 | * | crystal | symbol | decision | **WalkDecision (gardenbundle)** - One budgeted item's triage outcome from a garden walk (internal/gardenbundle/walk.go): a Disposition (act/review/defer), the ready Action command to run, a Reason, and a Perform flag, emitted worst-first for each issue the walk inspected so the dispatch garden can split human-needed from fleet-drivable work. |
@@ -399,6 +400,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **RefusePagedHostPlanIfTooBig** - The demand-paged host fit guard: refuses a MemoryPlan whose host-scoped demands exceed HostBudgetForPagedWeights, the tighter of the fractional headroom budget and MemAvailable minus the absolute page-cache floor. |
 | * | crystal | symbol | plan | **refusePagedHostPlanForHostMem** - The injectable core of RefusePagedHostPlanIfTooBig: takes the host (total, free, known) triple explicitly so the demand-paged refusal is testable without a live /proc/meminfo probe. |
 | * | crystal | symbol | plan | **refuseHostScopedPlanForHostMem** - The injectable core of RefuseHostScopedPlanIfTooBig (capacity.go): given a plan and an explicit host (total, free, known), it refuses when the plan's host-scoped demands exceed BudgetAfterHeadroom — the FRACTION-only host budget. Taking the host explicitly is what makes the refusal testable without a live /proc/meminfo. |
+| * | crystal | symbol | plan | **PlanTurnTax** - The pure per-turn function that scores the three context-acquisition strategies (prefix reuse, session-index query, cold prefill) by their token tax and returns the single cheapest AVAILABLE one together with the reason it won. |
 | * | crystal | concept | plan | **replanning** - The property/act of re-deriving a plan for the same turn (ctxplan PlanView, supervisoragent action) - a deterministic re-admission that reuses the existing admit receipt, not a new authority. |
 | * | crystal | symbol | plan | **RolePlan** - Binds one execution Role to its own modelroute Subject (independent model constraints), an independent per-axis Budget, an escalation target, and a result fold. |
 | * | crystal | symbol | plan | **RolePlanSet** - The declared multi-role execution plan: an ordered list of RolePlans plus a top-level fold that composes the roles' results into the final answer. |
@@ -2417,8 +2419,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2500/3972 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2141 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2502/3974 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2143 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
