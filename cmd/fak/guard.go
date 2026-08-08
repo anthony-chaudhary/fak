@@ -162,7 +162,7 @@ func cmdGuard(argv []string) {
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: refresh interval for the fak-info pane")
 	splitDryRun := fs.Bool("split-dry-run", false, "preview the --split 80/20 plan (resolved multiplexer, geometry, and the exact `fak info` pane command) and EXIT, without bringing up the gateway, spawning a pane, or launching the agent. Use it to see what --split will do before handing the terminal to the agent.")
 	ctxViewBudget := fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
-	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
+	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON, but NOTE the resolved default for `fak guard` is NOT the value printed here: unless you pass this flag explicitly, every guard launch resolves gateway.HeadlessCompactHistoryBudget (96000) instead, because a guard always fronts Claude Code and its fixed system+tools floor (resolveGuardCompactBudget, #4888). The number compared against it is the COMPACTIBLE messages[] span — the system/tools head is a separate top-level block and is NOT counted — so read the live figure off /debug/vars metrics.compaction (budget, last_suffix_tokens, peak_suffix_tokens) rather than inferring it from this line. Once that span sprawls past the resolved budget the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
 	compactAnchorHead := fs.Bool("compact-anchor-head", true, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything (see the 'anchor-starved' diagnostic). DEFAULT-ON, and every fire stays gated on the burst economics (CacheBurstPaysBack, #1408): a WARM session with no bounded turns budget never bursts — it fires only when a wired session-turn horizon repays the one-time burst, or when the trace OBSERVABLY idled past the message-breakpoint cache TTL since its last served turn (the suffix re-bills cold that turn anyway, so the cut is penalty-free — the long-session firing path a plain `fak guard -- claude` actually hits). Pass =false to pin the old warm-only first-breakpoint anchor.")
 	compactSolvencyFloor := fs.Int("compact-solvency-floor", 0, "resident-token occupancy at or above which CONTEXT SOLVENCY overrides the head-anchored burst gate's cache economics: once this trace's OBSERVED peak resident window reaches it, --compact-history-budget fires even when the burst does not repay (CacheBurstPaysBack says no). It fixes the measured inversion where the pure-economics gate refuses HARDEST exactly where refusing is most expensive — over 3191 real served turns the fire rate ran 33% at 96-125k, 14% at 140-155k, 3% at 155-170k and 0% above 170k, and 100% of traces that ever fired never fired again, drifting a median +33.8k further into the window before the run ended. Above the floor the question stops being 'does this burst pay?' and becomes 'can we afford not to?': the burst penalty is one-time and bounded, hitting the context wall costs the whole session. Set it to a fraction (~0.85) of (model context window − output reserve); the gateway cannot derive it because it never sees a window size. 0 (the default) keeps the gate on pure economics, byte-for-byte. Forced fires are counted apart as 'solvency-forced' in the exit summary so they are never booked as cache wins. Consulted only when --compact-anchor-head is on and the head re-anchor engages; it can only ever turn a burst_unprofitable BAIL into a fire, never the reverse.")
 	assumeSessionTurns := fs.Int("assume-session-turns", gateway.DefaultAssumedSessionTurns, "the session length the head-anchored burst gate (--compact-anchor-head) ASSUMES when no bounded turn horizon is wired — the common `fak guard -- claude` case, where the wrapped harness owns the turn loop and hands the gateway no Budget.TurnsLeft. It lets a WARM continuously-active long session shed early instead of waiting to OBSERVABLY idle past the message-span cache TTL: the gate maps the trace's real served-turn depth to CurrentTurn and this value to TotalTurns, fires early (many repaying turns left) and refuses near the presumed end — the same one-time-burst break-even economics (CacheBurstPaysBack, #1408), just given a history-based length instead of refusing outright. DEFAULT-ON at gateway.DefaultAssumedSessionTurns; a genuine wired Budget.TurnsLeft horizon always WINS over this prior, and a large invalidated suffix still refuses regardless. Pass 0 to disable (byte-for-byte the conservative no-horizon behavior). Consulted only when --compact-anchor-head is on and the head re-anchor engages; inert on every other path.")
@@ -602,7 +602,7 @@ func cmdGuard(argv []string) {
 	// upgrade). AUTO keys on provable API-key billing — the OAuth branch above rewrote
 	// apiKey to the subscription token but stamped oauthSource, so the pair distinguishes
 	// the two credentials. Fail loud on an unknown mode before any gateway binds.
-	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, guardManagedCacheInputs{
+	mcIn := guardManagedCacheInputs{
 		// ALONGSIDE mode still has a real provider wire on the proxy side, so only the
 		// PURE local branch (no upstream at all) turns the cache posture off.
 		localModel:     localModel && !localAlongside,
@@ -610,11 +610,18 @@ func cmdGuard(argv []string) {
 		apiKey:         apiKey,
 		oauthSource:    oauthSource,
 		keychainAPIKey: keychainAPIKey,
-	})
+	}
+	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, mcIn)
 	if mcErr != nil {
 		fmt.Fprintln(os.Stderr, "fak guard:", mcErr)
 		os.Exit(2)
 	}
+	// Publish the billing seat off the SAME resolved credential (#3664) so the Track-2
+	// savings rows this session writes at exit record whether their list-priced dollars
+	// were billed per token (API-key, real) or against a flat-rate subscription
+	// (OAuth, notional). Without it the fleet reduction blends both seats into one
+	// API-key-equivalent headline that the ledger cannot decompose.
+	recordBillingMode(billingModeFrom(mcIn))
 
 	// Fail loud BEFORE binding the gateway if the wrapped agent is not on PATH — a cold
 	// adopter who installed only fak (curl|sh) and ran `fak guard -- claude` without Claude
@@ -865,6 +872,12 @@ func cmdGuard(argv []string) {
 			}
 		}
 	}
+
+	// Pin the compaction anchor mode this launch runs under for the durable per-session
+	// compaction-health witness (#3152). Stamped here, next to the CompactAnchorHead the
+	// gateway is about to be built with, so the row can never disagree with the server; the
+	// exit funnel reads it when it writes the witness.
+	setGuardCompactionAnchorMode(*compactAnchorHead)
 
 	srv, err := gateway.New(gateway.Config{
 		EngineID: "inkernel",
