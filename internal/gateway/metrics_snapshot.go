@@ -72,6 +72,7 @@ type compactionSnapshot struct {
 	cacheReads          uint64
 	lastCacheRd         float64
 	anchorStarved       uint64
+	thrashSessions      uint64
 	solvencyForced      uint64
 	lastSuffixTokens    uint64
 	peakSuffixTokens    uint64
@@ -195,6 +196,7 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 		cacheReads:          m.compactCacheReads,
 		lastCacheRd:         m.compactLastCacheRd,
 		anchorStarved:       m.compactAnchorStarved,
+		thrashSessions:      m.compactThrashSessions,
 		solvencyForced:      m.compactSolvencyForced,
 		lastSuffixTokens:    m.compactLastSuffixTokens,
 		peakSuffixTokens:    m.compactPeakSuffixTokens,

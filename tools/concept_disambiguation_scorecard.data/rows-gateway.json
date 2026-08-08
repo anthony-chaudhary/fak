@@ -132,5 +132,66 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "x2-context-ctx-reasoncompactionthrash",
+      "canonical": "ReasonCompactionThrash / COMPACTION_THRASH (session verdict)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The closed session verdict for a served session whose context window refills to the compaction limit on three consecutive turns: the compaction lever sheds, the next turn refills, and the session burns one compaction per reply without making headway. Declared in dos.toml as [reasons.COMPACTION_THRASH] and counted on the gateway metrics page whether or not the operator arms the matching stop.",
+      "distinction": "Not a stdlib context.Context plumbing concern (x2-context-ctx-commandcontext) and not a context-window SIZING plan (x2-context-ctx-basecontextplan): those decide how much window a turn gets, this is a verdict about the window's BEHAVIOUR OVER TIME — the observation that shedding is no longer buying progress, which no per-turn size decision can express.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "x2-context-ctx-basecontextplan",
+        "x2-context-ctx-envcompactionthrashstop"
+      ],
+      "aliases": [],
+      "grounding": "ReasonCompactionThrash",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x2-context-ctx-envcompactionthrashstop",
+      "canonical": "envCompactionThrashStop / FAK_COMPACTION_THRASH_STOP (thrash stop arming knob)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The environment knob that arms the compaction-thrash STOP at the session gate. Unset or false leaves detection and telemetry on and the stop inert, so the serve path is byte-for-byte historical until an operator opts in — the soak-first posture the sibling expense advisory already takes.",
+      "distinction": "Not the verdict itself (x2-context-ctx-reasoncompactionthrash): the verdict is computed and counted unconditionally, this knob decides only whether the gate ACTS on it. Keeping them apart is what lets a deploy see the signal for a soak period before anything refuses a turn on it.",
+      "distinct_from": [
+        "x2-context-ctx-reasoncompactionthrash",
+        "x2-context-ctx-basecontextplan"
+      ],
+      "aliases": [],
+      "grounding": "envCompactionThrashStop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x2-guard-gate-compactionthrashsessionstotal",
+      "canonical": "fak_gateway_compaction_thrash_sessions_total (metric)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The gateway metrics counter naming how many served sessions reached the COMPACTION_THRASH verdict. It is the operator-visible half of the thrash detector: incremented on every thrash session regardless of whether the stop is armed, so the signal is readable before anything acts on it.",
+      "distinction": "Not a capacity precondition like INSUFFICIENT_AGGREGATE_HBM (insufficientaggregatehbm) or a measured capacity like AggregateHBMBytes (aggregatehbmbytes): those describe whether a workload CAN be admitted at all, while this counts sessions that were admitted and served but whose context lever stopped paying for itself.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "aggregatehbmbytes"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_compaction_thrash_sessions_total",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

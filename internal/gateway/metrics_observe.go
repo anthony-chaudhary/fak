@@ -220,6 +220,20 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 	}
 }
 
+// recordCompactionThrash books one COMPACTION_THRASH verdict (#2424): a session whose window
+// refilled to the compaction limit ctxThrashConsecutiveRefills turns running. Called from
+// observeCtxValue the turn the run reaches the line, so the count is sessions-that-thrashed,
+// not turns-spent-thrashing. Always on — the STOP that acts on it is opt-in, but a signal an
+// operator cannot see is the gap #2424 exists to close. Nil-safe like every sibling recorder.
+func (m *gatewayMetrics) recordCompactionThrash() {
+	if m == nil {
+		return
+	}
+	m.compactMu.Lock()
+	m.compactThrashSessions++
+	m.compactMu.Unlock()
+}
+
 // compactBailPartition splits a bail-reason tally into the half the compactor decided BEFORE
 // any compactible span existed and the half it decided after — agent.CompactBailPreEligible
 // owns the classification, so this package never re-types the vocabulary it does not emit.

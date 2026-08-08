@@ -153,11 +153,19 @@ type gatewayMetrics struct {
 	// traffic ever occupies". Zero until the first under_budget bail carries a span.
 	compactLastSuffixTokens uint64
 	compactPeakSuffixTokens uint64
-	compactSolvencyForced   uint64            // WITNESSED: fires the burst economics REFUSED that the context-solvency floor forced anyway (agent.CompactOutcome.SolvencyForced). A subset of attempts[fired]; these are deliberately unprofitable bursts bought to keep the session inside its window, so they must never be read as cache wins.
-	uncachedTrimResults     uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
-	uncachedTrimShed        uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
-	ttlUpgrades             map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
-	placementAttempts       map[string]uint64 // WITNESSED: offensive cache-breakpoint placement attempts by outcome ("placed" | agent.BreakpointReason*). "placed" is the fak-authored slice — a breakpoint spliced onto a caller that sent none, so the provider cache_read it earns is fak-unlocked; "already_set" is the Claude-Code shape fak leaves alone (the client's cache, not fak's).
+	// WITNESSED: sessions whose window refilled to the compaction limit ctxThrashConsecutiveRefills
+	// turns RUNNING (#2424, ctxadvice.go). Counted ONCE per thrashing stretch. Deliberately its
+	// own counter rather than a compactAttempts["bailed"] + compactBailReasons row: compaction
+	// FIRED on every one of those turns, so booking it as a bail would both inflate the bailed
+	// lump and (via compactBailPartition) skew the alertable candidate-bail rate with a reason the
+	// compactor never emitted. It joins the AdjudicationSummary.CompactionBailReasons map at read
+	// time instead, where an operator asking "why is compaction not holding this session" reads it.
+	compactThrashSessions uint64
+	compactSolvencyForced uint64            // WITNESSED: fires the burst economics REFUSED that the context-solvency floor forced anyway (agent.CompactOutcome.SolvencyForced). A subset of attempts[fired]; these are deliberately unprofitable bursts bought to keep the session inside its window, so they must never be read as cache wins.
+	uncachedTrimResults   uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
+	uncachedTrimShed      uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
+	ttlUpgrades           map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
+	placementAttempts     map[string]uint64 // WITNESSED: offensive cache-breakpoint placement attempts by outcome ("placed" | agent.BreakpointReason*). "placed" is the fak-authored slice — a breakpoint spliced onto a caller that sent none, so the provider cache_read it earns is fak-unlocked; "already_set" is the Claude-Code shape fak leaves alone (the client's cache, not fak's).
 	// anchorMon is the LIVE loop over that same placement stream (#3622): the counter above is a
 	// cumulative tally nobody watches, so a session whose head turns volatile mid-conversation just
 	// stops incrementing "placed" and nothing fires. The monitor folds each outcome into a rolling
@@ -898,8 +906,22 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.ToolRefTurns, sum.ToolRefConverted = m.toolRefSanitizeSnapshot()
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	sum.ToolFeedbackTurns, _ = m.toolFeedbackSnapshot()
-	if len(comp.bailReasons) > 0 {
-		sum.CompactionBailReasons = comp.bailReasons
+	// COMPACTION_THRASH (#2424) rides this same map. It is NOT part of the CompactionBailed
+	// lump — the lever FIRED on every thrashing turn — but an operator reading "why is
+	// compaction not holding this session" needs it beside the bail reasons, and a verdict
+	// published nowhere is the gap the issue reports. Kept out of comp.bailReasons (and so
+	// out of bail_reason_total's closed set and compactBailPartition's alertable rate) by
+	// folding into a fresh map here; its own /metrics counter is
+	// fak_gateway_compaction_thrash_sessions_total.
+	if len(comp.bailReasons) > 0 || comp.thrashSessions > 0 {
+		reasons := make(map[string]uint64, len(comp.bailReasons)+1)
+		for k, v := range comp.bailReasons {
+			reasons[k] = v
+		}
+		if comp.thrashSessions > 0 {
+			reasons[ReasonCompactionThrash] = comp.thrashSessions
+		}
+		sum.CompactionBailReasons = reasons
 	}
 	// Managed-cache TTL-upgrade outcomes (#1844 C6): split the snapshot's one outcome
 	// map into the AUTHORED count and the refusal-reason breakdown, attaching the map only

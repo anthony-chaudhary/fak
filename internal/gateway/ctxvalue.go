@@ -99,6 +99,16 @@ type sessionCtxValue struct {
 	ttl1hActive        bool // the 1h prompt-cache TTL-upgrade rung fired for this session
 	ttl1hMessagePrefix bool // that rung upgraded at least one message-prefix breakpoint
 
+	// consecutiveEvents is the run of BACK-TO-BACK context-event turns: the window
+	// refilling to the limit as fast as the transform sheds it. Any turn that fired no
+	// context event resets it, so it measures a RUN and never a lifetime total. At
+	// ctxThrashConsecutiveRefills it is the COMPACTION_THRASH verdict (ctxadvice.go).
+	consecutiveEvents int
+	// noticedClass is the step class the in-band advisory last reported to the model for
+	// this session, so the push fires once per ENTRY into a pressure state rather than
+	// every turn the session sits in one (ctxAdviceNoteOnce).
+	noticedClass StepClass
+
 	// ring holds the last ctxValueWindow turns' resident-token counts within the
 	// CURRENT window era; a context event clears it, so the growth slope never spans
 	// a rewrite (which would read as negative growth and poison the forecast).
@@ -403,9 +413,18 @@ func (s *Server) observeCtxValue(trace string, uncachedPrompt, cacheRead, cacheC
 		v.turnsSinceEvent = 0
 		v.lastTurnEvent = true
 		v.resetRing() // the growth slope never spans a window rewrite
+		// COMPACTION THRASH (#2424): count the RUN of back-to-back context events. Recorded
+		// on the turn the run REACHES the line (== not >=) so one thrashing stretch books
+		// exactly one verdict however long it goes on — a session stuck at the limit must
+		// read as one sick session, not as a counter that climbs with the transcript.
+		v.consecutiveEvents++
+		if v.consecutiveEvents == ctxThrashConsecutiveRefills {
+			s.metrics.recordCompactionThrash()
+		}
 	} else {
 		v.turnsSinceEvent++
 		v.lastTurnEvent = false
+		v.consecutiveEvents = 0
 	}
 	v.push(resident)
 	v.lastResident = resident

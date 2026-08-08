@@ -1497,6 +1497,16 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	if note := s.ctxExpenseNoteOnce(reqTrace); note != "" {
 		blocks = prependTextBlock(blocks, note)
 	}
+	// Context-pressure PUSH (#2424): the step_advice verdict ctxvalue.go already computes
+	// every turn was pull-only at /v1/fak/ctxvalue, so an agent that never asked never heard
+	// it — least of all on the turn its window is about to turn over. When the verdict ENTERS
+	// checkpoint or rebuild, say so in-band once (ctxAdviceNoteOnce dedups per state entry),
+	// rendered from the SAME CtxStepAdvice the HTTP/MCP read returns so the pushed line and
+	// the pulled report for one trace cannot disagree. "" for any/bounded/unknown and for a
+	// state already reported, so a steady session's response is byte-for-byte unchanged.
+	if note := s.ctxAdviceNoteOnce(reqTrace); note != "" {
+		blocks = prependTextBlock(blocks, note)
+	}
 	// Compaction continuation contract (#2422): if this turn crossed a compaction boundary,
 	// tell the model what survived, what stays re-derivable, and — the whole point — that the
 	// shortened transcript is not a reason to wrap up. takeCompactionContract CONSUMES the
