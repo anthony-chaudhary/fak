@@ -3,6 +3,7 @@ package quality
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -12,8 +13,8 @@ import (
 // task and pass WELL-FORMED arguments that conform to that tool's declared
 // schema. A fluent turn that reaches for the wrong tool, or the right tool
 // with a missing / mistyped / out-of-constraint argument, executes the wrong
-// action downstream — exactly the fluent-but-wrong failure class the spine
-// exists to catch — so selection and argument conformance are judged together
+// action downstream â€” exactly the fluent-but-wrong failure class the spine
+// exists to catch â€” so selection and argument conformance are judged together
 // in one rubric.
 //
 // The contract travels IN the case, additively: Reference.Text carries one
@@ -34,7 +35,7 @@ import (
 // Edge behavior (defined and tested): an empty or unparseable call, or one
 // naming no tool, fails closed at score 0 as malformed; a case with no usable
 // spec (empty, unparseable, no tool name, or an unknown type name) fails
-// closed too — a tool-call case that checks nothing is not green.
+// closed too â€” a tool-call case that checks nothing is not green.
 type toolCallFidelity struct{}
 
 func (toolCallFidelity) Name() string { return "tool-call-fidelity" }
@@ -96,6 +97,8 @@ func (toolCallFidelity) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 		default:
 			if fault := toolConstraintFault(name, as, got); fault != "" {
 				faults = append(faults, fault)
+			} else if fault := toolInstructionFault(name, got, c.Prompt); fault != "" {
+				faults = append(faults, fault)
 			} else {
 				passed++
 			}
@@ -130,7 +133,7 @@ func (toolCallFidelity) Judge(_ Trace, eng Trace, c QualityCase) Verdict {
 
 // toolParseSpec parses and admission-checks the case-carried tool contract. It
 // refuses (with a reason) an empty or unparseable spec, one naming no expected
-// tool, and an argument declaring a type name outside the closed vocabulary —
+// tool, and an argument declaring a type name outside the closed vocabulary â€”
 // a spec bug must fail the case loudly, not silently skip checks.
 func toolParseSpec(text string) (toolCallSpec, error) {
 	var s toolCallSpec
@@ -198,4 +201,112 @@ func toolConstraintFault(name string, as toolArgSpec, got any) string {
 // toolNum renders a numeric bound/value compactly for fault messages.
 func toolNum(f float64) string {
 	return strconv.FormatFloat(f, 'g', -1, 64)
+}
+
+var toolNumberLiteral = regexp.MustCompile(`[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?`)
+
+// toolInstructionFault rejects schema-legal values invented by the model. A
+// schema proves legality; only the task instruction establishes intent.
+func toolInstructionFault(name string, got any, prompt string) string {
+	return toolInstructionValueFault(name, got, prompt)
+}
+
+func toolInstructionValueFault(path string, got any, prompt string) string {
+	switch x := got.(type) {
+	case map[string]any:
+		for _, key := range sortedKeys(x) {
+			if fault := toolInstructionValueFault(path+"."+key, x[key], prompt); fault != "" {
+				return fault
+			}
+		}
+		return ""
+	case []any:
+		for i, value := range x {
+			if fault := toolInstructionValueFault(fmt.Sprintf("%s[%d]", path, i), value, prompt); fault != "" {
+				return fault
+			}
+		}
+		return ""
+	case string:
+		if toolInstructionContainsString(prompt, x) {
+			return ""
+		}
+		return fmt.Sprintf("argument %q has invented literal %q absent from the task instruction", path, x)
+	case float64:
+		for _, literal := range toolNumberLiteral.FindAllString(prompt, -1) {
+			want, err := strconv.ParseFloat(literal, 64)
+			if err == nil && want == x {
+				return ""
+			}
+		}
+		return fmt.Sprintf("argument %q has invented literal %s absent from the task instruction", path, toolNum(x))
+	case bool:
+		if toolInstructionHasToken(prompt, strconv.FormatBool(x)) {
+			return ""
+		}
+		return fmt.Sprintf("argument %q has invented literal %t absent from the task instruction", path, x)
+	case nil:
+		if toolInstructionHasToken(prompt, "null") {
+			return ""
+		}
+		return fmt.Sprintf("argument %q has invented literal null absent from the task instruction", path)
+	default:
+		return fmt.Sprintf("argument %q has an unsupported instruction literal", path)
+	}
+}
+
+func toolInstructionContainsString(prompt, value string) bool {
+	needle := toolInstructionText(value)
+	if needle == "" {
+		return false
+	}
+	haystack := " " + toolInstructionText(prompt) + " "
+	if strings.Contains(haystack, " "+needle+" ") {
+		return true
+	}
+	aliases := map[string][]string{
+		"celsius":    {"c", "deg c", "degree c", "degrees c", "centigrade"},
+		"fahrenheit": {"f", "deg f", "degree f", "degrees f"},
+	}
+	for canonical, variants := range aliases {
+		all := append([]string{canonical}, variants...)
+		matched := false
+		for _, variant := range all {
+			if needle == variant {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		for _, variant := range all {
+			if strings.Contains(haystack, " "+variant+" ") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func toolInstructionHasToken(prompt, token string) bool {
+	return strings.Contains(" "+toolInstructionText(prompt)+" ", " "+token+" ")
+}
+
+func toolInstructionText(s string) string {
+	s = strings.ToLower(strings.ReplaceAll(s, "°", " deg "))
+	var b strings.Builder
+	space := true
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			space = false
+			continue
+		}
+		if !space {
+			b.WriteByte(' ')
+			space = true
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
