@@ -7,7 +7,9 @@ injected issue dicts. The load() importlib pattern mirrors the sibling tools.
 from __future__ import annotations
 
 import importlib.util
+import io
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "issue_lane_router.py"
@@ -1374,6 +1376,15 @@ class PhantomTreeRegionFidelityTest(unittest.TestCase):
             m.path_matches_lane(self.NAMED, {r["lane"]: region}), [r["lane"]],
             "lane %r region %r does not cover the named cmd/fak file %r"
             % (r["lane"], region, self.NAMED))
+
+
+class PairedFlagTest(unittest.TestCase):
+    def test_apply_labels_write_requires_apply_labels(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            m.main(["--apply-labels-write"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--apply-labels-write requires --apply-labels", stderr.getvalue())
 
 
 if __name__ == "__main__":

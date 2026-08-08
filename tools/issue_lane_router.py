@@ -1609,6 +1609,8 @@ def main(argv: list[str] | None = None) -> int:
                          "GitHub (create the labels + `gh issue edit`). The only "
                          "outward-facing action this tool takes; operator-gated.")
     args = ap.parse_args(argv)
+    if args.apply_labels_write and not args.apply_labels:
+        ap.error("--apply-labels-write requires --apply-labels")
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
     scope_alias = label_alias = None
