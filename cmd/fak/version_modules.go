@@ -191,6 +191,12 @@ func stampModverLedger(stdout, stderr io.Writer, root, ledger string, rep modver
 		fmt.Fprintf(stderr, "fak version modules: read ledger: %v\n", err)
 		return 1
 	}
+	// The score-regression advisory (#2470) runs BEFORE the append: afterwards the
+	// row this stamp is about to write is itself the module's last scored row, and
+	// the comparison it needs — freshly joined score vs. last remembered score —
+	// would compare the number against itself. It is advisory, so it only writes to
+	// stderr; the stamp still happens and the exit code is untouched.
+	modver.ScoreDropAdvisory(stderr, modver.ScoreDrops(rep, prev))
 	rows := modver.DeltaRows(rep, prev, time.Now().UTC().Format(time.RFC3339))
 	if len(rows) == 0 {
 		fmt.Fprintf(stdout, "fak version modules: ledger current — 0 of %d modules moved\n", len(rep.Modules))
